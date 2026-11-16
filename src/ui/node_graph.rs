@@ -6,6 +6,7 @@
 //! Properties panel's own rows for that entity (built and written back in
 //! `app::node_graph`); operation rows come from the node's spec.
 
+use crate::ui::style::kit_metrics as km;
 use document::{EntityType, Handle};
 use graph::{Kind, NodeId, Port, Spec};
 use iced::advanced::layout::{self, Layout};
@@ -14,8 +15,8 @@ use iced::advanced::widget::{self, tree, Widget};
 use iced::advanced::{overlay, renderer, Renderer as _, Shell};
 use iced::keyboard;
 use iced::widget::{
-    button, canvas, checkbox, column, container, hover, mouse_area, opaque, pin, row, scrollable,
-    slider, stack, text, text_input, tooltip, Space,
+    button, canvas, checkbox, column, container, hover, mouse_area, opaque, pin, row, slider,
+    stack, text, text_input, tooltip, Space,
 };
 use iced::{
     mouse, Background, Border, Element, Length, Point, Rectangle, Size, Theme, Transformation,
@@ -466,10 +467,13 @@ impl PaletteItem {
 }
 
 /// The tint over the palette entry about to be added.
+/// A node-library entry under the pointer or being dragged: lit like a
+/// palette row.
 fn palette_highlight(theme: &Theme) -> container::Style {
-    let tint = theme.palette().primary.base.color.scale_alpha(0.25);
     container::Style {
-        background: Some(Background::Color(tint)),
+        background: Some(Background::Color(crate::ui::style::chrome::row_selected(
+            theme,
+        ))),
         ..Default::default()
     }
 }
@@ -1216,10 +1220,10 @@ impl Graph {
         let icon: Element<'_, Message> = match item {
             PaletteItem::Object(kind) => crate::modules::registry::command_icon(kind.command())
                 .map_or_else(
-                    || Space::new().width(14.0).into(),
-                    |bytes| crate::ui::icons::semantic(bytes, 14.0),
+                    || Space::new().width(km::ROW_ICON).into(),
+                    |bytes| crate::ui::icons::semantic(bytes, km::ROW_ICON),
                 ),
-            PaletteItem::Op(_) => Space::new().width(14.0).into(),
+            PaletteItem::Op(_) => Space::new().width(km::ROW_ICON).into(),
         };
         let held = match self.drag {
             Some(Drag::Palette(held)) => Some(held),
@@ -1227,11 +1231,16 @@ impl Graph {
         };
         let selected = held.is_some_and(|held| held.same(item));
         let entry = container(
-            row![icon, text(t!(item.label())).size(12)]
-                .spacing(6)
-                .align_y(iced::Center),
+            row![
+                icon,
+                crate::ui::kit::value_text(t!(item.label()).into_owned(), false)
+            ]
+            .spacing(km::TOOL_GAP)
+            .align_y(iced::Center),
         )
-        .padding([3, 10])
+        .padding([0.0, km::CELL_PAD_X + km::INDENT])
+        .height(Length::Fixed(km::ROW_H))
+        .align_y(iced::Center)
         .width(Length::Fill)
         .style(move |theme: &Theme| {
             if selected {
@@ -1256,8 +1265,16 @@ impl Graph {
             PaletteItem::Op(spec) => Some(spec),
             PaletteItem::Object(_) => None,
         };
+        // The highlight is a layer under the entry, so the entry's icon and
+        // name stay on top of it.
+        let lit = hover(
+            container(Space::new())
+                .width(Length::Fill)
+                .height(Length::Fixed(km::ROW_H)),
+            hovered,
+        );
         with_tip(
-            mouse_area(hover(entry, hovered))
+            mouse_area(iced::widget::stack![lit, entry])
                 .on_press(msg(GraphMsg::PalettePress(item)))
                 .on_release(msg(GraphMsg::PaletteRelease)),
             node_tip(t!(item.label()).into_owned(), spec),
@@ -1270,30 +1287,33 @@ impl Graph {
     /// clicked or dragged onto the canvas.
     pub fn panel(&self, width: f32, chrome: crate::ui::dock::Chrome) -> Element<'_, Message> {
         use crate::ui::dock::{self, PanelId};
+        use crate::ui::kit;
         let tool = |icon: &'static [u8], tip: &str, message: GraphMsg| {
-            dock::tool_button(
-                crate::ui::icons::themed(icon, dock::TOOL_H - 6.0),
+            kit::tool_button(
+                kit::tool_icon(icon),
                 t!(tip).into_owned(),
-                msg(message),
+                Some(msg(message)),
+                false,
             )
         };
-        let toolbar = row![
-            text_input(&t!("Search nodes…"), &self.search)
-                .on_input(|value| msg(GraphMsg::Search(value)))
-                .padding([4, 8])
-                .size(12),
-            tool(crate::ui::icons::DOC_NEW, "New graph", GraphMsg::New),
-            tool(crate::ui::icons::FOLDER_OPEN, "Open graph", GraphMsg::Open),
-            tool(crate::ui::icons::SAVE, "Save graph", GraphMsg::Save),
-        ]
-        .spacing(4)
-        .align_y(iced::Center);
+        let toolbar = kit::band(
+            row![
+                kit::search_field(&t!("Search nodes…"), &self.search, |value| {
+                    msg(GraphMsg::Search(value))
+                }),
+                tool(crate::ui::icons::DOC_NEW, "New graph", GraphMsg::New),
+                tool(crate::ui::icons::FOLDER_OPEN, "Open graph", GraphMsg::Open),
+                tool(crate::ui::icons::SAVE, "Save graph", GraphMsg::Save),
+            ]
+            .spacing(km::TOOL_GAP)
+            .align_y(iced::Center),
+        );
 
         let query = self.search.trim().to_lowercase();
         let wanted = |item: PaletteItem| {
             query.is_empty() || t!(item.label()).to_lowercase().contains(&query)
         };
-        let mut tree = column![].spacing(1);
+        let mut tree = column![];
         use crate::app::node_graph::ops;
         let categories = std::iter::once("Objects")
             .chain(ops::CATEGORIES.iter().copied())
@@ -1319,43 +1339,24 @@ impl Graph {
             // A search shows every match, collapsed categories included.
             let open = !query.is_empty()
                 || (category == "Objects") != self.toggled_categories.contains(category);
-            tree = tree.push(
-                button(
-                    row![
-                        crate::ui::icons::themed_arrow_toggle(open, 9.0),
-                        text(t!(category)).size(11)
-                    ]
-                    .spacing(4)
-                    .align_y(iced::Center),
-                )
-                .on_press(msg(GraphMsg::Category(category)))
-                .style(|theme: &Theme, status| {
-                    let mut style = button::text(theme, status);
-                    style.background =
-                        Some(Background::Color(theme.palette().background.weak.color));
-                    style
-                })
-                .width(Length::Fill)
-                .padding([3, 6]),
-            );
+            tree = tree.push(kit::category_bar(
+                t!(category).into_owned(),
+                !open,
+                msg(GraphMsg::Category(category)),
+            ));
             if open {
                 for item in items {
                     tree = tree.push(self.palette_entry(item));
                 }
             }
         }
-        let body = scrollable(container(tree).padding(iced::Padding {
-            top: 0.0,
-            right: 8.0,
-            bottom: 6.0,
-            left: 0.0,
-        }))
-        .width(Length::Fill)
-        .height(Length::Fill);
-
-        dock::frame(
+        kit::palette(
             dock::title_bar(PanelId::NodeGraph, t!("Node Graph").into_owned(), chrome),
-            column![toolbar, body].spacing(6),
+            column![
+                toolbar,
+                Space::new().height(km::TOOL_GAP),
+                kit::scroll_area(tree)
+            ],
             width,
         )
     }
@@ -1403,8 +1404,8 @@ impl Graph {
         ]
         .height(HEADER_H);
         let header = container(header).style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().primary.weak.color)),
-            text_color: Some(theme.palette().primary.weak.text),
+            background: Some(Background::Color(crate::ui::style::chrome::lit(theme))),
+            text_color: Some(crate::ui::style::chrome::strong(theme)),
             ..Default::default()
         });
         let driven = self.driven_fields(id, &sections);
@@ -1461,9 +1462,9 @@ impl Graph {
             container(col)
                 .width(NODE_W)
                 .style(|theme: &Theme| container::Style {
-                    background: Some(Background::Color(theme.palette().background.base.color)),
+                    background: Some(Background::Color(crate::ui::style::chrome::surface(theme))),
                     border: Border {
-                        color: theme.palette().background.strong.color,
+                        color: crate::ui::style::chrome::border(theme),
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -1669,17 +1670,15 @@ fn port_dot<'a>(linked: bool) -> Element<'a, Message> {
         container(Space::new())
             .width(8.0)
             .height(8.0)
-            .style(move |theme: &Theme| {
-                let palette = theme.palette();
-                container::Style {
-                    background: linked.then_some(Background::Color(palette.primary.base.color)),
-                    border: Border {
-                        color: palette.primary.base.color,
-                        width: 1.5,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                }
+            .style(move |theme: &Theme| container::Style {
+                background: linked
+                    .then_some(Background::Color(crate::ui::style::chrome::accent(theme))),
+                border: Border {
+                    color: crate::ui::style::chrome::accent(theme),
+                    width: 1.5,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
             }),
     )
     .width(PORT_W)
@@ -1715,15 +1714,14 @@ impl canvas::Program<Message> for Wires {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
-        let palette = theme.palette();
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         frame.fill_rectangle(
             Point::ORIGIN,
             bounds.size(),
-            palette.background.base.color.scale_alpha(0.6),
+            crate::ui::style::chrome::surface(theme).scale_alpha(0.6),
         );
         let stroke = canvas::Stroke::default()
-            .with_color(palette.primary.base.color)
+            .with_color(crate::ui::style::chrome::accent(theme))
             .with_width(self.width);
         for (a, b) in &self.wires {
             frame.stroke(&wire_path(*a, *b), stroke);
@@ -1731,7 +1729,7 @@ impl canvas::Program<Message> for Wires {
         if let Some((a, b)) = self.pending {
             frame.stroke(
                 &wire_path(a, b),
-                stroke.with_color(palette.primary.weak.color),
+                stroke.with_color(crate::ui::style::chrome::lit(theme)),
             );
         }
         vec![frame.into_geometry()]

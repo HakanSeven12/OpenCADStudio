@@ -7,14 +7,17 @@
 use crate::app::Message;
 use crate::t;
 use crate::ui::dock::PanelId;
+use crate::ui::kit;
+use crate::ui::kit::menu::{self, Item};
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{button_style, dialog_button, field_style};
+use crate::ui::style::{chrome, kit_metrics as km, text as text_size};
 use crate::ui::window::pdf_dialogs::{accent_text, card_style};
 use document::sheet_set::{self as ss, ComponentKind, Element as SsElement, SheetSetDatabase};
 use iced::widget::{
-    button, checkbox, column, container, mouse_area, pick_list, row, scrollable, text, text_input,
-    Space,
+    button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space,
 };
+use iced::Padding;
 use iced::{Background, Border, Element, Fill, Length, Theme};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -594,31 +597,12 @@ impl std::fmt::Display for Pick {
     }
 }
 
-fn menu_entry(label: String, m: Option<Message>) -> Element<'static, Message> {
-    button(text(label).size(12))
-        .width(Fill)
-        .padding([5, 12])
-        .on_press_maybe(m)
-        .style(|theme: &Theme, status| {
-            let mut s = button::text(theme, status);
-            if matches!(status, button::Status::Hovered) {
-                s.background = Some(Background::Color(theme.palette().primary.base.color));
-                s.text_color = theme.palette().primary.base.text;
-            }
-            s
-        })
-        .into()
-}
-
-fn menu_separator() -> Element<'static, Message> {
-    container(Space::new())
-        .height(1)
-        .width(Fill)
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.neutral.color)),
-            ..Default::default()
-        })
-        .into()
+/// A palette-menu item; `None` shows it disabled.
+fn menu_item(label: String, m: Option<Message>) -> Item {
+    match m {
+        Some(m) => Item::new(label, m),
+        None => Item::new(label, Message::Noop).enabled(false),
+    }
 }
 
 /// A row's right-click menu.
@@ -626,7 +610,7 @@ fn menu_separator() -> Element<'static, Message> {
 /// its subset, and only an empty subset can be removed.
 fn row_menu(id: String, kind: ComponentKind, empty: bool) -> Element<'static, Message> {
     let entry = |label: &str, action: MenuAction, on: bool| {
-        menu_entry(
+        menu_item(
             t!(label).into_owned(),
             on.then(|| msg(SheetSetMsg::Menu(id.clone(), action))),
         )
@@ -635,10 +619,10 @@ fn row_menu(id: String, kind: ComponentKind, empty: bool) -> Element<'static, Me
     match kind {
         ComponentKind::SheetSet => items.extend([
             entry("Close Sheet Set", MenuAction::Close, true),
-            menu_separator(),
+            Item::Separator,
         ]),
         ComponentKind::Sheet => {
-            items.extend([entry("Open", MenuAction::Open, true), menu_separator()])
+            items.extend([entry("Open", MenuAction::Open, true), Item::Separator])
         }
         ComponentKind::Subset => {}
     }
@@ -654,55 +638,43 @@ fn row_menu(id: String, kind: ComponentKind, empty: bool) -> Element<'static, Me
     match kind {
         ComponentKind::SheetSet => {}
         ComponentKind::Subset => items.extend([
-            menu_separator(),
+            Item::Separator,
             entry("Rename Subset...", MenuAction::Properties, true),
             entry("Remove Subset", MenuAction::Remove, empty),
         ]),
         ComponentKind::Sheet => items.extend([
-            menu_separator(),
+            Item::Separator,
             entry("Rename & Renumber...", MenuAction::Rename, true),
             entry("Remove Sheet", MenuAction::Remove, true),
         ]),
     }
-    items.push(menu_separator());
+    items.push(Item::Separator);
     items.push(entry("Properties...", MenuAction::Properties, true));
-    container(iced::widget::Column::with_children(items).spacing(1))
-        .padding(4)
-        .width(Length::Fixed(220.0))
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.weak.color)),
-            border: Border {
-                color: theme.palette().background.neutral.color,
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
-        })
-        .into()
+    menu::view(items)
 }
 
 /// A small status badge after a sheet name.
 fn badge<'a>(prefix: &str, label: &str, warn: bool) -> Element<'a, Message> {
-    container(text(format!("{prefix}{}", t!(label))).size(10))
-        .padding([0, 5])
-        .style(move |theme: &Theme| {
-            let p = theme.palette();
-            let c = if warn {
-                p.warning.base
-            } else {
-                p.secondary.base
-            };
-            container::Style {
-                background: Some(Background::Color(c.color)),
-                text_color: Some(c.text),
-                border: Border {
-                    radius: 7.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            }
-        })
-        .into()
+    container(
+        text(format!("{prefix}{}", t!(label)))
+            .size(text_size::UI_SMALL)
+            .line_height(text_size::line()),
+    )
+    .padding(Padding::ZERO.left(km::CELL_PAD_X).right(km::CELL_PAD_X))
+    .style(move |theme: &Theme| container::Style {
+        text_color: Some(if warn {
+            chrome::danger(theme)
+        } else {
+            chrome::muted(theme)
+        }),
+        border: Border {
+            color: chrome::border(theme),
+            width: km::line(),
+            radius: (km::CHECK / 2.0).into(),
+        },
+        ..Default::default()
+    })
+    .into()
 }
 
 /// A tree row of the Sheet Views / Model Views pages with its own menu.
@@ -715,90 +687,42 @@ fn plain_row<'a>(
     menu: Vec<Mi>,
     open_sub: Option<String>,
 ) -> Element<'a, Message> {
-    let arrow: Element<'a, Message> = match fold {
-        Some((open, m)) => button(if open {
-            crate::ui::icons::themed_arrow_down(10.0)
-        } else {
-            crate::ui::icons::themed_arrow_right(10.0)
-        })
-        .on_press(m)
-        .style(button::text)
-        .padding(2)
-        .into(),
-        None => Space::new().width(14).into(),
+    let mut item = kit::tree_row(label)
+        .depth(depth)
+        .icon(crate::ui::icons::semantic(icon, km::ROW_ICON));
+    item = match fold {
+        Some((open, m)) => item.fold(open, m),
+        None => item.caret_room(),
     };
-    let cells = row![
-        Space::new().width(Length::Fixed(f32::from(depth) * 16.0)),
-        arrow,
-        crate::ui::icons::semantic(icon, 14.0),
-        text(label).size(12).width(Fill),
-    ]
-    .spacing(5)
-    .align_y(iced::Center);
-    let mut area = mouse_area(container(cells).width(Fill).padding([3, 6]));
     if let Some(m) = double {
-        area = area.on_double_click(m);
+        item = item.on_double_click(m);
     }
+    let area = item.view();
     if menu.is_empty() {
-        return area.into();
+        return area;
     }
     iced_aw::ContextMenu::new(area, move || menu_panel(&menu, open_sub.as_deref())).into()
 }
 
-fn menu_box<'b>(items: Vec<Element<'b, Message>>) -> Element<'b, Message> {
-    container(iced::widget::Column::with_children(items).spacing(1))
-        .padding(4)
-        .width(Length::Fixed(240.0))
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.weak.color)),
-            border: Border {
-                color: theme.palette().background.neutral.color,
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
-        })
-        .into()
-}
-
-/// A row's right-click menu. A submenu expands in place below its entry
-/// while hovered (a click would close the menu).
+/// A row's right-click menu. A submenu opens beside its entry while
+/// hovered (a click would close the menu).
 fn menu_panel(menu: &[Mi], open: Option<&str>) -> Element<'static, Message> {
-    let mut items: Vec<Element<'static, Message>> = Vec::new();
-    for item in menu {
-        match item {
-            Mi::Sep => items.push(menu_separator()),
-            Mi::Entry(label, m) => items.push(menu_entry(label.clone(), m.clone())),
-            Mi::Sub(label, key, sub) => {
-                let expanded = open == Some(key.as_str());
-                let arrow = if expanded {
-                    crate::ui::icons::themed_arrow_down(9.0)
-                } else {
-                    crate::ui::icons::themed_arrow_right(9.0)
-                };
-                let header = container(
-                    row![text(label.clone()).size(12).width(Fill), arrow].align_y(iced::Center),
-                )
-                .width(Fill)
-                .padding([5, 12]);
-                items.push(
-                    mouse_area(header)
-                        .on_enter(msg(SheetSetMsg::Submenu(Some(key.clone()))))
-                        .into(),
-                );
-                if expanded {
-                    for (l, m) in sub {
-                        items.push(
-                            container(menu_entry(l.clone(), m.clone()))
-                                .padding(iced::Padding::ZERO.left(12))
-                                .into(),
-                        );
-                    }
-                }
-            }
-        }
-    }
-    menu_box(items)
+    let items = menu
+        .iter()
+        .map(|item| match item {
+            Mi::Sep => Item::Separator,
+            Mi::Entry(label, m) => menu_item(label.clone(), m.clone()),
+            Mi::Sub(label, key, sub) => Item::submenu(
+                label.clone(),
+                msg(SheetSetMsg::Submenu(Some(key.clone()))),
+                sub.iter()
+                    .map(|(l, m)| menu_item(l.clone(), m.clone()))
+                    .collect(),
+            )
+            .open(open == Some(key.as_str())),
+        })
+        .collect();
+    menu::with_submenus(items, msg(SheetSetMsg::Submenu(None)))
 }
 
 /// A menu item: translated label and message (an empty label is a separator).
@@ -820,49 +744,25 @@ fn tree_row<'a>(
 ) -> Element<'a, Message> {
     let id = el.id().to_string();
     let kind = ComponentKind::of(el).unwrap_or(ComponentKind::Sheet);
-    let arrow: Element<'a, Message> = match fold {
-        Some(open) => button(if open {
-            crate::ui::icons::themed_arrow_down(10.0)
-        } else {
-            crate::ui::icons::themed_arrow_right(10.0)
-        })
-        .on_press(msg(SheetSetMsg::Expand(id.clone())))
-        .style(button::text)
-        .padding(2)
-        .into(),
-        None => Space::new().width(14).into(),
-    };
     let selected = state.selected.as_deref() == Some(id.as_str());
     let status = state.status.get(&id).copied();
-    let mut cells = row![
-        Space::new().width(Length::Fixed(f32::from(depth) * 16.0)),
-        arrow,
-        crate::ui::icons::semantic(icon, 14.0),
-    ]
-    .spacing(5)
-    .align_y(iced::Center);
-    let name = text(label).size(12);
-    cells = match status {
-        // A missing drawing: grey with a "? missing" badge; an open one: a lock badge.
-        Some(SheetStatus::Missing) => cells
-            .push(name.style(muted_style))
-            .push(badge("? ", "missing", true))
-            .push(Space::new().width(Fill)),
-        Some(SheetStatus::Locked) => cells
-            .push(name)
-            .push(badge("", "open", false))
-            .push(Space::new().width(Fill)),
-        None => cells.push(name.width(Fill)),
+    let mut item = kit::tree_row(label)
+        .depth(depth)
+        .icon(crate::ui::icons::semantic(icon, km::ROW_ICON))
+        .selected(selected)
+        .on_press(msg(SheetSetMsg::Select(id.clone())))
+        .on_double_click(msg(SheetSetMsg::Activate(id.clone())));
+    item = match fold {
+        Some(open) => item.fold(open, msg(SheetSetMsg::Expand(id.clone()))),
+        None => item.caret_room(),
     };
-    let area = mouse_area(container(cells).width(Fill).padding([3, 6]).style(
-        move |theme: &Theme| container::Style {
-            background: selected.then(|| Background::Color(theme.palette().primary.weak.color)),
-            text_color: selected.then(|| theme.palette().primary.weak.text),
-            ..Default::default()
-        },
-    ))
-    .on_press(msg(SheetSetMsg::Select(id.clone())))
-    .on_double_click(msg(SheetSetMsg::Activate(id.clone())));
+    // A missing drawing: grey with a "? missing" badge; an open one: a lock badge.
+    item = match status {
+        Some(SheetStatus::Missing) => item.muted(true).trailing(badge("? ", "missing", true)),
+        Some(SheetStatus::Locked) => item.trailing(badge("", "open", false)),
+        None => item,
+    };
+    let area = item.view();
     let empty = !el.children.iter().any(|c| {
         matches!(
             ComponentKind::of(c),
@@ -1123,31 +1023,17 @@ fn model_views_rows<'a>(state: &SheetSetManager) -> Vec<Element<'a, Message>> {
         }
     }
     rows.push(
-        button(
-            text(format!("+ {}", t!("Add New Location...")))
-                .size(12)
-                .style(muted_style),
-        )
-        .on_press(msg(SheetSetMsg::AddLocation))
-        .style(button::text)
-        .padding([3, 6])
-        .into(),
+        kit::tree_row(format!("+ {}", t!("Add New Location...")))
+            .muted(true)
+            .on_press(msg(SheetSetMsg::AddLocation))
+            .view(),
     );
     rows
 }
 
-fn heading(label: &str) -> Element<'static, Message> {
-    text(t!(label).into_owned())
-        .size(11)
-        .font(iced::Font {
-            weight: iced::font::Weight::Bold,
-            ..iced::Font::DEFAULT
-        })
-        .style(|theme: &Theme| text::Style {
-            color: Some(theme.palette().primary.base.color),
-        })
-        .width(Fill)
-        .into()
+/// A page's heading: a section bar with its buttons.
+fn heading<'a>(label: &str, buttons: Vec<Element<'a, Message>>) -> Element<'a, Message> {
+    kit::section_bar(t!(label).into_owned(), buttons)
 }
 
 pub fn view<'a>(
@@ -1171,142 +1057,117 @@ pub fn view<'a>(
     let combo = pick_list(current, picks, |p: &Pick| p.1.clone())
         .placeholder(t!("Open...").into_owned())
         .on_select(|p: Pick| msg(SheetSetMsg::PickSet(p.0)))
-        .text_size(12)
-        .padding([5, 8])
+        .text_size(text_size::UI)
+        .padding(kit::BOX_PAD)
+        .style(kit::pick_list_style)
+        .menu_style(kit::pick_menu_style)
         .width(Fill);
-    let tab = |label: &str, t: SsmTab| {
-        button(text(t!(label).into_owned()).size(11).center().width(Fill))
-            .on_press(msg(SheetSetMsg::Tab(t)))
-            .style(button_style(state.tab == t))
-            .padding([5, 4])
-            .width(Fill)
-    };
-    let tabs = row![
-        tab("Sheet List", SsmTab::SheetList),
-        tab("Sheet Views", SsmTab::SheetViews),
-        tab("Model Views", SsmTab::ModelViews),
-    ]
-    .spacing(2);
+    let tabs = kit::tabs(
+        vec![
+            (
+                t!("Sheet List").into_owned(),
+                msg(SheetSetMsg::Tab(SsmTab::SheetList)),
+            ),
+            (
+                t!("Sheet Views").into_owned(),
+                msg(SheetSetMsg::Tab(SsmTab::SheetViews)),
+            ),
+            (
+                t!("Model Views").into_owned(),
+                msg(SheetSetMsg::Tab(SsmTab::ModelViews)),
+            ),
+        ],
+        match state.tab {
+            SsmTab::SheetList => 0,
+            SsmTab::SheetViews => 1,
+            SsmTab::ModelViews => 2,
+        },
+    );
 
-    let body: Element<'a, Message> = match (state.db(), state.tab) {
-        (None, _) => text(t!("Open a sheet set or create one with NEWSHEETSET.").into_owned())
-            .size(12)
-            .style(muted_style)
-            .into(),
-        (Some(db), SsmTab::SheetList) => {
-            let set = db.sheet_set();
-            let open = !state.collapsed.contains(set.id());
-            let mut rows = vec![tree_row(
-                state,
-                set,
-                0,
-                SET_ICON,
-                db.name().to_string(),
-                Some(open),
-            )];
-            if open {
-                push_tree(state, set, 1, &mut rows);
+    let refresh = || {
+        kit::bar_button(
+            crate::ui::icons::REFRESH,
+            t!("Refresh"),
+            msg(SheetSetMsg::Refresh),
+        )
+    };
+    let (header, rows): (Element<'a, Message>, Vec<Element<'a, Message>>) =
+        match (state.db(), state.tab) {
+            (None, _) => (
+                Space::new().into(),
+                vec![kit::empty_state(
+                    t!("Open a sheet set or create one with NEWSHEETSET.").into_owned(),
+                )],
+            ),
+            (Some(db), SsmTab::SheetList) => {
+                let set = db.sheet_set();
+                let open = !state.collapsed.contains(set.id());
+                let mut rows = vec![tree_row(
+                    state,
+                    set,
+                    0,
+                    SET_ICON,
+                    db.name().to_string(),
+                    Some(open),
+                )];
+                if open {
+                    push_tree(state, set, 1, &mut rows);
+                }
+                (heading("Sheets", vec![refresh()]), rows)
             }
-            let header = row![
-                heading("Sheets"),
-                button(crate::ui::icons::themed(crate::ui::icons::REFRESH, 13.0))
-                    .on_press(msg(SheetSetMsg::Refresh))
-                    .style(button::subtle)
-                    .padding([2, 4]),
-            ]
-            .align_y(iced::Center);
-            column![
-                header,
-                scrollable(iced::widget::Column::with_children(rows).spacing(1)).height(Fill)
-            ]
-            .spacing(6)
-            .into()
-        }
-        (Some(db), SsmTab::SheetViews) => {
-            let by = state.by_category;
-            let header = row![
-                heading(if by {
-                    "View by category"
-                } else {
-                    "View by sheet"
-                }),
-                button(
-                    row![
-                        text(
+            (Some(db), SsmTab::SheetViews) => {
+                let by = state.by_category;
+                let header = heading(
+                    if by {
+                        "View by category"
+                    } else {
+                        "View by sheet"
+                    },
+                    vec![
+                        kit::bar_button(
+                            crate::ui::icons::SWAP,
                             t!(if by {
                                 "View by sheet"
                             } else {
                                 "View by category"
-                            })
-                            .into_owned()
-                        )
-                        .size(11),
-                        crate::ui::icons::themed(crate::ui::icons::SWAP, 11.0),
-                    ]
-                    .spacing(4)
-                    .align_y(iced::Center),
-                )
-                .on_press(msg(SheetSetMsg::ViewsByCategory(!by)))
-                .style(button::subtle)
-                .padding([2, 4]),
-                button(crate::ui::icons::semantic(crate::ui::icons::PLUS, 12.0))
-                    .on_press(msg(SheetSetMsg::NewCategory))
-                    .style(button::subtle)
-                    .padding([2, 4]),
-            ]
-            .spacing(4)
-            .align_y(iced::Center);
-            column![
-                header,
-                scrollable(
-                    iced::widget::Column::with_children(sheet_views_rows(state, db)).spacing(1)
-                )
-                .height(Fill)
-            ]
-            .spacing(6)
-            .into()
-        }
-        (Some(_), SsmTab::ModelViews) => {
-            let header = row![
-                heading("Locations"),
-                button(crate::ui::icons::themed(crate::ui::icons::REFRESH, 13.0))
-                    .on_press(msg(SheetSetMsg::Refresh))
-                    .style(button::subtle)
-                    .padding([2, 4]),
-                button(crate::ui::icons::semantic(crate::ui::icons::PLUS, 12.0))
-                    .on_press(msg(SheetSetMsg::AddLocation))
-                    .style(button::subtle)
-                    .padding([2, 4]),
-            ]
-            .spacing(4)
-            .align_y(iced::Center);
-            column![
-                header,
-                scrollable(iced::widget::Column::with_children(model_views_rows(state)).spacing(1))
-                    .height(Fill)
-            ]
-            .spacing(6)
-            .into()
-        }
-    };
-    let card = container(body)
-        .padding(6)
-        .width(Fill)
-        .height(Fill)
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.weak.color)),
-            border: Border {
-                radius: 4.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        });
-    let hint = text(t!("Double-click opens a sheet. Right-click for more commands.").into_owned())
-        .size(10)
-        .style(muted_style);
-    crate::ui::dock::frame(
+                            }),
+                            msg(SheetSetMsg::ViewsByCategory(!by)),
+                        ),
+                        kit::bar_button(
+                            crate::ui::icons::PLUS,
+                            t!("New View Category..."),
+                            msg(SheetSetMsg::NewCategory),
+                        ),
+                    ],
+                );
+                (header, sheet_views_rows(state, db))
+            }
+            (Some(_), SsmTab::ModelViews) => (
+                heading(
+                    "Locations",
+                    vec![
+                        refresh(),
+                        kit::bar_button(
+                            crate::ui::icons::PLUS,
+                            t!("Add New Location..."),
+                            msg(SheetSetMsg::AddLocation),
+                        ),
+                    ],
+                ),
+                model_views_rows(state),
+            ),
+        };
+    let hint = kit::footer(kit::footer_text(
+        t!("Double-click opens a sheet. Right-click for more commands.").into_owned(),
+    ));
+    kit::palette(
         title_bar,
-        column![combo, tabs, card, hint].spacing(6),
+        column![
+            kit::band(combo),
+            tabs,
+            kit::scroll_area(column![header, iced::widget::Column::with_children(rows)]),
+            hint,
+        ],
         width,
     )
 }
@@ -1316,7 +1177,9 @@ pub fn view<'a>(
 fn card<'a>(title: &str, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     container(
         column![
-            text(t!(title).to_uppercase()).size(10).style(accent_text),
+            text(t!(title).to_uppercase())
+                .size(crate::ui::style::text::UI_SMALL)
+                .style(accent_text),
             content.into()
         ]
         .spacing(8),
@@ -1329,7 +1192,7 @@ fn card<'a>(title: &str, content: impl Into<Element<'a, Message>>) -> Element<'a
 
 fn input<'a>(value: &str, field: FieldId) -> Element<'a, Message> {
     text_input("", value)
-        .size(12)
+        .size(crate::ui::style::text::UI_LARGE)
         .padding([5, 8])
         .style(field_style)
         .on_input(move |v| msg(SheetSetMsg::Input(field, v)))
@@ -1339,7 +1202,7 @@ fn input<'a>(value: &str, field: FieldId) -> Element<'a, Message> {
 fn labeled<'a>(label: &str, control: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     row![
         text(t!(label).into_owned())
-            .size(12)
+            .size(crate::ui::style::text::UI_LARGE)
             .width(Length::Fixed(170.0)),
         control.into()
     ]
@@ -1349,7 +1212,7 @@ fn labeled<'a>(label: &str, control: impl Into<Element<'a, Message>>) -> Element
 }
 
 fn browse<'a>(m: SheetSetMsg) -> Element<'a, Message> {
-    button(text("...").size(12))
+    button(text("...").size(crate::ui::style::text::UI_LARGE))
         .on_press(msg(m))
         .style(button_style(false))
         .padding([5, 10])
@@ -1358,12 +1221,16 @@ fn browse<'a>(m: SheetSetMsg) -> Element<'a, Message> {
 
 fn error_band<'a>(error: &Option<String>) -> Option<Element<'a, Message>> {
     error.as_ref().map(|e| {
-        container(text(e.clone()).size(12))
+        container(text(e.clone()).size(crate::ui::style::text::UI_LARGE))
             .padding([6, 10])
             .width(Fill)
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(theme.palette().danger.weak.color)),
-                text_color: Some(theme.palette().danger.weak.text),
+                background: Some(Background::Color(crate::ui::style::chrome::mix(
+                    crate::ui::style::chrome::surface(theme),
+                    crate::ui::style::chrome::danger(theme),
+                    0.2,
+                ))),
+                text_color: Some(crate::ui::style::chrome::strong(theme)),
                 border: Border {
                     radius: 4.0.into(),
                     ..Default::default()
@@ -1378,7 +1245,7 @@ fn footer<'a>(
     left: Vec<Element<'a, Message>>,
     right: Vec<Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    let mut r = row![button(text("?").size(12))
+    let mut r = row![button(text("?").size(crate::ui::style::text::UI_LARGE))
         .on_press(msg(SheetSetMsg::Help))
         .style(button_style(false))
         .padding([5, 11])]
@@ -1407,7 +1274,7 @@ fn wizard_view<'a>(w: &'a Wizard) -> Element<'a, Message> {
     };
     let chips =
         iced::widget::Row::with_children(steps.iter().enumerate().map(|(n, (s, label))| {
-            button(text(format!("{} {}", n + 1, t!(*label))).size(12))
+            button(text(format!("{} {}", n + 1, t!(*label))).size(crate::ui::style::text::UI_LARGE))
                 .on_press(msg(SheetSetMsg::Wizard(WizardMsg::Step(*s))))
                 .style(button_style(w.step == *s))
                 .padding([4, 10])
@@ -1420,12 +1287,12 @@ fn wizard_view<'a>(w: &'a Wizard) -> Element<'a, Message> {
             column![
                 checkbox(!w.existing)
                     .label(t!("An empty sheet set").into_owned())
-                    .text_size(12)
+                    .text_size(crate::ui::style::text::UI_LARGE)
                     .size(14)
                     .on_toggle(|_| msg(SheetSetMsg::Wizard(WizardMsg::Existing(false)))),
                 checkbox(w.existing)
                     .label(t!("Existing drawings").into_owned())
-                    .text_size(12)
+                    .text_size(crate::ui::style::text::UI_LARGE)
                     .size(14)
                     .on_toggle(|_| msg(SheetSetMsg::Wizard(WizardMsg::Existing(true)))),
                 text(
@@ -1436,7 +1303,7 @@ fn wizard_view<'a>(w: &'a Wizard) -> Element<'a, Message> {
                     })
                     .into_owned()
                 )
-                .size(11)
+                .size(crate::ui::style::text::UI)
                 .style(muted_style),
             ]
             .spacing(8),
@@ -1452,12 +1319,12 @@ fn wizard_view<'a>(w: &'a Wizard) -> Element<'a, Message> {
                 ),
                 checkbox(w.hierarchy)
                     .label(t!("Create a folder hierarchy based on subsets").into_owned())
-                    .text_size(12)
+                    .text_size(crate::ui::style::text::UI_LARGE)
                     .size(14)
                     .on_toggle(|v| msg(SheetSetMsg::Toggle(FieldId::Hierarchy, v))),
                 row![
                     Space::new().width(Fill),
-                    button(text(t!("Sheet Set Properties...").into_owned()).size(12))
+                    button(text(t!("Sheet Set Properties...").into_owned()).size(crate::ui::style::text::UI_LARGE))
                         .on_press(msg(SheetSetMsg::WizardProperties))
                         .style(button_style(false))
                         .padding([5, 12]),
@@ -1469,14 +1336,14 @@ fn wizard_view<'a>(w: &'a Wizard) -> Element<'a, Message> {
             let rows = w.layouts.iter().enumerate().map(|(i, l)| {
                 checkbox(l.on)
                     .label(format!("{} — {}", l.file, l.layout))
-                    .text_size(12)
+                    .text_size(crate::ui::style::text::UI_LARGE)
                     .size(14)
                     .on_toggle(move |v| msg(SheetSetMsg::Wizard(WizardMsg::LayoutOn(i, v))))
                     .into()
             });
             let folders = w.folders.iter().enumerate().map(|(i, f)| {
                 row![
-                    text(f.clone()).size(12).width(Fill),
+                    text(f.clone()).size(crate::ui::style::text::UI_LARGE).width(Fill),
                     button(crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 12.0))
                         .on_press(msg(SheetSetMsg::Wizard(WizardMsg::RemoveFolder(i))))
                         .style(button::text)
@@ -1489,10 +1356,10 @@ fn wizard_view<'a>(w: &'a Wizard) -> Element<'a, Message> {
                 column![
                     row![
                         text(t!("Select folders containing drawings. Layouts in the drawings can be added to the sheet set.").into_owned())
-                            .size(11)
+                            .size(crate::ui::style::text::UI)
                             .style(muted_style)
                             .width(Fill),
-                        button(text(t!("Browse...").into_owned()).size(12))
+                        button(text(t!("Browse...").into_owned()).size(crate::ui::style::text::UI_LARGE))
                             .on_press(msg(SheetSetMsg::Browse(FieldId::AddFolder)))
                             .style(button_style(false))
                             .padding([5, 12]),
@@ -1521,7 +1388,7 @@ fn wizard_view<'a>(w: &'a Wizard) -> Element<'a, Message> {
             }
             card(
                 "Confirm",
-                iced::widget::Column::with_children(lines.into_iter().map(|l| text(l).size(12).into())).spacing(4),
+                iced::widget::Column::with_children(lines.into_iter().map(|l| text(l).size(crate::ui::style::text::UI_LARGE).into())).spacing(4),
             )
         }
     };
@@ -1537,12 +1404,12 @@ fn wizard_view<'a>(w: &'a Wizard) -> Element<'a, Message> {
         (1, _) => Some(0),
         _ => None,
     };
-    let back = button(text(t!("Back").into_owned()).size(12))
+    let back = button(text(t!("Back").into_owned()).size(crate::ui::style::text::UI_LARGE))
         .on_press_maybe(back_step.map(|s| msg(SheetSetMsg::Wizard(WizardMsg::Step(s)))))
         .style(button_style(false))
         .padding([6, 14]);
     let next: Element<'a, Message> = match next_step {
-        Some(s) => button(text(t!("Next").into_owned()).size(12))
+        Some(s) => button(text(t!("Next").into_owned()).size(crate::ui::style::text::UI_LARGE))
             .on_press(msg(SheetSetMsg::Wizard(WizardMsg::Step(s))))
             .style(button_style(true))
             .padding([6, 14])
@@ -1593,10 +1460,14 @@ fn properties_view<'a>(p: &'a Properties) -> Element<'a, Message> {
             current = Some(r.group);
         }
         let control: Element<'a, Message> = match r.key {
-            RowKey::ReadOnly => container(text(r.value.clone()).size(12).style(muted_style))
-                .padding([5, 8])
-                .width(Fill)
-                .into(),
+            RowKey::ReadOnly => container(
+                text(r.value.clone())
+                    .size(crate::ui::style::text::UI_LARGE)
+                    .style(muted_style),
+            )
+            .padding([5, 8])
+            .width(Fill)
+            .into(),
             RowKey::Folder(_) => row![
                 input(&r.value, FieldId::Row(i)),
                 browse(SheetSetMsg::Browse(FieldId::Row(i)))
@@ -1604,7 +1475,7 @@ fn properties_view<'a>(p: &'a Properties) -> Element<'a, Message> {
             .spacing(6)
             .into(),
             RowKey::Template => row![
-                container(text(r.value.clone()).size(12))
+                container(text(r.value.clone()).size(crate::ui::style::text::UI_LARGE))
                     .padding([5, 8])
                     .width(Fill),
                 browse(SheetSetMsg::BrowseTemplate)
@@ -1626,7 +1497,7 @@ fn properties_view<'a>(p: &'a Properties) -> Element<'a, Message> {
                         usize::from(s != t!("Yes")),
                     ))
                 })
-                .text_size(12)
+                .text_size(crate::ui::style::text::UI_LARGE)
                 .padding([5, 8])
                 .width(Fill)
                 .into()
@@ -1661,9 +1532,11 @@ fn properties_view<'a>(p: &'a Properties) -> Element<'a, Message> {
                     name.clone()
                 };
                 row![
-                    text(label).size(12).width(Length::Fixed(170.0)),
+                    text(label)
+                        .size(crate::ui::style::text::UI_LARGE)
+                        .width(Length::Fixed(170.0)),
                     text_input("", value)
-                        .size(12)
+                        .size(crate::ui::style::text::UI_LARGE)
                         .padding([5, 8])
                         .style(field_style)
                         .on_input(move |v| msg(SheetSetMsg::CustomValue(i, v))),
@@ -1685,7 +1558,7 @@ fn properties_view<'a>(p: &'a Properties) -> Element<'a, Message> {
                                 row![
                                     checkbox(!*sheet)
                                         .label(t!("Sheet Set").into_owned())
-                                        .text_size(12)
+                                        .text_size(crate::ui::style::text::UI_LARGE)
                                         .size(14)
                                         .on_toggle(|_| msg(SheetSetMsg::Choose(
                                             FieldId::CustomOwner,
@@ -1693,7 +1566,7 @@ fn properties_view<'a>(p: &'a Properties) -> Element<'a, Message> {
                                         ))),
                                     checkbox(*sheet)
                                         .label(t!("Sheet").into_owned())
-                                        .text_size(12)
+                                        .text_size(crate::ui::style::text::UI_LARGE)
                                         .size(14)
                                         .on_toggle(|_| msg(SheetSetMsg::Choose(
                                             FieldId::CustomOwner,
@@ -1718,7 +1591,7 @@ fn properties_view<'a>(p: &'a Properties) -> Element<'a, Message> {
                     .padding(8)
                     .style(|theme: &Theme| container::Style {
                         border: Border {
-                            color: theme.palette().background.neutral.color,
+                            color: chrome::border(theme),
                             width: 1.0,
                             radius: 4.0.into(),
                         },
@@ -1729,10 +1602,13 @@ fn properties_view<'a>(p: &'a Properties) -> Element<'a, Message> {
                 None => custom.push(
                     row![
                         Space::new().width(Fill),
-                        button(text(t!("Add Custom Property...").into_owned()).size(12))
-                            .on_press(msg(SheetSetMsg::AddCustom))
-                            .style(button_style(false))
-                            .padding([5, 12]),
+                        button(
+                            text(t!("Add Custom Property...").into_owned())
+                                .size(crate::ui::style::text::UI_LARGE)
+                        )
+                        .on_press(msg(SheetSetMsg::AddCustom))
+                        .style(button_style(false))
+                        .padding([5, 12]),
                     ]
                     .into(),
                 ),
@@ -1762,7 +1638,7 @@ fn properties_view<'a>(p: &'a Properties) -> Element<'a, Message> {
 fn check<'a>(on: bool, label: &str, field: FieldId, enabled: bool) -> Element<'a, Message> {
     let c = checkbox(on)
         .label(t!(label).into_owned())
-        .text_size(12)
+        .text_size(crate::ui::style::text::UI_LARGE)
         .size(14);
     if enabled {
         c.on_toggle(move |v| msg(SheetSetMsg::Toggle(field, v)))
@@ -1773,10 +1649,14 @@ fn check<'a>(on: bool, label: &str, field: FieldId, enabled: bool) -> Element<'a
 }
 
 fn read_only<'a>(value: &str) -> Element<'a, Message> {
-    container(text(value.to_string()).size(12).style(muted_style))
-        .padding([5, 8])
-        .width(Fill)
-        .into()
+    container(
+        text(value.to_string())
+            .size(crate::ui::style::text::UI_LARGE)
+            .style(muted_style),
+    )
+    .padding([5, 8])
+    .width(Fill)
+    .into()
 }
 
 fn ok_cancel<'a>(ok: &str) -> Element<'a, Message> {
@@ -1798,7 +1678,7 @@ fn yes_no<'a>(yes: bool, field: FieldId, a: &str, b: &str) -> Element<'a, Messag
         |s: &String| s.clone(),
     )
     .on_select(move |s: String| msg(SheetSetMsg::Toggle(field, s == first)))
-    .text_size(12)
+    .text_size(crate::ui::style::text::UI_LARGE)
     .padding([5, 8])
     .width(Fill)
     .into()
@@ -1807,10 +1687,10 @@ fn yes_no<'a>(yes: bool, field: FieldId, a: &str, b: &str) -> Element<'a, Messag
 fn form_view<'a>(f: &'a Form) -> Element<'a, Message> {
     let number_title = row![
         text(t!("Number").into_owned())
-            .size(12)
+            .size(crate::ui::style::text::UI_LARGE)
             .width(Length::Fixed(96.0)),
         container(input(&f.number, FieldId::Number)).width(Length::Fixed(110.0)),
-        text(t!("Sheet title").into_owned()).size(12),
+        text(t!("Sheet title").into_owned()).size(crate::ui::style::text::UI_LARGE),
         input(&f.title, FieldId::Title),
     ]
     .spacing(8)
@@ -1818,7 +1698,7 @@ fn form_view<'a>(f: &'a Form) -> Element<'a, Message> {
     let short = |label: &str, control: Element<'a, Message>| -> Element<'a, Message> {
         row![
             text(t!(label).into_owned())
-                .size(12)
+                .size(crate::ui::style::text::UI_LARGE)
                 .width(Length::Fixed(96.0)),
             control
         ]
@@ -1905,7 +1785,8 @@ fn form_view<'a>(f: &'a Form) -> Element<'a, Message> {
                     "Rename options",
                     row![
                         column![
-                            text(t!("Rename layout to match:").into_owned()).size(12),
+                            text(t!("Rename layout to match:").into_owned())
+                                .size(crate::ui::style::text::UI_LARGE),
                             check(f.rename[0], "Sheet title", FieldId::RenameOption(0), true),
                             row![
                                 Space::new().width(22),
@@ -1920,7 +1801,8 @@ fn form_view<'a>(f: &'a Form) -> Element<'a, Message> {
                         .spacing(6)
                         .width(Fill),
                         column![
-                            text(t!("Rename drawing file to match:").into_owned()).size(12),
+                            text(t!("Rename drawing file to match:").into_owned())
+                                .size(crate::ui::style::text::UI_LARGE),
                             check(f.rename[2], "Sheet title", FieldId::RenameOption(2), true),
                             row![
                                 Space::new().width(22),
@@ -1943,10 +1825,10 @@ fn form_view<'a>(f: &'a Form) -> Element<'a, Message> {
             "View",
             row![
                 text(t!("Number").into_owned())
-                    .size(12)
+                    .size(crate::ui::style::text::UI_LARGE)
                     .width(Length::Fixed(70.0)),
                 container(input(&f.number, FieldId::Number)).width(Length::Fixed(90.0)),
-                text(t!("View title").into_owned()).size(12),
+                text(t!("View title").into_owned()).size(crate::ui::style::text::UI_LARGE),
                 input(&f.title, FieldId::Title),
             ]
             .spacing(8)
@@ -1955,9 +1837,15 @@ fn form_view<'a>(f: &'a Form) -> Element<'a, Message> {
         FormKind::ImportLayout => {
             let head = row![
                 Space::new().width(22),
-                text(t!("Layout name").into_owned()).size(11).width(Fill),
-                text(t!("Drawing").into_owned()).size(11).width(Fill),
-                text(t!("Status").into_owned()).size(11).width(Fill),
+                text(t!("Layout name").into_owned())
+                    .size(crate::ui::style::text::UI)
+                    .width(Fill),
+                text(t!("Drawing").into_owned())
+                    .size(crate::ui::style::text::UI)
+                    .width(Fill),
+                text(t!("Status").into_owned())
+                    .size(crate::ui::style::text::UI)
+                    .width(Fill),
             ]
             .spacing(6);
             let mut list = vec![head.into()];
@@ -1980,7 +1868,7 @@ fn form_view<'a>(f: &'a Form) -> Element<'a, Message> {
                     ("Available for import", false)
                 };
                 let status: Element<'a, Message> = text(t!(label).into_owned())
-                    .size(12)
+                    .size(crate::ui::style::text::UI_LARGE)
                     .style(move |t: &Theme| text::Style {
                         color: Some(if warn {
                             t.palette().warning.base.color
@@ -1997,8 +1885,12 @@ fn form_view<'a>(f: &'a Form) -> Element<'a, Message> {
                 } else {
                     cb.into()
                 };
-                let name = text(r.layout.clone()).size(12).width(Fill);
-                let file = text(file).size(12).width(Fill);
+                let name = text(r.layout.clone())
+                    .size(crate::ui::style::text::UI_LARGE)
+                    .width(Fill);
+                let file = text(file)
+                    .size(crate::ui::style::text::UI_LARGE)
+                    .width(Fill);
                 list.push(
                     row![
                         cb,
@@ -2023,15 +1915,15 @@ fn form_view<'a>(f: &'a Form) -> Element<'a, Message> {
                 "Drawings",
                 column![
                     row![
-                        text(t!("Select drawing files containing layouts").into_owned()).size(12).width(Fill),
-                        button(text(t!("Browse for Drawings...").into_owned()).size(12))
+                        text(t!("Select drawing files containing layouts").into_owned()).size(crate::ui::style::text::UI_LARGE).width(Fill),
+                        button(text(t!("Browse for Drawings...").into_owned()).size(crate::ui::style::text::UI_LARGE))
                             .on_press(msg(SheetSetMsg::BrowseDrawings))
                             .style(button_style(false))
                             .padding([5, 12]),
                     ]
                     .align_y(iced::Center),
                     text(t!("A layout can belong to only one sheet set. If a layout already belongs to a sheet set, you must create a copy of the layout to import it.").into_owned())
-                        .size(11)
+                        .size(crate::ui::style::text::UI)
                         .style(muted_style),
                     container(scrollable(iced::widget::Column::with_children(list).spacing(4)))
                         .padding(6)
@@ -2050,12 +1942,12 @@ fn form_view<'a>(f: &'a Form) -> Element<'a, Message> {
     let foot = match f.kind {
         FormKind::Rename | FormKind::RenameView => footer(
             vec![
-                button(text(t!("Previous").into_owned()).size(12))
+                button(text(t!("Previous").into_owned()).size(crate::ui::style::text::UI_LARGE))
                     .on_press(msg(SheetSetMsg::Previous))
                     .style(button_style(false))
                     .padding([5, 12])
                     .into(),
-                button(text(t!("Next").into_owned()).size(12))
+                button(text(t!("Next").into_owned()).size(crate::ui::style::text::UI_LARGE))
                     .on_press(msg(SheetSetMsg::Next))
                     .style(button_style(false))
                     .padding([5, 12])
@@ -2074,7 +1966,7 @@ fn form_view<'a>(f: &'a Form) -> Element<'a, Message> {
 
 fn template_view<'a>(t: &'a TemplatePick) -> Element<'a, Message> {
     let rows = t.layouts.iter().enumerate().map(|(i, name)| {
-        button(text(name.clone()).size(12))
+        button(text(name.clone()).size(crate::ui::style::text::UI_LARGE))
             .on_press(msg(SheetSetMsg::Choose(FieldId::Layout, i)))
             .style(button_style(t.layout == i))
             .padding([3, 8])
@@ -2085,11 +1977,13 @@ fn template_view<'a>(t: &'a TemplatePick) -> Element<'a, Message> {
         card(
             "Template",
             column![
-                text(t!("Drawing template file name").into_owned()).size(12),
+                text(t!("Drawing template file name").into_owned())
+                    .size(crate::ui::style::text::UI_LARGE),
                 row![read_only(&t.file), browse(SheetSetMsg::BrowseTemplate)]
                     .spacing(6)
                     .align_y(iced::Center),
-                text(t!("Select a layout to create new sheets").into_owned()).size(12),
+                text(t!("Select a layout to create new sheets").into_owned())
+                    .size(crate::ui::style::text::UI_LARGE),
                 container(scrollable(
                     iced::widget::Column::with_children(rows.collect::<Vec<_>>()).spacing(1)
                 ))
@@ -2115,16 +2009,16 @@ fn category_view<'a>(c: &'a Category) -> Element<'a, Message> {
         "Category",
         column![
             labeled("Category name", input(&c.name, FieldId::Name)),
-            text(t!("Select the callout blocks to be used in this category").into_owned()).size(12),
+            text(t!("Select the callout blocks to be used in this category").into_owned()).size(crate::ui::style::text::UI_LARGE),
             container(scrollable(iced::widget::Column::with_children(blocks.collect::<Vec<_>>()).spacing(4)))
                 .padding(6)
                 .height(Length::Fixed(90.0))
                 .width(Fill)
                 .style(card_style),
             text(t!("Selected blocks will be available for selection when you insert a callout block from the view tab.").into_owned())
-                .size(11)
+                .size(crate::ui::style::text::UI)
                 .style(muted_style),
-            button(text(t!("Add Blocks...").into_owned()).size(12))
+            button(text(t!("Add Blocks...").into_owned()).size(crate::ui::style::text::UI_LARGE))
                 .on_press(msg(SheetSetMsg::AddBlocks))
                 .style(button_style(false))
                 .padding([5, 12]),
@@ -2152,7 +2046,7 @@ fn preview_box<'a>(
             crate::ui::window::block_palette::preview_canvas(w, height - 8.0)
         }
         _ => text(t!("preview").into_owned())
-            .size(11)
+            .size(crate::ui::style::text::UI)
             .style(muted_style)
             .into(),
     };
@@ -2166,7 +2060,7 @@ fn preview_box<'a>(
 
 fn block_list_view<'a>(b: &'a BlockList, state: &'a SheetSetManager) -> Element<'a, Message> {
     let rows = b.blocks.iter().enumerate().map(|(i, (_, label))| {
-        button(text(label.clone()).size(12))
+        button(text(label.clone()).size(crate::ui::style::text::UI_LARGE))
             .on_press(msg(SheetSetMsg::BlockListSelect(i)))
             .style(button_style(b.selected == Some(i)))
             .padding([3, 8])
@@ -2176,7 +2070,7 @@ fn block_list_view<'a>(b: &'a BlockList, state: &'a SheetSetManager) -> Element<
     let side = column![
         button(
             text(t!("Add...").into_owned())
-                .size(12)
+                .size(crate::ui::style::text::UI_LARGE)
                 .center()
                 .width(Fill)
         )
@@ -2186,7 +2080,7 @@ fn block_list_view<'a>(b: &'a BlockList, state: &'a SheetSetManager) -> Element<
         .width(Fill),
         button(
             text(t!("Delete").into_owned())
-                .size(12)
+                .size(crate::ui::style::text::UI_LARGE)
                 .center()
                 .width(Fill)
         )
@@ -2203,7 +2097,7 @@ fn block_list_view<'a>(b: &'a BlockList, state: &'a SheetSetManager) -> Element<
             "Blocks",
             column![
                 text(t!("The following blocks are associated with this sheet set:").into_owned())
-                    .size(12),
+                    .size(crate::ui::style::text::UI_LARGE),
                 row![
                     container(scrollable(
                         iced::widget::Column::with_children(rows.collect::<Vec<_>>()).spacing(1)
@@ -2227,7 +2121,10 @@ fn block_list_view<'a>(b: &'a BlockList, state: &'a SheetSetManager) -> Element<
 
 fn select_block_view<'a>(b: &'a SelectBlock, state: &'a SheetSetManager) -> Element<'a, Message> {
     let names = b.names.iter().enumerate().map(|(i, (name, _, on))| {
-        let c = checkbox(*on).label(name.clone()).text_size(12).size(14);
+        let c = checkbox(*on)
+            .label(name.clone())
+            .text_size(crate::ui::style::text::UI_LARGE)
+            .size(14);
         if b.whole {
             c.into()
         } else {
@@ -2238,14 +2135,15 @@ fn select_block_view<'a>(b: &'a SelectBlock, state: &'a SheetSetManager) -> Elem
     let radio = |on: bool, label: &str, whole: bool| {
         checkbox(on)
             .label(t!(label).into_owned())
-            .text_size(12)
+            .text_size(crate::ui::style::text::UI_LARGE)
             .size(14)
             .on_toggle(move |_| msg(SheetSetMsg::SelectBlockWhole(whole)))
     };
     let mut col = column![card(
         "Drawing",
         column![
-            text(t!("Enter the drawing file name:").into_owned()).size(12),
+            text(t!("Enter the drawing file name:").into_owned())
+                .size(crate::ui::style::text::UI_LARGE),
             row![read_only(&b.file), browse(SheetSetMsg::SelectBlockBrowse)]
                 .spacing(6)
                 .align_y(iced::Center),
@@ -2279,9 +2177,9 @@ fn confirm_view<'a>(question: &'a str) -> Element<'a, Message> {
         row![
             text("?").size(22).style(accent_text),
             column![
-                text(question.to_string()).size(12),
+                text(question.to_string()).size(crate::ui::style::text::UI_LARGE),
                 text(t!("(The layout and the drawing file will not be deleted.)").into_owned())
-                    .size(12)
+                    .size(crate::ui::style::text::UI_LARGE)
                     .style(muted_style),
             ]
             .spacing(4),

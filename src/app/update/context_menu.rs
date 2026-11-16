@@ -129,6 +129,11 @@ impl OpenCADStudio {
         }) {
             return menu;
         }
+        if self.tabs[self.active_tab].scene.selection.borrow().menu.user {
+            let mut rows = crate::ui::popup::context_menu::user_rows(&self.context_menu_custom);
+            crate::ui::popup::context_menu::give_mnemonics(&mut rows);
+            return ContextMenu::from_rows(rows);
+        }
         let context = self.context_menu_context();
         let mut menu = build_context_menu(&context, open);
         if matches!(

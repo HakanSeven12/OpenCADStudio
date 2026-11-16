@@ -378,17 +378,27 @@ impl OpenCADStudio {
     /// unchanged. Keyed uppercase so lowercase aliases from scripts/plugins
     /// (which bypass the command line's verb-uppercasing) still resolve.
     pub(super) fn resolve_alias(&self, cmd: &str) -> Option<String> {
-        if self.command_aliases.is_empty() {
-            return None;
-        }
         let (verb, rest) = match cmd.split_once(char::is_whitespace) {
             Some((v, r)) => (v, Some(r)),
             None => (cmd, None),
         };
-        let canon = self.command_aliases.get(&verb.to_uppercase())?;
+        let upper = verb.to_uppercase();
+        let canon = match self.command_aliases.get(&upper) {
+            Some(canon) => canon.clone(),
+            // Localized command names (LINEA, CIRCULO, -CAPA…) type straight in,
+            // keeping any `_` / `.` prefix for the dispatch below.
+            None => {
+                let name = upper.trim_start_matches(['_', '.']);
+                let english = pgp::canonical(name);
+                if english == name {
+                    return None;
+                }
+                format!("{}{english}", &upper[..upper.len() - name.len()])
+            }
+        };
         Some(match rest {
             Some(r) => format!("{canon} {r}"),
-            None => canon.clone(),
+            None => canon,
         })
     }
 

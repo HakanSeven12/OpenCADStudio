@@ -1,7 +1,8 @@
 name: Tests
 
 # Runs the workspace tests on every push to main and on every pull request,
-# on Linux, Windows and macOS. A separate lint job reports rustfmt and clippy
+# on Linux and Windows; macOS runs on pushes to main only, since its 7 GB
+# runner swaps through the main crate's test build (#3059). A separate lint job reports rustfmt and clippy
 # results without blocking merges until the existing tree has been cleaned up,
 # and a health job reports what each pull request does to the code-health
 # measures (docs/architecture/HEALTH.md) the same way.
@@ -25,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest, macos-15]
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-22.04","windows-latest"]' || '["ubuntu-22.04","windows-latest","macos-15"]') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -51,6 +52,10 @@ jobs:
         env:
           LC_ALL: C
         run: cargo test --workspace --locked
+
+      - name: Runner memory (macOS)
+        if: always() && runner.os == 'macOS'
+        run: sysctl hw.memsize vm.swapusage
 
   lint:
     name: lint (informational)
@@ -88,6 +93,13 @@ jobs:
         continue-on-error: true
         run: cargo clippy --workspace --all-targets --locked
 
+      # Reports a file built on the UI kit that gains generic iced colours or literal
+      # sizes (see src/ui/kit/mod.rs); the counts in
+      # docs/ui/audit_counts.txt only go down.
+      - name: kit audit
+        continue-on-error: true
+        run: sh docs/ui/audit_counts.sh --check
+
       # The whole tree has too many warnings for a list to help, so the
       # summary shows only those in the files this pull request touches.
       - name: Warnings in the files this pull request touches
@@ -117,10 +129,20 @@ jobs:
           fetch-depth: 2
 
       - name: Tool tests
+        id: tool_tests
         continue-on-error: true
         run: |
           python3 scripts/test_arch_check.py
           python3 scripts/test_health.py
+
+      # The job stays green (it never fails a pull request), but a failure of
+      # the report's own tests is shown, since the report may then be wrong.
+      - name: Report a tool test failure
+        if: steps.tool_tests.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          echo "::warning::The tests of scripts/arch_check.py or scripts/health.py failed (see the Tool tests step); the report below may be wrong."
+          echo "**The report's own tests failed** (see the Tool tests step), so the report below may be wrong." >> "$GITHUB_STEP_SUMMARY"
 
       - name: What this pull request changes
         if: github.event_name == 'pull_request'

@@ -1867,7 +1867,7 @@ impl OpenCADStudio {
                     ),
                     iced::widget::scrollable::AbsoluteOffset {
                         x: 0.0,
-                        y: idx as f32 * crate::ui::ROW_H,
+                        y: idx as f32 * crate::ui::window::layers::ROW_H,
                     },
                 ),
                 super::focus_layer_name_field(),

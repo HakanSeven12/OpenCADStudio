@@ -294,7 +294,12 @@ impl OpenCADStudio {
                 }
             }
         }
-        crate::sys::open_url("https://3dconnexion.com/drivers/", self.main_window)
+        let url = if cfg!(target_os = "linux") {
+            "https://spacenav.sourceforge.net/"
+        } else {
+            "https://3dconnexion.com/drivers/"
+        };
+        crate::sys::open_url(url, self.main_window)
     }
 }
 

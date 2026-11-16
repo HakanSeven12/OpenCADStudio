@@ -4,24 +4,23 @@
 //! widget trees with title bar, collapse pins, inputs, buttons, collapsible sections,
 //! and data tables, integrated with OpenCADStudio's docking system.
 
-use std::collections::{HashMap, HashSet};
 use iced::widget::{
-    button, checkbox, column, container, pick_list, row, rule, scrollable, text, text_input, Space,
+    button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space,
 };
-use iced::{Element, Fill, Length, Theme};
+use iced::{Element, Fill, Length, Padding, Theme};
 use ocs_plugin_api::dialog::{
     DialogControl, DialogValue, HorizontalAlign, PanelDef, PanelSnapshot, VerticalAlign,
 };
+use std::collections::{HashMap, HashSet};
 
 use crate::app::Message;
 use crate::ui::dock::{title_bar, Chrome, PanelId};
-use crate::ui::style::form::{button_style, field_style};
+use crate::ui::kit;
+use crate::ui::style::{chrome, kit_metrics as km, text as ui_text};
 use crate::ui::window::plugin_dialog::{
     apply_control_value_updates, collect_svg_handles, find_choice_option_in_controls, styled_text,
     svg_image, ChoiceOption,
 };
-
-const LABEL_WIDTH: f32 = 110.0;
 
 /// Per-snapshot construction budget (P1-21): a panel snapshot was a complete,
 /// unrestricted clone of every typed value, raw text and full table, and a
@@ -427,9 +426,12 @@ impl PluginPanelState {
                             errors.push(format!("missing table value for control id '{id}'"));
                         }
                     }
-                    DialogControl::Row { controls, .. } | DialogControl::Column { controls, .. } => {
+                    DialogControl::Row { controls, .. }
+                    | DialogControl::Column { controls, .. } => {
                         if budget.depth >= MAX_SNAPSHOT_FIELDS_DEPTH {
-                            errors.push("controls exceed the snapshot depth budget; skipped".to_string());
+                            errors.push(
+                                "controls exceed the snapshot depth budget; skipped".to_string(),
+                            );
                         } else {
                             budget.depth += 1;
                             snapshot_controls(
@@ -574,26 +576,35 @@ impl PluginPanelState {
     ) -> Element<'a, Message> {
         let tbar = title_bar(PanelId::Plugin(num_id), self.def.title.clone(), chrome);
 
-        // SCN-013 widget-surface mount hook (additive): when the host has a
-        // registered WidgetSurface for THIS panel id, the mounted body renders
-        // and the legacy control loop below never runs. NOTHING registers a
-        // widget surface yet (the real registration calls arrive with the
-        // wire era), so every panel today — and every existing test — falls
-        // to `None` and takes the legacy branch byte-identically.
+        // SCN-013 widget-surface mount hook: when the app-owned mount
+        // registry has a mounted surface for THIS panel id, the mounted body
+        // renders and the legacy control loop below never runs. Panels
+        // without a mounted surface — every unmounted panel — fall to `None`
+        // and take the legacy branch untouched.
         // SCN-014 made the gate's mapping REAL: each builder-emitted gesture
         // rides `Message::WidgetMountMsg` — through the bridge's one
         // `app_message` mapping — into `app::update::widget_mount`, which
         // applies it to the registered machines and settles the forwarded
         // commands' addresses (bridge-forwards-then-settle).
-        // SCN-020 adds the mounted body's pointer-capture wrapper: the
+        // SCN-020 wraps the mounted body in the pointer-capture shell: the
         // surface-level press/move/release ride the SAME mount vocabulary
         // (host-local; capture + coalesced moves in the registry's input
-        // store). Nothing registers a surface yet, so the legacy branch
-        // below stays byte-identical for every panel today.
+        // store).
         // SCN-016: the registry's storage is APP-OWNED
         // (`OpenCADStudio::mount_registry`), and the view pass reads it
         // through the registry ref handed down by the dock composition —
         // zero entries still means the zero-code legacy path below.
+        // SCN-025: the surface registration and the wire attach are LIVE (the
+        // app store feeds the v24 wire crossing's publish/patch legs), so the
+        // `Some` arm is no longer aspirational; the legacy `None` branch
+        // remains the byte-identical fallback for unmounted panels.
+        // SCN-026 (upstream merge adaptation): upstream reworked this
+        // palette's legacy chrome onto the shared `kit` (title bar +
+        // `kit::scroll_area` + the `km::TOOL_GAP` band insets) and away from
+        // the hand-rolled scrollable/container/style composition. The seam
+        // keeps its exact call-forms (the `mount_store` parameter, the match,
+        // `pointer_capture_body` + `app_message`); the legacy arm renders
+        // upstream's reworked bytes exactly.
         let body = match mount_store.borrow().mounted_body_owned(self.def.id.as_str()) {
             Some(surface_view) => {
                 let surface_id = mount_store.borrow().panel_surface_id_owned(self.def.id.as_str());
@@ -604,42 +615,28 @@ impl PluginPanelState {
                 .map(crate::ui::window::plugin_widget_mount::app_message)
             }
             None => {
-                let mut body_col = column![].spacing(8).width(Fill);
+                let mut body_col = column![].spacing(km::TOOL_GAP).width(Fill);
                 for control in &self.def.controls {
-                    if control.id().is_some_and(|id| self.hidden_controls.contains(id)) {
+                    if control
+                        .id()
+                        .is_some_and(|id| self.hidden_controls.contains(id))
+                    {
                         continue;
                     }
                     body_col = body_col.push(self.view_control_inner(control, false));
                 }
-                container(body_col).padding([8, 10]).width(Fill).into()
+                container(body_col)
+                    .padding(Padding::ZERO.top(km::TOOL_GAP))
+                    .into()
             }
         };
 
-        let scroll_body = scrollable(body)
-            .direction(scrollable::Direction::Vertical(
-                scrollable::Scrollbar::default(),
-            ))
-            .height(Fill)
-            .width(Fill);
-
-        container(column![tbar, scroll_body].width(Fill).height(Fill))
-            .width(Length::Fixed(width))
-            .height(Fill)
-            .style(|theme: &Theme| {
-                let palette = theme.palette();
-                container::Style {
-                    background: Some(iced::Background::Color(palette.background.base.color)),
-                    border: iced::Border {
-                        color: palette.background.neutral.color,
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                }
-            })
-            .into()
+        kit::palette(tbar, kit::scroll_area(body), width)
     }
 
+    /// A value control as a row of the Properties grid: its label in the
+    /// name cell, the field, list, check box, swatch or path in the value
+    /// cell. Anything else is laid out by [`Self::view_control_inner`].
     fn view_field_item<'a>(
         &'a self,
         control: &'a DialogControl,
@@ -650,53 +647,34 @@ impl PluginPanelState {
                 return Space::new().width(0).height(0).into();
             }
         }
-        let is_disabled =
-            parent_disabled || control.id().is_some_and(|id| self.disabled_controls.contains(id));
+        let is_disabled = parent_disabled
+            || control
+                .id()
+                .is_some_and(|id| self.disabled_controls.contains(id));
         let panel_id = self.def.id.clone();
         match control {
             DialogControl::Text { id, label, .. } | DialogControl::Number { id, label, .. } => {
                 let current = self.text_values.get(id).map(|s| s.as_str()).unwrap_or("");
                 let pid = panel_id.clone();
                 let cid = id.clone();
-                let mut input = text_input("", current)
-                    .padding([3, 6])
-                    .size(12)
-                    .style(field_style);
-                if !is_disabled {
-                    input = input.on_input(move |val| {
+                grid_row(
+                    label,
+                    grid_field(current, is_disabled, move |val| {
                         Message::PluginPanelTextChange(pid.clone(), cid.clone(), val)
-                    });
-                }
-
-                row![
-                    container(text(label).size(11))
-                        .width(Length::Fixed(LABEL_WIDTH)),
-                    input
-                ]
-                .spacing(8)
-                .align_y(iced::Alignment::Center)
-                .width(Fill)
-                .into()
+                    }),
+                )
             }
             DialogControl::Checkbox { id, label, .. } => {
                 let current = self.bool_values.get(id).copied().unwrap_or(false);
                 let pid = panel_id.clone();
                 let cid = id.clone();
-                let mut cb = checkbox(current)
-                    .label(label)
-                    .size(14)
-                    .text_size(12);
+                let mut cb = checkbox(current).size(km::CHECK);
                 if !is_disabled {
                     cb = cb.on_toggle(move |checked| {
                         Message::PluginPanelBoolToggle(pid.clone(), cid.clone(), checked)
                     });
                 }
-
-                row![Space::new().width(Length::Fixed(LABEL_WIDTH)), cb]
-                    .spacing(8)
-                    .align_y(iced::Alignment::Center)
-                    .width(Fill)
-                    .into()
+                grid_row(label, value_box(cb))
             }
             DialogControl::Choice {
                 id, label, options, ..
@@ -716,8 +694,11 @@ impl PluginPanelState {
                 let cid = id.clone();
 
                 let mut picker = pick_list(selected, choice_opts, |opt| opt.label.clone())
-                    .padding([3, 6])
-                    .text_size(12);
+                    .text_size(ui_text::UI)
+                    .padding(kit::FIELD_PAD)
+                    .style(kit::pick_list_style)
+                    .menu_style(kit::pick_menu_style)
+                    .width(Fill);
                 if !is_disabled {
                     picker = picker.on_select(move |opt| {
                         Message::PluginPanelChoiceSelect(
@@ -728,78 +709,64 @@ impl PluginPanelState {
                         )
                     });
                 }
-
-                row![
-                    container(text(label).size(11)).width(Length::Fixed(LABEL_WIDTH)),
-                    picker
-                ]
-                .spacing(8)
-                .align_y(iced::Alignment::Center)
-                .width(Fill)
-                .into()
+                grid_row(label, picker)
             }
             DialogControl::Color { id, label, .. } => {
                 let rgb = self.color_values.get(id).copied().unwrap_or([255, 0, 0]);
-                let color_preview = container(Space::new().width(24).height(16))
+                let color_preview = container(Space::new().width(km::ROW_ICON).height(km::CHECK))
                     .style(move |theme: &Theme| container::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgb8(rgb[0], rgb[1], rgb[2]))),
+                        background: Some(iced::Background::Color(iced::Color::from_rgb8(
+                            rgb[0], rgb[1], rgb[2],
+                        ))),
                         border: iced::Border {
-                            color: theme.palette().background.neutral.color,
-                            width: 1.0,
-                            radius: 2.0.into(),
+                            color: chrome::border(theme),
+                            width: km::line(),
+                            radius: 0.0.into(),
                         },
                         ..Default::default()
                     });
-
-                row![
-                    container(text(label).size(11))
-                        .width(Length::Fixed(LABEL_WIDTH)),
-                    row![
-                        color_preview,
-                        text(format!("RGB({}, {}, {})", rgb[0], rgb[1], rgb[2])).size(11)
-                    ]
-                    .spacing(6)
-                    .align_y(iced::Alignment::Center)
-                ]
-                .spacing(8)
-                .align_y(iced::Alignment::Center)
-                .width(Fill)
-                .into()
+                grid_row(
+                    label,
+                    value_box(
+                        row![
+                            color_preview,
+                            kit::value_text(
+                                format!("RGB({}, {}, {})", rgb[0], rgb[1], rgb[2]),
+                                false
+                            )
+                        ]
+                        .spacing(km::TOOL_GAP)
+                        .align_y(iced::Alignment::Center),
+                    ),
+                )
             }
             DialogControl::FilePicker { id, label, .. } => {
                 let current = self.file_values.get(id).map(|s| s.as_str()).unwrap_or("");
                 let pid = panel_id.clone();
                 let cid = id.clone();
                 let cid_for_pick = id.clone();
-
-                let mut input = text_input("", current)
-                    .padding([3, 6])
-                    .size(12)
-                    .style(field_style);
-                if !is_disabled {
-                    input = input.on_input(move |val| {
-                        Message::PluginPanelFileTextChange(pid.clone(), cid.clone(), val)
-                    });
-                }
-
-                let pid_pick = panel_id.clone();
-                let mut browse_btn = button(text("Browse...").size(11))
-                    .style(button_style(false))
-                    .padding([3, 6]);
-                if !is_disabled {
-                    browse_btn =
-                        browse_btn.on_press(Message::PluginPanelFilePick(pid_pick, cid_for_pick));
-                }
-
-                row![
-                    container(text(label).size(11))
-                        .width(Length::Fixed(LABEL_WIDTH)),
-                    row![input, browse_btn].spacing(4).align_y(iced::Alignment::Center)
-                ]
-                .spacing(8)
-                .align_y(iced::Alignment::Center)
-                .width(Fill)
-                .into()
+                let input = grid_field(current, is_disabled, move |val| {
+                    Message::PluginPanelFileTextChange(pid.clone(), cid.clone(), val)
+                });
+                let browse_btn = button(
+                    container(
+                        text("Browse...")
+                            .size(ui_text::UI)
+                            .line_height(ui_text::line()),
+                    )
+                    .center_y(Fill),
+                )
+                .on_press_maybe(
+                    (!is_disabled)
+                        .then(|| Message::PluginPanelFilePick(panel_id.clone(), cid_for_pick)),
+                )
+                .style(kit::cell_button_style)
+                .height(Length::Fixed(km::ROW_H))
+                .padding([0.0, km::CELL_PAD_X]);
+                grid_row(
+                    label,
+                    row![input, browse_btn].align_y(iced::Alignment::Center),
+                )
             }
             _ => self.view_control_inner(control, parent_disabled),
         }
@@ -815,8 +782,10 @@ impl PluginPanelState {
                 return Space::new().width(0).height(0).into();
             }
         }
-        let is_disabled =
-            parent_disabled || control.id().is_some_and(|id| self.disabled_controls.contains(id));
+        let is_disabled = parent_disabled
+            || control
+                .id()
+                .is_some_and(|id| self.disabled_controls.contains(id));
         let panel_id = self.def.id.clone();
         match control {
             DialogControl::InfoText { text: msg, align_h }
@@ -827,9 +796,12 @@ impl PluginPanelState {
                     .id()
                     .and_then(|id| self.text_values.get(id))
                     .map_or(msg.as_str(), String::as_str);
-                let mut t = text(display_msg).size(12).style(|theme: &Theme| text::Style {
-                    color: Some(crate::ui::style::readable::muted_text(theme)),
-                });
+                let mut t = text(display_msg)
+                    .size(ui_text::UI)
+                    .line_height(ui_text::line())
+                    .style(|theme: &Theme| text::Style {
+                        color: Some(chrome::muted(theme)),
+                    });
                 if let Some(h) = align_h {
                     match h {
                         HorizontalAlign::Left => {
@@ -858,7 +830,7 @@ impl PluginPanelState {
                 align_h,
                 align_v,
             } => {
-                let mut row_el = row![].spacing(8);
+                let mut row_el = row![].spacing(km::TOOL_GAP);
                 match align_v {
                     Some(VerticalAlign::Top) => {
                         row_el = row_el.align_y(iced::alignment::Vertical::Top);
@@ -880,15 +852,18 @@ impl PluginPanelState {
                     row_el = row_el.push(self.view_control_inner(c, is_disabled));
                 }
                 match align_h {
-                    Some(HorizontalAlign::Left) => {
-                        container(row_el).width(Fill).align_x(iced::alignment::Horizontal::Left).into()
-                    }
-                    Some(HorizontalAlign::Center) => {
-                        container(row_el).width(Fill).align_x(iced::alignment::Horizontal::Center).into()
-                    }
-                    Some(HorizontalAlign::Right) => {
-                        container(row_el).width(Fill).align_x(iced::alignment::Horizontal::Right).into()
-                    }
+                    Some(HorizontalAlign::Left) => container(row_el)
+                        .width(Fill)
+                        .align_x(iced::alignment::Horizontal::Left)
+                        .into(),
+                    Some(HorizontalAlign::Center) => container(row_el)
+                        .width(Fill)
+                        .align_x(iced::alignment::Horizontal::Center)
+                        .into(),
+                    Some(HorizontalAlign::Right) => container(row_el)
+                        .width(Fill)
+                        .align_x(iced::alignment::Horizontal::Right)
+                        .into(),
                     None => row_el.width(Fill).into(),
                 }
             }
@@ -897,7 +872,7 @@ impl PluginPanelState {
                 align_h,
                 align_v,
             } => {
-                let mut col_el = column![].spacing(8);
+                let mut col_el = column![].spacing(km::TOOL_GAP);
                 match align_h {
                     Some(HorizontalAlign::Left) => {
                         col_el = col_el.align_x(iced::alignment::Horizontal::Left);
@@ -917,15 +892,18 @@ impl PluginPanelState {
                     col_el = col_el.push(self.view_control_inner(c, is_disabled));
                 }
                 match align_v {
-                    Some(VerticalAlign::Top) => {
-                        container(col_el).height(Fill).align_y(iced::alignment::Vertical::Top).into()
-                    }
-                    Some(VerticalAlign::Middle) => {
-                        container(col_el).height(Fill).align_y(iced::alignment::Vertical::Center).into()
-                    }
-                    Some(VerticalAlign::Bottom) => {
-                        container(col_el).height(Fill).align_y(iced::alignment::Vertical::Bottom).into()
-                    }
+                    Some(VerticalAlign::Top) => container(col_el)
+                        .height(Fill)
+                        .align_y(iced::alignment::Vertical::Top)
+                        .into(),
+                    Some(VerticalAlign::Middle) => container(col_el)
+                        .height(Fill)
+                        .align_y(iced::alignment::Vertical::Center)
+                        .into(),
+                    Some(VerticalAlign::Bottom) => container(col_el)
+                        .height(Fill)
+                        .align_y(iced::alignment::Vertical::Bottom)
+                        .into(),
                     None => col_el.into(),
                 }
             }
@@ -939,7 +917,7 @@ impl PluginPanelState {
                 let pid = panel_id.clone();
                 let cid = id.clone();
                 let act = action.clone();
-                let mut label_txt = text(label).size(12);
+                let mut label_txt = text(label).size(ui_text::UI).line_height(ui_text::line());
                 if let Some(h) = align_h {
                     match h {
                         HorizontalAlign::Left => {
@@ -955,9 +933,10 @@ impl PluginPanelState {
                 } else {
                     label_txt = label_txt.align_x(iced::Center);
                 }
-                let mut btn = button(label_txt)
-                    .style(button_style(false))
-                    .padding([5, 10]);
+                let mut btn = button(container(label_txt.width(Fill)).center_y(Fill))
+                    .style(kit::text_button_style(false))
+                    .height(Length::Fixed(km::TOOL_H))
+                    .padding([0.0, km::MENU_PAD_X]);
                 if !is_disabled {
                     btn = btn.on_press(Message::PluginPanelButtonClick(pid, cid, act));
                 }
@@ -968,200 +947,36 @@ impl PluginPanelState {
                 }
                 btn.into()
             }
-            DialogControl::Text { id, label, .. } | DialogControl::Number { id, label, .. } => {
-                let current = self.text_values.get(id).map(|s| s.as_str()).unwrap_or("");
-                let pid = panel_id.clone();
-                let cid = id.clone();
-                let mut input = text_input("", current)
-                    .padding(5)
-                    .size(12)
-                    .style(field_style);
-                if !is_disabled {
-                    input = input.on_input(move |val| {
-                        Message::PluginPanelTextChange(pid.clone(), cid.clone(), val)
-                    });
-                }
-
-                column![text(label).size(11), input]
-                    .spacing(4)
-                    .width(Fill)
-                    .into()
-            }
-            DialogControl::Checkbox { id, label, .. } => {
-                let current = self.bool_values.get(id).copied().unwrap_or(false);
-                let pid = panel_id.clone();
-                let cid = id.clone();
-                let mut cb = checkbox(current)
-                    .label(label)
-                    .size(14)
-                    .text_size(12);
-                if !is_disabled {
-                    cb = cb.on_toggle(move |checked| {
-                        Message::PluginPanelBoolToggle(pid.clone(), cid.clone(), checked)
-                    });
-                }
-                cb.into()
-            }
-            DialogControl::Choice {
-                id, label, options, ..
-            } => {
-                let current_idx = self.choice_values.get(id).copied().unwrap_or(0);
-                let effective_options = self.dynamic_choice_options.get(id).unwrap_or(options);
-                let choice_opts: Vec<ChoiceOption> = effective_options
-                    .iter()
-                    .enumerate()
-                    .map(|(i, opt)| ChoiceOption {
-                        index: i,
-                        label: opt.clone(),
-                    })
-                    .collect();
-                let selected = choice_opts.get(current_idx).cloned();
-                let pid = panel_id.clone();
-                let cid = id.clone();
-
-                let mut picker = pick_list(selected, choice_opts, |opt| opt.label.clone())
-                    .padding(5);
-                if !is_disabled {
-                    picker = picker.on_select(move |opt| {
-                        Message::PluginPanelChoiceSelect(
-                            pid.clone(),
-                            cid.clone(),
-                            opt.index,
-                            opt.label.clone(),
-                        )
-                    });
-                }
-
-                column![text(label).size(11), picker]
-                    .spacing(4)
-                    .width(Fill)
-                    .into()
-            }
-            DialogControl::Color { id, label, .. } => {
-                let rgb = self.color_values.get(id).copied().unwrap_or([255, 0, 0]);
-                let color_preview = container(Space::new().width(24).height(16))
-                    .style(move |theme: &Theme| container::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgb8(rgb[0], rgb[1], rgb[2]))),
-                        border: iced::Border {
-                            color: theme.palette().background.neutral.color,
-                            width: 1.0,
-                            radius: 2.0.into(),
-                        },
-                        ..Default::default()
-                    });
-
-                column![
-                    text(label).size(11),
-                    row![
-                        color_preview,
-                        text(format!("RGB({}, {}, {})", rgb[0], rgb[1], rgb[2])).size(11)
-                    ]
-                    .spacing(6)
-                    .align_y(iced::Alignment::Center)
-                ]
-                .spacing(4)
-                .width(Fill)
-                .into()
-            }
-            DialogControl::FilePicker { id, label, .. } => {
-                let current = self.file_values.get(id).map(|s| s.as_str()).unwrap_or("");
-                let pid = panel_id.clone();
-                let cid = id.clone();
-                let cid_for_pick = id.clone();
-
-                let mut input = text_input("", current)
-                    .padding(5)
-                    .size(12)
-                    .style(field_style);
-                if !is_disabled {
-                    input = input.on_input(move |val| {
-                        Message::PluginPanelFileTextChange(pid.clone(), cid.clone(), val)
-                    });
-                }
-
-                let pid_pick = panel_id.clone();
-                let mut browse_btn = button(text("Browse...").size(11))
-                    .style(button_style(false))
-                    .padding([4, 8]);
-                if !is_disabled {
-                    browse_btn =
-                        browse_btn.on_press(Message::PluginPanelFilePick(pid_pick, cid_for_pick));
-                }
-
-                column![
-                    text(label).size(11),
-                    row![input, browse_btn]
-                        .spacing(6)
-                        .align_y(iced::Alignment::Center)
-                ]
-                .spacing(4)
-                .width(Fill)
-                .into()
-            }
+            DialogControl::Text { .. }
+            | DialogControl::Number { .. }
+            | DialogControl::Checkbox { .. }
+            | DialogControl::Choice { .. }
+            | DialogControl::Color { .. }
+            | DialogControl::FilePicker { .. } => self.view_field_item(control, parent_disabled),
             DialogControl::Fields {
                 id,
                 title,
                 controls,
                 ..
             } => {
-                let mut group_col = column![].spacing(6).width(Fill);
+                let mut group_col = column![].width(Fill);
                 let is_collapsed = self.collapsed_sections.contains(id);
-
                 if let Some(t) = title {
-                    let pid = panel_id.clone();
-                    let cid = id.clone();
-
-                    let header_btn = button(
-                        row![
-                            if is_collapsed {
-                                crate::ui::icons::themed_arrow_right(10.0)
-                            } else {
-                                crate::ui::icons::themed_arrow_down(10.0)
-                            },
-                            text(t).size(12),
-                        ]
-                        .spacing(6)
-                        .align_y(iced::Alignment::Center)
-                    )
-                    .on_press(Message::PluginPanelSectionToggle(pid, cid))
-                    .style(button::text)
-                    .padding([2, 4]);
-
-                    group_col = group_col.push(header_btn);
-                    if !is_collapsed {
-                        group_col = group_col.push(rule::horizontal(1));
-                    }
+                    group_col = group_col.push(kit::category_bar(
+                        t.clone(),
+                        is_collapsed,
+                        Message::PluginPanelSectionToggle(panel_id.clone(), id.clone()),
+                    ));
                 }
-
                 if !is_collapsed {
-                    let mut inner_items = column![].spacing(6).width(Fill);
                     for c in controls {
                         if c.id().is_some_and(|cid| self.hidden_controls.contains(cid)) {
                             continue;
                         }
-                        inner_items = inner_items.push(self.view_field_item(c, is_disabled));
+                        group_col = group_col.push(self.view_field_item(c, is_disabled));
                     }
-                    group_col = group_col.push(inner_items);
                 }
-
-                container(group_col)
-                    .padding([8, 10])
-                    .style(|theme: &Theme| {
-                        let palette = theme.palette();
-                        container::Style {
-                            background: Some(iced::Background::Color(
-                                palette.background.weak.color,
-                            )),
-                            border: iced::Border {
-                                color: palette.background.neutral.color,
-                                width: 1.0,
-                                radius: 4.0.into(),
-                            },
-                            ..Default::default()
-                        }
-                    })
-                    .width(Fill)
-                    .into()
+                group_col.into()
             }
             DialogControl::Table {
                 id,
@@ -1171,255 +986,217 @@ impl PluginPanelState {
                 allow_delete,
                 ..
             } => {
-                let mut table_col = column![].spacing(6).width(Fill);
+                let mut table_col = column![].spacing(km::TOOL_GAP).width(Fill);
 
                 if let Some(lbl) = label {
-                    table_col = table_col.push(text(lbl).size(12));
+                    table_col = table_col.push(
+                        text(lbl)
+                            .size(ui_text::UI)
+                            .line_height(ui_text::line())
+                            .font(kit::SEMIBOLD),
+                    );
                 }
 
-                let mut grid_col = column![].spacing(0).width(Fill);
-
-                // Table headers
+                // Table headers, as the kit's column header: surface_raised,
+                // semibold titles, 1 px palette-body lines between them.
                 let mut header_row = row![]
-                    .spacing(0)
+                    .spacing(km::line())
                     .align_y(iced::Alignment::Center)
                     .width(Fill);
                 for h in headers {
                     header_row = header_row.push(
-                        container(text(h).size(11))
-                            .padding([5, 8])
-                            .width(Fill)
-                            .style(|theme: &Theme| container::Style {
-                                border: iced::Border {
-                                    color: theme
-                                        .palette()
-                                        .background
-                                        .neutral
-                                        .color
-                                        .scale_alpha(0.3),
-                                    width: 1.0,
-                                    radius: 0.0.into(),
-                                },
-                                ..Default::default()
-                            })
+                        container(
+                            text(h)
+                                .size(ui_text::UI)
+                                .line_height(ui_text::line())
+                                .font(kit::SEMIBOLD)
+                                .wrapping(iced::widget::text::Wrapping::None),
+                        )
+                        .padding([0.0, km::CELL_PAD_X])
+                        .height(Length::Fixed(km::ROW_H))
+                        .align_y(iced::Alignment::Center)
+                        .width(Fill)
+                        .clip(true)
+                        .style(|theme: &Theme| container::Style {
+                            background: Some(iced::Background::Color(chrome::surface_raised(
+                                theme,
+                            ))),
+                            ..Default::default()
+                        }),
                     );
                 }
                 if *allow_delete {
-                    header_row = header_row.push(Space::new().width(Length::Fixed(28.0)));
-                }
-                grid_col = grid_col.push(
-                    container(header_row)
-                        .style(|theme: &Theme| {
-                            let palette = theme.palette();
-                            container::Style {
-                                background: Some(iced::Background::Color(
-                                    palette.background.weakest.color,
-                                )),
-                                border: iced::Border {
-                                    color: palette.background.neutral.color,
-                                    width: 1.0,
-                                    radius: 0.0.into(),
-                                },
+                    header_row = header_row.push(
+                        container(Space::new().width(km::BAR_BUTTON).height(km::ROW_H)).style(
+                            |theme: &Theme| container::Style {
+                                background: Some(iced::Background::Color(chrome::surface_raised(
+                                    theme,
+                                ))),
                                 ..Default::default()
-                            }
-                        })
-                        .width(Fill)
-                );
+                            },
+                        ),
+                    );
+                }
 
-                // Table data rows
+                // Table data rows: plain text until hovered or typed in,
+                // 1 px lines between rows and cells.
                 let current_rows = self.table_values.get(id);
-                let mut rows_list = column![].spacing(0).width(Fill);
+                let mut rows_list = column![header_row].spacing(km::line()).width(Fill);
 
                 if let Some(rows) = current_rows {
                     for (r_idx, row_cells) in rows.iter().enumerate() {
                         let mut r_widget = row![]
-                            .spacing(0)
+                            .spacing(km::line())
                             .align_y(iced::Alignment::Center)
                             .width(Fill);
                         for (c_idx, cell_text) in row_cells.iter().enumerate() {
                             let pid = panel_id.clone();
                             let tid = id.clone();
                             let mut ti = text_input("", cell_text.as_str())
-                                .style(|theme: &Theme, status| {
-                                    let palette = theme.palette();
-                                    match status {
-                                        text_input::Status::Focused { .. } => text_input::Style {
-                                            background: iced::Background::Color(
-                                                palette.background.base.color,
-                                            ),
-                                            border: iced::Border {
-                                                color: palette.primary.base.color,
-                                                width: 1.0,
-                                                radius: 2.0.into(),
-                                            },
-                                            icon: palette.background.base.text,
-                                            placeholder: crate::ui::style::readable::hint_text(
-                                                theme,
-                                            ),
-                                            value: palette.background.base.text,
-                                            selection: palette.primary.base.color.scale_alpha(0.5),
-                                        },
-                                        text_input::Status::Hovered => text_input::Style {
-                                            background: iced::Background::Color(
-                                                palette.background.weak.color,
-                                            ),
-                                            border: iced::Border {
-                                                color: palette.background.neutral.color,
-                                                width: 1.0,
-                                                radius: 2.0.into(),
-                                            },
-                                            icon: palette.background.base.text,
-                                            placeholder: crate::ui::style::readable::hint_text(
-                                                theme,
-                                            ),
-                                            value: palette.background.base.text,
-                                            selection: palette.primary.base.color.scale_alpha(0.5),
-                                        },
-                                        _ => text_input::Style {
-                                            background: iced::Background::Color(
-                                                iced::Color::TRANSPARENT,
-                                            ),
-                                            border: iced::Border {
-                                                color: iced::Color::TRANSPARENT,
-                                                width: 1.0,
-                                                radius: 0.0.into(),
-                                            },
-                                            icon: palette.background.base.text,
-                                            placeholder: crate::ui::style::readable::hint_text(
-                                                theme,
-                                            ),
-                                            value: palette.background.base.text,
-                                            selection: palette.primary.base.color.scale_alpha(0.5),
-                                        },
-                                    }
-                                })
-                                .padding([4, 6])
-                                .size(12)
+                                .style(cell_field_style)
+                                .padding(kit::FIELD_PAD)
+                                .size(ui_text::UI)
+                                .line_height(ui_text::line())
                                 .width(Fill);
                             if !is_disabled {
                                 ti = ti.on_input(move |val| {
-                                    Message::PluginPanelTableCellChange(pid.clone(), tid.clone(), r_idx, c_idx, val)
+                                    Message::PluginPanelTableCellChange(
+                                        pid.clone(),
+                                        tid.clone(),
+                                        r_idx,
+                                        c_idx,
+                                        val,
+                                    )
                                 });
                             }
-
-                            let cell_container =
-                                container(ti)
-                                    .width(Fill)
-                                    .style(|theme: &Theme| container::Style {
-                                        border: iced::Border {
-                                            color: theme
-                                                .palette()
-                                                .background
-                                                .neutral
-                                                .color
-                                                .scale_alpha(0.2),
-                                            width: 1.0,
-                                            radius: 0.0.into(),
-                                        },
-                                        ..Default::default()
-                                    });
-                            r_widget = r_widget.push(cell_container);
+                            r_widget = r_widget.push(body_cell(ti, Fill));
                         }
                         if *allow_delete {
                             let pid = panel_id.clone();
                             let tid = id.clone();
-                            let mut del_btn = button(
-                                crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 10.0)
+                            let del_btn = button(
+                                container(crate::ui::icons::tinted(
+                                    crate::ui::icons::CLOSE,
+                                    km::BAR_ICON,
+                                    chrome::text,
+                                ))
+                                .center(Fill),
                             )
-                            .style(button::text)
-                            .padding([3, 8]);
-                            if !is_disabled {
-                                del_btn = del_btn.on_press(Message::PluginPanelTableRemoveRow(pid, tid, r_idx));
-                            }
-                            r_widget = r_widget.push(del_btn);
+                            .on_press_maybe(
+                                (!is_disabled)
+                                    .then(|| Message::PluginPanelTableRemoveRow(pid, tid, r_idx)),
+                            )
+                            .width(Length::Fixed(km::BAR_BUTTON))
+                            .height(Length::Fixed(km::ROW_H))
+                            .padding(0)
+                            .style(kit::flat_button_style(false));
+                            r_widget = r_widget.push(body_cell(del_btn, Length::Shrink));
                         }
-
-                        let row_container =
-                            container(r_widget).width(Fill).style(move |theme: &Theme| {
-                                let palette = theme.palette();
-                                let bg = if r_idx % 2 == 0 {
-                                    palette.background.base.color
-                                } else {
-                                    palette.background.weak.color
-                                };
-                                container::Style {
-                                    background: Some(iced::Background::Color(bg)),
-                                    border: iced::Border {
-                                        color: palette.background.neutral.color.scale_alpha(0.25),
-                                        width: 1.0,
-                                        radius: 0.0.into(),
-                                    },
-                                    ..Default::default()
-                                }
-                            });
-
-                        rows_list = rows_list.push(row_container);
+                        rows_list = rows_list.push(r_widget);
                     }
                 }
 
-                let scrollable_rows = scrollable(rows_list)
-                    .direction(scrollable::Direction::Vertical(
-                        scrollable::Scrollbar::default(),
-                    ))
-                    .height(Length::Shrink)
-                    .width(Fill);
-
-                grid_col = grid_col.push(scrollable_rows);
-
-                let grid_container = container(grid_col)
-                    .style(|theme: &Theme| {
-                        let palette = theme.palette();
-                        container::Style {
-                            background: Some(iced::Background::Color(
-                                palette.background.base.color,
-                            )),
-                            border: iced::Border {
-                                color: palette.background.neutral.color,
-                                width: 1.0,
-                                radius: 4.0.into(),
-                            },
-                            ..Default::default()
-                        }
-                    })
-                    .width(Fill);
+                let grid_container = container(
+                    scrollable(rows_list)
+                        .direction(scrollable::Direction::Vertical(
+                            scrollable::Scrollbar::new()
+                                .width(km::SCROLLBAR_W)
+                                .scroller_width(km::SCROLL_THUMB_W),
+                        ))
+                        .style(kit::scroll_style)
+                        .height(Length::Shrink)
+                        .width(Fill),
+                )
+                .padding(km::line())
+                .style(|theme: &Theme| container::Style {
+                    background: Some(iced::Background::Color(chrome::surface_raised(theme))),
+                    ..Default::default()
+                })
+                .width(Fill);
 
                 table_col = table_col.push(grid_container);
 
                 if *allow_add {
                     let pid = panel_id.clone();
                     let tid = id.clone();
-                    let mut add_btn = button(text(crate::t!("Add row").into_owned()).size(11))
-                        .style(button_style(false))
-                        .padding([4, 10]);
-                    if !is_disabled {
-                        add_btn = add_btn.on_press(Message::PluginPanelTableAddRow(pid, tid));
-                    }
                     table_col = table_col.push(
-                        row![Space::new().width(Fill), add_btn].width(Fill)
+                        row![
+                            Space::new().width(Fill),
+                            kit::text_button(
+                                crate::t!("Add row").into_owned(),
+                                (!is_disabled).then(|| Message::PluginPanelTableAddRow(pid, tid)),
+                                false,
+                            )
+                        ]
+                        .width(Fill),
                     );
                 }
 
-                container(table_col)
-                    .padding([8, 10])
-                    .style(|theme: &Theme| {
-                        let palette = theme.palette();
-                        container::Style {
-                            background: Some(iced::Background::Color(
-                                palette.background.weak.color,
-                            )),
-                            border: iced::Border {
-                                color: palette.background.neutral.color,
-                                width: 1.0,
-                                radius: 4.0.into(),
-                            },
-                            ..Default::default()
-                        }
-                    })
-                    .width(Fill)
-                    .into()
+                table_col.into()
             }
         }
     }
+}
+
+// ── Kit mapping ──────────────────────────────────────────────────────────────
+
+/// A control as a row of the Properties grid: `label` in the name cell,
+/// `value` in the value cell.
+fn grid_row<'a>(label: &str, value: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    kit::row_view(kit::name_text(label.to_string()), value.into(), false, None)
+}
+
+/// A text field filling a grid value cell; read-only while `disabled`.
+fn grid_field<'a>(
+    current: &str,
+    disabled: bool,
+    on_input: impl Fn(String) -> Message + 'a,
+) -> Element<'a, Message> {
+    let mut input = text_input("", current)
+        .size(ui_text::UI)
+        .line_height(ui_text::line())
+        .padding(kit::FIELD_PAD)
+        .style(kit::field_style)
+        .width(Fill);
+    if !disabled {
+        input = input.on_input(on_input);
+    }
+    input.into()
+}
+
+/// A value cell's content inset like the grid's text.
+fn value_box<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    container(content)
+        .padding([0.0, km::CELL_PAD_X])
+        .height(Length::Fixed(km::ROW_H))
+        .align_y(iced::Alignment::Center)
+        .width(Fill)
+        .into()
+}
+
+/// A table cell on the surface, one row high.
+fn body_cell<'a>(content: impl Into<Element<'a, Message>>, width: Length) -> Element<'a, Message> {
+    container(content)
+        .height(Length::Fixed(km::ROW_H))
+        .width(width)
+        .style(|theme: &Theme| container::Style {
+            background: Some(iced::Background::Color(chrome::surface(theme))),
+            ..Default::default()
+        })
+        .into()
+}
+
+/// A table cell's field: plain text until hovered or typed in.
+fn cell_field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let mut style = kit::field_style(theme, status);
+    if matches!(
+        status,
+        text_input::Status::Active | text_input::Status::Disabled
+    ) {
+        style.background = iced::Background::Color(iced::Color::TRANSPARENT);
+        style.border.color = iced::Color::TRANSPARENT;
+    }
+    style
 }
 
 /// Whether a control in `controls`, at any depth, has id `id`.
@@ -1680,14 +1457,14 @@ mod tests {
                 "title".to_string(),
                 DialogValue::Text("IFC properties - Alignment-Axis-h-seg-001".to_string()),
             ),
-            (
-                "length".to_string(),
-                DialogValue::Text("2.5".to_string()),
-            ),
+            ("length".to_string(), DialogValue::Text("2.5".to_string())),
         ]));
         assert_eq!(state.def.title, "IFC properties - Alignment-Axis-h-seg-001");
         assert_eq!(state.def.controls, original_controls);
-        assert_eq!(state.text_values.get("length").map(String::as_str), Some("2.5"));
+        assert_eq!(
+            state.text_values.get("length").map(String::as_str),
+            Some("2.5")
+        );
         assert!(!state.text_values.contains_key("title"));
     }
 
@@ -1716,7 +1493,9 @@ mod tests {
         ]);
         assert_eq!(
             state.svg_handles.get("chart"),
-            Some(&iced::widget::svg::Handle::from_memory(svg.as_bytes().to_vec()))
+            Some(&iced::widget::svg::Handle::from_memory(
+                svg.as_bytes().to_vec()
+            ))
         );
         let snapshot = state.snapshot(0);
         assert!(snapshot.errors.is_empty(), "{:?}", snapshot.errors);
@@ -1731,7 +1510,10 @@ mod tests {
             };
         }
         let updated = PluginPanelState::from_def(def);
-        assert_ne!(updated.svg_handles.get("chart"), state.svg_handles.get("chart"));
+        assert_ne!(
+            updated.svg_handles.get("chart"),
+            state.svg_handles.get("chart")
+        );
     }
 
     #[test]

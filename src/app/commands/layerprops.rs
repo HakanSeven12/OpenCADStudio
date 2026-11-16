@@ -48,63 +48,66 @@ impl OpenCADStudio {
                                 crate::tf!("LAYER: '{}' already exists.", name).as_ref(),
                             );
                         } else {
+                            // The snapshot records the state before the
+                            // change, so every option takes it first.
+                            self.push_undo_snapshot(i, "LAYER NEW");
                             let mut layer = Layer::new(&name);
                             // Allocate a unique handle so the layer survives a
                             // DWG save (handle-based format; issue #67).
                             layer.handle = self.tabs[i].scene.document.allocate_handle();
                             let _ = self.tabs[i].scene.document.layers.add(layer);
-                            self.push_undo_snapshot(i, "LAYER NEW");
                             self.tabs[i].dirty = true;
                             self.command_line
                                 .push_output(crate::tf!("LAYER: '{}' created.", name).as_ref());
                         }
                     }
                     "ON" => {
+                        self.push_undo_snapshot(i, "LAYER ON");
                         for name in &parts[1..] {
                             if let Some(l) = self.tabs[i].scene.document.layers.get_mut(name) {
                                 l.flags.off = false;
                                 l.flags.frozen = false;
                             }
                         }
-                        self.push_undo_snapshot(i, "LAYER ON");
                         self.tabs[i].dirty = true;
                         self.command_line
                             .push_output(crate::t!("LAYER: layers turned on.").as_ref());
                     }
                     "OFF" => {
+                        self.push_undo_snapshot(i, "LAYER OFF");
                         for name in &parts[1..] {
                             if let Some(l) = self.tabs[i].scene.document.layers.get_mut(name) {
                                 l.flags.off = true;
                             }
                         }
-                        self.push_undo_snapshot(i, "LAYER OFF");
                         self.tabs[i].dirty = true;
                         self.command_line
                             .push_output(crate::t!("LAYER: layers turned off.").as_ref());
                     }
                     "FREEZE" | "FR" => {
+                        self.push_undo_snapshot(i, "LAYER FREEZE");
                         for name in &parts[1..] {
                             if let Some(l) = self.tabs[i].scene.document.layers.get_mut(name) {
                                 l.flags.frozen = true;
                             }
                         }
-                        self.push_undo_snapshot(i, "LAYER FREEZE");
                         self.tabs[i].dirty = true;
                         self.command_line
                             .push_output(crate::t!("LAYER: layers frozen.").as_ref());
                     }
                     "THAW" | "TH" => {
+                        self.push_undo_snapshot(i, "LAYER THAW");
                         for name in &parts[1..] {
                             if let Some(l) = self.tabs[i].scene.document.layers.get_mut(name) {
                                 l.flags.frozen = false;
                             }
                         }
-                        self.push_undo_snapshot(i, "LAYER THAW");
                         self.tabs[i].dirty = true;
                         self.command_line
                             .push_output(crate::t!("LAYER: layers thawed.").as_ref());
                     }
                     "LOCK" | "LO" => {
+                        self.push_undo_snapshot(i, "LAYER LOCK");
                         let names: Vec<String> =
                             parts[1..].iter().map(|name| (*name).to_string()).collect();
                         for name in &parts[1..] {
@@ -113,13 +116,13 @@ impl OpenCADStudio {
                             }
                         }
                         self.tabs[i].scene.invalidate_layer_dependencies(&names);
-                        self.push_undo_snapshot(i, "LAYER LOCK");
                         self.tabs[i].dirty = true;
                         self.refresh_properties();
                         self.command_line
                             .push_output(crate::t!("LAYER: layers locked.").as_ref());
                     }
                     "UNLOCK" | "UL" => {
+                        self.push_undo_snapshot(i, "LAYER UNLOCK");
                         let names: Vec<String> =
                             parts[1..].iter().map(|name| (*name).to_string()).collect();
                         for name in &parts[1..] {
@@ -128,7 +131,6 @@ impl OpenCADStudio {
                             }
                         }
                         self.tabs[i].scene.invalidate_layer_dependencies(&names);
-                        self.push_undo_snapshot(i, "LAYER UNLOCK");
                         self.tabs[i].dirty = true;
                         self.refresh_properties();
                         self.command_line
@@ -159,6 +161,7 @@ impl OpenCADStudio {
                             );
                             return Some(Task::none());
                         };
+                        self.push_undo_snapshot(i, "LAYER COLOR");
                         let Some(layer) =
                             self.tabs[i].scene.document.layers.get_mut(&layer_name)
                         else {
@@ -170,7 +173,6 @@ impl OpenCADStudio {
                         layer.color = color;
                         layer.color_name = None;
                         layer.book_name = None;
-                        self.push_undo_snapshot(i, "LAYER COLOR");
                         self.tabs[i].dirty = true;
                         // By-layer colour is baked into every wire on this
                         // layer. The dependency index maps block children back
@@ -2278,4 +2280,58 @@ fn reapply_mleader_style(doc: &mut document::Document, style_handle: document::H
             crate::scene::annotative::apply_mleader_style_to_object(doc, *handle, &style)
         })
         .count()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::OpenCADStudio;
+
+    fn run(app: &mut OpenCADStudio, line: &str) {
+        let result = app.automation_op(&serde_json::json!({"op": "run", "cmd": line}).to_string());
+        assert_eq!(result["status"], "completed", "{line}: {result}");
+    }
+
+    fn layers(app: &OpenCADStudio) -> Vec<document::tables::Layer> {
+        let doc = &app.tabs[app.active_tab].scene.document;
+        doc.layers.iter().cloned().collect()
+    }
+
+    fn entities(app: &OpenCADStudio) -> usize {
+        app.tabs[app.active_tab].scene.document.entities().count()
+    }
+
+    /// Each option of `LAYER` is one undo step: UNDO puts the layer table
+    /// back and leaves the step before it (a line) alone, and REDO puts the
+    /// change back.
+    #[test]
+    fn each_layer_option_is_one_undo_step() {
+        for (setup, option) in [
+            ("", "LAYER NEW Doors"),
+            ("-LAYER OFF Walls ", "LAYER ON Walls"),
+            ("", "LAYER OFF Walls"),
+            ("", "LAYER FREEZE Walls"),
+            ("-LAYER FREEZE Walls ", "LAYER THAW Walls"),
+            ("", "LAYER LOCK Walls"),
+            ("-LAYER LOCK Walls ", "LAYER UNLOCK Walls"),
+            ("", "LAYER COLOR 1 Walls"),
+        ] {
+            let mut app = OpenCADStudio::new_for_test();
+            app.automation_op(r#"{"op":"new"}"#);
+            run(&mut app, "-LAYER NEW Walls");
+            if !setup.is_empty() {
+                run(&mut app, setup);
+            }
+            run(&mut app, "LINE 0,0 10,0 ");
+            let before = layers(&app);
+            run(&mut app, option);
+            let after = layers(&app);
+            assert_ne!(after, before, "{option} changed no layer");
+
+            app.undo_active_tab();
+            assert_eq!(layers(&app), before, "{option}: UNDO");
+            assert_eq!(entities(&app), 1, "{option}: UNDO took back the line");
+            app.redo_active_tab();
+            assert_eq!(layers(&app), after, "{option}: REDO");
+        }
+    }
 }

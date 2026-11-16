@@ -1206,6 +1206,24 @@ fn window_content(windows: &[OsWindow], id: iced::window::Id) -> Option<Detached
         .map(|window| window.content)
 }
 
+/// Keep the windows of their own above the main window while the app has the
+/// focus, the way owned windows behave: a click on the drawing no longer
+/// sends an open dialog behind it. Back to normal once another app is in
+/// front, so they do not float over it.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn float_os_windows(windows: &[OsWindow], app_focused: bool) -> Task<Message> {
+    let level = if app_focused {
+        iced::window::Level::AlwaysOnTop
+    } else {
+        iced::window::Level::Normal
+    };
+    Task::batch(
+        windows
+            .iter()
+            .map(|window| iced::window::set_level(window.id, level)),
+    )
+}
+
 /// Open a window of its own at `placement` (centred when it has no place).
 #[cfg(not(target_arch = "wasm32"))]
 fn open_window(
@@ -1226,6 +1244,8 @@ fn open_window(
         position,
         min_size: Some(Size::new(240.0, 160.0)),
         exit_on_close_request: false,
+        // Opened from the app, which has the focus: above the main window.
+        level: iced::window::Level::AlwaysOnTop,
         icon: super::helpers::build_window_icon()
             .and_then(|rgba| iced::window::icon::from_rgba(rgba, 32, 32).ok()),
         // The same app id as the main window: the dock groups them and shows

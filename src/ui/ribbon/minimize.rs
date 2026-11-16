@@ -9,8 +9,7 @@ use iced::widget::{button, column, container, mouse_area, opaque, row, text, too
 use iced::{Background, Element, Fill, Length, Padding, Theme};
 
 use super::widgets::{
-    make_icon, make_tip, popup_panel_style, qat_split_part_style, split_outline, tip_style,
-    tool_btn_style, PANEL_TITLE_SIZE,
+    make_icon, qat_split_part_style, split_outline, tool_btn_style, PANEL_TITLE_SIZE,
 };
 use super::{
     draw_panel, extras, first_tool_icon, keytips, position_ribbon_dropdown, render_group,
@@ -352,18 +351,16 @@ impl Ribbon {
                 ..qat_split_part_style(theme, true, false, status)
             }
         };
-        let face = tooltip(
+        let face = crate::ui::kit::tooltip(
             button(container(icons::ribbon_toggle(minimized)).center(Fill))
                 .on_press(Message::RibbonMinimize(MinimizeMsg::Toggle))
                 .style(part_style)
                 .width(metrics::MINIMIZE_FACE_W)
                 .height(metrics::QAT_BUTTON)
                 .padding(0),
-            make_tip(tip),
+            tip,
             tooltip::Position::Bottom,
-        )
-        .delay(Duration::from_millis(400))
-        .style(tip_style);
+        );
         let arrow = button(container(icons::dropdown_arrow()).center(Fill))
             .on_press(Message::ToggleRibbonDropdown(MINIMIZE_MENU_ID.to_string()))
             .style(part_style)
@@ -643,7 +640,7 @@ impl Ribbon {
             container(popup.width(Length::Shrink))
                 .width(Length::Shrink)
                 .style(move |theme: &Theme| {
-                    let mut style = popup_panel_style(theme);
+                    let mut style = crate::ui::kit::menu::frame_style(theme);
                     if more {
                         style.background = Some(Background::Color(chrome::open_panel(theme)));
                     }

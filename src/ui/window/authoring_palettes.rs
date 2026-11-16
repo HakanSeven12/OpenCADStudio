@@ -2,13 +2,16 @@
 
 use crate::app::Message;
 use crate::modules::{parametric, IconKind, ToolDef};
-use crate::ui::dock::{self, Chrome, PanelId, VerticalLabel};
+use crate::ui::dock::{self, Chrome, PanelId};
 use crate::ui::icons;
-use crate::ui::ribbon::{tooltip_content, tooltip_style};
-use iced::widget::{
-    button, canvas, column, container, row, rule, scrollable, stack, text, tooltip, Space,
-};
-use iced::{Background, Border, Element, Fill, Theme};
+use crate::ui::kit;
+use crate::ui::style::kit_metrics as km;
+use iced::widget::{button, column, container, row, stack, text, Space};
+use iced::{Element, Fill};
+
+/// Size of a tool's icon in the catalog, and the height of its row.
+const TOOL_ICON: f32 = 24.0;
+const TOOL_ROW_H: f32 = 32.0;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Tab {
@@ -237,20 +240,20 @@ fn catalog(
             .flatten();
         let enabled = (geometry_action&&action_error.is_none())||(single&&point_error.is_none())||(lookup_action&&lookup_error.is_none())||(properties_table_action&&properties_table_error.is_none())||(orientation && orientation_error.is_none()) || (visibility && visibility_error.is_none()) || ((point || distance) && point_error.is_none()) || (parameter_set.is_some() && parameter_set_error.is_none());
         let base = if enabled {
-            icons::semantic(icon, 28.0)
+            icons::semantic(icon, TOOL_ICON)
         } else {
-            icons::semantic_disabled(icon, 28.0)
+            icons::semantic_disabled(icon, TOOL_ICON)
         };
         let icon = if tab != Tab::Parameters {
             stack![
                 base,
                 container(if enabled {
-                    icons::semantic(include_bytes!("../../../assets/icons/ui/bolt.svg"), 14.0)
+                    icons::semantic(include_bytes!("../../../assets/icons/ui/bolt.svg"), km::BAR_ICON)
                 } else {
-                    icons::semantic_disabled(include_bytes!("../../../assets/icons/ui/bolt.svg"), 14.0)
+                    icons::semantic_disabled(include_bytes!("../../../assets/icons/ui/bolt.svg"), km::BAR_ICON)
                 })
-                .width(28)
-                .height(28)
+                .width(TOOL_ICON)
+                .height(TOOL_ICON)
                 .align_right(Fill)
                 .align_top(Fill),
             ]
@@ -311,7 +314,7 @@ fn catalog(
             entry
         }
     }))
-    .spacing(2)
+    .spacing(km::line())
     .into()
 }
 
@@ -321,41 +324,27 @@ fn tool_row(
     message: Option<Message>,
     description: &str,
 ) -> Element<'static, Message> {
-    let enabled = message.is_some();
     let entry = button(
-        row![icon, text(crate::t!(label).into_owned()).size(12)]
-            .spacing(8)
+        row![icon, kit::value_text(crate::t!(label).into_owned(), false)]
+            .spacing(km::TOOL_GAP * 2.0)
             .align_y(iced::Center),
     )
     .on_press_maybe(message)
-    .padding([4, 6])
-    .height(40)
+    .padding([0.0, km::CELL_PAD_X])
+    .height(TOOL_ROW_H)
     .width(Fill)
-    .style(move |theme: &Theme, status| {
-        if enabled {
-            button::text(theme, status)
-        } else {
-            button::Style {
-                text_color: theme.palette().background.base.text.scale_alpha(0.55),
-                ..Default::default()
-            }
-        }
-    });
-    tooltip(
+    .style(kit::flat_button_style(false));
+    kit::tooltip(
         entry,
-        tooltip_content(format!("{}\n{}", crate::t!(label), description)),
-        tooltip::Position::Right,
+        format!("{}\n{}", crate::t!(label), description),
+        kit::TipPosition::Right,
     )
-    .gap(6.0)
-    .delay(std::time::Duration::from_millis(400))
-    .style(tooltip_style)
-    .into()
 }
 
 fn constraint_row(tool: ToolDef) -> Element<'static, Message> {
     let icon = match tool.icon {
-        IconKind::Svg(bytes) => icons::semantic(bytes, 28.0),
-        IconKind::Glyph(glyph) => text(glyph).size(28).into(),
+        IconKind::Svg(bytes) => icons::semantic(bytes, TOOL_ICON),
+        IconKind::Glyph(glyph) => text(glyph).size(TOOL_ICON).into(),
     };
     let label = if tool.id == "LCONSTRAINT" {
         "Collinear"
@@ -404,11 +393,10 @@ fn constraints() -> Element<'static, Message> {
         parametric::dimensional_tools::diameter(),
     ];
     column![
-        container(text(crate::t!("Geometric Constraints")).size(11)).padding([10, 6]),
-        column(geometric.into_iter().map(constraint_row)).spacing(2),
-        container(rule::horizontal(1)).padding([8, 6]),
-        container(text(crate::t!("Constraint Parameters")).size(11)).padding([10, 6]),
-        column(dimensional.into_iter().map(constraint_row)).spacing(2),
+        kit::section_bar(crate::t!("Geometric Constraints").into_owned(), Vec::new()),
+        column(geometric.into_iter().map(constraint_row)).spacing(km::line()),
+        kit::section_bar(crate::t!("Constraint Parameters").into_owned(), Vec::new()),
+        column(dimensional.into_iter().map(constraint_row)).spacing(km::line()),
     ]
     .into()
 }
@@ -433,55 +421,24 @@ pub fn view(
     parameter_set_error: Option<&'static str>,
 ) -> Element<'static, Message> {
     let tabs = column(Tab::ALL.into_iter().map(|category| {
-        let label = category.label();
-        let selected = category == selected_tab;
-        container(
-            button(
-                canvas(VerticalLabel {
-                    text: crate::t!(label).into_owned(),
-                    centered: false,
-                })
-                .width(16)
-                .height((label.len() as f32 * 7.0) + 8.0),
-            )
-            .on_press(Message::AuthoringPaletteTabSelected(category))
-            .padding([6, 4])
-            .style(move |theme: &Theme, status| {
-                let palette = theme.palette();
-                button::Style {
-                    background: Some(Background::Color(
-                        if selected || status == button::Status::Hovered {
-                            palette.background.base.color
-                        } else {
-                            palette.background.weak.color
-                        },
-                    )),
-                    border: Border {
-                        color: if selected {
-                            palette.primary.base.color
-                        } else {
-                            palette.background.neutral.color
-                        },
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    ..Default::default()
-                }
-            }),
-        )
+        container(kit::side_tab(
+            &crate::t!(category.label()),
+            category == selected_tab,
+            Message::AuthoringPaletteTabSelected(category),
+        ))
         .id(category.widget_id())
         .into()
     }))
-    .spacing(2)
+    .spacing(km::line())
     .push(Space::new().height(Fill));
-    dock::frame(
+    kit::palette(
         dock::title_bar(
             PanelId::AuthoringPalettes,
             crate::t!("Authoring Palettes").into_owned(),
             chrome,
         ),
         row![
-            scrollable(catalog(
+            kit::scroll_area(catalog(
                 selected_tab,
                 visibility_error,
                 point_error,
@@ -496,12 +453,9 @@ pub fn view(
                 polar_stretch_action_error,
                 array_action_error,
                 parameter_set_error,
-            ))
-            .width(Fill)
-            .height(Fill),
+            )),
             tabs
         ]
-        .spacing(4)
         .height(Fill),
         width,
     )

@@ -345,7 +345,7 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
                 ..Default::default()
             }
         })
-        .height(crate::ui::ROW_H)
+        .height(crate::ui::style::form::ROW_H)
         .padding([3, 6])
         .width(Fill);
         row![text(label).size(11).width(43), picker]
@@ -434,7 +434,7 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
             ]
             .spacing(4)
             .align_y(iced::Center)
-            .height(crate::ui::ROW_H)
+            .height(crate::ui::style::form::ROW_H)
             .width(Fill)
         ]
         .spacing(6)
@@ -453,7 +453,7 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
                 .style(button::subtle)
                 .padding(3)
                 .width(24)
-                .height(crate::ui::ROW_H),
+                .height(crate::ui::style::form::ROW_H),
             text(crate::t!("Reset angle")).size(10),
             tooltip::Position::Bottom,
         ),

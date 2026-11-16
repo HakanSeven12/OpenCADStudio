@@ -1660,6 +1660,7 @@ impl OpenCADStudio {
             show_command_history: self.show_command_history,
             show_layers: self.show_layers,
             show_file_tabs: self.show_file_tabs,
+            file_tabs_above_docks: self.file_tabs_above_docks,
             show_layout_tabs: self.show_layout_tabs,
             graphic_fills_on_current_layer: self.graphic_attributes.fill_on_current_layer,
             annotation_auto_scale: self.annotation_auto_scale,
@@ -1740,6 +1741,7 @@ impl OpenCADStudio {
         // The pallets and tabs come back as they were left (#2616).
         self.show_layers = cfg.show_layers && self.dock.is_placed(crate::ui::dock::PanelId::Layers);
         self.show_file_tabs = cfg.show_file_tabs;
+        self.file_tabs_above_docks = cfg.file_tabs_above_docks;
         self.ribbon.set_file_tabs(self.show_file_tabs);
         self.show_layout_tabs = cfg.show_layout_tabs;
         self.ribbon.set_layout_tabs(self.show_layout_tabs);

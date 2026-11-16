@@ -56,6 +56,8 @@ fn measure(content: &str, size: f32, bold: bool) -> f32 {
         shaping: text::Shaping::default(),
         wrapping: text::Wrapping::None,
         ellipsis: text::Ellipsis::None,
+        // Hinting is off in the pinned iced: `iced_graphics::text::hint_factor`
+        // returns `None`; follow `renderer.hint_factor()` once it is enabled.
         hint_factor: None,
     });
     paragraph.min_bounds().width.ceil()

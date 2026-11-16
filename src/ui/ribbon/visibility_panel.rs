@@ -1,5 +1,5 @@
 //! The contextual visibility controls share the ribbon's buttons, tips and collapse layout.
-use iced::widget::{button, column, container, pick_list, row, text, tooltip};
+use iced::widget::{button, column, container, pick_list, row, text};
 use iced::{Element, Fill, Theme};
 
 use super::collapse::{Level, Panel};
@@ -57,15 +57,12 @@ fn tool(
     } else {
         control.width(SMALL_W).height(ROW_H)
     };
-    tooltip(
+    crate::ui::kit::tooltip_gap(
         super::keytips::anchor(id, container(control).id(id)),
-        super::tooltip_content(crate::t!(label).into_owned()),
+        crate::t!(label).into_owned(),
         iced::widget::tooltip::Position::Right,
+        crate::ui::style::ribbon_metrics::TIP_GAP,
     )
-    .gap(6)
-    .delay(std::time::Duration::from_millis(400))
-    .style(super::tooltip_style)
-    .into()
 }
 
 fn view(context: Option<RibbonContext>, compact: bool) -> Element<'static, Message> {

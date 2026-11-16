@@ -17,10 +17,9 @@ macro_rules! label {
     };
 }
 
-const ROW_H: f32 = 24.0;
-const HEADER_H: f32 = 25.0;
-const SEP_H: f32 = 9.0;
-const PANEL_PAD: f32 = 4.0;
+// The kit menu's measurements: its rows, separators and frame.
+const ROW_H: f32 = km::MENU_ITEM_H;
+const HEADER_H: f32 = km::MENU_ITEM_H;
 
 /// A press outside the open popup closes it; the editor routes the rest.
 fn close() -> Message {
@@ -32,20 +31,18 @@ fn dim(theme: &Theme) -> Color {
     crate::ui::style::readable::muted_text(theme)
 }
 
+/// A row in the kit menu's colours: lit with `hover`, square.
 fn item_style(theme: &Theme, status: button::Status) -> button::Style {
-    let palette = theme.palette();
     let (background, text_color) = match status {
-        button::Status::Hovered | button::Status::Pressed => (
-            Some(palette.primary.weak.color.into()),
-            palette.primary.weak.text,
-        ),
+        button::Status::Hovered | button::Status::Pressed => {
+            (Some(chrome::hover(theme).into()), chrome::text(theme))
+        }
         button::Status::Disabled => (None, dim(theme)),
-        button::Status::Active => (None, palette.background.base.text),
+        button::Status::Active => (None, chrome::text(theme)),
     };
     button::Style {
         background,
         text_color,
-        border: Border::default().rounded(3),
         ..Default::default()
     }
 }
@@ -65,6 +62,9 @@ impl From<&'static str> for Mark {
     }
 }
 
+/// Width of a number field in a menu row.
+const MENU_FIELD_W: f32 = 64.0;
+
 const SUPERSCRIPT: &[u8] = include_bytes!("../../../../assets/icons/mt_superscript.svg");
 const SUBSCRIPT: &[u8] = include_bytes!("../../../../assets/icons/mt_subscript.svg");
 const UPPERCASE: &[u8] = include_bytes!("../../../../assets/icons/mt_upper.svg");
@@ -78,10 +78,15 @@ const REFRESH: &[u8] = include_bytes!("../../../../assets/icons/ui/refresh.svg")
 fn mark_cell(mark: Mark) -> Element<'static, Message> {
     let cell: Element<'static, Message> = match mark {
         Mark::Check => crate::ui::icons::themed_check_cell(true),
-        Mark::Svg(bytes) => crate::ui::icons::themed(bytes, 12.0),
-        Mark::Text(text_mark) => text(text_mark).size(12).into(),
+        Mark::Svg(bytes) => crate::ui::icons::themed(bytes, km::BAR_ICON),
+        Mark::Text(text_mark) => text(text_mark)
+            .size(ui_text::UI)
+            .line_height(ui_text::line())
+            .into(),
     };
-    iced::widget::container(cell).width(22).into()
+    iced::widget::container(cell)
+        .center_x(Length::Fixed(km::MENU_CHECK_W))
+        .into()
 }
 
 /// A menu row: check/icon column, then the label.
@@ -90,16 +95,16 @@ fn row_button(mark: impl Into<Mark>, name: String, on_press: Message) -> Element
         row![
             mark_cell(mark.into()),
             text(name)
-                .size(11)
+                .size(ui_text::UI)
+                .line_height(ui_text::line())
                 .width(Fill)
                 .wrapping(iced::widget::text::Wrapping::None),
         ]
-        .spacing(2)
         .align_y(iced::Alignment::Center)
         .height(Fill),
     )
     .on_press(on_press)
-    .padding([0, 6])
+    .padding(iced::Padding::ZERO.right(km::MENU_PAD_X))
     .width(Fill)
     .height(ROW_H)
     .style(item_style)
@@ -126,15 +131,24 @@ fn field(
     on: impl Fn(String) -> Message + 'static,
 ) -> Element<'static, Message> {
     row![
-        text(name).size(11).width(Fill),
+        text(name)
+            .size(ui_text::UI)
+            .line_height(ui_text::line())
+            .width(Fill),
         text_input("0", value)
             .on_input(on)
-            .size(12)
-            .padding(2)
-            .width(64),
+            .size(ui_text::UI)
+            .line_height(ui_text::line())
+            .padding(crate::ui::kit::FIELD_PAD)
+            .style(crate::ui::kit::field_style)
+            .width(MENU_FIELD_W),
     ]
-    .spacing(6)
-    .padding([0, 6])
+    .spacing(km::TOOL_GAP)
+    .padding(
+        iced::Padding::ZERO
+            .left(km::MENU_CHECK_W)
+            .right(km::MENU_PAD_X),
+    )
     .align_y(iced::Alignment::Center)
     .height(ROW_H)
     .into()
@@ -162,24 +176,31 @@ impl Panel {
     }
 
     fn separator(mut self) -> Self {
-        self.rows.push(
-            container(iced::widget::rule::horizontal(1))
-                .height(SEP_H)
-                .center_y(SEP_H)
-                .into(),
-        );
+        self.rows.push(crate::ui::kit::menu::entry(
+            crate::ui::kit::menu::Item::Separator,
+        ));
         self
     }
 
+    /// The kit menu: its frame, the title as a heading over the rows.
     fn build(self) -> Element<'static, Message> {
-        let header = container(text(self.title).size(12))
-            .height(HEADER_H)
-            .padding([0, 6])
-            .center_y(HEADER_H);
+        let header = container(
+            text(self.title)
+                .size(ui_text::UI)
+                .line_height(ui_text::line())
+                .font(crate::ui::kit::SEMIBOLD),
+        )
+        .height(HEADER_H)
+        .padding(
+            iced::Padding::ZERO
+                .left(km::MENU_CHECK_W)
+                .right(km::MENU_PAD_X),
+        )
+        .center_y(HEADER_H);
         container(column![header, column(self.rows).spacing(0).width(Fill)])
             .width(self.width)
-            .padding(PANEL_PAD)
-            .style(crate::ui::color_select::popup_panel_style)
+            .padding(crate::ui::kit::menu::inset(km::MENU_PAD_Y))
+            .style(crate::ui::kit::menu::frame_style)
             .into()
     }
 }
@@ -249,7 +270,7 @@ pub(super) fn style_menu(ed: &MTextEditorState) -> Element<'static, Message> {
             .on_press(Message::MTextMenu(Some(EditorMenu::Style)))
             .padding([5, 6])
             .style(trigger_style(open)),
-        container(text(t!("Style")).size(11))
+        container(text(t!("Style")).size(ui_text::UI))
             .padding(6)
             .style(container::rounded_box),
         iced::widget::tooltip::Position::Bottom,
@@ -291,12 +312,12 @@ fn style_panel(ed: &MTextEditorState) -> Element<'static, Message> {
 
 fn new_style_panel(ed: &MTextEditorState) -> Element<'static, Message> {
     let name = row![
-        text(t!("Name")).size(11).width(Fill),
+        text(t!("Name")).size(ui_text::UI).width(Fill),
         text_input("", &ed.new_style_name)
             .id(crate::app::mtext_editor::NEW_STYLE_NAME_ID)
             .on_input(Message::MTextNewStyleName)
             .on_submit(Message::MTextNewStyleCreate)
-            .size(12)
+            .size(ui_text::UI)
             .padding(2)
             .width(150),
     ]
@@ -307,11 +328,11 @@ fn new_style_panel(ed: &MTextEditorState) -> Element<'static, Message> {
     let named = !ed.new_style_name.trim().is_empty();
     let buttons = row![
         Space::new().width(Fill),
-        button(text(label!("cancel")).size(11))
+        button(text(label!("cancel")).size(ui_text::UI))
             .on_press(Message::MTextNewStyleOpen)
             .padding([3, 10])
             .style(button::secondary),
-        button(text(t!("Create")).size(11))
+        button(text(t!("Create")).size(ui_text::UI))
             .on_press_maybe(named.then_some(Message::MTextNewStyleCreate))
             .padding([3, 10])
             .style(button::primary),
@@ -340,7 +361,7 @@ pub(super) fn toolbar_menu(ed: &MTextEditorState, menu: EditorMenu) -> Element<'
     let open = shown == Some(menu);
     let base = button(
         row![
-            text(title(menu)).size(11),
+            text(title(menu)).size(ui_text::UI),
             crate::ui::icons::themed_arrow_down(9.0)
         ]
         .spacing(5)
@@ -608,10 +629,10 @@ fn find_panel(ed: &MTextEditorState) -> Element<'static, Message> {
     let input =
         |name: String, value: &str, on: fn(String) -> Message| -> Element<'static, Message> {
             row![
-                text(name.clone()).size(11).width(90),
+                text(name.clone()).size(ui_text::UI).width(90),
                 text_input(&name, value)
                     .on_input(on)
-                    .size(12)
+                    .size(ui_text::UI)
                     .padding(2)
                     .width(Fill),
             ]
@@ -622,7 +643,7 @@ fn find_panel(ed: &MTextEditorState) -> Element<'static, Message> {
             .into()
         };
     let action = |name: String, message: Message| {
-        button(text(name).size(11))
+        button(text(name).size(ui_text::UI))
             .on_press(message)
             .padding([3, 8])
             .style(button::secondary)
@@ -661,11 +682,11 @@ fn fraction_panel(ed: &MTextEditorState) -> Element<'static, Message> {
     let draft = ed.fraction.clone().unwrap_or_else(|| ed.fraction_draft());
     let part = |name: String, part: FractionPart, value: String| -> Element<'static, Message> {
         row![
-            text(name).size(11).width(Fill),
+            text(name).size(ui_text::UI).width(Fill),
             text_input("", &value)
                 .on_input(move |v| Message::MTextFractionPart(part, v))
                 .on_submit(Message::MTextFractionInsert)
-                .size(12)
+                .size(ui_text::UI)
                 .padding(2)
                 .width(96),
         ]
@@ -684,11 +705,11 @@ fn fraction_panel(ed: &MTextEditorState) -> Element<'static, Message> {
     };
     let buttons = row![
         Space::new().width(Fill),
-        button(text(label!("cancel")).size(11))
+        button(text(label!("cancel")).size(ui_text::UI))
             .on_press(Message::MTextFractionOpen)
             .padding([3, 10])
             .style(button::secondary),
-        button(text(label!("insert")).size(11))
+        button(text(label!("insert")).size(ui_text::UI))
             .on_press(Message::MTextFractionInsert)
             .padding([3, 10])
             .style(button::primary),
@@ -721,16 +742,19 @@ fn fraction_panel(ed: &MTextEditorState) -> Element<'static, Message> {
 fn inert(mark: impl Into<Mark>, name: String, reason: String) -> Element<'static, Message> {
     iced::widget::tooltip(
         button(
-            row![mark_cell(mark.into()), text(name).size(11).width(Fill),]
-                .spacing(2)
-                .align_y(iced::Alignment::Center)
-                .height(Fill),
+            row![
+                mark_cell(mark.into()),
+                text(name).size(ui_text::UI).width(Fill),
+            ]
+            .spacing(2)
+            .align_y(iced::Alignment::Center)
+            .height(Fill),
         )
         .padding([0, 6])
         .width(Fill)
         .height(ROW_H)
         .style(item_style),
-        container(text(reason).size(11).width(240))
+        container(text(reason).size(ui_text::UI).width(240))
             .padding(6)
             .style(container::rounded_box),
         iced::widget::tooltip::Position::Right,

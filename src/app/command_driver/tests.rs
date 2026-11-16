@@ -9155,4 +9155,521 @@ mod attedit_one_at_a_time_tests {
     }
 }
 
+#[cfg(test)]
+mod viewport_annotation_sync_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Viewport;
+    use document::EntityType;
 
+    /// The status pill's sync action re-links the viewport it describes to
+    /// its annotation scale, from the headless dispatch path. A clean round
+    /// trip: the viewport has the scale stored, the stored link is cleared,
+    /// and the sync message re-establishes it.
+    #[test]
+    fn the_sync_action_relinks_a_viewport_to_its_scale() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let handle = {
+            let i = app.active_tab;
+            let scene = &mut app.tabs[i].scene;
+            scene.add_layout("P1").unwrap();
+            scene.current_layout = "P1".to_string();
+            let mut viewport = Viewport::new();
+            viewport.width = 200.0;
+            viewport.height = 100.0;
+            let handle = scene
+                .document
+                .add_entity_to_layout(EntityType::Viewport(Box::new(viewport)), "P1")
+                .unwrap();
+            assert!(scene.add_scale("1:100", 1.0, 100.0));
+            assert!(scene.set_viewport_scale_named_for(handle, "1:100").is_some());
+            // Clear the link the render paths see, as a drawing from an
+            // older file or a bad reference would carry.
+            scene
+                .document
+                .set_viewport_annotation_scale(handle, document::Handle::NULL);
+            assert_eq!(
+                scene.document.viewport_annotation_scale(handle),
+                Some(document::Handle::NULL)
+            );
+            handle
+        };
+
+        let _ = app.update(crate::app::Message::SyncViewportAnnotationScale);
+
+        let scene = &mut app.tabs[app.active_tab].scene;
+        let stored = scene.document.viewport_annotation_scale(handle);
+        let named = scene
+            .scale_handle_ensuring("1:100")
+            .expect("the 1:100 scale exists");
+        assert_eq!(
+            stored,
+            Some(named),
+            "the sync action links the viewport the pill describes"
+        );
+    }
+}
+
+
+
+#[cfg(test)]
+mod data_extraction_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Line;
+    use document::types::Vector3;
+
+    /// `-DATAEXTRACTION <settings> <point>` runs a saved extraction end to
+    /// end: the external file the wizard offers is written with the rows,
+    /// and the extraction table lands at the point. This pins the whole
+    /// path an automated run needs — no point of it stops at a prompt
+    /// nobody can answer headlessly.
+    #[test]
+    fn a_saved_extraction_writes_the_file_and_places_the_table() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let _ = app.run_command_line("-LAYER NEW WALLS");
+        let mut line = Line::from_points(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
+        line.common.layer = "WALLS".to_string();
+        app.tabs[i].scene.add_entity(document::EntityType::Line(line));
+
+        let folder = std::env::temp_dir().join(format!(
+            "ocs-extraction-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(&folder).expect("the folder");
+        let ext = folder.join("lines.csv");
+        let settings_path = folder.join("lines.dxex");
+        let settings = serde_json::json!({
+            "version": 1,
+            "source": "currentDrawing",
+            "includeCurrent": true,
+            "includeSubfolders": false,
+            "objectTypes": ["Line"],
+            "properties": ["Layer"],
+            "combineIdentical": false,
+            "showCount": true,
+            "showName": true,
+            "outputTable": true,
+            "outputFile": true,
+            "outputPath": ext.display().to_string(),
+            "tableTitle": "LINES",
+            "propertyHeaders": true,
+            "inUseOnly": false,
+            "blocksOnly": false,
+            "attributedBlocksOnly": false,
+            "displayAllTypes": true,
+            "hiddenCategories": [],
+        });
+        std::fs::write(&settings_path, settings.to_string()).expect("the settings file");
+
+        let settings_text = settings_path.display().to_string().replace('\\', "/");
+        let line = format!("-DATAEXTRACTION {settings_text} 0,0");
+        let _ = app.run_command_line(&line);
+
+        let written = std::fs::read_to_string(&ext).expect("the extraction file was written");
+        assert!(
+            written.to_uppercase().contains("WALLS"),
+            "the file names the layer: {written}"
+        );
+        let tables: Vec<document::entities::Table> = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Table(table) => Some((**table).clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tables.len(), 1, "one extraction table was placed");
+        assert_eq!(
+            tables[0].cell_text(0, 0).map(|text| text.to_string()).as_deref(),
+            Some("LINES"),
+        );
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+}
+
+#[cfg(test)]
+mod attsync_order_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::{AttributeDefinition, AttributeEntity, Insert};
+    use document::EntityType;
+    use document::types::Vector3;
+
+    fn redefine(app: &mut OpenCADStudio, name: &str, attributes: &[(&str, &str)]) {
+        let definition = |tag: &str, index: usize| {
+            EntityType::AttributeDefinition(AttributeDefinition {
+                insertion_point: Vector3::new(2.0, 2.0 + index as f64 * 3.0, 0.0),
+                height: 1.0,
+                ..AttributeDefinition::new(tag.into(), format!("{tag} prompt"), String::new())
+            })
+        };
+        app.tabs[app.active_tab].scene.define_block_raw(
+            name,
+            Vector3::ZERO,
+            attributes
+                .iter()
+                .enumerate()
+                .map(|(index, (tag, _))| definition(tag, index))
+                .collect(),
+        );
+    }
+
+    fn placed(app: &mut OpenCADStudio, name: &str, values: &[(&str, &str)]) -> document::Handle {
+        let mut insert = Insert::new(name, Vector3::new(100.0, 100.0, 0.0));
+        for (tag, value) in values {
+            insert
+                .attributes
+                .push(AttributeEntity::new(tag.to_string(), value.to_string()));
+        }
+        app.tabs[app.active_tab]
+            .scene
+            .add_entity(EntityType::Insert(insert))
+    }
+
+    #[test]
+    fn attsync_reorders_the_reference_to_follow_the_definition() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        redefine(&mut app, "PANEL", &[("ALPHA", "a"), ("BRAVO", "b")]);
+        let reference = placed(&mut app, "PANEL", &[("ALPHA", "first"), ("BRAVO", "second")]);
+        app.tabs[i]
+            .scene
+            .redefine_block_raw(
+                "PANEL",
+                Vector3::ZERO,
+                vec![
+                    EntityType::AttributeDefinition(AttributeDefinition {
+                        insertion_point: Vector3::new(2.0, 5.0, 0.0),
+                        height: 1.0,
+                        ..AttributeDefinition::new("BRAVO".into(), "b".into(), String::new())
+                    }),
+                    EntityType::AttributeDefinition(AttributeDefinition {
+                        insertion_point: Vector3::new(2.0, 2.0, 0.0),
+                        height: 1.0,
+                        ..AttributeDefinition::new("ALPHA".into(), "a".into(), String::new())
+                    }),
+                ],
+            )
+            .expect("the definition takes the reordered tags");
+
+        let _ = app.run_command_line("ATTSYNC PANEL");
+
+        let document = &app.tabs[i].scene.document;
+        let EntityType::Insert(insert) = document.get_entity(reference).expect("reference")
+        else {
+            panic!("not an insert");
+        };
+        let pairs: Vec<(String, String)> = insert
+            .attributes
+            .iter()
+            .map(|attribute| (attribute.tag.clone(), attribute.get_value().to_string()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("BRAVO".into(), "second".into()),
+                ("ALPHA".into(), "first".into())
+            ],
+            "the reference follows the definition's order, by tag"
+        );
+    }
+}
+
+#[cfg(test)]
+mod battman_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::{AttributeDefinition, AttributeEntity, Insert};
+    use document::EntityType;
+    use document::types::Vector3;
+
+    /// BATTMAN asks the picked reference's block for its definitions and
+    /// writes the edited list back to the block, tag-for-tag, values kept.
+    /// The reference an editing session renames keeps the value it held.
+    #[test]
+    fn battman_applies_the_edited_definition_to_its_references() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "PANEL",
+            Vector3::ZERO,
+            vec![EntityType::AttributeDefinition(AttributeDefinition {
+                insertion_point: Vector3::new(2.0, 2.0, 0.0),
+                height: 1.0,
+                ..AttributeDefinition::new("TAGGED".into(), "Tag".into(), String::new())
+            })],
+        );
+        let mut insert = Insert::new("PANEL", Vector3::new(100.0, 100.0, 0.0));
+        insert
+            .attributes
+            .push(AttributeEntity::new("TAGGED".into(), "kept".into()));
+        let reference = app.tabs[i]
+            .scene
+            .add_entity(EntityType::Insert(insert));
+
+        app.tabs[i].scene.select_entities(&[reference]);
+        let _ = app.dispatch_command("BATTMAN");
+        assert_eq!(
+            app.active_modal,
+            Some(crate::app::ModalKind::AttMan),
+            "BATTMAN opens on the picked reference's block"
+        );
+
+        let _ = app.update(crate::app::Message::AttMan(
+            crate::ui::window::attman_dialog::AttManMsg::Tag("RENAMED".to_string()),
+        ));
+        let _ = app.update(crate::app::Message::AttMan(
+            crate::ui::window::attman_dialog::AttManMsg::Apply,
+        ));
+
+        let document = &app.tabs[i].scene.document;
+        let EntityType::Insert(insert) = document.get_entity(reference).expect("reference")
+        else {
+            panic!("not an insert");
+        };
+        let tags: Vec<String> = insert.attributes.iter().map(|a| a.tag.clone()).collect();
+        assert_eq!(tags, vec!["RENAMED".to_string()]);
+        let values: Vec<String> = insert
+            .attributes
+            .iter()
+            .map(|a| a.get_value().to_string())
+            .collect();
+        assert_eq!(values, vec!["kept".to_string()]);
+    }
+}
+
+
+
+#[cfg(test)]
+mod hatch_panel_edit_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use crate::modules::draw::draw::hatch::{HatchFill, HatchSettings};
+    use document::entities::{BoundaryEdge, BoundaryPath, Hatch, PolylineEdge};
+    use document::types::{Color, Vector2};
+
+    fn app_base_settings(fill: HatchFill) -> HatchSettings {
+        HatchSettings {
+            fill,
+            angle_deg: 0.0,
+            scale: 1.0,
+            origin: [0.0, 0.0],
+            method: 0,
+            islands: document::entities::HatchStyleType::Normal,
+            associative: true,
+            separate: false,
+            keep_boundaries: false,
+            gap_tolerance: 0.0,
+            color: None,
+            background: None,
+            layer: None,
+            transparency: None,
+            gradient_colors: [Color::Index(5), Color::Index(1)],
+            draw_order: 0,
+            annotative: false,
+        }
+    }
+
+    /// The Hatch panel is one of the paths that writes onto the entity. The
+    /// prebuilt fill model has to follow, like every other editing path; a
+    /// stale cache would keep showing the old pattern after OK.
+    #[test]
+    fn the_panel_edit_rebuilds_the_cached_fill_model() {
+        use document::entities::BoundaryPath as BoundaryPathType;
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+
+        let mut hatch = Hatch::new();
+        hatch.is_solid = true;
+        let mut path = BoundaryPathType::new();
+        path.add_edge(BoundaryEdge::Polyline(PolylineEdge::new(
+            [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]
+                .into_iter()
+                .map(|p| Vector2::new(p[0], p[1]))
+                .collect(),
+            true,
+        )));
+        hatch.paths.push(path);
+        let handle = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Hatch(Box::new(hatch)));
+        app.tabs[i].scene.refresh_fill_model(handle);
+        assert_eq!(
+            app.tabs[i].scene.hatches.get(&handle).map(|m| m.name.clone()),
+            Some("SOLID".to_string())
+        );
+
+        let before = app_base_settings(HatchFill::Solid);
+        let after = app_base_settings(HatchFill::Pattern("ANSI31".to_string()));
+        app.apply_hatch_panel_edit(handle, &before, &after);
+
+        let model = app.tabs[i]
+            .scene
+            .hatches
+            .get(&handle)
+            .expect("the fill model was rebuilt");
+        assert_eq!(model.name, "ANSI31");
+    }
+}
+
+#[cfg(test)]
+mod group_roundtrip_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Line;
+    use document::types::Vector3;
+
+    fn scratch_path(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "ocs-groups-{}-{}.dwg",
+            std::process::id(),
+            tag
+        ))
+    }
+
+    /// Groups are document objects with real records: they must survive the
+    /// round trip through the file, with their membership, the same as every
+    /// other object. The mission this pins claimed they were missing.
+    #[test]
+    fn a_group_survives_a_save_and_reload() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let a = app.tabs[app.active_tab].scene.add_entity(
+            document::EntityType::Line(Line::from_points(
+                Vector3::new(0.0, 0.0, 0.0),
+                Vector3::new(10.0, 0.0, 0.0),
+            )),
+        );
+        let b = app.tabs[app.active_tab].scene.add_entity(
+            document::EntityType::Line(Line::from_points(
+                Vector3::new(0.0, 5.0, 0.0),
+                Vector3::new(10.0, 5.0, 0.0),
+            )),
+        );
+        let i = app.active_tab;
+        app.tabs[i].scene.create_group("FRAME".to_string(), vec![a, b]);
+        let path = scratch_path("roundtrip");
+        let saved = app.automation_op(&format!(r#"{{"op":"save","path":"{}"}}"#, path.display().to_string().replace('\\', "/")));
+        assert_eq!(saved["ok"], true, "the save reported success: {saved}");
+        let opened = app.automation_op(&format!(r#"{{"op":"open","path":"{}"}}"#, path.display().to_string().replace('\\', "/")));
+        assert_eq!(opened["ok"], true, "the open reported success: {opened}");
+
+        let groups: Vec<String> = app.tabs[app.active_tab]
+            .scene
+            .groups()
+            .map(|group| group.name.clone())
+            .collect();
+        assert_eq!(groups, vec!["FRAME".to_string()]);
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+
+
+#[cfg(test)]
+mod copy_draw_order_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Line;
+    use document::types::Vector3;
+
+    fn sort_entries(app: &OpenCADStudio) -> std::collections::HashMap<u64, u64> {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .objects
+            .values()
+            .filter_map(|obj| match obj {
+                document::objects::ObjectType::SortEntitiesTable(t) => Some(t),
+                _ => None,
+            })
+            .flat_map(|t| t.entries().map(|e| (e.entity_handle.value(), e.sort_handle.value())))
+            .collect()
+    }
+
+    fn fresh_line(app: &mut OpenCADStudio, x: f64) -> document::Handle {
+        app.tabs[app.active_tab].scene.add_entity(
+            document::EntityType::Line(Line::from_points(
+                Vector3::new(x, 0.0, 0.0),
+                Vector3::new(x, 10.0, 0.0),
+            )),
+        )
+    }
+
+    /// When several overlapping objects are copied, the copies must keep
+    /// the original objects' drawing order: whatever was behind stays
+    /// behind, whatever was in front stays in front.
+    #[test]
+    fn copying_multiple_overlapping_objects_preserves_their_order() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let a = fresh_line(&mut app, 0.0);
+        let b = fresh_line(&mut app, 5.0);
+        let c = fresh_line(&mut app, 10.0);
+        let i = app.active_tab;
+
+        // Reverse the automatic handle order: send B behind A, keep C where it is.
+        app.tabs[i].scene.select_entities(&[b]);
+        let _ = app.run_command_line("DRAWORDER BACK");
+
+        eprintln!("before copy table: {:?}", sort_entries(&app));
+
+        app.tabs[i].scene.select_entities(&[a, b, c]);
+        let _ = app.run_command_line("COPY");
+        let _ = app.feed_script_line("0,0");
+        let _ = app.feed_script_line("100,0");
+        let _ = app.feed_script_line("");
+
+        let entries = sort_entries(&app);
+        eprintln!("after copy table:  {:?}", entries);
+        let eff = |h: document::Handle| {
+            entries
+                .get(&h.value())
+                .copied()
+                .unwrap_or(h.value())
+        };
+        let line_starts: Vec<(document::Handle, f64)> = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|e| match e {
+                document::EntityType::Line(l) => Some((e.common().handle, l.start.x)),
+                _ => None,
+            })
+            .collect();
+        let by_x = |x: f64| {
+            line_starts
+                .iter()
+                .find(|(_, start)| (start - x).abs() < 1e-9)
+                .map(|(h, _)| *h)
+                .expect("a line at that offset")
+        };
+        // The right-most copies correspond to the five source positions.
+        let copy_of = |source: document::Handle| {
+            let x = line_starts.iter().find(|(h, _)| *h == source).map(|(_, x)| *x).unwrap();
+            by_x(x + 100.0)
+        };
+        let cp_a = copy_of(a);
+        let cp_b = copy_of(b);
+        let cp_c = copy_of(c);
+        eprintln!(
+            "source effs: a={} b={} c={}  copies: a={} b={} c={}",
+            eff(a), eff(b), eff(c), eff(cp_a), eff(cp_b), eff(cp_c)
+        );
+        // The source order itself: B behind A behind C.
+        assert!(eff(b) < eff(a), "B stays behind A");
+        assert!(eff(a) < eff(c), "A stays behind C");
+        // And the copies replicate it.
+        assert!(eff(cp_b) < eff(cp_a), "the copy of B must stay behind the copy of A");
+        assert!(eff(cp_a) < eff(cp_c), "the copy of A must stay behind the copy of C");
+    }
+}

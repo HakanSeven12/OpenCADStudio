@@ -17,8 +17,16 @@ mod navlib;
 mod pan;
 #[cfg(windows)]
 mod raw_input;
+#[cfg(target_os = "linux")]
+mod spnav;
 #[cfg(windows)]
 mod worker;
+
+/// Linux reads the device axes for every view and orbits itself; on Windows
+/// NavLib owns orbit and the raw axes drive only planar views.
+const DEVICE_ORBIT: bool = cfg!(target_os = "linux");
+/// Orbit rate at full deflection, in radians per second.
+const ORBIT_SPEED: f64 = 2.;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -93,8 +101,9 @@ impl Status {
             Self::Starting => "Connecting…",
             Self::Ready => "Ready",
             Self::Disconnected => "No SpaceMouse connected",
+            Self::Unavailable(_) if cfg!(target_os = "linux") => "spacenavd unavailable",
             Self::Unavailable(_) => "3DxWare unavailable",
-            Self::Unsupported => "Available in the Windows desktop app",
+            Self::Unsupported => "Available in the Windows and Linux desktop apps",
         }
     }
 }
@@ -141,6 +150,10 @@ pub struct View {
 impl View {
     fn planar(&self) -> bool {
         !self.rotate
+    }
+    /// Views moved from the raw device axes in `Service::frame`.
+    fn device_driven(&self) -> bool {
+        self.planar() || DEVICE_ORBIT
     }
     pub fn affine(&self) -> [f64; 16] {
         DMat4::from_rotation_translation(self.rotation, self.eye).to_cols_array()
@@ -289,6 +302,22 @@ impl Bridge {
     }
 }
 
+fn publish_status(shared: &Mutex<Bridge>, status: Status) {
+    let mut bridge = shared.lock().unwrap();
+    bridge.ever_connected |= status == Status::Ready;
+    if bridge.status.as_ref() != Some(&status) {
+        if status != Status::Ready {
+            bridge.pending_view = None;
+            bridge.commands.clear();
+            bridge.moving = false;
+            bridge.in_transaction = false;
+            bridge.pan.clear();
+        }
+        bridge.status = Some(status);
+        bridge.wake();
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct Service(Arc<Mutex<Bridge>>);
 impl Hash for Service {
@@ -298,7 +327,7 @@ impl Hash for Service {
 }
 impl Service {
     pub fn status(&self) -> Status {
-        if !cfg!(any(windows, test)) {
+        if !cfg!(any(windows, target_os = "linux", test)) {
             return Status::Unsupported;
         }
         self.0
@@ -313,8 +342,8 @@ impl Service {
     }
     pub fn moving(&self) -> bool {
         let bridge = self.0.lock().unwrap();
-        if let Some(view) = bridge.view.as_ref().filter(|v| v.planar()) {
-            bridge.pan.moving(view.zoom)
+        if let Some(view) = bridge.view.as_ref().filter(|v| v.device_driven()) {
+            bridge.pan.moving(view.zoom, view.rotate)
         } else {
             bridge.moving
         }
@@ -325,12 +354,22 @@ impl Service {
             && bridge
                 .view
                 .as_ref()
-                .is_some_and(|v| v.planar() && v.motion_enabled)
+                .is_some_and(|v| v.device_driven() && v.motion_enabled)
         {
-            let zoom = bridge.view.as_ref().unwrap().zoom;
-            let delta = bridge.pan.frame(milliseconds, zoom);
-            if delta != DVec3::ZERO {
+            let (zoom, rotate) = bridge.view.as_ref().map(|v| (v.zoom, v.rotate)).unwrap();
+            let (delta, orbit) = bridge.pan.frame(milliseconds, zoom, rotate);
+            if delta != DVec3::ZERO || orbit != glam::DVec2::ZERO {
                 let view = bridge.view.as_mut().unwrap();
+                if orbit != glam::DVec2::ZERO {
+                    // Yaw about world up and pitch about screen right, around
+                    // the pivot; the horizon stays level.
+                    let previous = view.rotation;
+                    let turn = DQuat::from_rotation_z(orbit.y * ORBIT_SPEED)
+                        * DQuat::from_axis_angle(previous * DVec3::X, orbit.x * ORBIT_SPEED);
+                    view.eye = view.pivot + turn * (view.eye - view.pivot);
+                    view.rotation = (turn * previous).normalize();
+                    view.lock_horizon(previous, true);
+                }
                 view.eye -= view.rotation
                     * delta.truncate().extend(0.)
                     * view.half_height()
@@ -446,7 +485,11 @@ impl Service {
         {
             iced::Subscription::run_with(self.clone(), navlib::subscription)
         }
-        #[cfg(not(windows))]
+        #[cfg(target_os = "linux")]
+        {
+            iced::Subscription::run_with(self.clone(), spnav::subscription)
+        }
+        #[cfg(not(any(windows, target_os = "linux")))]
         {
             iced::Subscription::none()
         }

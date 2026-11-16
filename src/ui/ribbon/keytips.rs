@@ -1244,6 +1244,8 @@ pub(crate) fn text_width(content: &str, size: f32, font: iced::Font) -> f32 {
         shaping: advanced_text::Shaping::Advanced,
         wrapping: advanced_text::Wrapping::None,
         ellipsis: advanced_text::Ellipsis::None,
+        // Hinting is off in the pinned iced: `iced_graphics::text::hint_factor`
+        // returns `None`; follow `renderer.hint_factor()` once it is enabled.
         hint_factor: None,
     })
     .min_bounds()
@@ -1276,9 +1278,11 @@ fn draw_text(
             shaping: advanced_text::Shaping::Advanced,
             wrapping: advanced_text::Wrapping::None,
             ellipsis: advanced_text::Ellipsis::None,
+            // Hinting is off in the pinned iced: `iced_graphics::text::hint_factor`
+            // returns `None`; follow `renderer.hint_factor()` once it is enabled.
             hint_factor: None,
         },
-        at,
+        crate::ui::style::text::snap_point(at),
         color,
         clip,
     );

@@ -51,7 +51,10 @@ class ReleaseTests(unittest.TestCase):
             binary = str(Path(temp) / "build-script")
             subprocess.run(["rustc", str(Path(__file__).resolve().parents[1] / "build.rs"), "-o", binary], check=True)
             for cargo in ("0.9.8", "2026.9.0", "2026.35.0", "2026.53.0", "2027.1.0", "2026.40.1", "2026.5.2"):
-                result = subprocess.check_output([binary], text=True, env={**os.environ, "CARGO_PKG_VERSION": cargo})
+                result = subprocess.check_output([binary], text=True, env={
+                    **os.environ, "CARGO_PKG_VERSION": cargo, "OUT_DIR": temp,
+                    "CARGO_MANIFEST_DIR": str(Path(__file__).resolve().parents[1]),
+                })
                 self.assertIn(f"cargo:rustc-env=OCS_APP_VERSION={release.display_version(cargo)}\n", result)
 
     def test_build_script_inputs(self):
@@ -72,8 +75,10 @@ class ReleaseTests(unittest.TestCase):
             git("worktree", "add", "-b", "perf/test-worktree", str(worktree))
 
             def inputs(cwd):
+                # Cargo sets these for every build script.
                 output = subprocess.check_output([str(binary)], cwd=cwd, text=True, env={
-                    **os.environ, "CARGO_PKG_VERSION": "2026.44.0",
+                    **os.environ, "CARGO_PKG_VERSION": "2026.44.0", "OUT_DIR": temp,
+                    "CARGO_MANIFEST_DIR": str(cwd),
                 })
                 return [(cwd / line.split("=", 1)[1]).resolve() for line in output.splitlines()
                         if line.startswith("cargo:rerun-if-changed=")]

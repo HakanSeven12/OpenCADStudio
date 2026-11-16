@@ -1310,11 +1310,10 @@ impl<'a> Widget<Message, Theme, Renderer> for ReorderTab<'a> {
         renderer: &Renderer,
     ) -> mouse::Interaction {
         let state = tree.state.downcast_ref::<ReorderState>();
+        // Only a drag shows the hand: resting on a tab shows the tab's own
+        // pointer, though pressing and dragging still reorders it.
         if state.dragging {
             return mouse::Interaction::Grabbing;
-        }
-        if cursor.is_over(layout.bounds()) {
-            return mouse::Interaction::Grab;
         }
         self.child.as_widget().mouse_interaction(
             &tree.children[0],

@@ -280,7 +280,8 @@ pub fn discard_guard<'a>(
     .on_press(on_keep.clone());
     let panel = container(
         column![
-            iced::widget::text(crate::t!("Unsaved changes will be discarded.")).size(13.5),
+            iced::widget::text(crate::t!("Unsaved changes will be discarded."))
+                .size(crate::ui::style::text::UI_LARGE),
             Space::new().height(12),
             row![
                 button(iced::widget::text(crate::t!("Discard & close")).size(12))

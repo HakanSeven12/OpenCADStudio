@@ -6,13 +6,12 @@
 use crate::app::Message;
 use crate::scene::model::point_cloud::{self, UNASSIGNED_OFF};
 use crate::ui::dock::PanelId;
+use crate::ui::kit;
+use crate::ui::style::{chrome, kit_metrics as km};
 use document::entities::ExtendedEntityData;
 use document::{Document, EntityType, Handle};
-use iced::widget::{
-    button, checkbox, column, container, mouse_area, row, scrollable, text, text_input, tooltip,
-    Space,
-};
-use iced::{Background, Border, Element, Fill, Length, Theme};
+use iced::widget::{button, checkbox, column, container};
+use iced::{Element, Fill, Length};
 use std::collections::HashSet;
 
 const CLOUD_ICON: &[u8] = include_bytes!("../../../assets/icons/pc_attach.svg");
@@ -197,79 +196,42 @@ fn tree_row<'a>(
     label: String,
     switch: Option<(Switch, Message)>,
 ) -> Element<'a, Message> {
-    let arrow: Element<'a, Message> = match fold {
-        Some(open) => button(if open {
-            crate::ui::icons::themed_arrow_down(10.0)
-        } else {
-            crate::ui::icons::themed_arrow_right(10.0)
-        })
-        .on_press(msg(PcManagerMsg::Expand(key.clone())))
-        .style(button::text)
-        .padding(2)
-        .into(),
-        None => Space::new().width(14).into(),
-    };
     let enabled = switch.is_some();
-    let label = text(label).size(12).width(Fill);
-    let label = if enabled {
-        label
-    } else {
-        label.style(crate::ui::style::common::muted_style)
-    };
     let switch: Element<'a, Message> = match switch {
         // Mixed: a dash in the box, as the reference's indeterminate state.
-        Some((Switch::Mixed, message)) => button(crate::ui::icons::themed_primary(
-            crate::ui::icons::MINUS,
-            10.0,
-        ))
+        Some((Switch::Mixed, message)) => button(
+            container(crate::ui::icons::tinted(
+                crate::ui::icons::MINUS,
+                km::BAR_ICON,
+                chrome::accent,
+            ))
+            .center(Fill),
+        )
         .on_press(message)
-        .style(button::secondary)
-        .padding(1)
-        .width(Length::Fixed(16.0))
-        .height(Length::Fixed(16.0))
+        .style(kit::flat_button_style(true))
+        .padding(0)
+        .width(Length::Fixed(km::CHECK))
+        .height(Length::Fixed(km::CHECK))
         .into(),
         Some((on, message)) => checkbox(on == Switch::On)
             .on_toggle(move |_| message.clone())
-            .size(14)
+            .size(km::CHECK)
             .into(),
-        None => checkbox(false).size(14).into(),
+        None => checkbox(false).size(km::CHECK).into(),
     };
     let selected = state.selected.as_deref() == Some(key.as_str());
-    let cells = row![
-        Space::new().width(Length::Fixed(f32::from(depth) * 16.0)),
-        arrow,
-        icon,
-        label,
-        switch
-    ]
-    .spacing(5)
-    .align_y(iced::Center);
-    mouse_area(
-        container(cells)
-            .width(Fill)
-            .padding([3, 6])
-            .style(move |theme: &Theme| container::Style {
-                background: selected.then(|| Background::Color(theme.palette().primary.weak.color)),
-                text_color: selected.then(|| theme.palette().primary.weak.text),
-                ..Default::default()
-            }),
-    )
-    .on_press(msg(PcManagerMsg::Select(key)))
-    .into()
-}
-
-fn fold_button<'a>(
-    icon: &'static [u8],
-    tip: String,
-    message: PcManagerMsg,
-) -> Element<'a, Message> {
-    let b = button(crate::ui::icons::themed_secondary(icon, 12.0))
-        .on_press(msg(message))
-        .style(button::subtle)
-        .padding([2, 4]);
-    tooltip(b, text(tip).size(10), tooltip::Position::Bottom)
-        .gap(4)
-        .into()
+    let mut row = kit::tree_row(label)
+        .depth(depth)
+        .icon(icon)
+        .trailing(switch)
+        .muted(!enabled)
+        .selected(selected)
+        .on_press(msg(PcManagerMsg::Select(key.clone())));
+    row = match fold {
+        Some(open) => row.fold(open, msg(PcManagerMsg::Expand(key))),
+        None => row.caret_room(),
+    };
+    row.view()
 }
 
 pub fn view<'a>(
@@ -292,7 +254,7 @@ pub fn view<'a>(
     let unassigned = crate::t!("Unassigned Points").into_owned();
     let scans_label = crate::t!("Scans").into_owned();
 
-    let mut tree = column![].spacing(1);
+    let mut tree = column![];
     for cloud in clouds(document, selected) {
         let root = key(cloud.handle);
         let scans: Vec<&(String, String)> = cloud
@@ -309,7 +271,7 @@ pub fn view<'a>(
             let on = switch_state(&cloud.hidden, &cloud.scans, &row);
             Some((on, msg(PcManagerMsg::Toggle(cloud.handle, row))))
         };
-        let cloud_icon = || crate::ui::icons::semantic(CLOUD_ICON, 14.0);
+        let cloud_icon = || crate::ui::icons::semantic(CLOUD_ICON, km::ROW_ICON);
         tree = tree.push(tree_row(
             state,
             root.clone(),
@@ -329,7 +291,7 @@ pub fn view<'a>(
                 format!("{root}/regions"),
                 1,
                 None,
-                crate::ui::icons::semantic_disabled(REGION_ICON, 14.0),
+                crate::ui::icons::semantic_disabled(REGION_ICON, km::ROW_ICON),
                 regions.clone(),
                 None,
             ));
@@ -340,7 +302,7 @@ pub fn view<'a>(
                 format!("{root}/unassigned"),
                 1,
                 None,
-                crate::ui::icons::semantic(UNASSIGNED_ICON, 14.0),
+                crate::ui::icons::semantic(UNASSIGNED_ICON, km::ROW_ICON),
                 unassigned.clone(),
                 switch(Row::Unassigned),
             ));
@@ -373,48 +335,29 @@ pub fn view<'a>(
         }
     }
 
-    let heading = text(crate::t!("REGIONS AND SCANS").into_owned())
-        .size(11)
-        .font(iced::Font {
-            weight: iced::font::Weight::Bold,
-            style: iced::font::Style::Italic,
-            ..iced::Font::DEFAULT
-        })
-        .style(|theme: &Theme| text::Style {
-            color: Some(theme.palette().primary.base.color),
-        })
-        .width(Fill);
-    let header = row![
-        heading,
-        fold_button(
-            crate::ui::icons::MINUS,
-            crate::t!("Collapse all").into_owned(),
-            PcManagerMsg::CollapseAll
-        ),
-        fold_button(
-            crate::ui::icons::PLUS,
-            crate::t!("Expand all").into_owned(),
-            PcManagerMsg::ExpandAll
-        ),
-    ]
-    .spacing(2)
-    .align_y(iced::Center);
-    let card = container(column![header, scrollable(tree).height(Fill)].spacing(6))
-        .padding(6)
-        .width(Fill)
-        .height(Fill)
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.weak.color)),
-            border: Border {
-                radius: 4.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        });
-    let search = text_input(&crate::t!("Search"), &state.search)
-        .on_input(|v| msg(PcManagerMsg::Search(v)))
-        .padding([4, 8])
-        .size(12);
-
-    crate::ui::dock::frame(title_bar, column![card, search].spacing(6), width)
+    let header = kit::section_bar(
+        crate::t!("REGIONS AND SCANS").into_owned(),
+        vec![
+            kit::bar_button(
+                crate::ui::icons::MINUS,
+                crate::t!("Collapse all").into_owned(),
+                msg(PcManagerMsg::CollapseAll),
+            ),
+            kit::bar_button(
+                crate::ui::icons::PLUS,
+                crate::t!("Expand all").into_owned(),
+                msg(PcManagerMsg::ExpandAll),
+            ),
+        ],
+    );
+    let search = kit::band(kit::search_field(
+        &crate::t!("Search"),
+        &state.search,
+        |v| msg(PcManagerMsg::Search(v)),
+    ));
+    kit::palette(
+        title_bar,
+        column![search, kit::scroll_area(column![header, tree]),],
+        width,
+    )
 }

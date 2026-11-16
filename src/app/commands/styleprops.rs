@@ -4119,7 +4119,8 @@ impl OpenCADStudio {
             cmd if cmd.starts_with("RENAME ") => {
                 // Usage: RENAME <type> <old_name> <new_name>
                 // Types: LAYER BLOCK STYLE DIMSTYLE LINETYPE UCS VIEW
-                let parts: Vec<&str> = cmd.split_whitespace().collect();
+                // Quoted names may hold spaces; RenameCommand quotes them too.
+                let parts = dash::split_quoted(cmd);
                 let type_str = parts.get(1).map(|s| s.to_uppercase()).unwrap_or_default();
                 let old_name = parts.get(2).map(|s| s.trim()).unwrap_or("").to_string();
                 let new_name = parts.get(3).map(|s| s.trim()).unwrap_or("").to_string();

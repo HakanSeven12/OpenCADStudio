@@ -2186,7 +2186,7 @@ pub fn view_window<'a>(
     // before the list of pages is complete.
     let tab_button = |label, tab| {
         let selected = active_tab == tab;
-        button(text(label).size(12.5))
+        button(text(label).size(crate::ui::style::text::UI_LARGE))
             .on_press(Message::OptionsTabChanged(tab))
             .padding([7, 12])
             .width(Fill)

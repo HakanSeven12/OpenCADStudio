@@ -5,21 +5,30 @@ use crate::app::config::DockSide;
 use crate::app::{ColorPickTarget, Message};
 use crate::scene::Scene;
 use crate::ui::dock::PanelId;
+use crate::ui::kit;
+use crate::ui::style::{chrome, kit_metrics as km};
 use crate::ui::window::gradient_editor::{GradientEditorState, GradientMsg};
 use document::entities::{EntityCommon, Hatch, HatchGradientPattern};
 use document::types::{Color as AcadColor, LineWeight, Transparency};
 use document::{Document, EntityType, Handle};
 use iced::widget::{
-    button, column, combo_box, container, image, row, slider, text, text_input, tooltip, Space,
+    button, column, combo_box, container, image, row, slider, text, text_input, Space,
 };
-use iced::{Background, Border, Element, Fill, Length, Padding, Theme};
+use iced::{Background, Border, Element, Fill, Length, Theme};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 
 type DrawDepth = FxHashMap<u64, [f32; 2]>;
 
-const PALETTE_CONTROL_ICON_SIZE: f32 = 20.0;
-const COMPACT_BUTTON_HEIGHT: f32 = 22.0;
+const PALETTE_CONTROL_ICON_SIZE: f32 = km::ROW_ICON;
+const COMPACT_BUTTON_HEIGHT: f32 = km::TOOL_H;
+/// Width of the transparency value beside its slider.
+const TRANSPARENCY_LABEL_W: f32 = 38.0;
+/// Width of the hatch pattern flyout and its height.
+const HATCH_FLYOUT_W: f32 = 352.0;
+const HATCH_FLYOUT_H: f32 = 724.0;
+/// Width of the gradient editor flyout.
+const GRADIENT_FLYOUT_W: f32 = 390.0;
 const TRANSPARENCY_ICON: &[u8] =
     include_bytes!("../../../assets/icons/attributes/transparency.svg");
 const LINEWEIGHT_ICON: &[u8] = include_bytes!("../../../assets/icons/attributes/lineweight.svg");
@@ -657,24 +666,19 @@ fn popup_alignment(side: DockSide) -> iced_aw::drop_down::Alignment {
 }
 
 fn compact_button_content(label: &'static str) -> Element<'static, Message> {
-    container(text(label).size(crate::ui::ROW_H * 0.42))
-        .width(12)
-        .height(Fill)
-        .align_x(iced::Center)
-        .align_y(iced::Center)
-        .into()
+    container(
+        text(label)
+            .size(crate::ui::style::text::UI)
+            .line_height(crate::ui::style::text::line()),
+    )
+    .width(km::BAR_ICON)
+    .height(Fill)
+    .align_x(iced::Center)
+    .align_y(iced::Center)
+    .into()
 }
 
-fn popup_item<'a>(label: std::borrow::Cow<'a, str>, message: Message) -> Element<'a, Message> {
-    button(text(label).size(11))
-        .on_press(message)
-        .style(crate::ui::color_select::list_row_style)
-        .width(Fill)
-        .padding([2, 4])
-        .into()
-}
-
-/// The small L / B / C / V button next to a control, with its drop-down.
+/// The small L / B / C / V button next to a control, with its menu.
 fn mode_menu<'a>(
     side: DockSide,
     mode: PropertyMode,
@@ -686,30 +690,22 @@ fn mode_menu<'a>(
     let open = open_menu == Some(menu);
     let more = button(compact_button_content(mode.button_label()))
         .on_press(msg(GraphicAttributesMsg::ToggleMenu(menu)))
-        .style(move |theme: &Theme, status| {
-            if open {
-                button::primary(theme, status)
-            } else {
-                button::secondary(theme, status)
-            }
-        })
+        .style(kit::box_button_style(open))
         .height(height)
-        .padding([1, 3]);
+        .padding([0.0, km::LINE * 3.0]);
     if !open {
         return more.into();
     }
-    let popup = container(column(
-        items
-            .into_iter()
-            .map(|(label, message)| popup_item(label, message)),
-    ))
-    .style(crate::ui::color_select::popup_panel_style)
-    .padding(2);
-    iced_aw::DropDown::new(more, popup, true)
-        .width(Length::Fixed(110.0))
+    let items: Vec<crate::ui::kit::menu::Item> = items
+        .into_iter()
+        .map(|(label, message)| crate::ui::kit::menu::Item::new(label, message))
+        .collect();
+    let menu_w = crate::ui::kit::menu::width(&items);
+    iced_aw::DropDown::new(more, crate::ui::kit::menu::view(items), true)
+        .width(Length::Fixed(menu_w))
         .height(Length::Shrink)
         .alignment(popup_alignment(side))
-        .offset(2.0)
+        .offset(km::LINE * 2.0)
         .on_dismiss(msg(GraphicAttributesMsg::CloseMenu))
         .into()
 }
@@ -725,13 +721,17 @@ fn color_control<'a>(
     // ByLayer / ByBlock show only on the L / B button; differing colours are
     // also spelled out on the swatch.
     let label: Element<'a, Message> = if info.varies {
-        container(text("*VARIES*").size(10))
-            .width(Fill)
-            .height(Fill)
-            .align_x(iced::Left)
-            .align_y(iced::Center)
-            .padding([0, 6])
-            .into()
+        container(
+            text("*VARIES*")
+                .size(crate::ui::style::text::UI_SMALL)
+                .line_height(crate::ui::style::text::line()),
+        )
+        .width(Fill)
+        .height(Fill)
+        .align_x(iced::Left)
+        .align_y(iced::Center)
+        .padding([0.0, km::CELL_PAD_X])
+        .into()
     } else {
         Space::new().width(Fill).height(Fill).into()
     };
@@ -750,12 +750,12 @@ fn color_control<'a>(
             },
             border: Border {
                 color: if matches!(status, button::Status::Hovered) {
-                    theme.palette().primary.base.color
+                    chrome::accent(theme)
                 } else {
-                    theme.palette().background.neutral.color
+                    chrome::border(theme)
                 },
-                width: 1.0,
-                radius: 2.0.into(),
+                width: km::line(),
+                radius: 0.0.into(),
             },
             ..Default::default()
         });
@@ -774,7 +774,10 @@ fn color_control<'a>(
             ),
         ],
     );
-    row![swatch, more].spacing(4).align_y(iced::Center).into()
+    row![swatch, more]
+        .spacing(km::TOOL_GAP)
+        .align_y(iced::Center)
+        .into()
 }
 
 fn transparency_control<'a>(
@@ -792,28 +795,34 @@ fn transparency_control<'a>(
     let percent = |value: u8| Transparency::from_percent(f64::from(value) / 100.0);
     let control = row![
         crate::ui::icons::semantic(TRANSPARENCY_ICON, PALETTE_CONTROL_ICON_SIZE),
-        text(value_label).size(10).width(38),
+        text(value_label)
+            .size(crate::ui::style::text::UI_SMALL)
+            .line_height(crate::ui::style::text::line())
+            .width(TRANSPARENCY_LABEL_W),
         slider(0..=90, i32::from(info.value), move |value| {
             msg(changed(percent(value as u8)))
         })
         .width(Fill),
     ]
-    .spacing(5)
+    .spacing(km::TOOL_GAP)
     .align_y(iced::Center)
-    .height(crate::ui::ROW_H);
+    .height(km::TOOL_H);
     let more = mode_menu(
         side,
         info.mode(),
         menu,
         open_menu,
-        crate::ui::ROW_H,
+        km::TOOL_H,
         vec![
             ("ByLayer".into(), msg(changed(Transparency::BY_LAYER))),
             ("ByBlock".into(), msg(changed(Transparency::BY_BLOCK))),
             (crate::t!("Custom"), msg(changed(percent(info.value)))),
         ],
     );
-    row![control, more].spacing(4).align_y(iced::Center).into()
+    row![control, more]
+        .spacing(km::TOOL_GAP)
+        .align_y(iced::Center)
+        .into()
 }
 
 fn header_menu(
@@ -821,64 +830,45 @@ fn header_menu(
     open: bool,
     fill_on_current_layer: bool,
 ) -> Element<'static, Message> {
-    let menu_button = button(crate::ui::icons::themed_secondary(
-        crate::ui::icons::MENU,
-        12.0,
-    ))
-    .on_press(msg(GraphicAttributesMsg::ToggleMenu(Menu::Header)))
-    .style(move |theme: &Theme, status| {
-        if open {
-            button::primary(theme, status)
-        } else {
-            button::subtle(theme, status)
-        }
-    })
-    .padding([3, 5]);
+    use crate::ui::kit::menu::{Item, Mark};
+    let menu_button = crate::ui::dock::menu_button(
+        msg(GraphicAttributesMsg::ToggleMenu(Menu::Header)),
+        crate::t!("Options").into_owned(),
+    );
     if !open {
-        return menu_button.into();
+        return menu_button;
     }
-
-    let item = |label: &'static str, message| {
-        button(text(crate::t!(label)).size(11))
-            .on_press(msg(message))
-            .style(crate::ui::color_select::list_row_style)
-            .width(Fill)
-            .padding([4, 8])
-    };
-    let popup = container(column![
+    let item = |label: &'static str, message| Item::new(crate::t!(label), msg(message));
+    let items = vec![
         item(
             "Set all attributes ByLayer",
-            GraphicAttributesMsg::SetAllByLayer
+            GraphicAttributesMsg::SetAllByLayer,
         ),
         item(
             "Set all attributes ByBlock",
-            GraphicAttributesMsg::SetAllByBlock
+            GraphicAttributesMsg::SetAllByBlock,
         ),
         item(
             "Remove ByLayer / ByBlock",
-            GraphicAttributesMsg::RemoveReferences
+            GraphicAttributesMsg::RemoveReferences,
         ),
         item(
             "Create Layer with active settings",
-            GraphicAttributesMsg::CreateLayer
+            GraphicAttributesMsg::CreateLayer,
         ),
-        container(iced::widget::rule::horizontal(1)).padding([2, 4]),
-        container(
-            iced::widget::checkbox(fill_on_current_layer)
-                .label(crate::t!("Create fills on the current layer"))
-                .on_toggle(|_| msg(GraphicAttributesMsg::ToggleFillOnCurrentLayer))
-                .size(12)
-                .text_size(11),
+        Item::Separator,
+        item(
+            "Create fills on the current layer",
+            GraphicAttributesMsg::ToggleFillOnCurrentLayer,
         )
-        .padding([4, 8]),
-    ])
-    .style(crate::ui::color_select::popup_panel_style)
-    .padding(2);
-    iced_aw::DropDown::new(menu_button, popup, true)
-        .width(Length::Fixed(220.0))
+        .mark(Mark::Check(fill_on_current_layer)),
+    ];
+    let menu_w = crate::ui::kit::menu::width(&items);
+    iced_aw::DropDown::new(menu_button, crate::ui::kit::menu::view(items), true)
+        .width(Length::Fixed(menu_w))
         .height(Length::Shrink)
         .alignment(popup_alignment(side))
-        .offset(2.0)
+        .offset(km::LINE * 2.0)
         .on_dismiss(msg(GraphicAttributesMsg::CloseMenu))
         .into()
 }
@@ -886,56 +876,49 @@ fn header_menu(
 fn fill_picker<'a>(current: GraphicAttribute, open: bool) -> Element<'a, Message> {
     let picker = button(
         row![
-            crate::ui::icons::semantic(current.icon(), 14.0),
-            text(current.to_string()).size(11),
+            crate::ui::icons::semantic(current.icon(), km::ROW_ICON),
+            text(current.to_string())
+                .size(crate::ui::style::text::UI)
+                .line_height(crate::ui::style::text::line()),
             Space::new().width(Fill),
-            crate::ui::icons::themed_arrow_toggle(open, 9.0),
+            if open {
+                crate::ui::icons::dropup_arrow()
+            } else {
+                crate::ui::icons::dropdown_arrow()
+            },
         ]
-        .spacing(5)
+        .spacing(km::TOOL_GAP)
         .align_y(iced::Center),
     )
     .on_press(msg(GraphicAttributesMsg::ToggleMenu(Menu::Fill)))
-    .style(move |theme: &Theme, _| {
-        let palette = theme.palette();
-        button::Style {
-            background: Some(Background::Color(palette.background.base.color)),
-            text_color: palette.background.base.text,
-            border: Border {
-                color: if open {
-                    palette.primary.base.color
-                } else {
-                    palette.background.neutral.color
-                },
-                width: 1.0,
-                radius: 2.0.into(),
-            },
-            ..Default::default()
-        }
-    })
-    .height(crate::ui::ROW_H)
+    .style(kit::box_button_style(open))
+    .height(km::TOOL_H)
     .width(Fill)
-    .padding([3, 6]);
+    .padding([0.0, km::CELL_PAD_X]);
     if !open {
         return picker.into();
     }
     let rows = column(GraphicAttribute::ALL.into_iter().map(|value| {
         button(
             row![
-                crate::ui::icons::semantic(value.icon(), 14.0),
-                text(value.to_string()).size(11),
+                crate::ui::icons::semantic(value.icon(), km::ROW_ICON),
+                text(value.to_string())
+                    .size(crate::ui::style::text::UI)
+                    .line_height(crate::ui::style::text::line()),
             ]
-            .spacing(5)
+            .spacing(km::TOOL_GAP)
             .align_y(iced::Center),
         )
         .on_press(msg(GraphicAttributesMsg::Fill(value)))
-        .style(crate::ui::color_select::list_row_style)
+        .style(crate::ui::kit::dropdown_row_style)
         .width(Fill)
-        .padding([2, 4])
+        .height(km::MENU_ITEM_H)
+        .padding([0.0, km::CELL_PAD_X])
         .into()
     }));
     let popup = container(rows)
-        .style(crate::ui::color_select::popup_panel_style)
-        .padding(2);
+        .style(crate::ui::kit::menu::frame_style)
+        .padding([km::MENU_PAD_Y, 0.0]);
     crate::ui::color_select::drop_down_below(
         picker.into(),
         popup.into(),
@@ -960,42 +943,32 @@ fn preview_row<'a>(
         .height(COMPACT_BUTTON_HEIGHT)
         .padding(0)
         .style(move |theme: &Theme, status| button::Style {
-            background: Some(Background::Color(theme.palette().background.base.color)),
+            background: Some(Background::Color(chrome::surface_raised(theme))),
             border: Border {
                 color: if editor_open
                     || matches!(status, button::Status::Hovered | button::Status::Pressed)
                 {
-                    theme.palette().primary.base.color
+                    chrome::accent(theme)
                 } else {
-                    theme.palette().background.neutral.color
+                    chrome::surface_raised(theme)
                 },
-                width: 1.0,
-                radius: 2.0.into(),
+                width: km::line(),
+                radius: 0.0.into(),
             },
             ..Default::default()
         });
     let edit = button(compact_button_content("⋮"))
         .on_press(msg(toggle))
-        .style(move |theme: &Theme, status| {
-            if editor_open {
-                button::primary(theme, status)
-            } else {
-                button::secondary(theme, status)
-            }
-        })
+        .style(kit::box_button_style(editor_open))
         .height(COMPACT_BUTTON_HEIGHT)
-        .padding([1, 3]);
-    let edit = tooltip(
-        edit,
-        text(tooltip_label).size(10),
-        tooltip::Position::Bottom,
-    );
+        .padding([0.0, km::LINE * 3.0]);
+    let edit = kit::tooltip(edit, tooltip_label, kit::TipPosition::Bottom);
     let edit: Element<'a, Message> = match flyout {
         Some((popup, width, height)) => {
             let mut drop_down = iced_aw::DropDown::new(edit, popup, true)
                 .width(Length::Fixed(width))
                 .alignment(popup_alignment(side))
-                .offset(4.0);
+                .offset(km::TOOL_GAP);
             if let Some(height) = height {
                 drop_down = drop_down
                     .height(Length::Fixed(height))
@@ -1003,9 +976,12 @@ fn preview_row<'a>(
             }
             drop_down.into()
         }
-        None => edit.into(),
+        None => edit,
     };
-    row![preview, edit].spacing(4).align_y(iced::Center).into()
+    row![preview, edit]
+        .spacing(km::TOOL_GAP)
+        .align_y(iced::Center)
+        .into()
 }
 
 fn linetype_row<'a>(
@@ -1031,13 +1007,9 @@ fn linetype_row<'a>(
             msg(GraphicAttributesMsg::LineLinetype(item.name))
         },
     )
-    .size(crate::ui::ROW_H * 0.42)
-    .padding(Padding {
-        top: 3.0,
-        bottom: 3.0,
-        left: 6.0,
-        right: 6.0,
-    })
+    .size(crate::ui::style::text::UI)
+    .line_height(crate::ui::style::text::line())
+    .padding(kit::BOX_PAD)
     .input_style(crate::ui::properties::combo_input_style)
     .width(Fill);
     let mode = if varies {
@@ -1066,8 +1038,8 @@ fn linetype_row<'a>(
             ),
         ],
     );
-    row![crate::ui::wide_menu::wide_menu(combo, 220.0), more]
-        .spacing(4)
+    row![crate::ui::wide_menu::wide_menu(combo, km::MENU_W), more]
+        .spacing(km::TOOL_GAP)
         .align_y(iced::Center)
         .into()
 }
@@ -1089,14 +1061,14 @@ fn linetype_scale_field<'a>(
     };
     let mut field = text_input(if varies { "*VARIES*" } else { "" }, &shown)
         .id(iced::widget::Id::new(LINETYPE_SCALE_FIELD))
-        .size(crate::ui::ROW_H * 0.42)
-        .padding([5, 5])
+        .size(crate::ui::style::text::UI)
+        .line_height(crate::ui::style::text::line())
+        .padding(kit::BOX_PAD)
         .style(move |theme: &Theme, status| {
             let mut style = crate::ui::properties::combo_input_style(theme, status);
             if continuous {
-                let disabled = theme.palette().background.base.text.scale_alpha(0.42);
-                style.value = disabled;
-                style.placeholder = disabled;
+                style.value = chrome::muted(theme);
+                style.placeholder = chrome::muted(theme);
             }
             style
         })
@@ -1113,7 +1085,7 @@ fn linetype_scale_field<'a>(
         crate::ui::icons::semantic(icon, PALETTE_CONTROL_ICON_SIZE)
     };
     row![icon, field]
-        .spacing(3)
+        .spacing(km::TOOL_GAP)
         .align_y(iced::Center)
         .width(Length::FillPortion(1))
         .into()
@@ -1143,13 +1115,9 @@ fn lineweight_field<'a>(
         selected.as_ref(),
         |item: crate::ui::properties::LwItem| msg(GraphicAttributesMsg::LineLineweight(item.0)),
     )
-    .size(crate::ui::ROW_H * 0.42)
-    .padding(Padding {
-        top: 3.0,
-        bottom: 3.0,
-        left: 6.0,
-        right: 6.0,
-    })
+    .size(crate::ui::style::text::UI)
+    .line_height(crate::ui::style::text::line())
+    .padding(kit::BOX_PAD)
     .input_style(crate::ui::properties::combo_input_style)
     .width(Fill);
     let more = mode_menu(
@@ -1174,7 +1142,7 @@ fn lineweight_field<'a>(
         picker,
         more,
     ]
-    .spacing(3)
+    .spacing(km::TOOL_GAP)
     .align_y(iced::Center)
     .width(Length::FillPortion(1))
     .into()
@@ -1266,9 +1234,9 @@ fn line_section<'a>(
                 open_menu
             ),
         ]
-        .spacing(12)
+        .spacing(km::GRID_INSET_R)
         .align_y(iced::Center)
-        .height(crate::ui::ROW_H)
+        .height(km::TOOL_H)
         .into(),
     );
     rows.push(transparency_control(
@@ -1298,7 +1266,7 @@ pub fn view<'a>(
     let line_handles = line_handles(document, &selected);
     let (fill_handles, current) = state.fills(scene, &selected);
 
-    let mut body = column![text(crate::t!("Line")).size(11)].spacing(6);
+    let mut body = column![kit::section_bar(crate::t!("Line").into_owned(), Vec::new())];
     body = body.extend(line_section(
         document,
         properties,
@@ -1310,8 +1278,7 @@ pub fn view<'a>(
     ));
 
     body = body
-        .push(Space::new().height(2))
-        .push(text(crate::t!("Fill")).size(11))
+        .push(kit::section_bar(crate::t!("Fill").into_owned(), Vec::new()))
         .push(fill_picker(current, open_menu == Some(Menu::Fill)));
     if !matches!(current, GraphicAttribute::None | GraphicAttribute::Gradient) {
         if let Some(info) = color_info(document, &fill_handles, draw_depth) {
@@ -1346,17 +1313,9 @@ pub fn view<'a>(
                     },
                 );
                 let popup = container(picker)
-                    .padding(1)
-                    .style(|theme: &Theme| container::Style {
-                        background: Some(Background::Color(theme.palette().background.base.color)),
-                        border: Border {
-                            color: theme.palette().primary.base.color,
-                            width: 1.0,
-                            radius: 3.0.into(),
-                        },
-                        ..Default::default()
-                    });
-                (popup.into(), 352.0, Some(724.0))
+                    .padding(km::line())
+                    .style(crate::ui::kit::menu::frame_style);
+                (popup.into(), HATCH_FLYOUT_W, Some(HATCH_FLYOUT_H))
             });
             let open = state.hatch_editor.is_some();
             body = body.push(preview_row(
@@ -1378,12 +1337,16 @@ pub fn view<'a>(
                 let preview = if gradients_vary(document, &fill_handles) {
                     iced::widget::stack![
                         preview,
-                        container(text("*VARIES*").size(10))
-                            .width(Fill)
-                            .height(Fill)
-                            .align_x(iced::Left)
-                            .align_y(iced::Center)
-                            .padding([0, 6]),
+                        container(
+                            text("*VARIES*")
+                                .size(crate::ui::style::text::UI_SMALL)
+                                .line_height(crate::ui::style::text::line())
+                        )
+                        .width(Fill)
+                        .height(Fill)
+                        .align_x(iced::Left)
+                        .align_y(iced::Center)
+                        .padding([0.0, km::CELL_PAD_X]),
                     ]
                     .into()
                 } else {
@@ -1392,7 +1355,7 @@ pub fn view<'a>(
                 let flyout = state.gradient_editor.as_ref().map(|editor| {
                     (
                         crate::ui::window::gradient_editor::view(editor, gradient_color_picking),
-                        390.0,
+                        GRADIENT_FLYOUT_W,
                         None,
                     )
                 });
@@ -1425,29 +1388,24 @@ pub fn view<'a>(
         }
     }
 
-    container(column![
-        crate::ui::dock::title_bar_with(
-            PanelId::GraphicAttributes,
-            crate::t!("Graphic Attributes").into_owned(),
-            // Keep the bar's controls up while the menu hangs off them, so
-            // moving into the menu does not hide its button and close it.
-            crate::ui::dock::Chrome {
-                title_hovered: chrome.title_hovered || open_menu == Some(Menu::Header),
-                ..chrome
-            },
-            Some(header_menu(
-                side,
-                open_menu == Some(Menu::Header),
-                state.fill_on_current_layer
-            )),
-        ),
-        body.padding(8)
-    ])
-    .width(Length::Fixed(width))
-    .height(Fill)
-    .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(theme.palette().background.base.color)),
-        ..Default::default()
-    })
-    .into()
+    let title_bar = crate::ui::dock::title_bar_with(
+        PanelId::GraphicAttributes,
+        crate::t!("Graphic Attributes").into_owned(),
+        // Keep the bar's controls up while the menu hangs off them, so
+        // moving into the menu does not hide its button and close it.
+        crate::ui::dock::Chrome {
+            title_hovered: chrome.title_hovered || open_menu == Some(Menu::Header),
+            ..chrome
+        },
+        Some(header_menu(
+            side,
+            open_menu == Some(Menu::Header),
+            state.fill_on_current_layer,
+        )),
+    );
+    kit::palette(
+        title_bar,
+        kit::scroll_area(body.spacing(km::TOOL_GAP)),
+        width,
+    )
 }

@@ -1848,28 +1848,24 @@ fn emit_hatch(
     let (world_ox, world_oy) = (hatch.world_origin[0], hatch.world_origin[1]);
 
     // Split the boundary into rings on every NaN-NaN separator.
+    // Arcs among the chords are written as curves (#3076).
     let mut rings: Vec<PolygonRing> = Vec::new();
-    let mut current: Vec<LinePoint> = Vec::new();
-    for &[bx, by] in hatch.boundary.iter() {
-        if bx.is_nan() || by.is_nan() {
-            if current.len() >= 3 {
-                rings.push(PolygonRing {
-                    points: std::mem::take(&mut current),
-                });
-            } else {
-                current.clear();
-            }
+    for ring in hatch.boundary.split(|p| p[0].is_nan() || p[1].is_nan()) {
+        if ring.len() < 3 {
             continue;
         }
-        let px = (bx as f64 + world_ox + ox) as f32;
-        let py = (by as f64 + world_oy + oy) as f32;
-        current.push(LinePoint {
-            p: Point::new(Mm(px), Mm(py)),
-            bezier: false,
-        });
-    }
-    if current.len() >= 3 {
-        rings.push(PolygonRing { points: current });
+        let points: Vec<glam::DVec2> = ring
+            .iter()
+            .map(|&[bx, by]| glam::DVec2::new(bx as f64 + world_ox + ox, by as f64 + world_oy + oy))
+            .collect();
+        let points = crate::io::plot::curved_ring(&points)
+            .into_iter()
+            .map(|(p, bezier)| LinePoint {
+                p: Point::new(Mm(p.x as f32), Mm(p.y as f32)),
+                bezier,
+            })
+            .collect();
+        rings.push(PolygonRing { points });
     }
     if rings.is_empty() {
         return;
@@ -1919,7 +1915,8 @@ fn emit_hatch(
         } else {
             scale.max(1e-6)
         };
-        let segments = hatch.pattern_segments_for_plot();
+        let fine = crate::io::plot::hatch_with_fine_arcs(hatch);
+        let segments = fine.as_ref().unwrap_or(hatch).pattern_segments_for_plot();
         if segments.is_empty() {
             return;
         }
@@ -2764,8 +2761,8 @@ impl TextFonts {
             let gids: Vec<u16> = std::iter::once(0)
                 .chain(font.used.keys().copied().filter(|&gid| gid != 0))
                 .collect();
-            let subset = subset_font(&font.blob, &gids)
-                .and_then(|bytes| ParsedFont::from_bytes(&bytes, 0, &mut Vec::new()));
+            let subset =
+                subset_font(&font.blob, &gids).and_then(|bytes| parsed_with_widths(bytes, 0));
             let parsed = match subset {
                 Some(parsed) => {
                     let remap: std::collections::HashMap<u16, u16> = gids
@@ -2778,8 +2775,7 @@ impl TextFonts {
                 }
                 None => {
                     log::warn!("PDF export: font subsetting failed; embedding the whole face");
-                    let whole =
-                        ParsedFont::from_bytes(&font.blob.data, font.blob.index, &mut Vec::new());
+                    let whole = parsed_with_widths(font.blob.data.clone(), font.blob.index);
                     match whole {
                         Some(parsed) => parsed,
                         None => continue, // `font_for` already checked it parses
@@ -2792,6 +2788,37 @@ impl TextFonts {
                 .insert(font.id, PdfFont::new(parsed));
         }
     }
+}
+
+/// A [`ParsedFont`] for `bytes` that carries the face's real glyph advances
+/// and metrics.
+///
+/// printpdf without `text_layout` builds `/W` from `ParsedFont::glyph_widths`
+/// (scaled by `units_per_em`), but its `from_bytes` stub leaves that map
+/// empty and assumes 1000 units per em, so every glyph went out with width 0
+/// and PDF readers split visible TrueType text into one "word" per letter.
+fn parsed_with_widths(bytes: Vec<u8>, index: u32) -> Option<ParsedFont> {
+    let face = ttf_parser::Face::parse(&bytes, index).ok()?;
+    let widths: std::collections::BTreeMap<u16, u16> = (0..face.number_of_glyphs())
+        .map(|g| (g, face.glyph_hor_advance(ttf_parser::GlyphId(g)).unwrap_or(0)))
+        .collect();
+    let units_per_em = face.units_per_em().max(1);
+    // The descriptor's /Ascent and /Descent are glyph-space (1000 per em);
+    // printpdf writes `FontMetrics` as given, so scale from font units.
+    let per_mille = |v: i16| (i32::from(v) * 1000 / i32::from(units_per_em)) as i16;
+    let metrics = printpdf::FontMetrics {
+        ascent: per_mille(face.ascender()),
+        descent: per_mille(face.descender()),
+    };
+    Some(ParsedFont::with_glyph_data(
+        bytes,
+        index,
+        None,
+        std::collections::BTreeMap::new(),
+        widths,
+        units_per_em,
+        metrics,
+    ))
 }
 
 /// `blob`'s face reduced to `gids` (glyph 0 first), keeping the hinting tables

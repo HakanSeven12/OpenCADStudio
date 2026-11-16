@@ -785,6 +785,7 @@ common =
     .dimension = Kóta
     .dimensions = Kóty
     .discard = Zahodit
+    .dont-save = Neukládat
     .discussions = Diskuze
     .discussions-load-from-github = Načítání diskuzí z GitHubu.
     .display = Zobrazení
@@ -2465,6 +2466,10 @@ common =
     .leader-specify-next-point-or-annotation-format-undo-annotation = LEADER  Určete další bod nebo [Annotation/Format/Undo] <Annotation>:
     .leader-specify-next-point = LEADER  Určete další bod:
     .lengthen-select-an-object-to-change-or-undo = LENGTHEN  Vyberte objekt ke změně nebo [Undo]:
+    .addvertex-select-a-polyline-segment-or-undo = ADDVERTEX  Select a polyline segment or [Undo]:
+    .addvertex-specify-new-vertex-location = ADDVERTEX  Specify new vertex location:
+    .popmenu-add-commands-to-the-right-click-menu-with-its-customize-row-first = POPMENU  Add commands to the right-click menu with its Customize row first.
+    .delvertex-select-a-polyline-vertex-or-undo = DELVERTEX  Select a polyline vertex or [Undo]:
     .lengthen-select-an-object-to-measure-or-delta-percent-total-dynamic = LENGTHEN  Vyberte objekt k měření nebo [Delta/Percent/Total/Dynamic]:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnitude-cross-sections-only = LOFT  Zadejte možnost [Guides/Path/Cross sections only/Settings/Continuity/Bulge magnitude] <Cross sections only>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-cross-sections-only = LOFT  Zadejte možnost [Guides/Path/Cross sections only/Settings] <Cross sections only>:
@@ -7223,6 +7228,7 @@ count-feature =
 dock =
     .icons-only = Pouze ikony
     .icons-and-names = Ikony a názvy
+    .names-only = Pouze názvy
     .allow-docking = Povolit ukotvení
     .auto-hide = Automaticky skrýt
     .dock-left = Ukotvit vlevo
@@ -9800,3 +9806,69 @@ anno-scale-prompt =
     .scale = Annotation scale
     .dont-ask = Don't ask again
     .ok = OK
+
+doc-tabs =
+    .above-palettes = Karty nad paletami
+
+text-style =
+    .invalid-width =
+        Invalid Width Factor, please enter a new value.
+
+        (Range: 0.01 to 100.0)
+    .invalid-oblique = Invalid Oblique angle, please enter a new angle.
+    .invalid-height =
+        Invalid Height, please enter a new value.
+
+        (0.0 or minimum of 1.0E-50)
+    .orientation = Match text orientation to layout
+    .new-title = New Text Style
+    .style-name = Style name
+    .ok = OK
+    .cancel = Cancel
+    .close = Close
+    .yes = Yes
+    .no = No
+    .name-empty = The name must be at least one character long.
+    .name-exists = The name, { $name }, is already in use.
+    .name-exists-detail = You will need to enter a different name.
+    .name-chars = The name contains unsupported characters.
+    .name-chars-detail = The following characters are not supported:
+    .delete-title = Delete Text Style
+    .delete-ask = Delete Text Style: { $name }?
+    .in-use = Style in use, can't be deleted.
+    .modified = The current style has been modified.
+    .modified-ask = Do you want to save your changes?
+    .cmd-name = -STYLE  Enter name of text style or [?] <{ $name }>:
+    .cmd-list = -STYLE  Enter text style(s) to list <*>:
+    .cmd-font = -STYLE  Specify font name or font filename (for SHX) <{ $font }>:
+    .cmd-height = -STYLE  Specify height of text or [Annotative] <{ $value }>:
+    .cmd-annotative = -STYLE  Create annotative text style [Yes/No] <Yes>:
+    .cmd-orientation = -STYLE  Match text orientation to layout? [Yes/No] <No>:
+    .cmd-width = -STYLE  Specify width factor <{ $value }>:
+    .cmd-oblique = -STYLE  Specify obliquing angle <{ $value }>:
+    .cmd-vertical = -STYLE  Vertical? [Yes/No] <No>:
+    .font-missing = Font not available.
+    .now-current = "{ $name }" is now the current text style.
+    .list-title = Text styles:
+    .list-name = Style name: "{ $name }"
+    .list-typeface = Font typeface: { $face }
+    .list-files = Font files: { $files }
+    .list-values = {"   "}Height: { $height }  Width factor: { $width }  Obliquing angle: { $oblique }
+    .list-generation = {"   "}Generation: { $generation }
+    .gen-normal = Normal
+    .gen-backwards = Backwards
+    .gen-upside-down = Upside-down
+    .gen-vertical = Vertical
+    .current = Current text style: "{ $name }"
+    .width-range = Width factor out of range (0.01 to 100.0).
+    .oblique-large = Obliquing angle too large.
+    .yes-or-no = Yes or No, please.
+    .numeric-value = Requires numeric value.
+    .angle-two-points = Requires valid numeric angle or two points.
+    .info-new = -STYLE  New style.
+    .info-existing = -STYLE  Existing style.
+    .info-full-font = {" "}Full font name = { $font }
+    .cmd-press-enter = -STYLE  Press ENTER to continue:
+    .menu-set-current = Set current
+    .menu-rename = Rename
+    .menu-delete = Delete

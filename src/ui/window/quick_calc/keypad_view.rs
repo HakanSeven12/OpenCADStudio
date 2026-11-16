@@ -317,15 +317,19 @@ fn memory_button<'a>(
 
 fn memory_row<'a>(p: &QuickCalcPalette) -> Element<'a, Message> {
     let has = !p.memory.is_empty();
-    let label =
-        |s: &str| -> Element<'a, Message> { text(s.to_string()).size(11.5).font(STRONG).into() };
+    let label = |s: &str| -> Element<'a, Message> {
+        text(s.to_string())
+            .size(crate::ui::style::text::UI)
+            .font(STRONG)
+            .into()
+    };
     let op = |s: &str, op: MemoryOp, enabled: bool| {
         memory_button(label(s), QuickCalcMsg::Memory(op), enabled, false)
     };
     let list_open = p.flyout == Some(Flyout::Memory);
     let list = memory_button(
         row![
-            text("M").size(11.5).font(STRONG),
+            text("M").size(crate::ui::style::text::UI).font(STRONG),
             // The svg doesn't take the button's text colour, so it is
             // dimmed here to match the disabled label.
             if has {

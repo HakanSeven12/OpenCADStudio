@@ -1065,6 +1065,7 @@ impl OpenCADStudio {
                 let styles: Vec<String> = self.style_names(super::super::StyleKind::Text);
                 let draft = &self.textstyle_draft;
                 let edited = draft.resolved();
+                let textstyle_modified = self.textstyle_modified();
                 let read_only = self.selected_textstyle_is_read_only();
                 let pending = self.textstyle_pending_changes();
                 let apply_summary = crate::ui::style::textstyle::ApplySummary {
@@ -1161,8 +1162,12 @@ impl OpenCADStudio {
                             upside_down: draft.style.flags.upside_down,
                             vertical: draft.style.is_vertical,
                             annotative: draft.style.annotative,
+                            orientation: draft.orientation,
+                            modified: textstyle_modified,
                             rename_active: self.style_rename.as_deref(),
                             rename_buf: &self.style_rename_buf,
+                            card: self.textstyle_card.as_ref(),
+                            context: self.textstyle_context.as_deref(),
                         },
                         flow,
                     )
@@ -2118,7 +2123,7 @@ fn unsaved_changes_dialog_window(
                     if block_edit {
                         t!("Discard the changes")
                     } else {
-                        t!("Discard")
+                        t!("Don't Save")
                     },
                     if block_edit {
                         Message::BlockEditChangesDiscard

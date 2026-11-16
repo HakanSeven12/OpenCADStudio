@@ -269,7 +269,18 @@ impl OpenCADStudio {
                 .scene
                 .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
         } else {
-            self.tabs[i].scene.update_entity(entity);
+            let document = &mut self.tabs[i].scene.document;
+            if let Some(target) = document.get_entity_mut(handle) {
+                *target = entity;
+            }
+            // A typed formula is stored as a formula field.
+            crate::entities::table::typed_formula_to_field(document, handle, row, column);
+            if let Some(EntityType::Table(table)) = document.get_entity_mut(handle) {
+                table.block_record_handle = None;
+            }
+            self.tabs[i]
+                .scene
+                .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
         }
         self.tabs[i].dirty = true;
         self.finish_pending_history(i);

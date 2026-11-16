@@ -3,7 +3,6 @@ use super::super::Message;
 use super::*;
 use iced::widget::{button, column, container, mouse_area, row, text, tooltip};
 use iced::{Background, Border, Element, Length, Theme};
-use std::time::Duration;
 
 fn viewport_tooltip<'a>(
     control: impl Into<Element<'a, Message>>,
@@ -11,15 +10,149 @@ fn viewport_tooltip<'a>(
     command: &'static str,
 ) -> Element<'a, Message> {
     let text = format!("{title}\n{} {command}", crate::t!("Command:"));
-    tooltip(
+    crate::ui::kit::tooltip_gap(
         control,
-        crate::ui::ribbon::tooltip_content(text),
+        text,
         tooltip::Position::Bottom,
+        crate::ui::style::ribbon_metrics::TIP_GAP,
     )
-    .gap(6.0)
-    .delay(Duration::from_millis(400))
-    .style(crate::ui::ribbon::tooltip_style)
-    .into()
+}
+
+// ── Viewport control bar: the prototype's measurements ─────────────────────
+//
+// iced draws a border inside its container, so the 1 px border is part of
+// the bar's padding: 1 px top and bottom, 1 + 3 px left and right.
+
+/// Height of the bar: 22 px of content and the 1 px border top and bottom.
+const VP_BAR_H: f32 = 24.0;
+/// The bar's border width.
+const VP_BORDER: f32 = 1.0;
+/// Room between the border and the first / last item.
+const VP_PAD_X: f32 = 3.0;
+/// Space between items (no separators).
+const VP_GAP: f32 = 2.0;
+/// Corner radius of the bar.
+const VP_BAR_RADIUS: f32 = 3.0;
+/// Opacity of the bar's background over the drawing.
+const VP_BAR_ALPHA: f32 = 0.88;
+/// Side of an icon button.
+const VP_BTN: f32 = 20.0;
+/// Icon size inside a button.
+const VP_ICON: f32 = 16.0;
+/// Corner radius of a lit or hovered button.
+const VP_BTN_RADIUS: f32 = 2.0;
+/// Height of the visual-style picker head and its side padding.
+const VP_PICKER_H: f32 = 20.0;
+const VP_PICKER_PAD_X: f32 = 6.0;
+/// Gap between the picker's text and its arrow.
+const VP_PICKER_GAP: f32 = 6.0;
+/// Text size of the picker and its flyout (whole pixels).
+const VP_TEXT: f32 = crate::ui::style::text::UI;
+/// Line height of that text, in whole pixels.
+const VP_TEXT_LINE: f32 = crate::ui::style::text::UI_LINE;
+/// The flyout: row height, the check-mark column, the right padding, the
+/// vertical padding of the frame and how far below the head it opens.
+const VP_MENU_ROW_H: f32 = 22.0;
+const VP_MENU_CHECK_W: f32 = 26.0;
+const VP_MENU_PAD_R: f32 = 16.0;
+const VP_MENU_PAD_Y: f32 = 3.0;
+const VP_MENU_OFFSET: f32 = 3.0;
+/// Narrowest flyout.
+const VP_MENU_MIN_W: f32 = 180.0;
+/// How far the danger colour tints the close button's hover.
+const VP_DANGER_TINT: f32 = 0.25;
+/// Distance of the bar from the drawing area's top-left corner.
+pub(super) const VP_INSET: f32 = 6.0;
+
+/// Width of the visual-style flyout for `labels`: the longest name plus the
+/// check column, the right padding and the frame's border.
+fn vp_menu_width<'a>(labels: impl Iterator<Item = &'a str>) -> f32 {
+    crate::ui::style::common::dropdown_popup_width(
+        labels,
+        VP_TEXT,
+        VP_MENU_CHECK_W + VP_MENU_PAD_R + 2.0 * VP_BORDER,
+        VP_MENU_MIN_W,
+    )
+}
+
+/// Background of a highlighted flyout row: the palette's `row_selected`
+/// (the accent at 38 % over the panel).
+pub(crate) fn vp_row_selected(theme: &Theme) -> iced::Color {
+    crate::ui::style::chrome::row_selected(theme)
+}
+
+/// Background of the bar: the theme background, faintly showing the
+/// drawing through.
+pub(crate) fn vp_bar_background(theme: &Theme) -> iced::Color {
+    crate::ui::style::chrome::bar(theme).scale_alpha(VP_BAR_ALPHA)
+}
+
+/// A bar button's look: idle flat; hovered `hover` with a `hover_border`;
+/// an `active` toggle lit like a ribbon button, its border lighter while
+/// hovered. `danger` tints the hover with the danger colour (close).
+fn vp_button_style(active: bool, hovered: bool, danger: bool, theme: &Theme) -> container::Style {
+    use crate::ui::style::chrome;
+    let (background, border) = match (active, hovered) {
+        (true, false) => (Some(chrome::lit(theme)), chrome::lit_border(theme)),
+        (true, true) => (Some(chrome::lit(theme)), chrome::hover_border(theme)),
+        (false, true) if danger => (
+            Some(chrome::mix(
+                chrome::panel(theme),
+                chrome::danger(theme),
+                VP_DANGER_TINT,
+            )),
+            chrome::hover_border(theme),
+        ),
+        (false, true) => (Some(chrome::hover(theme)), chrome::hover_border(theme)),
+        (false, false) => (None, iced::Color::TRANSPARENT),
+    };
+    container::Style {
+        background: background.map(Background::Color),
+        border: Border {
+            color: border,
+            width: if background.is_some() { VP_BORDER } else { 0.0 },
+            radius: VP_BTN_RADIUS.into(),
+        },
+        ..Default::default()
+    }
+}
+
+/// The icon of a bar button in `color`.
+fn vp_icon<'a>(bytes: &'static [u8], color: fn(&Theme) -> iced::Color) -> Element<'a, Message> {
+    crate::ui::icons::tinted(bytes, VP_ICON, color)
+}
+
+/// A 20 px square cell holding `icon`, styled for `active` / `hovered`.
+fn vp_cell<'a>(
+    icon: Element<'a, Message>,
+    active: bool,
+    hovered: bool,
+    danger: bool,
+) -> Element<'a, Message> {
+    container(icon)
+        .center_x(Length::Fixed(VP_BTN))
+        .center_y(Length::Fixed(VP_BTN))
+        .style(move |theme: &Theme| vp_button_style(active, hovered, danger, theme))
+        .into()
+}
+
+/// A bar button drawn by hover state: `idle` normally, `hovered` while the
+/// pointer is over it. Lets a `mouse_area` (which has no status) look like
+/// the buttons.
+fn vp_hover_cell<'a>(bytes: &'static [u8], active: bool, danger: bool) -> Element<'a, Message> {
+    use crate::ui::style::chrome;
+    let idle: fn(&Theme) -> iced::Color = if active { chrome::strong } else { chrome::text };
+    let hover: fn(&Theme) -> iced::Color = if danger {
+        chrome::danger
+    } else if active {
+        chrome::strong
+    } else {
+        chrome::text
+    };
+    iced::widget::hover(
+        vp_cell(vp_icon(bytes, idle), active, false, danger),
+        vp_cell(vp_icon(bytes, hover), active, true, danger),
+    )
 }
 
 pub(super) fn viewport_controls<'a>(
@@ -33,95 +166,77 @@ pub(super) fn viewport_controls<'a>(
     style_name: Option<String>,
     hover_outline: (bool, u8),
 ) -> Element<'a, Message> {
+    use crate::ui::style::chrome;
     let render_modes: Vec<RenderModeChoice> = crate::modules::view::visual_style::VISUAL_STYLES
         .iter()
         .map(|style| RenderModeChoice(style.mode))
         .collect();
-    let danger_btn =
-        move |bytes: &'static [u8], msg: Message, title: String, command: &'static str| {
-            let button = button(crate::ui::icons::themed_danger(bytes, 15.0))
-                .on_press(msg)
-                .padding([4, 6])
-                .style(move |theme: &Theme, status| iced::widget::button::Style {
-                    background: matches!(
-                        status,
-                        iced::widget::button::Status::Hovered
-                            | iced::widget::button::Status::Pressed
-                    )
-                    .then_some(Background::Color(theme.palette().danger.weak.color)),
-                    border: Border {
-                        radius: 3.0.into(),
-                        ..Default::default()
-                    },
-                    text_color: theme.palette().danger.base.color,
-                    ..Default::default()
-                });
-            viewport_tooltip(button, title, command)
-        };
 
-    // Borderless icon button; an `active` toggle gets an accent tint + fill.
-    let icon_btn = move |bytes: &'static [u8],
-                         active: bool,
-                         msg: Message,
-                         title: String,
-                         command: &'static str| {
-        let icon = if active {
-            crate::ui::icons::themed_primary_weak_text(bytes, 15.0)
-        } else {
-            crate::ui::icons::themed(bytes, 15.0)
-        };
-        let button =
-            button(icon)
-                .on_press(msg)
-                .padding([4, 6])
-                .style(move |theme: &Theme, status| {
-                    let palette = theme.palette();
-                    let pair = match (active, status) {
-                        (_, iced::widget::button::Status::Hovered) => {
-                            Some(palette.background.strong)
-                        }
-                        (true, _) => Some(palette.primary.weak),
-                        (false, _) => None,
-                    };
-                    iced::widget::button::Style {
-                        background: pair.map(|p| Background::Color(p.color)),
-                        border: Border {
-                            radius: 3.0.into(),
-                            ..Default::default()
-                        },
-                        text_color: pair.map(|p| p.text).unwrap_or(palette.background.base.text),
-                        ..Default::default()
-                    }
-                });
+    // A bar button: flat until hovered, an `active` toggle lit; `danger`
+    // (close) turns its icon and hover the danger colour.
+    let bar_btn = move |bytes: &'static [u8],
+                        active: bool,
+                        danger: bool,
+                        msg: Message,
+                        title: String,
+                        command: &'static str| {
+        let button = button(vp_hover_cell(bytes, active, danger))
+            .on_press(msg)
+            .padding(0)
+            .style(|_: &Theme, _| button::Style::default());
         viewport_tooltip(button, title, command)
     };
+    let icon_btn =
+        move |bytes: &'static [u8],
+              active: bool,
+              msg: Message,
+              title: String,
+              command: &'static str| { bar_btn(bytes, active, false, msg, title, command) };
+    let danger_btn =
+        move |bytes: &'static [u8], msg: Message, title: String, command: &'static str| {
+            bar_btn(bytes, false, true, msg, title, command)
+        };
 
     // The standard picker cannot show a live sample beside its rows. This
     // flyout keeps the current style unchanged while hovering; a click commits.
+    let arrow = if render_mode_menu_open {
+        crate::ui::icons::dropup_arrow()
+    } else {
+        crate::ui::icons::dropdown_arrow()
+    };
     let picker_head = button(
         row![
-            text(style_name.unwrap_or_else(|| RenderModeChoice(render_mode).to_string())).size(11),
-            crate::ui::icons::themed_arrow_toggle(render_mode_menu_open, 9.0),
+            text(style_name.unwrap_or_else(|| RenderModeChoice(render_mode).to_string()))
+                .size(VP_TEXT)
+                .line_height(iced::Pixels(VP_TEXT_LINE))
+                .wrapping(iced::advanced::text::Wrapping::None),
+            arrow,
         ]
-        .spacing(6)
+        .spacing(VP_PICKER_GAP)
+        .height(Length::Fill)
         .align_y(iced::Center),
     )
     .on_press(Message::ToggleRenderModeMenu(render_mode))
-    .padding([4, 6])
+    .height(Length::Fixed(VP_PICKER_H))
+    .padding([0.0, VP_PICKER_PAD_X])
     .style(move |theme: &Theme, status| {
-        let palette = theme.palette();
-        let active = render_mode_menu_open
+        let lit = render_mode_menu_open
             || matches!(status, button::Status::Hovered | button::Status::Pressed);
         button::Style {
-            background: active.then_some(Background::Color(palette.background.strong.color)),
-            text_color: if active {
-                palette.background.strong.text
+            background: lit.then(|| Background::Color(chrome::hover(theme))),
+            text_color: if lit {
+                chrome::strong(theme)
             } else {
-                palette.background.base.text
+                chrome::text(theme)
             },
             border: Border {
-                radius: 3.0.into(),
-                ..Default::default()
+                color: if lit {
+                    chrome::hover_border(theme)
+                } else {
+                    iced::Color::TRANSPARENT
+                },
+                width: if lit { VP_BORDER } else { 0.0 },
+                radius: VP_BTN_RADIUS.into(),
             },
             ..Default::default()
         }
@@ -134,48 +249,33 @@ pub(super) fn viewport_controls<'a>(
 
     let preview_mode = render_mode_preview.unwrap_or(render_mode);
     let mode_names: Vec<String> = render_modes.iter().map(|c| c.to_string()).collect();
-    let dropdown_w = crate::ui::style::common::dropdown_popup_width(
-        mode_names.iter().map(|s| s.as_str()),
-        11.0,
-        46.0,
-        180.0,
-    );
+    let dropdown_w = vp_menu_width(mode_names.iter().map(|s| s.as_str()));
 
-    let mut choices = column![].spacing(2).width(Length::Fill);
+    let mut choices = column![].width(Length::Fill);
     for choice in render_modes {
         let highlighted = choice.0 == preview_mode;
         let selected = choice.0 == render_mode;
-        let checkmark = crate::ui::icons::themed_check_cell(selected);
+        let checkmark = container(crate::ui::icons::themed_check_cell(selected))
+            .center_x(Length::Fixed(VP_MENU_CHECK_W));
         let label = text(choice.to_string())
-            .size(11)
+            .size(VP_TEXT)
+            .line_height(iced::Pixels(VP_TEXT_LINE))
             .wrapping(iced::advanced::text::Wrapping::None);
         let row_content = row![checkmark, label]
-            .spacing(6)
+            .height(Length::Fill)
             .align_y(iced::alignment::Vertical::Center);
         let option = container(row_content)
-            .padding([5, 8])
+            .padding(iced::Padding::ZERO.right(VP_MENU_PAD_R))
             .width(Length::Fill)
-            .style(move |theme: &Theme| {
-                let palette = theme.palette();
-                let bg = if highlighted {
-                    Some(Background::Color(palette.background.strong.color))
+            .height(Length::Fixed(VP_MENU_ROW_H))
+            .style(move |theme: &Theme| container::Style {
+                background: highlighted.then(|| Background::Color(vp_row_selected(theme))),
+                text_color: Some(if highlighted {
+                    chrome::strong(theme)
                 } else {
-                    None
-                };
-                let text_color = if highlighted || selected {
-                    palette.background.strong.text
-                } else {
-                    palette.background.base.text
-                };
-                container::Style {
-                    background: bg,
-                    text_color: Some(text_color),
-                    border: Border {
-                        radius: 3.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }
+                    chrome::text(theme)
+                }),
+                ..Default::default()
             });
         choices = choices.push(
             mouse_area(option)
@@ -185,42 +285,30 @@ pub(super) fn viewport_controls<'a>(
         );
     }
     let popup = container(choices)
-        .padding(4)
+        .padding([VP_MENU_PAD_Y + VP_BORDER, VP_BORDER])
         .width(Length::Fixed(dropdown_w))
-        .style(|theme: &Theme| {
-            let palette = theme.palette();
-            container::Style {
-                background: Some(Background::Color(palette.background.weak.color)),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                text_color: Some(palette.background.weak.text),
-                ..Default::default()
-            }
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(chrome::panel(theme))),
+            border: Border {
+                color: chrome::border(theme),
+                width: VP_BORDER,
+                radius: 0.0.into(),
+            },
+            text_color: Some(chrome::text(theme)),
+            ..Default::default()
         });
     let picker: Element<'a, Message> =
         iced_aw::DropDown::new(picker_head, popup, render_mode_menu_open)
             .width(Length::Fixed(dropdown_w))
             .alignment(iced_aw::drop_down::Alignment::Bottom)
-            .offset(3.0)
+            .offset(VP_MENU_OFFSET)
             .on_dismiss(Message::DismissRenderModeMenu)
             .into();
 
-    // Thin vertical divider between control groups.
-    let sep = || {
-        container(iced::widget::Space::new().width(1.0).height(16.0)).style(|theme: &Theme| {
-            iced::widget::container::Style {
-                background: Some(Background::Color(
-                    theme.palette().background.neutral.color.scale_alpha(0.7),
-                )),
-                ..Default::default()
-            }
-        })
-    };
-
-    let mut bar = row![].spacing(3).align_y(iced::alignment::Vertical::Center);
+    // No separators: the gap alone parts the items.
+    let mut bar = row![]
+        .spacing(VP_GAP)
+        .align_y(iced::alignment::Vertical::Center);
     bar = bar
         .push(icon_btn(
             crate::ui::icons::GRID,
@@ -229,7 +317,6 @@ pub(super) fn viewport_controls<'a>(
             crate::t!("Toggle Grid").into_owned(),
             "GRID",
         ))
-        .push(sep())
         .push(icon_btn(
             crate::ui::icons::SNAP,
             snap_on,
@@ -237,11 +324,9 @@ pub(super) fn viewport_controls<'a>(
             crate::t!("Toggle Grid Snap").into_owned(),
             "SNAP",
         ))
-        .push(sep())
         .push(picker);
     if include_split {
         bar = bar
-            .push(sep())
             .push(icon_btn(
                 crate::ui::icons::SPLIT_V,
                 false,
@@ -249,7 +334,6 @@ pub(super) fn viewport_controls<'a>(
                 crate::tr!("viewport", "split-vertical"),
                 "VPORTS 2V",
             ))
-            .push(sep())
             .push(icon_btn(
                 crate::ui::icons::SPLIT_H,
                 false,
@@ -262,32 +346,14 @@ pub(super) fn viewport_controls<'a>(
         // letting the drag continue onto the target pane to swap them (a button
         // would only fire on release). Placed just left of Close.
         if tile_count > 1 {
-            let drag = mouse_area(
-                container(crate::ui::icons::themed_success(
-                    crate::ui::icons::MOVE,
-                    15.0,
-                ))
-                .padding([4, 6])
-                .style(|_: &Theme| iced::widget::container::Style {
-                    border: Border {
-                        radius: 3.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }),
-            )
-            .interaction(iced::mouse::Interaction::Grab)
-            .on_press(Message::PaneMoveStart);
+            let drag = mouse_area(vp_hover_cell(crate::ui::icons::MOVE, false, false))
+                .interaction(iced::mouse::Interaction::Grab)
+                .on_press(Message::PaneMoveStart);
             let drag = viewport_tooltip(drag, crate::tr!("viewport", "move"), "VPORTS");
             // Hover outline switch: one small icon, lit while the outline is
             // on. A click switches it; the wheel over it sets the strength.
             let (outline_on, outline_opacity) = hover_outline;
-            let outline_icon = if outline_on {
-                crate::ui::icons::themed_primary_weak_text(VPORTS_HIGHLIGHT_ICON, 15.0)
-            } else {
-                crate::ui::icons::themed(VPORTS_HIGHLIGHT_ICON, 15.0)
-            };
-            let outline = mouse_area(container(outline_icon).padding([4, 6]))
+            let outline = mouse_area(vp_hover_cell(VPORTS_HIGHLIGHT_ICON, outline_on, false))
                 .interaction(iced::mouse::Interaction::Pointer)
                 .on_press(Message::ViewportHighlightToggle)
                 .on_enter(Message::ViewportOutlineSwitchHover(true))
@@ -300,35 +366,27 @@ pub(super) fn viewport_controls<'a>(
                 outline_tooltip(outline_on, outline_opacity),
                 "VPHIGHLIGHT",
             );
-            bar = bar
-                .push(sep())
-                .push(outline)
-                .push(drag)
-                .push(sep())
-                .push(danger_btn(
-                    crate::ui::icons::CLOSE,
-                    Message::CloseModelViewport,
-                    crate::tr!("viewport", "close"),
-                    "VPORTS SINGLE",
-                ));
+            bar = bar.push(outline).push(drag).push(danger_btn(
+                crate::ui::icons::CLOSE,
+                Message::CloseModelViewport,
+                crate::tr!("viewport", "close"),
+                "VPORTS SINGLE",
+            ));
         }
     }
 
     container(bar)
-        .padding(2)
-        .style(|theme: &Theme| {
-            let palette = theme.palette();
-            iced::widget::container::Style {
-                background: Some(Background::Color(
-                    palette.background.weak.color.scale_alpha(0.92),
-                )),
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            }
+        .height(Length::Fixed(VP_BAR_H))
+        .padding([VP_BORDER, VP_BORDER + VP_PAD_X])
+        .align_y(iced::alignment::Vertical::Center)
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(vp_bar_background(theme))),
+            border: Border {
+                color: chrome::strip_divider(theme),
+                width: VP_BORDER,
+                radius: VP_BAR_RADIUS.into(),
+            },
+            ..Default::default()
         })
         .into()
 }
@@ -453,6 +511,26 @@ mod tests {
     }
 
     #[test]
+    fn the_bar_measurements_are_whole_pixels() {
+        for v in [
+            VP_BAR_H,
+            VP_PAD_X,
+            VP_GAP,
+            VP_BTN,
+            VP_ICON,
+            VP_PICKER_H,
+            VP_TEXT,
+            VP_TEXT_LINE,
+            VP_MENU_ROW_H,
+            VP_MENU_CHECK_W,
+            VP_MENU_PAD_R,
+            VP_INSET,
+        ] {
+            assert_eq!(v.fract(), 0.0, "{v}");
+        }
+    }
+
+    #[test]
     fn test_viewport_controls_construction() {
         for style in crate::modules::view::visual_style::VISUAL_STYLES {
             let _el = viewport_controls(
@@ -484,43 +562,25 @@ mod tests {
 
     #[test]
     fn test_visual_style_dropdown_contrast_across_all_themes() {
+        use crate::ui::style::chrome;
         for theme in iced::Theme::ALL {
-            let p = theme.palette();
-            let bg = p.background.weak.color;
-
-            // 1. Text contrast (WCAG standard AA for normal text is >= 4.5:1, large/ui >= 3:1):
-            let strong_text = p.background.strong.text;
-            let text_contrast = wcag_contrast(strong_text, bg);
+            // The flyout sits on the panel; the highlighted row on the
+            // accent mix, in the strong text colour.
+            let panel = chrome::panel(theme);
+            let text_contrast = wcag_contrast(chrome::text(theme), panel);
             assert!(
                 text_contrast >= 4.5,
-                "Theme {:?} selected text contrast {:.2} on background is too low",
+                "Theme {:?} row text contrast {:.2} on the panel is too low",
                 theme,
                 text_contrast
             );
-
-            let base_text = p.background.base.text;
-            let base_contrast = wcag_contrast(base_text, bg);
+            let row = vp_row_selected(theme);
+            let selected_contrast = wcag_contrast(chrome::strong(theme), row);
             assert!(
-                base_contrast >= 4.5,
-                "Theme {:?} unselected text contrast {:.2} on background is too low",
+                selected_contrast >= 3.0,
+                "Theme {:?} highlighted row text contrast {:.2} is too low",
                 theme,
-                base_contrast
-            );
-
-            // 2. Checkmark contrast:
-            let pri = p.primary.base.color;
-            let pri_contrast = wcag_contrast(pri, bg);
-            let tick_color = if pri_contrast >= 2.0 {
-                pri
-            } else {
-                p.background.base.text
-            };
-            let final_tick_contrast = wcag_contrast(tick_color, bg);
-            assert!(
-                final_tick_contrast >= 2.0,
-                "Theme {:?} tick contrast {:.2} on background is too low",
-                theme,
-                final_tick_contrast
+                selected_contrast
             );
         }
     }
@@ -532,29 +592,23 @@ mod tests {
             .map(|c| c.label.chars().count())
             .max()
             .unwrap_or(0);
-        let dropdown_w = crate::ui::style::common::dropdown_popup_width(
+        let dropdown_w = vp_menu_width(
             crate::modules::view::visual_style::VISUAL_STYLES
                 .iter()
                 .map(|c| c.label),
-            11.0,
-            46.0,
-            180.0,
         );
 
         // Longest default label is "Gouraud Shaded + Edges" (22 chars)
         assert_eq!(max_label_len, 22);
-        // Computed width should easily fit the 22-char label + checkmark + padding
-        assert!(dropdown_w >= 210.0);
+        // The width fits the 22-char label (as estimated at 11 px) plus the
+        // check column, the right padding and the frame.
+        let text_w = max_label_len as f32 * VP_TEXT * 0.68;
+        assert!(dropdown_w >= text_w + VP_MENU_CHECK_W + VP_MENU_PAD_R);
 
         // CJK labels count wide characters double
         let cjk_labels = ["二维线框", "着色+边"];
-        let cjk_w = crate::ui::style::common::dropdown_popup_width(
-            cjk_labels.iter().copied(),
-            11.0,
-            46.0,
-            180.0,
-        );
-        assert_eq!(cjk_w, 180.0);
+        let cjk_w = vp_menu_width(cjk_labels.iter().copied());
+        assert_eq!(cjk_w, VP_MENU_MIN_W);
 
         for style in crate::modules::view::visual_style::VISUAL_STYLES {
             assert!(!style.label.contains('\n'), "Label should be a single line");

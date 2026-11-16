@@ -30,13 +30,13 @@ fn token(theme: &Theme, t: f32) -> Color {
 }
 
 /// A surface `step` of OKLCH lightness away from the background.
-fn surface(theme: &Theme, step: f32) -> Color {
-    super::readable::surface(theme, step)
+fn step(theme: &Theme, by: f32) -> Color {
+    super::readable::surface(theme, by)
 }
 
 /// Lines between bars; the darkest recess (a step back from the bars).
 pub fn page(theme: &Theme) -> Color {
-    surface(theme, -0.070)
+    step(theme, -0.070)
 }
 
 /// Menu-bar and tab-row background.
@@ -46,32 +46,32 @@ pub fn bar(theme: &Theme) -> Color {
 
 /// Panel title strip.
 pub fn title_bar(theme: &Theme) -> Color {
-    surface(theme, 0.039)
+    step(theme, 0.039)
 }
 
 /// Ribbon tool area, active tab, popups.
 pub fn panel(theme: &Theme) -> Color {
-    surface(theme, 0.073)
+    step(theme, 0.073)
 }
 
 /// Panel body while its slide-out is open and unpinned.
 pub fn open_panel(theme: &Theme) -> Color {
-    surface(theme, 0.107)
+    step(theme, 0.107)
 }
 
 /// Hover and pressed background.
 pub fn hover(theme: &Theme) -> Color {
-    surface(theme, 0.135)
+    step(theme, 0.135)
 }
 
 /// Popup and control borders.
 pub fn border(theme: &Theme) -> Color {
-    surface(theme, 0.175)
+    step(theme, 0.175)
 }
 
 /// Hover outline of buttons.
 pub fn hover_border(theme: &Theme) -> Color {
-    surface(theme, 0.199)
+    step(theme, 0.199)
 }
 
 /// Section labels, shortcut text.
@@ -103,8 +103,18 @@ pub fn accent(theme: &Theme) -> Color {
     theme.palette().primary.base.color
 }
 
+/// Text and icons on an accent fill (a primary button).
+pub fn on_accent(theme: &Theme) -> Color {
+    theme.palette().primary.base.text
+}
+
 pub fn danger(theme: &Theme) -> Color {
     theme.palette().danger.base.color
+}
+
+/// A good outcome: a live connection, a step that worked.
+pub fn success(theme: &Theme) -> Color {
+    theme.palette().success.base.color
 }
 
 /// Background of a lit button: the command it runs is running, or the
@@ -116,6 +126,51 @@ pub fn lit(theme: &Theme) -> Color {
 /// Outline of a lit button.
 pub fn lit_border(theme: &Theme) -> Color {
     mix(panel(theme), accent(theme), 0.7)
+}
+
+// ── Palette area (strip, docked palettes, Properties, drawing tabs) ──────
+//
+// The prototype "palettes up to the ribbon" names its own surfaces. Where
+// one is within a step of a chrome surface it is that surface, so the
+// palettes and the ribbon stay one family; the others are steps of their
+// own, by the same OKLCH rule, so every theme follows.
+
+/// Palette background, its title bar, the open strip group and the active
+/// drawing tab.
+pub fn surface(theme: &Theme) -> Color {
+    panel(theme)
+}
+
+/// Category bars, property grid lines, the combo field, the splitter.
+pub fn surface_raised(theme: &Theme) -> Color {
+    step(theme, 0.013)
+}
+
+/// Palette strip and drawing-tab bar background.
+pub fn strip(theme: &Theme) -> Color {
+    bar(theme)
+}
+
+/// The dark 1 px edge: strip and palette border, the lines around the open
+/// strip group, the line under the ribbon.
+pub fn edge(theme: &Theme) -> Color {
+    step(theme, -0.041)
+}
+
+/// Line between strip groups.
+pub fn strip_divider(theme: &Theme) -> Color {
+    step(theme, 0.132)
+}
+
+/// Name cell of the selected property row: the accent at 38 % over the
+/// surface.
+pub fn row_selected(theme: &Theme) -> Color {
+    mix(surface(theme), accent(theme), 0.38)
+}
+
+/// Inactive drawing tab.
+pub fn tab_inactive(theme: &Theme) -> Color {
+    title_bar(theme)
 }
 
 #[cfg(test)]

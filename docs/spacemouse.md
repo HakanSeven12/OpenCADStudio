@@ -3,8 +3,19 @@
 The Windows desktop app supports 3Dconnexion SpaceMouse devices through the
 installed [3DxWare driver](https://3dconnexion.com/drivers/). Open CAD Studio
 loads NavLib from the Windows system directory at runtime. An SDK installation
-is not needed to build or run the app. macOS, Linux, and the web build currently
-show an unavailable state; their device adapters are not implemented.
+is not needed to build or run the app.
+
+The Linux desktop app reads the [spacenavd](https://spacenav.sourceforge.net/)
+daemon socket (`$SPNAV_SOCKET`, `$XDG_RUNTIME_DIR/spnav.sock`, `/run/spnav.sock`
+or `/var/run/spnav.sock`). Install and start `spacenavd`; the app connects and
+reconnects on its own. Linux has no driver settings UI, so the app maps all six
+axes itself: push pans, lift or press zooms, and in 3D navigation tilting
+forward/back pitches and twisting turns the view about the pivot. Button 1 fits
+the view and button 2 returns to the top view. Axis sensitivity, inversion and
+dead zones are set in spacenavd (`spnavcfg` or `/etc/spnavrc`).
+
+macOS and the web build show an unavailable state; their device adapters are
+not implemented.
 
 ## Navigation
 

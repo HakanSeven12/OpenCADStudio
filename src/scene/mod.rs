@@ -1457,16 +1457,19 @@ const DRAW_DEPTH_LABEL_MIN: i32 = -1_000_000_000;
 const DRAW_DEPTH_LABEL_MAX: i32 = 1_000_000_000;
 const DRAW_DEPTH_INITIAL_MIN: i32 = -800_000_000;
 const DRAW_DEPTH_INITIAL_MAX: i32 = 800_000_000;
-const DRAW_DEPTH_LABEL_SCALE: f32 = 1.0 / 1_073_741_824.0;
+const DRAW_DEPTH_LABEL_SCALE: f32 = 1.0 / 2_147_483_648.0;
 // Label stride for a block that starts empty and grows by Add: wide enough for
-// the depth buffer to keep neighbours apart (about 80 steps of a 24-bit buffer
+// the depth buffer to keep neighbours apart (about 40 steps of a 24-bit buffer
 // at the default draw-order scale), and narrow enough to leave room for
 // thousands of Adds before a full rebuild.
 const DRAW_DEPTH_EMPTY_BLOCK_STRIDE: i32 = 1 << 18;
 
+/// Labels map into (0, 1): draw order only ever moves 2D geometry towards
+/// the camera. A negative bias pushed lines lying on a solid's face behind
+/// that face in shaded views (#3119); 0 stays the true depth of 3D geometry.
 fn draw_depth_value(label: i32, half_label: i32) -> [f32; 2] {
     [
-        label as f32 * DRAW_DEPTH_LABEL_SCALE,
+        (label as i64 + (1_i64 << 30)) as f32 * DRAW_DEPTH_LABEL_SCALE,
         half_label as f32 * DRAW_DEPTH_LABEL_SCALE,
     ]
 }

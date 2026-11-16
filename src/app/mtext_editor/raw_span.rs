@@ -440,6 +440,20 @@ mod tests {
     }
 
     #[test]
+    fn removing_the_last_tab_stop_writes_tz_only_after_a_paragraph_with_tabs() {
+        // The reference's Paragraph window: the second paragraph's stop
+        // removed gives `\ptz;`; every stop removed leaves no code at all.
+        let mut app = app("\\pxt10;A\tB\\PC\tD");
+        select(&mut app, 4, 4);
+        app.raw_paragraph_tabs(&[]);
+        assert_eq!(raw(&app), "\\pxt10;A\tB\\P\\ptz;C\tD");
+        let mut app = self::app("\\pxt10;A\tB\\PC\tD");
+        select(&mut app, 0, 7);
+        app.raw_paragraph_tabs(&[]);
+        assert_eq!(raw(&app), "A\tB\\PC\tD");
+    }
+
+    #[test]
     fn replace_all_rewrites_only_the_matches_as_one_step() {
         let mut app = app(r"\pxqc,t4;a{\Lxa}a");
         let ed = app.mtext_editor.as_mut().unwrap();

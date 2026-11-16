@@ -434,9 +434,9 @@ impl CadCommand for RenameCommand {
                 };
                 Some(CmdResult::NeedPoint)
             }
-            RenameStep::New { ty, old } => {
-                Some(CmdResult::Dispatch(format!("RENAME {ty} {old} {t}")))
-            }
+            RenameStep::New { ty, old } => Some(CmdResult::Dispatch(format!(
+                "RENAME {ty} \"{old}\" \"{t}\""
+            ))),
         }
     }
 

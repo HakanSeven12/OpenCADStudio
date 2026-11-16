@@ -116,7 +116,10 @@
 //! The SCOPE law (documented at [`key_route_owned`]): Tab at the widget
 //! ring's edge DIVES IN (the table is the wrap target — a table-level ring
 //! entry that dives, no widget-ring bytes move for non-table surfaces);
-//! Tab inside RETURNS to the ring; Up/Down rove rows (a window edge
+//! INSIDE, Tab/Shift+Tab ADVANCE/REVERSE the cell cursor (SCN-030 form
+//! semantics: the row wraps at the column edge, an open draft COMMITS
+//! first, and only the table's MATERIALIZED edge LEAVES to the ring);
+//! Up/Down rove rows (a window edge
 //! advances the scroll anchor; the PUBLISHED tail asks for the next page);
 //! Left/Right rove the cell cursor; Enter arms/commits the edit (the
 //! committed fact forwards as `WidgetEvent::TableCellChanged` through the
@@ -945,6 +948,13 @@ fn apply_mount_table_msg_owned<S: WidgetEventSink + ?Sized>(
                 column: *column,
             };
             registry.table_scope_set_cursor_owned(surface_id, table_id, Some(pressed_cell));
+            // (SCN-030) A SUCCESSFUL press CLAIMS the keyboard — the same
+            // desktop input model `mount_press_owned` runs for the
+            // surface-level press (the clicked control owns the keys). The
+            // table route never did, so the scope's keys were only reached
+            // through the SOLE-mount fallback — broken the moment two mount
+            // surfaces exist.
+            registry.set_mount_key_target_owned(Some(surface_id));
             MountRouting::Applied { forwarded }
         }
         WidgetMountMsg::TableCellCommitted { value, .. } => {
@@ -1954,9 +1964,11 @@ pub struct SurfaceMountHandle {
 impl SurfaceMountHandle {
     /// Build a handle; the state opens for `surface_id` + syncs (the
     /// machines' registered starting point — the dispatcher's command read
-    /// model syncs separately, when the owner plugin publishes its command
-    /// defs). The §16 "closing a tab cancels pending requests and releases
-    /// state" teardown is [`MountRegistry::teardown_surface_owned`] (SCN-014).
+    /// model syncs at REGISTRATION, when
+    /// [`MountRegistry::register_surface_owned`] walks the surface's
+    /// button/menu defs into it, SCN-030). The §16 "closing a tab cancels
+    /// pending requests and releases state" teardown is
+    /// [`MountRegistry::teardown_surface_owned`] (SCN-014).
     // Bench seam, SCN-024; ADR-007 item 3; never wire — the SurfaceMountHandle construction
     // path the bench's registration drives.
     #[doc(hidden)]
@@ -2435,11 +2447,21 @@ impl MountRegistry {
         // and applied patches): missing slots are created, existing slots
         // re-sync against the REGISTERED surface (selection/focus/draft
         // survive patches that do not touch their keys — the machine's
-        // documented sync contract). Attach/patch-rate cost, never
-        // keystroke-rate.
+        // documented sync contract). (SCN-030) The command read model rides
+        // the same way: the registered handle's dispatcher captures the
+        // surface's buttons/menus (`dispatcher_sync_surface_owned`).
+        // Attach/patch-rate cost, never keystroke-rate.
+        //
+        // (SCN-030 safety) PRESERVE-ON-IDENTICAL keeps the ALREADY-synced
+        // dispatcher, and the upserts re-write identical views (the sync_*
+        // are idempotent by address); a non-identical surface REPLACES the
+        // whole handle with a FRESH empty dispatcher (release_mount reset
+        // the outgoing one), so no stale address survives; and the §16
+        // teardown still resets everything via `release_mount`.
         if let Some(stored) = self.by_panel.get(panel_id) {
             let (surface_id, surface) = (stored.surface_id(), stored.surface.clone());
             self.table_sync_surface_owned(surface_id, &surface);
+            self.dispatcher_sync_surface_owned(surface_id, &surface);
         }
         // The input store is the surfaces' mirror: sweep it after ANY
         // registration path (a replaced surface's stale hover/capture/
@@ -3096,6 +3118,47 @@ impl MountRegistry {
         }
     }
 
+    /// (SCN-030) Capture one surface's command read model into the
+    /// REGISTERED handle's [`WidgetDispatcher`] — the registration path's
+    /// sync point for the dispatcher, riding EVERY successful surface swap
+    /// (the same contract as [`Self::table_sync_surface_owned`]:
+    /// attach/patch-rate, never keystroke-rate). An explicit-stack walk
+    /// over the VISIBLE nodes (the SAME walk discipline as
+    /// [`first_table_ref_of`]/[`nav_ring`] — §16's invisible-node law skips
+    /// a hidden subtree whole) upserting every icon button via
+    /// [`WidgetDispatcher::sync_button`] and every menu via
+    /// [`WidgetDispatcher::sync_menu`]; the machine's OWN guards (the
+    /// effective-flag fold, the [`MAX_MENU_DEPTH`] submenu cap) stay the
+    /// only validation — this walk feeds, it never re-implements.
+    ///
+    /// Registration now feeds the read model (the doc closure for
+    /// `plugin_widgets_dispatch.rs`'s "ownership and the read model" note,
+    /// which is outside this task's owned files): before this walk the
+    /// production dispatcher stayed EMPTY and every live GUI/MCP invocation
+    /// refused as an unknown address while the controls still rendered from
+    /// the defs.
+    fn dispatcher_sync_surface_owned(&mut self, surface_id: StableId, surface: &WidgetSurface) {
+        // Clone the handle out FIRST (an `Rc` clone): no registry borrow is
+        // held across the dispatcher's.
+        let Some(handle) = self.handle_for_surface_owned(surface_id) else {
+            return;
+        };
+        let mut dispatcher = handle.dispatcher.borrow_mut();
+        let mut walker: Vec<&WidgetNode> = surface.roots.iter().rev().collect();
+        while let Some(node) = walker.pop() {
+            if !node_visible(node) {
+                continue;
+            }
+            match node {
+                WidgetNode::Group(def) => walker.extend(def.children.iter().rev()),
+                WidgetNode::IconButton(def) => dispatcher.sync_button(def),
+                WidgetNode::Menu(def) => dispatcher.sync_menu(def),
+                // Trees/lists/tables carry no command addresses.
+                _ => {}
+            }
+        }
+    }
+
     /// The scoped machine read (`&mut`): the (surface, table)-addressed
     /// [`TableUiState`] slot.
     fn table_machine_mut_owned(
@@ -3417,9 +3480,12 @@ pub(crate) fn key_route_owned(
     // roving position, the keys route through the table machine — Up/Down
     // row roving within the materialized window, Left/Right the caller-held
     // cell cursor, Enter the edit arm/commit, characters the draft's value
-    // keys, Tab the LEAVE edge (back to the widget ring). One production
-    // body ([`table_scope_key_owned`]); the navigation keys route THROUGH
-    // the pure [`mount_table_key_route_owned`].
+    // keys. (SCN-030, form semantics) Tab/Shift+Tab INSIDE advance/reverse
+    // the cell cursor (wrapping rows at the column edge; an open draft
+    // commits FIRST); only the table's MATERIALIZED edge leaves to the
+    // widget ring. One production body ([`table_scope_key_owned`]); the
+    // navigation keys route THROUGH the pure
+    // [`mount_table_key_route_owned`].
     if registry.table_scope_active(surface_id) {
         return table_scope_key_owned(registry, surface_id, state, key, modifiers, &ring);
     }
@@ -3837,10 +3903,15 @@ pub(crate) fn mount_table_key_route(
 /// through [`bench_handle_mount_key_owned`]; no app file touched).
 ///
 /// Key map (the module docs' scope law, in code):
-/// - **Tab** LEAVES the scope: it clears and the widget-ring walk resumes —
-///   forward to the ring's TOP (Shift: its bottom), the roving-tabindex
-///   wrap model. The machine's row focus stays parked (re-entering
-///   resumes there) — a navigation step, counted.
+/// - **Tab / Shift+Tab** (SCN-030 — form semantics) advance/reverse the
+///   CELL CURSOR: Right-/Left-equivalent through the SAME pure route body;
+///   at the ROW's column edge the cursor wraps one row down/up (the
+///   machine's own row roving) landing on the first/last column; at the
+///   table's MATERIALIZED edge the scope LEAVES to the widget ring (the
+///   ring walk restarts from its top — Shift: its bottom; the machine's
+///   row focus stays parked, re-entering resumes). An open draft COMMITS
+///   FIRST (exactly one `TableCellCommitted`, the Excel form law;
+///   [`table_scope_tab_step_owned`]).
 /// - **Up/Down/Left/Right + Escape** route THROUGH the pure
 ///   [`mount_table_key_route_owned`] (ONE translation body). At the
 ///   Up/Down WINDOW edges the roving stops; the v1 SCROLL law advances the
@@ -3877,27 +3948,14 @@ fn table_scope_key_owned(
     if modifiers.control() || modifiers.alt() || modifiers.logo() {
         return Vec::new();
     }
-    // Tab LEAVES (needs the widget ring + the WidgetUiState roving — both
-    // resolved before the machine borrow).
+    // (SCN-030, form semantics) Tab / Shift+Tab INSIDE the scope advance /
+    // reverse the cell cursor (Right-/Left-equivalent — the Excel form
+    // law), wrapping rows at the column edge; at the table's MATERIALIZED
+    // edge they LEAVE to the widget ring (the pre-existing leave path).
+    // An open draft COMMITS FIRST — exactly one `TableCellCommitted` (see
+    // the helper); Escape stays the FREE cancel.
     if key == Key::Named(keyboard_key::Named::Tab) {
-        registry.table_scope_leave_owned(surface_id);
-        registry.record_key_nav_step_owned();
-        let views = state.synced().map(|synced| synced.views.clone()).unwrap_or_default();
-        let ring_ids: Vec<StableId> = ring.iter().map(|(id, _)| *id).collect();
-        let target = if modifiers.shift() {
-            state.focus_prev(None, &ring_ids, &views)
-        } else {
-            state.focus_next(None, &ring_ids, &views)
-        };
-        let Some(row_id) = target else {
-            return Vec::new();
-        };
-        let widget_id = owner_of(ring, Some(row_id)).unwrap_or(StableId(0));
-        return vec![WidgetMountMsg::FocusMoved {
-            surface_id,
-            widget_id,
-            to: Some(row_id),
-        }];
+        return table_scope_tab_step_owned(registry, surface_id, state, modifiers, ring);
     }
 
     let Some(scope_table) = registry.table_scope_table_of(surface_id) else {
@@ -4057,6 +4115,142 @@ fn table_scope_key_owned(
         }
         _ => Vec::new(),
     }
+}
+
+/// The scope's Tab step (SCN-030 — the form-semantics law the
+/// [`table_scope_key_owned`] Tab arm rides). ONE machine phase (the borrow
+/// ends before any leave/ring walk):
+///
+/// 1. an open draft COMMITS FIRST — exactly one `WidgetOp::TableCell` fact
+///    leaves as [`WidgetMountMsg::TableCellCommitted`] (the Enter commit's
+///    own path; the Excel form law. Escape stays the FREE cancel);
+/// 2. the cell cursor advances (Tab) / reverses (Shift+Tab) through the
+///    SAME pure route body — Tab rides as Right, Shift+Tab as Left, so the
+///    machine's own methods do every step;
+/// 3. at the ROW's column edge the cursor WRAPS: one row down/up (the
+///    machine's `row_focus_next`/`prev`), landing on its first (Tab) /
+///    last (Shift+Tab) column — the cursor resets and the cell step
+///    re-runs from `None`;
+/// 4. at the table's MATERIALIZED edge the scope LEAVES to the widget ring
+///    (the pre-existing leave path: the scope clears, the ring walk
+///    restarts from its top — Shift+Tab from its bottom — and the machine's
+///    row focus stays parked for the resume).
+fn table_scope_tab_step_owned(
+    registry: &mut MountRegistry,
+    surface_id: StableId,
+    state: &mut WidgetUiState,
+    modifiers: Modifiers,
+    ring: &[(StableId, StableId)],
+) -> Vec<WidgetMountMsg> {
+    let Some(scope_table) = registry.table_scope_table_of(surface_id) else {
+        return Vec::new();
+    };
+    let mut msgs: Vec<WidgetMountMsg> = Vec::new();
+    let mut leave = false;
+    {
+        let Some(entry) = registry.tables.get_mut(&surface_id) else {
+            return Vec::new();
+        };
+        let Some(scope) = entry.scope.as_mut() else {
+            return Vec::new();
+        };
+        let Some(machine) = entry.machines.get_mut(&scope_table) else {
+            return Vec::new();
+        };
+        let column_order: Vec<StableId> = machine
+            .synced()
+            .map(|synced| synced.column_order.clone())
+            .unwrap_or_default();
+        // 1. The open draft COMMITS first (exactly ONE fact, exactly once).
+        if machine.draft().is_some() {
+            match machine.commit_cell_draft() {
+                Ok(Some(WidgetOp::TableCell {
+                    key: op_key,
+                    column: op_column,
+                    value,
+                    ..
+                })) => {
+                    scope.edit = None;
+                    msgs.push(WidgetMountMsg::TableCellCommitted {
+                        surface_id,
+                        table_id: scope_table,
+                        key: op_key,
+                        column: op_column,
+                        value,
+                    });
+                }
+                // `NoDraft` cannot fire (the draft was just read); the
+                // reserved None shape is future elision.
+                _ => {}
+            }
+        }
+        // 2/3. Advance or reverse: the column step, else the row wrap
+        //      landing on the wrapped row's first/last column.
+        let direction = if modifiers.shift() {
+            Key::Named(keyboard_key::Named::ArrowLeft)
+        } else {
+            Key::Named(keyboard_key::Named::ArrowRight)
+        };
+        // Disjoint registry fields: the machines/scope ride `tables`, the
+        // nav-step probe rides `counters`.
+        let counters = &mut registry.counters;
+        let column_step = mount_table_key_route_owned(
+            counters,
+            machine,
+            &mut scope.cursor,
+            direction.clone(),
+            Modifiers::NONE,
+            &DEFAULT_WINDOW_SPEC,
+            &column_order,
+        );
+        if column_step.is_none() {
+            let wrapped = if modifiers.shift() {
+                machine.row_focus_prev(&DEFAULT_WINDOW_SPEC)
+            } else {
+                machine.row_focus_next(&DEFAULT_WINDOW_SPEC)
+            };
+            if wrapped.is_some() {
+                // The wrapped row's FIRST (Tab) / LAST (Shift+Tab) column.
+                scope.cursor = None;
+                let _ = mount_table_key_route_owned(
+                    counters,
+                    machine,
+                    &mut scope.cursor,
+                    direction,
+                    Modifiers::NONE,
+                    &DEFAULT_WINDOW_SPEC,
+                    &column_order,
+                );
+            } else {
+                // 4. The MATERIALIZED edge — the leave runs below, after
+                //    the machine borrow ends.
+                leave = true;
+            }
+        }
+    }
+    if leave {
+        registry.table_scope_leave_owned(surface_id);
+        registry.record_key_nav_step_owned();
+        let views = state
+            .synced()
+            .map(|synced| synced.views.clone())
+            .unwrap_or_default();
+        let ring_ids: Vec<StableId> = ring.iter().map(|(id, _)| *id).collect();
+        let target = if modifiers.shift() {
+            state.focus_prev(None, &ring_ids, &views)
+        } else {
+            state.focus_next(None, &ring_ids, &views)
+        };
+        if let Some(row_id) = target {
+            let widget_id = owner_of(ring, Some(row_id)).unwrap_or(StableId(0));
+            msgs.push(WidgetMountMsg::FocusMoved {
+                surface_id,
+                widget_id,
+                to: Some(row_id),
+            });
+        }
+    }
+    msgs
 }
 
 /// The draft's VALUE keys (characters / Backspace): compose the candidate
@@ -8103,12 +8297,15 @@ mod tests {
 
     // -- 17c. the keyboard scope (Tab dive/leave, roving, edges) --------------
 
-    /// The ring law: Tab walks the WIDGET ring (byte-identical), the edge
-    /// DIVES into the table (the machine's row focus lands on the window's
-    /// first row), Tab inside RETURNS to the ring (focus stays parked —
-    /// re-entering resumes forward).
+    /// The ring law (SCN-028, unchanged bytes): Tab walks the WIDGET ring,
+    /// the edge DIVES into the table (the machine's row focus lands on the
+    /// window's first row). The SCOPE law (SCN-030 form semantics): Tab
+    /// INSIDE advances the cell cursor across the row and wraps DOWN to the
+    /// next row's first column; Shift+Tab reverses (wrapping UP to the last
+    /// column); only the table's MATERIALIZED edge LEAVES to the ring (the
+    /// machine's row focus stays parked — re-entering resumes forward).
     #[test]
-    fn table_keyboard_tab_dives_in_and_returns() {
+    fn table_keyboard_tab_dives_in_and_advances_form_semantics() {
         let _app = OpenCADStudio::new_for_test();
         // A MIXED surface: list rows 7/8 + the demo table.
         let mut surface = demo_surface(demo_table_def(4, None));
@@ -8120,18 +8317,19 @@ mod tests {
         with_test_registry_mut(|registry| {
             registry.set_mount_key_target_owned(Some(sid(200)));
         });
-        let tab = || Key::Named(keyboard_key::Named::Tab);
-        let key = |key: Key| {
+        let shift_tab = || (Key::Named(keyboard_key::Named::Tab), Modifiers::SHIFT);
+        let key = |(key, modifiers): (Key, Modifiers)| {
             with_test_registry_mut(|registry| {
-                bench_handle_mount_key_owned(registry, key, Modifiers::NONE)
+                bench_handle_mount_key_owned(registry, key, modifiers)
             })
         };
+        let bare_tab = || (Key::Named(keyboard_key::Named::Tab), Modifiers::NONE);
 
         let handle = MountRegistry::handle_for_surface(sid(200)).expect("registered");
         assert!(!scope_active(200));
 
         // The widget ring first (unchanged bytes).
-        let msgs = key(tab());
+        let msgs = key(bare_tab());
         assert_eq!(
             msgs,
             vec![WidgetMountMsg::FocusMoved {
@@ -8141,12 +8339,12 @@ mod tests {
             }]
         );
         assert_eq!(handle.state.borrow().focus(), Some(sid(7)));
-        let _ = key(tab());
+        let _ = key(bare_tab());
         assert_eq!(handle.state.borrow().focus(), Some(sid(8)));
 
         // The EDGE: no wrap — the DIVE. Row focus lands on the window's
         // first row; the machine's row focus is the table's own namespace.
-        let msgs = key(tab());
+        let msgs = key(bare_tab());
         assert!(msgs.is_empty(), "the dive routes no ring message");
         assert!(scope_active(200));
         assert_eq!(
@@ -8154,18 +8352,85 @@ mod tests {
             Some(Some(sid(300)))
         );
 
-        // Tab INSIDE: back to the ring (its top — the wrap model); the
-        // table's row focus stays parked.
-        let msgs = key(tab());
+        // Tab INSIDE (form semantics): the cell cursor ADVANCES across the
+        // row — the scope STAYS, the machine's row focus stays.
+        let _ = key(bare_tab());
+        assert_eq!(
+            scope_cursor_of(200, 200),
+            Some(CellFocus {
+                key: sid(300),
+                column: sid(201)
+            }),
+            "the first Tab lands the first column"
+        );
+        for column in [202, 203, 204] {
+            let _ = key(bare_tab());
+            assert_eq!(
+                scope_cursor_of(200, 200),
+                Some(CellFocus {
+                    key: sid(300),
+                    column: sid(column)
+                })
+            );
+        }
+        assert!(scope_active(200), "the scope survives the in-row advance");
+
+        // The ROW's column edge: Tab wraps DOWN one row to its FIRST column.
+        let _ = key(bare_tab());
+        assert_eq!(
+            table_read(200, 200, |machine| machine.focus()),
+            Some(Some(sid(301))),
+            "the wrap moved the row"
+        );
+        assert_eq!(
+            scope_cursor_of(200, 200),
+            Some(CellFocus {
+                key: sid(301),
+                column: sid(201)
+            }),
+            "the wrapped row's first column"
+        );
+
+        // Shift+Tab REVERSES: the first column wraps UP one row to its LAST.
+        let _ = key(shift_tab());
+        assert_eq!(
+            table_read(200, 200, |machine| machine.focus()),
+            Some(Some(sid(300))),
+            "the backward wrap moved the row back"
+        );
+        assert_eq!(
+            scope_cursor_of(200, 200),
+            Some(CellFocus {
+                key: sid(300),
+                column: sid(204)
+            }),
+            "the wrapped-back row's LAST column"
+        );
+
+        // Walk back to the FIRST row's FIRST cell, then Shift+Tab: the
+        // BACKWARD materialized edge LEAVES to the ring (the leave path's
+        // FocusMoved, the ring walk restarted).
+        for _ in 0..3 {
+            let _ = key(shift_tab());
+        }
+        assert_eq!(
+            scope_cursor_of(200, 200),
+            Some(CellFocus {
+                key: sid(300),
+                column: sid(201)
+            })
+        );
+        let msgs = key(shift_tab());
+        assert!(!scope_active(200), "the backward edge left the scope");
         assert_eq!(
             msgs,
             vec![WidgetMountMsg::FocusMoved {
                 surface_id: sid(200),
                 widget_id: sid(200),
-                to: Some(sid(7)),
-            }]
+                to: Some(sid(8)),
+            }],
+            "the leave routes the ring walk (Shift direction: from its bottom)"
         );
-        assert!(!scope_active(200));
         assert_eq!(
             table_read(200, 200, |machine| machine.focus()),
             Some(Some(sid(300))),
@@ -8173,13 +8438,129 @@ mod tests {
         );
 
         // Re-enter: the roving RESUMES from the parked row (301).
-        let _ = key(tab()); // 7
-        let _ = key(tab()); // 8
-        let _ = key(tab()); // dive
+        let _ = key(bare_tab()); // 7
+        let _ = key(bare_tab()); // 8
+        let _ = key(bare_tab()); // dive
         assert_eq!(
             table_read(200, 200, |machine| machine.focus()),
             Some(Some(sid(301))),
             "the roving resumed, not restarted"
+        );
+    }
+
+    /// The Excel form law (SCN-030): Tab with an open draft COMMITS it
+    /// FIRST — exactly one `TableCellCommitted` fact through the route —
+    /// THEN advances the cell cursor; Escape stays the FREE cancel.
+    #[test]
+    fn table_tab_commits_open_draft_then_advances() {
+        let _app = OpenCADStudio::new_for_test();
+        let _guard = register_test_surface(
+            "scn030_tab_commit",
+            demo_surface(demo_table_def(4, None)),
+        );
+        with_test_registry_mut(|registry| {
+            registry.set_mount_key_target_owned(Some(sid(120)));
+        });
+        let key = |key: Key, modifiers: Modifiers| {
+            with_test_registry_mut(|registry| {
+                bench_handle_mount_key_owned(registry, key, modifiers)
+            })
+        };
+        let tab = || Key::Named(keyboard_key::Named::Tab);
+        let enter = || Key::Named(keyboard_key::Named::Enter);
+
+        let _ = key(tab(), Modifiers::NONE); // the dive (the table-only ring is empty)
+        let _ = key(
+            Key::Named(keyboard_key::Named::ArrowRight),
+            Modifiers::NONE,
+        ); // the cursor lands (300, 201)
+        let _ = key(enter(), Modifiers::NONE); // the draft arms (seed "material 000")
+        assert_eq!(
+            scope_cursor_of(120, 200),
+            Some(CellFocus {
+                key: sid(300),
+                column: sid(201)
+            })
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine
+                .draft()
+                .map(|draft| draft.pending.clone())),
+            Some(Some(WidgetCellValue::Text("material 000".to_string()))),
+            "the draft armed"
+        );
+
+        // Tab: the commit FACT leaves exactly once, THEN the cursor advances.
+        let msgs = key(tab(), Modifiers::NONE);
+        assert_eq!(
+            msgs,
+            vec![WidgetMountMsg::TableCellCommitted {
+                surface_id: sid(120),
+                table_id: sid(200),
+                key: sid(300),
+                column: sid(201),
+                value: WidgetCellValue::Text("material 000".to_string()),
+            }],
+            "exactly ONE commit fact, then the advance"
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine.draft().is_some()),
+            Some(false),
+            "the draft completed"
+        );
+        assert_eq!(
+            scope_cursor_of(120, 200),
+            Some(CellFocus {
+                key: sid(300),
+                column: sid(202)
+            }),
+            "the cursor advanced AFTER the commit"
+        );
+        assert!(scope_active(120), "the scope survives the commit-advance");
+    }
+
+    /// (SCN-030) A SUCCESSFUL table press CLAIMS the keyboard — the same
+    /// desktop model the surface-level press runs — so the scope's keys
+    /// survive a second registered surface (no sole-mount fallback).
+    #[test]
+    fn table_press_claims_the_keyboard_target() {
+        let _app = OpenCADStudio::new_for_test();
+        let _guard = register_test_surface(
+            "scn030_press_target",
+            demo_surface(demo_table_def(4, None)),
+        );
+        // A SECOND registered surface: the sole-mount fallback would name
+        // whichever it lists first — only the explicit target is correct.
+        let _other = register_test_surface(
+            "scn030_press_other",
+            surface(vec![WidgetNode::List(item_list(200, vec![item(7, "x")]))]),
+        );
+        with_test_registry_mut(|registry| {
+            registry.set_mount_key_target_owned(None);
+        });
+        assert_eq!(
+            with_test_registry(|registry| registry.mount_key_surface_owned()),
+            None,
+            "no fallback is trusted with two surfaces"
+        );
+
+        // The press: row 301's cell (301, 201) selects + focuses AND claims
+        // the keyboard target.
+        let _ = with_test_registry_mut(|registry| {
+            route_mount_table_msg_owned(
+                registry,
+                &WidgetMountMsg::TableRowPressed {
+                    surface_id: sid(120),
+                    table_id: sid(200),
+                    key: sid(301),
+                    column: sid(201),
+                },
+            )
+        });
+        assert_eq!(
+            with_test_registry(|registry| registry.mount_key_surface_owned()),
+            Some(sid(120)),
+            "the pressed table owns the keys"
         );
     }
 
@@ -8822,7 +9203,333 @@ mod tests {
         });
     }
 
+    // -- SCN-030: registration feeds the dispatcher's read model --------------
 
+    /// THE REGRESSION PIN (SCN-030 — the live-firetest defect): a surface
+    /// carrying an icon button (id 110, `ConfirmPolicy::Prompt` — the demo
+    /// delete's shape) and a menu with a submenu registers, and the INVOKE
+    /// route (`apply_mount_msg` — the exact path the MCP
+    /// `panel_widget_invoke` rides) dispatches WITHOUT any manual
+    /// `sync_button`/`sync_menu`: the targeted reads resolve (they returned
+    /// `null` before the fix), the button click arms the prompt, and the
+    /// dialog's confirm emits exactly ONE `CommandInvoked`.
+    #[test]
+    fn registration_feeds_the_dispatch_read_model_invoke_route() {
+        let surface = surface(vec![
+            WidgetNode::List(item_list(200, vec![item(7, "row")])),
+            WidgetNode::IconButton(IconActionDef {
+                confirmation: Some(ConfirmPolicy::Prompt {
+                    message: "Really delete the selection?".to_string(),
+                }),
+                ..button_def(110, "Delete", "delete")
+            }),
+            WidgetNode::Menu(menu_def(400, vec![MenuItemDef {
+                submenu: Some(Box::new(menu_def(401, vec![menu_item_def("inner", "Inner")]))),
+                ..menu_item_def("outer", "Outer")
+            }])),
+        ]);
+        let _guard = register_test_surface("scn030_invoke", surface);
+        let handle = MountRegistry::handle_for_surface(sid(200)).expect("registered");
+        // NO manual sync_* anywhere: REGISTRATION walked the surface's defs.
+
+        // The targeted read (what `panel_semantics`' per-button read
+        // serves): the registered button and every menu item resolve
+        // effective enablement/visibility.
+        {
+            let dispatcher = handle.dispatcher.borrow();
+            let button = DispatchKey::Button(sid(110));
+            assert_eq!(dispatcher.effective_enabled(&button), Some(true));
+            assert_eq!(dispatcher.effective_visible(&button), Some(true));
+            let outer = DispatchKey::MenuItem(sid(400), "outer".to_string());
+            let inner = DispatchKey::MenuItem(sid(401), "inner".to_string());
+            assert_eq!(dispatcher.effective_enabled(&outer), Some(true));
+            assert_eq!(dispatcher.effective_visible(&inner), Some(true));
+        }
+
+        // The invoke route: select (the command's targets), then activate.
+        let route = |msg: WidgetMountMsg| {
+            let mut sink = Vec::new();
+            let routing = {
+                let mut state = handle.state.borrow_mut();
+                let mut dispatcher = handle.dispatcher.borrow_mut();
+                apply_mount_msg(&mut state, &mut dispatcher, &msg, &mut sink)
+            };
+            (routing, sink)
+        };
+        let (routing, _events) = route(WidgetMountMsg::SelectionChanged {
+            surface_id: sid(200),
+            widget_id: sid(200),
+            selected: vec![sid(7)],
+        });
+        assert_eq!(routing, MountRouting::Applied { forwarded: 1 });
+
+        // The prompt-policy button: the click ARMS (the existing pin),
+        // the dialog's confirm emits exactly ONE CommandInvoked.
+        let (routing, events) = route(click_msg(200, 110));
+        assert_eq!(
+            routing,
+            MountRouting::PromptRequested {
+                prompt: "Really delete the selection?".to_string(),
+            }
+        );
+        assert!(events.is_empty(), "no command event exists yet");
+        let outcome = handle
+            .dispatcher
+            .borrow_mut()
+            .confirm(DispatchKey::Button(sid(110)))
+            .expect("the armed stage the dialog owns");
+        assert_eq!(
+            outcome,
+            DispatchOutcome::ConfirmedEmitted(WidgetEvent::CommandInvoked {
+                surface_id: sid(200),
+                command_id: "delete".to_string(),
+                target_ids: vec![sid(7)],
+            }),
+            "exactly ONE CommandInvoked, without any manual sync"
+        );
+        assert!(handle.dispatcher.borrow_mut().settle(DispatchKey::Button(sid(110))));
+
+        // The submenu item invokes on its OWNING submenu's id (the
+        // dispatcher's addressing convention) — also fed by registration.
+        let (routing, events) = route(WidgetMountMsg::MenuItemClicked {
+            surface_id: sid(200),
+            menu_id: sid(401),
+            command_id: "inner".to_string(),
+        });
+        assert_eq!(routing, MountRouting::Applied { forwarded: 1 });
+        assert_eq!(
+            events,
+            vec![WidgetEvent::CommandInvoked {
+                surface_id: sid(200),
+                command_id: "inner".to_string(),
+                target_ids: vec![sid(7)],
+            }]
+        );
+    }
+
+    /// The REPLACE path: surface B moves button 110's command AND policy —
+    /// the whole handle (dispatcher included) swaps, and the read model
+    /// reflects B (the fresh machine's own upserts), no stale A view; the
+    /// outgoing dispatcher released with its surface.
+    #[test]
+    fn registration_replace_reflects_surface_b_no_stale_a_view() {
+        let _guard = register_test_surface(
+            "scn030_replace",
+            surface(vec![
+                WidgetNode::List(item_list(200, vec![item(7, "row")])),
+                WidgetNode::IconButton(IconActionDef {
+                    confirmation: Some(ConfirmPolicy::Prompt {
+                        message: "Really delete the selection?".to_string(),
+                    }),
+                    ..button_def(110, "Delete", "delete")
+                }),
+            ]),
+        );
+        let old = MountRegistry::handle_for_surface(sid(200)).expect("registered");
+
+        // The moved surface: a raised revision (→ a REPLACE, never a
+        // preserve) where 110 is a plain, prompt-free "purge".
+        let changed = WidgetSurface {
+            revision: SceneRevision(2),
+            ..surface(vec![
+                WidgetNode::List(item_list(200, vec![item(7, "row")])),
+                WidgetNode::IconButton(button_def(110, "Purge", "purge")),
+            ])
+        };
+        let before = MountRegistry::counters();
+        let _replaced = register_test_surface("scn030_replace", changed);
+        let after = MountRegistry::counters();
+        assert_eq!(
+            after.registers_replaced - before.registers_replaced,
+            1,
+            "the moved surface replaced"
+        );
+
+        // The fresh dispatcher took the slot; the outgoing one released.
+        let handle = MountRegistry::handle_for_surface(sid(200)).expect("registered");
+        assert!(
+            !Rc::ptr_eq(&handle.dispatcher, &old.dispatcher),
+            "a FRESH dispatcher took the slot"
+        );
+        assert_eq!(
+            old.dispatcher
+                .borrow()
+                .effective_enabled(&DispatchKey::Button(sid(110))),
+            None,
+            "the replaced dispatcher released — no stale address survives"
+        );
+
+        // The read model (and the invoke route) reflect B only.
+        let route = |msg: WidgetMountMsg| {
+            let mut sink = Vec::new();
+            let routing = {
+                let mut state = handle.state.borrow_mut();
+                let mut dispatcher = handle.dispatcher.borrow_mut();
+                apply_mount_msg(&mut state, &mut dispatcher, &msg, &mut sink)
+            };
+            (routing, sink)
+        };
+        let (routing, _) = route(WidgetMountMsg::SelectionChanged {
+            surface_id: sid(200),
+            widget_id: sid(200),
+            selected: vec![sid(7)],
+        });
+        assert_eq!(routing, MountRouting::Applied { forwarded: 1 });
+        let (routing, events) = route(click_msg(200, 110));
+        assert_eq!(
+            routing,
+            MountRouting::Applied { forwarded: 1 },
+            "B has no prompt policy — a stale A view would have armed one"
+        );
+        assert_eq!(
+            events,
+            vec![WidgetEvent::CommandInvoked {
+                surface_id: sid(200),
+                command_id: "purge".to_string(),
+                target_ids: vec![sid(7)],
+            }],
+            "the read model carries B's command, never A's"
+        );
+    }
+
+    /// The PRESERVE path: an IDENTICAL re-register keeps the RUNNING
+    /// dispatcher (the counters say "preserved"); the walk's re-upsert of
+    /// the same defs is IDEMPOTENT — 110 still resolves and still invokes,
+    /// never a duplicate or a refusal.
+    #[test]
+    fn registration_preserve_re_upserts_idempotently() {
+        let fixture = || {
+            surface(vec![
+                WidgetNode::List(item_list(200, vec![item(7, "row")])),
+                WidgetNode::IconButton(button_def(110, "Delete", "delete")),
+            ])
+        };
+        let _guard = register_test_surface("scn030_preserve", fixture());
+        let handle = MountRegistry::handle_for_surface(sid(200)).expect("registered");
+
+        let before = MountRegistry::counters();
+        let _fresh = register_test_surface("scn030_preserve", fixture());
+        let after = MountRegistry::counters();
+        assert_eq!(
+            after.registers_preserved - before.registers_preserved,
+            1,
+            "the identical resurface preserved"
+        );
+        assert_eq!(
+            after.registers_replaced - before.registers_replaced,
+            0,
+            "an identical resurface never replaces"
+        );
+
+        // The SAME dispatcher stayed registered — the walk re-synced it in
+        // place (no swap, no reset).
+        let still = MountRegistry::handle_for_surface(sid(200)).expect("registered");
+        assert!(
+            Rc::ptr_eq(&still.dispatcher, &handle.dispatcher),
+            "the original dispatcher survived the identical resurface"
+        );
+        let key = DispatchKey::Button(sid(110));
+        assert_eq!(handle.dispatcher.borrow().effective_enabled(&key), Some(true));
+        assert_eq!(handle.dispatcher.borrow().effective_visible(&key), Some(true));
+
+        // Idempotence, proven on the invoke route: no duplicate state, no
+        // refusal — the click emits exactly once.
+        let mut sink = Vec::new();
+        let routing = {
+            let mut state = handle.state.borrow_mut();
+            let mut dispatcher = handle.dispatcher.borrow_mut();
+            apply_mount_msg(
+                &mut state,
+                &mut dispatcher,
+                &WidgetMountMsg::SelectionChanged {
+                    surface_id: sid(200),
+                    widget_id: sid(200),
+                    selected: vec![sid(7)],
+                },
+                &mut sink,
+            )
+        };
+        assert_eq!(routing, MountRouting::Applied { forwarded: 1 });
+        sink.clear(); // the selection's own notify drained; the click is next
+        let routing = {
+            let mut state = handle.state.borrow_mut();
+            let mut dispatcher = handle.dispatcher.borrow_mut();
+            apply_mount_msg(&mut state, &mut dispatcher, &click_msg(200, 110), &mut sink)
+        };
+        assert_eq!(routing, MountRouting::Applied { forwarded: 1 });
+        assert_eq!(
+            sink,
+            vec![WidgetEvent::CommandInvoked {
+                surface_id: sid(200),
+                command_id: "delete".to_string(),
+                target_ids: vec![sid(7)],
+            }],
+            "the re-upserted address still invokes, exactly once"
+        );
+    }
+
+    /// The §16 invisible law + the machine's own depth guard: a button
+    /// under an INVISIBLE group is never synced (the walk skips invisible
+    /// nodes whole), and a submenu deeper than [`MAX_MENU_DEPTH`] never
+    /// registers (the dispatcher's own cap — the walk feeds, it never
+    /// re-implements).
+    #[test]
+    fn registration_skips_invisible_subtrees_and_overdeep_menus() {
+        // A submenu chain MAX_MENU_DEPTH + 1 menus deep; the deepest
+        // menu's item sits past the machine's cap.
+        let mut sub: Option<MenuDef> = None;
+        for level in (1..=MAX_MENU_DEPTH + 1).rev() {
+            let item = MenuItemDef {
+                submenu: sub.take().map(Box::new),
+                ..menu_item_def(&format!("c{level}"), &format!("level {level}"))
+            };
+            sub = Some(menu_def(400 + level as u64, vec![item]));
+        }
+        let deep_menu = sub.expect("the chain built");
+
+        let surface = surface(vec![
+            invisible(WidgetNode::Group(group_def(
+                300,
+                Axis::Vertical,
+                None,
+                vec![WidgetNode::IconButton(button_def(130, "Hidden", "hidden"))],
+            ))),
+            WidgetNode::IconButton(button_def(110, "Live", "live")),
+            WidgetNode::Menu(deep_menu),
+        ]);
+        let _guard = register_test_surface("scn030_law", surface);
+        let handle = MountRegistry::handle_for_surface(sid(300)).expect("registered");
+        let dispatcher = handle.dispatcher.borrow();
+
+        assert_eq!(
+            dispatcher.effective_visible(&DispatchKey::Button(sid(110))),
+            Some(true),
+            "the visible button synced"
+        );
+        assert_eq!(
+            dispatcher.effective_enabled(&DispatchKey::Button(sid(130))),
+            None,
+            "a button under an invisible group is NOT synced (§16)"
+        );
+        let deepest_synced = DispatchKey::MenuItem(
+            sid(400 + MAX_MENU_DEPTH as u64),
+            format!("c{MAX_MENU_DEPTH}"),
+        );
+        assert_eq!(
+            dispatcher.effective_enabled(&deepest_synced),
+            Some(true),
+            "the level-MAX item registered"
+        );
+        let overdeep = DispatchKey::MenuItem(
+            sid(400 + MAX_MENU_DEPTH as u64 + 1),
+            format!("c{}", MAX_MENU_DEPTH + 1),
+        );
+        assert_eq!(
+            dispatcher.effective_visible(&overdeep),
+            None,
+            "past the machine's own depth cap: never registered"
+        );
+    }
 
     // -- SCN-025: the app-owned PANEL SURFACE STORE (the wire attach) --------
 

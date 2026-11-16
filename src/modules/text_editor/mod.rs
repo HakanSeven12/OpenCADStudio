@@ -111,9 +111,30 @@ impl CadModule for TextEditorModule {
                                 vec![
                                     tool("_MTED STRIKE", "Strikethrough", svg(include_bytes!("../../../assets/icons/mt_strike.svg"))),
                                     tool("_MTED STACK", "Stack", glyph("½")),
-                                    tool("_MTED CLEAR", "Clear", svg(include_bytes!("../../../assets/icons/mt_cancel.svg"))),
                                 ],
                             ],
+                        },
+                        RibbonItem::Dropdown {
+                            id: "MTED_CLEAR",
+                            icon: svg(include_bytes!("../../../assets/icons/mt_cancel.svg")),
+                            items: vec![
+                                (
+                                    "_MTED CLEAR CHAR",
+                                    "Remove Character Formatting",
+                                    svg(include_bytes!("../../../assets/icons/mt_cancel.svg")),
+                                ),
+                                (
+                                    "_MTED CLEAR PARA",
+                                    "Remove Paragraph Formatting",
+                                    svg(include_bytes!("../../../assets/icons/mt_cancel.svg")),
+                                ),
+                                (
+                                    "_MTED CLEAR ALL",
+                                    "Remove All Formatting",
+                                    svg(include_bytes!("../../../assets/icons/mt_cancel.svg")),
+                                ),
+                            ],
+                            default: "_MTED CLEAR CHAR",
                         },
                         RibbonItem::Dropdown {
                             id: "MTED_CASE",
@@ -357,7 +378,8 @@ pub fn symbols() -> Vec<(&'static str, &'static str, IconKind)> {
     ]
 }
 
-/// The Options > More menu: character sets, the editor settings and help.
+/// The Options > More menu: character sets, the editor settings, the stack
+/// windows and help. A setting that is on shows a check mark.
 fn more_items() -> Vec<(&'static str, &'static str, IconKind)> {
     let glyph = IconKind::Glyph;
     vec![
@@ -366,6 +388,8 @@ fn more_items() -> Vec<(&'static str, &'static str, IconKind)> {
         ("_MTED TOOLBAR", "Show Toolbar", glyph("")),
         ("_MTED BACKGROUND", "Show Background", glyph("")),
         ("_MTED HIGHLIGHT", "Text Highlight Color...", glyph("")),
+        ("_MTED STACKPROPS", "Stack Properties...", glyph("½")),
+        ("_MTED AUTOSTACK", "AutoStack...", glyph("")),
         ("_MTED HELP", "Help", glyph("?")),
     ]
 }

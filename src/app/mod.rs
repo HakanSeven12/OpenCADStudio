@@ -74,6 +74,7 @@ mod linetype_manager_tests;
 mod measurement;
 mod model_ops;
 mod mtext_editor;
+pub(crate) use mtext_editor::prefs as mtext_prefs;
 #[cfg(test)]
 mod mtext_follows_style_tests;
 #[cfg(test)]
@@ -5576,6 +5577,10 @@ pub enum Message {
     MTextSelTo(usize),
     /// Move the preview caret by N visible characters.
     MTextCaretMove(i32),
+    /// A pointer selection in the text editor is finished (Match takes it).
+    MTextSelEnd,
+    /// Import Text: the file picked.
+    MTextImport(String),
     /// Timer tick toggling the preview caret's blink phase.
     MTextCaretBlink,
     TableEditorClick(iced::Point),

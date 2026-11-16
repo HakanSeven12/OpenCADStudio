@@ -939,6 +939,7 @@ impl OpenCADStudio {
             ole_hide: crate::entities::ole2frame::hide_mode(),
             ole_quality: crate::app::commands::ole_quality(),
             mtext_toolbar: crate::app::commands::mtext_toolbar(),
+            mtext_editor: crate::app::mtext_editor::prefs::prefs(),
             group_display_mode: crate::app::commands::group_display_mode(),
             selection_anno_display: crate::app::commands::selection_anno_display(),
             anno_monitor: crate::app::commands::anno_monitor(),
@@ -1162,6 +1163,7 @@ impl OpenCADStudio {
         crate::entities::ole2frame::set_hide_mode(s.ole_hide);
         crate::app::commands::set_ole_quality(s.ole_quality);
         crate::app::commands::set_mtext_toolbar(s.mtext_toolbar);
+        crate::app::mtext_editor::prefs::set_prefs(s.mtext_editor.clone());
         crate::app::commands::set_group_display_mode(s.group_display_mode);
         crate::app::commands::set_selection_anno_display(s.selection_anno_display);
         crate::app::commands::set_anno_monitor(s.anno_monitor);

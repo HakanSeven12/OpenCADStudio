@@ -114,6 +114,13 @@ pub enum MTextDialog {
     Columns(ColumnsDraft),
     Mask(MaskDraft),
     Find(FindDraft),
+    Charset(super::mtext_tool_dialogs::CharsetDraft),
+    StyleChange(super::mtext_tool_dialogs::StyleChangeDraft),
+    Dictionaries(super::mtext_tool_dialogs::DictionariesDraft),
+    SpellSettings(super::mtext_tool_dialogs::SpellSettingsDraft),
+    Highlight(super::mtext_tool_dialogs::HighlightDraft),
+    Stack(super::mtext_tool_dialogs::StackDraft),
+    AutoStack(super::mtext_tool_dialogs::AutoStackDraft),
 }
 
 #[derive(Debug, Clone)]
@@ -156,6 +163,44 @@ pub enum MTextDialogMsg {
     FindNext,
     ReplaceOne,
     ReplaceAll,
+    Charset(u8),
+    StyleAlways(bool),
+    StyleYes,
+    StyleNo,
+    DictLanguage(String),
+    DictSource(Option<usize>),
+    DictWord(String),
+    DictAdd,
+    DictDelete,
+    DictSelect(usize),
+    DictImport,
+    DictImported(Vec<String>),
+    DictManage(bool),
+    DictManageSelect(usize),
+    DictNewFile,
+    DictAddFile,
+    DictFilePicked(String, bool),
+    DictRemoveFile,
+    DictHelp,
+    SpellOption(super::spell_dialog::SpellSetting, bool),
+    HighlightR(String),
+    HighlightG(String),
+    HighlightB(String),
+    HighlightTheme,
+    StackUpper(String),
+    StackLower(String),
+    StackStyleSet(super::mtext_tool_dialogs::StackStyle),
+    StackPositionSet(super::mtext_tool_dialogs::StackPosition),
+    StackSize(String),
+    /// Defaults: save the window's style, position and size (true) or
+    /// restore the saved ones (false).
+    StackDefaults(bool),
+    AutoStackOpen,
+    AutoEnabled(bool),
+    AutoDiagonal(bool),
+    AutoTrim(bool),
+    /// Back from AutoStack to the Stack Properties window it came from.
+    AutoBack,
     Ok,
 }
 
@@ -487,10 +532,12 @@ pub fn view_mask<'a>(
         ]
         .spacing(6),
     );
+    // A fixed width: the window is measured from it.
+    let _ = sizing;
     column![mask, fill, footer(true)]
         .spacing(10)
         .padding([10, 12])
-        .width(sizing.width)
+        .width(Length::Fixed(430.0))
         .into()
 }
 

@@ -117,6 +117,10 @@ pub struct SpellPrefs {
     pub options: crate::ui::window::spell_dialog::SpellOptions,
     /// Words added to the user's dictionary.
     pub custom: Vec<String>,
+    /// Custom dictionary files (one word per line).
+    pub custom_files: Vec<String>,
+    /// The custom dictionary file in use; None: the word list above.
+    pub current_custom: Option<usize>,
 }
 
 /// TXT2MTXT (Combine Text) settings, the profile values
@@ -946,6 +950,9 @@ pub struct UserSettings {
     /// MTEXTTOOLBAR: the in-place text editor's floating toolbar (0 never,
     /// 1 always, 2 while the ribbon's Text Editor tab is not on show).
     pub mtext_toolbar: i16,
+    /// The in-place text editor's own settings (lists, AutoStack, spell
+    /// checking, display).
+    pub mtext_editor: super::mtext_editor::prefs::MTextEditorPrefs,
     /// GROUPDISPLAYMODE: a picked group shows member grips (0), a centre
     /// grip (1) or a centre grip and a box (2).
     pub group_display_mode: i16,
@@ -1533,6 +1540,7 @@ impl Default for UserSettings {
             ole_hide: 0,
             ole_quality: 3,
             mtext_toolbar: 2,
+            mtext_editor: Default::default(),
             group_display_mode: 2,
             selection_anno_display: 1,
             anno_monitor: -2,

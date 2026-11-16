@@ -3338,14 +3338,48 @@ impl OpenCADStudio {
             // "factor=<n>", "background=0|1", "color=<1..7>", "find=<text>",
             // "replace=<text>", "match_case=0|1", "whole=0|1", "wild=0|1",
             // "next", "replace_one", "replace_all", "ok", "cancel".
+            // Character set "charset=<code>"; style question "style_always=0|1",
+            // "style_yes", "style_no"; dictionaries "dict_language=<tag>",
+            // "dict_source=<n>|none", "dict_word=<text>", "dict_add",
+            // "dict_select=<n>", "dict_delete", "dict_manage=0|1",
+            // "dict_file=<path>" (adds a file), "dict_new=<path>",
+            // "dict_remove"; spelling "spell_option=<capitalized|mixed|upper|
+            // numbers|punctuation>:0|1"; "highlight=<r>,<g>,<b>",
+            // "highlight_theme"; stack "stack_upper=<text>",
+            // "stack_lower=<text>", "stack_style=h|d|t|dec",
+            // "stack_position=top|center|bottom", "stack_size=<n>%",
+            // "stack_defaults=save|restore", "autostack_open";
+            // AutoStack "auto_enabled=0|1", "auto_diagonal=0|1",
+            // "auto_trim=0|1", "auto_back". "import=<path>" puts a .txt or
+            // .rtf file in at the caret and "select=<from>,<to>" makes a
+            // pointer selection (Match takes it); no window is needed for
+            // either.
             "mtext_dialog" => {
                 use crate::ui::window::mtext_dialogs::{
                     Align, ColumnKind, LineMode, MTextDialogMsg as D, TabKind,
                 };
+                use crate::ui::window::mtext_tool_dialogs::{StackPosition, StackStyle};
+                let spec = string(req, "value")?;
+                if let Some(path) = spec.strip_prefix("import=") {
+                    if self.mtext_editor.is_none() {
+                        return Err(failure("no_editor", "No multiline text is edited"));
+                    }
+                    Message::MTextImport(path.to_string())
+                } else if let Some(range) = spec.strip_prefix("select=") {
+                    if self.mtext_editor.is_none() {
+                        return Err(failure("no_editor", "No multiline text is edited"));
+                    }
+                    let (from, to) = range
+                        .split_once(',')
+                        .and_then(|(a, b)| Some((a.trim().parse().ok()?, b.trim().parse().ok()?)))
+                        .ok_or_else(|| failure("invalid_value", spec))?;
+                    let _ = self.update(Message::MTextSelStart(from));
+                    let _ = self.update(Message::MTextSelTo(to));
+                    Message::MTextSelEnd
+                } else {
                 if !self.focus_dialog(crate::app::ModalKind::MTextDialog) {
                     return Err(failure("no_dialog", "No Text Editor window is open"));
                 }
-                let spec = string(req, "value")?;
                 let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
                 let on = value == "1";
                 let invalid = || failure("invalid_value", spec);
@@ -3425,9 +3459,74 @@ impl OpenCADStudio {
                     "next" => Message::MTextDialog(D::FindNext),
                     "replace_one" => Message::MTextDialog(D::ReplaceOne),
                     "replace_all" => Message::MTextDialog(D::ReplaceAll),
+                    "charset" => Message::MTextDialog(D::Charset(
+                        value.parse().map_err(|_| invalid())?,
+                    )),
+                    "style_always" => Message::MTextDialog(D::StyleAlways(on)),
+                    "style_yes" => Message::MTextDialog(D::StyleYes),
+                    "style_no" => Message::MTextDialog(D::StyleNo),
+                    "dict_language" => Message::MTextDialog(D::DictLanguage(value.into())),
+                    "dict_source" => Message::MTextDialog(D::DictSource(value.parse().ok())),
+                    "dict_word" => Message::MTextDialog(D::DictWord(value.into())),
+                    "dict_add" => Message::MTextDialog(D::DictAdd),
+                    "dict_select" => Message::MTextDialog(D::DictSelect(
+                        value.parse().map_err(|_| invalid())?,
+                    )),
+                    "dict_delete" => Message::MTextDialog(D::DictDelete),
+                    "dict_manage" => Message::MTextDialog(D::DictManage(on)),
+                    "dict_file" => Message::MTextDialog(D::DictFilePicked(value.into(), false)),
+                    "dict_new" => Message::MTextDialog(D::DictFilePicked(value.into(), true)),
+                    "dict_remove" => Message::MTextDialog(D::DictRemoveFile),
+                    "dict_manage_select" => Message::MTextDialog(D::DictManageSelect(
+                        value.parse().map_err(|_| invalid())?,
+                    )),
+                    "spell_option" => {
+                        use crate::ui::window::spell_dialog::SpellSetting as S;
+                        let (name, state) = value.split_once(':').ok_or_else(invalid)?;
+                        let setting = match name {
+                            "capitalized" => S::IgnoreCapitalized,
+                            "mixed" => S::IgnoreMixed,
+                            "upper" => S::IgnoreUpper,
+                            "numbers" => S::IgnoreNumbers,
+                            "punctuation" => S::IgnorePunctuation,
+                            _ => return Err(invalid()),
+                        };
+                        Message::MTextDialog(D::SpellOption(setting, state == "1"))
+                    }
+                    "highlight" => {
+                        let parts: Vec<&str> = value.split(',').collect();
+                        let [r, g, b] = parts[..] else {
+                            return Err(invalid());
+                        };
+                        step(self, D::HighlightR(r.into()));
+                        step(self, D::HighlightG(g.into()));
+                        Message::MTextDialog(D::HighlightB(b.into()))
+                    }
+                    "highlight_theme" => Message::MTextDialog(D::HighlightTheme),
+                    "stack_upper" => Message::MTextDialog(D::StackUpper(value.into())),
+                    "stack_lower" => Message::MTextDialog(D::StackLower(value.into())),
+                    "stack_style" => Message::MTextDialog(D::StackStyleSet(match value {
+                        "d" => StackStyle::Diagonal,
+                        "t" => StackStyle::Tolerance,
+                        "dec" => StackStyle::Decimal,
+                        _ => StackStyle::Horizontal,
+                    })),
+                    "stack_position" => Message::MTextDialog(D::StackPositionSet(match value {
+                        "top" => StackPosition::Top,
+                        "bottom" => StackPosition::Bottom,
+                        _ => StackPosition::Center,
+                    })),
+                    "stack_size" => Message::MTextDialog(D::StackSize(value.into())),
+                    "stack_defaults" => Message::MTextDialog(D::StackDefaults(value == "save")),
+                    "autostack_open" => Message::MTextDialog(D::AutoStackOpen),
+                    "auto_enabled" => Message::MTextDialog(D::AutoEnabled(on)),
+                    "auto_diagonal" => Message::MTextDialog(D::AutoDiagonal(on)),
+                    "auto_trim" => Message::MTextDialog(D::AutoTrim(on)),
+                    "auto_back" => Message::MTextDialog(D::AutoBack),
                     "ok" => Message::MTextDialog(D::Ok),
                     "cancel" => Message::CloseModal,
                     _ => return Err(invalid()),
+                }
                 }
             }
             // The Text Style window, one step per call: "select=<name>",

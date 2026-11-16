@@ -79,6 +79,13 @@ impl OpenCADStudio {
                     Some(D::Paragraph(_)) => "Paragraph",
                     Some(D::Columns(_)) => "Column Settings",
                     Some(D::Mask(_)) => "Background Mask",
+                    Some(D::Charset(_)) => "Character Set",
+                    Some(D::StyleChange(_)) => "Text Style Change",
+                    Some(D::Dictionaries(_)) => "Dictionaries",
+                    Some(D::SpellSettings(_)) => "Check Spelling Settings",
+                    Some(D::Highlight(_)) => "Text Highlight Color",
+                    Some(D::Stack(_)) => "Stack Properties",
+                    Some(D::AutoStack(_)) => "AutoStack Properties",
                     _ => "Find and Replace",
                 })
                 .into_owned()
@@ -631,11 +638,19 @@ impl OpenCADStudio {
             }
             super::super::ModalKind::MTextDialog => {
                 use crate::ui::window::mtext_dialogs::{self as w, MTextDialog as D};
+                use crate::ui::window::mtext_tool_dialogs as t;
                 match self.mtext_dialog.as_ref()? {
                     D::Paragraph(d) => sized_flow(ex, 640, 560, |flow| w::view_paragraph(d, flow)),
                     D::Columns(d) => sized_flow(ex, 520, 330, |flow| w::view_columns(d, flow)),
                     D::Mask(d) => sized_flow(ex, 440, 300, |flow| w::view_mask(d, flow)),
                     D::Find(d) => sized_flow(ex, 560, 360, |flow| w::view_find(d, flow)),
+                    D::Charset(d) => sized_flow(ex, 340, 420, |_| t::view_charset(d)),
+                    D::StyleChange(d) => sized_flow(ex, 470, 220, |_| t::view_style_change(d)),
+                    D::Dictionaries(d) => sized_flow(ex, 450, 480, |_| t::view_dictionaries(d)),
+                    D::SpellSettings(d) => sized_flow(ex, 410, 320, |_| t::view_spell_settings(d)),
+                    D::Highlight(d) => sized_flow(ex, 370, 260, |_| t::view_highlight(d)),
+                    D::Stack(d) => sized_flow(ex, 530, 400, |_| t::view_stack(d)),
+                    D::AutoStack(d) => sized_flow(ex, 450, 330, |_| t::view_autostack(d)),
                 }
             }
             super::super::ModalKind::AnnotationScalePrompt => {

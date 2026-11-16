@@ -1561,7 +1561,10 @@ impl OpenCADStudio {
         // Open MText editor swallows Escape (cancel without committing). An
         // open menu or the colour list closes first, one per Escape.
         if let Some(ed) = self.mtext_editor.as_mut() {
-            if ed.menu.take().is_some() || std::mem::take(&mut ed.color_picker_open) {
+            if ed.menu.take().is_some()
+                || std::mem::take(&mut ed.color_picker_open)
+                || ed.matching.take().is_some()
+            {
                 return Task::none();
             }
             self.mtext_cancel();

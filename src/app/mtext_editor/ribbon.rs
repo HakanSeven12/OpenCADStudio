@@ -55,6 +55,52 @@ impl OpenCADStudio {
         if ed.selected_range().is_empty() {
             off.extend(["_MTED STACK", "_MTED SUPERSCRIPT", "_MTED SUBSCRIPT"]);
         }
+        let p = super::prefs::prefs();
+        if ed.matching.is_some() {
+            lit.push("_MTED MATCH");
+        }
+        if p.spell_check {
+            lit.push("_MTED SPELL");
+        }
+        if p.wysiwyg {
+            lit.push("_MTED WYSIWYG");
+        }
+        if crate::app::commands::mtext_toolbar() == 1 {
+            lit.push("_MTED TOOLBAR");
+        }
+        if p.show_background {
+            lit.push("_MTED BACKGROUND");
+        }
+        if p.allow_lists {
+            lit.push("_MTED LIST ALLOW");
+            if p.allow_auto_lists {
+                lit.push("_MTED LIST AUTO");
+            }
+        } else {
+            off.extend([
+                "_MTED LIST OFF",
+                "_MTED LIST NUMBER",
+                "_MTED LIST LOWER",
+                "_MTED LIST UPPER",
+                "_MTED LIST BULLET",
+                "_MTED LIST START",
+                "_MTED LIST CONTINUE",
+                "_MTED LIST AUTO",
+            ]);
+        }
+        match ed.list_kind() {
+            Some(ListKind::Number) => lit.push("_MTED LIST NUMBER"),
+            Some(ListKind::LowerLetter) => lit.push("_MTED LIST LOWER"),
+            Some(ListKind::UpperLetter) => lit.push("_MTED LIST UPPER"),
+            Some(ListKind::Bullet) => lit.push("_MTED LIST BULLET"),
+            None => lit.push("_MTED LIST OFF"),
+        }
+        if ed.column_type == 0 {
+            off.push("_MTED COLUMNBREAK");
+        }
+        if ed.caret_stack().is_none() {
+            off.push("_MTED STACKPROPS");
+        }
         let font = {
             let font = ed.font_field();
             match &ed.object_style.font {
@@ -66,8 +112,27 @@ impl OpenCADStudio {
         };
         let mut styles: Vec<String> = doc.text_styles.iter().map(|s| s.name.clone()).collect();
         styles.sort_by_key(|name| name.to_lowercase());
+        let style_faces = styles
+            .iter()
+            .map(|name| {
+                let face = super::raw_style::ObjectStyle::of(doc, name).face;
+                (!face.trim().is_empty() && !crate::scene::text::lff::is_shx_name(&face))
+                    .then_some(face)
+            })
+            .collect();
+        let style_annotative = styles
+            .iter()
+            .map(|name| {
+                doc.text_styles
+                    .iter()
+                    .find(|s| s.name.eq_ignore_ascii_case(name))
+                    .is_some_and(|s| s.annotative)
+            })
+            .collect();
         Some(TextEditorRibbon {
             styles,
+            style_faces,
+            style_annotative,
             style: ed.style.clone(),
             height: ed.span_field("height", &ed.height).to_string(),
             font,
@@ -86,6 +151,7 @@ impl OpenCADStudio {
     /// Hand the ribbon what the open editor holds, and show or leave the Text
     /// Editor tab with it.
     pub(in crate::app) fn sync_text_editor_ribbon(&mut self) {
+        self.refresh_mtext_spelling();
         let state = self.text_editor_ribbon_state();
         let editing = state.is_some();
         if crate::ui::ribbon::text_editor::set(state) {
@@ -124,7 +190,18 @@ impl OpenCADStudio {
             "UNDERLINE" => Message::MTextFmt(MTextFmt::Underline),
             "OVERLINE" => Message::MTextFmt(MTextFmt::Overline),
             "STRIKE" => Message::MTextFmt(MTextFmt::Strike),
-            "CLEAR" => Message::MTextClearFormatting,
+            "CLEAR" => {
+                self.mtext_clear(match arg {
+                    "PARA" => ClearMode::Paragraph,
+                    "ALL" => ClearMode::All,
+                    _ => ClearMode::Character,
+                });
+                return Some(Task::none());
+            }
+            "MATCH" => {
+                self.mtext_match_toggle();
+                return Some(Task::none());
+            }
             "STACK" => Message::MTextStack,
             "SUPERSCRIPT" => Message::MTextScript(true),
             "SUBSCRIPT" => Message::MTextScript(false),
@@ -158,12 +235,58 @@ impl OpenCADStudio {
                 "BULLET" => Message::MTextList(Some(ListKind::Bullet)),
                 "LOWER" => Message::MTextList(Some(ListKind::LowerLetter)),
                 "UPPER" => Message::MTextList(Some(ListKind::UpperLetter)),
+                "START" | "CONTINUE" => {
+                    self.mtext_list_restart(arg == "CONTINUE");
+                    return Some(Task::none());
+                }
+                "AUTO" => {
+                    super::prefs::update_prefs(|p| p.allow_auto_lists = !p.allow_auto_lists);
+                    self.save_config();
+                    return Some(Task::none());
+                }
+                "ALLOW" => {
+                    super::prefs::update_prefs(|p| p.allow_lists = !p.allow_lists);
+                    self.save_config();
+                    return Some(Task::none());
+                }
                 _ => return Some(self.text_editor_tool_unavailable(cmd)),
             },
+            "SPACING" if arg == "CLEAR" => {
+                self.raw_paragraph_line_spacing(
+                    document::entities::mtext_format::MTextLineSpacing::Default,
+                );
+                return Some(Task::none());
+            }
             "SPACING" => match arg.parse::<f64>() {
                 Ok(factor) => Message::MTextLineSpacing(factor),
                 Err(_) => Message::MTextLineSpacing(1.0),
             },
+            "COLUMNBREAK" => {
+                self.mtext_column_break();
+                return Some(Task::none());
+            }
+            "SPELL" => {
+                super::prefs::update_prefs(|p| p.spell_check = !p.spell_check);
+                self.save_config();
+                return Some(Task::none());
+            }
+            "WYSIWYG" => {
+                super::prefs::update_prefs(|p| p.wysiwyg = !p.wysiwyg);
+                self.save_config();
+                return Some(Task::none());
+            }
+            "BACKGROUND" => {
+                super::prefs::update_prefs(|p| p.show_background = !p.show_background);
+                self.save_config();
+                return Some(Task::none());
+            }
+            "IMPORT" => return Some(self.mtext_import_pick()),
+            "HELP" => return Some(self.dispatch_command("HELP MTEXT")),
+            "DICTIONARIES" | "SPELLSETTINGS" | "CHARSET" | "HIGHLIGHT" | "STACKPROPS"
+            | "AUTOSTACK" => {
+                self.open_mtext_dialog(action);
+                return Some(Task::none());
+            }
             "COLUMNS" => {
                 let mut parts = arg.split_whitespace();
                 let mode = match (parts.next(), parts.next()) {
@@ -244,6 +367,8 @@ impl OpenCADStudio {
         Task::none()
     }
 }
+
+inventory::submit!(crate::command::CommandRegistration { names: &["_MTED"] });
 
 /// The text a Symbol menu entry puts in: `%%d`, `%%p` and `%%c` as their
 /// characters, `\U+XXXX` as that character, NBSP as a non-breaking space.

@@ -3251,12 +3251,22 @@ bg={bg_ms:.1}ms n={view_count}"
                     };
                     let frame = (|| {
                         let origin = project(ed.pos)?;
-                        let x = project(ed.pos + glam::DVec3::X)? - origin;
-                        let y = project(ed.pos + glam::DVec3::Y)? - origin;
+                        let mut x = project(ed.pos + glam::DVec3::X)? - origin;
+                        let mut y = project(ed.pos + glam::DVec3::Y)? - origin;
                         if (x.x * y.y - x.y * y.x).abs() < 1e-8 {
                             return None;
                         }
-                        let angle = ed.rotation_input_value().unwrap_or(0.0) as f32;
+                        // Not WYSIWYG (MTEXTFIXED 2): a text too small to read
+                        // is shown at a readable size, and level.
+                        if !crate::app::mtext_prefs::prefs().wysiwyg {
+                            let unit = x.x.hypot(x.y);
+                            let readable = overlay::MTEXT_PREVIEW_EM_PX
+                                / (ed.height_value() as f32).max(1e-6);
+                            let k = (readable / unit.max(1e-9)).max(1.0);
+                            x = x * k;
+                            y = y * k;
+                        }
+                        let angle = overlay::editor_angle(ed);
                         let (sin, cos) = angle.sin_cos();
                         let width = (ed.rect_width as f32).max(0.001);
                         let padding = ed.height_value() as f32 * 0.5;

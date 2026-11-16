@@ -1049,6 +1049,7 @@ impl WireArena {
             instance_count: self.inst_tail,
             is_3d_mesh_edge: self.mesh_edge,
             const_bind_group: Some(self.const_bind_group.clone()),
+            const_buffer: Some(self.const_buf.clone()),
         }]
     }
 
@@ -1148,6 +1149,7 @@ impl WireArena {
                 instance_count: end - start,
                 is_3d_mesh_edge: self.mesh_edge,
                 const_bind_group: Some(self.const_bind_group.clone()),
+                const_buffer: Some(self.const_buf.clone()),
             })
             .collect()
     }
@@ -1537,6 +1539,7 @@ impl PackedWireArena {
             instance_count: self.inst_tail,
             is_3d_mesh_edge: self.mesh_edge,
             const_bind_group: None,
+            const_buffer: None,
         }]
     }
 
@@ -1570,6 +1573,7 @@ impl PackedWireArena {
                 instance_count: end - start,
                 is_3d_mesh_edge: self.mesh_edge,
                 const_bind_group: None,
+                const_buffer: None,
             })
             .collect()
     }
@@ -1702,7 +1706,9 @@ impl PersistentWireArena {
         for arena in arenas {
             let mut ranges = Vec::new();
             for (&handle, &wire_count) in candidates {
-                let Some(slab) = arena.slabs.get(&handle) else { continue };
+                let Some(slab) = arena.slabs.get(&handle) else {
+                    continue;
+                };
                 if slab.inst_len == 0 || slab.const_len as usize != wire_count {
                     continue;
                 }
@@ -1728,14 +1734,18 @@ impl PersistentWireArena {
                 merged.push((start, end));
             }
             let mut constants = arena.consts_cpu.clone();
-            for constant in &mut constants { constant.color = color; }
-            let binding = super::wire_gpu::build_const_bind_group(device, queue, const_bgl, &constants);
+            for constant in &mut constants {
+                constant.color = color;
+            }
+            let (binding, const_buffer) =
+                super::wire_gpu::build_const_bind_group(device, queue, const_bgl, &constants);
             output.extend(merged.into_iter().map(|(start, end)| WireGpu {
                 instance_buffer: arena.inst_buf.clone(),
                 first_instance: start,
                 instance_count: end - start,
                 is_3d_mesh_edge: false,
                 const_bind_group: Some(binding.clone()),
+                const_buffer: Some(const_buffer.clone()),
             }));
         }
         (output, reused)
@@ -1745,13 +1755,13 @@ impl PersistentWireArena {
     /// Device bytes this arena holds. The instance buffer is reserved with
     /// headroom, so this is the allocation, not the occupied prefix — which is
     /// what a memory budget has to answer for.
-    pub fn gpu_bytes(&self) -> u64 {
+    pub(super) fn gpu_bytes(&self, counter: &mut super::gpu_memory::ResourceCounter) -> u64 {
         match &self.inner {
             PersistentWireArenaKind::Indexed(arenas) => arenas
                 .iter()
-                .map(|arena| arena.inst_buf.size() + arena.const_buf.size())
+                .map(|arena| counter.buffer(&arena.inst_buf) + counter.buffer(&arena.const_buf))
                 .sum(),
-            PersistentWireArenaKind::Packed(arena) => arena.inst_buf.size(),
+            PersistentWireArenaKind::Packed(arena) => counter.buffer(&arena.inst_buf),
         }
     }
 

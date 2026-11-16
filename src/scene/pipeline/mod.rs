@@ -1,3 +1,4 @@
+mod gpu_memory;
 // WGSL has no includes. Compose one shared draw-order function into each 2D
 // shader at compile time, including the sources used by shader validation tests.
 macro_rules! draw_order_shader {
@@ -207,6 +208,7 @@ pub struct Pipeline {
     mesh_plain_depth_pipeline: wgpu::RenderPipeline,
     mesh_material_bgl: wgpu::BindGroupLayout,
     mesh_default_material_bind_group: wgpu::BindGroup,
+    mesh_default_material_memory: mesh_gpu::MaterialMemory,
     face3d_pipeline: wgpu::RenderPipeline,
     block_face3d_pipeline: wgpu::RenderPipeline,
     /// Depth-only variant of the face3d pipeline (no color writes,
@@ -1381,7 +1383,7 @@ impl Pipeline {
                 },
             ],
         });
-        let mesh_default_material_bind_group =
+        let (mesh_default_material_bind_group, mesh_default_material_memory) =
             mesh_gpu::create_material_bind_group(device, queue, &mesh_material_bgl, None);
 
         let mesh_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -2484,6 +2486,7 @@ impl Pipeline {
             mesh_plain_depth_pipeline,
             mesh_material_bgl,
             mesh_default_material_bind_group,
+            mesh_default_material_memory,
             face3d_pipeline,
             block_face3d_pipeline,
             face3d_depth_pipeline,
@@ -3178,16 +3181,28 @@ impl Pipeline {
             let gpu = WireGpu::from_highlight_refs(
                 device, queue, group, color, depth_map, self.wire_const_bgl.as_ref(),
             );
-            let bytes = gpu.iter().fold(0usize, |sum, wire| {
-                sum.saturating_add(usize::try_from(wire.instance_buffer.size()).unwrap_or(usize::MAX))
-            }).saturating_add(group.len().saturating_mul(std::mem::size_of::<wire_gpu::WireConst>()));
+            let bytes = gpu
+                .iter()
+                .fold(0usize, |sum, wire| {
+                    sum.saturating_add(
+                        usize::try_from(wire.instance_buffer.size()).unwrap_or(usize::MAX),
+                    )
+                })
+                .saturating_add(
+                    group
+                        .len()
+                        .saturating_mul(std::mem::size_of::<wire_gpu::WireConst>()),
+                );
             if bytes <= MAX_BYTES.saturating_sub(self.highlight_wire_chunk_bytes) {
                 self.highlight_wire_chunk_bytes += bytes;
-                self.highlight_wire_chunks.insert(key, HighlightWireChunk {
-                    members,
-                    gpu: gpu.clone(),
-                    bytes,
-                });
+                self.highlight_wire_chunks.insert(
+                    key,
+                    HighlightWireChunk {
+                        members,
+                        gpu: gpu.clone(),
+                        bytes,
+                    },
+                );
             }
             output.extend(gpu);
             rebuilt += 1;
@@ -3210,7 +3225,14 @@ impl Pipeline {
         const MIN_POINTS: usize = 8192;
         const MAX_CACHE_BYTES: usize = 128 * 1024 * 1024;
         if self.highlight_wire_cache_key.is_none() {
-            return WireGpu::from_highlight_refs(device, queue, wires, color, depth_map, self.wire_const_bgl.as_ref());
+            return WireGpu::from_highlight_refs(
+                device,
+                queue,
+                wires,
+                color,
+                depth_map,
+                self.wire_const_bgl.as_ref(),
+            );
         }
 
         // Annotation outlines are transient and can share an entity handle
@@ -3231,12 +3253,21 @@ impl Pipeline {
                 }
             }
         }
-        wire_counts.retain(|handle, _| !ineligible.contains(handle)
-            && counts.get(&handle.value()).copied().unwrap_or(0) >= MIN_POINTS);
-        let (mut output, reused) = match (&self.wire_arena, &self.wire_const_bgl, self.highlight_wire_cache_key) {
+        wire_counts.retain(|handle, _| {
+            !ineligible.contains(handle)
+                && counts.get(&handle.value()).copied().unwrap_or(0) >= MIN_POINTS
+        });
+        let (mut output, reused) = match (
+            &self.wire_arena,
+            &self.wire_const_bgl,
+            self.highlight_wire_cache_key,
+        ) {
             (Some(arena), Some(bgl), Some((wire_id, depth_generation)))
-                if self.wire_arena_id == wire_id && self.wire_arena_depth_generation == depth_generation =>
-                    arena.highlight_dense(device, queue, bgl, &wire_counts, color),
+                if self.wire_arena_id == wire_id
+                    && self.wire_arena_depth_generation == depth_generation =>
+            {
+                arena.highlight_dense(device, queue, bgl, &wire_counts, color)
+            }
             _ => (Vec::new(), rustc_hash::FxHashSet::default()),
         };
         let mut groups = rustc_hash::FxHashMap::<u64, Vec<&WireModel>>::default();
@@ -3247,16 +3278,16 @@ impl Pipeline {
                 continue;
             }
             match wire_gpu::fast_parse_u64(&wire.name) {
-                Some(handle) if reused.contains(&document::Handle::new(handle)) => {},
+                Some(handle) if reused.contains(&document::Handle::new(handle)) => {}
                 Some(handle) if counts.get(&handle).copied().unwrap_or(0) >= MIN_POINTS => {
                     groups.entry(handle).or_default().push(wire);
                 }
                 _ => small.push(wire),
             }
         }
-        output.extend(self.highlight_small_wire_chunks(
-            device, queue, &small, color, depth_map, &transient,
-        ));
+        output.extend(
+            self.highlight_small_wire_chunks(device, queue, &small, color, depth_map, &transient),
+        );
         for (handle, group) in groups {
             let key = (handle, color.map(f32::to_bits));
             if let Some(cached) = self.highlight_wire_cache.get(&key) {
@@ -3266,9 +3297,18 @@ impl Pipeline {
             let gpu = WireGpu::from_highlight_refs(
                 device, queue, &group, color, depth_map, self.wire_const_bgl.as_ref(),
             );
-            let bytes = gpu.iter().fold(0usize, |total, wire| {
-                total.saturating_add(usize::try_from(wire.instance_buffer.size()).unwrap_or(usize::MAX))
-            }).saturating_add(group.len().saturating_mul(std::mem::size_of::<wire_gpu::WireConst>()));
+            let bytes = gpu
+                .iter()
+                .fold(0usize, |total, wire| {
+                    total.saturating_add(
+                        usize::try_from(wire.instance_buffer.size()).unwrap_or(usize::MAX),
+                    )
+                })
+                .saturating_add(
+                    group
+                        .len()
+                        .saturating_mul(std::mem::size_of::<wire_gpu::WireConst>()),
+                );
             if bytes <= MAX_CACHE_BYTES.saturating_sub(self.highlight_wire_cache_bytes) {
                 self.highlight_wire_cache_bytes += bytes;
                 self.highlight_wire_cache.insert(key, gpu.clone());
@@ -3476,7 +3516,14 @@ impl Pipeline {
         };
         let t_split = perf_started.map(|t| t.elapsed().as_secs_f64() * 1000.0);
         let mut gpu = if let Some(tint) = selected_tint {
-            self.highlight_regular_wires(device, queue, &selected_regular, tint, depth_map, annotation_context_wires)
+            self.highlight_regular_wires(
+                device,
+                queue,
+                &selected_regular,
+                tint,
+                depth_map,
+                annotation_context_wires,
+            )
         } else {
             Vec::new()
         };
@@ -6334,13 +6381,10 @@ fn aabb_below_pixel(
     (max_px - min_px).max(max_py - min_py) < threshold_px
 }
 
-/// Device bytes a renderer is holding, counted from the sizes it allocated
-/// rather than from process RSS — the allocator and the driver both keep
-/// high-water memory that RSS cannot distinguish from live resources.
-///
-/// Partial by construction: it covers the categories large enough to decide
-/// where the next fix goes, and says so rather than pretending to be a total.
-#[derive(Default, Clone, Copy, PartialEq)]
+/// Logical sizes of live resources held by viewport slots and shared caches.
+/// Shared handles count once. Excludes driver heaps/alignment, staging, iced
+/// and ViewCube resources; Depth24Plus storage is estimated at 4 bytes/texel.
+#[derive(Default, Clone, Copy, PartialEq, serde::Serialize)]
 pub(crate) struct GpuLiveBytes {
     pub slots: usize,
     pub shadow: u64,
@@ -6348,48 +6392,176 @@ pub(crate) struct GpuLiveBytes {
     pub text_atlas: u64,
     pub wire_arena: u64,
     pub block_geometry: u64,
+    pub wires: u64,
+    pub meshes: u64,
+    pub images: u64,
+    pub materials: u64,
+    pub text: u64,
+    pub overlays: u64,
+    pub hatches: u64,
+    pub point_clouds: u64,
+    pub other: u64,
 }
 
 impl GpuLiveBytes {
     pub(crate) fn total(&self) -> u64 {
-        self.shadow + self.render_targets + self.text_atlas + self.wire_arena + self.block_geometry
+        self.shadow
+            + self.render_targets
+            + self.text_atlas
+            + self.wire_arena
+            + self.block_geometry
+            + self.wires
+            + self.meshes
+            + self.images
+            + self.materials
+            + self.text
+            + self.overlays
+            + self.hatches
+            + self.point_clouds
+            + self.other
+    }
+    fn accumulate(&mut self, other: Self) {
+        self.slots += other.slots;
+        self.shadow += other.shadow;
+        self.render_targets += other.render_targets;
+        self.text_atlas += other.text_atlas;
+        self.wire_arena += other.wire_arena;
+        self.block_geometry += other.block_geometry;
+        self.wires += other.wires;
+        self.meshes += other.meshes;
+        self.images += other.images;
+        self.materials += other.materials;
+        self.text += other.text;
+        self.overlays += other.overlays;
+        self.hatches += other.hatches;
+        self.point_clouds += other.point_clouds;
+        self.other += other.other;
     }
 }
 
 impl Pipeline {
-    /// This slot's share. `alloc_size` is the real allocation, which is rounded
-    /// up from the requested size and grows only.
-    fn gpu_live_bytes(&self) -> GpuLiveBytes {
-        // 4x MSAA colour (4 B/sample) + 4x MSAA depth-stencil (4 B/sample) +
-        // one single-sample resolve target.
-        const BYTES_PER_PIXEL: u64 = (MSAA_SAMPLES as u64) * 4 + (MSAA_SAMPLES as u64) * 4 + 4;
-        let pixels = u64::from(self.alloc_size.width) * u64::from(self.alloc_size.height);
-        GpuLiveBytes {
+    fn collect_gpu_live(&self, counter: &mut gpu_memory::ResourceCounter) -> GpuLiveBytes {
+        let mut bytes = GpuLiveBytes {
             slots: 1,
-            // Only while this viewport casts shadows; the placeholder that
-            // stands in otherwise is 4 bytes.
-            shadow: match &self.shadow_full {
-                Some(_) => u64::from(SHADOW_MAP_SIZE) * u64::from(SHADOW_MAP_SIZE) * 4,
-                None => 4,
-            },
-            render_targets: pixels * BYTES_PER_PIXEL,
-            text_atlas: self
-                .text_atlas_gpu
+            ..Default::default()
+        };
+        bytes.shadow = counter.texture(&self._shadow_fallback_texture)
+            + self
+                .shadow_full
                 .as_ref()
-                .map(text_gpu::TextAtlasGpu::gpu_bytes)
-                .unwrap_or(0),
-            wire_arena: self
-                .wire_arena
-                .as_ref()
-                .map(wire_arena::PersistentWireArena::gpu_bytes)
-                .unwrap_or(0)
-                + self
-                    .wire_arena_mesh
-                    .as_ref()
-                    .map(wire_arena::PersistentWireArena::gpu_bytes)
-                    .unwrap_or(0),
-            block_geometry: 0,
+                .map_or(0, |(texture, _)| counter.texture(texture));
+        bytes.render_targets = counter.texture(self.depth_view.texture())
+            + counter.texture(self.msaa_view.texture())
+            + counter.texture(self.resolve_view.texture());
+        bytes.text_atlas = self
+            .text_atlas_gpu
+            .as_ref()
+            .map_or(0, |atlas| atlas.counted_gpu_bytes(counter));
+        // Arenas first: draw-range WireGpu clones below must not charge them again.
+        for arena in [&self.wire_arena, &self.wire_arena_mesh]
+            .into_iter()
+            .flatten()
+        {
+            bytes.wire_arena += arena.gpu_bytes(counter);
         }
+        bytes.wires += counter.wires(&self.gpu_wires)
+            + counter.wires(&self.wire_arena_fallback)
+            + counter.wires(&self.gpu_face3d_edges);
+        for circle in self.gpu_circles.iter() {
+            bytes.wires += counter.buffer(&circle.instance_buffer);
+        }
+        for ellipse in self.gpu_ellipses.iter() {
+            bytes.wires += counter.buffer(&ellipse.instance_buffer);
+        }
+        bytes.block_geometry += counter.blocks(&self.gpu_block_wires);
+        bytes.text += counter.text(&self.text_gpu) + counter.block_text(&self.block_text_gpu);
+        for chunks in [
+            self.gpu_mesh_batch.as_slice(),
+            self.gpu_mesh_dynamic.as_slice(),
+        ] {
+            let (meshes, materials) = counter.meshes(chunks);
+            bytes.meshes += meshes;
+            bytes.materials += materials;
+        }
+        bytes.materials += self.mesh_default_material_memory.gpu_bytes(counter);
+        for image in &self.gpu_images {
+            bytes.images += image.gpu_bytes(counter);
+        }
+        bytes.point_clouds += self.gpu_point_clouds.gpu_bytes(counter);
+        bytes.hatches +=
+            self.hatch_gpu.gpu_bytes(counter) + self.hatch_translucent_gpu.gpu_bytes(counter);
+        for wipeout in &self.gpu_wipeouts {
+            bytes.hatches +=
+                counter.buffer(&wipeout.vertex_buffer) + counter.buffer(&wipeout.instance_buffer)
+                + counter.buffer(&wipeout.uniform_buffers[0])
+                + counter.buffer(&wipeout.uniform_buffers[1]);
+        }
+        if let Some(fill) = &self.gpu_face3d_fill {
+            for chunk in fill.chunks_3d.iter().chain(&fill.chunks_2d) {
+                bytes.meshes += counter.buffer(&chunk.vertex_buffer);
+            }
+            for chunk in fill.block_chunks_3d.iter().chain(&fill.block_chunks_2d) {
+                bytes.meshes +=
+                    counter.buffer(&chunk.vertex_buffer) + counter.buffer(&chunk.instance_buffer);
+            }
+        }
+        bytes.overlays += counter.wires(&self.gpu_selected_wires)
+            + counter.wires(&self.gpu_preview_wires)
+            + counter.text(&self.text_highlight_gpu)
+            + counter.text(&self.text_preview_gpu)
+            + counter.block_text(&self.block_text_highlight_gpu);
+        bytes.block_geometry += counter.blocks(&self.gpu_selected_block_wires)
+            + counter.blocks(&self.gpu_preview_block_wires);
+        for circle in self
+            .gpu_selected_circles
+            .iter()
+            .chain(&self.gpu_preview_circles)
+        {
+            bytes.overlays += counter.buffer(&circle.instance_buffer);
+        }
+        for ellipse in self
+            .gpu_selected_ellipses
+            .iter()
+            .chain(&self.gpu_preview_ellipses)
+        {
+            bytes.overlays += counter.buffer(&ellipse.instance_buffer);
+        }
+        for wires in self.highlight_wire_cache.values() {
+            bytes.overlays += counter.wires(wires);
+        }
+        for chunk in self.highlight_wire_chunks.values() {
+            bytes.overlays += counter.wires(&chunk.gpu);
+        }
+        if let Some(cache) = &self.selected_highlight_gpu_cache {
+            bytes.overlays += counter.wires(&cache.wires)
+                + counter.text(&cache.text)
+                + counter.block_text(&cache.block_text);
+            bytes.block_geometry += counter.blocks(&cache.blocks);
+            for circle in &cache.circles {
+                bytes.overlays += counter.buffer(&circle.instance_buffer);
+            }
+            for ellipse in &cache.ellipses {
+                bytes.overlays += counter.buffer(&ellipse.instance_buffer);
+            }
+        }
+        for chunk in &self.silhouette_chunks {
+            bytes.overlays +=
+                counter.buffer(&chunk.vertex_buffer) + counter.buffer(&chunk.instance_buffer);
+        }
+        for group in &self.silhouette_source_groups {
+            for (buffer, _) in &group.instance_buffers {
+                bytes.overlays += counter.buffer(buffer);
+            }
+        }
+        if let Some((buffer, _)) = &self.clip_boundary {
+            bytes.other += counter.buffer(buffer);
+        }
+        bytes.other += counter.buffer(&self.uniform_buffer)
+            + counter.buffer(&self.selection_uniform_buffer)
+            + counter.buffer(&self.blit_uniform_buffer)
+            + counter.texture(&self.background_texture)
+            + counter.texture(&self.environment_texture);
+        bytes
     }
 }
 
@@ -6417,9 +6589,9 @@ impl MultiPipeline {
             }
             // Nothing to give back — releasing again would only churn the
             // render targets it just rebuilt at their smallest size.
-            let held = self.inners[index].gpu_live_bytes();
-            if held.wire_arena == 0
-                && held.shadow <= 4
+            if self.inners[index].wire_arena.is_none()
+                && self.inners[index].wire_arena_mesh.is_none()
+                && self.inners[index].shadow_full.is_none()
                 && self.inners[index].alloc_size == Size::new(0, 0)
             {
                 continue;
@@ -6445,22 +6617,25 @@ impl MultiPipeline {
     /// Sum across slots, plus the caches held once for all of them.
     pub(crate) fn gpu_live_bytes(&self) -> GpuLiveBytes {
         let mut total = GpuLiveBytes::default();
-        // Block arenas belong to the batches, and a cached build hands the same
-        // arenas to several slots, so each one is counted once.
-        let mut counted = rustc_hash::FxHashSet::default();
+        let mut counter = gpu_memory::ResourceCounter::default();
         for inner in &self.inners {
-            let slot = inner.gpu_live_bytes();
-            total.slots += slot.slots;
-            total.shadow += slot.shadow;
-            total.render_targets += slot.render_targets;
-            total.text_atlas += slot.text_atlas;
-            total.wire_arena += slot.wire_arena;
-            total.block_geometry +=
-                wire_gpu::block_arena_bytes(&inner.gpu_block_wires, &mut counted)
-                    + wire_gpu::block_arena_bytes(&inner.gpu_selected_block_wires, &mut counted);
+            total.accumulate(inner.collect_gpu_live(&mut counter));
         }
+        // Cold cached resources are still live even without an active slot.
         for entry in self.wire_buffer_cache.values() {
-            total.block_geometry += wire_gpu::block_arena_bytes(&entry.1, &mut counted);
+            total.wires += counter.wires(&entry.0);
+            total.block_geometry += counter.blocks(&entry.1);
+            for circle in entry.3.iter() {
+                total.wires += counter.buffer(&circle.instance_buffer);
+            }
+            for ellipse in entry.4.iter() {
+                total.wires += counter.buffer(&ellipse.instance_buffer);
+            }
+        }
+        for entry in self.mesh_batch_cache.values() {
+            let (meshes, materials) = counter.meshes(&entry.1);
+            total.meshes += meshes;
+            total.materials += materials;
         }
         total
     }
@@ -7108,11 +7283,10 @@ mod mesh_highlight_draw_tests {
             } else {
                 continue;
             };
-            out.extend(
-                ranges
-                    .iter()
-                    .map(|range| MeshHighlightDraw { range: *range, kind }),
-            );
+            out.extend(ranges.iter().map(|range| MeshHighlightDraw {
+                range: *range,
+                kind,
+            }));
         }
         out
     }

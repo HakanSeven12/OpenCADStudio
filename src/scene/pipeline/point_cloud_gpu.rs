@@ -79,6 +79,15 @@ pub struct PointCloudGpu {
 }
 
 impl PointCloudGpu {
+    pub(super) fn gpu_bytes(&self, counter: &mut super::gpu_memory::ResourceCounter) -> u64 {
+        counter.buffer(&self.params)
+            + self
+                .clouds
+                .iter()
+                .map(|cloud| counter.buffer(&cloud.buffer))
+                .sum::<u64>()
+    }
+
     pub fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> Self {
         let params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("point_cloud.params"),

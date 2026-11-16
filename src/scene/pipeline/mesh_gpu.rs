@@ -357,6 +357,7 @@ pub struct MeshBatchChunk {
     pub material: Option<crate::scene::model::material_model::MeshMaterial>,
     pub face_color: [f32; 4],
     pub material_bind_group: Option<wgpu::BindGroup>,
+    pub(super) material_memory: Option<MaterialMemory>,
 }
 
 #[derive(Clone, Copy)]
@@ -527,6 +528,7 @@ fn make_chunk(
         material: material.cloned(),
         face_color,
         material_bind_group: None,
+        material_memory: None,
     }
 }
 
@@ -652,6 +654,31 @@ fn upload_rgba_texture(
         },
     );
     texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
+#[derive(Clone)]
+pub(super) struct MaterialMemory {
+    resources: std::sync::Arc<MeshMaterialResources>,
+    surface: wgpu::Buffer,
+}
+
+impl MaterialMemory {
+    pub(super) fn gpu_bytes(&self, counter: &mut super::gpu_memory::ResourceCounter) -> u64 {
+        let resources = &self.resources;
+        let mut bytes = counter.buffer(&resources.params_buffer) + counter.buffer(&self.surface);
+        for view in [
+            &resources.diffuse_view,
+            &resources.specular_view,
+            &resources.reflection_view,
+            &resources.opacity_view,
+            &resources.bump_view,
+            &resources.refraction_view,
+            &resources.normal_view,
+        ] {
+            bytes += counter.texture(view.texture());
+        }
+        bytes
+    }
 }
 
 pub struct MeshMaterialResources {
@@ -918,7 +945,7 @@ pub fn create_material_bind_group_from_resources(
     resources: &MeshMaterialResources,
     material: Option<&crate::scene::model::material_model::MeshMaterial>,
     face_color: [f32; 4],
-) -> wgpu::BindGroup {
+) -> (wgpu::BindGroup, wgpu::Buffer) {
     let surface = surface_params(material, face_color);
     let surface_buffer = super::gpu_upload::upload_buffer(
         device,
@@ -927,7 +954,7 @@ pub fn create_material_bind_group_from_resources(
         std::slice::from_ref(&surface),
         wgpu::BufferUsages::UNIFORM,
     );
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("mesh.material.bind_group"),
         layout,
         entries: &[
@@ -996,18 +1023,22 @@ pub fn create_material_bind_group_from_resources(
                 resource: surface_buffer.as_entire_binding(),
             },
         ],
-    })
+    });
+    (bind_group, surface_buffer)
 }
 
-pub fn create_material_bind_group(
+pub(super) fn create_material_bind_group(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     material: Option<&crate::scene::model::material_model::MeshMaterial>,
-) -> wgpu::BindGroup {
-    let resources = create_material_resources(device, queue, material);
+) -> (wgpu::BindGroup, MaterialMemory) {
+    let resources = std::sync::Arc::new(create_material_resources(device, queue, material));
     let color = material.map_or([0.8, 0.8, 0.8, 1.0], |material| material.diffuse);
-    create_material_bind_group_from_resources(device, queue, layout, &resources, material, color)
+    let (group, surface) = create_material_bind_group_from_resources(
+        device, queue, layout, &resources, material, color,
+    );
+    (group, MaterialMemory { resources, surface })
 }
 
 /// Give every chunk its material bind group. Chunks are split by geometry
@@ -1024,12 +1055,14 @@ pub fn upload_chunk_material_bind_groups(
     // Resources by material handle; a material without one, and without
     // images, by its map parameters. Thousands of coloured meshes carry such
     // a material, and one set each ran D3D12 out of memory (#2343).
-    let mut materials: rustc_hash::FxHashMap<(Option<u64>, Vec<u32>), MeshMaterialResources> =
-        rustc_hash::FxHashMap::default();
+    let mut materials: rustc_hash::FxHashMap<
+        (Option<u64>, Vec<u32>),
+        std::sync::Arc<MeshMaterialResources>,
+    > = Default::default();
     let mut bind_groups: rustc_hash::FxHashMap<
         ((Option<u64>, Vec<u32>), [u32; 24]),
-        wgpu::BindGroup,
-    > = rustc_hash::FxHashMap::default();
+        (wgpu::BindGroup, MaterialMemory),
+    > = Default::default();
     for chunk in chunks {
         let material = chunk.material.as_ref();
         let key = match material {
@@ -1043,38 +1076,48 @@ pub fn upload_chunk_material_bind_groups(
                         bytemuck::cast_slice(std::slice::from_ref(&params)).to_vec(),
                     )
                 }
-                // Images but no handle to identify them by: keep it private.
                 None => {
-                    let resources = create_material_resources(device, queue, Some(material));
-                    chunk.material_bind_group = Some(create_material_bind_group_from_resources(
+                    let resources = std::sync::Arc::new(create_material_resources(
+                        device,
+                        queue,
+                        Some(material),
+                    ));
+                    let (group, surface) = create_material_bind_group_from_resources(
                         device,
                         queue,
                         layout,
                         &resources,
                         Some(material),
                         chunk.face_color,
-                    ));
+                    );
+                    chunk.material_bind_group = Some(group);
+                    chunk.material_memory = Some(MaterialMemory { resources, surface });
                     continue;
                 }
             },
         };
         let surface = bytemuck::cast(surface_params(material, chunk.face_color));
-        let bind_group = bind_groups
+        let (bind_group, memory) = bind_groups
             .entry((key.clone(), surface))
             .or_insert_with(|| {
                 let resources = materials
                     .entry(key)
-                    .or_insert_with(|| create_material_resources(device, queue, material));
-                create_material_bind_group_from_resources(
+                    .or_insert_with(|| {
+                        std::sync::Arc::new(create_material_resources(device, queue, material))
+                    })
+                    .clone();
+                let (group, surface) = create_material_bind_group_from_resources(
                     device,
                     queue,
                     layout,
-                    resources,
+                    &resources,
                     material,
                     chunk.face_color,
-                )
+                );
+                (group, MaterialMemory { resources, surface })
             });
         chunk.material_bind_group = Some(bind_group.clone());
+        chunk.material_memory = Some(memory.clone());
     }
 }
 

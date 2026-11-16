@@ -107,6 +107,14 @@ pub(super) struct TextureHatch {
 }
 
 impl TextureHatch {
+    pub(super) fn gpu_bytes(&self, counter: &mut super::super::gpu_memory::ResourceCounter) -> u64 {
+        counter.buffer(&self.vertex_buffer)
+            + counter.buffer(&self.index_buffer)
+            + counter.buffer(&self.placement_buffer)
+            + counter.buffer(&self._uniform_buf)
+            + counter.texture(&self._data_tex)
+    }
+
     pub(super) fn from_models(
         device: &wgpu::Device,
         queue: &wgpu::Queue,

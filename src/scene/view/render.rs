@@ -2441,6 +2441,17 @@ text_atlas={:.1} wire_arena={:.1} block_geometry={:.1}",
             mib(now.wire_arena),
             mib(now.block_geometry),
         );
+        // Exact byte counts for automated comparisons. The human-readable
+        // diagnostic above remains compatible with existing traces.
+        crate::perf_record!(
+            "[perf] gpu-live-json {}",
+            serde_json::json!({
+                "schema": 1,
+                "scope": "logical live resources; excludes driver heaps/alignment, staging, iced and ViewCube; Depth24Plus estimated",
+                "total_bytes": now.total(),
+                "categories": now,
+            })
+        );
     });
 }
 

@@ -40,7 +40,16 @@ records the peak RSS observed at the polling interval. The open diagnostic is
 emitted after document installation; it does not prove that the first frame,
 window responsiveness, or all background work has completed. It is a different
 metric from a window-ready measurement. GPU memory and child-process memory
-are not included. USS is private resident memory, not private committed memory.
+are not included in RSS/USS. The report separately parses structured
+`gpu-live-json` samples, retaining the last sample and highest observed total.
+These count logical sizes of live renderer resources, deduplicating shared GPU
+handles across slots and caches: targets, shadow maps, text atlases, wire arenas,
+fallback/analytical wires, meshes, image/material textures, text buffers,
+selection/preview overlays, hatches and point clouds. They exclude driver heap
+alignment, staging/commands, pipelines, iced and ViewCube resources; Depth24Plus
+storage is estimated. They are not physical VRAM usage and must not be added to
+RSS (especially on shared-memory GPUs). Missing structured telemetry is unknown,
+not zero. USS is private resident memory, not private committed memory.
 Tracing affects timings, so compare only runs with the same instrumentation.
 
 The report defaults to `target/drawing-startup-benchmark.json`; use `-Output`

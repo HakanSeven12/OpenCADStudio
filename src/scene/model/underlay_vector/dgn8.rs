@@ -484,6 +484,39 @@ fn marked_string(e: &[u8], from: usize) -> Option<String> {
     Some(String::from_utf8_lossy(&e[i..end]).to_string())
 }
 
+/// The text of an element's first string linkage (id 0x56d2). Linkages
+/// start at the attribute offset (words, at byte 8), each opening with its
+/// size in words less one, the id and, for a string, its number and byte
+/// length. The string is UTF-16LE after an "ff fd" marker, otherwise single
+/// bytes (#3093).
+fn string_linkage(e: &[u8]) -> Option<String> {
+    let mut at = u32_at(e, 8)? as usize * 2;
+    while at + 12 <= e.len() {
+        let size = (usize::from(e[at]) + 1) * 2;
+        if e[at + 2..at + 4] == [0xd2, 0x56] {
+            let len = u32_at(e, at + 8)? as usize;
+            let data = e.get(at + 12..(at + 12).saturating_add(len).min(e.len()))?;
+            return Some(match data {
+                [0xff, 0xfd, rest @ ..] => {
+                    let units: Vec<u16> = rest
+                        .chunks_exact(2)
+                        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                        .take_while(|&u| u != 0)
+                        .collect();
+                    String::from_utf16_lossy(&units)
+                }
+                _ => data
+                    .iter()
+                    .take_while(|&&b| b != 0)
+                    .map(|&b| char::from(b))
+                    .collect(),
+            });
+        }
+        at += size;
+    }
+    None
+}
+
 struct Styles {
     colors: Vec<[u8; 3]>,
     /// Level id → colour index.
@@ -1601,7 +1634,9 @@ fn level_table_raw(nm: &[&[u8]]) -> Vec<(u32, String, u32)> {
                 let (Some(id), Some(color)) = (u32_at(e, 32), u32_at(e, 72)) else {
                     continue;
                 };
-                let name = marked_string(e, 32).unwrap_or_default();
+                let name = marked_string(e, 32)
+                    .or_else(|| string_linkage(e))
+                    .unwrap_or_default();
                 out.push((id, name, color));
             }
             _ => {}
@@ -1610,12 +1645,25 @@ fn level_table_raw(nm: &[&[u8]]) -> Vec<(u32, String, u32)> {
     out
 }
 
-fn non_model(cfb: &Cfb) -> Vec<u8> {
-    cfb.streams()
+/// The non-model element streams `Dgn^Nm/$1`, `$2`, … in number order. A
+/// file can keep its tables in a later stream, the level table in `$23`
+/// with `$1` holding others (#3093).
+fn non_model(cfb: &Cfb) -> Vec<Vec<u8>> {
+    let streams = cfb.streams();
+    let mut found: Vec<(u32, &Entry)> = streams
         .iter()
-        .find(|(p, _)| p == "Dgn^Nm/$1")
-        .map(|(_, e)| inflate(&cfb.stream(e)))
-        .unwrap_or_default()
+        .filter_map(|(p, e)| Some((p.strip_prefix("Dgn^Nm/$")?.parse().ok()?, *e)))
+        .collect();
+    found.sort_by_key(|(n, _)| *n);
+    found
+        .into_iter()
+        .map(|(_, e)| element_stream(&cfb.stream(e)))
+        .collect()
+}
+
+/// The elements of every non-model stream, in stream order.
+fn non_model_elements(streams: &[Vec<u8>]) -> Vec<&[u8]> {
+    streams.iter().flat_map(|s| elements(s)).collect()
 }
 
 /// Level names of the file, for the underlay layers list.
@@ -1623,7 +1671,7 @@ pub fn layer_names(bytes: &[u8]) -> Option<Vec<String>> {
     let cfb = Cfb::open(bytes)?;
     let nm = non_model(&cfb);
     Some(
-        level_table(&elements(&nm))
+        level_table(&non_model_elements(&nm))
             .into_iter()
             .map(|l| l.1)
             .filter(|n| !n.is_empty())
@@ -1639,7 +1687,7 @@ pub fn model(bytes: &[u8], name: &str, hidden: &[String]) -> Option<Sheet> {
         .find(|m| m.0.eq_ignore_ascii_case(name))
         .or_else(|| all.first())?;
     let non_model = non_model(&cfb);
-    let nm = elements(&non_model);
+    let nm = non_model_elements(&non_model);
     // Colours 0-254 from byte 37, the background (255) opening the table.
     let color_table = nm
         .iter()
@@ -1875,7 +1923,7 @@ pub fn import(bytes: &[u8], name: &str) -> Option<DgnImport> {
         .or_else(|| designs.first().copied())?;
     let (_, graphics, header) = &all[k];
     let non_model = non_model(&cfb);
-    let nm = elements(&non_model);
+    let nm = non_model_elements(&non_model);
     let colors = nm
         .iter()
         .find(|e| kind(e) == 5)

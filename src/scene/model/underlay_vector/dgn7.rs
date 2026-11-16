@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use super::model::{
     arc_cubics, bspline_points, dgn_color_table, paths_bounds, scaled_elements, By, DgnCollector,
     DgnColor, DgnElement, DgnGeom, DgnImport, Path, PathBuilder, Segment, Sheet, SubPath, Text,
-    DGN_DEFAULT_COLORS,
+    DGN_DEFAULT_COLORS, DGN_PLACEMENT_BUDGET,
 };
 
 /// A 32-bit integer stored as two little-endian words, high word first.
@@ -834,8 +834,16 @@ fn compose(outer: &Affine, inner: &Affine) -> Affine {
     ]
 }
 
-/// Places raw geometry (and the shared cells it instances) through `m`.
-fn place(raw: &Raw, m: &Affine, defs: &HashMap<String, Raw>, depth: usize, out: &mut Sheet) {
+/// Places raw geometry (and the shared cells it instances) through `m`;
+/// the instances spend `budget` (see [`DGN_PLACEMENT_BUDGET`]).
+fn place(
+    raw: &Raw,
+    m: &Affine,
+    defs: &HashMap<String, Raw>,
+    depth: usize,
+    out: &mut Sheet,
+    budget: &mut usize,
+) {
     let map = |p: [f64; 2]| apply(m, p);
     for path in &raw.paths {
         out.paths.push(Path {
@@ -877,6 +885,11 @@ fn place(raw: &Raw, m: &Affine, defs: &HashMap<String, Raw>, depth: usize, out: 
         let Some(def) = defs.get(&inst.name.to_ascii_uppercase()) else {
             continue;
         };
+        let cost = 1 + def.paths.len() + def.texts.len() + def.instances.len();
+        let Some(left) = budget.checked_sub(cost) else {
+            return;
+        };
+        *budget = left;
         let local: Affine = [
             inst.m[0],
             inst.m[1],
@@ -885,7 +898,7 @@ fn place(raw: &Raw, m: &Affine, defs: &HashMap<String, Raw>, depth: usize, out: 
             inst.origin[0],
             inst.origin[1],
         ];
-        place(def, &compose(m, &local), defs, depth + 1, out);
+        place(def, &compose(m, &local), defs, depth + 1, out, budget);
     }
 }
 
@@ -1024,7 +1037,8 @@ pub fn model(bytes: &[u8], hidden: &[String], code_page: Option<u16>) -> Option<
         table_colors,
         ..Default::default()
     };
-    place(&raw, &m, &defs, 0, &mut sheet);
+    let mut budget = DGN_PLACEMENT_BUDGET;
+    place(&raw, &m, &defs, 0, &mut sheet, &mut budget);
     sheet.rect = paths_bounds(&sheet.paths).or_else(|| {
         let t = sheet.texts.first()?;
         Some([

@@ -10,7 +10,7 @@ use std::io::Read;
 use super::model::{
     arc_cubics, bspline_points, dgn_color_table, paths_bounds, scaled_elements, By, DgnCollector,
     DgnColor, DgnDimLook, DgnDimStyle, DgnElement, DgnGeom, DgnImport, DgnReference, Path,
-    PathBuilder, Segment, Sheet, SubPath, Text, DGN_DEFAULT_COLORS,
+    PathBuilder, Segment, Sheet, SubPath, Text, DGN_DEFAULT_COLORS, DGN_PLACEMENT_BUDGET,
 };
 
 // ── Compound file ───────────────────────────────────────────────────────────
@@ -1445,7 +1445,8 @@ fn apply(m: &Affine, p: [f64; 2]) -> [f64; 2] {
 }
 
 /// Places plan geometry through the sheet mapping `m`, and the shared cells
-/// it instances (each definition read through its own placement).
+/// it instances (each definition read through its own placement); the
+/// instances spend `budget` (see [`DGN_PLACEMENT_BUDGET`]).
 fn place(
     raw: &Raw,
     m: &Affine,
@@ -1453,6 +1454,7 @@ fn place(
     styles: &Styles,
     depth: usize,
     out: &mut Sheet,
+    budget: &mut usize,
 ) {
     let map = |p: [f64; 2]| apply(m, p);
     for path in &raw.paths {
@@ -1495,6 +1497,11 @@ fn place(
         let Some(def) = defs.get(&inst.name) else {
             continue;
         };
+        // Each instance reads its definition's elements again.
+        let Some(left) = budget.checked_sub(1 + def.len()) else {
+            return;
+        };
+        *budget = left;
         place(
             &read_run(def, styles, &inst.xf),
             m,
@@ -1502,6 +1509,7 @@ fn place(
             styles,
             depth + 1,
             out,
+            budget,
         );
     }
 }
@@ -1744,7 +1752,8 @@ pub fn model(bytes: &[u8], name: &str, hidden: &[String]) -> Option<Sheet> {
         table_colors,
         ..Default::default()
     };
-    place(&raw, &m, &defs, &styles, 0, &mut sheet);
+    let mut budget = DGN_PLACEMENT_BUDGET;
+    place(&raw, &m, &defs, &styles, 0, &mut sheet, &mut budget);
     // The model's extent is its elements' stored ranges (text by its full
     // box), as the reference sizes a model.
     sheet.rect = match stored_range(&graphics) {

@@ -993,3 +993,310 @@ fn odd_values_never_panic() {
     }
     assert_eq!(runs, 32 * 3 * 3 * 2);
 }
+
+// ── The PDFIMPORT command's prompts ─────────────────────────────────────────
+
+fn fixture(path: &str) -> String {
+    format!("{}/tests/fixtures/{path}", env!("CARGO_MANIFEST_DIR"))
+}
+
+/// Types `text` at the command's prompt.
+fn typed(command: &mut PdfImportCommand, text: &str) -> CmdResult {
+    command
+        .on_text_input(text)
+        .unwrap_or_else(|| panic!("{text:?} not taken at {:?}", command.prompt()))
+}
+
+fn error(result: CmdResult) -> String {
+    match result {
+        CmdResult::ReportError(message) => message,
+        _ => panic!("not an error"),
+    }
+}
+
+fn measurement(result: CmdResult) -> String {
+    match result {
+        CmdResult::ReportMeasurement(message) => message,
+        _ => panic!("not a report"),
+    }
+}
+
+fn needs_point(result: CmdResult) -> bool {
+    matches!(result, CmdResult::NeedPoint)
+}
+
+/// -PDFIMPORT at the File option, the Inkscape fixture read and its page
+/// asked for.
+fn at_page() -> PdfImportCommand {
+    let mut command = PdfImportCommand::command_line();
+    assert_eq!(command.prompt(), "Select PDF underlay or [File] <File>:");
+    assert!(needs_point(command.on_enter()));
+    assert_eq!(command.prompt(), "Enter filename for PDF import:");
+    assert!(needs_point(typed(
+        &mut command,
+        &fixture("pdf/inkscape.pdf")
+    )));
+    assert_eq!(command.prompt(), "Enter page number or [?] <1>:");
+    command
+}
+
+#[test]
+fn the_file_option_asks_for_the_page_insertion_scale_and_rotation() {
+    let mut command = at_page();
+    // `?` lists the pages, or finds one.
+    assert!(needs_point(typed(&mut command, "?")));
+    assert_eq!(command.prompt(), "Enter page to list <*>:");
+    assert_eq!(measurement(typed(&mut command, "*")), "1");
+    assert!(needs_point(typed(&mut command, "?")));
+    assert_eq!(measurement(typed(&mut command, "1")), "Found page 1.");
+    assert!(needs_point(typed(&mut command, "?")));
+    assert_eq!(
+        measurement(typed(&mut command, "7")),
+        "No matching page found."
+    );
+    // Enter takes page 1.
+    assert!(needs_point(command.on_enter()));
+    assert_eq!(command.prompt(), "Specify insertion point <0,0>:");
+    assert!(needs_point(command.on_point(DVec3::new(10.0, 20.0, 0.0))));
+    assert_eq!(command.prompt(), "Specify scale factor <1.0>:");
+    assert!(needs_point(typed(&mut command, "2")));
+    assert_eq!(command.prompt(), "Specify rotation <0>:");
+    let CmdResult::PdfImportFile(import) = typed(&mut command, "90") else {
+        panic!("no import");
+    };
+    assert_eq!(import.path, fixture("pdf/inkscape.pdf"));
+    assert_eq!(import.page, "1");
+    assert_eq!(import.insertion, DVec3::new(10.0, 20.0, 0.0));
+    assert_eq!(import.scale, 2.0);
+    assert!((import.rotation - FRAC_PI_2).abs() < 1e-12);
+
+    // A name without its extension is a PDF file; a second point gives the
+    // scale, then the angle, from the insertion point.
+    let mut command = PdfImportCommand::command_line();
+    let _ = command.on_enter();
+    let stem = fixture("pdf/inkscape");
+    assert!(needs_point(typed(&mut command, &stem)));
+    assert!(needs_point(typed(&mut command, "1")));
+    let at = DVec3::new(1.0, 1.0, 0.0);
+    let _ = command.on_point(at);
+    assert!(needs_point(
+        command.on_point(at + DVec3::new(3.0, 4.0, 0.0))
+    ));
+    let CmdResult::PdfImportFile(import) = command.on_point(at + DVec3::new(0.0, 2.0, 0.0)) else {
+        panic!("no import");
+    };
+    assert_eq!(import.path, format!("{stem}.pdf"));
+    assert_eq!(import.scale, 5.0);
+    assert!((import.rotation - FRAC_PI_2).abs() < 1e-12);
+
+    // Enter at each step takes the defaults: page 1, the origin, 1 and 0.
+    let mut command = at_page();
+    for _ in 0..4 {
+        if let CmdResult::PdfImportFile(import) = command.on_enter() {
+            assert_eq!(
+                (import.insertion, import.scale, import.rotation),
+                (DVec3::ZERO, 1.0, 0.0)
+            );
+            return;
+        }
+    }
+    panic!("no import after the defaults");
+}
+
+#[test]
+fn the_file_option_refuses_what_it_cannot_use() {
+    let mut command = PdfImportCommand::command_line();
+    let _ = command.on_enter();
+    assert_eq!(error(command.on_enter()), "Filename cannot be blank");
+    let missing = fixture("pdf/missing.pdf");
+    assert!(error(typed(&mut command, &missing)).ends_with("missing.pdf does not exist."));
+    // A file that is no PDF (it has no trailer) cannot be opened.
+    let not_pdf = error(typed(&mut command, &fixture("pdf/README.md")));
+    assert!(
+        not_pdf.starts_with("This file cannot be opened."),
+        "{not_pdf}"
+    );
+    // Still at the file name.
+    assert_eq!(command.prompt(), "Enter filename for PDF import:");
+    // A PDF with its objects but no cross-reference table or trailer, as
+    // one cut off before its end: refused, though the interpreter could
+    // rebuild it.
+    let cut_off = "%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n\
+                   2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n\
+                   3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] >>\nendobj\n";
+    let path = std::env::temp_dir().join(format!("pdfimport-test-cut-{}.pdf", std::process::id()));
+    std::fs::write(&path, cut_off).unwrap();
+    let message = error(typed(&mut command, path.to_str().unwrap()));
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        message.starts_with("This file cannot be opened."),
+        "{message}"
+    );
+
+    let mut command = at_page();
+    assert_eq!(
+        error(typed(&mut command, "x")),
+        "Please enter page number or '?'."
+    );
+    assert_eq!(
+        error(typed(&mut command, "-1")),
+        "Please enter page number or '?'."
+    );
+    // Zero is asked again without a message.
+    assert!(needs_point(typed(&mut command, "0")));
+    assert_eq!(command.prompt(), "Enter page number or [?] <1>:");
+    assert!(error(typed(&mut command, "2")).starts_with("There is no 2 in "));
+    assert!(needs_point(typed(&mut command, "?")));
+    assert_eq!(
+        error(typed(&mut command, "x")),
+        "Please enter page number or *."
+    );
+
+    let mut command = at_page();
+    let _ = command.on_enter();
+    let _ = command.on_enter();
+    assert_eq!(
+        error(typed(&mut command, "0")),
+        "Value must be positive and nonzero."
+    );
+    assert_eq!(
+        error(typed(&mut command, "big")),
+        "Requires numeric distance or second point."
+    );
+    // A second point on the insertion point is a scale of 0.
+    assert_eq!(
+        error(command.on_point(DVec3::ZERO)),
+        "Value must be positive and nonzero."
+    );
+    let _ = command.on_enter();
+    assert_eq!(
+        error(typed(&mut command, "steep")),
+        "Requires valid numeric angle or second point."
+    );
+}
+
+/// A PDF underlay, as the command is handed it when one is picked.
+fn pdf_underlay() -> EntityType {
+    EntityType::Underlay(Underlay::pdf())
+}
+
+#[test]
+fn an_underlay_is_imported_by_its_area_and_what_becomes_of_it() {
+    let handle = Handle::new(42);
+    // Only a PDF underlay can be picked.
+    let mut command = PdfImportCommand::new();
+    assert!(command.needs_entity_pick());
+    command.inject_picked_entity(EntityType::Line(document::entities::Line::new()));
+    assert_eq!(
+        error(command.on_entity_pick(handle, DVec3::ZERO)),
+        "Object selected was not a PDF underlay."
+    );
+    command.inject_picked_entity(pdf_underlay());
+    assert!(needs_point(command.on_entity_pick(handle, DVec3::ZERO)));
+    assert_eq!(
+        command.prompt(),
+        "Specify first corner of area to import or [Polygonal/All/Settings] <All>:"
+    );
+
+    // Two corners give a rectangle; Keep.
+    let a = DVec3::new(1.0, 2.0, 0.0);
+    let b = DVec3::new(5.0, 7.0, 0.0);
+    let _ = command.on_point(a);
+    assert_eq!(command.prompt(), "Specify opposite corner:");
+    let _ = command.on_point(b);
+    assert_eq!(
+        command.prompt(),
+        "Keep, Detach or Unload PDF underlay? [Keep/Detach/Unload] <Unload>:"
+    );
+    assert_eq!(error(typed(&mut command, "X")), "Invalid option keyword.");
+    let CmdResult::PdfImport(request) = typed(&mut command, "K") else {
+        panic!("no import");
+    };
+    assert_eq!(request.underlay, handle);
+    assert_eq!(request.mode, UnderlayMode::Keep);
+    assert_eq!(
+        request.area,
+        ImportArea::Polygon(vec![
+            a,
+            DVec3::new(5.0, 2.0, 0.0),
+            b,
+            DVec3::new(1.0, 7.0, 0.0)
+        ])
+    );
+
+    // A polygon, its last point taken back; All; the other modes.
+    let mut command = PdfImportCommand::for_underlay(handle);
+    assert_eq!(error(typed(&mut command, "Z")), "Invalid option keyword.");
+    assert!(matches!(
+        typed(&mut command, "S"),
+        CmdResult::OpenPdfImportSettings
+    ));
+    assert!(needs_point(typed(&mut command, "P")));
+    assert_eq!(command.prompt(), "Specify first point:");
+    let corners = [
+        DVec3::new(0.0, 0.0, 0.0),
+        DVec3::new(4.0, 0.0, 0.0),
+        DVec3::new(9.0, 9.0, 0.0),
+        DVec3::new(0.0, 4.0, 0.0),
+    ];
+    for p in &corners[..3] {
+        let _ = command.on_point(*p);
+    }
+    assert_eq!(command.prompt(), "Specify next point or [Undo]:");
+    let _ = typed(&mut command, "U");
+    let _ = command.on_point(corners[3]);
+    let _ = command.on_enter();
+    let CmdResult::PdfImport(request) = typed(&mut command, "D") else {
+        panic!("no import");
+    };
+    assert_eq!(
+        request.area,
+        ImportArea::Polygon(vec![corners[0], corners[1], corners[3]])
+    );
+    assert_eq!(request.mode, UnderlayMode::Detach);
+    // Fewer than three points is no polygon yet.
+    let mut command = PdfImportCommand::for_underlay(handle);
+    let _ = typed(&mut command, "P");
+    let _ = command.on_point(corners[0]);
+    let _ = command.on_point(corners[1]);
+    let _ = command.on_enter();
+    assert_eq!(command.prompt(), "Specify next point or [Undo]:");
+
+    let mut command = PdfImportCommand::for_underlay(handle);
+    let _ = command.on_enter();
+    let CmdResult::PdfImport(request) = command.on_enter() else {
+        panic!("no import");
+    };
+    assert_eq!(
+        (request.area, request.mode),
+        (ImportArea::All, UnderlayMode::Unload)
+    );
+}
+
+#[test]
+fn a_file_import_is_placed_at_its_point_scale_and_rotation() {
+    let import = PdfFileImport {
+        path: fixture("pdf/inkscape.pdf"),
+        page: "1".to_string(),
+        scale: 2.5,
+        rotation: 0.5,
+        insertion: DVec3::new(3.0, 4.0, 5.0),
+    };
+    crate::scene::model::pdf_raster::register_source(
+        &import.path,
+        std::sync::Arc::new(std::fs::read(&import.path).unwrap()),
+    );
+    let u = import.placement();
+    assert_eq!(u.underlay_type, UnderlayType::Pdf);
+    assert_eq!(
+        (
+            u.insertion_point.x,
+            u.insertion_point.y,
+            u.insertion_point.z
+        ),
+        (3.0, 4.0, 5.0)
+    );
+    // A page without a viewport measure: one drawing unit per page inch.
+    assert_eq!((u.x_scale, u.y_scale), (2.5, 2.5));
+    assert_eq!(u.rotation, 0.5);
+}

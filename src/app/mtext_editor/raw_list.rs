@@ -577,6 +577,12 @@ impl OpenCADStudio {
                 + marker_text(item.kind, number, item.style).chars().count();
             Ok(TextEdit { raw, caret })
         });
+        // Leaving the list also breaks the paragraph: the emptied item stays
+        // as a plain empty paragraph and the caret goes on below it.
+        if empty {
+            self.raw_type("
+", false);
+        }
         true
     }
 

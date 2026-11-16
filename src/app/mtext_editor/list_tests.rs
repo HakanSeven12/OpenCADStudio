@@ -105,13 +105,14 @@ fn enter_on_an_empty_item_leaves_the_list() {
     app.mtext_type("\n");
     assert_eq!(texts(&app), ["·\ta", "·\tb", "·\t"]);
     app.mtext_type("\n");
-    assert_eq!(texts(&app), ["·\ta", "·\tb", ""]);
+    // The emptied item stays as a plain empty paragraph and the caret goes
+    // on in a new one below it.
+    assert_eq!(texts(&app), ["·\ta", "·\tb", "", ""]);
     assert_eq!(ed(&app).list_kind(), None);
     let source = raw(&app);
-    assert!(source.ends_with(r"\P\pi0,l0,tz;"), "{source}");
-    // Typing goes on in a plain paragraph.
+    assert!(source.ends_with(r"\P\pi0,l0,tz;\P"), "{source}");
     app.mtext_type("z");
-    assert_eq!(texts(&app), ["·\ta", "·\tb", "z"]);
+    assert_eq!(texts(&app), ["·\ta", "·\tb", "", "z"]);
 }
 
 #[test]

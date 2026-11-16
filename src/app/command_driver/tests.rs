@@ -10045,3 +10045,46 @@ mod scale_rotate_copy_tests {
         assert_eq!(vertical, 1, "the duplicate is rotated 90 degrees");
     }
 }
+
+#[cfg(test)]
+mod attedit_editor_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::{AttributeEntity, Insert};
+    use document::types::Vector3;
+
+    fn attributed_insert() -> (OpenCADStudio, document::Handle) {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut insert = Insert::new("TITLEBLOCK", Vector3::new(0.0, 0.0, 0.0));
+        insert
+            .attributes
+            .push(AttributeEntity::new("TITLE".into(), "old".into()));
+        let handle = app.tabs[i].scene.add_entity(document::EntityType::Insert(insert));
+        (app, handle)
+    }
+
+    /// Bare ATTEDIT opens the interactive attribute editor on the
+    /// selected reference instead of ending silently: the editor's rows
+    /// list the reference's attributes with their current values.
+    #[test]
+    fn attedit_opens_the_editor_on_the_selected_reference() {
+        let (mut app, handle) = attributed_insert();
+        let i = app.active_tab;
+        app.tabs[i].scene.select_entities(&[handle]);
+
+        let _ = app.run_command_line("ATTEDIT");
+
+        assert_eq!(
+            app.attr_editor_rows.len(),
+            1,
+            "the editor opened on the reference's one attribute"
+        );
+        assert_eq!(
+            app.attr_editor_rows[0].value,
+            "old",
+            "the row shows the attribute's current value"
+        );
+    }
+}

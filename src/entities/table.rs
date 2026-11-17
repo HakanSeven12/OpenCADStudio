@@ -2809,8 +2809,6 @@ pub fn tessellate_table(
             WireModel {
                 bg_adapt: None,
                 point_marker: None,
-                taper_widths: Vec::new(),
-                pattern_stations: Vec::new(),
                 world_width: 0.0,
                 depth_override: None,
                 display_visible: true,
@@ -2820,32 +2818,36 @@ pub fn tessellate_table(
                 fill_is_2d_solid: false,
                 solid_normal: None,
                 render_instance: None,
-                pick_tris: Vec::new(),
-                pick_tris_low: Vec::new(),
                 dash_from_start: false,
-                text_verts: Vec::new(),
                 name: name.clone(),
-                points,
-                points_low: Vec::new(),
                 color,
                 selected,
                 pattern_length: 0.0,
                 pattern: [0.0; 8],
                 line_weight_px: lw,
                 aci: 0,
-                snap_pts: vec![],
-                tangent_geoms: vec![],
-                key_vertices: vec![],
                 aabb: WireModel::UNBOUNDED_AABB,
                 plinegen: true,
-                fill_tris,
-                // fill_tris_low intentionally empty: this fill renders on the
-                // top-level path, where consumers (face3d_gpu, xclip) treat a
-                // short low half as all-zero, so it draws at f32 precision
-                // (sub-metre error at UTM scale) — not a crash. Follow-up:
-                // double-single-split via points_to_ds to match emit_wire.
-                fill_tris_low: Vec::new(),
-
+                geom: std::sync::Arc::new(crate::scene::WireGeom {
+                    taper_widths: Vec::new(),
+                    pattern_stations: Vec::new(),
+                    pick_tris: Vec::new(),
+                    pick_tris_low: Vec::new(),
+                    text_verts: Vec::new(),
+                    points,
+                    points_low: Vec::new(),
+                    snap_pts: vec![],
+                    tangent_geoms: vec![],
+                    key_vertices: vec![],
+                    fill_tris,
+                    // fill_tris_low intentionally empty: this fill renders on the
+                    // top-level path, where consumers (face3d_gpu, xclip) treat a
+                    // short low half as all-zero, so it draws at f32 precision
+                    // (sub-metre error at UTM scale) — not a crash. Follow-up:
+                    // double-single-split via points_to_ds to match emit_wire.
+                    fill_tris_low: Vec::new(),
+                    ..crate::scene::WireGeom::default()
+                }),
                 ..Default::default()
             }
         };

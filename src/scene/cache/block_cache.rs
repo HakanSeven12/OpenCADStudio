@@ -1817,6 +1817,7 @@ fn tessellate_sub_local(
         if wire.points.len() > 100_000 {
             continue;
         }
+        let geom = std::sync::Arc::unwrap_or_clone(wire.geom);
 
         // Geometry is stored absolute; the double-single (high/low) render path
         // keeps it precise at UTM scale, so no per-defn offset is subtracted.
@@ -1828,14 +1829,14 @@ fn tessellate_sub_local(
         // only around `points` would make a block child's thickness wall or wide
         // polyline band unpickable — `points` merely bounds those.
         let aabb_local = aabb_from_points_iter(
-            wire.points
+            geom.points
                 .iter()
                 .copied()
-                .chain(wire.fill_tris.iter().copied())
-                .chain(wire.pick_tris.iter().copied())
-                .chain(wire.text_verts.iter().map(|v| v.pos)),
+                .chain(geom.fill_tris.iter().copied())
+                .chain(geom.pick_tris.iter().copied())
+                .chain(geom.text_verts.iter().map(|v| v.pos)),
         );
-        let is_fill_only = wire.points.is_empty() && !wire.fill_tris.is_empty();
+        let is_fill_only = geom.points.is_empty() && !geom.fill_tris.is_empty();
         let mtext_has_background = matches!(
             sub,
             EntityType::MText(text) if text.background_fill_flags & 0x01 != 0
@@ -1847,7 +1848,7 @@ fn tessellate_sub_local(
                 EntityType::MText(text) if text.background_fill_flags & 0x02 != 0
             );
         let contrast_bg =
-            if !preserve_color && (!wire.text_verts.is_empty() || !wire.points.is_empty()) {
+            if !preserve_color && (!geom.text_verts.is_empty() || !geom.points.is_empty()) {
                 tessellate::explicit_mtext_background(sub)
             } else {
                 None
@@ -1864,9 +1865,9 @@ fn tessellate_sub_local(
         // walk.
         let complex_walk = if !(walks_complex || walks_whole_path)
             || wire.snap_only
-            || wire.points.len() < 2
-            || (!walks_whole_path && (wire.world_width != 0.0 || !wire.taper_widths.is_empty()))
-            || !wire.fill_tris.is_empty()
+            || geom.points.len() < 2
+            || (!walks_whole_path && (wire.world_width != 0.0 || !geom.taper_widths.is_empty()))
+            || !geom.fill_tris.is_empty()
         {
             ComplexWalk::None
         } else if let Some((path, closure, band)) = polyline_path.take() {
@@ -1924,7 +1925,7 @@ fn tessellate_sub_local(
                         )
                     };
                     let inherited_l0 = bylayer && on_l0;
-                    let walks = wire.points.len() >= 2
+                    let walks = geom.points.len() >= 2
                         && (own.is_some() || (complex_possible && (byblock || inherited_l0)));
                     (
                         byblock,
@@ -1940,22 +1941,22 @@ fn tessellate_sub_local(
                 None => (lt_is_byblock, lt_l0, own_complex.clone(), complex_walk),
             };
         result.push(LocalWire {
-            points: wire.points,
-            points_low: wire.points_low,
+            points: geom.points,
+            points_low: geom.points_low,
             is_point: matches!(sub, EntityType::Point(_)),
             point_marker: wire.point_marker,
-            text_verts: wire.text_verts,
-            searchable_text: wire.searchable_text,
-            key_vertices: wire.key_vertices,
-            snap_pts: wire.snap_pts,
-            tangent_geoms: wire.tangent_geoms,
-            fill_tris: wire.fill_tris,
-            fill_tris_low: wire.fill_tris_low,
+            text_verts: geom.text_verts,
+            searchable_text: geom.searchable_text,
+            key_vertices: geom.key_vertices,
+            snap_pts: geom.snap_pts,
+            tangent_geoms: geom.tangent_geoms,
+            fill_tris: geom.fill_tris,
+            fill_tris_low: geom.fill_tris_low,
             fill_is_3d: wire.fill_is_3d,
             fill_is_2d_solid: wire.fill_is_2d_solid,
             solid_normal: wire.solid_normal,
-            pick_tris: wire.pick_tris,
-            pick_tris_low: wire.pick_tris_low,
+            pick_tris: geom.pick_tris,
+            pick_tris_low: geom.pick_tris_low,
             color: wire_color,
             layer_locked,
             contrast_bg,
@@ -1965,9 +1966,9 @@ fn tessellate_sub_local(
             pattern_length: wire_pattern_length,
             pattern: wire_pattern,
             line_weight_px: lw_px,
-            pattern_stations: wire.pattern_stations,
+            pattern_stations: geom.pattern_stations,
             world_width: wire.world_width,
-            taper_widths: wire.taper_widths,
+            taper_widths: geom.taper_widths,
             plinegen: wire.plinegen,
             snap_only: wire.snap_only,
             region_boundary_click: wire.region_boundary_click,
@@ -2558,9 +2559,10 @@ pub(crate) fn translated_prototype_wire(
             instance.translation[axis] += delta[axis];
         }
     }
-    translate_double_single(&mut wire.points, &mut wire.points_low, delta);
-    translate_double_single(&mut wire.fill_tris, &mut wire.fill_tris_low, delta);
-    translate_double_single(&mut wire.pick_tris, &mut wire.pick_tris_low, delta);
+    let geom = wire.geom_mut();
+    translate_double_single(&mut geom.points, &mut geom.points_low, delta);
+    translate_double_single(&mut geom.fill_tris, &mut geom.fill_tris_low, delta);
+    translate_double_single(&mut geom.pick_tris, &mut geom.pick_tris_low, delta);
     if let Some(marker) = &mut wire.point_marker {
         marker.origin += glam::DVec3::from_array(delta);
     }
@@ -3129,8 +3131,6 @@ impl Batches {
                 WireModel {
                     bg_adapt,
                     point_marker: b.point_marker,
-                    taper_widths: b.taper_widths,
-                    pattern_stations: b.pattern_stations,
                     world_width: b.world_width,
                     depth_override: b.local_depth,
                     display_visible: !b.snap_only && (!b.hide_unselected || selected),
@@ -3143,31 +3143,36 @@ impl Batches {
                     solid_normal: b.solid_normal,
                     render_instance: None,
                     stub: None,
-                    pick_tris: b.pick_tris,
-                    pick_tris_low: b.pick_tris_low,
                     dash_from_start: false,
                     element_linetype: None,
                     element_color: None,
                     dash_closure: b.dash_closure,
-                    text_verts: b.text_verts,
-                    searchable_text: b.searchable_text,
                     name: name.to_string(),
                     effective_layer: b.effective_layer,
-                    points: b.points,
-                    points_low: b.points_low,
                     color,
                     selected,
                     pattern_length: b.pattern_length,
                     pattern: b.pattern,
                     line_weight_px: b.line_weight_px,
                     aci: b.aci,
-                    snap_pts: b.snap_pts,
-                    tangent_geoms: b.tangent_geoms,
-                    key_vertices: b.key_vertices,
                     aabb,
                     plinegen: b.plinegen,
-                    fill_tris: b.fill_tris,
-                    fill_tris_low: b.fill_tris_low,
+                    geom: std::sync::Arc::new(crate::scene::WireGeom {
+                        taper_widths: b.taper_widths,
+                        pattern_stations: b.pattern_stations,
+                        pick_tris: b.pick_tris,
+                        pick_tris_low: b.pick_tris_low,
+                        text_verts: b.text_verts,
+                        searchable_text: b.searchable_text,
+                        points: b.points,
+                        points_low: b.points_low,
+                        snap_pts: b.snap_pts,
+                        tangent_geoms: b.tangent_geoms,
+                        key_vertices: b.key_vertices,
+                        fill_tris: b.fill_tris,
+                        fill_tris_low: b.fill_tris_low,
+                        ..crate::scene::WireGeom::default()
+                    }),
                 }
             })
             .collect();
@@ -3872,12 +3877,13 @@ fn emit_complex_walk(
     };
     for wire in walked {
         let mut piece = plain.clone();
-        piece.points = wire.points;
-        piece.points_low = wire.points_low;
+        let geom = std::sync::Arc::unwrap_or_clone(wire.geom);
+        piece.points = geom.points;
+        piece.points_low = geom.points_low;
         piece.world_width = wire.world_width;
-        piece.taper_widths = wire.taper_widths;
-        piece.text_verts = wire.text_verts;
-        piece.searchable_text = wire.searchable_text;
+        piece.taper_widths = geom.taper_widths;
+        piece.text_verts = geom.text_verts;
+        piece.searchable_text = geom.searchable_text;
         emit_wire(&piece, &identity, ctx, out, d_range, None);
     }
 }
@@ -4447,8 +4453,6 @@ fn emit_wire(
                 let wire = WireModel {
                     bg_adapt,
                     point_marker: lw.point_marker,
-                    taper_widths: final_taper_widths,
-                    pattern_stations: Vec::new(),
                     world_width: final_world_width,
                     depth_override: local_depth,
                     display_visible: !lw.snap_only && (!lw.hide_unselected || ctx.selected),
@@ -4459,29 +4463,33 @@ fn emit_wire(
                     fill_is_2d_solid: false,
                     solid_normal: None,
                     render_instance: None,
-                    pick_tris: Vec::new(),
-                    pick_tris_low: Vec::new(),
                     dash_from_start: false,
                     dash_closure: lw.dash_closure,
-                    text_verts: Vec::new(),
                     name: String::new(),
                     effective_layer: Some(Arc::clone(&effective_layer)),
-                    points,
-                    points_low,
                     color,
                     selected: ctx.selected,
                     pattern_length: final_pat_len,
                     pattern: final_pat,
                     line_weight_px: final_lw_px,
                     aci: final_aci,
-                    snap_pts,
-                    tangent_geoms: tangents,
-                    key_vertices,
                     aabb,
                     plinegen: lw.plinegen,
-                    fill_tris: Vec::new(),
-                    fill_tris_low: Vec::new(),
-
+                    geom: std::sync::Arc::new(crate::scene::WireGeom {
+                        taper_widths: final_taper_widths,
+                        pattern_stations: Vec::new(),
+                        pick_tris: Vec::new(),
+                        pick_tris_low: Vec::new(),
+                        text_verts: Vec::new(),
+                        points,
+                        points_low,
+                        snap_pts,
+                        tangent_geoms: tangents,
+                        key_vertices,
+                        fill_tris: Vec::new(),
+                        fill_tris_low: Vec::new(),
+                        ..crate::scene::WireGeom::default()
+                    }),
                     ..Default::default()
                 };
                 out.extra_wires.push(wire);

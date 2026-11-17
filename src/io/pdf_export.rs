@@ -3646,7 +3646,10 @@ mod tests {
         push_glyph_vertices(&mut verts, &quads, origin, 1.0, [1.0, 0.0, 0.0, 1.0], 0.0);
         PlotWire {
             wire: WireModel {
-                text_verts: verts,
+                geom: std::sync::Arc::new(crate::scene::WireGeom {
+                    text_verts: verts,
+                    ..crate::scene::WireGeom::default()
+                }),
                 ..WireModel::solid("t".into(), Vec::new(), WireModel::WHITE, false)
             },
             draw_depth: 0.0,
@@ -3656,7 +3659,10 @@ mod tests {
     // Draw ops `emit_text` produces for one run of glyph vertices.
     fn glyph_draw_ops(verts: &[crate::scene::pipeline::text_gpu::TextVertex]) -> usize {
         let wire = WireModel {
-            text_verts: verts.to_vec(),
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                text_verts: verts.to_vec(),
+                ..crate::scene::WireGeom::default()
+            }),
             ..WireModel::solid("t".into(), Vec::new(), WireModel::WHITE, false)
         };
         let mut ops = Vec::new();
@@ -3681,7 +3687,9 @@ mod tests {
     // and not a panic.
     #[test]
     fn every_glyph_quad_is_drawn_and_a_partial_trailing_quad_is_ignored() {
-        let verts = text_wire("HELLO", [20.0, 20.0, 0.0]).wire.text_verts;
+        let verts =
+            std::sync::Arc::unwrap_or_clone(text_wire("HELLO", [20.0, 20.0, 0.0]).wire.geom)
+                .text_verts;
         assert_eq!(verts.len() % 6, 0);
         let per_quad: Vec<usize> = verts.chunks(6).map(glyph_draw_ops).collect();
         assert_eq!(per_quad.len(), 5, "one quad per glyph");
@@ -3721,16 +3729,19 @@ mod tests {
         use crate::scene::model::wire_model::SearchableTextRun;
         PlotWire {
             wire: WireModel {
-                searchable_text: vec![SearchableTextRun {
-                    text: text.to_string(),
-                    origin,
-                    height: 10.0,
-                    rotation: 0.0,
-                    color: [0.0, 0.0, 0.0, 1.0],
-                    bold: false,
-                    font: "txt".into(),
-                    adv_width: 10.0 * text.chars().count().max(1) as f32,
-                }],
+                geom: std::sync::Arc::new(crate::scene::WireGeom {
+                    searchable_text: vec![SearchableTextRun {
+                        text: text.to_string(),
+                        origin,
+                        height: 10.0,
+                        rotation: 0.0,
+                        color: [0.0, 0.0, 0.0, 1.0],
+                        bold: false,
+                        font: "txt".into(),
+                        adv_width: 10.0 * text.chars().count().max(1) as f32,
+                    }],
+                    ..crate::scene::WireGeom::default()
+                }),
                 ..WireModel::solid("t".into(), Vec::new(), WireModel::WHITE, false)
             },
             draw_depth: 0.0,
@@ -3788,9 +3799,10 @@ mod tests {
             let mut outline_only = text_wire("HELLO", [20.0, 20.0, 0.0]);
             outline_only.wire.searchable_text.clear();
             let mut searchable = text_wire("HELLO", [20.0, 20.0, 0.0]);
-            searchable.wire.searchable_text = searchable_wire("HELLO", [20.0, 20.0, 0.0])
-                .wire
-                .searchable_text;
+            searchable.wire.searchable_text = std::sync::Arc::unwrap_or_clone(
+                searchable_wire("HELLO", [20.0, 20.0, 0.0]).wire.geom,
+            )
+            .searchable_text;
 
             // Outlines are never suppressed: both wires keep their glyph quads.
             assert!(
@@ -4024,7 +4036,10 @@ mod tests {
                 );
                 let wire = PlotWire {
                     wire: WireModel {
-                        text_verts: verts,
+                        geom: std::sync::Arc::new(crate::scene::WireGeom {
+                            text_verts: verts,
+                            ..crate::scene::WireGeom::default()
+                        }),
                         ..WireModel::solid("t".into(), Vec::new(), WireModel::WHITE, false)
                     },
                     draw_depth: 0.0,

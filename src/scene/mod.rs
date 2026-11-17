@@ -866,7 +866,7 @@ pub use model::hatch_model::HatchModel;
 pub use model::image_model::ImageModel;
 pub use model::mesh_model::MeshLodSet;
 pub use model::object::{GripApply, GripDef};
-pub use model::wire_model::WireModel;
+pub use model::wire_model::{WireGeom, WireModel};
 use pick::interaction_index::{InteractionCandidates, InteractionIndex, SnapQueryCategory};
 pub use pick::selection_state::SelectionState;
 pub use pipeline::uniforms::Uniforms;
@@ -20426,7 +20426,7 @@ mod layout_cache_tests {
                     only,
                 )
                 .into_iter()
-                .map(|wire| (wire.name, wire.points))
+                .map(|wire| (wire.name, std::sync::Arc::unwrap_or_clone(wire.geom).points))
                 .collect();
             wires.sort_by(|a, b| a.0.cmp(&b.0));
             wires

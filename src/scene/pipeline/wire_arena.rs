@@ -1792,7 +1792,10 @@ mod tests {
     fn wire_partition_excludes_blocks_and_preserves_mixed_run_edges() {
         let line = WireModel {
             name: "line".into(),
-            points: vec![[0.0; 3], [1.0, 0.0, 0.0]],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points: vec![[0.0; 3], [1.0, 0.0, 0.0]],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let mesh = WireModel {

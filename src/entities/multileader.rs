@@ -2258,8 +2258,9 @@ fn lift_wire_to_world(w: &mut crate::scene::model::wire_model::WireModel, origin
         *tris = hi;
         *low = lo;
     };
-    lift(&mut w.fill_tris, &mut w.fill_tris_low);
-    lift(&mut w.pick_tris, &mut w.pick_tris_low);
+    let geom = w.geom_mut();
+    lift(&mut geom.fill_tris, &mut geom.fill_tris_low);
+    lift(&mut geom.pick_tris, &mut geom.pick_tris_low);
     let offset = DVec3::from_array(origin);
     for (p, _) in &mut w.snap_pts {
         *p += offset;
@@ -2617,8 +2618,6 @@ impl MultiLeaderFrameTess for MultiLeader {
         wires.push(WireModel {
             bg_adapt: None,
             point_marker: None,
-            taper_widths: Vec::new(),
-            pattern_stations: Vec::new(),
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
@@ -2628,32 +2627,36 @@ impl MultiLeaderFrameTess for MultiLeader {
             fill_is_2d_solid: false,
             solid_normal: None,
             render_instance: None,
-            pick_tris: Vec::new(),
-            pick_tris_low: Vec::new(),
             dash_from_start: false,
-            text_verts: Vec::new(),
             name: name.clone(),
-            points,
-            points_low: Vec::new(),
             color: line_color,
             selected,
             aci: 0,
             pattern_length: leader_pat_len,
             pattern: leader_pat,
             line_weight_px: leader_lw_px,
-            snap_pts,
-            tangent_geoms: tangents,
-            key_vertices: key_verts,
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
-            fill_tris: arrow_fill,
-            // fill_tris_low intentionally empty: this fill renders on the
-            // top-level path, where consumers (face3d_gpu, xclip) treat a short
-            // low half as all-zero, so it draws at f32 precision (sub-metre
-            // error at UTM scale) — not a crash. Follow-up: double-single-split
-            // via points_to_ds to match emit_wire's paired fill path.
-            fill_tris_low: Vec::new(),
-
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                taper_widths: Vec::new(),
+                pattern_stations: Vec::new(),
+                pick_tris: Vec::new(),
+                pick_tris_low: Vec::new(),
+                text_verts: Vec::new(),
+                points,
+                points_low: Vec::new(),
+                snap_pts,
+                tangent_geoms: tangents,
+                key_vertices: key_verts,
+                fill_tris: arrow_fill,
+                // fill_tris_low intentionally empty: this fill renders on the
+                // top-level path, where consumers (face3d_gpu, xclip) treat a short
+                // low half as all-zero, so it draws at f32 precision (sub-metre
+                // error at UTM scale) — not a crash. Follow-up: double-single-split
+                // via points_to_ds to match emit_wire's paired fill path.
+                fill_tris_low: Vec::new(),
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         });
 
@@ -3061,8 +3064,6 @@ impl MultiLeaderFrameTess for MultiLeader {
                     wires.push(WireModel {
                         bg_adapt: None,
                         point_marker: None,
-                        taper_widths: Vec::new(),
-                        pattern_stations: Vec::new(),
                         world_width: 0.0,
                         depth_override: None,
                         display_visible: true,
@@ -3075,34 +3076,39 @@ impl MultiLeaderFrameTess for MultiLeader {
                         solid_normal: None,
                         render_instance: None,
                         stub: None,
-                        pick_tris: Vec::new(),
-                        pick_tris_low: Vec::new(),
                         dash_from_start: false,
                         element_linetype: None,
                         element_color: None,
                         dash_closure: Default::default(),
-                        text_verts: sdf_verts,
-                        searchable_text: searchable,
                         name: name.clone(),
                         effective_layer: None,
-                        points: deco_pts,
-                        points_low: Vec::new(),
                         color: neutral,
                         selected,
                         aci: 0,
                         pattern_length: 0.0,
                         pattern: [0.0; 8],
                         line_weight_px,
-                        snap_pts: vec![(
-                            glam::DVec3::new(local_ins_x as f64, local_ins_y as f64, z as f64),
-                            SnapHint::Node,
-                        )],
-                        tangent_geoms: vec![],
-                        key_vertices: vec![],
                         aabb: [nx as f32, ny as f32, xx as f32, xy as f32],
                         plinegen: true,
-                        fill_tris: deco_fill,
-                        fill_tris_low: Vec::new(),
+                        geom: std::sync::Arc::new(crate::scene::WireGeom {
+                            taper_widths: Vec::new(),
+                            pattern_stations: Vec::new(),
+                            pick_tris: Vec::new(),
+                            pick_tris_low: Vec::new(),
+                            text_verts: sdf_verts,
+                            searchable_text: searchable,
+                            points: deco_pts,
+                            points_low: Vec::new(),
+                            snap_pts: vec![(
+                                glam::DVec3::new(local_ins_x as f64, local_ins_y as f64, z as f64),
+                                SnapHint::Node,
+                            )],
+                            tangent_geoms: vec![],
+                            key_vertices: vec![],
+                            fill_tris: deco_fill,
+                            fill_tris_low: Vec::new(),
+                            ..crate::scene::WireGeom::default()
+                        }),
                     });
                 }
             }
@@ -3175,8 +3181,6 @@ impl MultiLeaderFrameTess for MultiLeader {
                 wires.push(WireModel {
                     bg_adapt: None,
                     point_marker: None,
-                    taper_widths: Vec::new(),
-                    pattern_stations: Vec::new(),
                     world_width: 0.0,
                     depth_override: None,
                     display_visible: true,
@@ -3186,27 +3190,31 @@ impl MultiLeaderFrameTess for MultiLeader {
                     fill_is_2d_solid: false,
                     solid_normal: None,
                     render_instance: None,
-                    pick_tris: Vec::new(),
-                    pick_tris_low: Vec::new(),
                     dash_from_start: false,
-                    text_verts: Vec::new(),
                     name: name.clone(),
-                    points: pts,
-                    points_low: Vec::new(),
                     color: line_color,
                     selected,
                     aci: 0,
                     pattern_length: 0.0,
                     pattern: [0.0; 8],
                     line_weight_px,
-                    snap_pts: vec![],
-                    tangent_geoms: vec![],
-                    key_vertices: vec![],
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
-                    fill_tris: vec![],
-                    fill_tris_low: Vec::new(),
-
+                    geom: std::sync::Arc::new(crate::scene::WireGeom {
+                        taper_widths: Vec::new(),
+                        pattern_stations: Vec::new(),
+                        pick_tris: Vec::new(),
+                        pick_tris_low: Vec::new(),
+                        text_verts: Vec::new(),
+                        points: pts,
+                        points_low: Vec::new(),
+                        snap_pts: vec![],
+                        tangent_geoms: vec![],
+                        key_vertices: vec![],
+                        fill_tris: vec![],
+                        fill_tris_low: Vec::new(),
+                        ..crate::scene::WireGeom::default()
+                    }),
                     ..Default::default()
                 });
             }
@@ -3276,8 +3284,6 @@ impl MultiLeaderFrameTess for MultiLeader {
                             })
                         }),
                         point_marker: None,
-                        taper_widths: Vec::new(),
-                        pattern_stations: Vec::new(),
                         world_width: 0.0,
                         depth_override: None,
                         display_visible: true,
@@ -3287,27 +3293,31 @@ impl MultiLeaderFrameTess for MultiLeader {
                         fill_is_2d_solid: false,
                         solid_normal: None,
                         render_instance: None,
-                        pick_tris: Vec::new(),
-                        pick_tris_low: Vec::new(),
                         dash_from_start: false,
-                        text_verts: Vec::new(),
                         name: name.clone(),
-                        points: vec![],
-                        points_low: Vec::new(),
                         color: fill_color,
                         selected,
                         aci: 0,
                         pattern_length: 0.0,
                         pattern: [0.0; 8],
                         line_weight_px: 1.0,
-                        snap_pts: vec![],
-                        tangent_geoms: vec![],
-                        key_vertices: vec![],
                         aabb: WireModel::UNBOUNDED_AABB,
                         plinegen: true,
-                        fill_tris,
-                        fill_tris_low: Vec::new(),
-
+                        geom: std::sync::Arc::new(crate::scene::WireGeom {
+                            taper_widths: Vec::new(),
+                            pattern_stations: Vec::new(),
+                            pick_tris: Vec::new(),
+                            pick_tris_low: Vec::new(),
+                            text_verts: Vec::new(),
+                            points: vec![],
+                            points_low: Vec::new(),
+                            snap_pts: vec![],
+                            tangent_geoms: vec![],
+                            key_vertices: vec![],
+                            fill_tris,
+                            fill_tris_low: Vec::new(),
+                            ..crate::scene::WireGeom::default()
+                        }),
                         ..Default::default()
                     });
                 }
@@ -3324,8 +3334,6 @@ impl MultiLeaderFrameTess for MultiLeader {
                     wires.push(WireModel {
                         bg_adapt: None,
                         point_marker: None,
-                        taper_widths: Vec::new(),
-                        pattern_stations: Vec::new(),
                         world_width: 0.0,
                         depth_override: None,
                         display_visible: true,
@@ -3335,27 +3343,31 @@ impl MultiLeaderFrameTess for MultiLeader {
                         fill_is_2d_solid: false,
                         solid_normal: None,
                         render_instance: None,
-                        pick_tris: Vec::new(),
-                        pick_tris_low: Vec::new(),
                         dash_from_start: false,
-                        text_verts: Vec::new(),
                         name,
-                        points: frame_points,
-                        points_low: Vec::new(),
                         color: text_color,
                         selected,
                         aci: 0,
                         pattern_length: 0.0,
                         pattern: [0.0; 8],
                         line_weight_px,
-                        snap_pts: vec![],
-                        tangent_geoms: vec![],
-                        key_vertices: vec![],
                         aabb: WireModel::UNBOUNDED_AABB,
                         plinegen: true,
-                        fill_tris: vec![],
-                        fill_tris_low: Vec::new(),
-
+                        geom: std::sync::Arc::new(crate::scene::WireGeom {
+                            taper_widths: Vec::new(),
+                            pattern_stations: Vec::new(),
+                            pick_tris: Vec::new(),
+                            pick_tris_low: Vec::new(),
+                            text_verts: Vec::new(),
+                            points: frame_points,
+                            points_low: Vec::new(),
+                            snap_pts: vec![],
+                            tangent_geoms: vec![],
+                            key_vertices: vec![],
+                            fill_tris: vec![],
+                            fill_tris_low: Vec::new(),
+                            ..crate::scene::WireGeom::default()
+                        }),
                         ..Default::default()
                     });
                 }

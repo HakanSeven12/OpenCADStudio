@@ -33,11 +33,14 @@ impl WorldAsScreen {
 fn segment_wire(name: &str, from: [f64; 3], to: [f64; 3], reference_only: bool) -> WireModel {
     WireModel {
         name: name.to_owned(),
-        points: vec![
-            [from[0] as f32, from[1] as f32, from[2] as f32],
-            [to[0] as f32, to[1] as f32, to[2] as f32],
-        ],
         reference_only,
+        geom: std::sync::Arc::new(crate::scene::WireGeom {
+            points: vec![
+                [from[0] as f32, from[1] as f32, from[2] as f32],
+                [to[0] as f32, to[1] as f32, to[2] as f32],
+            ],
+            ..crate::scene::WireGeom::default()
+        }),
         ..WireModel::default()
     }
 }

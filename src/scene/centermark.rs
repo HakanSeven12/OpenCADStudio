@@ -571,6 +571,7 @@ pub(crate) fn entity_has_center_association(entity: &EntityType) -> bool {
 mod tests {
     use super::*;
     use document::entities::{Circle, Line};
+    use document::Document;
 
     fn source_circle() -> EntityType {
         EntityType::Circle(Circle::from_center_radius(
@@ -666,5 +667,38 @@ mod tests {
         scene.bump_entities(&[(source, ChangeKind::Modified)]);
         assert!((carrier_y(&scene, pasted) - 20.0).abs() < 1e-9);
         assert!((carrier_y(&scene, early) - 20.0).abs() < 1e-9);
+    }
+
+    /// The cross is the part of a mark a user snaps to, so the wire that
+    /// carries it must keep the mark's key vertices and segment tangents.
+    #[test]
+    fn a_marks_cross_wire_keeps_the_snaps_and_vertices() {
+        let mut document = Document::new();
+        let source = document.add_entity(source_circle()).unwrap_or(Handle::NULL);
+        let entity = carrier(source);
+        let wires = crate::scene::tessellate_entity(
+            &document,
+            &HashSet::default(),
+            None,
+            [0.0, 0.0, 0.0, 1.0],
+            1.0,
+            None,
+            &entity,
+            None,
+            None,
+            None,
+            None,
+            &HashSet::default(),
+        );
+        let cross = wires.last().expect("the mark draws a cross wire");
+        assert!(
+            cross.key_vertices.contains(&[10.0, 10.0, 0.0]),
+            "the centre stays a snap vertex: {:?}",
+            cross.key_vertices
+        );
+        assert!(
+            !cross.tangent_geoms.is_empty(),
+            "each cross segment keeps its tangent"
+        );
     }
 }

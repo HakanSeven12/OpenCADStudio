@@ -3653,8 +3653,9 @@ impl Scene {
                 if let Some(mm) = style.resolve_lineweight(wire.aci) {
                     wire.line_weight_px = (mm * MM_TO_PX).max(1.0);
                 }
+                let aci = wire.aci;
                 for vertex in &mut wire.text_verts {
-                    self.apply_display_plot_style(&mut vertex.color, wire.aci, &style);
+                    self.apply_display_plot_style(&mut vertex.color, aci, &style);
                 }
             }
         }
@@ -4390,8 +4391,9 @@ pub(crate) fn resolve_colors_for_bg(wires: &mut [WireModel], bg: [f32; 4]) {
         } else {
             adapt_to_bg(adapt.raw_color, contrast)
         };
-        if !adapt.preserve_color {
-            for (vertex, raw) in wire.text_verts.iter_mut().zip(&adapt.text_raw_colors) {
+        if !adapt.preserve_color && !wire.text_verts.is_empty() {
+            let geom = std::sync::Arc::make_mut(&mut wire.geom);
+            for (vertex, raw) in geom.text_verts.iter_mut().zip(&adapt.text_raw_colors) {
                 vertex.color = adapt_to_bg(*raw, contrast);
             }
         }

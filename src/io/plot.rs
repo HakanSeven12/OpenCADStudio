@@ -432,18 +432,21 @@ mod tests {
     fn arc_wire(sweep: f64, segments: usize) -> WireModel {
         let (center, radius) = ([1000.0, 2000.0], 5.0);
         WireModel {
-            points: (0..=segments)
-                .map(|i| {
-                    let t = 0.3 + sweep * i as f64 / segments as f64;
-                    let x = center[0] + radius * t.cos();
-                    let y = center[1] + radius * t.sin();
-                    [x as f32, y as f32, 0.0]
-                })
-                .collect(),
-            tangent_geoms: vec![TangentGeom::Circle {
-                center: [1000.0, 2000.0, 0.0],
-                radius: 5.0,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points: (0..=segments)
+                    .map(|i| {
+                        let t = 0.3 + sweep * i as f64 / segments as f64;
+                        let x = center[0] + radius * t.cos();
+                        let y = center[1] + radius * t.sin();
+                        [x as f32, y as f32, 0.0]
+                    })
+                    .collect(),
+                tangent_geoms: vec![TangentGeom::Circle {
+                    center: [1000.0, 2000.0, 0.0],
+                    radius: 5.0,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         }
     }

@@ -58,10 +58,13 @@ fn block_edits_preserve_cache_coordinates_and_arena_partition() {
     let mut block_geometry = wire_gpu::BlockGeometryCache::default();
     let block = |handle: u64, x: f64| WireModel {
         name: handle.to_string(),
-        points: vec![[x as f32, 0.0, 0.0], [x as f32 + 1.0, 0.0, 0.0]],
         render_instance: Some(crate::scene::model::instance_model::RenderInstance {
             source_id: 1,
             translation: [x, 0.0, 0.0],
+        }),
+        geom: std::sync::Arc::new(crate::scene::WireGeom {
+            points: vec![[x as f32, 0.0, 0.0], [x as f32 + 1.0, 0.0, 0.0]],
+            ..crate::scene::WireGeom::default()
         }),
         ..Default::default()
     };
@@ -178,7 +181,10 @@ fn bounded_gpu_uploads_preserve_geometry_and_instancing() {
     let pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Bgra8UnormSrgb);
 
     let line = WireModel {
-        points: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+        geom: std::sync::Arc::new(crate::scene::WireGeom {
+            points: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            ..crate::scene::WireGeom::default()
+        }),
         ..Default::default()
     };
     let count = gpu_budget::max_storage_elements::<wire_gpu::WireConst>(&device) + 2;
@@ -200,7 +206,10 @@ fn bounded_gpu_uploads_preserve_geometry_and_instancing() {
     }
     let segments = gpu_budget::max_elements::<wire_gpu::WireInstance>(&device) + 1;
     let dense = WireModel {
-        points: (0..=segments).map(|i| [i as f32, 0.0, 0.0]).collect(),
+        geom: std::sync::Arc::new(crate::scene::WireGeom {
+            points: (0..=segments).map(|i| [i as f32, 0.0, 0.0]).collect(),
+            ..crate::scene::WireGeom::default()
+        }),
         ..Default::default()
     };
     let chunks = wire_gpu::WireGpu::from_run(

@@ -357,6 +357,8 @@ impl OpenCADStudio {
         let pattern = self.find_replace.search.clone();
         let with = self.find_replace.replacement.clone();
         let opts = self.find_replace.options.matching();
+        // Each external reference's file is written once, after the run.
+        let mut xref_writes: Vec<String> = Vec::new();
         while run.next < run.matches.len() {
             let result = run.matches[run.next].clone();
             let key = result.key;
@@ -454,13 +456,18 @@ impl OpenCADStudio {
                         }
                         if result.kind == FindKind::Xref {
                             if let Some(name) = definition {
-                                self.write_back_find_xref(i, &name, &pattern, &with);
+                                if !xref_writes.iter().any(|n: &String| n.eq_ignore_ascii_case(&name)) {
+                                    xref_writes.push(name);
+                                }
                             }
                         }
                     }
                 }
             }
             run.next += 1;
+        }
+        for name in &xref_writes {
+            self.write_back_find_xref(i, name, &pattern, &with);
         }
         self.after_find_changes();
         if run.single {
@@ -536,20 +543,30 @@ impl OpenCADStudio {
             return;
         };
         let opts = self.find_replace.options.matching();
-        for entity in source.entities_mut() {
-            let value = match &*entity {
-                EntityType::Text(t) => t.value.clone(),
-                EntityType::MText(t) => t.value.clone(),
-                _ => continue,
-            };
-            let ranges = crate::app::text_match::str_ranges(&value, pattern, &opts);
-            if ranges.is_empty() {
-                continue;
-            }
-            let replaced = crate::app::text_match::replace_ranges(&value, &ranges, with);
-            match entity {
-                EntityType::Text(t) => t.value = replaced,
-                EntityType::MText(t) => t.value = replaced,
+        // Only the texts that change are taken mutably: a mutable pass over
+        // every entity drops their raw records and re-encodes the whole file.
+        let edits: Vec<(Handle, String)> = source
+            .entities()
+            .filter_map(|e| {
+                let value = match e {
+                    EntityType::Text(t) => &t.value,
+                    EntityType::MText(t) => &t.value,
+                    _ => return None,
+                };
+                let ranges = crate::app::text_match::str_ranges(value, pattern, &opts);
+                (!ranges.is_empty()).then(|| {
+                    let replaced = crate::app::text_match::replace_ranges(value, &ranges, with);
+                    (e.common().handle, replaced)
+                })
+            })
+            .collect();
+        if edits.is_empty() {
+            return;
+        }
+        for (handle, replaced) in edits {
+            match source.get_entity_mut(handle) {
+                Some(EntityType::Text(t)) => t.value = replaced,
+                Some(EntityType::MText(t)) => t.value = replaced,
                 _ => {}
             }
         }

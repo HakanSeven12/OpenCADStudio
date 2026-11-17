@@ -26,12 +26,18 @@ fn new_drawing() -> OpenCADStudio {
     app
 }
 
+/// Runs the command and the tasks it starts (model files are read on a
+/// worker thread) to the end, as the automation server does.
 fn command(app: &mut OpenCADStudio, cmd: &str) {
-    let _ = app.update(Message::Command(cmd.to_string()));
+    let task = app.update(Message::Command(cmd.to_string()));
+    app.drive_headless_task(task)
+        .expect("the command runs headless");
 }
 
 fn dialog(app: &mut OpenCADStudio, message: ImportDialogMsg) {
-    let _ = app.update(Message::ImportDialog(message));
+    let task = app.update(Message::ImportDialog(message));
+    app.drive_headless_task(task)
+        .expect("the dialog runs headless");
 }
 
 fn last_line(app: &OpenCADStudio) -> String {

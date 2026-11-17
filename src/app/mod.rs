@@ -1888,6 +1888,8 @@ pub(super) struct OpenCADStudio {
     attr_editor_error: Option<String>,
     /// "Keep the changes?" before Select block picks another block.
     attr_editor_asking: bool,
+    /// The field last typed in, checked when the cursor leaves it.
+    attr_editor_editing: Option<crate::ui::window::attribute_editor::AttrField>,
     /// Plugin ids the user turned off in the Plugin Manager. Disabled plugins
     /// keep their manifest listed but drop their ribbon tab and command
     /// dispatch. Persisted via [`settings::UserSettings::disabled_plugins`].
@@ -5415,6 +5417,7 @@ pub enum Message {
     /// Set the value from the Field dialog.
     AttrEditorInsertField,
     AttrEditorBoundary(String),
+    AttrEditorAnnotative(bool),
     /// A colour chosen in the colour window.
     AttrEditorColorValue(document::types::Color),
     /// Title-bar pressed: begin dragging the active modal.
@@ -6751,6 +6754,7 @@ impl OpenCADStudio {
             attr_editor_session: None,
             attr_editor_error: None,
             attr_editor_asking: false,
+            attr_editor_editing: None,
             disabled_plugins: rustc_hash::FxHashSet::default(),
             #[cfg(not(target_arch = "wasm32"))]
             last_plugin_selection: None,

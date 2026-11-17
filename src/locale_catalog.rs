@@ -20,7 +20,6 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Invalid Oblique angle, please enter a new angle." => Some(("eattedit", "invalid-oblique")),
         "Select block" => Some(("eattedit", "select-block")),
         "Edit the multi-line value" => Some(("eattedit", "edit-multiline-value")),
-        "Not annotative" => Some(("eattedit", "not-annotative")),
         "The attributes of this block have changed. Keep the changes before picking another block?" => Some(("eattedit", "keep-before-pick")),
         "Keep changes" => Some(("eattedit", "keep-changes")),
         "Discard changes" => Some(("eattedit", "discard-changes")),

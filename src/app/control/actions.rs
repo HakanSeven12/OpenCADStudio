@@ -211,6 +211,7 @@ pub(super) const NAMES: &[&str] = &[
     // The enhanced attribute editor: `tab=attribute|text|properties`,
     // `row=<n>`, `value=`, `style=`, `justify=`, `height=`, `rotation=`,
     // `width=`, `oblique=`, `boundary=`, `backwards=0|1`, `upside_down=0|1`,
+    // `annotative=0|1`,
     // `layer=`, `linetype=`, `color=`, `apply`, `ok`, `cancel`, `help`,
     // `select_block`, `answer=save|discard|stay`, `dismiss`, `edit_value`,
     // `insert_field`.
@@ -2470,6 +2471,7 @@ impl OpenCADStudio {
                     "boundary" => Message::AttrEditorBoundary(v.into()),
                     "backwards" => Message::AttrEditorBackwards(v == "1"),
                     "upside_down" => Message::AttrEditorUpsideDown(v == "1"),
+                    "annotative" => Message::AttrEditorAnnotative(v == "1"),
                     "layer" => Message::AttrEditorLayer(v.into()),
                     "linetype" => Message::AttrEditorLinetype(v.into()),
                     "color" => Message::AttrEditorColor(v.into()),

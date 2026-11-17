@@ -10177,7 +10177,6 @@ eattedit =
     .invalid-oblique = Invalid Oblique angle, please enter a new angle.
     .select-block = Select block
     .edit-multiline-value = Edit the multi-line value
-    .not-annotative = Not annotative
     .keep-before-pick = The attributes of this block have changed. Keep the changes before picking another block?
     .keep-changes = Keep changes
     .discard-changes = Discard changes

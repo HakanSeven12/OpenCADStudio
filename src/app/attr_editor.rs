@@ -7,7 +7,7 @@
 //! labelled EATTEDIT, opened on the first change.
 use super::{Message, ModalKind, OpenCADStudio};
 use crate::modules::draw::modify::attedit::{AtteditCommand, AtteditKind};
-use crate::ui::window::attribute_editor::{AttrAnswer, AttrRow, AttrTab};
+use crate::ui::window::attribute_editor::{AttrAnswer, AttrField, AttrRow, AttrTab};
 use document::entities::{AttachmentPoint, HorizontalAlignment, VerticalAlignment};
 use document::{EntityType, Handle};
 use iced::Task;
@@ -81,44 +81,54 @@ pub(crate) fn alignment_of(p: AttachmentPoint) -> (HorizontalAlignment, Vertical
     }
 }
 
-/// The message the reference shows for a value the window cannot keep, and
-/// the tab the value is on. A zero height is not an error: it is ignored.
-pub(crate) fn row_error(r: &AttrRow) -> Option<(&'static str, AttrTab)> {
-    let num = |s: &str| s.trim().parse::<f64>().ok();
+/// The message the reference shows when the cursor leaves a field holding a
+/// value it cannot keep. A zero height is not an error: it is ignored.
+pub(crate) fn field_error(r: &AttrRow, field: AttrField) -> Option<&'static str> {
     const NUMERIC: &str = "Not a numeric value";
     const ANGLE: &str = "Not a valid angle value";
     const NEGATIVE: &str = "Negative values not allowed";
-    match num(&r.height) {
-        None => return Some((NUMERIC, AttrTab::TextOptions)),
-        Some(h) if h < 0.0 => return Some((NEGATIVE, AttrTab::TextOptions)),
-        _ => {}
-    }
-    if num(&r.rotation).is_none() {
-        return Some((ANGLE, AttrTab::TextOptions));
-    }
-    if r.multiline {
-        match num(&r.boundary_width) {
-            None => return Some((NUMERIC, AttrTab::TextOptions)),
-            Some(w) if w < 0.0 => return Some((NEGATIVE, AttrTab::TextOptions)),
-            _ => {}
+    let value = match field {
+        AttrField::Height => &r.height,
+        AttrField::Rotation => &r.rotation,
+        AttrField::Width => &r.width_factor,
+        AttrField::Oblique => &r.oblique,
+        AttrField::Boundary => &r.boundary_width,
+    };
+    let num = value.trim().parse::<f64>().ok();
+    match (field, num) {
+        (AttrField::Rotation | AttrField::Oblique, None) => Some(ANGLE),
+        (_, None) => Some(NUMERIC),
+        (AttrField::Height | AttrField::Boundary, Some(v)) if v < 0.0 => Some(NEGATIVE),
+        (AttrField::Width, Some(v)) if !(0.01..=100.0).contains(&v) => {
+            Some("Value is not within range")
         }
-        return None;
-    }
-    match num(&r.width_factor) {
-        None => return Some((NUMERIC, AttrTab::TextOptions)),
-        Some(w) if !(0.01..=100.0).contains(&w) => {
-            return Some(("Value is not within range", AttrTab::TextOptions))
+        (AttrField::Oblique, Some(v)) if v.abs() > 85.0 => {
+            Some("Invalid Oblique angle, please enter a new angle.")
         }
-        _ => {}
-    }
-    match num(&r.oblique) {
-        None => Some((ANGLE, AttrTab::TextOptions)),
-        Some(d) if d.abs() > 85.0 => Some((
-            "Invalid Oblique angle, please enter a new angle.",
-            AttrTab::TextOptions,
-        )),
         _ => None,
     }
+}
+
+/// The fields a row offers: a multi-line attribute has a boundary width
+/// instead of the width factor and oblique angle.
+fn row_fields(r: &AttrRow) -> &'static [AttrField] {
+    if r.multiline {
+        &[AttrField::Height, AttrField::Rotation, AttrField::Boundary]
+    } else {
+        &[
+            AttrField::Height,
+            AttrField::Rotation,
+            AttrField::Width,
+            AttrField::Oblique,
+        ]
+    }
+}
+
+/// The first field of a row the window cannot keep.
+pub(crate) fn row_error(r: &AttrRow) -> Option<(&'static str, AttrField)> {
+    row_fields(r)
+        .iter()
+        .find_map(|&f| field_error(r, f).map(|e| (e, f)))
 }
 
 /// The value collected by the multi-line editor for the open window.
@@ -320,6 +330,7 @@ impl OpenCADStudio {
         self.attr_editor_handle = Some(handle);
         self.attr_editor_error = None;
         self.attr_editor_asking = false;
+        self.attr_editor_editing = None;
         self.active_modal = Some(ModalKind::AttributeEditor);
         self.modal_offset = iced::Vector::ZERO;
         self.modal_resize = iced::Vector::ZERO;
@@ -358,12 +369,19 @@ impl OpenCADStudio {
         let rows = self.attr_editor_rows.clone();
         let doc = &mut self.tabs[i].scene.document;
         doc.replace_entity_arc(handle, applied);
+        let mut annotative = Vec::new();
         if let Some(EntityType::Insert(ins)) = doc.get_entity_mut(handle) {
             for row in &rows {
                 if let Some(attr) = ins.attributes.get_mut(row.index) {
                     crate::app::update::command::apply_attr_row(attr, row);
+                    if attr.flags.annotative != row.annotative {
+                        annotative.push((row.index, row.annotative));
+                    }
                 }
             }
+        }
+        for (index, on) in annotative {
+            crate::scene::annotative::set_attribute_annotative(doc, handle, index, on);
         }
         self.tabs[i]
             .scene
@@ -374,7 +392,7 @@ impl OpenCADStudio {
     /// Apply: refuse an unreadable value (the window shows why and goes to
     /// it), otherwise keep what the drawing shows.
     pub(in crate::app) fn attr_editor_apply(&mut self) -> bool {
-        if let Some((idx, (msg, tab))) = self
+        if let Some((idx, (msg, field))) = self
             .attr_editor_rows
             .iter()
             .enumerate()
@@ -382,7 +400,8 @@ impl OpenCADStudio {
         {
             self.attr_editor_error = Some(crate::t!(msg).into_owned());
             self.attr_editor_selected = idx;
-            self.attr_editor_tab = tab;
+            self.attr_editor_tab = AttrTab::TextOptions;
+            self.attr_editor_editing = Some(field);
             return false;
         }
         self.attr_editor_error = None;
@@ -475,6 +494,7 @@ impl OpenCADStudio {
         self.attr_editor_tab = AttrTab::Attribute;
         self.attr_editor_error = None;
         self.attr_editor_asking = false;
+        self.attr_editor_editing = None;
         self.refresh_properties();
     }
 
@@ -602,10 +622,17 @@ impl OpenCADStudio {
                 self.active_modal = None;
                 self.open_field_dialog(crate::ui::window::field_dialog::FieldTarget::AttrEditor);
             }
+            Message::AttrEditorAnnotative(on) => {
+                if let Some(r) = self.attr_row_selected_mut() {
+                    r.annotative = on;
+                }
+                self.attr_editor_preview();
+            }
             Message::AttrEditorBoundary(s) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.boundary_width = s;
                 }
+                self.attr_editor_editing = Some(AttrField::Boundary);
                 self.attr_editor_preview();
             }
             Message::AttrEditorColorValue(color) => {
@@ -617,5 +644,47 @@ impl OpenCADStudio {
             _ => {}
         }
         Task::none()
+    }
+
+    /// Leaving a field: the reference checks it as the cursor leaves. Any
+    /// other action in the window first checks the field last typed in; a
+    /// value it cannot keep is reported, the action does not happen, and the
+    /// field takes the cursor back with its text selected.
+    pub(in crate::app) fn attr_editor_leave_check(&mut self, msg: &Message) -> Option<Task<Message>> {
+        let field = self.attr_editor_editing?;
+        let typing_same = matches!(
+            (field, msg),
+            (AttrField::Height, Message::AttrEditorHeight(_))
+                | (AttrField::Rotation, Message::AttrEditorRotation(_))
+                | (AttrField::Width, Message::AttrEditorWidth(_))
+                | (AttrField::Oblique, Message::AttrEditorOblique(_))
+                | (AttrField::Boundary, Message::AttrEditorBoundary(_))
+        );
+        if typing_same
+            || matches!(
+                msg,
+                Message::AttrEditorCancel
+                    | Message::AttrEditorDismissError
+                    | Message::AttrEditorHelp
+            )
+        {
+            return None;
+        }
+        let row = self.attr_editor_rows.get(self.attr_editor_selected)?;
+        match field_error(row, field) {
+            None => {
+                self.attr_editor_editing = None;
+                None
+            }
+            Some(error) => {
+                self.attr_editor_error = Some(crate::t!(error).into_owned());
+                self.attr_editor_tab = AttrTab::TextOptions;
+                let id = iced::widget::Id::new(crate::ui::window::attribute_editor::field_id(field));
+                Some(Task::batch([
+                    iced::widget::operation::focus(id.clone()),
+                    iced::widget::operation::select_all(id),
+                ]))
+            }
+        }
     }
 }

@@ -102,6 +102,7 @@ impl PartialEq for AttrRow {
             && self.line_weight == other.line_weight
             && self.boundary_width == other.boundary_width
             && self.field_changed == other.field_changed
+            && self.annotative == other.annotative
     }
 }
 
@@ -200,6 +201,27 @@ pub fn color_from_label(label: &str) -> Option<AcadColor> {
 }
 
 
+/// A Text Options field that is checked as the cursor leaves it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AttrField {
+    Height,
+    Rotation,
+    Width,
+    Oblique,
+    Boundary,
+}
+
+/// The widget id of a field, so a refused value takes the cursor back.
+pub fn field_id(field: AttrField) -> &'static str {
+    match field {
+        AttrField::Height => "attr-editor-height",
+        AttrField::Rotation => "attr-editor-rotation",
+        AttrField::Width => "attr-editor-width",
+        AttrField::Oblique => "attr-editor-oblique",
+        AttrField::Boundary => "attr-editor-boundary",
+    }
+}
+
 /// The last entry of the colour list: the colour window.
 pub const SELECT_COLOR: &str = "Select Color...";
 
@@ -249,12 +271,14 @@ fn label<'a>(value: Cow<'static, str>, enabled: bool) -> Element<'a, Message> {
 /// input and shows nothing, as for a multi-line attribute's width factor.
 fn edit_field<'a>(
     name: Cow<'static, str>,
+    field: AttrField,
     value: &'a str,
     enabled: bool,
     on_input: impl Fn(String) -> Message + 'a,
 ) -> Element<'a, Message> {
     let shown = if enabled { value } else { "" };
     let mut input = text_input("", shown)
+        .id(iced::widget::Id::new(field_id(field)))
         .size(12)
         .padding([4, 8])
         .width(Fill)
@@ -511,14 +535,12 @@ fn text_options_tab<'a>(view: &AttrEditorView<'a>) -> Element<'a, Message> {
     let justify_sel = Some(justify_label(r.h_align, r.v_align).to_string());
     let annotative = row![
         label(Cow::Borrowed(""), true),
+        chip(
+            t!("Annotative").into_owned(),
+            r.annotative,
+            Message::AttrEditorAnnotative(!r.annotative),
+        ),
         crate::ui::icons::themed(ICON_ANNOTATIVE, 14.0),
-        text(if r.annotative {
-            t!("Annotative")
-        } else {
-            t!("Not annotative")
-        })
-        .size(11)
-        .style(muted_style),
     ]
     .spacing(6)
     .align_y(iced::Center);
@@ -547,9 +569,10 @@ fn text_options_tab<'a>(view: &AttrEditorView<'a>) -> Element<'a, Message> {
             true,
             Message::AttrEditorJustify
         ),
-        edit_field(t!("Height"), &r.height, true, Message::AttrEditorHeight),
+        edit_field(t!("Height"), AttrField::Height, &r.height, true, Message::AttrEditorHeight),
         edit_field(
             t!("Rotation"),
+            AttrField::Rotation,
             &r.rotation,
             true,
             Message::AttrEditorRotation
@@ -562,18 +585,21 @@ fn text_options_tab<'a>(view: &AttrEditorView<'a>) -> Element<'a, Message> {
         flags,
         edit_field(
             t!("Width Factor"),
+            AttrField::Width,
             &r.width_factor,
             single,
             Message::AttrEditorWidth
         ),
         edit_field(
             t!("Oblique Angle"),
+            AttrField::Oblique,
             &r.oblique,
             single,
             Message::AttrEditorOblique
         ),
         edit_field(
             t!("Boundary width"),
+            AttrField::Boundary,
             &r.boundary_width,
             r.multiline,
             Message::AttrEditorBoundary

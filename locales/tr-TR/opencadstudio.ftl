@@ -10096,7 +10096,6 @@ eattedit =
     .invalid-oblique = Geçersiz eğiklik açısı, lütfen yeni bir açı girin.
     .select-block = Blok seç
     .edit-multiline-value = Çok satırlı değeri düzenle
-    .not-annotative = Açıklamalı değil
     .keep-before-pick = Bu bloğun öznitelikleri değişti. Başka bir blok seçmeden önce değişiklikler korunsun mu?
     .keep-changes = Değişiklikleri koru
     .discard-changes = Değişiklikleri at

@@ -266,7 +266,19 @@ pub fn set_entity_xdata(
     let Some(entity) = doc.get_entity_mut(handle) else {
         return;
     };
-    let common = entity.common_mut();
+    replace_xdata_record(entity.common_mut(), app, app_handle, values);
+}
+
+/// Replace one application's XDATA record on an object (`None` drops it).
+/// `app_handle` is the application's registered handle, whose raw DWG copy
+/// goes with it. Used directly for an INSERT's attributes, which are not
+/// document entities of their own.
+pub fn replace_xdata_record(
+    common: &mut document::entities::EntityCommon,
+    app: &str,
+    app_handle: Option<u64>,
+    values: Option<Vec<document::xdata::XDataValue>>,
+) {
     let mut rebuilt = document::xdata::ExtendedData::new();
     for r in common.extended_data.records() {
         if r.application_name != app {

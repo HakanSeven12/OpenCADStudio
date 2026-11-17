@@ -626,6 +626,10 @@ impl OpenCADStudio {
                 tab.layers.keys_active = false;
             }
         }
+        // The attribute editor checks a field as the cursor leaves it.
+        if let Some(task) = self.attr_editor_leave_check(&msg) {
+            return task;
+        }
         // Pickers offer the catalog linetypes the drawing lacks; the one
         // picked is loaded before it is assigned.
         if let Message::LayerLinetypeSet(name)
@@ -13276,6 +13280,8 @@ impl OpenCADStudio {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.height = s;
                 }
+                self.attr_editor_editing =
+                    Some(crate::ui::window::attribute_editor::AttrField::Height);
                 self.attr_editor_preview();
                 Task::none()
             }
@@ -13283,6 +13289,8 @@ impl OpenCADStudio {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.rotation = s;
                 }
+                self.attr_editor_editing =
+                    Some(crate::ui::window::attribute_editor::AttrField::Rotation);
                 self.attr_editor_preview();
                 Task::none()
             }
@@ -13290,6 +13298,8 @@ impl OpenCADStudio {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.width_factor = s;
                 }
+                self.attr_editor_editing =
+                    Some(crate::ui::window::attribute_editor::AttrField::Width);
                 self.attr_editor_preview();
                 Task::none()
             }
@@ -13297,6 +13307,8 @@ impl OpenCADStudio {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.oblique = s;
                 }
+                self.attr_editor_editing =
+                    Some(crate::ui::window::attribute_editor::AttrField::Oblique);
                 self.attr_editor_preview();
                 Task::none()
             }
@@ -13365,6 +13377,7 @@ impl OpenCADStudio {
             | Message::AttrEditorEditValue
             | Message::AttrEditorInsertField
             | Message::AttrEditorBoundary(_)
+            | Message::AttrEditorAnnotative(_)
             | Message::AttrEditorColorValue(_) => self.on_attr_editor_msg(msg),
             Message::ToolWindow(kind, inner) => {
                 // Working in a dialog gives it the keyboard; its own layout

@@ -436,6 +436,10 @@ harness = false
 name = "wire_model_memory"
 harness = false
 
+[[bench]]
+name = "wire_view_culling"
+harness = false
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

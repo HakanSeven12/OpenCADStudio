@@ -428,6 +428,12 @@ fn handle_ranges(wires: &[&WireModel]) -> Option<Vec<(Handle, usize, usize)>> {
     Some(out)
 }
 
+/// Bench hook: the world-XY bounds the arena stores with each entity's slab.
+#[doc(hidden)]
+pub fn wire_run_aabb(wires: &[&WireModel]) -> [f32; 4] {
+    run_aabb(wires)
+}
+
 fn run_aabb(wires: &[&WireModel]) -> [f32; 4] {
     let mut out = [
         f32::INFINITY,
@@ -1069,60 +1075,15 @@ impl WireArena {
         if self.inst_tail == 0 {
             return vec![];
         }
-        let projected_x = view_rot.transform_vector3(glam::Vec3::X);
-        let projected_y = view_rot.transform_vector3(glam::Vec3::Y);
-        let projected_z = view_rot.transform_vector3(glam::Vec3::Z);
-        let xy_scale = projected_x
-            .truncate()
-            .length()
-            .max(projected_y.truncate().length())
-            .max(f32::MIN_POSITIVE);
-        if projected_z.truncate().length() > xy_scale * 1e-5 {
-            return self.wire_gpus();
-        }
-
-        let mut ranges: Vec<(u32, u32)> = self
-            .slabs
-            .values()
-            .filter(|slab| {
-                slab.inst_len > 0
-                    && !super::aabb_offscreen(
-                        slab.aabb.map(f64::from),
-                        view_rot,
-                        eye,
-                        clip_w,
-                        clip_h,
-                    )
-            })
-            .map(|slab| (slab.inst_off, slab.inst_off + slab.inst_len))
-            .collect();
-        ranges.sort_unstable_by_key(|range| range.0);
-        let mut merged: Vec<(u32, u32)> = Vec::with_capacity(ranges.len());
-        for (start, end) in ranges {
-            if let Some((_, previous_end)) = merged.last_mut() {
-                if *previous_end == start {
-                    *previous_end = end;
-                    continue;
-                }
-            }
-            merged.push((start, end));
-        }
-        let mut ranges = merged;
+        let ranges = visible_wire_ranges(
+            self.slabs.values().map(cull_slab),
+            view_rot,
+            eye,
+            clip_w,
+            clip_h,
+        );
         if ranges.is_empty() {
             return vec![];
-        }
-
-        // Cap CPU draw-call overhead on pathologically interleaved draw order.
-        // Merging a few separated visible spans draws their offscreen gap too,
-        // but retains order and still avoids the rest of a multi-million
-        // instance drawing.
-        const MAX_RANGES: usize = 64;
-        if ranges.len() > MAX_RANGES {
-            let group = ranges.len().div_ceil(MAX_RANGES);
-            ranges = ranges
-                .chunks(group)
-                .map(|chunk| (chunk[0].0, chunk[chunk.len() - 1].1))
-                .collect();
         }
 
         if perf {
@@ -1213,15 +1174,54 @@ fn alloc_packed_initialized(
     )
 }
 
-fn visible_ranges(
-    slabs: &FxHashMap<Handle, Slab>,
+/// One entity slab as the camera cull sees it: its instance range and the
+/// world-XY bounds of the wires it holds.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WireCullSlab {
+    pub inst_off: u32,
+    pub inst_len: u32,
+    pub aabb: [f32; 4],
+}
+
+fn cull_slab(slab: &Slab) -> WireCullSlab {
+    WireCullSlab {
+        inst_off: slab.inst_off,
+        inst_len: slab.inst_len,
+        aabb: slab.aabb,
+    }
+}
+
+/// Ranges of the instance buffer that can reach the viewport, merged and capped
+/// so the draw stays a handful of calls. Slabs are visited in map order and the
+/// survivors sorted by offset, so the returned ranges keep submission order.
+#[doc(hidden)]
+pub fn visible_wire_ranges(
+    slabs: impl Iterator<Item = WireCullSlab>,
     view_rot: glam::Mat4,
     eye: glam::DVec3,
     clip_w: u32,
     clip_h: u32,
 ) -> Vec<(u32, u32)> {
+    let projected_x = view_rot.transform_vector3(glam::Vec3::X);
+    let projected_y = view_rot.transform_vector3(glam::Vec3::Y);
+    let projected_z = view_rot.transform_vector3(glam::Vec3::Z);
+    let xy_scale = projected_x
+        .truncate()
+        .length()
+        .max(projected_y.truncate().length())
+        .max(f32::MIN_POSITIVE);
+    if projected_z.truncate().length() > xy_scale * 1e-5 {
+        // A 2-D entity AABB does not contain Z, so it cannot bound a non-plan
+        // view: draw everything instead of culling on an unsound bound.
+        let end = slabs
+            .map(|slab| slab.inst_off + slab.inst_len)
+            .max()
+            .unwrap_or(0);
+        return if end == 0 { Vec::new() } else { vec![(0, end)] };
+    }
+
     let mut ranges: Vec<(u32, u32)> = slabs
-        .values()
         .filter(|slab| {
             slab.inst_len > 0
                 && !super::aabb_offscreen(slab.aabb.map(f64::from), view_rot, eye, clip_w, clip_h)
@@ -1553,29 +1553,23 @@ impl PackedWireArena {
         if self.inst_tail == 0 {
             return Vec::new();
         }
-        let projected_x = view_rot.transform_vector3(glam::Vec3::X);
-        let projected_y = view_rot.transform_vector3(glam::Vec3::Y);
-        let projected_z = view_rot.transform_vector3(glam::Vec3::Z);
-        let xy_scale = projected_x
-            .truncate()
-            .length()
-            .max(projected_y.truncate().length())
-            .max(f32::MIN_POSITIVE);
-        if projected_z.truncate().length() > xy_scale * 1e-5 {
-            return self.wire_gpus();
-        }
-
-        visible_ranges(&self.slabs, view_rot, eye, clip_w, clip_h)
-            .into_iter()
-            .map(|(start, end)| WireGpu {
-                instance_buffer: self.inst_buf.clone(),
-                first_instance: start,
-                instance_count: end - start,
-                is_3d_mesh_edge: self.mesh_edge,
-                const_bind_group: None,
-                const_buffer: None,
-            })
-            .collect()
+        visible_wire_ranges(
+            self.slabs.values().map(cull_slab),
+            view_rot,
+            eye,
+            clip_w,
+            clip_h,
+        )
+        .into_iter()
+        .map(|(start, end)| WireGpu {
+            instance_buffer: self.inst_buf.clone(),
+            first_instance: start,
+            instance_count: end - start,
+            is_3d_mesh_edge: self.mesh_edge,
+            const_bind_group: None,
+            const_buffer: None,
+        })
+        .collect()
     }
 }
 
@@ -1787,6 +1781,7 @@ impl PersistentWireArena {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scene::view::camera::{Camera, Projection};
 
     #[test]
     fn wire_partition_excludes_blocks_and_preserves_mixed_run_edges() {
@@ -2027,5 +2022,71 @@ mod tests {
         assert_eq!(partitioned.circle_instances[0].params[3], 8.0);
         assert_eq!(partitioned.circle_instances[1].start_width, 2.0);
         assert_eq!(partitioned.circle_instances[1].params[3], 10.0);
+    }
+
+    fn plan_camera(target: glam::DVec3, half_height: f64) -> (glam::Mat4, glam::DVec3) {
+        let mut cam = Camera::default();
+        cam.target = target;
+        cam.distance = (half_height / (cam.fov_y * 0.5).tan() as f64) as f32;
+        let bounds = iced::Rectangle::new(iced::Point::ORIGIN, iced::Size::new(800.0, 600.0));
+        (cam.view_proj_rte(bounds), cam.eye())
+    }
+
+    fn tilted_camera(target: glam::DVec3, half_height: f64) -> (glam::Mat4, glam::DVec3) {
+        let mut cam = Camera::default();
+        cam.target = target;
+        cam.distance = (half_height / (cam.fov_y * 0.5).tan() as f64) as f32;
+        cam.rotation = glam::Quat::from_euler(glam::EulerRot::XYZ, -0.9, 0.0, 0.5);
+        cam.projection = Projection::Perspective;
+        let bounds = iced::Rectangle::new(iced::Point::ORIGIN, iced::Size::new(800.0, 600.0));
+        (cam.view_proj_rte(bounds), cam.eye())
+    }
+
+    fn cull_entry(inst_off: u32, inst_len: u32, aabb: [f32; 4]) -> WireCullSlab {
+        WireCullSlab {
+            inst_off,
+            inst_len,
+            aabb,
+        }
+    }
+
+    #[test]
+    fn visible_wire_ranges_culls_plan_view_slabs_outside_the_viewport() {
+        let (view, eye) = plan_camera(glam::DVec3::ZERO, 100.0);
+        let slabs = [
+            cull_entry(0, 10, [-10.0, -10.0, 10.0, 10.0]),
+            cull_entry(10, 10, [5_000.0, 5_000.0, 5_010.0, 5_010.0]),
+        ];
+        assert_eq!(
+            visible_wire_ranges(slabs.into_iter(), view, eye, 800, 600),
+            vec![(0, 10)]
+        );
+    }
+
+    #[test]
+    fn visible_wire_ranges_merges_slabs_that_touch_in_submission_order() {
+        let (view, eye) = plan_camera(glam::DVec3::ZERO, 100_000.0);
+        let slabs = [
+            cull_entry(40, 10, [-90.0, 0.0, -80.0, 10.0]),
+            cull_entry(0, 10, [0.0, 0.0, 10.0, 10.0]),
+            cull_entry(20, 20, [20.0, 0.0, 30.0, 10.0]),
+        ];
+        assert_eq!(
+            visible_wire_ranges(slabs.into_iter(), view, eye, 800, 600),
+            vec![(0, 10), (20, 50)]
+        );
+    }
+
+    #[test]
+    fn non_plan_views_draw_every_slab() {
+        let (view, eye) = tilted_camera(glam::DVec3::ZERO, 500.0);
+        let slabs = [
+            cull_entry(0, 10, [-10.0, -10.0, 10.0, 10.0]),
+            cull_entry(10, 10, [500_000.0, 500_000.0, 500_010.0, 500_010.0]),
+        ];
+        assert_eq!(
+            visible_wire_ranges(slabs.into_iter(), view, eye, 800, 600),
+            vec![(0, 20)]
+        );
     }
 }

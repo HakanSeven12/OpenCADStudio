@@ -1118,8 +1118,25 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::FbxExport));
             }
 
-            // STEPOUT — export 3D meshes to STEP AP214 format
-            "STEPOUT" | "EXPORTSTEP" | "STPOUT" => {
+            // STEPOUT [AP203|AP214|AP242] — export the drawing's 3D objects
+            // to STEP, exact B-reps where they have one (AP214 by default).
+            cmd if ["STEPOUT", "EXPORTSTEP", "STPOUT"]
+                .contains(&cmd.split_whitespace().next().unwrap_or("")) =>
+            {
+                let keyword = cmd.split_whitespace().nth(1);
+                match keyword.map(crate::io::step::parse_schema) {
+                    None => self.step_schema = crate::io::step::Schema::Ap214,
+                    Some(Some(schema)) => self.step_schema = schema,
+                    Some(None) => {
+                        let error = format!(
+                            "unknown schema {} (AP203, AP214 or AP242)",
+                            keyword.unwrap_or("")
+                        );
+                        self.command_line
+                            .push_error(crate::tf!("STEPOUT: {error}").as_ref());
+                        return Some(Task::none());
+                    }
+                }
                 return Some(Task::done(Message::StepExport));
             }
 

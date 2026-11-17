@@ -1,450 +1,820 @@
-// STEP AP214 export: tessellated MeshModels as an ISO 10303-21 file.
+// STEP (ISO 10303-21) export of a drawing's 3D objects.
 //
-// Each mesh becomes a faceted B-rep: its triangles are ADVANCED_FACEs on
-// their own PLANEs, sharing vertices and edges, in a CLOSED_SHELL when every
-// edge bounds two triangles (a MANIFOLD_SOLID_BREP) and an OPEN_SHELL
-// otherwise (a SHELL_BASED_SURFACE_MODEL). The shapes hang off the product
-// structure (PRODUCT ... SHAPE_DEFINITION_REPRESENTATION) that importers
-// start from, with millimetre units.
+// Solids, regions and surfaces whose ACIS data lifts into a kernel body are
+// written as exact B-reps: their planes, cylinders, cones, spheres, tori and
+// spline surfaces, bounded by lines, circles, ellipses and spline curves, in
+// a MANIFOLD_SOLID_BREP (a BREP_WITH_VOIDS when the solid has voids) or a
+// SHELL_BASED_SURFACE_MODEL. Anything else with a display mesh is written as
+// planar faces, coplanar triangles merged into one face. The bodies are
+// mapped to the neutral model of the vendored `step-export` writer, which
+// writes the product structure, millimetre units, and each body's name,
+// layer and colour, under the AP203, AP214 or AP242 schema.
+
+use std::collections::HashMap;
+
+use kernel::brep::{
+    Body, Curve3, EdgeKey, FaceKey, LoopKey, ShellKey, Surface, VertexKey,
+};
+use kernel::space::{NurbsSurface3, Plane, Vec3};
+use solidcore_record::step::model as m;
+pub use step_export::Schema;
 
 use crate::scene::model::mesh_model::MeshModel;
-use std::fmt::Write as FmtWrite;
 
-/// Build a STEP AP214 text representation from a slice of mesh models.
-///
-/// Returns `None` if there are no triangles to export.
-pub fn build_step(meshes: &[&MeshModel]) -> Option<String> {
+/// One object to export.
+pub struct StepItem {
+    /// The exact B-rep, when the object has one.
+    pub body: Option<Body>,
+    /// Whether the body is a solid (a region or surface is a sheet).
+    pub solid: bool,
+    /// The display mesh, written when there is no body or it cannot be
+    /// mapped.
+    pub mesh: Option<MeshModel>,
+    /// The representation item's name.
+    pub name: String,
+    /// Its presentation layer.
+    pub layer: Option<String>,
+    /// Its colour, as 0–1 RGB.
+    pub color: Option<[f64; 3]>,
+}
+
+/// The STEP text of `items`, in a single product named `product`. Drawing
+/// units are `unit_mm` millimetres each. `Err` when nothing could be
+/// written.
+pub fn build_step(
+    items: &[StepItem],
+    unit_mm: f64,
+    schema: Schema,
+    product: &str,
+) -> Result<String, String> {
+    let mut model = m::Model::default();
+    let mut styles = Vec::new();
+    for item in items {
+        let bodies = item
+            .body
+            .as_ref()
+            .and_then(|body| body_models(body, unit_mm, item.solid).ok())
+            .or_else(|| {
+                let mesh = item.mesh.as_ref()?;
+                mesh_body(mesh, unit_mm).map(|body| vec![body])
+            })
+            .unwrap_or_default();
+        for mut body in bodies {
+            body.step_id = model.bodies.len() as u64 + 1;
+            body.name = (!item.name.is_empty()).then(|| item.name.clone());
+            model.bodies.push(body);
+            styles.push(step_export::BodyStyle {
+                layer: item.layer.clone(),
+                color: item.color,
+            });
+        }
+    }
+    if model.bodies.is_empty() {
+        return Err("no 3D data to export".into());
+    }
+    let mut metadata = step_export::ExportMetadata::new()
+        .with_schema(schema)
+        .with_product_name(product)
+        .with_organization("OpenCADStudio");
+    metadata.body_styles = styles;
+    step_export::write_with_metadata(&model, &metadata).map_err(|error| error.message)
+}
+
+/// Parses a schema keyword: `AP203`, `AP214`, `AP242` (or the bare number).
+pub fn parse_schema(text: &str) -> Option<Schema> {
+    Schema::parse(text.trim())
+}
+
+type Lifted<T> = Result<T, &'static str>;
+
+fn scaled(point: [f64; 3], scale: f64) -> Lifted<[f64; 3]> {
+    let out = point.map(|value| value * scale);
+    if out.iter().all(|value| value.is_finite()) {
+        Ok(out)
+    } else {
+        Err("non-finite coordinate")
+    }
+}
+
+/// A plane's frame squared up: its normal, its x axis made square to it, and
+/// y completing the right-handed set; the origin scaled.
+fn frame(plane: &Plane, scale: f64) -> Lifted<m::Frame> {
+    let z = Vec3::from(plane.normal().ok_or("degenerate frame")?);
+    let x = Vec3::from(plane.x_axis);
+    let x = (x - z * x.dot(z)).normalize().ok_or("degenerate frame")?;
+    let y = z.cross(x);
+    Ok(m::Frame {
+        origin: scaled(plane.origin, scale)?,
+        x: x.to_array(),
+        y: y.to_array(),
+        z: z.to_array(),
+    })
+}
+
+/// Turns a frame half a turn about its z axis: the same circle with its
+/// parameter moved by π, which is how a negative radius reads.
+fn half_turn(frame: m::Frame) -> m::Frame {
+    m::Frame {
+        x: frame.x.map(|value| -value),
+        y: frame.y.map(|value| -value),
+        ..frame
+    }
+}
+
+/// Distinct knots and their multiplicities.
+fn knot_form(knots: &[f64]) -> (Vec<f64>, Vec<u32>) {
+    let mut values: Vec<f64> = Vec::new();
+    let mut mults: Vec<u32> = Vec::new();
+    for &knot in knots {
+        match (values.last(), mults.last_mut()) {
+            (Some(&last), Some(mult)) if last == knot => *mult += 1,
+            _ => {
+                values.push(knot);
+                mults.push(1);
+            }
+        }
+    }
+    (values, mults)
+}
+
+fn bspline_curve(
+    degree: usize,
+    points: Vec<[f64; 3]>,
+    weights: Option<Vec<f64>>,
+    knots: &[f64],
+) -> Lifted<m::Curve> {
+    if points.iter().flatten().any(|value| !value.is_finite()) {
+        return Err("non-finite control point");
+    }
+    let (knots, mults) = knot_form(knots);
+    Ok(m::Curve::BSpline(m::BSplineCurve {
+        degree: degree as u32,
+        points,
+        weights,
+        knots,
+        mults,
+    }))
+}
+
+/// A curve in STEP's form, and the factor its parameter takes there (an
+/// angle is in degrees).
+fn curve(curve: &Curve3, scale: f64) -> Lifted<(m::Curve, f64)> {
+    Ok(match curve {
+        Curve3::Line(line) => {
+            let direction = Vec3::from(line.direction);
+            let dir = direction.normalize().ok_or("degenerate line")?;
+            (
+                m::Curve::Line {
+                    origin: scaled(line.origin, scale)?,
+                    dir: dir.to_array(),
+                    magnitude: direction.length() * scale,
+                },
+                1.0,
+            )
+        }
+        Curve3::Circle(circle) => {
+            let frame = frame(&circle.plane, scale)?;
+            let frame = if circle.radius < 0.0 {
+                half_turn(frame)
+            } else {
+                frame
+            };
+            let radius = circle.radius.abs() * scale;
+            (m::Curve::Circle { frame, radius }, 1f64.to_degrees())
+        }
+        Curve3::Ellipse(ellipse) => (
+            m::Curve::Ellipse {
+                frame: frame(&ellipse.plane, scale)?,
+                semi1: ellipse.major_radius.abs() * scale,
+                semi2: ellipse.minor_radius.abs() * scale,
+            },
+            1f64.to_degrees(),
+        ),
+        Curve3::PlanarSpline { plane, curve } => {
+            let points = curve
+                .control_points()
+                .iter()
+                .map(|&point| scaled(plane.point_at(point), scale))
+                .collect::<Lifted<Vec<_>>>()?;
+            let weights = curve.is_rational().then(|| curve.weights().to_vec());
+            (
+                bspline_curve(curve.degree(), points, weights, curve.knots())?,
+                1.0,
+            )
+        }
+        Curve3::Nurbs(curve) => {
+            let points = curve
+                .control_points()
+                .iter()
+                .map(|&point| scaled(point, scale))
+                .collect::<Lifted<Vec<_>>>()?;
+            let weights = curve.is_rational().then(|| curve.weights().to_vec());
+            (
+                bspline_curve(curve.degree(), points, weights, curve.knots())?,
+                1.0,
+            )
+        }
+    })
+}
+
+fn bspline_surface(surface: &NurbsSurface3, scale: f64) -> Lifted<m::Surface> {
+    let points = surface
+        .control_points()
+        .iter()
+        .map(|row| row.iter().map(|&point| scaled(point, scale)).collect())
+        .collect::<Lifted<Vec<Vec<_>>>>()?;
+    let rational = surface
+        .weights()
+        .iter()
+        .flatten()
+        .any(|weight| (weight - 1.0).abs() > 1e-12);
+    let (u_degree, v_degree) = surface.degrees();
+    let (u_knots, v_knots) = surface.knots();
+    let (u_knots, u_mults) = knot_form(u_knots);
+    let (v_knots, v_mults) = knot_form(v_knots);
+    Ok(m::Surface::BSpline(m::BSplineSurface {
+        u_degree: u_degree as u32,
+        v_degree: v_degree as u32,
+        points,
+        weights: rational.then(|| surface.weights().to_vec()),
+        u_knots,
+        u_mults,
+        v_knots,
+        v_mults,
+    }))
+}
+
+/// A surface in STEP's form. A spline whose `v` the kernel reads backwards
+/// is written with its own net, so its normal is the other way round: the
+/// flag says so.
+fn surface(surface: &Surface, scale: f64) -> Lifted<(m::Surface, bool)> {
+    Ok(match surface {
+        Surface::Plane(plane) => (
+            m::Surface::Plane {
+                frame: frame(plane, scale)?,
+            },
+            false,
+        ),
+        Surface::Cylinder(cylinder) => (
+            m::Surface::Cylinder {
+                frame: frame(&cylinder.base, scale)?,
+                radius: cylinder.radius.abs() * scale,
+            },
+            false,
+        ),
+        Surface::Cone(cone) => {
+            // The kernel's radius shrinks along the axis by tan(half_angle);
+            // STEP's grows by tan(semi_angle), from a radius that is not
+            // negative. A cone narrowing along its axis is written about the
+            // reversed axis, and one whose base radius is negative from its
+            // apex.
+            let tan = cone.half_angle.tan();
+            let mut base = cone.base;
+            let mut radius = cone.radius;
+            if radius < 0.0 && tan != 0.0 {
+                let normal = Vec3::from(base.normal().ok_or("degenerate frame")?);
+                base.origin = (Vec3::from(base.origin) + normal * (radius / tan)).to_array();
+                radius = 0.0;
+            }
+            let frame = frame(&base, scale)?;
+            let frame = if cone.half_angle > 0.0 {
+                m::Frame {
+                    y: frame.y.map(|value| -value),
+                    z: frame.z.map(|value| -value),
+                    ..frame
+                }
+            } else {
+                frame
+            };
+            (
+                m::Surface::Cone {
+                    frame,
+                    radius: radius.abs() * scale,
+                    semi_angle_deg: cone.half_angle.abs().to_degrees(),
+                },
+                false,
+            )
+        }
+        Surface::Sphere(sphere) => (
+            m::Surface::Sphere {
+                frame: frame(&sphere.frame, scale)?,
+                radius: sphere.radius.abs() * scale,
+            },
+            false,
+        ),
+        Surface::Torus(torus) => (
+            m::Surface::Torus {
+                frame: frame(&torus.frame, scale)?,
+                major: torus.major_radius.abs() * scale,
+                minor: torus.minor_radius.abs() * scale,
+            },
+            false,
+        ),
+        Surface::Nurbs(spline) => (bspline_surface(spline, scale)?, spline.v_reversed()),
+        Surface::Offset(offset) => (
+            bspline_surface(&offset.approximation, scale)?,
+            offset.approximation.v_reversed(),
+        ),
+    })
+}
+
+/// STEP's normal of an analytic surface at a point on it: away from the
+/// plane's front, the axis, the centre or the tube's core circle.
+fn step_normal(surface: &m::Surface, point: [f64; 3]) -> Option<Vec3> {
+    let radial = |frame: &m::Frame| {
+        let offset = Vec3::from(point) - Vec3::from(frame.origin);
+        let z = Vec3::from(frame.z);
+        (offset - z * offset.dot(z)).normalize()
+    };
+    match surface {
+        m::Surface::Plane { frame } => Some(Vec3::from(frame.z)),
+        m::Surface::Cylinder { frame, .. } => radial(frame),
+        m::Surface::Cone {
+            frame,
+            semi_angle_deg,
+            ..
+        } => {
+            let angle = semi_angle_deg.to_radians();
+            Some(radial(frame)? * angle.cos() - Vec3::from(frame.z) * angle.sin())
+        }
+        m::Surface::Sphere { frame, .. } => {
+            (Vec3::from(point) - Vec3::from(frame.origin)).normalize()
+        }
+        m::Surface::Torus { frame, major, .. } => {
+            let core = Vec3::from(frame.origin) + radial(frame)? * *major;
+            (Vec3::from(point) - core).normalize()
+        }
+        _ => None,
+    }
+}
+
+/// One lump of a body, gathered into a neutral body.
+struct Lump<'a> {
+    body: &'a Body,
+    scale: f64,
+    vertices: Vec<m::Vertex>,
+    vertex_of: HashMap<VertexKey, usize>,
+    edges: Vec<m::Edge>,
+    edge_of: HashMap<EdgeKey, usize>,
+    faces: Vec<m::Face>,
+}
+
+impl Lump<'_> {
+    fn vertex(&mut self, key: VertexKey) -> Lifted<usize> {
+        if let Some(&index) = self.vertex_of.get(&key) {
+            return Ok(index);
+        }
+        let vertex = self.body.vertices.get(key).ok_or("missing vertex")?;
+        let index = self.vertices.len();
+        self.vertices.push(m::Vertex {
+            step_id: index as u64 + 1,
+            point: scaled(vertex.point, self.scale)?,
+        });
+        self.vertex_of.insert(key, index);
+        Ok(index)
+    }
+
+    fn edge(&mut self, key: EdgeKey) -> Lifted<usize> {
+        if let Some(&index) = self.edge_of.get(&key) {
+            return Ok(index);
+        }
+        let edge = self.body.edges.get(key).ok_or("missing edge")?;
+        let geometry = self.body.curves.get(edge.curve).ok_or("missing curve")?;
+        let (curve, factor) = curve(geometry, self.scale)?;
+        let start = self.vertex(edge.start)?;
+        let end = self.vertex(edge.end)?;
+        let index = self.edges.len();
+        self.edges.push(m::Edge {
+            step_id: index as u64 + 1,
+            start,
+            end,
+            curve,
+            same_sense: true,
+            t_start: edge.start_parameter * factor,
+            t_end: edge.end_parameter * factor,
+        });
+        self.edge_of.insert(key, index);
+        Ok(index)
+    }
+
+    /// Points of a face's boundary in the middle of its edges, where its
+    /// normal is compared.
+    fn boundary_samples(&self, loops: &[LoopKey]) -> Vec<[f64; 3]> {
+        let body = self.body;
+        loops
+            .iter()
+            .filter_map(|&key| body.loops.get(key))
+            .flat_map(|ring| ring.coedges.iter())
+            .filter_map(|&coedge| {
+                let edge = body.edges.get(body.coedges.get(coedge)?.edge)?;
+                let curve = body.curves.get(edge.curve)?;
+                Some(curve.point_at(0.5 * (edge.start_parameter + edge.end_parameter)))
+            })
+            .collect()
+    }
+
+    /// Adds a face; `reverse` turns it over (a void's faces, which STEP
+    /// reverses again through the void shell's orientation).
+    fn face(&mut self, key: FaceKey, reverse: bool) -> Lifted<usize> {
+        let face = self.body.faces.get(key).ok_or("missing face")?;
+        let geometry = self.body.surfaces.get(face.surface).ok_or("missing surface")?;
+        let (written, mut flipped) = surface(geometry, self.scale)?;
+        if !matches!(written, m::Surface::BSpline(_)) {
+            // Which way the analytic surface's normal runs against STEP's,
+            // seen at the first boundary point where both are clear.
+            let samples = self.boundary_samples(&face.loops);
+            flipped = samples
+                .iter()
+                .find_map(|&point| {
+                    let (u, v) = geometry.parameters_at(point)?;
+                    let kernel = Vec3::from(geometry.normal_at(u, v)?);
+                    let step = step_normal(&written, scaled(point, self.scale).ok()?)?;
+                    let agreement = kernel.dot(step);
+                    (agreement.abs() > 0.2).then_some(agreement < 0.0)
+                })
+                .unwrap_or(false);
+        }
+        let mut loops = Vec::new();
+        for &loop_key in &face.loops {
+            let ring = self.body.loops.get(loop_key).ok_or("missing loop")?;
+            let mut oriented = Vec::new();
+            for &coedge_key in &ring.coedges {
+                let coedge = self.body.coedges.get(coedge_key).ok_or("missing coedge")?;
+                oriented.push(m::OrientedEdge {
+                    edge: self.edge(coedge.edge)?,
+                    forward: coedge.forward,
+                });
+            }
+            if oriented.is_empty() {
+                continue;
+            }
+            if reverse {
+                oriented.reverse();
+                for edge in &mut oriented {
+                    edge.forward = !edge.forward;
+                }
+            }
+            loops.push(m::Loop {
+                outer: loops.is_empty(),
+                orientation: true,
+                bound: m::Bound::Edges(oriented),
+            });
+        }
+        if loops.is_empty() {
+            return Err("unbounded face");
+        }
+        let index = self.faces.len();
+        self.faces.push(m::Face {
+            step_id: index as u64 + 1,
+            surface: written,
+            same_sense: face.forward ^ flipped ^ reverse,
+            loops,
+        });
+        Ok(index)
+    }
+
+    /// Whether every edge of a shell's faces is used twice.
+    fn closed(&self, shell: ShellKey) -> bool {
+        let body = self.body;
+        body.shells.get(shell).is_some_and(|shell| {
+            shell
+                .faces
+                .iter()
+                .filter_map(|&face| body.faces.get(face))
+                .flat_map(|face| face.loops.iter())
+                .filter_map(|&ring| body.loops.get(ring))
+                .flat_map(|ring| ring.coedges.iter())
+                .all(|&coedge| {
+                    body.coedges
+                        .get(coedge)
+                        .and_then(|coedge| body.edges.get(coedge.edge))
+                        .is_some_and(|edge| edge.coedges.len() == 2)
+                })
+        })
+    }
+}
+
+/// A kernel body as neutral bodies, one per lump: a solid when `solid` and
+/// its shells close, otherwise a shell model.
+fn body_models(body: &Body, scale: f64, solid: bool) -> Lifted<Vec<m::Body>> {
+    let mut out = Vec::new();
+    for &lump_key in &body.roots {
+        let lump = body.lumps.get(lump_key).ok_or("missing lump")?;
+        let mut gathered = Lump {
+            body,
+            scale,
+            vertices: Vec::new(),
+            vertex_of: HashMap::new(),
+            edges: Vec::new(),
+            edge_of: HashMap::new(),
+            faces: Vec::new(),
+        };
+        let as_solid = solid && lump.shells.iter().all(|&shell| gathered.closed(shell));
+        let mut shells = Vec::new();
+        for (position, &shell_key) in lump.shells.iter().enumerate() {
+            let shell = body.shells.get(shell_key).ok_or("missing shell")?;
+            // A void's faces point out of the material, into the void; STEP
+            // keeps its closed shell pointing out of the void and reverses
+            // it through the oriented shell.
+            let void = as_solid && position > 0;
+            let faces = shell
+                .faces
+                .iter()
+                .map(|&face| gathered.face(face, void))
+                .collect::<Lifted<Vec<_>>>()?;
+            if faces.is_empty() {
+                continue;
+            }
+            shells.push(m::Shell {
+                step_id: shells.len() as u64 + 1,
+                closed: as_solid || gathered.closed(shell_key),
+                orientation: !void,
+                faces,
+            });
+        }
+        if shells.is_empty() {
+            continue;
+        }
+        let kind = match (as_solid, shells.len()) {
+            (false, _) => m::BodyKind::ShellModel,
+            (true, 1) => m::BodyKind::ManifoldSolid,
+            (true, _) => m::BodyKind::SolidWithVoids,
+        };
+        out.push(m::Body {
+            step_id: 0,
+            name: None,
+            kind,
+            unit_mm: 1.0,
+            uncertainty_mm: None,
+            shells,
+            faces: gathered.faces,
+            edges: gathered.edges,
+            vertices: gathered.vertices,
+        });
+    }
+    if out.is_empty() {
+        Err("empty body")
+    } else {
+        Ok(out)
+    }
+}
+
+/// A display mesh as planar faces: positions welded, coplanar neighbouring
+/// triangles merged into one face bounded by its outline and holes. A closed
+/// mesh is a solid, an open one a shell model. `None` when it has no
+/// triangles.
+fn mesh_body(mesh: &MeshModel, scale: f64) -> Option<m::Body> {
     struct Tri {
         v: [usize; 3],
         n: [f64; 3],
     }
-
-    let mut data = String::new();
-    // Start past the first growth doublings; the fixed header block alone is
-    // already a couple of kilobytes.
-    data.reserve(1 << 16);
-    let mut next_id: usize = 1;
-    let mut alloc = || {
-        let id = next_id;
-        next_id += 1;
-        id
+    let verts = &mesh.verts;
+    let normals = &mesh.normals;
+    let idx = &mesh.indices;
+    // Positions are stored as an f32 half plus a low residual so they stay
+    // precise at survey coordinates; write the sum, as the renderer uses.
+    let point = |i: usize| {
+        let high = verts[i];
+        let low = mesh.verts_low.get(i).copied().unwrap_or([0.0; 3]);
+        [0, 1, 2].map(|k| (high[k] as f64 + low[k] as f64) * scale)
     };
-    let mut items: Vec<usize> = Vec::new();
-    let mut all_solids = true;
-
-    for mesh in meshes {
-        let verts = &mesh.verts;
-        let normals = &mesh.normals;
-        let idx = &mesh.indices;
-        // Positions are stored as an f32 half plus a low residual so they stay
-        // precise at survey coordinates; write the sum, as the renderer uses.
-        let point = |i: usize| {
-            let high = verts[i];
-            let low = mesh.verts_low.get(i).copied().unwrap_or([0.0; 3]);
-            [0, 1, 2].map(|k| high[k] as f64 + low[k] as f64)
-        };
-        // Faces share vertices by position: the tessellator repeats a vertex
-        // per face where the normal changes, and a seam's two copies differ
-        // in the last bits, but the shell is one surface. Positions weld on a
-        // grid of 1e-9 of the mesh's size.
-        let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
-        for i in 0..verts.len() {
-            let p = point(i);
-            for k in 0..3 {
-                lo[k] = lo[k].min(p[k]);
-                hi[k] = hi[k].max(p[k]);
-            }
+    // Faces share vertices by position: the tessellator repeats a vertex per
+    // face where the normal changes, and a seam's two copies differ in the
+    // last bits, but the shell is one surface. Positions weld on a grid of
+    // 1e-9 of the mesh's size.
+    let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
+    for i in 0..verts.len() {
+        let p = point(i);
+        for k in 0..3 {
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
         }
-        let size = (hi[0] - lo[0]).hypot(hi[1] - lo[1]).hypot(hi[2] - lo[2]);
-        let grid = if size.is_finite() && size > 0.0 {
-            size * 1e-9
-        } else {
-            1.0
-        };
-        let mut points: Vec<[f64; 3]> = Vec::new();
-        let mut by_position: std::collections::HashMap<[i64; 3], usize> =
-            std::collections::HashMap::new();
-        let mut vertex = |p: [f64; 3]| {
-            let key = [0, 1, 2].map(|k| ((p[k] - lo[k]) / grid).round() as i64);
-            *by_position.entry(key).or_insert_with(|| {
-                points.push(p);
-                points.len() - 1
-            })
-        };
-        let mut tris: Vec<Tri> = Vec::new();
-        for t in 0..idx.len() / 3 {
-            let i = [idx[t * 3], idx[t * 3 + 1], idx[t * 3 + 2]].map(|i| i as usize);
-            if i.iter().any(|&i| i >= verts.len()) {
-                continue;
-            }
-            let [a, b, c] = i.map(point);
-            let v = [vertex(a), vertex(b), vertex(c)];
-            if v[0] == v[1] || v[1] == v[2] || v[0] == v[2] {
-                continue;
-            }
-            // The face is placed on the triangle's own plane. A smoothed vertex
-            // normal leans off it, so only a triangle whose cross product is
-            // zero falls back to the normal the mesh gives it. Small triangles
-            // have a tiny cross product but still a plane of their own.
-            let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-            let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-            let cross = [
-                ab[1] * ac[2] - ab[2] * ac[1],
-                ab[2] * ac[0] - ab[0] * ac[2],
-                ab[0] * ac[1] - ab[1] * ac[0],
-            ];
-            let len = cross[0].hypot(cross[1]).hypot(cross[2]);
-            let n = if len == 0.0 && i[0] < normals.len() {
-                normals[i[0]].map(f64::from)
-            } else {
-                let len = len.max(f64::MIN_POSITIVE);
-                cross.map(|value| value / len)
-            };
-            tris.push(Tri { v, n });
-        }
-        if tris.is_empty() {
+    }
+    let size = (hi[0] - lo[0]).hypot(hi[1] - lo[1]).hypot(hi[2] - lo[2]);
+    let grid = if size.is_finite() && size > 0.0 {
+        size * 1e-9
+    } else {
+        1.0
+    };
+    let mut points: Vec<[f64; 3]> = Vec::new();
+    let mut by_position: HashMap<[i64; 3], usize> = HashMap::new();
+    let mut vertex = |p: [f64; 3]| {
+        let key = [0, 1, 2].map(|k| ((p[k] - lo[k]) / grid).round() as i64);
+        *by_position.entry(key).or_insert_with(|| {
+            points.push(p);
+            points.len() - 1
+        })
+    };
+    let mut tris: Vec<Tri> = Vec::new();
+    for t in 0..idx.len() / 3 {
+        let i = [idx[t * 3], idx[t * 3 + 1], idx[t * 3 + 2]].map(|i| i as usize);
+        if i.iter().any(|&i| i >= verts.len()) {
             continue;
         }
-
-        let point_ids: Vec<usize> = points
-            .iter()
-            .map(|&[x, y, z]| {
-                let cp = alloc();
-                let vp = alloc();
-                writeln!(data, "#{cp} = CARTESIAN_POINT('',({x:.6},{y:.6},{z:.6}));").ok();
-                writeln!(data, "#{vp} = VERTEX_POINT('',#{cp});").ok();
-                cp
-            })
-            .collect();
-        // VERTEX_POINT ids follow their CARTESIAN_POINT.
-        let vertex_id = |v: usize| point_ids[v] + 1;
-
-        // One EDGE_CURVE per vertex pair, oriented from the lower index, and
-        // how many faces use it.
-        let mut edges: std::collections::HashMap<(usize, usize), (usize, usize)> =
-            std::collections::HashMap::new();
-        let mut faces = Vec::new();
-        // Per-face scratch for the comma-joined entity ids: reused across
-        // faces so a large mesh does not allocate a formatted String per
-        // oriented edge and bound.
-        let mut edge_ids = String::new();
-        let mut bound_ids = String::new();
-        // A face bounded by `loops` (vertex rings, the outer one first) on
-        // the plane through its first vertex with normal `n`.
-        let mut write_face = |loops: &[Vec<usize>], n: [f64; 3], data: &mut String| {
-            bound_ids.clear();
-            for (index, ring) in loops.iter().enumerate() {
-                edge_ids.clear();
-                for k in 0..ring.len() {
-                    let (from, to) = (ring[k], ring[(k + 1) % ring.len()]);
-                    let key = (from.min(to), from.max(to));
-                    let curve = match edges.get_mut(&key) {
-                        Some(entry) => {
-                            entry.1 += 1;
-                            entry.0
-                        }
-                        None => {
-                            let (start, end) = key;
-                            let (p, q) = (points[start], points[end]);
-                            let d = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
-                            let length = d[0].hypot(d[1]).hypot(d[2]).max(f64::EPSILON);
-                            let (dir, vector, line, curve) = (alloc(), alloc(), alloc(), alloc());
-                            writeln!(
-                                data,
-                                "#{dir} = DIRECTION('',({:.6},{:.6},{:.6}));",
-                                d[0] / length,
-                                d[1] / length,
-                                d[2] / length
-                            )
-                            .ok();
-                            writeln!(data, "#{vector} = VECTOR('',#{dir},{length:.6});").ok();
-                            writeln!(data, "#{line} = LINE('',#{},#{vector});", point_ids[start])
-                                .ok();
-                            writeln!(
-                                data,
-                                "#{curve} = EDGE_CURVE('',#{},#{},#{line},.T.);",
-                                vertex_id(start),
-                                vertex_id(end)
-                            )
-                            .ok();
-                            edges.insert(key, (curve, 1));
-                            curve
-                        }
-                    };
-                    let id = alloc();
-                    let sense = if from == key.0 { ".T." } else { ".F." };
-                    writeln!(data, "#{id} = ORIENTED_EDGE('',*,*,#{curve},{sense});").ok();
-                    if !edge_ids.is_empty() {
-                        edge_ids.push(',');
-                    }
-                    write!(edge_ids, "#{id}").ok();
-                }
-                let (lp, bound) = (alloc(), alloc());
-                writeln!(data, "#{lp} = EDGE_LOOP('',({edge_ids}));").ok();
-                let kind = if index == 0 {
-                    "FACE_OUTER_BOUND"
-                } else {
-                    "FACE_BOUND"
-                };
-                writeln!(data, "#{bound} = {kind}('',#{lp},.T.);").ok();
-                if !bound_ids.is_empty() {
-                    bound_ids.push(',');
-                }
-                write!(bound_ids, "#{bound}").ok();
-            }
-            let (normal, reference, placement, plane, face) =
-                (alloc(), alloc(), alloc(), alloc(), alloc());
-            let [nx, ny, nz] = n;
-            writeln!(data, "#{normal} = DIRECTION('',({nx:.6},{ny:.6},{nz:.6}));").ok();
-            // The reference direction: the first edge, made square to the
-            // normal (a degenerate triangle's edge need not be).
-            let outer = &loops[0];
-            let (p, q) = (points[outer[0]], points[outer[1]]);
-            let d = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
-            let along = d[0] * nx + d[1] * ny + d[2] * nz;
-            let r = [d[0] - along * nx, d[1] - along * ny, d[2] - along * nz];
-            let r_len = r[0].hypot(r[1]).hypot(r[2]);
-            let r = if r_len > 0.0 {
-                r.map(|value| value / r_len)
-            } else if nx.abs() < 0.9 {
-                [0.0, -nz, ny]
-            } else {
-                [-nz, 0.0, nx]
-            };
-            writeln!(
-                data,
-                "#{reference} = DIRECTION('',({:.6},{:.6},{:.6}));",
-                r[0], r[1], r[2]
-            )
-            .ok();
-            writeln!(
-                data,
-                "#{placement} = AXIS2_PLACEMENT_3D('',#{},#{normal},#{reference});",
-                point_ids[outer[0]]
-            )
-            .ok();
-            writeln!(data, "#{plane} = PLANE('',#{placement});").ok();
-            writeln!(
-                data,
-                "#{face} = ADVANCED_FACE('',({bound_ids}),#{plane},.T.);"
-            )
-            .ok();
-            faces.push(face);
-        };
-
-        // Coplanar neighbours are one face, as a modeller writes a box's six
-        // faces rather than its twelve triangles: triangles that share an
-        // edge and lie on one plane are grouped, and each group is written
-        // bounded by its outline and holes.
-        let mut by_edge: std::collections::HashMap<(usize, usize), Vec<usize>> =
-            std::collections::HashMap::new();
-        for (t, tri) in tris.iter().enumerate() {
-            for k in 0..3 {
-                let (a, b) = (tri.v[k], tri.v[(k + 1) % 3]);
-                by_edge.entry((a.min(b), a.max(b))).or_default().push(t);
-            }
+        let [a, b, c] = i.map(point);
+        if [a, b, c].iter().flatten().any(|value| !value.is_finite()) {
+            continue;
         }
-        let mut parent: Vec<usize> = (0..tris.len()).collect();
-        fn root(parent: &mut [usize], mut i: usize) -> usize {
-            while parent[i] != i {
-                parent[i] = parent[parent[i]];
-                i = parent[i];
-            }
-            i
+        let v = [vertex(a), vertex(b), vertex(c)];
+        if v[0] == v[1] || v[1] == v[2] || v[0] == v[2] {
+            continue;
         }
-        let offset = |tri: &Tri| {
-            let p = points[tri.v[0]];
-            tri.n[0] * p[0] + tri.n[1] * p[1] + tri.n[2] * p[2]
-        };
-        let mut shared: Vec<_> = by_edge.values().filter(|users| users.len() == 2).collect();
-        shared.sort();
-        for users in shared {
-            let (a, b) = (&tris[users[0]], &tris[users[1]]);
-            let facing = a.n[0] * b.n[0] + a.n[1] * b.n[1] + a.n[2] * b.n[2];
-            if facing > 1.0 - 1e-9 && (offset(a) - offset(b)).abs() <= grid * 1e3 {
-                let (ra, rb) = (root(&mut parent, users[0]), root(&mut parent, users[1]));
-                if ra != rb {
-                    parent[ra.max(rb)] = ra.min(rb);
-                }
-            }
-        }
-        let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
-        // Root -> index into `groups`. A linear find here made the grouping
-        // quadratic: with one face per triangle it re-scanned every earlier
-        // group for each triangle of a large mesh.
-        let mut group_of_root: std::collections::HashMap<usize, usize> =
-            std::collections::HashMap::new();
-        for t in 0..tris.len() {
-            let r = root(&mut parent, t);
-            match group_of_root.get(&r) {
-                Some(&index) => groups[index].1.push(t),
-                None => {
-                    group_of_root.insert(r, groups.len());
-                    groups.push((r, vec![t]));
-                }
-            }
-        }
-        for (_, members) in &groups {
-            let n = tris[members[0]].n;
-            match outline(members.iter().map(|&t| tris[t].v), &points, n) {
-                Some(loops) => write_face(&loops, n, &mut data),
-                // An outline that does not close into rings: its triangles.
-                None => {
-                    for &t in members {
-                        write_face(&[tris[t].v.to_vec()], tris[t].n, &mut data);
-                    }
-                }
-            }
-        }
-
-        let mut face_ids = String::new();
-        for id in &faces {
-            if !face_ids.is_empty() {
-                face_ids.push(',');
-            }
-            write!(face_ids, "#{id}").ok();
-        }
-        let closed = edges.values().all(|(_, uses)| *uses == 2);
-        let (shell, item) = (alloc(), alloc());
-        if closed {
-            writeln!(data, "#{shell} = CLOSED_SHELL('',({face_ids}));").ok();
-            writeln!(data, "#{item} = MANIFOLD_SOLID_BREP('',#{shell});").ok();
+        // The face is placed on the triangle's own plane. A smoothed vertex
+        // normal leans off it, so only a triangle whose cross product is zero
+        // falls back to the normal the mesh gives it. Small triangles have a
+        // tiny cross product but still a plane of their own.
+        let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        let cross = [
+            ab[1] * ac[2] - ab[2] * ac[1],
+            ab[2] * ac[0] - ab[0] * ac[2],
+            ab[0] * ac[1] - ab[1] * ac[0],
+        ];
+        let len = cross[0].hypot(cross[1]).hypot(cross[2]);
+        let n = if len == 0.0 && i[0] < normals.len() {
+            normals[i[0]].map(f64::from)
         } else {
-            all_solids = false;
-            writeln!(data, "#{shell} = OPEN_SHELL('',({face_ids}));").ok();
-            writeln!(data, "#{item} = SHELL_BASED_SURFACE_MODEL('',(#{shell}));").ok();
-        }
-        items.push(item);
+            let len = len.max(f64::MIN_POSITIVE);
+            cross.map(|value| value / len)
+        };
+        tris.push(Tri { v, n });
     }
-
-    if items.is_empty() {
+    if tris.is_empty() {
         return None;
     }
 
-    // ── Units, context and the product structure ─────────────────────────
-    let (app, protocol, product_context, product, formation, definition_context) =
-        (alloc(), alloc(), alloc(), alloc(), alloc(), alloc());
-    let (definition, definition_shape, length, angle, solid_angle, uncertainty) =
-        (alloc(), alloc(), alloc(), alloc(), alloc(), alloc());
-    let (context, representation, shape_definition, category) =
-        (alloc(), alloc(), alloc(), alloc());
-    writeln!(
-        data,
-        "#{app} = APPLICATION_CONTEXT('core data for automotive mechanical design processes');"
-    )
-    .ok();
-    writeln!(
-        data,
-        "#{protocol} = APPLICATION_PROTOCOL_DEFINITION('international standard',\
-         'automotive_design',2000,#{app});"
-    )
-    .ok();
-    writeln!(
-        data,
-        "#{product_context} = PRODUCT_CONTEXT('',#{app},'mechanical');"
-    )
-    .ok();
-    writeln!(
-        data,
-        "#{product} = PRODUCT('OpenCADStudio','OpenCADStudio','',(#{product_context}));"
-    )
-    .ok();
-    writeln!(
-        data,
-        "#{formation} = PRODUCT_DEFINITION_FORMATION('','',#{product});"
-    )
-    .ok();
-    writeln!(
-        data,
-        "#{definition_context} = PRODUCT_DEFINITION_CONTEXT('part definition',#{app},'design');"
-    )
-    .ok();
-    writeln!(
-        data,
-        "#{definition} = PRODUCT_DEFINITION('design','',#{formation},#{definition_context});"
-    )
-    .ok();
-    writeln!(
-        data,
-        "#{definition_shape} = PRODUCT_DEFINITION_SHAPE('','',#{definition});"
-    )
-    .ok();
-    writeln!(
-        data,
-        "#{category} = PRODUCT_RELATED_PRODUCT_CATEGORY('part',$,(#{product}));"
-    )
-    .ok();
-    writeln!(
-        data,
-        "#{length} = (LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));"
-    )
-    .ok();
-    writeln!(
-        data,
-        "#{angle} = (NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));"
-    )
-    .ok();
-    writeln!(
-        data,
-        "#{solid_angle} = (NAMED_UNIT(*)SI_UNIT($,.STERADIAN.)SOLID_ANGLE_UNIT());"
-    )
-    .ok();
-    writeln!(
-        data,
-        "#{uncertainty} = UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-06),#{length},\
-         'distance_accuracy_value','confusion accuracy');"
-    )
-    .ok();
-    writeln!(
-        data,
-        "#{context} = (GEOMETRIC_REPRESENTATION_CONTEXT(3)\
-         GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#{uncertainty}))\
-         GLOBAL_UNIT_ASSIGNED_CONTEXT((#{length},#{angle},#{solid_angle}))\
-         REPRESENTATION_CONTEXT('Context3D','3D Context with 1e-06 uncertainty'));"
-    )
-    .ok();
-    let mut item_ids = String::new();
-    for id in &items {
-        if !item_ids.is_empty() {
-            item_ids.push(',');
+    // One line edge per vertex pair, running from the lower index, and how
+    // many faces use it.
+    let mut edges: Vec<m::Edge> = Vec::new();
+    let mut edge_of: HashMap<(usize, usize), (usize, usize)> = HashMap::new();
+    let mut faces: Vec<m::Face> = Vec::new();
+    // A face bounded by `rings` (vertex rings, the outer one first) on the
+    // plane through its first vertex with normal `n`.
+    let mut add_face = |rings: &[Vec<usize>], n: [f64; 3]| {
+        let mut loops = Vec::new();
+        for ring in rings {
+            let mut oriented = Vec::new();
+            for k in 0..ring.len() {
+                let (from, to) = (ring[k], ring[(k + 1) % ring.len()]);
+                let key = (from.min(to), from.max(to));
+                let edge = match edge_of.get_mut(&key) {
+                    Some(entry) => {
+                        entry.1 += 1;
+                        entry.0
+                    }
+                    None => {
+                        let (p, q) = (points[key.0], points[key.1]);
+                        let d = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
+                        let length = d[0].hypot(d[1]).hypot(d[2]).max(f64::EPSILON);
+                        edges.push(m::Edge {
+                            step_id: edges.len() as u64 + 1,
+                            start: key.0,
+                            end: key.1,
+                            curve: m::Curve::Line {
+                                origin: p,
+                                dir: d.map(|value| value / length),
+                                magnitude: length,
+                            },
+                            same_sense: true,
+                            t_start: 0.0,
+                            t_end: 1.0,
+                        });
+                        edge_of.insert(key, (edges.len() - 1, 1));
+                        edges.len() - 1
+                    }
+                };
+                oriented.push(m::OrientedEdge {
+                    edge,
+                    forward: from == key.0,
+                });
+            }
+            loops.push(m::Loop {
+                outer: loops.is_empty(),
+                orientation: true,
+                bound: m::Bound::Edges(oriented),
+            });
         }
-        write!(item_ids, "#{id}").ok();
-    }
-    // Surface models are not B-rep solids, so a mixed export stays a plain
-    // shape representation.
-    let kind = if all_solids {
-        "ADVANCED_BREP_SHAPE_REPRESENTATION"
-    } else {
-        "SHAPE_REPRESENTATION"
+        // The reference direction: the first edge, made square to the normal
+        // (a degenerate triangle's edge need not be).
+        let [nx, ny, nz] = n;
+        let outer = &rings[0];
+        let (p, q) = (points[outer[0]], points[outer[1]]);
+        let d = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
+        let along = d[0] * nx + d[1] * ny + d[2] * nz;
+        let r = [d[0] - along * nx, d[1] - along * ny, d[2] - along * nz];
+        let r_len = r[0].hypot(r[1]).hypot(r[2]);
+        let x = if r_len > 0.0 {
+            r.map(|value| value / r_len)
+        } else if nx.abs() < 0.9 {
+            [0.0, -nz, ny]
+        } else {
+            [-nz, 0.0, nx]
+        };
+        let y = [ny * x[2] - nz * x[1], nz * x[0] - nx * x[2], nx * x[1] - ny * x[0]];
+        faces.push(m::Face {
+            step_id: faces.len() as u64 + 1,
+            surface: m::Surface::Plane {
+                frame: m::Frame {
+                    origin: p,
+                    x,
+                    y,
+                    z: n,
+                },
+            },
+            same_sense: true,
+            loops,
+        });
     };
-    writeln!(
-        data,
-        "#{representation} = {kind}('OpenCADStudio',({item_ids}),#{context});"
-    )
-    .ok();
-    writeln!(
-        data,
-        "#{shape_definition} = SHAPE_DEFINITION_REPRESENTATION(#{definition_shape},\
-         #{representation});"
-    )
-    .ok();
 
-    // ── Assemble file ─────────────────────────────────────────────────────
-    let ts = chrono_timestamp();
-    let file = format!(
-        "ISO-10303-21;\n\
-         HEADER;\n\
-         FILE_DESCRIPTION(('Open CAD Studio STEP export'),'2;1');\n\
-         FILE_NAME('export.step','{ts}',(''),(''),'Open CAD Studio','Open CAD Studio','');\n\
-         FILE_SCHEMA(('AUTOMOTIVE_DESIGN {{ 1 0 10303 214 1 1 1 1 }}'));\n\
-         ENDSEC;\n\
-         DATA;\n\
-         {data}\
-         ENDSEC;\n\
-         END-ISO-10303-21;\n"
-    );
+    // Coplanar neighbours are one face, as a modeller writes a box's six
+    // faces rather than its twelve triangles: triangles that share an edge
+    // and lie on one plane are grouped, and each group is written bounded by
+    // its outline and holes.
+    let mut by_edge: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
+    for (t, tri) in tris.iter().enumerate() {
+        for k in 0..3 {
+            let (a, b) = (tri.v[k], tri.v[(k + 1) % 3]);
+            by_edge.entry((a.min(b), a.max(b))).or_default().push(t);
+        }
+    }
+    let mut parent: Vec<usize> = (0..tris.len()).collect();
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    let offset = |tri: &Tri| {
+        let p = points[tri.v[0]];
+        tri.n[0] * p[0] + tri.n[1] * p[1] + tri.n[2] * p[2]
+    };
+    let mut shared: Vec<_> = by_edge.values().filter(|users| users.len() == 2).collect();
+    shared.sort();
+    for users in shared {
+        let (a, b) = (&tris[users[0]], &tris[users[1]]);
+        let facing = a.n[0] * b.n[0] + a.n[1] * b.n[1] + a.n[2] * b.n[2];
+        if facing > 1.0 - 1e-9 && (offset(a) - offset(b)).abs() <= grid * 1e3 {
+            let (ra, rb) = (root(&mut parent, users[0]), root(&mut parent, users[1]));
+            if ra != rb {
+                parent[ra.max(rb)] = ra.min(rb);
+            }
+        }
+    }
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    // Root -> index into `groups`, so grouping a large mesh stays linear.
+    let mut group_of_root: HashMap<usize, usize> = HashMap::new();
+    for t in 0..tris.len() {
+        let r = root(&mut parent, t);
+        match group_of_root.get(&r) {
+            Some(&index) => groups[index].push(t),
+            None => {
+                group_of_root.insert(r, groups.len());
+                groups.push(vec![t]);
+            }
+        }
+    }
+    for members in &groups {
+        let n = tris[members[0]].n;
+        match outline(members.iter().map(|&t| tris[t].v), &points, n) {
+            Some(rings) => add_face(&rings, n),
+            // An outline that does not close into rings: its triangles.
+            None => {
+                for &t in members {
+                    add_face(&[tris[t].v.to_vec()], tris[t].n);
+                }
+            }
+        }
+    }
 
-    Some(file)
+    let closed = edge_of.values().all(|(_, uses)| *uses == 2);
+    Some(m::Body {
+        step_id: 0,
+        name: None,
+        kind: if closed {
+            m::BodyKind::ManifoldSolid
+        } else {
+            m::BodyKind::ShellModel
+        },
+        unit_mm: 1.0,
+        uncertainty_mm: None,
+        shells: vec![m::Shell {
+            step_id: 1,
+            closed,
+            orientation: true,
+            faces: (0..faces.len()).collect(),
+        }],
+        faces,
+        edges,
+        vertices: points
+            .iter()
+            .enumerate()
+            .map(|(index, &point)| m::Vertex {
+                step_id: index as u64 + 1,
+                point,
+            })
+            .collect(),
+    })
 }
 
 /// Web: no save dialog — the export continues with a virtual filename and
@@ -454,7 +824,6 @@ pub async fn pick_step_path_owned(stem: String) -> Option<std::path::PathBuf> {
     Some(std::path::PathBuf::from(format!("{stem}.step")))
 }
 
-/// Returns an ISO 8601-like timestamp string for the STEP file header.
 /// The rings bounding a set of triangles that share one plane: its edges used
 /// once, chained end to start, the ring enclosing the most area (seen along
 /// `n`) first. `None` when they do not close into rings.
@@ -522,30 +891,228 @@ fn outline(
     rings.swap(0, outer);
     Some(rings)
 }
-
-fn chrono_timestamp() -> String {
-    // Use seconds since Unix epoch for a simple timestamp without chrono dep.
-    // `SystemTime::now` panics in the browser; ask the page's clock there. (#761)
-    #[cfg(target_arch = "wasm32")]
-    let secs = (js_sys::Date::now() / 1000.0) as u64;
-    #[cfg(not(target_arch = "wasm32"))]
-    let secs = {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0)
-    };
-    // Format: YYYY-MM-DDTHH:MM:SS, UTC.
-    let (hh, mm, ss) = (secs / 3600 % 24, secs / 60 % 60, secs % 60);
-    let (year, month, day) = crate::patreon::civil_from_days((secs / 86_400) as i64);
-    format!("{year:04}-{month:02}-{day:02}T{hh:02}:{mm:02}:{ss:02}")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::build_step;
+    use super::{build_step, mesh_body, Schema, StepItem};
     use crate::scene::model::mesh_model::MeshModel;
+    use kernel::brep::{make, Body};
+
+    fn mesh_step(mesh: MeshModel) -> String {
+        let item = StepItem {
+            body: None,
+            solid: true,
+            mesh: Some(mesh),
+            name: String::new(),
+            layer: None,
+            color: None,
+        };
+        build_step(&[item], 1.0, Schema::Ap214, "part").expect("step")
+    }
+
+    fn body_step(body: Body, solid: bool, unit_mm: f64) -> String {
+        let item = StepItem {
+            body: Some(body),
+            solid,
+            mesh: None,
+            name: "part".into(),
+            layer: None,
+            color: None,
+        };
+        build_step(&[item], unit_mm, Schema::Ap214, "part").expect("step")
+    }
+
+    /// The bodies OCS's own reader makes of a STEP text, unscaled.
+    fn read_back(step: &str) -> Vec<Body> {
+        let model = crate::io::step_import::read(step.as_bytes()).expect("readable");
+        let mut bodies: Vec<Body> = model.direct.into_iter().map(|b| b.body).collect();
+        for product in model.products {
+            bodies.extend(product.bodies.into_iter().map(|b| b.body));
+        }
+        bodies
+    }
+
+    fn volume(body: &Body) -> f64 {
+        kernel::brep::mass_properties(body).expect("mass").volume
+    }
+
+    /// Exports a solid, reads it back through both readers and compares
+    /// volumes: the faces must point out of the material for that to hold.
+    fn round_trip(body: Body, expected: f64, kinds: &[&str]) -> String {
+        let step = body_step(body, true, 1.0);
+        for kind in kinds {
+            assert!(step.contains(kind), "no {kind}:\n{step}");
+        }
+        assert!(!step.contains("POLY_LOOP"), "{step}");
+        let back = read_back(&step);
+        assert_eq!(back.len(), 1, "{step}");
+        let got = volume(&back[0]);
+        assert!(
+            (got - expected).abs() <= expected * 1e-3,
+            "volume {got} != {expected}:\n{step}"
+        );
+        let neutral = step_export::import(step.as_bytes(), &step_export::Limits::default())
+            .expect("the mapper reads it");
+        assert_eq!(neutral.bodies.len(), 1, "{:?}", neutral.skipped);
+        step
+    }
+
+    #[test]
+    fn a_box_round_trips_as_an_exact_solid() {
+        let step = round_trip(
+            make::cuboid([1.0, 2.0, 3.0], [10.0, 20.0, 30.0]).unwrap(),
+            6000.0,
+            &["MANIFOLD_SOLID_BREP", "CLOSED_SHELL", "PLANE("],
+        );
+        assert_eq!(step.matches("ADVANCED_FACE").count(), 6);
+        assert!(step.contains("FILE_SCHEMA(('AUTOMOTIVE_DESIGN'))"));
+    }
+
+    #[test]
+    fn a_cylinder_round_trips() {
+        let expected = std::f64::consts::PI * 25.0 * 10.0;
+        round_trip(
+            make::cylinder([0.0, 0.0, 0.0], 5.0, 10.0).unwrap(),
+            expected,
+            &["CYLINDRICAL_SURFACE", "CIRCLE("],
+        );
+    }
+
+    #[test]
+    fn a_cone_round_trips() {
+        let expected = std::f64::consts::PI * 16.0 * 9.0 / 3.0;
+        round_trip(
+            make::cone([1.0, 1.0, 0.0], 4.0, 9.0).unwrap(),
+            expected,
+            &["CONICAL_SURFACE"],
+        );
+    }
+
+    #[test]
+    fn a_frustum_round_trips() {
+        let (r, top, h) = (6.0, 2.0, 5.0);
+        let expected = std::f64::consts::PI * h / 3.0 * (r * r + r * top + top * top);
+        round_trip(
+            make::frustum([0.0, 0.0, 0.0], r, r, top, h).unwrap(),
+            expected,
+            &["CONICAL_SURFACE"],
+        );
+    }
+
+    #[test]
+    fn a_sphere_round_trips() {
+        let expected = 4.0 / 3.0 * std::f64::consts::PI * 27.0;
+        round_trip(
+            make::sphere([2.0, 0.0, 0.0], 3.0).unwrap(),
+            expected,
+            &["SPHERICAL_SURFACE"],
+        );
+    }
+
+    #[test]
+    fn a_torus_round_trips() {
+        let expected = 2.0 * std::f64::consts::PI.powi(2) * 6.0 * 1.5 * 1.5;
+        round_trip(
+            make::torus([0.0, 0.0, 0.0], 6.0, 1.5).unwrap(),
+            expected,
+            &["TOROIDAL_SURFACE"],
+        );
+    }
+
+    #[test]
+    fn a_spline_walled_cone_round_trips() {
+        // An elliptical cone's wall is a spline surface.
+        let (a, b, h) = (6.0, 4.0, 9.0);
+        let expected = std::f64::consts::PI * a * b * h / 3.0;
+        round_trip(
+            make::frustum([0.0, 0.0, 0.0], a, b, 0.0, h).unwrap(),
+            expected,
+            &["B_SPLINE_SURFACE"],
+        );
+    }
+
+    #[test]
+    fn a_solid_with_a_void_keeps_it() {
+        let outer = make::cuboid([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
+        let inner = make::cuboid([3.0, 3.0, 3.0], [4.0, 4.0, 4.0]).unwrap();
+        let hollow =
+            kernel::brep::combine(outer, inner, kernel::brep::Operation::Difference, 1e-6)
+                .expect("difference");
+        round_trip(
+            hollow,
+            1000.0 - 64.0,
+            &["BREP_WITH_VOIDS", "ORIENTED_CLOSED_SHELL"],
+        );
+    }
+
+    #[test]
+    fn drawing_units_are_written_in_millimetres() {
+        let body = make::cuboid([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
+        let step = body_step(body, true, 25.4);
+        let back = read_back(&step);
+        let got = volume(&back[0]);
+        assert!((got - 25.4f64.powi(3)).abs() < 1e-6 * got, "{got}");
+    }
+
+    #[test]
+    fn a_sheet_is_a_shell_based_surface_model() {
+        let square = make::cuboid([0.0, 0.0, 0.0], [2.0, 2.0, 2.0]).unwrap();
+        let face = square.face_keys().next().unwrap();
+        let sheet = kernel::brep::face_sheet(&square, &[face]).expect("sheet");
+        let step = body_step(sheet, false, 1.0);
+        assert!(step.contains("SHELL_BASED_SURFACE_MODEL"), "{step}");
+        assert!(step.contains("OPEN_SHELL"), "{step}");
+        assert!(step.contains("MANIFOLD_SURFACE_SHAPE_REPRESENTATION"), "{step}");
+        assert_eq!(read_back(&step).len(), 1);
+    }
+
+    #[test]
+    fn each_object_keeps_its_layer_and_colour() {
+        let item = |x: f64, layer: &str, color: [f64; 3]| StepItem {
+            body: make::cuboid([x, 0.0, 0.0], [1.0, 1.0, 1.0]),
+            solid: true,
+            mesh: None,
+            name: layer.to_lowercase(),
+            layer: Some(layer.into()),
+            color: Some(color),
+        };
+        let items = [
+            item(0.0, "A", [1.0, 0.0, 0.0]),
+            item(5.0, "B", [0.0, 0.0, 1.0]),
+            item(9.0, "A", [1.0, 0.0, 0.0]),
+        ];
+        let step = build_step(&items, 1.0, Schema::Ap242, "part").unwrap();
+        assert!(step.contains("FILE_SCHEMA(('AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF'))"));
+        assert_eq!(step.matches("PRESENTATION_LAYER_ASSIGNMENT").count(), 2, "{step}");
+        assert_eq!(step.matches("COLOUR_RGB").count(), 2, "{step}");
+        assert_eq!(step.matches("STYLED_ITEM").count(), 3, "{step}");
+        assert!(step.contains("MANIFOLD_SOLID_BREP('b'"), "{step}");
+        let model = crate::io::step_import::read(step.as_bytes()).unwrap();
+        let colours: Vec<_> = model
+            .direct
+            .iter()
+            .chain(model.products.iter().flat_map(|p| p.bodies.iter()))
+            .map(|b| b.colour)
+            .collect();
+        assert_eq!(
+            colours,
+            [Some([1.0, 0.0, 0.0]), Some([0.0, 0.0, 1.0]), Some([1.0, 0.0, 0.0])]
+        );
+    }
+
+    #[test]
+    fn a_body_that_cannot_be_written_falls_back_to_its_mesh() {
+        let item = StepItem {
+            body: Some(Body::new()),
+            solid: true,
+            mesh: Some(cube()),
+            name: String::new(),
+            layer: None,
+            color: None,
+        };
+        let step = build_step(&[item], 1.0, Schema::Ap203, "part").unwrap();
+        assert!(step.contains("FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'))"));
+        assert_eq!(step.matches("ADVANCED_FACE").count(), 6, "{step}");
+    }
 
     fn triangle(verts: Vec<[f32; 3]>, verts_low: Vec<[f32; 3]>) -> MeshModel {
         MeshModel {
@@ -581,14 +1148,10 @@ mod tests {
         .into_iter()
         .map(split)
         .unzip();
-        let step = build_step(&[&triangle(verts, verts_low)]).expect("step");
-        assert!(
-            step.contains("CARTESIAN_POINT('',(500000.123000,500010.456000,0.000000));"),
-            "first vertex lost its residual:\n{}",
-            step.lines()
-                .find(|line| line.contains("CARTESIAN_POINT"))
-                .unwrap_or("")
-        );
+        let body = mesh_body(&triangle(verts, verts_low), 1.0).expect("body");
+        let first = body.vertices[0].point;
+        assert!((first[0] - 500000.123).abs() < 1e-6, "{first:?}");
+        assert!((first[1] - 500010.456).abs() < 1e-6, "{first:?}");
     }
 
     /// Meshes without residuals (imported OBJ, legacy meshes) export as before.
@@ -598,31 +1161,18 @@ mod tests {
             vec![[1.5, 2.0, 0.0], [2.5, 2.0, 0.0], [1.5, 3.0, 0.0]],
             Vec::new(),
         );
-        let step = build_step(&[&mesh]).expect("step");
-        assert!(step.contains("CARTESIAN_POINT('',(1.500000,2.000000,0.000000));"));
+        let step = mesh_step(mesh);
+        assert!(step.contains("CARTESIAN_POINT('',(1.5,2.0,0.))"), "{step}");
     }
 
-    /// The direction each face's PLANE is placed with, read back through its
-    /// AXIS2_PLACEMENT_3D. The export writes one face per triangle.
-    fn plane_normals(step: &str) -> Vec<[f64; 3]> {
-        let direction = |id: &str| -> [f64; 3] {
-            let prefix = format!("{id} = DIRECTION('',(");
-            let line = step
-                .lines()
-                .find(|line| line.starts_with(&prefix))
-                .unwrap_or_else(|| panic!("no DIRECTION {id}"));
-            let values: Vec<f64> = line[prefix.len()..]
-                .trim_end_matches("));")
-                .split(',')
-                .map(|value| value.parse().expect("number"))
-                .collect();
-            [values[0], values[1], values[2]]
-        };
-        step.lines()
-            .filter_map(|line| line.split_once(" = AXIS2_PLACEMENT_3D('',"))
-            .map(|(_, refs)| {
-                let refs: Vec<&str> = refs.trim_end_matches(");").split(',').collect();
-                direction(refs[1])
+    /// The normal of each face's plane.
+    fn plane_normals(mesh: &MeshModel) -> Vec<[f64; 3]> {
+        let body = mesh_body(mesh, 1.0).expect("body");
+        body.faces
+            .iter()
+            .map(|face| match &face.surface {
+                solidcore_record::step::model::Surface::Plane { frame } => frame.z,
+                other => panic!("not a plane: {other:?}"),
             })
             .collect()
     }
@@ -642,8 +1192,7 @@ mod tests {
             std::f32::consts::FRAC_1_SQRT_2,
         ];
         mesh.normals = vec![leaning; 3];
-        let step = build_step(&[&mesh]).expect("step");
-        assert_eq!(plane_normals(&step), vec![[0.0, 0.0, 1.0]]);
+        assert_eq!(plane_normals(&mesh), vec![[0.0, 0.0, 1.0]]);
     }
 
     /// A small triangle still has a plane of its own. Its cross product is
@@ -660,8 +1209,7 @@ mod tests {
             std::f32::consts::FRAC_1_SQRT_2,
         ];
         mesh.normals = vec![leaning; 3];
-        let step = build_step(&[&mesh]).expect("step");
-        assert_eq!(plane_normals(&step), vec![[0.0, 0.0, 1.0]]);
+        assert_eq!(plane_normals(&mesh), vec![[0.0, 0.0, 1.0]]);
     }
 
     /// A triangle with no area has no plane of its own, so it keeps the
@@ -673,8 +1221,7 @@ mod tests {
             Vec::new(),
         );
         mesh.normals = vec![[0.0, 1.0, 0.0]; 3];
-        let step = build_step(&[&mesh]).expect("step");
-        assert_eq!(plane_normals(&step), vec![[0.0, 1.0, 0.0]]);
+        assert_eq!(plane_normals(&mesh), vec![[0.0, 1.0, 0.0]]);
     }
 
     /// A unit cube as twelve triangles, each face's corners repeated (as the
@@ -705,11 +1252,12 @@ mod tests {
 
     #[test]
     fn a_box_exports_six_planar_faces_in_a_closed_shell() {
-        let mesh = cube();
-        let step = build_step(&[&mesh]).unwrap();
+        let step = mesh_step(cube());
         assert_eq!(step.matches("ADVANCED_FACE").count(), 6, "{step}");
         assert_eq!(step.matches("EDGE_CURVE").count(), 12);
         assert!(step.contains("CLOSED_SHELL") && step.contains("MANIFOLD_SOLID_BREP"));
+        let back = read_back(&step);
+        assert!((volume(&back[0]) - 1.0).abs() < 1e-9);
     }
 
     #[test]
@@ -733,9 +1281,10 @@ mod tests {
             indices,
             ..triangle(verts, Vec::new())
         };
-        let step = build_step(&[&mesh]).unwrap();
+        let step = mesh_step(mesh);
         assert_eq!(step.matches("ADVANCED_FACE").count(), 1, "{step}");
         assert_eq!(step.matches("FACE_OUTER_BOUND").count(), 1);
-        assert_eq!(step.matches("= FACE_BOUND").count(), 1);
+        assert_eq!(step.matches("=FACE_BOUND").count(), 1);
+        assert!(step.contains("SHELL_BASED_SURFACE_MODEL"), "{step}");
     }
 }

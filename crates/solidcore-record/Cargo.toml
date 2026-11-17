@@ -1,0 +1,10 @@
+[package]
+name = "solidcore-record"
+description = "STEP (ISO 10303) exchange structure, units, geometry and neutral B-rep model; the step module of solidcore's solidcore-record, vendored"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+thiserror = "2"

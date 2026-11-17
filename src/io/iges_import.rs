@@ -1403,6 +1403,9 @@ pub fn read(bytes: &[u8], drawing_mm: Option<f64>) -> Option<IgesModel> {
             shells.push(outer);
             shells.extend(voids);
             if assembly.build.lump(shells).is_some() {
+                // Faces of trimmed surfaces share their corners but not
+                // their edges: sewing makes the shell one.
+                assembly.build.heal(Some(doc.resolution), true);
                 bodies.push((assembly.build.body, doc.color(entity.color), layer(entity)));
             }
         }
@@ -1436,6 +1439,9 @@ pub fn read(bytes: &[u8], drawing_mm: Option<f64>) -> Option<IgesModel> {
             143 | 144 => assembly.sheet(entity).map(|_| false),
             _ => assembly.whole(number as f64),
         };
+        if let Some(closed) = made {
+            assembly.build.heal(Some(doc.resolution), closed);
+        }
         match made {
             Some(true) => {
                 bodies.push((assembly.build.body, doc.color(entity.color), layer(entity)))

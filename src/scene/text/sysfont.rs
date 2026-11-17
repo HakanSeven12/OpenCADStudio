@@ -1081,4 +1081,36 @@ mod tests {
             1
         );
     }
+
+    /// Font files are parsed while the font database is locked
+    /// (`with_face_data` runs its closure inside the lock). A panic there, on
+    /// a damaged font, is caught by the open or export that read it, but it
+    /// leaves the lock poisoned, and every later text draw used to panic on
+    /// the UI thread when it took the lock. The caches and the database stay
+    /// usable after a panic, so the next lock must recover them.
+    #[test]
+    fn a_panic_while_a_font_is_parsed_does_not_break_later_text() {
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/web/fonts/greek.ttf"))
+            .expect("bundled web font");
+        let (family, _) = register_font_file("Poison-Test.ttf", &bytes).expect("a face");
+        let alpha = crate::scene::text::ttf_glyph::glyph(&family, '\u{3b1}');
+        assert!(alpha.is_some(), "the bundled font draws alpha");
+
+        let caught = std::panic::catch_unwind(|| {
+            with_face_data::<()>(&family, |_, _| panic!("a damaged font"))
+        });
+        assert!(caught.is_err());
+        assert!(
+            fonts().db.is_poisoned(),
+            "the panic poisoned the font database"
+        );
+
+        // What a text draw does next: find the face, read it, build a glyph.
+        assert!(has_family(&family));
+        assert!(with_face_data(&family, |data, _| data.len()).is_some_and(|len| len > 0));
+        assert!(crate::scene::text::ttf_glyph::glyph(&family, '\u{3b2}').is_some());
+
+        // The lock is shared with every other test in this binary.
+        fonts().db.clear_poison();
+    }
 }

@@ -6,6 +6,11 @@
 //! 2. `undo_redo_vis_state`: undo + redo of a block `visibility_states` switch
 //! 3. `show_visibility_state`: interactive BEDIT `show_visibility_state` switch
 //! 4. `dynamic_action_eval`: interactive dynamic-block stretch parameter commit
+//! 5. `prop_edit_in_block`: `invalidate_property_targets_or_blocks` on a block member
+//! 6. `bedit_save`: `save_block_edit` inside BEDIT on a block with many other blocks
+//! 7. `find_replace_text`: `find_replace_all` replacing top-level + block text
+//! 8. `battman_apply`: `BATTMAN` tag rename + attribute sync
+//! 9. `bcycleorder_apply`: `BCYCLEORDER` grip cycling apply inside BEDIT
 //!
 //! Run: `cargo bench --bench block_incremental_perf`
 
@@ -83,6 +88,47 @@ fn run() {
         let x = 11.0 + ((step % 10) as f64) * 0.5;
         action_app.evaluate_dynamic_action(insert, action_def, stretch_param, x)
     });
+
+    let (mut prop_app, prop_member) = BlockBenchHarness::setup_block_prop_edit(
+        BACKGROUND_LINES,
+        OTHER_BLOCKS,
+        ENTITIES_PER_BLOCK,
+    );
+    bench_op("prop_edit_in_block", |step| {
+        prop_app.prop_edit_in_block(prop_member, step)
+    });
+
+    let (mut bedit_app, bedit_member) = BlockBenchHarness::setup_bedit_save(
+        BACKGROUND_LINES,
+        OTHER_BLOCKS,
+        ENTITIES_PER_BLOCK,
+    );
+    bench_op("bedit_save", |step| {
+        bedit_app.bedit_save_step(bedit_member, step)
+    });
+
+    let mut find_app = BlockBenchHarness::setup_find_replace(
+        BACKGROUND_LINES,
+        OTHER_BLOCKS,
+        ENTITIES_PER_BLOCK,
+    );
+    bench_op("find_replace_text", |step| {
+        find_app.find_replace_cycle(step)
+    });
+
+    let mut att_app = BlockBenchHarness::setup_battman(
+        BACKGROUND_LINES,
+        OTHER_BLOCKS,
+        ENTITIES_PER_BLOCK,
+    );
+    bench_op("battman_apply", |step| att_app.battman_apply(step));
+
+    let mut cycle_app = BlockBenchHarness::setup_bcycleorder(
+        BACKGROUND_LINES,
+        OTHER_BLOCKS,
+        ENTITIES_PER_BLOCK,
+    );
+    bench_op("bcycleorder_apply", |_| cycle_app.bcycleorder_apply());
 }
 
 fn main() {

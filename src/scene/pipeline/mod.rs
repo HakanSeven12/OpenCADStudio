@@ -87,7 +87,28 @@ struct SilhouetteSourceGroup {
 use device_capabilities::DeviceCapabilities;
 
 /// MSAA sample count for the main drawing pipelines.
-const MSAA_SAMPLES: u32 = 4;
+///
+/// Defaults to 4. `OCS_MSAA=1` (or `4`) overrides it at startup so low-end
+/// integrated GPUs, which are fill-rate and bandwidth bound, can trade edge
+/// smoothing for frame time and GPU memory. With 1 the scene renders straight
+/// into the resolve texture and the resolve pass is skipped. Only 1 and 4 are
+/// accepted: WebGPU guarantees just those counts for `Bgra8Unorm` and
+/// `Depth24PlusStencil8`; 2 and 8 need `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`,
+/// which the device is not requested with.
+pub(crate) fn msaa_samples() -> u32 {
+    static SAMPLES: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *SAMPLES.get_or_init(|| {
+        let n = std::env::var("OCS_MSAA")
+            .ok()
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .filter(|n| matches!(n, 1 | 4))
+            .unwrap_or(4);
+        if crate::perf::enabled() {
+            eprintln!("[perf] msaa samples={n}");
+        }
+        n
+    })
+}
 const SHADOW_MAP_SIZE: u32 = 2048;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -783,7 +804,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -823,7 +844,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -902,7 +923,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -944,7 +965,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -987,7 +1008,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -1072,7 +1093,7 @@ impl Pipeline {
                         bias: wgpu::DepthBiasState::default(),
                     }),
                     multisample: wgpu::MultisampleState {
-                        count: MSAA_SAMPLES,
+                        count: msaa_samples(),
                         mask: !0,
                         alpha_to_coverage_enabled: false,
                     },
@@ -1179,7 +1200,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -1502,7 +1523,7 @@ impl Pipeline {
                 },
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -1548,7 +1569,7 @@ impl Pipeline {
                 },
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -1600,7 +1621,7 @@ impl Pipeline {
                     },
                 }),
                 multisample: wgpu::MultisampleState {
-                    count: MSAA_SAMPLES,
+                    count: msaa_samples(),
                     mask: !0,
                     alpha_to_coverage_enabled: false,
                 },
@@ -1647,7 +1668,7 @@ impl Pipeline {
                     },
                 }),
                 multisample: wgpu::MultisampleState {
-                    count: MSAA_SAMPLES,
+                    count: msaa_samples(),
                     mask: !0,
                     alpha_to_coverage_enabled: false,
                 },
@@ -1694,7 +1715,7 @@ impl Pipeline {
                         bias: wgpu::DepthBiasState::default(),
                     }),
                     multisample: wgpu::MultisampleState {
-                        count: MSAA_SAMPLES,
+                        count: msaa_samples(),
                         mask: !0,
                         alpha_to_coverage_enabled: false,
                     },
@@ -1770,7 +1791,7 @@ impl Pipeline {
                         bias: wgpu::DepthBiasState::default(),
                     }),
                     multisample: wgpu::MultisampleState {
-                        count: MSAA_SAMPLES,
+                        count: msaa_samples(),
                         mask: !0,
                         alpha_to_coverage_enabled: false,
                     },
@@ -1835,7 +1856,7 @@ impl Pipeline {
                     bias: wgpu::DepthBiasState::default(),
                 }),
                 multisample: wgpu::MultisampleState {
-                    count: MSAA_SAMPLES,
+                    count: msaa_samples(),
                     mask: !0,
                     alpha_to_coverage_enabled: false,
                 },
@@ -1890,7 +1911,7 @@ impl Pipeline {
                 },
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -1937,7 +1958,7 @@ impl Pipeline {
                     },
                 }),
                 multisample: wgpu::MultisampleState {
-                    count: MSAA_SAMPLES,
+                    count: msaa_samples(),
                     mask: !0,
                     alpha_to_coverage_enabled: false,
                 },
@@ -2001,7 +2022,7 @@ impl Pipeline {
                 },
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -2049,7 +2070,7 @@ impl Pipeline {
                     },
                 }),
                 multisample: wgpu::MultisampleState {
-                    count: MSAA_SAMPLES,
+                    count: msaa_samples(),
                     mask: !0,
                     alpha_to_coverage_enabled: false,
                 },
@@ -2096,7 +2117,7 @@ impl Pipeline {
                     },
                 }),
                 multisample: wgpu::MultisampleState {
-                    count: MSAA_SAMPLES,
+                    count: msaa_samples(),
                     mask: !0,
                     alpha_to_coverage_enabled: false,
                 },
@@ -2197,7 +2218,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -2251,7 +2272,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -2282,7 +2303,7 @@ impl Pipeline {
             &frame_bgl,
             &text_atlas_bgl,
             format,
-            MSAA_SAMPLES,
+            msaa_samples(),
             &content_stencil,
         );
 
@@ -2290,7 +2311,7 @@ impl Pipeline {
             device,
             &frame_bgl,
             format,
-            MSAA_SAMPLES,
+            msaa_samples(),
             &content_stencil,
         );
 
@@ -2298,17 +2319,22 @@ impl Pipeline {
             device,
             &frame_bgl,
             format,
-            MSAA_SAMPLES,
+            msaa_samples(),
             &content_stencil,
         );
 
         let viewcube = ViewCubePipeline::new(device, queue, format);
 
         let init_size = Size::new(1, 1);
-        let msaa_view = create_msaa_texture(device, init_size, format)
-            .create_view(&wgpu::TextureViewDescriptor::default());
         let resolve_tex = create_resolve_texture(device, init_size, format);
         let resolve_view = resolve_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        // At 1 sample there is nothing to resolve: draw into the resolve texture.
+        let msaa_view = if msaa_samples() > 1 {
+            create_msaa_texture(device, init_size, format)
+                .create_view(&wgpu::TextureViewDescriptor::default())
+        } else {
+            resolve_tex.create_view(&wgpu::TextureViewDescriptor::default())
+        };
 
         // ── Blit pipeline (resolve texture → surface target) ──────────────
         let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -5971,7 +5997,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             // resolve never touches the surface. Only the drawn [0, render_size]
             // corner holds content; the rounded border stays the cleared bg color
             // and is never sampled (the blit UV is scaled to render/alloc).
-            {
+            if msaa_samples() > 1 {
                 let _resolve = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("msaa.resolve_pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -6226,10 +6252,14 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             let size = alloc;
             let depth_tex = create_depth_texture(device, size);
             self.depth_view = depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
-            let msaa_tex = create_msaa_texture(device, size, self.surface_format);
-            self.msaa_view = msaa_tex.create_view(&wgpu::TextureViewDescriptor::default());
             let resolve_tex = create_resolve_texture(device, size, self.surface_format);
             let resolve_view = resolve_tex.create_view(&wgpu::TextureViewDescriptor::default());
+            self.msaa_view = if msaa_samples() > 1 {
+                create_msaa_texture(device, size, self.surface_format)
+                    .create_view(&wgpu::TextureViewDescriptor::default())
+            } else {
+                resolve_tex.create_view(&wgpu::TextureViewDescriptor::default())
+            };
             self.blit_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("blit.bind_group"),
                 layout: &self.blit_bind_group_layout,
@@ -6800,7 +6830,7 @@ fn create_depth_texture(device: &wgpu::Device, size: Size<u32>) -> wgpu::Texture
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: MSAA_SAMPLES,
+        sample_count: msaa_samples(),
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Depth24PlusStencil8,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -6842,7 +6872,7 @@ fn create_msaa_texture(
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: MSAA_SAMPLES,
+        sample_count: msaa_samples(),
         dimension: wgpu::TextureDimension::D2,
         format,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,

@@ -2396,6 +2396,18 @@ const SCENE_REGION_V1_HEIGHT: f32 = 240.0;
 /// scene-shaped beyond the view-pass `Rc` snapshot (see
 /// [`MountRegistry::scene_region_element_owned`]); the retained prims live
 /// registry-side in the shared cache slot.
+///
+/// SCN-031b FIT-AND-CENTER LAW (enforced inside the cache's build path —
+/// the program only ever sees the finished `Geometry` blob): every
+/// committed build fits the projected stream's bounding box into these
+/// bounds — translate + uniform scale, centered, [`SCENE_FIT_MARGIN`]
+/// (the cache module's constant) inset, scaling UP small scenes too (the
+/// documented viewer law). That is what makes an origin-centered graph
+/// (negative scene coordinates) visible in a top-left-origin region — the
+/// live SCN-031 defect. The transform is a pure function of the existing
+/// layer-key inputs (bbox = f(revision), bounds, const margin), so it adds
+/// no key field and no rebuild: replay stays replay. SCN-032 will invert
+/// it for pointer→scene mapping ([`crate::ui::window::plugin_scene_cache::SceneFitTransform::invert`]).
 #[cfg(not(target_arch = "wasm32"))]
 struct SceneRegionProgram {
     /// The store's scene leg, snapshotted at composition time.
@@ -11007,6 +11019,37 @@ mod tests {
         fixture_graph_scene(revision, 4, 0x5C39)
     }
 
+    /// The SCN-031b defect fixture: an ORIGIN-CENTERED two-card scene —
+    /// negative AND positive coordinates, the reference demo graph's shape
+    /// (which the 1:1 stage-1 mapping drew entirely off-region).
+    fn origin_centered_leg(revision: u64) -> ocs_plugin_api::scene::PanelScene {
+        ocs_plugin_api::scene::PanelScene {
+            revision: SceneRevision(revision),
+            elements: vec![
+                SceneElement::Rect {
+                    id: sid(1),
+                    name: None,
+                    actions: vec![],
+                    drag: None,
+                    pos: Vec2([-60.0, -40.0]),
+                    size: Vec2([40.0, 20.0]),
+                    fill: Some(SceneColor::Theme(ThemeColor::Normal)),
+                    stroke: None,
+                },
+                SceneElement::Rect {
+                    id: sid(2),
+                    name: None,
+                    actions: vec![],
+                    drag: None,
+                    pos: Vec2([20.0, 20.0]),
+                    size: Vec2([40.0, 20.0]),
+                    fill: Some(SceneColor::Theme(ThemeColor::Normal)),
+                    stroke: None,
+                },
+            ],
+        }
+    }
+
     /// One coloured root rect (the patch payload; a fill so the projection
     /// actually emits a prim for it).
     fn scene_rect(id: u64) -> SceneElement {
@@ -11257,6 +11300,71 @@ mod tests {
             let counters = cache.counters();
             assert_eq!(counters.layer_builds, 4);
             assert_eq!(counters.probe_hits, 1);
+        });
+    }
+
+    /// THE SCN-031b SEAM PIN (the live defect, dead at the composition
+    /// level): the defect fixture — an ORIGIN-CENTERED scene whose cards
+    /// span NEGATIVE coordinates (the demo graph's shape, which the 1:1
+    /// stage-1 mapping drew entirely off the top-left-origin region) —
+    /// builds ONCE through the panel's cache slot and then replays: the
+    /// fit-and-center transform the cache now applies on every build is a
+    /// pure function of the existing key inputs, so it forces no extra
+    /// re-projection (replay stays replay), and its invertible fit law is
+    /// pinned in the cache module (`SceneFitTransform`).
+    #[test]
+    fn negative_coord_scene_builds_once_then_replays() {
+        let _app = OpenCADStudio::new_for_test();
+        with_test_registry_mut(|registry| {
+            registry
+                .panel_surface_store_mut()
+                .publish("PLUGIN", "scn_panel", SceneOrWidgetSurface::Scene(origin_centered_leg(1)))
+                .expect("the scene leg stores");
+        });
+        assert!(MountRegistry::mounted_body("scn_panel").is_some());
+        let slot = MountRegistry::scene_cache_slot("scn_panel").expect("slot");
+
+        let dark = iced::Theme::Dark;
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 240.0,
+            height: 180.0,
+        };
+        with_test_registry(|registry| {
+            let scene = registry
+                .panel_surface_store()
+                .entry("scn_panel")
+                .unwrap()
+                .scene
+                .as_ref()
+                .unwrap()
+                .clone();
+            // The defect's precondition, pinned at the seam level: the
+            // stored leg projects to negative coordinates.
+            let prims = project_scene(&scene, dark.palette(), bounds.size())
+                .expect("the leg is valid");
+            let (min, _) =
+                crate::ui::window::plugin_scene_cache::prims_bbox(&prims).expect("geometry");
+            assert!(min.x < 0.0 && min.y < 0.0);
+
+            // THE LAW: exactly one build, then replay — the transform
+            // forced no re-projection.
+            let mut cache = slot.borrow_mut();
+            assert_eq!(
+                cache.apply_build(&scene, dark.palette(), bounds),
+                DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+            );
+            assert_eq!(
+                cache.apply_build(&scene, dark.palette(), bounds),
+                DrawDecision::LayerHit
+            );
+            let counters = cache.counters();
+            assert_eq!(counters.layer_builds, 1);
+            assert_eq!(counters.probe_hits, 1);
+            assert_eq!(counters.rebuilds_bounds, 0);
+            assert_eq!(counters.rebuilds_palette, 0);
+            assert_eq!(counters.last_error, None);
         });
     }
 

@@ -47,12 +47,22 @@
 //! per applied patch, ONLY the segments the `AppliedPatchReport` names. The
 //! `CachedOverlayLayer` stays the pixel-path carrier: the layer still rebuilds
 //! on a revision bump (`layer_builds` — the cheap emit), but when the store is
-//! fresh the build paints from the store's segment Arcs instead of re-running
+//! fresh the build paints from the store's segments instead of re-running
 //! the semantic flatten, and the honest cost proof is the store's
 //! `StoreCounters.subtree_reprojects` (segments actually re-projected, ==
 //! segments touched) vs `layer_builds`: prim re-projection avoided for
 //! untouched segments is the win being instrumented. The SCN-012 benchmark
 //! consumes these counters.
+//!
+//! SCN-031b fit-and-center law: a committed build NEVER paints the stream
+//! 1:1 any more — the stream's bounding box is fitted into the region's
+//! bounds (translate + uniform scale, centered, `SCENE_FIT_MARGIN` inset;
+//! see the transform section for the exact math and the determinism
+//! reasoning). That closed the live defect where an origin-centered graph
+//! (negative scene coordinates) landed entirely off a top-left-origin
+//! region and the mount rendered (nearly) nothing. The transform adds NO
+//! key field and NO counter: it is a pure function of the existing key
+//! inputs, so replay stays replay.
 //!
 //! Palette-fingerprint scope decision: [`palette_fingerprint`] hashes EVERY
 //! bound slot named in its doc — deliberately WIDER than
@@ -69,11 +79,10 @@
 use std::collections::HashMap;
 
 use iced::widget::canvas;
-use iced::{Color, Rectangle};
+use iced::{Color, Point, Rectangle, Size};
 use ocs_plugin_api::scene::{
     AppliedPatchReport, PanelScene, SceneError, SceneRevision, SceneSummary, StableId,
 };
-use std::sync::Arc;
 
 use crate::ui::overlay::CachedOverlayLayer;
 use crate::ui::window::plugin_scene::{
@@ -174,6 +183,11 @@ pub(crate) fn palette_fingerprint(palette: &iced::theme::Palette) -> u64 {
 ///   the scene tier offers);
 /// - `palette_fingerprint` stands in for palette identity (SIMPLE > subtle:
 ///   no `PartialEq` reliance — see the module docs).
+///
+/// SCN-031b: the committed layer's fit-and-center transform derives from
+/// EXACTLY these fields (bbox = f(revision)'s prim stream, bounds, and the
+/// constant margin) — no key field was added, so key-equal draws replay a
+/// layer built under the identical transform (pinned by tests).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SceneLayerKey {
     /// Scene revision the cached projection was built from.
@@ -183,6 +197,257 @@ pub(crate) struct SceneLayerKey {
     /// [`palette_fingerprint`] of the palette the projection resolved
     /// against.
     pub palette_fingerprint: u64,
+}
+
+// ── SCN-031b: the region fit-and-center transform ───────────────────────────
+//
+// `project_scene` maps scene units 1:1 onto region-local pixels (the
+// documented stage-1 law; `bounds` only anchors the interaction-phase
+// transform). The reference demo's graph, however, is centered on the
+// SCENE ORIGIN — its node cards span negative coordinates — so under 1:1
+// into a region whose local origin is the TOP-LEFT, the negative-coordinate
+// geometry lands entirely OFF-REGION and the mounted region draws (nearly)
+// nothing. That was exactly the live defect this section closes.
+//
+// The fix lives HERE (the cache owns projection AND emit; the region
+// program only ever sees the finished `Geometry` blob): every committed
+// build fits the projected prim stream's bounding box into the region's
+// bounds with a TRANSLATE + UNIFORM-SCALE transform before emitting.
+//
+// Determinism / retention reasoning (pinned by tests): the transform is a
+// PURE function of (scene bbox, bounds.size(), margin) — and
+//   scene bbox = f(project_scene(scene)) = f(revision)  (the monotone law
+//     the layer key already relies on: an equal revision IS an equal prim
+//     stream — a content change always arrives at a greater revision), and
+//   bounds are a key field, and the margin is a compile-time constant.
+// The transform is therefore fully determined by the existing
+// [`SceneLayerKey`]: a key HIT replays a layer built under the IDENTICAL
+// transform; a key MISS recomputes it identically. The transform
+// deliberately adds NO key field and advances NO counter — replay stays
+// replay, and the retained counters keep proving rebuild-vs-reuse exactly
+// as before (a transform change with unchanged scene/bounds/palette is
+// impossible by this construction).
+//
+// SCN-032 contract: the transform is affine and INVERTIBLE —
+// [`SceneFitTransform::invert`] is the pointer→scene half of the coming
+// hit-testing. Keep [`SceneFitTransform::fit`] a pure function of
+// (scene bbox, region size); SCN-032 consumes it verbatim.
+
+/// The margin (logical px) a fitted scene keeps from the region's edges on
+/// every side (documented v1 value: a thin breathing frame).
+pub(crate) const SCENE_FIT_MARGIN: f32 = 8.0;
+
+/// Scene extents at or below this are DEGENERATE along their axis (a
+/// single point on it): the axis contributes NO scale constraint — the
+/// scale division is guarded, never executed. 0.001 scene units ≪ any
+/// real geometry.
+const FIT_DEGENERATE_EXTENT: f32 = 1.0e-3;
+
+/// The region's fit-and-center view transform: a scene point `p` paints at
+/// `(p - bbox_center) * scale + region_center`.
+///
+/// LAWS (all pinned by tests):
+/// - UNIFORM scale — the aspect ratio is preserved;
+/// - `scale = min(inner_w / sw, inner_h / sh)` over the NON-degenerate
+///   axes: the scene fits INSIDE the margin-inset bounds BOTH ways, and a
+///   small scene SCALES UP to use the region (the Excel-fit /
+///   diagram-viewport choice, decided and documented: the region is a
+///   scene VIEWER — 1:1 would strand origin-centered graphs off-canvas and
+///   waste the viewport on stamp-sized scenes);
+/// - the bbox center lands at the region center;
+/// - an EMPTY scene (no bbox) fits to the IDENTITY transform — nothing is
+///   drawn anyway; no panic, no NaN;
+/// - a degenerate bbox axis contributes no scale constraint (a single
+///   point with both axes degenerate keeps scale 1.0 and lands at the
+///   region center; a straight line fits along its extent axis only).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SceneFitTransform {
+    /// The uniform scale (strictly positive — `invert`'s division guard
+    /// never trips in practice, it only pins the law).
+    scale: f32,
+    /// The x translation (applied after scaling).
+    tx: f32,
+    /// The y translation (applied after scaling).
+    ty: f32,
+}
+
+impl SceneFitTransform {
+    /// The identity transform (1:1, no offset) — the empty-scene answer.
+    pub(crate) fn identity() -> Self {
+        Self {
+            scale: 1.0,
+            tx: 0.0,
+            ty: 0.0,
+        }
+    }
+
+    /// THE fit law: (scene bbox, region size, margin) → transform.
+    pub(crate) fn fit(bbox: Option<(Point, Point)>, size: Size, margin: f32) -> Self {
+        let Some((min, max)) = bbox else {
+            return Self::identity();
+        };
+        // The margin-inset inner area, clamped so a region smaller than
+        // twice the margin still yields a finite (1px) fit surface.
+        let inner_w = (size.width - 2.0 * margin).max(1.0);
+        let inner_h = (size.height - 2.0 * margin).max(1.0);
+        let sw = max.x - min.x;
+        let sh = max.y - min.y;
+        let wide = sw > FIT_DEGENERATE_EXTENT;
+        let tall = sh > FIT_DEGENERATE_EXTENT;
+        let mut scale = f32::INFINITY;
+        if wide {
+            scale = scale.min(inner_w / sw);
+        }
+        if tall {
+            scale = scale.min(inner_h / sh);
+        }
+        if !scale.is_finite() {
+            // Both axes degenerate (a single point): identity scale.
+            scale = 1.0;
+        }
+        // Center of the bbox per axis (a degenerate axis centers its point).
+        let cx = if wide { (min.x + max.x) * 0.5 } else { min.x };
+        let cy = if tall { (min.y + max.y) * 0.5 } else { min.y };
+        Self {
+            scale,
+            tx: size.width * 0.5 - cx * scale,
+            ty: size.height * 0.5 - cy * scale,
+        }
+    }
+
+    /// Scene point → region-local pixel point.
+    pub(crate) fn apply(&self, p: Point) -> Point {
+        Point::new(p.x * self.scale + self.tx, p.y * self.scale + self.ty)
+    }
+
+    /// Region-local pixel point → scene point — SCN-032's pointer→scene
+    /// half, the exact inverse of [`Self::apply`].
+    pub(crate) fn invert(&self, p: Point) -> Point {
+        let scale = if self.scale == 0.0 { 1.0 } else { self.scale };
+        Point::new((p.x - self.tx) / scale, (p.y - self.ty) / scale)
+    }
+
+    /// The uniform scale (the stroke-width / font-size multiplier).
+    pub(crate) fn scale(&self) -> f32 {
+        self.scale
+    }
+}
+
+/// The bounding box of one projected prim stream — the WHOLE scene as the
+/// fit law measures it (every geometry a prim paints: shape rings, the
+/// text anchor, clip rectangles). `None` when the stream paints nothing
+/// (an empty scene). Documented approximation: a text run contributes its
+/// BASELINE ANCHOR only — text metrics are not measurable headlessly, and
+/// the anchor is where iced starts painting the run.
+pub(crate) fn prims_bbox(prims: &[ScenePrim]) -> Option<(Point, Point)> {
+    fn acc(min: &mut Option<Point>, max: &mut Option<Point>, x: f32, y: f32) {
+        let lo = min.get_or_insert(Point::new(x, y));
+        lo.x = lo.x.min(x);
+        lo.y = lo.y.min(y);
+        let hi = max.get_or_insert(Point::new(x, y));
+        hi.x = hi.x.max(x);
+        hi.y = hi.y.max(y);
+    }
+    let mut min = None;
+    let mut max = None;
+    for prim in prims {
+        match prim {
+            ScenePrim::Fill { vertices, .. }
+            | ScenePrim::Stroke { vertices, .. }
+            | ScenePrim::FillStroke { vertices, .. } => {
+                for vertex in vertices {
+                    acc(&mut min, &mut max, vertex.x, vertex.y);
+                }
+            }
+            ScenePrim::Text { position, .. } => {
+                acc(&mut min, &mut max, position.x, position.y);
+            }
+            ScenePrim::ClipPush { rect, .. } => {
+                acc(&mut min, &mut max, rect.x, rect.y);
+                acc(&mut min, &mut max, rect.x + rect.width, rect.y + rect.height);
+            }
+            ScenePrim::ClipPop { .. } => {}
+        }
+    }
+    min.zip(max)
+}
+
+/// Merge two bboxes (the store-fed plan folds its segments' boxes).
+fn merge_bbox(
+    a: Option<(Point, Point)>,
+    b: Option<(Point, Point)>,
+) -> Option<(Point, Point)> {
+    match (a, b) {
+        (None, b) => b,
+        (a, None) => a,
+        (Some((amin, amax)), Some((bmin, bmax))) => Some((
+            Point::new(amin.x.min(bmin.x), amin.y.min(bmin.y)),
+            Point::new(amax.x.max(bmax.x), amax.y.max(bmax.y)),
+        )),
+    }
+}
+
+/// The transform a committed build paints under: the fit of the stream's
+/// [`prims_bbox`] into `size` at `margin`. Pure and deterministic per
+/// (prim stream, size) — see the section docs for why the existing layer
+/// key already covers it.
+pub(crate) fn fit_scene_prims(
+    prims: &[ScenePrim],
+    size: Size,
+    margin: f32,
+) -> SceneFitTransform {
+    SceneFitTransform::fit(prims_bbox(prims), size, margin)
+}
+
+/// Transform a prim stream IN PLACE through the fit: vertices, clip
+/// rectangles and text anchors move; stroke widths and font sizes scale by
+/// the uniform factor so the painted scene keeps its proportions. Paint
+/// order, element identity (`StableId`s) and the prim COUNT are untouched
+/// (the counters measure the same stream before and after).
+fn transform_prims(prims: &mut [ScenePrim], t: &SceneFitTransform) {
+    fn transform_vertices(vertices: &mut [Point], t: &SceneFitTransform) {
+        for vertex in vertices {
+            *vertex = t.apply(*vertex);
+        }
+    }
+    let scale = t.scale();
+    for prim in prims {
+        match prim {
+            ScenePrim::Fill { vertices, .. } => transform_vertices(vertices, t),
+            ScenePrim::Stroke {
+                vertices, width, ..
+            } => {
+                transform_vertices(vertices, t);
+                *width *= scale;
+            }
+            ScenePrim::FillStroke {
+                vertices,
+                stroke_width,
+                ..
+            } => {
+                transform_vertices(vertices, t);
+                *stroke_width *= scale;
+            }
+            ScenePrim::Text {
+                position, size, ..
+            } => {
+                *position = t.apply(*position);
+                *size *= scale;
+            }
+            ScenePrim::ClipPush { rect, .. } => {
+                // Scale is strictly positive, so min/max survive the trip.
+                let lo = t.apply(Point::new(rect.x, rect.y));
+                let hi = t.apply(Point::new(rect.x + rect.width, rect.y + rect.height));
+                *rect = Rectangle {
+                    x: lo.x,
+                    y: lo.y,
+                    width: hi.x - lo.x,
+                    height: hi.y - lo.y,
+                };
+            }
+            ScenePrim::ClipPop { .. } => {}
+        }
+    }
 }
 
 // ── Decision classification ─────────────────────────────────────────────────
@@ -304,15 +569,21 @@ pub(crate) struct ProjectionCounters {
 
 /// The paint plan one committed rebuild produced: either the classic
 /// full flatten (a fresh prim list), or the store's segment lists
-/// (Arc-shared, paint order; the report-driven retention products).
+/// (paint order; the report-driven retention products).
 /// Both paint with `emit_prims`; the segments variant emits segment-wise
 /// — each segment is clip-balanced at root boundaries (the store's v1
 /// segmentation rule), so segment-wise emit equals the whole-list emit.
+/// BOTH plans are already FITTED (SCN-031b): the build transformed the
+/// geometry before handing it here, so every plan paints the whole scene
+/// inside the region's bounds. The segments plan holds OWNED copies — the
+/// store's Arcs stay untouched (the fit is build-local); production
+/// attaches no store today (the region path is always the prims plan),
+/// but the law is uniform.
 enum PaintPlan {
-    /// The classic `project_scene` output.
+    /// The classic `project_scene` output, fitted into the region.
     Prims(Vec<ScenePrim>),
-    /// The store's live segment prim lists in paint order.
-    Segments(Vec<Arc<Vec<ScenePrim>>>),
+    /// The store's live segment prim lists in paint order, each fitted.
+    Segments(Vec<Vec<ScenePrim>>),
 }
 
 /// One retained projection of one panel scene: the identity (`surface_id`),
@@ -608,13 +879,38 @@ impl SceneProjectionCache {
             .map(|store| store.live_arcs());
         let rebuilt = match from_store {
             Some(parts) => {
+                // Store-fed build (SCN-011b): the segments are Arc-shared
+                // with the store, so the fit transforms an OWNED copy per
+                // rebuild — one bbox folded over all segments, one shared
+                // transform (the segments concatenate into exactly the
+                // whole-scene stream, so this IS `fit_scene_prims` of the
+                // concatenation, computed without materializing it).
+                let bbox = parts.iter().fold(None, |acc, part| {
+                    merge_bbox(acc, prims_bbox(part))
+                });
+                let transform =
+                    SceneFitTransform::fit(bbox, bounds.size(), SCENE_FIT_MARGIN);
+                let parts: Vec<Vec<ScenePrim>> = parts
+                    .iter()
+                    .map(|part| {
+                        let mut owned = (**part).clone();
+                        transform_prims(&mut owned, &transform);
+                        owned
+                    })
+                    .collect();
                 let prims_len: usize = parts.iter().map(|part| part.len()).sum();
                 let path_work: usize = parts.iter().map(|part| prim_vertex_count(part)).sum();
                 self.record_committed(prims_len, path_work, report_summary, scene);
                 Some((key, PaintPlan::Segments(parts)))
             }
             None => match project_scene(scene, palette, bounds.size()) {
-                Ok(prims) => {
+                Ok(mut prims) => {
+                    // SCN-031b: fit-and-center the projected stream into
+                    // the region BEFORE committing — the transform moves
+                    // geometry, never counts, so the counters measure the
+                    // same stream they always did.
+                    let transform = fit_scene_prims(&prims, bounds.size(), SCENE_FIT_MARGIN);
+                    transform_prims(&mut prims, &transform);
                     self.record_committed(
                         count_prims(&prims),
                         prim_vertex_count(&prims),
@@ -673,8 +969,10 @@ impl SceneProjectionCache {
                 geometry
             }
             // Store-fed build: segment-wise emit over the (possibly
-            // partially refreshed) segment Arcs — the pixel path identical
+            // partially refreshed) segment lists — the pixel path identical
             // to painting the concatenated list; no semantic flatten ran.
+            // The lists are the build's OWNED FITTED copies (the store's
+            // Arcs stay untouched — see `PaintPlan`).
             Some((key, PaintPlan::Segments(parts))) => {
                 let geometry = self
                     .layer
@@ -1602,5 +1900,257 @@ mod tests {
         assert_eq!(store.subtree_retained_hits, 118, "59 + 59 retained");
         assert_eq!(store.full_reprojects, 1, "still no fallback");
         assert_eq!(cache.counters().layer_builds, 3);
+    }
+
+    // -- SCN-031b: the region fit-and-center transform ------------------------
+
+    use crate::ui::window::plugin_scene::project_scene;
+
+    /// One fill-only rect at an arbitrary scene position.
+    fn filled_rect_at(id: u64, x: f64, y: f64) -> SceneElement {
+        SceneElement::Rect {
+            id: StableId(id),
+            name: None,
+            actions: Vec::new(),
+            drag: None,
+            pos: v2(x, y),
+            size: v2(40.0, 20.0),
+            fill: Some(SceneColor::Theme(ThemeColor::Normal)),
+            stroke: None,
+        }
+    }
+
+    /// THE DEFECT FIXTURE: an ORIGIN-CENTERED two-card scene — negative AND
+    /// positive coordinates (the reference demo graph's shape) — which the
+    /// 1:1 stage-1 mapping drew entirely off a top-left-origin region.
+    fn origin_centered_scene(revision: u64) -> PanelScene {
+        PanelScene {
+            revision: SceneRevision(revision),
+            elements: vec![
+                filled_rect_at(1, -60.0, -40.0),
+                filled_rect_at(2, 20.0, 20.0),
+            ],
+        }
+    }
+
+    /// The closed rect rings' vertices (the geometry the visual-law pin
+    /// walks).
+    fn ring_vertices(prims: &[ScenePrim]) -> Vec<Point> {
+        prims
+            .iter()
+            .flat_map(|prim| match prim {
+                ScenePrim::Fill { vertices, .. }
+                | ScenePrim::Stroke { vertices, .. }
+                | ScenePrim::FillStroke { vertices, .. } => vertices.clone(),
+                _ => Vec::new(),
+            })
+            .collect()
+    }
+
+    /// THE VISUAL-LAW PIN (the off-region bug, dead): the origin-centered
+    /// fixture projects to negative coordinates (the defect's precondition,
+    /// pinned), and after the production fit EVERY transformed vertex lies
+    /// inside the bounds minus the margin — and the prim stream keeps its
+    /// count and paint order (the transform moves geometry, nothing else).
+    #[test]
+    fn fitted_prims_lie_inside_the_bounds_minus_margin() {
+        let palette = distinct_palette(false);
+        let scene = origin_centered_scene(1);
+        let prims = project_scene(&scene, &palette, fixture_bounds().size())
+            .expect("the fixture is valid");
+        let (raw_min, _) = prims_bbox(&prims).expect("the fixture has geometry");
+        assert!(
+            raw_min.x < 0.0 && raw_min.y < 0.0,
+            "precondition: the fixture spans negative scene coordinates (the defect)"
+        );
+
+        let bounds = fixture_bounds();
+        let transform = fit_scene_prims(&prims, bounds.size(), SCENE_FIT_MARGIN);
+        let mut fitted = prims.clone();
+        transform_prims(&mut fitted, &transform);
+        assert_eq!(fitted.len(), prims.len(), "the transform never adds/drops prims");
+
+        let eps = 1.0e-3;
+        for vertex in ring_vertices(&fitted) {
+            assert!(
+                vertex.x >= SCENE_FIT_MARGIN - eps
+                    && vertex.x <= bounds.width - SCENE_FIT_MARGIN + eps
+                    && vertex.y >= SCENE_FIT_MARGIN - eps
+                    && vertex.y <= bounds.height - SCENE_FIT_MARGIN + eps,
+                "every fitted vertex inside bounds minus margin (got {vertex:?})"
+            );
+        }
+        // And the bbox center landed at the region center.
+        let (min, max) = prims_bbox(&fitted).expect("geometry survives the fit");
+        assert!(((min.x + max.x) * 0.5 - bounds.width * 0.5).abs() < eps);
+        assert!(((min.y + max.y) * 0.5 - bounds.height * 0.5).abs() < eps);
+    }
+
+    /// FIT MATH: a wide scene (200x10) in a tall region (120x300) — the
+    /// width axis constrains the scale, the aspect ratio is preserved, and
+    /// the bbox center lands at the region center.
+    #[test]
+    fn wide_scene_in_tall_region_fits_width_and_centers() {
+        let scene = PanelScene {
+            revision: SceneRevision(1),
+            elements: vec![filled_rect_at(1, 0.0, 0.0), filled_rect_at(2, 160.0, 0.0)],
+        };
+        // filled_rect_at is 40x20, so the two cards at y=0 span x 0..200,
+        // y 0..20 — wide, not tall.
+        let prims = project_scene(&scene, &distinct_palette(false), Size::new(120.0, 300.0))
+            .expect("valid");
+        let (min, max) = prims_bbox(&prims).expect("geometry");
+        assert_eq!((max.x - min.x, max.y - min.y), (200.0, 20.0));
+
+        let bounds = Size::new(120.0, 300.0);
+        let transform = fit_scene_prims(&prims, bounds, SCENE_FIT_MARGIN);
+        let expected = (120.0 - 2.0 * SCENE_FIT_MARGIN) / 200.0; // 104/200, < 284/20
+        assert!(
+            (transform.scale() - expected).abs() < 1.0e-4,
+            "width-constrained uniform scale, got {}",
+            transform.scale()
+        );
+        // Centered: the bbox center (100, 10) maps to the region center.
+        let center = transform.apply(Point::new(100.0, 10.0));
+        assert!((center.x - 60.0).abs() < 1.0e-3 && (center.y - 150.0).abs() < 1.0e-3);
+    }
+
+    /// FIT MATH (the documented scale-up choice): a small scene SCALES UP
+    /// to use the region (the Excel-fit / diagram-viewport law) — the
+    /// defect fixture's 120x80 bbox in the 200x160 region fits at
+    /// min(184/120, 144/80) = 184/120 > 1.
+    #[test]
+    fn small_scene_scales_up_to_fill_the_region() {
+        let scene = origin_centered_scene(1);
+        let prims = project_scene(&scene, &distinct_palette(false), fixture_bounds().size())
+            .expect("valid");
+        let transform = fit_scene_prims(&prims, fixture_bounds().size(), SCENE_FIT_MARGIN);
+        let expected = (fixture_bounds().width - 2.0 * SCENE_FIT_MARGIN) / 120.0;
+        assert!(transform.scale() > 1.0, "the fit scales UP small scenes");
+        assert!((transform.scale() - expected).abs() < 1.0e-4);
+    }
+
+    /// EDGE (the pinned degenerate rule): a single-point bbox (both axes
+    /// degenerate) keeps scale 1.0 — the division is guarded, never run —
+    /// and lands at the region center; a straight LINE fits along its
+    /// extent axis only. Neither panics, neither yields NaN.
+    #[test]
+    fn degenerate_bbox_is_guarded_not_divided() {
+        // A single point at (5, 7) in the 200x160 region: scale 1.0,
+        // the point lands at the region center (100, 80).
+        let point = SceneFitTransform::fit(
+            Some((Point::new(5.0, 7.0), Point::new(5.0, 7.0))),
+            Size::new(200.0, 160.0),
+            SCENE_FIT_MARGIN,
+        );
+        assert_eq!(point.scale(), 1.0);
+        let landed = point.apply(Point::new(5.0, 7.0));
+        assert!((landed.x - 100.0).abs() < 1.0e-4 && (landed.y - 80.0).abs() < 1.0e-4);
+
+        // A horizontal line (zero height) fits by width only; the line's
+        // y stays pinned at the region center.
+        let line = SceneFitTransform::fit(
+            Some((Point::new(0.0, 3.0), Point::new(100.0, 3.0))),
+            Size::new(200.0, 160.0),
+            SCENE_FIT_MARGIN,
+        );
+        assert!((line.scale() - (200.0 - 2.0 * SCENE_FIT_MARGIN) / 100.0).abs() < 1.0e-4);
+        let left = line.apply(Point::new(0.0, 3.0));
+        let right = line.apply(Point::new(100.0, 3.0));
+        assert!((left.y - 80.0).abs() < 1.0e-3 && (right.y - 80.0).abs() < 1.0e-3);
+        assert!(left.x.is_finite() && right.x.is_finite());
+    }
+
+    /// EDGE: an EMPTY scene — no bbox, the IDENTITY transform, nothing
+    /// drawn, no panic; the cache treats it exactly like any other scene
+    /// (one build, then replay).
+    #[test]
+    fn empty_scene_fits_identity_and_draws_nothing() {
+        assert_eq!(prims_bbox(&[]), None);
+        assert_eq!(
+            SceneFitTransform::fit(None, Size::new(200.0, 160.0), SCENE_FIT_MARGIN),
+            SceneFitTransform::identity()
+        );
+        let palette = distinct_palette(false);
+        let scene = PanelScene {
+            revision: SceneRevision(1),
+            elements: Vec::new(),
+        };
+        let mut cache = SceneProjectionCache::new(StableId(31));
+        assert_eq!(
+            cache.apply_build(&scene, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+        );
+        assert_eq!(cache.counters().prims_last_build, 0, "nothing to paint");
+        assert_eq!(
+            cache.apply_build(&scene, &palette, fixture_bounds()),
+            DrawDecision::LayerHit
+        );
+    }
+
+    /// DETERMINISM: the same scene/bounds/palette compute the SAME
+    /// transform twice (different bounds compute a different one), and the
+    /// transform's presence advances NOTHING in the retained counters —
+    /// the defect fixture builds once, then replays (replay stays replay).
+    #[test]
+    fn fit_transform_is_deterministic_and_key_covered() {
+        let palette = distinct_palette(false);
+        let scene = origin_centered_scene(1);
+        let prims = project_scene(&scene, &palette, fixture_bounds().size())
+            .expect("valid");
+        let size = fixture_bounds().size();
+        let a = fit_scene_prims(&prims, size, SCENE_FIT_MARGIN);
+        let b = fit_scene_prims(&prims, size, SCENE_FIT_MARGIN);
+        assert_eq!(a, b, "same inputs, same transform");
+        assert_ne!(
+            fit_scene_prims(&prims, Size::new(300.0, 160.0), SCENE_FIT_MARGIN),
+            a,
+            "different bounds, different transform"
+        );
+
+        // Through the cache: build once, replay — the counters prove the
+        // transform forced no re-projection (it keys on nothing new).
+        let mut cache = SceneProjectionCache::new(StableId(32));
+        assert_eq!(
+            cache.apply_build(&scene, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+        );
+        assert_eq!(
+            cache.apply_build(&scene, &palette, fixture_bounds()),
+            DrawDecision::LayerHit
+        );
+        let counters = cache.counters();
+        assert_eq!(counters.layer_builds, 1);
+        assert_eq!(counters.probe_hits, 1);
+        assert_eq!(counters.prims_last_build, 2);
+        assert_eq!(counters.path_work_last_build, 10);
+        assert_eq!(counters.last_error, None);
+    }
+
+    /// THE SCN-032 CONTRACT: the transform is affine and invertible —
+    /// `invert(apply(p))` round-trips scene points exactly (within float
+    /// epsilon) for the defect fixture's transform. SCN-032's hit-testing
+    /// consumes `fit` + `invert` verbatim.
+    #[test]
+    fn fit_transform_round_trips_through_invert() {
+        let scene = origin_centered_scene(1);
+        let prims = project_scene(&scene, &distinct_palette(false), fixture_bounds().size())
+            .expect("valid");
+        let transform = fit_scene_prims(&prims, fixture_bounds().size(), SCENE_FIT_MARGIN);
+        let (min, max) = prims_bbox(&prims).expect("geometry");
+        for p in [
+            min,
+            max,
+            Point::new((min.x + max.x) * 0.5, (min.y + max.y) * 0.5),
+            Point::new(min.x, max.y),
+            Point::new(17.3, -23.9),
+        ] {
+            let back = transform.invert(transform.apply(p));
+            assert!(
+                (back.x - p.x).abs() < 1.0e-2 * (1.0 + p.x.abs()) && (back.y - p.y).abs() < 1.0e-2 * (1.0 + p.y.abs()),
+                "round trip drifted: {p:?} -> {:?} -> {back:?}",
+                transform.apply(p)
+            );
+        }
     }
 }

@@ -6258,6 +6258,11 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.partition_depth_generation = u64::MAX;
     }
 
+    /// Accept the errors seen so far without dropping this slot's caches.
+    pub(crate) fn absorb_gpu_errors(&mut self, errors: usize) {
+        self.gpu_error_epoch = errors;
+    }
+
     /// Catch errors delivered after the previous upload/submit completed.
     pub(crate) fn sync_gpu_error_epoch(&mut self) {
         let errors = gpu_errors_seen();
@@ -7020,6 +7025,10 @@ pub struct MultiPipeline {
     slot_clock: u64,
     pub(crate) frame_rendered: std::sync::atomic::AtomicBool,
     pub(crate) gpu_error_epoch: usize,
+    /// Consecutive frames that each reported new device errors.
+    pub(crate) gpu_error_streak: u32,
+    /// Consecutive frames without new device errors.
+    pub(crate) gpu_clean_frames: u32,
     /// Definition geometry shared across viewport slots.
     pub(crate) block_geometry: wire_gpu::BlockGeometryCache,
     /// Solid-mesh batches shared across slots, keyed by mesh-set identity.
@@ -7414,6 +7423,8 @@ impl iced::widget::shader::Pipeline for MultiPipeline {
             slot_clock: 0,
             frame_rendered: std::sync::atomic::AtomicBool::new(false),
             gpu_error_epoch: gpu_errors_seen(),
+            gpu_error_streak: 0,
+            gpu_clean_frames: 0,
             mesh_batch_cache: Default::default(),
             wire_buffer_cache: rustc_hash::FxHashMap::default(),
         }

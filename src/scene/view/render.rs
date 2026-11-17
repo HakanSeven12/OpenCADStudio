@@ -385,7 +385,39 @@ impl shader::Primitive for Primitive {
             }
         }
         let errors_at_entry = crate::scene::pipeline::gpu_errors_seen();
-        let recovering = pipeline.gpu_error_epoch != errors_at_entry;
+        let mut recovering = pipeline.gpu_error_epoch != errors_at_entry;
+        if recovering {
+            pipeline.gpu_error_streak = pipeline.gpu_error_streak.saturating_add(1);
+            pipeline.gpu_clean_frames = 0;
+        } else {
+            // Not every prepare is followed by a draw that can fail, so one
+            // clean prepare does not end a run of failing frames.
+            pipeline.gpu_clean_frames = pipeline.gpu_clean_frames.saturating_add(1);
+            if pipeline.gpu_clean_frames >= 8 {
+                pipeline.gpu_error_streak = 0;
+            }
+        }
+        // Rebuilding the caches answers a rejected allocation. When the
+        // frame keeps failing after that, the fault is in the draw itself:
+        // rebuilding again only re-uploads the whole scene every frame, and
+        // that memory piles up until the system runs out (#3189). Keep the
+        // caches then, and retry the rebuild only now and then.
+        const REBUILD_TRIES: u32 = 4;
+        const RETRY_EVERY: u32 = 256;
+        let streak = pipeline.gpu_error_streak;
+        if streak > REBUILD_TRIES && streak % RETRY_EVERY != 0 {
+            static REPORTED: std::sync::Once = std::sync::Once::new();
+            REPORTED.call_once(|| {
+                eprintln!(
+                    "[gpu] every frame fails the same way; keeping GPU caches instead of rebuilding them each frame"
+                );
+            });
+            pipeline.gpu_error_epoch = errors_at_entry;
+            for inner in &mut pipeline.inners {
+                inner.absorb_gpu_errors(errors_at_entry);
+            }
+            recovering = false;
+        }
         if recovering {
             pipeline.wire_buffer_cache.clear();
             pipeline.mesh_batch_cache.clear();

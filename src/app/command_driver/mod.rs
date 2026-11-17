@@ -2481,7 +2481,7 @@ fn apply_mleader_align(
                 .filter_map(|&h| leader(scene, h).map(|ml| (h, mleader_base(&ml))))
                 .map(|(h, base)| ((base - a).dot(span), h, base))
                 .collect();
-            order.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+            order.sort_by(|x, y| x.0.total_cmp(&y.0));
             let last = order.len().saturating_sub(1).max(1) as f64;
             for (k, (_, h, base)) in order.into_iter().enumerate() {
                 let target = a + span * (k as f64 / last);
@@ -2546,7 +2546,7 @@ fn apply_mleader_align(
                     moves.push((h, origin + dir * t - base));
                 }
             } else {
-                along.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+                along.sort_by(|x, y| x.0.total_cmp(&y.0));
                 let reference_extent = mleader_extent_along(&reference, dir);
                 // Ahead of the reference, then behind it, each content one
                 // spacing clear of the one before.

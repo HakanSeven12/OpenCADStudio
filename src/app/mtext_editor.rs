@@ -405,7 +405,7 @@ impl MTextEditorState {
         let unit = if heights.is_empty() {
             self.height_value() as f32
         } else {
-            heights.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            heights.sort_by(|a, b| a.total_cmp(b));
             let (mut best_height, mut best_count, mut index) = (heights[0], 0usize, 0usize);
             while index < heights.len() {
                 let mut end = index;

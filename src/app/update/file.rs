@@ -5943,8 +5943,7 @@ impl OpenCADStudio {
             let name = ratio_scale_name(factor);
             if !d.scales.iter().any(|(n, _)| n == &name) {
                 d.scales.push((name.clone(), factor));
-                d.scales
-                    .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                d.scales.sort_by(|a, b| a.1.total_cmp(&b.1));
             }
             name
         });
@@ -7247,9 +7246,7 @@ impl OpenCADStudio {
                 if factor.is_finite() && factor > 0.0 {
                     let name = self.plot_dialog.scale.clone();
                     self.plot_dialog.scales.push((name, factor));
-                    self.plot_dialog
-                        .scales
-                        .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                    self.plot_dialog.scales.sort_by(|a, b| a.1.total_cmp(&b.1));
                 }
             }
         } else {
@@ -8280,8 +8277,7 @@ impl OpenCADStudio {
                     // A scale the drawing has no name for stays what it is.
                     let name = ratio_scale_name(target_factor);
                     d.scales.push((name.clone(), target_factor));
-                    d.scales
-                        .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                    d.scales.sort_by(|a, b| a.1.total_cmp(&b.1));
                     name
                 })
             };

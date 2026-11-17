@@ -1720,10 +1720,9 @@ impl OpenCADStudio {
             matched.push((nearest.map(|nearest| nearest.distance), entity));
         }
         if near.is_some() {
-            matched.sort_by(|left, right| {
-                left.0
-                    .partial_cmp(&right.0)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+            matched.sort_by(|left, right| match (left.0, right.0) {
+                (Some(left), Some(right)) => left.total_cmp(&right),
+                (left, right) => left.is_some().cmp(&right.is_some()),
             });
         }
         let count = matched.len();

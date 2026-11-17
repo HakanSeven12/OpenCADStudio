@@ -75,7 +75,7 @@ impl Canvas {
             if xs.len() < 2 {
                 continue;
             }
-            xs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            xs.sort_by(|a, b| a.total_cmp(b));
             for pair in xs.chunks_exact(2) {
                 let xa = pair[0].max(self.clip.0).max(0.0).round() as usize;
                 let xb = pair[1].min(self.clip.2).min(self.w as f32).round() as usize;

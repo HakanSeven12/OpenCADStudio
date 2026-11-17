@@ -4365,7 +4365,7 @@ fn extension_bases_screen(
     }
     // Nearest-fit first, then keep up to two with distinct origins (collinear
     // segments sharing an endpoint must not draw the same guide twice).
-    found.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+    found.sort_by(|x, y| x.0.total_cmp(&y.0));
     let mut bases: [Option<Point>; 2] = [None, None];
     let mut origins: Vec<glam::DVec3> = Vec::new();
     let mut directions: Vec<glam::DVec3> = Vec::new();

@@ -269,15 +269,8 @@ pub fn compare(current: &Scene, other: Document, settings: CompareSettings) -> C
         b.bounds
             .1
             .y
-            .partial_cmp(&a.bounds.1.y)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then(
-                a.bounds
-                    .0
-                    .x
-                    .partial_cmp(&b.bounds.0.x)
-                    .unwrap_or(std::cmp::Ordering::Equal),
-            )
+            .total_cmp(&a.bounds.1.y)
+            .then(a.bounds.0.x.total_cmp(&b.bounds.0.x))
     });
     let count = |change| differences.iter().filter(|d| d.change == change).count();
     Comparison {

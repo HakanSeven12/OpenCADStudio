@@ -697,7 +697,7 @@ fn cut_params(target: &Curve, handle: Handle, geos: &[Geo]) -> Vec<f64> {
         }
     }
 
-    ts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    ts.sort_by(|a, b| a.total_cmp(b));
     ts.dedup_by(|a, b| {
         let diff = (*a - *b).abs();
         let cyclic = if is_closed {
@@ -779,7 +779,7 @@ fn polyline_seg_ts(
         } else {
             ts.into_iter().map(|t| (1.0 - t).clamp(0.0, 1.0)).collect()
         };
-        u_ts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        u_ts.sort_by(|a, b| a.total_cmp(b));
         u_ts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
         u_ts
     } else {
@@ -2404,7 +2404,7 @@ fn crossing_trim_lwpolyline(
         return None;
     }
 
-    removed.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    removed.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut merged = Vec::<(f64, f64)>::new();
     for span in removed {
         if let Some(last) = merged.last_mut() {
@@ -3539,7 +3539,7 @@ fn fence_cross_points(e: &EntityType, fence_geos: &[Geo]) -> Vec<[f64; 2]> {
             Handle::new(FENCE_PROBE),
             fence_geos,
         );
-        ts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        ts.sort_by(|a, b| a.total_cmp(b));
         for t in ts {
             out.push(lerp2(w[0], w[1], t));
         }
@@ -9212,7 +9212,7 @@ fn extrim_circle(orig: &CircleEnt, ts: &[f64], side: &dyn Fn([f64; 2]) -> bool) 
     }
     let (cx, cy, r) = (orig.center.x, orig.center.y, orig.radius);
     let mut s = ts.to_vec();
-    s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    s.sort_by(|a, b| a.total_cmp(b));
     let n = s.len();
     let mut out = Vec::new();
     for i in 0..n {
@@ -9435,7 +9435,7 @@ fn insert_boundary_crossings(pts: &[[f64; 2]], geos: &[Geo]) -> Vec<[f64; 2]> {
         let (a, b) = (w[0], w[1]);
         out.push(a);
         let mut ts = line_seg_ts(a[0], a[1], b[0], b[1], Handle::NULL, geos);
-        ts.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+        ts.sort_by(|x, y| x.total_cmp(y));
         for t in ts {
             if t > 1e-6 && t < 1.0 - 1e-6 {
                 out.push(lerp2(a, b, t));

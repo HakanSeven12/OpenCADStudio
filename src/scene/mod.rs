@@ -2261,11 +2261,11 @@ fn cluster_extent_from_centers(
     // dense cluster while leaving room for legitimate outliers (sparse leaders,
     // dimensions, scattered annotations).
     let median = |v: &mut Vec<f64>| -> f64 {
-        v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        v.sort_by(|a, b| a.total_cmp(b));
         v[v.len() / 2]
     };
     let percentile = |v: &mut Vec<f64>, frac: f64| -> f64 {
-        v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        v.sort_by(|a, b| a.total_cmp(b));
         let i = ((v.len() as f64 - 1.0) * frac).round() as usize;
         v[i]
     };
@@ -7786,7 +7786,7 @@ impl Scene {
                 _ => None,
             })
             .collect();
-        list.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+        list.sort_by(|a, b| a.2.total_cmp(&b.2));
         if list.is_empty() {
             // Many drawings (and minimal DXF/DWG exports) carry no
             // ACAD_SCALELIST Scale objects at all. Without a fallback the
@@ -7861,7 +7861,7 @@ impl Scene {
             }
         }
 
-        visible.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+        visible.sort_by(|a, b| a.2.total_cmp(&b.2));
         visible
     }
 

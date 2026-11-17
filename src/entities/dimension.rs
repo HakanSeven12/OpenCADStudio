@@ -3895,9 +3895,11 @@ fn tessellate_dimension_inner(
             text_lifted: style.map(|s| s.dimtad).unwrap_or(1) != 0 || text_splits_at_line(dim),
             text_movement,
             text_break: text_layout.break_box,
-            leader_anchor: style
-                .filter(|s| s.dimtmove == 1)
-                .and_then(|_| stored_text_point(dim))
+            leader_anchor: stored_text_point(dim)
+                .filter(|point| {
+                    style.is_some_and(|s| s.dimtmove == 1)
+                        || radius_hook_point(dim, style, *point, dim_txt as f64)
+                })
                 .map(vec3_local),
         },
         SuppressFlags {
@@ -8704,6 +8706,28 @@ fn diameter_point_on_leader(
 
 /// Whether `point` lies on the line through `a` and `b` rather than an
 /// `offset` (a DIMTAD lift) away from it.
+/// A radius with horizontal text placed by a point on its line through the
+/// centre, as DIMRADIUS stores the click: the point is where the leader's
+/// hook starts, so the leader runs straight from the arc point along that
+/// line and the text sits beside the hook (#3149). A file saved elsewhere
+/// stores the text's own middle, which stands off that line; a leader within
+/// 15° of horizontal runs straight to the text either way.
+fn radius_hook_point(
+    dim: &Dimension,
+    style: Option<&DimStyle>,
+    point: Vector3,
+    text_height: f64,
+) -> bool {
+    let Dimension::Radius(d) = dim else {
+        return false;
+    };
+    let (dx, dy) = (point.x - d.definition_point.x, point.y - d.definition_point.y);
+    dimension_text_reads_horizontal(dim, style)
+        && d.angle_vertex.distance(&point) > d.angle_vertex.distance(&d.definition_point)
+        && dy.abs().atan2(dx.abs()) > 15.0_f64.to_radians()
+        && point_on_line(d.angle_vertex, d.definition_point, point, text_height * 0.1)
+}
+
 fn point_on_line(a: Vector3, b: Vector3, point: Vector3, offset: f64) -> bool {
     let (dx, dy) = (b.x - a.x, b.y - a.y);
     let length = dx.hypot(dy);
@@ -8792,7 +8816,8 @@ fn dimension_text_pos_f64(
             // Measured on 39 such dimensions the stored point sits 2.4 text
             // heights before the text, which is DIMASZ plus DIMGAP.
             Dimension::Radius(_) | Dimension::Diameter(_)
-                if style.is_some_and(|s| s.dimtmove == 1) =>
+                if style.is_some_and(|s| s.dimtmove == 1)
+                    || radius_hook_point(dim, style, point, text_height) =>
             {
                 let tip = radial_leader_tip(dim, point);
                 let side = if point.x >= tip.x { 1.0 } else { -1.0 };

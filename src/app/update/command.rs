@@ -6397,11 +6397,13 @@ pub(crate) fn apply_attr_row(a: &mut document::entities::AttributeEntity, row: &
             ch = true;
         }
     }
-    if a.horizontal_alignment != row.h_align {
+    // A multi-line attribute is placed by its text box's attachment (below);
+    // its own single-line justification stays as it is.
+    if !row.multiline && a.horizontal_alignment != row.h_align {
         a.horizontal_alignment = row.h_align;
         ch = true;
     }
-    if a.vertical_alignment != row.v_align {
+    if !row.multiline && a.vertical_alignment != row.v_align {
         a.vertical_alignment = row.v_align;
         ch = true;
     }
@@ -6451,7 +6453,7 @@ pub(crate) fn apply_attr_row(a: &mut document::entities::AttributeEntity, row: &
             m.style = a.text_style.clone();
             ch = true;
         }
-        if let Some(p) = crate::app::attr_editor::attachment_for(a.horizontal_alignment, a.vertical_alignment) {
+        if let Some(p) = crate::app::attr_editor::attachment_for(row.h_align, row.v_align) {
             if m.attachment_point != p {
                 m.attachment_point = p;
                 ch = true;

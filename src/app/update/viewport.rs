@@ -6857,8 +6857,16 @@ impl OpenCADStudio {
         self.box_preview_pending = None;
         self.box_preview_due = None;
         self.box_preview_cache = None;
-        // The release commits (or restarts) any box; its preview is done.
-        self.tabs[i].scene.set_box_hover_highlights(&[]);
+        // The release commits (or restarts) any box; its preview is done. A
+        // Fence / polygon being picked keeps its own: the click only adds a
+        // vertex where the cursor already stands.
+        let path = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|command| command.selection_path().is_some());
+        if !path {
+            self.tabs[i].scene.set_box_hover_highlights(&[]);
+        }
         // A block dragged from the Blocks palette lands here.
         if let Some(item) = self.take_block_drop() {
             return self.drop_block(item);

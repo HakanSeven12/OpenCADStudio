@@ -228,6 +228,30 @@ fn a_crossing_polygon_highlights_what_it_would_take_while_drawn() {
     assert_eq!(preview_with("CP"), (true, true, false));
 }
 
+/// A click that adds a vertex leaves the rolled-over objects lit: they must
+/// not go dark until the next pointer move brings them back.
+#[test]
+fn a_vertex_click_keeps_the_path_highlights() {
+    let (mut app, _, crossing, away) = drawing();
+    click(&mut app, 2.0, 2.0);
+    feed(&mut app, "CP");
+    click(&mut app, 10.0, 2.0);
+    hover(&mut app, 10.0, 8.0);
+    assert!(highlighted(&app, crossing), "lit before the click");
+    click(&mut app, 10.0, 8.0);
+    assert!(
+        highlighted(&app, crossing) && !highlighted(&app, away),
+        "the click must not clear the preview"
+    );
+    assert!(
+        app.tabs[app.active_tab]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|command| command.selection_path().is_some()),
+        "the path goes on after the click"
+    );
+}
+
 #[test]
 fn escape_drops_a_path_and_its_highlights() {
     let (mut app, inside, _, _) = drawing();

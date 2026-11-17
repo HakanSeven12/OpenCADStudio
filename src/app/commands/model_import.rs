@@ -1043,12 +1043,12 @@ impl OpenCADStudio {
 /// (`benches/model_import.rs`). Holds a hermetic app and imports a file into
 /// a fresh drawing, reporting what the UI thread runs of the import.
 #[doc(hidden)]
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(test, not(target_arch = "wasm32")))]
 pub struct ModelImportBenchHarness {
     app: OpenCADStudio,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(test, not(target_arch = "wasm32")))]
 impl ModelImportBenchHarness {
     fn new_app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new();

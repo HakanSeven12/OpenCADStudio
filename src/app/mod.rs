@@ -46,7 +46,7 @@ pub(crate) use command_driver::{
 mod assistant;
 pub(crate) mod commands;
 #[doc(hidden)]
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(test, not(target_arch = "wasm32")))]
 pub use commands::ModelImportBenchHarness;
 #[cfg(test)]
 mod dim_constraint_value_tests;
@@ -67,7 +67,7 @@ mod history;
 mod layer_filter_store;
 mod layer_filters;
 #[doc(hidden)]
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(test, not(target_arch = "wasm32")))]
 pub use layer_filters::LayerRefreshBenchHarness;
 pub(crate) mod layer_groups;
 pub(crate) mod layer_import;

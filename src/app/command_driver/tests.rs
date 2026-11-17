@@ -10065,16 +10065,16 @@ mod attedit_editor_tests {
         (app, handle)
     }
 
-    /// Bare ATTEDIT opens the interactive attribute editor on the
+    /// Bare EATTEDIT opens the interactive attribute editor on the
     /// selected reference instead of ending silently: the editor's rows
     /// list the reference's attributes with their current values.
     #[test]
-    fn attedit_opens_the_editor_on_the_selected_reference() {
+    fn eattedit_opens_the_editor_on_the_selected_reference() {
         let (mut app, handle) = attributed_insert();
         let i = app.active_tab;
         app.tabs[i].scene.select_entities(&[handle]);
 
-        let _ = app.run_command_line("ATTEDIT");
+        let _ = app.run_command_line("EATTEDIT");
 
         assert_eq!(
             app.attr_editor_rows.len(),

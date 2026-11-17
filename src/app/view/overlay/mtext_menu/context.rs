@@ -243,6 +243,8 @@ pub(in crate::app::view::overlay) fn context_menu(
         vec![
             line(check(p.wysiwyg), m!("wysiwyg"), "", Some("_MTED WYSIWYG"), true),
             line(check(toolbar), m!("show-toolbar"), "", Some("_MTED TOOLBAR"), true),
+            // The toolbar's options row always shows with it: checked, greyed.
+            line(check(true), m!("show-options"), "", None, true),
             line(check(ed.ruler), m!("show-ruler"), "", Some("_MTED RULER"), true),
             line(check(p.show_background), m!("show-background"), "", Some("_MTED BACKGROUND"), true),
             separator(),
@@ -256,7 +258,8 @@ pub(in crate::app::view::overlay) fn context_menu(
     .push(line("", m!("help"), "F1", Some("_MTED HELP"), false))
     .separator()
     .push(line("", m!("cancel"), "", Some("_MTED CANCEL"), false));
-    Some((menu.at, panel.build()))
+    // Taller than the drawing area, the menu scrolls rather than run off it.
+    Some((menu.at, iced::widget::scrollable(panel.build()).into()))
 }
 
 /// The tag's button under the text, with its menu while open; `place`

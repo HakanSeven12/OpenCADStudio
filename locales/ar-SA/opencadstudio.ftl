@@ -10123,6 +10123,7 @@ text-editor-menu =
     .editor-settings = Editor settings
     .wysiwyg = Always display as WYSIWYG
     .show-toolbar = Show toolbar
+    .show-options = Show options
     .show-ruler = Show ruler
     .show-background = Show background
     .check-spelling = Check spelling

@@ -793,6 +793,7 @@ fn with_editor_menus<'a>(
     ed: &super::super::mtext_editor::MTextEditorState,
     cell: super::super::table_cell_edit::CellCanvas,
     angle: f32,
+    bottom_inset: f32,
     surface: Element<'a, Message>,
 ) -> Element<'a, Message> {
     let (sin, cos) = angle.sin_cos();
@@ -813,7 +814,7 @@ fn with_editor_menus<'a>(
                     .on_press(Message::MTextContextClose)
                     .on_right_press(Message::MTextContextClose),
             )
-            .push(position_canvas_overlay_clamped(at, 0.0, Vector::ZERO, panel));
+            .push(position_canvas_overlay_clamped(at, bottom_inset, Vector::ZERO, panel));
     }
     layers.into()
 }
@@ -825,6 +826,7 @@ pub(super) fn mtext_inplace_overlay<'a>(
     cell: super::super::table_cell_edit::CellCanvas,
     size: (f32, f32),
     show_toolbar: bool,
+    bottom_inset: f32,
 ) -> Element<'a, Message> {
     let angle = editor_angle(ed);
     let prog = MTextPreview {
@@ -866,7 +868,7 @@ pub(super) fn mtext_inplace_overlay<'a>(
         iced::widget::canvas(prog).width(size.0).height(size.1),
         Message::CommandAppendChar,
     );
-    let surface = with_editor_menus(ed, cell, angle, surface);
+    let surface = with_editor_menus(ed, cell, angle, bottom_inset, surface);
     // Keep the commonly edited fields visible together on a normal viewport.
     // The first row still scrolls horizontally when the viewport is narrow.
     let toolbar_width = size.0.min(1000.0).max(1.0);

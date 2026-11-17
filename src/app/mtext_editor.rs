@@ -1150,7 +1150,11 @@ impl super::OpenCADStudio {
     /// patching the raw source in place (a line break goes in as `\P`).
     pub(super) fn mtext_type(&mut self, s: &str) {
         if let Some(ed) = self.mtext_editor.as_mut() {
-            ed.smart_tag = None;
+            // A list tag stays while its item is typed on (measured); a
+            // paragraph break or a stack's next character takes a tag away.
+            if s == "\n" || !matches!(ed.smart_tag, Some(context_menu::SmartTag::List(_))) {
+                ed.smart_tag = None;
+            }
             ed.smart_tag_open = false;
             ed.list_tag_removed = false;
         }

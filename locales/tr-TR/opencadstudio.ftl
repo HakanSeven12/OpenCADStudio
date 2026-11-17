@@ -10039,6 +10039,7 @@ text-editor-menu =
     .editor-settings = Düzenleyici ayarları
     .wysiwyg = Her zaman göründüğü gibi göster
     .show-toolbar = Araç çubuğunu göster
+    .show-options = Seçenekleri göster
     .show-ruler = Cetveli göster
     .show-background = Arka planı göster
     .check-spelling = Yazımı denetle

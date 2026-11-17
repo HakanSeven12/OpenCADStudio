@@ -836,9 +836,10 @@ impl OpenCADStudio {
                     for (handle, _) in &selected {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity(*handle) {
                             use crate::entities::traits::EntityTypeOps;
-                            // A solid's properties come from its B-rep: exact
-                            // where the kernel knows the shape, a fine mesh
-                            // otherwise — not the display mesh.
+                            // A solid's properties come from its B-rep:
+                            // integrated over its faces to about ten digits,
+                            // a fine mesh only where a trim cannot be
+                            // followed — not the display mesh.
                             let acis = match entity {
                                 document::EntityType::Solid3D(solid) => Some(&solid.acis_data),
                                 document::EntityType::Body(body) => Some(&body.acis_data),

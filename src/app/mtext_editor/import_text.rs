@@ -106,7 +106,72 @@ pub(crate) fn file_source(path: &std::path::Path, bytes: &[u8]) -> String {
     if rtf {
         rtf_source(bytes)
     } else {
-        escape(&decode(bytes))
+        escape(&marker_tabs(&decode(bytes)))
+    }
+}
+
+/// A line that opens with a list marker and a space gets a tab for that
+/// space, as a typed marker does (`1. a`, `b) c`, `- d`, `IV. e`).
+fn marker_tabs(text: &str) -> String {
+    text.split('\n')
+        .map(|line| match line.split_once(' ') {
+            Some((head, rest)) if is_list_marker(head) => format!("{head}\t{rest}"),
+            _ => line.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// A bullet sign, or parts split by `.` (each up to nine digits or up to six
+/// letters of one case), closed by `.`, `:` or `)` or put in brackets.
+fn is_list_marker(head: &str) -> bool {
+    let mut chars = head.chars();
+    if let (Some(sign), None) = (chars.next(), chars.next()) {
+        return !sign.is_alphanumeric() && !matches!(sign, '>' | ':' | '.' | ')' | '(');
+    }
+    let body = match head.strip_prefix('(') {
+        Some(inner) => inner.strip_suffix(')'),
+        None => head.strip_suffix(['.', ':', ')']),
+    };
+    body.is_some_and(|body| {
+        body.split('.').all(|part| {
+            let n = part.len();
+            (1..=9).contains(&n) && part.chars().all(|c| c.is_ascii_digit())
+                || (1..=6).contains(&n)
+                    && (part.chars().all(|c| c.is_ascii_lowercase())
+                        || part.chars().all(|c| c.is_ascii_uppercase()))
+        })
+    })
+}
+
+#[cfg(test)]
+#[test]
+fn a_marker_and_a_space_open_a_line_with_a_tab() {
+    // The reference's Import Text, file by file.
+    for (line, want) in [
+        ("BOM: x", "BOM:\tx"),
+        ("a: b", "a:\tb"),
+        ("a:  b", "a:\t b"),
+        ("1) x", "1)\tx"),
+        ("(a) x", "(a)\tx"),
+        ("a.b: x", "a.b:\tx"),
+        ("1.1. x", "1.1.\tx"),
+        ("abcdef. x", "abcdef.\tx"),
+        ("123456789. x", "123456789.\tx"),
+        ("ab.cdef. x", "ab.cdef.\tx"),
+        ("1234567890. x", "1234567890. x"),
+        ("- x", "-\tx"),
+        ("# x", "#\tx"),
+        ("a b", "a b"),
+        ("Hello: world", "Hello: world"),
+        ("abcdefg. x", "abcdefg. x"),
+        ("a1: x", "a1: x"),
+        ("1.2 x", "1.2 x"),
+        ("> x", "> x"),
+        (": x", ": x"),
+        ("p c: d", "p c: d"),
+    ] {
+        assert_eq!(marker_tabs(line), want, "{line}");
     }
 }
 

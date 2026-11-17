@@ -88,6 +88,10 @@ pub(super) fn text_inline_overlay(
 /// world XY plane; the program fits + vertically flips them into the box.
 pub(in crate::app) const MTEXT_PREVIEW_PAD: f32 = 12.0;
 pub(in crate::app) const MTEXT_PREVIEW_EM_PX: f32 = 15.0;
+/// MTEXTFIXED 2: a text whose height shows under this many pixels is edited
+/// at [`MTEXT_READABLE_PX`] instead; larger text keeps its drawing size.
+pub(in crate::app) const MTEXT_READABLE_BELOW_PX: f32 = 5.5;
+pub(in crate::app) const MTEXT_READABLE_PX: f32 = 12.0;
 // Used only until the shared modal sensor reports the first real layout width.
 const MTEXT_EDITOR_FALLBACK_WIDTH: f32 = 660.0;
 pub(in crate::app) const MTEXT_EDITOR_WRITING_WIDTH: f32 =
@@ -343,6 +347,13 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                     state.dragging = true;
                     let off = self.offset_at(p);
                     return Some(Action::publish(Message::MTextSelStart(off)).and_capture());
+                }
+            }
+            Event::Mouse(Me::ButtonPressed(Button::Right)) if self.inplace => {
+                let p = cursor.position_in(bounds)?;
+                if self.cell.is_some_and(|cell| cell.contains(p)) {
+                    let off = self.offset_at(p);
+                    return Some(Action::publish(Message::MTextContextOpen(p, off)).and_capture());
                 }
             }
             Event::Mouse(Me::CursorMoved { .. }) => {
@@ -776,6 +787,37 @@ pub(super) fn editor_angle(ed: &super::super::mtext_editor::MTextEditorState) ->
     }
 }
 
+/// The editing surface with the tag under text the editor just changed and
+/// the right-click menu; a press outside an open menu closes it.
+fn with_editor_menus<'a>(
+    ed: &super::super::mtext_editor::MTextEditorState,
+    cell: super::super::table_cell_edit::CellCanvas,
+    angle: f32,
+    surface: Element<'a, Message>,
+) -> Element<'a, Message> {
+    let (sin, cos) = angle.sin_cos();
+    let place = |u: f32, v: f32| cell.project(u * cos - v * sin, u * sin + v * cos);
+    let tag = mtext_menu::context::smart_tag(ed, place);
+    let menu = mtext_menu::context::context_menu(ed);
+    if tag.is_none() && menu.is_none() {
+        return surface;
+    }
+    let mut layers = stack![surface];
+    if let Some((at, tag)) = tag {
+        layers = layers.push(position_canvas_overlay(at, tag));
+    }
+    if let Some((at, panel)) = menu {
+        layers = layers
+            .push(
+                mouse_area(iced::widget::Space::new().width(Fill).height(Fill))
+                    .on_press(Message::MTextContextClose)
+                    .on_right_press(Message::MTextContextClose),
+            )
+            .push(position_canvas_overlay_clamped(at, 0.0, Vector::ZERO, panel));
+    }
+    layers.into()
+}
+
 /// A drawing-scale editing surface and a separate formatting toolbar.
 pub(super) fn mtext_inplace_overlay<'a>(
     ed: &'a super::super::mtext_editor::MTextEditorState,
@@ -824,6 +866,7 @@ pub(super) fn mtext_inplace_overlay<'a>(
         iced::widget::canvas(prog).width(size.0).height(size.1),
         Message::CommandAppendChar,
     );
+    let surface = with_editor_menus(ed, cell, angle, surface);
     // Keep the commonly edited fields visible together on a normal viewport.
     // The first row still scrolls horizontally when the viewport is narrow.
     let toolbar_width = size.0.min(1000.0).max(1.0);

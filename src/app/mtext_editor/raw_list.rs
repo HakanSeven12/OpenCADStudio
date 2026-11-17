@@ -20,8 +20,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Hanging indent of a list item made from the menu, in text heights.
 const INDENT: f64 = 3.0;
-/// Hanging indent of a list item made by typing its marker and a tab: the
-/// marker stays one height in, the text goes to the next default tab stop.
+/// Left indent of a list item made by typing its marker and a tab: the
+/// marker stays at the menu's place, the text goes to the next tab stop.
 const AUTO_INDENT: f64 = 4.0;
 /// The bullet the menu writes: the Symbol font's `·`.
 const BULLET: char = '\u{b7}';
@@ -273,7 +273,9 @@ fn remove_marker(raw: &str, n: usize, item: Item) -> Result<String, EditError> {
 fn set_indent(raw: &str, targets: &[usize], indent: f64) -> Result<String, EditError> {
     rewrite(raw, |n, state| {
         if targets.contains(&n) {
-            state.first = -indent;
+            // The marker stays one height in from the menu's indent, also
+            // where a typed marker puts the text at the next tab stop.
+            state.first = if indent > 0.0 { -INDENT } else { 0.0 };
             state.left = indent;
             state.tabs = if indent > 0.0 {
                 vec![TabStop::Left(indent)]
@@ -333,6 +335,22 @@ fn clear_item(raw: &str, n: usize) -> Result<String, EditError> {
     };
     let raw = remove_marker(raw, n, item)?;
     set_indent(&raw, &[n], 0.0)
+}
+
+/// Bullets and Lists > Off: the marker goes, and the paragraph's first
+/// line stays where it started, with no left indent or tab stops left.
+fn turn_off_item(raw: &str, n: usize) -> Result<String, EditError> {
+    let Some(item) = paragraphs(raw)[n].item() else {
+        return Ok(raw.to_owned());
+    };
+    let raw = remove_marker(raw, n, item)?;
+    rewrite(&raw, |m, state| {
+        if m == n {
+            state.first += state.left;
+            state.left = 0.0;
+            state.tabs.clear();
+        }
+    })
 }
 
 /// Number every run of consecutive items of a kind: the run's first item
@@ -468,7 +486,7 @@ impl OpenCADStudio {
                     Some(kind) => {
                         make_item(&raw, n, kind, n - targets.start + 1, Style::default())?
                     }
-                    None => clear_item(&raw, n)?,
+                    None => turn_off_item(&raw, n)?,
                 };
             }
             let raw = renumber(raw)?;
@@ -497,6 +515,15 @@ impl OpenCADStudio {
             ed.sel_anchor = a;
             ed.caret = b;
         }
+    }
+
+    /// The list tag's Remove: paragraph `n` keeps its typed marker as text
+    /// and loses the hanging indent that made it an item. One undo step.
+    pub(in crate::app) fn mtext_list_plain(&mut self, n: usize) {
+        self.edit_raw(|ed, index| {
+            let raw = set_indent(index.raw, &[n], 0.0)?;
+            Ok(TextEdit { raw, caret: ed.caret })
+        });
     }
 
     /// Start: the caret's item numbers from 1 (a, A), the items after it
@@ -563,12 +590,17 @@ impl OpenCADStudio {
         }
         let empty = paragraph.text.len() == item.marker;
         self.edit_raw(|_, index| {
+            // Leaving the list also breaks the paragraph: the emptied item
+            // stays as a plain empty paragraph and the caret goes on in a new
+            // one below it.
+            let split = index.replace(range.clone(), "\n")?;
             if empty {
-                let raw = renumber(clear_item(index.raw, n)?)?;
-                let caret = paragraphs(&raw)[n].range.start;
+                // The new paragraph takes the cleared item's values too.
+                let raw = set_indent(&clear_item(&split.raw, n)?, &[n + 1], 0.0)?;
+                let raw = renumber(raw)?;
+                let caret = paragraphs(&raw)[n + 1].range.start;
                 return Ok(TextEdit { raw, caret });
             }
-            let split = index.replace(range.clone(), "\n")?;
             let next = n + 1;
             let number = item.number + 1;
             let raw = make_item(&split.raw, next, item.kind, number, item.style)?;
@@ -616,6 +648,9 @@ impl OpenCADStudio {
             let raw = set_indent(&raw, &[n], AUTO_INDENT)?;
             Ok(TextEdit { raw, caret })
         });
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            ed.smart_tag = Some(super::context_menu::SmartTag::List(paragraph.range.start));
+        }
         true
     }
 }

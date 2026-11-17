@@ -25,6 +25,7 @@ mod raw_edit;
 mod raw_field;
 mod raw_geometry;
 mod raw_list;
+pub(crate) mod context_menu;
 mod raw_paragraph_codes;
 pub(crate) mod prefs;
 mod raw_tools;
@@ -285,6 +286,18 @@ pub struct MTextEditorState {
     /// dictionary they were found for.
     pub spell_marks: Vec<(usize, usize)>,
     pub(super) spell_key: String,
+    /// Words Ignore All took off the marks while this text is edited.
+    pub(super) spell_ignored: Vec<String>,
+    /// The misspelled word the right-click menu was opened on.
+    pub(super) spell_word: Option<(usize, usize)>,
+    /// The tag AutoStack or an automatic list left, and whether its menu
+    /// is open.
+    pub smart_tag: Option<context_menu::SmartTag>,
+    pub smart_tag_open: bool,
+    /// The list tag's Remove ran: its Redo puts the list back.
+    pub(super) list_tag_removed: bool,
+    /// The right-click menu while it is open.
+    pub context_menu: Option<context_menu::EditorContextMenu>,
 }
 
 impl MTextEditorState {
@@ -365,6 +378,12 @@ impl MTextEditorState {
             matching: None,
             spell_marks: Vec::new(),
             spell_key: String::new(),
+            spell_ignored: Vec::new(),
+            spell_word: None,
+            smart_tag: None,
+            smart_tag_open: false,
+            list_tag_removed: false,
+            context_menu: None,
             original: None,
             hidden_source_tab: None,
         }
@@ -1130,6 +1149,11 @@ impl super::OpenCADStudio {
     /// Insert text (or replace the current selection) at the preview caret,
     /// patching the raw source in place (a line break goes in as `\P`).
     pub(super) fn mtext_type(&mut self, s: &str) {
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            ed.smart_tag = None;
+            ed.smart_tag_open = false;
+            ed.list_tag_removed = false;
+        }
         // Enter in a list item continues the list or leaves it.
         if s == "\n" && self.mtext_list_enter() {
             return;

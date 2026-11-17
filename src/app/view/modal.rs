@@ -86,6 +86,7 @@ impl OpenCADStudio {
                     Some(D::Highlight(_)) => "Text Highlight Color",
                     Some(D::Stack(_)) => "Stack Properties",
                     Some(D::AutoStack(_)) => "AutoStack Properties",
+                    Some(D::ListsToggle(_)) => "Bullets and Lists",
                     _ => "Find and Replace",
                 })
                 .into_owned()
@@ -646,11 +647,14 @@ impl OpenCADStudio {
                     D::Find(d) => sized_flow(ex, 560, 360, |flow| w::view_find(d, flow)),
                     D::Charset(d) => sized_flow(ex, 340, 420, |_| t::view_charset(d)),
                     D::StyleChange(d) => sized_flow(ex, 470, 220, |_| t::view_style_change(d)),
-                    D::Dictionaries(d) => sized_flow(ex, 450, 480, |_| t::view_dictionaries(d)),
+                    D::Dictionaries(d) => sized_flow(ex, 450, if d.manage { 660 } else { 480 }, |_| {
+                        t::view_dictionaries(d)
+                    }),
                     D::SpellSettings(d) => sized_flow(ex, 410, 320, |_| t::view_spell_settings(d)),
                     D::Highlight(d) => sized_flow(ex, 370, 260, |_| t::view_highlight(d)),
                     D::Stack(d) => sized_flow(ex, 530, 400, |_| t::view_stack(d)),
                     D::AutoStack(d) => sized_flow(ex, 450, 330, |_| t::view_autostack(d)),
+                    D::ListsToggle(d) => sized_flow(ex, 470, 220, |_| t::view_lists_toggle(d)),
                 }
             }
             super::super::ModalKind::AnnotationScalePrompt => {

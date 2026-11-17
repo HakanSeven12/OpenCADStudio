@@ -91,7 +91,7 @@ impl OpenCADStudio {
     }
 
     /// Keep a custom dictionary's words: in its file, or in the profile.
-    fn store_dictionary_words(&mut self, source: Option<usize>, words: &[String]) {
+    pub(super) fn store_dictionary_words(&mut self, source: Option<usize>, words: &[String]) {
         match source.and_then(|n| self.spell_prefs.custom_files.get(n).cloned()) {
             Some(path) => {
                 if let Err(error) = crate::app::commands::write_word_file(&path, words) {
@@ -113,6 +113,17 @@ impl OpenCADStudio {
             (MTextDialog::StyleChange(d), M::StyleAlways(on)) => d.always = on,
             (MTextDialog::StyleChange(_), M::StyleYes) => return self.answer_style_change(true),
             (MTextDialog::StyleChange(_), M::StyleNo) => return self.answer_style_change(false),
+            (MTextDialog::ListsToggle(d), M::ListsAlways(on)) => d.always = on,
+            (MTextDialog::ListsToggle(d), M::ListsContinue) => {
+                let always = d.always;
+                self.mtext_dialog = None;
+                self.close_active_modal();
+                update_prefs(|p| {
+                    p.allow_lists = !p.allow_lists;
+                    p.always_toggle_lists |= always;
+                });
+                self.save_config();
+            }
             (MTextDialog::Dictionaries(d), message) => {
                 let source = d.current;
                 match message {
@@ -336,6 +347,19 @@ impl OpenCADStudio {
         self.mtext_change_style(name);
     }
 
+    /// Allow Bullets and Lists: the lists already in the text stay as they
+    /// are; it is asked about first unless "Always turn Bullets and Lists on
+    /// or off".
+    pub(in crate::app) fn mtext_lists_toggle(&mut self) {
+        if prefs().always_toggle_lists {
+            update_prefs(|p| p.allow_lists = !p.allow_lists);
+            self.save_config();
+            return;
+        }
+        self.mtext_dialog = Some(MTextDialog::ListsToggle(Default::default()));
+        self.active_modal = Some(ModalKind::MTextDialog);
+    }
+
     /// The style question answered: Yes (and Esc) changes the style.
     fn answer_style_change(&mut self, yes: bool) -> Task<Message> {
         let Some(MTextDialog::StyleChange(d)) = self.mtext_dialog.take() else {
@@ -419,7 +443,8 @@ impl OpenCADStudio {
             return;
         }
         let marks = if on {
-            let custom = crate::app::commands::custom_words(&self.spell_prefs);
+            let mut custom = crate::app::commands::custom_words(&self.spell_prefs);
+            custom.extend(ed.spell_ignored.iter().cloned());
             crate::app::commands::misspelled(&text, &self.spell_prefs, &custom)
         } else {
             Vec::new()

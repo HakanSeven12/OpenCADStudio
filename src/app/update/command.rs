@@ -3341,7 +3341,7 @@ impl OpenCADStudio {
         Task::none()
     }
 
-    pub(super) fn on_paste_shortcut(&mut self) -> Task<Message> {
+    pub(in crate::app) fn on_paste_shortcut(&mut self) -> Task<Message> {
         if self.mtext_editor.is_some() {
             // Web reads via the browser's async Clipboard API (iced's
             // sync clipboard read returns nothing there); native uses

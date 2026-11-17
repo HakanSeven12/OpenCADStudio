@@ -3339,7 +3339,8 @@ impl OpenCADStudio {
             // "replace=<text>", "match_case=0|1", "whole=0|1", "wild=0|1",
             // "next", "replace_one", "replace_all", "ok", "cancel".
             // Character set "charset=<code>"; style question "style_always=0|1",
-            // "style_yes", "style_no"; dictionaries "dict_language=<tag>",
+            // "style_yes", "style_no"; lists question "lists_always=0|1",
+            // "lists_continue"; dictionaries "dict_language=<tag>",
             // "dict_source=<n>|none", "dict_word=<text>", "dict_add",
             // "dict_select=<n>", "dict_delete", "dict_manage=0|1",
             // "dict_file=<path>" (adds a file), "dict_new=<path>",
@@ -3465,6 +3466,8 @@ impl OpenCADStudio {
                     "style_always" => Message::MTextDialog(D::StyleAlways(on)),
                     "style_yes" => Message::MTextDialog(D::StyleYes),
                     "style_no" => Message::MTextDialog(D::StyleNo),
+                    "lists_always" => Message::MTextDialog(D::ListsAlways(on)),
+                    "lists_continue" => Message::MTextDialog(D::ListsContinue),
                     "dict_language" => Message::MTextDialog(D::DictLanguage(value.into())),
                     "dict_source" => Message::MTextDialog(D::DictSource(value.parse().ok())),
                     "dict_word" => Message::MTextDialog(D::DictWord(value.into())),

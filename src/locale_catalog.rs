@@ -7549,6 +7549,11 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Text file (*.txt)" => Some(("text-editor-tools", "text-file-txt")),
         "Dictionaries" => Some(("text-editor-tools", "dictionaries")),
         "Select File" => Some(("text-editor-tools", "select-file")),
+        "Upper text" => Some(("text-editor-stack", "upper-text")),
+        "Lower text" => Some(("text-editor-stack", "lower-text")),
+        "Bullets and Lists" => Some(("text-editor-lists", "bullets-and-lists")),
+        "Turning Bullets and Lists on or off changes the whole text object, not only the selection. Continue?" => Some(("text-editor-lists", "turning-bullets-and-lists-on-or-off-chan")),
+        "Always turn Bullets and Lists on or off" => Some(("text-editor-lists", "always-turn-bullets-and-lists-on-or-off")),
         _ => None,
     }
 }

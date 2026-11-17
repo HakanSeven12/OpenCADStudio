@@ -105,13 +105,14 @@ fn enter_on_an_empty_item_leaves_the_list() {
     app.mtext_type("\n");
     assert_eq!(texts(&app), ["·\ta", "·\tb", "·\t"]);
     app.mtext_type("\n");
-    assert_eq!(texts(&app), ["·\ta", "·\tb", ""]);
+    // The emptied item stays as a plain empty paragraph and the caret goes
+    // on in a new one below it.
+    assert_eq!(texts(&app), ["·\ta", "·\tb", "", ""]);
     assert_eq!(ed(&app).list_kind(), None);
     let source = raw(&app);
-    assert!(source.ends_with(r"\P\pi0,l0,tz;"), "{source}");
-    // Typing goes on in a plain paragraph.
+    assert!(source.ends_with(r"\P\pi0,l0,tz;\P"), "{source}");
     app.mtext_type("z");
-    assert_eq!(texts(&app), ["·\ta", "·\tb", "z"]);
+    assert_eq!(texts(&app), ["·\ta", "·\tb", "", "z"]);
 }
 
 #[test]
@@ -136,6 +137,13 @@ fn an_imported_list_is_continued_and_turned_off_whole() {
     let mut app = self::app(source);
     let _ = app.update(Message::MTextList(None));
     assert_eq!(raw(&app), "a");
+    // A typed list's first lines stay one text height in, as the
+    // reference's menu Off leaves them.
+    let mut app = self::app("\\pxi-3,l4,t4;1.\tAlpha\\P2.\tBeta");
+    let end = ed(&app).visible_character_count();
+    select(&mut app, 0, end);
+    let _ = app.update(Message::MTextList(None));
+    assert_eq!(raw(&app), "\\pxi1;Alpha\\PBeta");
 }
 
 #[test]
@@ -181,4 +189,13 @@ fn line_spacing_mode_and_a_typed_factor_are_saved_with_the_text() {
     app.mtext_undo();
     app.mtext_undo();
     assert_eq!(ed(&app).build_mtext().line_spacing_style, S::AtLeast);
+}
+
+#[test]
+fn a_typed_marker_and_tab_make_an_item_that_two_enters_leave() {
+    let mut app = app("");
+    for s in ["1", ".", "\t", "a", "\n", "\n", "b"] {
+        app.mtext_type(s);
+    }
+    assert_eq!(raw(&app), r"\pxi-3,l4,t4;1.	a\P\pi0,l0,tz;\Pb");
 }

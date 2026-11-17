@@ -432,6 +432,10 @@ harness = false
 name = "cache_memory_budget"
 harness = false
 
+[[bench]]
+name = "wire_model_memory"
+harness = false
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

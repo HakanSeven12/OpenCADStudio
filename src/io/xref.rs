@@ -1747,6 +1747,14 @@ fn collect_entries_impl(
             .filter(|e| e.parent_key.is_some())
             .filter_map(|e| e.found_at.as_deref().map(normalize_lexical))
             .collect();
+        // The host's copy of a nested record keeps the path it had where the
+        // parent was last saved (another machine's folder), so it may resolve
+        // to another file than the walk did; its name is the nested row's.
+        let nested_names: HashSet<String> = entries
+            .iter()
+            .filter(|e| e.parent_key.is_some())
+            .map(|e| e.name.to_uppercase())
+            .collect();
         let inserted: HashSet<String> = doc
             .entities()
             .filter_map(|e| match e {
@@ -1758,10 +1766,10 @@ fn collect_entries_impl(
             e.parent_key.is_some()
                 || e.kind != RefKind::DwgXref
                 || inserted.contains(&e.name.to_uppercase())
-                || !e
-                    .found_at
-                    .as_deref()
-                    .is_some_and(|found| nested_files.contains(&normalize_lexical(found)))
+                || !(nested_names.contains(&e.name.to_uppercase())
+                    || e.found_at
+                        .as_deref()
+                        .is_some_and(|found| nested_files.contains(&normalize_lexical(found))))
         });
     }
 
@@ -4557,3 +4565,4 @@ mod web_registry_tests {
         assert!(unresolved_xref_names(&[]).is_empty());
     }
 }
+

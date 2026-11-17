@@ -9829,7 +9829,8 @@ impl Scene {
         // Rebuild the resident set in that case so an incremental patch cannot
         // retain the source solid's uncut edge cache.
         if self.active_live_section(block).is_none() && !self.constraint_shading_active() {
-            if let Some(arc) = self.try_resident_patch(
+            let t_patch = crate::perf::enabled().then(iced::time::Instant::now);
+            let patched = self.try_resident_patch(
                 key,
                 block,
                 bg,
@@ -9838,7 +9839,15 @@ impl Scene {
                 all_visible,
                 frozen_layers,
                 style_viewport,
-            ) {
+            );
+            if let Some(t) = t_patch {
+                crate::perf_record!(
+                    "[perf] resident-patch-attempt {:.1}ms hit={}",
+                    t.elapsed().as_secs_f64() * 1000.0,
+                    patched.is_some()
+                );
+            }
+            if let Some(arc) = patched {
                 return arc;
             }
         }
@@ -9926,6 +9935,7 @@ impl Scene {
         let arc = Arc::new(wires);
         // The memo keeps one copy of what this set holds; read before the
         // previous set is evicted below, which may hold runs it still needs.
+        let t_memo = perf.then(iced::time::Instant::now);
         if self.uses_resident_memo(block, frozen_layers) {
             match &layout {
                 Some(layout) if self.resident_runs_match_memo(block) => {
@@ -9933,6 +9943,13 @@ impl Scene {
                 }
                 _ => self.detach_memo_backing(),
             }
+        }
+        if let Some(t) = t_memo {
+            crate::perf_record!(
+                "[perf] memo-bind {:.1}ms wires={}",
+                t.elapsed().as_secs_f64() * 1000.0,
+                arc.len()
+            );
         }
         let gen = WIRE_CONTENT_GEN.fetch_add(1, Ordering::Relaxed);
         self.last_model_wire_gen.set(gen);

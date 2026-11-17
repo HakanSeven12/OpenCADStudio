@@ -191,6 +191,30 @@ fn rebuild_scene(label: &str, mut scene: Scene) {
         median_ms(&mut samples),
     );
 
+    // Same rebuild, but every produced set stays alive: the cache eviction
+    // inside the timed window then drops nothing, isolating the previous
+    // set's teardown cost from the build cost.
+    let mut keep_alive: Vec<std::sync::Arc<Vec<OpenCADStudio::scene::model::wire_model::WireModel>>> =
+        Vec::new();
+    let mut samples = Vec::with_capacity(RUNS);
+    for _ in 0..WARMUP {
+        scene.bump_geometry();
+        let w = scene.model_tile_wires_arc(0, &cam, 1.0, 1.0);
+        keep_alive.push(w);
+    }
+    for _ in 0..RUNS {
+        scene.bump_geometry();
+        let start = Instant::now();
+        let w = scene.model_tile_wires_arc(0, black_box(&cam), 1.0, 1.0);
+        samples.push(start.elapsed().as_nanos() as u64);
+        keep_alive.push(w);
+    }
+    println!(
+        "  {label:<24} (sets kept alive, no teardown)      median={:.3} ms",
+        median_ms(&mut samples),
+    );
+    drop(keep_alive);
+
     if label == "lines_200k" {
         let wires = scene.model_tile_wires_arc(0, &cam, 1.0, 1.0);
         let refs: Vec<_> = wires.iter().collect();

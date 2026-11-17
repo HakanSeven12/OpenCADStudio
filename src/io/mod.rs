@@ -5,6 +5,8 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod edit_lock;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod connection_workers;
 // Same split as web_session/web_autosave: the save-routing decision (and
 // its tests) is pure and compiles everywhere; the showSaveFilePicker half
 // inside is wasm-only.

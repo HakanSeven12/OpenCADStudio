@@ -52,7 +52,6 @@ const COMMAND_ICON_ALIASES: &[(&str, &str)] = &[
     ("-BOUNDARY", "BPOLY"),
     ("IMAGE", "IMAGEATTACH"),
     ("-IMAGE", "IMAGEATTACH"),
-    ("BMPOUT", "IMAGEATTACH"),
     // Modify & clipboard
     ("PASTE", "PASTECLIP"),
     ("ARRAY", "ARRAYRECT"),
@@ -333,6 +332,10 @@ const COMMAND_ICON_ALIASES: &[(&str, &str)] = &[
     ("STLOUT", "EXPORT"),
     ("FBXEXPORT", "EXPORT"),
     ("EXPORTSVG", "EXPORT"),
+    ("PNGOUT", "EXPORT"),
+    ("JPGOUT", "EXPORT"),
+    ("BMPOUT", "EXPORT"),
+    ("TIFOUT", "EXPORT"),
     ("ETRANSMIT", "EXPORT"),
     ("ARCHIVE", "EXPORT"),
     ("IMPORT", "IMPORTOBJ"),

@@ -35,6 +35,44 @@ fn write_export(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
     }
 }
 
+/// `page` rendered `width` × `height` pixels on white, encoded as `format`.
+pub(in crate::app) fn raster_page(
+    page: &PdfPageInput,
+    width: u32,
+    height: u32,
+    format: image::ImageFormat,
+) -> Result<Vec<u8>, String> {
+    let svg = crate::io::svg_export::build_svg(page, None)?;
+    let tree = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default())
+        .map_err(|e| e.to_string())?;
+    let mut pixmap =
+        resvg::tiny_skia::Pixmap::new(width, height).ok_or("image size out of range")?;
+    pixmap.fill(resvg::tiny_skia::Color::WHITE);
+    let size = tree.size();
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(
+            width as f32 / size.width(),
+            height as f32 / size.height(),
+        ),
+        &mut pixmap.as_mut(),
+    );
+    // Opaque, so the premultiplied pixels are the plain ones.
+    let rgba = image::RgbaImage::from_raw(width, height, pixmap.take())
+        .ok_or("image size out of range")?;
+    let picture = match format {
+        image::ImageFormat::Jpeg | image::ImageFormat::Bmp => {
+            image::DynamicImage::ImageRgb8(image::DynamicImage::ImageRgba8(rgba).to_rgb8())
+        }
+        _ => image::DynamicImage::ImageRgba8(rgba),
+    };
+    let mut bytes = Vec::new();
+    picture
+        .write_to(&mut std::io::Cursor::new(&mut bytes), format)
+        .map_err(|e| e.to_string())?;
+    Ok(bytes)
+}
+
 /// Run `work` on a worker thread and map its result into a `Message`.
 ///
 /// `context` names the operation for error reporting. A worker panic never
@@ -6747,6 +6785,144 @@ impl OpenCADStudio {
             self.report_plot_result(result, reopen_plot);
             Task::none()
         }
+    }
+
+    /// PNGOUT / JPGOUT / BMPOUT / TIFOUT: `handles` drawn as they plot,
+    /// fitted into an image the size of the drawing area, on white.
+    pub(in crate::app) fn raster_out(
+        &mut self,
+        cmd: &str,
+        handles: &[document::Handle],
+    ) -> Task<Message> {
+        let (ext, name, format) = match cmd {
+            "JPGOUT" => ("jpg", "JPEG", image::ImageFormat::Jpeg),
+            "BMPOUT" => ("bmp", "BMP", image::ImageFormat::Bmp),
+            "TIFOUT" => ("tif", "TIFF", image::ImageFormat::Tiff),
+            _ => ("png", "PNG", image::ImageFormat::Png),
+        };
+        let Some((page, width, height)) = self.raster_out_page(handles) else {
+            self.command_line.push_error(
+                crate::t!("None of the selected entities could be exported.").as_ref(),
+            );
+            return Task::none();
+        };
+        let start = move |path: std::path::PathBuf| {
+            background_task(
+                crate::t!("Export"),
+                move || {
+                    let bytes = raster_page(&page, width, height, format)?;
+                    write_export(&path, &bytes)?;
+                    Ok(crate::tf!("Exported: {}", path.display()).into_owned())
+                },
+                |result| Message::BackgroundIoFinished(result, false),
+            )
+        };
+        let file_name = format!("{}.{ext}", self.active_stem(""));
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = name;
+            start(std::path::PathBuf::from(file_name))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut start = Some(start);
+            Task::perform(
+                async move {
+                    crate::sys::file_dialog()
+                        .set_title(crate::t!("Export").as_ref())
+                        .set_file_name(&file_name)
+                        .add_filter(name, &[ext])
+                        .add_filter(crate::t!("All Files").as_ref(), &["*"])
+                        .save_file()
+                        .await
+                        .map(|h| crate::sys::handle_path(&h))
+                },
+                |path| path,
+            )
+            .then(move |path| match (path, start.take()) {
+                (Some(path), Some(start)) => start(path),
+                _ => Task::none(),
+            })
+        }
+    }
+
+    /// The plot page of `handles` alone, fitted with a margin into a sheet
+    /// the size of the drawing area at 96 dpi, and that size in pixels.
+    /// `None` when they draw nothing.
+    pub(in crate::app) fn raster_out_page(
+        &self,
+        handles: &[document::Handle],
+    ) -> Option<(PdfPageInput, u32, u32)> {
+        let scene = &self.tabs[self.active_tab].scene;
+        let wanted: rustc_hash::FxHashSet<document::Handle> = handles.iter().copied().collect();
+        // Keep the selected items; `split` counts the kept ones of the
+        // first group.
+        fn keep<T>(items: &mut Vec<T>, split: &mut usize, mut keep: impl FnMut(&T) -> bool) {
+            let (mut index, mut first) = (0, 0);
+            items.retain(|item| {
+                let kept = keep(item);
+                if kept && index < *split {
+                    first += 1;
+                }
+                index += 1;
+                kept
+            });
+            *split = first;
+        }
+        let mut content = plot_scene_content(scene, false, None);
+        let splits = &mut content.group_splits;
+        keep(
+            std::sync::Arc::make_mut(&mut content.wires),
+            &mut splits.wires,
+            |wire| {
+                crate::scene::Scene::handle_from_wire_name(&wire.name)
+                    .is_some_and(|h| wanted.contains(&h))
+            },
+        );
+        keep(&mut content.hatches, &mut splits.hatches, |hatch| {
+            hatch.entity.is_some_and(|h| wanted.contains(&h))
+        });
+        keep(&mut content.wipeouts, &mut splits.wipeouts, |hatch| {
+            hatch.entity.is_some_and(|h| wanted.contains(&h))
+        });
+        // ponytail: image models carry no entity handle, so raster images
+        // are left out; add one to ImageModel to export them too.
+        content.images.clear();
+        splits.images = 0;
+        let (min_x, min_y, max_x, max_y) = plot_content_extents(&content)?;
+        let (vp_w, vp_h) = scene.selection.borrow().view.vp_size;
+        let (width, height) = if vp_w >= 1.0 && vp_h >= 1.0 {
+            (vp_w.round() as u32, vp_h.round() as u32)
+        } else {
+            (1600, 1200)
+        };
+        // Paper at 96 dpi, so lineweights come out as on screen.
+        const MM_PER_PX: f64 = 25.4 / 96.0;
+        let (paper_w, paper_h) = (width as f64 * MM_PER_PX, height as f64 * MM_PER_PX);
+        let (content_w, content_h) = ((max_x - min_x).max(1e-9), (max_y - min_y).max(1e-9));
+        const MARGIN: f64 = 1.05;
+        let scale = ((paper_w / MARGIN) / content_w)
+            .min((paper_h / MARGIN) / content_h)
+            .max(1e-9);
+        let mut options = Self::pdf_plot_options(&self.plot_dialog);
+        options.text_as_outlines = true;
+        options.stamp = false;
+        options.scale_lineweights = false;
+        let page = PdfPageInput {
+            content,
+            paper_w,
+            paper_h,
+            offset_x: (paper_w - content_w * scale) * 0.5 / scale - min_x,
+            offset_y: (paper_h - content_h * scale) * 0.5 / scale - min_y,
+            rotation_deg: 0,
+            content_rotation: 0.0,
+            scale: scale as f32,
+            clip: None,
+            options,
+            plot_style: None,
+            geopdf: None,
+        };
+        Some((page, width, height))
     }
 
     /// Assemble a layout page for PDF export, preview, or printing.

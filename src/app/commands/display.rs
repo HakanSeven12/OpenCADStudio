@@ -1169,6 +1169,24 @@ impl OpenCADStudio {
             "EXPORT" => {
                 return Some(Task::done(Message::PlotExport));
             }
+            // PNGOUT / JPGOUT / BMPOUT / TIFOUT — the selected objects as an
+            // image file.
+            "PNGOUT" | "JPGOUT" | "BMPOUT" | "TIFOUT" => {
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let select = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&select.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(select));
+                } else {
+                    return Some(self.raster_out(cmd, &handles));
+                }
+            }
             // PREVIEW [path] — render the plot page to SVG through the plot
             // pipeline, including the plot style, and report its paper size and
             // scale before committing to paper.

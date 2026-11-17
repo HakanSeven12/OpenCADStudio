@@ -3812,10 +3812,14 @@ mod adapter_tests {
             other => panic!("expected a stack run, got {other:?}"),
         }
 
-        // Diagonal stays inline `num/den` — that is what a slanted fraction
-        // reads as, and it needs no second baseline.
-        let (t, _) = first_run(&adapt_mtext_paragraphs("\\S1#2;", 2.5, true));
-        assert_eq!(t, "1/2");
+        // A diagonal stack is a stack too: the denominator after the
+        // numerator, under a slanted rule.
+        let lines = adapt_mtext_paragraphs("\\S1#2;", 2.5, true);
+        assert!(matches!(
+            &lines[0].runs[0].kind,
+            MTextRunKind::Stack { diagonal: true, bar: false, .. }
+        ));
+        assert_eq!(stack_slot("1", "2", false, false, true, digit), (2.0, 0.0, 1.0));
     }
 
     #[test]

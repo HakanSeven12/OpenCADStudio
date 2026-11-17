@@ -18,6 +18,22 @@ use document::{EntityType as AcadEntityType, Handle};
 use iced::time::Instant;
 use iced::{mouse, Point, Task};
 
+/// Wait for save work without occupying the executor that delivers timers and
+/// control messages. A worker panic drops the sender and follows save failure
+/// handling just like the former join error.
+#[cfg(not(target_arch = "wasm32"))]
+async fn native_save_worker<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, crate::io::SaveFailure> {
+    let (sender, receiver) = iced::futures::channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(work());
+    });
+    receiver
+        .await
+        .map_err(|_| crate::io::SaveFailure::other("save worker panicked"))
+}
+
 /// Write an exported file: to disk on the desktop, as a browser download on
 /// the web, where there is no filesystem behind the dialog's path. (#761)
 fn write_export(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
@@ -4227,7 +4243,7 @@ impl OpenCADStudio {
                 async move {
                     let physical_path = destination_is_current.then(|| worker_path.clone());
                     let logical_path = destination_is_current.then(|| path.clone());
-                    let (result, refreshed_preview) = std::thread::spawn(move || {
+                    let (result, refreshed_preview) = native_save_worker(move || {
                         let mut refreshed_preview = None;
                         if let Some(png) = thumbnail {
                             let started = iced::time::Instant::now();
@@ -4260,13 +4276,8 @@ impl OpenCADStudio {
                         );
                         (result, refreshed_preview)
                     })
-                    .join()
-                    .unwrap_or_else(|_| {
-                        (
-                            Err(crate::io::SaveFailure::other("save worker panicked")),
-                            None,
-                        )
-                    });
+                    .await
+                    .unwrap_or_else(|error| (Err(error), None));
                     crate::app::SaveOutcome {
                         job_id,
                         tab_id,
@@ -11808,6 +11819,48 @@ mod background_task_tests {
             .expect("worker panic reported as an error");
         assert!(error.contains("STL export"), "error = {error}");
         assert!(error.contains("worker exploded"), "error = {error}");
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod native_save_worker_tests {
+    use super::native_save_worker;
+    use iced::futures::{executor::block_on, task::noop_waker};
+    use std::{future::Future, sync::mpsc, task::Context, time::Duration};
+
+    #[test]
+    fn waiting_for_save_yields_before_the_worker_finishes() {
+        let (release, released) = mpsc::channel();
+        let (polled, polling) = mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            let mut future = Box::pin(native_save_worker(move || {
+                released.recv_timeout(Duration::from_secs(5)).unwrap();
+                42
+            }));
+            let waker = noop_waker();
+            let mut context = Context::from_waker(&waker);
+            let pending = future.as_mut().poll(&mut context).is_pending();
+            polled.send(pending).unwrap();
+            block_on(future).unwrap()
+        });
+        // Release even on failure, so a blocking-wait regression cannot leave
+        // the test worker stuck waiting for its own assertion to finish.
+        let first_poll = polling.recv_timeout(Duration::from_secs(2));
+        release.send(()).unwrap();
+        assert_eq!(waiter.join().unwrap(), 42);
+        assert_eq!(first_poll, Ok(true));
+    }
+
+    #[test]
+    fn save_worker_preserves_returned_failure() {
+        let result = block_on(native_save_worker(|| Err::<(), _>("write failed"))).unwrap();
+        assert_eq!(result, Err("write failed"));
+    }
+
+    #[test]
+    fn save_worker_panic_becomes_a_save_failure() {
+        let error = block_on(native_save_worker(|| panic!("worker exploded"))).unwrap_err();
+        assert_eq!(error.to_string(), "save worker panicked");
     }
 }
 

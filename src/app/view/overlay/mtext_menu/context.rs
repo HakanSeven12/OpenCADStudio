@@ -258,7 +258,8 @@ pub(in crate::app::view::overlay) fn context_menu(
     .push(line("", m!("help"), "F1", Some("_MTED HELP"), false))
     .separator()
     .push(line("", m!("cancel"), "", Some("_MTED CANCEL"), false));
-    Some((menu.at, panel.build()))
+    // Taller than the drawing area, the menu scrolls rather than run off it.
+    Some((menu.at, iced::widget::scrollable(panel.build()).into()))
 }
 
 /// The tag's button under the text, with its menu while open; `place`

@@ -2733,6 +2733,9 @@ pub struct Scene {
     /// The table whose fill grip is being dragged: its picked range stays
     /// drawn over the grip preview that hides it.
     pub table_fill_drag: Option<Handle>,
+    /// The table whose cell is open in the in-place editor: the editor's
+    /// picture hides it, but its row and column labels stay drawn.
+    pub table_cell_editing: Option<Handle>,
     /// Source handles replaced by an active command preview. Kept separate
     /// from grip state so either interaction can clean up only its own hides.
     command_preview_hidden: HashSet<Handle>,
@@ -3641,6 +3644,7 @@ impl Scene {
             reference_only: Default::default(),
             preview_hidden: HashSet::default(),
             table_fill_drag: None,
+            table_cell_editing: None,
             command_preview_hidden: HashSet::default(),
             mtext_editor_hidden: None,
             refedit_keep: None,

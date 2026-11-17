@@ -155,7 +155,7 @@ fn reorder_insertion_index(from: usize, to: usize, after: bool, len: usize) -> O
 #[cfg(test)]
 mod block_ops_tests;
 pub(super) mod blocks_palette;
-mod command;
+pub(in crate::app) mod command;
 pub(crate) mod context_menu;
 mod dialog;
 mod dynamic;
@@ -357,14 +357,8 @@ impl OpenCADStudio {
             Some(AssocPrompt) => self.mark_assoc_prompted(),
             // Cancel: leave the layer (and its objects) untouched.
             Some(LayerDeleteWarning) => self.layer_delete_pending = None,
-            // Cancel: drop the working copy without touching the block.
-            Some(AttributeEditor) => {
-                self.attr_editor_handle = None;
-                self.attr_editor_block.clear();
-                self.attr_editor_rows.clear();
-                self.attr_editor_selected = 0;
-                self.attr_editor_tab = crate::ui::window::attribute_editor::AttrTab::Attribute;
-            }
+            // ✕ is Cancel: what was not applied is taken back.
+            Some(AttributeEditor) => self.attr_editor_end(false),
             Some(GeometricTolerance) => self.geometric_tolerance = None,
             Some(BlockDefinition) => self.block_definition = None,
             Some(AttMan) => self.attman = None,
@@ -12980,6 +12974,16 @@ impl OpenCADStudio {
                 }
                 if self.active_modal == Some(super::ModalKind::InsertAttributes) {
                     let i = self.active_tab;
+                    // ATTEDIT's Cancel leaves the values as they were.
+                    if self
+                        .insert_attr_dialog
+                        .as_ref()
+                        .is_some_and(|d| d.edit.is_some())
+                    {
+                        self.insert_attr_dialog = None;
+                        self.close_active_modal();
+                        return Task::none();
+                    }
                     if self.tabs[i]
                         .active_cmd
                         .as_ref()
@@ -13233,13 +13237,19 @@ impl OpenCADStudio {
             Message::AttrEditorInput { idx, value } => {
                 if let Some(r) = self.attr_editor_rows.get_mut(idx) {
                     r.value = value;
+                    // Retyping a picked field drops it.
+                    if r.field.take().is_some() {
+                        r.field_changed = false;
+                    }
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorTextStyle(s) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.text_style = s;
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorJustify(label) => {
@@ -13251,71 +13261,103 @@ impl OpenCADStudio {
                         r.v_align = v;
                     }
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorHeight(s) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.height = s;
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorRotation(s) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.rotation = s;
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorWidth(s) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.width_factor = s;
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorOblique(s) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.oblique = s;
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorBackwards(b) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.backwards = b;
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorUpsideDown(b) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.upside_down = b;
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorLayer(s) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.layer = s;
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorLinetype(s) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.linetype = if s == "ByLayer" { String::new() } else { s };
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorColor(label) => {
+                if label == crate::ui::window::attribute_editor::SELECT_COLOR {
+                    let current = self
+                        .attr_editor_rows
+                        .get(self.attr_editor_selected)
+                        .map(|r| r.color)
+                        .unwrap_or(document::types::Color::ByLayer);
+                    return self.update(Message::OpenColorWindow(
+                        crate::app::ColorPickTarget::AttrEditor,
+                        current,
+                    ));
+                }
                 if let Some(c) = crate::ui::window::attribute_editor::color_from_label(&label) {
                     if let Some(r) = self.attr_row_selected_mut() {
                         r.color = c;
                     }
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorLineweight(lw) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.line_weight = lw;
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
-            Message::AttrEditorApply => self.on_attr_editor_apply(),
+            Message::AttrEditorApply
+            | Message::AttrEditorOk
+            | Message::AttrEditorCancel
+            | Message::AttrEditorHelp
+            | Message::AttrEditorSelectBlock
+            | Message::AttrEditorAnswer(_)
+            | Message::AttrEditorDismissError
+            | Message::AttrEditorEditValue
+            | Message::AttrEditorInsertField
+            | Message::AttrEditorBoundary(_)
+            | Message::AttrEditorColorValue(_) => self.on_attr_editor_msg(msg),
             Message::ToolWindow(kind, inner) => {
                 // Working in a dialog gives it the keyboard; its own layout
                 // pass measuring it does not.

@@ -1516,6 +1516,36 @@ impl OpenCADStudio {
             .as_ref()
             .and_then(|c| c.attedit_pending_handle());
         if let Some(ins_handle) = attedit_handle {
+            let mode = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .and_then(|c| c.attedit_mode());
+            if let Some((kind, current)) = mode {
+                // Back to the window's block (Enter / Esc at Select block),
+                // or a pick the prompt refuses: say why and ask again.
+                let back = current == Some(ins_handle);
+                let refusal = (!back)
+                    .then(|| self.attedit_refusal(i, ins_handle, kind, current.is_some()))
+                    .flatten();
+                if let Some(msg) = refusal {
+                    if !msg.is_empty() {
+                        self.command_line.push_output(crate::t!(msg).as_ref());
+                    }
+                    self.start_attedit_pick(kind, current);
+                    return Some(Task::none());
+                }
+                self.tabs[i].active_cmd = None;
+                self.command_line.set_step_options(Vec::new());
+                match kind {
+                    crate::modules::draw::modify::attedit::AtteditKind::Enhanced => {
+                        self.open_attribute_editor(ins_handle)
+                    }
+                    crate::modules::draw::modify::attedit::AtteditKind::Classic => {
+                        self.open_attribute_value_form(ins_handle)
+                    }
+                }
+                return Some(Task::none());
+            }
             self.tabs[i].active_cmd = None;
             self.command_line.set_step_options(Vec::new());
             self.open_attribute_editor(ins_handle);

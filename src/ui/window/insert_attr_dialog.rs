@@ -24,6 +24,21 @@ pub struct InsertAttrState {
     pub rows: Vec<InsertAttrRow>,
     /// The first row the page shows.
     pub first: usize,
+    /// ATTEDIT: the block reference whose values the form edits. `None`
+    /// while placing a block.
+    pub edit: Option<AttrFormEdit>,
+}
+
+/// The block reference ATTEDIT's form edits.
+#[derive(Debug, Clone)]
+pub struct AttrFormEdit {
+    pub handle: document::Handle,
+    /// The position of each row's attribute in the block reference.
+    pub indices: Vec<usize>,
+    /// Rows whose value is multi-line text, typed in the text editor ("…").
+    pub multiline: Vec<bool>,
+    /// The row the text editor is typing.
+    pub editing: Option<usize>,
 }
 
 impl InsertAttrState {
@@ -49,6 +64,8 @@ impl InsertAttrState {
 #[derive(Debug, Clone)]
 pub enum InsertAttrMsg {
     Value(usize, String),
+    /// "…": type a multi-line value in the text editor.
+    EditValue(usize),
     Previous,
     Next,
     Ok,
@@ -79,7 +96,25 @@ fn line<'a>(label: String, value: Element<'a, Message>) -> Element<'a, Message> 
     .into()
 }
 
-fn slot<'a>(value: &'a str, index: usize) -> Element<'a, Message> {
+fn slot<'a>(value: &'a str, index: usize, multiline: bool) -> Element<'a, Message> {
+    if multiline {
+        // A multi-line value is shown on one line and typed in the editor.
+        let shown = crate::ui::window::attribute_editor::one_line(value);
+        return row![
+            text_input("", &shown)
+                .size(12)
+                .padding([5, 8])
+                .width(Fill)
+                .style(field_style),
+            button(text("…").size(12))
+                .on_press(Message::InsertAttrDialog(InsertAttrMsg::EditValue(index)))
+                .style(crate::ui::style::form::button_style(false))
+                .padding([4, 9]),
+        ]
+        .spacing(6)
+        .align_y(iced::Alignment::Center)
+        .into();
+    }
     text_input("", value)
         .size(12)
         .padding([5, 8])
@@ -105,7 +140,11 @@ pub fn view(
     }
     let mut body = column![line(caption(&crate::t!("Block name")), name.into())].spacing(6);
     for (index, row) in state.rows.iter().enumerate().take(last).skip(state.first) {
-        body = body.push(line(caption(&row.label), slot(&row.value, index)));
+        let multiline = state
+            .edit
+            .as_ref()
+            .is_some_and(|e| e.multiline.get(index).copied().unwrap_or(false));
+        body = body.push(line(caption(&row.label), slot(&row.value, index, multiline)));
     }
     let step = |label: &str, go: bool, msg: InsertAttrMsg| {
         dialog_button_styled_opt(

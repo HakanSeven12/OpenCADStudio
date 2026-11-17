@@ -3851,6 +3851,17 @@ pub trait CadCommand: Send {
         None
     }
 
+    /// An EATTEDIT / ATTEDIT block pick: the window it opens and the block
+    /// an open window is on (Select block).
+    fn attedit_mode(
+        &self,
+    ) -> Option<(
+        crate::modules::draw::modify::attedit::AtteditKind,
+        Option<document::Handle>,
+    )> {
+        None
+    }
+
     /// Inject block attribute definitions after the INSERT point is picked.
     fn attreq_set_attdefs(
         &mut self,

@@ -90,9 +90,14 @@ fn rendered_wire_bounds_memo(
             }
             has_precise_position = true;
         }
-        for &(point, _) in &wire.snap_pts {
-            include_bound!(point);
-            has_precise_position = true;
+        // Snap points are not drawn geometry: an arc's centre or a text's
+        // alignment point can sit far outside what the entity draws (#3205).
+        // They only stand in for a wire that has no drawn points at all.
+        if !has_precise_position {
+            for &(point, _) in &wire.snap_pts {
+                include_bound!(point);
+                has_precise_position = true;
+            }
         }
 
         if !has_precise_position {

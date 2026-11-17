@@ -1389,3 +1389,439 @@ mod dgn_dialog_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod dgn_worker_tests {
+    use super::*;
+    use crate::modules::insert::dgn_import::{test_files, ExistingReference, PreparedImport};
+
+    fn app_with_new_drawing() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    /// A V7 file with one line, registered under a name of its own.
+    fn v7_file(name: &str) -> String {
+        let path = format!("memory://dgn-worker-{name}-{}.dgn", std::process::id());
+        crate::scene::model::pdf_raster::register_source(
+            &path,
+            Arc::new(test_files::minimal_v7_line()),
+        );
+        path
+    }
+
+    fn junk_file(name: &str) -> String {
+        let path = format!("memory://dgn-worker-{name}-{}.dgn", std::process::id());
+        crate::scene::model::pdf_raster::register_source(
+            &path,
+            Arc::new(b"not a design file".to_vec()),
+        );
+        path
+    }
+
+    fn request(path: &str, current_drawing: bool) -> DgnImportRequest {
+        DgnImportRequest {
+            path: path.to_string(),
+            model: "Default".to_string(),
+            sub_units: false,
+            explode_text_nodes: false,
+            current_drawing,
+            prefix_duplicates: false,
+            references: ReferenceMode::Ignore,
+            existing_reference: ExistingReference::Prompt,
+            code_page: None,
+        }
+    }
+
+    fn last_line(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .last()
+            .map(|entry| entry.text.clone())
+            .unwrap_or_default()
+    }
+
+    fn lines(app: &OpenCADStudio, i: usize) -> usize {
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter(|e| matches!(e, document::EntityType::Line(_)))
+            .count()
+    }
+
+    fn panicking_check(_: &str) -> bool {
+        panic!("check failed")
+    }
+
+    fn panicking_window_reader(_: &str, _: Option<u16>) -> Option<DgnWindowRead> {
+        panic!("window reader failed")
+    }
+
+    fn panicking_import_reader(
+        _: &DgnImportRequest,
+    ) -> Result<PreparedImport, dgn_import::DgnImportError> {
+        panic!("import reader failed")
+    }
+
+    fn panicking_decoder(
+        _: &str,
+        _: &str,
+        _: Option<u16>,
+    ) -> Option<crate::scene::model::underlay_vector::DgnImport> {
+        panic!("decoder failed")
+    }
+
+    /// A decoder whose model has unit names that the test file does not
+    /// have, so a test sees whether the window took its result.
+    fn feet_decoder(
+        _: &str,
+        _: &str,
+        _: Option<u16>,
+    ) -> Option<crate::scene::model::underlay_vector::DgnImport> {
+        Some(crate::scene::model::underlay_vector::DgnImport {
+            unit_names: ("ft".into(), "in".into()),
+            ..Default::default()
+        })
+    }
+
+    /// The window opens only when the read on the worker ends.
+    #[test]
+    fn the_window_opens_only_when_its_read_ends() {
+        let mut app = app_with_new_drawing();
+        let path = v7_file("window");
+        let task = app.read_dgn_for_dialog(&path, DgnReadFrom::DgnImport);
+        assert!(app.active_modal.is_none(), "no window during the read");
+        assert_eq!(last_line(&app), format!("ⓘ Reading {path}…"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::DgnImport));
+        let s = app.import_dialogs.dgn.as_ref().expect("window state");
+        assert_eq!(s.path, path);
+        assert_eq!(s.version, "V7");
+        assert_eq!(s.units, ("m".to_string(), "mm".to_string()));
+    }
+
+    #[test]
+    fn a_panic_in_the_window_read_is_an_error() {
+        let mut app = app_with_new_drawing();
+        let path = v7_file("window-panic");
+        let task =
+            app.read_dgn_for_dialog_with(&path, DgnReadFrom::DgnImport, panicking_window_reader);
+        app.drive_headless_task(task).expect("the read task");
+        assert!(app.active_modal.is_none());
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("DGNIMPORT failed: window reader failed")
+        );
+    }
+
+    /// If a different window opened during the read, the DGN Import window
+    /// does not take its place.
+    #[test]
+    fn a_window_opened_during_the_read_stays() {
+        let mut app = app_with_new_drawing();
+        let path = v7_file("window-other");
+        let task = app.read_dgn_for_dialog(&path, DgnReadFrom::DgnImport);
+        app.active_modal = Some(crate::app::ModalKind::About);
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::About));
+        assert!(app.import_dialogs.dgn.is_none());
+        assert!(app
+            .command_line
+            .last_error
+            .as_deref()
+            .is_some_and(|e| e.starts_with("DGN Import cancelled")));
+    }
+
+    /// IMPORT in the Import File window: the window stays open during the
+    /// read; a file that is no DGN model shows the error there, a DGN model
+    /// opens the DGN Import window in its place.
+    #[test]
+    fn the_import_file_window_waits_for_the_read() {
+        let mut app = app_with_new_drawing();
+        for (path, dgn) in [(junk_file("import-junk"), false), (v7_file("import"), true)] {
+            app.open_import_file_dialog();
+            let s = app.import_dialogs.file.as_mut().unwrap();
+            s.path = path.clone();
+            s.format = 1; // MicroStation DGN
+            let task = app.update_import_dialog(ImportDialogMsg::ImportOk);
+            assert_eq!(app.active_modal, Some(crate::app::ModalKind::ImportFile));
+            app.drive_headless_task(task).expect("the read task");
+            if dgn {
+                assert_eq!(app.active_modal, Some(crate::app::ModalKind::DgnImport));
+                assert_eq!(app.import_dialogs.recent.first(), Some(&path));
+            } else {
+                assert_eq!(app.active_modal, Some(crate::app::ModalKind::ImportFile));
+                assert_eq!(
+                    app.import_dialogs.file.as_ref().unwrap().error.as_deref(),
+                    Some("Invalid or unsupported DGN file.")
+                );
+                assert!(!app.import_dialogs.recent.contains(&path));
+                app.close_active_modal();
+            }
+        }
+    }
+
+    /// IMPORT on the command line or from a script: the error goes to the
+    /// command line, also when the Import File window is open (the
+    /// automation `run` operation sends IMPORT and the file name apart, so
+    /// that window opens first). After OK in an Import File window that
+    /// closed during the read, the error also goes to the command line.
+    #[test]
+    fn a_command_line_import_shows_the_error_on_the_command_line() {
+        let mut app = app_with_new_drawing();
+        app.open_import_file_dialog();
+        let path = junk_file("command-line-junk");
+        let from = DgnReadFrom::Import("not a DGN model".into());
+        let task = app.read_dgn_for_dialog(&path, from);
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("not a DGN model")
+        );
+        assert!(app.import_dialogs.file.as_ref().unwrap().error.is_none());
+
+        app.active_modal = None;
+        let from = DgnReadFrom::ImportFileWindow("closed window".into());
+        let task = app.read_dgn_for_dialog(&path, from);
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("closed window")
+        );
+        assert!(app.import_dialogs.file.as_ref().unwrap().error.is_none());
+    }
+
+    /// A model number that the window does not list changes nothing and
+    /// reads nothing; a listed one is read again on a worker.
+    #[test]
+    fn only_a_listed_model_is_read_again() {
+        let mut app = app_with_new_drawing();
+        let path = v7_file("model-choice");
+        window(&mut app, &path);
+        assert_eq!(app.import_dialogs.dgn.as_ref().unwrap().models.len(), 1);
+        let task = app.update_import_dialog(ImportDialogMsg::DgnModel(1));
+        assert_eq!(task.units(), 0);
+        assert_eq!(app.import_dialogs.dgn.as_ref().unwrap().model, 0);
+        let task = app.update_import_dialog(ImportDialogMsg::DgnModel(0));
+        assert!(task.units() > 0, "the read runs as a task");
+        app.drive_headless_task(task).expect("the decode task");
+        assert!(app.command_line.last_error.is_none());
+    }
+
+    /// IMPORT with FILEDIA off: -DGNIMPORT starts only for a DGN model.
+    #[test]
+    fn import_without_the_window_checks_the_file_first() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let junk = junk_file("check-junk");
+        let task = app.check_dgn_for_import(&junk, "not a DGN model".into());
+        app.drive_headless_task(task).expect("the check task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("not a DGN model")
+        );
+        assert!(app.tabs[i].active_cmd.is_none());
+
+        let path = v7_file("check");
+        let task = app.check_dgn_for_import(&path, "not a DGN model".into());
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "nothing starts during the read"
+        );
+        app.drive_headless_task(task).expect("the check task");
+        assert!(
+            app.tabs[i].active_cmd.is_some(),
+            "-DGNIMPORT asks for the model"
+        );
+        assert_eq!(app.import_dialogs.recent.first(), Some(&path));
+    }
+
+    #[test]
+    fn a_panic_in_the_check_is_an_error() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let path = v7_file("check-panic");
+        let task = app.check_dgn_for_import_with(&path, "not a DGN model".into(), panicking_check);
+        app.drive_headless_task(task).expect("the check task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("IMPORT failed: check failed")
+        );
+        assert!(app.tabs[i].active_cmd.is_none());
+    }
+
+    /// The import places nothing itself: the model is read and converted
+    /// on a worker, and only the result places the line, as one undo step.
+    #[test]
+    fn the_import_is_placed_only_when_its_read_ends() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let path = v7_file("import-current");
+        app.finish_all_pending_history();
+        let undo = app.tabs[i].history.undo_stack.len();
+        let task = app.run_dgn_import(i, request(&path, true));
+        assert_eq!(lines(&app, i), 0, "nothing is placed during the read");
+        assert_eq!(last_line(&app), format!("ⓘ Reading {path}…"));
+        app.drive_headless_task(task).expect("the import task");
+        assert_eq!(lines(&app, i), 1);
+        app.finish_all_pending_history();
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo + 1);
+        assert!(app.tabs[i].dirty);
+    }
+
+    #[test]
+    fn a_panic_in_the_import_read_is_an_error() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let tabs = app.tabs.len();
+        let path = v7_file("import-panic");
+        let task = app.run_dgn_import_with(i, request(&path, false), panicking_import_reader);
+        app.drive_headless_task(task).expect("the import task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("DGNIMPORT failed: import reader failed")
+        );
+        assert_eq!(app.tabs.len(), tabs, "no new drawing");
+        assert_eq!(lines(&app, i), 0);
+    }
+
+    #[test]
+    fn a_file_that_is_no_dgn_model_is_an_error_after_the_read() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let path = junk_file("import-junk-run");
+        let task = app.run_dgn_import(i, request(&path, true));
+        app.drive_headless_task(task).expect("the import task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Invalid or unsupported DGN file.")
+        );
+    }
+
+    /// An import into the current drawing is dropped if that drawing was
+    /// replaced during the read; an import into a new drawing is not.
+    #[test]
+    fn only_an_import_into_a_replaced_drawing_is_dropped() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let path = v7_file("import-replaced");
+        let task = app.run_dgn_import(i, request(&path, true));
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.drive_headless_task(task).expect("the import task");
+        assert_eq!(lines(&app, app.active_tab), 0, "dropped");
+        assert!(app
+            .command_line
+            .history
+            .iter()
+            .any(|entry| entry.text.contains("was replaced")));
+
+        let tabs = app.tabs.len();
+        let i = app.active_tab;
+        let task = app.run_dgn_import(i, request(&path, false));
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.drive_headless_task(task).expect("the import task");
+        assert!(app.tabs.len() > tabs, "a new drawing");
+        assert_eq!(lines(&app, app.active_tab), 1);
+    }
+
+    fn window(app: &mut OpenCADStudio, path: &str) {
+        let task = app.read_dgn_for_dialog(path, DgnReadFrom::DgnImport);
+        app.drive_headless_task(task).expect("the read task");
+        assert!(app.import_dialogs.dgn.is_some());
+    }
+
+    /// A model read again for the code page the window shows changes the
+    /// window when it ends; a read for a code page that the window no
+    /// longer shows is dropped.
+    #[test]
+    fn only_a_current_decode_changes_the_window() {
+        let mut app = app_with_new_drawing();
+        let path = v7_file("decode");
+        window(&mut app, &path);
+        let task = app.decode_dgn_model_with(feet_decoder);
+        app.import_dialogs.dgn.as_mut().unwrap().code_page = Some(1250);
+        app.drive_headless_task(task).expect("the decode task");
+        let units = &app.import_dialogs.dgn.as_ref().unwrap().units;
+        assert_eq!(
+            units,
+            &("m".to_string(), "mm".to_string()),
+            "stale: dropped"
+        );
+
+        let task = app.decode_dgn_model_with(feet_decoder);
+        app.drive_headless_task(task).expect("the decode task");
+        let units = &app.import_dialogs.dgn.as_ref().unwrap().units;
+        assert_eq!(units, &("ft".to_string(), "in".to_string()));
+    }
+
+    #[test]
+    fn a_code_page_change_reads_the_model_on_a_worker() {
+        let mut app = app_with_new_drawing();
+        let path = v7_file("decode-page");
+        window(&mut app, &path);
+        let label = crate::modules::insert::dgn_import::code_page_label(Some(1250));
+        let task = app.update_import_dialog(ImportDialogMsg::DgnCodePage(label));
+        assert!(task.units() > 0, "the read runs as a task");
+        assert_eq!(
+            app.import_dialogs.dgn.as_ref().unwrap().code_page,
+            Some(1250)
+        );
+        app.drive_headless_task(task).expect("the decode task");
+        assert!(app.command_line.last_error.is_none());
+    }
+
+    #[test]
+    fn a_panic_in_the_decode_is_an_error_and_the_window_stays() {
+        let mut app = app_with_new_drawing();
+        let path = v7_file("decode-panic");
+        window(&mut app, &path);
+        let task = app.decode_dgn_model_with(panicking_decoder);
+        app.drive_headless_task(task).expect("the decode task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("DGNIMPORT failed: decoder failed")
+        );
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::DgnImport));
+    }
+
+    /// The UI half of a translated reference: the converted model is
+    /// written beside its file and attached as an external reference.
+    #[test]
+    fn a_translated_reference_is_written_and_attached() {
+        let folder = std::env::temp_dir().join(format!("ocs-dgn-attach-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let host = v7_file("attach-host");
+        let prepared = dgn_import::prepare_import(&request(&host, true)).expect("read");
+        let reference = dgn_import::PreparedReference {
+            reference: Default::default(),
+            file: folder.join("site.dgn"),
+            model: "Default".to_string(),
+            converted: Some(prepared.converted.clone()),
+        };
+        let prepared = PreparedImport {
+            references: vec![reference],
+            ..prepared
+        };
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let mut translate = request(&host, true);
+        translate.references = ReferenceMode::Translate;
+        let _ = app.place_dgn_import(i, &translate, prepared);
+        let written = folder.join("site-Default.dwg").is_file();
+        let document = &app.tabs[i].scene.document;
+        let inserts: Vec<String> = document
+            .entities()
+            .filter_map(|e| match e {
+                document::EntityType::Insert(insert) => Some(insert.block_name.clone()),
+                _ => None,
+            })
+            .collect();
+        let _ = std::fs::remove_dir_all(&folder);
+        assert!(written, "the drawing is written");
+        assert_eq!(inserts, ["site - Default"], "the reference is attached");
+        assert!(document.block_records.get("site - Default").is_some());
+    }
+}

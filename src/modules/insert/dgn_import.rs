@@ -2859,3 +2859,11 @@ mod cell_color_tests {
         assert!(!line_by_block(&v7(cells)));
     }
 }
+
+#[cfg(test)]
+#[path = "dgn_import_test_files.rs"]
+pub(crate) mod test_files;
+
+#[cfg(test)]
+#[path = "dgn_import_prepare_tests.rs"]
+mod prepare_tests;

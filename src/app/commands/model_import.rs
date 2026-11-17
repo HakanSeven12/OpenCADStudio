@@ -1599,6 +1599,274 @@ mod import_tests {
 }
 
 #[cfg(test)]
+mod picture_import_tests {
+    use super::*;
+
+    fn app_with_new_drawing() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    fn fixture(name: &str) -> String {
+        format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"))
+    }
+
+    fn last_line(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .last()
+            .map(|entry| entry.text.clone())
+            .unwrap_or_default()
+    }
+
+    fn has_block(app: &OpenCADStudio, i: usize, name: &str) -> bool {
+        app.tabs[i].scene.document.block_records.get(name).is_some()
+    }
+
+    fn undo_steps(app: &mut OpenCADStudio, i: usize) -> usize {
+        app.finish_all_pending_history();
+        app.tabs[i].history.undo_stack.len()
+    }
+
+    /// The import places nothing itself: the metafile is read on a worker,
+    /// the command line says so, and only the result places the block.
+    #[test]
+    fn a_metafile_is_placed_only_when_its_read_ends() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let path = fixture("wmf/shapes.wmf");
+        let task = app.import_wmf(i, &path, false);
+        assert!(
+            !has_block(&app, i, "WMF0"),
+            "nothing is placed during the read"
+        );
+        assert_eq!(last_line(&app), format!("ⓘ Reading {path}…"));
+        app.drive_headless_task(task).expect("the import task");
+        assert!(has_block(&app, i, "WMF0"), "the result places the block");
+        assert!(app.tabs[i].dirty);
+    }
+
+    /// The same for an SVG file.
+    #[test]
+    fn an_svg_drawing_is_placed_only_when_its_read_ends() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let path = "picture-import-test-square.svg";
+        crate::scene::model::pdf_raster::register_source(
+            path,
+            std::sync::Arc::new(
+                br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="8" height="8"/></svg>"#
+                    .to_vec(),
+            ),
+        );
+        let task = app.import_svg(i, path, false);
+        assert!(
+            !has_block(&app, i, "SVG0"),
+            "nothing is placed during the read"
+        );
+        assert_eq!(last_line(&app), format!("ⓘ Reading {path}…"));
+        app.drive_headless_task(task).expect("the import task");
+        assert!(has_block(&app, i, "SVG0"), "the result places the block");
+    }
+
+    /// The picture fits half the view in which it was started: a wide one
+    /// by the width of the view, a tall one by its height.
+    #[test]
+    fn a_picture_fits_half_the_view() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let (_, view, _) = app.tabs[i].scene.view_window();
+        for (n, (name, svg)) in [
+            ("wide", r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="10"><rect width="100" height="10" fill="none" stroke="black"/></svg>"#),
+            ("tall", r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="100"><rect width="10" height="100" fill="none" stroke="black"/></svg>"#),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let path = format!("picture-import-test-{name}.svg");
+            crate::scene::model::pdf_raster::register_source(
+                &path,
+                std::sync::Arc::new(svg.as_bytes().to_vec()),
+            );
+            let task = app.import_svg(i, &path, false);
+            app.drive_headless_task(task).expect("the import task");
+            let wires = app.tabs[i].scene.block_preview_wires(&format!("SVG{n}"));
+            assert!(!wires.is_empty(), "{name}: the block has objects");
+            let [x0, y0, x1, y1] = wires.iter().fold(
+                [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
+                |[a, b, c, d], w| [a.min(w.aabb[0]), b.min(w.aabb[1]), c.max(w.aabb[2]), d.max(w.aabb[3])],
+            );
+            let (long, side) = if name == "wide" {
+                (f64::from(x1 - x0), view[0])
+            } else {
+                (f64::from(y1 - y0), view[1])
+            };
+            // The wire boxes are a little larger than the shapes (1 % here); a fit
+            // from the wrong view size is about twice as large or near zero.
+            assert!(
+                long <= 0.5 * side * 1.05 && long >= 0.25 * side,
+                "{name}: {long} against half of the view side {side}"
+            );
+        }
+    }
+
+    /// A model import also says that it reads the file (TODO 2.2).
+    #[test]
+    fn a_model_import_says_that_it_reads_the_file() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let path = fixture("step/box.step");
+        let _task = app.import_model(i, &path, ModelFormat::Step);
+        assert_eq!(last_line(&app), format!("ⓘ Reading {path}…"));
+    }
+
+    /// A reader that panics gives an error on the command line. The drawing
+    /// does not change, no undo step is added, and the next import works.
+    #[test]
+    fn a_reader_panic_is_an_error_and_the_app_continues() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let undo = undo_steps(&mut app, i);
+        let blocks = app.tabs[i].scene.document.block_records.len();
+        let task = app.read_picture_with(
+            i,
+            PictureFormat::Wmf,
+            PictureSource::File("panics.wmf".to_string()),
+            false,
+            |_, _, _| panic!("a reader bug"),
+        );
+        app.drive_headless_task(task).expect("the import task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("IMPORT failed: a reader bug")
+        );
+        assert_eq!(app.tabs[i].scene.document.block_records.len(), blocks);
+        assert_eq!(app.tabs[i].scene.document.entity_count(), 0);
+        assert_eq!(undo_steps(&mut app, i), undo);
+        let task = app.import_wmf(i, &fixture("wmf/shapes.wmf"), false);
+        app.drive_headless_task(task).expect("the next import task");
+        assert!(has_block(&app, i, "WMF0"), "the next import works");
+    }
+
+    /// A result for a drawing that was replaced during the read is dropped.
+    #[test]
+    fn a_picture_read_for_a_replaced_drawing_is_dropped() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let task = app.import_wmf(i, &fixture("wmf/shapes.wmf"), false);
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.drive_headless_task(task).expect("the import task");
+        assert!(!has_block(&app, i, "WMF0"));
+        assert!(!app.tabs[i].dirty);
+        assert!(last_line(&app).contains("was replaced"));
+    }
+
+    /// A result for a drawing that was closed during the read is dropped.
+    #[test]
+    fn a_picture_read_for_a_closed_drawing_is_dropped() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let read = picture_import::read(
+            PictureFormat::Wmf,
+            &std::fs::read(fixture("wmf/shapes.wmf")).unwrap(),
+            [100.0, 100.0],
+        );
+        let _ = app.finish_picture_import(
+            u64::MAX,
+            0,
+            Some("shapes.wmf"),
+            PictureFormat::Wmf,
+            false,
+            read,
+        );
+        assert!(!has_block(&app, i, "WMF0"));
+        assert!(app.command_line.last_error.is_none());
+        assert!(last_line(&app).contains("was closed"));
+    }
+
+    /// WMFIN places the block with the insertion prompts. If a different
+    /// command started during the read, the block is not placed, and that
+    /// command stays.
+    #[test]
+    fn a_command_started_during_the_read_stays_and_the_picture_is_not_placed() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let undo = undo_steps(&mut app, i);
+        let task = app.import_wmf(i, &fixture("wmf/shapes.wmf"), true);
+        let _ = app.update(Message::Command("LINE".to_string()));
+        app.drive_headless_task(task).expect("the import task");
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|command| command.name()),
+            Some("LINE")
+        );
+        assert!(!has_block(&app, i, "WMF0"));
+        assert_eq!(undo_steps(&mut app, i), undo);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("WMFIN cancelled: a different command started while the picture was read.")
+        );
+    }
+
+    /// The file name typed at WMFIN's prompt (FILEDIA off) ends that prompt
+    /// before the read, so the insertion prompts place the block.
+    #[test]
+    fn a_file_name_typed_at_the_prompt_is_placed_by_the_insertion_prompts() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        app.tabs[i].active_cmd = Some(Box::new(crate::command::FreeTextValuePromptCommand::new(
+            "_WMFINFILE",
+            "Enter name of WMF file to import (no extension):",
+        )));
+        let task = app.feed_command(crate::command::StepInput::Text(fixture("wmf/shapes.wmf")));
+        app.drive_headless_task(task).expect("the import task");
+        assert!(has_block(&app, i, "WMF0"));
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|command| command.name()),
+            Some("-INSERT"),
+            "the insertion prompts place the block"
+        );
+    }
+
+    /// Pasted markup that is not SVG gives the clipboard's message.
+    #[test]
+    fn pasted_markup_that_is_not_svg_gives_the_clipboard_message() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let blocks = app.tabs[i].scene.document.block_records.len();
+        let task = app.update(Message::SystemClipboardPaste(
+            crate::app::SystemClipboardText::Text("<svg this is not markup".to_string()),
+        ));
+        app.drive_headless_task(task).expect("the paste task");
+        assert_eq!(app.tabs[i].scene.document.block_records.len(), blocks);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some(crate::tr!("clipboard", "no-supported-content").as_str())
+        );
+    }
+
+    /// A file that is not there gives the same message as before.
+    #[test]
+    fn a_missing_picture_file_is_reported() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let task = app.import_svg(i, "picture-import-test-not-here.svg", true);
+        app.drive_headless_task(task).expect("the import task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("File picture-import-test-not-here.svg does not exist.")
+        );
+        assert!(app.tabs[i].active_cmd.is_none());
+    }
+}
+
+#[cfg(test)]
 mod svg_paste_tests {
     #[test]
     fn copied_svg_pastes_back_as_drawing() {

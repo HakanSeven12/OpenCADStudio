@@ -137,7 +137,7 @@ pub enum ExistingReference {
 
 /// The objects of an import: layers (name, colour), text styles (name, font
 /// file), blocks (name, objects) and the model's objects, in file order.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Converted {
     pub layers: Vec<(String, Color)>,
     /// Layers that come in turned off.
@@ -148,6 +148,136 @@ pub struct Converted {
     pub dim_styles: Vec<(String, Option<DimStyle>)>,
     pub blocks: Vec<(String, Vec<EntityType>)>,
     pub entities: Vec<EntityType>,
+}
+
+/// What an import reads from its files, made off the UI thread
+/// ([`prepare_import`]): the model, its objects converted, and the
+/// reference attachments that are placed.
+#[derive(Clone)]
+pub struct PreparedImport {
+    pub import: DgnImport,
+    pub converted: Converted,
+    pub references: Vec<PreparedReference>,
+}
+
+impl std::fmt::Debug for PreparedImport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreparedImport")
+            .field("entities", &self.converted.entities.len())
+            .field("references", &self.references.len())
+            .finish_non_exhaustive()
+    }
+}
+
+/// A reference attachment that is placed: the attachment, the file it
+/// names as found beside the host file, and the model it shows. For a
+/// translation, `converted` is the model to write as "<file>-<model>.dwg";
+/// none when the drawing is already there and is kept.
+#[derive(Clone)]
+pub struct PreparedReference {
+    pub reference: crate::scene::model::underlay_vector::DgnReference,
+    pub file: std::path::PathBuf,
+    pub model: String,
+    pub converted: Option<Converted>,
+}
+
+/// The drawing a translated reference is written to, beside its file.
+pub fn reference_drawing(file: &std::path::Path, model: &str) -> std::path::PathBuf {
+    let stem = file
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    // The model name comes from the file: made a plain file name so the
+    // drawing is written in the reference's folder.
+    file.with_file_name(format!("{stem}-{}.dwg", symbol_name(model)))
+}
+
+/// Reads and converts what an import places, without the app: the
+/// request's model, then each reference attachment the request keeps.
+/// This is the part of DGNIMPORT that reads files, so it runs on a worker.
+pub fn prepare_import(request: &DgnImportRequest) -> Result<PreparedImport, DgnImportError> {
+    let Some(import) = crate::scene::model::underlay_vector::dgn_import(
+        &request.path,
+        &request.model,
+        request.code_page,
+    ) else {
+        return Err(DgnImportError::InvalidDgn);
+    };
+    prepare_read(request, import)
+}
+
+/// [`prepare_import`] after the model is read: the model converted, then
+/// its reference attachments.
+fn prepare_read(
+    request: &DgnImportRequest,
+    import: DgnImport,
+) -> Result<PreparedImport, DgnImportError> {
+    let converted = convert(&import, request.sub_units, request.explode_text_nodes);
+    let no_references = request.references == ReferenceMode::Ignore || import.references.is_empty();
+    if converted.entities.is_empty() && no_references {
+        return Err(DgnImportError::EmptyModel);
+    }
+    let references = if request.references == ReferenceMode::Ignore {
+        Vec::new()
+    } else {
+        import
+            .references
+            .iter()
+            .filter_map(|reference| prepare_reference(request, reference))
+            .collect()
+    };
+    Ok(PreparedImport {
+        import,
+        converted,
+        references,
+    })
+}
+
+/// One reference attachment for [`prepare_import`]; none when its file is
+/// not found, names no model, or (for a translation that writes the
+/// drawing) cannot be read.
+fn prepare_reference(
+    request: &DgnImportRequest,
+    reference: &crate::scene::model::underlay_vector::DgnReference,
+) -> Option<PreparedReference> {
+    use crate::scene::model::underlay_vector::{dgn_import, dgn_import_models};
+    let host_dir = std::path::Path::new(&request.path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_default();
+    // A relative name is beside the host file; failing that, the file
+    // of that name in the host's folder.
+    let named = std::path::Path::new(&reference.file.replace('\\', "/")).to_path_buf();
+    let joined = host_dir.join(&named);
+    let file = if joined.is_file() {
+        joined
+    } else {
+        host_dir.join(named.file_name().unwrap_or_default())
+    };
+    let path = file.to_string_lossy().into_owned();
+    crate::scene::model::pdf_raster::source_bytes(&path)?;
+    let model = if reference.model.is_empty() {
+        dgn_import_models(&path).and_then(|m| m.into_iter().next())?
+    } else {
+        reference.model.clone()
+    };
+    let mut converted = None;
+    if request.references != ReferenceMode::Underlay {
+        // ponytail: "Prompt to overwrite" asks nothing and keeps the existing
+        // drawing, like "Do not overwrite"; add a confirmation if wanted.
+        let write = !reference_drawing(&file, &model).is_file()
+            || request.existing_reference == ExistingReference::Overwrite;
+        if write {
+            let source = dgn_import(&path, &model, request.code_page)?;
+            converted = Some(convert(&source, false, request.explode_text_nodes));
+        }
+    }
+    Some(PreparedReference {
+        reference: reference.clone(),
+        file,
+        model,
+        converted,
+    })
 }
 
 /// A DGN weight (0-31) as a lineweight (1/100 mm), as the Standard mapping

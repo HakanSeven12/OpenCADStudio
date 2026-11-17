@@ -78,7 +78,66 @@ pub enum ImportDialogMsg {
         std::sync::Arc<crate::io::tds_import::TdsScene>,
         Box<crate::io::tds_import::TdsImport>,
     ),
+    /// A file read off the UI thread for the DGN Import window: the file,
+    /// what was read (none when it is no DGN model), and where the read
+    /// started (which says where an error goes).
+    DgnRead(String, Option<std::sync::Arc<DgnWindowRead>>, DgnReadFrom),
+    /// IMPORT with FILEDIA off: whether the file is a DGN model, checked off
+    /// the UI thread; the error to show when it is not.
+    DgnChecked(String, bool, String),
+    /// A model read off the UI thread again after the window chose a model
+    /// or a code page: the file, the model, the code page and the model
+    /// (none when it cannot be read).
+    DgnDecoded(
+        String,
+        String,
+        Option<u16>,
+        Option<std::sync::Arc<crate::scene::model::underlay_vector::DgnImport>>,
+    ),
+    /// A DGN import read and converted off the UI thread: the tab it was
+    /// started for, that document's generation, the import's choices, and
+    /// what was read.
+    DgnPrepared(
+        u64,
+        u64,
+        Box<crate::modules::insert::dgn_import::DgnImportRequest>,
+        Box<
+            Result<
+                crate::modules::insert::dgn_import::PreparedImport,
+                crate::modules::insert::dgn_import::DgnImportError,
+            >,
+        >,
+    ),
     Help(&'static str),
+}
+
+/// Where a read for the DGN Import window started, and thus where its
+/// error goes when the file is no DGN model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DgnReadFrom {
+    /// DGNIMPORT or "Change…": the command line says the file is invalid.
+    DgnImport,
+    /// IMPORT on the command line or from a script: this error on the
+    /// command line.
+    Import(String),
+    /// OK in the Import File window: this error in that window.
+    ImportFileWindow(String),
+}
+
+/// What the DGN Import window shows of a file, read off the UI thread:
+/// the design models, the first model, and a thumbnail of each model.
+pub struct DgnWindowRead {
+    pub models: Vec<String>,
+    pub import: crate::scene::model::underlay_vector::DgnImport,
+    pub thumbs: Vec<PageThumb>,
+}
+
+impl std::fmt::Debug for DgnWindowRead {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DgnWindowRead")
+            .field("models", &self.models)
+            .finish_non_exhaustive()
+    }
 }
 
 /// The colour of a format that is read in part or only written.

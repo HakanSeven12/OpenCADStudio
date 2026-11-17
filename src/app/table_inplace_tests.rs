@@ -1177,3 +1177,26 @@ fn a_formula_entered_on_the_command_line_is_stored_as_a_formula_field() {
     assert_eq!(formula_code(&app, handle), None);
     assert_eq!(source(&app, handle), "before");
 }
+
+/// A Shift+letter bound to a command types the letter in a
+/// cell editor; it must not run the command.
+#[test]
+fn a_shift_shortcut_types_its_letter_in_the_cell_editor() {
+    let (mut app, handle) = fixture("x");
+    app.shortcut_bindings
+        .insert("SHIFT+D".to_string(), "QUADTOGGLE".to_string());
+    let before = app.quad;
+    start(&mut app, handle);
+    app.shift_down = true;
+    let _ = app.update(Message::CommandAppendChar("D".into()));
+    app.shift_down = false;
+    assert_eq!(app.quad, before, "SHIFT+D must not run its shortcut");
+    assert_eq!(
+        app.mtext_editor
+            .as_ref()
+            .map(|e| e.content.text())
+            .as_deref(),
+        Some("xD")
+    );
+}
+

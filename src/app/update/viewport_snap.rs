@@ -231,6 +231,16 @@ impl OpenCADStudio {
         {
             return None;
         }
+        // Typing text (in-place text / table cell editor, a text prompt):
+        // the glyph is text, never a shortcut.
+        if self.mtext_editor.is_some()
+            || self.tabs[self.active_tab]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|c| c.wants_text_input())
+        {
+            return None;
+        }
         let mut chars = s.chars();
         let (Some(ch), None) = (chars.next(), chars.next()) else {
             return None;

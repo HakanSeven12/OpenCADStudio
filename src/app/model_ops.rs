@@ -820,8 +820,12 @@ impl super::OpenCADStudio {
             match kernel::brep::fillet_edges(&body, edges, value) {
                 Ok(result) => Some(result),
                 Err(error) => {
+                    use kernel::brep::FilletError::{InvalidResult, RadiusTooLargeOrInteracting};
+                    let fit = matches!(error, RadiusTooLargeOrInteracting | InvalidResult)
+                        .then(|| kernel::brep::fillet_fit(&body, edges, value))
+                        .flatten();
                     self.command_line
-                        .push_error(&format!("FILLETEDGE: {error}"));
+                        .push_error(&format!("FILLETEDGE: {error}{}", fit_hint("radius", fit)));
                     return Task::none();
                 }
             }
@@ -834,8 +838,14 @@ impl super::OpenCADStudio {
             match kernel::brep::chamfer_edges(&body, edges, base_face, value, other_value) {
                 Ok(result) => Some(result),
                 Err(error) => {
+                    use kernel::brep::ChamferError::{DistanceTooLargeOrInteracting, InvalidResult};
+                    let fit = matches!(error, DistanceTooLargeOrInteracting | InvalidResult)
+                        .then(|| {
+                            kernel::brep::chamfer_fit(&body, edges, base_face, value, other_value)
+                        })
+                        .flatten();
                     self.command_line
-                        .push_error(&format!("CHAMFEREDGE: {error}"));
+                        .push_error(&format!("CHAMFEREDGE: {error}{}", fit_hint("distance", fit)));
                     return Task::none();
                 }
             }
@@ -2616,4 +2626,19 @@ impl super::OpenCADStudio {
         );
         Task::none()
     }
+}
+
+/// The size a refused blend would have fitted at, rounded down to three
+/// figures, as the end of its refusal: empty where none was found.
+fn fit_hint(size: &str, fit: Option<f64>) -> String {
+    let Some(fit) = fit.filter(|fit| *fit > 0.0) else {
+        return String::new();
+    };
+    let digits = (2 - fit.log10().floor() as i32).max(0);
+    let scale = 10f64.powi(digits);
+    format!(
+        "; the largest {size} that fits is about {:.*}",
+        digits as usize,
+        (fit * scale).floor() / scale
+    )
 }

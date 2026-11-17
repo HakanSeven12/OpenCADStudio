@@ -614,6 +614,16 @@ pub(crate) struct SceneProjectionCache {
     /// turns the next decision's reason into
     /// [`RebuildReason::Cleared`] instead of [`RebuildReason::FirstBuild`].
     cleared: bool,
+    /// (SCN-032) THE TRANSFORM CUSTODY: the [`SceneFitTransform`] the last
+    /// committed build actually painted under — the SAME values the fitted
+    /// prims in the retained layer carry — retained at every commit so the
+    /// mount's live pointer mapping consumes the render's transform, never a
+    /// recomputation (a click must map to the scene point the user actually
+    /// sees). Identity until the first successful build, and reset to
+    /// identity on a failed build / explicit `clear` (a blank layer paints
+    /// under no fit). Read via [`Self::last_fit_transform`]; the pure
+    /// [`SceneFitTransform::invert`] is the pointer→scene half.
+    last_fit: SceneFitTransform,
 }
 
 /// Manual `Debug`: the retained layer's geometry is opaque renderer state
@@ -644,6 +654,7 @@ impl SceneProjectionCache {
             store: None,
             last_summary: None,
             cleared: false,
+            last_fit: SceneFitTransform::identity(),
         }
     }
 
@@ -736,6 +747,20 @@ impl SceneProjectionCache {
         self.layer.key.borrow().clone()
     }
 
+    /// (SCN-032) The transform the LAST COMMITTED BUILD painted under — the
+    /// custody accessor the mount's scene-region program feeds its live
+    /// pointer mapping ([`SceneFitTransform::invert`]). The mount
+    /// deliberately does NOT recompute a fit at event time: hit-testing and
+    /// the pointer→scene mapping must use the SAME transform instance/values
+    /// the render used, or a click maps to the wrong scene point. Identity
+    /// until the first successful build and after a failed build / `clear`
+    /// (a blank layer paints under no fit). Note the accessor reads the
+    /// retained value only — it runs NO decision and NO projection (the
+    /// retained law: reads never rebuild).
+    pub(crate) fn last_fit_transform(&self) -> SceneFitTransform {
+        self.last_fit
+    }
+
     /// Evict the retained layer: the cached geometry is dropped, the stored
     /// key is reset (so the next draw rebuilds with reason
     /// [`RebuildReason::Cleared`]) and [`ProjectionCounters::rebuilds_cleared`]
@@ -746,6 +771,8 @@ impl SceneProjectionCache {
         self.cleared = true;
         self.layer.cache.clear();
         self.counters.rebuilds_cleared += 1;
+        // SCN-032 custody: the evicted layer paints under no fit.
+        self.last_fit = SceneFitTransform::identity();
     }
 
     /// Pure key math: what the decision for these draw inputs must compare.
@@ -840,6 +867,10 @@ impl SceneProjectionCache {
         self.counters.prims_last_build = 0;
         self.counters.path_work_last_build = 0;
         self.last_summary = None;
+        // SCN-032 custody: a failed build commits NO layer (blank render), so
+        // no fit stands either — the pointer mapping goes back to identity
+        // rather than mapping clicks through a transform nothing painted.
+        self.last_fit = SceneFitTransform::identity();
     }
 
     /// Shared first half of [`Self::draw`], [`Self::apply_build`], and
@@ -901,6 +932,10 @@ impl SceneProjectionCache {
                 let prims_len: usize = parts.iter().map(|part| part.len()).sum();
                 let path_work: usize = parts.iter().map(|part| prim_vertex_count(part)).sum();
                 self.record_committed(prims_len, path_work, report_summary, scene);
+                // SCN-032 custody: the committed build's transform is THE
+                // pointer-mapping source from here on (the segments were
+                // transformed through exactly it).
+                self.last_fit = transform;
                 Some((key, PaintPlan::Segments(parts)))
             }
             None => match project_scene(scene, palette, bounds.size()) {
@@ -917,6 +952,10 @@ impl SceneProjectionCache {
                         report_summary,
                         scene,
                     );
+                    // SCN-032 custody: same law as the store-fed arm — the
+                    // fitted prims in the retained layer and the retained
+                    // transform are ONE committed pair.
+                    self.last_fit = transform;
                     Some((key, PaintPlan::Prims(prims)))
                 }
                 Err(error) => {
@@ -2152,5 +2191,58 @@ mod tests {
                 transform.apply(p)
             );
         }
+    }
+
+    /// THE SCN-032 CUSTODY PIN: after a committed build the cache RETAINS
+    /// the transform that build painted under
+    /// ([`SceneProjectionCache::last_fit_transform`]) — the exact
+    /// `fit_scene_prims` values the fitted prims carry — so the mount's live
+    /// pointer mapping consumes the render's transform, never a
+    /// recomputation. `invert(apply(p))` round-trips through the RETAINED
+    /// accessor (the click maps to the scene point the user actually sees),
+    /// and the custody resets: a `clear` (and a failed build) puts the
+    /// identity back — a blank layer paints under no fit.
+    #[test]
+    fn last_fit_transform_is_the_committed_builds_transform() {
+        let palette = distinct_palette(false);
+        let scene = origin_centered_scene(1);
+        let bounds = fixture_bounds();
+
+        // Before ANY build: identity (nothing painted under a fit).
+        let mut cache = SceneProjectionCache::new(StableId(41));
+        assert_eq!(cache.last_fit_transform(), SceneFitTransform::identity());
+
+        // The committed build retains ITS transform — equal to the pure fit
+        // of the projected stream (the same inputs, the same values: the
+        // accessor is custody, not recomputation).
+        cache.apply_build(&scene, &palette, bounds);
+        let prims = project_scene(&scene, &palette, bounds.size()).expect("valid");
+        let expected = fit_scene_prims(&prims, bounds.size(), SCENE_FIT_MARGIN);
+        let retained = cache.last_fit_transform();
+        assert_eq!(retained, expected, "the retained fit IS the committed fit");
+
+        // Round trip THROUGH the retained accessor (the mount's live law):
+        // a region-local pixel maps to the scene point the user sees.
+        let region_pixel = retained.apply(Point::new(-17.5, 40.25));
+        let back = retained.invert(region_pixel);
+        assert!((back.x + 17.5).abs() < 1.0e-2 && (back.y - 40.25).abs() < 1.0e-2);
+
+        // A replay (key hit) does NOT move the custody — same transform.
+        assert_eq!(cache.apply_build(&scene, &palette, bounds), DrawDecision::LayerHit);
+        assert_eq!(cache.last_fit_transform(), retained);
+
+        // The explicit clear resets the custody: no layer, no fit.
+        cache.clear();
+        assert_eq!(cache.last_fit_transform(), SceneFitTransform::identity());
+
+        // And a failed build commits no fit either (blank layer).
+        cache.apply_build(&scene, &palette, bounds);
+        assert_ne!(cache.last_fit_transform(), SceneFitTransform::identity());
+        cache.apply_build(&invalid_scene_at(9), &palette, bounds);
+        assert_eq!(
+            cache.last_fit_transform(),
+            SceneFitTransform::identity(),
+            "the failed build reset the custody"
+        );
     }
 }

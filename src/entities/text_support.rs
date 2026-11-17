@@ -1017,18 +1017,46 @@ pub const STACK_BAR_Y: f32 = 7.0 / 6.0;
 /// height (measured: 4/3; a diagonal stack raises it one height).
 pub const STACK_RAISE: f32 = 4.0 / 3.0;
 
-/// How far a stack reaches above its baseline: the top of its numerator.
-fn stack_top(kind: &AtomKind, run_h: f32) -> f32 {
-    match kind {
-        AtomKind::Stack {
-            numerator,
-            diagonal,
-            ..
-        } if !numerator.is_empty() => {
-            run_h * (if *diagonal { 1.0 } else { STACK_RAISE } + STACK_HALF_SCALE)
-        }
-        _ => run_h,
+/// Where a stack's parts sit above its baseline, from the halves' ink in
+/// their own font (measured in stroke and TrueType fonts alike): the
+/// numerator's ink starts a third of a height above the denominator's ink top
+/// (right on it for a diagonal stack), the rule a sixth of a height above that
+/// top. A stroke font's digits reach the cap, which gives the 4/3 and 7/6 of
+/// `STACK_RAISE` and `STACK_BAR_Y`; a TrueType digit or an old-style figure
+/// moves them with its own height. Returns (numerator baseline, rule, top).
+fn stack_layout(
+    atom: &LayoutAtom,
+    entity_h: f32,
+    base_wf: f32,
+    base_font: &str,
+) -> Option<(f32, f32, f32)> {
+    let AtomKind::Stack {
+        numerator,
+        denominator,
+        diagonal,
+        ..
+    } = &atom.kind
+    else {
+        return None;
+    };
+    if numerator.is_empty() {
+        return None;
     }
+    let h = atom.state.height_mul * entity_h * STACK_HALF_SCALE;
+    let font = resolve_font(&atom.state, base_font);
+    let wf = atom.state.width_mul * base_wf.abs();
+    let ink = |t: &str| text_local_bounds(&font, t, h, wf, 0.0);
+    let den_top = ink(denominator).map_or(h, |b| b.ink_max[1]);
+    let (num_bottom, num_top) = ink(numerator).map_or((0.0, h), |b| (b.ink_min[1], b.ink_max[1]));
+    let gap = if *diagonal { 0.0 } else { h / 3.0 };
+    let raise = den_top + gap - num_bottom;
+    Some((raise, den_top + h / 6.0, raise + num_top))
+}
+
+/// How far an atom reaches above its baseline: a stack to its numerator's top.
+fn stack_top(atom: &LayoutAtom, entity_h: f32, base_wf: f32, base_font: &str) -> f32 {
+    stack_layout(atom, entity_h, base_wf, base_font)
+        .map_or(atom.state.height_mul * entity_h, |(_, _, top)| top)
 }
 
 #[derive(Clone)]
@@ -2201,7 +2229,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                 .filter_map(|atom| {
                     // A stack's numerator pushes the first baseline down too.
                     if let AtomKind::Stack { .. } = &atom.kind {
-                        return Some(stack_top(&atom.kind, atom.state.height_mul * entity_h));
+                        return Some(stack_top(atom, entity_h, base_wf, &base_font_name));
                     }
                     let AtomKind::Word(text) = &atom.kind else {
                         return None;
@@ -2662,7 +2690,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         let line_max_h = sub
             .atoms
             .iter()
-            .map(|a| stack_top(&a.kind, a.state.height_mul * entity_h))
+            .map(|a| stack_top(a, entity_h, base_wf, &base_font_name))
             .fold(entity_h, f32::max);
 
         // A paragraph break (explicit `\n` / `\P`) that started this line gets
@@ -3094,7 +3122,9 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     // `\A` moves the text around a stack, not the stack: the
                     // stack is measured whole, so as the line's tallest part
                     // it stays on the baseline.
-                    let stack_h = stack_top(&atom.kind, run_h);
+                    let stack_h = stack_top(atom, entity_h, base_wf, &base_font_name);
+                    let (stack_raise, stack_bar, _) = stack_layout(atom, entity_h, base_wf, &base_font_name)
+                        .unwrap_or((run_h * STACK_RAISE, run_h * STACK_BAR_Y, run_h));
                     let valign_dy = match atom.state.valign {
                         1 => (line_max_h - stack_h) * 0.5,
                         2 => line_max_h - stack_h,
@@ -3163,8 +3193,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         valign_dy
                     };
                     emit(denominator, bottom_dy, den_dx);
-                    let raise = if *diagonal { 1.0 } else { STACK_RAISE };
-                    emit(numerator, valign_dy + run_h * raise, num_dx);
+                    emit(numerator, valign_dy + stack_raise, num_dx);
 
                     if opts.want_glyph_boxes {
                         let slots = numerator.chars().count()
@@ -3231,10 +3260,10 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         });
                     };
                     if *diagonal && !numerator.is_empty() && !denominator.is_empty() {
-                        // Measured: a rule two heights long at 55°, centred one
-                        // height up and a sixth of a height before the
+                        // Measured: a rule two heights long at 55°, centred on the
+                        // numerator's baseline and a sixth of a height before the
                         // denominator.
-                        let (cx, cy) = (cursor_x + den_dx - half_h / 6.0, valign_dy + half_h);
+                        let (cx, cy) = (cursor_x + den_dx - half_h / 6.0, valign_dy + stack_raise);
                         let (dx, dy) = (half_h * 55f32.to_radians().cos(), half_h * 55f32.to_radians().sin());
                         rule([cx - dx, cy - dy], [cx + dx, cy + dy]);
                     }
@@ -3251,7 +3280,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                 * atom.state.tracking
                                 * run_scale(&half_state, entity_h, base_wf)
                         });
-                        let by = valign_dy + run_h * STACK_BAR_Y;
+                        let by = valign_dy + stack_bar;
                         rule([cursor_x, by], [cursor_x + (slot_w - gap).max(0.0), by]);
                     }
                     local_bounds[0] = local_bounds[0].min(cursor_x);

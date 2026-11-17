@@ -465,3 +465,55 @@ fn a_3d_studio_import_runs_through_its_window() {
     assert_eq!(app.active_modal, None);
     assert!(!layers(&app).contains(&"CRATE".to_string()));
 }
+
+/// `nurbs_sphere.step` with one byte changed: the `9` in its first knot
+/// (`-2.094395102393`) becomes a comma, so the knots read `-2.0943,
+/// 5102393, 0., ...` and are no longer in order. The kernel's NURBS
+/// evaluation then panics (`f64::clamp` with its minimum above its maximum).
+fn step_with_knots_out_of_order() -> String {
+    let mut bytes = std::fs::read(fixture("step/nurbs_sphere.step")).expect("fixture");
+    assert_eq!(&bytes[1568..1578], b"-2.0943951", "the fixture changed");
+    bytes[1575] = b',';
+    register("knots-out-of-order.step", bytes)
+}
+
+#[test]
+fn a_model_reader_that_panics_reports_an_error_and_changes_nothing() {
+    let path = step_with_knots_out_of_order();
+    let mut app = new_drawing();
+    let before = state(&app);
+    command(&mut app, &format!("IMPORT {path}"));
+    // The app is still here (the reader ran on a worker thread), it said
+    // what failed, and the drawing is as it was, with no undo step.
+    let line = last_line(&app);
+    assert!(line.contains(&format!("Import of {path} failed")), "{line}");
+    assert_eq!(state(&app), before);
+
+    // The drawing still takes the next import.
+    command(&mut app, &format!("IMPORT {}", fixture("step/box.step")));
+    assert_eq!(inserted(&app), ["Box"]);
+    assert_eq!(state(&app).undo, 1);
+}
+
+#[test]
+fn a_model_read_for_a_drawing_closed_meanwhile_is_dropped() {
+    let mut app = new_drawing();
+    let tab_id = app.tabs[app.active_tab].id;
+    let task = app.update(Message::Command(format!(
+        "IMPORT {}",
+        fixture("step/box.step")
+    )));
+    // The drawing closes while the file is being read; a new one takes
+    // its place.
+    let _ = app.update(Message::TabClose(tab_id));
+    assert_ne!(app.tabs[app.active_tab].id, tab_id);
+    let before = state(&app);
+    app.drive_headless_task(task)
+        .expect("the import runs headless");
+    let line = last_line(&app);
+    assert!(
+        line.ends_with("IMPORT: target drawing was closed."),
+        "{line}"
+    );
+    assert_eq!(state(&app), before);
+}

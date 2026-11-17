@@ -4955,11 +4955,7 @@ fn draw_ucs_icon(
         },
     ];
     // Back-to-front: draw axis farthest from viewer first.
-    axes.sort_by(|a, b| {
-        b.depth
-            .partial_cmp(&a.depth)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    axes.sort_by(|a, b| b.depth.total_cmp(&a.depth));
 
     for ax in &axes {
         // On highlight, lerp the axis colour toward white and thicken the shaft

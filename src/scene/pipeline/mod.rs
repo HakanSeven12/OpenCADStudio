@@ -2658,17 +2658,9 @@ impl Pipeline {
                 #[cfg(not(target_arch = "wasm32"))]
                 use rayon::prelude::*;
                 #[cfg(not(target_arch = "wasm32"))]
-                sorted.par_sort_by(|a, b| {
-                    a.params[2]
-                        .partial_cmp(&b.params[2])
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                sorted.par_sort_by(|a, b| a.params[2].total_cmp(&b.params[2]));
                 #[cfg(target_arch = "wasm32")]
-                sorted.sort_by(|a, b| {
-                    a.params[2]
-                        .partial_cmp(&b.params[2])
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                sorted.sort_by(|a, b| a.params[2].total_cmp(&b.params[2]));
             }
             vec![CircleGpu::from_instances(
                 device,
@@ -2715,17 +2707,9 @@ impl Pipeline {
                 #[cfg(not(target_arch = "wasm32"))]
                 use rayon::prelude::*;
                 #[cfg(not(target_arch = "wasm32"))]
-                sorted.par_sort_by(|a, b| {
-                    a.params[2]
-                        .partial_cmp(&b.params[2])
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                sorted.par_sort_by(|a, b| a.params[2].total_cmp(&b.params[2]));
                 #[cfg(target_arch = "wasm32")]
-                sorted.sort_by(|a, b| {
-                    a.params[2]
-                        .partial_cmp(&b.params[2])
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                sorted.sort_by(|a, b| a.params[2].total_cmp(&b.params[2]));
             }
             vec![EllipseGpu::from_instances(
                 device,

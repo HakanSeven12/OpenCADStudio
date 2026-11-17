@@ -968,7 +968,7 @@ fn clip_segment_params(p0: [f32; 3], p1: [f32; 3], poly: &[[f32; 2]]) -> Vec<(f3
         }
         j = i;
     }
-    ts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    ts.sort_by(|a, b| a.total_cmp(b));
     ts.dedup_by(|a, b| (*a - *b).abs() < 1e-7);
 
     let point = |t: f32| {

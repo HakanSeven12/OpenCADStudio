@@ -97,12 +97,17 @@ impl Default for AppConfig {
 #[serde(default)]
 pub struct ShortcutConfig {
     pub bindings: std::collections::BTreeMap<String, String>,
+    /// The shipped default keys this table has already been offered. A
+    /// default added in a later release is backfilled once; one the user
+    /// removed stays removed.
+    pub known_defaults: std::collections::BTreeSet<String>,
 }
 
 impl Default for ShortcutConfig {
     fn default() -> Self {
         Self {
             bindings: super::shortcuts::default_bindings(),
+            known_defaults: super::shortcuts::default_bindings().into_keys().collect(),
         }
     }
 }

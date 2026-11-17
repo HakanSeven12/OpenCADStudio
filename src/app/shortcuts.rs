@@ -514,6 +514,7 @@ mod tests {
         cfg.shortcuts.bindings = [(normalize_key("F12"), "DYNINPUT".to_string())]
             .into_iter()
             .collect();
+        cfg.shortcuts.known_defaults.clear();
         app.apply_config(cfg);
 
         let dyn_before = app.dyn_input;
@@ -553,6 +554,7 @@ mod tests {
         // Also from a configuration saved before the binding existed.
         let mut cfg = crate::app::config::AppConfig::default();
         cfg.shortcuts.bindings.remove(&format!("{ACCEL}+SHIFT+A"));
+        cfg.shortcuts.known_defaults.clear();
         app.apply_config(cfg);
         let key = format!("{ACCEL}+SHIFT+A");
         let _ = app.update(Message::ShortcutPressed(key.clone()));

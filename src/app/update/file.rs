@@ -1682,6 +1682,10 @@ impl OpenCADStudio {
                     .iter()
                     .map(|(key, command)| (key.clone(), command.clone()))
                     .collect(),
+                // Loading offered every default (see `apply_config`).
+                known_defaults: crate::app::shortcuts::default_bindings()
+                    .into_keys()
+                    .collect(),
             },
             model_space: self.model_space.clone(),
         }
@@ -1764,45 +1768,14 @@ impl OpenCADStudio {
         self.ribbon.set_layout(cfg.ribbon.layout);
         self.plot_dialog = cfg.plot;
         self.context_menu_custom = cfg.context_menu;
+        let known = cfg.shortcuts.known_defaults;
         self.shortcut_bindings = cfg.shortcuts.bindings.into_iter().collect();
-        self.shortcut_bindings
-            .entry("F5".to_string())
-            .or_insert_with(|| "ISOPLANE".to_string());
-        self.shortcut_bindings
-            .entry("SHIFT+TAB".to_string())
-            .or_insert_with(|| "DYNTABPREV".to_string());
-        // A config saved before the quad cursor menu carried no SHIFT+F12
-        // row; without this backfill `run_shortcut`'s bare-base-key fallback
-        // resolves SHIFT+F12 to F12 (DYNINPUT) and the quad never toggles.
-        self.shortcut_bindings
-            .entry("SHIFT+F12".to_string())
-            .or_insert_with(|| "QUADTOGGLE".to_string());
-        // Before group selection had Ctrl+Shift+A, the base-key fallback
-        // read it as Ctrl+A and selected everything.
-        self.shortcut_bindings
-            .entry(
-                if cfg!(target_os = "macos") {
-                    "CMD+SHIFT+A"
-                } else {
-                    "CTRL+SHIFT+A"
-                }
-                .to_string(),
-            )
-            .or_insert_with(|| "TOGGLEGROUPS".to_string());
-        self.shortcut_bindings
-            .entry(
-                if cfg!(target_os = "macos") {
-                    "CMD+R"
-                } else {
-                    "CTRL+R"
-                }
-                .to_string(),
-            )
-            .or_insert_with(|| "NEXTVIEWPORT".to_string());
-        for (key, action) in crate::app::shortcuts::PLATFORM_BINDINGS {
-            self.shortcut_bindings
-                .entry(key.to_string())
-                .or_insert_with(|| action.to_string());
+        // A default shipped after the table was saved (Ctrl+9, Shift+F12 …)
+        // is added once; a default the user removed is not brought back.
+        for (key, action) in crate::app::shortcuts::default_bindings() {
+            if !known.contains(&key) {
+                self.shortcut_bindings.entry(key).or_insert(action);
+            }
         }
         crate::app::shortcuts::sync_space_dispatch_flag(&self.shortcut_bindings);
     }

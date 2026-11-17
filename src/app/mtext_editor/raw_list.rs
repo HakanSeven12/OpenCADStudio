@@ -589,18 +589,22 @@ impl OpenCADStudio {
             return false;
         }
         let empty = paragraph.text.len() == item.marker;
-        self.edit_raw(|_, index| {
-            // Leaving the list also breaks the paragraph: the emptied item
-            // stays as a plain empty paragraph and the caret goes on in a new
-            // one below it.
-            let split = index.replace(range.clone(), "\n")?;
+        self.edit_raw(|ed, index| {
             if empty {
+                // Leaving the list also breaks the paragraph: the emptied
+                // item stays as a plain empty paragraph and the caret goes on
+                // in a new one below it. The marker is cleared first, so the
+                // break is not written inside the marker's font group.
+                let cleared = clear_item(&ed.content.text(), n)?;
+                let at = paragraphs(&cleared)[n].range.end;
+                let split = SourceIndex::new(&cleared).replace(at..at, "\n")?;
                 // The new paragraph takes the cleared item's values too.
-                let raw = set_indent(&clear_item(&split.raw, n)?, &[n + 1], 0.0)?;
+                let raw = set_indent(&split.raw, &[n + 1], 0.0)?;
                 let raw = renumber(raw)?;
                 let caret = paragraphs(&raw)[n + 1].range.start;
                 return Ok(TextEdit { raw, caret });
             }
+            let split = index.replace(range.clone(), "\n")?;
             let next = n + 1;
             let number = item.number + 1;
             let raw = make_item(&split.raw, next, item.kind, number, item.style)?;

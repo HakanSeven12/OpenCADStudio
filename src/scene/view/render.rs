@@ -1308,6 +1308,7 @@ retained_contributors={}",
                 inner.cached_mesh_source = Some(Arc::clone(&vp.meshes));
             }
             inner.cached_mesh_content_id = vp.wire_content_id;
+            inner.select_mesh_lods();
             // Selection / hover highlight overlay — tinted copies of just the
             // picked solids, rebuilt only when the highlight set (or geometry)
             // changes. Drawn over the static batch so the base never re-packs.

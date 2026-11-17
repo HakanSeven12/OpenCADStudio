@@ -401,12 +401,10 @@ impl OpenCADStudio {
             Some(ImportFile) => self.import_dialogs.file = None,
             Some(DgnImport) => self.import_dialogs.dgn = None,
             Some(TdsImport) => self.import_dialogs.tds = None,
-            // Cancel or ✕ stops the import at this mesh.
-            Some(TdsMaterial) => {
-                if let Some(state) = self.import_dialogs.tds_material.take() {
-                    self.stop_tds_import(state);
-                }
-            }
+            // Cancel and ✕ stop the import at this mesh in
+            // `Message::CloseModal`; closed for another window, the import
+            // is dropped.
+            Some(TdsMaterial) => self.import_dialogs.tds_material = None,
             // OK or ✕ dismisses this map; the next one follows.
             // Cancel or ✕ leaves the cells as they were.
             Some(TableCellWarning) => self.table_cell_warning = None,
@@ -12883,6 +12881,15 @@ impl OpenCADStudio {
                 )
             }
             Message::CloseModal => {
+                // Cancel or ✕ in the multiple-material window of a 3D Studio
+                // import stops the import at the asked mesh; the meshes
+                // before it are converted off the UI thread.
+                if self.active_modal == Some(super::ModalKind::TdsMaterial) {
+                    if let Some(state) = self.import_dialogs.tds_material.take() {
+                        self.close_active_modal();
+                        return self.stop_tds_import(state);
+                    }
+                }
                 // The multileader style window's ✕ closes its topmost face.
                 if self.active_modal == Some(super::ModalKind::MLeaderStyle)
                     && self.mleader_style_close_face()

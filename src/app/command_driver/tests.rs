@@ -10330,3 +10330,71 @@ mod dash_block_command_line_tests {
     }
 }
 
+
+// -INSERT takes its name and insertion point on one command line and places
+// a reference of the named definition at that point.
+mod dash_insert_placement_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::entities::{EntityType, Line};
+    use document::types::Vector3;
+
+    #[test]
+    fn dash_insert_places_the_named_block_at_the_typed_point() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "GEAR",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+
+        let _ = app.run_command_line("-INSERT GEAR 5,5");
+        // Classic -INSERT keeps asking after the point: the line's trailing
+        // Enter accepted the X scale <1> default, Y scale follows.
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("classic -INSERT asks the scale factors next")
+                .prompt(),
+            "Enter Y scale factor <use X scale factor>:"
+        );
+        let _ = app.feed_command(StepInput::Enter);
+        let _ = app.feed_command(StepInput::Enter);
+
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "name and point complete the placement: prompt={:?} out={:?}",
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|c| (c.name(), c.prompt())),
+            app.command_line.history_plain_text()
+        );
+        assert!(app.command_line.last_error.is_none());
+        let insert = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Insert(ins) if ins.block_name == "GEAR" => Some(ins.clone()),
+                _ => None,
+            })
+            .expect("-INSERT places a reference of the named definition");
+        assert_eq!(
+            insert.insert_point,
+            Vector3::new(5.0, 5.0, 0.0),
+            "the reference lands on the typed point"
+        );
+        assert_eq!(
+            app.tabs[i].insname, "GEAR",
+            "the placed name is remembered for the next INSERT"
+        );
+    }
+}
+

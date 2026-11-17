@@ -301,6 +301,10 @@ name = "step_tokenizer"
 harness = false
 
 [[bench]]
+name = "model_import"
+harness = false
+
+[[bench]]
 name = "properties_selection_aggregation"
 harness = false
 

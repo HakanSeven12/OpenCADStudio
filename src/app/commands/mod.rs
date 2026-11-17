@@ -61,6 +61,8 @@ mod inquiry;
 mod layerprops;
 mod layers;
 mod model_import;
+#[doc(hidden)]
+pub use model_import::ModelImportBenchHarness;
 mod ole;
 mod mtext_toolbar;
 pub(crate) use mtext_toolbar::{mtext_toolbar, set_mtext_toolbar};

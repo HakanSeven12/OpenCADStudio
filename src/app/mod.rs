@@ -65,6 +65,8 @@ mod layer_filter_store;
 mod layer_filters;
 #[doc(hidden)]
 pub use layer_filters::LayerRefreshBenchHarness;
+#[doc(hidden)]
+pub use commands::ModelImportBenchHarness;
 pub(crate) mod layer_groups;
 pub(crate) mod layer_import;
 mod layer_walk;

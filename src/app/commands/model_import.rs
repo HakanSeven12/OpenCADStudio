@@ -1003,6 +1003,109 @@ impl OpenCADStudio {
     }
 }
 
+/// Bench bridge for the UI-thread cost of a model import
+/// (`benches/model_import.rs`). Holds a hermetic app and imports a file into
+/// a fresh drawing, reporting what the UI thread runs of the import.
+#[doc(hidden)]
+pub struct ModelImportBenchHarness {
+    app: OpenCADStudio,
+}
+
+impl ModelImportBenchHarness {
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new();
+        app.apply_config(crate::app::config::AppConfig::default());
+        app.last_saved_config = Some(app.current_config());
+        app
+    }
+
+    pub fn setup() -> Self {
+        let mut app = Self::new_app();
+        app.automation_op(r#"{"op":"new"}"#);
+        Self { app }
+    }
+
+    /// The drawing's unit in millimetres, as the import scales to it.
+    pub fn drawing_mm(&self) -> Option<f64> {
+        crate::app::properties::insunits_to_mm(
+            self.app.tabs[self.app.active_tab]
+                .scene
+                .document
+                .header
+                .insertion_units,
+        )
+    }
+
+    /// Imports `path` as `format` into a fresh drawing and reports
+    /// `(ui, total, sink)` in nanoseconds: the time the UI thread spends on
+    /// the import, the whole import from the caller's point of view, and a
+    /// hash of what the drawing holds afterwards.
+    pub fn import(&mut self, path: &str, format: ModelFormat) -> (u64, u64, u64) {
+        self.reset();
+        let i = self.app.active_tab;
+        let started = std::time::Instant::now();
+        let _ = self.app.import_model(i, path, format);
+        let elapsed = started.elapsed().as_nanos() as u64;
+        (elapsed, elapsed, self.sink())
+    }
+
+    /// A fresh drawing with no history carried from the previous sample.
+    fn reset(&mut self) {
+        self.app.automation_op(r#"{"op":"new"}"#);
+        let i = self.app.active_tab;
+        self.app.tabs[i].history = Default::default();
+        self.app.tabs[i].dirty = false;
+    }
+
+    /// Everything the import leaves in the drawing: entity and block counts,
+    /// block names, and each object's type, layer, colour and geometry.
+    fn sink(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let document = &self.app.tabs[self.app.active_tab].scene.document;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        document.entity_count().hash(&mut hasher);
+        let mut names: Vec<&str> = document
+            .block_records
+            .iter()
+            .map(|block| block.name.as_str())
+            .collect();
+        names.sort();
+        names.hash(&mut hasher);
+        for block in document.block_records.iter() {
+            block.entity_handles.len().hash(&mut hasher);
+        }
+        for entity in document.entities() {
+            std::mem::discriminant(entity).hash(&mut hasher);
+            entity.common().layer.hash(&mut hasher);
+            entity.common().color.index().hash(&mut hasher);
+            match entity {
+                document::EntityType::Region(region) => {
+                    region.acis_data.sat_data.hash(&mut hasher);
+                }
+                document::EntityType::Surface(surface) => {
+                    surface.acis_data.sat_data.hash(&mut hasher);
+                }
+                document::EntityType::Spline(spline) => {
+                    spline.degree.hash(&mut hasher);
+                    for point in &spline.control_points {
+                        point.x.to_bits().hash(&mut hasher);
+                        point.y.to_bits().hash(&mut hasher);
+                        point.z.to_bits().hash(&mut hasher);
+                    }
+                }
+                document::EntityType::Insert(insert) => {
+                    insert.block_name.hash(&mut hasher);
+                    insert.insert_point.x.to_bits().hash(&mut hasher);
+                    insert.insert_point.y.to_bits().hash(&mut hasher);
+                    insert.rotation.to_bits().hash(&mut hasher);
+                }
+                _ => {}
+            }
+        }
+        hasher.finish()
+    }
+}
+
 #[cfg(test)]
 mod svg_paste_tests {
     #[test]

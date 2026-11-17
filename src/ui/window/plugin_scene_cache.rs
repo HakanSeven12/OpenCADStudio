@@ -64,6 +64,16 @@
 //! key field and NO counter: it is a pure function of the existing key
 //! inputs, so replay stays replay.
 //!
+//! SCN-036 draft-path emit law: upstream iced (rev 23604ff22) masks canvas
+//! geometry by its FRAME clip bounds pre-multiplied by the render
+//! translation, so under the mount's nested composition prims drawn
+//! DIRECTLY on the build frame mask away while prims emitted inside a
+//! `Frame::with_clip` draft paint correctly (proven live on host 26ad461d,
+//! 2026-11-17 — see the section docs above `emit_in_full_frame_draft`).
+//! The build emission therefore rides ONE full-frame draft through
+//! [`emit_in_full_frame_draft`]; keys, decisions and counters are untouched
+//! (the wrap happens after the decision, on the emit only).
+//!
 //! Palette-fingerprint scope decision: [`palette_fingerprint`] hashes EVERY
 //! bound slot named in its doc — deliberately WIDER than
 //! [`scene_color`](crate::ui/window/plugin_scene::scene_color)'s table
@@ -567,10 +577,73 @@ pub(crate) struct ProjectionCounters {
 
 // ── Per-panel retained projection ───────────────────────────────────────────
 
+// ── SCN-036: the draft-path emit law (the vanishing-prims defect) ───────────
+//
+// Upstream iced rev 23604ff22 (a git dependency) masks canvas geometry by
+// its FRAME clip bounds pre-multiplied by the render translation:
+//
+// - the canvas widget wraps the program's draw in
+//   `renderer.with_translation(Vector::new(bounds.x, bounds.y), ...)`
+//   (widget/src/canvas.rs `Canvas::draw`);
+// - the renderers push the geometry as one clip group carrying the
+//   frame-LOCAL clip bounds PRE-multiplied by the accumulated
+//   transformation — `Item::Group(primitives, clip_bounds * transformation,
+//   transformation)` in tiny_skia's `draw_primitive_group`, and wgpu's
+//   geometry `Frame::paste` bakes the frame's `clip_bounds` into every
+//   drafted mesh (`into_meshes(frame.clip_bounds)`);
+// - the flush masks every primitive against
+//   `(group.clip_bounds * scale_factor) ∩ layer_bounds`
+//   (tiny_skia lib.rs `Layer::draw`).
+//
+// The build frame is `Frame::with_bounds(renderer, bounds)`, i.e. its clip
+// bounds are the WIDGET bounds (nonzero x/y under the mount's nested panel
+// column / scrollable / dock composition), while the emitted geometry is in
+// FRAME-LOCAL coordinates. Direct prims therefore end up in a group whose
+// clip is the widget bounds shifted AGAIN by the widget's own
+// `with_translation` (and any outer translations) — under that nested
+// composition the group clip disagrees with the geometry's effective
+// transform and the prims mask away. Prims emitted inside a
+// `Frame::with_clip` draft instead carry the DRAFT's region (frame-local
+// origin (0,0)) as their clip and land exactly where the fit transform
+// paints them. This is the empirical law proven live on host 26ad461d
+// (2026-11-17): the demo's `with_clip` legend group (its Muted text + green
+// Success diamond) rendered EXACTLY on the SceneFitTransform prediction,
+// while every prim drawn directly on the program's frame (fills, strokes,
+// edges, markers) painted nothing. Text groups bypass the group clip in
+// the flush (tiny_skia's `draw_text_group` masks text by layer bounds
+// only), which is why text-ish prims survived. (On tiny_skia specifically
+// `paste` flattens the draft's primitives into the parent list, so the
+// wrap is paint-neutral there; the wgpu per-mesh clip is where the direct
+// frame's stale clip bounds were fatal. The wrap is mandated for BOTH
+// backends because the host renderer is the wgpu/tiny-skia fallback.)
+//
+// THE FIX (host-side only; no upstream PR): route ALL scene prims through
+// the draft path. [`emit_in_full_frame_draft`] wraps the build emission in
+// ONE `with_clip(Rectangle::with_size(frame.size()), ...)` — a full-frame
+// region at the frame-local origin, so the wrap itself introduces NO
+// visual clipping. The wrap happens AFTER the decision, on the emit only:
+// cache keys, decisions and counter semantics are byte-identical.
+
+/// THE single scene-prim emit funnel: run `emit` on `frame` inside ONE
+/// full-frame [`iced::widget::canvas::Frame::with_clip`] draft.
+///
+/// Every build-emit route ([`SceneProjectionCache::draw`]'s prim plan AND
+/// its store-fed segment plan) MUST paint through this funnel — a direct
+/// `emit_prims` on the build frame is the vanishing-prims defect (see the
+/// section docs). The region is
+/// `Rectangle::with_size(frame.size())`: the draft covers the whole frame
+/// at the frame-local origin, so nothing is excluded and the wrapped
+/// prims' clip lands in frame-local coordinates — the exact property the
+/// surviving legend prims had.
+fn emit_in_full_frame_draft(frame: &mut canvas::Frame, emit: impl FnOnce(&mut canvas::Frame)) {
+    frame.with_clip(Rectangle::with_size(frame.size()), emit);
+}
+
 /// The paint plan one committed rebuild produced: either the classic
 /// full flatten (a fresh prim list), or the store's segment lists
 /// (paint order; the report-driven retention products).
-/// Both paint with `emit_prims`; the segments variant emits segment-wise
+/// Both paint with `emit_prims` through the SCN-036 full-frame draft
+/// funnel; the segments variant emits segment-wise
 /// — each segment is clip-balanced at root boundaries (the store's v1
 /// segmentation rule), so segment-wise emit equals the whole-list emit.
 /// BOTH plans are already FITTED (SCN-031b): the build transformed the
@@ -1001,7 +1074,10 @@ impl SceneProjectionCache {
                     .layer
                     .cache
                     .draw_with_bounds(renderer, bounds, move |frame| {
-                        emit_prims(frame, &prims);
+                        // SCN-036: the emission rides the full-frame draft
+                        // (the draft-path emit law) — a direct emit on the
+                        // build frame is the vanishing-prims defect.
+                        emit_in_full_frame_draft(frame, |inner| emit_prims(inner, &prims));
                     });
                 // Key install AFTER the build commit (overlay discipline).
                 *self.layer.key.borrow_mut() = Some(key);
@@ -1017,9 +1093,14 @@ impl SceneProjectionCache {
                     .layer
                     .cache
                     .draw_with_bounds(renderer, bounds, move |frame| {
-                        for part in parts {
-                            emit_prims(frame, &part);
-                        }
+                        // SCN-036: same funnel as the prims plan — the
+                        // store-fed path paints under the identical
+                        // full-frame draft law.
+                        emit_in_full_frame_draft(frame, |inner| {
+                            for part in parts {
+                                emit_prims(inner, &part);
+                            }
+                        });
                     });
                 // Key install AFTER the build commit (overlay discipline).
                 *self.layer.key.borrow_mut() = Some(key);
@@ -2244,5 +2325,136 @@ mod tests {
             SceneFitTransform::identity(),
             "the failed build reset the custody"
         );
+    }
+
+    // -- SCN-036: the draft-path emit law ------------------------------------
+
+    use std::cell::Cell;
+
+    /// A distinctive fill prim — the shape class that vanished when drawn
+    /// directly on the build frame (the live defect).
+    fn fill_prim(element: u64, x: f32, y: f32) -> ScenePrim {
+        ScenePrim::Fill {
+            element: StableId(element),
+            vertices: vec![
+                Point::new(x, y),
+                Point::new(x + 40.0, y),
+                Point::new(x + 40.0, y + 20.0),
+                Point::new(x, y + 20.0),
+            ],
+            color: tint(60, 0, 0),
+        }
+    }
+
+    /// A real CPU renderer (tiny-skia forced, so no GPU is touched) so the
+    /// tests can build an actual [`canvas::Frame`] headlessly — the same
+    /// frame type [`SceneProjectionCache::draw`] paints into.
+    fn headless_frame_renderer() -> iced::Renderer {
+        let _lock = crate::headless_ui_lock();
+        iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                Some("tiny-skia"),
+            ),
+        )
+        .expect("headless tiny-skia renderer")
+    }
+
+    /// THE STRUCTURAL PIN: the build-emit funnel routes the prim emission
+    /// through ONE full-frame `with_clip` draft — the closure runs exactly
+    /// once, on an inner frame whose size is the OUTER frame's size (the
+    /// draft region covers the whole frame at the frame-local origin, so
+    /// the wrap introduces no clipping of its own; this is the exact
+    /// property the surviving draft prims had in the live defect). The
+    /// wrapped frame still resolves to geometry.
+    #[test]
+    fn the_build_emit_rides_one_full_frame_draft() {
+        let renderer = headless_frame_renderer();
+        let size = Size::new(200.0, 160.0);
+
+        let mut frame = canvas::Frame::new(&renderer, size);
+        let entered = Cell::new(0u32);
+        emit_in_full_frame_draft(&mut frame, |inner| {
+            entered.set(entered.get() + 1);
+            assert_eq!(
+                inner.size(),
+                size,
+                "the draft must be FULL-FRAME: the wrap clips nothing"
+            );
+            emit_prims(inner, &[fill_prim(1, 10.0, 12.0)]);
+        });
+        assert_eq!(entered.get(), 1, "exactly one draft, one emit");
+        frame.into_geometry();
+    }
+
+    /// The nested-clip path (the demo's legend group): `emit_prims`' own
+    /// `with_clip` chaperoning must compose INSIDE the full-frame draft —
+    /// a draft within a draft — without panicking, with the enclosed prims
+    /// emitted through the nested draft and the stream balanced.
+    #[test]
+    fn nested_clips_nest_inside_the_full_frame_draft() {
+        let renderer = headless_frame_renderer();
+        let size = Size::new(200.0, 160.0);
+
+        let mut frame = canvas::Frame::new(&renderer, size);
+        let entered = Cell::new(0u32);
+        let prims = vec![
+            ScenePrim::ClipPush {
+                element: StableId(2),
+                rect: Rectangle::new(Point::new(0.0, 0.0), Size::new(100.0, 80.0)),
+            },
+            fill_prim(3, 4.0, 4.0),
+            ScenePrim::ClipPop {
+                element: StableId(2),
+            },
+        ];
+        emit_in_full_frame_draft(&mut frame, |inner| {
+            entered.set(entered.get() + 1);
+            assert_eq!(inner.size(), size, "outer draft full-frame");
+            emit_prims(inner, &prims);
+        });
+        assert_eq!(entered.get(), 1);
+        frame.into_geometry();
+    }
+
+    /// THE EMIT-SITE PIN (decision-side blindness): the wrap lives AFTER
+    /// the decision, on the emit only — a simulated draw before/after the
+    /// law lands the SAME decision sequence and the SAME counters, byte for
+    /// byte (keys never learned about the draft).
+    #[test]
+    fn the_wrap_changes_no_decision_and_no_counter() {
+        let palette = distinct_palette(false);
+        let scene = scene_at(1, 2);
+        let bounds = fixture_bounds();
+
+        // Before the law: the funnel is decision-blind, so the headless
+        // mirror (which shares the draw path's decision funnel) pins the
+        // decision/counter surface the renderer path sees.
+        let mut cache = SceneProjectionCache::new(StableId(51));
+        assert_eq!(
+            cache.apply_build(&scene, &palette, bounds),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+        );
+        assert_eq!(
+            cache.apply_build(&scene, &palette, bounds),
+            DrawDecision::LayerHit
+        );
+        let counters = cache.counters().clone();
+        assert_eq!(counters.layer_builds, 1);
+        assert_eq!(counters.probe_hits, 1);
+        assert_eq!(counters.prims_last_build, 2);
+        assert_eq!(counters.path_work_last_build, 10);
+
+        // And the WRAPPED build's key replays: a key-equal draw is a hit,
+        // so the replayed geometry was BUILT under the wrap — the wrap
+        // rides the cached geometry forward without new decisions.
+        let key = cache.layer_key().expect("the build installed a key");
+        let fresh = SceneProjectionCache::new(StableId(52));
+        assert_eq!(
+            fresh.probe_draw_decision(&scene, &palette, bounds),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild),
+            "a fresh cache rebuilds (the wrap forces no special decision)"
+        );
+        assert_eq!(key.bounds, bounds);
     }
 }

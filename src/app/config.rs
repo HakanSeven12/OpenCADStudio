@@ -38,6 +38,8 @@ pub struct AppConfig {
     pub show_command_history: bool,
     /// Whether the Layer Manager pallet is open.
     pub show_layers: bool,
+    /// Whether the Blocks palette is open.
+    pub show_block_palette: bool,
     /// Whether the document file tabs are shown (FILETAB).
     pub show_file_tabs: bool,
     /// The drawing tabs run across the window above the palettes, instead
@@ -78,6 +80,7 @@ impl Default for AppConfig {
             show_tool_palettes: false,
             show_command_history: false,
             show_layers: false,
+            show_block_palette: false,
             show_file_tabs: true,
             file_tabs_above_docks: false,
             show_layout_tabs: true,

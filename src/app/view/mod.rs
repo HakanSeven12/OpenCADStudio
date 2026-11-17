@@ -3316,6 +3316,7 @@ bg={bg_ms:.1}ms n={view_count}"
                                 frame,
                                 canvas,
                                 self.mtext_toolbar_shown(),
+                                command_line_inset,
                             ));
                     } else {
                         viewport_stack = viewport_stack.push(mtext_editor_overlay(

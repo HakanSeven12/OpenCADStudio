@@ -278,9 +278,12 @@ impl Pipeline {
     /// This slot's share. `alloc_size` is the real allocation, which is rounded
     /// up from the requested size and grows only.
     fn performance_audit_legacy_bytes(&self) -> LegacyGpuLiveBytes {
-        // 4x MSAA colour (4 B/sample) + 4x MSAA depth-stencil (4 B/sample) +
+        // MSAA colour (4 B/sample; not allocated at 1 sample, where the scene
+        // draws into the resolve target) + MSAA depth-stencil (4 B/sample) +
         // one single-sample resolve target.
-        const BYTES_PER_PIXEL: u64 = (MSAA_SAMPLES as u64) * 4 + (MSAA_SAMPLES as u64) * 4 + 4;
+        let samples = u64::from(msaa_samples());
+        let msaa_colour = if samples > 1 { samples * 4 } else { 0 };
+        let bytes_per_pixel: u64 = msaa_colour + samples * 4 + 4;
         let pixels = u64::from(self.alloc_size.width) * u64::from(self.alloc_size.height);
         LegacyGpuLiveBytes {
             slots: 1,
@@ -290,7 +293,7 @@ impl Pipeline {
                 Some(_) => u64::from(SHADOW_MAP_SIZE) * u64::from(SHADOW_MAP_SIZE) * 4,
                 None => 4,
             },
-            render_targets: pixels * BYTES_PER_PIXEL,
+            render_targets: pixels * bytes_per_pixel,
             text_atlas: self
                 .text_atlas_gpu
                 .as_ref()

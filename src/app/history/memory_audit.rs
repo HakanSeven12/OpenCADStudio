@@ -24,9 +24,9 @@ fn legacy_trim(
     let mut discarded = Vec::new();
     while entries > max_entries || bytes > max_bytes {
         let item = if !history.undo_stack.is_empty() {
-            history.undo_stack.remove(0)
+            history.undo_stack.0.remove(0)
         } else if !history.redo_stack.is_empty() {
-            history.redo_stack.remove(0)
+            history.redo_stack.0.remove(0)
         } else {
             break;
         };
@@ -37,7 +37,7 @@ fn legacy_trim(
     discarded
 }
 
-fn fixture(entries: usize, width: usize, distinct: bool) -> HistoryState {
+pub(super) fn fixture(entries: usize, width: usize, distinct: bool) -> HistoryState {
     let mut history = HistoryState::default();
     let mut versions: Vec<_> = (0..width)
         .map(|i| {
@@ -70,7 +70,7 @@ fn fixture(entries: usize, width: usize, distinct: bool) -> HistoryState {
                 )
             })
             .collect();
-        history.undo_stack.push(entry);
+        history.push_undo(entry);
     }
     history
 }
@@ -78,9 +78,10 @@ fn fixture(entries: usize, width: usize, distinct: bool) -> HistoryState {
 fn timed(source: &HistoryState, modern: bool, entries: usize, bytes: usize) -> f64 {
     // Cloning the shared fixture is setup, not the history-trimming operation.
     let mut history = HistoryState {
-        undo_stack: source.undo_stack.clone(),
-        redo_stack: source.redo_stack.clone(),
+        undo_stack: HistoryStack(source.undo_stack.0.clone()),
+        redo_stack: HistoryStack(source.redo_stack.0.clone()),
         pending: None,
+        budget: None,
     };
     let start = Instant::now();
     let discarded = if modern {
@@ -147,11 +148,11 @@ fn performance_audit_history() {
             || timed(&source, true, limit, bytes),
         );
         let mut old = HistoryState {
-            undo_stack: source.undo_stack.clone(),
+            undo_stack: HistoryStack(source.undo_stack.0.clone()),
             ..Default::default()
         };
         let mut new = HistoryState {
-            undo_stack: source.undo_stack.clone(),
+            undo_stack: HistoryStack(source.undo_stack.0.clone()),
             ..Default::default()
         };
         drop(legacy_trim(&mut old, limit, bytes));

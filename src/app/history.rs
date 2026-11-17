@@ -1,4 +1,4 @@
-mod memory;
+pub(super) mod memory;
 
 use super::{
     tab_document::{
@@ -120,7 +120,7 @@ impl OpenCADStudio {
     }
 
     fn clear_redo_history(&mut self, i: usize) {
-        let discarded = std::mem::take(&mut self.tabs[i].history.redo_stack);
+        let discarded = self.tabs[i].history.take_redo();
         defer_history_drop(discarded);
     }
 
@@ -136,7 +136,7 @@ impl OpenCADStudio {
                 delta.view = Some(Box::new(self.tabs[i].scene.camera.borrow().clone()));
             }
         }
-        self.tabs[i].history.undo_stack.push(snapshot);
+        self.tabs[i].history.push_undo(snapshot);
         self.tabs[i].edit_revision = self.tabs[i].edit_revision.wrapping_add(1);
         self.clear_redo_history(i);
         self.trim_history(i);
@@ -222,7 +222,10 @@ impl OpenCADStudio {
     }
 
     pub(super) fn defer_live_entity_history_after(&mut self, i: usize, handle: Handle) {
-        let Some(HistorySnapshot::Delta(delta)) = self.tabs[i].history.undo_stack.last_mut() else {
+        let Some(mut entry) = self.tabs[i].history.last_undo_mut() else {
+            return;
+        };
+        let HistorySnapshot::Delta(delta) = &mut *entry else {
             return;
         };
         if let Some((_, _, after)) = delta
@@ -241,7 +244,10 @@ impl OpenCADStudio {
         let selected_after = self.tabs[i].scene.selected.iter().copied().collect();
         let current_layout_after = self.tabs[i].scene.current_layout.clone();
         let dirty_after = self.tabs[i].dirty;
-        let Some(HistorySnapshot::Delta(delta)) = self.tabs[i].history.undo_stack.last_mut() else {
+        let Some(mut entry) = self.tabs[i].history.last_undo_mut() else {
+            return;
+        };
+        let HistorySnapshot::Delta(delta) = &mut *entry else {
             return;
         };
         let Some((_, _, entry_after)) = delta
@@ -262,7 +268,7 @@ impl OpenCADStudio {
             self.tabs[i].scene.document.end_entity_change_recording();
             return;
         }
-        if let Some(discarded) = self.tabs[i].history.undo_stack.pop() {
+        if let Some(discarded) = self.tabs[i].history.pop_undo() {
             defer_history_drop(vec![discarded]);
         }
     }
@@ -946,14 +952,11 @@ impl OpenCADStudio {
                     if matches!(delta.structure, Some(StructureSnapshot::Styles { .. }))
             );
             if merges {
-                if let Some(HistorySnapshot::Delta(previous)) =
-                    self.tabs[i].history.undo_stack.pop()
-                {
+                if let Some(HistorySnapshot::Delta(previous)) = self.tabs[i].history.pop_undo() {
                     let previous = *previous;
                     dirty_before = previous.dirty_before;
-                    if let Some(StructureSnapshot::Styles {
-                        before: first, ..
-                    }) = previous.structure
+                    if let Some(StructureSnapshot::Styles { before: first, .. }) =
+                        previous.structure
                     {
                         before = first;
                     }
@@ -1654,13 +1657,13 @@ impl OpenCADStudio {
         let mut touched_visibility_blocks = Vec::new();
         let mut step_view = None;
         for _ in 0..steps {
-            let Some(snapshot) = self.tabs[i].history.undo_stack.pop() else {
+            let Some(mut replay) = self.tabs[i].history.take_replay(true) else {
                 break;
             };
-            last_label = snapshot.display_label().into_owned();
-            let step_label = snapshot.label().to_owned();
-            match snapshot {
-                HistorySnapshot::Delta(mut d) => {
+            last_label = replay.snapshot.display_label().into_owned();
+            let step_label = replay.snapshot.label().to_owned();
+            match &mut replay.snapshot {
+                HistorySnapshot::Delta(d) => {
                     native_graph_changed |=
                         !d.parametric_constraints.is_empty() || d.named_parameters.is_some();
                     reference_session_changed |= d.reference_session.is_some();
@@ -1681,7 +1684,7 @@ impl OpenCADStudio {
                     had_full |= d.structure.as_ref().is_some_and(StructureSnapshot::is_full);
                     changes.extend(self.apply_delta_state(
                         i,
-                        &mut d,
+                        d,
                         true,
                         &mut touched_visibility_blocks,
                     ));
@@ -1689,19 +1692,12 @@ impl OpenCADStudio {
                         .view
                         .clone()
                         .map(|view| (view, d.current_layout_after.clone()));
-                    self.tabs[i]
-                        .history
-                        .redo_stack
-                        .push(HistorySnapshot::Delta(d));
                 }
                 HistorySnapshot::ObjectVisibility(v) => {
                     self.apply_object_visibility_state(i, &v, true);
-                    self.tabs[i]
-                        .history
-                        .redo_stack
-                        .push(HistorySnapshot::ObjectVisibility(v));
                 }
             }
+            self.tabs[i].history.finish_replay(replay, true);
             self.refedit_after_history_step(i, &step_label, true);
         }
         self.finish_history_apply(
@@ -1769,13 +1765,13 @@ impl OpenCADStudio {
         let mut touched_visibility_blocks = Vec::new();
         let mut step_view = None;
         for _ in 0..steps {
-            let Some(snapshot) = self.tabs[i].history.redo_stack.pop() else {
+            let Some(mut replay) = self.tabs[i].history.take_replay(false) else {
                 break;
             };
-            last_label = snapshot.display_label().into_owned();
-            let step_label = snapshot.label().to_owned();
-            match snapshot {
-                HistorySnapshot::Delta(mut d) => {
+            last_label = replay.snapshot.display_label().into_owned();
+            let step_label = replay.snapshot.label().to_owned();
+            match &mut replay.snapshot {
+                HistorySnapshot::Delta(d) => {
                     native_graph_changed |=
                         !d.parametric_constraints.is_empty() || d.named_parameters.is_some();
                     reference_session_changed |= d.reference_session.is_some();
@@ -1793,7 +1789,7 @@ impl OpenCADStudio {
                     had_full |= d.structure.as_ref().is_some_and(StructureSnapshot::is_full);
                     changes.extend(self.apply_delta_state(
                         i,
-                        &mut d,
+                        d,
                         false,
                         &mut touched_visibility_blocks,
                     ));
@@ -1801,19 +1797,12 @@ impl OpenCADStudio {
                         .view
                         .clone()
                         .map(|view| (view, d.current_layout_after.clone()));
-                    self.tabs[i]
-                        .history
-                        .undo_stack
-                        .push(HistorySnapshot::Delta(d));
                 }
                 HistorySnapshot::ObjectVisibility(v) => {
                     self.apply_object_visibility_state(i, &v, false);
-                    self.tabs[i]
-                        .history
-                        .undo_stack
-                        .push(HistorySnapshot::ObjectVisibility(v));
                 }
             }
+            self.tabs[i].history.finish_replay(replay, false);
             self.refedit_after_history_step(i, &step_label, false);
         }
         self.finish_history_apply(
@@ -1881,10 +1870,12 @@ mod block_history_tests {
     fn block_definition_undo_redo_is_incremental() {
         let mut app = super::OpenCADStudio::new_for_test();
         let i = app.active_tab;
-        let bg_line = app.tabs[i].scene.add_entity(EntityType::Line(Line::from_points(
-            Vector3::new(100.0, 0.0, 0.0),
-            Vector3::new(110.0, 0.0, 0.0),
-        )));
+        let bg_line = app.tabs[i]
+            .scene
+            .add_entity(EntityType::Line(Line::from_points(
+                Vector3::new(100.0, 0.0, 0.0),
+                Vector3::new(110.0, 0.0, 0.0),
+            )));
         app.tabs[i].scene.define_block_raw(
             "KeepDef",
             Vector3::ZERO,
@@ -1921,13 +1912,15 @@ mod block_history_tests {
         let keep_defn_before = cache_before.defn_ptr("KeepDef").unwrap();
 
         app.push_undo_snapshot(i, HistoryLabel::Message("Edit block line"));
-        if let Some(EntityType::Line(line)) = app.tabs[i].scene.document.get_entity_mut(edit_line)
-        {
+        if let Some(EntityType::Line(line)) = app.tabs[i].scene.document.get_entity_mut(edit_line) {
             line.end.x = 8.0;
         }
-        app.tabs[i]
-            .scene
-            .bump_entities_with_block_deps(&[(edit_line, crate::scene::ChangeKind::Modified)], &[], &[], false);
+        app.tabs[i].scene.bump_entities_with_block_deps(
+            &[(edit_line, crate::scene::ChangeKind::Modified)],
+            &[],
+            &[],
+            false,
+        );
         app.finish_pending_history(i);
 
         let _ = app.tabs[i].scene.entity_wires();
@@ -1947,7 +1940,10 @@ mod block_history_tests {
         assert!(app.tabs[i].scene.has_resident_tess_memo(keep_insert));
         let _ = app.tabs[i].scene.entity_wires();
         let cache_after_undo = app.tabs[i].scene.active_block_cache_arc();
-        assert_eq!(keep_defn_before, cache_after_undo.defn_ptr("KeepDef").unwrap());
+        assert_eq!(
+            keep_defn_before,
+            cache_after_undo.defn_ptr("KeepDef").unwrap()
+        );
 
         let epoch_before_redo = app.tabs[i].scene.geometry_epoch;
         app.redo_active_tab();

@@ -1429,8 +1429,9 @@ pub(super) struct ReferenceDesignationDelta {
 
 #[derive(Default)]
 pub(super) struct HistoryState {
-    pub(super) undo_stack: Vec<HistorySnapshot>,
-    pub(super) redo_stack: Vec<HistorySnapshot>,
+    pub(super) undo_stack: super::history::memory::HistoryStack,
+    pub(super) redo_stack: super::history::memory::HistoryStack,
+    pub(super) budget: Option<super::history::memory::HistoryBudget>,
     pub(super) pending: Option<PendingHistorySnapshot>,
 }
 

@@ -679,7 +679,10 @@ impl OpenCADStudio {
         if before == doc {
             return;
         }
-        let Some(HistorySnapshot::Delta(delta)) = tab.history.undo_stack.last_mut() else {
+        let Some(mut entry) = tab.history.last_undo_mut() else {
+            return;
+        };
+        let HistorySnapshot::Delta(delta) = &mut *entry else {
             return;
         };
         let handles = before

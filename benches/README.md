@@ -8,6 +8,10 @@ history accounting and GPU telemetry. It found measurable overheads; passing
 correctness tests does not establish zero performance impact. Reproduction
 commands and raw samples are linked in that report.
 
+The [incremental history follow-up](../docs/performance-history-incremental.md)
+compares recording costs and retained geometry against the full-scan budget,
+including the memory used by the persistent accounting tables.
+
 ## Quick Start
 
 Run the full benchmark suite with native `--release` optimizations:

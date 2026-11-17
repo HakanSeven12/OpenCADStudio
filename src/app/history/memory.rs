@@ -12,12 +12,12 @@ use std::{
 };
 
 #[derive(Default)]
-struct SharedBytes(FxHashMap<usize, (usize, usize)>);
+struct SharedBytes(FxHashMap<usize, (usize, usize)>, usize);
 
 impl SharedBytes {
     fn retain(&mut self, key: usize, cost: impl FnOnce() -> usize) -> Option<usize> {
         use std::collections::hash_map::Entry;
-        match self.0.entry(key) {
+        let retained = match self.0.entry(key) {
             Entry::Occupied(mut entry) => {
                 entry.get_mut().1 += 1;
                 None
@@ -27,7 +27,11 @@ impl SharedBytes {
                 entry.insert((bytes, 1));
                 Some(bytes)
             }
-        }
+        };
+        // Deletion tombstones can lower HashMap::capacity without freeing its
+        // buckets. Keep the allocation high-water mark until an explicit rebuild.
+        self.1 = self.1.max(self.0.capacity());
+        retained
     }
 
     fn release(&mut self, key: usize) -> Option<usize> {
@@ -101,27 +105,225 @@ impl EntityBudget {
     }
 }
 
-/// Determine both prefixes before draining: removing index zero repeatedly
-/// shifts every remaining snapshot. Shared bytes disappear only when the last
-/// history reference is removed, even when it lives on the other stack.
+/// Read-only stack access keeps every mutation on HistoryState's accounted
+/// paths. In particular, callers cannot obtain an untracked `last_mut`.
+#[derive(Default)]
+pub(in crate::app) struct HistoryStack(Vec<HistorySnapshot>);
+
+impl std::ops::Deref for HistoryStack {
+    type Target = [HistorySnapshot];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'a> IntoIterator for &'a HistoryStack {
+    type Item = &'a HistorySnapshot;
+    type IntoIter = std::slice::Iter<'a, HistorySnapshot>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+#[derive(Default)]
+pub(in crate::app) struct HistoryBudget {
+    entities: EntityBudget,
+    bytes: usize,
+}
+
+impl SharedBytes {
+    fn metadata_bytes(&self) -> usize {
+        // Conservative allowance for hash-table spare buckets/control bytes.
+        // The budget remains an estimate, rather than an allocator census.
+        self.1
+            .saturating_mul(2 * (size_of::<(usize, (usize, usize))>() + 1))
+    }
+
+    fn compact(&mut self) {
+        if self.0.is_empty() {
+            self.0 = FxHashMap::default();
+            self.1 = 0;
+        } else if self.0.len() < self.1 / 4 {
+            let mut compact = FxHashMap::with_capacity_and_hasher(
+                self.0.len().saturating_mul(2),
+                Default::default(),
+            );
+            compact.extend(self.0.drain());
+            self.0 = compact;
+            self.1 = self.0.capacity();
+        }
+    }
+}
+
+impl HistoryBudget {
+    fn retain(&mut self, snapshot: &HistorySnapshot) {
+        self.bytes = self
+            .bytes
+            .saturating_add(snapshot.estimated_overhead_bytes())
+            .saturating_add(self.entities.snapshot(snapshot, true));
+    }
+
+    fn release(&mut self, snapshot: &HistorySnapshot) {
+        self.bytes = self
+            .bytes
+            .saturating_sub(snapshot.estimated_overhead_bytes())
+            .saturating_sub(self.entities.snapshot(snapshot, false));
+    }
+
+    fn total(&self) -> usize {
+        self.bytes
+            .saturating_add(self.entities.entities.metadata_bytes())
+            .saturating_add(self.entities.records.metadata_bytes())
+    }
+
+    fn compact(&mut self) {
+        self.entities.entities.compact();
+        self.entities.records.compact();
+    }
+}
+
+/// Re-account just the edited entry, including live after-images and structure
+/// coalescing. The guard restores accounting on early returns as well.
+pub(in crate::app) struct HistoryEdit<'a> {
+    snapshot: &'a mut HistorySnapshot,
+    budget: &'a mut Option<HistoryBudget>,
+}
+
+impl std::ops::Deref for HistoryEdit<'_> {
+    type Target = HistorySnapshot;
+
+    fn deref(&self) -> &Self::Target {
+        self.snapshot
+    }
+}
+
+impl std::ops::DerefMut for HistoryEdit<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.snapshot
+    }
+}
+
+impl Drop for HistoryEdit<'_> {
+    fn drop(&mut self) {
+        if let Some(budget) = self.budget {
+            budget.retain(self.snapshot);
+            budget.compact();
+        }
+    }
+}
+
+/// Replay keeps the same entity images alive while moving an entry between
+/// stacks. Only structure state may be swapped by apply_delta_state; refresh
+/// its overhead without releasing/re-registering all the entity references.
+#[must_use = "return replay entries to a stack with finish_replay"]
+pub(in crate::app) struct HistoryReplay {
+    pub(in crate::app) snapshot: HistorySnapshot,
+    overhead: usize,
+}
+
+impl HistoryState {
+    pub(in crate::app) fn push_undo(&mut self, snapshot: HistorySnapshot) {
+        if let Some(budget) = &mut self.budget {
+            budget.retain(&snapshot);
+        }
+        self.undo_stack.0.push(snapshot);
+    }
+
+    #[cfg(test)]
+    pub(in crate::app) fn push_redo(&mut self, snapshot: HistorySnapshot) {
+        if let Some(budget) = &mut self.budget {
+            budget.retain(&snapshot);
+        }
+        self.redo_stack.0.push(snapshot);
+    }
+
+    pub(in crate::app) fn pop_undo(&mut self) -> Option<HistorySnapshot> {
+        let snapshot = self.undo_stack.0.pop()?;
+        if let Some(budget) = &mut self.budget {
+            budget.release(&snapshot);
+            budget.compact();
+        }
+        Some(snapshot)
+    }
+
+    pub(in crate::app) fn take_redo(&mut self) -> Vec<HistorySnapshot> {
+        let snapshots = std::mem::take(&mut self.redo_stack.0);
+        if let Some(budget) = &mut self.budget {
+            for snapshot in &snapshots {
+                budget.release(snapshot);
+            }
+            budget.compact();
+        }
+        snapshots
+    }
+
+    pub(in crate::app) fn last_undo_mut(&mut self) -> Option<HistoryEdit<'_>> {
+        let snapshot = self.undo_stack.0.last_mut()?;
+        if let Some(budget) = &mut self.budget {
+            budget.release(snapshot);
+        }
+        Some(HistoryEdit {
+            snapshot,
+            budget: &mut self.budget,
+        })
+    }
+
+    pub(in crate::app) fn take_replay(&mut self, undo: bool) -> Option<HistoryReplay> {
+        let snapshot = if undo {
+            &mut self.undo_stack
+        } else {
+            &mut self.redo_stack
+        }
+        .0
+        .pop()?;
+        let overhead = if self.budget.is_some() {
+            snapshot.estimated_overhead_bytes()
+        } else {
+            0
+        };
+        Some(HistoryReplay { snapshot, overhead })
+    }
+
+    pub(in crate::app) fn finish_replay(&mut self, replay: HistoryReplay, undo: bool) {
+        if let Some(budget) = &mut self.budget {
+            budget.bytes = budget
+                .bytes
+                .saturating_sub(replay.overhead)
+                .saturating_add(replay.snapshot.estimated_overhead_bytes());
+        }
+        if undo {
+            &mut self.redo_stack
+        } else {
+            &mut self.undo_stack
+        }
+        .0
+        .push(replay.snapshot);
+    }
+}
+
+/// Retain the reference census between edits. Ordinary checks are constant
+/// time; adding, removing or editing a snapshot visits only that snapshot.
+/// Unlimited byte budgets allocate no census. Prefixes still drain in batches.
 pub(super) fn trim(
     history: &mut HistoryState,
     max_entries: usize,
     max_bytes: usize,
 ) -> Vec<HistorySnapshot> {
-    let mut entities = EntityBudget::default();
+    if max_bytes == usize::MAX {
+        history.budget = None;
+    } else if history.budget.is_none() {
+        let mut budget = HistoryBudget::default();
+        for snapshot in history.undo_stack.iter().chain(&history.redo_stack) {
+            budget.retain(snapshot);
+        }
+        history.budget = Some(budget);
+    }
     let mut entries = history
         .undo_stack
         .len()
         .saturating_add(history.redo_stack.len());
-    let mut bytes = 0usize;
-    if max_bytes != usize::MAX {
-        for snapshot in history.undo_stack.iter().chain(&history.redo_stack) {
-            bytes = bytes
-                .saturating_add(snapshot.estimated_overhead_bytes())
-                .saturating_add(entities.snapshot(snapshot, true));
-        }
-    }
     let mut undo = 0;
     let mut redo = 0;
     for (is_redo, snapshot) in history
@@ -130,14 +332,15 @@ pub(super) fn trim(
         .map(|s| (false, s))
         .chain(history.redo_stack.iter().map(|s| (true, s)))
     {
-        if entries <= max_entries && bytes <= max_bytes {
+        if entries <= max_entries
+            && history.budget.as_ref().map_or(0, HistoryBudget::total) <= max_bytes
+        {
             break;
         }
         entries -= 1;
-        if max_bytes != usize::MAX {
-            bytes = bytes
-                .saturating_sub(snapshot.estimated_overhead_bytes())
-                .saturating_sub(entities.snapshot(snapshot, false));
+        if let Some(budget) = &mut history.budget {
+            budget.release(snapshot);
+            budget.compact();
         }
         if is_redo {
             redo += 1;
@@ -146,8 +349,8 @@ pub(super) fn trim(
         }
     }
     let mut discarded = Vec::with_capacity(undo + redo);
-    discarded.extend(history.undo_stack.drain(..undo));
-    discarded.extend(history.redo_stack.drain(..redo));
+    discarded.extend(history.undo_stack.0.drain(..undo));
+    discarded.extend(history.redo_stack.0.drain(..redo));
     discarded
 }
 
@@ -475,15 +678,19 @@ mod tests {
     fn undo_budget_counts_shared_images_across_both_stacks_once() {
         let entity = large_polyline();
         let mut history = HistoryState::default();
-        history.undo_stack.push(snapshot(entity.clone()));
-        history.redo_stack.push(snapshot(entity.clone()));
+        history.push_undo(snapshot(entity.clone()));
+        history.push_redo(snapshot(entity.clone()));
         let overhead: usize = history
             .undo_stack
             .iter()
             .chain(&history.redo_stack)
             .map(HistorySnapshot::estimated_overhead_bytes)
             .sum();
-        assert!(trim(&mut history, 256, overhead + entity_bytes(&entity)).is_empty());
+        assert!(trim(&mut history, 256, usize::MAX - 1).is_empty());
+        let budget = history.budget.as_ref().unwrap();
+        assert_eq!(budget.bytes, overhead + entity_bytes(&entity));
+        let limit = budget.total();
+        assert!(trim(&mut history, 256, limit).is_empty());
         let discarded = trim(&mut history, 1, usize::MAX);
         assert_eq!(discarded.len(), 1);
         assert!(history.undo_stack.is_empty());
@@ -493,10 +700,8 @@ mod tests {
     #[test]
     fn undo_budget_evicts_large_old_entries_and_keeps_the_newest_small_edit() {
         let mut history = HistoryState::default();
-        history.undo_stack.push(snapshot(large_polyline()));
-        history
-            .undo_stack
-            .push(snapshot(Arc::new(EntityType::Line(Line::new()))));
+        history.push_undo(snapshot(large_polyline()));
+        history.push_undo(snapshot(Arc::new(EntityType::Line(Line::new()))));
         let discarded = trim(&mut history, 256, 64 * 1024);
         assert_eq!(discarded.len(), 1);
         assert_eq!(history.undo_stack.len(), 1);
@@ -514,10 +719,10 @@ mod tests {
         let entity = Arc::new(EntityType::Line(Line::new()));
         let mut history = HistoryState::default();
         for _ in 0..10 {
-            history.undo_stack.push(snapshot(entity.clone()));
+            history.push_undo(snapshot(entity.clone()));
         }
         for _ in 0..5 {
-            history.redo_stack.push(snapshot(entity.clone()));
+            history.push_redo(snapshot(entity.clone()));
         }
         assert_eq!(trim(&mut history, 3, usize::MAX).len(), 12);
         assert!(history.undo_stack.is_empty());
@@ -548,7 +753,7 @@ mod tests {
                     )
                 })
                 .collect();
-            history.undo_stack.push(entry);
+            history.push_undo(entry);
         }
         let start = std::time::Instant::now();
         for _ in 0..5 {
@@ -589,7 +794,7 @@ mod tests {
                 // An erased polyline is held only by its undo before-image.
                 delta.entities[0].0 = Handle::new(i as u64 + 1);
                 delta.entities[0].2 = None;
-                history.undo_stack.push(entry);
+                history.push_undo(entry);
             }
             history
         }
@@ -645,7 +850,7 @@ mod tests {
             let mut bytes: usize = history.undo_stack.iter().map(legacy_bytes).sum();
             let mut discarded = Vec::new();
             while history.undo_stack.len() > 256 || bytes > LIMIT {
-                let entry = history.undo_stack.remove(0);
+                let entry = history.undo_stack.0.remove(0);
                 bytes -= legacy_bytes(&entry);
                 discarded.push(entry);
             }
@@ -689,3 +894,7 @@ mod tests {
 #[cfg(all(test, feature = "performance-audit"))]
 #[path = "memory_audit.rs"]
 mod performance_audit;
+
+#[cfg(test)]
+#[path = "memory_incremental.rs"]
+mod incremental_tests;

@@ -69,8 +69,7 @@ fn drawing() -> (OpenCADStudio, Drawing) {
             )))
             .value(),
     };
-    app.tabs[tab].history.undo_stack.clear();
-    app.tabs[tab].history.redo_stack.clear();
+    app.tabs[tab].history = Default::default();
     (app, drawing)
 }
 

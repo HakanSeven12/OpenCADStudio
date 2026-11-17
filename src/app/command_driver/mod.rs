@@ -1410,6 +1410,10 @@ impl OpenCADStudio {
                 distance,
             } => return self.handle_solid_shell(handle, actions, distance),
 
+            CmdResult::SolidEdit(request) => return self.handle_solid_edit(*request),
+
+            CmdResult::ExtractEdges(handles) => return self.handle_extract_edges(handles),
+
             CmdResult::SolidSubtract {
                 bases,
                 cutters,

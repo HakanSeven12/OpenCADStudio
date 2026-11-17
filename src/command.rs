@@ -1588,6 +1588,42 @@ pub enum ShellFaceAction {
     AddAll,
 }
 
+/// One face or edge pick made while collecting a solid edit.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FacePick {
+    Add(DVec3),
+    Remove(DVec3),
+    All,
+}
+
+/// What a solid edit does to the faces, edges or body it collected.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SolidEditAction {
+    ExtrudeFaces { height: f64, taper: f64 },
+    MoveFaces { from: DVec3, to: DVec3 },
+    RotateFaces { origin: DVec3, axis: DVec3, angle: f64 },
+    OffsetFaces { distance: f64 },
+    TaperFaces { base: DVec3, toward: DVec3, angle: f64 },
+    DeleteFaces,
+    CopyFaces { from: DVec3, to: DVec3 },
+    ColorFaces(document::types::Color),
+    CopyEdges { from: DVec3, to: DVec3 },
+    ColorEdges(document::types::Color),
+    Imprint { tool: Handle, delete_tool: bool },
+    Separate,
+    Clean,
+    Check,
+}
+
+/// A solid edit on one solid: the faces or edges picked on it, and what to
+/// do with them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SolidEditRequest {
+    pub handle: Handle,
+    pub picks: Vec<FacePick>,
+    pub action: SolidEditAction,
+}
+
 impl Default for LoftOptions {
     fn default() -> Self {
         Self {
@@ -2661,6 +2697,11 @@ pub enum CmdResult {
         actions: Vec<ShellFaceAction>,
         distance: f64,
     },
+    /// Edit faces, edges or the body of one solid; end command.
+    SolidEdit(Box<SolidEditRequest>),
+    /// Draw every edge of these solids, regions and surfaces as curves; end
+    /// command.
+    ExtractEdges(Vec<Handle>),
     SolidSubtract {
         bases: Vec<Handle>,
         cutters: Vec<Handle>,

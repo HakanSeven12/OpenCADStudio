@@ -2506,6 +2506,7 @@ fn transform_block_mesh_lod_set(
         complete: set.complete,
         edge_verts: Vec::new(),
         edge_verts_low: Vec::new(),
+        edge_vert_colors: Vec::new(),
         curved_gens: Vec::new(),
         metrics: set.metrics,
         world_aabb: [

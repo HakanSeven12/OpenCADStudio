@@ -54,6 +54,11 @@ pub const DROPDOWN_ITEMS: &[(&str, &str, IconKind)] = &[
         "Chamfer",
         IconKind::Svg(include_bytes!("../../../../assets/icons/chamfer.svg")),
     ),
+    (
+        "BLEND",
+        "Blend Curves",
+        IconKind::Svg(include_bytes!("../../../../assets/icons/blend.svg")),
+    ),
 ];
 
 // ══════════════════════════════════════════════════════════════════════════

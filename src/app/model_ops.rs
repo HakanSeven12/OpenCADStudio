@@ -416,7 +416,7 @@ impl super::OpenCADStudio {
         handle
     }
 
-    fn add_surface_model_preserving_style(&mut self, entity: EntityType, surface: Body) -> Handle {
+    pub(super) fn add_surface_model_preserving_style(&mut self, entity: EntityType, surface: Body) -> Handle {
         self.add_surface_model_inner(entity, surface, false)
     }
 
@@ -468,7 +468,7 @@ impl super::OpenCADStudio {
         self.add_region_model_inner(region, body, false)
     }
 
-    fn add_region_model_preserving_style(&mut self, region: Region, body: Body) -> Handle {
+    pub(super) fn add_region_model_preserving_style(&mut self, region: Region, body: Body) -> Handle {
         self.add_region_model_inner(region, body, true)
     }
 

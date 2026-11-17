@@ -2415,9 +2415,17 @@ pub fn build_mesh_batch_filtered(
                     continue;
                 }
                 for i in edge_start..edge_start + take {
+                    // An edge's own colour, unless a visual style draws
+                    // every edge in one.
+                    let own = set
+                        .edge_vert_colors
+                        .get(i)
+                        .copied()
+                        .flatten()
+                        .filter(|_| edge_color == edge_base);
                     edge_verts.push(MeshEdgeVertex {
                         position: set.edge_verts[i],
-                        color: edge_color,
+                        color: own.unwrap_or(edge_color),
                         position_low: set.edge_verts_low.get(i).copied().unwrap_or([0.0; 3]),
                     });
                 }

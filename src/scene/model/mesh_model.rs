@@ -124,6 +124,9 @@ pub struct MeshLodSet {
     pub edge_verts: Vec<[f32; 3]>,
     /// Low residual paired with `edge_verts`.
     pub edge_verts_low: Vec<[f32; 3]>,
+    /// A colour of its own for each of `edge_verts`, where the B-rep edge
+    /// carries one; shorter or empty when none do.
+    pub edge_vert_colors: Vec<Option<[f32; 4]>>,
     /// Kernel sources for per-frame silhouettes.
     pub curved_gens: Vec<CurvedGen>,
     /// Geometry measurements calculated once from the highest available LOD.
@@ -249,6 +252,7 @@ impl MeshLodSet {
             complete: true,
             edge_verts: Vec::new(),
             edge_verts_low: Vec::new(),
+            edge_vert_colors: Vec::new(),
             curved_gens: Vec::new(),
             metrics,
             world_aabb,

@@ -3151,6 +3151,7 @@ mod tests {
             complete: true,
             edge_verts: Vec::new(),
             edge_verts_low: Vec::new(),
+            edge_vert_colors: Vec::new(),
             curved_gens: Vec::new(),
             metrics: Default::default(),
             world_aabb: [0.0; 4],

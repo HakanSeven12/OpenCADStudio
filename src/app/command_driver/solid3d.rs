@@ -857,6 +857,27 @@ impl OpenCADStudio {
         task
     }
 
+    pub(super) fn handle_solid_edit(
+        &mut self,
+        request: crate::command::SolidEditRequest,
+    ) -> Task<Message> {
+        let i = self.active_tab;
+        self.tabs[i].active_cmd = None;
+        self.tabs[i].snap_result = None;
+        self.tabs[i].scene.clear_preview_wire();
+        self.restore_pre_cmd_tangent();
+        self.solid_edit(request)
+    }
+
+    pub(super) fn handle_extract_edges(&mut self, handles: Vec<Handle>) -> Task<Message> {
+        let i = self.active_tab;
+        self.tabs[i].active_cmd = None;
+        self.tabs[i].snap_result = None;
+        self.tabs[i].scene.clear_preview_wire();
+        self.restore_pre_cmd_tangent();
+        self.extract_edges(&handles)
+    }
+
     pub(super) fn handle_solid_subtract(
         &mut self,
         bases: Vec<Handle>,

@@ -138,6 +138,81 @@ fn paint_record(
     }
 }
 
+/// Gives the faces and edges of `body`, written into `document` by
+/// [`solid_to_sat`](super::acis_export::solid_to_sat), colours of their own.
+pub fn paint_body(
+    document: &mut document::entities::acis::SatDocument,
+    body: &kernel::brep::Body,
+    faces: &std::collections::HashMap<kernel::brep::FaceKey, document::types::Color>,
+    edges: &std::collections::HashMap<kernel::brep::EdgeKey, document::types::Color>,
+) {
+    // The writer puts faces and edges in the body's own order.
+    let records = |kind: &str| -> Vec<usize> {
+        (0..document.record_count())
+            .filter(|&at| document.record(at).is_some_and(|r| r.entity_type == kind))
+            .collect()
+    };
+    let face_records = records("face");
+    let edge_records = records("edge");
+    for (key, at) in body.faces.keys().zip(face_records) {
+        if let Some(color) = faces.get(&key) {
+            paint_record(document, at, *color);
+        }
+    }
+    for (key, at) in body.edges.keys().zip(edge_records) {
+        if let Some(color) = edges.get(&key) {
+            paint_record(document, at, *color);
+        }
+    }
+}
+
+/// The colours a lifted body's faces and edges carry of their own, found
+/// through the records each node was lifted from.
+pub fn body_colors(
+    document: &document::entities::acis::SatDocument,
+    body: &kernel::brep::Body,
+) -> (
+    std::collections::HashMap<kernel::brep::FaceKey, document::types::Color>,
+    std::collections::HashMap<kernel::brep::EdgeKey, document::types::Color>,
+) {
+    let mut owned = std::collections::HashMap::new();
+    // A true colour outranks the index beside it, so it is read last.
+    for kind in ["color-adesk-attrib", "truecolor-adesk-attrib"] {
+        for record in document.records.iter().filter(|record| record.entity_type == kind) {
+            let (Some(owner), Some(value)) = (
+                record.token_pointer(2).map(|pointer| pointer.0),
+                record.token(3).and_then(|token| token.as_integer()),
+            ) else {
+                continue;
+            };
+            let color = if kind == "truecolor-adesk-attrib" {
+                document::types::Color::from_true_color_value(
+                    ((value & 0x00FF_FFFF) | 0x0100_0000) as i32,
+                )
+            } else if (1..=255).contains(&value) {
+                document::types::Color::from_index(value as i16)
+            } else {
+                continue;
+            };
+            owned.insert(owner, color);
+        }
+    }
+    let source = |provenance: &kernel::brep::Provenance| {
+        provenance.source().and_then(|source| owned.get(&(source.index() as i32)).copied())
+    };
+    let faces = body
+        .faces
+        .iter()
+        .filter_map(|(key, face)| Some((key, source(&face.provenance)?)))
+        .collect();
+    let edges = body
+        .edges
+        .iter()
+        .filter_map(|(key, edge)| Some((key, source(&edge.provenance)?)))
+        .collect();
+    (faces, edges)
+}
+
 /// A kernel body as its drawing object in `colour` (by block when `None`),
 /// with the faces given a colour of their own carrying it, and the edges
 /// bounding those faces carrying it too. A `sheet` is a SURFACE however

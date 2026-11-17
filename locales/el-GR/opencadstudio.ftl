@@ -443,6 +443,7 @@ gpu =
 
 recovery =
     .newer-autosave = Βρέθηκε αντίγραφο ανάκτησης νεότερο από αυτό το σχέδιο: { $file }. Ανοίξτε το για να ανακτήσετε τη μη αποθηκευμένη εργασία.
+    .unsaved-autosave = A drawing that was never saved was kept from a session that ended: { $file }. Open it to get the work back.
     .opened-with-repairs = Το σχέδιο άνοιξε με αναφορά ανάκτησης
     .open-failed = Δεν ήταν δυνατό το άνοιγμα του σχεδίου
     .repaired-description = Εντοπίστηκαν προβλήματα κατά το άνοιγμα του σχεδίου. Ελέγξτε την αναφορά· αν επιδιορθώθηκαν δεδομένα σχεδίου, αποθηκεύστε τα σε νέο αρχείο.

@@ -443,6 +443,7 @@ gpu =
 
 recovery =
     .newer-autosave = ພົບສຳເນົາກູ້ຄືນທີ່ໃໝ່ກວ່າແບບແຕ້ມນີ້: { $file }. ເປີດມັນເພື່ອເອົາວຽກທີ່ບໍ່ໄດ້ບັນທຶກຄືນມາ.
+    .unsaved-autosave = A drawing that was never saved was kept from a session that ended: { $file }. Open it to get the work back.
     .opened-with-repairs = ຮູບແຕ້ມຖືກເປີດພ້ອມລາຍງານການກູ້ຄືນ
     .open-failed = ບໍ່ສາມາດເປີດຮູບແຕ້ມໄດ້
     .repaired-description = ພົບຂໍ້ຜິດພາດຂະນະເປີດຮູບແຕ້ມ. ກະລຸນາກວດສອບລາຍງານ; ຖ້າຂໍ້ມູນຮູບແຕ້ມໄດ້ຮັບການສ້ອມແປງແລ້ວ, ໃຫ້ບັນທຶກເປັນໄຟລ໌ໃໝ່.

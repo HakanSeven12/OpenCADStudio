@@ -444,6 +444,7 @@ gpu =
 
 recovery =
     .newer-autosave = عُثر على نسخة استرداد أحدث من هذا الرسم: { $file }. افتحها لاستعادة العمل غير المحفوظ.
+    .unsaved-autosave = A drawing that was never saved was kept from a session that ended: { $file }. Open it to get the work back.
     .opened-with-repairs = فُتح الرسم مع تقرير استرداد
     .open-failed = تعذر فتح الرسم
     .repaired-description = اكتُشفت مشكلات أثناء فتح الرسم. راجع التقرير؛ وإذا أُصلحت بيانات الرسم، فاحفظه كملف جديد.

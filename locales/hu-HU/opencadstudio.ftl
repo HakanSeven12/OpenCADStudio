@@ -437,6 +437,7 @@ gpu =
 
 recovery =
     .newer-autosave = A rajznál újabb helyreállítási másolat található: { $file }. Nyissa meg a nem mentett munka visszaállításához.
+    .unsaved-autosave = A drawing that was never saved was kept from a session that ended: { $file }. Open it to get the work back.
     .opened-with-repairs = A rajz helyreállítási jelentéssel nyílt meg
     .open-failed = A rajz nem nyitható meg
     .repaired-description = A rajz megnyitásakor problémák léptek fel. Tekintse át a jelentést; ha a rajz adatai javítva lettek, mentse új fájlba.

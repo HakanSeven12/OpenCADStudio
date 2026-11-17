@@ -7447,6 +7447,9 @@ impl OpenCADStudio {
             s.script_queue.extend(cfg.script_lines);
             Task::done(Message::ScriptPump)
         };
+        // Unsaved drawings a crashed session left behind.
+        #[cfg(not(target_arch = "wasm32"))]
+        s.recover_ended_session_autosaves();
         // An unattended script must not stop at a startup dialog.
         if !has_script {
             s.queue_startup_prompts();

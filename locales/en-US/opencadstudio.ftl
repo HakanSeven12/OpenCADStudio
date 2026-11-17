@@ -443,6 +443,7 @@ gpu =
 
 recovery =
     .newer-autosave = A recovery copy newer than this drawing was found: { $file }. Open it to get the unsaved work back.
+    .unsaved-autosave = A drawing that was never saved was kept from a session that ended: { $file }. Open it to get the work back.
     .opened-with-repairs = Drawing opened with a recovery report
     .open-failed = Drawing could not be opened
     .repaired-description = Problems were detected while opening the drawing. Review the report; if drawing data was repaired, save it as a new file.

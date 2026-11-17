@@ -444,6 +444,7 @@ gpu =
 
 recovery =
     .newer-autosave = इस ड्रॉइंग से नई एक रिकवरी प्रति मिली: { $file }। बिना सहेजा काम वापस पाने के लिए इसे खोलें।
+    .unsaved-autosave = A drawing that was never saved was kept from a session that ended: { $file }. Open it to get the work back.
     .opened-with-repairs = ड्रॉइंग पुनर्प्राप्ति रिपोर्ट के साथ खोली गई
     .open-failed = ड्रॉइंग खोली नहीं जा सकी
     .repaired-description = ड्रॉइंग खोलते समय समस्याएँ मिलीं। रिपोर्ट की समीक्षा करें; यदि ड्रॉइंग डेटा सुधारा गया है, तो उसे नई फ़ाइल के रूप में सहेजें।

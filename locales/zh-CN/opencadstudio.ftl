@@ -443,6 +443,7 @@ gpu =
 
 recovery =
     .newer-autosave = 找到比此图形更新的恢复副本：{ $file }。打开它以找回未保存的工作。
+    .unsaved-autosave = A drawing that was never saved was kept from a session that ended: { $file }. Open it to get the work back.
     .opened-with-repairs = 图形已打开，并生成修复报告
     .open-failed = 无法打开图形
     .repaired-description = 打开图形时检测到问题。请查看报告；如果图形数据已修复，请将其另存为新文件。

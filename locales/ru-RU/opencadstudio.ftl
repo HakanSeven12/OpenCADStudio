@@ -444,6 +444,7 @@ gpu =
 
 recovery =
     .newer-autosave = Найдена копия для восстановления новее этого чертежа: { $file }. Откройте её, чтобы вернуть несохранённую работу.
+    .unsaved-autosave = A drawing that was never saved was kept from a session that ended: { $file }. Open it to get the work back.
     .opened-with-repairs = Чертёж открыт с отчётом о восстановлении
     .open-failed = Не удалось открыть чертёж
     .repaired-description = При открытии чертежа обнаружены проблемы. Просмотрите отчёт; если данные чертежа были исправлены, сохраните его в новый файл.

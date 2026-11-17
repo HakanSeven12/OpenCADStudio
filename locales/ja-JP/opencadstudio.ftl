@@ -444,6 +444,7 @@ gpu =
 
 recovery =
     .newer-autosave = この図面より新しい回復用コピーが見つかりました: { $file }。開くと保存されていない作業を取り戻せます。
+    .unsaved-autosave = A drawing that was never saved was kept from a session that ended: { $file }. Open it to get the work back.
     .opened-with-repairs = 修復レポートとともに図面を開きました
     .open-failed = 図面を開けませんでした
     .repaired-description = 図面を開くときに問題が検出されました。レポートを確認し、図面データが修復された場合は新しいファイルとして保存してください。

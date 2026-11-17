@@ -5339,7 +5339,61 @@ impl OpenCADStudio {
                     .chars()
                     .map(|c| if c.is_alphanumeric() { c } else { '_' })
                     .collect();
-                folder.join(format!("OpenCADStudio_{safe}_{}.sv$", self.tabs[i].id))
+                // Tab ids start again every session: the session keeps one
+                // session's copy from replacing another's.
+                folder.join(format!(
+                    "OpenCADStudio_{safe}_{}_{}.sv$",
+                    autosave_session(),
+                    self.tabs[i].id
+                ))
+            }
+        }
+    }
+
+    /// At startup: the recovery copies of unsaved drawings whose session has
+    /// ended (a crash, a forced quit) are moved aside, so this session's
+    /// autosaves never replace them, and the command line says where each one
+    /// is. A copy of an editor still running is left alone: each session holds
+    /// a lock for as long as it runs, which the system drops however it ends.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn recover_ended_session_autosaves(&mut self) {
+        // Locks of sessions that ended with no copy left are removed here.
+        let locks = autosave_session_dir().and_then(|dir| std::fs::read_dir(dir).ok());
+        for entry in locks.into_iter().flatten().flatten() {
+            if let Some(id) = entry.file_name().to_string_lossy().strip_suffix(".lock") {
+                session_running(id);
+            }
+        }
+        let Ok(entries) = std::fs::read_dir(self.save_file_folder()) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let copy = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Some(stem) = name
+                .strip_prefix("OpenCADStudio_")
+                .and_then(|rest| rest.strip_suffix(".sv$"))
+            else {
+                continue;
+            };
+            if stem.ends_with(".ocs-recovered") {
+                continue;
+            }
+            // `<name>_<session>_<tab>`; a copy from before sessions were
+            // named has no lock to find and counts as ended.
+            let session = stem.rsplit('_').nth(1).unwrap_or_default();
+            if session_running(session) {
+                continue;
+            }
+            let kept = copy.with_file_name(format!(
+                "OpenCADStudio_{stem}.ocs-recovered.sv$"
+            ));
+            if std::fs::rename(&copy, &kept).is_ok() {
+                self.command_line.push_warning(&crate::tr!(
+                    "recovery",
+                    "unsaved-autosave",
+                    file = kept.display().to_string()
+                ));
             }
         }
     }
@@ -11796,5 +11850,58 @@ mod minimized_save_tests {
         assert!(saved.refreshed_preview.is_none());
         assert!(path.is_file());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// Folder of the session locks, one per running editor.
+#[cfg(not(target_arch = "wasm32"))]
+fn autosave_session_dir() -> Option<std::path::PathBuf> {
+    crate::config::config_dir().map(|dir| dir.join("sessions"))
+}
+
+/// This editor's session id, part of its unsaved drawings' recovery copy
+/// names. Its lock file is held from the first call until the process ends.
+#[cfg(not(target_arch = "wasm32"))]
+fn autosave_session() -> &'static str {
+    static SESSION: std::sync::OnceLock<(String, Option<std::fs::File>)> =
+        std::sync::OnceLock::new();
+    &SESSION
+        .get_or_init(|| {
+            let started = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or_default();
+            let id = format!("{:x}{started:x}", std::process::id());
+            let lock = autosave_session_dir().and_then(|dir| {
+                std::fs::create_dir_all(&dir).ok()?;
+                let file = std::fs::File::create(dir.join(format!("{id}.lock"))).ok()?;
+                file.try_lock().ok()?;
+                Some(file)
+            });
+            (id, lock)
+        })
+        .0
+}
+
+/// Whether the editor of session `id` still runs: its lock is held. A
+/// session found ended has its lock file removed.
+#[cfg(not(target_arch = "wasm32"))]
+fn session_running(id: &str) -> bool {
+    if id.is_empty() || id == autosave_session() {
+        return !id.is_empty();
+    }
+    let Some(path) = autosave_session_dir().map(|dir| dir.join(format!("{id}.lock"))) else {
+        return false;
+    };
+    let Ok(file) = std::fs::File::open(&path) else {
+        return false;
+    };
+    match file.try_lock() {
+        Err(std::fs::TryLockError::WouldBlock) => true,
+        _ => {
+            drop(file);
+            let _ = std::fs::remove_file(&path);
+            false
+        }
     }
 }

@@ -444,6 +444,7 @@ gpu =
 
 recovery =
     .newer-autosave = Tätä piirustusta uudempi palautuskopio löytyi: { $file }. Avaa se saadaksesi tallentamattoman työn takaisin.
+    .unsaved-autosave = A drawing that was never saved was kept from a session that ended: { $file }. Open it to get the work back.
     .opened-with-repairs = Piirustus avattiin palautusraportin kanssa
     .open-failed = Piirustusta ei voitu avata
     .repaired-description = Piirustusta avattaessa havaittiin ongelmia. Tarkista raportti ja tallenna piirustus uutena tiedostona, jos tietoja korjattiin.

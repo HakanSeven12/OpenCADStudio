@@ -443,6 +443,7 @@ gpu =
 
 recovery =
     .newer-autosave = Đã tìm thấy bản khôi phục mới hơn bản vẽ này: { $file }. Mở nó để lấy lại phần việc chưa lưu.
+    .unsaved-autosave = A drawing that was never saved was kept from a session that ended: { $file }. Open it to get the work back.
     .opened-with-repairs = Bản vẽ đã mở kèm báo cáo phục hồi
     .open-failed = Không thể mở bản vẽ
     .repaired-description = Đã phát hiện sự cố khi mở bản vẽ. Xem lại báo cáo; nếu dữ liệu bản vẽ đã được sửa chữa, hãy lưu nó thành một tệp mới.

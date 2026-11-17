@@ -444,6 +444,7 @@ gpu =
 
 recovery =
     .newer-autosave = Eine Wiederherstellungskopie, die neuer als diese Zeichnung ist, wurde gefunden: { $file }. Öffnen Sie sie, um die nicht gespeicherte Arbeit zurückzuholen.
+    .unsaved-autosave = A drawing that was never saved was kept from a session that ended: { $file }. Open it to get the work back.
     .opened-with-repairs = Zeichnung mit einem Wiederherstellungsbericht geöffnet
     .open-failed = Zeichnung konnte nicht geöffnet werden
     .repaired-description = Beim Öffnen der Zeichnung wurden Probleme erkannt. Prüfen Sie den Bericht; wenn Zeichnungsdaten repariert wurden, speichern Sie die Zeichnung als neue Datei.

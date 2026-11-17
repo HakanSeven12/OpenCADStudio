@@ -446,6 +446,7 @@ gpu =
 
 recovery =
     .newer-autosave = Byla nalezena záložní kopie novější než tento výkres: { $file }. Otevřete ji a obnovte neuloženou práci.
+    .unsaved-autosave = A drawing that was never saved was kept from a session that ended: { $file }. Open it to get the work back.
     .opened-with-repairs = Výkres byl otevřen s opravami
     .open-failed = Výkres se nepodařilo otevřít
     .repaired-description = Při otevírání výkresu byly zjištěny problémy. Projděte zprávu a pokud byla data opravena, uložte výkres jako nový soubor.

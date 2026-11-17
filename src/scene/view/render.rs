@@ -4501,7 +4501,7 @@ impl Scene {
         verts
     }
 
-    fn annotation_context_highlight_wires(
+    pub(in crate::scene) fn annotation_context_highlight_wires(
         &self,
         inst: &ViewportInstance,
         selected_part: bool,

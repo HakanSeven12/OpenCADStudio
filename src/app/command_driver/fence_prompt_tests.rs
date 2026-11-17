@@ -269,3 +269,88 @@ fn escape_drops_a_path_and_its_highlights() {
         .is_empty());
     assert!(!selected(&app, inside));
 }
+
+const BOX_PROMPT: &str = "Specify opposite corner or [Fence/WPolygon/CPolygon]:";
+
+fn option_keywords(app: &OpenCADStudio) -> Vec<String> {
+    app.command_line
+        .step_options()
+        .iter()
+        .map(|option| option.keyword.clone())
+        .collect()
+}
+
+fn pinned_prompt(app: &OpenCADStudio) -> Option<String> {
+    app.command_line
+        .history
+        .iter()
+        .rev()
+        .find(|entry| entry.pinned)
+        .map(|entry| entry.text.clone())
+}
+
+/// Whether the line the command line keeps and hangs the option buttons on
+/// is the box prompt.
+fn box_prompt_pinned(app: &OpenCADStudio) -> bool {
+    pinned_prompt(app).is_some_and(|text| text.ends_with(BOX_PROMPT))
+}
+
+#[test]
+fn a_clicked_box_asks_with_the_paths_as_its_options() {
+    let (mut app, _, _, _) = drawing();
+    click(&mut app, 2.0, 2.0);
+    // The prompt stays, its three paths shown the way a command step's are.
+    assert!(box_prompt_pinned(&app), "{:?}", pinned_prompt(&app));
+    assert_eq!(option_keywords(&app), ["F", "WP", "CP"]);
+    // Once the path is running the prompt and the options are its own.
+    feed(&mut app, "F");
+    assert!(!box_prompt_pinned(&app), "{:?}", pinned_prompt(&app));
+    assert_ne!(option_keywords(&app), ["F", "WP", "CP"]);
+    let _ = app.update(Message::CommandEscape);
+    assert!(option_keywords(&app).is_empty());
+}
+
+#[test]
+fn letters_typed_at_a_clicked_box_open_no_command_suggestions() {
+    let (mut app, _, _, _) = drawing();
+    assert!(app.autocomplete_allowed());
+    click(&mut app, 2.0, 2.0);
+    // F answers the prompt here; it is not the start of FILLET.
+    let _ = app.update(Message::CommandInput("F".to_string()));
+    assert!(!app.autocomplete_allowed());
+    // Escape takes the typed letter first and the box second, as anywhere.
+    let _ = app.update(Message::CommandEscape);
+    assert!(app.command_line.input.is_empty());
+    assert!(!app.autocomplete_allowed());
+    let _ = app.update(Message::CommandEscape);
+    assert!(app.autocomplete_allowed());
+}
+
+#[test]
+fn escape_at_a_clicked_box_takes_its_options_away() {
+    let (mut app, _, _, _) = drawing();
+    click(&mut app, 2.0, 2.0);
+    assert_eq!(option_keywords(&app), ["F", "WP", "CP"]);
+    let _ = app.update(Message::CommandEscape);
+    assert!(option_keywords(&app).is_empty());
+    assert!(!box_prompt_pinned(&app), "{:?}", pinned_prompt(&app));
+}
+
+#[test]
+fn a_path_button_at_a_clicked_box_starts_from_the_clicked_point() {
+    let (mut app, inside, crossing, away) = drawing();
+    click(&mut app, 2.0, 2.0);
+    let _ = app.update(Message::CommandOptionPick("CP".to_string()));
+    click(&mut app, 10.0, 2.0);
+    click(&mut app, 10.0, 8.0);
+    click(&mut app, 2.0, 8.0);
+    feed(&mut app, "");
+    assert!(
+        app.tabs[app.active_tab].active_cmd.is_none(),
+        "{}",
+        history(&app)
+    );
+    assert!(selected(&app, inside), "{}", history(&app));
+    assert!(selected(&app, crossing));
+    assert!(!selected(&app, away));
+}

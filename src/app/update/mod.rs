@@ -1152,16 +1152,27 @@ impl OpenCADStudio {
             }),
             other => other,
         };
+        // A clicked box waiting for its opposite corner asks for it, with the
+        // paths that may take its place as its options.
+        let box_step = self.box_corner_step();
+        let prompt = match &box_step {
+            Some((text, _)) => Some(text.clone()),
+            None => prompt,
+        };
         // After each "N found" line the selection step asks again, under it.
         if std::mem::take(&mut self.selection_reprompt) && gathering {
             self.command_line.set_step_prompt(None);
         }
         self.command_line.set_step_prompt(prompt);
         // Mirror the step's clickable options so they render as buttons (#304).
-        let opts = self.tabs[self.active_tab]
-            .active_cmd
-            .as_ref()
-            .map(|c| c.options())
+        let opts = box_step
+            .map(|(_, options)| options)
+            .or_else(|| {
+                self.tabs[self.active_tab]
+                    .active_cmd
+                    .as_ref()
+                    .map(|c| c.options())
+            })
             .or_else(|| {
                 self.graphic_attributes
                     .pending_fill_close
@@ -4482,6 +4493,7 @@ impl OpenCADStudio {
                 }
                 let i = self.active_tab;
                 if !self.command_line.history_navigation_active()
+                    && !self.box_corner_prompt_pending()
                     && (self.tabs[i].active_cmd.is_none()
                         || self.command_line.has_contextual_suggestions())
                     && self.command_line.autocomplete_prev()
@@ -4510,6 +4522,7 @@ impl OpenCADStudio {
                 }
                 let i = self.active_tab;
                 if !self.command_line.history_navigation_active()
+                    && !self.box_corner_prompt_pending()
                     && (self.tabs[i].active_cmd.is_none()
                         || self.command_line.has_contextual_suggestions())
                     && self.command_line.autocomplete_next()
@@ -4823,6 +4836,15 @@ impl OpenCADStudio {
                 }
                 if kw.is_empty() {
                     return self.feed_command(crate::command::StepInput::Enter);
+                }
+                // A path picked at a clicked box starts from the clicked
+                // point, as the typed word does.
+                if self.box_corner_prompt_pending() {
+                    self.command_line.input = kw.clone();
+                    if let Some(task) = self.try_box_path_keyword() {
+                        return task;
+                    }
+                    self.command_line.input.clear();
                 }
                 self.feed_active_cmd(&kw)
             }

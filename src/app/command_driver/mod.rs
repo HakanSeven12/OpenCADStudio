@@ -600,6 +600,9 @@ impl OpenCADStudio {
         // Task produced by a command the arm dispatches; it must reach the
         // runtime or messages such as a chosen render mode are dropped.
         let mut dispatched = Task::none();
+        // SELECT, or a path picked from a clicked box, leaves a plain
+        // selection behind.
+        let mut selection_left = false;
         match result {
             CmdResult::QSelectSample {
                 state,
@@ -1199,6 +1202,8 @@ impl OpenCADStudio {
                 crossing,
             } => return self.handle_select_by_path(path, closed, crossing),
             CmdResult::Relaunch(cmd, handles) => {
+                selection_left =
+                    cmd == "_SELECT_DONE" || cmd == crate::modules::draw::select::IMPLIED_PATH_DONE;
                 dispatched = self.handle_relaunch(cmd, handles);
             }
             CmdResult::Dispatch(cmd) => {
@@ -1512,7 +1517,10 @@ impl OpenCADStudio {
         // The rich text canvas owns keyboard editing itself. Leaving the
         // hidden command input focused would make it consume Left/Right before
         // the editor can handle them.
-        let focus = if self.mtext_editor.is_some() {
+        // A selection left for the next shortcut is in the same case: a
+        // focused command field would take Ctrl+C for itself, as it does
+        // after SELECTALL.
+        let focus = if self.mtext_editor.is_some() || selection_left {
             self.unfocus_widgets()
         } else if self.text_inline.is_some() {
             // The in-place TEXT editor needs keyboard focus on its own field.

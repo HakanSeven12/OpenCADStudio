@@ -3385,7 +3385,6 @@ bg={bg_ms:.1}ms n={view_count}"
         }
         let workspace: Element<'_, Message> = row(parts).width(Fill).height(Fill).into();
 
-        let workspace = self.dock_overlay(workspace, tab);
         let command_line = self.command_line.view(
             allow_autocomplete,
             dyn_capturing,
@@ -3427,6 +3426,9 @@ bg={bg_ms:.1}ms n={view_count}"
                 .height(Fill)
                 .into()
         };
+        // Floating pallets draw over the command line, so the bottom rows of
+        // a tall one (Layer Manager with many layers) are not hidden by it.
+        let center_stack = self.dock_overlay(center_stack, tab);
 
         let center_stack: Element<'_, Message> = if self.command_history_resizing {
             mouse_area(center_stack)

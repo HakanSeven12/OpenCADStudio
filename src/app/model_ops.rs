@@ -2451,9 +2451,8 @@ impl super::OpenCADStudio {
     }
 
     /// SPLINEFIT — replace the selected polyline with a cubic spline that passes
-    /// through its vertices. Control points come from the Catmull-Rom → cubic
-    /// Bézier formula (the curve provably interpolates each vertex), with a
-    /// clamped piecewise-Bézier knot vector the spline renderer reads directly.
+    /// through its vertices: the kernel's C² interpolation, so the control
+    /// curve is the one its stored fit points describe.
     pub(super) fn fit_spline(&mut self) -> Task<Message> {
         use document::entities::Spline;
         use document::types::Vector3;
@@ -2493,32 +2492,26 @@ impl super::OpenCADStudio {
             return Task::none();
         }
         let n = fit.len();
-        let m = n - 1; // Bézier segments
-        let p = |k: usize| glam::DVec3::new(fit[k][0], fit[k][1], fit[k][2]);
-        // Catmull-Rom → cubic Bézier control points: [P0, b1,b2,P1, b1,b2,P2, …].
-        let mut ctrl: Vec<Vector3> = Vec::with_capacity(3 * m + 1);
-        ctrl.push(Vector3::new(fit[0][0], fit[0][1], fit[0][2]));
-        for seg in 0..m {
-            let p0 = p(seg);
-            let p1 = p(seg + 1);
-            let prev = if seg > 0 { p(seg - 1) } else { p0 };
-            let next = if seg + 2 <= m { p(seg + 2) } else { p1 };
-            let b1 = p0 + (p1 - prev) / 6.0;
-            let b2 = p1 - (next - p0) / 6.0;
-            ctrl.push(Vector3::new(b1.x, b1.y, b1.z));
-            ctrl.push(Vector3::new(b2.x, b2.y, b2.z));
-            ctrl.push(Vector3::new(p1.x, p1.y, p1.z));
-        }
-        // Clamped piecewise-Bézier knots (degree 3): len == ctrl.len()+degree+1.
-        let mut knots: Vec<f64> = vec![0.0; 4];
-        for s in 1..m {
-            knots.extend_from_slice(&[s as f64, s as f64, s as f64]);
-        }
-        knots.extend_from_slice(&[m as f64; 4]);
+        // The C² cubic through every vertex, chord-length parameterised: the
+        // same interpolation the stored fit points describe.
+        let Some(curve) = kernel::space::NurbsCurve3::interpolate_fit(
+            &fit,
+            None,
+            None,
+            kernel::space::Parameterization::Chord,
+        ) else {
+            self.command_line
+                .push_error(crate::t!("SPLINEFIT: need at least 3 points.").as_ref());
+            return Task::none();
+        };
         let mut spl = Spline::new();
         spl.degree = 3;
-        spl.control_points = ctrl;
-        spl.knots = knots;
+        spl.control_points = curve
+            .control_points()
+            .iter()
+            .map(|q| Vector3::new(q[0], q[1], q[2]))
+            .collect();
+        spl.knots = curve.knots().to_vec();
         spl.fit_points = fit.iter().map(|q| Vector3::new(q[0], q[1], q[2])).collect();
         // flags.rational defaults to false (non-rational) — exactly what we want.
         self.push_undo_snapshot(i, "SPLINEFIT");

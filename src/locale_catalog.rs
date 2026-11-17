@@ -385,7 +385,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Tolerance..." => Some(("menu-labels", "tolerance")),
         "Tool Palettes" => Some(("menu-labels", "tool-palettes")),
         "Tool Palettes..." => Some(("menu-labels", "tool-palettes-2")),
-        "Toolbars..." => Some(("menu-labels", "toolbars")),
+        "Toolbars" => Some(("menu-labels", "toolbars")),
         "UCS Icon" => Some(("menu-labels", "ucs-icon")),
         "Units..." => Some(("menu-labels", "units")),
         "View Plot and Publish Details..." => Some(("menu-labels", "view-plot-and-publish-details")),

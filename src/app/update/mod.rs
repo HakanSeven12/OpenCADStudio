@@ -1328,6 +1328,9 @@ impl OpenCADStudio {
                 let float = Task::none();
                 if Some(id) == self.main_window {
                     self.spacemouse_focused = focused;
+                    if !focused {
+                        self.release_pointer_navigation();
+                    }
                 }
                 // Key tips close when the window loses focus, and an Alt
                 // held while it left or arrived (Alt+Tab, window activation)
@@ -3968,6 +3971,7 @@ impl OpenCADStudio {
                 self.doc_tab_layouts = None;
                 if idx != self.active_tab {
                     self.close_table_cell_editor();
+                    self.release_pointer_navigation();
                 }
                 if self.dialog_open(super::ModalKind::Recovery) {
                     return Task::none();
@@ -4177,6 +4181,7 @@ impl OpenCADStudio {
                 }
                 self.hovered_doc_tab = None;
                 self.doc_tab_layouts = None;
+                self.release_pointer_navigation();
                 // Resolve the stable id when the message is handled, not when
                 // it was built: an earlier close in the same batch may have
                 // shifted or removed the tab a captured index referred to.

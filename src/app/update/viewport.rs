@@ -5226,6 +5226,24 @@ impl OpenCADStudio {
         self.nav_drag_by_button = true;
     }
 
+    /// Drops every pointer navigation in flight. Its release can go missing
+    /// when the window loses focus or the drawing it began in is switched
+    /// away or closed, leaving the view following the pointer (#3195).
+    pub(in crate::app) fn release_pointer_navigation(&mut self) {
+        for tab in &self.tabs {
+            let mut sel = tab.scene.selection.borrow_mut();
+            sel.input.middle_down = false;
+            sel.input.middle_last_pos = None;
+            sel.orbit.pivot = None;
+        }
+        self.nav_held = Default::default();
+        self.nav_claimed = Default::default();
+        self.nav_pending = None;
+        self.nav_middle_press = None;
+        self.nav_drag_by_button = false;
+        self.nav_zoom_latched = false;
+    }
+
     fn nav_end_drag(&mut self, i: usize) {
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
         sel.input.middle_down = false;

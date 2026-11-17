@@ -1117,3 +1117,163 @@ fn a_formula_entered_on_the_command_line_is_stored_as_a_formula_field() {
     assert_eq!(formula_code(&app, handle), None);
     assert_eq!(source(&app, handle), "before");
 }
+
+/// A copy of a table with a formula cell computes its own
+/// formula; editing a number in the copy updates the copy's sum.
+#[test]
+fn copied_table_formula_follows_the_copys_cells() {
+    let (mut app, handle) = fixture("1");
+    let i = app.active_tab;
+    let edit = |app: &mut OpenCADStudio, at: DVec3, text: &str| {
+        let _ = app.dispatch_command("TABLEDIT");
+        let _ = app.feed_command(crate::command::StepInput::Point(at));
+        assert!(app.table_cell_editor.is_some(), "editor opens at {at:?}");
+        app.mtext_select_all();
+        app.mtext_type(text);
+        assert!(app.commit_table_cell_editor());
+    };
+    edit(&mut app, DVec3::new(30.0, -5.0, 0.0), "2");
+    edit(&mut app, DVec3::new(50.0, -5.0, 0.0), "=SUM(A1:B1)");
+    let shown = |app: &OpenCADStudio, h: Handle| -> (String, bool) {
+        let doc = &app.tabs[app.active_tab].scene.document;
+        let table = table_in(doc, h);
+        (
+            table.cell(0, 2).unwrap().contents[0].value.display().to_string(),
+            picture_texts(doc, table)
+                .unwrap_or_default()
+                .iter()
+                .any(|t| t.starts_with("\"12\"")),
+        )
+    };
+    assert_eq!(shown(&app, handle).0, "3");
+
+    let copies = app.tabs[i].scene.copy_entities(
+        &[handle],
+        &crate::entities::transform::EntityTransform::Translate(DVec3::new(0.0, -100.0, 0.0)),
+    );
+    let copy = copies[0];
+    edit(&mut app, DVec3::new(10.0, -105.0, 0.0), "10");
+    assert_eq!(
+        table_in(&app.tabs[i].scene.document, copy).cell_text(0, 0),
+        Some("10"),
+        "the copy's A1 was edited"
+    );
+    let (copy_sum, copy_picture) = shown(&app, copy);
+    assert_eq!(copy_sum, "12", "copy's sum");
+    assert!(copy_picture, "copy's picture shows 12");
+    assert_eq!(shown(&app, handle).0, "3", "source's sum");
+    // And the other way round: the source's edit leaves the copy alone.
+    edit(&mut app, DVec3::new(10.0, -5.0, 0.0), "5");
+    assert_eq!(shown(&app, handle).0, "7", "source's sum after its edit");
+    assert_eq!(shown(&app, copy).0, "12", "copy's sum after the source's edit");
+}
+
+/// An associative array of a formula table, exploded: every
+/// table it leaves computes its own formula from its own cells.
+#[test]
+fn exploded_array_tables_keep_their_own_formulas() {
+    let (mut app, handle) = fixture("1");
+    let i = app.active_tab;
+    let edit = |app: &mut OpenCADStudio, at: DVec3, text: &str| {
+        let _ = app.dispatch_command("TABLEDIT");
+        let _ = app.feed_command(crate::command::StepInput::Point(at));
+        assert!(app.table_cell_editor.is_some(), "editor opens at {at:?}");
+        app.mtext_select_all();
+        app.mtext_type(text);
+        assert!(app.commit_table_cell_editor());
+    };
+    edit(&mut app, DVec3::new(30.0, -5.0, 0.0), "2");
+    edit(&mut app, DVec3::new(50.0, -5.0, 0.0), "=SUM(A1:B1)");
+    let top_tables = |app: &OpenCADStudio| -> Vec<Handle> {
+        let doc = &app.tabs[app.active_tab].scene.document;
+        doc.entities()
+            .filter(|e| matches!(e, EntityType::Table(_)))
+            .map(|e| e.common().handle)
+            .filter(|h| {
+                doc.block_records
+                    .iter()
+                    .all(|record| record.is_layout() || !record.entity_handles.contains(h))
+            })
+            .collect()
+    };
+    let before: Vec<Handle> = app.tabs[i]
+        .scene
+        .document
+        .entities()
+        .filter(|e| matches!(e, EntityType::Insert(_)))
+        .map(|e| e.common().handle)
+        .collect();
+    crate::scene::assoc_array::create_from_spec(
+        &mut app.tabs[i].scene,
+        &[handle],
+        DVec3::ZERO,
+        &crate::scene::assoc_array::AssocArraySpec::Rectangular {
+            columns: 2,
+            rows: 1,
+            column_spacing: 200.0,
+            row_spacing: 50.0,
+        },
+    )
+    .expect("the array is made");
+    let array: Vec<Handle> = app.tabs[i]
+        .scene
+        .document
+        .entities()
+        .filter(|e| matches!(e, EntityType::Insert(_)))
+        .map(|e| e.common().handle)
+        .filter(|h| !before.contains(h))
+        .filter(|h| {
+            let doc = &app.tabs[i].scene.document;
+            doc.block_records
+                .iter()
+                .all(|record| record.is_layout() || !record.entity_handles.contains(h))
+        })
+        .collect();
+    assert_eq!(array.len(), 1, "one array insert");
+    // EXPLODE until tables are top-level (an array may explode into its items).
+    for _ in 0..2 {
+        if top_tables(&app).len() >= 2 {
+            break;
+        }
+        let selection: Vec<Handle> = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter(|e| matches!(e, EntityType::Insert(_)))
+            .map(|e| e.common().handle)
+            .filter(|h| !before.contains(h))
+            .filter(|h| {
+                let doc = &app.tabs[i].scene.document;
+                doc.block_records
+                    .iter()
+                    .all(|record| record.is_layout() || !record.entity_handles.contains(h))
+            })
+            .collect();
+        app.tabs[i].scene.selected.clear();
+        app.tabs[i].scene.selected.extend(selection);
+        let _ = app.dispatch_command("EXPLODE");
+    }
+    let mut tables = top_tables(&app);
+    assert_eq!(tables.len(), 2, "two tables after EXPLODE");
+    let x_of = |app: &OpenCADStudio, h: Handle| {
+        table_in(&app.tabs[app.active_tab].scene.document, h)
+            .insertion_point
+            .x
+    };
+    tables.sort_by(|a, b| x_of(&app, *a).total_cmp(&x_of(&app, *b)));
+    let sum = |app: &OpenCADStudio, h: Handle| {
+        table_in(&app.tabs[app.active_tab].scene.document, h)
+            .cell(0, 2)
+            .unwrap()
+            .contents[0]
+            .value
+            .display()
+            .to_string()
+    };
+    assert_eq!(sum(&app, tables[0]), "3", "first item's sum after EXPLODE");
+    assert_eq!(sum(&app, tables[1]), "3", "second item's sum after EXPLODE");
+    edit(&mut app, DVec3::new(10.0, -5.0, 0.0), "10");
+    edit(&mut app, DVec3::new(210.0, -5.0, 0.0), "20");
+    assert_eq!(sum(&app, tables[0]), "12", "first item follows its own A1");
+    assert_eq!(sum(&app, tables[1]), "22", "second item follows its own A1");
+}

@@ -132,7 +132,7 @@ fn a_changed_value_says_what_was_stored_and_apply_says_what_it_does() {
 }
 
 #[test]
-fn the_columns_sit_side_by_side_and_stack_in_a_narrow_window() {
+fn the_preview_sits_above_the_cards_and_they_stack_in_a_narrow_window() {
     let mut app = manager();
     let _ = app.update(Message::TextStyleEdit {
         field: "height",
@@ -141,7 +141,10 @@ fn the_columns_sit_side_by_side_and_stack_in_a_narrow_window() {
     let mut wide = window(&app, 1280.0);
     let font = shown(&mut wide, "Font style");
     let preview = shown(&mut wide, "Sample text");
-    assert!(preview.x > font.x + font.width, "{font:?} {preview:?}");
+    assert!(preview.y < font.y, "{font:?} {preview:?}");
+    // Two columns: the effects card comes under the font card.
+    let effects = shown(&mut wide, "Width factor");
+    assert!(effects.y > font.y && (effects.x - font.x).abs() < 40.0, "{font:?} {effects:?}");
     shown(&mut wide, "Set Current");
     drop(wide);
 
@@ -282,9 +285,9 @@ fn a_long_preview_caption_wraps_inside_the_box() {
     let mut ui = window(&app, 1280.0);
     let label = shown(&mut ui, "Preview");
     let text = shown(&mut ui, &caption);
-    // The right column is 320 wide with 14 on each side.
-    assert!(text.x + text.width <= label.x + 292.0, "{text:?} {label:?}");
-    assert!(text.height > 14.0, "one line: {text:?}");
+    // The preview spans the editor, inside the window.
+    assert!(text.x >= label.x, "{text:?} {label:?}");
+    assert!(text.x + text.width <= 1280.0, "{text:?}");
 }
 
 /// Test 10: the window draws, wide and narrow. With

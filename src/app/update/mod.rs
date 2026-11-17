@@ -15794,8 +15794,14 @@ impl OpenCADStudio {
             // ── MLeaderStyle Dialog ───────────────────────────────────────────
             Message::MLeaderStyleDialogOpen => self.on_mleader_style_dialog_open(),
             Message::MLeaderStyleDlg(message) => self.on_mleader_style_dlg(message),
-            Message::MLeaderStyleEdit { field, value } => self.on_mleader_style_edit(field, value),
-            Message::MLeaderStyleToggle(field) => self.on_mleader_style_toggle(field),
+            Message::MLeaderStyleEdit { field, value } => {
+                self.mls_mark_dirty();
+                self.on_mleader_style_edit(field, value)
+            }
+            Message::MLeaderStyleToggle(field) => {
+                self.mls_mark_dirty();
+                self.on_mleader_style_toggle(field)
+            }
             Message::MLeaderColorMore(field) => {
                 self.mls_color_open = if self.mls_color_open == Some(field) {
                     None
@@ -15805,9 +15811,11 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::MLeaderStyleSetEnum { field, value } => {
+                self.mls_mark_dirty();
                 self.on_mleader_style_set_enum(field, value)
             }
             Message::MLeaderStyleLineWeightChanged(line_weight) => {
+                self.mls_mark_dirty();
                 self.mls_color_open = None;
                 let i = self.active_tab;
                 if let Some(s) = self.mleaderstyle_mut(i) {
@@ -15816,6 +15824,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::MLeaderStyleSetHandle { field, value } => {
+                self.mls_mark_dirty();
                 self.on_mleader_style_set_handle(field, value)
             }
 

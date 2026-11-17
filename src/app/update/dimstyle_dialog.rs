@@ -524,6 +524,7 @@ impl OpenCADStudio {
         self.active_modal = Some(ModalKind::DimStyle);
         // Linetypes loaded from Select Linetype belong to the session too.
         self.style_stage_begin_linetypes();
+        self.ds_sync_edit();
         Task::none()
     }
 
@@ -541,7 +542,6 @@ impl OpenCADStudio {
             || d.load.take().is_some()
             || d.pick.take().is_some()
             || d.create.take().is_some()
-            || d.edit.take().is_some()
             || d.compare.take().is_some()
         {
             d.open_list = None;
@@ -736,6 +736,7 @@ impl OpenCADStudio {
             dimtaln: extras.dimtaln,
             draft,
             tab: 0,
+            dirty: false,
         });
         self.dsd.context = None;
         self.dsd.open_list = None;
@@ -753,24 +754,112 @@ impl OpenCADStudio {
         }
     }
 
+    /// The settings under the preview always belong to the selected entry:
+    /// a face that no longer matches it is dropped and the selected style's
+    /// (or the current style's overrides) opened.
+    fn ds_sync_edit(&mut self) {
+        let d = &self.dsd;
+        if d.compare.is_some() || d.create.is_some() {
+            return;
+        }
+        let selected_handle = self.ds_style(&self.dimstyle_selected).map(|s| s.handle);
+        let current_selected = self.dimstyle_selected.eq_ignore_ascii_case(&self.ds_current());
+        let keep = match d.edit.as_ref().map(|e| &e.mode) {
+            None => false,
+            Some(Mode::New(_)) => true,
+            Some(Mode::Override) => d.overrides_selected || current_selected,
+            Some(Mode::Modify) => {
+                !d.overrides_selected
+                    && d.edit.as_ref().map(|e| e.draft.handle) == selected_handle
+            }
+        };
+        if keep {
+            // A rename keeps the face; its caption follows.
+            if let Some(e) = self.dsd.edit.as_mut().filter(|e| e.mode == Mode::Modify) {
+                e.name = ui::display_name(&self.dimstyle_selected);
+            }
+            return;
+        }
+        self.dsd.edit = None;
+        if self.dsd.overrides_selected {
+            if let (Some(style), Some(extras)) = (self.ds_overridden(), self.ds_overridden_extras()) {
+                let name = style.name.clone();
+                self.ds_begin_edit(Mode::Override, name, style, extras);
+            }
+        } else if let Some(style) = self.ds_style(&self.dimstyle_selected).cloned() {
+            let extras = dim_style_extras(&self.tabs[self.active_tab].scene.document, style.handle);
+            let name = ui::display_name(&self.dimstyle_selected);
+            self.ds_begin_edit(Mode::Modify, name, style, extras);
+        }
+        // The face's tab survives a change of style.
+        if let (Some(e), Some(tab)) = (self.dsd.edit.as_mut(), self.dsd.last_tab) {
+            e.tab = tab;
+        }
+    }
+
+    /// Leaving the selected entry applies what its settings changed;
+    /// `Some` when a value is refused and the selection must stay.
+    fn ds_apply_before_leaving(&mut self) -> Option<Task<Message>> {
+        let pending = self
+            .dsd
+            .edit
+            .as_ref()
+            .is_some_and(|e| e.dirty || matches!(e.mode, Mode::New(_)));
+        if !pending {
+            return None;
+        }
+        let task = self.ds_ok();
+        self.dsd.edit.is_some().then_some(task)
+    }
+
     pub(super) fn on_dim_style_dlg(&mut self, message: DsMsg) -> Task<Message> {
+        let changes_value = matches!(
+            message,
+            DsMsg::Text(..)
+                | DsMsg::Set(..)
+                | DsMsg::Toggle(..)
+                | DsMsg::Color(..)
+                | DsMsg::Arrow(..)
+                | DsMsg::Linetype(..)
+                | DsMsg::Lineweight(..)
+                | DsMsg::PickOk
+        );
+        let task = self.on_dim_style_dlg_inner(message);
+        if let Some(e) = self.dsd.edit.as_mut() {
+            e.dirty |= changes_value;
+            self.dsd.last_tab = Some(e.tab);
+        }
+        self.ds_sync_edit();
+        task
+    }
+
+    fn on_dim_style_dlg_inner(&mut self, message: DsMsg) -> Task<Message> {
         let i = self.active_tab;
         match message {
             DsMsg::Select(name) => {
-                if self.dsd.edit.is_none() {
-                    self.dimstyle_selected = name;
-                    self.dsd.overrides_selected = false;
-                    self.dsd.context = None;
+                if let Some(refused) = self.ds_apply_before_leaving() {
+                    return refused;
                 }
+                self.dimstyle_selected = name;
+                self.dsd.overrides_selected = false;
+                self.dsd.context = None;
+                self.dsd.edit = None;
             }
             DsMsg::SelectOverrides => {
+                if let Some(refused) = self.ds_apply_before_leaving() {
+                    return refused;
+                }
                 self.dimstyle_selected = self.ds_current();
                 self.dsd.overrides_selected = true;
                 self.dsd.context = None;
+                self.dsd.edit = None;
             }
             DsMsg::ListFilter(in_use) => self.dsd.in_use_only = in_use,
             DsMsg::HideXrefs(hide) => self.dsd.list_xrefs = !hide,
             DsMsg::Context(name) => {
+                if let Some(refused) = self.ds_apply_before_leaving() {
+                    return refused;
+                }
                 self.dsd.context = if self.dsd.context == name { None } else { name };
                 match self.dsd.context.clone() {
                     Some(name) if name == ui::OVERRIDES => {
@@ -895,6 +984,9 @@ impl OpenCADStudio {
                 }
             }
             DsMsg::New => {
+                if let Some(refused) = self.ds_apply_before_leaving() {
+                    return refused;
+                }
                 let start = if self.dsd.overrides_selected {
                     self.ds_current()
                 } else {
@@ -959,6 +1051,9 @@ impl OpenCADStudio {
                 }
             }
             DsMsg::Override => {
+                if let Some(refused) = self.ds_apply_before_leaving() {
+                    return refused;
+                }
                 // Override… changes the current style only.
                 if !self.dsd.overrides_selected
                     && !self.dimstyle_selected.eq_ignore_ascii_case(&self.ds_current())

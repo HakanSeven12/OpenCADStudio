@@ -78,6 +78,12 @@ pub struct Scaffold<'a, 'b> {
     pub on_context: Option<fn(String) -> Message>,
     /// The style whose actions show under it, and those actions.
     pub context_menu: Option<(&'b str, Vec<(Cow<'static, str>, Option<Message>)>)>,
+    /// A manager whose list nests entries (family members, overrides)
+    /// draws its own; it replaces the plain rows and the in-use filter.
+    pub list: Option<Element<'a, Message>>,
+    /// Manager-specific actions after New / Copy / Delete (Override…,
+    /// Compare…); `None` leaves one off.
+    pub extra_actions: Vec<(Cow<'static, str>, Option<Message>)>,
     pub editor: Element<'a, Message>,
 }
 
@@ -148,6 +154,9 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
             false,
             compact,
         ));
+    }
+    for (caption, message) in s.extra_actions {
+        bar = bar.push(tb_button_maybe(caption, message.filter(|_| editable), false));
     }
     let mut bar = bar.push(Space::new().width(width));
     if let Some(reason) = s.apply_blocked {
@@ -237,44 +246,54 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
             .into(),
         None => Space::new().height(0).into(),
     };
-    let list_panel = container(
-        column![
-            text(t!("Styles")).size(10).style(muted_text_style),
-            filter,
-            // The scrollbar gets its own gutter instead of covering the counts.
-            container({
-                let list = scrollable(column(rows).spacing(1))
-                    .spacing(2)
-                    .height(height);
-                match s.on_list_scroll {
-                    Some(on_scroll) => list.id(linetype_list_id()).on_scroll(on_scroll),
-                    None => list,
-                }
-            })
-            .style(|theme: &Theme| {
-                let palette = theme.palette();
-                container::Style {
-                    background: Some(Background::Color(palette.background.weak.color)),
-                    border: Border {
-                        color: palette.background.neutral.color,
-                        width: 1.0,
-                        radius: 3.0.into(),
-                    },
-                    ..Default::default()
-                }
-            })
-            .width(width)
-            .height(height)
-            .padding(2),
-            text(t!("Double-click a name to rename it."))
-                .size(10)
-                .style(muted_text_style),
-        ]
-        .spacing(4)
-        .height(height),
-    )
-    // A list with counts needs room for a name and the count beside it.
-    .width(if s.rows.is_some() { 240 } else { 170 })
+    let custom_list = s.list.is_some();
+    let list_panel = if let Some(list) = s.list {
+        container(
+            column![text(t!("Styles")).size(10).style(muted_text_style), list]
+                .spacing(4)
+                .height(height),
+        )
+    } else {
+        container(
+            column![
+                text(t!("Styles")).size(10).style(muted_text_style),
+                filter,
+                // The scrollbar gets its own gutter instead of covering the counts.
+                container({
+                    let list = scrollable(column(rows).spacing(1))
+                        .spacing(2)
+                        .height(height);
+                    match s.on_list_scroll {
+                        Some(on_scroll) => list.id(linetype_list_id()).on_scroll(on_scroll),
+                        None => list,
+                    }
+                })
+                .style(|theme: &Theme| {
+                    let palette = theme.palette();
+                    container::Style {
+                        background: Some(Background::Color(palette.background.weak.color)),
+                        border: Border {
+                            color: palette.background.neutral.color,
+                            width: 1.0,
+                            radius: 3.0.into(),
+                        },
+                        ..Default::default()
+                    }
+                })
+                .width(width)
+                .height(height)
+                .padding(2),
+                text(t!("Double-click a name to rename it."))
+                    .size(10)
+                    .style(muted_text_style),
+            ]
+            .spacing(4)
+            .height(height),
+        )
+    }
+    // A list with counts, or a manager's own list, needs room for a name and
+    // what it shows beside it.
+    .width(if s.rows.is_some() || custom_list { 240 } else { 170 })
     .height(height)
     .padding(iced::Padding {
         top: 12.0,

@@ -15,6 +15,12 @@
 use std::hint::black_box;
 use std::time::Instant;
 
+// Match the Windows app's allocator (src/main.rs) so the bench measures the
+// same alloc/dealloc cost the app pays; other targets keep the system heap.
+#[cfg(target_os = "windows")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use document::entities::{Line, LwPolyline, LwVertex, Spline, Text};
 use document::types::{Vector2, Vector3};
 use document::EntityType;

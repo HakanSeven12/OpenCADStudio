@@ -4556,7 +4556,22 @@ DEAD
                 .color,
             document::types::Color::Index(4)
         );
-        assert!(app.tabs[i].scene.replay_since(geometry_before).is_none());
+        // The edit invalidates the member and the INSERT that shows its block,
+        // not the whole drawing.
+        let insert = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| {
+                matches!(entity, document::EntityType::Insert(_)).then(|| entity.common().handle)
+            })
+            .expect("block insert");
+        let changes = app.tabs[i]
+            .scene
+            .replay_since(geometry_before)
+            .expect("targeted block invalidation");
+        assert!(changes.contains(&(line, crate::scene::ChangeKind::Modified)), "{changes:?}");
+        assert!(changes.contains(&(insert, crate::scene::ChangeKind::Modified)), "{changes:?}");
         app.undo_active_tab();
         assert_eq!(
             app.tabs[i]

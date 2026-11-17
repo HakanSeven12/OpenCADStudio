@@ -220,6 +220,44 @@ fn check_family(
 
 // ── Fragment shader ──────────────────────────────────────────────────────
 
+// Ordered 4x4 threshold in (0, 1) for the pixel at `frag`: lights a steady
+// share of the pixels of a region, the same ones every frame.
+fn dither_threshold(frag: vec2<f32>) -> f32 {
+    var bayer = array<f32, 16>(
+        0.0, 8.0, 2.0, 10.0,
+        12.0, 4.0, 14.0, 6.0,
+        3.0, 11.0, 1.0, 9.0,
+        15.0, 7.0, 13.0, 5.0,
+    );
+    let x = u32(floor(frag.x)) % 4u;
+    let y = u32(floor(frag.y)) % 4u;
+    return (bayer[y * 4u + x] + 0.5) / 16.0;
+}
+
+// Share of the area one family's lines cover on screen: line width over
+// line spacing, times the share of each period the dashes draw (a dot
+// draws one line width). Used once the lines are closer than 2 px.
+fn family_coverage(fam: LineFamily, scale: f32) -> f32 {
+    let spacing_px = abs(fam.perp_step) * scale / u.world_per_pixel;
+    let width_px = select(1.0, display_lineweight(fam.line_width), u.lwdisplay_enable > 0.5);
+    var along = 1.0;
+    let period = abs(fam.period) * scale;
+    if fam.n_dashes > 0u && period > 0.0 {
+        var lit = 0.0;
+        for (var j = 0u; j < fam.n_dashes; j++) {
+            let sv = dashes[fam.dash_offset + j] * scale;
+            if sv > 0.0 {
+                lit = lit + sv;
+            } else if sv == 0.0 {
+                lit = lit + width_px * u.world_per_pixel;
+            }
+        }
+        along = clamp(lit / period, 0.0, 1.0);
+    }
+    return clamp(width_px / spacing_px, 0.0, 1.0) * along;
+}
+
+
 // Entity transparency shows only while transparency display is on.
 fn shown(color: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(color.rgb, select(1.0, color.a, u.transparency_enable > 0.5));
@@ -266,8 +304,10 @@ fn shown(color: vec4<f32>) -> vec4<f32> {
     }
 
     // Pattern LOD. Keep every family visible until all family spacings
-    //    project below 2 px, then substitute one solid fill. A single dense
-    //    family must neither hide itself nor turn a complex hatch solid.
+    //    project below 2 px, then substitute an even tone that covers the
+    //    share of the area the lines cover (not a solid fill, which drew a
+    //    1-px-every-1.5-px pattern as if it covered all of it). A single
+    //    dense family must neither hide itself nor turn a complex hatch solid.
     var all_families_subpixel = inst.family_count > 0u && u.world_per_pixel > 0.0;
     if all_families_subpixel {
         for (var i = 0u; i < inst.family_count; i++) {
@@ -281,7 +321,15 @@ fn shown(color: vec4<f32>) -> vec4<f32> {
         }
     }
     if all_families_subpixel {
-        return shown(inst.color);
+        var uncovered = 1.0;
+        for (var i = 0u; i < inst.family_count; i++) {
+            uncovered = uncovered
+                * (1.0 - family_coverage(families[inst.family_offset + i], inst.scale));
+        }
+        if dither_threshold(v.clip.xy) < 1.0 - uncovered {
+            return shown(inst.color);
+        }
+        discard;
     }
 
     // Pattern evaluation.

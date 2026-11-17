@@ -2744,6 +2744,7 @@ common =
     .wblock-help-info = يقوم WBLOCK بكتابة كائنات أو كتلة أو الرسم بالكامل إلى ملف رسم جديد.
     .blank-drawing = رسم فارغ
     .default-template-new-drawings = القالب الافتراضي للرسومات الجديدة
+    .drawing-templates-folder = قوالب الرسومات
     .fillet-trim-mode-trim = FILLET  Enter Trim mode option [Trim/No trim] <Trim>:
     .fillet-trim-mode-no-trim = FILLET  Enter Trim mode option [Trim/No trim] <No trim>:
     .linetype-files = ملفات أنواع الخطوط

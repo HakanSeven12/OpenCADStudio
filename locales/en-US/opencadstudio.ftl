@@ -2732,6 +2732,7 @@ common =
     .wblock-help-info = WBLOCK writes objects, a block, or the entire drawing to a new drawing file.
     .blank-drawing = Blank drawing
     .default-template-new-drawings = Default template for new drawings
+    .drawing-templates-folder = Drawing templates
     .fillet-trim-mode-trim = FILLET  Enter Trim mode option [Trim/No trim] <Trim>:
     .fillet-trim-mode-no-trim = FILLET  Enter Trim mode option [Trim/No trim] <No trim>:
     .linetype-files = Linetype Files

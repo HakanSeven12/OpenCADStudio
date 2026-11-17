@@ -2731,6 +2731,7 @@ common =
     .wblock-help-info = A WBLOCK objektumokat, egy blokkot vagy a teljes rajzot új rajzfájlba menti.
     .blank-drawing = Üres rajz
     .default-template-new-drawings = Alapértelmezett sablon új rajzokhoz
+    .drawing-templates-folder = Rajzsablonok
     .fillet-trim-mode-trim = FILLET  Adja meg a metszési módot [Trim/No trim] <Trim>:
     .fillet-trim-mode-no-trim = FILLET  Adja meg a metszési módot [Trim/No trim] <No trim>:
     .linetype-files = Vonaltípus-fájlok

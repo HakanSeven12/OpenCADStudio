@@ -2732,6 +2732,7 @@ common =
     .wblock-help-info = WBLOCK schreibt Objekte, einen Block oder die gesamte Zeichnung in eine neue Zeichnungsdatei.
     .blank-drawing = Leere Zeichnung
     .default-template-new-drawings = Standardvorlage für neue Zeichnungen
+    .drawing-templates-folder = Zeichnungsvorlagen
     .fillet-trim-mode-trim = FILLET  Enter Trim mode option [Trim/No trim] <Trim>:
     .fillet-trim-mode-no-trim = FILLET  Enter Trim mode option [Trim/No trim] <No trim>:
     .linetype-files = Linientypdateien

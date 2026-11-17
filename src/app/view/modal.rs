@@ -365,6 +365,8 @@ impl OpenCADStudio {
                                         .is_some(),
                                     support: crate::io::font_repo::support_folder()
                                         .map(|p| p.display().to_string()),
+                                    templates: crate::config::templates_dir()
+                                        .map(|p| p.display().to_string()),
                                 }
                             }
                             #[cfg(target_arch = "wasm32")]

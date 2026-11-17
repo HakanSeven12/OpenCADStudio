@@ -2736,6 +2736,7 @@ common =
     .wblock-help-info = WBLOCK zapíše objekty, blok nebo celý výkres do nového výkresového souboru.
     .blank-drawing = Prázdný výkres
     .default-template-new-drawings = Výchozí šablona pro nové výkresy
+    .drawing-templates-folder = Šablony výkresů
     .fillet-trim-mode-trim = FILLET  Zadejte možnost režimu oříznutí [Trim/No trim] <Trim>:
     .fillet-trim-mode-no-trim = FILLET  Zadejte možnost režimu oříznutí [Trim/No trim] <No trim>:
     .linetype-files = Soubory typů čar

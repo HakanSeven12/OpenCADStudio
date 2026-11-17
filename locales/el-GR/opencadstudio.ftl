@@ -2731,6 +2731,7 @@ common =
     .wblock-help-info = Η εντολή WBLOCK εγγράφει αντικείμενα, ένα μπλοκ ή ολόκληρο το σχέδιο σε ένα νέο αρχείο σχεδίου.
     .blank-drawing = Κενό σχέδιο
     .default-template-new-drawings = Προεπιλεγμένο πρότυπο για νέα σχέδια
+    .drawing-templates-folder = Πρότυπα σχεδίων
     .fillet-trim-mode-trim = FILLET  Enter Trim mode option [Trim/No trim] <Trim>:
     .fillet-trim-mode-no-trim = FILLET  Enter Trim mode option [Trim/No trim] <No trim>:
     .linetype-files = Αρχεία τύπων γραμμής

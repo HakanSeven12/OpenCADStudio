@@ -2716,6 +2716,7 @@ common =
     .wblock-help-info = WBLOCK nesneleri, bir bloğu veya tüm çizimi yeni bir çizim dosyasına yazar.
     .blank-drawing = Boş çizim
     .default-template-new-drawings = Yeni çizimler için varsayılan şablon
+    .drawing-templates-folder = Çizim şablonları
     .fillet-trim-mode-trim = FILLET  Enter Trim mode option [Trim/No trim] <Trim>:
     .fillet-trim-mode-no-trim = FILLET  Enter Trim mode option [Trim/No trim] <No trim>:
     .linetype-files = Çizgi tipi dosyaları

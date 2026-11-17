@@ -2731,6 +2731,7 @@ common =
     .wblock-help-info = WBLOCK kirjoittaa kohteet, lohkon tai koko piirustuksen uuteen piirustustiedostoon.
     .blank-drawing = Tyhjä piirustus
     .default-template-new-drawings = Uusien piirustusten oletusmalli
+    .drawing-templates-folder = Piirustusmallit
     .fillet-trim-mode-trim = FILLET  Enter Trim mode option [Trim/No trim] <Trim>:
     .fillet-trim-mode-no-trim = FILLET  Enter Trim mode option [Trim/No trim] <No trim>:
     .linetype-files = Viivatyyppitiedostot

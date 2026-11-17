@@ -2722,6 +2722,7 @@ common =
     .wblock-help-info = WBLOCK はオブジェクト、ブロック、または図面全体を新しい図面ファイルに書き出します。
     .blank-drawing = 空の図面
     .default-template-new-drawings = 新規図面の既定テンプレート
+    .drawing-templates-folder = 図面テンプレート
     .fillet-trim-mode-trim = FILLET  Enter Trim mode option [Trim/No trim] <Trim>:
     .fillet-trim-mode-no-trim = FILLET  Enter Trim mode option [Trim/No trim] <No trim>:
     .linetype-files = 線種ファイル

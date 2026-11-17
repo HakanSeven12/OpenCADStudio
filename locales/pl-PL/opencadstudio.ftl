@@ -2731,6 +2731,7 @@ common =
     .wblock-help-info = WBLOCK zapisuje obiekty, blok lub cały rysunek do nowego pliku rysunku.
     .blank-drawing = Pusty rysunek
     .default-template-new-drawings = Domyślny szablon nowych rysunków
+    .drawing-templates-folder = Szablony rysunków
     .fillet-trim-mode-trim = FILLET  Enter Trim mode option [Trim/No trim] <Trim>:
     .fillet-trim-mode-no-trim = FILLET  Enter Trim mode option [Trim/No trim] <No trim>:
     .linetype-files = Pliki rodzajów linii

@@ -2732,6 +2732,7 @@ common =
     .wblock-help-info = WBLOCK ຂຽນວັດຖຸ, ບລັອກ, ຫຼື ແບບແຕ້ມທັງໝົດ ອອກໄປເປັນໄຟລ໌ແບບແຕ້ມໃໝ່.
     .blank-drawing = ແບບແຕ້ມຫວ່າງເປົ່າ
     .default-template-new-drawings = ແມ່ແບບເລີ່ມຕົ້ນສຳລັບແບບແຕ້ມໃໝ່
+    .drawing-templates-folder = ແມ່ແບບແບບແຕ້ມ
     .fillet-trim-mode-trim = FILLET  ປ້ອນຕົວເລືອກໂໝດຕັດ [Trim/No trim] <Trim>:
     .fillet-trim-mode-no-trim = FILLET  ປ້ອນຕົວເລືອກໂໝດຕັດ [Trim/No trim] <No trim>:
     .linetype-files = ໄຟລ໌ຮູບແບບເສັ້ນ

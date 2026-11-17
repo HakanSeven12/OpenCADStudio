@@ -38,6 +38,16 @@ pub fn config_dir() -> Option<PathBuf> {
     Some(p)
 }
 
+/// The drawing templates folder (`templates` in the config folder), created
+/// on first use: NEW opens its template picker here unless the default
+/// template lives somewhere else.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn templates_dir() -> Option<PathBuf> {
+    let dir = config_dir()?.join("templates");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
 // ── Last file-dialog directory ───────────────────────────────────────────────
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -2735,6 +2735,7 @@ common =
     .wblock-help-info = WBLOCK записывает объекты, блок или весь чертеж в новый файл чертежа.
     .blank-drawing = Пустой чертёж
     .default-template-new-drawings = Шаблон по умолчанию для новых чертежей
+    .drawing-templates-folder = Шаблоны чертежей
     .fillet-trim-mode-trim = FILLET  Enter Trim mode option [Trim/No trim] <Trim>:
     .fillet-trim-mode-no-trim = FILLET  Enter Trim mode option [Trim/No trim] <No trim>:
     .linetype-files = Файлы типов линий

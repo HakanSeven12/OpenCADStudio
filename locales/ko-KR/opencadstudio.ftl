@@ -2731,6 +2731,7 @@ common =
     .wblock-help-info = WBLOCK은 객체, 블록 또는 도면 전체를 새 도면 파일로 내보냅니다.
     .blank-drawing = 빈 도면
     .default-template-new-drawings = 새 도면의 기본 템플릿
+    .drawing-templates-folder = 도면 템플릿
     .fillet-trim-mode-trim = FILLET  Enter Trim mode option [Trim/No trim] <Trim>:
     .fillet-trim-mode-no-trim = FILLET  Enter Trim mode option [Trim/No trim] <No trim>:
     .linetype-files = 선종류 파일

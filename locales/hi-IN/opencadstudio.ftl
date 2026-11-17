@@ -2720,6 +2720,7 @@ common =
     .wblock-help-info = WBLOCK ऑब्जेक्ट, एक ब्लॉक, या संपूर्ण रेखाचित्र को एक नई रेखाचित्र फ़ाइल में लिखता है।
     .blank-drawing = रिक्त ड्रॉइंग
     .default-template-new-drawings = नई ड्रॉइंग के लिए डिफ़ॉल्ट टेम्पलेट
+    .drawing-templates-folder = ड्रॉइंग टेम्पलेट
     .fillet-trim-mode-trim = FILLET  Enter Trim mode option [Trim/No trim] <Trim>:
     .fillet-trim-mode-no-trim = FILLET  Enter Trim mode option [Trim/No trim] <No trim>:
     .linetype-files = लाइनटाइप फ़ाइलें

@@ -6177,6 +6177,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "ALIGNSPACE: the points must not coincide." => Some(("common", "alignspace-coincident")),
         "Blank drawing" => Some(("common", "blank-drawing")),
         "Default template for new drawings" => Some(("common", "default-template-new-drawings")),
+        "Drawing templates" => Some(("common", "drawing-templates-folder")),
         "FILLET  Enter Trim mode option [Trim/No trim] <Trim>:" => Some(("common", "fillet-trim-mode-trim")),
         "FILLET  Enter Trim mode option [Trim/No trim] <No trim>:" => Some(("common", "fillet-trim-mode-no-trim")),
         "Linetype Files" => Some(("common", "linetype-files")),

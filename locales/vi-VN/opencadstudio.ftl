@@ -2736,6 +2736,7 @@ common =
     .wblock-help-info = WBLOCK ghi các đối tượng, một khối hoặc toàn bộ bản vẽ vào một tệp bản vẽ mới.
     .blank-drawing = Bản vẽ trống
     .default-template-new-drawings = Mẫu mặc định cho bản vẽ mới
+    .drawing-templates-folder = Mẫu bản vẽ
     .fillet-trim-mode-trim = FILLET  Nhập tùy chọn chế độ cắt [Cắt/Không cắt] <Cắt>:
     .fillet-trim-mode-no-trim = FILLET  Nhập tùy chọn chế độ cắt [Cắt/Không cắt] <Không cắt>:
     .linetype-files = Tệp kiểu đường

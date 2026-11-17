@@ -2731,6 +2731,7 @@ common =
     .wblock-help-info = WBLOCK 將物件、圖塊或整個圖面寫入新的圖面檔案。
     .blank-drawing = 空白圖面
     .default-template-new-drawings = 新圖面的預設樣板
+    .drawing-templates-folder = 圖面樣板
     .fillet-trim-mode-trim = FILLET  Enter Trim mode option [Trim/No trim] <Trim>:
     .fillet-trim-mode-no-trim = FILLET  Enter Trim mode option [Trim/No trim] <No trim>:
     .linetype-files = 線型檔案

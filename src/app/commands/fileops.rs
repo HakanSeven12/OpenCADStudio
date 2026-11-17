@@ -28,11 +28,14 @@ impl OpenCADStudio {
             "NEW" => {
                 self.start_templates = None;
                 // Open where the default template lives, so its neighbours in
-                // a template folder are one click away (#1836).
+                // a template folder are one click away (#1836); else in the
+                // templates folder Options › Files lists.
                 let template_dir = std::path::Path::new(self.qnew_template.trim())
                     .parent()
                     .filter(|dir| dir.is_dir())
                     .map(std::path::Path::to_path_buf);
+                #[cfg(not(target_arch = "wasm32"))]
+                let template_dir = template_dir.or_else(crate::config::templates_dir);
                 return Some(Task::perform(
                     async move {
                         let dialog = crate::sys::file_dialog();

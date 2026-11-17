@@ -2732,6 +2732,7 @@ common =
     .wblock-help-info = O WBLOCK grava objetos, um bloco ou o desenho inteiro em um novo arquivo de desenho.
     .blank-drawing = Desenho em branco
     .default-template-new-drawings = Modelo padrão para novos desenhos
+    .drawing-templates-folder = Modelos de desenho
     .fillet-trim-mode-trim = FILLET  Enter Trim mode option [Trim/No trim] <Trim>:
     .fillet-trim-mode-no-trim = FILLET  Enter Trim mode option [Trim/No trim] <No trim>:
     .linetype-files = Arquivos de tipos de linha

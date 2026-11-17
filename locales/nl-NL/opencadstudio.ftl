@@ -2732,6 +2732,7 @@ common =
     .wblock-help-info = WBLOCK schrijft objecten, een blok of de volledige tekening naar een nieuw tekeningbestand.
     .blank-drawing = Lege tekening
     .default-template-new-drawings = Standaardsjabloon voor nieuwe tekeningen
+    .drawing-templates-folder = Tekeningsjablonen
     .fillet-trim-mode-trim = FILLET  Enter Trim mode option [Trim/No trim] <Trim>:
     .fillet-trim-mode-no-trim = FILLET  Enter Trim mode option [Trim/No trim] <No trim>:
     .linetype-files = Lijntypebestanden

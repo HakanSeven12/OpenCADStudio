@@ -93,6 +93,7 @@ struct VIn  {
     @location(1) translation: vec2<f32>,
     @location(2) translation_low: vec2<f32>,
     @location(3) draw_depth: f32,
+    @location(4) translation_z: f32,
 }
 struct VOut {
     @invariant @builtin(position) clip: vec4<f32>,
@@ -103,9 +104,11 @@ struct VOut {
     var o: VOut;
     // Double-single relative-to-eye: anchor high cancels eye_high (Sterbenz);
     // boundary-local v.pos + anchor low + (−eye_low) carry the residual.
+    // v.pos.z is the fill plane's height over the vertex; a block copy adds
+    // its own rise.
     let hi = vec3<f32>(h.origin.x - u.eye_high.x + v.translation.x,
                        h.origin.y - u.eye_high.y + v.translation.y,
-                       -u.eye_high.z);
+                       v.translation_z - u.eye_high.z);
     let lo = vec3<f32>(v.pos.x + h.origin_low.x + v.translation_low.x - u.eye_low.x,
                        v.pos.y + h.origin_low.y + v.translation_low.y - u.eye_low.y,
                        v.pos.z - u.eye_low.z);

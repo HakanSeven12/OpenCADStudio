@@ -44,11 +44,10 @@ use crate::modules::draw::modify::spline_ops::{
     spline_cut, spline_nearest_t, spline_pts_wire, spline_range, spline_to_nurbs, t_to_rel,
 };
 use crate::modules::IconKind;
-use crate::scene::convert::tess::entity_world_aabb_f64;
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
 
-use super::entity_index::ModifyEntityIndex;
+use super::entity_index::{modify_aabb, ModifyEntityIndex};
 
 #[path = "trim_hatch_region.rs"]
 mod hatch_region;
@@ -3871,7 +3870,7 @@ fn cutters_near<'a>(
     geos: &'a [Geo],
     local: bool,
 ) -> std::borrow::Cow<'a, [Geo]> {
-    let Some(bounds) = local.then(|| entity_world_aabb_f64(target)).flatten() else {
+    let Some(bounds) = local.then(|| modify_aabb(target)).flatten() else {
         return std::borrow::Cow::Borrowed(geos);
     };
     let pad = 1e-6
@@ -4424,7 +4423,7 @@ impl TrimCommand {
         let Some(target_entity) = self.entity_index.get(&self.all_entities, handle) else {
             return self.geos.clone();
         };
-        let Some(target_bounds) = entity_world_aabb_f64(target_entity) else {
+        let Some(target_bounds) = modify_aabb(target_entity) else {
             return self.geos.clone();
         };
         if !target_bounds.iter().all(|value| value.is_finite()) {

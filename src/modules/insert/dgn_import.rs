@@ -1283,19 +1283,35 @@ impl<'a> Converter<'a> {
         name
     }
 
-    /// Every colour index a cell draws with, through the cells it places.
-    fn cell_colors(&self, name: &str, depth: usize, out: &mut Vec<u32>) {
-        let Some(def) = self.defs.get(&name.to_ascii_uppercase()) else {
-            return;
-        };
-        for e in def.iter() {
-            if let By::Own(c) = e.color {
-                out.push(c.index);
+    /// Every colour index a cell draws with, through the cells it places
+    /// down to eight levels. Each cell is read once, at the shallowest level
+    /// that reaches it, so the colours are the same as following every
+    /// placement, which for a cell placing itself n times takes n⁸ steps.
+    fn cell_colors(&self, name: &str) -> Vec<u32> {
+        let mut out = Vec::new();
+        let mut read = HashSet::new();
+        let mut level = vec![name.to_ascii_uppercase()];
+        for _ in 0..=8 {
+            let mut next = Vec::new();
+            for name in level {
+                if !read.insert(name.clone()) {
+                    continue;
+                }
+                let Some(def) = self.defs.get(&name) else {
+                    continue;
+                };
+                for e in def.iter() {
+                    if let By::Own(c) = e.color {
+                        out.push(c.index);
+                    }
+                    if let DgnGeom::Cell { name, .. } = &e.geom {
+                        next.push(name.to_ascii_uppercase());
+                    }
+                }
             }
-            if let (DgnGeom::Cell { name, .. }, true) = (&e.geom, depth < 8) {
-                self.cell_colors(name, depth + 1, out);
-            }
+            level = next;
         }
+        out
     }
 
     /// The block a V7 instance of `cell` inserts: a copy of the definition
@@ -1312,8 +1328,7 @@ impl<'a> Converter<'a> {
         let Some(def) = self.defs.get(&cell.to_ascii_uppercase()).copied() else {
             return name;
         };
-        let mut colors = Vec::new();
-        self.cell_colors(cell, 0, &mut colors);
+        let colors = self.cell_colors(cell);
         let copy = CellCopy {
             active: true,
             color_by_block: colors.windows(2).all(|w| w[0] == w[1]),

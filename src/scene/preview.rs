@@ -358,6 +358,25 @@ impl Scene {
         self.preview_text = verts;
     }
 
+    /// Whether the rubber band and the dynamic-input guide of a running
+    /// command or grip drag are drawn. A view being dragged (pan, orbit,
+    /// zoom) shows neither: both end at the cursor's last drawing point,
+    /// which the drag leaves behind. They return with the first cursor
+    /// position after the drag.
+    pub fn drawing_feedback_shown(&self) -> bool {
+        !self.selection.borrow().input.middle_down
+    }
+
+    /// The rubber band a frame draws: the live segment and the preview
+    /// wires of the running command, or nothing while the view is dragged.
+    pub fn shown_rubber_band(&self) -> (Option<&WireModel>, &[WireModel]) {
+        if self.drawing_feedback_shown() {
+            (self.interim_wire.as_ref(), &self.preview_wires[..])
+        } else {
+            (None, &[])
+        }
+    }
+
     pub fn clear_preview_wire(&mut self) {
         self.set_command_preview_hidden(&[]);
         // No geometry bump — see `set_preview_wires`. Dropping the overlay

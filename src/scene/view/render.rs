@@ -5226,9 +5226,10 @@ impl Scene {
         } else {
             (Vec::new(), Vec::new())
         };
+        let (interim_wire, command_preview) = self.shown_rubber_band();
         let mut preview_wires = if !show_live_overlay
-            || (self.interim_wire.is_none()
-                && self.preview_wires.is_empty()
+            || (interim_wire.is_none()
+                && command_preview.is_empty()
                 && self.constraint_hover_wires.is_empty()
                 && self.ducs_face_wires.is_empty()
                 && self.cv_net_wires.is_empty()
@@ -5238,15 +5239,15 @@ impl Scene {
             Arc::new(Vec::new())
         } else {
             let mut v: Vec<WireModel> = Vec::with_capacity(
-                self.preview_wires.len()
+                command_preview.len()
                     + self.constraint_hover_wires.len()
                     + cloud_2d_wires.len()
                     + 1,
             );
-            if let Some(iw) = &self.interim_wire {
+            if let Some(iw) = interim_wire {
                 v.push(iw.clone());
             }
-            v.extend(self.preview_wires.iter().cloned());
+            v.extend(command_preview.iter().cloned());
             v.extend(self.constraint_hover_wires.iter().cloned());
             v.extend(self.ducs_face_wires.iter().cloned());
             v.extend(self.cv_net_wires.values().flatten().cloned());

@@ -2151,6 +2151,7 @@ bg={bg_ms:.1}ms n={view_count}"
         #[cfg(target_arch = "wasm32")]
         let plugin_grip_active = false;
         let dyn_input_overlay: Option<Element<'_, Message>> = if self.dyn_input
+            && tab.scene.drawing_feedback_shown()
             && (tab.active_cmd.is_some() || tab.active_grip.is_some() || plugin_grip_active)
             && (!tab.dyn_fields.is_empty() || dyn_picks_object)
         {

@@ -6623,7 +6623,7 @@ impl OpenCADStudio {
                 sel.orbit.pivot = None;
                 drop(sel);
                 self.arm_hover_after_navigation(i);
-                Task::none()
+                self.refresh_pointer_after_navigation(i)
             }
 
             Message::ViewportScroll(delta) => self.on_viewport_scroll(delta),

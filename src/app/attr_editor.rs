@@ -652,6 +652,37 @@ impl OpenCADStudio {
     /// field takes the cursor back with its text selected.
     pub(in crate::app) fn attr_editor_leave_check(&mut self, msg: &Message) -> Option<Task<Message>> {
         let field = self.attr_editor_editing?;
+        // Only the window's own actions leave the field; ticks, automation
+        // envelopes and the rest of the app pass through untouched.
+        let window_action = matches!(
+            msg,
+            Message::AttrEditorTab(_)
+                | Message::AttrEditorSelect(_)
+                | Message::AttrEditorInput { .. }
+                | Message::AttrEditorTextStyle(_)
+                | Message::AttrEditorJustify(_)
+                | Message::AttrEditorHeight(_)
+                | Message::AttrEditorRotation(_)
+                | Message::AttrEditorWidth(_)
+                | Message::AttrEditorOblique(_)
+                | Message::AttrEditorBoundary(_)
+                | Message::AttrEditorBackwards(_)
+                | Message::AttrEditorUpsideDown(_)
+                | Message::AttrEditorAnnotative(_)
+                | Message::AttrEditorLayer(_)
+                | Message::AttrEditorLinetype(_)
+                | Message::AttrEditorColor(_)
+                | Message::AttrEditorColorValue(_)
+                | Message::AttrEditorLineweight(_)
+                | Message::AttrEditorApply
+                | Message::AttrEditorOk
+                | Message::AttrEditorSelectBlock
+                | Message::AttrEditorEditValue
+                | Message::AttrEditorInsertField
+        );
+        if !window_action {
+            return None;
+        }
         let typing_same = matches!(
             (field, msg),
             (AttrField::Height, Message::AttrEditorHeight(_))

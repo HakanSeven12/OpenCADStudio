@@ -4061,6 +4061,15 @@ impl OpenCADStudio {
         } else {
             Subscription::none()
         };
+        // Turns the Plugin Manager's spinners while a download or a release
+        // check runs.
+        let plugin_spinner = if self.plugin_installing.is_empty()
+            && self.plugin_releases_loading.is_empty()
+        {
+            Subscription::none()
+        } else {
+            iced::time::every(std::time::Duration::from_millis(50)).map(|_| Message::Noop)
+        };
         let quick_calc_flash = if self.quick_calc.flash.is_some() {
             iced::time::every(crate::ui::window::quick_calc::QuickCalcPalette::flash_interval())
                 .map(|_| {
@@ -4201,6 +4210,7 @@ impl OpenCADStudio {
             quick_calc_flash,
             assistant_poll,
             ribbon_minimize,
+            plugin_spinner,
             web_fonts,
             autosave,
             plugin_drain,

@@ -194,6 +194,8 @@ pub(super) const NAMES: &[&str] = &[
     "pc_section",
     "ribbon_tab",
     "ribbon_dropdown",
+    "plugin_install",
+    "plugin_search",
     "keytips",
     "dialog_ok",
     "dialog_answer",
@@ -1876,6 +1878,10 @@ impl OpenCADStudio {
             }
             // The Plot dialog's Plot / Export button.
             "plot_commit" => Message::PlotDlg(crate::ui::window::plot::PlotDlgMsg::Commit),
+            // The Plugin Manager's Install button for `owner/repo`.
+            "plugin_install" => Message::PluginInstall(string(req, "value")?.to_string()),
+            // The Plugin Manager's search box.
+            "plugin_search" => Message::PluginSearchInput(string(req, "value")?.to_string()),
             // The "changed outside" modal's suggested actions (D6): reload
             // the disk copy, keep the in-memory one and overwrite, save as,
             // or dismiss. Native only — the web build has no such dialog.

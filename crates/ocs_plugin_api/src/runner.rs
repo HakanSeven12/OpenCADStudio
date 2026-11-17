@@ -608,6 +608,10 @@ fn handle_host_request(
         }
         // The V3 path serves plugins far older than v24.
         HostRequest::UndoStep { .. } => HostResponse::UndoStep(None),
+        HostRequest::ListTools => HostResponse::Tools(Vec::new()),
+        HostRequest::CallTool { .. } => {
+            HostResponse::Error("AI tools require the V4 protocol".to_string())
+        }
         HostRequest::ExecuteCode { .. } => {
             HostResponse::Error("ExecuteCode requires V4 protocol".to_string())
         }
@@ -865,6 +869,36 @@ fn handle_host_request_v4(
             command_id,
             api_version,
         ))),
+        // API v25 gate: an older cdylib's vtable has neither slot.
+        HostRequest::ListTools => {
+            if api_version < 25 {
+                return Some(HostResponse::Tools(Vec::new()));
+            }
+            Some(
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| plugin.tools())) {
+                    Ok(tools) => HostResponse::Tools(tools),
+                    Err(_) => HostResponse::Error("plugin tools() panicked".to_string()),
+                },
+            )
+        }
+        HostRequest::CallTool {
+            tab_index,
+            name,
+            arguments,
+        } => {
+            if api_version < 25 {
+                return Some(HostResponse::ToolResult(Err(
+                    "the plugin predates AI tools (API v25)".to_string(),
+                )));
+            }
+            let mut proxy = client.plugin_host_api(tab_index, interactive.clone());
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                plugin.call_tool(&mut proxy, &name, &arguments)
+            }));
+            Some(HostResponse::ToolResult(result.unwrap_or_else(|_| {
+                Err(format!("plugin tool '{name}' panicked"))
+            })))
+        }
         HostRequest::ExecuteCode {
             command_id,
             source,

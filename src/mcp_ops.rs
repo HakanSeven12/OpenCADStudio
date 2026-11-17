@@ -692,6 +692,23 @@ pub static XDATA_SET: OpDef = OpDef {
     example: r#"{"op":"xdata_set","app":"APP","handles":["2A"],"data":[{"code":1000,"value":"tag"}]}"#,
 };
 
+pub static PLUGIN_CALL: OpDef = OpDef {
+    name: "plugin_call",
+    doc: "Run one AI tool a plugin offers (read op plugins lists each plugin's tools with their input schema). The call is one undo step.",
+    batchable: false,
+    params: &[
+        req("plugin", Ty::Str, "Plugin id, as op plugins lists it."),
+        req("tool", Ty::Str, "Tool name within that plugin."),
+        opt(
+            "arguments",
+            Ty::Raw(r#"{"type":"object","description":"Tool arguments matching its input_schema"}"#),
+            "Arguments object, checked against the tool's input_schema.",
+        ),
+    ],
+    rules: &[],
+    example: r#"{"op":"plugin_call","plugin":"opencad.example","tool":"hello","arguments":{}}"#,
+};
+
 pub static VIEW_FOCUS: OpDef = OpDef {
     name: "view_focus",
     doc: "Focus the viewport camera on the bounds of specific entities.",
@@ -1331,6 +1348,7 @@ pub static OPS: &[&OpDef] = &[
     &GETPOINT,
     &CLOSE,
     &SYSVAR,
+    &PLUGIN_CALL,
     &LAYOUT_CREATE,
     &LAYOUT_RENAME,
     &LAYOUT_ACTIVATE,

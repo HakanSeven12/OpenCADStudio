@@ -64,7 +64,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// The enhanced attribute editor joined them: `attr_editor`.
 /// Find and Replace is driveable from a script: `find_replace_dialog`.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "f7ea6bdcc8946c0272d4d0faf7ba8eb9ee537303e5574ceb0180a37549a08194";
+const TOOL_SCHEMA_DIGEST: &str = "191f3b50f1b2cc1cd826c31d41f4c087a3db9f4d0fa7199ebc3141478f8bceb0";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
@@ -105,6 +105,7 @@ const READ_OPS: &[&str] = &[
     "text_search",
     "text_audit",
     "keytips",
+    "plugins",
     "capture",
 ];
 const EXECUTE_OPS: &[&str] = &[
@@ -156,6 +157,7 @@ const EXECUTE_OPS: &[&str] = &[
     "getpoint",
     "close",
     "sysvar",
+    "plugin_call",
     "layout_create",
     "layout_rename",
     "layout_activate",

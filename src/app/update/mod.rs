@@ -5756,6 +5756,9 @@ impl OpenCADStudio {
 
             Message::WindowCloseRequested(id) => {
                 if self.main_window == Some(id) {
+                    // A plain quit after a cancelled Restart quits only.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    super::RESTART_AFTER_EXIT.store(false, std::sync::atomic::Ordering::Relaxed);
                     return self.request_quit_with_block_edits();
                 }
                 #[cfg(not(target_arch = "wasm32"))]
@@ -13732,6 +13735,7 @@ impl OpenCADStudio {
                     // Refresh the on-disk external-plugin list each time the manager
                     // opens so newly dropped-in packages show up.
                     self.external_plugins = crate::plugin::external::discover();
+                    self.refresh_plugin_tools();
                     self.marketplace_status.clear();
                     self.active_modal = Some(super::ModalKind::PluginManager);
                     // Fetch the curated registry and release lists for linked repos.
@@ -13977,6 +13981,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::PluginReleasesFetched(repo, Ok(releases)) => {
+                self.plugin_releases_loading.remove(&repo);
                 if let Some(first) = releases.first() {
                     self.repo_selected_tag
                         .entry(repo.clone())
@@ -13995,6 +14000,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::PluginReleasesFetched(repo, Err(e)) => {
+                self.plugin_releases_loading.remove(&repo);
                 self.marketplace_status = format!("{repo}: {e}");
                 Task::none()
             }
@@ -14027,14 +14033,23 @@ impl OpenCADStudio {
                 let Some(tag) = self.repo_selected_tag.get(&repo).cloned() else {
                     return Task::none();
                 };
+                if !self.plugin_installing.insert(repo.clone()) {
+                    return Task::none();
+                }
+                self.plugin_installed_now.insert(repo.clone(), true);
                 self.marketplace_status = crate::tf!("Installing {repo} {tag}…").into_owned();
                 self.install_task(repo, tag)
             }
             Message::PluginUpdate(repo, tag) => {
+                if !self.plugin_installing.insert(repo.clone()) {
+                    return Task::none();
+                }
+                self.plugin_installed_now.insert(repo.clone(), false);
                 self.marketplace_status = crate::tf!("Updating {repo} to {tag}…").into_owned();
                 self.install_task(repo, tag)
             }
-            Message::PluginInstalled(Ok(id)) => {
+            Message::PluginInstalled(repo, Ok(id)) => {
+                self.plugin_installing.remove(&repo);
                 self.marketplace_status =
                     crate::tf!("Installed '{id}'. Restart to load it.").into_owned();
                 for id in id.split(", ") {
@@ -14046,9 +14061,16 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
-            Message::PluginInstalled(Err(e)) => {
+            Message::PluginInstalled(repo, Err(e)) => {
+                self.plugin_installing.remove(&repo);
+                self.plugin_installed_now.remove(&repo);
                 self.marketplace_status = crate::tf!("Install failed: {e}").into_owned();
                 Task::none()
+            }
+            Message::PluginRestart => {
+                #[cfg(not(target_arch = "wasm32"))]
+                super::RESTART_AFTER_EXIT.store(true, std::sync::atomic::Ordering::Relaxed);
+                self.request_quit_with_block_edits()
             }
             Message::PluginUninstall(id) => {
                 #[cfg(not(target_arch = "wasm32"))]

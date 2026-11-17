@@ -185,7 +185,11 @@
 /// hook, with the `HostRequest::UndoStep` / `HostResponse::UndoStep` pair. A
 /// v23 runner cannot decode the request, so the host sends it only to plugins
 /// whose manifest declares v24; older plugins keep the document undo.
-pub const API_VERSION: u32 = 24;
+/// v25 appends `BuiltinPlugin::tools` / `BuiltinPlugin::call_tool`, typed
+/// operations AI clients call over the automation bridge, with the
+/// `HostRequest::ListTools` / `CallTool` pair. Older runners cannot decode
+/// them, so the host asks only plugins whose manifest declares v25.
+pub const API_VERSION: u32 = 25;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

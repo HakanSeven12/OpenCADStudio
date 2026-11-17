@@ -1471,6 +1471,8 @@ impl OpenCADStudio {
                 "selection_set_save":true,
                 "sysvar":true,
                 "plot":true,
+                "plugins":true,
+                "plugin_call":!cfg!(target_arch = "wasm32"),
                 "view_focus":true,
                 "wblock":true,
                 "xdata_get":true,

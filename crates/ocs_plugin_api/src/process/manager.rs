@@ -498,6 +498,15 @@ impl PluginManager {
             .collect()
     }
 
+    /// The process of the loaded plugin `id`, for host calls that outlive a
+    /// manager borrow (AI tool calls serve nested HostApi requests).
+    pub fn process(&self, id: &str) -> Option<Arc<PluginProcess>> {
+        self.plugins
+            .iter()
+            .find(|p| p.process.id() == id)
+            .map(|p| Arc::clone(&p.process))
+    }
+
     /// Ids of loaded plugins whose processes are currently alive (API v11).
     pub fn alive_ids(&self) -> Vec<String> {
         self.plugins

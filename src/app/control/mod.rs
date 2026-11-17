@@ -732,6 +732,7 @@ impl OpenCADStudio {
                 | "cad_get_blocks"
                 | "cad_extract_block_instances"
                 | "keytips"
+                | "plugins"
         );
         if !query && !self.control.enabled {
             return (
@@ -863,6 +864,9 @@ impl OpenCADStudio {
                 }),
                 Task::none(),
             );
+        }
+        if op == "plugins" {
+            return self.control_plugins();
         }
         let id = if query {
             String::new()
@@ -1484,6 +1488,8 @@ impl OpenCADStudio {
             "getpoint" => self.control_getpoint(req)?,
             "close" => self.control_close(req)?,
             "sysvar" => self.control_sysvar(req)?,
+            #[cfg(not(target_arch = "wasm32"))]
+            "plugin_call" => self.control_plugin_call(req)?,
             "layout_create" => self.control_layout_create(req)?,
             "layout_rename" => self.control_layout_rename(req)?,
             "layout_activate" => self.control_layout_activate(req)?,
@@ -2296,6 +2302,7 @@ mod entities;
 pub(crate) mod http_bridge;
 mod interactive;
 mod node_graph;
+mod plugins;
 mod sheets;
 mod xrefs;
 pub(crate) use sheets::new_guid_v4;

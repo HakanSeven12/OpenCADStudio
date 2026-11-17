@@ -141,6 +141,16 @@ pub enum HostRequest {
     UndoStep {
         command_id: u64,
     },
+    /// V25 (additive): the plugin's AI tools. The runner answers with
+    /// [`HostResponse::Tools`]; sent only to plugins declaring v25 or newer.
+    ListTools,
+    /// V25 (additive): run one AI tool on the given tab. The runner answers
+    /// with [`HostResponse::ToolResult`].
+    CallTool {
+        tab_index: usize,
+        name: String,
+        arguments: String,
+    },
 }
 
 /// Responses the plugin runner sends back for `HostRequest`.
@@ -163,6 +173,11 @@ pub enum HostResponse {
     /// V24 (additive): answer to [`HostRequest::UndoStep`]; `None` when the
     /// command leaves Ctrl+Z to the document undo.
     UndoStep(Option<Box<CommandStep>>),
+    /// V25 (additive): answer to [`HostRequest::ListTools`].
+    Tools(Vec<crate::host::PluginTool>),
+    /// V25 (additive): answer to [`HostRequest::CallTool`]: the result as
+    /// JSON text, or the plugin's error message.
+    ToolResult(Result<String, String>),
 }
 
 /// Requests the plugin runner sends to the host.

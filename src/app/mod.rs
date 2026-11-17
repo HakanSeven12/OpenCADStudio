@@ -1938,6 +1938,10 @@ pub(super) struct OpenCADStudio {
     /// keep their manifest listed but drop their ribbon tab and command
     /// dispatch. Persisted via [`settings::UserSettings::disabled_plugins`].
     disabled_plugins: rustc_hash::FxHashSet<String>,
+    /// AI tools each loaded plugin offers (API v25), read when the Plugin
+    /// Manager opens or a client reads `plugins`.
+    #[cfg(not(target_arch = "wasm32"))]
+    plugin_tools: rustc_hash::FxHashMap<String, Vec<ocs_plugin_api::host::PluginTool>>,
     /// `(tab id, selection fingerprint)` last broadcast to V4 plugins, so
     /// `SelectionChangedV4` fires once per real change rather than per message.
     #[cfg(not(target_arch = "wasm32"))]
@@ -1987,6 +1991,13 @@ pub(super) struct OpenCADStudio {
     plugin_readmes: rustc_hash::FxHashMap<String, Result<iced::widget::markdown::Content, String>>,
     /// README requests in flight, used to render a deterministic loading state.
     plugin_readme_loading: rustc_hash::FxHashSet<String>,
+    /// Repositories whose release list is being fetched.
+    plugin_releases_loading: rustc_hash::FxHashSet<String>,
+    /// Repositories whose install or update is downloading.
+    plugin_installing: rustc_hash::FxHashSet<String>,
+    /// Repositories installed in this session and waiting for a restart:
+    /// `true` for a fresh install, `false` for an update.
+    plugin_installed_now: rustc_hash::FxHashMap<String, bool>,
     /// Last marketplace status / error line shown in the Plugin Manager.
     marketplace_status: String,
     /// PDSIZE text buffer for the Point Style (DDPTYPE) dialog.
@@ -5514,8 +5525,10 @@ pub enum Message {
     PluginInstall(String),
     /// Install a specific newer release from an installed plugin card.
     PluginUpdate(String, String),
-    /// Result of an install: the plugin id, or an error message.
-    PluginInstalled(Result<String, String>),
+    /// Result of installing `owner/repo`: the plugin id, or an error message.
+    PluginInstalled(String, Result<String, String>),
+    /// Quit (asking about unsaved drawings) and start the app again.
+    PluginRestart,
     /// Delete an installed plugin's folder (effective next restart).
     PluginUninstall(String),
     // ── Point Style (DDPTYPE) dialog ──────────────────────────────────────
@@ -6810,6 +6823,8 @@ impl OpenCADStudio {
             attr_editor_editing: None,
             disabled_plugins: rustc_hash::FxHashSet::default(),
             #[cfg(not(target_arch = "wasm32"))]
+            plugin_tools: rustc_hash::FxHashMap::default(),
+            #[cfg(not(target_arch = "wasm32"))]
             last_plugin_selection: None,
             #[cfg(not(target_arch = "wasm32"))]
             selection_revision_by_tab: rustc_hash::FxHashMap::default(),
@@ -6830,6 +6845,9 @@ impl OpenCADStudio {
             selected_plugin_repo: None,
             plugin_readmes: rustc_hash::FxHashMap::default(),
             plugin_readme_loading: rustc_hash::FxHashSet::default(),
+            plugin_releases_loading: rustc_hash::FxHashSet::default(),
+            plugin_installing: rustc_hash::FxHashSet::default(),
+            plugin_installed_now: rustc_hash::FxHashMap::default(),
             marketplace_status: String::new(),
             point_size_buf: String::new(),
             point_style_tab_id: None,
@@ -7782,7 +7800,22 @@ pub fn run() -> iced::Result {
     .theme(|state: &OpenCADStudio, _| state.active_theme.clone())
     .font(iced_aw::ICED_AW_FONT_BYTES)
     .run()
+    .inspect(|()| {
+        // Started once this process has let go of its window and its
+        // single-instance port, so the new one boots as the only editor.
+        if RESTART_AFTER_EXIT.load(std::sync::atomic::Ordering::Relaxed) {
+            if let Ok(exe) = std::env::current_exe() {
+                let _ = std::process::Command::new(exe).spawn();
+            }
+        }
+    })
 }
+
+/// Set when the user quits through Restart (the Plugin Manager after an
+/// install); `run` starts the app again once its loop ends.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) static RESTART_AFTER_EXIT: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 impl Drop for OpenCADStudio {
     fn drop(&mut self) {

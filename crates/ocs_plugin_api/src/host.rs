@@ -953,6 +953,45 @@ pub trait BuiltinPlugin: Send + Sync {
         _pick_point: [f64; 3],
     ) {
     }
+
+    /// The typed operations this plugin offers to AI clients over the
+    /// automation bridge (API v25). The host lists them with the plugin and
+    /// calls one through [`Self::call_tool`]. The default offers none.
+    ///
+    /// The runner only calls this for plugins whose exported
+    /// `ocs_plugin_api_version` symbol reports API major 25 or newer.
+    fn tools(&self) -> Vec<PluginTool> {
+        Vec::new()
+    }
+
+    /// Run one of [`Self::tools`] (API v25). `arguments` is the JSON object
+    /// the client sent, already checked against the tool's `input_schema`;
+    /// the result is a JSON value as text, an `Err` a message for the client.
+    ///
+    /// `host` is the active tab's full [`HostApi`]: the host wraps the whole
+    /// call in one undo step named after the tool, so every write the call
+    /// makes undoes together. The host guards this call: a panic is contained
+    /// and reported as an error.
+    fn call_tool(
+        &mut self,
+        _host: &mut dyn HostApi,
+        name: &str,
+        _arguments: &str,
+    ) -> Result<String, String> {
+        Err(format!("unknown tool '{name}'"))
+    }
+}
+
+/// One operation a plugin offers to AI clients (API v25): see
+/// [`BuiltinPlugin::tools`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginTool {
+    /// Unique within the plugin; `[a-z0-9_]`, as clients address it.
+    pub name: String,
+    /// What the tool does and when to use it, written for the AI client.
+    pub description: String,
+    /// JSON Schema of the `arguments` object, as JSON text.
+    pub input_schema: String,
 }
 
 /// A point-driven interactive command a plugin starts via

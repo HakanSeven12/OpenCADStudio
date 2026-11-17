@@ -384,6 +384,7 @@ impl shader::Primitive for Primitive {
                 crate::perf_record!("[perf] view-to-prepare {:>7.1}ms", gap_ms);
             }
         }
+        crate::scene::pipeline::note_frame_gpu_errors(&mut pipeline.gpu_error_frames);
         let errors_at_entry = crate::scene::pipeline::gpu_errors_seen();
         let recovering = pipeline.gpu_error_epoch != errors_at_entry;
         if recovering {

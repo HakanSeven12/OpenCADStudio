@@ -7020,6 +7020,8 @@ pub struct MultiPipeline {
     slot_clock: u64,
     pub(crate) frame_rendered: std::sync::atomic::AtomicBool,
     pub(crate) gpu_error_epoch: usize,
+    /// Device errors frame by frame ([`note_frame_gpu_errors`]).
+    pub(crate) gpu_error_frames: GpuErrorFrames,
     /// Definition geometry shared across viewport slots.
     pub(crate) block_geometry: wire_gpu::BlockGeometryCache,
     /// Solid-mesh batches shared across slots, keyed by mesh-set identity.
@@ -7152,13 +7154,94 @@ static GPU_ERRORS_SEEN: std::sync::atomic::AtomicUsize = std::sync::atomic::Atom
 /// move means "something failed", while no move is not proof that nothing did.
 /// That is the right asymmetry here — the cost of believing a bad buffer is a
 /// frozen viewport, the cost of rebuilding a good one is a frame.
+///
+/// While errors arrive on frame after frame ([`note_frame_gpu_errors`]), the
+/// count is held where it stood: rebuilding cannot cure an error that every
+/// frame raises, and each rebuild left the previous allocations to the
+/// device, so GPU memory grew by the frame until the system ran out (#3189).
 pub(crate) fn gpu_errors_seen() -> usize {
-    GPU_ERRORS_SEEN.load(std::sync::atomic::Ordering::Relaxed)
+    use std::sync::atomic::Ordering;
+    match GPU_ERRORS_HELD.load(Ordering::Relaxed) {
+        NOT_HELD => GPU_ERRORS_SEEN.load(Ordering::Relaxed),
+        held => held,
+    }
+}
+
+/// The error count callers see while errors persist; [`NOT_HELD`] otherwise.
+static GPU_ERRORS_HELD: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(NOT_HELD);
+const NOT_HELD: usize = usize::MAX;
+
+/// Frames in a row that may bring new GPU errors and still rebuild what they
+/// built: enough for an allocation that failed once to be tried again. As
+/// many frames in a row without a new error release a held count: errors
+/// arrive asynchronously, so one quiet frame between two failing ones is no
+/// sign that the failures stopped.
+const GPU_ERROR_FRAMES_REBUILT: u32 = 3;
+
+/// The device error counts a frame keeps between frames, for
+/// [`note_frame_gpu_errors`].
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct GpuErrorFrames {
+    /// The raw error count the last frame saw.
+    last: usize,
+    /// Frames in a row that brought new errors.
+    failing: u32,
+    /// Frames in a row that brought none.
+    clean: u32,
+}
+
+/// Count a frame's new device errors, before the frame looks at
+/// [`gpu_errors_seen`]. Past [`GPU_ERROR_FRAMES_REBUILT`] frames in a row
+/// with new errors, the seen count is held, so what was built is kept and
+/// drawn degraded instead of rebuilt on every frame; as many frames in a row
+/// without one release it, and the jump in the count then rebuilds once.
+pub(crate) fn note_frame_gpu_errors(frames: &mut GpuErrorFrames) {
+    use std::sync::atomic::Ordering;
+    let raw = GPU_ERRORS_SEEN.load(Ordering::Relaxed);
+    let held = GPU_ERRORS_HELD.load(Ordering::Relaxed);
+    let next = held_gpu_errors(raw, held, frames);
+    if next != held {
+        GPU_ERRORS_HELD.store(next, Ordering::Relaxed);
+        // Once per device: a failure that comes back with every redraw holds
+        // and releases the count again and again.
+        if next != NOT_HELD && !GPU_ERRORS_HOLD_LOGGED.swap(true, Ordering::Relaxed) {
+            eprintln!("[gpu] device errors on {GPU_ERROR_FRAMES_REBUILT} frames in a row: GPU resources are kept instead of rebuilt until frames draw without errors");
+        }
+    }
+}
+
+/// Whether [`note_frame_gpu_errors`] has said that it holds the count.
+static GPU_ERRORS_HOLD_LOGGED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// The held error count after a frame that sees `raw` errors in all, given
+/// the count `held` so far ([`NOT_HELD`] for none); see
+/// [`note_frame_gpu_errors`].
+fn held_gpu_errors(raw: usize, held: usize, frames: &mut GpuErrorFrames) -> usize {
+    let previous = std::mem::replace(&mut frames.last, raw);
+    if raw == previous {
+        frames.failing = 0;
+        frames.clean = frames.clean.saturating_add(1);
+        return if frames.clean >= GPU_ERROR_FRAMES_REBUILT {
+            NOT_HELD
+        } else {
+            held
+        };
+    }
+    frames.clean = 0;
+    frames.failing = frames.failing.saturating_add(1);
+    match held {
+        NOT_HELD if frames.failing > GPU_ERROR_FRAMES_REBUILT => previous,
+        held => held,
+    }
 }
 
 fn install_gpu_error_handler(device: &wgpu::Device) {
     use std::sync::atomic::Ordering;
     GPU_ERRORS_SEEN.store(0, Ordering::Relaxed);
+    GPU_ERRORS_HELD.store(NOT_HELD, Ordering::Relaxed);
+    GPU_ERRORS_HOLD_LOGGED.store(false, Ordering::Relaxed);
     device.on_uncaptured_error(std::sync::Arc::new(|e: wgpu::Error| {
         let n = GPU_ERRORS_SEEN.fetch_add(1, Ordering::Relaxed) + 1;
         if n.is_power_of_two() {
@@ -7414,6 +7497,10 @@ impl iced::widget::shader::Pipeline for MultiPipeline {
             slot_clock: 0,
             frame_rendered: std::sync::atomic::AtomicBool::new(false),
             gpu_error_epoch: gpu_errors_seen(),
+            gpu_error_frames: GpuErrorFrames {
+                last: gpu_errors_seen(),
+                ..GpuErrorFrames::default()
+            },
             mesh_batch_cache: Default::default(),
             wire_buffer_cache: rustc_hash::FxHashMap::default(),
         }

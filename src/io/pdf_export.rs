@@ -477,10 +477,8 @@ fn render_pdf_bytes_impl(
     plot_style: Option<&PlotStyleTable>,
     include_geopdf: bool,
 ) -> Result<Vec<u8>, String> {
-    for (index, page) in pages.iter().enumerate() {
-        page.validate_plot_styles(plot_style)
-            .map_err(|error| format!("Page {}: {error}", index + 1))?;
-    }
+    // A style the table lacks plots with Normal here; the automation export
+    // checks `validate_plot_styles` up front and refuses instead.
     let mut doc = PdfDocument::new("Open CAD Studio Export");
     // Subset-embed one TrueType font per used system family before any page
     // references them (fonts live on the document resource dictionary).
@@ -3589,11 +3587,13 @@ mod tests {
         page.content
             .entity_plot_styles
             .insert((document::Handle::new(11), None), "Missing".into());
-        let error = render_pdf_bytes(&[page], Some(&named)).unwrap_err();
+        let error = page.validate_plot_styles(Some(&named)).unwrap_err();
         assert!(
             error.contains("Named.stb") && error.contains("Missing") && error.contains("0 matches"),
             "{error}"
         );
+        let text = pdf_stream_text(&render_pdf_bytes(&[page], Some(&named)).unwrap());
+        assert!(text.contains("0 1 0 RG"), "a missing style plots with Normal");
     }
 
     #[test]

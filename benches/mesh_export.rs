@@ -25,7 +25,7 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use OpenCADStudio::io::step::build_step;
+use OpenCADStudio::io::step::{Schema, StepItem};
 use OpenCADStudio::io::stl::build_stl;
 use OpenCADStudio::scene::model::mesh_model::MeshModel;
 
@@ -90,13 +90,26 @@ fn data_section(text: &str) -> &str {
         .unwrap_or(text)
 }
 
+/// The STEP text of the fixture mesh as one body-less item.
+fn build_step(mesh: &MeshModel) -> Result<String, String> {
+    let item = StepItem {
+        body: None,
+        solid: true,
+        mesh: Some(mesh.clone()),
+        name: String::new(),
+        layer: None,
+        color: None,
+    };
+    OpenCADStudio::io::step::build_step(&[item], 1.0, Schema::Ap214, "part")
+}
+
 fn main() {
     let mesh = fixture();
     assert_eq!(mesh.indices.len() / 3, TRIS, "the fixture triangle count");
 
     for _ in 0..WARMUP {
         black_box(build_stl(&[&mesh]));
-        black_box(build_step(&[&mesh]));
+        black_box(build_step(&mesh));
     }
 
     let mut stl_best = f64::MAX;
@@ -128,7 +141,7 @@ fn main() {
     let mut faces = 0usize;
     for run in 0..RUNS {
         let started = Instant::now();
-        let text = build_step(black_box(&[&mesh])).expect("the fixture exports");
+        let text = build_step(black_box(&mesh)).expect("the fixture exports");
         let seconds = started.elapsed().as_secs_f64();
         faces = count_needle(&text, "ADVANCED_FACE(");
         // The steep heightfield leaves at most a stray coplanar pair; the

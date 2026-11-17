@@ -637,7 +637,7 @@ impl OpenCADStudio {
                     D::Paragraph(d) => sized_flow(ex, 640, 560, |flow| w::view_paragraph(d, flow)),
                     D::Columns(d) => sized_flow(ex, 520, 330, |flow| w::view_columns(d, flow)),
                     D::Mask(d) => sized_flow(ex, 440, 300, |flow| w::view_mask(d, flow)),
-                    D::Find(d) => sized_flow(ex, 560, 360, |flow| w::view_find(d, flow)),
+                    D::Find(d) => sized_flow(ex, 560, 440, |flow| w::view_find(d, flow)),
                     D::Charset(d) => sized_flow(ex, 340, 420, |_| t::view_charset(d)),
                     D::StyleChange(d) => sized_flow(ex, 470, 220, |_| t::view_style_change(d)),
                     D::Dictionaries(d) => sized_flow(ex, 450, if d.manage { 660 } else { 480 }, |_| {

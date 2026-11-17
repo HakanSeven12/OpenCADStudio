@@ -149,12 +149,16 @@ fn inherited_common(source: &EntityCommon) -> EntityCommon {
 
 fn union_bodies(kind: UnionEntityKind, bodies: Vec<Body>) -> Result<Body, kernel::brep::Snag> {
     if kind == UnionEntityKind::Solid {
+        let references = bodies.iter().collect::<Vec<_>>();
+        let tolerance = kernel::brep::operation_tolerance(&references);
         let mut operands = bodies.into_iter();
-        let mut result = operands.next().ok_or(kernel::brep::Snag::CutRefused)?;
-        for operand in operands {
-            result = solid_model::boolean_result(Bool::Union, &result, &operand)?;
-        }
-        return Ok(result);
+        let first = operands.next().ok_or(kernel::brep::Snag::CutRefused)?;
+        return kernel::brep::combine_all(
+            first,
+            operands.collect(),
+            kernel::brep::Operation::Union,
+            tolerance,
+        );
     }
     let references = bodies.iter().collect::<Vec<_>>();
     let tolerance = kernel::brep::operation_tolerance(&references);
@@ -214,15 +218,15 @@ fn subtract_bodies(
         return kernel::brep::subtract_planar_regions(&bases, &cutters, tolerance);
     }
 
+    // Cutters that keep clear of each other are taken away in one pass: a
+    // plate drilled with a hundred holes is cut once, not a hundred times.
+    let references = bases.iter().chain(&cutters).collect::<Vec<_>>();
+    let tolerance = kernel::brep::operation_tolerance(&references);
     let mut bases = bases.into_iter();
-    let mut result = bases.next().ok_or(kernel::brep::Snag::CutRefused)?;
-    for base in bases {
-        result = solid_model::boolean_result(Bool::Union, &result, &base)?;
-    }
-    for cutter in cutters {
-        result = solid_model::boolean_result(Bool::Subtract, &result, &cutter)?;
-    }
-    Ok(result)
+    let first = bases.next().ok_or(kernel::brep::Snag::CutRefused)?;
+    let united =
+        kernel::brep::combine_all(first, bases.collect(), kernel::brep::Operation::Union, tolerance)?;
+    kernel::brep::combine_all(united, cutters, kernel::brep::Operation::Difference, tolerance)
 }
 
 inventory::submit!(crate::command::CommandRegistration {

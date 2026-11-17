@@ -477,6 +477,10 @@ fn render_pdf_bytes_impl(
     plot_style: Option<&PlotStyleTable>,
     include_geopdf: bool,
 ) -> Result<Vec<u8>, String> {
+    for (index, page) in pages.iter().enumerate() {
+        page.validate_plot_styles(plot_style)
+            .map_err(|error| format!("Page {}: {error}", index + 1))?;
+    }
     let mut doc = PdfDocument::new("Open CAD Studio Export");
     // Subset-embed one TrueType font per used system family before any page
     // references them (fonts live on the document resource dictionary).
@@ -512,7 +516,11 @@ fn render_pdf_bytes_impl(
     // out 1191 x 842 instead of 1190.55 x 841.89); write the exact size.
     for (page, id) in pages.iter().zip(lo.get_pages().into_values()) {
         let size = [page.paper_w, page.paper_h].map(|mm| (mm * 72.0 / 25.4) as f32);
-        let Some(dict) = lo.get_object_mut(id).ok().and_then(|o| o.as_dict_mut().ok()) else {
+        let Some(dict) = lo
+            .get_object_mut(id)
+            .ok()
+            .and_then(|o| o.as_dict_mut().ok())
+        else {
             continue;
         };
         for key in [&b"MediaBox"[..], b"TrimBox", b"CropBox"] {
@@ -806,16 +814,15 @@ fn append_pdf_page(
                 DrawItem::Image(_) => None,
             };
             // A named (STB) table plots each entity with its own object style.
-            let item_name = match &item {
+            let style_key = match &item {
                 DrawItem::WireFill(wire) | DrawItem::Wire(wire) | DrawItem::Text(wire) => {
-                    Some(wire.name.as_str())
+                    crate::scene::Scene::handle_from_wire_name(&wire.name)
+                        .map(|handle| (handle, wire.block_member))
                 }
-                DrawItem::Hatch(hatch) => Some(hatch.name.as_str()),
+                DrawItem::Hatch(hatch) => hatch.entity.map(|handle| (handle, None)),
                 DrawItem::Image(_) => None,
             };
-            let object_style = item_name
-                .and_then(crate::scene::Scene::handle_from_wire_name)
-                .and_then(|handle| entity_plot_styles.get(&handle));
+            let object_style = style_key.and_then(|key| entity_plot_styles.get(&key));
             let plot_style = match (plot_style, object_style) {
                 (Some(table), Some(style)) if table.is_stb => {
                     if !named_styles.contains_key(style) {
@@ -961,14 +968,14 @@ fn append_pdf_page(
             ) {
                 continue;
             }
-            // Apply CTB plot style table overrides (color + lineweight).
+            // CTB uses the ACI row. STB applies the selected style to any object color.
             let mut lw_override: Option<f32> = None;
             let mut screening = 1.0;
             let mut color_overridden = false;
             let mut cap = None;
             let mut join = None;
             if let Some(ctb) = plot_style {
-                if wire.aci > 0 {
+                if wire.aci > 0 || ctb.is_stb {
                     if let Some([cr, cg, cb]) = ctb.resolve_style_color(wire.aci) {
                         r = cr;
                         g = cg;
@@ -3531,9 +3538,8 @@ mod tests {
     }
 
     #[test]
-    fn stb_plots_each_entity_with_its_own_named_style() {
-        // Two red wires: entity 10 takes the "Blue" named style, entity 11
-        // has a style the table lacks and falls back to Normal (green).
+    fn stb_plot_style_applies_per_entity_and_rejects_a_missing_entry() {
+        // Two red wires: entity 10 takes "Blue" and entity 11 takes "Normal".
         let entry = |name: &str, rgb: [u8; 3]| {
             let mut e = crate::io::plot_style::PlotStyleEntry::default();
             e.name = name.to_string();
@@ -3549,7 +3555,7 @@ mod tests {
         named
             .named_entries
             .insert("Blue".to_string(), entry("Blue", [0, 0, 255]));
-        let wire = |handle: &str| {
+        let wire = |handle: &str, aci| {
             let mut w = PlotWire {
                 wire: WireModel::solid(
                     handle.into(),
@@ -3559,20 +3565,35 @@ mod tests {
                 ),
                 draw_depth: 0.0,
             };
-            w.wire.aci = 1;
+            w.wire.aci = aci;
             w
         };
-        let mut page = test_page(vec![wire("10"), wire("11")]);
+        let mut page = test_page(vec![wire("10", 0), wire("11", 1)]);
         page.content.entity_plot_styles = [
-            (document::Handle::new(10), "blue".to_string()),
-            (document::Handle::new(11), "Missing".to_string()),
+            ((document::Handle::new(10), None), "blue".to_string()),
+            ((document::Handle::new(11), None), "Normal".to_string()),
         ]
         .into_iter()
         .collect();
-        let text = pdf_stream_text(&render_pdf_bytes(&[page], Some(&named)).unwrap());
-        assert!(text.contains("0 0 1 RG"), "named style Blue applies: {text}");
-        assert!(text.contains("0 1 0 RG"), "unknown style falls back to Normal");
-        assert!(!text.contains("1 0 0 RG"), "no wire keeps its object colour");
+        let text =
+            pdf_stream_text(&render_pdf_bytes(std::slice::from_ref(&page), Some(&named)).unwrap());
+        assert!(
+            text.contains("0 0 1 RG"),
+            "named style Blue applies: {text}"
+        );
+        assert!(text.contains("0 1 0 RG"), "explicit Normal applies");
+        assert!(
+            !text.contains("1 0 0 RG"),
+            "no wire keeps its object colour"
+        );
+        page.content
+            .entity_plot_styles
+            .insert((document::Handle::new(11), None), "Missing".into());
+        let error = render_pdf_bytes(&[page], Some(&named)).unwrap_err();
+        assert!(
+            error.contains("Named.stb") && error.contains("Missing") && error.contains("0 matches"),
+            "{error}"
+        );
     }
 
     #[test]

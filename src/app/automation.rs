@@ -1334,6 +1334,7 @@ impl OpenCADStudio {
                 };
                 if let Some(session) = &self.tabs[i].ifccad_session {
                     if let Err(error) = session.check_destination(
+                        &self.tabs[i].scene.document,
                         path.extension()
                             .and_then(|ext| ext.to_str())
                             .unwrap_or_default(),
@@ -1942,7 +1943,11 @@ impl OpenCADStudio {
                 json!({"ok":false,"code":"temporary_document","error":"Test Block is temporary and cannot be saved."}),
             );
         }
-        if self.tabs[i].ifccad_session.is_some() {
+        if self.tabs[i]
+            .ifccad_session
+            .as_ref()
+            .is_some_and(ocs_save::IfccadSession::has_native_context)
+        {
             return Err(json!({
                 "ok": false, "status": "failed", "code": "unsupported_format",
                 "error": "This drawing has retained IFCCAD content. Use Save as .ifccad.",

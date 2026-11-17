@@ -81,6 +81,7 @@ pub enum ComplexWalk {
 
 #[derive(Clone, Debug)]
 pub struct LocalWire {
+    plot_member: Option<Handle>,
     pub points: Vec<[f32; 3]>,
     /// Low-bit residual paired with `points` so block-instance wires keep
     /// sub-f32 precision once the renderer translates them to world space.
@@ -1941,6 +1942,7 @@ fn tessellate_sub_local(
                 None => (lt_is_byblock, lt_l0, own_complex.clone(), complex_walk),
             };
         result.push(LocalWire {
+            plot_member: (!doc.header.plotstyle_mode).then_some(sub.common().handle),
             points: geom.points,
             points_low: geom.points_low,
             is_point: matches!(sub, EntityType::Point(_)),
@@ -2845,6 +2847,7 @@ pub(crate) fn xref_fade(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
 /// f32 fields are bit-cast to u32 to make the key Hash + Eq.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct StyleKey {
+    plot_member: Option<Handle>,
     /// Keep identical geometry on different effective layers in distinct
     /// batches; a finalized WireModel has only one layer attribution.
     effective_layer: Option<Arc<str>>,
@@ -2897,6 +2900,7 @@ struct PointMarkerKey {
 
 #[derive(Default, Debug)]
 struct BatchEntry {
+    plot_member: Option<Handle>,
     effective_layer: Option<Arc<str>>,
     color: [f32; 4],
     contrast_bg: Option<[f32; 4]>,
@@ -3149,6 +3153,7 @@ impl Batches {
                     dash_closure: b.dash_closure,
                     name: name.to_string(),
                     effective_layer: b.effective_layer,
+                    block_member: b.plot_member,
                     color,
                     selected,
                     pattern_length: b.pattern_length,
@@ -3209,6 +3214,7 @@ fn style_key(
     local_depth: Option<f32>,
 ) -> StyleKey {
     StyleKey {
+        plot_member: None,
         effective_layer: Some(effective_layer),
         color: [
             color[0].to_bits(),
@@ -4467,6 +4473,7 @@ fn emit_wire(
                     dash_closure: lw.dash_closure,
                     name: String::new(),
                     effective_layer: Some(Arc::clone(&effective_layer)),
+                    block_member: lw.plot_member,
                     color,
                     selected: ctx.selected,
                     pattern_length: final_pat_len,
@@ -4610,6 +4617,7 @@ fn emit_wire(
         lw.hide_unselected,
         local_depth,
     );
+    key.plot_member = lw.plot_member;
     key.solid_normal = lw.solid_normal.map(|normal| normal.map(f32::to_bits));
     // Never fold reference-only boundaries into a visible geometry batch.
     key.snap_only = lw.snap_only;
@@ -4681,6 +4689,7 @@ fn emit_wire(
             lw.hide_unselected,
         )
     });
+    entry.plot_member = lw.plot_member;
     entry.local_depth = local_depth;
     entry.solid_normal = lw.solid_normal;
     entry.snap_only = lw.snap_only;

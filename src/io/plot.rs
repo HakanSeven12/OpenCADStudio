@@ -164,10 +164,9 @@ pub struct PlotContent {
     /// Legacy handle-based layer fallback. Per-occurrence `effective_layer`
     /// metadata takes precedence for expanded block and xref content.
     pub entity_layers: std::collections::HashMap<document::Handle, String>,
-    /// Named plot style of each plotted entity (ByLayer and ByBlock already
-    /// resolved), keyed like `entity_layers`; a named (STB) table plots each
-    /// entity with this style.
-    pub entity_plot_styles: std::collections::HashMap<document::Handle, String>,
+    /// Effective STB style keyed by the plotted object and optional block member.
+    pub entity_plot_styles:
+        std::collections::HashMap<(document::Handle, Option<document::Handle>), String>,
 }
 
 /// Owned geometry and settings for one plot page.
@@ -207,6 +206,37 @@ pub fn turned_bounds(angle: f64, [x0, y0, x1, y1]: [f64; 4]) -> [f64; 4] {
         out = [out[0].min(tx), out[1].min(ty), out[2].max(tx), out[3].max(ty)];
     }
     out
+}
+
+impl PlotPage {
+    pub(crate) fn validate_plot_styles(
+        &self,
+        fallback: Option<&PlotStyleTable>,
+    ) -> Result<(), String> {
+        let Some(table) = self
+            .plot_style
+            .as_ref()
+            .or(fallback)
+            .filter(|table| table.is_stb)
+        else {
+            return Ok(());
+        };
+        for ((handle, member), style) in &self.content.entity_plot_styles {
+            let matches = table
+                .named_entries
+                .keys()
+                .filter(|entry| entry.eq_ignore_ascii_case(style))
+                .count();
+            if matches != 1 {
+                let object = member.unwrap_or(*handle);
+                return Err(format!(
+                    "Table {:?}, object {object}: style {style:?} has {matches} matches.",
+                    table.name,
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Default for PlotOptions {
@@ -303,7 +333,9 @@ fn circle_beziers(points: &[glam::DVec2]) -> Option<Vec<[glam::DVec2; 4]>> {
     use glam::DVec2;
     let (center, radius, start, sweep) = fit_circle(points)?;
     // A full turn sums to a hair over 2π; that is still four quarters.
-    let pieces = (sweep.abs() / std::f64::consts::FRAC_PI_2 - 1.0e-9).ceil().max(1.0) as usize;
+    let pieces = (sweep.abs() / std::f64::consts::FRAC_PI_2 - 1.0e-9)
+        .ceil()
+        .max(1.0) as usize;
     let step = sweep / pieces as f64;
     let handle = 4.0 / 3.0 * (step / 4.0).tan();
     let at = |t: f64| center + radius * DVec2::from_angle(t);
@@ -311,7 +343,10 @@ fn circle_beziers(points: &[glam::DVec2]) -> Option<Vec<[glam::DVec2; 4]>> {
     Some(
         (0..pieces)
             .map(|piece| {
-                let (t0, t1) = (start + step * piece as f64, start + step * (piece + 1) as f64);
+                let (t0, t1) = (
+                    start + step * piece as f64,
+                    start + step * (piece + 1) as f64,
+                );
                 [
                     at(t0),
                     at(t0) + handle * tangent(t0),
@@ -455,7 +490,10 @@ mod tests {
     fn circles_and_arcs_plot_as_curves() {
         for sweep in [1.0, -2.5, std::f64::consts::TAU] {
             let spans = super::wire_arc_beziers(&arc_wire(sweep, 48), 1.0).unwrap();
-            assert_eq!(spans.len(), (sweep.abs() / std::f64::consts::FRAC_PI_2).ceil() as usize);
+            assert_eq!(
+                spans.len(),
+                (sweep.abs() / std::f64::consts::FRAC_PI_2).ceil() as usize
+            );
             let center = glam::DVec2::new(1000.0, 2000.0);
             for [p0, c1, c2, p3] in &spans {
                 // The curve's midpoint lies on the circle.

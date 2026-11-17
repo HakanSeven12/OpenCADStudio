@@ -1618,7 +1618,8 @@ impl OpenCADStudio {
                 }
                 let ext = if is_dxf { "dxf" } else { "dwg" };
                 if let Some(session) = &self.tabs[i].ifccad_session {
-                    session.check_destination(ext)
+                    session
+                        .check_destination(&self.tabs[i].scene.document, ext)
                         .map_err(|error| failure("save_failed", error))?;
                 }
                 self.sync_view_state_for_save(i);

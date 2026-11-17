@@ -717,51 +717,69 @@ fn plot_scene_content(
     }
 }
 
-/// Named plot style of every entity the plot draws, keyed like
-/// `plot_entity_layers`: the object's own style, its layer's for ByLayer, and
-/// `Normal` for ByBlock at the top level or a layer without one.
-// shortcut: block children plot with their INSERT's style (wires carry the
-// INSERT handle), like `plot_entity_layers`; per-child needs BlockCache handles.
+/// Resolve the object style and ByLayer or ByBlock inheritance for the
+/// plotted occurrence. Block wires keep the member and the outer INSERT.
 fn plot_entity_styles(
     scene: &crate::scene::Scene,
     wires: &[crate::io::pdf_export::PlotWire],
     hatches: &[crate::scene::model::hatch_model::HatchModel],
     wipeouts: &[crate::scene::model::hatch_model::HatchModel],
-) -> std::collections::HashMap<document::Handle, String> {
+) -> std::collections::HashMap<(document::Handle, Option<document::Handle>), String> {
     let doc = &scene.document;
-    let names = wires.iter().map(|wire| wire.name.as_str()).chain(
-        hatches
-            .iter()
-            .chain(wipeouts)
-            .map(|hatch| hatch.name.as_str()),
-    );
+    if doc.header.plotstyle_mode {
+        return Default::default();
+    }
+    let objects = wires
+        .iter()
+        .filter_map(|wire| {
+            crate::scene::Scene::handle_from_wire_name(&wire.name)
+                .map(|handle| (handle, wire.block_member, wire.effective_layer.as_deref()))
+        })
+        .chain(
+            hatches
+                .iter()
+                .chain(wipeouts)
+                .filter_map(|hatch| Some((hatch.entity?, None, hatch.effective_layer.as_deref()))),
+        );
     let mut styles = std::collections::HashMap::new();
-    for name in names {
-        let Some(handle) = crate::scene::Scene::handle_from_wire_name(name) else {
-            continue;
-        };
-        if styles.contains_key(&handle) {
+    for (handle, member, effective_layer) in objects {
+        if styles.contains_key(&(handle, member)) {
             continue;
         }
-        let Some(entity) = doc.get_entity(handle) else {
+        let Some(owner) = doc.get_entity(handle) else {
             continue;
         };
-        let common = entity.common();
-        let style = match common.plotstyle_flags {
-            0 => doc
-                .layers
-                .get(&common.layer)
-                .map(|layer| layer.plotstyle_handle)
-                .filter(|h| !h.is_null())
-                .map(|h| crate::app::properties::plot_style_name(doc, 3, Some(h)))
-                .filter(|name| name != "ByLayer")
-                .unwrap_or_else(|| "Normal".to_string()),
-            1 => "Normal".to_string(),
-            flags => crate::app::properties::plot_style_name(doc, flags, common.plotstyle_handle),
+        let owner = owner.common();
+        let child = member.and_then(|member| doc.get_entity(member));
+        let style = match child.map(|child| child.common()) {
+            Some(child) if child.plotstyle_flags != 1 => {
+                plot_occurrence_style(doc, child, effective_layer)
+            }
+            _ => plot_occurrence_style(doc, owner, None),
         };
-        styles.insert(handle, style);
+        styles.insert((handle, member), style);
     }
     styles
+}
+
+fn plot_occurrence_style(
+    doc: &document::Document,
+    common: &document::entities::EntityCommon,
+    effective_layer: Option<&str>,
+) -> String {
+    let style_name = crate::app::properties::plot_style_name;
+    match common.plotstyle_flags {
+        0 => doc
+            .layers
+            .get(effective_layer.unwrap_or(&common.layer))
+            .map(|layer| layer.plotstyle_handle)
+            .filter(|h| !h.is_null())
+            .map(|handle| style_name(doc, 3, Some(handle)))
+            .filter(|name| name != "ByLayer")
+            .unwrap_or_else(|| "Normal".to_string()),
+        1 => "Normal".to_string(),
+        flags => style_name(doc, flags, common.plotstyle_handle),
+    }
 }
 
 /// Legacy handle-based layer fallback for direct and synthetic plot items.
@@ -2907,7 +2925,7 @@ impl OpenCADStudio {
                 .extension()
                 .and_then(|ext| ext.to_str())
                 .unwrap_or_default();
-            if let Err(error) = session.check_destination(ext) {
+            if let Err(error) = session.check_destination(&self.tabs[i].scene.document, ext) {
                 return Task::done(Message::WblockWriteFinished("*".into(), path, Err(error)));
             }
         }
@@ -3347,7 +3365,10 @@ impl OpenCADStudio {
         )
     }
 
-    pub(in crate::app) fn on_obj_import_path_some(&mut self, path: std::path::PathBuf) -> Task<Message> {
+    pub(in crate::app) fn on_obj_import_path_some(
+        &mut self,
+        path: std::path::PathBuf,
+    ) -> Task<Message> {
         let tab_id = self.tabs[self.active_tab].id;
         let worker_path = path.clone();
         background_task(
@@ -8023,8 +8044,7 @@ impl OpenCADStudio {
                     self.plot_dialog.style_missing = false;
                     self.plot_dialog.style_error = None;
                 } else {
-                    let base = crate::io::drawing_dir(&self.tabs[self.active_tab].scene.document);
-                    match crate::io::plot_style::PlotStyleTable::load_named_at(&name, base) {
+                    match self.load_layout_plot_style(&name) {
                         Ok(table) => {
                             self.plot_dialog.style_name = table.name.clone();
                             self.plot_dialog.apply_plot_styles = true;
@@ -8352,22 +8372,16 @@ impl OpenCADStudio {
             self.plot_dialog.window = self.plot_window;
         }
         let mut style_error = None;
-        let drawing_base = crate::io::drawing_dir(&self.tabs[self.active_tab].scene.document);
-        if !ps.current_style_sheet.is_empty()
-            && self
-                .active_plot_style
-                .as_ref()
-                .is_none_or(|table| !table.name.eq_ignore_ascii_case(&ps.current_style_sheet))
-        {
-            match crate::io::plot_style::PlotStyleTable::load_named_at(
-                &ps.current_style_sheet,
-                drawing_base,
-            ) {
+        if !ps.current_style_sheet.is_empty() {
+            match self.load_layout_plot_style(&ps.current_style_sheet) {
                 Ok(table) => {
                     self.report_plot_style_warnings(&table);
                     self.active_plot_style = Some(table);
                 }
-                Err(error) => style_error = Some(error),
+                Err(error) => {
+                    self.active_plot_style = None;
+                    style_error = Some(error);
+                }
             }
         }
         let active_style_name = self
@@ -8788,6 +8802,106 @@ impl OpenCADStudio {
         // silently ignore the selected CTB in that state.
         let base = crate::io::drawing_dir(&self.tabs[self.active_tab].scene.document);
         crate::io::plot_style::PlotStyleTable::load_named_at(&d.style_name, base).ok()
+    }
+
+    fn load_layout_plot_style(
+        &self,
+        name: &str,
+    ) -> Result<crate::io::plot_style::PlotStyleTable, String> {
+        use crate::io::plot_style::{PlotStyleTable, PlotStyleTableExt};
+
+        let tab = &self.tabs[self.active_tab];
+        let doc = &tab.scene.document;
+        let base = crate::io::drawing_dir(doc);
+        let source = tab
+            .ifccad_session
+            .as_ref()
+            .and_then(|session| session.plot_style_source(doc, &tab.scene.current_layout, name));
+        let hash = source.and_then(|source| source.sha256.as_deref());
+        #[cfg(target_arch = "wasm32")]
+        if let Some(hash) = hash {
+            use crate::io::plot_style::{parse_external_table, session_table};
+            use sha2::{Digest, Sha256};
+            let bytes = session_table(&format!("{hash}/{name}"))
+                .or_else(|| {
+                    session_table(name)
+                        .filter(|bytes| format!("{:x}", Sha256::digest(bytes.as_slice())) == hash)
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "No supplied plot style table {name:?} matches the SHA-256 in the drawing."
+                    )
+                })?;
+            return parse_external_table(name, !doc.header.plotstyle_mode, &bytes);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use crate::io::plot_style;
+
+            let picked = hash
+                .and_then(|hash| plot_style::picked_table_path(name, hash).ok())
+                .filter(|path| path.is_file());
+            let local = plot_style::drawing_table_path(name, base);
+            if source.is_some() || local.is_some() {
+                let candidates: Vec<_> = picked
+                    .into_iter()
+                    .chain(local)
+                    .chain(
+                        plot_style::plot_styles_folder()
+                            .into_iter()
+                            .filter_map(|folder| std::fs::read_dir(folder).ok())
+                            .flatten()
+                            .filter_map(Result::ok)
+                            .map(|entry| entry.path()),
+                    )
+                    .collect();
+                return plot_style::resolve_external_table(
+                    name,
+                    !doc.header.plotstyle_mode,
+                    hash,
+                    &candidates,
+                );
+            }
+        }
+        PlotStyleTable::load_named_at(name, base)
+    }
+
+    pub(super) fn bind_picked_plot_style(
+        &mut self,
+        index: usize,
+        name: &str,
+        picked: &crate::io::plot_style::PickedPlotStyle,
+    ) -> Result<(), String> {
+        use document::objects::ObjectType;
+
+        let tab = &mut self.tabs[index];
+        let doc = &mut tab.scene.document;
+        if picked.table.is_stb == doc.header.plotstyle_mode {
+            return Err(format!(
+                "Plot style table {:?} is incompatible with the drawing mode.",
+                picked.source.file_name
+            ));
+        }
+        let (handle, layout) = doc
+            .objects
+            .iter_mut()
+            .find_map(|(handle, object)| {
+                let ObjectType::Layout(layout) = object else {
+                    return None;
+                };
+                (layout.name == name).then_some((*handle, layout))
+            })
+            .ok_or_else(|| format!("Layout {name:?} no longer exists."))?;
+        picked.remember()?;
+        layout.plot_style_sheet.clone_from(&picked.source.file_name);
+        layout.plot_flags.plot_plot_styles = true;
+        tab.ifccad_session
+            .get_or_insert_with(Default::default)
+            .bind_plot_style(handle, picked.source.clone());
+        tab.dirty = true;
+        tab.edit_revision = tab.edit_revision.wrapping_add(1);
+        tab.scene.bump_geometry_no_blocks();
+        Ok(())
     }
 
     pub(in crate::app) fn window_plot_job(&self) -> Option<PdfPageInput> {
@@ -10282,11 +10396,17 @@ mod plot_paper_tests {
             "sheet origin {x0} {y0}"
         );
         let ((px, py), _) = app.tabs[i].scene.printable_area_limits().unwrap();
-        assert!((px - 40.0).abs() < 1e-9 && (py - 25.0).abs() < 1e-9, "{px} {py}");
+        assert!(
+            (px - 40.0).abs() < 1e-9 && (py - 25.0).abs() < 1e-9,
+            "{px} {py}"
+        );
         let _ = app.on_plot_dialog_open();
         let page = app.layout_plot_page_for("Layout");
         let scale = page.scale as f64;
-        let at = ((40.0 + page.offset_x) * scale, (25.0 + page.offset_y) * scale);
+        let at = (
+            (40.0 + page.offset_x) * scale,
+            (25.0 + page.offset_y) * scale,
+        );
         assert!(
             (at.0 - 2.0).abs() < 1e-6 && (at.1 - 3.0).abs() < 1e-6,
             "printable corner plots at {at:?}"
@@ -11185,6 +11305,66 @@ cupsPrintQuality/Print Quality: *Normal High\n";
 #[cfg(test)]
 mod plot_device_persistence_tests {
     use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn picked_plot_style_rebinds_same_basename_across_ifccad_save_and_open() {
+        use crate::io::plot_style::{PickedPlotStyle, PlotStyleEntry, PlotStyleTable};
+
+        let mut app = OpenCADStudio::new_for_test();
+        let i = app.active_tab;
+        let layout = app.tabs[i].scene.current_layout.clone();
+        let file = "review-binding.stb";
+        app.tabs[i].scene.document.header.plotstyle_mode = false;
+        let make_pick = |rgb| {
+            let mut table = PlotStyleTable::identity(file);
+            table.is_stb = true;
+            table.named_entries.insert(
+                "Normal".into(),
+                PlotStyleEntry {
+                    name: "Normal".into(),
+                    color: Some(rgb),
+                    ..Default::default()
+                },
+            );
+            let bytes = table.to_bytes().unwrap();
+            PickedPlotStyle::from_bytes(file.into(), bytes).unwrap()
+        };
+        let initial = make_pick([0, 0, 255]);
+        let replacement = make_pick([255, 0, 0]);
+        assert_ne!(initial.source.sha256, replacement.source.sha256);
+        for picked in [&initial, &replacement] {
+            let id = app.tabs[i].id;
+            let _task = app.update(Message::PlotStyleLoaded(
+                id,
+                layout.clone(),
+                Ok(Some(picked.clone())),
+            ));
+            assert!(app.tabs[i].dirty);
+            let tab = &app.tabs[i];
+            let bytes = ocs_save::write_external_for_edit(
+                &tab.scene.document,
+                ocs_save::external_format("ifccad").unwrap(),
+                true,
+                tab.ifccad_session.as_ref(),
+            )
+            .unwrap();
+            let (opened, session) = ocs_save::read_ifccad_for_edit(&bytes).unwrap();
+            let restored = session
+                .as_ref()
+                .unwrap()
+                .plot_style_source(&opened.document, &layout, file)
+                .unwrap();
+            assert_eq!(restored, &picked.source);
+            app.tabs[i].scene.document = opened.document;
+            app.tabs[i].note_document_loaded(session);
+            let table = app.load_layout_plot_style(file).unwrap();
+            assert_eq!(
+                table.named_entries["Normal"].color,
+                picked.table.named_entries["Normal"].color
+            );
+        }
+    }
 
     /// Reopening the Plot dialog must keep the user's printer. Layouts in
     /// real drawings carry plot settings with no device, and the auto-applied

@@ -6295,7 +6295,10 @@ pub(crate) fn attr_row_from_entity(
     AttrRow {
         tag: a.tag.clone(),
         prompt,
-        value: a.get_value().to_string(),
+        value: a
+            .embedded_mtext
+            .as_ref()
+            .map_or_else(|| a.get_value().to_string(), |m| m.value.clone()),
         text_style: a.text_style.clone(),
         height: fmt(a.height),
         rotation: fmt(a.rotation.to_degrees()),
@@ -6337,8 +6340,16 @@ pub(crate) fn attr_row_from_entity(
 /// field is left as-is. Constant attributes ignore edits to their value.
 pub(crate) fn apply_attr_row(a: &mut document::entities::AttributeEntity, row: &AttrRow) -> bool {
     let mut ch = false;
-    if !row.is_constant && a.get_value() != row.value {
+    let active_value = a
+        .embedded_mtext
+        .as_ref()
+        .map_or(a.get_value(), |m| m.value.as_str());
+    if !row.is_constant && active_value != row.value {
+        // An explicit edit updates both forms. An unchanged row preserves its fallback.
         a.set_value(row.value.clone());
+        if let Some(m) = a.embedded_mtext.as_mut() {
+            m.value = row.value.clone();
+        }
         ch = true;
     }
     if a.text_style != row.text_style {

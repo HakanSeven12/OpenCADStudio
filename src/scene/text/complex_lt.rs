@@ -563,6 +563,7 @@ fn apply_stretched(
             dash_closure: Default::default(),
             name: name.to_string(),
             effective_layer: None,
+            block_member: None,
             color,
             selected,
             pattern_length: 0.0,

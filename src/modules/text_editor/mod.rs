@@ -121,17 +121,17 @@ impl CadModule for TextEditorModule {
                                 (
                                     "_MTED CLEAR CHAR",
                                     "Remove Character Formatting",
-                                    svg(include_bytes!("../../../assets/icons/mt_cancel.svg")),
+                                    svg(include_bytes!("../../../assets/icons/mt_clear_char.svg")),
                                 ),
                                 (
                                     "_MTED CLEAR PARA",
                                     "Remove Paragraph Formatting",
-                                    svg(include_bytes!("../../../assets/icons/mt_cancel.svg")),
+                                    svg(include_bytes!("../../../assets/icons/mt_clear_para.svg")),
                                 ),
                                 (
                                     "_MTED CLEAR ALL",
                                     "Remove All Formatting",
-                                    svg(include_bytes!("../../../assets/icons/mt_cancel.svg")),
+                                    svg(include_bytes!("../../../assets/icons/mt_clear_all.svg")),
                                 ),
                             ],
                             default: "_MTED CLEAR CHAR",

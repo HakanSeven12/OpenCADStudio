@@ -287,7 +287,7 @@ use std::rc::Rc;
 
 use iced::keyboard::{Key, Modifiers, key as keyboard_key};
 use iced::widget::tooltip::Position as TooltipPosition;
-use iced::widget::{Tooltip, button, column, container, mouse_area, row, text};
+use iced::widget::{Tooltip, button, canvas, column, container, mouse_area, row, text};
 use iced::{Element, Fill, Length, Point, Theme};
 use iced_aw::menu::{Item, Menu, MenuBar};
 // The v24 panel-surface store's vocabulary (SCN-025). Wire-adjacent STRUCT
@@ -322,6 +322,11 @@ use crate::ui::window::plugin_widgets_dispatch::{
 use crate::ui::window::plugin_widgets_tables::{
     is_patch_writable, CellFocus, TableUiState,
 };
+// (SCN-031) The retained scene-projection layer the mount's scene region
+// replays — the seam consumes the SCN-011a/b cache verbatim, nothing of it
+// is reinvented here.
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ui::window::plugin_scene_cache::SceneProjectionCache;
 
 
 /// The mount's iced_aw menu element types with the crate's theme/renderer
@@ -1996,10 +2001,24 @@ impl SurfaceMountHandle {
     /// (SCN-028) The typed-table context rides in: the surface itself, the
     /// registry-owned per-table machines, and the scope's cell cursor —
     /// view-pass reads only.
+    ///
+    /// (SCN-031) THE FIXED SPLIT (v1, recorded): when the panel's store
+    /// holds a scene leg, the scene region composes ABOVE the widget stack
+    /// as the column's FIRST child, at a FIXED height
+    /// ([`SCENE_REGION_V1_HEIGHT`]) — inside the panel's scroll area the
+    /// main axis is unbounded, so a `Fill`-height region would resolve to
+    /// infinite height; fixed is the simple, correct v1 split. A scene-only
+    /// panel renders the region as the whole body (the stack below is
+    /// empty); a widgets-only panel receives `None` and builds EXACTLY
+    /// today's element tree (byte-identical by construction — no scene
+    /// element ever enters the column). A SceneRef widget variant that
+    /// would let a plugin place the scene inside its own widget tree is the
+    /// later refinement, deliberately NOT this package.
     fn body(
         &self,
         tables: &HashMap<StableId, TableUiState>,
         cell_cursor: Option<CellFocus>,
+        scene_region: Option<Element<'static, WidgetMountMsg>>,
     ) -> Element<'static, WidgetMountMsg> {
         let state = self.state.borrow();
         let dispatcher = self.dispatcher.borrow();
@@ -2009,6 +2028,11 @@ impl SurfaceMountHandle {
             cell_cursor,
         };
         let mut col = column![].spacing(MOUNT_GROUP_SPACING).width(Fill);
+        // (SCN-031) The scene region first (the fixed split, see the doc
+        // above); `None` builds exactly the pre-seam tree.
+        if let Some(scene_region) = scene_region {
+            col = col.push(scene_region);
+        }
         for node in &self.surface.roots {
             if let Some(element) = build_node(node, &state, &dispatcher, &DEFAULT_WINDOW_SPEC, &table_ctx) {
                 col = col.push(element);
@@ -2097,6 +2121,20 @@ pub struct MountRegistry {
     /// legacy-behavior guarantee now holds for this store BY CONSTRUCTION).
     #[cfg(not(target_arch = "wasm32"))]
     panel_surfaces: PanelSurfaceStore,
+    /// (SCN-031) The per-panel SCENE-PROJECTION cache slots — the retained
+    /// side of the scene-mount render seam: one
+    /// `Rc<RefCell<SceneProjectionCache>>` per panel id (the store's key;
+    /// see [`Self::scene_cache_slot_owned`]), shared with the composed
+    /// canvas program so the element tree's per-frame rebuild never
+    /// rebuilds the retained projection with it. Created on first need (a
+    /// scene-only panel has no registration to hang creation on), KEPT
+    /// across the SCN-033 same-surface carries, DROPPED on the §16
+    /// teardown and the teardown-class replace (the same lifecycle rule as
+    /// the input store). Registry-adjacent ON PURPOSE: one borrow domain
+    /// with the store it re-keys against, one lifecycle. Host-local only,
+    /// never serialized.
+    #[cfg(not(target_arch = "wasm32"))]
+    scene_caches: RefCell<HashMap<String, Rc<RefCell<SceneProjectionCache>>>>,
 }
 
 impl MountRegistry {
@@ -2128,23 +2166,265 @@ impl MountRegistry {
     }
 
     /// The mounted body for `panel_id` (see [`SurfaceMountHandle::body`]);
-    /// `None` = no registered mount → the caller renders its legacy view.
-    /// (SCN-028) The typed-table context resolves HERE — the registry owns
-    /// the machine slots + the scope's cursor, and the body builder is a
-    /// pure function over them.
+    /// `None` = no registered mount AND no stored scene leg → the caller
+    /// renders its legacy view. (SCN-028) The typed-table context resolves
+    /// HERE — the registry owns the machine slots + the scope's cursor, and
+    /// the body builder is a pure function over them.
+    ///
+    /// (SCN-031) THE STORE→MOUNT READ PATH: the panel's scene leg is read
+    /// from the store HERE, per view pass, through
+    /// [`Self::scene_leg_element_owned`] — the store stays the SOLE
+    /// scene-truth owner; nothing scene-shaped is stored registry-side
+    /// beyond the cache's prim output ([`Self::scene_caches`]). The gate
+    /// widens accordingly: a panel whose store holds ONLY a scene leg (no
+    /// widget leg, no registration — the demo's `scn_panel` shape) now
+    /// mounts a full-body scene region; zero entries in BOTH the registry
+    /// and the store still means the byte-identical legacy path by
+    /// construction (the legacy pin keeps green).
     pub(crate) fn mounted_body_owned(
         &self,
         panel_id: &str,
     ) -> Option<Element<'static, WidgetMountMsg>> {
-        let handle = self.by_panel.get(panel_id)?;
-        let surface_id = handle.surface_id();
-        let empty = HashMap::new();
-        let entry = self.tables.get(&surface_id);
-        let machines = entry.map(|entry| &entry.machines).unwrap_or(&empty);
-        let cell_cursor = entry
-            .and_then(|entry| entry.scope.as_ref())
-            .and_then(|scope| scope.cursor);
-        Some(handle.body(machines, cell_cursor))
+        let scene_leg = self.scene_leg_element_owned(panel_id);
+        let handle = self.by_panel.get(panel_id);
+        match handle {
+            Some(handle) => {
+                let surface_id = handle.surface_id();
+                let empty = HashMap::new();
+                let entry = self.tables.get(&surface_id);
+                let machines = entry.map(|entry| &entry.machines).unwrap_or(&empty);
+                let cell_cursor = entry
+                    .and_then(|entry| entry.scope.as_ref())
+                    .and_then(|scope| scope.cursor);
+                Some(handle.body(machines, cell_cursor, scene_leg))
+            }
+            // Scene-only panel (the store holds the leg, no widget leg ever
+            // registered): the scene region IS the body — the same padded
+            // container the widget body uses.
+            None if scene_leg.is_some() => Some(
+                container(scene_leg.expect("gated by the scene leg read"))
+                    .padding([8, 10])
+                    .width(Fill)
+                    .into(),
+            ),
+            None => None,
+        }
+    }
+
+    /// (SCN-031) The mounted body's SHAPE — the same gate
+    /// [`Self::mounted_body_owned`] resolves, named for the composition
+    /// pins (headless: which regions the body composes, without building
+    /// iced elements). `None` = the legacy path (neither leg present).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn body_shape_owned(&self, panel_id: &str) -> Option<MountBodyShape> {
+        let scene = self
+            .panel_surfaces
+            .entry(panel_id)
+            .is_some_and(|entry| entry.scene.is_some());
+        let widgets = self.by_panel.contains_key(panel_id);
+        match (widgets, scene) {
+            (true, true) => Some(MountBodyShape::SceneAndWidgets),
+            (true, false) => Some(MountBodyShape::WidgetsOnly),
+            (false, true) => Some(MountBodyShape::SceneOnly),
+            (false, false) => None,
+        }
+    }
+
+    /// (SCN-031) The panel's scene region element, read per view pass from
+    /// the store's scene leg; `None` when the panel stores no scene (the
+    /// widgets-only and legacy paths stay exactly as they were).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn scene_leg_element_owned(
+        &self,
+        panel_id: &str,
+    ) -> Option<Element<'static, WidgetMountMsg>> {
+        let scene = self.panel_surfaces.entry(panel_id)?.scene.as_ref()?;
+        Some(self.scene_region_element_owned(panel_id, scene))
+    }
+
+    /// (wasm32) No panel surface store — no scene leg, no scene region; the
+    /// widget-only/legacy paths are the whole story there.
+    #[cfg(target_arch = "wasm32")]
+    fn scene_leg_element_owned(&self, _panel_id: &str) -> Option<Element<'static, WidgetMountMsg>> {
+        None
+    }
+
+    // -- SCN-031: the scene-mount render seam (the retained side) ----------
+
+    /// The panel's scene-projection cache slot, created on first need (the
+    /// generalization of the SCN-028 slot law: a SCENE-ONLY panel has no
+    /// widget registration to create the slot at, so the slot is born when
+    /// the first view pass composes the region). One slot per PANEL id —
+    /// the store's own key and the scene leg's vocabulary; a scene-only
+    /// panel has no `surface_id` to key by (the recorded deviation from the
+    /// per-surface table slots, which key a widget leg that may not exist).
+    ///
+    /// The `&self` + `RefCell` shape: the VIEW pass takes the registry
+    /// through an immutable borrow (`plugin_panel.rs`'s
+    /// `mount_store.borrow()`), and the slot map is the one registry-side
+    /// structure the view path must be able to grow. Interior-mutable like
+    /// the cache layer's own key cell; single UI thread, no cross-thread
+    /// sharing (the registry's discipline).
+    ///
+    /// RETAINED LAW: the slot is a plain `Rc` handle shared with the
+    /// composed canvas program — the element tree is rebuilt every view
+    /// pass, the cache is NOT: consecutive draws at an equal
+    /// [`crate::ui::window::plugin_scene_cache::SceneLayerKey`]
+    /// (revision + bounds + palette fingerprint) replay the cached frame
+    /// and `project_scene` never runs (the counters prove it). No sync-on-
+    /// swap is needed BEYOND the key math: the program re-reads the store's
+    /// LIVE scene each frame and the cache re-keys against it — a publish's
+    /// replaced leg always arrives at a greater revision or identical
+    /// content (the store's monotone law), so a content change is always a
+    /// revision change. The cache therefore holds no scene copy to go
+    /// stale.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn scene_cache_slot_owned(&self, panel_id: &str) -> Rc<RefCell<SceneProjectionCache>> {
+        // The cache's `surface_id` is diagnostic only (its Debug/records);
+        // the frozen widget identity when one exists, else the no-widget
+        // placeholder.
+        let surface_id = self
+            .panel_surfaces
+            .entry(panel_id)
+            .and_then(|entry| entry.surface_id)
+            .unwrap_or(StableId(0));
+        Rc::clone(
+            self.scene_caches
+                .borrow_mut()
+                .entry(panel_id.to_owned())
+                .or_insert_with(|| Rc::new(RefCell::new(SceneProjectionCache::new(surface_id)))),
+        )
+    }
+
+    /// The scene cache slot, read-only (no insert) — the lifecycle pins'
+    /// probe (teardown drops, the carry keeps) and the tests' counter
+    /// handle.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn scene_cache_slot_read_owned(
+        &self,
+        panel_id: &str,
+    ) -> Option<Rc<RefCell<SceneProjectionCache>>> {
+        self.scene_caches.borrow().get(panel_id).cloned()
+    }
+
+    /// Drop the panel's scene cache slot (the §16 release rule, scene
+    /// edition): the explicit teardown and the teardown-class REPLACE call
+    /// this; the SCN-033 same-surface carry deliberately does NOT (the
+    /// retained prims stay valid — the same machines, the same scene leg).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn drop_scene_cache_slot(&mut self, panel_id: &str) {
+        self.scene_caches.borrow_mut().remove(panel_id);
+    }
+
+    /// The scene region element: an iced `canvas` whose program pulls the
+    /// CACHED prims ([`SceneProjectionCache::draw`]) — on a layer-key miss
+    /// (revision / bounds / palette fingerprint changed) it re-projects and
+    /// re-emits; on a hit it replays the cached frame with zero projection
+    /// work.
+    ///
+    /// ASSETREF v1 LAW (recorded here; the projection is the enforcer):
+    /// scene `Asset` elements render as their documented placeholder — a
+    /// bounded FRAME outline at the asset's frame (the projection's accent
+    /// stroke, `plugin_scene.rs`'s recorded stage-1 treatment), NOT the
+    /// asset's bytes. URI loading / thumbnails / a host asset store do not
+    /// exist yet; when they land they slot in behind the same prim stream.
+    /// The demo's asset element shows the frame plus plain swatch rects
+    /// (which render fully).
+    ///
+    /// The scene `Rc` snapshot: cloned from the store's leg ONCE per view
+    /// pass (bounded by the scene budget, view rate) so the `'static`
+    /// program borrows nothing from the view. The store remains the sole
+    /// truth owner — the snapshot drops with the frame, and the next pass
+    /// re-reads the store (a patch the store applied mid-frame is picked up
+    /// at the NEXT composition, ≤ one frame stale, and re-keys the cache by
+    /// its revision bump).
+    ///
+    /// POINTER FENCE (SCN-032 boundary): the program overrides NOTHING —
+    /// iced's default canvas `update` returns no action and the default
+    /// mouse interaction is the neutral one, so the region consumes no
+    /// pointer input beyond iced's defaults. Hit-testing/drag is the next
+    /// package's seam.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn scene_region_element_owned(
+        &self,
+        panel_id: &str,
+        scene: &PanelScene,
+    ) -> Element<'static, WidgetMountMsg> {
+        canvas(SceneRegionProgram {
+            scene: Rc::new(scene.clone()),
+            cache: self.scene_cache_slot_owned(panel_id),
+        })
+        .width(Fill)
+        .height(Length::Fixed(SCENE_REGION_V1_HEIGHT))
+        .into()
+    }
+}
+
+/// (SCN-031) Which regions the mounted body composes — the composition
+/// pins' vocabulary (see [`MountRegistry::body_shape_owned`]). The legacy
+/// path is the `None` case, unchanged.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MountBodyShape {
+    /// Only the widget stack (the pre-seam body, byte-identical).
+    WidgetsOnly,
+    /// Only the scene region (the demo's `scn_panel` shape): the region IS
+    /// the body.
+    SceneOnly,
+    /// The fixed split: the scene region above, the widget stack below.
+    SceneAndWidgets,
+}
+
+/// (SCN-031) The scene region's FIXED v1 height, in points — the recorded
+/// fixed split (see [`SurfaceMountHandle::body`]): the panel's scroll area
+/// lays its content out with an UNBOUNDED main axis, so a `Fill`-height
+/// region would resolve to infinite height; fixed is the simple, correct
+/// v1 answer. Tall scenes pan with the panel's own scrollbar; a
+/// viewport-integrated region (or a SceneRef widget variant) is the later
+/// refinement, not this package.
+#[cfg(not(target_arch = "wasm32"))]
+const SCENE_REGION_V1_HEIGHT: f32 = 240.0;
+
+/// (SCN-031) The scene region's canvas program: a thin adapter over the
+/// SCN-011a/b cache — every frame it hands the renderer, the store-read
+/// scene snapshot, the LIVE theme palette (a theme switch therefore moves
+/// the layer key's palette fingerprint and repaints) and the frame bounds
+/// to [`SceneProjectionCache::draw`], which re-projects only on a key miss
+/// and replays the cached geometry otherwise. The program owns nothing
+/// scene-shaped beyond the view-pass `Rc` snapshot (see
+/// [`MountRegistry::scene_region_element_owned`]); the retained prims live
+/// registry-side in the shared cache slot.
+#[cfg(not(target_arch = "wasm32"))]
+struct SceneRegionProgram {
+    /// The store's scene leg, snapshotted at composition time.
+    scene: Rc<PanelScene>,
+    /// The registry-owned retained projection (the panel's slot).
+    cache: Rc<RefCell<SceneProjectionCache>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl canvas::Program<WidgetMountMsg> for SceneRegionProgram {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &iced::Renderer,
+        theme: &Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        // The one seam call: key math + counted decision + (on a miss) the
+        // projection run and emit, all inside the cache (its headless
+        // `apply_build` mirror is what the tests counter-pin, the two
+        // paths funnel through the same decision).
+        let geometry = self
+            .cache
+            .borrow_mut()
+            .draw(renderer, &self.scene, theme.palette(), bounds);
+        vec![geometry]
     }
 }
 
@@ -2475,6 +2755,11 @@ impl MountRegistry {
                 // interaction — the armed desc stays armed), no
                 // `torn_down`. The dispatcher/table sync block below
                 // re-captures changed defs on the carried machines.
+                //
+                // (SCN-031) The scene-projection cache slot deliberately
+                // SURVIVES the carry (no drop in this arm): the retained
+                // prims stay valid — same panel, same scene leg, and the
+                // cache re-keys against the live store scene at draw time.
                 Some(previous) if previous.surface_id() == handle.surface_id() => {
                     let mut carried = handle;
                     carried.state = Rc::clone(&previous.state);
@@ -2488,10 +2773,14 @@ impl MountRegistry {
                 // as every replacement always has (§16: the outgoing
                 // machines release through the ONE dispose path; the
                 // armed desc is registry-side of the same interaction and
-                // dies with its surface).
+                // dies with its surface). (SCN-031) The scene-projection
+                // cache slot drops with the replace — the §16 release
+                // rule, scene edition; the next region composition starts
+                // a fresh cache.
                 Some(previous) => {
                     release_mount(&previous);
                     self.prompts.remove(&previous.surface_id());
+                    self.drop_scene_cache_slot(panel_id);
                     self.counters.registers_replaced += 1;
                     self.counters.torn_down += 1;
                     self.by_panel.insert(panel_id.to_string(), handle);
@@ -2554,6 +2843,10 @@ impl MountRegistry {
             self.prompts.remove(&handle.surface_id());
             self.counters.torn_down += 1;
         }
+        // (SCN-031) The scene-projection cache slot dies with the §16
+        // teardown (the retained prims are the surface's mirror — the same
+        // lifecycle rule as the input store).
+        self.drop_scene_cache_slot(panel_id);
         self.prune_input_entries();
     }
 
@@ -4550,10 +4843,15 @@ impl Drop for RegisteredGuard {
 // attach. Zero publishes ⇒ zero entries ⇒ every legacy panel takes the
 // byte-identical legacy view path; the store cannot add others.
 //
-// RECORDED BOUNDARY (SCN-025, not claimed): the SCENE MOUNT rendering seam
-// (a `PanelScene` render onto host UI state) is NOT this package — the
-// scene leg is STORED here (patch truth + snapshot2/pages) and stays
-// invisible to the mounts until the scene-mount seam package lands.
+// RECORDED BOUNDARY (SCN-025, updated SCN-031): the SCENE MOUNT rendering
+// seam (a `PanelScene` render onto host UI state) was deferred — the scene
+// leg was STORED here (patch truth + snapshot2/pages) and stayed invisible
+// to the mounts. SCN-031 IS that seam package: the mount now READS the leg
+// per view pass (`mounted_body_owned` → `scene_leg_element_owned`) and
+// renders it through the retained cache slots (`scene_caches`) — while the
+// store REMAINS the sole scene-truth owner: nothing scene-shaped is stored
+// registry-side beyond the cache's prim output, and every store semantics
+// below (owner law, revision law, page reads) is untouched.
 
 /// One panel's stored surface truth (SCN-025).
 ///
@@ -5806,6 +6104,23 @@ impl MountRegistry {
         with_test_registry(|registry| registry.mounted_body_owned(panel_id))
     }
 
+    /// The scene cache slot read's test form — see
+    /// [`Self::scene_cache_slot_read_owned`].
+    #[cfg(not(target_arch = "wasm32"))]
+    #[allow(dead_code)]
+    pub(crate) fn scene_cache_slot(
+        panel_id: &str,
+    ) -> Option<Rc<RefCell<SceneProjectionCache>>> {
+        with_test_registry(|registry| registry.scene_cache_slot_read_owned(panel_id))
+    }
+
+    /// The body-shape probe's test form — see [`Self::body_shape_owned`].
+    #[cfg(not(target_arch = "wasm32"))]
+    #[allow(dead_code)]
+    pub(crate) fn body_shape(panel_id: &str) -> Option<MountBodyShape> {
+        with_test_registry(|registry| registry.body_shape_owned(panel_id))
+    }
+
     /// The PRESERVE-ON-IDENTICAL lifecycle's test form — see
     /// [`Self::register_surface_owned`].
     pub(crate) fn register_surface(panel_id: &str, handle: SurfaceMountHandle) {
@@ -6928,9 +7243,10 @@ mod tests {
         // facts stay the assertion surface:
         assert_eq!(handle.state.borrow().explicit_expansion(sid(1)), Some(true));
         // (SCN-028) The typed-table context: an empty machine map + no
-        // cursor (this fixture carries no tables).
+        // cursor (this fixture carries no tables). (SCN-031) No scene leg —
+        // the pre-seam body, byte-identical.
         let no_machines = HashMap::new();
-        let _body = handle.body(&no_machines, None);
+        let _body = handle.body(&no_machines, None, None);
     }
 
     // -- 12. the SCN-014 registration lifecycle (headless seam) ---------------
@@ -10465,11 +10781,12 @@ mod tests {
         });
     }
 
-    /// Scene regions: a scene leg STORES (the scene MOUNT rendering seam is
-    /// NOT this package — nothing registers into the mount) with no frozen
-    /// surface id yet; region pages resolve the pre-order subtree; a scene
-    /// read NEVER demands (the host store is the whole scene truth) and a
-    /// past-end window is the empty page.
+    /// Scene regions: a scene leg STORES with no frozen surface id yet;
+    /// region pages resolve the pre-order subtree; a scene read NEVER
+    /// demands (the host store is the whole scene truth) and a past-end
+    /// window is the empty page. (The store itself still registers nothing
+    /// into the mount map — the SCN-031 seam READS the leg at view time
+    /// from `mounted_body_owned`; registration stays a widget-leg affair.)
     #[test]
     fn scene_leg_stores_but_mounts_nothing_and_regions_never_demand() {
         let _app = OpenCADStudio::new_for_test();
@@ -10674,6 +10991,428 @@ mod tests {
             attach_publish(registry, "PLUGIN_B", "panel_b", forward).expect("forward");
             assert_eq!(registry.panel_surface_id_owned("panel_b"), Some(b_id));
         });
+    }
+
+    // -- SCN-031: the scene-mount render seam --------------------------------
+
+    use crate::ui::window::plugin_scene::project_scene;
+    use crate::ui::window::plugin_scene_cache::{DrawDecision, ProjectionCounters, RebuildReason};
+    use ocs_plugin_api::scene::{AssetKind, SceneColor, ThemeColor};
+    use ocs_plugin_api::scene_builder::{PatchBuilder, SceneBuilder, fixture_graph_scene};
+
+    /// The demo-shape fixture: the crate's deterministic graph scene (the
+    /// same generator the scene_graph demo's spirit runs on), published
+    /// scene-leg-only — no widget leg, no registration.
+    fn graph_scene(revision: u64) -> ocs_plugin_api::scene::PanelScene {
+        fixture_graph_scene(revision, 4, 0x5C39)
+    }
+
+    /// One coloured root rect (the patch payload; a fill so the projection
+    /// actually emits a prim for it).
+    fn scene_rect(id: u64) -> SceneElement {
+        SceneElement::Rect {
+            id: sid(id),
+            name: None,
+            actions: vec![],
+            drag: None,
+            pos: Vec2([500.0, 500.0]),
+            size: Vec2([10.0, 10.0]),
+            fill: Some(SceneColor::Theme(ThemeColor::Normal)),
+            stroke: None,
+        }
+    }
+
+    /// THE COMPOSITION PIN (scene-only): a panel whose store holds ONLY a
+    /// scene leg — the demo's `scn_panel` shape, which SCN-025 recorded as
+    /// "stored but invisible" — now mounts a full-body scene region. The
+    /// gate answers `Some` where it answered `None` before, the shape is
+    /// `SceneOnly`, and the region's cache slot is born at composition
+    /// (with counters at their defaults: composition runs NO projection —
+    /// the retained law starts at draw time).
+    #[test]
+    fn scene_only_leg_mounts_a_full_body_scene_region() {
+        let _app = OpenCADStudio::new_for_test();
+        with_test_registry_mut(|registry| {
+            let outcome = registry
+                .panel_surface_store_mut()
+                .publish("PLUGIN", "scn_panel", SceneOrWidgetSurface::Scene(graph_scene(1)))
+                .expect("the scene leg stores");
+            assert!(outcome.widget_mount.is_none(), "scene-only: no widget mount");
+            assert!(!registry.mount_registered_owned("scn_panel"));
+        });
+        // THE SEAM: the previously-invisible leg now mounts.
+        assert!(MountRegistry::mounted_body("scn_panel").is_some());
+        assert_eq!(
+            MountRegistry::body_shape("scn_panel"),
+            Some(MountBodyShape::SceneOnly)
+        );
+        // The slot exists (born at composition) and NOTHING has drawn: no
+        // projection ran at view time.
+        let slot = MountRegistry::scene_cache_slot("scn_panel").expect("slot at composition");
+        assert_eq!(slot.borrow().counters(), &ProjectionCounters::default());
+    }
+
+    /// THE COMPOSITION PIN (both legs): scene + widgets compose the fixed
+    /// split — one body, both regions; the widget reads (frozen surface id)
+    /// are untouched by the scene leg.
+    #[test]
+    fn scene_and_widgets_compose_both_regions() {
+        let _app = OpenCADStudio::new_for_test();
+        with_test_registry_mut(|registry| {
+            attach_publish(
+                registry,
+                "PLUGIN",
+                "scn_panel",
+                simple_list_surface(SceneRevision(1), vec![item(7, "a")]),
+            )
+            .expect("the widget leg attaches");
+            registry
+                .panel_surface_store_mut()
+                .publish("PLUGIN", "scn_panel", SceneOrWidgetSurface::Scene(graph_scene(1)))
+                .expect("the scene leg stores");
+        });
+        assert!(MountRegistry::mounted_body("scn_panel").is_some());
+        assert_eq!(
+            MountRegistry::body_shape("scn_panel"),
+            Some(MountBodyShape::SceneAndWidgets)
+        );
+        // The widget leg's frozen identity rides as before.
+        assert_eq!(
+            with_test_registry(|r| r.panel_surface_id_owned("scn_panel")),
+            Some(sid(200))
+        );
+        // And the region's slot is live.
+        assert!(MountRegistry::scene_cache_slot("scn_panel").is_some());
+    }
+
+    /// THE COMPOSITION PIN (widgets-only): no scene leg ⇒ NO scene region —
+    /// the body is the pre-seam widget stack (byte-identical by
+    /// construction: the `None` scene element never enters the column) and
+    /// NO cache slot is created (nothing registry-side to go stale).
+    #[test]
+    fn widgets_only_body_stays_widget_only_and_cache_free() {
+        let _app = OpenCADStudio::new_for_test();
+        with_test_registry_mut(|registry| {
+            attach_publish(
+                registry,
+                "PLUGIN",
+                "align_tools",
+                simple_list_surface(SceneRevision(1), vec![item(7, "a")]),
+            )
+            .expect("attach");
+        });
+        assert!(MountRegistry::mounted_body("align_tools").is_some());
+        assert_eq!(
+            MountRegistry::body_shape("align_tools"),
+            Some(MountBodyShape::WidgetsOnly)
+        );
+        assert!(MountRegistry::scene_cache_slot("align_tools").is_none());
+    }
+
+    /// THE LEGACY PIN (re-stated at the seam): neither leg ⇒ the legacy
+    /// path, unchanged — zero publishes and zero registrations mean the
+    /// mount read answers `None` exactly as it always has.
+    #[test]
+    fn zero_entries_still_take_the_legacy_path() {
+        let _app = OpenCADStudio::new_for_test();
+        assert_eq!(MountRegistry::body_shape("legacy_panel"), None);
+        assert!(MountRegistry::mounted_body("legacy_panel").is_none());
+    }
+
+    /// THE RETAINED LAW, through the registry's slot: same key ⇒ replay
+    /// (0 re-projections); a patch's revision bump ⇒ exactly the
+    /// revision-classified rebuild; a palette switch ⇒ the palette rebuild
+    /// (theme switches repaint); a resize ⇒ the bounds rebuild. The slot is
+    /// ALSO the same `Rc` across view passes — the element tree rebuilds
+    /// every frame, the retained cache does not.
+    #[test]
+    fn scene_region_replays_until_inputs_change() {
+        let _app = OpenCADStudio::new_for_test();
+        with_test_registry_mut(|registry| {
+            registry
+                .panel_surface_store_mut()
+                .publish("PLUGIN", "scn_panel", SceneOrWidgetSurface::Scene(graph_scene(1)))
+                .expect("the scene leg stores");
+        });
+        // First composition: the slot is born.
+        assert!(MountRegistry::mounted_body("scn_panel").is_some());
+        let slot = MountRegistry::scene_cache_slot("scn_panel").expect("slot");
+
+        let dark = iced::Theme::Dark;
+        let light = iced::Theme::Light;
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 240.0,
+            height: 180.0,
+        };
+        let resized = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 300.0,
+            height: 180.0,
+        };
+
+        // Two draws at the same revision/bounds/palette: one build, one
+        // replay — ZERO re-projections (an unexpected full-scene rebuild
+        // per frame is a DEFECT, the counters are its evidence).
+        with_test_registry(|registry| {
+            let scene = registry
+                .panel_surface_store()
+                .entry("scn_panel")
+                .unwrap()
+                .scene
+                .as_ref()
+                .unwrap()
+                .clone();
+            let mut cache = slot.borrow_mut();
+            assert_eq!(
+                cache.apply_build(&scene, dark.palette(), bounds),
+                DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+            );
+            assert_eq!(cache.apply_build(&scene, dark.palette(), bounds), DrawDecision::LayerHit);
+            let counters = cache.counters();
+            assert_eq!(counters.layer_builds, 1);
+            assert_eq!(counters.probe_hits, 1);
+            assert_eq!(counters.rebuilds_revision, 0);
+            assert_eq!(counters.rebuilds_bounds, 0);
+            assert_eq!(counters.rebuilds_palette, 0);
+            assert!(counters.prims_last_build > 0, "the fixture projects prims");
+            assert_eq!(counters.last_error, None);
+        });
+
+        // A second view pass hands the program the SAME cache — the
+        // retained side survives the element-tree rebuild.
+        assert!(MountRegistry::mounted_body("scn_panel").is_some());
+        let slot2 = MountRegistry::scene_cache_slot("scn_panel").expect("slot");
+        assert!(Rc::ptr_eq(&slot, &slot2), "one slot per panel, kept");
+
+        // A patch (the demo's own move: an Add op) bumps the revision; the
+        // next draw is EXACTLY the revision-classified rebuild.
+        let scene_patch = PatchBuilder::new(1)
+            .add(None, scene_rect(9090))
+            .finish(2)
+            .expect("the patch builds");
+        with_test_registry_mut(|registry| {
+            let outcome = registry
+                .panel_surface_store_mut()
+                .patch("PLUGIN", "scn_panel", SceneOrWidgetPatch::Scene(scene_patch))
+                .expect("the patch applies");
+            assert_eq!(outcome.report.revision, SceneRevision(2));
+        });
+        with_test_registry(|registry| {
+            let scene = registry
+                .panel_surface_store()
+                .entry("scn_panel")
+                .unwrap()
+                .scene
+                .as_ref()
+                .unwrap()
+                .clone();
+            let mut cache = slot.borrow_mut();
+            assert_eq!(
+                cache.apply_build(&scene, dark.palette(), bounds),
+                DrawDecision::LayerRebuild(RebuildReason::RevisionChanged)
+            );
+            assert_eq!(cache.counters().rebuilds_revision, 1);
+        });
+
+        // A theme switch moves the palette fingerprint: the palette rebuild.
+        with_test_registry(|registry| {
+            let scene = registry
+                .panel_surface_store()
+                .entry("scn_panel")
+                .unwrap()
+                .scene
+                .as_ref()
+                .unwrap()
+                .clone();
+            let mut cache = slot.borrow_mut();
+            assert_eq!(
+                cache.apply_build(&scene, light.palette(), bounds),
+                DrawDecision::LayerRebuild(RebuildReason::PaletteChanged)
+            );
+            assert_eq!(cache.counters().rebuilds_palette, 1);
+        });
+
+        // A resize re-projects at the new bounds (the grammar's clip
+        // discipline applies at emit; the key change is the invalidation).
+        with_test_registry(|registry| {
+            let scene = registry
+                .panel_surface_store()
+                .entry("scn_panel")
+                .unwrap()
+                .scene
+                .as_ref()
+                .unwrap()
+                .clone();
+            let mut cache = slot.borrow_mut();
+            assert_eq!(
+                cache.apply_build(&scene, dark.palette(), resized),
+                DrawDecision::LayerRebuild(RebuildReason::BoundsChanged)
+            );
+            assert_eq!(cache.counters().rebuilds_bounds, 1);
+            // Totals: exactly four builds for exactly four key misses, one
+            // replay in between — never more.
+            let counters = cache.counters();
+            assert_eq!(counters.layer_builds, 4);
+            assert_eq!(counters.probe_hits, 1);
+        });
+    }
+
+    /// THE LIFECYCLE PIN: the scene cache slot follows the surface
+    /// lifecycle — the SCN-033 same-surface carry KEEPS it (the retained
+    /// prims stay valid; the cache re-keys at draw), a teardown-class
+    /// replace DROPS it, and the §16 teardown stays graceful (and slotless)
+    /// afterwards.
+    #[test]
+    fn scene_cache_slot_follows_the_surface_lifecycle() {
+        let _app = OpenCADStudio::new_for_test();
+        with_test_registry_mut(|registry| {
+            attach_publish(
+                registry,
+                "PLUGIN",
+                "scn_panel",
+                simple_list_surface(SceneRevision(1), vec![item(7, "a")]),
+            )
+            .expect("the widget leg attaches");
+            registry
+                .panel_surface_store_mut()
+                .publish("PLUGIN", "scn_panel", SceneOrWidgetSurface::Scene(graph_scene(1)))
+                .expect("the scene leg stores");
+        });
+        assert!(MountRegistry::mounted_body("scn_panel").is_some());
+        let slot = MountRegistry::scene_cache_slot("scn_panel").expect("slot");
+
+        // (a) The CARRY: a widget patch re-registers the same frozen
+        // surface id — the machines carry, and the scene slot survives
+        // VERBATIM (same Rc).
+        let widget_patch = SceneOrWidgetPatch::Widgets(WidgetSurfacePatch {
+            base_revision: SceneRevision(1),
+            revision: SceneRevision(2),
+            ops: vec![WidgetOp::Add {
+                parent: None,
+                widget: WidgetNode::List(ItemListDef {
+                    id: sid(300),
+                    name: None,
+                    enabled: true,
+                    visible: true,
+                    label: None,
+                    items: vec![item(11, "b")],
+                }),
+            }],
+        });
+        with_test_registry_mut(|registry| {
+            let outcome = registry
+                .panel_surface_store_mut()
+                .patch("PLUGIN", "scn_panel", widget_patch)
+                .expect("the widget patch applies");
+            if let Some((surface_id, surface)) = outcome.widget_mount {
+                registry.register_surface_owned(
+                    "scn_panel",
+                    SurfaceMountHandle::from_surface(surface_id, surface),
+                );
+            }
+        });
+        let carried = MountRegistry::scene_cache_slot("scn_panel").expect("the carry keeps");
+        assert!(Rc::ptr_eq(&slot, &carried), "the carry keeps the slot");
+
+        // (b) The TEARDOWN-CLASS REPLACE: a genuinely new surface id starts
+        // clean — the scene slot drops with it.
+        with_test_registry_mut(|registry| {
+            registry.register_surface_owned(
+                "scn_panel",
+                SurfaceMountHandle::from_surface(
+                    sid(777),
+                    surface(vec![WidgetNode::List(ItemListDef {
+                        id: sid(777),
+                        name: None,
+                        enabled: true,
+                        visible: true,
+                        label: None,
+                        items: vec![item(12, "c")],
+                    })]),
+                ),
+            );
+        });
+        assert!(
+            MountRegistry::scene_cache_slot("scn_panel").is_none(),
+            "the teardown-class replace drops the slot"
+        );
+
+        // (c) The §16 teardown: graceful, and still slotless.
+        with_test_registry_mut(|registry| registry.teardown_surface_owned("scn_panel"));
+        assert!(MountRegistry::scene_cache_slot("scn_panel").is_none());
+    }
+
+    /// THE ASSETREF v1 LAW, through the seam: an asset element renders as
+    /// its documented placeholder — the bounded FRAME outline at the
+    /// asset's frame (accent stroke, one scene unit), NOT the asset's
+    /// bytes. Exactly one stroke prim; the cache counts it as exactly one
+    /// prim / one closed rect ring, so the placeholder is stable (a second
+    /// identical draw replays — no re-projection).
+    #[test]
+    fn asset_element_projects_as_the_documented_frame_placeholder() {
+        let _app = OpenCADStudio::new_for_test();
+        let mut builder = SceneBuilder::new(1);
+        builder
+            .asset(
+                5,
+                AssetKind::Svg,
+                "asset://fixture",
+                Rect2D {
+                    pos: Vec2([0.0, 0.0]),
+                    size: Vec2([10.0, 10.0]),
+                },
+            )
+            .expect("the asset registers");
+        let scene = builder.finish().expect("the asset scene validates");
+        with_test_registry_mut(|registry| {
+            registry
+                .panel_surface_store_mut()
+                .publish("PLUGIN", "scn_panel", SceneOrWidgetSurface::Scene(scene.clone()))
+                .expect("the scene leg stores");
+        });
+        assert!(MountRegistry::mounted_body("scn_panel").is_some());
+        let slot = MountRegistry::scene_cache_slot("scn_panel").expect("slot");
+
+        let dark = iced::Theme::Dark;
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 240.0,
+            height: 180.0,
+        };
+        // The placeholder prims, pinned at the projection (the doc'd FRAME
+        // outline: the frame ring, the accent slot, one scene-unit width).
+        let prims = project_scene(&scene, dark.palette(), bounds.size())
+            .expect("the asset scene projects");
+        assert_eq!(prims.len(), 1, "the placeholder IS the frame stroke");
+        match prims.as_slice() {
+            [crate::ui::window::plugin_scene::ScenePrim::Stroke {
+                element,
+                vertices,
+                color,
+                width,
+            }] => {
+                assert_eq!(*element, sid(5));
+                assert_eq!(vertices.len(), 5, "a closed rect ring");
+                assert_eq!(*color, dark.palette().primary.base.color, "the accent slot");
+                assert!((*width - 1.0).abs() < f32::EPSILON, "one scene unit");
+            }
+            other => panic!("expected exactly the frame stroke, got {other:?}"),
+        }
+        // And the cache counts the same story through the seam's slot.
+        let mut cache = slot.borrow_mut();
+        assert_eq!(
+            cache.apply_build(&scene, dark.palette(), bounds),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+        );
+        assert_eq!(cache.apply_build(&scene, dark.palette(), bounds), DrawDecision::LayerHit);
+        let counters = cache.counters();
+        assert_eq!(counters.prims_last_build, 1);
+        assert_eq!(counters.path_work_last_build, 5);
+        assert_eq!(counters.layer_builds, 1, "the placeholder replays");
     }
 
 }

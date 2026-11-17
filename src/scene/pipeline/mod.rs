@@ -7835,3 +7835,77 @@ mod msaa_sample_tests {
         assert_eq!(msaa_samples_from(None), 4);
     }
 }
+
+#[cfg(test)]
+mod persistent_gpu_error_tests {
+    use super::{held_gpu_errors, GpuErrorFrames, GPU_ERROR_FRAMES_REBUILT, NOT_HELD};
+
+    /// Raw error counts frame by frame, and the count the frame's callers see.
+    fn seen(raw_by_frame: &[usize]) -> Vec<usize> {
+        let (mut frames, mut held) = (GpuErrorFrames::default(), NOT_HELD);
+        raw_by_frame
+            .iter()
+            .map(|&raw| {
+                held = held_gpu_errors(raw, held, &mut frames);
+                if held == NOT_HELD {
+                    raw
+                } else {
+                    held
+                }
+            })
+            .collect()
+    }
+
+    /// An error on every frame is seen as new on the first frames only, so
+    /// they rebuild what failed; after that the count holds still and nothing
+    /// is rebuilt again, frame after frame.
+    #[test]
+    fn errors_on_every_frame_stop_rebuilding_after_a_few_frames() {
+        let raw: Vec<usize> = (1..=12).collect();
+        let seen = seen(&raw);
+        let frames = GPU_ERROR_FRAMES_REBUILT as usize;
+        assert_eq!(
+            &seen[..frames],
+            &raw[..frames],
+            "the first frames see their errors"
+        );
+        assert!(
+            seen[frames..]
+                .iter()
+                .all(|&count| count == seen[frames - 1]),
+            "later frames see no new error: {seen:?}"
+        );
+    }
+
+    /// One quiet frame between failing ones does not release the count, so
+    /// errors that arrive late do not set off a rebuild.
+    #[test]
+    fn a_quiet_frame_among_failing_ones_keeps_the_count_held() {
+        let raw = [1, 2, 3, 4, 5, 5, 6, 7, 7, 8, 9];
+        let held = seen(&raw)[3];
+        assert!(seen(&raw)[3..].iter().all(|&count| count == held));
+    }
+
+    /// Frames without a new error release the count: the frame that does
+    /// sees every error since, once, and rebuilds; a later lone error is
+    /// seen at once.
+    #[test]
+    fn frames_without_errors_let_the_count_move_again() {
+        let mut raw: Vec<usize> = (1..=8).collect();
+        raw.extend([8, 8, 8, 8, 9, 9]);
+        let seen = seen(&raw);
+        let held = seen[7];
+        assert_eq!(&seen[8..10], &[held, held], "two quiet frames keep it held");
+        assert_eq!(seen[10], 8, "the third sees every error since");
+        assert_eq!(seen[11], 8);
+        assert_eq!(seen[12], 9, "a later error is seen at once");
+    }
+
+    /// Errors that come and go, with quiet frames between, never hold the
+    /// count.
+    #[test]
+    fn errors_with_quiet_frames_between_are_always_seen() {
+        let raw = [1, 1, 2, 2, 3, 3, 4, 4, 5, 5];
+        assert_eq!(seen(&raw), raw.to_vec());
+    }
+}

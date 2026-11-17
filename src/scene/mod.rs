@@ -3158,6 +3158,8 @@ pub struct Scene {
     has_dimension_associations: std::cell::Cell<Option<bool>>,
     /// Conservative hint for whether any Underlay entities exist in the document.
     pub(crate) has_underlays: std::cell::Cell<Option<bool>>,
+    /// Conservative hint for whether any OLE2FRAME entities exist in the document.
+    pub(crate) has_ole_frames: std::cell::Cell<Option<bool>>,
     /// Conservative hint for whether any Face3D entities exist in the document.
     pub(crate) has_face3d: std::cell::Cell<Option<bool>>,
     /// Conservative hint for whether any section object exists in the
@@ -3201,15 +3203,10 @@ pub struct Scene {
     hidden_dynamic_dimensions: HashSet<Handle>,
     /// The camera generation the dynamic dimensions were last scaled for.
     dynamic_dimension_camera_gen: Option<u64>,
-    /// The view scale (world units per pixel, in quarter-octave steps) the
-    /// underlay rasters are made for, and a new step waiting for the view
-    /// to settle.
-    underlay_world_per_pixel: Option<f64>,
-    underlay_scale_pending: Option<((i32, u64), iced::time::Instant)>,
-    /// World rectangle the zoomed-in underlay regions are drawn for (the
-    /// plan view with a margin), and whether any underlay drew one.
-    underlay_view: Option<[f64; 4]>,
-    underlay_region_used: std::cell::Cell<bool>,
+    /// The view scale the underlay rasters are made for (model space).
+    underlay_scale: raster_scale::RasterScale,
+    /// The view scale the OLE pictures of the current layout are made for.
+    ole_scale: raster_scale::RasterScale,
     /// Session-only visibility overrides for constraint glyphs.
     hidden_parametric_constraints: HashSet<(
         parametric_constraints::ParametricScope,
@@ -3766,10 +3763,8 @@ impl Scene {
             dynamic_constraint_display: true,
             hidden_dynamic_dimensions: HashSet::default(),
             dynamic_dimension_camera_gen: None,
-            underlay_world_per_pixel: None,
-            underlay_scale_pending: None,
-            underlay_view: None,
-            underlay_region_used: std::cell::Cell::new(false),
+            underlay_scale: raster_scale::RasterScale::default(),
+            ole_scale: raster_scale::RasterScale::default(),
             hidden_parametric_constraints: HashSet::default(),
             shown_parametric_constraints: HashSet::default(),
             constraints_epoch: 0,
@@ -3779,6 +3774,7 @@ impl Scene {
             has_associative_centers: std::cell::Cell::new(None),
             has_dimension_associations: std::cell::Cell::new(None),
             has_underlays: std::cell::Cell::new(None),
+            has_ole_frames: std::cell::Cell::new(None),
             has_face3d: std::cell::Cell::new(None),
             has_section_objects: std::cell::Cell::new(None),
             has_tables: std::cell::Cell::new(None),
@@ -3843,76 +3839,54 @@ impl Scene {
     /// Paper-space callers use their own scale instead.
     /// Rasterise the underlays again when the view's scale has moved to
     /// another quarter-octave step and stayed there briefly (not on every
-    /// frame of a zoom).
+    /// frame of a zoom), and likewise the OLE pictures of the current layout.
     pub fn refresh_underlay_resolution(&mut self, now: iced::time::Instant) {
-        let Some(wpp) = self.world_per_pixel() else {
-            return;
-        };
-        let step = (f64::from(wpp).log2() * 4.0).ceil() as i32;
-        let current = self
-            .underlay_world_per_pixel
-            .map(|w| (w.log2() * 4.0).round() as i32);
-        if current == Some(step) && !self.underlay_view_moved() {
-            self.underlay_scale_pending = None;
-            return;
-        }
-        // Wait for the camera to rest, not only for the scale step to hold.
-        let key = (step, self.camera_generation);
-        match self.underlay_scale_pending {
-            Some((pending, since)) if pending == key => {
-                if now.duration_since(since) < std::time::Duration::from_millis(150) {
-                    return;
-                }
-            }
-            _ => {
-                self.underlay_scale_pending = Some((key, now));
-                return;
+        let generation = self.camera_generation;
+        if let Some(wpp) = self.world_per_pixel() {
+            let view = self.plan_view_rect();
+            if self
+                .underlay_scale
+                .settle(wpp, view, "Model", generation, now)
+                && self
+                    .document
+                    .entities()
+                    .any(|e| matches!(e, EntityType::Underlay(_)))
+            {
+                self.reseed_underlays();
             }
         }
-        self.underlay_scale_pending = None;
-        self.underlay_world_per_pixel = Some(2f64.powf(step as f64 / 4.0));
-        self.underlay_view = self.plan_view_rect().map(|[x0, y0, x1, y1]| {
-            let (mx, my) = ((x1 - x0) * 0.5, (y1 - y0) * 0.5);
-            [x0 - mx, y0 - my, x1 + mx, y1 + my]
-        });
-        self.underlay_region_used.set(false);
-        if self
-            .document
-            .entities()
-            .any(|e| matches!(e, EntityType::Underlay(_)))
-        {
-            self.reseed_underlays();
+        if let Some(wpp) = self.layout_world_per_pixel() {
+            let view = self.layout_plan_view_rect();
+            let layout = self.current_layout.clone();
+            if self.ole_scale.settle(wpp, view, &layout, generation, now) && self.has_ole_frames() {
+                self.reseed_ole_frames();
+            }
         }
     }
 
-    /// The view has moved to another scale step than the underlay rasters
-    /// were made for, or out of their sharp region (frames are requested
-    /// until they are made again).
+    /// The view has moved to another scale step than the underlay or OLE
+    /// rasters were made for, or out of their sharp region (frames are
+    /// requested until they are made again).
     pub fn underlay_resolution_stale(&self) -> bool {
-        if !self.has_underlays() {
-            return false;
-        }
-        let Some(wpp) = self.world_per_pixel() else {
-            return false;
-        };
-        let step = (f64::from(wpp).log2() * 4.0).ceil() as i32;
-        self.underlay_world_per_pixel
-            .map(|w| (w.log2() * 4.0).round() as i32)
-            != Some(step)
-            || self.underlay_view_moved()
+        let underlays = self.has_underlays()
+            && self.world_per_pixel().is_some_and(|wpp| {
+                self.underlay_scale
+                    .stale(wpp, self.plan_view_rect(), "Model")
+            });
+        underlays
+            || (self.has_ole_frames()
+                && self.layout_world_per_pixel().is_some_and(|wpp| {
+                    self.ole_scale
+                        .stale(wpp, self.layout_plan_view_rect(), &self.current_layout)
+                }))
     }
 
-    /// A zoomed-in underlay region was drawn and the view has left it.
-    fn underlay_view_moved(&self) -> bool {
-        if !self.underlay_region_used.get() {
-            return false;
-        }
-        match (self.underlay_view, self.plan_view_rect()) {
-            (Some(have), Some(now)) => {
-                now[0] < have[0] || now[1] < have[1] || now[2] > have[2] || now[3] > have[3]
-            }
-            _ => true,
-        }
+    /// World units per screen pixel of the current layout's view: the model
+    /// camera's in Model, the sheet camera's in a paper layout. `None` until
+    /// a render captured real bounds.
+    fn layout_world_per_pixel(&self) -> Option<f32> {
+        let v = self.last_world_per_pixel.get();
+        (v > 0.0 && v.is_finite()).then_some(v)
     }
 
     /// World XY rectangle of the model view when it looks straight down
@@ -3921,6 +3895,13 @@ impl Scene {
         if self.current_layout != "Model" {
             return None;
         }
+        self.layout_plan_view_rect()
+    }
+
+    /// World XY rectangle of the current layout's view when it looks straight
+    /// down (orthographic plan view) — model space in Model, the sheet in a
+    /// paper layout; `None` otherwise.
+    fn layout_plan_view_rect(&self) -> Option<[f64; 4]> {
         let cam = self.camera.borrow();
         if !matches!(cam.projection, view::camera::Projection::Orthographic) {
             return None;
@@ -4607,6 +4588,19 @@ impl Scene {
                 || crate::scene::centermark::entity_has_center_association(entity)
         });
         self.has_associative_centers.set(Some(any));
+        any
+    }
+
+    /// Fast check for whether any OLE2FRAME entities exist in the document.
+    pub(crate) fn has_ole_frames(&self) -> bool {
+        if let Some(known) = self.has_ole_frames.get() {
+            return known;
+        }
+        let any = self
+            .document
+            .entities()
+            .any(|e| matches!(e, EntityType::Ole2Frame(_)));
+        self.has_ole_frames.set(Some(any));
         any
     }
 
@@ -5441,6 +5435,20 @@ impl Scene {
         }) {
             self.has_underlays.set(Some(true));
         }
+        if let Some(true) = self.has_ole_frames.get() {
+            if changes
+                .iter()
+                .any(|(_, k)| matches!(k, ChangeKind::Removed))
+            {
+                self.has_ole_frames.set(None);
+            }
+        } else if changes.iter().any(|(h, _)| {
+            self.document
+                .get_entity(*h)
+                .is_some_and(|e| matches!(e, EntityType::Ole2Frame(_)))
+        }) {
+            self.has_ole_frames.set(Some(true));
+        }
         let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
         self.geometry_epoch = epoch;
         self.invalidate_projection_bounds();
@@ -5740,6 +5748,7 @@ impl Scene {
         *self.document_render_env_cache.borrow_mut() = None;
         self.background_image_cache.borrow_mut().clear();
         self.has_underlays.set(None);
+        self.has_ole_frames.set(None);
         self.has_face3d.set(None);
         self.has_section_objects.set(None);
         self.has_tables.set(None);
@@ -5852,6 +5861,7 @@ impl Scene {
         *self.document_render_env_cache.borrow_mut() = None;
         self.background_image_cache.borrow_mut().clear();
         self.has_underlays.set(None);
+        self.has_ole_frames.set(None);
         self.has_face3d.set(None);
         self.has_section_objects.set(None);
         self.has_tables.set(None);

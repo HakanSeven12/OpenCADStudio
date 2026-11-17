@@ -935,6 +935,25 @@ impl Scene {
         self.bump_entities(&changes);
     }
 
+    /// Rebuild every OLE picture's raster, after the view scale it follows
+    /// moved.
+    pub(crate) fn reseed_ole_frames(&mut self) {
+        let handles: Vec<Handle> = self
+            .document
+            .entities()
+            .filter(|entity| matches!(entity, EntityType::Ole2Frame(_)))
+            .map(|entity| entity.common().handle)
+            .collect();
+        for handle in &handles {
+            self.reseed_derived_caches(*handle);
+        }
+        let changes: Vec<_> = handles
+            .iter()
+            .map(|handle| (*handle, crate::scene::ChangeKind::Modified))
+            .collect();
+        self.bump_entities(&changes);
+    }
+
     pub(crate) fn reseed_derived_caches(&mut self, handle: Handle) {
         let (hatch_seed, image_seed) = match self.document.get_entity(handle) {
             None => (None, None),
@@ -3514,7 +3533,23 @@ impl Scene {
     ) -> Option<ImageModel> {
         match entity {
             EntityType::RasterImage(img) => ImageModel::from_raster_image(img),
-            EntityType::Ole2Frame(ole) => ImageModel::from_ole2frame(ole),
+            EntityType::Ole2Frame(ole) => {
+                // Pictures of the layout in view follow its scale; others
+                // keep the size used when the view is unknown.
+                let in_view = ole.common.owner_handle == self.current_layout_block_handle();
+                let scale = &self.ole_scale;
+                let (wpp, view) = if in_view {
+                    (scale.world_per_pixel, scale.view)
+                } else {
+                    (None, None)
+                };
+                ImageModel::from_ole2frame_in_view(ole, wpp, view).map(|(model, sharp)| {
+                    if sharp {
+                        scale.region_used.set(true);
+                    }
+                    model
+                })
+            }
             EntityType::Underlay(u) => match self.document.objects.get(&u.definition_handle) {
                 Some(document::objects::ObjectType::UnderlayDefinition(def)) => {
                     // A paper-space underlay adjusts to the sheet, not the canvas.
@@ -3529,12 +3564,12 @@ impl Scene {
                         u,
                         def,
                         background,
-                        self.underlay_world_per_pixel,
-                        self.underlay_view,
+                        self.underlay_scale.world_per_pixel,
+                        self.underlay_scale.view,
                     )
                     .map(|(model, sharp)| {
                         if sharp {
-                            self.underlay_region_used.set(true);
+                            self.underlay_scale.region_used.set(true);
                         }
                         model
                     })
@@ -3545,12 +3580,32 @@ impl Scene {
         }
     }
 
-    /// A PDF underlay's image for a plot, drawn at print resolution; `None`
-    /// for anything else, which plots as it is shown.
+    /// A PDF underlay's image for a plot, drawn at print resolution, and an
+    /// OLE picture's at its own size, not the view's; `None` for anything
+    /// else, which plots as it is shown.
     pub(super) fn print_underlay_image(
         &self,
         entity: &document::entities::EntityType,
     ) -> Option<ImageModel> {
+        if let EntityType::Ole2Frame(ole) = entity {
+            // Only a metafile drawn for the view in sight differs from its
+            // own size; anything else plots the raster already shown.
+            let sized_to_view = self.ole_scale.world_per_pixel.is_some()
+                && ole.common.owner_handle == self.current_layout_block_handle();
+            if !sized_to_view {
+                return None;
+            }
+            let picture = crate::scene::model::ole_pres::picture(&ole.encoded_payload())?;
+            if !picture.is_metafile() {
+                return None;
+            }
+            let shown = self.images.get(&ole.common.handle)?;
+            return ImageModel::from_ole2frame(ole).map(|model| ImageModel {
+                render_instance: shown.render_instance.clone(),
+                draw_depth: shown.draw_depth,
+                ..model
+            });
+        }
         let EntityType::Underlay(u) = entity else {
             return None;
         };

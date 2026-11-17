@@ -6,7 +6,10 @@
 // this player understands.
 
 use super::raster::{Canvas, Rgba};
-use super::{canvas_for_box, colorref, dib, stock_obj, text, Brush, Dc, Font, Obj, Pen, Xform};
+use super::{
+    canvas_for_box, colorref, dib, stock_obj, text, Brush, Dc, Font, Obj, Pen, Rendered, Target,
+    Xform,
+};
 
 #[inline]
 fn u32_at(d: &[u8], o: usize) -> u32 {
@@ -158,7 +161,7 @@ impl Player {
     }
 }
 
-pub fn render(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+pub fn render(data: &[u8], target: Target) -> Option<Rendered> {
     if data.len() < 88 || u32_at(data, 0) != 1 || &data[40..44] != b" EMF" {
         return None;
     }
@@ -169,7 +172,12 @@ pub fn render(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
         i32_at(data, 16) as f32,
         i32_at(data, 20) as f32,
     );
-    let (mut canvas, dev_scale) = canvas_for_box(br - bl, bb - bt)?;
+    let super::Frame {
+        mut canvas,
+        dev_scale,
+        offset,
+        full,
+    } = canvas_for_box(br - bl, bb - bt, target)?;
     let mut p = Player {
         dc: Dc::new(),
         objects: Vec::new(),
@@ -177,6 +185,8 @@ pub fn render(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     };
     p.dc.dev_org = (bl, bt);
     p.dc.dev_scale = dev_scale;
+    p.dc.canvas_off = offset;
+    p.dc.ss = canvas.ss as f32;
 
     let mut off = 0usize;
     let mut guard = 0usize;
@@ -635,8 +645,15 @@ pub fn render(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
         }
     }
 
-    let (px, w, h) = canvas.downsample(super::SS);
-    Some((px, w, h))
+    Some(
+        super::Frame {
+            canvas,
+            dev_scale,
+            offset,
+            full,
+        }
+        .finish(),
+    )
 }
 
 #[cfg(test)]
@@ -680,7 +697,7 @@ mod polypoly_size_tests {
     fn a_28_byte_polypolyline_record_is_skipped_not_oob() {
         let rec = record(7, &[0u8; 20]);
         assert_eq!(rec.len(), 28);
-        assert!(render(&emf_with(&[rec])).is_some());
+        assert!(render(&emf_with(&[rec]), super::super::Target::DEFAULT).is_some());
     }
 
     /// `iType = 91` maps to kind 8 the same way (`ty - 83`).
@@ -688,7 +705,7 @@ mod polypoly_size_tests {
     fn a_28_byte_polypolygon_record_is_skipped_not_oob() {
         let rec = record(91, &[0u8; 20]);
         assert_eq!(rec.len(), 28);
-        assert!(render(&emf_with(&[rec])).is_some());
+        assert!(render(&emf_with(&[rec]), super::super::Target::DEFAULT).is_some());
     }
 
     /// A well-formed record (nPolys + total + counts fit in 36 bytes) still
@@ -701,7 +718,7 @@ mod polypoly_size_tests {
         body.extend_from_slice(&0u32.to_le_bytes()); // counts[0] @32 (empty ring)
         let rec = record(7, &body);
         assert_eq!(rec.len(), 36);
-        assert!(render(&emf_with(&[rec])).is_some());
+        assert!(render(&emf_with(&[rec]), super::super::Target::DEFAULT).is_some());
     }
 
     /// A per-ring point count is a raw u32 (`counts[0] @32`). `pts32` sized
@@ -759,7 +776,7 @@ mod polypoly_size_tests {
         body.extend_from_slice(&50i32.to_le_bytes()); // point (50,0)
         body.extend_from_slice(&0i32.to_le_bytes());
         let rec = record(7, &body);
-        assert!(render(&emf_with(&[rec])).is_some());
+        assert!(render(&emf_with(&[rec]), super::super::Target::DEFAULT).is_some());
     }
 }
 

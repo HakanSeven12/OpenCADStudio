@@ -6277,11 +6277,12 @@ fn round_up_tex(n: u32) -> u32 {
 }
 
 /// `true` when the world-XY AABB projects entirely outside the
-/// viewport rect (extended by `MARGIN_FRAC` to absorb pan inertia and
-/// avoid edge pop-in). Phase 2.2 mesh-frustum / Phase 2.3 hatch +
+/// viewport rect (extended by [`OFFSCREEN_MARGIN_FRAC`] to absorb pan inertia
+/// and avoid edge pop-in). Phase 2.2 mesh-frustum / Phase 2.3 hatch +
 /// wipeout cull. Equivalent to a 2D bounding-box rejection test in
 /// NDC; uses the same 4-corner projection that LOD picking already
-/// does, so the extra cost is negligible.
+/// does, so the extra cost is negligible. Geometry with a known depth
+/// extent calls [`box_offscreen`] instead.
 ///
 /// IMPORTANT: the AABB must be in the same local space (world_offset
 /// subtracted) that `view_proj` expects. `WipeoutGpu.world_aabb` rebuilds
@@ -6301,7 +6302,9 @@ fn aabb_offscreen(
     let w = clip_w as f32;
     let h = clip_h as f32;
     // A corner behind the perspective eye mirrors across the screen, so the
-    // projected union bounds nothing: never cull in that case (#64).
+    // projected union bounds nothing: never cull in that case (#64). Without a
+    // depth extent there is no telling where this geometry really sits, so a
+    // box entirely behind the eye is kept too.
     let corners = [(x0, y0), (x1, y0), (x0, y1), (x1, y1)].map(|(x, y)| {
         crate::scene::view::projection::project_ndc(view_rot, eye, glam::DVec3::new(x, y, 0.0))
     });
@@ -6326,13 +6329,129 @@ fn aabb_offscreen(
             max_py = py;
         }
     }
-    // 25% pad on each side — matches `view_world_aabb` (wire path),
-    // keeps edge geometry rendered while panning before the next
-    // upload reaches the GPU.
-    const MARGIN_FRAC: f32 = 0.25;
-    let mx = w * MARGIN_FRAC;
-    let my = h * MARGIN_FRAC;
+    let mx = w * OFFSCREEN_MARGIN_FRAC;
+    let my = h * OFFSCREEN_MARGIN_FRAC;
     max_px < -mx || min_px > w + mx || max_py < -my || min_py > h + my
+}
+
+/// 25% pad on each side — matches `view_world_aabb` (wire path), keeps edge
+/// geometry rendered while panning before the next upload reaches the GPU.
+const OFFSCREEN_MARGIN_FRAC: f32 = 0.25;
+
+/// [`aabb_offscreen`] for a box that has a real depth extent. A tilted or
+/// perspective view maps the far face to a different screen rect than the near
+/// one, so the test needs all eight corners: projecting the footprint alone
+/// would cull geometry that the camera can still see. `depth_ignored` is the
+/// caller's [`parallel_view_ignores_depth`] answer, passed in so it is decided
+/// once per view rather than once per box.
+fn box_offscreen(
+    bounds: [f64; 6],
+    depth_ignored: bool,
+    view_rot: glam::Mat4,
+    eye: glam::DVec3,
+    clip_w: u32,
+    clip_h: u32,
+) -> bool {
+    let [x0, y0, z0, x1, y1, z1] = bounds;
+    if ![x0, y0, z0, x1, y1, z1].into_iter().all(f64::is_finite) {
+        return false;
+    }
+    let (z0, z1) = if z0 <= z1 { (z0, z1) } else { (z1, z0) };
+    let w = clip_w as f32;
+    let h = clip_h as f32;
+    let corners = [
+        (x0, y0, z0),
+        (x1, y0, z0),
+        (x0, y1, z0),
+        (x1, y1, z0),
+        (x0, y0, z1),
+        (x1, y0, z1),
+        (x0, y1, z1),
+        (x1, y1, z1),
+    ];
+    // The footprint alone bounds the box when the far face lands on the near
+    // one: flat geometry, or a view that depth cannot move on screen.
+    let corners = if z0 == z1 || depth_ignored {
+        &corners[..4]
+    } else {
+        &corners[..]
+    };
+    let mut min_px = f32::INFINITY;
+    let mut max_px = f32::NEG_INFINITY;
+    let mut min_py = f32::INFINITY;
+    let mut max_py = f32::NEG_INFINITY;
+    let mut behind = 0usize;
+    for &(x, y, z) in corners {
+        // A corner behind the perspective eye mirrors across the screen, so the
+        // projected union bounds nothing: never cull a box that straddles the
+        // eye plane (#64). One whose every corner is behind it is out of sight.
+        let Some(clip) =
+            crate::scene::view::projection::project_clip(view_rot, eye, glam::DVec3::new(x, y, z))
+        else {
+            return false;
+        };
+        if crate::scene::view::projection::behind_eye(clip) {
+            behind += 1;
+            continue;
+        }
+        let c = clip.truncate() / clip.w;
+        if !c.is_finite() {
+            return false;
+        }
+        let px = (c.x + 1.0) * 0.5 * w;
+        let py = (1.0 - c.y) * 0.5 * h;
+        if px < min_px {
+            min_px = px;
+        }
+        if px > max_px {
+            max_px = px;
+        }
+        if py < min_py {
+            min_py = py;
+        }
+        if py > max_py {
+            max_py = py;
+        }
+    }
+    if behind == corners.len() {
+        return true;
+    }
+    if behind > 0 {
+        return false;
+    }
+    let mx = w * OFFSCREEN_MARGIN_FRAC;
+    let my = h * OFFSCREEN_MARGIN_FRAC;
+    max_px < -mx || min_px > w + mx || max_py < -my || min_py > h + my
+}
+
+/// Whether a point's Z cannot move it on screen: a parallel projection looking
+/// straight down the world Z axis at the drawing plane, i.e. the usual plan view.
+///
+/// `view_proj_rte` zeroes the bottom row for a parallel projection, and a
+/// translated view keeps it zero, so `(0, 0, 0, 1)` proves one. Perspective
+/// never qualifies — there depth also changes the scale. The tolerance is
+/// relative and sits far above the f32 cosine noise of an exact plan rotation
+/// (~4e-8), while keeping a view tilted by up to 1e-6 rad on the fast path.
+fn parallel_view_ignores_depth(view_rot: glam::Mat4) -> bool {
+    if view_rot.row(3) != glam::Vec4::W {
+        return false;
+    }
+    let along = view_rot
+        .transform_vector3(glam::Vec3::Z)
+        .truncate()
+        .length();
+    let across = view_rot
+        .transform_vector3(glam::Vec3::X)
+        .truncate()
+        .length()
+        .max(
+            view_rot
+                .transform_vector3(glam::Vec3::Y)
+                .truncate()
+                .length(),
+        )
+        .max(f32::MIN_POSITIVE);
+    along <= across * 1e-6
 }
 
 /// Return `true` when the world-XY AABB's screen-space size is below the

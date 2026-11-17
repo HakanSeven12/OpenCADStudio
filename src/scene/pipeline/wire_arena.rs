@@ -55,9 +55,10 @@ struct Slab {
     inst_len: u32,
     const_off: u32,
     const_len: u32,
-    /// World-XY bounds for plan-view draw-range culling. Unbounded whenever a
-    /// source wire does not carry a trustworthy entity AABB.
-    aabb: [f32; 4],
+    /// World bounds for draw-range culling. The XY extent is unbounded
+    /// whenever a source wire does not carry a trustworthy entity AABB; the Z
+    /// extent is what lets a tilted view project the box at all.
+    bounds: RunBounds,
     /// Entity-level draw depth used when this slab was emitted. Individual
     /// consts may carry block-local offsets around it; structural edits shift
     /// the whole slab by the base-depth delta instead of flattening those
@@ -74,7 +75,7 @@ struct PreparedPatchRun {
     csts: Vec<WireConst>,
     content: u64,
     base_depth: f32,
-    aabb: [f32; 4],
+    bounds: RunBounds,
     order_sensitive: bool,
 }
 
@@ -428,10 +429,54 @@ fn handle_ranges(wires: &[&WireModel]) -> Option<Vec<(Handle, usize, usize)>> {
     Some(out)
 }
 
-/// Bench hook: the world-XY bounds the arena stores with each entity's slab.
+/// World bounds the arena keeps with each entity's slab: the XY footprint, and
+/// the Z extent that lets the camera test box it in three dimensions. Without
+/// Z a tilted or perspective view could only project the footprint.
+#[derive(Clone, Copy, Debug)]
+struct RunBounds {
+    aabb: [f32; 4],
+    z: [f32; 2],
+}
+
+/// Bench hook: the bounds the arena stores with each entity's slab.
 #[doc(hidden)]
-pub fn wire_run_aabb(wires: &[&WireModel]) -> [f32; 4] {
-    run_aabb(wires)
+pub fn wire_run_bounds(wires: &[&WireModel]) -> ([f32; 4], [f32; 2]) {
+    let bounds = run_bounds(wires);
+    (bounds.aabb, bounds.z)
+}
+
+fn run_bounds(wires: &[&WireModel]) -> RunBounds {
+    let aabb = run_aabb(wires);
+    if !aabb.iter().all(|v| v.is_finite()) {
+        // Unbounded XY keeps every view, so no depth extent is needed.
+        return RunBounds {
+            aabb,
+            z: [0.0, 0.0],
+        };
+    }
+    let mut z0 = f32::INFINITY;
+    let mut z1 = f32::NEG_INFINITY;
+    let mut pad = 0.0f32;
+    for wire in wires {
+        // A wide band is extruded off its centreline in world space, which
+        // reaches in Z on a non-horizontal segment; `run_aabb` pads XY the
+        // same way.
+        pad = pad.max((wire.world_width * 0.5).max(0.0));
+        for point in &wire.points {
+            if point[2].is_finite() {
+                z0 = z0.min(point[2]);
+                z1 = z1.max(point[2]);
+            }
+        }
+    }
+    RunBounds {
+        aabb,
+        z: if z0 <= z1 {
+            [z0 - pad, z1 + pad]
+        } else {
+            [0.0, 0.0]
+        },
+    }
 }
 
 fn run_aabb(wires: &[&WireModel]) -> [f32; 4] {
@@ -605,7 +650,7 @@ impl WireArena {
             handle: Handle,
             const_off: u32,
             base_depth: f32,
-            aabb: [f32; 4],
+            bounds: RunBounds,
             content: u64,
             instances: Vec<WireInstance>,
             consts: Vec<WireConst>,
@@ -662,7 +707,7 @@ impl WireArena {
                     handle: plan.handle,
                     const_off: plan.const_off,
                     base_depth: plan.base_depth,
-                    aabb: run_aabb(run),
+                    bounds: run_bounds(run),
                     content: slab_content(&instances, plan.const_off, &consts),
                     instances,
                     consts,
@@ -696,7 +741,7 @@ impl WireArena {
                     inst_len,
                     const_off: packed_slab.const_off,
                     const_len,
-                    aabb: packed_slab.aabb,
+                    bounds: packed_slab.bounds,
                     base_depth: packed_slab.base_depth,
                     content: packed_slab.content,
                 },
@@ -835,7 +880,7 @@ impl WireArena {
                     } else {
                         depth_map.get(&h.value()).map_or(0.0, |d| d[0])
                     },
-                    aabb: run_aabb(run),
+                    bounds: run_bounds(run),
                     order_sensitive: order_sensitive(run, depth_map),
                 },
             );
@@ -876,7 +921,7 @@ impl WireArena {
                 csts,
                 content,
                 base_depth,
-                aabb,
+                bounds,
                 order_sensitive: run_order_sensitive,
             } = prepared
                 .remove(&h)
@@ -920,7 +965,7 @@ impl WireArena {
                 dirty_consts.push((const_off, const_off + const_len));
                 let slab = self.slabs.get_mut(&h).unwrap();
                 slab.base_depth = base_depth;
-                slab.aabb = aabb;
+                slab.bounds = bounds;
                 slab.content = content;
                 continue;
             }
@@ -964,7 +1009,7 @@ impl WireArena {
                 slab.inst_len = inst_len;
                 slab.const_len = const_len;
                 slab.base_depth = base_depth;
-                slab.aabb = aabb;
+                slab.bounds = bounds;
                 slab.content = content;
                 self.order_sensitive |= run_order_sensitive;
                 continue;
@@ -1021,7 +1066,7 @@ impl WireArena {
                     inst_len,
                     const_off,
                     const_len,
-                    aabb,
+                    bounds,
                     base_depth,
                     content,
                 },
@@ -1059,10 +1104,10 @@ impl WireArena {
         }]
     }
 
-    /// Draw only plan-view entity ranges that can reach the viewport. The
-    /// instance buffer stays fully resident, so pan/zoom changes only this tiny
-    /// list of offsets — no repack and no GPU upload. Non-plan views use the
-    /// conservative full draw because a 2-D entity AABB does not contain Z.
+    /// Draw only entity ranges that can reach the viewport. The instance buffer
+    /// stays fully resident, so pan/zoom changes only this tiny list of
+    /// offsets — no repack and no GPU upload. Each slab's stored Z extent lets
+    /// a tilted or perspective view bound its box too.
     pub fn wire_gpus_visible(
         &self,
         view_rot: glam::Mat4,
@@ -1136,7 +1181,7 @@ struct PackedWireArena {
 struct PreparedPackedPatchRun {
     insts: Vec<PackedWireInstance>,
     base_depth: f32,
-    aabb: [f32; 4],
+    bounds: RunBounds,
     order_sensitive: bool,
 }
 
@@ -1175,20 +1220,22 @@ fn alloc_packed_initialized(
 }
 
 /// One entity slab as the camera cull sees it: its instance range and the
-/// world-XY bounds of the wires it holds.
+/// world bounds of the wires it holds.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WireCullSlab {
     pub inst_off: u32,
     pub inst_len: u32,
     pub aabb: [f32; 4],
+    pub z: [f32; 2],
 }
 
 fn cull_slab(slab: &Slab) -> WireCullSlab {
     WireCullSlab {
         inst_off: slab.inst_off,
         inst_len: slab.inst_len,
-        aabb: slab.aabb,
+        aabb: slab.bounds.aabb,
+        z: slab.bounds.z,
     }
 }
 
@@ -1203,28 +1250,25 @@ pub fn visible_wire_ranges(
     clip_w: u32,
     clip_h: u32,
 ) -> Vec<(u32, u32)> {
-    let projected_x = view_rot.transform_vector3(glam::Vec3::X);
-    let projected_y = view_rot.transform_vector3(glam::Vec3::Y);
-    let projected_z = view_rot.transform_vector3(glam::Vec3::Z);
-    let xy_scale = projected_x
-        .truncate()
-        .length()
-        .max(projected_y.truncate().length())
-        .max(f32::MIN_POSITIVE);
-    if projected_z.truncate().length() > xy_scale * 1e-5 {
-        // A 2-D entity AABB does not contain Z, so it cannot bound a non-plan
-        // view: draw everything instead of culling on an unsound bound.
-        let end = slabs
-            .map(|slab| slab.inst_off + slab.inst_len)
-            .max()
-            .unwrap_or(0);
-        return if end == 0 { Vec::new() } else { vec![(0, end)] };
-    }
-
+    let depth_ignored = super::parallel_view_ignores_depth(view_rot);
     let mut ranges: Vec<(u32, u32)> = slabs
         .filter(|slab| {
             slab.inst_len > 0
-                && !super::aabb_offscreen(slab.aabb.map(f64::from), view_rot, eye, clip_w, clip_h)
+                && !super::box_offscreen(
+                    [
+                        slab.aabb[0] as f64,
+                        slab.aabb[1] as f64,
+                        slab.z[0] as f64,
+                        slab.aabb[2] as f64,
+                        slab.aabb[3] as f64,
+                        slab.z[1] as f64,
+                    ],
+                    depth_ignored,
+                    view_rot,
+                    eye,
+                    clip_w,
+                    clip_h,
+                )
         })
         .map(|slab| (slab.inst_off, slab.inst_off + slab.inst_len))
         .collect();
@@ -1275,7 +1319,7 @@ impl PackedWireArena {
         struct PackedSlab {
             handle: Handle,
             base_depth: f32,
-            aabb: [f32; 4],
+            bounds: RunBounds,
             instances: Vec<PackedWireInstance>,
         }
 
@@ -1305,7 +1349,7 @@ impl PackedWireArena {
                 PackedSlab {
                     handle,
                     base_depth,
-                    aabb: run_aabb(run),
+                    bounds: run_bounds(run),
                     instances,
                 }
             })
@@ -1328,7 +1372,7 @@ impl PackedWireArena {
                     inst_len,
                     const_off: 0,
                     const_len: 0,
-                    aabb: packed_slab.aabb,
+                    bounds: packed_slab.bounds,
                     base_depth: packed_slab.base_depth,
                     content: 0,
                 },
@@ -1414,7 +1458,7 @@ impl PackedWireArena {
                     } else {
                         depth_map.get(&handle.value()).map_or(0.0, |depth| depth[0])
                     },
-                    aabb: run_aabb(run),
+                    bounds: run_bounds(run),
                     order_sensitive: order_sensitive(run, depth_map),
                 },
             );
@@ -1440,7 +1484,7 @@ impl PackedWireArena {
             let PreparedPackedPatchRun {
                 insts,
                 base_depth,
-                aabb,
+                bounds,
                 order_sensitive: run_order_sensitive,
             } = prepared
                 .remove(&handle)
@@ -1467,7 +1511,7 @@ impl PackedWireArena {
                 self.write_insts(queue, inst_off, &insts);
                 let slab = self.slabs.get_mut(&handle).unwrap();
                 slab.base_depth = base_depth;
-                slab.aabb = aabb;
+                slab.bounds = bounds;
                 continue;
             }
 
@@ -1487,7 +1531,7 @@ impl PackedWireArena {
                 let slab = self.slabs.get_mut(&handle).unwrap();
                 slab.inst_len = inst_len;
                 slab.base_depth = base_depth;
-                slab.aabb = aabb;
+                slab.bounds = bounds;
                 self.order_sensitive |= run_order_sensitive;
                 continue;
             }
@@ -1518,7 +1562,7 @@ impl PackedWireArena {
                     inst_len,
                     const_off: 0,
                     const_len: 0,
-                    aabb,
+                    bounds,
                     base_depth,
                     content: 0,
                 },
@@ -1831,7 +1875,10 @@ mod tests {
             inst_len: 10,
             const_off: 20,
             const_len: 2,
-            aabb: [0.0; 4],
+            bounds: RunBounds {
+                aabb: [0.0; 4],
+                z: [0.0; 2],
+            },
             base_depth: 0.0,
             content: 0,
         }
@@ -2042,20 +2089,42 @@ mod tests {
         (cam.view_proj_rte(bounds), cam.eye())
     }
 
-    fn cull_entry(inst_off: u32, inst_len: u32, aabb: [f32; 4]) -> WireCullSlab {
+    fn cull_entry(inst_off: u32, inst_len: u32, aabb: [f32; 4], z: [f32; 2]) -> WireCullSlab {
         WireCullSlab {
             inst_off,
             inst_len,
             aabb,
+            z,
         }
+    }
+
+    fn front_camera(target: glam::DVec3, half_height: f64) -> (glam::Mat4, glam::DVec3) {
+        let mut cam = Camera::default();
+        cam.target = target;
+        cam.distance = (half_height / (cam.fov_y * 0.5).tan() as f64) as f32;
+        cam.rotation = glam::Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
+        cam.projection = Projection::Orthographic;
+        let bounds = iced::Rectangle::new(iced::Point::ORIGIN, iced::Size::new(800.0, 600.0));
+        (cam.view_proj_rte(bounds), cam.eye())
+    }
+
+    /// A perspective view from `(0, 0, eye_z)` looking down at the XY plane.
+    fn perspective_camera(eye_z: f64) -> (glam::Mat4, glam::DVec3) {
+        let mut cam = Camera::default();
+        cam.target = glam::DVec3::ZERO;
+        cam.rotation = glam::Quat::IDENTITY;
+        cam.distance = eye_z as f32;
+        cam.projection = Projection::Perspective;
+        let bounds = iced::Rectangle::new(iced::Point::ORIGIN, iced::Size::new(800.0, 600.0));
+        (cam.view_proj_rte(bounds), cam.eye())
     }
 
     #[test]
     fn visible_wire_ranges_culls_plan_view_slabs_outside_the_viewport() {
         let (view, eye) = plan_camera(glam::DVec3::ZERO, 100.0);
         let slabs = [
-            cull_entry(0, 10, [-10.0, -10.0, 10.0, 10.0]),
-            cull_entry(10, 10, [5_000.0, 5_000.0, 5_010.0, 5_010.0]),
+            cull_entry(0, 10, [-10.0, -10.0, 10.0, 10.0], [0.0, 0.0]),
+            cull_entry(10, 10, [5_000.0, 5_000.0, 5_010.0, 5_010.0], [0.0, 0.0]),
         ];
         assert_eq!(
             visible_wire_ranges(slabs.into_iter(), view, eye, 800, 600),
@@ -2067,9 +2136,9 @@ mod tests {
     fn visible_wire_ranges_merges_slabs_that_touch_in_submission_order() {
         let (view, eye) = plan_camera(glam::DVec3::ZERO, 100_000.0);
         let slabs = [
-            cull_entry(40, 10, [-90.0, 0.0, -80.0, 10.0]),
-            cull_entry(0, 10, [0.0, 0.0, 10.0, 10.0]),
-            cull_entry(20, 20, [20.0, 0.0, 30.0, 10.0]),
+            cull_entry(40, 10, [-90.0, 0.0, -80.0, 10.0], [0.0, 0.0]),
+            cull_entry(0, 10, [0.0, 0.0, 10.0, 10.0], [0.0, 0.0]),
+            cull_entry(20, 20, [20.0, 0.0, 30.0, 10.0], [0.0, 0.0]),
         ];
         assert_eq!(
             visible_wire_ranges(slabs.into_iter(), view, eye, 800, 600),
@@ -2078,15 +2147,72 @@ mod tests {
     }
 
     #[test]
-    fn non_plan_views_draw_every_slab() {
+    fn non_plan_views_cull_slabs_outside_the_frustum() {
         let (view, eye) = tilted_camera(glam::DVec3::ZERO, 500.0);
         let slabs = [
-            cull_entry(0, 10, [-10.0, -10.0, 10.0, 10.0]),
-            cull_entry(10, 10, [500_000.0, 500_000.0, 500_010.0, 500_010.0]),
+            cull_entry(0, 10, [-10.0, -10.0, 10.0, 10.0], [-1.0, 1.0]),
+            cull_entry(
+                10,
+                10,
+                [500_000.0, 500_000.0, 500_010.0, 500_010.0],
+                [0.0, 0.0],
+            ),
         ];
         assert_eq!(
             visible_wire_ranges(slabs.into_iter(), view, eye, 800, 600),
-            vec![(0, 20)]
+            vec![(0, 10)]
+        );
+    }
+
+    #[test]
+    fn elevated_wires_stay_drawn_in_a_front_view() {
+        let (view, eye) = front_camera(glam::DVec3::new(0.0, 0.0, 50.0), 10.0);
+        let slabs = [
+            // The footprint alone sits far below this view; the wires span
+            // z 40..60, which is what the camera sees.
+            cull_entry(0, 10, [-5.0, -5.0, 5.0, 5.0], [40.0, 60.0]),
+            cull_entry(10, 10, [5_000.0, -5.0, 5_010.0, 5.0], [40.0, 60.0]),
+        ];
+        assert_eq!(
+            visible_wire_ranges(slabs.into_iter(), view, eye, 800, 600),
+            vec![(0, 10)]
+        );
+    }
+
+    #[test]
+    fn front_view_tests_the_whole_depth_extent() {
+        let (view, eye) = front_camera(glam::DVec3::new(0.0, 0.0, 50.0), 10.0);
+        let slabs = [
+            // Its near face is 50 units below the view; the far face is the
+            // only part on screen.
+            cull_entry(0, 10, [-5.0, -5.0, 5.0, 5.0], [0.0, 60.0]),
+            // Entirely above the view.
+            cull_entry(10, 10, [-5.0, -5.0, 5.0, 5.0], [100.0, 120.0]),
+        ];
+        assert_eq!(
+            visible_wire_ranges(slabs.into_iter(), view, eye, 800, 600),
+            vec![(0, 10)]
+        );
+    }
+
+    #[test]
+    fn perspective_view_keeps_boxes_that_cross_the_eye_plane() {
+        let (view, eye) = perspective_camera(100.0);
+        let slabs = [
+            // Crosses the eye plane: the far corners mirror on screen, so the
+            // box cannot be bounded and must stay drawn (#64).
+            cull_entry(0, 10, [-5.0, -5.0, 5.0, 5.0], [30.0, 200.0]),
+            // Entirely behind the eye.
+            cull_entry(10, 10, [-5.0, -5.0, 5.0, 5.0], [200.0, 210.0]),
+            // In front of it, filling the view.
+            cull_entry(20, 10, [-5.0, -5.0, 5.0, 5.0], [-5.0, 5.0]),
+            // Straddles it too, but its footprint is far off screen: still
+            // kept, because no bound can say where the mirrored part lands.
+            cull_entry(50, 10, [5_000.0, 5_000.0, 5_010.0, 5_010.0], [30.0, 200.0]),
+        ];
+        assert_eq!(
+            visible_wire_ranges(slabs.into_iter(), view, eye, 800, 600),
+            vec![(0, 10), (20, 30), (50, 60)]
         );
     }
 }

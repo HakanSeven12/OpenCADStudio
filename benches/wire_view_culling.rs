@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use glam::{DVec3, Mat4, Quat};
 use OpenCADStudio::scene::pipeline::wire_arena::{
-    visible_wire_ranges, wire_run_aabb, WireCullSlab,
+    visible_wire_ranges, wire_run_bounds, WireCullSlab,
 };
 use OpenCADStudio::scene::view::camera::{Camera, Projection};
 use OpenCADStudio::scene::WireModel;
@@ -39,15 +39,21 @@ fn entity_origin(i: usize) -> (f32, f32) {
     )
 }
 
+fn entity_z(i: usize) -> f32 {
+    ((i * 7) % 11) as f32 * 3.0
+}
+
 /// One slab per entity, laid out in submission order like the arena's tail.
 fn slab_table() -> Vec<WireCullSlab> {
     (0..ENTITIES)
         .map(|i| {
             let (x, y) = entity_origin(i);
+            let z = entity_z(i);
             WireCullSlab {
                 inst_off: (i * SEGMENTS) as u32,
                 inst_len: SEGMENTS as u32,
                 aabb: [x, y, x + 30.0, y + 30.0],
+                z: [z - 1.0, z + 1.0],
             }
         })
         .collect()
@@ -58,7 +64,7 @@ fn wire_models() -> Vec<WireModel> {
     (0..ENTITIES)
         .map(|i| {
             let (x, y) = entity_origin(i);
-            let z = ((i * 7) % 11) as f32 * 3.0;
+            let z = entity_z(i);
             let points = (0..=SEGMENTS)
                 .map(|s| {
                     let t = s as f32 / SEGMENTS as f32;
@@ -156,18 +162,15 @@ fn run_view(slabs: &[WireCullSlab], name: &str, view: Mat4, eye: DVec3) -> u64 {
 fn run_bounds_build(wires: &[&WireModel]) -> u64 {
     let mut sink = 0u64;
     for _ in 0..WARMUP {
-        let aabb = wire_run_aabb(black_box(wires));
-        sink ^= (aabb[0] as u64)
-            ^ ((aabb[2] as u64) << 32)
-            ^ (aabb[1] as u64)
-            ^ ((aabb[3] as u64) << 32);
+        let (aabb, z) = wire_run_bounds(black_box(wires));
+        sink ^= (aabb[0] as u64) ^ ((aabb[2] as u64) << 32) ^ (z[0] as u64) ^ ((z[1] as u64) << 32);
     }
     let mut samples = Vec::with_capacity(RUNS);
     for _ in 0..RUNS {
         let start = Instant::now();
-        let aabb = wire_run_aabb(black_box(wires));
+        let (aabb, z) = wire_run_bounds(black_box(wires));
         samples.push(start.elapsed().as_nanos() as u64);
-        sink ^= (aabb[0] as u64) ^ ((aabb[2] as u64) << 32);
+        sink ^= (aabb[0] as u64) ^ ((aabb[2] as u64) << 32) ^ (z[0] as u64);
     }
     samples.sort_unstable();
     println!(

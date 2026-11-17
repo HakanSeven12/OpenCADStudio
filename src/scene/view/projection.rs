@@ -17,6 +17,19 @@ use iced::{Point, Rectangle};
 /// same way everywhere.
 const MIN_CLIP_W: f32 = 1e-7;
 
+/// Clip-space position of `world` under a relative-to-eye view-projection, so a
+/// caller that bounds a volume can tell a corner in front of the eye from one
+/// behind it. `None` when the position is not finite.
+pub(crate) fn project_clip(view_rot: Mat4, eye: DVec3, world: DVec3) -> Option<glam::Vec4> {
+    let clip = view_rot * (world - eye).as_vec3().extend(1.0);
+    clip.is_finite().then_some(clip)
+}
+
+/// Whether a clip-space position lies on or behind the perspective eye plane.
+pub(crate) fn behind_eye(clip: glam::Vec4) -> bool {
+    clip.w <= MIN_CLIP_W
+}
+
 /// NDC of `world` under a relative-to-eye view-projection, or `None` when the
 /// point sits on/behind the perspective eye plane or is not finite.
 pub(crate) fn project_ndc(view_rot: Mat4, eye: DVec3, world: DVec3) -> Option<Vec3> {

@@ -286,6 +286,8 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use iced::keyboard::{Key, Modifiers, key as keyboard_key};
+#[cfg(not(target_arch = "wasm32"))]
+use iced::mouse;
 use iced::widget::tooltip::Position as TooltipPosition;
 use iced::widget::{Tooltip, button, canvas, column, container, mouse_area, row, text};
 use iced::{Element, Fill, Length, Point, Theme};
@@ -301,7 +303,10 @@ use ocs_plugin_api::ipc::protocol::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 use ocs_plugin_api::widgets::WidgetRange;
-use ocs_plugin_api::scene::{PanelScene, SceneElement, SceneKindCounts, SceneRevision, StableId};
+use ocs_plugin_api::scene::{
+    DragMeta, MarkerKind, PanelScene, Rect2D, SceneColor, SceneElement, SceneKindCounts,
+    SceneRevision, StableId,
+};
 use ocs_plugin_api::widgets::{
     Axis, CellKind, IconActionDef, ItemListDef, MAX_MENU_DEPTH, MAX_WIDGET_RANGE_LEN,
     MAX_WIDGET_ROWS_INITIAL, MenuDef, PanelTableDef, TableRef, TableCell, TableRowDef, TreeRowDef,
@@ -327,6 +332,13 @@ use crate::ui::window::plugin_widgets_tables::{
 // is reinvented here.
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ui::window::plugin_scene_cache::SceneProjectionCache;
+// (SCN-032) The scene drag rail's MACHINE (SCN-021's `plugin_drag.rs` — the
+// wire-free Begin/Move/Settle/Cancel state machine, untouched: this mount
+// only WIRES it).
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ui::window::plugin_drag::{
+    DragCancelReason, DragPhase, DragSession, DragSettled, MoveDisposition,
+};
 
 
 /// The mount's iced_aw menu element types with the crate's theme/renderer
@@ -2135,6 +2147,45 @@ pub struct MountRegistry {
     /// never serialized.
     #[cfg(not(target_arch = "wasm32"))]
     scene_caches: RefCell<HashMap<String, Rc<RefCell<SceneProjectionCache>>>>,
+    /// (SCN-032) The per-surface SCENE DRAG slots — SCN-021's
+    /// [`DragSession`] machines (one live drag per surface at most, the
+    /// machine owns every threshold/preview/settle decision) plus the
+    /// settle-bound events awaiting the forward drain. One `Rc` slot per
+    /// surface id, SHARED with the composed scene-region canvas program
+    /// (exactly the `scene_caches` sharing law: the element tree rebuilds
+    /// every view pass, the machine slot does not) — the canvas's pointer
+    /// events drive the session through it, the registry-side routes
+    /// (Escape cancel, §16 teardown, the release drain that forwards the
+    /// settle event) reach the SAME machine. Born when a panel's scene
+    /// region first composes over a REGISTERED widget surface (the
+    /// scene-only shape keeps the pointer fence — no surface, no slot, no
+    /// interaction; the demo's panel carries both legs), pruned with the
+    /// surfaces like every other per-surface store.
+    #[cfg(not(target_arch = "wasm32"))]
+    scene_drags: RefCell<HashMap<StableId, Rc<RefCell<SceneDragSlot>>>>,
+}
+
+/// (SCN-032) One surface's scene-drag slot: the [`DragSession`] machine plus
+/// the bookkeeping the wiring needs around it. Host-local only, never
+/// serialized (§3 transient class); the machine's OWN invariants
+/// (losslessness, exactly-once completion, latest-wins parks) live in
+/// `plugin_drag.rs` — nothing here re-implements them.
+#[cfg(not(target_arch = "wasm32"))]
+struct SceneDragSlot {
+    /// The SCN-021 machine. Its synced draggable set is re-synced at every
+    /// region composition (the machine's REPLACE contract — idempotent);
+    /// an in-flight drag's own origin was validated at arm time and survives.
+    session: DragSession,
+    /// The settle-bound [`WidgetEvent`]s awaiting the forward drain (one per
+    /// settled drag — the machine's exactly-once discipline is what bounds
+    /// this vec). Drained by [`MountRegistry::mount_pointer_released_owned`]
+    /// (the release route the body wrapper already publishes) and forwarded
+    /// through the same broadcast call the drained-events path uses.
+    pending_events: Vec<WidgetEvent>,
+    /// The monotonic logical press tick (the machine's `start_tick` is a
+    /// caller-supplied headless/route input, never wall-clock). One tick per
+    /// press the region canvas saw, per surface.
+    next_tick: u64,
 }
 
 impl MountRegistry {
@@ -2318,6 +2369,89 @@ impl MountRegistry {
         self.scene_caches.borrow_mut().remove(panel_id);
     }
 
+    // -- SCN-032: the scene drag rail (the machine + the wiring) ------------
+
+    /// The surface's scene-drag slot, born on first need (the cache-slot
+    /// law generalized: a scene region over a REGISTERED widget surface
+    /// creates the slot at composition; the scene-only shape never calls
+    /// this — its region keeps the pointer fence). Shared `Rc` with the
+    /// composed canvas program; registry-side routes reach the same machine
+    /// through this map.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn scene_drag_slot_owned(&self, surface_id: StableId) -> Rc<RefCell<SceneDragSlot>> {
+        Rc::clone(
+            self.scene_drags
+                .borrow_mut()
+                .entry(surface_id)
+                .or_insert_with(|| {
+                    Rc::new(RefCell::new(SceneDragSlot {
+                        session: DragSession::new(surface_id),
+                        pending_events: Vec::new(),
+                        next_tick: 0,
+                    }))
+                }),
+        )
+    }
+
+    /// The scene-drag slot read (the tests' handle; `None` = no slot — the
+    /// surface never composed a scene region over a registered mount).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn scene_drag_slot_read_owned(
+        &self,
+        surface_id: StableId,
+    ) -> Option<Rc<RefCell<SceneDragSlot>>> {
+        self.scene_drags.borrow().get(&surface_id).cloned()
+    }
+
+    /// The machine-direct scene-drag cancel (Escape today): end the
+    /// surface's live drag with NO semantic exit (the §7 cancel side — the
+    /// plugin receives nothing, the landed lossless no-op). Returns `true`
+    /// when a live interaction was completed. Like the armed-prompt
+    /// dismissal, this is a HOST control operation routed machine-direct —
+    /// no message exists for it and no machine sees a KEY.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn scene_drag_cancel_owned(&mut self, surface_id: StableId, reason: DragCancelReason) -> bool {
+        let Some(slot) = self.scene_drags.borrow().get(&surface_id).cloned() else {
+            return false;
+        };
+        let cancelled = slot.borrow_mut().session.cancel(reason).is_ok();
+        cancelled
+    }
+
+    /// Drain the surface's settle-bound events and forward them the way
+    /// every drained-events batch forwards: the §16 forward probe
+    /// ([`Self::record_panel_events_forwarded_owned`]) plus the v24 notify
+    /// router (`broadcast_panel_scene_events`, bounded batches — the settle
+    /// is exactly one row). This is the RELEASE route's tail: the body
+    /// wrapper's `PointerReleased` (and the window-level release-anywhere
+    /// catcher) both land in
+    /// [`Self::mount_pointer_released_owned`], which drains here — so the
+    /// settle event rides the mount's ONE forwarding shape without a second
+    /// code path through the bridge. An unresolvable panel id is the
+    /// bridge's own grace mirrored: drained and dropped, never re-delivered.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn forward_scene_drag_events_owned(&mut self, surface_id: StableId) {
+        let Some(slot) = self.scene_drags.borrow().get(&surface_id).cloned() else {
+            return;
+        };
+        let events = std::mem::take(&mut slot.borrow_mut().pending_events);
+        if events.is_empty() {
+            return;
+        }
+        self.record_panel_events_forwarded_owned(events.len());
+        if let Some(panel_id) = self.panel_for_surface_owned(surface_id) {
+            crate::plugin::external::with_manager(|manager| {
+                for batch in
+                    events.chunks(ocs_plugin_api::ipc::protocol::MAX_WIDGET_EVENT_ROWS)
+                {
+                    manager.broadcast_panel_scene_events(&panel_id, surface_id, batch);
+                }
+            });
+        }
+    }
+
     /// The scene region element: an iced `canvas` whose program pulls the
     /// CACHED prims ([`SceneProjectionCache::draw`]) — on a layer-key miss
     /// (revision / bounds / palette fingerprint changed) it re-projects and
@@ -2341,20 +2475,45 @@ impl MountRegistry {
     /// at the NEXT composition, ≤ one frame stale, and re-keys the cache by
     /// its revision bump).
     ///
-    /// POINTER FENCE (SCN-032 boundary): the program overrides NOTHING —
-    /// iced's default canvas `update` returns no action and the default
-    /// mouse interaction is the neutral one, so the region consumes no
-    /// pointer input beyond iced's defaults. Hit-testing/drag is the next
-    /// package's seam.
+    /// POINTER FENCE, SCN-032 STATUS: LIFTED FOR THIS PROGRAM ONLY. The
+    /// program now consumes press/move/release over the canvas
+    /// ([`SceneRegionProgram::update`]) and drives the SCN-021 drag machine
+    /// through the surface's shared [`SceneDragSlot`]. The lift is scoped
+    /// EXACTLY here: a region composed over a REGISTERED widget surface
+    /// gets an interactive program (the demo's panel: scene leg + widget
+    /// leg); a SCENE-ONLY panel composes the same canvas WITHOUT a slot —
+    /// its program still consumes nothing (the recorded fence stands
+    /// there), and every legacy / widgets-only body never composes a scene
+    /// region at all. `DragMeta`-bearing elements are synced into the
+    /// machine's draggable set at every composition (the machine's REPLACE
+    /// contract — the same def-walk discipline the widget mount syncs its
+    /// read models at attach/patch rate).
     #[cfg(not(target_arch = "wasm32"))]
     fn scene_region_element_owned(
         &self,
         panel_id: &str,
         scene: &PanelScene,
     ) -> Element<'static, WidgetMountMsg> {
+        // The drag slot: only where a registered widget surface exists (the
+        // surface id the pointer routes and the settle event name).
+        let drag = self
+            .panel_surface_id_owned(panel_id)
+            .map(|surface_id| {
+                let slot = self.scene_drag_slot_owned(surface_id);
+                // The synced draggable set: every element in the CURRENT
+                // scene leg that carries `DragMeta` (the machine refuses
+                // everything not synced — the dispatcher's synced-read-model
+                // discipline). REPLACE per composition: idempotent, and an
+                // in-flight drag's own origin was validated at arm time.
+                slot.borrow_mut()
+                    .session
+                    .sync_draggables(scene_draggable_ids(&scene.elements));
+                slot
+            });
         canvas(SceneRegionProgram {
             scene: Rc::new(scene.clone()),
             cache: self.scene_cache_slot_owned(panel_id),
+            drag,
         })
         .width(Fill)
         .height(Length::Fixed(SCENE_REGION_V1_HEIGHT))
@@ -2414,6 +2573,410 @@ struct SceneRegionProgram {
     scene: Rc<PanelScene>,
     /// The registry-owned retained projection (the panel's slot).
     cache: Rc<RefCell<SceneProjectionCache>>,
+    /// (SCN-032) The surface's shared scene-drag slot (`None` = the
+    /// scene-only shape — the pointer fence stands: the program consumes
+    /// nothing). The SAME `Rc` the registry's Escape/teardown/release
+    /// routes reach: the canvas drives the machine, the registry completes
+    /// it — one machine, two hands.
+    drag: Option<Rc<RefCell<SceneDragSlot>>>,
+}
+
+/// (SCN-032) The settle command id the mount binds (its v1 spelling — the
+/// demo plugin resolves this exact string; the host's own constant is the
+/// authority here, the demo's mirrors it).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) const SCENE_DRAG_SETTLE_COMMAND: &str = "drag_settle";
+
+/// (SCN-032) Hit-test apertures, mirroring the projection's painted extents
+/// (`plugin_scene.rs`: the port disc radius, the marker shapes). Kept as
+/// LOCAL constants — the hit-test is this module's approximation contract,
+/// not a second projection.
+/// Port discs (and the marker Dot) paint at radius 4.
+#[cfg(not(target_arch = "wasm32"))]
+const SCENE_HIT_PORT_RADIUS: f32 = 4.0;
+/// The marker Arrow's tip/base/half-width (the projection's 8-unit shape).
+#[cfg(not(target_arch = "wasm32"))]
+const SCENE_HIT_ARROW_TIP: f32 = 8.0;
+#[cfg(not(target_arch = "wasm32"))]
+const SCENE_HIT_ARROW_BASE: f32 = 4.0;
+#[cfg(not(target_arch = "wasm32"))]
+const SCENE_HIT_ARROW_HALF_WIDTH: f32 = 5.0;
+/// The marker Diamond's half diagonal.
+#[cfg(not(target_arch = "wasm32"))]
+const SCENE_HIT_DIAMOND_HALF_DIAGONAL: f32 = 8.0;
+/// The polygon strokes' hit tolerance beyond half the stroke width (scene
+/// units — a thin stroke still catches a click).
+#[cfg(not(target_arch = "wasm32"))]
+const SCENE_HIT_STROKE_TOLERANCE: f32 = 2.0;
+
+/// (SCN-032) The settle→semantic binding (INT-4, the ONE event conversion):
+/// a settle FACT becomes EXACTLY ONE `WidgetEvent::CommandInvoked(command,
+/// [the dragged element's address])` — nothing else on the event (the
+/// meta-echo law: `DragMeta.opaque` NEVER rides the wire; the plugin
+/// resolves the payload from its own model). The mount-side twin of
+/// `app::update::widget_drag::settle_to_event` — that module is private to
+/// the app tree, and the binding is a pure fact→event mapping with no
+/// machine logic in it, so the twin is deliberate and pinned by tests.
+#[cfg(not(target_arch = "wasm32"))]
+fn settle_to_command_event(settled: DragSettled, command: String) -> WidgetEvent {
+    WidgetEvent::CommandInvoked {
+        surface_id: settled.surface_id,
+        command_id: command,
+        target_ids: vec![settled.address],
+    }
+}
+
+/// (SCN-032) The `DragMeta`-bearing element ids of one scene — the machine's
+/// synced draggable set (a def walk, the registration-sync discipline).
+#[cfg(not(target_arch = "wasm32"))]
+fn scene_draggable_ids(elements: &[SceneElement]) -> Vec<StableId> {
+    let mut ids = Vec::new();
+    let mut walker: Vec<&SceneElement> = elements.iter().collect();
+    while let Some(element) = walker.pop() {
+        let drag = match element {
+            SceneElement::Group { drag, children, .. } => {
+                walker.extend(children.iter());
+                drag
+            }
+            SceneElement::Rect { drag, .. }
+            | SceneElement::Path { drag, .. }
+            | SceneElement::CubicPath { drag, .. }
+            | SceneElement::Text { drag, .. }
+            | SceneElement::Asset { drag, .. }
+            | SceneElement::Port { drag, .. }
+            | SceneElement::Marker { drag, .. }
+            | SceneElement::Edge { drag, .. } => drag,
+        };
+        if drag.is_some() {
+            ids.push(element.stable_id());
+        }
+    }
+    ids
+}
+
+/// (SCN-032) The element's `DragMeta`, if it carries one (the verbatim arm
+/// payload — INT-5: the host returns it to the plugin through the settle
+/// FACT, never through the event).
+#[cfg(not(target_arch = "wasm32"))]
+fn scene_element_drag_meta(element: &SceneElement) -> Option<&DragMeta> {
+    match element {
+        SceneElement::Group { drag, .. }
+        | SceneElement::Rect { drag, .. }
+        | SceneElement::Path { drag, .. }
+        | SceneElement::CubicPath { drag, .. }
+        | SceneElement::Text { drag, .. }
+        | SceneElement::Asset { drag, .. }
+        | SceneElement::Port { drag, .. }
+        | SceneElement::Marker { drag, .. }
+        | SceneElement::Edge { drag, .. } => drag.as_ref(),
+    }
+}
+
+/// (SCN-032) The TOPMOST-BY-PAINT-ORDER element under the SCENE point:
+/// `flat` is the document-order pre-order flatten (the SAME one walk the
+/// region reads use — paint order is document order, parents before
+/// children), so the REVERSE walk hits the last-painted (topmost) element
+/// first. The drag-relevant test (the element's `DragMeta` presence) is the
+/// caller's — this answers the pure geometric hit. Groups carry no geometry
+/// and are never hit targets (v1 approximation, recorded); clip rectangles
+/// do not filter the hit walk (v1 approximation, recorded — a clipped-out
+/// child still answers; the demo scene carries no clips).
+#[cfg(not(target_arch = "wasm32"))]
+fn scene_hit_element<'a>(
+    flat: &[&'a SceneElement],
+    point: Point,
+) -> Option<&'a SceneElement> {
+    flat.iter()
+        .rev()
+        .copied()
+        .find(|element| scene_element_contains(element, point))
+}
+
+/// (SCN-032) The containment test per element kind, in SCENE space (the
+/// point arrived through the render's own transform — the custody law).
+/// Approximations recorded at each arm: text is its baseline-anchored box
+/// (the projection's own bbox contribution is the anchor; the box is the
+/// deterministic estimate), cubic chains hit-test as their control
+/// polygons, fills/closed shapes hit by area, strokes by half-width +
+/// [`SCENE_HIT_STROKE_TOLERANCE`].
+#[cfg(not(target_arch = "wasm32"))]
+fn scene_element_contains(element: &SceneElement, point: Point) -> bool {
+    match element {
+        // A group paints no geometry: never a hit target.
+        SceneElement::Group { .. } => false,
+        SceneElement::Rect { pos, size, .. } | SceneElement::Asset { frame: Rect2D { pos, size }, .. } => {
+            let (x, y) = (pos.0[0] as f32, pos.0[1] as f32);
+            let (w, h) = (size.0[0] as f32, size.0[1] as f32);
+            point.x >= x && point.x <= x + w && point.y >= y && point.y <= y + h
+        }
+        SceneElement::Path { points, closed, fill, stroke, .. } => {
+            let polygon: Vec<Point> = points.iter().map(scene_element_point).collect();
+            scene_polygon_contains(&polygon, *closed, *fill, stroke.as_ref(), point)
+        }
+        SceneElement::CubicPath { segments, closed, fill, stroke, .. } => {
+            // The control polygon is the deterministic hit approximation of
+            // the host-side flattening (the paint path samples the curve;
+            // the hit path walks its anchors).
+            let mut polygon: Vec<Point> = Vec::new();
+            if let Some(first) = segments.first() {
+                polygon.push(scene_element_point(&first.start));
+            }
+            for segment in segments {
+                polygon.push(scene_element_point(&segment.ctrl_a));
+                polygon.push(scene_element_point(&segment.ctrl_b));
+                polygon.push(scene_element_point(&segment.end));
+            }
+            scene_polygon_contains(&polygon, *closed, *fill, stroke.as_ref(), point)
+        }
+        SceneElement::Text { content, pos, size, .. } => {
+            // Baseline-anchored box: height one em ABOVE the baseline, width
+            // a deterministic per-char estimate (the anchor is where iced
+            // starts painting the run).
+            let (x, y) = (pos.0[0] as f32, pos.0[1] as f32);
+            let width = content.chars().count().max(1) as f32 * *size * 0.6;
+            point.x >= x && point.x <= x + width && point.y >= y - *size && point.y <= y
+        }
+        SceneElement::Port { at, .. } => {
+            distance_px(point, scene_element_point(at)) <= SCENE_HIT_PORT_RADIUS
+        }
+        SceneElement::Marker { at, kind, .. } => {
+            let at = scene_element_point(at);
+            match kind {
+                MarkerKind::Dot => distance_px(point, at) <= SCENE_HIT_PORT_RADIUS,
+                MarkerKind::Arrow => {
+                    let dx = point.x - at.x;
+                    let dy = point.y - at.y;
+                    // The tip/base band along +x, within the triangle's
+                    // taper: at the tip zero height, at the base the full
+                    // half-width.
+                    dx >= -SCENE_HIT_ARROW_BASE
+                        && dx <= SCENE_HIT_ARROW_TIP
+                        && dy.abs() <= SCENE_HIT_ARROW_HALF_WIDTH
+                            * (1.0 - (dx + SCENE_HIT_ARROW_BASE)
+                                / (SCENE_HIT_ARROW_TIP + SCENE_HIT_ARROW_BASE))
+                }
+                MarkerKind::Diamond => {
+                    let dx = (point.x - at.x) / SCENE_HIT_DIAMOND_HALF_DIAGONAL;
+                    let dy = (point.y - at.y) / SCENE_HIT_DIAMOND_HALF_DIAGONAL;
+                    dx.abs() + dy.abs() <= 1.0
+                }
+            }
+        }
+        SceneElement::Edge { route, stroke, .. } => {
+            let Some(stroke) = stroke else {
+                // A stroke-less edge paints nothing (the visibility rule).
+                return false;
+            };
+            let half = stroke.width * 0.5 + SCENE_HIT_STROKE_TOLERANCE;
+            let route: Vec<Point> = route.iter().map(scene_element_point).collect();
+            scene_polyline_within(&route, half, point)
+        }
+    }
+}
+
+/// The even-odd polygon test (closed/filled shapes) with the stroke
+/// fallback for open polylines — the shared Path/CubicPath arm.
+#[cfg(not(target_arch = "wasm32"))]
+fn scene_polygon_contains(
+    polygon: &[Point],
+    closed: bool,
+    fill: Option<SceneColor>,
+    stroke: Option<&ocs_plugin_api::scene::Stroke>,
+    point: Point,
+) -> bool {
+    if polygon.len() < 2 {
+        return false;
+    }
+    if closed || fill.is_some() {
+        if scene_point_in_polygon(polygon, point) {
+            return true;
+        }
+    }
+    match stroke {
+        Some(stroke) => {
+            let half = stroke.width * 0.5 + SCENE_HIT_STROKE_TOLERANCE;
+            scene_polyline_within(polygon, half, point)
+        }
+        None => false,
+    }
+}
+
+/// Even-odd ray cast (the classic crossing count) over the polygon ring.
+#[cfg(not(target_arch = "wasm32"))]
+fn scene_point_in_polygon(polygon: &[Point], point: Point) -> bool {
+    let mut inside = false;
+    let mut previous = polygon[polygon.len() - 1];
+    for &vertex in polygon {
+        let crosses = (vertex.y > point.y) != (previous.y > point.y)
+            && point.x
+                < (previous.x - vertex.x) * (point.y - vertex.y) / (previous.y - vertex.y)
+                    + vertex.x;
+        if crosses {
+            inside = !inside;
+        }
+        previous = vertex;
+    }
+    inside
+}
+
+/// `true` when `point` is within `half` of ANY segment of the polyline.
+#[cfg(not(target_arch = "wasm32"))]
+fn scene_polyline_within(points: &[Point], half: f32, point: Point) -> bool {
+    points.windows(2).any(|pair| {
+        let (a, b) = (pair[0], pair[1]);
+        let (ax, ay) = (a.x, a.y);
+        let (bx, by) = (b.x, b.y);
+        let (dx, dy) = (bx - ax, by - ay);
+        let length_sq = dx * dx + dy * dy;
+        // The parameter clamps the projection to the segment (endpoints are
+        // their own closest points).
+        let t = if length_sq <= f32::EPSILON {
+            0.0
+        } else {
+            (((point.x - ax) * dx + (point.y - ay) * dy) / length_sq).clamp(0.0, 1.0)
+        };
+        let (cx, cy) = (ax + t * dx, ay + t * dy);
+        distance_px(point, Point::new(cx, cy)) <= half
+    })
+}
+
+/// Scene `Vec2` → iced point (the projection's own mapping, mirrored).
+#[cfg(not(target_arch = "wasm32"))]
+fn scene_element_point(v: &ocs_plugin_api::scene::Vec2) -> Point {
+    Point::new(v.0[0] as f32, v.0[1] as f32)
+}
+
+/// Euclidean pixel distance (the drag machine's own helper shape).
+#[cfg(not(target_arch = "wasm32"))]
+fn distance_px(a: Point, b: Point) -> f32 {
+    let dx = a.x - b.x;
+    let dy = a.y - b.y;
+    (dx * dx + dy * dy).sqrt()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl SceneRegionProgram {
+    /// THE PRESS: region-local pixel → SCENE point through the RENDER's own
+    /// retained transform ([`SceneProjectionCache::last_fit_transform`] —
+    /// the custody law: the hit-test maps through what the user actually
+    /// sees), topmost-by-paint-order hit, and — only when the hit element
+    /// carries `DragMeta` — the machine's Begin (origin facts captured
+    /// verbatim; the machine's refusals are the evidence). A press on
+    /// nothing / on a non-draggable element routes NOTHING: no begin, no
+    /// counter, no capture change (the body wrapper's surface capture
+    /// stays exactly the SCN-020 gesture it was).
+    fn scene_press(&self, slot: &RefCell<SceneDragSlot>, local: Point) {
+        // The custody read: the transform the render committed (no decision,
+        // no projection — a pure accessor read).
+        let transform = self.cache.borrow().last_fit_transform();
+        let scene_point = transform.invert(local);
+        let flat = scene_region_flatten(&self.scene.elements, None);
+        let Some(hit) = scene_hit_element(&flat, scene_point) else {
+            return;
+        };
+        let Some(meta) = scene_element_drag_meta(hit).cloned() else {
+            // A geometry hit WITHOUT DragMeta: the recorded boundary — the
+            // press routes nothing (scene-element selection is NOT this
+            // package).
+            return;
+        };
+        let mut slot = slot.borrow_mut();
+        slot.next_tick += 1;
+        let surface_id = slot.session.surface_id();
+        let tick = slot.next_tick;
+        let _ = slot
+            .session
+            .begin(surface_id, hit.stable_id(), meta, scene_point, tick);
+    }
+
+    /// THE MOVE: only a LIVE drag (Armed/InFlight) consumes it —
+    /// host-local, NO message, NO plugin round-trip (§14). The point maps
+    /// through the render's transform (the same frame the press armed in)
+    /// and rides the machine's latest-wins park; the delivered move's
+    /// preview emits ONCE per delivery under the machine's ≤1-in-flight
+    /// gate (the synchronous host-local release — the DragRouter
+    /// composition contract). The pixel half of the previews rides the
+    /// later transient-layer join; the SPEC emission + counters are the
+    /// machine's own evidence. The pointer OUTSIDE the region while live is
+    /// the point-out cancel (`PointerOut` — the lossless no-event exit).
+    fn scene_move(&self, slot: &RefCell<SceneDragSlot>, cursor: mouse::Cursor, bounds: iced::Rectangle) {
+        let live = matches!(
+            slot.borrow().session.phase(),
+            DragPhase::Armed | DragPhase::InFlight
+        );
+        if !live {
+            return;
+        }
+        let Some(local) = cursor.position_over(bounds) else {
+            let _ = slot.borrow_mut().session.cancel(DragCancelReason::PointerOut);
+            return;
+        };
+        let transform = self.cache.borrow().last_fit_transform();
+        let scene_point = transform.invert(local);
+        let mut slot = slot.borrow_mut();
+        match slot.session.move_drag(scene_point) {
+            MoveDisposition::Crossed | MoveDisposition::Parked { .. } => {
+                if let Some(delivered) = slot.session.take_deliverable_move() {
+                    let _previews = slot.session.preview_prims(delivered);
+                    // The host-local channel is synchronous: the slot
+                    // releases this tick (the DragRouter composition law).
+                    slot.session.release_delivered_move();
+                }
+            }
+            // Sub-threshold jitter and inactive phases: nothing parks,
+            // nothing previews (the machine's own gates).
+            MoveDisposition::UnderThreshold { .. } | MoveDisposition::Inactive => {}
+        }
+    }
+
+    /// THE RELEASE: InFlight settles — the machine drains the newest parked
+    /// move FIRST (lossless), the settle FACT converts through
+    /// [`settle_to_event`] into EXACTLY ONE
+    /// `WidgetEvent::CommandInvoked(SCENE_DRAG_SETTLE_COMMAND, [address])`,
+    /// parked in the slot for the release route's forward drain (the body
+    /// wrapper's `PointerReleased` lands in
+    /// [`MountRegistry::mount_pointer_released_owned`], which forwards it
+    /// through the v24 notify router — the drained-events shape). An ARMED
+    /// release is a click, not a drag: `cancel(ThresholdNotMet)`, no event.
+    /// A release observed outside the region is the point-out completion
+    /// (the move that left already cancelled; this is the lossless
+    /// belt-and-braces).
+    fn scene_release(&self, slot: &RefCell<SceneDragSlot>, cursor: mouse::Cursor, bounds: iced::Rectangle) {
+        let live = matches!(
+            slot.borrow().session.phase(),
+            DragPhase::Armed | DragPhase::InFlight
+        );
+        if !live {
+            return;
+        }
+        let Some(local) = cursor.position_over(bounds) else {
+            let _ = slot.borrow_mut().session.cancel(DragCancelReason::PointerOut);
+            return;
+        };
+        let transform = self.cache.borrow().last_fit_transform();
+        let scene_point = transform.invert(local);
+        let mut slot = slot.borrow_mut();
+        match slot.session.phase() {
+            DragPhase::InFlight => {
+                if let Ok(settled) = slot.session.settle(scene_point) {
+                    // The ONE event binding (INT-4): the settle fact
+                    // converts to exactly one CommandInvoked — the demo's
+                    // authoritative-move trigger. The meta rides the FACT
+                    // (dropped here), never the event (INT-5).
+                    let event = settle_to_command_event(
+                        settled,
+                        SCENE_DRAG_SETTLE_COMMAND.to_string(),
+                    );
+                    slot.pending_events.push(event);
+                }
+            }
+            // A click, not a drag: the machine decides (no settle exists).
+            DragPhase::Armed => {
+                let _ = slot.session.cancel(DragCancelReason::ThresholdNotMet);
+            }
+            _ => {}
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -2437,6 +3000,43 @@ impl canvas::Program<WidgetMountMsg> for SceneRegionProgram {
             .borrow_mut()
             .draw(renderer, &self.scene, theme.palette(), bounds);
         vec![geometry]
+    }
+
+    fn update(
+        &self,
+        _state: &mut Self::State,
+        event: &canvas::Event,
+        bounds: iced::Rectangle,
+        cursor: iced::mouse::Cursor,
+    ) -> Option<canvas::Action<WidgetMountMsg>> {
+        // THE POINTER FENCE, lifted for THIS program only (the recorded
+        // SCN-031 boundary closes here): the region's canvas consumes
+        // press/move/release over the fitted scene and drives the SCN-021
+        // drag machine through the shared slot. Everything else is
+        // unchanged — no message is published, no event is captured (the
+        // body wrapper's surface capture / coalescing keep running exactly
+        // as they were), and a program WITHOUT a slot (the scene-only
+        // shape) consumes nothing at all.
+        let Some(drag) = self.drag.as_ref() else {
+            return None;
+        };
+        if let iced::Event::Mouse(mouse_event) = event {
+            match mouse_event {
+                mouse::Event::ButtonPressed(mouse::Button::Left) => {
+                    if let Some(local) = cursor.position_over(bounds) {
+                        self.scene_press(drag, local);
+                    }
+                }
+                mouse::Event::CursorMoved { .. } => {
+                    self.scene_move(drag, cursor, bounds);
+                }
+                mouse::Event::ButtonReleased(mouse::Button::Left) => {
+                    self.scene_release(drag, cursor, bounds);
+                }
+                _ => {}
+            }
+        }
+        None
     }
 }
 
@@ -3186,6 +3786,14 @@ impl MountRegistry {
     // storm drives.
     #[doc(hidden)]
     pub fn mount_pointer_released_owned(&mut self, surface_id: StableId) -> usize {
+        // (SCN-032) The release route's scene-drag tail runs FIRST: a settled
+        // drag's one `CommandInvoked("drag_settle", [address])` drains +
+        // forwards here (the route the body wrapper's release AND the
+        // window-level release-anywhere catcher both run). A surface without
+        // a scene-drag slot — every legacy / widgets-only panel — drains
+        // nothing: zero legacy bytes move.
+        #[cfg(not(target_arch = "wasm32"))]
+        self.forward_scene_drag_events_owned(surface_id);
         let Some(entry) = self.input.per_surface.get_mut(&surface_id) else {
             return 0;
         };
@@ -3466,6 +4074,19 @@ impl MountRegistry {
         if self.input.key_target.is_some_and(|target| !registered(target)) {
             self.input.key_target = None;
         }
+        // (SCN-032) The scene-drag slots are the surfaces' mirror too: a
+        // surface leaving the registry has its LIVE drag completed as
+        // `cancel(Teardown)` (never a settle, never a lost origin — the §16
+        // close-tab contract; a pending settle event dies with the surface:
+        // the plugin it was bound for is gone) and the slot entry drops.
+        #[cfg(not(target_arch = "wasm32"))]
+        self.scene_drags.borrow_mut().retain(|surface_id, slot| {
+            let registered = registered(*surface_id);
+            if !registered {
+                let _ = slot.borrow_mut().session.cancel(DragCancelReason::Teardown);
+            }
+            registered
+        });
     }
 
     // -- SCN-028: the typed-table store (machines + keyboard scope) ---------
@@ -4016,6 +4637,14 @@ pub fn bench_handle_mount_key_owned(
         if registry.table_scope_cancel_draft_owned(surface_id) {
             return Vec::new();
         }
+        // (SCN-032) The scene drag's cancel rides the same machine-direct
+        // arm BEFORE the armed-prompt dismissal: a live drag is the newest
+        // gesture on the surface, and its lossless no-event completion is
+        // independent of the prompt machine's (both may run; neither sees a
+        // KEY). The slot's existence gates it — a scene-less surface
+        // cancels nothing, exactly as before.
+        #[cfg(not(target_arch = "wasm32"))]
+        registry.scene_drag_cancel_owned(surface_id, DragCancelReason::Escape);
         registry.mount_escape_cancel_owned(surface_id);
         return Vec::new();
     }
@@ -11721,6 +12350,701 @@ mod tests {
             found,
             vec![SCENE_REGION_V1_HEIGHT],
             "the scene-only body holds exactly one region, at the fixed height"
+        );
+    }
+
+    // -- SCN-032: scene hit-testing + drag interactivity ----------------------
+
+    use crate::ui::window::plugin_scene_cache::{
+        SceneFitTransform, SCENE_FIT_MARGIN, fit_scene_prims,
+    };
+    // The canvas program trait (the update seam the synthetic events drive).
+    use iced::widget::canvas::Program as _;
+
+    /// The card's scene rect (the demo's shape: a 120x48 accent card).
+    const CARD: ([f64; 2], [f64; 2]) = ([40.0, 40.0], [120.0, 48.0]);
+
+    fn drag_meta() -> DragMeta {
+        DragMeta {
+            opaque: Some("scn-drag:node-1".to_string()),
+        }
+    }
+
+    /// The drag fixture: a non-draggable BACKDROP, the DRAGGABLE card
+    /// (id 600 — the demo's element id), and a smaller NON-draggable patch
+    /// painted ON TOP of the card (document order = paint order, so the
+    /// topmost law is observable: a press at the patch's center must NOT
+    /// begin the card beneath it).
+    fn drag_scene(revision: u64) -> ocs_plugin_api::scene::PanelScene {
+        let rect = |id: u64, pos: [f64; 2], size: [f64; 2], drag: Option<DragMeta>| {
+            SceneElement::Rect {
+                id: sid(id),
+                name: None,
+                actions: vec![],
+                drag,
+                pos: Vec2(pos),
+                size: Vec2(size),
+                fill: Some(ocs_plugin_api::scene::SceneColor::Theme(
+                    ocs_plugin_api::scene::ThemeColor::Normal,
+                )),
+                stroke: None,
+            }
+        };
+        ocs_plugin_api::scene::PanelScene {
+            revision: SceneRevision(revision),
+            elements: vec![
+                rect(100, [0.0, 0.0], [300.0, 200.0], None),
+                rect(600, CARD.0, CARD.1, Some(drag_meta())),
+                rect(101, [45.0, 45.0], [20.0, 20.0], None),
+            ],
+        }
+    }
+
+    /// The both-legs panel (the demo's shape): widget surface (surface id
+    /// 200 by the first-root convention) + the drag scene leg. Composition
+    /// is what births the slots (cache + drag) and syncs the draggables.
+    fn attach_drag_panel() {
+        let _app = OpenCADStudio::new_for_test();
+        with_test_registry_mut(|registry| {
+            attach_publish(
+                registry,
+                "PLUGIN",
+                "scn_panel",
+                simple_list_surface(SceneRevision(1), vec![item(7, "a")]),
+            )
+            .expect("the widget leg attaches");
+            registry
+                .panel_surface_store_mut()
+                .publish("PLUGIN", "scn_panel", SceneOrWidgetSurface::Scene(drag_scene(1)))
+                .expect("the scene leg stores");
+        });
+        // One composition pass: both slots are born, the card is synced.
+        assert!(MountRegistry::mounted_body("scn_panel").is_some());
+    }
+
+    /// The committed fit: run the cache's headless build over the STORE's
+    /// live scene at the region bounds (the same call the renderer's draw
+    /// funnels through) and read the retained transform back — the custody
+    /// law's test-side twin: the test maps pixels through EXACTLY what the
+    /// render committed.
+    fn committed_fit(bounds: iced::Rectangle) -> SceneFitTransform {
+        let cache = MountRegistry::scene_cache_slot("scn_panel").expect("cache slot");
+        let scene = with_test_registry(|registry| {
+            registry
+                .panel_surface_store()
+                .entry("scn_panel")
+                .unwrap()
+                .scene
+                .clone()
+                .expect("the scene leg")
+        });
+        let decision = cache
+            .borrow_mut()
+            .apply_build(&scene, &iced::Theme::Dark.palette(), bounds);
+        assert!(
+            matches!(decision, crate::ui::window::plugin_scene_cache::DrawDecision::LayerRebuild(_)),
+            "the first build commits"
+        );
+        let transform = cache.borrow().last_fit_transform();
+        // The custody is the pure fit of the projected stream (not a
+        // recomputation with different values).
+        let expected = fit_scene_prims(
+            &crate::ui::window::plugin_scene::project_scene(
+                &drag_scene(1),
+                &iced::Theme::Dark.palette(),
+                bounds.size(),
+            )
+            .expect("valid"),
+            bounds.size(),
+            SCENE_FIT_MARGIN,
+        );
+        assert_eq!(transform, expected, "the retained fit IS the committed fit");
+        transform
+    }
+
+    /// The composed region program over the fixture (the child test module
+    /// sees the private fields): the same construction
+    /// `scene_region_element_owned` runs, driven by synthetic events.
+    fn drag_program() -> (SceneRegionProgram, Rc<RefCell<SceneDragSlot>>) {
+        let scene = with_test_registry(|registry| {
+            registry
+                .panel_surface_store()
+                .entry("scn_panel")
+                .unwrap()
+                .scene
+                .clone()
+                .expect("the scene leg")
+        });
+        let slot = with_test_registry(|registry| {
+            registry
+                .scene_drag_slot_read_owned(sid(200))
+                .expect("the drag slot is born at composition")
+        });
+        (
+            SceneRegionProgram {
+                scene: Rc::new(scene),
+                cache: MountRegistry::scene_cache_slot("scn_panel").expect("cache slot"),
+                drag: Some(Rc::clone(&slot)),
+            },
+            slot,
+        )
+    }
+
+    /// One synthetic pointer event through the program's REAL update seam.
+    fn pointer_event(
+        program: &SceneRegionProgram,
+        event: iced::mouse::Event,
+        cursor_at: Point,
+        bounds: iced::Rectangle,
+    ) {
+        let _ = program.update(
+            &mut (),
+            &iced::Event::Mouse(event),
+            bounds,
+            iced::mouse::Cursor::Available(cursor_at),
+        );
+    }
+
+    /// The region-local pixel a SCENE point paints at (the transform's
+    /// apply — the tests compute presses the way the renderer paints).
+    fn region_pixel(transform: &SceneFitTransform, scene: Point) -> Point {
+        transform.apply(scene)
+    }
+
+    /// The machine counter snapshot (the drag machine's own §16 probes).
+    fn drag_counters(slot: &Rc<RefCell<SceneDragSlot>>) -> crate::ui::window::plugin_drag::DragCounters {
+        slot.borrow().session.counters()
+    }
+
+    /// THE INTERACTION PIN: a DragMeta-carrying card fitted into region
+    /// bounds — a synthetic press at the card's REGION pixel (computed via
+    /// the transform's apply) begins the drag; moves cross the machine's
+    /// threshold and park latest-wins with one host-local preview per
+    /// delivery; the release settles with EXACTLY ONE
+    /// `CommandInvoked("drag_settle", [600])`, which the release route
+    /// drains and forwards exactly once.
+    #[test]
+    fn scene_drag_press_move_release_settles_with_exactly_one_command() {
+        attach_drag_panel();
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 240.0,
+            height: 240.0,
+        };
+        let transform = committed_fit(bounds);
+        let (program, slot) = drag_program();
+
+        // PRESS at the card's center pixel (scene (100, 64) — inside the
+        // card, off the overlapping non-draggable patch).
+        let press = region_pixel(&transform, Point::new(100.0, 64.0));
+        pointer_event(
+            &program,
+            iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+            press,
+            bounds,
+        );
+        {
+            let slot = slot.borrow();
+            assert_eq!(slot.session.phase(), DragPhase::Armed, "the card armed");
+            assert_eq!(slot.session.counters().begins, 1);
+        }
+
+        // MOVES: each crosses the machine's threshold in scene units (the
+        // machine's frame — the points it is fed ARE the scene points).
+        for step in 1..=3u32 {
+            let local = region_pixel(
+                &transform,
+                Point::new(100.0 + 60.0 * step as f32, 64.0),
+            );
+            pointer_event(
+                &program,
+                iced::mouse::Event::CursorMoved { position: local },
+                local,
+                bounds,
+            );
+        }
+        {
+            let slot = slot.borrow();
+            assert_eq!(slot.session.phase(), DragPhase::InFlight, "live");
+            let counters = slot.session.counters();
+            assert_eq!(counters.moves_parked, 3, "the crossing move + two more");
+            assert_eq!(counters.moves_delivered, 3, "≤1 in flight, delivered per tick");
+            assert_eq!(counters.previews_emitted, 3, "one preview per delivered move");
+            assert_eq!(counters.settles, 0);
+            assert_eq!(counters.cancels, 0);
+        }
+
+        // RELEASE at a final position: the settle converts to EXACTLY ONE
+        // event, parked for the forward drain.
+        let release = region_pixel(&transform, Point::new(280.0, 64.0));
+        pointer_event(
+            &program,
+            iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left),
+            release,
+            bounds,
+        );
+        let pending = slot.borrow().pending_events.clone();
+        assert_eq!(
+            pending,
+            vec![WidgetEvent::CommandInvoked {
+                surface_id: sid(200),
+                command_id: SCENE_DRAG_SETTLE_COMMAND.to_string(),
+                target_ids: vec![sid(600)],
+            }],
+            "ONE CommandInvoked, bound to the card's address, the settle command"
+        );
+        {
+            let slot = slot.borrow();
+            assert_eq!(slot.session.phase(), DragPhase::Settled);
+            let counters = slot.session.counters();
+            assert_eq!(counters.settles, 1);
+            assert_eq!(counters.cancels, 0, "1:1: the settle was the one completion");
+            // The end context is the newest delivered point (the settle
+            // drains the parked slot first — the machine's own law; the
+            // release argument only stands in when nothing was ever fed).
+        }
+
+        // THE FORWARD: the release route drains + forwards exactly once.
+        let forwards_before = MountRegistry::counters().mount_event_forwards;
+        MountRegistry::mount_pointer_released(sid(200));
+        assert_eq!(
+            MountRegistry::counters().mount_event_forwards,
+            forwards_before + 1,
+            "exactly one forwarded row (the settle command)"
+        );
+        assert!(
+            slot.borrow().pending_events.is_empty(),
+            "the drain emptied the slot (exactly-once: a re-drain forwards nothing)"
+        );
+        MountRegistry::mount_pointer_released(sid(200));
+        assert_eq!(
+            MountRegistry::counters().mount_event_forwards,
+            forwards_before + 1,
+            "the second release forwards nothing"
+        );
+    }
+
+    /// THE TRANSFORM CUSTODY, live: the hit-test and the pointer mapping go
+    /// through the SAME retained transform the render committed —
+    /// `invert(apply(p))` round-trips on the fixture, and a press mapped
+    /// through the fit hits the element the user actually sees (the card's
+    /// pixel press from the interaction pin began THE CARD).
+    #[test]
+    fn scene_hit_test_uses_the_render_transform_custody() {
+        attach_drag_panel();
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 240.0,
+            height: 240.0,
+        };
+        let transform = committed_fit(bounds);
+        for scene_point in [
+            Point::new(100.0, 64.0),
+            Point::new(40.0, 40.0),
+            Point::new(159.0, 87.0),
+        ] {
+            let pixel = region_pixel(&transform, scene_point);
+            let back = transform.invert(pixel);
+            assert!(
+                (back.x - scene_point.x).abs() < 1.0e-2 && (back.y - scene_point.y).abs() < 1.0e-2,
+                "the custody round trip drifted for {scene_point:?}"
+            );
+        }
+        // And the mapping is the render's, not the identity: the card's
+        // scene origin does NOT sit at the region origin (the fit centered
+        // the 300x200 scene into the 240x240 region).
+        let card_pixel = region_pixel(&transform, Point::new(40.0, 40.0));
+        assert!(
+            card_pixel.x > 4.0 && card_pixel.y > 4.0,
+            "the fit translated the scene: the card paints away from the origin ({card_pixel:?})"
+        );
+    }
+
+    /// THE BOUNDARY PINS: a press on EMPTY scene area routes nothing; a
+    /// press on a DRAGMETA-LESS element routes nothing (no Begin, no
+    /// refusal counter — the boundary is the hit walk's, not the machine's);
+    /// and the TOPMOST element wins: the non-draggable patch painted over
+    /// the card blocks the drag where it covers it, while the card's own
+    /// exposed area still arms.
+    #[test]
+    fn scene_press_on_empty_or_non_draggable_area_routes_nothing() {
+        attach_drag_panel();
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 240.0,
+            height: 240.0,
+        };
+        let transform = committed_fit(bounds);
+        let (program, slot) = drag_program();
+
+        // (a) Empty area: the fitted scene leaves a margin — a pixel ABOVE
+        // the fitted bbox maps to a scene point off every element (the fit
+        // centered the 300x200 scene vertically, so the top band is empty).
+        pointer_event(
+            &program,
+            iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+            Point::new(120.0, 20.0),
+            bounds,
+        );
+        assert_eq!(slot.borrow().session.phase(), DragPhase::Idle, "nothing armed");
+
+        // (b) TOPMOST wins: the patch (id 101) paints OVER the card; its
+        // center press hits the PATCH, which carries no DragMeta → no Begin.
+        let patch_center = region_pixel(&transform, Point::new(55.0, 55.0));
+        pointer_event(
+            &program,
+            iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+            patch_center,
+            bounds,
+        );
+        {
+            let slot = slot.borrow();
+            assert_eq!(slot.session.phase(), DragPhase::Idle, "the topmost element wins");
+            assert_eq!(
+                slot.session.counters().refusals_not_draggable, 0,
+                "the boundary is the hit walk's: the machine was never asked"
+            );
+        }
+
+        // (c) The card's own exposed area still arms (the same gesture, one
+        // candidate over).
+        let card_pixel = region_pixel(&transform, Point::new(120.0, 70.0));
+        pointer_event(
+            &program,
+            iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+            card_pixel,
+            bounds,
+        );
+        {
+            let slot = slot.borrow();
+            assert_eq!(slot.session.phase(), DragPhase::Armed, "the card armed");
+            assert_eq!(slot.session.counters().begins, 1);
+        }
+    }
+
+    /// THE LOSSLESS COMPLETIONS: Escape (machine-direct, the keyboard seam)
+    /// and point-out (the move that leaves the region) each cancel their own
+    /// begun interaction 1:1 — NO event, no forward, counters 1:1.
+    #[test]
+    fn scene_drag_esc_and_point_out_cancel_lossless() {
+        attach_drag_panel();
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 240.0,
+            height: 240.0,
+        };
+        let transform = committed_fit(bounds);
+        let forwards_before = MountRegistry::counters().mount_event_forwards;
+
+        // (a) ESCAPE: press + crossing move, then the keyboard seam's
+        // machine-direct cancel (the press also captured the surface — the
+        // keyboard target the Escape route resolves).
+        {
+            let (program, slot) = drag_program();
+            let press = region_pixel(&transform, Point::new(100.0, 64.0));
+            pointer_event(
+                &program,
+                iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+                press,
+                bounds,
+            );
+            let moved = region_pixel(&transform, Point::new(160.0, 64.0));
+            pointer_event(
+                &program,
+                iced::mouse::Event::CursorMoved { position: moved },
+                moved,
+                bounds,
+            );
+            assert_eq!(slot.borrow().session.phase(), DragPhase::InFlight);
+            assert!(MountRegistry::mount_press(sid(200)), "the capture armed the keys");
+            with_test_registry_mut(|registry| {
+                let msgs = bench_handle_mount_key_owned(
+                    registry,
+                    Key::Named(keyboard_key::Named::Escape),
+                    Modifiers::NONE,
+                );
+                assert!(msgs.is_empty(), "the cancel is machine-direct: no messages");
+            });
+            {
+                let slot = slot.borrow();
+                assert_eq!(slot.session.phase(), DragPhase::Cancelled);
+                let counters = slot.session.counters();
+                assert_eq!(counters.begins, 1);
+                assert_eq!(counters.cancels, 1, "1:1");
+                assert_eq!(counters.settles, 0, "cancel is the no-event exit");
+            }
+            assert!(slot.borrow().pending_events.is_empty(), "no event parked");
+            MountRegistry::mount_pointer_released(sid(200));
+        }
+        assert_eq!(
+            MountRegistry::counters().mount_event_forwards,
+            forwards_before,
+            "the cancel forwarded nothing"
+        );
+
+        // (b) POINT-OUT: press + crossing move, then a move whose cursor is
+        // OUTSIDE the region — the PointerOut cancel, lossless again. The
+        // slot's machine ACCUMULATES its §16 counters across interactions
+        // (the session is the surface's rail, not per gesture): (b)'s
+        // assertions are deltas over (a)'s settled state (begins 1, cancels
+        // 1 after (a)).
+        {
+            let begins_before = with_test_registry(|registry| {
+                registry
+                    .scene_drag_slot_read_owned(sid(200))
+                    .map(|slot| slot.borrow().session.counters().begins)
+                    .unwrap_or(0)
+            });
+            let cancels_before = with_test_registry(|registry| {
+                registry
+                    .scene_drag_slot_read_owned(sid(200))
+                    .map(|slot| slot.borrow().session.counters().cancels)
+                    .unwrap_or(0)
+            });
+            let (program, slot) = drag_program();
+            let press = region_pixel(&transform, Point::new(100.0, 64.0));
+            pointer_event(
+                &program,
+                iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+                press,
+                bounds,
+            );
+            let moved = region_pixel(&transform, Point::new(160.0, 64.0));
+            pointer_event(
+                &program,
+                iced::mouse::Event::CursorMoved { position: moved },
+                moved,
+                bounds,
+            );
+            // The pointer leaves: the cursor is far outside the bounds.
+            pointer_event(
+                &program,
+                iced::mouse::Event::CursorMoved { position: Point::new(5_000.0, 5_000.0) },
+                Point::new(5_000.0, 5_000.0),
+                bounds,
+            );
+            {
+                let slot = slot.borrow();
+                assert_eq!(slot.session.phase(), DragPhase::Cancelled);
+                let counters = slot.session.counters();
+                assert_eq!(counters.begins, begins_before + 1, "1:1 per interaction");
+                assert_eq!(counters.cancels, cancels_before + 1);
+                assert_eq!(counters.settles, 0);
+            }
+            assert!(slot.borrow().pending_events.is_empty());
+            MountRegistry::mount_pointer_released(sid(200));
+        }
+        assert_eq!(
+            MountRegistry::counters().mount_event_forwards,
+            forwards_before,
+            "point-out forwarded nothing either"
+        );
+    }
+
+    /// THE ARM-THRESHOLD law through the real seam: an ARMED release (no
+    /// crossing move) is a CLICK — `cancel(ThresholdNotMet)`, never a
+    /// settle, never an event.
+    #[test]
+    fn scene_armed_release_is_a_click_not_a_settle() {
+        attach_drag_panel();
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 240.0,
+            height: 240.0,
+        };
+        let transform = committed_fit(bounds);
+        let (program, slot) = drag_program();
+
+        let press = region_pixel(&transform, Point::new(100.0, 64.0));
+        pointer_event(
+            &program,
+            iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+            press,
+            bounds,
+        );
+        // A sub-threshold jitter: one region pixel ≪ the 3-scene-unit
+        // threshold at the fixture's fit scale (< 1).
+        let jitter = Point::new(press.x + 1.0, press.y);
+        pointer_event(
+            &program,
+            iced::mouse::Event::CursorMoved { position: jitter },
+            jitter,
+            bounds,
+        );
+        assert_eq!(slot.borrow().session.phase(), DragPhase::Armed, "still armed");
+        pointer_event(
+            &program,
+            iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left),
+            jitter,
+            bounds,
+        );
+        {
+            let slot = slot.borrow();
+            assert_eq!(slot.session.phase(), DragPhase::Cancelled);
+            let counters = slot.session.counters();
+            assert_eq!(counters.settles, 0, "a click is not a drag");
+            assert_eq!(counters.cancels, 1);
+            assert_eq!(counters.moves_parked, 0, "the jitter parked nothing");
+        }
+        assert!(slot.borrow().pending_events.is_empty());
+        let forwards_before = MountRegistry::counters().mount_event_forwards;
+        MountRegistry::mount_pointer_released(sid(200));
+        assert_eq!(
+            MountRegistry::counters().mount_event_forwards,
+            forwards_before,
+            "a click forwards nothing"
+        );
+    }
+
+    /// THE COALESCING LAW through the real seam: a storm of moves parks
+    /// latest-wins into the machine's single slot; every delivery is the
+    /// then-newest point; the settle's end context is the LAST position —
+    /// nothing between the first and last ever survives.
+    #[test]
+    fn scene_drag_move_storm_latest_wins_never_drops_the_last() {
+        attach_drag_panel();
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 240.0,
+            height: 240.0,
+        };
+        let transform = committed_fit(bounds);
+        let (program, slot) = drag_program();
+
+        let press = region_pixel(&transform, Point::new(100.0, 64.0));
+        pointer_event(
+            &program,
+            iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+            press,
+            bounds,
+        );
+        let last_scene = Point::new(100.0 + 4.0 * 30.0, 64.0);
+        for step in 1..=30u32 {
+            let scene_point = Point::new(100.0 + 4.0 * step as f32, 64.0);
+            let local = region_pixel(&transform, scene_point);
+            pointer_event(
+                &program,
+                iced::mouse::Event::CursorMoved { position: local },
+                local,
+                bounds,
+            );
+            // At most ONE move in flight: every delivery was released
+            // synchronously (the host-local law), so the machine never
+            // holds a delivery across moves.
+            let counters = drag_counters(&slot);
+            assert!(counters.moves_delivered <= counters.moves_parked);
+            assert_eq!(counters.previews_emitted, counters.moves_delivered);
+        }
+        let release = region_pixel(&transform, last_scene);
+        pointer_event(
+            &program,
+            iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left),
+            release,
+            bounds,
+        );
+        {
+            let slot = slot.borrow();
+            assert_eq!(slot.session.counters().moves_parked, 30, "every move parked");
+            assert_eq!(slot.session.counters().previews_emitted, 30);
+            assert_eq!(slot.session.counters().settles, 1);
+        }
+        // The parked event names the card (the content of the coalescing is
+        // the machine's; the slot's ONE event is this test's content pin).
+        let pending = slot.borrow().pending_events.clone();
+        assert_eq!(pending.len(), 1);
+    }
+
+    /// THE LIFECYCLE: the slot is born at composition, pruned with the
+    /// surface (a live drag completes as `cancel(Teardown)` — lossless),
+    /// and a WIDGETS-ONLY panel never grows one (the release route's drain
+    /// is a no-op there — zero legacy bytes).
+    #[test]
+    fn scene_drag_slot_follows_the_surface_teardown_and_widgets_only_grows_none() {
+        attach_drag_panel();
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 240.0,
+            height: 240.0,
+        };
+        let transform = committed_fit(bounds);
+        let (program, slot) = drag_program();
+        let press = region_pixel(&transform, Point::new(100.0, 64.0));
+        pointer_event(
+            &program,
+            iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+            press,
+            bounds,
+        );
+        let moved = region_pixel(&transform, Point::new(160.0, 64.0));
+        pointer_event(
+            &program,
+            iced::mouse::Event::CursorMoved { position: moved },
+            moved,
+            bounds,
+        );
+        assert_eq!(slot.borrow().session.phase(), DragPhase::InFlight);
+
+        // §16 teardown: the machine completes losslessly, the slot leaves.
+        MountRegistry::teardown_surface("scn_panel");
+        assert!(
+            with_test_registry(|registry| registry.scene_drag_slot_read_owned(sid(200)).is_none()),
+            "the slot died with the surface"
+        );
+
+        // A widgets-only panel: composition grows NO drag slot and the
+        // release route is a quiet no-op (the legacy shape).
+        with_test_registry_mut(|registry| {
+            attach_publish(
+                registry,
+                "PLUGIN",
+                "plain_panel",
+                simple_list_surface(SceneRevision(1), vec![item(9, "b")]),
+            )
+            .expect("attach");
+        });
+        assert!(MountRegistry::mounted_body("plain_panel").is_some());
+        let plain_id = MountRegistry::panel_surface_id("plain_panel").expect("frozen");
+        assert!(
+            with_test_registry(|registry| registry.scene_drag_slot_read_owned(plain_id).is_none()),
+            "no scene leg, no drag slot"
+        );
+        MountRegistry::mount_pointer_released(plain_id);
+    }
+
+    /// THE FENCE, scene-only edition: a scene leg WITHOUT a registered
+    /// widget surface composes the region but grows NO drag slot — the
+    /// pointer fence stands there (no surface id to route by; the demo's
+    /// panel carries both legs, so this is the recorded boundary, not the
+    /// demo's path).
+    #[test]
+    fn scene_only_region_keeps_the_pointer_fence() {
+        let _app = OpenCADStudio::new_for_test();
+        with_test_registry_mut(|registry| {
+            registry
+                .panel_surface_store_mut()
+                .publish("PLUGIN", "scn_panel", SceneOrWidgetSurface::Scene(drag_scene(1)))
+                .expect("the scene-only leg stores");
+        });
+        assert_eq!(
+            MountRegistry::body_shape("scn_panel"),
+            Some(MountBodyShape::SceneOnly)
+        );
+        assert!(MountRegistry::mounted_body("scn_panel").is_some());
+        // No registered surface → no slot: the composed program's `drag` is
+        // None and the update seam consumes nothing (fence by construction).
+        assert!(
+            with_test_registry(|registry| {
+                registry.scene_drag_slot_read_owned(sid(600)).is_none()
+                    && registry.scene_drag_slot_read_owned(sid(0)).is_none()
+            }),
+            "a scene-only region grows no drag slot"
         );
     }
 

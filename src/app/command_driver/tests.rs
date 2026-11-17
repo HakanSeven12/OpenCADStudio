@@ -10253,3 +10253,80 @@ mod block_definition_dialog_tests {
     }
 }
 
+
+// -BLOCK from the command line: the name and base point steps run through
+// the active command, and a preselection stands in for the select-objects
+// step, so the block is defined in one pass.
+mod dash_block_command_line_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::entities::Line;
+    use document::types::Vector3;
+    use glam::DVec3;
+
+    #[test]
+    fn dash_block_defines_the_block_from_a_preselection_and_a_typed_base() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let line = app.tabs[i].scene.add_entity(document::EntityType::Line(
+            Line::from_points(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0)),
+        ));
+        app.tabs[i].scene.select_entity(line, true);
+
+        let _ = app.run_command_line("-BLOCK");
+        let command = app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("-BLOCK stays active to ask its prompts");
+        assert_eq!(command.name(), "-BLOCK");
+        assert_eq!(command.prompt(), "Enter block name or [?]:");
+
+        let _ = app.feed_command(StepInput::Text("GEAR".into()));
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("the base point step follows the name")
+                .prompt(),
+            "Specify insertion base point or [Annotative/mOde]:"
+        );
+        let _ = app.feed_command(StepInput::Point(DVec3::new(2.0, 3.0, 0.0)));
+
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "the preselection completes the command"
+        );
+        assert!(app.command_line.last_error.is_none());
+
+        let record = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("GEAR")
+            .expect("the command line defines the named block");
+        assert!(
+            !record.entity_handles.is_empty(),
+            "the definition holds the preselected objects"
+        );
+        assert!(
+            app.tabs[i].scene.document.get_entity(line).is_none(),
+            "convert mode consumes the preselected objects"
+        );
+        let insert = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Insert(ins) if ins.block_name == "GEAR" => Some(ins.clone()),
+                _ => None,
+            })
+            .expect("convert mode leaves a reference where the objects were");
+        assert_eq!(
+            insert.insert_point,
+            Vector3::new(2.0, 3.0, 0.0),
+            "the reference sits at the typed base point"
+        );
+    }
+}
+

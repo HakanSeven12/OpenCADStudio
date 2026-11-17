@@ -62,6 +62,7 @@ mod layerprops;
 mod layers;
 mod model_import;
 #[doc(hidden)]
+#[cfg(not(target_arch = "wasm32"))]
 pub use model_import::ModelImportBenchHarness;
 mod ole;
 mod mtext_toolbar;

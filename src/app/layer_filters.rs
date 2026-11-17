@@ -597,8 +597,10 @@ pub(in crate::app) fn expand_layer_list<'a>(
 /// across them, `filters` property filters and a small selection, then exposes
 /// the refresh entry production calls after every message.
 #[doc(hidden)]
+#[cfg(not(target_arch = "wasm32"))]
 pub struct LayerRefreshBenchHarness(OpenCADStudio);
 
+#[cfg(not(target_arch = "wasm32"))]
 impl LayerRefreshBenchHarness {
     fn new_app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new();

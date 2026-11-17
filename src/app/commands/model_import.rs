@@ -1960,6 +1960,279 @@ mod picture_import_tests {
 }
 
 #[cfg(test)]
+mod tds_worker_tests {
+    use super::*;
+    use crate::app::ModalKind;
+    use crate::modules::insert::tds_import::TdsImportRequest;
+    use crate::ui::window::import_dialogs::ImportDialogMsg;
+
+    fn app_with_new_drawing() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    fn fixture(name: &str) -> String {
+        format!("{}/tests/fixtures/tds/{name}", env!("CARGO_MANIFEST_DIR"))
+    }
+
+    fn last_line(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .last()
+            .map(|entry| entry.text.clone())
+            .unwrap_or_default()
+    }
+
+    fn undo_steps(app: &mut OpenCADStudio, i: usize) -> usize {
+        app.finish_all_pending_history();
+        app.tabs[i].history.undo_stack.len()
+    }
+
+    fn has_layer(app: &OpenCADStudio, i: usize, name: &str) -> bool {
+        app.tabs[i].scene.document.layers.contains(name)
+    }
+
+    fn row_names(app: &OpenCADStudio) -> Vec<String> {
+        app.import_dialogs
+            .tds
+            .as_ref()
+            .map(|s| s.objects.iter().map(|(n, _, _)| n.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Opens the 3D Studio Import window on `name` and runs its read.
+    fn open_window(app: &mut OpenCADStudio, name: &str) {
+        let task = app.read_tds_for_dialog(&fixture(name));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::TdsImport));
+    }
+
+    /// Checks the rows named `names` and presses OK; returns the task OK
+    /// starts, not run.
+    fn press_ok(app: &mut OpenCADStudio, names: &[&str]) -> Task<Message> {
+        for (k, name) in row_names(app).iter().enumerate() {
+            if names.contains(&name.as_str()) {
+                let _ = app.update(Message::ImportDialog(ImportDialogMsg::TdsCheck(k, true)));
+            }
+        }
+        app.update(Message::ImportDialog(ImportDialogMsg::TdsOk))
+    }
+
+    /// The window opens only when the read ends, after a `Reading` line.
+    #[test]
+    fn the_window_opens_only_when_the_read_ends() {
+        let mut app = app_with_new_drawing();
+        let path = fixture("objects.3ds");
+        let task = app.read_tds_for_dialog(&path);
+        assert_eq!(app.active_modal, None, "nothing opens during the read");
+        assert_eq!(last_line(&app), format!("ⓘ Reading {path}…"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::TdsImport));
+        assert_eq!(
+            row_names(&app),
+            ["Global Settings", "Alpha", "Beta", "mid/part", "zeta"]
+        );
+    }
+
+    /// A reader that panics gives an error, no window opens, and the next
+    /// read works.
+    #[test]
+    fn a_reader_panic_is_an_error_and_no_window_opens() {
+        let mut app = app_with_new_drawing();
+        let task = app.read_tds_for_dialog_with("panics.3ds", |_| panic!("a reader bug"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("IMPORT failed: a reader bug")
+        );
+        assert_eq!(app.active_modal, None);
+        assert!(app.import_dialogs.tds.is_none());
+        open_window(&mut app, "box.3ds");
+    }
+
+    /// A window that opened during the read stays, and the 3D Studio
+    /// Import window does not open.
+    #[test]
+    fn a_window_opened_during_the_read_stays() {
+        let mut app = app_with_new_drawing();
+        let task = app.read_tds_for_dialog(&fixture("box.3ds"));
+        app.active_modal = Some(ModalKind::TdsMissingMap);
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::TdsMissingMap));
+        assert!(app.import_dialogs.tds.is_none());
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("3D Studio Import cancelled: a different window opened while the file was read.")
+        );
+    }
+
+    /// IMPORT with a file name, from a script or the automation `run`
+    /// operation, leaves the Import File window open during the read; the
+    /// 3D Studio Import window takes its place, as before the read moved to
+    /// a worker.
+    #[test]
+    fn the_window_takes_the_place_of_the_import_file_window() {
+        let mut app = app_with_new_drawing();
+        let task = app.read_tds_for_dialog(&fixture("box.3ds"));
+        app.active_modal = Some(ModalKind::ImportFile);
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::TdsImport));
+        assert!(app.command_line.last_error.is_none());
+    }
+
+    /// "Change" in the open window reads the new file and shows its
+    /// objects; the window's layer choice stays.
+    #[test]
+    fn a_file_changed_in_the_window_replaces_its_objects() {
+        let mut app = app_with_new_drawing();
+        open_window(&mut app, "objects.3ds");
+        let _ = app.update(Message::ImportDialog(ImportDialogMsg::TdsLayers(2)));
+        let task = app.update(Message::ImportDialog(ImportDialogMsg::TdsPicked(Some(
+            fixture("lights_camera.3ds"),
+        ))));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::TdsImport));
+        assert!(row_names(&app).contains(&"Camera".to_string()));
+        assert!(!row_names(&app).contains(&"Alpha".to_string()));
+        assert_eq!(app.import_dialogs.tds.as_ref().map(|s| s.layers), Some(2));
+    }
+
+    /// OK places nothing itself: the conversion runs on a worker, and its
+    /// result is placed as one undo step.
+    #[test]
+    fn the_import_is_placed_only_when_the_conversion_ends() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        open_window(&mut app, "objects.3ds");
+        let task = press_ok(&mut app, &["Alpha"]);
+        assert_eq!(app.active_modal, None);
+        assert!(
+            !has_layer(&app, i, "ALPHA"),
+            "nothing is placed during the conversion"
+        );
+        assert_eq!(undo_steps(&mut app, i), 0);
+        app.drive_headless_task(task).expect("the import task");
+        assert!(has_layer(&app, i, "ALPHA"));
+        assert_eq!(undo_steps(&mut app, i), 1);
+        assert!(app.tabs[i].dirty);
+    }
+
+    /// With "single layer", the meshes go on the drawing's current layer,
+    /// which is read before the conversion starts.
+    #[test]
+    fn single_layer_puts_the_meshes_on_the_current_layer() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let current = app.tabs[i].scene.document.header.current_layer_name.clone();
+        open_window(&mut app, "objects.3ds");
+        let _ = app.update(Message::ImportDialog(ImportDialogMsg::TdsLayers(3)));
+        let task = press_ok(&mut app, &["Alpha"]);
+        app.drive_headless_task(task).expect("the import task");
+        let meshes: Vec<String> = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter(|e| matches!(e, document::EntityType::PolyfaceMesh(_)))
+            .map(|e| e.common().layer.clone())
+            .collect();
+        assert!(!meshes.is_empty(), "the mesh comes in");
+        assert!(meshes.iter().all(|layer| *layer == current), "{meshes:?}");
+    }
+
+    /// A conversion that panics gives an error; the drawing and the undo
+    /// steps do not change.
+    #[test]
+    fn a_conversion_panic_is_an_error_and_the_drawing_does_not_change() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        open_window(&mut app, "objects.3ds");
+        let state = app.import_dialogs.tds.take().expect("the window's state");
+        app.close_active_modal();
+        let request = TdsImportRequest {
+            path: state.path.clone(),
+            selected: vec!["Alpha".to_string()],
+            layers: crate::io::tds_import::LayerMode::ByObject,
+            multi: Default::default(),
+            compact: true,
+            asked: false,
+            stop_at: None,
+        };
+        let layers = app.tabs[i].scene.document.layers.len();
+        let task =
+            app.run_tds_import_with(i, request, state.scene, |_, _| panic!("a conversion bug"));
+        app.drive_headless_task(task).expect("the import task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("IMPORT failed: a conversion bug")
+        );
+        assert_eq!(app.tabs[i].scene.document.layers.len(), layers);
+        assert_eq!(undo_steps(&mut app, i), 0);
+        assert!(!app.tabs[i].dirty);
+    }
+
+    /// A conversion for a drawing that was replaced is dropped.
+    #[test]
+    fn a_conversion_for_a_replaced_drawing_is_dropped() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        open_window(&mut app, "objects.3ds");
+        let task = press_ok(&mut app, &["Alpha"]);
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.drive_headless_task(task).expect("the import task");
+        assert!(!has_layer(&app, i, "ALPHA"));
+        assert!(!app.tabs[i].dirty);
+        assert!(last_line(&app).contains("was replaced"));
+    }
+
+    /// Cancel at the material question converts the objects before the
+    /// asked mesh: here the global settings, not the mesh.
+    #[test]
+    fn cancel_at_the_material_question_imports_what_comes_before() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        open_window(&mut app, "two_materials.3ds");
+        let task = press_ok(&mut app, &["Global Settings", "Crate"]);
+        app.drive_headless_task(task).expect("OK asks first");
+        assert_eq!(app.active_modal, Some(ModalKind::TdsMaterial));
+        let task = app.update(Message::CloseModal);
+        assert_eq!(app.active_modal, None);
+        app.drive_headless_task(task).expect("the import task");
+        assert!(!has_layer(&app, i, "CRATE"), "the asked mesh stays out");
+        assert!(
+            app.tabs[i]
+                .scene
+                .document
+                .block_records
+                .get("AVE_RENDER")
+                .is_some(),
+            "the global settings before it come in"
+        );
+        assert_eq!(undo_steps(&mut app, i), 1);
+    }
+
+    /// The material question closed for another window drops the import.
+    #[test]
+    fn the_material_question_closed_for_another_window_drops_the_import() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        open_window(&mut app, "two_materials.3ds");
+        let task = press_ok(&mut app, &["Global Settings", "Crate"]);
+        app.drive_headless_task(task).expect("OK asks first");
+        assert_eq!(app.active_modal, Some(ModalKind::TdsMaterial));
+        app.close_active_modal();
+        assert!(app.import_dialogs.tds_material.is_none());
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("AVE_RENDER")
+            .is_none());
+        assert_eq!(undo_steps(&mut app, i), 0);
+    }
+}
+
+#[cfg(test)]
 mod svg_paste_tests {
     #[test]
     fn copied_svg_pastes_back_as_drawing() {

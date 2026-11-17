@@ -5839,7 +5839,11 @@ pub enum Message {
     /// Callback when the user picks (or cancels) a CTB/STB file.
     /// The Load… picker finished: a table, nothing (cancelled), or why the
     /// file could not be read.
-    PlotStyleLoaded(Result<Option<crate::io::plot_style::PlotStyleTable>, String>),
+    PlotStyleLoaded(
+        u64,
+        String,
+        Result<Option<crate::io::plot_style::PickedPlotStyle>, String>,
+    ),
     /// Clear the active plot style table.
     PlotStyleClear,
     /// Open/close the Plot Style panel.

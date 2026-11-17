@@ -27,7 +27,8 @@ pub use dxf_reference_integrity::{has_omitted_dxf_records, prune_omitted_dxf_rec
 /// changes; the `?v=` cache-buster on the worker URL must match. v5 adds the
 /// `serialize` action and extends the runtime-field sidecar with
 /// `graphic_data`.
-pub const PROTOCOL_VERSION: u16 = 5;
+/// v6 selects the updated Document codec for external plot styles.
+pub const PROTOCOL_VERSION: u16 = 6;
 
 /// Serialize a document to an in-memory byte buffer, format chosen by `ext`
 /// (`dxf` → DXF, a listed converter's extension → that converter, anything
@@ -131,7 +132,7 @@ pub fn write_external_for_edit(
 ) -> Result<Vec<u8>, String> {
     let extension = format.extensions().first().copied().unwrap_or_default();
     if let Some(session) = session {
-        session.check_destination(extension)?;
+        session.check_destination(doc, extension)?;
     }
     let (bytes, losses) = if let Some(session) = session.filter(|_| is_ifccad_extension(extension))
     {
@@ -173,7 +174,7 @@ pub fn external_losses_for_edit(
         return external_losses(doc, format);
     };
     let extension = format.extensions().first().copied().unwrap_or_default();
-    session.check_destination(extension)?;
+    session.check_destination(doc, extension)?;
     if !is_ifccad_extension(extension) {
         return external_losses(doc, format);
     }

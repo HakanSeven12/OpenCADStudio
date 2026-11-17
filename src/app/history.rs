@@ -1240,7 +1240,11 @@ impl OpenCADStudio {
                 let next = document.next_handle().max(document.header.handle_seed);
                 *stored =
                     document.swap_structure(std::mem::replace(stored, document::Document::new()));
-                if tab.ifccad_session.is_some() {
+                if tab
+                    .ifccad_session
+                    .as_ref()
+                    .is_some_and(ocs_save::IfccadSession::has_native_context)
+                {
                     // The IFCCAD session keeps mappings for saved handles across
                     // undo. New objects must never pick up those mappings.
                     let next = next

@@ -791,6 +791,8 @@ pub struct WireModel {
     /// keep their own nonzero layer or inherit the nearest nonzero INSERT layer;
     /// `None` retains the handle-based fallback for direct and synthetic wires.
     pub effective_layer: Option<std::sync::Arc<str>>,
+    /// Source member used to resolve named plot styles on expanded INSERT wires.
+    pub block_member: Option<document::Handle>,
     /// Point-marker scaling shared by the GPU, picking, and plotting paths.
     pub point_marker: Option<PointMarker>,
     /// RGBA colour in [0, 1].
@@ -902,6 +904,7 @@ impl WireModel {
         Self {
             name: name.to_string(),
             effective_layer: self.effective_layer.clone(),
+            block_member: self.block_member,
             point_marker: self.point_marker,
             color: self.color,
             bg_adapt: self.bg_adapt.clone(),
@@ -1269,29 +1272,57 @@ impl WireModel {
                 0.0,
                 std::f64::consts::TAU,
             ),
-            TangentGeom::PlanarCircle { center, axis_x, axis_y, radius } => (
+            TangentGeom::PlanarCircle {
+                center,
+                axis_x,
+                axis_y,
+                radius,
+            } => (
                 v(center),
                 v(axis_x).normalize_or_zero() * radius,
                 v(axis_y).normalize_or_zero() * radius,
                 0.0,
                 std::f64::consts::TAU,
             ),
-            TangentGeom::Arc { center, axis_x, axis_y, radius, start_angle, end_angle } => (
+            TangentGeom::Arc {
+                center,
+                axis_x,
+                axis_y,
+                radius,
+                start_angle,
+                end_angle,
+            } => (
                 v(center),
                 v(axis_x).normalize_or_zero() * radius,
                 v(axis_y).normalize_or_zero() * radius,
                 start_angle,
-                if end_angle < start_angle { end_angle + std::f64::consts::TAU } else { end_angle },
+                if end_angle < start_angle {
+                    end_angle + std::f64::consts::TAU
+                } else {
+                    end_angle
+                },
             ),
-            TangentGeom::PlanarEllipse { center, major_axis, normal, minor_axis_ratio, start_param, end_param } => {
+            TangentGeom::PlanarEllipse {
+                center,
+                major_axis,
+                normal,
+                minor_axis_ratio,
+                start_param,
+                end_param,
+            } => {
                 let major = v(major_axis);
-                let minor = v(normal).cross(major).normalize_or_zero() * major.length() * minor_axis_ratio;
+                let minor =
+                    v(normal).cross(major).normalize_or_zero() * major.length() * minor_axis_ratio;
                 (
                     v(center),
                     major,
                     minor,
                     start_param,
-                    if end_param < start_param { end_param + std::f64::consts::TAU } else { end_param },
+                    if end_param < start_param {
+                        end_param + std::f64::consts::TAU
+                    } else {
+                        end_param
+                    },
                 )
             }
             TangentGeom::Line { .. } => return,
@@ -1536,6 +1567,7 @@ impl Default for WireModel {
             point_marker: None,
             name: String::new(),
             effective_layer: None,
+            block_member: None,
             color: Self::WHITE,
             bg_adapt: None,
             selected: false,

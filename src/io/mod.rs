@@ -74,8 +74,6 @@ pub mod xref_model;
 #[path = "save_audit.rs"]
 mod performance_audit;
 
-#[cfg(not(target_arch = "wasm32"))]
-use crate::io::plot_style::PlotStyleTableExt as _;
 use crate::scene::DerivedCaches;
 use document::entities::EntityType;
 // The path-based readers are native-only; web parsing runs through the
@@ -1042,6 +1040,11 @@ pub fn load_bytes(name: &str, bytes: Vec<u8>) -> Result<Document, String> {
     } else {
         ext.as_str()
     };
+    // Share the converter route used by GUI/worker opening, including IFCCAD.
+    // Headless automation must not reject a format the application supports.
+    if let Some(converter) = ocs_save::external_format(format) {
+        return ocs_save::read_external(converter, &bytes).map(|outcome| outcome.document);
+    }
     match format {
         // Templates (.dwt) and standards (.dws) are drawings in the DWG format.
         "dwg" | "dwt" | "dws" => {
@@ -2402,12 +2405,13 @@ pub async fn pick_linetype_file() -> Option<(Option<std::path::PathBuf>, String)
         .map(|file| (file.dir, file.source))
 }
 
-pub async fn pick_plot_style() -> Result<Option<plot_style::PlotStyleTable>, String> {
+pub async fn pick_plot_style() -> Result<Option<plot_style::PickedPlotStyle>, String> {
     let dialog = crate::sys::file_dialog()
         .set_title(crate::t!("Load Plot Style Table").as_ref())
-        .add_filter(crate::t!("Plot Style Tables").as_ref(), &["ctb", "CTB"])
-        .add_filter(crate::t!("CTB Files").as_ref(), &["ctb", "CTB"])
-        .add_filter(crate::t!("All Files").as_ref(), &["*"]);
+        .add_filter(
+            crate::t!("Plot Style Tables").as_ref(),
+            &["ctb", "CTB", "stb", "STB"],
+        );
     #[cfg(not(target_arch = "wasm32"))]
     let dialog = match plot_style::ensure_plot_styles_dir() {
         Ok(dir) => dialog.set_directory(dir),
@@ -2416,39 +2420,13 @@ pub async fn pick_plot_style() -> Result<Option<plot_style::PlotStyleTable>, Str
     let Some(handle) = dialog.pick_file().await else {
         return Ok(None);
     };
+    let name = handle.file_name();
     #[cfg(not(target_arch = "wasm32"))]
-    {
-        let path = crate::sys::handle_path(&handle);
-        let table = plot_style::PlotStyleTable::load(&path)?;
-        if let (Ok(dir), Some(file_name)) = (plot_style::ensure_plot_styles_dir(), path.file_name())
-        {
-            let destination = dir.join(file_name);
-            let same_place = path.parent().is_some_and(|parent| {
-                parent
-                    .canonicalize()
-                    .ok()
-                    .zip(dir.canonicalize().ok())
-                    .is_some_and(|(a, b)| a == b)
-            });
-            if !same_place && !destination.exists() {
-                let _ = std::fs::copy(&path, &destination);
-            }
-        }
-        Ok(Some(table))
-    }
-    // Web: read the picked file's bytes now — the name-only path has nothing
-    // behind it — parse them, and remember them in the session registry so
-    // `load_named` resolves the name afterwards. There is no plot-styles
-    // folder on the web, so registration lasts for the session.
+    let bytes =
+        std::fs::read(crate::sys::handle_path(&handle)).map_err(|error| error.to_string())?;
     #[cfg(target_arch = "wasm32")]
-    {
-        let name = handle.file_name();
-        let bytes: std::sync::Arc<Vec<u8>> = std::sync::Arc::new(handle.read().await);
-        let table =
-            plot_style::PlotStyleTable::from_bytes(&name, &bytes).map_err(|e| e.to_string())?;
-        plot_style::register_session_table(&name, bytes);
-        Ok(Some(table))
-    }
+    let bytes = handle.read().await;
+    plot_style::PickedPlotStyle::from_bytes(name, bytes).map(Some)
 }
 
 // ── Image file picker ─────────────────────────────────────────────────────
@@ -2689,7 +2667,7 @@ where
         .unwrap_or_default();
     if let Some(session) = ifccad_session {
         session
-            .check_destination(&ext)
+            .check_destination(&doc, &ext)
             .map_err(SaveFailure::other)?;
     }
     let write_started = iced::time::Instant::now();
@@ -3062,7 +3040,7 @@ pub async fn serialize_prepared_document(
     ifccad_session: Option<&ocs_save::IfccadSession>,
 ) -> Result<Vec<u8>, String> {
     if let Some(session) = ifccad_session {
-        session.check_destination(ext)?;
+        session.check_destination(prepared, ext)?;
     }
     // A converter writes inline: the worker only carries the DWG/DXF writers,
     // and the user's "Save anyway" lives on this side.

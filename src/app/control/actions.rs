@@ -642,6 +642,31 @@ impl OpenCADStudio {
 
         // Optional plot style table: a CTB path or a folder-discovered name.
         let style = req["plot_style"].as_str().filter(|s| !s.is_empty());
+        let external_tables = req
+            .get("plot_style_files")
+            .map(|value| {
+                value
+                    .as_array()
+                    .and_then(|files| {
+                        files
+                            .iter()
+                            .map(|file| file.as_str().map(std::path::PathBuf::from))
+                            .collect::<Option<Vec<_>>>()
+                    })
+                    .ok_or_else(|| {
+                        failure(
+                            "invalid_value",
+                            "plot_style_files must be an array of file paths",
+                        )
+                    })
+            })
+            .transpose()?;
+        if style.is_some() && external_tables.is_some() {
+            return Err(failure(
+                "invalid_value",
+                "Choose either plot_style or plot_style_files",
+            ));
+        }
         let drawing_base = crate::io::drawing_dir(&self.tabs[i].scene.document);
         let loaded_style = match style {
             // An existing file reports its own load error; anything else is
@@ -894,6 +919,31 @@ impl OpenCADStudio {
                         page_dialog.style_error = None;
                     }
                 }
+                if let Some(files) = &external_tables {
+                    app.active_plot_style = None;
+                    if page_dialog.apply_plot_styles && !page_dialog.style_name.is_empty() {
+                        let tab = &app.tabs[i];
+                        let document = &tab.scene.document;
+                        let named = !document.header.plotstyle_mode;
+                        let sha256 = tab
+                            .ifccad_session
+                            .as_ref()
+                            .and_then(|session| {
+                                session.plot_style_source(document, name, &page_dialog.style_name)
+                            })
+                            .and_then(|source| source.sha256.as_deref());
+                        let table = crate::io::plot_style::resolve_external_table(
+                            &page_dialog.style_name,
+                            named,
+                            sha256,
+                            files,
+                        )
+                        .map_err(|error| format!("Layout {name:?}: {error}"))?;
+                        page_dialog.style_missing = false;
+                        page_dialog.style_error = None;
+                        app.active_plot_style = Some(table);
+                    }
+                }
                 app.plot_dialog = page_dialog;
                 if app.plot_dialog.area == "Display" {
                     app.tabs[i].scene.restore_saved_camera();
@@ -921,6 +971,8 @@ impl OpenCADStudio {
                 if !is_svg {
                     app.validate_geopdf_page(&page)?;
                 }
+                page.validate_plot_styles(export_style)
+                    .map_err(|error| format!("Layout {name:?}: {error}"))?;
                 pages.push(page);
             }
             Ok(pages)
@@ -1452,7 +1504,10 @@ impl OpenCADStudio {
             .filter(|id| !id.is_empty())
             .ok_or_else(|| failure("invalid_request", "control_id is required"))?;
         if !self.plugin_panels.contains_key(panel_id) {
-            return Err(failure("panel_not_found", "The requested panel is not registered"));
+            return Err(failure(
+                "panel_not_found",
+                "The requested panel is not registered",
+            ));
         }
         let text = if let Some(text) = req["text"].as_str() {
             text.to_string()
@@ -3299,15 +3354,13 @@ impl OpenCADStudio {
                         arg == "1",
                     )),
                     "scale_layout" => dlg(M::ScaleToLayout(value == "1")),
-                    "color_list" => {
-                        Message::MLeaderColorMore(known(&[
-                            "line_color",
-                            "text_color",
-                            "block_color",
-                            "line_type",
-                            "line_weight",
-                        ])?)
-                    }
+                    "color_list" => Message::MLeaderColorMore(known(&[
+                        "line_color",
+                        "text_color",
+                        "block_color",
+                        "line_type",
+                        "line_weight",
+                    ])?),
                     "pick" => dlg(M::PickChoice(value.to_string())),
                     "pick_ok" => dlg(M::PickOk),
                     "pick_cancel" => dlg(M::PickCancel),
@@ -3342,12 +3395,7 @@ impl OpenCADStudio {
                     "text_styles" => dlg(M::TextStyles),
                     "ok" => dlg(M::Ok),
                     "cancel" => dlg(M::Cancel),
-                    _ => {
-                        return Err(failure(
-                            "invalid_value",
-                            "Unknown Multileader Style field",
-                        ))
-                    }
+                    _ => return Err(failure("invalid_value", "Unknown Multileader Style field")),
                 }
             }
             // The Dimension Style window, one field per call. Manager:
@@ -3375,7 +3423,10 @@ impl OpenCADStudio {
             "anno_scale_prompt" => {
                 use crate::ui::window::anno_scale_prompt::AnnoScaleMsg as A;
                 if !self.focus_dialog(crate::app::ModalKind::AnnotationScalePrompt) {
-                    return Err(failure("no_dialog", "The annotation scale question is not open"));
+                    return Err(failure(
+                        "no_dialog",
+                        "The annotation scale question is not open",
+                    ));
                 }
                 let spec = string(req, "value")?;
                 let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
@@ -3678,22 +3729,96 @@ impl OpenCADStudio {
                 let (field, arg) = value.split_once(':').unwrap_or((value, ""));
                 // The fields of the settings face, as the window names them.
                 const FIELDS: &[&str] = &[
-                    "dimdle", "dimdli", "dimexe", "dimexo", "dimfxl", "dimasz", "dimcen",
-                    "dimbreak", "dimjogang", "dimjag", "dimtxt", "dimtfac", "dimgap",
-                    "dimscale", "dimrnd", "prefix", "suffix", "dimlfac", "dimmzf", "dimmzs",
-                    "dimaltf", "dimaltrnd", "alt_prefix", "alt_suffix", "dimaltmzf",
-                    "dimaltmzs", "dimtp", "dimtm", "dimtxsty", "center", "dimarcsym",
-                    "dimtad", "dimjust", "dimtxtdirection", "text_align", "fit", "dimtmove",
-                    "scale_mode", "dimlunit", "dimdec", "dimfrac", "dimdsep", "dimaunit",
-                    "dimadec", "dimaltu", "dimaltd", "dimalttd", "alt_place", "tol_method",
-                    "dimtdec", "dimtolj", "dimtaln", "dimsd1", "dimsd2", "dimse1", "dimse2",
-                    "dimfxlon", "frame", "annotative", "dimsoxd", "dimupt", "dimtofl",
-                    "dimalt", "layout_only", "dimazin.lead", "dimazin.trail", "dimzin.lead",
-                    "dimzin.trail", "dimzin.feet", "dimzin.inch", "dimaltz.lead",
-                    "dimaltz.trail", "dimaltz.feet", "dimaltz.inch", "dimtzin.lead",
-                    "dimtzin.trail", "dimtzin.feet", "dimtzin.inch", "dimalttz.lead",
-                    "dimalttz.trail", "dimalttz.feet", "dimalttz.inch", "dimclrd", "dimclre",
-                    "dimclrt", "fill", "dimltype", "dimltex1", "dimltex2", "dimlwd",
+                    "dimdle",
+                    "dimdli",
+                    "dimexe",
+                    "dimexo",
+                    "dimfxl",
+                    "dimasz",
+                    "dimcen",
+                    "dimbreak",
+                    "dimjogang",
+                    "dimjag",
+                    "dimtxt",
+                    "dimtfac",
+                    "dimgap",
+                    "dimscale",
+                    "dimrnd",
+                    "prefix",
+                    "suffix",
+                    "dimlfac",
+                    "dimmzf",
+                    "dimmzs",
+                    "dimaltf",
+                    "dimaltrnd",
+                    "alt_prefix",
+                    "alt_suffix",
+                    "dimaltmzf",
+                    "dimaltmzs",
+                    "dimtp",
+                    "dimtm",
+                    "dimtxsty",
+                    "center",
+                    "dimarcsym",
+                    "dimtad",
+                    "dimjust",
+                    "dimtxtdirection",
+                    "text_align",
+                    "fit",
+                    "dimtmove",
+                    "scale_mode",
+                    "dimlunit",
+                    "dimdec",
+                    "dimfrac",
+                    "dimdsep",
+                    "dimaunit",
+                    "dimadec",
+                    "dimaltu",
+                    "dimaltd",
+                    "dimalttd",
+                    "alt_place",
+                    "tol_method",
+                    "dimtdec",
+                    "dimtolj",
+                    "dimtaln",
+                    "dimsd1",
+                    "dimsd2",
+                    "dimse1",
+                    "dimse2",
+                    "dimfxlon",
+                    "frame",
+                    "annotative",
+                    "dimsoxd",
+                    "dimupt",
+                    "dimtofl",
+                    "dimalt",
+                    "layout_only",
+                    "dimazin.lead",
+                    "dimazin.trail",
+                    "dimzin.lead",
+                    "dimzin.trail",
+                    "dimzin.feet",
+                    "dimzin.inch",
+                    "dimaltz.lead",
+                    "dimaltz.trail",
+                    "dimaltz.feet",
+                    "dimaltz.inch",
+                    "dimtzin.lead",
+                    "dimtzin.trail",
+                    "dimtzin.feet",
+                    "dimtzin.inch",
+                    "dimalttz.lead",
+                    "dimalttz.trail",
+                    "dimalttz.feet",
+                    "dimalttz.inch",
+                    "dimclrd",
+                    "dimclre",
+                    "dimclrt",
+                    "fill",
+                    "dimltype",
+                    "dimltex1",
+                    "dimltex2",
+                    "dimlwd",
                     "dimlwe",
                 ];
                 let known = |name: &str| -> Result<&'static str, Value> {
@@ -3772,9 +3897,7 @@ impl OpenCADStudio {
                         match arg.to_ascii_lowercase().as_str() {
                             "bylayer" => document::types::Color::ByLayer,
                             "byblock" => document::types::Color::ByBlock,
-                            index => {
-                                document::types::Color::from_index(index.parse().unwrap_or(7))
-                            }
+                            index => document::types::Color::from_index(index.parse().unwrap_or(7)),
                         },
                     )),
                     "color_more" => dlg(M::ColorMore(known(value)?)),
@@ -3809,12 +3932,7 @@ impl OpenCADStudio {
                     })),
                     "copy" => dlg(M::CompareCopy),
                     "compare_close" => dlg(M::CompareClose),
-                    _ => {
-                        return Err(failure(
-                            "invalid_value",
-                            "Unknown Dimension Style field",
-                        ))
-                    }
+                    _ => return Err(failure("invalid_value", "Unknown Dimension Style field")),
                 }
             }
             // The Annotation Object Scale window, one field per call:

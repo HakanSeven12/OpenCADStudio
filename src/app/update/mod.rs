@@ -3121,7 +3121,11 @@ impl OpenCADStudio {
 
             Message::ClearScene => {
                 let i = self.active_tab;
-                if self.tabs[i].ifccad_session.is_some() {
+                if self.tabs[i]
+                    .ifccad_session
+                    .as_ref()
+                    .is_some_and(ocs_save::IfccadSession::has_native_context)
+                {
                     self.command_line.push_info(
                         crate::t!("This drawing has retained IFCCAD content. Create a new drawing instead.").as_ref(),
                     );
@@ -14999,10 +15003,27 @@ impl OpenCADStudio {
             }
             Message::LinetypeLoaded(None) => Task::none(),
             Message::PlotStyleLoad => {
-                Task::perform(crate::io::pick_plot_style(), Message::PlotStyleLoaded)
+                let tab = &self.tabs[self.active_tab];
+                let id = tab.id;
+                let layout = tab.scene.current_layout.clone();
+                Task::perform(crate::io::pick_plot_style(), move |result| {
+                    Message::PlotStyleLoaded(id, layout.clone(), result)
+                })
             }
-            Message::PlotStyleLoaded(Ok(Some(table))) => {
+            Message::PlotStyleLoaded(id, layout, Ok(Some(picked))) => {
+                let Some(i) = self.tabs.iter().position(|tab| tab.id == id) else {
+                    return Task::none();
+                };
+                if let Err(error) = self.bind_picked_plot_style(i, &layout, &picked) {
+                    self.command_line.push_error(&error);
+                    return Task::none();
+                }
+                if i != self.active_tab || self.tabs[i].scene.current_layout != layout {
+                    return Task::none();
+                }
+                let table = picked.table;
                 self.plot_dialog.style_name = table.name.clone();
+                self.plot_dialog.apply_plot_styles = true;
                 self.plot_dialog.style_missing = false;
                 self.plot_dialog.style_error = None;
                 self.report_plot_style_warnings(&table);
@@ -15025,13 +15046,15 @@ impl OpenCADStudio {
                 self.plot_dialog.plot_styles = crate::io::plot_style::available_table_names();
                 Task::none()
             }
-            Message::PlotStyleLoaded(Ok(None)) => Task::none(),
-            Message::PlotStyleLoaded(Err(error)) => {
+            Message::PlotStyleLoaded(_, _, Ok(None)) => Task::none(),
+            Message::PlotStyleLoaded(id, layout, Err(error)) => {
                 // The file the user pointed at could not be read: say why,
                 // in the dialog as well as on the command line.
                 self.command_line.push_error(&error);
-                self.plot_dialog.style_missing = true;
-                self.plot_dialog.style_error = Some(error);
+                let tab = &self.tabs[self.active_tab];
+                if tab.id == id && tab.scene.current_layout == layout {
+                    self.plot_dialog.style_error = Some(error);
+                }
                 Task::none()
             }
             Message::PlotStyleClear => {

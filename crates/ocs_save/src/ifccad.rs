@@ -8,13 +8,59 @@ use document::{Document, Error, Format, Loss};
 use serde_json::Value;
 
 /// State owned by one open tab, shared with that tab's save snapshots.
-#[derive(Clone, Debug)]
-pub struct IfccadSession(Arc<Mutex<document::IfccadRoundtripContext>>);
+#[derive(Clone, Debug, Default)]
+pub struct IfccadSession(
+    Option<Arc<Mutex<document::IfccadRoundtripContext>>>,
+    Arc<BTreeMap<document::Handle, document::ifccad::IfccadPlotStyleSource>>,
+);
 
 impl IfccadSession {
+    pub fn has_native_context(&self) -> bool {
+        self.0.is_some()
+    }
+
+    pub fn bind_plot_style(
+        &mut self,
+        layout: document::Handle,
+        source: document::ifccad::IfccadPlotStyleSource,
+    ) {
+        Arc::make_mut(&mut self.1).insert(layout, source);
+    }
+
+    pub fn check_cad_plot_style_bindings(&self, doc: &Document) -> Result<(), String> {
+        document::Ifcx
+            .validate_cad_plot_style_sources(doc.objects.iter().filter_map(|(handle, object)| {
+                let document::objects::ObjectType::Layout(layout) = object else {
+                    return None;
+                };
+                let source = self.1.get(handle)?;
+                source
+                    .file_name
+                    .eq_ignore_ascii_case(&layout.plot_style_sheet)
+                    .then_some((layout.name.as_str(), source))
+            }))
+            .map_err(|error| error.to_string())
+    }
+
+    /// The external plot table declared by the IFCCAD file for this CAD layout.
+    pub fn plot_style_source(
+        &self,
+        doc: &Document,
+        layout_name: &str,
+        file_name: &str,
+    ) -> Option<&document::ifccad::IfccadPlotStyleSource> {
+        let layout = ifccad_plot_layout(doc, layout_name)?;
+        self.1
+            .get(&layout)
+            .filter(|source| source.file_name.eq_ignore_ascii_case(file_name))
+    }
+
     /// Human-readable notices for preserved content that has no CAD geometry.
     pub fn blocked_entities(&self) -> Vec<(u64, String)> {
-        self.0
+        let Some(context) = &self.0 else {
+            return Vec::new();
+        };
+        context
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .blocked_entities()
@@ -24,16 +70,24 @@ impl IfccadSession {
 
     /// Whether this session carries content that ordinary CAD formats cannot retain.
     pub fn has_blocked_entities(&self) -> bool {
-        self.0
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .blocked_entities()
-            .next()
-            .is_some()
+        self.0.as_ref().is_some_and(|context| {
+            context
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .blocked_entities()
+                .next()
+                .is_some()
+        })
     }
 
     /// Prevent a save to a format that cannot carry the session's retained roots.
-    pub fn check_destination(&self, ext: &str) -> Result<(), String> {
+    pub fn check_destination(&self, doc: &Document, ext: &str) -> Result<(), String> {
+        if matches!(
+            ext.to_ascii_lowercase().as_str(),
+            "dxf" | "dwg" | "dwt" | "dws"
+        ) {
+            self.check_cad_plot_style_bindings(doc)?;
+        }
         if super::is_ifccad_extension(ext) || !self.has_blocked_entities() {
             Ok(())
         } else {
@@ -46,17 +100,76 @@ impl IfccadSession {
         doc: &Document,
         preview: bool,
     ) -> Result<document::IfccadExportOutcome, String> {
-        let mut context = self
-            .0
-            .lock()
-            .map_err(|_| "IFCCAD save state is unavailable")?;
-        let result = if preview {
-            document::Ifcx.export_ifccad_preserving(doc, &mut context.clone())
+        let result = if let Some(context) = &self.0 {
+            let mut context = context
+                .lock()
+                .map_err(|_| "IFCCAD save state is unavailable")?;
+            if preview {
+                document::Ifcx.export_ifccad_preserving(doc, &mut context.clone())
+            } else {
+                document::Ifcx.export_ifccad_preserving(doc, &mut context)
+            }
         } else {
-            document::Ifcx.export_ifccad_preserving(doc, &mut context)
+            document::Ifcx.export_ifccad(doc)
         };
-        result.map_err(|error| error.to_string())
+        let mut result = result.map_err(|error| error.to_string())?;
+        let drawing = &mut result.drawing;
+        let layouts = std::iter::once((drawing.model.id, "Model")).chain(
+            drawing
+                .paper_layouts
+                .iter()
+                .map(|layout| (layout.id, layout.name.as_str())),
+        );
+        let styles = &mut drawing.plot_styles;
+        for (id, name) in layouts {
+            let Some(file_name) = styles
+                .layout_sources
+                .get(&id)
+                .and_then(|source| styles.sources.get(source))
+                .map(|source| source.file_name.as_str())
+            else {
+                continue;
+            };
+            let Some(source) = self
+                .plot_style_source(doc, name, file_name)
+                .filter(|source| source.sha256.is_some())
+            else {
+                continue;
+            };
+            // Different layouts may declare different bytes under the same file name.
+            let source_id = styles
+                .sources
+                .iter()
+                .find_map(|(&id, candidate)| (candidate == source).then_some(id));
+            let source_id = source_id.unwrap_or_else(|| {
+                let id = styles.next_source_id;
+                styles.next_source_id += 1;
+                styles.sources.insert(id, source.clone());
+                id
+            });
+            styles.layout_sources.insert(id, source_id);
+        }
+        let used_sources = styles
+            .layout_sources
+            .values()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+        styles.sources.retain(|id, _| used_sources.contains(id));
+        Ok(result)
     }
+}
+
+fn ifccad_plot_layout(doc: &Document, name: &str) -> Option<document::Handle> {
+    doc.objects
+        .iter()
+        .find_map(|(handle, object)| match object {
+            document::objects::ObjectType::Layout(layout)
+                if layout.name.eq_ignore_ascii_case(name) =>
+            {
+                Some(*handle)
+            }
+            _ => None,
+        })
 }
 
 /// Read IFCCAD for a drawing tab. A context is needed while it retains roots.
@@ -65,10 +178,31 @@ pub fn read_ifccad_for_edit(
 ) -> Result<(document::ReadOutcome, Option<IfccadSession>), String> {
     let read = || -> Result<_, Error> {
         let file = document::ifccad::load_ifccad_bytes(bytes, Default::default())?;
-        document::Ifcx.import_ifccad_preserving(file.document())
+        let drawing = file.document();
+        let (outcome, context) = document::Ifcx.import_ifccad_preserving(drawing)?;
+        let layouts = std::iter::once((drawing.model.id, "Model")).chain(
+            drawing
+                .paper_layouts
+                .iter()
+                .map(|layout| (layout.id, layout.name.as_str())),
+        );
+        let sources = layouts
+            .filter_map(|(id, name)| {
+                let source = drawing.plot_styles.layout_sources.get(&id)?;
+                Some((
+                    ifccad_plot_layout(&outcome.document, name)?,
+                    drawing.plot_styles.sources.get(source)?.clone(),
+                ))
+            })
+            .collect();
+        Ok((outcome, context, sources))
     };
-    let (outcome, context) = read().map_err(|error| read_error(bytes, &error.to_string()))?;
-    let session = Some(IfccadSession(Arc::new(Mutex::new(context))));
+    let (outcome, context, sources) =
+        read().map_err(|error| read_error(bytes, &error.to_string()))?;
+    let session = Some(IfccadSession(
+        Some(Arc::new(Mutex::new(context))),
+        Arc::new(sources),
+    ));
     Ok((
         super::external_read_outcome(outcome.document, outcome.losses),
         session,

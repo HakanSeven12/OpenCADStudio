@@ -3082,6 +3082,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                         dash_closure: Default::default(),
                         name: name.clone(),
                         effective_layer: None,
+                        block_member: None,
                         color: neutral,
                         selected,
                         aci: 0,

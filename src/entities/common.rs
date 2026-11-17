@@ -187,10 +187,11 @@ fn format_signed_length(value: f64) -> String {
             }
         }
         4 | 5 => {
-            // Architectural and fractional formats use 1/64-inch resolution.
+            // Architectural and fractional read LUPREC as the power of two
+            // of the smallest fraction: 4 rounds to 1/16, 8 to 1/256.
             let sign = if value < 0.0 { "-" } else { "" };
             let abs = value.abs();
-            let denom = 64.0;
+            let denom = 2f64.powi(ctx.luprec.clamp(0, 8) as i32);
             let ticks = (abs * denom).round();
             let (feet, rest) = if ctx.lunits == 4 {
                 let per_foot = 12.0 * denom;
@@ -1379,25 +1380,25 @@ mod length_format_tests {
 
     #[test]
     fn fractional_carries_a_rounded_up_fraction() {
-        assert_eq!(with_units(5, 4, 5.99), "5 63/64");
-        assert_eq!(with_units(5, 4, 5.995), "6");
-        assert_eq!(with_units(5, 4, 0.995), "1");
-        assert_eq!(with_units(5, 4, 11.999), "12");
-        assert_eq!(with_units(5, 4, -5.995), "-6");
-        assert_eq!(with_units(5, 4, 0.5), "0 1/2");
-        assert_eq!(with_units(5, 4, 9.25), "9 1/4");
-        assert_eq!(with_units(5, 4, 3.0e17), "300000000000000000");
+        assert_eq!(with_units(5, 6, 5.99), "5 63/64");
+        assert_eq!(with_units(5, 6, 5.995), "6");
+        assert_eq!(with_units(5, 6, 0.995), "1");
+        assert_eq!(with_units(5, 6, 11.999), "12");
+        assert_eq!(with_units(5, 6, -5.995), "-6");
+        assert_eq!(with_units(5, 6, 0.5), "0 1/2");
+        assert_eq!(with_units(5, 6, 9.25), "9 1/4");
+        assert_eq!(with_units(5, 6, 3.0e17), "300000000000000000");
     }
 
     #[test]
     fn architectural_carries_into_feet() {
-        assert_eq!(with_units(4, 4, 11.99), "11 63/64\"");
-        assert_eq!(with_units(4, 4, 0.5), "0 1/2\"");
-        assert_eq!(with_units(4, 4, -9.25), "-9 1/4\"");
-        assert_eq!(with_units(4, 4, 11.999), "1'-0\"");
-        assert_eq!(with_units(4, 4, 23.999), "2'-0\"");
-        assert_eq!(with_units(4, 4, 66.5), "5'-6 1/2\"");
-        assert_eq!(with_units(4, 4, -11.999), "-1'-0\"");
+        assert_eq!(with_units(4, 6, 11.99), "11 63/64\"");
+        assert_eq!(with_units(4, 6, 0.5), "0 1/2\"");
+        assert_eq!(with_units(4, 6, -9.25), "-9 1/4\"");
+        assert_eq!(with_units(4, 6, 11.999), "1'-0\"");
+        assert_eq!(with_units(4, 6, 23.999), "2'-0\"");
+        assert_eq!(with_units(4, 6, 66.5), "5'-6 1/2\"");
+        assert_eq!(with_units(4, 6, -11.999), "-1'-0\"");
     }
 
     #[test]
@@ -1415,7 +1416,7 @@ mod length_format_tests {
     fn formatted_lengths_read_back() {
         for lunits in [3, 4, 5] {
             for value in [0.995f64, 5.995, 11.999, 23.999, 66.5, 9.25] {
-                let shown = with_units(lunits, if lunits == 3 { 4 } else { 4 }, value);
+                let shown = with_units(lunits, 4, value);
                 let read = parse_length(&shown).unwrap_or_else(|| {
                     panic!("lunits {lunits} wrote {shown:?}, which does not read back")
                 });

@@ -28,8 +28,8 @@
 //!
 //! Run with:
 //!   `cargo bench` (runs in --release mode, does not run on cargo test)
-//!   `cargo run --release --bench performance_benchmarks`
-//!   `cargo run --release --bench performance_benchmarks -- --quick` (quick smoke test)
+//!   `cargo bench --bench performance_benchmarks`
+//!   `cargo bench --bench performance_benchmarks -- --quick` (quick smoke test)
 
 #![allow(clippy::field_reassign_with_default, clippy::manual_is_multiple_of)]
 

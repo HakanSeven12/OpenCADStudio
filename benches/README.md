@@ -1,20 +1,16 @@
 ﻿# OpenCADStudio Performance Benchmarks
 
-A standardized, statistical performance benchmarking suite measuring throughput, latency, and memory metrics across core CAD subsystems and the user interface.
+The Rust suite measures CAD subsystems and UI construction using controlled
+fixtures. Separate GUI scripts measure real drawing workloads. Subsystem timing,
+automation response time, present cadence, and displayed-frame timing are
+different metrics; none establishes the others.
 
-The [release audit of the memory changes](../docs/performance-memory-audit.md)
-records before/after latency, p95 and bookkeeping costs for save preparation,
-history accounting and GPU telemetry. It found measurable overheads; passing
-correctness tests does not establish zero performance impact. Reproduction
-commands and raw samples are linked in that report.
-
-The [incremental history follow-up](../docs/performance-history-incremental.md)
-compares recording costs and retained geometry against the full-scan budget,
-including the memory used by the persistent accounting tables.
-
-The [GPU collection follow-up](../docs/performance-gpu-collection.md) compares
-complete byte counting before/after borrowed handles and wire-batch deduplication,
-with shared/unique-resource fixtures and checks that prior memory gains remain.
+Internal measurements, captures and analysis must remain untracked in
+[`local_measurements/`](local_measurements/README.md). Commit reusable benchmark
+code, tests and general instructions only. Keep actual results and
+machine/drawing-specific conclusions out of tracked documentation and commit
+descriptions, including sanitized results. Correctness tests alone do not
+establish a performance improvement.
 
 ## Quick Start
 
@@ -31,6 +27,140 @@ cargo bench --bench performance_benchmarks -- --quick
 > [!NOTE]
 > The Rust benchmarks are registered under `[[bench]]` with `harness = false`.
 > They are **never** executed by regular `cargo test` runs, preventing CI slowdowns.
+
+## Coverage audit and PERF-off GUI interactions
+
+Use a local baseline to identify hypotheses, isolate one cause at a time, then
+compare a proposed change against matching workloads. A single current-build
+capture does not establish the impact of previous optimizations.
+
+Memory-isolation controls are available with `--scenario idle`, `edits`,
+`navigation`, `layout_churn`, and `state_requests`. Fixed-layout controls require
+one `--layouts` value and retain the same panes across cycles. `layout_churn`
+deliberately recreates them. Use `--cycles` and `--cycle-seconds` to compare equal
+work counts and pacing; `--autosave-minutes 0` removes periodic saving from these
+controls, and `--history-max-entries` overrides retention only in the owned child.
+Compare `state_requests` over `--transport native` and `--transport http` to
+identify control-channel overhead. A read-only request control is essential:
+automation itself can allocate memory even when the drawing is unchanged.
+Reports retain transport call counts, including native operation-status polls.
+Background memory controls do not establish displayed-frame performance.
+
+| Existing benchmark | What it measures | Remaining gap |
+| --- | --- | --- |
+| `performance_benchmarks`, `command_benchmarks` | Synthetic ingestion, geometry, hit testing, snapping, solver, IO, UI/overlay/pipeline construction and command work | Actual drawing mix, window presentation and sustained interactive sessions |
+| `navigation_selection_bounds`, `scene_pick_micro`, `large_overlay_interaction`, `overlay_interaction_candidates` | Controlled CPU navigation bounds, picking and overlay queries, including large synthetic scenes | Real GUI input, render/present cadence and actual drawing geometry |
+| `selection_overlay_frame`, `wire_view_culling`, `wires_build_visible` | Isolated overlay replay, culling and wire preparation | Full-window compositing/display, multi-viewport GUI interaction |
+| `drawing_open_memory`, `cache_memory_budget`, `save_batch_memory`, history/GPU audit probes | Requested Rust allocations, retained capacities or instrumented subsystem costs | Normal production allocator residency and interactive frame behavior |
+| `drawing_startup.py` | Real drawing installation diagnostic with `PERF` enabled; settled RSS/USS | PERF-off interactions, first display, edits and long sessions |
+| **`drawing_interaction.py`** | **PERF-off real DWG/DXF GUI replay, RSS/USS/private commit, normal `MOVE`/undo, retained edit history, 1/2/4 viewports; optional external ETW present/display data** | Hardware input-to-photon latency, hours-long human workflows, other drawing/feature combinations |
+
+Build again before collecting a baseline. The interaction harness records CLI
+version/revision, binary and drawing hashes, the live editor version, settings
+hashes, adapter/driver, viewport dimensions and foreground checks. Use
+`--expected-revision` to reject a stale executable:
+
+```powershell
+cargo build --locked --release --bin OpenCADStudio
+python -m pip install -r benches/requirements.txt
+python benches/drawing_interaction.py --executable target/release/OpenCADStudio.exe --drawing "C:/drawings/typical.dwg" --runs 1 --session-seconds 900 --expected-revision YOUR_BUILD_REVISION --output benches/local_measurements/interaction-baseline.json
+```
+
+This Windows harness starts a new GUI process with saving disabled
+(`--read-only` permits in-memory editing). The original drawing path is retained
+for relative reference resolution. It copies the user's settings into an
+isolated config directory, uses a fresh GPU crash-sentinel directory, suppresses
+managed-deployment notices, removes `PERF` from the child environment (setting
+`PERF=0` would still enable tracing), and refuses a PERF panel or PERF log output.
+It checks source-file hashes after successful runs. Private drawing files,
+settings, screenshots and local paths remain in the output/artifact directory;
+never commit those artifacts, including sanitized summaries.
+
+The drawing and nonzero viewport must become queryable before setup begins.
+Readiness is **not first paint**. Setup selects a real, visible model-space line,
+proves a normal `MOVE` changes it, and proves undo restores its geometry. The
+workload replays middle-button pan and wheel zoom through the editor's pointer
+handlers, performs pointer hit selection, then measures normal `MOVE`/undo and
+paired forward/backward moves that retain undo history. Selection clicks are
+spaced beyond Windows' double-click interval to avoid opening an inline editor.
+`VPORTS` must confirm each requested layout; pan/zoom must change the camera;
+edits must restore the original line. The GUI currently exposes presets up to
+four model viewports; the eight-slot GPU collection probe is a separate synthetic
+workload.
+
+Each pointer event uses a separate request so the event loop can redraw between
+events. The default input cadence is at most 30 requests/second; server response
+time can lower it. Readiness uses HTTP, then measurement uses the owned editor's
+private loopback control channel with 2 ms operation polling. This avoids the GUI
+HTTP adapter's 100 ms settlement-poll floor. **Request roundtrips still include
+automation, serialization, scheduling and polling costs. They are not physical
+input latency or maximum interaction throughput.** Edit phases separate selection,
+command and undo distributions rather than mixing their timings. Viewport setup,
+initial screenshots, hashing and memory checkpoints are outside those request
+timings. The memory sampler polls RSS and foreground state every 250 ms; USS,
+private commit, CPU seconds, handles and thread counts are sampled at checkpoints.
+Sampled RSS peaks can miss short spikes. These are process metrics, excluding
+children and physical VRAM. An increasing RSS alone does not establish a leak.
+
+Add [PresentMon's standalone console executable](https://github.com/GameTechDev/PresentMon/blob/main/README-ConsoleApplication.md)
+to collect external frame data without enabling OCS's PERF instrumentation:
+
+```powershell
+python benches/drawing_interaction.py --executable target/release/OpenCADStudio.exe --drawing "C:/drawings/typical.dwg" --runs 1 --session-seconds 900 --presentmon "C:/tools/PresentMon-2.6.0-x64.exe" --wait-for-foreground-seconds 180 --output benches/local_measurements/interaction-frames.json
+```
+
+Bring the benchmark window to the foreground during that wait and leave it
+unobstructed; avoid interacting with it during replay. The harness reads window
+state; it does not steal focus from another application. PresentMon requires ETW
+rights, normally an administrator or a member
+of [Performance Log Users](https://learn.microsoft.com/en-us/windows/win32/etw/controlling-event-tracing-sessions).
+After a membership change, an existing login token can remain unchanged. For the
+current session, `--presentmon-elevated` requests UAC for the tracer only; the
+editor remains at normal permissions. Each capture has a unique session name;
+cleanup stops only that session and the editor process created by this run.
+The harness never changes group membership or downloads/installs PresentMon.
+
+`--read-only` blocks manual saving; the application still permits periodic
+recovery autosave. Recovery copies remain inside the isolated config; the
+harness rejects a custom recovery destination. To isolate autosave, compare
+matching `state_requests` controls with `--dirty-start --autosave-minutes 0`
+and `--dirty-start --autosave-minutes 1`, running long enough for the timer.
+Dirty-start applies inverse edits, verifies unchanged geometry, and leaves the
+owned document dirty so recovery saving actually occurs. Reports retain request
+start/end QPC timestamps and sampled recovery-file changes. File observations
+show filesystem changes, not save start or completion (an empty destination can
+appear before replacement), and have the memory sampler's polling uncertainty.
+Mutation completion can wait for active save jobs by design; slow mutation
+replies alone do not establish an
+event-loop stall. Read-only probes isolate responsiveness without that gate.
+
+The CSV contract is `--v1_metrics --qpc_time` (validated with PresentMon 2.6.0).
+Frame data is filtered by editor PID and split by swap chain and phase using QPC.
+The first present interval in each phase/chain is excluded because it can span
+setup or an idle period. Reports retain displayed and dropped counts; missing
+ETW data is unknown, never zero. Present-to-display delay is **not input-to-display
+latency**, and pointer replay does not generate hardware-input timestamps. Check
+foreground samples and present modes before interpreting display data. A
+foreground check at a sampling instant does not prove continuous lack of
+occlusion. PresentMon itself also has overhead; compare captures with matching
+instrumentation. A redraw notification or screenshot completion is not a display
+timestamp.
+
+Use `--drawing` multiple times for a local corpus; runs are sequential. The
+default is three fresh processes per drawing and at least 15 minutes per process.
+The last complete cycle can extend the requested duration. A short validation is
+`--runs 1 --session-seconds 0 --steps 6 --edit-steps 2 --settle-seconds 1`.
+Compare repeated processes with the same drawing hash, references, fonts, graphics
+settings, driver, viewport dimensions, cadence, settings, foreground conditions
+and power/background workload. This is a current-build baseline, not proof of
+zero performance impact from earlier changes. Add multi-hour runs, drawing swaps,
+save/reopen, large selections, heavy edits, xrefs, rasters and 3D corpora before
+generalizing to all CAD use.
+
+```powershell
+python -m unittest discover -s benches -p 'test_drawing*.py'
+python benches/summarize_drawing_interaction.py benches/local_measurements/interaction-frames.json --output benches/local_measurements/interaction-summary.json
+```
 
 ## Drawing startup and memory
 

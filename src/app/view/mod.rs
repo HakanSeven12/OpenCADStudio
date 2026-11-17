@@ -4439,7 +4439,7 @@ fn tab_bar_button_style(theme: &Theme, status: button::Status) -> button::Style 
 /// 1 px apart, a + after the last tab and a ☰ menu at the far right. A tab
 /// shows its whole file name, a dot before it while unsaved, and always
 /// the palette's close button. The Start
-/// page lives in the ☰ menu, which a right-click on the empty bar opens at
+/// page is a home tab at the left and in the ☰ menu, which a right-click on the empty bar opens at
 /// the pointer too; it also sets whether the bar runs above the palettes
 /// or (by default) between them. Resting on a tab lists its drawing's
 /// layouts. Tabs
@@ -4460,6 +4460,36 @@ pub(super) fn doc_tab_bar<'a>(
         .filter_map(|(idx, tab)| (!tab.is_start).then_some(idx))
         .collect::<Vec<_>>()
         .into();
+
+    // Start: a home tab pinned at the left, one click away (#3171).
+    if let Some(start) = tabs.iter().position(|tab| tab.is_start) {
+        let is_active = start == active_tab;
+        let home: fn(&Theme) -> Color = if is_active {
+            chrome::strong
+        } else {
+            chrome::tab_text
+        };
+        let start_btn = button(
+            container(crate::ui::icons::tinted(
+                crate::ui::icons::HOME,
+                km::TITLE_ICON,
+                home,
+            ))
+            .center(Fill),
+        )
+        .on_press(Message::TabSwitch(start))
+        .width(iced::Length::Fixed(km::TAB_BUTTON_W))
+        .height(iced::Length::Fixed(km::TAB_H))
+        .padding(0)
+        .style(move |theme: &Theme, status| {
+            let mut style = tab_bar_button_style(theme, status);
+            if is_active {
+                style.background = Some(Background::Color(chrome::surface(theme)));
+            }
+            style
+        });
+        items.push(start_btn.into());
+    }
 
     for (idx, tab) in tabs.iter().enumerate() {
         if tab.is_start {

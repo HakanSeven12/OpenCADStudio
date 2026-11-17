@@ -1015,6 +1015,8 @@ mod tests {
             "qat-properties",
             "add-to-qat",
             "remove-from-qat",
+            "add-to-my-tools",
+            "remove-from-my-tools",
             "add-separator",
             "remove-separator",
             "qat-show-below",

@@ -292,9 +292,9 @@ pub struct TextAtlasGpu {
 }
 
 impl TextAtlasGpu {
-    pub(super) fn counted_gpu_bytes(
-        &self,
-        counter: &mut super::gpu_memory::ResourceCounter,
+    pub(super) fn counted_gpu_bytes<'a>(
+        &'a self,
+        counter: &mut super::gpu_memory::ResourceCounter<'a>,
     ) -> u64 {
         counter.texture(&self._texture)
     }

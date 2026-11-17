@@ -1802,7 +1802,7 @@ impl PersistentWireArena {
         }
     }
 
-    pub(super) fn gpu_bytes(&self, counter: &mut super::gpu_memory::ResourceCounter) -> u64 {
+    pub(super) fn gpu_bytes<'a>(&'a self, counter: &mut super::gpu_memory::ResourceCounter<'a>) -> u64 {
         match &self.inner {
             PersistentWireArenaKind::Indexed(arenas) => arenas
                 .iter()

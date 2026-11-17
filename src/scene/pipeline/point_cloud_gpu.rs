@@ -79,7 +79,7 @@ pub struct PointCloudGpu {
 }
 
 impl PointCloudGpu {
-    pub(super) fn gpu_bytes(&self, counter: &mut super::gpu_memory::ResourceCounter) -> u64 {
+    pub(super) fn gpu_bytes<'a>(&'a self, counter: &mut super::gpu_memory::ResourceCounter<'a>) -> u64 {
         counter.buffer(&self.params)
             + self
                 .clouds

@@ -6545,7 +6545,7 @@ impl GpuLiveBytes {
 }
 
 impl Pipeline {
-    fn collect_gpu_live(&self, counter: &mut gpu_memory::ResourceCounter) -> GpuLiveBytes {
+    fn collect_gpu_live<'a>(&'a self, counter: &mut gpu_memory::ResourceCounter<'a>) -> GpuLiveBytes {
         let mut bytes = GpuLiveBytes {
             slots: 1,
             ..Default::default()

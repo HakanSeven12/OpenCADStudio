@@ -114,7 +114,7 @@ pub(super) struct TextureHatch {
 }
 
 impl TextureHatch {
-    pub(super) fn gpu_bytes(&self, counter: &mut super::super::gpu_memory::ResourceCounter) -> u64 {
+    pub(super) fn gpu_bytes<'a>(&'a self, counter: &mut super::super::gpu_memory::ResourceCounter<'a>) -> u64 {
         counter.buffer(&self.vertex_buffer)
             + counter.buffer(&self.index_buffer)
             + counter.buffer(&self.placement_buffer)

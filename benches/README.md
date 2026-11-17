@@ -12,6 +12,10 @@ The [incremental history follow-up](../docs/performance-history-incremental.md)
 compares recording costs and retained geometry against the full-scan budget,
 including the memory used by the persistent accounting tables.
 
+The [GPU collection follow-up](../docs/performance-gpu-collection.md) compares
+complete byte counting before/after borrowed handles and wire-batch deduplication,
+with shared/unique-resource fixtures and checks that prior memory gains remain.
+
 ## Quick Start
 
 Run the full benchmark suite with native `--release` optimizations:

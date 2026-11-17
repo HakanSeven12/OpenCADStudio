@@ -663,7 +663,7 @@ pub(super) struct MaterialMemory {
 }
 
 impl MaterialMemory {
-    pub(super) fn gpu_bytes(&self, counter: &mut super::gpu_memory::ResourceCounter) -> u64 {
+    pub(super) fn gpu_bytes<'a>(&'a self, counter: &mut super::gpu_memory::ResourceCounter<'a>) -> u64 {
         let resources = &self.resources;
         let mut bytes = counter.buffer(&resources.params_buffer) + counter.buffer(&self.surface);
         for view in [

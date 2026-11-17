@@ -6,23 +6,26 @@ use iced::wgpu;
 use rustc_hash::FxHashSet;
 
 #[derive(Default)]
-pub(super) struct ResourceCounter {
-    buffers: FxHashSet<wgpu::Buffer>,
-    textures: FxHashSet<wgpu::Texture>,
+pub(super) struct ResourceCounter<'a> {
+    // Borrow the live owners for this census instead of cloning each handle
+    // for a hash lookup. Handle equality still deduplicates cloned wrappers.
+    buffers: FxHashSet<&'a wgpu::Buffer>,
+    textures: FxHashSet<&'a wgpu::Texture>,
     block_arenas: FxHashSet<usize>,
+    wire_batches: FxHashSet<(usize, usize)>,
 }
 
-impl ResourceCounter {
-    pub(super) fn buffer(&mut self, buffer: &wgpu::Buffer) -> u64 {
-        if self.buffers.insert(buffer.clone()) {
+impl<'a> ResourceCounter<'a> {
+    pub(super) fn buffer(&mut self, buffer: &'a wgpu::Buffer) -> u64 {
+        if self.buffers.insert(buffer) {
             buffer.size()
         } else {
             0
         }
     }
 
-    pub(super) fn texture(&mut self, texture: &wgpu::Texture) -> u64 {
-        if !self.textures.insert(texture.clone()) {
+    pub(super) fn texture(&mut self, texture: &'a wgpu::Texture) -> u64 {
+        if !self.textures.insert(texture) {
             return 0;
         }
         texture_bytes(
@@ -34,11 +37,21 @@ impl ResourceCounter {
         )
     }
 
-    pub(super) fn blocks(&mut self, blocks: &[super::wire_gpu::BlockWireGpu]) -> u64 {
+    pub(super) fn blocks(&mut self, blocks: &'a [super::wire_gpu::BlockWireGpu]) -> u64 {
         super::wire_gpu::block_arena_bytes(blocks, &mut self.block_arenas)
     }
 
-    pub(super) fn wires(&mut self, wires: &[super::WireGpu]) -> u64 {
+    pub(super) fn wires(&mut self, wires: &'a [super::WireGpu]) -> u64 {
+        // Slots and the cold cache often hold the same immutable Arc<Vec<_>>.
+        // Include length so a prefix and the complete batch remain distinct.
+        // This set lasts only for this census; it cannot become stale next frame.
+        if wires.is_empty()
+            || !self
+                .wire_batches
+                .insert((wires.as_ptr() as usize, wires.len()))
+        {
+            return 0;
+        }
         wires
             .iter()
             .map(|wire| {
@@ -51,19 +64,19 @@ impl ResourceCounter {
             .sum()
     }
 
-    pub(super) fn text(&mut self, text: &[super::text_gpu::TextGpu]) -> u64 {
+    pub(super) fn text(&mut self, text: &'a [super::text_gpu::TextGpu]) -> u64 {
         text.iter()
             .map(|text| self.buffer(&text.vertex_buffer))
             .sum()
     }
 
-    pub(super) fn block_text(&mut self, text: &[super::text_gpu::BlockTextGpu]) -> u64 {
+    pub(super) fn block_text(&mut self, text: &'a [super::text_gpu::BlockTextGpu]) -> u64 {
         text.iter()
             .map(|text| self.buffer(&text.vertex_buffer) + self.buffer(&text.instance_buffer))
             .sum()
     }
 
-    pub(super) fn meshes(&mut self, chunks: &[super::mesh_gpu::MeshBatchChunk]) -> (u64, u64) {
+    pub(super) fn meshes(&mut self, chunks: &'a [super::mesh_gpu::MeshBatchChunk]) -> (u64, u64) {
         let mut buffers = 0;
         let mut materials = 0;
         for chunk in chunks {
@@ -193,14 +206,13 @@ mod tests {
             usage: wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
+        let buffer_alias = buffer.clone();
+        let texture_view = texture.create_view(&Default::default());
         let mut counter = ResourceCounter::default();
         assert_eq!(counter.buffer(&buffer), 4096);
-        assert_eq!(counter.buffer(&buffer.clone()), 0);
+        assert_eq!(counter.buffer(&buffer_alias), 0);
         assert_eq!(counter.texture(&texture), 512);
-        assert_eq!(
-            counter.texture(texture.create_view(&Default::default()).texture()),
-            0
-        );
+        assert_eq!(counter.texture(texture_view.texture()), 0);
         drop(counter);
         let mut next_frame = ResourceCounter::default();
         assert_eq!(next_frame.buffer(&buffer), 4096);
@@ -222,15 +234,10 @@ mod tests {
         assert_eq!(after.total() - before.total(), 4096);
         assert_eq!(after.wires - before.wires, 4096);
         assert_eq!(after.overlays, before.overlays);
+        let material_alias = pipeline.mesh_default_material_memory.clone();
         let mut shared = ResourceCounter::default();
         assert!(pipeline.mesh_default_material_memory.gpu_bytes(&mut shared) >= 7 * 4);
-        assert_eq!(
-            pipeline
-                .mesh_default_material_memory
-                .clone()
-                .gpu_bytes(&mut shared),
-            0
-        );
+        assert_eq!(material_alias.gpu_bytes(&mut shared), 0);
         pipeline.gpu_wires = Default::default();
         pipeline.gpu_preview_wires.clear();
         assert_eq!(
@@ -245,3 +252,7 @@ mod tests {
 #[cfg(all(test, feature = "performance-audit"))]
 #[path = "gpu_memory_audit.rs"]
 mod performance_audit;
+
+#[cfg(test)]
+#[path = "gpu_memory_collection_tests.rs"]
+mod collection_tests;

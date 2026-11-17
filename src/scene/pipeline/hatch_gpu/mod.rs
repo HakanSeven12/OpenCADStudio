@@ -53,7 +53,7 @@ pub struct HatchGpu {
 }
 
 impl HatchGpu {
-    pub(super) fn gpu_bytes(&self, counter: &mut super::gpu_memory::ResourceCounter) -> u64 {
+    pub(super) fn gpu_bytes<'a>(&'a self, counter: &mut super::gpu_memory::ResourceCounter<'a>) -> u64 {
         match &self.backend {
             HatchBackend::Storage { resident, preview } => resident
                 .iter()

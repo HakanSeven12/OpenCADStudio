@@ -2,6 +2,8 @@ The release audit found measurable CPU costs. The memory changes cannot be descr
 
 The [incremental history follow-up](performance-history-incremental.md) measures the subsequent history fix against this full-scan implementation. The measurements below describe the four original commits.
 
+The [GPU collection follow-up](performance-gpu-collection.md) measures the subsequent reduction in complete GPU collection cost and rechecks the history/save memory gains.
+
 Lazy save preparation improves the tested batch work and reduces its longest synchronous preparation burst. History accounting adds work when recording an edit, reaching 4.40 ms median for the dense distinct-version fixture. Expanded GPU counting costs CPU with PERF enabled; maintained GPU metadata also costs time and host memory with PERF disabled.
 
 Run date: 16 November 2026. Windows 11 Pro 26200, Intel Core Ultra 5 245KF (14 logical processors), NVIDIA RTX 5070 / Vulkan, driver 32.0.16.1088, rustc 1.94.1. The audit uses release optimization and mimalloc, matching the Windows application allocator. No counting allocator is installed. Both arms use the same current dependencies, hardware, allocator and fixture.

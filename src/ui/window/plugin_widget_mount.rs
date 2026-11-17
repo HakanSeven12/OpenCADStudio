@@ -118,7 +118,9 @@
 //! entry that dives, no widget-ring bytes move for non-table surfaces);
 //! INSIDE, Tab/Shift+Tab ADVANCE/REVERSE the cell cursor (SCN-030 form
 //! semantics: the row wraps at the column edge, an open draft COMMITS
-//! first, and only the table's MATERIALIZED edge LEAVES to the ring);
+//! first, and only the table's MATERIALIZED edge LEAVES to the ring;
+//! SCN-035: the landing ARMS — a writable landing opens the seeded draft
+//! immediately, Tab lands the user IN the editor);
 //! Up/Down rove rows (a window edge
 //! advances the scroll anchor; the PUBLISHED tail asks for the next page);
 //! Left/Right rove the cell cursor; Enter arms/commits the edit (the
@@ -4914,7 +4916,10 @@ pub(crate) fn mount_table_key_route(
 ///   ring walk restarts from its top — Shift: its bottom; the machine's
 ///   row focus stays parked, re-entering resumes). An open draft COMMITS
 ///   FIRST (exactly one `TableCellCommitted`, the Excel form law;
-///   [`table_scope_tab_step_owned`]).
+///   [`table_scope_tab_step_owned`]). (SCN-035) EVERY advance landing
+///   ARMS: a writable landing opens the seeded draft immediately — Tab
+///   lands the user IN the editor; a non-writable landing refuses quietly
+///   (the machine's counter is the probe).
 /// - **Up/Down/Left/Right + Escape** route THROUGH the pure
 ///   [`mount_table_key_route_owned`] (ONE translation body). At the
 ///   Up/Down WINDOW edges the roving stops; the v1 SCROLL law advances the
@@ -4956,7 +4961,8 @@ fn table_scope_key_owned(
     // law), wrapping rows at the column edge; at the table's MATERIALIZED
     // edge they LEAVE to the widget ring (the pre-existing leave path).
     // An open draft COMMITS FIRST — exactly one `TableCellCommitted` (see
-    // the helper); Escape stays the FREE cancel.
+    // the helper); Escape stays the FREE cancel. (SCN-035) the landing
+    // ARMS — Tab lands the user IN the editor (see the helper's step 5).
     if key == Key::Named(keyboard_key::Named::Tab) {
         return table_scope_tab_step_owned(registry, surface_id, state, modifiers, ring);
     }
@@ -5137,7 +5143,15 @@ fn table_scope_key_owned(
 /// 4. at the table's MATERIALIZED edge the scope LEAVES to the widget ring
 ///    (the pre-existing leave path: the scope clears, the ring walk
 ///    restarts from its top — Shift+Tab from its bottom — and the machine's
-///    row focus stays parked for the resume).
+///    row focus stays parked for the resume);
+/// 5. (SCN-035) every ADVANCE landing ARMS: when the landed cell is
+///    writable, the edit begins immediately (the machine's
+///    `begin_cell_edit` — the seeded draft; the user types directly —
+///    standard form semantics: Tab lands you IN the editor). The machine's
+///    gate is the authority: a non-writable landing (badge/icon/…) refuses
+///    QUIETLY — its `invalid_cell_refusals` counter is the probe, the
+///    cursor has still moved, no draft. Arming never happens on the LEAVE
+///    (step 4) and never on the DIVE (the scope's entry lands no cursor).
 fn table_scope_tab_step_owned(
     registry: &mut MountRegistry,
     surface_id: StableId,
@@ -5228,6 +5242,27 @@ fn table_scope_tab_step_owned(
                 // 4. The MATERIALIZED edge — the leave runs below, after
                 //    the machine borrow ends.
                 leave = true;
+            }
+        }
+        // 5. (SCN-035) The landing ARMS: Tab/Shift+Tab land the user IN the
+        //    editor — the machine's `begin_cell_edit` on the landed cell
+        //    (the seeded draft; the scope's compose buffer resets so the
+        //    typing composes from the seed, the Enter arm's own discipline).
+        //    The machine's gate is the authority: a non-writable landing
+        //    refuses QUIETLY (its counter is the probe — the cursor moved,
+        //    no draft); an in-flight address refuses the same way; a
+        //    commit that somehow left its draft open (the reserved shape —
+        //    unreachable post-SCN-034, the rollback law) refuses as
+        //    `DraftInFlight` and the draft stays. NO arm on a leave (`leave`
+        //    is the scope's exit — there is no landing) and the landing is
+        //    only real when the cursor names the machine's focused row.
+        if !leave {
+            if let Some(cell) = scope.cursor {
+                if machine.focus() == Some(cell.key)
+                    && machine.begin_cell_edit(cell.key, cell.column).is_ok()
+                {
+                    scope.edit = None;
+                }
             }
         }
     }
@@ -9551,6 +9586,86 @@ mod tests {
         );
     }
 
+    /// THE TWO-PHASE PRESS INVESTIGATION (the coordinator's synthetic
+    /// observation: press-2 ~1–2s after press-1 "did NOT arm — press 3
+    /// did"). Finding: NO production defect — the press route's
+    /// `already_here` probe (`machine.focus()` + the PRE-press cursor read
+    /// in `apply_mount_table_msg_owned`) is state-pure: in ONE process
+    /// press-2 arms (pinned by
+    /// `table_pointer_press_selects_then_edits_on_second_press` and re-pinned
+    /// here as the exact three-press sequence). The observation reproduces
+    /// ONLY across a process boundary: two SEPARATE script invocations each
+    /// start a fresh app — a fresh registry whose machines, focus and
+    /// cursor are empty — so invocation two's "press-2" is a PHASE-ONE
+    /// press (selection + cursor, no arm), and its "press-3" (the first
+    /// repeat WITHIN that process) arms. Pinned here as the split-process
+    /// simulation: the in-memory mount state is exactly what a process
+    /// restart discards; the production arm route is unchanged.
+    #[test]
+    fn table_press_arm_in_process_and_split_invocation_analysis() {
+        let _app = OpenCADStudio::new_for_test();
+        let _guard = register_test_surface(
+            "scn035_press_split",
+            demo_surface(demo_table_def(4, None)),
+        );
+        let press = |key: u64, column: u64| {
+            WidgetMountMsg::TableRowPressed {
+                surface_id: sid(120),
+                table_id: sid(200),
+                key: sid(key),
+                column: sid(column),
+            }
+        };
+        let route = |msg: WidgetMountMsg| {
+            with_test_registry_mut(|registry| route_mount_table_msg_owned(registry, &msg))
+        };
+
+        // INVOCATION ONE: press-1 (phase one), press-2 (arms — in-process).
+        let _ = route(press(300, 201));
+        assert_eq!(
+            table_read(120, 200, |machine| machine.draft().is_some()),
+            Some(false),
+            "press-1: selection + cursor, no editor yet"
+        );
+        let _ = route(press(300, 201));
+        assert_eq!(
+            table_read(120, 200, |machine| machine.draft().is_some()),
+            Some(true),
+            "press-2 IN-PROCESS arms (the already_here probe has no defect)"
+        );
+
+        // INVOCATION TWO (a NEW app/registry — what a separate script run
+        // sees; every in-memory fact above is gone): the SAME cell's press
+        // is a phase-one press again — NO arm (the observation) — and the
+        // NEXT press within this process arms (press-3, the observation).
+        let _app2 = OpenCADStudio::new_for_test();
+        let _guard2 = register_test_surface(
+            "scn035_press_split",
+            demo_surface(demo_table_def(4, None)),
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine.draft().is_some()),
+            Some(false),
+            "the fresh process carries no draft, no focus, no cursor"
+        );
+        let _ = route(press(300, 201));
+        assert_eq!(
+            table_read(120, 200, |machine| machine.draft().is_some()),
+            Some(false),
+            "press-2 across the process boundary: phase one, no arm"
+        );
+        let _ = route(press(300, 201));
+        assert!(
+            matches!(
+                table_read(120, 200, |machine| machine
+                    .draft()
+                    .map(|draft| draft.pending.clone())),
+                Some(Some(WidgetCellValue::Text(text))) if text == "material 000"
+            ),
+            "press-3 — the first repeat of ITS process — arms"
+        );
+    }
+
     /// The published-tail press asks for the next page ONCE (the machine's
     /// dedup suppresses the repeat); a mid-table press asks nothing.
     #[test]
@@ -9630,11 +9745,16 @@ mod tests {
 
     /// The ring law (SCN-028, unchanged bytes): Tab walks the WIDGET ring,
     /// the edge DIVES into the table (the machine's row focus lands on the
-    /// window's first row). The SCOPE law (SCN-030 form semantics): Tab
-    /// INSIDE advances the cell cursor across the row and wraps DOWN to the
-    /// next row's first column; Shift+Tab reverses (wrapping UP to the last
-    /// column); only the table's MATERIALIZED edge LEAVES to the ring (the
-    /// machine's row focus stays parked — re-entering resumes forward).
+    /// window's first row; the dive arms nothing). The SCOPE law (SCN-030
+    /// form semantics, SCN-035's arm): Tab INSIDE advances the cell cursor
+    /// across the row AND ARMS the landed writable cell (the seeded draft —
+    /// the user types directly); the row wraps DOWN to the next row's first
+    /// column (armed there too); Shift+Tab reverses (wrapping UP to the
+    /// last column, arming likewise); a display-only landing moves the
+    /// cursor and refuses QUIETLY (the machine's counter is the probe);
+    /// only the table's MATERIALIZED edge LEAVES to the ring (no arm on a
+    /// leave; the machine's row focus stays parked — re-entering resumes
+    /// forward).
     #[test]
     fn table_keyboard_tab_dives_in_and_advances_form_semantics() {
         let _app = OpenCADStudio::new_for_test();
@@ -9655,6 +9775,7 @@ mod tests {
             })
         };
         let bare_tab = || (Key::Named(keyboard_key::Named::Tab), Modifiers::NONE);
+        let escape = || (Key::Named(keyboard_key::Named::Escape), Modifiers::NONE);
 
         let handle = MountRegistry::handle_for_surface(sid(200)).expect("registered");
         assert!(!scope_active(200));
@@ -9682,9 +9803,17 @@ mod tests {
             table_read(200, 200, |machine| machine.focus()),
             Some(Some(sid(300)))
         );
+        // (SCN-035) The DIVE arms NOTHING — the law arms the ADVANCE
+        // landings (the dive lands no cursor at all).
+        assert_eq!(
+            table_read(200, 200, |machine| machine.draft().is_some()),
+            Some(false),
+            "the dive lands no editor"
+        );
 
-        // Tab INSIDE (form semantics): the cell cursor ADVANCES across the
-        // row — the scope STAYS, the machine's row focus stays.
+        // Tab INSIDE (form semantics, SCN-035): the cursor ADVANCES *AND*
+        // the edit ARMS — one press lands the user IN the editor (the
+        // seeded draft; the scope STAYS, the machine's row focus stays).
         let _ = key(bare_tab());
         assert_eq!(
             scope_cursor_of(200, 200),
@@ -9694,16 +9823,77 @@ mod tests {
             }),
             "the first Tab lands the first column"
         );
-        for column in [202, 203, 204] {
-            let _ = key(bare_tab());
-            assert_eq!(
-                scope_cursor_of(200, 200),
-                Some(CellFocus {
-                    key: sid(300),
-                    column: sid(column)
-                })
-            );
-        }
+        assert_eq!(
+            table_read(200, 200, |machine| machine
+                .draft()
+                .map(|draft| draft.pending.clone())),
+            Some(Some(WidgetCellValue::Text("material 000".to_string()))),
+            "the landing ARMED: the seeded text draft"
+        );
+        // The user types DIRECTLY into the armed draft — no second gesture.
+        let _ = key((Key::Character("Z".to_string().into()), Modifiers::NONE));
+        assert_eq!(
+            table_read(200, 200, |machine| machine
+                .draft()
+                .map(|draft| draft.pending.clone())),
+            Some(Some(WidgetCellValue::Text("material 000Z".to_string()))),
+            "the typing composed the armed draft"
+        );
+        // Escape stays the FREE cancel; the cursor stays put.
+        let _ = key(escape());
+        assert_eq!(
+            table_read(200, 200, |machine| machine.draft().is_some()),
+            Some(false)
+        );
+        assert_eq!(
+            scope_cursor_of(200, 200),
+            Some(CellFocus {
+                key: sid(300),
+                column: sid(201)
+            }),
+            "the free cancel left the cursor as-was"
+        );
+
+        // The WRITABLE landings arm their kinds; the DISPLAY-ONLY landing
+        // (badge 204) moves the cursor and refuses QUIETLY — the machine's
+        // gate is the authority, its counter the probe.
+        let _ = key(bare_tab()); // → (300, 202)
+        assert_eq!(
+            table_read(200, 200, |machine| machine
+                .draft()
+                .map(|draft| draft.pending.clone())),
+            Some(Some(WidgetCellValue::Number(0.0))),
+            "the Number landing armed its seeded draft"
+        );
+        let _ = key(escape());
+        let _ = key(bare_tab()); // → (300, 203)
+        assert_eq!(
+            table_read(200, 200, |machine| machine
+                .draft()
+                .map(|draft| draft.pending.clone())),
+            Some(Some(WidgetCellValue::Bool(true))),
+            "the Bool landing armed its seeded draft"
+        );
+        let _ = key(escape());
+        let _ = key(bare_tab()); // → (300, 204) — the BADGE
+        assert_eq!(
+            scope_cursor_of(200, 200),
+            Some(CellFocus {
+                key: sid(300),
+                column: sid(204)
+            }),
+            "the non-writable landing still moves the cursor"
+        );
+        assert_eq!(
+            table_read(200, 200, |machine| machine.draft().is_some()),
+            Some(false),
+            "the quiet refusal: no draft"
+        );
+        assert_eq!(
+            table_read(200, 200, |machine| machine.mutations().invalid_cell_refusals),
+            Some(1),
+            "the machine's kind gate counted ONE refusal"
+        );
         assert!(scope_active(200), "the scope survives the in-row advance");
 
         // The ROW's column edge: Tab wraps DOWN one row to its FIRST column.
@@ -9721,6 +9911,14 @@ mod tests {
             }),
             "the wrapped row's first column"
         );
+        assert_eq!(
+            table_read(200, 200, |machine| machine
+                .draft()
+                .map(|draft| draft.pending.clone())),
+            Some(Some(WidgetCellValue::Text("material 001".to_string()))),
+            "the row-wrap landing armed too (the new row's first cell)"
+        );
+        let _ = key(escape());
 
         // Shift+Tab REVERSES: the first column wraps UP one row to its LAST.
         let _ = key(shift_tab());
@@ -9737,19 +9935,41 @@ mod tests {
             }),
             "the wrapped-back row's LAST column"
         );
+        assert_eq!(
+            table_read(200, 200, |machine| machine.draft().is_some()),
+            Some(false),
+            "the backward landing is the display-only column: cursor only"
+        );
+        assert_eq!(
+            table_read(200, 200, |machine| machine.mutations().invalid_cell_refusals),
+            Some(2),
+            "the reverse onto the badge refused once more"
+        );
 
-        // Walk back to the FIRST row's FIRST cell, then Shift+Tab: the
+        // Walk back to the FIRST row's FIRST cell (each writable landing
+        // arms; the free cancel keeps the walk clean), then Shift+Tab: the
         // BACKWARD materialized edge LEAVES to the ring (the leave path's
         // FocusMoved, the ring walk restarted).
-        for _ in 0..3 {
+        for column in [203, 202, 201] {
             let _ = key(shift_tab());
+            assert_eq!(
+                scope_cursor_of(200, 200),
+                Some(CellFocus {
+                    key: sid(300),
+                    column: sid(column)
+                })
+            );
+            assert_eq!(
+                table_read(200, 200, |machine| machine.draft().is_some()),
+                Some(true),
+                "the reverse landing armed (column {column})"
+            );
+            let _ = key(escape());
         }
         assert_eq!(
-            scope_cursor_of(200, 200),
-            Some(CellFocus {
-                key: sid(300),
-                column: sid(201)
-            })
+            table_read(200, 200, |machine| machine.draft().is_some()),
+            Some(false),
+            "the walk back ended clean"
         );
         let msgs = key(shift_tab());
         assert!(!scope_active(200), "the backward edge left the scope");
@@ -9767,6 +9987,11 @@ mod tests {
             Some(Some(sid(300))),
             "the row focus parks across the leave"
         );
+        assert_eq!(
+            table_read(200, 200, |machine| machine.draft().is_some()),
+            Some(false),
+            "the LEAVE arms nothing (no landing, no editor)"
+        );
 
         // Re-enter: the roving RESUMES from the parked row (301).
         let _ = key(bare_tab()); // 7
@@ -9779,14 +10004,20 @@ mod tests {
         );
     }
 
-    /// The Excel form law (SCN-030): Tab with an open draft COMMITS it
-    /// FIRST — exactly one `TableCellCommitted` fact through the route —
-    /// THEN advances the cell cursor; Escape stays the FREE cancel.
+    /// THE FORM CHAIN (SCN-030's commit law + SCN-035's arm, end-to-end):
+    /// Tab arms the landed writable cell (seeded from the store), the user
+    /// types directly, the next Tab COMMITS exactly ONE fact, advances, and
+    /// arms the next writable cell — type → Tab → type → Tab, the standard
+    /// form semantics; a display-only landing (the badge) takes the quiet
+    /// refusal (cursor moves, no draft, the machine's counter the probe);
+    /// the machine's commit is infallible post-gates (SCN-034), so no
+    /// rollback shape can fire on this path. Enter's arm/commit halves are
+    /// the unchanged law (the dedicated pins hold; sanity-pinned here).
     #[test]
-    fn table_tab_commits_open_draft_then_advances() {
+    fn table_tab_form_chain_arms_types_commits_advances() {
         let _app = OpenCADStudio::new_for_test();
         let _guard = register_test_surface(
-            "scn030_tab_commit",
+            "scn035_tab_chain",
             demo_surface(demo_table_def(4, None)),
         );
         with_test_registry_mut(|registry| {
@@ -9799,13 +10030,20 @@ mod tests {
         };
         let tab = || Key::Named(keyboard_key::Named::Tab);
         let enter = || Key::Named(keyboard_key::Named::Enter);
+        let char_key = |text: &str| Key::Character(text.to_string().into());
+        let draft_of = || {
+            table_read(120, 200, |machine| {
+                machine
+                    .draft()
+                    .map(|draft| (draft.key, draft.column, draft.pending.clone()))
+            })
+        };
 
         let _ = key(tab(), Modifiers::NONE); // the dive (the table-only ring is empty)
         let _ = key(
             Key::Named(keyboard_key::Named::ArrowRight),
             Modifiers::NONE,
         ); // the cursor lands (300, 201)
-        let _ = key(enter(), Modifiers::NONE); // the draft arms (seed "material 000")
         assert_eq!(
             scope_cursor_of(120, 200),
             Some(CellFocus {
@@ -9813,15 +10051,46 @@ mod tests {
                 column: sid(201)
             })
         );
+
+        // TAB #1: the ADVANCE lands (300, 202) and ARMS it — one press, the
+        // seeded Number draft waits (no draft was open: no commit fact, no
+        // message; the resting cell is left untouched — Enter edits the
+        // resting cell, Tab edits the LANDING).
+        let msgs = key(tab(), Modifiers::NONE);
+        assert!(msgs.is_empty(), "an arming advance routes no message");
         assert_eq!(
-            table_read(120, 200, |machine| machine
-                .draft()
-                .map(|draft| draft.pending.clone())),
-            Some(Some(WidgetCellValue::Text("material 000".to_string()))),
-            "the draft armed"
+            scope_cursor_of(120, 200),
+            Some(CellFocus {
+                key: sid(300),
+                column: sid(202)
+            }),
+            "the advance landed"
+        );
+        assert_eq!(
+            draft_of(),
+            Some(Some((
+                sid(300),
+                sid(202),
+                WidgetCellValue::Number(0.0)
+            ))),
+            "the Tab landing armed the seeded Number draft"
         );
 
-        // Tab: the commit FACT leaves exactly once, THEN the cursor advances.
+        // The user types DIRECTLY (the Enter arm's own compose path).
+        let _ = key(char_key("4"), Modifiers::NONE);
+        let _ = key(char_key("2"), Modifiers::NONE);
+        assert_eq!(
+            draft_of(),
+            Some(Some((
+                sid(300),
+                sid(202),
+                WidgetCellValue::Number(42.0)
+            ))),
+            "the pending updates under the typing"
+        );
+
+        // TAB #2: exactly ONE commit fact, THEN the advance, THEN the next
+        // arm — the full form step.
         let msgs = key(tab(), Modifiers::NONE);
         assert_eq!(
             msgs,
@@ -9829,25 +10098,103 @@ mod tests {
                 surface_id: sid(120),
                 table_id: sid(200),
                 key: sid(300),
-                column: sid(201),
-                value: WidgetCellValue::Text("material 000".to_string()),
+                column: sid(202),
+                value: WidgetCellValue::Number(42.0),
             }],
             "exactly ONE commit fact, then the advance"
-        );
-        assert_eq!(
-            table_read(120, 200, |machine| machine.draft().is_some()),
-            Some(false),
-            "the draft completed"
         );
         assert_eq!(
             scope_cursor_of(120, 200),
             Some(CellFocus {
                 key: sid(300),
-                column: sid(202)
+                column: sid(203)
             }),
             "the cursor advanced AFTER the commit"
         );
-        assert!(scope_active(120), "the scope survives the commit-advance");
+        assert_eq!(
+            draft_of(),
+            Some(Some((
+                sid(300),
+                sid(203),
+                WidgetCellValue::Bool(true)
+            ))),
+            "the NEXT writable cell armed in the same press"
+        );
+        assert!(scope_active(120), "the scope survives the form step");
+
+        // The Bool draft composes through its own value key (Space), then
+        // TAB #3 lands on the BADGE: the cursor moves, the edit refuses
+        // QUIETLY — no draft, the machine's counter the probe. The commit
+        // is infallible post-gates (SCN-034): no rollback shape fired
+        // anywhere on this chain.
+        let _ = key(Key::Named(keyboard_key::Named::Space), Modifiers::NONE);
+        assert_eq!(
+            draft_of(),
+            Some(Some((
+                sid(300),
+                sid(203),
+                WidgetCellValue::Bool(false)
+            ))),
+            "the Bool draft toggled"
+        );
+        let refusals_before =
+            table_read(120, 200, |machine| machine.mutations().invalid_cell_refusals);
+        let msgs = key(tab(), Modifiers::NONE);
+        assert_eq!(
+            msgs,
+            vec![WidgetMountMsg::TableCellCommitted {
+                surface_id: sid(120),
+                table_id: sid(200),
+                key: sid(300),
+                column: sid(203),
+                value: WidgetCellValue::Bool(false),
+            }],
+            "the open Bool draft committed first; the badge landing then refused quietly"
+        );
+        assert_eq!(
+            scope_cursor_of(120, 200),
+            Some(CellFocus {
+                key: sid(300),
+                column: sid(204)
+            }),
+            "the non-writable landing moved the cursor"
+        );
+        assert_eq!(
+            draft_of(),
+            Some(None),
+            "the quiet refusal: NO draft on the badge"
+        );
+        assert_eq!(
+            table_read(120, 200, |machine| machine.mutations().invalid_cell_refusals),
+            refusals_before.map(|count| count + 1),
+            "the kind gate counted ONE refusal"
+        );
+
+        // The chain's ledger: TWO form steps, TWO facts, one per cell.
+        assert_eq!(
+            table_read(120, 200, |machine| machine.mutations().cell_writes),
+            Some(2),
+            "type → Tab → type → Tab committed exactly one fact per step"
+        );
+
+        // (Enter's law rides unchanged: Escape frees the armed draft, the
+        // cursor walks back, Enter re-arms — the dedicated pins hold.)
+        let _ = key(Key::Named(keyboard_key::Named::Escape), Modifiers::NONE);
+        for _ in 0..3 {
+            let _ = key(
+                Key::Named(keyboard_key::Named::ArrowLeft),
+                Modifiers::NONE,
+            );
+        }
+        let _ = key(enter(), Modifiers::NONE);
+        assert!(
+            matches!(
+                draft_of(),
+                Some(Some((key, column, WidgetCellValue::Text(_))))
+                    if key == sid(300) && column == sid(201)
+            ),
+            "Enter arms as before (the law's unchanged half)"
+        );
     }
 
     /// (SCN-030) A SUCCESSFUL table press CLAIMS the keyboard — the same

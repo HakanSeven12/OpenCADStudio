@@ -641,6 +641,10 @@ impl OpenCADStudio {
                 }
                 self.active_modal = Some(crate::app::ModalKind::AttDefEdit);
             }
+            FieldTarget::AttrEditor => {
+                self.field_dialog = None;
+                self.attr_editor_field_back(field, value);
+            }
             FieldTarget::EditorInsert => {
                 self.close_active_modal();
                 let (code, objects) = field.expect("set above");
@@ -679,6 +683,9 @@ impl OpenCADStudio {
             }
             Some(FieldTarget::AttdefEdit) if self.attdef_edit.is_some() => {
                 Some(crate::app::ModalKind::AttDefEdit)
+            }
+            Some(FieldTarget::AttrEditor) if self.attr_editor_session.is_some() => {
+                Some(crate::app::ModalKind::AttributeEditor)
             }
             _ => None,
         };

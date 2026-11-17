@@ -404,7 +404,10 @@ impl OpenCADStudio {
                     // instead of refusing to start.
                     if args.is_empty() {
                         use crate::modules::draw::modify::attedit::AtteditCommand;
-                        let command = AtteditCommand::new();
+                        let command = AtteditCommand::new(
+                            crate::modules::draw::modify::attedit::AtteditKind::Classic,
+                            None,
+                        );
                         self.command_line.push_info(&command.prompt());
                         self.tabs[i].active_cmd = Some(Box::new(command));
                     } else {

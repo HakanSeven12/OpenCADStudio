@@ -1113,6 +1113,9 @@ impl OpenCADStudio {
                 Some(Message::PropColorFieldChanged { field, color })
             }
             Some(crate::app::ColorPickTarget::MText) => Some(Message::MTextColorChanged(color)),
+            Some(crate::app::ColorPickTarget::AttrEditor) => {
+                Some(Message::AttrEditorColorValue(color))
+            }
             Some(crate::app::ColorPickTarget::MTextMask) => {
                 // Picked from the Background Mask window: its draft takes it.
                 if let Some(crate::ui::window::mtext_dialogs::MTextDialog::Mask(draft)) =

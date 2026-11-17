@@ -37,6 +37,7 @@ mod block_visibility;
 pub(crate) mod calc;
 mod command_driver;
 mod extraction_catalog;
+mod attr_editor;
 mod insert_attributes;
 #[cfg(test)]
 mod insert_attributes_tests;
@@ -1880,6 +1881,12 @@ pub(super) struct OpenCADStudio {
     attr_editor_tab: crate::ui::window::attribute_editor::AttrTab,
     /// Highlighted attribute row driving the Text Options / Properties tabs.
     attr_editor_selected: usize,
+    /// The editing session: what was last applied, for Cancel and Apply.
+    attr_editor_session: Option<attr_editor::AttrEditorSession>,
+    /// A refused value, shown in the window.
+    attr_editor_error: Option<String>,
+    /// "Keep the changes?" before Select block picks another block.
+    attr_editor_asking: bool,
     /// Plugin ids the user turned off in the Plugin Manager. Disabled plugins
     /// keep their manifest listed but drop their ribbon tab and command
     /// dispatch. Persisted via [`settings::UserSettings::disabled_plugins`].
@@ -2646,6 +2653,8 @@ pub enum ColorPickTarget {
     Interface(UiColor),
     /// A colour of the view Background dialog: 0 solid, 1 top, 2 middle, 3 bottom.
     ViewBackground(u8),
+    /// The selected attribute of the enhanced attribute editor.
+    AttrEditor,
 }
 
 /// Table records the clipboard entities depend on, snapshotted from the source
@@ -5389,9 +5398,24 @@ pub enum Message {
     AttrEditorLinetype(String),
     AttrEditorColor(String),
     AttrEditorLineweight(document::types::LineWeight),
-    /// Commit every attribute edit to the block, keeping the dialog open
-    /// (Apply); the frame ✕ closes and discards any un-applied edits.
+    /// Keep every attribute edit (Apply); the window stays open.
     AttrEditorApply,
+    /// Apply and close.
+    AttrEditorOk,
+    /// Take back what was not applied and close.
+    AttrEditorCancel,
+    AttrEditorHelp,
+    /// Pick another block (asks first when there are changes).
+    AttrEditorSelectBlock,
+    AttrEditorAnswer(crate::ui::window::attribute_editor::AttrAnswer),
+    AttrEditorDismissError,
+    /// Edit a multi-line value in the text editor.
+    AttrEditorEditValue,
+    /// Set the value from the Field dialog.
+    AttrEditorInsertField,
+    AttrEditorBoundary(String),
+    /// A colour chosen in the colour window.
+    AttrEditorColorValue(document::types::Color),
     /// Title-bar pressed: begin dragging the active modal.
     ModalGrab,
     /// Cursor moved while dragging the modal title bar.
@@ -6719,6 +6743,9 @@ impl OpenCADStudio {
             attr_editor_rows: Vec::new(),
             attr_editor_tab: crate::ui::window::attribute_editor::AttrTab::Attribute,
             attr_editor_selected: 0,
+            attr_editor_session: None,
+            attr_editor_error: None,
+            attr_editor_asking: false,
             disabled_plugins: rustc_hash::FxHashSet::default(),
             #[cfg(not(target_arch = "wasm32"))]
             last_plugin_selection: None,

@@ -30,6 +30,8 @@ pub enum FieldTarget {
     FormulaOperand,
     /// The caret of the open text editor.
     EditorInsert,
+    /// The selected value of the enhanced attribute editor.
+    AttrEditor,
 }
 
 /// The categories the dialog offers, with their fields (only the ones the

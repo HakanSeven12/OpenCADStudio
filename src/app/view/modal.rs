@@ -1745,12 +1745,17 @@ impl OpenCADStudio {
             super::super::ModalKind::AttributeEditor => {
                 let doc = &self.tabs[self.active_tab].scene.document;
                 let layers: Vec<String> = doc.layers.iter().map(|l| l.name.clone()).collect();
-                let mut linetypes: Vec<String> = vec!["ByLayer".to_string()];
+                // ByBlock and ByLayer, then the loaded linetypes.
+                let mut linetypes: Vec<String> = vec!["ByBlock".to_string(), "ByLayer".to_string()];
                 linetypes.extend(
                     doc.line_types
                         .iter()
                         .map(|lt| lt.name.clone())
-                        .filter(|n| !n.is_empty() && n != "ByLayer"),
+                        .filter(|n| {
+                            !n.is_empty()
+                                && !n.eq_ignore_ascii_case("ByLayer")
+                                && !n.eq_ignore_ascii_case("ByBlock")
+                        }),
                 );
                 let styles: Vec<String> = doc
                     .text_styles
@@ -1758,15 +1763,24 @@ impl OpenCADStudio {
                     .map(|s| s.name.trim().to_string())
                     .filter(|n| !n.is_empty())
                     .collect();
-                sized_flow(ex, 640, 500, |flow| {
+                // Shown, not edited: an attribute plots by its layer.
+                let plot_style = "ByLayer".to_string();
+                let pending = self.attr_editor_pending();
+                sized_flow(ex, 640, 560, |flow| {
                     crate::ui::window::attribute_editor::view_window(
-                        &self.attr_editor_block,
-                        &self.attr_editor_rows,
-                        self.attr_editor_selected,
-                        self.attr_editor_tab,
-                        layers.clone(),
-                        linetypes.clone(),
-                        styles.clone(),
+                        crate::ui::window::attribute_editor::AttrEditorView {
+                            block: &self.attr_editor_block,
+                            rows: &self.attr_editor_rows,
+                            selected: self.attr_editor_selected,
+                            tab: self.attr_editor_tab,
+                            layers: layers.clone(),
+                            linetypes: linetypes.clone(),
+                            styles: styles.clone(),
+                            plot_style: plot_style.clone(),
+                            pending,
+                            error: self.attr_editor_error.as_deref(),
+                            asking: self.attr_editor_asking,
+                        },
                         flow,
                     )
                 })

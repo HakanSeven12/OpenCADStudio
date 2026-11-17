@@ -6244,117 +6244,13 @@ impl OpenCADStudio {
         Task::none()
     }
 
-    /// Open the attribute editor dialog for the given INSERT, loading a working
-    /// copy of its attribute values. No-op (with a hint) when the block has no
-    /// attributes. Entry points: double-clicking such a block, or ATTEDIT.
-    pub(crate) fn open_attribute_editor(&mut self, handle: document::Handle) {
-        let i = self.active_tab;
-        if self.reject_locked_edit(i, handle) {
-            return;
-        }
-        let doc = &self.tabs[i].scene.document;
-        // Ok((block, rows)) to open; Err(msg) to report and stay closed. The
-        // borrow of `doc` ends with this match, before any `self` mutation.
-        let result = match doc.get_entity(handle) {
-            Some(document::EntityType::Insert(ins)) if !ins.attributes.is_empty() => {
-                // The prompt text lives on the block's ATTDEFs, not on the
-                // attribute instances — map tag → prompt from the definition.
-                let meta = block_attr_meta(doc, &ins.block_name);
-                let rows = ins
-                    .attributes
-                    .iter()
-                    .map(|a| attr_row_from_entity(a, &meta))
-                    .collect::<Vec<_>>();
-                Ok((ins.block_name.clone(), rows))
-            }
-            Some(document::EntityType::Insert(_)) => Err("ATTEDIT  This block has no attributes."),
-            _ => Err("ATTEDIT  Select a block with attributes."),
-        };
-        match result {
-            Ok((block, rows)) => {
-                self.attr_editor_block = block;
-                self.attr_editor_rows = rows;
-                self.attr_editor_selected = 0;
-                self.attr_editor_tab = AttrTab::Attribute;
-                self.attr_editor_handle = Some(handle);
-                self.active_modal = Some(crate::app::ModalKind::AttributeEditor);
-                self.modal_offset = iced::Vector::ZERO;
-                self.modal_resize = iced::Vector::ZERO;
-            }
-            Err(msg) => self.command_line.push_error(msg),
-        }
-    }
-
     /// The currently-selected editor row, for the Text Options / Properties
     /// edit handlers (which all act on that one attribute).
-    pub(super) fn attr_row_selected_mut(&mut self) -> Option<&mut AttrRow> {
+    pub(in crate::app) fn attr_row_selected_mut(&mut self) -> Option<&mut AttrRow> {
         let sel = self.attr_editor_selected;
         self.attr_editor_rows.get_mut(sel)
     }
 
-    /// Close the attribute editor without applying, if it is open. Used when
-    /// the tab it belongs to closes or the active tab switches — its handle is
-    /// document-local and must not outlive its tab.
-    pub(in crate::app) fn cancel_attr_editor(&mut self) {
-        if self.focus_dialog(crate::app::ModalKind::AttributeEditor) {
-            self.active_modal = None;
-            self.reset_modal_geometry();
-        }
-        self.attr_editor_handle = None;
-        self.attr_editor_block.clear();
-        self.attr_editor_rows.clear();
-        self.attr_editor_selected = 0;
-        self.attr_editor_tab = AttrTab::Attribute;
-    }
-
-    /// Commit every edited attribute (value, text options, common properties)
-    /// back to the block, keeping the dialog open (Apply). Closing is the frame
-    /// ✕ (`CloseModal`), which discards any un-applied edits — matching the
-    /// other modal windows. Applied positionally so blocks with duplicate tags
-    /// stay correct; guarded on block name + count so an edit can never land on
-    /// a different entity if the selection changed under the open dialog.
-    pub(super) fn on_attr_editor_apply(&mut self) -> Task<Message> {
-        let i = self.active_tab;
-        let Some(handle) = self.attr_editor_handle else {
-            return Task::none();
-        };
-        // The block's layer may have been locked while the editor was open —
-        // refuse to write attributes to a locked-layer block.
-        if let Some(layer) = self.tabs[i].scene.locked_layer_name(handle) {
-            self.command_line.push_info(
-                crate::tf!(
-                "Object is on locked layer \"{layer}\" — unlock the layer to edit its attributes."
-            )
-                .as_ref(),
-            );
-            return Task::none();
-        }
-        // Snapshot the working copy so the document can be mutated while the
-        // dialog's rows stay put (it remains open for further edits).
-        let rows = self.attr_editor_rows.clone();
-        let block = self.attr_editor_block.clone();
-
-        self.push_undo_snapshot(i, "ATTEDIT");
-        let mut changed = false;
-        if let Some(document::EntityType::Insert(ins)) =
-            self.tabs[i].scene.document.get_entity_mut(handle)
-        {
-            if ins.block_name == block && rows.len() == ins.attributes.len() {
-                for (attr, row) in ins.attributes.iter_mut().zip(rows.iter()) {
-                    changed |= apply_attr_row(attr, row);
-                }
-            }
-        }
-        if changed {
-            self.invalidate_property_targets(i, &[handle]);
-            self.tabs[i].dirty = true;
-        } else {
-            // Nothing changed — drop the snapshot pushed a moment ago.
-            self.discard_last_undo_entry(i);
-        }
-        self.refresh_properties();
-        Task::none()
-    }
 }
 
 pub(crate) struct BlockAttrMeta {
@@ -6391,7 +6287,8 @@ pub(crate) fn attr_row_from_entity(
     a: &document::entities::AttributeEntity,
     meta: &rustc_hash::FxHashMap<String, BlockAttrMeta>,
 ) -> AttrRow {
-    let fmt = |v: f64| format!("{v}");
+    // Shown as the reference prints them: no trailing zeros.
+    let fmt = |v: f64| crate::app::attr_editor::number(v);
     let ad_meta = meta.get(&a.tag);
     let prompt = ad_meta.map(|m| m.prompt.clone()).unwrap_or_default();
     let is_constant = a.flags.constant || ad_meta.is_some_and(|m| m.constant);
@@ -6404,8 +6301,17 @@ pub(crate) fn attr_row_from_entity(
         rotation: fmt(a.rotation.to_degrees()),
         width_factor: fmt(a.width_factor),
         oblique: fmt(a.oblique_angle.to_degrees()),
-        h_align: a.horizontal_alignment,
-        v_align: a.vertical_alignment,
+        // A multi-line attribute is placed by its text box's attachment.
+        h_align: a
+            .embedded_mtext
+            .as_ref()
+            .map(|m| crate::app::attr_editor::alignment_of(m.attachment_point).0)
+            .unwrap_or(a.horizontal_alignment),
+        v_align: a
+            .embedded_mtext
+            .as_ref()
+            .map(|m| crate::app::attr_editor::alignment_of(m.attachment_point).1)
+            .unwrap_or(a.vertical_alignment),
         backwards: a.text_generation_flags & 0x2 != 0,
         upside_down: a.text_generation_flags & 0x4 != 0,
         layer: a.common.layer.clone(),
@@ -6413,6 +6319,16 @@ pub(crate) fn attr_row_from_entity(
         linetype: a.common.linetype.clone(),
         line_weight: a.common.line_weight,
         is_constant,
+        index: 0,
+        multiline: a.is_multiline || a.embedded_mtext.is_some(),
+        boundary_width: a
+            .embedded_mtext
+            .as_ref()
+            .map(|m| fmt(m.rectangle_width))
+            .unwrap_or_else(|| "0".to_string()),
+        annotative: crate::app::attr_editor::attribute_is_annotative(a),
+        field: None,
+        field_changed: false,
     }
 }
 
@@ -6429,26 +6345,41 @@ pub(crate) fn apply_attr_row(a: &mut document::entities::AttributeEntity, row: &
         a.text_style = row.text_style.clone();
         ch = true;
     }
-    if let Ok(h) = row.height.trim().parse::<f64>() {
+    // A zero height is ignored, as the reference does; the window refuses a
+    // negative one, an unreadable one, and the out-of-range factors.
+    if let Ok(h) = row.height.trim().parse::<f64>().map_err(|_| ()).and_then(|h| if h > 0.0 { Ok(h) } else { Err(()) }) {
         if a.height != h {
             a.height = h;
             ch = true;
         }
     }
     if let Ok(deg) = row.rotation.trim().parse::<f64>() {
-        let rad = deg.to_radians();
+        // 400 is kept as 40.
+        let rad = deg.rem_euclid(360.0).to_radians();
         if (a.rotation - rad).abs() > 1e-12 {
             a.rotation = rad;
             ch = true;
         }
     }
-    if let Ok(w) = row.width_factor.trim().parse::<f64>() {
+    if let Some(w) = row
+        .width_factor
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|w| (0.01..=100.0).contains(w) && !row.multiline)
+    {
         if a.width_factor != w {
             a.width_factor = w;
             ch = true;
         }
     }
-    if let Ok(deg) = row.oblique.trim().parse::<f64>() {
+    if let Some(deg) = row
+        .oblique
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|d| d.abs() <= 85.0 && !row.multiline)
+    {
         let rad = deg.to_radians();
         if (a.oblique_angle - rad).abs() > 1e-12 {
             a.oblique_angle = rad;
@@ -6488,6 +6419,33 @@ pub(crate) fn apply_attr_row(a: &mut document::entities::AttributeEntity, row: &
     if a.common.line_weight != row.line_weight {
         a.common.line_weight = row.line_weight;
         ch = true;
+    }
+    // A multi-line attribute draws from its embedded text: it follows.
+    if let Some(m) = a.embedded_mtext.as_mut() {
+        if let Some(w) = row
+            .boundary_width
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|w| *w >= 0.0)
+        {
+            if m.rectangle_width != w {
+                m.rectangle_width = w;
+                ch = true;
+            }
+        }
+        if m.height != a.height || m.rotation != a.rotation || m.style != a.text_style {
+            m.height = a.height;
+            m.rotation = a.rotation;
+            m.style = a.text_style.clone();
+            ch = true;
+        }
+        if let Some(p) = crate::app::attr_editor::attachment_for(a.horizontal_alignment, a.vertical_alignment) {
+            if m.attachment_point != p {
+                m.attachment_point = p;
+                ch = true;
+            }
+        }
     }
     ch
 }

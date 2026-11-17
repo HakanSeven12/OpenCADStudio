@@ -61,8 +61,9 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// Fresh xref reads joined the read facade; six direct-reference lifecycle
 /// writes joined execute with operation-local unknown-field rejection.
 /// The Text Editor tab's windows are driveable from a script: `mtext_dialog`.
+/// The enhanced attribute editor joined them: `attr_editor`.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "0da42ece4101c12a9924985337bf946bb6b3e8fd2dfddd33606ee9dd8174372e";
+const TOOL_SCHEMA_DIGEST: &str = "4366a2e031648b20e8222671513d26378581c0fbd191128c10a632f63ad8f4ec";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

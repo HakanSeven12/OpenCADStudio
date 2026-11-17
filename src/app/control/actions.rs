@@ -208,6 +208,13 @@ pub(super) const NAMES: &[&str] = &[
     "table_insert_dialog",
     "table_style_dialog",
     "attdef_dialog",
+    // The enhanced attribute editor: `tab=attribute|text|properties`,
+    // `row=<n>`, `value=`, `style=`, `justify=`, `height=`, `rotation=`,
+    // `width=`, `oblique=`, `boundary=`, `backwards=0|1`, `upside_down=0|1`,
+    // `layer=`, `linetype=`, `color=`, `apply`, `ok`, `cancel`, `help`,
+    // `select_block`, `answer=save|discard|stay`, `dismiss`, `edit_value`,
+    // `insert_field`.
+    "attr_editor",
     "field_dialog",
     "attman_dialog",
     "sheet_set",
@@ -2380,6 +2387,56 @@ impl OpenCADStudio {
             // `prompt=…`, `default=…`, `justify=MC`, `style=…`, `height=…`,
             // `rotation=…`, `width=…`, `on_screen=0|1`, `x=…` / `y=…` / `z=…`,
             // `mode=<bit>:0|1`, `annotative=0|1`, `align_below=0|1`, `edit_value`, `dismiss`.
+            "attr_editor" if self.attr_editor_session.is_some() => {
+                use crate::ui::window::attribute_editor::{AttrAnswer, AttrTab};
+                let value = string(req, "value")?;
+                let (key, v) = value.split_once('=').unwrap_or((value, ""));
+                let idx = self.attr_editor_selected;
+                match key {
+                    "tab" => Message::AttrEditorTab(match v {
+                        "text" => AttrTab::TextOptions,
+                        "properties" => AttrTab::Properties,
+                        _ => AttrTab::Attribute,
+                    }),
+                    "row" => Message::AttrEditorSelect(
+                        v.parse::<usize>()
+                            .map_err(|_| failure("invalid_value", "row=<n>"))?,
+                    ),
+                    "value" => Message::AttrEditorInput {
+                        idx,
+                        value: v.into(),
+                    },
+                    "style" => Message::AttrEditorTextStyle(v.into()),
+                    "justify" => Message::AttrEditorJustify(v.into()),
+                    "height" => Message::AttrEditorHeight(v.into()),
+                    "rotation" => Message::AttrEditorRotation(v.into()),
+                    "width" => Message::AttrEditorWidth(v.into()),
+                    "oblique" => Message::AttrEditorOblique(v.into()),
+                    "boundary" => Message::AttrEditorBoundary(v.into()),
+                    "backwards" => Message::AttrEditorBackwards(v == "1"),
+                    "upside_down" => Message::AttrEditorUpsideDown(v == "1"),
+                    "layer" => Message::AttrEditorLayer(v.into()),
+                    "linetype" => Message::AttrEditorLinetype(v.into()),
+                    "color" => Message::AttrEditorColor(v.into()),
+                    "apply" => Message::AttrEditorApply,
+                    "ok" => Message::AttrEditorOk,
+                    "cancel" => Message::AttrEditorCancel,
+                    "help" => Message::AttrEditorHelp,
+                    "select_block" => Message::AttrEditorSelectBlock,
+                    "answer" => Message::AttrEditorAnswer(match v {
+                        "save" => AttrAnswer::Save,
+                        "discard" => AttrAnswer::Discard,
+                        _ => AttrAnswer::Stay,
+                    }),
+                    "dismiss" => Message::AttrEditorDismissError,
+                    "edit_value" => Message::AttrEditorEditValue,
+                    "insert_field" => Message::AttrEditorInsertField,
+                    _ => return Err(failure("invalid_value", "Unknown attribute editor field")),
+                }
+            }
+            "attr_editor" => {
+                return Err(failure("no_dialog", "The attribute editor is not open"));
+            }
             "attdef_dialog" => {
                 use crate::ui::window::attdef_dialog::{AttdefDialogMsg as M, JustifyChoice};
                 let value = string(req, "value")?;

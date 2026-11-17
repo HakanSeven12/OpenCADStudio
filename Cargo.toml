@@ -18,6 +18,8 @@ members = [
     "crates/ocs_web_worker",
     "crates/dwg-thumbnailer",
     "crates/dwg-thumbnailer-win",
+    "crates/solidcore-record",
+    "crates/step-export",
 ]
 
 [target.'cfg(windows)'.build-dependencies]
@@ -46,6 +48,10 @@ svgtypes = "0.15.3"
 document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "b3cef47", features = ["serde"] }
 kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "302452d", features = ["brep", "offset"] }
 ocs_acis = { path = "crates/ocs_acis" }
+# STEP exchange structure and exact B-rep writer, vendored from solidcore
+# (Apache-2.0; see crates/step-export/VENDORED.md).
+solidcore-record = { path = "crates/solidcore-record" }
+step-export = { path = "crates/step-export" }
 kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "302452d" }
 graph = { package = "opencadgraph", git = "https://github.com/HakanSeven12/opencadgraph.git", rev = "5e4dc20" }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }

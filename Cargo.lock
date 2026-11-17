@@ -75,6 +75,8 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "skrifa 0.42.1",
+ "solidcore-record",
+ "step-export",
  "svgtypes",
  "tiny-skia",
  "ttf-parser",
@@ -6238,6 +6240,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore-record"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "spade"
 version = "2.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6278,6 +6287,13 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "step-export"
+version = "0.1.0"
+dependencies = [
+ "solidcore-record",
+]
 
 [[package]]
 name = "strict-num"

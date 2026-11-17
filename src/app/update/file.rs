@@ -3291,21 +3291,59 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_step_export_path_some(&mut self, path: std::path::PathBuf) -> Task<Message> {
+        use document::EntityType;
         let i = self.active_tab;
-        // Export uses LOD 0 (full resolution); see StlExportPath above.
-        let meshes: Vec<crate::scene::model::mesh_model::MeshModel> = self.tabs[i]
-            .scene
-            .meshes
-            .values()
-            .filter_map(|s| s.lods.first().cloned())
+        let scene = &self.tabs[i].scene;
+        // Every object with a 3D mesh, in handle order: its ACIS data (lifted
+        // on the worker) for an exact B-rep, and the full-resolution mesh
+        // (LOD 0; see StlExportPath above) to fall back on.
+        let mut handles: Vec<_> = scene.meshes.keys().copied().collect();
+        handles.sort_unstable_by_key(|h| h.value());
+        let objects: Vec<_> = handles
+            .into_iter()
+            .filter_map(|handle| {
+                let mesh = scene.meshes.get(&handle)?.lods.first()?.clone();
+                let entity = scene.document.get_entity(handle);
+                let (kind, acis, solid) = match entity {
+                    Some(EntityType::Solid3D(e)) => ("Solid", Some(e.acis_data.clone()), true),
+                    Some(EntityType::Body(e)) => ("Body", Some(e.acis_data.clone()), true),
+                    Some(EntityType::Region(e)) => ("Region", Some(e.acis_data.clone()), false),
+                    Some(EntityType::Surface(e)) => ("Surface", Some(e.acis_data.clone()), false),
+                    _ => ("Mesh", None, true),
+                };
+                let layer = entity.map(|e| e.common().layer.clone());
+                let [r, g, b, _] = mesh.color;
+                let name = format!("{kind} {:X}", handle.value());
+                Some((acis, solid, mesh, name, layer, [r, g, b].map(f64::from)))
+            })
             .collect();
+        let unit_mm =
+            crate::app::properties::insunits_to_mm(scene.document.header.insertion_units)
+                .unwrap_or(1.0);
+        let schema = self.step_schema;
+        let product = self.tabs[i]
+            .current_path
+            .as_deref()
+            .and_then(|p| p.file_stem())
+            .map_or_else(|| "OpenCADStudio".to_string(), |s| s.to_string_lossy().into_owned());
         let worker_path = path.clone();
         background_task(
             crate::t!("STEP export"),
             move || {
-                let mesh_refs: Vec<_> = meshes.iter().collect();
-                let text = crate::io::step::build_step(&mesh_refs)
-                    .ok_or_else(|| "no mesh data to export".to_string())?;
+                let items: Vec<_> = objects
+                    .into_iter()
+                    .map(|(acis, solid, mesh, name, layer, color)| crate::io::step::StepItem {
+                        body: acis.as_ref().and_then(
+                            crate::scene::convert::solid3d_tess::kernel_acis_body,
+                        ),
+                        solid,
+                        mesh: Some(mesh),
+                        name,
+                        layer,
+                        color: Some(color.map(|c| c.clamp(0.0, 1.0))),
+                    })
+                    .collect();
+                let text = crate::io::step::build_step(&items, unit_mm, schema, &product)?;
                 write_export(&worker_path, text.as_bytes())
             },
             move |result| Message::StepExportFinished(path, result),

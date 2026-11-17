@@ -354,7 +354,7 @@ Generated from the command registry of OpenCADStudio `main` (commit f664c42, 202
 | `REFCLOSE` | — | Closes in-place reference editing. † |
 | `REFEDIT` | — | Edits a block or xref in place. † |
 | `REFSET` | — | Adds or removes objects from the working set of an in-place edit. † |
-| `STEPOUT` | — | Export 3D meshes to STEP AP203 format. |
+| `STEPOUT` | — | Export 3D objects to STEP (AP214; `STEPOUT AP203` / `AP242`), solids as exact B-reps. |
 | `UNDERLAY` | — | Edit properties of selected PDF/DWF/DGN underlay entities. Usage: UNDERLAY FADE <0-80> UNDERLAY CONTRAST <0-100> UNDERLAY ON \| OFF UNDERLAY CLIP ON \| OFF UNDERLAY MONO ON \| OFF. |
 | `WMFIN` | — | Imports a Windows metafile (WMF). † |
 

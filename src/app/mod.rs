@@ -1405,6 +1405,8 @@ pub(super) struct OpenCADStudio {
     /// `MIRRTEXT`) — the next command-line entry is its new value, empty keeps
     /// the current one.
     pending_setvar: Option<String>,
+    /// The schema the next STEPOUT writes (`STEPOUT AP203|AP214|AP242`).
+    step_schema: crate::io::step::Schema,
     /// DELOBJ system variable (0–3), shared by every open drawing.
     delete_objects: i16,
     /// Cursor is hovering over the UCS icon body — drives the hover highlight.
@@ -6555,6 +6557,7 @@ impl OpenCADStudio {
             awaiting_vports: false,
             vpmax_state: None,
             pending_setvar: None,
+            step_schema: crate::io::step::Schema::Ap214,
             delete_objects: 1,
             ucs_icon_hover: false,
             ucs_icon_selected: false,

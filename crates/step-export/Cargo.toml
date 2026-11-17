@@ -1,0 +1,10 @@
+[package]
+name = "step-export"
+description = "ISO 10303-21 writer for the neutral STEP B-rep model, and the mapper that reads a Part 21 file into that model; vendored from solidcore"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+solidcore-record = { path = "../solidcore-record" }

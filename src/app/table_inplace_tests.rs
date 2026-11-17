@@ -1093,6 +1093,17 @@ fn a_formula_typed_in_a_cell_is_stored_as_a_formula_field() {
     );
 }
 
+/// The open cell editor marks its table so the scene keeps
+/// the row and column labels; closing it clears the mark.
+#[test]
+fn the_cell_editor_marks_its_table_for_the_labels() {
+    let (mut app, handle) = fixture("x");
+    start(&mut app, handle);
+    let i = app.active_tab;
+    assert_eq!(app.tabs[i].scene.table_cell_editing, Some(handle));
+    app.close_table_cell_editor();
+    assert_eq!(app.tabs[i].scene.table_cell_editing, None);
+}
 /// A formula entered on the command line (TABLEDIT, scripts) is stored as
 /// a formula field too, and undo brings back the cell as it was.
 #[test]

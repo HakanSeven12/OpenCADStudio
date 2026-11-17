@@ -177,6 +177,7 @@ impl OpenCADStudio {
             Vec::new()
         };
         scene.set_command_preview_hidden(&[cell.handle]);
+        scene.table_cell_editing = Some(cell.handle);
         scene.set_preview_wires(preview);
     }
 
@@ -186,6 +187,7 @@ impl OpenCADStudio {
         };
         if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == cell.tab_id) {
             tab.scene.set_command_preview_hidden(&[]);
+            tab.scene.table_cell_editing = None;
             tab.scene.set_preview_wires(Vec::new());
             tab.snap_result = None;
         }

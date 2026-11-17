@@ -98,16 +98,19 @@ use device_capabilities::DeviceCapabilities;
 pub(crate) fn msaa_samples() -> u32 {
     static SAMPLES: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
     *SAMPLES.get_or_init(|| {
-        let n = std::env::var("OCS_MSAA")
-            .ok()
-            .and_then(|v| v.trim().parse::<u32>().ok())
-            .filter(|n| matches!(n, 1 | 4))
-            .unwrap_or(4);
-        if crate::perf::enabled() {
-            eprintln!("[perf] msaa samples={n}");
-        }
+        let n = msaa_samples_from(std::env::var("OCS_MSAA").ok().as_deref());
+        crate::perf_record!("[perf] msaa samples={n}");
         n
     })
+}
+
+/// The sample count an `OCS_MSAA` value asks for: 1 or 4, and 4 for any
+/// other value or none.
+fn msaa_samples_from(value: Option<&str>) -> u32 {
+    value
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .filter(|n| matches!(n, 1 | 4))
+        .unwrap_or(4)
 }
 const SHADOW_MAP_SIZE: u32 = 2048;
 
@@ -7704,4 +7707,22 @@ mod highlight_classification_tests {
 /// edit (`OCS_ANALYTIC_PATCH=0` turns it off).
 pub(crate) fn analytic_patch_enabled() -> bool {
     analytic_slots::enabled()
+}
+
+#[cfg(test)]
+mod msaa_sample_tests {
+    use super::msaa_samples_from;
+
+    /// `OCS_MSAA` takes 1 or 4; anything else, or nothing, keeps the 4 the
+    /// pipelines always used.
+    #[test]
+    fn ocs_msaa_takes_one_or_four_and_keeps_four_otherwise() {
+        assert_eq!(msaa_samples_from(Some("1")), 1);
+        assert_eq!(msaa_samples_from(Some(" 1 ")), 1);
+        assert_eq!(msaa_samples_from(Some("4")), 4);
+        for other in ["2", "8", "0", "", "x", "-1"] {
+            assert_eq!(msaa_samples_from(Some(other)), 4, "OCS_MSAA={other:?}");
+        }
+        assert_eq!(msaa_samples_from(None), 4);
+    }
 }

@@ -28,6 +28,14 @@ pub enum ImportDialogMsg {
     OnlySupported(bool),
     Picked(Option<String>),
     ImportOk,
+    /// A SAT, STEP or IGES file read on a worker thread (IMPORT, ACISIN),
+    /// for the drawing with this tab id: what it brings in, or the error to
+    /// report.
+    ModelRead(
+        u64,
+        crate::io::model_import::ModelFormat,
+        Result<crate::io::model_import::Imported, String>,
+    ),
     // DGN Import
     DgnChange,
     DgnPicked(Option<String>),

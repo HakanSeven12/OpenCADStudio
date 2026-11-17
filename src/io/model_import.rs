@@ -15,6 +15,7 @@ pub enum ModelFormat {
 }
 
 /// The objects a file brings in.
+#[derive(Debug, Clone)]
 pub struct Imported {
     /// Block definitions, each before any block that inserts it.
     pub blocks: Vec<(String, Vec<EntityType>)>,

@@ -118,19 +118,17 @@ impl OpenCADStudio {
         }
     }
 
-    /// Reads a model file into drawing `i`.
+    /// Reads a model file into drawing `i`. The file is read and converted
+    /// on a worker thread, so a reader that panics on a damaged file reports
+    /// an error instead of ending the app; the objects are added to the
+    /// drawing when the worker finishes ([`Self::on_model_import_finished`]).
     pub(in crate::app) fn import_model(
         &mut self,
         i: usize,
         path: &str,
         format: ModelFormat,
     ) -> Task<Message> {
-        let Some(bytes) = crate::scene::model::pdf_raster::source_bytes(path) else {
-            self.command_line
-                .push_error(&format!("File {path} does not exist."));
-            return Task::none();
-        };
-        let translated = format != ModelFormat::Sat;
+        let tab_id = self.tabs[i].id;
         let drawing_mm = crate::app::properties::insunits_to_mm(
             self.tabs[i].scene.document.header.insertion_units,
         );
@@ -138,12 +136,48 @@ impl OpenCADStudio {
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let Some(imported) = model_import::read(format, &bytes, drawing_mm, &stem) else {
-            self.command_line.push_error(&format!(
-                "Import failed: {path} has no model the importer reads."
-            ));
+        let path = path.to_string();
+        crate::app::update::background_task(
+            crate::tf!("Import of {path}"),
+            move || {
+                let Some(bytes) = crate::scene::model::pdf_raster::source_bytes(&path) else {
+                    return Err(format!("File {path} does not exist."));
+                };
+                model_import::read(format, &bytes, drawing_mm, &stem).ok_or_else(|| {
+                    format!("Import failed: {path} has no model the importer reads.")
+                })
+            },
+            move |result| {
+                Message::ImportDialog(
+                    crate::ui::window::import_dialogs::ImportDialogMsg::ModelRead(
+                        tab_id, format, result,
+                    ),
+                )
+            },
+        )
+    }
+
+    /// Adds what a model file brought in to the drawing it was read for, as
+    /// one undo step, or reports why it brought nothing.
+    pub(in crate::app) fn on_model_import_finished(
+        &mut self,
+        tab_id: u64,
+        format: ModelFormat,
+        result: Result<model_import::Imported, String>,
+    ) -> Task<Message> {
+        let imported = match result {
+            Ok(imported) => imported,
+            Err(error) => {
+                self.command_line.push_error(&error);
+                return Task::none();
+            }
+        };
+        let Some(i) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            self.command_line
+                .push_info(crate::t!("IMPORT: target drawing was closed.").as_ref());
             return Task::none();
         };
+        let translated = format != ModelFormat::Sat;
         self.push_undo_snapshot(i, "IMPORT");
         let scene = &mut self.tabs[i].scene;
         // Each block goes under a name the drawing does not use yet (a

@@ -316,6 +316,9 @@ impl OpenCADStudio {
     ) -> Task<Message> {
         let i = self.active_tab;
         match message {
+            ImportDialogMsg::ModelRead(tab_id, format, result) => {
+                return self.on_model_import_finished(tab_id, format, result);
+            }
             ImportDialogMsg::Help(which) => {
                 let help = match which {
                     "dgn" => crate::t!(

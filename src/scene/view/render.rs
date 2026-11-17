@@ -6227,7 +6227,7 @@ fn edge_outline(name: String, points: Vec<[f64; 3]>, tint: [f32; 4], selected: b
 /// a block's, or the reference turns, scales or mirrors it.
 fn moved_edge_outline(
     set: &crate::scene::model::mesh_model::MeshLodSet,
-    prototypes: &mut rustc_hash::FxHashMap<usize, Arc<Vec<WireModel>>>,
+    prototypes: &mut rustc_hash::FxHashMap<(usize, bool), Arc<Vec<WireModel>>>,
     name: &str,
     tint: [f32; 4],
     selected: bool,
@@ -6238,7 +6238,9 @@ fn moved_edge_outline(
         return None;
     }
     let prototype = prototypes
-        .entry(Arc::as_ptr(source) as usize)
+        // The tint follows `selected`, so a hovered and a selected
+        // reference of one block each get their own shape.
+        .entry((Arc::as_ptr(source) as usize, selected))
         .or_insert_with(|| {
             let points = edge_outline_points(&source.edge_verts, &source.edge_verts_low, None);
             let mut outline = edge_outline(name.to_string(), points, tint, selected);

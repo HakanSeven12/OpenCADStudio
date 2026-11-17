@@ -491,12 +491,13 @@ fn lengthen_spline(spl: &SplineEnt, pick_pt: Vec3, mode: &LenMode) -> Option<Ent
         return None;
     }
     let new_len = apply_mode(arc_len, mode)?;
-    if new_len < 1e-10 || new_len >= arc_len {
-        // A spline is shortened by splitting it, so there is nothing to keep
-        // if the new length is the whole of it or more. Extending would mean
-        // continuing the curve past its own control polygon, which is a
-        // different operation from cutting one.
+    if new_len < 1e-10 || (new_len - arc_len).abs() <= 1e-10 * arc_len.max(1.0) {
         return None;
+    }
+    if new_len > arc_len {
+        // Longer: the curve continued past the picked end, curvature
+        // continuous, the original part unchanged.
+        return extend_spline(spl, pick_pt, new_len - arc_len);
     }
 
     let p_start = nurbs.point_at_knot(t0);
@@ -517,6 +518,42 @@ fn lengthen_spline(spl: &SplineEnt, pick_pt: Vec3, mode: &LenMode) -> Option<Ent
     let cut = (t0 + at * (t1 - t0)).clamp(t0 + 1e-10, t1 - 1e-10);
     let (left, right) = spline_cut(spl, cut)?;
     Some(EntityType::Spline(if extend_end { left } else { right }))
+}
+
+fn extend_spline(spl: &SplineEnt, pick_pt: Vec3, distance: f64) -> Option<EntityType> {
+    if spl.flags.closed || spl.flags.periodic {
+        return None;
+    }
+    let curve = crate::entities::spline::nurbs3(spl)?.with_periodicity(false);
+    let (t0, t1) = curve.domain();
+    let (p_start, p_end) = (curve.point_at_knot(t0), curve.point_at_knot(t1));
+    let (px, py) = (pick_pt.x as f64, pick_pt.y as f64);
+    let at_end =
+        (p_end[0] - px).hypot(p_end[1] - py) <= (p_start[0] - px).hypot(p_start[1] - py);
+    let longer = curve.extended(at_end, distance)?;
+    let mut result = spl.clone();
+    result.common.handle = Handle::NULL;
+    result.degree = longer.degree() as i32;
+    result.control_points = longer
+        .control_points()
+        .iter()
+        .map(|p| Vector3::new(p[0], p[1], p[2]))
+        .collect();
+    result.knots = longer.knots().to_vec();
+    result.flags.rational = longer.is_rational();
+    result.weights = if result.flags.rational {
+        longer.weights().to_vec()
+    } else {
+        Vec::new()
+    };
+    // The fit data described the shorter curve; what comes back is a
+    // control-point spline.
+    result.fit_points.clear();
+    result.begin_tangent = Vector3::ZERO;
+    result.end_tangent = Vector3::ZERO;
+    result.dwg_flags1 &= !1;
+    result.dxf_flags &= !(32 | 1024);
+    Some(EntityType::Spline(result))
 }
 
 // ── Autocomplete registry ─────────────────────────────────

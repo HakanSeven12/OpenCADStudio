@@ -88,6 +88,22 @@ fn spline_to_nurbs_with(
     }
 
     // No usable control polygon, so this is a fit-point spline.
+    if spl.fit_tolerance > 0.0 && !spl.flags.periodic {
+        // Fitted within a tolerance: the shared spatial fit, read in the
+        // plane. Projecting the control points projects the curve.
+        let curve = crate::entities::spline::fit_nurbs3(spl)?;
+        let projected = curve
+            .control_points()
+            .iter()
+            .map(|p| point(&Vector3::new(p[0], p[1], p[2])))
+            .collect();
+        return NurbsCurve::new(
+            curve.degree(),
+            projected,
+            curve.knots().to_vec(),
+            Some(curve.weights().to_vec()),
+        );
+    }
     let mut fit: Vec<[f64; 2]> = spl.fit_points.iter().map(&point).collect();
     let parameterization = match spl.knot_parameterization {
         2 => Parameterization::Uniform,

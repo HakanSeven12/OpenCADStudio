@@ -194,7 +194,9 @@ impl SplineditCommand {
         let Some(source) = self.spline.as_ref() else {
             return CmdResult::NeedPoint;
         };
-        if source.fit_tolerance != 0.0 || source.weights.windows(2).any(|w| w[0] != w[1]) {
+        // A tolerance fit is rebuilt like any other (`fit_nurbs3` honours the
+        // tolerance); a weighted control curve has no fit data to rebuild from.
+        if source.weights.windows(2).any(|w| w[0] != w[1]) {
             return CmdResult::ReportError(
                 crate::t!(
                     "Editing weighted or tolerance-fitted interpolation data is not supported."
@@ -233,12 +235,6 @@ impl SplineditCommand {
         };
         let mut result = source.clone();
         if crate::entities::spline::uses_fit_method(&result) {
-            if result.fit_tolerance != 0.0 {
-                return CmdResult::ReportError(
-                    crate::t!("Fit data cannot be purged without a stored control curve.")
-                        .into_owned(),
-                );
-            }
             let Some(curve) = spatial_spline(source)
                 .and_then(|c| c.compact_knots(source.control_tolerance.max(1e-9)))
             else {

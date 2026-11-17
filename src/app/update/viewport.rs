@@ -3866,7 +3866,7 @@ impl OpenCADStudio {
                     Instant::now(),
                 );
             }
-            let world = match snap {
+            let world = match crate::snap::pulling_snap(snap, p, self.snapper.osnap_radius_px) {
                 Some(hit) => hit.world,
                 None => {
                     let mut pt = cursor_world;
@@ -4287,14 +4287,18 @@ impl OpenCADStudio {
                 );
             }
 
+            let pull = crate::snap::pulling_snap(
+                self.tabs[i].snap_result,
+                p,
+                self.snapper.osnap_radius_px,
+            );
             let effective = {
                 // Ortho / polar from the last point keep its elevation.
                 let mut drafted_elevation = false;
                 let mut pt: glam::DVec3 = if let (Some(dir), Some(base)) =
                     (axis_lock, self.last_point)
                 {
-                    let point = self.tabs[i]
-                        .snap_result
+                    let point = pull
                         .map(|snap| snap.world)
                         .unwrap_or(cursor_world);
                     axis_lock_apply(point, base, dir)
@@ -4302,7 +4306,7 @@ impl OpenCADStudio {
                     // Exact object snaps win over tracking alignment, but
                     // Extension is a construction guide and must remain
                     // eligible for OTRACK intersections.
-                    !self.tabs[i].snap_result.is_some_and(|s| {
+                    !pull.is_some_and(|s| {
                         !matches!(
                             s.snap_type,
                             crate::snap::SnapType::Grid | crate::snap::SnapType::Extension
@@ -4313,12 +4317,10 @@ impl OpenCADStudio {
                 } else {
                     // Snap runs in model space (viewport camera or the
                     // model/paper view), so the result is already model.
-                    let mut pt = self.tabs[i]
-                        .snap_result
+                    let mut pt = pull
                         .map(|s| s.world)
                         .unwrap_or(cursor_world);
-                    let osnap_locked = self.tabs[i]
-                        .snap_result
+                    let osnap_locked = pull
                         .is_some_and(|s| s.snap_type != crate::snap::SnapType::Grid);
                     let drafted = (!osnap_locked && !free_point && !uses_command_cursor_plane)
                         .then_some(self.last_point)
@@ -4354,7 +4356,7 @@ impl OpenCADStudio {
                     && self.tabs[i].active_ucs.is_none()
                     && !uses_command_cursor_plane
                     && !drafted_elevation
-                    && !snap_keeps_elevation(self.tabs[i].snap_result.map(|s| s.snap_type))
+                    && !snap_keeps_elevation(pull.map(|s| s.snap_type))
                 {
                     pt.z = 0.0;
                 }
@@ -4374,7 +4376,7 @@ impl OpenCADStudio {
                     .and_then(|command| command.cursor_axis())
                     .and_then(|(origin, direction)| {
                         command_axis_point(
-                            self.tabs[i].snap_result,
+                            pull,
                             p,
                             bounds,
                             view_rot,

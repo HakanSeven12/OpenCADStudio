@@ -3418,6 +3418,21 @@ fn keep_stable_snap(
     }
 }
 
+/// The snap that moves the drawn point. A marker farther than the aperture
+/// (the hovered object's nearest point, #1914) is only shown: the rubber band
+/// stays on the cursor until the cursor comes near it, and a click still takes
+/// it (#2882). Grid snap always moves the point. `cursor` and the marker must
+/// share one pixel frame.
+pub(crate) fn pulling_snap(
+    snap: Option<SnapResult>,
+    cursor: Point,
+    radius_px: f32,
+) -> Option<SnapResult> {
+    snap.filter(|hit| {
+        hit.snap_type == SnapType::Grid || dist2(hit.screen, cursor) <= radius_px * radius_px
+    })
+}
+
 /// Merge paper and viewport snaps using the engine's ordering.
 /// Both screen positions must use canvas pixels.
 pub fn merge_snap(

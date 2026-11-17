@@ -7513,26 +7513,18 @@ impl OpenCADStudio {
                     })?
                 });
                 // A dimension pick inside a viewport measures the model
-                // geometry shown there, not the viewport entity itself.
+                // geometry shown there, never the viewport entity itself: with
+                // nothing under the cursor the click is a sheet point (#3203).
                 let hit = hit.filter(|&handle| {
                     let measures = self.tabs[i]
                         .active_cmd
                         .as_ref()
                         .is_some_and(|c| c.measures_through_viewports());
-                    if !measures
+                    !measures
                         || !matches!(
                             self.tabs[i].scene.document.get_entity(handle),
                             Some(document::EntityType::Viewport(_))
                         )
-                    {
-                        return true;
-                    }
-                    let per_px = self.tabs[i].scene.camera.borrow().ortho_size() as f64 * 2.0
-                        / (bounds.height as f64).max(1.0);
-                    self.tabs[i]
-                        .scene
-                        .dimension_pick_through_viewport(pick_wcs, pick_aperture as f64 * per_px)
-                        .is_none()
                 });
                 if let Some(handle) = hit {
                     let uses_surface_point = self.tabs[i]

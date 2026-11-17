@@ -9754,10 +9754,19 @@ impl Scene {
                 return v;
             }
         }
+        let t_scan = crate::perf::enabled().then(iced::time::Instant::now);
         let v = self
             .document
             .entities()
             .any(|e| crate::scene::annotative::is_annotative(&self.document, e));
+        if let Some(t) = t_scan {
+            crate::perf_record!(
+                "[perf] anno-scan {:.1}ms entities={} result={}",
+                t.elapsed().as_secs_f64() * 1000.0,
+                self.document.entity_count(),
+                v
+            );
+        }
         self.annotation_affects_wires
             .set(Some((self.geometry_epoch, v)));
         v

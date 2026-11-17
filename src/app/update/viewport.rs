@@ -155,6 +155,41 @@ mod selection_gesture_priority_tests {
     }
 }
 
+/// Whether a grip drag is a table's fill diamond: the fill reaches the cell
+/// under the cursor, so no snap, tracking or polar may move that point.
+fn table_fill_follows_cursor(
+    originals: &[(document::Handle, document::EntityType)],
+    handle: document::Handle,
+    grip_id: usize,
+) -> bool {
+    grip_id == crate::entities::table::CELL_GRIP_FILL
+        && originals.iter().any(|(original, entity)| {
+            *original == handle && matches!(entity, document::EntityType::Table(_))
+        })
+}
+
+#[cfg(test)]
+mod table_fill_cursor_tests {
+    use super::*;
+
+    #[test]
+    fn only_a_table_fill_diamond_follows_the_bare_cursor() {
+        let table = document::Handle::new(0x20);
+        let line = document::Handle::new(0x21);
+        let originals = vec![
+            (table, document::EntityType::Table(Box::default())),
+            (
+                line,
+                document::EntityType::Line(document::entities::Line::default()),
+            ),
+        ];
+        let fill = crate::entities::table::CELL_GRIP_FILL;
+        assert!(table_fill_follows_cursor(&originals, table, fill));
+        assert!(!table_fill_follows_cursor(&originals, table, fill - 1));
+        assert!(!table_fill_follows_cursor(&originals, line, fill));
+    }
+}
+
 /// Snapper coordinates are local to the active pane, while the overlay
 /// consumes canvas coordinates. Apply the same translation to the visible
 /// snap glyph and both Extension guide origins.
@@ -3125,6 +3160,17 @@ impl OpenCADStudio {
                 {
                     snapped = point;
                 }
+            }
+
+            // A table fill drag reaches the cell under the cursor: object
+            // snaps on the table's own lines, tracking and polar would pull it
+            // to an edge or a far corner.
+            if table_fill_follows_cursor(&self.grip_originals, grip.handle, grip.grip_id) {
+                snapped = raw;
+                self.tabs[i].snap_result = None;
+                self.otrack_active = None;
+                self.otrack_cross = None;
+                self.otrack_kind = None;
             }
 
             if let Some(axis) = grip.axis {

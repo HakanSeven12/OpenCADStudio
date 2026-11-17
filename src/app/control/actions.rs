@@ -179,6 +179,7 @@ pub(super) const NAMES: &[&str] = &[
     "text_style_dialog",
     "scale_list_dialog",
     "spell_dialog",
+    "find_replace_dialog",
     "table_cell_tab",
     "command_submit",
     "command_type",
@@ -3073,6 +3074,75 @@ impl OpenCADStudio {
                     Message::Spell(message)
                 }
             }
+            // The Find and Replace window, one step per call: "search=<text>",
+            // "replace=<text>", "scope=drawing|space|selection", "select",
+            // "list=0|1", "more=0|1", "option=<name>,0|1" (match_case,
+            // whole_words, wildcards, xrefs, blocks, ignore_hidden,
+            // diacritics, half_full, attributes, dimensions, texts, tables,
+            // link_texts, links), "find", "replace_one", "replace_all",
+            // "row=<n>", "zoom", "select_row", "select_all", "ok", "help",
+            // "answer=keep|unlock|skip_locked|all_blocks|this_block|
+            // skip_block|this_xref|all_xrefs|skip_xref|cancel", "done", or
+            // "ribbon=<text>" (the ribbon's Find text box).
+            "find_replace_dialog" => {
+                use crate::ui::window::find_replace::{FindAnswer as A, FindMsg as F, FindOpt, FindScope};
+                // "ribbon=<text>": the ribbon's Find text box, which opens
+                // the window itself.
+                if let Some(text) = string(req, "value")?.strip_prefix("ribbon=") {
+                    self.ribbon.text_find = text.to_string();
+                    return Ok(iced::Task::done(Message::RibbonTextFindSubmit));
+                }
+                if !self.focus_dialog(crate::app::ModalKind::FindReplace) {
+                    return Err(failure("no_dialog", "The Find and Replace window is not open"));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                let on = value != "0";
+                let message = match key {
+                    "search" => F::Search(value.to_string()),
+                    "replace" => F::Replacement(value.to_string()),
+                    "scope" => F::Scope(match value {
+                        "space" => FindScope::Space,
+                        "selection" => FindScope::Selection,
+                        _ => FindScope::Drawing,
+                    }),
+                    "select" => F::SelectObjects,
+                    "list" => F::ListResults(on),
+                    "more" => F::MoreOptions(on),
+                    "option" => {
+                        let (name, state) = value.split_once(',').unwrap_or((value, "1"));
+                        let opt = FindOpt::ALL
+                            .into_iter()
+                            .find(|o| o.key() == name)
+                            .ok_or_else(|| failure("invalid_value", spec))?;
+                        F::Option(opt, state != "0")
+                    }
+                    "find" => F::Find,
+                    "replace_one" => F::Replace,
+                    "replace_all" => F::ReplaceAll,
+                    "row" => F::Row(value.parse().map_err(|_| failure("invalid_value", spec))?),
+                    "zoom" => F::ZoomToResult,
+                    "select_row" => F::SelectHighlighted,
+                    "select_all" => F::SelectAll,
+                    "ok" => F::Dismiss,
+                    "help" => F::Help,
+                    "done" => F::Done,
+                    "answer" => F::Answer(match value {
+                        "keep" => A::KeepLocked,
+                        "unlock" => A::Unlock,
+                        "skip_locked" => A::SkipLocked,
+                        "all_blocks" => A::AllBlocks,
+                        "this_block" => A::ThisBlock,
+                        "skip_block" => A::SkipBlock,
+                        "this_xref" => A::ThisXref,
+                        "all_xrefs" => A::AllXrefs,
+                        "skip_xref" => A::SkipXref,
+                        _ => A::Cancel,
+                    }),
+                    _ => return Err(failure("invalid_value", spec)),
+                };
+                Message::Find(message)
+            }
             // The Inspection Dimension window, one field per call:
             // "shape=round|angular|none", "label_on=0|1", "label=<text>",
             // "rate_on=0|1", "rate=<text>", "select", "remove", "ok" or
@@ -3447,7 +3517,8 @@ impl OpenCADStudio {
             // "height=<n>", "width=<n>", "gutter=<n>", "mask=0|1",
             // "factor=<n>", "background=0|1", "color=<1..7>", "find=<text>",
             // "replace=<text>", "match_case=0|1", "whole=0|1", "wild=0|1",
-            // "next", "replace_one", "replace_all", "ok", "cancel".
+            // "diacritics=0|1", "half_full=0|1", "notice_ok", "next",
+            // "replace_one", "replace_all", "ok", "cancel".
             // Character set "charset=<code>"; style question "style_always=0|1",
             // "style_yes", "style_no"; lists question "lists_always=0|1",
             // "lists_continue"; dictionaries "dict_language=<tag>",
@@ -3567,6 +3638,9 @@ impl OpenCADStudio {
                     "match_case" => Message::MTextDialog(D::MatchCase(on)),
                     "whole" => Message::MTextDialog(D::WholeWords(on)),
                     "wild" => Message::MTextDialog(D::Wildcards(on)),
+                    "diacritics" => Message::MTextDialog(D::Diacritics(on)),
+                    "half_full" => Message::MTextDialog(D::HalfFull(on)),
+                    "notice_ok" => Message::MTextDialog(D::DismissNotice),
                     "next" => Message::MTextDialog(D::FindNext),
                     "replace_one" => Message::MTextDialog(D::ReplaceOne),
                     "replace_all" => Message::MTextDialog(D::ReplaceAll),

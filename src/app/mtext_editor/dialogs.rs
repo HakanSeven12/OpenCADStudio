@@ -134,12 +134,21 @@ impl OpenCADStudio {
                     },
                 })
             }
-            _ => MTextDialog::Find(FindDraft {
-                find: ed.find_text.clone(),
-                replace: ed.replace_text.clone(),
-                diacritics: true,
-                ..Default::default()
-            }),
+            _ => {
+                let [match_case, whole_words, wildcards, diacritics, half_full] = self
+                    .mtext_find_prefs
+                    .unwrap_or([false, false, false, true, false]);
+                MTextDialog::Find(FindDraft {
+                    find: ed.find_text.clone(),
+                    replace: ed.replace_text.clone(),
+                    match_case,
+                    whole_words,
+                    wildcards,
+                    diacritics,
+                    half_full,
+                    notice: None,
+                })
+            }
         };
         self.mtext_dialog = Some(dialog);
         self.active_modal = Some(ModalKind::MTextDialog);
@@ -234,6 +243,7 @@ impl OpenCADStudio {
                 M::Wildcards(on) => d.wildcards = on,
                 M::Diacritics(on) => d.diacritics = on,
                 M::HalfFull(on) => d.half_full = on,
+                M::DismissNotice => d.notice = None,
                 M::FindNext => {
                     let draft = d.clone();
                     self.mtext_find_with(&draft, false);
@@ -249,6 +259,15 @@ impl OpenCADStudio {
                 _ => {}
             },
             (_, message) => return self.on_mtext_tool_dialog(message),
+        }
+        if let Some(MTextDialog::Find(d)) = self.mtext_dialog.as_ref() {
+            self.mtext_find_prefs = Some([
+                d.match_case,
+                d.whole_words,
+                d.wildcards,
+                d.diacritics,
+                d.half_full,
+            ]);
         }
         Task::none()
     }
@@ -381,18 +400,25 @@ impl OpenCADStudio {
         let chars = editor_chars(ed);
         let matches = find_matches(&chars, d);
         let from = ed.caret;
-        let found = matches
-            .iter()
-            .find(|(s, _)| *s >= from)
-            .or_else(|| matches.first())
-            .copied();
-        if let Some((start, end)) = found {
-            ed.sel_anchor = start;
-            ed.sel = Some((start, end));
-            ed.caret = end;
-            ed.caret_blink_on = true;
+        // Past the last match the search reports it has finished and starts
+        // again from the top on the next press.
+        let found = matches.iter().find(|(s, _)| *s >= from).copied();
+        match found {
+            Some((start, end)) => {
+                ed.sel_anchor = start;
+                ed.sel = Some((start, end));
+                ed.caret = end;
+            }
+            None => {
+                ed.sel = None;
+                ed.sel_anchor = 0;
+                ed.caret = 0;
+            }
         }
-        let notice = found.is_none().then(|| crate::t!("The text was not found.").into_owned());
+        ed.caret_blink_on = true;
+        let notice = found
+            .is_none()
+            .then(|| crate::tr!("find", "finished-text"));
         if let Some(MTextDialog::Find(draft)) = self.mtext_dialog.as_mut() {
             draft.notice = notice;
         }
@@ -409,10 +435,10 @@ impl OpenCADStudio {
             self.raw_replace_ranges(&matches, &d.replace);
         }
         if let Some(MTextDialog::Find(draft)) = self.mtext_dialog.as_mut() {
-            draft.notice = Some(if count == 0 {
-                crate::t!("The text was not found.").into_owned()
-            } else {
-                crate::tf!("{count} occurrence(s) replaced.").into_owned()
+            draft.notice = Some(match count {
+                0 => crate::tr!("find", "finished-text"),
+                1 => crate::tr!("find", "replaced-one"),
+                n => crate::i18n::plain(crate::tr!("find", "replaced-many", count = n.to_string())),
             });
         }
     }
@@ -430,95 +456,17 @@ fn editor_chars(ed: &MTextEditorState) -> Vec<Option<char>> {
         .collect()
 }
 
-/// A character as the find options compare it.
-fn folded(c: char, d: &FindDraft) -> char {
-    let mut c = c;
-    if !d.half_full && ('\u{FF01}'..='\u{FF5E}').contains(&c) {
-        c = char::from_u32(c as u32 - 0xFEE0).unwrap_or(c);
-    }
-    if !d.diacritics {
-        c = base_letter(c);
-    }
-    if !d.match_case {
-        c = c.to_lowercase().next().unwrap_or(c);
-    }
-    c
-}
-
-/// The letter without its diacritic, for the Latin letters text uses most.
-fn base_letter(c: char) -> char {
-    const FROM: &str = "ÀÁÂÃÄÅàáâãäåÇçĆćČčÈÉÊËèéêëĞğÌÍÎÏìíîïİıÑñŃńÒÓÔÕÖØòóôõöøŞşŠšŚśÙÚÛÜùúûüÝýÿŽžŹźŻż";
-    const TO: &str = "AAAAAAaaaaaaCcCcCcEEEEeeeeGgIIIIiiiiIiNnNnOOOOOOooooooSsSsSsUUUUuuuuYyyZzZzZz";
-    FROM.chars()
-        .position(|f| f == c)
-        .and_then(|n| TO.chars().nth(n))
-        .unwrap_or(c)
-}
-
-fn is_word(c: Option<char>) -> bool {
-    c.is_some_and(|c| c.is_alphanumeric() || c == '_')
-}
-
-/// Every match of the find text in `chars` as (start, end), left to right and
-/// not overlapping. With wildcards `*` stands for any run and `?` for any one
-/// character (`#` a digit, `@` a letter).
+/// Every match of the window's text in `chars` as (start, end).
 fn find_matches(chars: &[Option<char>], d: &FindDraft) -> Vec<(usize, usize)> {
-    let needle: Vec<char> = d.find.chars().collect();
-    if needle.is_empty() {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    let mut at = 0;
-    while at < chars.len() {
-        let end = if d.wildcards {
-            wild_match(chars, at, &needle, d)
-        } else {
-            (at + needle.len() <= chars.len()
-                && chars[at..at + needle.len()]
-                    .iter()
-                    .zip(&needle)
-                    .all(|(c, n)| c.is_some_and(|c| folded(c, d) == folded(*n, d))))
-            .then_some(at + needle.len())
-        };
-        match end {
-            Some(end)
-                if end > at
-                    && (!d.whole_words
-                        || (!is_word(at.checked_sub(1).and_then(|p| chars[p]))
-                            && !is_word(chars.get(end).copied().flatten()))) =>
-            {
-                out.push((at, end));
-                at = end;
-            }
-            _ => at += 1,
-        }
-    }
-    out
-}
-
-/// The end of the shortest wildcard match of `pattern` starting at `at`.
-fn wild_match(chars: &[Option<char>], at: usize, pattern: &[char], d: &FindDraft) -> Option<usize> {
-    fn go(chars: &[Option<char>], i: usize, p: &[char], d: &FindDraft) -> Option<usize> {
-        let Some((&first, rest)) = p.split_first() else {
-            return Some(i);
-        };
-        match first {
-            '*' => (i..=chars.len()).find_map(|j| go(chars, j, rest, d)),
-            _ => {
-                let c = chars.get(i).copied().flatten()?;
-                let ok = match first {
-                    '?' => c != '\n',
-                    '#' => c.is_ascii_digit(),
-                    '@' => c.is_alphabetic(),
-                    other => folded(c, d) == folded(other, d),
-                };
-                if ok {
-                    go(chars, i + 1, rest, d)
-                } else {
-                    None
-                }
-            }
-        }
-    }
-    go(chars, at, pattern, d)
+    crate::app::text_match::find_ranges(
+        chars,
+        &d.find,
+        &crate::app::text_match::MatchOptions {
+            match_case: d.match_case,
+            whole_words: d.whole_words,
+            wildcards: d.wildcards,
+            diacritics: d.diacritics,
+            half_full: d.half_full,
+        },
+    )
 }

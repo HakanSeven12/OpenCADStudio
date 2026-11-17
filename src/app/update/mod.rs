@@ -8992,10 +8992,7 @@ impl OpenCADStudio {
                 if search.is_empty() {
                     return Task::none();
                 }
-                self.find_replace_search_changed(search);
-                let task = self.open_find_replace();
-                self.find_replace_find_all();
-                task
+                self.find_text_from_ribbon(search)
             }
             Message::RibbonTextHeight(value) => {
                 self.ribbon.text_height = value;
@@ -9807,34 +9804,7 @@ impl OpenCADStudio {
                 }
             }
             Message::FindReplaceOpen => self.open_find_replace(),
-            Message::FindReplaceSearchChanged(value) => {
-                self.find_replace_search_changed(value);
-                Task::none()
-            }
-            Message::FindReplaceReplacementChanged(value) => {
-                self.find_replace_replacement_changed(value);
-                Task::none()
-            }
-            Message::FindReplaceNext => {
-                self.find_replace_next();
-                Task::none()
-            }
-            Message::FindReplaceOne => {
-                self.find_replace_one();
-                Task::none()
-            }
-            Message::FindReplaceAll => {
-                self.find_replace_all();
-                Task::none()
-            }
-            Message::FindReplaceFindAll => {
-                self.find_replace_find_all();
-                Task::none()
-            }
-            Message::FindReplaceSelectResult(index) => {
-                self.find_replace_select_result(index);
-                Task::none()
-            }
+            Message::Find(message) => self.on_find_message(message),
             Message::OverkillSettingsChanged(settings) => {
                 if let Some(state) = &mut self.overkill_dialog {
                     state.settings = settings;

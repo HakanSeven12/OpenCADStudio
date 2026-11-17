@@ -1,12 +1,28 @@
-use super::{FindMatchKey, FindResult, Message, OpenCADStudio};
-use crate::entities::traits::EntityTypeOps;
-use document::EntityType;
+//! Find and Replace: which texts a search reads, in which order, and what
+//! Find, Replace and Replace All do with them. The window is
+//! `ui::window::find_replace`.
+
+use super::{FindMatchKey, FindPart, FindResult, Message, OpenCADStudio};
+use crate::scene::{FindZoom, Scene};
+use crate::ui::window::find_replace::{
+    FindAnswer, FindKind, FindMsg, FindNotice, FindOptions, FindPrompt, FindScope, LockChoice,
+    ReplaceRun,
+};
+use document::{EntityType, Handle};
 use iced::Task;
 
+/// How many earlier texts each history keeps.
+const HISTORY: usize = 20;
+
 impl OpenCADStudio {
+    /// Open the window. The texts, history and options stay from the last
+    /// time; where to look starts again from the whole drawing.
     pub(super) fn open_find_replace(&mut self) -> Task<Message> {
-        self.find_replace.current_match = None;
-        self.find_replace.status.clear();
+        let state = &mut self.find_replace;
+        state.scope = FindScope::Drawing;
+        state.selection.clear();
+        self.reset_find_search();
+        self.find_replace.undo_pushed = false;
         self.active_modal = Some(super::ModalKind::FindReplace);
         self.modal_offset = iced::Vector::ZERO;
         self.modal_resize = iced::Vector::ZERO;
@@ -15,541 +31,923 @@ impl OpenCADStudio {
         ))
     }
 
-    pub(super) fn find_replace_search_changed(&mut self, value: String) {
-        self.find_replace.search = value;
-        self.find_replace.current_match = None;
-        self.find_replace.status.clear();
-        self.find_replace.results.clear();
+    /// The ribbon's Find text box: the window opens on the current space and
+    /// searches at once.
+    pub(super) fn find_text_from_ribbon(&mut self, search: String) -> Task<Message> {
+        self.find_replace.search = search;
+        let task = self.open_find_replace();
+        self.find_replace.scope = FindScope::Space;
+        let found = self.find_replace_find();
+        Task::batch([task, found])
     }
 
-    pub(super) fn find_replace_replacement_changed(&mut self, value: String) {
-        self.find_replace.replacement = value;
+    fn reset_find_search(&mut self) {
+        let state = &mut self.find_replace;
+        state.current_match = None;
+        state.matches.clear();
+        state.results.clear();
+        state.changed.clear();
+        state.notice = None;
+        state.run = None;
     }
 
-    pub(super) fn find_replace_next(&mut self) {
-        let i = self.active_tab;
-        let matches = self.find_navigation_matches(i);
-        if matches.is_empty() {
-            self.find_replace.current_match = None;
-            self.find_replace.status = no_match_status(&self.find_replace.search);
-            return;
-        }
-
-        let start = self
-            .find_replace
-            .current_match
-            .and_then(|current| matches.iter().position(|candidate| *candidate == current))
-            .map_or(0, |current| (current + 1) % matches.len());
-        for offset in 0..matches.len() {
-            let index = (start + offset) % matches.len();
-            if self.visit_match(i, matches[index], index, matches.len(), false) {
-                return;
+    pub(super) fn on_find_message(&mut self, message: FindMsg) -> Task<Message> {
+        match message {
+            FindMsg::Search(value) => {
+                self.find_replace.search = value;
+                self.reset_find_search();
             }
-        }
-
-        self.find_replace.current_match = None;
-        self.find_replace.status = no_match_status(&self.find_replace.search);
-    }
-
-    /// Lists every visible match so the user can visit them in any order.
-    pub(super) fn find_replace_find_all(&mut self) {
-        let i = self.active_tab;
-        let scene = &self.tabs[i].scene;
-        let results: Vec<FindResult> = self
-            .find_navigation_matches(i)
-            .into_iter()
-            .map(|key| describe_match(&scene.document, key))
-            .collect();
-        self.find_replace.current_match = None;
-        self.find_replace.status = if results.is_empty() {
-            no_match_status(&self.find_replace.search)
-        } else {
-            crate::tf!("{} match(es) found.", results.len()).into_owned()
-        };
-        self.find_replace.results = results;
-    }
-
-    /// Zooms to one listed match and highlights it, without searching again.
-    pub(super) fn find_replace_select_result(&mut self, index: usize) {
-        let i = self.active_tab;
-        let total = self.find_replace.results.len();
-        let Some(target) = self.find_replace.results.get(index).map(|r| r.key) else {
-            return;
-        };
-        if !self.visit_match(i, target, index, total, true) {
-            self.find_replace.status =
-                crate::t!("The selected match is no longer in the drawing.").into_owned();
-        }
-    }
-
-    /// Brings `target` into view (centred, or zoomed around it with `zoom`),
-    /// selects its object as the highlight and reports the position.
-    fn visit_match(
-        &mut self,
-        i: usize,
-        target: FindMatchKey,
-        index: usize,
-        total: usize,
-        zoom: bool,
-    ) -> bool {
-        let scene = &mut self.tabs[i].scene;
-        let shown = match target {
-            FindMatchKey::Entity(handle) => scene.focus_camera_on_entity(handle, zoom),
-            FindMatchKey::BlockEntityInInsert { entity, insert } => {
-                scene.focus_camera_on_block_entity(insert, entity, zoom)
+            FindMsg::Replacement(value) => self.find_replace.replacement = value,
+            FindMsg::Scope(scope) => {
+                self.find_replace.scope = scope;
+                self.reset_find_search();
             }
-            FindMatchKey::InsertAttribute { insert, index } => {
-                scene.focus_camera_on_insert_attribute(insert, index, zoom)
+            FindMsg::SelectObjects => {
+                use crate::command::CadCommand;
+                use crate::modules::draw::select::SelectObjectsCommand;
+                self.active_modal = None;
+                let i = self.active_tab;
+                let cmd = SelectObjectsCommand::plain("FIND", "FIND_OBJECTS_GATHERED");
+                self.command_line.push_info(&cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
-        };
-        if !shown {
-            return false;
-        }
-        self.find_replace.current_match = Some(target);
-        self.find_replace.status =
-            crate::tf!("{} of {} — {}", index + 1, total, match_label(target)).into_owned();
-        self.tabs[i].scene.deselect_all();
-        self.tabs[i]
-            .scene
-            .select_entity(match_owner_handle(target), false);
-        self.refresh_properties();
-        true
-    }
-
-    /// Replacing text changes what matches; refresh an open result list.
-    fn refresh_find_results(&mut self) {
-        if !self.find_replace.results.is_empty() {
-            let status = std::mem::take(&mut self.find_replace.status);
-            self.find_replace_find_all();
-            self.find_replace.status = status;
-        }
-    }
-
-    pub(super) fn find_replace_one(&mut self) {
-        let i = self.active_tab;
-        let matches = self.find_text_matches(i);
-        let Some(target) = self
-            .find_replace
-            .current_match
-            .filter(|current| {
-                matches.iter().any(|candidate| {
-                    match_document_handle(*candidate) == match_document_handle(*current)
-                })
-            })
-            .or_else(|| matches.first().copied())
-        else {
-            self.find_replace.current_match = None;
-            self.find_replace.status = no_match_status(&self.find_replace.search);
-            return;
-        };
-
-        let search = self.find_replace.search.clone();
-        let replacement = self.find_replace.replacement.clone();
-        if match_is_locked(&self.tabs[i].scene, target) {
-            self.find_replace.status =
-                crate::t!("The matching object is on a locked layer.").into_owned();
-            return;
-        }
-        self.push_undo_snapshot(i, "FIND/REPLACE");
-        let replaced = replace_match_text(
-            &mut self.tabs[i].scene.document,
-            target,
-            &search,
-            &replacement,
-            false,
-        );
-        if replaced == 0 {
-            self.discard_last_undo_entry(i);
-            self.find_replace.status = no_match_status(&search);
-            return;
-        }
-
-        let handle = match_document_handle(target);
-        if self.tabs[i].scene.entity_belongs_to_active_space(handle) {
-            self.invalidate_property_targets(i, &[handle]);
-        } else {
-            // A block-definition edit must rebuild the definition cache; an
-            // entity-only delta would leave every visible INSERT showing the
-            // old text until some unrelated full rebuild.
-            self.tabs[i].scene.bump_geometry();
-        }
-        self.tabs[i].dirty = true;
-        self.find_replace.current_match = None;
-        let remaining = self.find_text_matches(i).len();
-        self.find_replace.status = crate::tf!(
-            "Replaced 1 occurrence in {}; {remaining} matching object(s) remain.",
-            match_label(target)
-        )
-        .into_owned();
-        self.refresh_find_results();
-        self.command_line.push_output(
-            crate::tf!("FIND/REPLACE: replaced 1 occurrence of \"{search}\".").as_ref(),
-        );
-        self.refresh_properties();
-    }
-
-    pub(super) fn find_replace_all(&mut self) {
-        let i = self.active_tab;
-        let matches = self.find_text_matches(i);
-        if matches.is_empty() {
-            self.find_replace.current_match = None;
-            self.find_replace.status = no_match_status(&self.find_replace.search);
-            return;
-        }
-
-        let search = self.find_replace.search.clone();
-        let replacement = self.find_replace.replacement.clone();
-        self.push_undo_snapshot(i, "FIND/REPLACE ALL");
-        let mut replaced = 0usize;
-        let mut changed = Vec::new();
-        let mut changed_outside_active_space = false;
-        let editable: Vec<_> = matches
-            .into_iter()
-            .filter(|target| !match_is_locked(&self.tabs[i].scene, *target))
-            .collect();
-        for target in editable {
-            let count = replace_match_text(
-                &mut self.tabs[i].scene.document,
-                target,
-                &search,
-                &replacement,
-                true,
-            );
-            if count > 0 {
-                replaced += count;
-                let handle = match_document_handle(target);
-                changed_outside_active_space |=
-                    !self.tabs[i].scene.entity_belongs_to_active_space(handle);
-                if !changed.contains(&handle) {
-                    changed.push(handle);
+            FindMsg::ListResults(on) => {
+                self.find_replace.list_results = on;
+                self.reset_find_search();
+            }
+            FindMsg::MoreOptions(on) => self.find_replace.more_options = on,
+            FindMsg::Option(opt, on) => {
+                *opt.slot(&mut self.find_replace.options) = on;
+                self.reset_find_search();
+            }
+            FindMsg::Find => return self.find_replace_find(),
+            FindMsg::Replace => return self.find_replace_one(),
+            FindMsg::ReplaceAll => return self.find_replace_all(),
+            FindMsg::Done => {
+                self.active_modal = None;
+                self.command_line
+                    .push_output(crate::tr!("find", "regenerating").as_str());
+            }
+            FindMsg::Help => self
+                .command_line
+                .push_info(crate::tr!("find", "help").as_str()),
+            FindMsg::Row(index) => {
+                if let Some(result) = self.find_replace.results.get(index).cloned() {
+                    self.find_replace.current_match = Some(result.key);
+                    return self.visit_find_result(&result);
                 }
             }
+            FindMsg::ZoomToResult => {
+                let current = self.find_replace.current_match;
+                if let Some(result) = self
+                    .find_replace
+                    .results
+                    .iter()
+                    .find(|r| Some(r.key) == current)
+                    .cloned()
+                {
+                    return self.visit_find_result(&result);
+                }
+            }
+            FindMsg::SelectHighlighted => {
+                let current = self.find_replace.current_match;
+                let picked: Vec<FindResult> = self
+                    .find_replace
+                    .results
+                    .iter()
+                    .filter(|r| Some(r.key) == current)
+                    .cloned()
+                    .collect();
+                return self.find_select_results(picked);
+            }
+            FindMsg::SelectAll => {
+                let all = self.find_replace.results.clone();
+                return self.find_select_results(all);
+            }
+            FindMsg::Dismiss => self.find_replace.notice = None,
+            FindMsg::Answer(answer) => return self.find_answer(answer),
         }
-        if changed.is_empty() {
-            self.discard_last_undo_entry(i);
-            self.find_replace.status = no_match_status(&search);
-            return;
-        }
-
-        if changed_outside_active_space {
-            self.tabs[i].scene.bump_geometry();
-        } else {
-            self.invalidate_property_targets(i, &changed);
-        }
-        self.tabs[i].dirty = true;
-        self.find_replace.current_match = None;
-        self.find_replace.status = crate::tf!(
-            "Replaced {replaced} occurrence(s) in {} object(s).",
-            changed.len()
-        )
-        .into_owned();
-        self.refresh_find_results();
-        self.command_line.push_output(
-            crate::tf!("FIND/REPLACE: replaced {replaced} occurrence(s) of \"{search}\".").as_ref(),
-        );
-        self.refresh_properties();
+        Task::none()
     }
 
-    fn find_text_matches(&self, i: usize) -> Vec<FindMatchKey> {
-        let search = self.find_replace.search.trim();
-        if search.is_empty() {
-            return Vec::new();
+    /// Back from "Select objects": search the picked objects.
+    pub(super) fn find_objects_gathered(&mut self, i: usize) {
+        let handles: Vec<Handle> = self.tabs[i]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .map(|(h, _)| h)
+            .collect();
+        self.tabs[i].active_cmd = None;
+        self.find_replace.selection = handles;
+        self.find_replace.scope = FindScope::Selection;
+        self.reset_find_search();
+        self.active_modal = Some(super::ModalKind::FindReplace);
+    }
+
+    fn remember_find_texts(&mut self) {
+        let state = &mut self.find_replace;
+        for (value, history) in [
+            (state.search.clone(), &mut state.search_history),
+            (state.replacement.clone(), &mut state.replace_history),
+        ] {
+            if value.is_empty() {
+                continue;
+            }
+            history.retain(|h| *h != value);
+            history.insert(0, value);
+            history.truncate(HISTORY);
         }
-        let mut visible = Vec::new();
-        let mut definitions = Vec::new();
-        for entity in self.tabs[i].scene.document.entities() {
-            if let Some(text) = entity.text_content() {
-                if find_case_insensitive_range(&text, search, 0).is_some() {
-                    let target = FindMatchKey::Entity(entity.common().handle);
-                    if self.tabs[i]
+    }
+
+    /// Find: with List results every match at once, else the next match;
+    /// past the last one the search reports it has finished.
+    pub(super) fn find_replace_find(&mut self) -> Task<Message> {
+        if self.find_replace.search.trim().is_empty() {
+            return Task::none();
+        }
+        self.remember_find_texts();
+        let i = self.active_tab;
+        if self.find_replace.list_results {
+            let matches = self.collect_find_matches(i);
+            self.find_replace.matches = matches.clone();
+            self.find_replace.results = matches;
+            self.find_replace.notice = Some(FindNotice::Finished {
+                found: self.find_replace.results.len(),
+                changed: self.find_replace.changed.len(),
+            });
+            let first = self.find_replace.results.first().cloned();
+            self.find_replace.current_match = first.as_ref().map(|r| r.key);
+            return first.map_or_else(Task::none, |r| self.visit_find_result(&r));
+        }
+        let next = match self.find_replace.current_match {
+            None => {
+                self.find_replace.matches = self.collect_find_matches(i);
+                0
+            }
+            Some(current) => self
+                .find_replace
+                .matches
+                .iter()
+                .position(|r| r.key == current)
+                .map_or(0, |p| p + 1),
+        };
+        self.show_find_match(next)
+    }
+
+    /// Show match `index` of the running search, or end the search.
+    fn show_find_match(&mut self, index: usize) -> Task<Message> {
+        match self.find_replace.matches.get(index).cloned() {
+            Some(result) => {
+                self.find_replace.current_match = Some(result.key);
+                self.visit_find_result(&result)
+            }
+            None => {
+                self.find_replace.notice = Some(FindNotice::Finished {
+                    found: self.find_replace.matches.len(),
+                    changed: self.find_replace.changed.len(),
+                });
+                self.find_replace.current_match = None;
+                Task::none()
+            }
+        }
+    }
+
+    /// Bring a match into view (switching to its layout) and highlight its
+    /// object.
+    fn visit_find_result(&mut self, result: &FindResult) -> Task<Message> {
+        let i = self.active_tab;
+        let mut task = Task::none();
+        if !result.location.eq_ignore_ascii_case(&self.tabs[i].scene.current_layout) {
+            task = self.on_layout_switch(result.location.clone());
+        }
+        let zoom = if result.height > 0.0 {
+            FindZoom::TextHeight(result.height)
+        } else {
+            FindZoom::Object
+        };
+        let key = result.key;
+        let scene = &mut self.tabs[i].scene;
+        match key.part {
+            FindPart::Attribute(index) => {
+                scene.focus_camera_on_insert_attribute(key.owner, index, zoom);
+            }
+            _ if key.owner == key.target => {
+                scene.focus_camera_on_entity(key.target, zoom);
+            }
+            _ => {
+                scene.focus_camera_on_block_entity(key.owner, key.target, zoom);
+            }
+        }
+        scene.deselect_all();
+        scene.select_entity(key.owner, false);
+        self.refresh_properties();
+        task
+    }
+
+    /// Create Selection Set: the listed objects become the selection, which
+    /// must lie in one space.
+    fn find_select_results(&mut self, picked: Vec<FindResult>) -> Task<Message> {
+        if picked.is_empty() {
+            return Task::none();
+        }
+        let first = picked[0].location.clone();
+        if picked.iter().any(|r| !r.location.eq_ignore_ascii_case(&first)) {
+            self.find_replace.notice = Some(FindNotice::CannotSelect);
+            return Task::none();
+        }
+        let mut owners: Vec<Handle> = Vec::new();
+        for r in &picked {
+            if !owners.contains(&r.key.owner) {
+                owners.push(r.key.owner);
+            }
+        }
+        let i = self.active_tab;
+        let mut task = Task::none();
+        if !first.eq_ignore_ascii_case(&self.tabs[i].scene.current_layout) {
+            task = self.on_layout_switch(first);
+        }
+        self.active_modal = None;
+        self.command_line
+            .push_output(crate::tr!("find", "regenerating").as_str());
+        let scene = &mut self.tabs[i].scene;
+        scene.deselect_all();
+        scene.select_entities(&owners);
+        self.command_line.push_output(
+            crate::i18n::plain(crate::tr!(
+                "find",
+                "selected",
+                count = owners.len().to_string(),
+                text = self.find_replace.search.clone()
+            ))
+            .as_str(),
+        );
+        self.refresh_properties();
+        task
+    }
+
+    // ── Replacing ─────────────────────────────────────────────────────────
+
+    /// Replace the match on show, then show the next one.
+    pub(super) fn find_replace_one(&mut self) -> Task<Message> {
+        let Some(current) = self.find_replace.current_match else {
+            return Task::none();
+        };
+        let Some(result) = self
+            .find_replace
+            .matches
+            .iter()
+            .chain(self.find_replace.results.iter())
+            .find(|r| r.key == current)
+            .cloned()
+        else {
+            return Task::none();
+        };
+        self.remember_find_texts();
+        self.find_replace.run = Some(new_run(vec![result], true));
+        self.continue_replace_run()
+    }
+
+    /// Replace every match.
+    pub(super) fn find_replace_all(&mut self) -> Task<Message> {
+        if self.find_replace.search.trim().is_empty() {
+            return Task::none();
+        }
+        self.remember_find_texts();
+        let i = self.active_tab;
+        let matches = self.collect_find_matches(i);
+        self.find_replace.matches = matches.clone();
+        self.find_replace.run = Some(new_run(matches, false));
+        self.continue_replace_run()
+    }
+
+    fn find_answer(&mut self, answer: FindAnswer) -> Task<Message> {
+        let Some(run) = self.find_replace.run.as_mut() else {
+            return Task::none();
+        };
+        let prompt = run.prompt.take();
+        match (answer, prompt) {
+            (FindAnswer::Cancel, _) | (_, None) => {
+                self.find_replace.run = None;
+                self.after_find_changes();
+                return Task::none();
+            }
+            (FindAnswer::KeepLocked, _) => run.locked = Some(LockChoice::Keep),
+            (FindAnswer::Unlock, _) => run.locked = Some(LockChoice::Unlock),
+            (FindAnswer::SkipLocked, _) => run.locked = Some(LockChoice::Skip),
+            (FindAnswer::AllBlocks, _) => run.all_blocks = true,
+            (FindAnswer::ThisBlock, Some(FindPrompt::Block(name))) => run.blocks.push((name, true)),
+            (FindAnswer::SkipBlock, Some(FindPrompt::Block(name))) => {
+                run.blocks.push((name, false))
+            }
+            (FindAnswer::AllXrefs, _) => run.all_xrefs = true,
+            (FindAnswer::ThisXref, Some(FindPrompt::Xref(name))) => run.xrefs.push((name, true)),
+            (FindAnswer::SkipXref, Some(FindPrompt::Xref(name))) => run.xrefs.push((name, false)),
+            _ => {}
+        }
+        self.continue_replace_run()
+    }
+
+    /// Go on with the replacement until it needs an answer or is done.
+    fn continue_replace_run(&mut self) -> Task<Message> {
+        let i = self.active_tab;
+        let Some(mut run) = self.find_replace.run.take() else {
+            return Task::none();
+        };
+        let pattern = self.find_replace.search.clone();
+        let with = self.find_replace.replacement.clone();
+        let opts = self.find_replace.options.matching();
+        while run.next < run.matches.len() {
+            let result = run.matches[run.next].clone();
+            let key = result.key;
+            let doc = &self.tabs[i].scene.document;
+            // Locked layers.
+            let layer = doc.get_entity(key.target).map(|e| e.common().layer.clone());
+            let locked = [key.target, key.owner]
+                .iter()
+                .any(|h| self.tabs[i].scene.is_layer_locked(*h));
+            if locked {
+                match run.locked {
+                    None => {
+                        run.prompt = Some(FindPrompt::Locked);
+                        self.find_replace.run = Some(run);
+                        return Task::none();
+                    }
+                    Some(LockChoice::Skip) => {
+                        run.next += 1;
+                        continue;
+                    }
+                    Some(LockChoice::Unlock) => {
+                        self.ensure_find_undo(i);
+                        let doc = &mut self.tabs[i].scene.document;
+                        for name in layer.iter().chain(
+                            doc.get_entity(key.owner)
+                                .map(|e| e.common().layer.clone())
+                                .iter(),
+                        ) {
+                            if let Some(l) = doc.layers.get_mut(name) {
+                                l.flags.locked = false;
+                            }
+                        }
+                    }
+                    Some(LockChoice::Keep) => {}
+                }
+            }
+            // Texts in an external reference or a block definition.
+            let definition = block_name_of(&self.tabs[i].scene, key);
+            if let Some(name) = definition.clone() {
+                let (all, answers, prompt) = if result.kind == FindKind::Xref {
+                    let path = self.tabs[i]
                         .scene
-                        .entity_belongs_to_active_space(entity.common().handle)
-                    {
-                        visible.push(target);
-                    } else {
-                        definitions.push(target);
+                        .document
+                        .block_records
+                        .get(&name)
+                        .map(|r| r.xref_path.clone())
+                        .unwrap_or_default();
+                    (run.all_xrefs, &run.xrefs, FindPrompt::Xref(path))
+                } else {
+                    (run.all_blocks, &run.blocks, FindPrompt::Block(name.clone()))
+                };
+                let key_name = match &prompt {
+                    FindPrompt::Xref(path) => path.clone(),
+                    _ => name.clone(),
+                };
+                let decided = answers
+                    .iter()
+                    .find(|(n, _)| n.eq_ignore_ascii_case(&key_name))
+                    .map(|(_, yes)| *yes);
+                match (all, decided) {
+                    (true, _) | (_, Some(true)) => {}
+                    (_, Some(false)) => {
+                        run.next += 1;
+                        continue;
+                    }
+                    (false, None) => {
+                        run.prompt = Some(prompt);
+                        self.find_replace.run = Some(run);
+                        return Task::none();
                     }
                 }
             }
-            if let EntityType::Insert(insert) = entity {
-                for (index, attribute) in insert.attributes.iter().enumerate() {
-                    if find_case_insensitive_range(attribute.get_value(), search, 0).is_some() {
-                        let target = FindMatchKey::InsertAttribute {
-                            insert: insert.common.handle,
-                            index,
-                        };
-                        if self.tabs[i]
-                            .scene
-                            .entity_belongs_to_active_space(insert.common.handle)
-                        {
-                            visible.push(target);
-                        } else {
-                            definitions.push(target);
+            self.ensure_find_undo(i);
+            let doc = &mut self.tabs[i].scene.document;
+            if let Some(value) = field_text(doc, key) {
+                let mut ranges = crate::app::text_match::str_ranges(&value, &pattern, &opts);
+                if run.single {
+                    ranges.truncate(1);
+                }
+                if !ranges.is_empty() {
+                    let replaced = crate::app::text_match::replace_ranges(&value, &ranges, &with);
+                    if set_field_text(doc, key, replaced) {
+                        let counted = (
+                            key.target,
+                            match key.part {
+                                FindPart::Attribute(n) => Some(n),
+                                _ => None,
+                            },
+                        );
+                        if !self.find_replace.changed.contains(&counted) {
+                            self.find_replace.changed.push(counted);
+                        }
+                        if result.kind == FindKind::Dimension {
+                            self.tabs[i].scene.invalidate_dim_block_recorded(key.target);
+                        }
+                        if result.kind == FindKind::Xref {
+                            if let Some(name) = definition {
+                                self.write_back_find_xref(i, &name, &pattern, &with);
+                            }
                         }
                     }
                 }
             }
+            run.next += 1;
         }
-        visible.extend(definitions);
-        visible
+        self.after_find_changes();
+        if run.single {
+            // The next match after the one replaced.
+            let at = self
+                .find_replace
+                .matches
+                .iter()
+                .position(|r| r.key == run.matches[0].key)
+                .unwrap_or(0);
+            self.find_replace.matches = self.collect_find_matches(i);
+            let still = self
+                .find_replace
+                .matches
+                .iter()
+                .position(|r| r.key == run.matches[0].key);
+            let next = still.map_or(at, |p| p + 1);
+            return self.show_find_match(next);
+        }
+        // The list keeps its rows and shows their new texts.
+        let doc = &self.tabs[i].scene.document;
+        for row in &mut self.find_replace.results {
+            if let Some(value) = field_text(doc, row.key) {
+                row.text = one_line(&value);
+            }
+        }
+        self.find_replace.current_match = None;
+        self.find_replace.notice = Some(FindNotice::Finished {
+            found: run.matches.len(),
+            changed: self.find_replace.changed.len(),
+        });
+        Task::none()
     }
 
-    fn find_navigation_matches(&self, i: usize) -> Vec<FindMatchKey> {
-        let scene = &self.tabs[i].scene;
-        let mut matches = Vec::new();
-        for target in self.find_text_matches(i) {
-            let owner = match_owner_handle(target);
-            if scene.entity_belongs_to_active_space(owner) {
-                matches.push(target);
+    /// The window is one undo step.
+    fn ensure_find_undo(&mut self, i: usize) {
+        if !self.find_replace.undo_pushed {
+            self.push_undo_snapshot(i, "FIND");
+            self.find_replace.undo_pushed = true;
+        }
+    }
+
+    fn after_find_changes(&mut self) {
+        if self.find_replace.changed.is_empty() {
+            return;
+        }
+        let i = self.active_tab;
+        self.tabs[i].scene.bump_geometry();
+        self.tabs[i].dirty = true;
+        self.refresh_properties();
+    }
+
+    /// Replace the text in an external reference's file and load it again.
+    fn write_back_find_xref(&mut self, i: usize, block: &str, pattern: &str, with: &str) {
+        let Some(raw) = self.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get(block)
+            .map(|r| r.xref_path.clone())
+        else {
+            return;
+        };
+        let base_dir = self.tabs[i]
+            .current_path
+            .as_ref()
+            .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+            .unwrap_or_default();
+        let Some(path) = crate::io::xref::resolve_path(&raw, &base_dir) else {
+            return;
+        };
+        let Ok(mut source) = crate::io::load_file(&path) else {
+            return;
+        };
+        let opts = self.find_replace.options.matching();
+        for entity in source.entities_mut() {
+            let value = match &*entity {
+                EntityType::Text(t) => t.value.clone(),
+                EntityType::MText(t) => t.value.clone(),
+                _ => continue,
+            };
+            let ranges = crate::app::text_match::str_ranges(&value, pattern, &opts);
+            if ranges.is_empty() {
                 continue;
             }
-
-            let FindMatchKey::Entity(entity) = target else {
-                continue;
-            };
-            for candidate in scene.document.entities() {
-                let EntityType::Insert(insert) = candidate else {
-                    continue;
-                };
-                if !scene.entity_belongs_to_active_space(insert.common.handle) {
-                    continue;
-                }
-                let mut visited = Vec::new();
-                if block_contains_entity(&scene.document, &insert.block_name, entity, &mut visited)
-                {
-                    matches.push(FindMatchKey::BlockEntityInInsert {
-                        entity,
-                        insert: insert.common.handle,
-                    });
-                }
+            let replaced = crate::app::text_match::replace_ranges(&value, &ranges, with);
+            match entity {
+                EntityType::Text(t) => t.value = replaced,
+                EntityType::MText(t) => t.value = replaced,
+                _ => {}
             }
         }
-        matches
-    }
-}
-
-fn no_match_status(search: &str) -> String {
-    if search.trim().is_empty() {
-        crate::t!("Enter text to find.").into_owned()
-    } else {
-        crate::tf!("\"{search}\" was not found.").into_owned()
-    }
-}
-
-fn replace_entity_text(
-    entity: &mut EntityType,
-    search: &str,
-    replacement: &str,
-    replace_all: bool,
-) -> usize {
-    let Some(value) = entity.text_content() else {
-        return 0;
-    };
-    let (value, count) = replace_case_insensitive(&value, search, replacement, replace_all);
-    if count == 0 {
-        return 0;
-    }
-    match entity {
-        EntityType::Text(text) => text.value = value,
-        EntityType::MText(text) => text.value = value,
-        EntityType::AttributeDefinition(attribute) => attribute.default_value = value,
-        EntityType::AttributeEntity(attribute) => attribute.set_value(value),
-        _ => return 0,
-    }
-    count
-}
-
-fn replace_match_text(
-    document: &mut document::Document,
-    target: FindMatchKey,
-    search: &str,
-    replacement: &str,
-    replace_all: bool,
-) -> usize {
-    match target {
-        FindMatchKey::Entity(handle) | FindMatchKey::BlockEntityInInsert { entity: handle, .. } => {
-            document.get_entity_mut(handle).map_or(0, |entity| {
-                replace_entity_text(entity, search, replacement, replace_all)
-            })
-        }
-        FindMatchKey::InsertAttribute { insert, index } => {
-            let Some(EntityType::Insert(entity)) = document.get_entity_mut(insert) else {
-                return 0;
-            };
-            let Some(attribute) = entity.attributes.get_mut(index) else {
-                return 0;
-            };
-            let (value, count) =
-                replace_case_insensitive(attribute.get_value(), search, replacement, replace_all);
-            if count > 0 {
-                attribute.set_value(value);
-            }
-            count
-        }
-    }
-}
-
-/// Row context for a match: its (single-line, shortened) text, object type
-/// and layer.
-fn describe_match(document: &document::Document, key: FindMatchKey) -> FindResult {
-    let (text, kind, layer) = match key {
-        FindMatchKey::Entity(handle) | FindMatchKey::BlockEntityInInsert { entity: handle, .. } => {
-            document
-                .get_entity(handle)
-                .map_or_else(Default::default, |entity| {
-                    (
-                        entity.text_content().unwrap_or_default(),
-                        crate::entities::traits::entity_type_name(entity).to_string(),
-                        entity.common().layer.clone(),
-                    )
+        if crate::io::save(&source, &path).is_ok() {
+            let insert_keys: rustc_hash::FxHashSet<Handle> = self.tabs[i]
+                .scene
+                .document
+                .entities()
+                .filter_map(|e| match e {
+                    EntityType::Insert(ins) if ins.block_name.eq_ignore_ascii_case(block) => {
+                        Some(ins.common.handle)
+                    }
+                    _ => None,
                 })
-        }
-        FindMatchKey::InsertAttribute { insert, index } => match document.get_entity(insert) {
-            Some(EntityType::Insert(entity)) => {
-                entity
-                    .attributes
-                    .get(index)
-                    .map_or_else(Default::default, |attribute| {
-                        (
-                            attribute.get_value().to_string(),
-                            "Attribute".to_string(),
-                            attribute.common.layer.clone(),
-                        )
-                    })
+                .collect();
+            for key in &insert_keys {
+                self.tabs[i].xref_stat_cache.0.remove(&key.value());
             }
-            _ => Default::default(),
-        },
+            let _ = crate::io::xref::resolve_xrefs_for_keys(
+                &mut self.tabs[i].scene.document,
+                &base_dir,
+                &insert_keys,
+            );
+        }
+    }
+
+    // ── Searching ─────────────────────────────────────────────────────────
+
+    /// Every match in search order: model space then the layouts in tab
+    /// order (or the picked objects in picking order), each space by object
+    /// age; an object's own text, then its hyperlink's text and address,
+    /// then an insert's attributes and the texts of its definition.
+    pub(super) fn collect_find_matches(&self, i: usize) -> Vec<FindResult> {
+        let scene = &self.tabs[i].scene;
+        let state = &self.find_replace;
+        let pattern = state.search.trim();
+        if pattern.is_empty() {
+            return Vec::new();
+        }
+        let spaces = space_blocks(scene);
+        let active = active_space_block(scene, &spaces);
+        let doc = &scene.document;
+        let mut tops: Vec<(usize, Handle)> = Vec::new();
+        for entity in doc.entities() {
+            let owner = entity.common().owner_handle;
+            if let Some(n) = spaces.iter().position(|(h, _)| *h == owner) {
+                tops.push((n, entity.common().handle));
+            }
+        }
+        tops.sort_by_key(|(n, h)| (*n, h.value()));
+        let tops: Vec<(usize, Handle)> = match state.scope {
+            FindScope::Drawing => tops,
+            FindScope::Space => tops
+                .into_iter()
+                .filter(|(n, _)| Some(*n) == active)
+                .collect(),
+            FindScope::Selection => state
+                .selection
+                .iter()
+                .filter_map(|h| tops.iter().find(|(_, t)| t == h).copied())
+                .collect(),
+        };
+        let mut walk = Walk {
+            doc,
+            opts: state.options,
+            matching: state.options.matching(),
+            pattern,
+            out: Vec::new(),
+        };
+        for (n, handle) in tops {
+            if let Some(entity) = doc.get_entity(handle) {
+                walk.entity(handle, entity, &spaces[n].1, None, 0);
+            }
+        }
+        walk.out
+    }
+}
+
+fn new_run(matches: Vec<FindResult>, single: bool) -> ReplaceRun {
+    ReplaceRun {
+        matches,
+        next: 0,
+        single,
+        prompt: None,
+        locked: None,
+        all_blocks: false,
+        blocks: Vec::new(),
+        all_xrefs: false,
+        xrefs: Vec::new(),
+    }
+}
+
+/// Model space then the paper layouts in tab order, as (block, name).
+fn space_blocks(scene: &Scene) -> Vec<(Handle, String)> {
+    let doc = &scene.document;
+    let mut out = vec![(scene.model_space_block_handle(), "Model".to_string())];
+    let mut layouts: Vec<(i16, String, Handle)> = doc
+        .objects
+        .values()
+        .filter_map(|o| match o {
+            document::objects::ObjectType::Layout(l)
+                if !l.name.eq_ignore_ascii_case("Model") && !l.name.is_empty() =>
+            {
+                Some((l.tab_order, l.name.clone(), l.block_record))
+            }
+            _ => None,
+        })
+        .collect();
+    layouts.sort_by_key(|(order, _, _)| *order);
+    layouts.dedup_by(|a, b| a.1 == b.1);
+    // Layouts read without their block (DXF) follow the paper space blocks
+    // in name order: *Paper_Space, *Paper_Space0, …
+    let mut paper: Vec<&document::tables::BlockRecord> = doc
+        .block_records
+        .iter()
+        .filter(|r| r.name.to_ascii_uppercase().starts_with("*PAPER_SPACE"))
+        .collect();
+    paper.sort_by_key(|r| (r.name.len(), r.name.to_ascii_uppercase()));
+    for (n, (_, name, block)) in layouts.into_iter().enumerate() {
+        let block = if block.is_null() {
+            paper.get(n).map_or(Handle::NULL, |r| r.handle)
+        } else {
+            block
+        };
+        if !block.is_null() {
+            out.push((block, name));
+        }
+    }
+    out
+}
+
+fn active_space_block(scene: &Scene, spaces: &[(Handle, String)]) -> Option<usize> {
+    if scene.current_layout.eq_ignore_ascii_case("Model") || scene.active_viewport.is_some() {
+        return Some(0);
+    }
+    spaces
+        .iter()
+        .position(|(_, name)| name.eq_ignore_ascii_case(&scene.current_layout))
+}
+
+/// The block definition holding a match's text, when the text is not in a
+/// space.
+fn block_name_of(scene: &Scene, key: FindMatchKey) -> Option<String> {
+    if key.owner == key.target {
+        return None;
+    }
+    let doc = &scene.document;
+    let owner = doc.get_entity(key.target)?.common().owner_handle;
+    doc.block_records
+        .iter()
+        .find(|r| r.handle == owner)
+        .map(|r| {
+            // A text nested in an xref belongs to the xref's file.
+            let mut name = r.name.clone();
+            if let Some(EntityType::Insert(ins)) = doc.get_entity(key.owner) {
+                if doc
+                    .block_records
+                    .get(&ins.block_name)
+                    .is_some_and(|b| b.flags.is_xref || b.flags.is_xref_overlay)
+                {
+                    name = ins.block_name.clone();
+                }
+            }
+            name
+        })
+}
+
+struct Walk<'a> {
+    doc: &'a document::Document,
+    opts: FindOptions,
+    matching: crate::app::text_match::MatchOptions,
+    pattern: &'a str,
+    out: Vec<FindResult>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Within {
+    Block,
+    Xref,
+}
+
+impl Walk<'_> {
+    fn hidden_layer(&self, layer: &str) -> bool {
+        self.doc
+            .layers
+            .get(layer)
+            .is_some_and(|l| l.flags.off || l.flags.frozen)
+    }
+
+    fn push(&mut self, owner: Handle, target: Handle, part: FindPart, kind: FindKind, location: &str, value: &str, height: f64) {
+        if crate::app::text_match::str_ranges(value, self.pattern, &self.matching).is_empty() {
+            return;
+        }
+        self.out.push(FindResult {
+            key: FindMatchKey {
+                owner,
+                target,
+                part,
+            },
+            location: location.to_string(),
+            kind,
+            text: one_line(value),
+            height,
+        });
+    }
+
+    fn entity(
+        &mut self,
+        owner: Handle,
+        entity: &EntityType,
+        location: &str,
+        within: Option<Within>,
+        depth: usize,
+    ) {
+        let common = entity.common();
+        if self.opts.ignore_hidden && (common.invisible || self.hidden_layer(&common.layer)) {
+            return;
+        }
+        let target = common.handle;
+        let inner = |kind: FindKind| match within {
+            Some(Within::Block) => FindKind::Block,
+            Some(Within::Xref) => FindKind::Xref,
+            None => kind,
+        };
+        match entity {
+            EntityType::Text(t) if self.opts.texts => {
+                self.push(owner, target, FindPart::Text, inner(FindKind::Text), location, &t.value, t.height)
+            }
+            EntityType::MText(t) if self.opts.texts => {
+                self.push(owner, target, FindPart::Text, inner(FindKind::MText), location, &t.value, t.height)
+            }
+            EntityType::Dimension(d) if self.opts.dimensions => {
+                if let Some(text) = d.base().text_override() {
+                    if !text.trim().is_empty() && text.trim() != "<>" {
+                        let height = dim_text_height(self.doc, &d.base().style_name);
+                        self.push(owner, target, FindPart::Text, inner(FindKind::Dimension), location, text, height);
+                    }
+                }
+            }
+            EntityType::MultiLeader(ml) if self.opts.dimensions && ml.context.has_text_contents => {
+                self.push(
+                    owner,
+                    target,
+                    FindPart::Text,
+                    inner(FindKind::MLeader),
+                    location,
+                    &ml.context.text_string,
+                    ml.context.text_height,
+                );
+            }
+            EntityType::Table(table) if self.opts.tables => {
+                let height = crate::entities::table::data_text_height(table, self.doc);
+                for row in 0..table.row_count() {
+                    for col in 0..table.column_count() {
+                        if let Some(text) = table.cell_text(row, col) {
+                            let text = text.to_string();
+                            self.push(owner, target, FindPart::Cell(row, col), inner(FindKind::Table), location, &text, height);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        if within.is_none() {
+            if let Some(link) = crate::scene::hyperlink::Link::of(entity) {
+                if self.opts.link_texts && !link.text.is_empty() {
+                    self.push(owner, target, FindPart::LinkText, FindKind::LinkText, location, &link.text, 0.0);
+                }
+                if self.opts.links && !link.url.is_empty() {
+                    self.push(owner, target, FindPart::LinkUrl, FindKind::Link, location, &link.url, 0.0);
+                }
+            }
+        }
+        if let EntityType::Insert(insert) = entity {
+            if self.opts.attributes && within.is_none() {
+                for (index, attribute) in insert.attributes.iter().enumerate() {
+                    if self.opts.ignore_hidden
+                        && (attribute.flags.invisible
+                            || attribute.common.invisible
+                            || self.hidden_layer(&attribute.common.layer))
+                    {
+                        continue;
+                    }
+                    let value = attribute.get_value().to_string();
+                    self.push(
+                        owner,
+                        insert.common.handle,
+                        FindPart::Attribute(index),
+                        FindKind::Attribute,
+                        location,
+                        &value,
+                        attribute.height,
+                    );
+                }
+            }
+            let Some(record) = self.doc.block_records.get(&insert.block_name) else {
+                return;
+            };
+            let xref = record.flags.is_xref || record.flags.is_xref_overlay;
+            let go = if xref { self.opts.xrefs } else { self.opts.blocks };
+            if !go || depth > 16 {
+                return;
+            }
+            let within = match within {
+                Some(w) => Some(w),
+                None if xref => Some(Within::Xref),
+                None => Some(Within::Block),
+            };
+            let children = record.entity_handles.clone();
+            for child in children {
+                if let Some(child) = self.doc.get_entity(child) {
+                    if matches!(child, EntityType::AttributeDefinition(_)) {
+                        continue;
+                    }
+                    self.entity(owner, child, location, within, depth + 1);
+                }
+            }
+        }
+    }
+}
+
+fn dim_text_height(doc: &document::Document, style: &str) -> f64 {
+    doc.dim_styles
+        .iter()
+        .find(|s| s.name.eq_ignore_ascii_case(style))
+        .map(|s| {
+            let scale = if s.dimscale > 1e-6 { s.dimscale } else { 1.0 };
+            s.dimtxt * scale
+        })
+        .filter(|h| *h > 1e-9)
+        .unwrap_or(2.5)
+}
+
+/// The text a match reads.
+fn field_text(doc: &document::Document, key: FindMatchKey) -> Option<String> {
+    let entity = doc.get_entity(key.target)?;
+    match (key.part, entity) {
+        (FindPart::Text, EntityType::Text(t)) => Some(t.value.clone()),
+        (FindPart::Text, EntityType::MText(t)) => Some(t.value.clone()),
+        (FindPart::Text, EntityType::Dimension(d)) => d.base().text_override().map(str::to_string),
+        (FindPart::Text, EntityType::MultiLeader(ml)) => Some(ml.context.text_string.clone()),
+        (FindPart::Cell(r, c), EntityType::Table(t)) => t.cell_text(r, c).map(str::to_string),
+        (FindPart::Attribute(n), EntityType::Insert(ins)) => {
+            ins.attributes.get(n).map(|a| a.get_value().to_string())
+        }
+        (FindPart::LinkText, e) => crate::scene::hyperlink::Link::of(e).map(|l| l.text),
+        (FindPart::LinkUrl, e) => crate::scene::hyperlink::Link::of(e).map(|l| l.url),
+        _ => None,
+    }
+}
+
+/// Write a match's text back.
+fn set_field_text(doc: &mut document::Document, key: FindMatchKey, value: String) -> bool {
+    if let FindPart::LinkText | FindPart::LinkUrl = key.part {
+        let Some(mut link) = doc.get_entity(key.target).and_then(crate::scene::hyperlink::Link::of)
+        else {
+            return false;
+        };
+        if key.part == FindPart::LinkText {
+            link.text = value;
+        } else {
+            link.url = value;
+        }
+        crate::scene::hyperlink::set(doc, key.target, Some(&link));
+        return true;
+    }
+    let Some(entity) = doc.get_entity_mut(key.target) else {
+        return false;
     };
-    let mut text = text.replace("\\P", " ").replace(['\r', '\n'], " ");
+    match (key.part, entity) {
+        (FindPart::Text, EntityType::Text(t)) => t.value = value,
+        (FindPart::Text, EntityType::MText(t)) => t.value = value,
+        (FindPart::Text, EntityType::Dimension(d)) => {
+            crate::entities::dimension::set_dimension_text_override(d.base_mut(), Some(value))
+        }
+        (FindPart::Text, EntityType::MultiLeader(ml)) => ml.context.text_string = value,
+        (FindPart::Cell(r, c), EntityType::Table(t)) => {
+            if !t.set_cell_text(r, c, &value) {
+                return false;
+            }
+            // The stored picture no longer shows the cells.
+            t.block_record_handle = None;
+        }
+        (FindPart::Attribute(n), EntityType::Insert(ins)) => match ins.attributes.get_mut(n) {
+            Some(a) => a.set_value(value),
+            None => return false,
+        },
+        _ => return false,
+    }
+    true
+}
+
+/// A text on one line, shortened, for the result list.
+fn one_line(value: &str) -> String {
+    let mut text = value.replace("\\P", " ").replace(['\r', '\n'], " ");
     if let Some((cut, _)) = text.char_indices().nth(80) {
         text.truncate(cut);
         text.push('…');
     }
-    FindResult {
-        key,
-        text,
-        kind,
-        layer,
-    }
-}
-
-fn match_owner_handle(target: FindMatchKey) -> document::Handle {
-    match target {
-        FindMatchKey::Entity(handle) => handle,
-        FindMatchKey::BlockEntityInInsert { insert, .. } => insert,
-        FindMatchKey::InsertAttribute { insert, .. } => insert,
-    }
-}
-
-fn match_document_handle(target: FindMatchKey) -> document::Handle {
-    match target {
-        FindMatchKey::Entity(handle) => handle,
-        FindMatchKey::BlockEntityInInsert { entity, .. } => entity,
-        FindMatchKey::InsertAttribute { insert, .. } => insert,
-    }
-}
-
-fn match_is_locked(scene: &crate::scene::Scene, target: FindMatchKey) -> bool {
-    scene.is_layer_locked(match_owner_handle(target))
-        || scene.is_layer_locked(match_document_handle(target))
-}
-
-fn match_label(target: FindMatchKey) -> String {
-    match target {
-        FindMatchKey::Entity(handle) => crate::tf!("handle {:X}", handle.value()).into_owned(),
-        FindMatchKey::BlockEntityInInsert { entity, insert } => {
-            crate::tf!("block {:X}, text {:X}", insert.value(), entity.value()).into_owned()
-        }
-        FindMatchKey::InsertAttribute { insert, index } => {
-            crate::tf!("block {:X}, attribute {}", insert.value(), index + 1).into_owned()
-        }
-    }
-}
-
-fn block_contains_entity(
-    document: &document::Document,
-    block_name: &str,
-    target: document::Handle,
-    visited: &mut Vec<String>,
-) -> bool {
-    if visited
-        .iter()
-        .any(|name| name.eq_ignore_ascii_case(block_name))
-    {
-        return false;
-    }
-    let Some(record) = document
-        .block_records
-        .iter()
-        .find(|record| record.name.eq_ignore_ascii_case(block_name))
-    else {
-        return false;
-    };
-    visited.push(record.name.clone());
-    let found = record.entity_handles.iter().any(|handle| {
-        if *handle == target {
-            return true;
-        }
-        matches!(
-            document.get_entity(*handle),
-            Some(EntityType::Insert(insert))
-                if block_contains_entity(document, &insert.block_name, target, visited)
-        )
-    });
-    visited.pop();
-    found
-}
-
-fn replace_case_insensitive(
-    value: &str,
-    search: &str,
-    replacement: &str,
-    replace_all: bool,
-) -> (String, usize) {
-    if search.is_empty() {
-        return (value.to_string(), 0);
-    }
-
-    let mut result = String::with_capacity(value.len());
-    let mut cursor = 0usize;
-    let mut count = 0usize;
-    while let Some((start, end)) = find_case_insensitive_range(value, search, cursor) {
-        result.push_str(&value[cursor..start]);
-        result.push_str(replacement);
-        cursor = end;
-        count += 1;
-        if !replace_all {
-            break;
-        }
-    }
-    if count == 0 {
-        return (value.to_string(), 0);
-    }
-    result.push_str(&value[cursor..]);
-    (result, count)
-}
-
-fn find_case_insensitive_range(value: &str, search: &str, from: usize) -> Option<(usize, usize)> {
-    let needle = search.to_lowercase();
-    if needle.is_empty() {
-        return None;
-    }
-
-    for (start, _) in value.char_indices().filter(|(index, _)| *index >= from) {
-        let ends = value[start..]
-            .char_indices()
-            .skip(1)
-            .map(|(offset, _)| start + offset)
-            .chain(std::iter::once(value.len()));
-        for end in ends {
-            let candidate = value[start..end].to_lowercase();
-            if candidate == needle {
-                return Some((start, end));
-            }
-            if candidate.len() > needle.len() {
-                break;
-            }
-        }
-    }
-    None
+    text
 }

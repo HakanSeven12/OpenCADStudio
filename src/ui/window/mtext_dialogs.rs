@@ -104,7 +104,8 @@ pub struct FindDraft {
     pub wildcards: bool,
     pub diacritics: bool,
     pub half_full: bool,
-    /// What the last search said ("not found", replacements made).
+    /// The message box after a search: "Finished searching." or the
+    /// replacement count. The buttons wait for its OK.
     pub notice: Option<String>,
 }
 
@@ -161,6 +162,8 @@ pub enum MTextDialogMsg {
     Wildcards(bool),
     Diacritics(bool),
     HalfFull(bool),
+    /// OK on the search message.
+    DismissNotice,
     FindNext,
     ReplaceOne,
     ReplaceAll,
@@ -558,7 +561,7 @@ pub fn view_find<'a>(
             .style(field_style)
             .on_input(move |v| msg(on(v)))
     };
-    let search = !d.find.is_empty();
+    let search = !d.find.is_empty() && d.notice.is_none();
     let action = |label: String, message: MTextDialogMsg| {
         button(text(label).size(11))
             .on_press_maybe(search.then(|| msg(message)))
@@ -589,14 +592,40 @@ pub fn view_find<'a>(
         .spacing(4),
     );
     let notice: Element<'a, Message> = match &d.notice {
-        Some(notice) => text(notice.clone()).size(11).style(muted_style).into(),
-        None => Space::new().into(),
+        Some(notice) => container(
+            row![
+                crate::ui::icons::semantic(crate::ui::icons::INFO, 14.0),
+                text(notice.clone()).size(11),
+                Space::new().width(Fill),
+                button(text(crate::t!("OK")).size(11))
+                    .on_press(msg(M::DismissNotice))
+                    .style(button_style(true))
+                    .padding([4, 14]),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+        )
+        .padding([6, 10])
+        .width(Fill)
+        .style(|theme: &iced::Theme| container::Style {
+            background: Some(iced::Background::Color(
+                theme.palette().primary.base.color.scale_alpha(0.14),
+            )),
+            border: iced::Border {
+                radius: 6.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .into(),
+        // The message's room is kept: the window does not grow for it.
+        None => Space::new().height(Length::Fixed(50.0)).into(),
     };
     column![
         texts,
         options,
+        notice,
         row![
-            notice,
             Space::new().width(Fill),
             action(t("Find Next"), M::FindNext),
             action(t("Replace"), M::ReplaceOne),

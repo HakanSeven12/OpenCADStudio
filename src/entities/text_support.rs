@@ -578,6 +578,9 @@ pub enum MTextRunKind {
         /// A decimal stack (`\S1.5~.2.25;`): the halves line up on their
         /// decimal points.
         decimal: bool,
+        /// A diagonal stack (`\S1#2;`): the numerator raised one height,
+        /// the denominator after it on the baseline, a slanted rule between.
+        diagonal: bool,
     },
 }
 
@@ -901,28 +904,15 @@ pub fn adapt_mtext_paragraphs(
                 strike: p.stroke.strikethrough(),
             };
             if let Some(st) = &span.stacking {
-                // `\S` stacks the two halves in one slot. A diagonal stack
-                // (`\S1#2;`) is the exception — it reads as an inline `num/den`
-                // and is drawn that way rather than as a slanted rule.
-                if matches!(st.stacking_type, StackingType::Diagonal) {
-                    let mut t = st.numerator.clone();
-                    if !st.denominator.is_empty() {
-                        t.push('/');
-                        t.push_str(&st.denominator);
-                    }
-                    if !t.is_empty() {
-                        line.runs.push(MTextRun {
-                            kind: MTextRunKind::Glyphs(t),
-                            state,
-                        });
-                    }
-                } else if !st.numerator.is_empty() || !st.denominator.is_empty() {
+                // `\S` stacks the two halves in one slot.
+                if !st.numerator.is_empty() || !st.denominator.is_empty() {
                     line.runs.push(MTextRun {
                         kind: MTextRunKind::Stack {
                             numerator: st.numerator.clone(),
                             denominator: st.denominator.clone(),
                             bar: matches!(st.stacking_type, StackingType::Horizontal),
                             decimal: matches!(st.stacking_type, StackingType::Decimal),
+                            diagonal: matches!(st.stacking_type, StackingType::Diagonal),
                         },
                         state,
                     });
@@ -1001,6 +991,9 @@ pub enum AtomKind {
         /// A decimal stack (`\S1.5~.2.25;`): the halves line up on their
         /// decimal points.
         decimal: bool,
+        /// A diagonal stack (`\S1#2;`): the numerator raised one height,
+        /// the denominator after it on the baseline, a slanted rule between.
+        diagonal: bool,
     },
 }
 
@@ -1009,20 +1002,34 @@ pub enum AtomKind {
 // is how a 70 %-scaled fraction is spelled, so the 0.7 *is* the fraction's size.
 // Shrinking again on top of it is what buries the halves.
 //
-// So a half is near the full run height and the stack ends up about twice that:
+// So a half is the full run height (measured) and the stack ends up over twice that:
 // it is meant to grow past the line, numerator above the cap and denominator on
 // the baseline — not to be squeezed into one line's worth of height.
 //
 // The three must stay ordered — denominator cap, then rule, then numerator
 // baseline — or the rule cuts through a half.
 /// Each half of a `\S` stack, as a fraction of the run's own height.
-pub const STACK_HALF_SCALE: f32 = 0.85;
+pub const STACK_HALF_SCALE: f32 = 1.0;
 /// Height of the fraction rule above the denominator's baseline, as a fraction
-/// of the run's height. Sits just clear of the denominator's cap.
-pub const STACK_BAR_Y: f32 = 0.95;
+/// of the run's height (measured: 7/6, a sixth under the numerator's baseline).
+pub const STACK_BAR_Y: f32 = 7.0 / 6.0;
 /// Baseline of the numerator above the denominator's, as a fraction of the run's
-/// height. Clears the rule.
-pub const STACK_RAISE: f32 = 1.05;
+/// height (measured: 4/3; a diagonal stack raises it one height).
+pub const STACK_RAISE: f32 = 4.0 / 3.0;
+
+/// How far a stack reaches above its baseline: the top of its numerator.
+fn stack_top(kind: &AtomKind, run_h: f32) -> f32 {
+    match kind {
+        AtomKind::Stack {
+            numerator,
+            diagonal,
+            ..
+        } if !numerator.is_empty() => {
+            run_h * (if *diagonal { 1.0 } else { STACK_RAISE } + STACK_HALF_SCALE)
+        }
+        _ => run_h,
+    }
+}
 
 #[derive(Clone)]
 pub struct LayoutAtom {
@@ -1378,27 +1385,33 @@ pub fn atom_width(atom: &LayoutAtom, entity_h: f32, base_wf: f32, base_font: &st
             denominator,
             bar,
             decimal,
+            diagonal,
         } => {
-            // Measured at the shrunk height the halves draw at.
+            // Measured at the height the halves draw at.
             let mut half = atom.state.clone();
             half.height_mul *= STACK_HALF_SCALE;
             let w = |t: &str| measure_word(t, &half, entity_h, base_wf, base_font);
-            stack_slot(numerator, denominator, *bar, *decimal, w).0
+            stack_slot(numerator, denominator, *bar, *decimal, *diagonal, w).0
         }
     }
 }
 
 /// A stack's slot width and each half's offset into it. Halves start at the
 /// slot's left edge; a fraction (`/`) centres them; a decimal stack lines
-/// their decimal points up when both have one.
+/// their decimal points up when both have one; a diagonal stack puts the
+/// denominator after the numerator.
 pub fn stack_slot(
     numerator: &str,
     denominator: &str,
     bar: bool,
     decimal: bool,
+    diagonal: bool,
     w: impl Fn(&str) -> f32,
 ) -> (f32, f32, f32) {
     let (n, d) = (w(numerator), w(denominator));
+    if diagonal {
+        return (n + d, 0.0, n);
+    }
     if decimal {
         if let (Some(np), Some(dp)) = (numerator.find('.'), denominator.find('.')) {
             let (np, dp) = (w(&numerator[..np]), w(&denominator[..dp]));
@@ -2040,6 +2053,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     denominator,
                     bar,
                     decimal,
+                    diagonal,
                 } => {
                     let slots = numerator.chars().count()
                         + denominator.chars().count()
@@ -2050,6 +2064,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             denominator: denominator.clone(),
                             bar: *bar,
                             decimal: *decimal,
+                            diagonal: *diagonal,
                         },
                         state: run.state.clone(),
                         char_offset: doc_char_offset,
@@ -2184,6 +2199,10 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             line.atoms
                 .iter()
                 .filter_map(|atom| {
+                    // A stack's numerator pushes the first baseline down too.
+                    if let AtomKind::Stack { .. } = &atom.kind {
+                        return Some(stack_top(&atom.kind, atom.state.height_mul * entity_h));
+                    }
                     let AtomKind::Word(text) = &atom.kind else {
                         return None;
                     };
@@ -2643,7 +2662,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         let line_max_h = sub
             .atoms
             .iter()
-            .map(|a| a.state.height_mul * entity_h)
+            .map(|a| stack_top(&a.kind, a.state.height_mul * entity_h))
             .fold(entity_h, f32::max);
 
         // A paragraph break (explicit `\n` / `\P`) that started this line gets
@@ -3060,6 +3079,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     denominator,
                     bar,
                     decimal,
+                    diagonal,
                 } => {
                     let run_h = atom.state.height_mul * entity_h;
                     let signed_wf = base_wf.signum() * atom.state.width_mul * base_wf.abs();
@@ -3071,9 +3091,13 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         .color
                         .as_ref()
                         .and_then(|c| resolve_inline_color(c, opts.layer_color.as_ref()));
+                    // `\A` moves the text around a stack, not the stack: the
+                    // stack is measured whole, so as the line's tallest part
+                    // it stays on the baseline.
+                    let stack_h = stack_top(&atom.kind, run_h);
                     let valign_dy = match atom.state.valign {
-                        1 => (line_max_h - run_h) * 0.5,
-                        2 => line_max_h - run_h,
+                        1 => (line_max_h - stack_h) * 0.5,
+                        2 => line_max_h - stack_h,
                         _ => 0.0,
                     };
 
@@ -3088,7 +3112,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     // the slot; a decimal stack lines up the decimal points;
                     // a `^` stack (tolerance, index) stays left.
                     let (slot_w, num_dx, den_dx) =
-                        stack_slot(numerator, denominator, *bar, *decimal, |t: &str| {
+                        stack_slot(numerator, denominator, *bar, *decimal, *diagonal, |t: &str| {
                             measure_word(t, &half_state, entity_h, base_wf, &base_font_name)
                         });
                     let mut emit = |text: &str, ly: f32, dx: f32| {
@@ -3139,7 +3163,8 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         valign_dy
                     };
                     emit(denominator, bottom_dy, den_dx);
-                    emit(numerator, valign_dy + run_h * STACK_RAISE, num_dx);
+                    let raise = if *diagonal { 1.0 } else { STACK_RAISE };
+                    emit(numerator, valign_dy + run_h * raise, num_dx);
 
                     if opts.want_glyph_boxes {
                         let slots = numerator.chars().count()
@@ -3147,7 +3172,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             + usize::from(!denominator.is_empty());
                         if slots > 0 {
                             let valign_dy = bottom_dy;
-                            let top = valign_dy + run_h * (STACK_RAISE + STACK_HALF_SCALE);
+                            let top = valign_dy + stack_h;
                             for index in 0..slots {
                                 let x0 = cursor_x + slot_w * index as f32 / slots as f32;
                                 let x1 = cursor_x + slot_w * (index + 1) as f32 / slots as f32;
@@ -3187,34 +3212,52 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         }
                     }
 
-                    if *bar && slot_w > 0.0 {
-                        // The rule is plain geometry, not a glyph, so it rides a
-                        // run-less group — those keep their strokes, while a
-                        // group carrying a `GlyphRun` renders as SDF quads and
-                        // has its strokes suppressed.
-                        let by = valign_dy + run_h * STACK_BAR_Y;
-                        let p = |lx: f32, ly: f32| -> [f32; 2] {
-                            [lx * cos_r - ly * sin_r, lx * sin_r + ly * cos_r]
-                        };
-                        let (ox, oy) = (
-                            ins_x + (line_base_x + p(cursor_x, by)[0]) as f64,
-                            ins_y + (line_base_y + p(cursor_x, by)[1]) as f64,
-                        );
-                        let end = p(slot_w, 0.0);
+                    let p = |lx: f32, ly: f32| -> [f32; 2] {
+                        [lx * cos_r - ly * sin_r, lx * sin_r + ly * cos_r]
+                    };
+                    let mut rule = |from: [f32; 2], to: [f32; 2]| {
+                        let start = p(from[0], from[1]);
+                        let end = p(to[0] - from[0], to[1] - from[1]);
                         all_strokes.push(TextStroke {
                             strokes: vec![vec![[0.0, 0.0], end]],
-                            origin: [ox, oy],
+                            origin: [
+                                ins_x + (line_base_x + start[0]) as f64,
+                                ins_y + (line_base_y + start[1]) as f64,
+                            ],
                             color,
                             fill_tris: Vec::new(),
                             plane: None,
                             run: None,
                         });
+                    };
+                    if *diagonal && !numerator.is_empty() && !denominator.is_empty() {
+                        // Measured: a rule two heights long at 55°, centred one
+                        // height up and a sixth of a height before the
+                        // denominator.
+                        let (cx, cy) = (cursor_x + den_dx - half_h / 6.0, valign_dy + half_h);
+                        let (dx, dy) = (half_h * 55f32.to_radians().cos(), half_h * 55f32.to_radians().sin());
+                        rule([cx - dx, cy - dy], [cx + dx, cy + dy]);
+                    }
+                    if *bar && slot_w > 0.0 {
+                        // The rule is plain geometry, not a glyph, so it rides a
+                        // run-less group — those keep their strokes, while a
+                        // group carrying a `GlyphRun` renders as SDF quads and
+                        // has its strokes suppressed. Measured: it runs from the
+                        // slot's start to the wider half's last glyph, leaving
+                        // out a stroke font's letter spacing after it.
+                        let wider = if num_dx <= den_dx { numerator } else { denominator };
+                        let gap = wider.chars().next_back().map_or(0.0, |c| {
+                            Face::resolve(&font_name).spacing_after(c)
+                                * atom.state.tracking
+                                * run_scale(&half_state, entity_h, base_wf)
+                        });
+                        let by = valign_dy + run_h * STACK_BAR_Y;
+                        rule([cursor_x, by], [cursor_x + (slot_w - gap).max(0.0), by]);
                     }
                     local_bounds[0] = local_bounds[0].min(cursor_x);
                     local_bounds[1] = local_bounds[1].min(line_ly + valign_dy);
                     local_bounds[2] = local_bounds[2].max(cursor_x + slot_w);
-                    local_bounds[3] = local_bounds[3]
-                        .max(line_ly + valign_dy + run_h * (STACK_RAISE + STACK_HALF_SCALE));
+                    local_bounds[3] = local_bounds[3].max(line_ly + valign_dy + stack_h);
                     cursor_x += slot_w;
                 }
                 AtomKind::Space => {
@@ -3754,8 +3797,8 @@ mod adapter_tests {
         // over `3.125` puts `3` under `2`; with a point missing they stay
         // left, as the reference lays out `\S10~.2.25;`.
         let digit = |t: &str| t.chars().count() as f32;
-        assert_eq!(stack_slot("12.5", "3.125", false, true, digit), (6.0, 0.0, 1.0));
-        assert_eq!(stack_slot("10", "2.25", false, true, digit), (4.0, 0.0, 0.0));
+        assert_eq!(stack_slot("12.5", "3.125", false, true, false, digit), (6.0, 0.0, 1.0));
+        assert_eq!(stack_slot("10", "2.25", false, true, false, digit), (4.0, 0.0, 0.0));
         let lines = adapt_mtext_paragraphs("\\S1.5~.2.25;", 2.5, true);
         assert!(matches!(
             &lines[0].runs[0].kind,

@@ -32,6 +32,7 @@ const INTERSECT_ICON: &[u8] = include_bytes!("../../../assets/icons/model/inters
 const FILLET_ICON: &[u8] = include_bytes!("../../../assets/icons/model/fillet.svg");
 const CHAMFER_ICON: &[u8] = include_bytes!("../../../assets/icons/model/chamfer.svg");
 const SHELL_ICON: &[u8] = include_bytes!("../../../assets/icons/model/shell.svg");
+const SLICE_ICON: &[u8] = include_bytes!("../../../assets/icons/model/slice.svg");
 
 /// Helper to declare a ribbon tool that fires a named command.
 fn tool(id: &'static str, label: &'static str, icon: &'static [u8]) -> ToolDef {
@@ -95,6 +96,7 @@ impl CadModule for ModelModule {
                         RibbonItem::LargeTool(tool("FILLETEDGE", "Fillet Edge", FILLET_ICON)),
                         RibbonItem::LargeTool(tool("CHAMFEREDGE", "Chamfer", CHAMFER_ICON)),
                         RibbonItem::LargeTool(tool("SHELL", "Shell", SHELL_ICON)),
+                        RibbonItem::LargeTool(tool("SLICE", "Slice", SLICE_ICON)),
                     ],
                 },
             ]

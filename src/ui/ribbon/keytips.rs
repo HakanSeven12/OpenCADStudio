@@ -496,6 +496,7 @@ const CODES: &[(&str, &str, &str)] = &[
     ("model", "FILLETEDGE", "ED"),
     ("model", "CHAMFEREDGE", "CE"),
     ("model", "SHELL", "SH"),
+    ("model", "SLICE", "SL"),
     // Insert.
     ("insert", "Block", "BK"),
     ("insert", "INSERT_GALLERY", "BI"),

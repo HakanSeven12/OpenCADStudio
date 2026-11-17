@@ -7889,7 +7889,9 @@ impl OpenCADStudio {
                 .unwrap_or_default();
             self.apply_panel_or_dialog_updates(panel_updates);
 
-            self.sync_dimension_snaps(i);
+            if !matches!(result, Some(crate::command::CmdResult::CommitDimension { .. })) {
+                self.sync_dimension_snaps(i);
+            }
             if let Some(r) = result {
                 let task = self.apply_cmd_result(r);
                 let mut sel = self.tabs[i].scene.selection.borrow_mut();

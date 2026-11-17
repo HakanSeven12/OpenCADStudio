@@ -479,6 +479,9 @@ impl OpenCADStudio {
         if let Some(pd) = pending {
             self.commit_undo_delta(i, pd);
         }
+        // The measuring snaps were kept for this commit; a command that goes on
+        // (DIM) starts its next dimension without them.
+        self.sync_dimension_snaps(i);
         // A dimension DIM placed over another asks what to do with them.
         let in_dim = self.tabs[i]
             .active_cmd

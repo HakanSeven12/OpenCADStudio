@@ -11523,4 +11523,205 @@ mod tests {
         assert_eq!(counters.layer_builds, 1, "the placeholder replays");
     }
 
+    // -- SCN-031c: the scene region's LAYOUT pin -----------------------------
+
+    /// THE LAYOUT PIN (SCN-031c): the scene region RESERVES its documented
+    /// fixed height in the REAL composition. Not a declared-length read —
+    /// the pin lays the exact live element chain out with iced's own layout
+    /// (mounted body → pointer-capture shell → `kit::scroll_area` →
+    /// `kit::palette` → the dock's `FillPortion` clip cell) through a
+    /// headless renderer and measures the RESOLVED node tree:
+    ///
+    /// - the region (the body column's FIRST child) resolves to EXACTLY
+    ///   [`SCENE_REGION_V1_HEIGHT`], and
+    /// - the widget stack begins BELOW it (region height + the column
+    ///   spacing) — never inside the region's band, and
+    /// - both hold in a viewport TALLER and one SHORTER than the region —
+    ///   the documented v1 law's reason: the panel scroll area lays its
+    ///   content out with an UNBOUNDED main axis (`scrollable` passes
+    ///   `f32::INFINITY` down; iced's `Limits::height(Fixed)` clamps a
+    ///   fixed length only by the incoming max), so the fixed height is
+    ///   never squeezed by the window.
+    ///
+    /// (The live "~90 px collapse" report this pin answers closed as a
+    /// misread of the CORRECT fitted render: the demo graph is wide, so the
+    /// fit is width-limited and its node cards — which read as "a widget
+    /// stack" on a screenshot — sit sparse inside the intact 240 band. The
+    /// layout math admits no collapse: verified through the vendored
+    /// iced flex/limits sources and this resolved-layout measurement.)
+    #[test]
+    fn scene_region_reserves_its_fixed_height_in_the_live_chain() {
+        use iced::advanced::layout::Limits;
+        use iced::widget::Space;
+        use iced::Size;
+
+        let _app = OpenCADStudio::new_for_test();
+        let _lock = crate::headless_ui_lock();
+        with_test_registry_mut(|registry| {
+            attach_publish(
+                registry,
+                "PLUGIN",
+                "scn_panel",
+                simple_list_surface(SceneRevision(1), vec![item(7, "a")]),
+            )
+            .expect("attach");
+            registry
+                .panel_surface_store_mut()
+                .publish("PLUGIN", "scn_panel", SceneOrWidgetSurface::Scene(graph_scene(1)))
+                .expect("the scene leg stores");
+        });
+        assert_eq!(
+            MountRegistry::body_shape("scn_panel"),
+            Some(MountBodyShape::SceneAndWidgets)
+        );
+        let surface_id = with_test_registry(|r| r.panel_surface_id_owned("scn_panel"));
+
+        let renderer = iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
+            ),
+        )
+        .expect("headless renderer");
+
+        // The exact live chain, `plugin_panel::view` + the dock edge down
+        // to the FillPortion cell.
+        let composed = || -> Element<'static, crate::app::Message> {
+            let body = MountRegistry::mounted_body("scn_panel").expect("the body composes");
+            let body = pointer_capture_body(body, surface_id).map(app_message);
+            let title_bar: Element<'static, crate::app::Message> = Space::new()
+                .width(Length::Fixed(360.0))
+                .height(Length::Fixed(crate::ui::style::kit_metrics::TITLE_H))
+                .into();
+            let panel = crate::ui::kit::palette(title_bar, crate::ui::kit::scroll_area(body), 360.0);
+            let cell = iced::widget::container(panel)
+                .height(Length::FillPortion(1))
+                .clip(true);
+            iced::widget::column![cell].height(Length::Fill).into()
+        };
+
+        // The region node: the FIRST child of exactly the region height,
+        // found with its parent (the body column).
+        fn find_region_with_parent<'a>(
+            node: &'a iced::advanced::layout::Node,
+        ) -> Option<(
+            &'a iced::advanced::layout::Node,
+            &'a iced::advanced::layout::Node,
+        )> {
+            let children = node.children();
+            if let Some(first) = children.first() {
+                if (first.bounds().size().height - SCENE_REGION_V1_HEIGHT).abs() < f32::EPSILON {
+                    return Some((node, first));
+                }
+            }
+            children.iter().find_map(find_region_with_parent)
+        }
+
+        for viewport_height in [600.0, 120.0] {
+            let mut root = composed();
+            let mut tree = iced::advanced::widget::Tree::empty();
+            tree.diff(root.as_widget_mut());
+            let node = root.as_widget_mut().layout(
+                &mut tree,
+                &renderer,
+                &Limits::new(Size::ZERO, Size::new(360.0, viewport_height)),
+            );
+            let (column, region) = find_region_with_parent(&node)
+                .unwrap_or_else(|| panic!("the region node at viewport {viewport_height}"));
+            let region_height = region.bounds().size().height;
+            assert!(
+                (region_height - SCENE_REGION_V1_HEIGHT).abs() < f32::EPSILON,
+                "the region reserves exactly its fixed height, got {region_height}"
+            );
+            // The widget stack begins BELOW the region, never inside it.
+            let stack = &column.children()[1..];
+            assert!(
+                !stack.is_empty(),
+                "the scene+widgets split keeps the widget stack below"
+            );
+            for widget in stack {
+                let top = widget.bounds().position().y;
+                assert!(
+                    top >= SCENE_REGION_V1_HEIGHT,
+                    "widgets start below the region, got y={top}"
+                );
+            }
+            let first_widget = stack[0].bounds().position().y;
+            assert!(
+                (first_widget - (SCENE_REGION_V1_HEIGHT + MOUNT_GROUP_SPACING)).abs() < f32::EPSILON,
+                "the stack begins at region height + column spacing, got {first_widget}"
+            );
+        }
+    }
+
+    /// THE LAYOUT PIN (scene-only edition): the region IS the body — the
+    /// padded body container's single child resolves to exactly
+    /// [`SCENE_REGION_V1_HEIGHT`] (nothing else competes for the band).
+    #[test]
+    fn scene_only_region_is_the_whole_body_at_the_fixed_height() {
+        use iced::advanced::layout::Limits;
+        use iced::widget::Space;
+        use iced::Size;
+
+        let _app = OpenCADStudio::new_for_test();
+        let _lock = crate::headless_ui_lock();
+        with_test_registry_mut(|registry| {
+            registry
+                .panel_surface_store_mut()
+                .publish("PLUGIN", "scn_panel", SceneOrWidgetSurface::Scene(graph_scene(1)))
+                .expect("the scene leg stores");
+        });
+        assert_eq!(
+            MountRegistry::body_shape("scn_panel"),
+            Some(MountBodyShape::SceneOnly)
+        );
+
+        let renderer = iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
+            ),
+        )
+        .expect("headless renderer");
+
+        let body = MountRegistry::mounted_body("scn_panel").expect("the body composes");
+        let body: Element<'static, crate::app::Message> = body.map(app_message);
+        let title_bar: Element<'static, crate::app::Message> = Space::new()
+            .width(Length::Fixed(360.0))
+            .height(Length::Fixed(crate::ui::style::kit_metrics::TITLE_H))
+            .into();
+        let panel = crate::ui::kit::palette(title_bar, crate::ui::kit::scroll_area(body), 360.0);
+        let mut root: Element<'static, crate::app::Message> =
+            iced::widget::column![iced::widget::container(panel)
+                .height(Length::FillPortion(1))
+                .clip(true)]
+            .height(Length::Fill)
+            .into();
+
+        let mut tree = iced::advanced::widget::Tree::empty();
+        tree.diff(root.as_widget_mut());
+        let node = root.as_widget_mut().layout(
+            &mut tree,
+            &renderer,
+            &Limits::new(Size::ZERO, Size::new(360.0, 600.0)),
+        );
+
+        fn region_nodes(node: &iced::advanced::layout::Node, out: &mut Vec<f32>) {
+            for child in node.children() {
+                let height = child.bounds().size().height;
+                if (height - SCENE_REGION_V1_HEIGHT).abs() < f32::EPSILON {
+                    out.push(height);
+                }
+                region_nodes(child, out);
+            }
+        }
+        let mut found = Vec::new();
+        region_nodes(&node, &mut found);
+        assert_eq!(
+            found,
+            vec![SCENE_REGION_V1_HEIGHT],
+            "the scene-only body holds exactly one region, at the fixed height"
+        );
+    }
+
 }

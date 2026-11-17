@@ -83,6 +83,8 @@ struct VIn {
     @location(3) translation_low: vec2<f32>,
     @location(4) draw_depth: f32,
     @location(5) visible: u32,
+    @location(6) z: f32,
+    @location(7) translation_z: f32,
 }
 
 struct VOut {
@@ -114,12 +116,14 @@ struct VOut {
     // term keeps full precision at UTM-scale anchors. The instance delta is
     // added after that cancellation: summed onto the anchor first it rounds to
     // the anchor's f32 step (1 unit at X≈8e6) and block copies drift. (#2638)
+    // `v.z` is the fill plane's height over the vertex; a block copy adds
+    // its own rise.
     let hi = vec3<f32>(inst.world_origin.x - u.eye_high.x + v.translation.x,
                        inst.world_origin.y - u.eye_high.y + v.translation.y,
-                       -u.eye_high.z);
+                       v.translation_z - u.eye_high.z);
     let lo = vec3<f32>(local.x + inst.world_origin_low.x + v.translation_low.x - u.eye_low.x,
                        local.y + inst.world_origin_low.y + v.translation_low.y - u.eye_low.y,
-                       -u.eye_low.z);
+                       v.z - u.eye_low.z);
     o.clip = u.view_rot * vec4<f32>(hi + lo, 1.0);
     o.clip = apply_draw_order(o.clip, inst.draw_depth + v.draw_depth);
     o.xz = local;

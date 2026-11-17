@@ -282,6 +282,40 @@ pub struct HatchModel {
 }
 
 impl HatchModel {
+    /// Height of the fill over a boundary vertex (`world_origin`-relative
+    /// XY). The boundary is the fill plane seen from above, so each vertex
+    /// lies at the plane's height over its point. A plane standing on edge
+    /// has no single height there and keeps its origin's; a hatch without a
+    /// plane lies on Z = 0.
+    pub(crate) fn plane_height(&self) -> impl Fn([f32; 2]) -> f32 + Copy {
+        let [base, per_x, per_y] = self.plane_height_terms();
+        move |[x, y]: [f32; 2]| (base + per_x * x as f64 + per_y * y as f64) as f32
+    }
+
+    /// Whether the fill lies on Z = 0 everywhere, where the screen cull
+    /// measures its XY box.
+    pub(crate) fn lies_on_ground(&self) -> bool {
+        self.plane_height_terms() == [0.0; 3]
+    }
+
+    /// `[height at the anchor, slope along X, slope along Y]` of the plane.
+    fn plane_height_terms(&self) -> [f64; 3] {
+        let Some(plane) = self.fill_plane else {
+            return [0.0; 3];
+        };
+        let normal = glam::DVec3::from_array(plane.x_axis)
+            .cross(glam::DVec3::from_array(plane.y_axis))
+            .normalize_or_zero();
+        if normal.z.abs() < 1e-9 {
+            return [plane.origin[2], 0.0, 0.0];
+        }
+        let (per_x, per_y) = (-normal.x / normal.z, -normal.y / normal.z);
+        let base = plane.origin[2]
+            + per_x * (self.world_origin[0] - plane.origin[0])
+            + per_y * (self.world_origin[1] - plane.origin[1]);
+        [base, per_x, per_y]
+    }
+
     /// Apply an entity's resolved opacity to every colour stop. Gradient stop
     /// colours come from the HATCH payload, but transparency remains a common
     /// entity property and must affect both ends equally.

@@ -4614,6 +4614,7 @@ impl Scene {
             }
         }
         let mut wires = Vec::new();
+        let mut edge_prototypes = rustc_hash::FxHashMap::default();
         for (handle, selected) in highlighted {
             let Some(entity) = self.document.get_entity(handle) else {
                 continue;
@@ -4646,35 +4647,19 @@ impl Scene {
                 continue;
             }
             for set in meshes_by_handle.get(&handle).into_iter().flatten() {
+                let name = format!("mesh-edge:{}", handle.value());
+                if let Some(stub) =
+                    moved_edge_outline(set, &mut edge_prototypes, &name, tint, selected)
+                {
+                    wires.push(stub);
+                    continue;
+                }
                 let (edges, edges_low) = set.geometry_edges();
                 if edges.len() < 2 {
                     continue;
                 }
-                let mut points = Vec::with_capacity(edges.len() / 2 * 3);
-                for pair_start in (0..edges.len() - 1).step_by(2) {
-                    for index in [pair_start, pair_start + 1] {
-                        let high = edges[index];
-                        let low = edges_low.get(index).copied().unwrap_or([0.0; 3]);
-                        let local = document::types::Vector3::new(
-                            high[0] as f64 + low[0] as f64,
-                            high[1] as f64 + low[1] as f64,
-                            high[2] as f64 + low[2] as f64,
-                        );
-                        let world = set
-                            .instance_transform
-                            .map_or(local, |transform| transform.apply(local));
-                        points.push([world.x, world.y, world.z]);
-                    }
-                    points.push([f64::NAN; 3]);
-                }
-                let mut edge_wire = WireModel::solid_f64(
-                    format!("mesh-edge:{}", handle.value()),
-                    points,
-                    tint,
-                    selected,
-                );
-                edge_wire.line_weight_px = 2.0;
-                wires.push(edge_wire);
+                let points = edge_outline_points(edges, edges_low, set.instance_transform.as_ref());
+                wires.push(edge_outline(name, points, tint, selected));
             }
 
             if matches!(entity, EntityType::Hatch(_)) {
@@ -6199,4 +6184,89 @@ static DEVICE_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32
 /// Device pixels per logical pixel of the drawing viewport.
 pub fn device_scale() -> f32 {
     f32::from_bits(DEVICE_SCALE.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// The edge outline of a highlighted solid: its edge pairs as one line broken
+/// between pairs, placed by `transform` when the solid is a block's.
+fn edge_outline_points(
+    edges: &[[f32; 3]],
+    edges_low: &[[f32; 3]],
+    transform: Option<&document::types::Transform>,
+) -> Vec<[f64; 3]> {
+    let mut points = Vec::with_capacity(edges.len() / 2 * 3);
+    for pair_start in (0..edges.len().saturating_sub(1)).step_by(2) {
+        for index in [pair_start, pair_start + 1] {
+            let high = edges[index];
+            let low = edges_low.get(index).copied().unwrap_or([0.0; 3]);
+            let local = document::types::Vector3::new(
+                high[0] as f64 + low[0] as f64,
+                high[1] as f64 + low[1] as f64,
+                high[2] as f64 + low[2] as f64,
+            );
+            let world = transform.map_or(local, |transform| transform.apply(local));
+            points.push([world.x, world.y, world.z]);
+        }
+        points.push([f64::NAN; 3]);
+    }
+    points
+}
+
+fn edge_outline(name: String, points: Vec<[f64; 3]>, tint: [f32; 4], selected: bool) -> WireModel {
+    let mut wire = WireModel::solid_f64(name, points, tint, selected);
+    wire.line_weight_px = 2.0;
+    wire
+}
+
+/// The edge outline of a solid that a block reference only moves: the block's
+/// own outline, built once for every reference that shares its geometry, and
+/// a stub that moves it. The GPU draws such stubs as instances of the one
+/// outline, as it draws the references themselves, instead of each reference
+/// carrying a copy of every edge point (#1872). `None` when the solid is not
+/// a block's, or the reference turns, scales or mirrors it.
+fn moved_edge_outline(
+    set: &crate::scene::model::mesh_model::MeshLodSet,
+    prototypes: &mut rustc_hash::FxHashMap<usize, Arc<Vec<WireModel>>>,
+    name: &str,
+    tint: [f32; 4],
+    selected: bool,
+) -> Option<WireModel> {
+    let source = set.instance_source.as_ref()?;
+    let delta = translation_only(set.instance_transform.as_ref()?)?;
+    if source.edge_verts.len() < 2 {
+        return None;
+    }
+    let prototype = prototypes
+        .entry(Arc::as_ptr(source) as usize)
+        .or_insert_with(|| {
+            let points = edge_outline_points(&source.edge_verts, &source.edge_verts_low, None);
+            let mut outline = edge_outline(name.to_string(), points, tint, selected);
+            outline.render_instance = Some(crate::scene::model::instance_model::RenderInstance {
+                source_id: crate::scene::model::instance_model::next_source_id(),
+                translation: [0.0; 3],
+            });
+            Arc::new(vec![outline])
+        });
+    let mut stub = WireModel::solid_f64(name.to_string(), Vec::new(), tint, selected);
+    stub.line_weight_px = 2.0;
+    stub.stub = Some(Arc::new(
+        crate::scene::model::instance_model::InstanceStub {
+            prototype: Arc::clone(prototype),
+            delta,
+            depth_delta: 0.0,
+        },
+    ));
+    Some(stub)
+}
+
+/// The move of a transform that only moves.
+fn translation_only(transform: &document::types::Transform) -> Option<[f64; 3]> {
+    let m = &transform.matrix.m;
+    let identity = (0..3).all(|row| {
+        (0..3).all(|column| {
+            let expected = if row == column { 1.0 } else { 0.0 };
+            (m[row][column] - expected).abs() <= 1e-12
+        })
+    }) && m[3] == [0.0, 0.0, 0.0, 1.0];
+    let delta = [m[0][3], m[1][3], m[2][3]];
+    (identity && delta.iter().all(|value| value.is_finite())).then_some(delta)
 }

@@ -10,4 +10,4 @@ publish = false
 
 [dependencies]
 document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "88f780e5ca3eb7ab06231bba2b1a4559b53879c6" }
-kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "302452d", features = ["brep"] }
+kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "7b5ed9d", features = ["brep"] }

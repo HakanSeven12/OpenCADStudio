@@ -27,6 +27,7 @@ pub mod ole_embed;
 pub mod paper_catalog;
 pub mod patterns;
 pub mod pdf_export;
+pub mod picture_import;
 pub mod plot;
 pub mod plot_device;
 pub mod plot_style;

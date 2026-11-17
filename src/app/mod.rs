@@ -6259,6 +6259,19 @@ pub enum Message {
         crate::io::model_import::ModelFormat,
         Result<crate::io::model_import::Imported, crate::io::model_import::ImportFailure>,
     ),
+    // ── Picture import (WMF/SVG) ──────────────────────────────────────────
+    /// Completion of a WMF or SVG import read off the UI thread: the tab it
+    /// was started for, that document's generation, the file (none for SVG
+    /// pasted from the clipboard), its format, whether the insertion prompts
+    /// place it, and the reader's result.
+    PictureImportFinished(
+        u64,
+        u64,
+        Option<String>,
+        crate::io::picture_import::PictureFormat,
+        bool,
+        crate::io::picture_import::PictureRead,
+    ),
     /// An edit in the Import File or DGN Import window.
     ImportDialog(crate::ui::window::import_dialogs::ImportDialogMsg),
 }

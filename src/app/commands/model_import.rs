@@ -7,6 +7,7 @@ use crate::io::tds_import::TdsStep;
 use std::collections::HashMap;
 
 use crate::io::model_import::{self, ModelFormat};
+use crate::io::picture_import::{self, PictureFormat, PictureRead};
 
 impl OpenCADStudio {
     /// ACISIN and WMFIN; `None` defers to the other families.
@@ -135,11 +136,31 @@ impl OpenCADStudio {
         );
         let path = path.to_string();
         let worker_path = path.clone();
+        self.command_line.push_info(&format!("Reading {path}…"));
         crate::app::update::background_task(
             "IMPORT",
             move || model_import::load(format, &worker_path, drawing_mm),
             move |result| Message::ModelImportFinished(tab_id, generation, path, format, result),
         )
+    }
+
+    /// The tab a finished import goes to: the one it was started for, while
+    /// that tab still holds the same document. If not, the command line says
+    /// why the result is dropped.
+    fn import_target(&mut self, tab_id: u64, generation: u64) -> Option<usize> {
+        let found = self
+            .tabs
+            .iter()
+            .position(|tab| tab.id == tab_id && tab.document_generation == generation);
+        if found.is_none() {
+            let message = if self.tabs.iter().any(|tab| tab.id == tab_id) {
+                "Import: the drawing it was headed for was replaced or cleared."
+            } else {
+                "Import: the drawing it was headed for was closed."
+            };
+            self.command_line.push_info(message);
+        }
+        found
     }
 
     /// Places a finished import on the UI thread: its blocks under names the
@@ -152,17 +173,7 @@ impl OpenCADStudio {
         format: ModelFormat,
         result: Result<model_import::Imported, model_import::ImportFailure>,
     ) -> Task<Message> {
-        let Some(i) = self
-            .tabs
-            .iter()
-            .position(|tab| tab.id == tab_id && tab.document_generation == generation)
-        else {
-            let message = if self.tabs.iter().any(|tab| tab.id == tab_id) {
-                "Import: the drawing it was headed for was replaced or cleared."
-            } else {
-                "Import: the drawing it was headed for was closed."
-            };
-            self.command_line.push_info(message);
+        let Some(i) = self.import_target(tab_id, generation) else {
             return Task::none();
         };
         let imported = match result {
@@ -233,26 +244,150 @@ impl OpenCADStudio {
 
     /// A metafile as a new block `WMF<n>`, fitted to half the current view:
     /// placed at the view's top-left corner (IMPORT), or by the insertion
-    /// prompts (WMFIN).
+    /// prompts (WMFIN). The file is read off the UI thread.
     pub(in crate::app) fn import_wmf(
         &mut self,
         i: usize,
         path: &str,
         prompt: bool,
     ) -> Task<Message> {
-        let Some(bytes) = crate::scene::model::pdf_raster::source_bytes(path) else {
-            self.command_line
-                .push_error(&format!("File {path} does not exist."));
-            return Task::none();
-        };
+        self.read_picture(
+            i,
+            PictureFormat::Wmf,
+            PictureSource::File(path.to_string()),
+            prompt,
+        )
+    }
+
+    /// An SVG drawing as a new block `SVG<n>`, fitted to half the current
+    /// view: placed at the view's top-left corner (IMPORT), or by the
+    /// insertion prompts (SVGIN). The file is read off the UI thread.
+    pub(in crate::app) fn import_svg(
+        &mut self,
+        i: usize,
+        path: &str,
+        prompt: bool,
+    ) -> Task<Message> {
+        self.read_picture(
+            i,
+            PictureFormat::Svg,
+            PictureSource::File(path.to_string()),
+            prompt,
+        )
+    }
+
+    /// SVG markup pasted from the system clipboard, as a block placed by
+    /// the insertion prompts. The markup is read off the UI thread.
+    pub(in crate::app) fn paste_svg_text(&mut self, i: usize, text: String) -> Task<Message> {
+        self.read_picture(i, PictureFormat::Svg, PictureSource::Clipboard(text), true)
+    }
+
+    /// Reads a picture for drawing `i` on a worker (inline where the
+    /// platform has no threads). A panic in the reader becomes an error on
+    /// the command line. The result is placed when it arrives
+    /// ([`Self::finish_picture_import`]).
+    fn read_picture(
+        &mut self,
+        i: usize,
+        format: PictureFormat,
+        source: PictureSource,
+        prompt: bool,
+    ) -> Task<Message> {
+        self.read_picture_with(i, format, source, prompt, read_picture_source)
+    }
+
+    /// [`Self::read_picture`] with the reader given, so a test can give one
+    /// that panics.
+    fn read_picture_with(
+        &mut self,
+        i: usize,
+        format: PictureFormat,
+        source: PictureSource,
+        prompt: bool,
+        reader: fn(PictureFormat, PictureSource, [f64; 2]) -> PictureRead,
+    ) -> Task<Message> {
+        let tab_id = self.tabs[i].id;
+        let generation = self.tabs[i].document_generation;
         let (_, size, _) = self.tabs[i].scene.view_window();
-        let Some(mut picture) = crate::io::wmf_import::read(&bytes, [0.5 * size[0], 0.5 * size[1]])
-        else {
-            self.command_line
-                .push_error(&format!("{path} is not a valid Windows metafile."));
+        let fit = [0.5 * size[0], 0.5 * size[1]];
+        let path = match &source {
+            PictureSource::File(path) => {
+                self.command_line.push_info(&format!("Reading {path}…"));
+                Some(path.clone())
+            }
+            PictureSource::Clipboard(_) => None,
+        };
+        crate::app::update::background_task(
+            picture_command(path.is_none(), format, prompt),
+            move || reader(format, source, fit),
+            move |read| {
+                Message::PictureImportFinished(tab_id, generation, path, format, prompt, read)
+            },
+        )
+    }
+
+    /// Places a finished picture read on the UI thread, as one undo step.
+    /// When the insertion prompts must place it but a different command
+    /// started during the read, the picture is not placed: that command
+    /// stays.
+    pub(in crate::app) fn finish_picture_import(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        path: Option<&str>,
+        format: PictureFormat,
+        prompt: bool,
+        read: PictureRead,
+    ) -> Task<Message> {
+        let Some(i) = self.import_target(tab_id, generation) else {
             return Task::none();
         };
-        self.push_undo_snapshot(i, if prompt { "WMFIN" } else { "IMPORT" });
+        let command = picture_command(path.is_none(), format, prompt);
+        let (metafile, entities) = match (read, path) {
+            (PictureRead::Wmf(picture), _) => (Some(picture), Vec::new()),
+            (PictureRead::Svg(entities), _) => (None, entities),
+            (failure, path) => {
+                let message = match (failure, path) {
+                    (_, None) => crate::tr!("clipboard", "no-supported-content"),
+                    (PictureRead::Missing, Some(path)) => format!("File {path} does not exist."),
+                    (PictureRead::Empty, Some(path)) => {
+                        format!("{path} has no shapes to import.")
+                    }
+                    (_, Some(path)) => match format {
+                        PictureFormat::Wmf => format!("{path} is not a valid Windows metafile."),
+                        PictureFormat::Svg => format!("{path} is not a valid SVG file."),
+                    },
+                };
+                self.command_line.push_error(&message);
+                return Task::none();
+            }
+        };
+        if prompt && self.tabs[i].active_cmd.is_some() {
+            self.command_line.push_error(&format!(
+                "{command} cancelled: a different command started while the picture was read."
+            ));
+            return Task::none();
+        }
+        self.push_undo_snapshot(i, command);
+        let entities = match metafile {
+            Some(picture) => self.add_metafile_text_styles(i, picture),
+            None => entities,
+        };
+        let prefix = match format {
+            PictureFormat::Wmf => "WMF",
+            PictureFormat::Svg => "SVG",
+        };
+        self.place_picture_block(i, prefix, entities, prompt)
+    }
+
+    /// Gives each face a metafile's text uses a text style in drawing `i`,
+    /// and returns the metafile's objects with their texts set to those
+    /// styles.
+    fn add_metafile_text_styles(
+        &mut self,
+        i: usize,
+        mut picture: crate::io::wmf_import::Picture,
+    ) -> Vec<document::EntityType> {
         let scene = &mut self.tabs[i].scene;
         // A text style per face, `WMF-<face><n>` with `n` counting the
         // face's bold and italic variants; the style's font is the
@@ -281,56 +416,7 @@ impl OpenCADStudio {
                 text.style = styles[*font].clone();
             }
         }
-        self.place_picture_block(i, "WMF", picture.entities, prompt)
-    }
-
-    /// An SVG drawing as a new block `SVG<n>`, fitted to half the current
-    /// view: placed at the view's top-left corner (IMPORT), or by the
-    /// insertion prompts (SVGIN).
-    pub(in crate::app) fn import_svg(
-        &mut self,
-        i: usize,
-        path: &str,
-        prompt: bool,
-    ) -> Task<Message> {
-        let Some(bytes) = crate::scene::model::pdf_raster::source_bytes(path) else {
-            self.command_line
-                .push_error(&format!("File {path} does not exist."));
-            return Task::none();
-        };
-        let (_, size, _) = self.tabs[i].scene.view_window();
-        let picture = match crate::io::svg_import::read(&bytes, [0.5 * size[0], 0.5 * size[1]]) {
-            Ok(picture) => picture,
-            Err(crate::io::svg_import::Error::NotSvg) => {
-                self.command_line
-                    .push_error(&format!("{path} is not a valid SVG file."));
-                return Task::none();
-            }
-            Err(crate::io::svg_import::Error::Empty) => {
-                self.command_line
-                    .push_error(&format!("{path} has no shapes to import."));
-                return Task::none();
-            }
-        };
-        self.push_undo_snapshot(i, if prompt { "SVGIN" } else { "IMPORT" });
-        self.place_picture_block(i, "SVG", picture.entities, prompt)
-    }
-
-    /// SVG markup pasted from the system clipboard, as a block placed by
-    /// the insertion prompts.
-    pub(in crate::app) fn paste_svg_text(&mut self, i: usize, text: String) -> Task<Message> {
-        let (_, size, _) = self.tabs[i].scene.view_window();
-        match crate::io::svg_import::read(text.as_bytes(), [0.5 * size[0], 0.5 * size[1]]) {
-            Ok(picture) => {
-                self.push_undo_snapshot(i, "PASTECLIP");
-                self.place_picture_block(i, "SVG", picture.entities, true)
-            }
-            Err(_) => {
-                self.command_line
-                    .push_error(crate::tr!("clipboard", "no-supported-content").as_ref());
-                Task::none()
-            }
-        }
+        picture.entities
     }
 
     /// Defines `entities` as a new block `<prefix><n>` and puts it in the
@@ -380,6 +466,34 @@ impl OpenCADStudio {
             self.refresh_properties();
         }
         Task::none()
+    }
+}
+
+/// Where the bytes of a picture import come from.
+enum PictureSource {
+    /// A file, by path.
+    File(String),
+    /// SVG markup pasted from the system clipboard.
+    Clipboard(String),
+}
+
+/// The reader of a picture import: the file, or the pasted markup, read
+/// as `format` and fitted to `fit`.
+fn read_picture_source(format: PictureFormat, source: PictureSource, fit: [f64; 2]) -> PictureRead {
+    match source {
+        PictureSource::File(path) => picture_import::load(format, &path, fit),
+        PictureSource::Clipboard(text) => picture_import::read(format, text.as_bytes(), fit),
+    }
+}
+
+/// The command a picture import runs for: it names the undo step and a
+/// failed read.
+fn picture_command(pasted: bool, format: PictureFormat, prompt: bool) -> &'static str {
+    match (pasted, format, prompt) {
+        (true, _, _) => "PASTECLIP",
+        (false, PictureFormat::Wmf, true) => "WMFIN",
+        (false, PictureFormat::Svg, true) => "SVGIN",
+        (false, _, false) => "IMPORT",
     }
 }
 
@@ -1497,9 +1611,11 @@ mod svg_paste_tests {
         let svg = crate::io::svg_clipboard::selection_svg(&app.tabs[i].scene, &[line])
             .expect("the line draws");
         let blocks = app.tabs[i].scene.document.block_records.len();
-        let _ = app.update(crate::app::Message::SystemClipboardPaste(
+        // The markup is read on a worker; its result places the block.
+        let task = app.update(crate::app::Message::SystemClipboardPaste(
             crate::app::SystemClipboardText::Text(svg),
         ));
+        app.drive_headless_task(task).expect("the paste task");
         assert_eq!(app.tabs[i].scene.document.block_records.len(), blocks + 1);
         assert!(
             app.tabs[i].active_cmd.is_some(),

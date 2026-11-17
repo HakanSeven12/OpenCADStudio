@@ -1314,7 +1314,11 @@ impl OpenCADStudio {
                     }
                     // Moving between the app's own windows sends Unfocused then
                     // Focused, so they end up floating again.
-                    crate::app::tool_windows::float_os_windows(&self.os_windows, focused)
+                    crate::app::tool_windows::float_os_windows(
+                        &self.os_windows,
+                        focused,
+                        self.focused_window,
+                    )
                 };
                 #[cfg(target_arch = "wasm32")]
                 let float = Task::none();

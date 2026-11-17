@@ -1217,17 +1217,30 @@ fn window_content(windows: &[OsWindow], id: iced::window::Id) -> Option<Detached
 /// sends an open dialog behind it. Back to normal once another app is in
 /// front, so they do not float over it.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn float_os_windows(windows: &[OsWindow], app_focused: bool) -> Task<Message> {
+pub(crate) fn float_os_windows(
+    windows: &[OsWindow],
+    app_focused: bool,
+    focused: Option<iced::window::Id>,
+) -> Task<Message> {
     let level = if app_focused {
         iced::window::Level::AlwaysOnTop
     } else {
         iced::window::Level::Normal
     };
-    Task::batch(
-        windows
-            .iter()
-            .map(|window| iced::window::set_level(window.id, level)),
-    )
+    // Setting a level raises the window, so the order is the stacking order:
+    // one after the other (a batch runs them in any order), openers before
+    // the dialogs they opened (the order they were opened in), the focused
+    // window last. Otherwise a dialog opened from Options could end up
+    // behind it (#3170).
+    let (last, rest): (Vec<_>, Vec<_>) = windows
+        .iter()
+        .map(|window| window.id)
+        .partition(|id| Some(*id) == focused);
+    rest.into_iter()
+        .chain(last)
+        .fold(Task::none(), |task, id| {
+            task.chain(iced::window::set_level(id, level))
+        })
 }
 
 /// Open a window of its own at `placement` (centred when it has no place).

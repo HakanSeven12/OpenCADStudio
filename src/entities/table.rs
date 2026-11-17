@@ -1151,6 +1151,47 @@ pub(crate) fn typed_formula_to_field(
         .is_some()
 }
 
+/// The formula a formula-field cell holds, as typed ("=A1+C1"): the cell's
+/// only content is a field whose one child is `\AcExpr (body)`. `None` for
+/// any other cell, a nested or mixed field included.
+pub(crate) fn cell_formula_text(
+    document: &document::Document,
+    table: &Table,
+    row: usize,
+    column: usize,
+) -> Option<String> {
+    let [content] = table.cell(row, column)?.contents.as_slice() else {
+        return None;
+    };
+    let field = |h| match document.objects.get(&h) {
+        Some(document::objects::ObjectType::Field(f)) => Some(f),
+        _ => None,
+    };
+    let mut current = field(content.field_handle?)?;
+    // The container carries the template; the formula sits in its child.
+    if current.evaluator_id == "_text" {
+        if current.code.trim() != "%<\\_FldIdx 0>%" {
+            return None;
+        }
+        let [child] = current.child_fields.as_slice() else {
+            return None;
+        };
+        current = field(*child)?;
+    }
+    let body = current
+        .code
+        .trim()
+        .strip_prefix("\\AcExpr")?
+        .trim()
+        .strip_prefix('(')?
+        .strip_suffix(')')?
+        .trim();
+    if body.is_empty() || body.contains("%<") || !current.child_fields.is_empty() {
+        return None;
+    }
+    Some(format!("={body}"))
+}
+
 /// Rewrite a formula cell's picture text to its computed value: the picture
 /// block is what a file stores and other programs draw, and it must show the
 /// same result the screen shows, not the raw "=A1+C1". Returns the picture

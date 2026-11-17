@@ -75,9 +75,18 @@ impl crate::app::OpenCADStudio {
                     };
                     match (self.table_cell_editor.as_ref(), entity) {
                         (Some(cell), document::EntityType::Table(table)) if cell.handle == h => {
-                            table.cell(cell.row, cell.column).is_some_and(|c| {
-                                c.contents.iter().any(|item| item.field_handle.is_some())
-                            })
+                            // A formula cell is edited as its formula text, not
+                            // through the field template.
+                            crate::entities::table::cell_formula_text(
+                                doc,
+                                table,
+                                cell.row,
+                                cell.column,
+                            )
+                            .is_none()
+                                && table.cell(cell.row, cell.column).is_some_and(|c| {
+                                    c.contents.iter().any(|item| item.field_handle.is_some())
+                                })
                         }
                         _ => crate::entities::field::hosts_field(doc, entity),
                     }

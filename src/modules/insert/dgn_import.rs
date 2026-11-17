@@ -2585,3 +2585,147 @@ mod request_resolution_tests {
         set_settings(previous);
     }
 }
+
+#[cfg(test)]
+mod cell_color_tests {
+    use super::*;
+    use crate::scene::model::underlay_vector::{By, DgnColor, DgnElement, DgnGeom, DgnImport};
+
+    fn element(color: u32, geom: DgnGeom) -> DgnElement {
+        DgnElement {
+            level: 1,
+            color: By::Own(DgnColor {
+                index: color,
+                table: [8, 8, 8],
+                rgb: [8, 8, 8],
+            }),
+            weight: By::Own(1),
+            style: By::Own(0),
+            geom,
+            filled: false,
+            construction: false,
+        }
+    }
+
+    fn line(color: u32) -> DgnElement {
+        element(color, DgnGeom::Line([0.0; 3], [10.0, 10.0, 0.0]))
+    }
+
+    /// An instance of the shared cell `name`, drawn in colour 3.
+    fn place(name: &str) -> DgnElement {
+        element(
+            3,
+            DgnGeom::Cell {
+                name: name.to_string(),
+                m: [1.0, 0.0, 0.0, 1.0],
+                origin: [0.0; 3],
+                z_scale: 1.0,
+            },
+        )
+    }
+
+    /// A V7 model whose shared cells are `cells` and which places `A` once.
+    fn v7(cells: Vec<(&str, Vec<DgnElement>)>) -> DgnImport {
+        DgnImport {
+            elements: vec![place("A")],
+            cells: cells
+                .into_iter()
+                .map(|(name, elements)| (name.to_string(), elements))
+                .collect(),
+            levels: [(1, ("Level 1".into(), None))].into(),
+            level_order: vec![1],
+            sub_per_master: 1.0,
+            unit_names: ("m".into(), "mm".into()),
+            v7: true,
+            ..Default::default()
+        }
+    }
+
+    /// `f`'s result, run on its own thread, so that a conversion that never
+    /// ends fails the test instead of stopping the run.
+    fn within_ten_seconds<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || tx.send(f()));
+        rx.recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the conversion did not end")
+    }
+
+    /// Whether the line in the block the model's insert of `A` uses takes
+    /// its colour from the insert (the whole cell is one colour).
+    fn line_by_block(import: &DgnImport) -> bool {
+        let c = convert(import, false, false);
+        let Some(EntityType::Insert(insert)) = c.entities.first() else {
+            panic!("no insert in model space: {:?}", c.entities.len());
+        };
+        let (_, entities) = c
+            .blocks
+            .iter()
+            .find(|(name, _)| *name == insert.block_name)
+            .expect("the inserted block");
+        let line = entities
+            .iter()
+            .find_map(|e| match e {
+                EntityType::Line(line) => Some(line),
+                _ => None,
+            })
+            .expect("the cell's line");
+        line.common.color == Color::ByBlock
+    }
+
+    /// A cell that places itself is read once, not once per placement: ten
+    /// placements took about 10⁸ steps before, a hundred never ended.
+    #[test]
+    fn a_cell_that_places_itself_converts_in_bounded_time() {
+        for (n, with_line) in [(10, true), (100, false)] {
+            let mut a: Vec<DgnElement> = (0..n).map(|_| place("A")).collect();
+            if with_line {
+                a.insert(0, line(3));
+            }
+            let import = v7(vec![("A", a)]);
+            let blocks = within_ten_seconds(move || convert(&import, false, false).blocks.len());
+            assert!(blocks > 0, "n = {n}");
+        }
+    }
+
+    /// A cell's colours are read through the cells it places down to eight
+    /// levels: a second colour at the eighth makes the cell keep its own
+    /// colours, one at the ninth does not count.
+    #[test]
+    fn colours_count_through_eight_levels_of_placed_cells() {
+        let chain = |other_at: usize| {
+            let names: Vec<String> = (0..=9).map(|k| format!("C{k}")).collect();
+            let mut cells = vec![("A", vec![line(3), place("C1")])];
+            for k in 1..=9 {
+                let mut def = vec![line(if k == other_at { 5 } else { 3 })];
+                if k < 9 {
+                    def.push(place(&names[k + 1]));
+                }
+                cells.push((names[k].as_str(), def));
+            }
+            line_by_block(&v7(cells))
+        };
+        assert!(!chain(8));
+        assert!(chain(9));
+    }
+
+    /// A cell reached first by a long path and again by a short one is read
+    /// at the short one's level, so the cells it places still count.
+    #[test]
+    fn a_cell_reached_by_two_paths_counts_from_the_shorter() {
+        let names: Vec<String> = (1..=7).map(|k| format!("C{k}")).collect();
+        // A places C1 (the long way: C1 … C7, then D at level 8) and then D
+        // itself (level 1); D places E (level 2), which has the other colour.
+        let mut cells = vec![("A", vec![line(3), place("C1"), place("D")])];
+        for k in 0..7 {
+            let next = if k + 1 < 7 {
+                names[k + 1].as_str()
+            } else {
+                "D"
+            };
+            cells.push((names[k].as_str(), vec![line(3), place(next)]));
+        }
+        cells.push(("D", vec![line(3), place("E")]));
+        cells.push(("E", vec![line(5)]));
+        assert!(!line_by_block(&v7(cells)));
+    }
+}

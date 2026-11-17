@@ -2383,6 +2383,14 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
                 Task::none()
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::OleEditPoll => self.poll_ole_edits(),
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::OleEditRendered(tab, handle, result) => {
+                self.on_ole_edit_rendered(tab, handle, result)
+            }
+            #[cfg(target_arch = "wasm32")]
+            Message::OleEditPoll | Message::OleEditRendered(..) => Task::none(),
             Message::InsertObjectResult(Err(e)) => {
                 if e != "Cancelled" {
                     self.command_line.push_error(&format!("INSERTOBJ: {e}"));

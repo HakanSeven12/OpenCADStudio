@@ -9659,6 +9659,7 @@ mod tests {
                 pixel_width: 4,
                 pixel_height: 3,
                 name: "audit.png".into(),
+                source: None,
             };
             crate::io::ole_embed::add_embedded_image(
                 host.document_mut(),

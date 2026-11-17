@@ -1,11 +1,108 @@
 //! INSERTOBJ, OLELINKS and the OLE variables (OLEHIDE, OLEQUALITY,
 //! OLESTARTUP, OLEFRAME, MSOLESCALE); the Properties edits of an OLE
-//! object's size, scales and aspect lock.
+//! object's size, scales and aspect lock; editing an embedded document in
+//! its own program.
 
 use crate::app::{Message, OpenCADStudio};
 use crate::entities::ole2frame::{self, FrameState};
 use document::{EntityType, Handle};
 use iced::Task;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl OpenCADStudio {
+    /// A double-clicked OLE package: its file is unpacked and opened in the
+    /// program for its type, then watched; each save there embeds it again.
+    /// `None` for an object that packages no file.
+    pub(in crate::app) fn edit_ole_package(
+        &mut self,
+        i: usize,
+        handle: Handle,
+    ) -> Option<Task<Message>> {
+        let Some(EntityType::Ole2Frame(ole)) = self.tabs[i].scene.document.get_entity(handle)
+        else {
+            return None;
+        };
+        let file = crate::io::ole_embed::packaged_file(ole)?;
+        let tab = self.tabs[i].id;
+        let dir = std::env::temp_dir().join(format!(
+            "ocs-ole-{}-{tab}-{:X}",
+            std::process::id(),
+            handle.value()
+        ));
+        // The label names the file; a path in it is no place to write to.
+        let name = std::path::Path::new(&file.name)
+            .file_name()
+            .map_or_else(|| "object".into(), |name| name.to_os_string());
+        let path = dir.join(name);
+        if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, &file.bytes))
+        {
+            self.command_line.push_error(&format!("OLE: {e}"));
+            return Some(Task::none());
+        }
+        let seen = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+        self.ole_edits
+            .retain(|(t, h, ..)| !(*t == tab && *h == handle));
+        self.ole_edits.push((tab, handle, path.clone(), seen));
+        Some(crate::sys::open_url(&path.to_string_lossy(), self.main_window))
+    }
+
+    /// Every second while documents are open for editing: a file saved since
+    /// is drawn again off the executor and embedded in its object.
+    pub(in crate::app) fn poll_ole_edits(&mut self) -> Task<Message> {
+        let open: Vec<u64> = self.tabs.iter().map(|tab| tab.id).collect();
+        self.ole_edits.retain(|(tab, ..)| open.contains(tab));
+        let mut tasks = Vec::new();
+        for (tab, handle, path, seen) in &mut self.ole_edits {
+            let now = std::fs::metadata(&*path).and_then(|m| m.modified()).ok();
+            if now.is_none() || now == *seen {
+                continue;
+            }
+            *seen = now;
+            let (tab, handle, path) = (*tab, *handle, path.clone());
+            let (tx, rx) = iced::futures::channel::oneshot::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::io::ole_embed::EmbeddedImage::from_document(&path));
+            });
+            tasks.push(Task::perform(rx, move |result| {
+                Message::OleEditRendered(
+                    tab,
+                    handle,
+                    result.unwrap_or_else(|_| Err("Cancelled".into())),
+                )
+            }));
+        }
+        Task::batch(tasks)
+    }
+
+    /// The document saved in its program, drawn again: it goes into its
+    /// object, which keeps its frame, as one undoable step.
+    pub(in crate::app) fn on_ole_edit_rendered(
+        &mut self,
+        tab: u64,
+        handle: Handle,
+        result: Result<crate::io::ole_embed::EmbeddedImage, String>,
+    ) -> Task<Message> {
+        let Some(i) = self.tabs.iter().position(|t| t.id == tab) else {
+            return Task::none();
+        };
+        match result {
+            Ok(image) => self.apply_property_op(i, "OLE", &[handle], |app, handle| {
+                if let Some(EntityType::Ole2Frame(ole)) =
+                    app.tabs[i].scene.document.get_entity_mut(handle)
+                {
+                    ole.storage = crate::io::ole_embed::build_embedded_ole(
+                        &image,
+                        ole.upper_left_corner,
+                        ole.lower_right_corner,
+                    )
+                    .storage;
+                }
+            }),
+            Err(e) => self.command_line.push_error(&format!("OLE: {e}")),
+        }
+        Task::none()
+    }
+}
 
 /// OLEQUALITY: the plot quality new OLE objects take (0 monochrome, 1 low
 /// graphics, 2 high graphics, 3 automatic). A profile setting.

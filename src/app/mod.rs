@@ -1995,6 +1995,9 @@ pub(super) struct OpenCADStudio {
     plugin_releases_loading: rustc_hash::FxHashSet<String>,
     /// Repositories whose install or update is downloading.
     plugin_installing: rustc_hash::FxHashSet<String>,
+    /// Embedded documents open in their own program: the tab id, the
+    /// object, the unpacked file and when it was last seen saved.
+    ole_edits: Vec<(u64, document::Handle, std::path::PathBuf, Option<std::time::SystemTime>)>,
     /// Repositories installed in this session and waiting for a restart:
     /// `true` for a fresh install, `false` for an update.
     plugin_installed_now: rustc_hash::FxHashMap<String, bool>,
@@ -6096,6 +6099,14 @@ pub enum Message {
     ImageEmbedPickResult(Result<crate::io::ole_embed::EmbeddedImage, String>),
     /// INSERTOBJ: the picture chosen in the Insert Object window.
     InsertObjectResult(Result<crate::io::ole_embed::EmbeddedImage, String>),
+    /// Look for embedded documents saved in their own program.
+    OleEditPoll,
+    /// An embedded document drawn again after a save: tab id, object.
+    OleEditRendered(
+        u64,
+        document::Handle,
+        Result<crate::io::ole_embed::EmbeddedImage, String>,
+    ),
     // ── Missing fonts ─────────────────────────────────────────────────────
     /// Download the offered missing fonts from the community repository.
     MissingFontsDownload,
@@ -6847,6 +6858,7 @@ impl OpenCADStudio {
             plugin_readme_loading: rustc_hash::FxHashSet::default(),
             plugin_releases_loading: rustc_hash::FxHashSet::default(),
             plugin_installing: rustc_hash::FxHashSet::default(),
+            ole_edits: Vec::new(),
             plugin_installed_now: rustc_hash::FxHashMap::default(),
             marketplace_status: String::new(),
             point_size_buf: String::new(),

@@ -2498,28 +2498,43 @@ pub fn image_file_size(path: PathBuf) -> Result<(PathBuf, u32, u32), String> {
 }
 
 /// INSERTOBJ: the system Insert Object window, then the file it names is
-/// prepared for embedding. A picture from a file is what can be embedded;
-/// elsewhere than Windows the file picker stands in for the window.
+/// prepared for embedding: a picture as it is, any other file as an OLE
+/// package. Elsewhere than Windows the file picker stands in for the window;
+/// the web embeds pictures only.
+#[cfg(target_arch = "wasm32")]
+pub async fn pick_insert_object() -> Result<ole_embed::EmbeddedImage, String> {
+    pick_embedded_image_file().await
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub async fn pick_insert_object() -> Result<ole_embed::EmbeddedImage, String> {
     #[cfg(target_os = "windows")]
-    {
+    let path = {
         let (tx, rx) = iced::futures::channel::oneshot::channel();
         std::thread::spawn(move || {
             let _ = tx.send(ole_embed::insert_object_dialog());
         });
-        let path = rx.await.map_err(|_| "Cancelled".to_string())??;
-        ole_embed::EmbeddedImage::from_file(&path).map_err(|_| {
-            format!(
-                "\"{}\" {}",
-                path.display(),
-                crate::tr!("ole-props", "not-embeddable")
-            )
-        })
-    }
+        rx.await.map_err(|_| "Cancelled".to_string())??
+    };
     #[cfg(not(target_os = "windows"))]
-    {
-        pick_embedded_image_file().await
-    }
+    let path = crate::sys::file_dialog()
+        .set_title(crate::t!("Select File").as_ref())
+        .add_filter(crate::t!("All Files").as_ref(), &["*"])
+        .pick_file()
+        .await
+        .ok_or_else(|| "Cancelled".to_string())?
+        .path()
+        .to_path_buf();
+    // A picture embeds as it is; any other file is packaged whole, its
+    // picture drawn by LibreOffice off the executor.
+    let (tx, rx) = iced::futures::channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let embedded = ole_embed::EmbeddedImage::from_file(&path)
+            .or_else(|_| ole_embed::EmbeddedImage::from_document(&path))
+            .map_err(|e| format!("\"{}\" {e}", path.display()));
+        let _ = tx.send(embedded);
+    });
+    rx.await.map_err(|_| "Cancelled".to_string())?
 }
 
 /// Pick an image file and prepare it for embedding (IMAGEEMBED). The bytes
@@ -4321,6 +4336,7 @@ mod ole_save_loss_tests {
             pixel_width: 1,
             pixel_height: 1,
             name: "synthetic.png".into(),
+            source: None,
         };
         let built = super::ole_embed::build_embedded_ole(
             &image,

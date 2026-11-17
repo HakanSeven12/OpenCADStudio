@@ -8978,6 +8978,11 @@ properties={:.1}ms picked={}",
             );
             return Some(Task::none());
         }
+        // An embedded document opens in its own program.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(task) = self.edit_ole_package(i, handle) {
+            return Some(task);
+        }
         // Table double-click: shared TABLEDIT editor setup. A
         // grid miss returns NoCell and falls through to the
         // other text/entity editors below; an editable cell or

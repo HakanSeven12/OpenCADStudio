@@ -35,6 +35,7 @@ pub(crate) mod hyperlink;
 pub mod model;
 pub mod pick;
 pub mod pipeline;
+pub(crate) mod raster_scale;
 pub(crate) mod render_graph;
 pub mod section_cull;
 pub mod sub_select;
@@ -60,6 +61,8 @@ mod block_definition_handles_tests;
 mod block_solid_fill_tests;
 #[cfg(test)]
 mod dwg_edit_after_open_tests;
+#[cfg(test)]
+mod ole_resolution_tests;
 #[cfg(test)]
 mod layer_visibility_block_cache_tests;
 mod boundary;

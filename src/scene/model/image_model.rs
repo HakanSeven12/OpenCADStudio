@@ -2199,4 +2199,67 @@ mod tests {
             "the drain cleared the queue"
         );
     }
+
+    fn ole_metafile() -> crate::scene::model::ole_pres::Picture {
+        crate::scene::model::ole_pres::Picture::Emf(crate::scene::model::gdi::test_hairline_emf(
+            None,
+        ))
+    }
+
+    /// A metafile picture shown 250 pixels wide is drawn 250 pixels wide, not
+    /// at the size used when the view is unknown and then reduced on screen.
+    #[test]
+    fn an_ole_metafile_is_drawn_at_the_size_it_shows() {
+        let rect = [0.0, 0.0, 100.0, 100.0];
+        let (shown, sharp) =
+            ImageModel::from_ole_picture(&ole_metafile(), rect, 0.0, Some(0.4), None).unwrap();
+        assert_eq!((shown.width, shown.height), (250, 250));
+        assert!(!sharp);
+        let (unknown, _) =
+            ImageModel::from_ole_picture(&ole_metafile(), rect, 0.0, None, None).unwrap();
+        assert_eq!((unknown.width, unknown.height), (1600, 1600));
+    }
+
+    /// Zoomed in past the whole picture's raster, the part in view is drawn
+    /// again at screen resolution below it in the same texture, and the
+    /// picture's triangles are split between the two.
+    #[test]
+    fn zoomed_in_an_ole_metafile_draws_the_view_again_at_screen_resolution() {
+        let rect = [0.0, 0.0, 100.0, 100.0];
+        let view = [40.0, 40.0, 50.0, 50.0];
+        let (model, sharp) =
+            ImageModel::from_ole_picture(&ole_metafile(), rect, 0.0, Some(0.01), Some(view))
+                .unwrap();
+        assert!(sharp, "the region in view is drawn sharper");
+        // The whole picture at 1600, then 2 gap rows, then 10 units at
+        // 100 pixels per unit.
+        assert_eq!((model.width, model.height), (1600, 1600 + 2 + 1000));
+        assert!(model.verts.len() > 6, "the quad is split around the region");
+        let below_whole = model
+            .verts
+            .iter()
+            .filter(|v| v.uv[1] > 1601.0 / 2602.0)
+            .count();
+        assert!(
+            below_whole >= 3,
+            "the region's triangles use the sharp raster"
+        );
+    }
+
+    /// Stored pixels have no more to show: they are used as they are, at
+    /// any zoom.
+    #[test]
+    fn an_ole_picture_of_stored_pixels_shows_as_it_is() {
+        let picture = crate::scene::model::ole_pres::Picture::Pixels(vec![0; 4 * 30 * 20], 30, 20);
+        let (model, sharp) = ImageModel::from_ole_picture(
+            &picture,
+            [0.0, 0.0, 30.0, 20.0],
+            0.0,
+            Some(0.001),
+            Some([0.0, 0.0, 1.0, 1.0]),
+        )
+        .unwrap();
+        assert_eq!((model.width, model.height), (30, 20));
+        assert!(!sharp);
+    }
 }

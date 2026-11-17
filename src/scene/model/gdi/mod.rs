@@ -17,6 +17,10 @@ mod wmf;
 
 pub use raster::{Canvas, Rgba};
 
+/// A 100×100 EMF with a one-pixel line across it at y = 50, for tests.
+#[cfg(test)]
+pub(crate) use emf::size_tests::hairline as test_hairline_emf;
+
 /// Output long-side target in pixels for a rasterized metafile.
 const TARGET_DIM: usize = 1600;
 /// Supersampling factor; the canvas renders at TARGET_DIM×SS and is

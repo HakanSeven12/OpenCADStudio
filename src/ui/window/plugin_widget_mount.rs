@@ -2867,6 +2867,18 @@ impl SceneRegionProgram {
     /// nothing / on a non-draggable element routes NOTHING: no begin, no
     /// counter, no capture change (the body wrapper's surface capture
     /// stays exactly the SCN-020 gesture it was).
+    ///
+    /// SCN-037 (live-verified defect): the pixel MUST be the REGION-LOCAL
+    /// read ([`mouse::Cursor::position_in`]) — iced's `position_over`
+    /// answers the WINDOW-absolute cursor, and the region's canvas sits at
+    /// a nonzero window origin (the docked pane + panel chrome + the
+    /// scrollable's content origin), so the absolute read inverted the fit
+    /// in the WRONG frame: the mapped scene point landed off the card
+    /// (usually on the underlay), the hit missed, and the press routed
+    /// nothing — for EVERY input, synthetic or manual, exactly as the live
+    /// host showed. The headless pins missed it because they passed bounds
+    /// at the window origin, where absolute == local; the offset-bounds
+    /// pins below pin the fix.
     fn scene_press(&self, slot: &RefCell<SceneDragSlot>, local: Point) {
         // The custody read: the transform the render committed (no decision,
         // no projection — a pure accessor read).
@@ -2909,7 +2921,11 @@ impl SceneRegionProgram {
         if !live {
             return;
         }
-        let Some(local) = cursor.position_over(bounds) else {
+        // The REGION-LOCAL read (SCN-037, see scene_press): position_over
+        // answers the window-absolute point and would map the move in the
+        // wrong frame; the same read also gates the point-out cancel (None
+        // outside the region, for both).
+        let Some(local) = cursor.position_in(bounds) else {
             let _ = slot.borrow_mut().session.cancel(DragCancelReason::PointerOut);
             return;
         };
@@ -2951,7 +2967,11 @@ impl SceneRegionProgram {
         if !live {
             return;
         }
-        let Some(local) = cursor.position_over(bounds) else {
+        // The REGION-LOCAL read (SCN-037, see scene_press): the settle point
+        // maps through the same frame the press armed in; the same read
+        // gates the point-out completion (None outside the region, for
+        // both).
+        let Some(local) = cursor.position_in(bounds) else {
             let _ = slot.borrow_mut().session.cancel(DragCancelReason::PointerOut);
             return;
         };
@@ -3025,7 +3045,14 @@ impl canvas::Program<WidgetMountMsg> for SceneRegionProgram {
         if let iced::Event::Mouse(mouse_event) = event {
             match mouse_event {
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                    if let Some(local) = cursor.position_over(bounds) {
+                    // THE REGION-LOCAL read (SCN-037): iced's position_over
+                    // answers the WINDOW-absolute cursor; the region's
+                    // canvas sits at a nonzero window origin (pane + chrome
+                    // + scroll content), so the absolute read inverted the
+                    // fit in the wrong frame and EVERY press missed the
+                    // card — the live defect. position_in is the bounds-
+                    // relative point the hit-test's custody law expects.
+                    if let Some(local) = cursor.position_in(bounds) {
                         self.scene_press(drag, local);
                     }
                 }
@@ -12630,6 +12657,270 @@ mod tests {
         }
     }
 
+    // -- SCN-037: the full-chain delivery pins --------------------------------
+    //
+    // The decision-level pins above drive the program seam directly with
+    // bounds at the WINDOW ORIGIN, where iced's absolute cursor and the
+    // region-local pixel coincide. The LIVE host never satisfies that: the
+    // region's canvas sits at a nonzero window origin (dock pane + panel
+    // chrome + body padding — (18, 35) in this composition) and, when the
+    // panel is scrolled, under a nonzero scroll translation. These two pins
+    // push a synthetic gesture through iced's REAL UserInterface over the
+    // EXACT live chain (`plugin_panel::view` + the dock edge down to the
+    // clip cell) and require the machine to engage — the headless twin of
+    // the live acceptance.
+
+    use crate::ui::style::kit_metrics as km;
+
+    /// The region canvas's ABSOLUTE bounds in this composition at a 360 px
+    /// pane: x = the body padding (10) + the band's left grid inset
+    /// ([`km::GRID_INSET_L`]); y = the title bar + the palette's top inset
+    /// band + the body padding (8) — verified against the Simulator's
+    /// internal layout (the throwaway `layout()` passes answer in
+    /// parent-relative node coordinates and must NOT be used for pointer
+    /// geometry).
+    fn region_canvas_origin() -> Point {
+        Point::new(
+            10.0 + km::GRID_INSET_L,
+            km::TITLE_H + (km::TOP_INSET - km::TOOL_GAP) + 8.0,
+        )
+    }
+
+    /// THE FULL-CHAIN PIN: a press→move→release on the draggable card
+    /// through the real widget tree (pointer-capture shell → scroll area →
+    /// palette → cell) ARMS the machine, goes InFlight on the first
+    /// threshold-crossing move, and settles with EXACTLY ONE
+    /// `CommandInvoked("drag_settle", [600])` — which the release route
+    /// forwards exactly once. The gesture rides WINDOW-absolute cursors
+    /// over a canvas at a NONZERO window origin: the SCN-037 defect's exact
+    /// shape (pre-fix, the press routed NOTHING here too).
+    #[test]
+    fn full_live_chain_delivers_the_scene_drag_to_the_machine() {
+        use iced::widget::Space;
+        use iced::Size;
+
+        attach_drag_panel();
+        let surface_id = with_test_registry(|r| r.panel_surface_id_owned("scn_panel"))
+            .expect("surface id");
+
+        let composed = || -> Element<'static, crate::app::Message> {
+            let body = MountRegistry::mounted_body("scn_panel").expect("the body composes");
+            let body = pointer_capture_body(body, Some(surface_id)).map(app_message);
+            let title_bar: Element<'static, crate::app::Message> = Space::new()
+                .width(Length::Fixed(360.0))
+                .height(Length::Fixed(km::TITLE_H))
+                .into();
+            let panel = crate::ui::kit::palette(title_bar, crate::ui::kit::scroll_area(body), 360.0);
+            let cell = iced::widget::container(panel)
+                .height(Length::FillPortion(1))
+                .clip(true);
+            iced::widget::column![cell].height(Length::Fill).into()
+        };
+
+        // The render the live host committed before the gesture: the fit at
+        // the region's size (322 px wide — 360 minus the band insets and the
+        // body padding — by the fixed 240 band height).
+        let transform = committed_fit(iced::Rectangle::with_size(Size::new(322.0, 240.0)));
+        let origin = region_canvas_origin();
+        let card_at = |scene: Point| Point::new(origin.x + transform.apply(scene).x, origin.y + transform.apply(scene).y);
+
+        let mut sim = iced_test::simulator::Simulator::with_size(
+            iced_test::core::Settings::default(),
+            Size::new(360.0, 600.0),
+            composed(),
+        );
+
+        // A press OUTSIDE the region (over the title bar) routes nothing.
+        sim.point_at(Point::new(origin.x + 100.0, origin.y - 10.0));
+        sim.simulate([iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+            iced::mouse::Button::Left,
+        ))]);
+        assert_eq!(
+            with_test_registry(|r| r.scene_drag_slot_read_owned(sid(200)))
+                .map(|s| s.borrow().session.phase().clone()),
+            Some(DragPhase::Idle),
+            "a press outside the region routes nothing"
+        );
+
+        // THE GESTURE: press the card's window pixel, cross the threshold,
+        // release — the settle binds and the forward drains once.
+        let press = card_at(Point::new(100.0, 64.0));
+        sim.point_at(press);
+        sim.simulate([
+            iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: press }),
+            iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        ]);
+        assert_eq!(
+            with_test_registry(|r| r.scene_drag_slot_read_owned(sid(200)))
+                .map(|s| s.borrow().session.phase().clone()),
+            Some(DragPhase::Armed),
+            "the press reached the canvas and armed the card (SCN-037)"
+        );
+
+        let move_to = Point::new(press.x + 60.0, press.y);
+        sim.point_at(move_to);
+        sim.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+            position: move_to,
+        })]);
+        assert_eq!(
+            with_test_registry(|r| r.scene_drag_slot_read_owned(sid(200)))
+                .map(|s| s.borrow().session.phase().clone()),
+            Some(DragPhase::InFlight),
+            "the window-coordinate move crossed the threshold"
+        );
+
+        sim.point_at(move_to);
+        sim.simulate([iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        ))]);
+        let pending = with_test_registry(|r| r.scene_drag_slot_read_owned(sid(200)))
+            .map(|s| s.borrow().pending_events.clone())
+            .unwrap();
+        assert_eq!(
+            pending,
+            vec![WidgetEvent::CommandInvoked {
+                surface_id: sid(200),
+                command_id: SCENE_DRAG_SETTLE_COMMAND.to_string(),
+                target_ids: vec![sid(600)],
+            }],
+            "the settle parked EXACTLY ONE CommandInvoked"
+        );
+
+        // The release route drains + forwards exactly once.
+        let forwards_before = MountRegistry::counters().mount_event_forwards;
+        MountRegistry::mount_pointer_released(sid(200));
+        assert_eq!(
+            MountRegistry::counters().mount_event_forwards,
+            forwards_before + 1,
+            "exactly one forwarded row"
+        );
+        assert!(with_test_registry(|r| r.scene_drag_slot_read_owned(sid(200)))
+            .map(|s| s.borrow().pending_events.is_empty())
+            .unwrap());
+    }
+
+    /// THE FULL-CHAIN PIN, BELOW THE FOLD: the widget stack taller than the
+    /// pane, the scrollable at a NONZERO translation (the live demo panel's
+    /// resting state — its Menu/List rows sit below the fold), the scene
+    /// band's top cut under the chrome, the card still visible — and the
+    /// drag at the card's VISIBLE window pixel still arms, lives and
+    /// settles. This is the coordinator's live repro case: the scroll
+    /// translation rides INSIDE the cursor iced hands the canvas (the
+    /// scrollable's own content mapping), so the region-local read stays
+    /// exact with the fold anywhere.
+    #[test]
+    fn full_live_chain_below_the_fold_still_delivers_the_scene_drag() {
+        use iced::widget::Space;
+        use iced::Size;
+
+        attach_drag_panel();
+        // Make the body TALLER than the viewport: a wide widget stack (many
+        // list rows) — the live demo body is below the fold. The scene leg
+        // (and its drag slot) carry over (the same-surface swap law).
+        with_test_registry_mut(|registry| {
+            let outcome = registry
+                .panel_surface_store_mut()
+                .publish(
+                    "PLUGIN",
+                    "scn_panel",
+                    simple_list_surface(
+                        SceneRevision(2),
+                        (0..60u64).map(|i| item(1000 + i, "row")).collect(),
+                    ),
+                )
+                .expect("the taller widget leg swaps in");
+            if let Some((surface_id, attach_surface)) = outcome.widget_mount.as_ref() {
+                registry.register_surface_owned(
+                    "scn_panel",
+                    SurfaceMountHandle::from_surface(*surface_id, attach_surface.clone()),
+                );
+            }
+        });
+        let surface_id = with_test_registry(|r| r.panel_surface_id_owned("scn_panel"))
+            .expect("surface id");
+
+        let composed = || -> Element<'static, crate::app::Message> {
+            let body = MountRegistry::mounted_body("scn_panel").expect("the body composes");
+            let body = pointer_capture_body(body, Some(surface_id)).map(app_message);
+            let title_bar: Element<'static, crate::app::Message> = Space::new()
+                .width(Length::Fixed(360.0))
+                .height(Length::Fixed(km::TITLE_H))
+                .into();
+            let panel = crate::ui::kit::palette(title_bar, crate::ui::kit::scroll_area(body), 360.0);
+            let cell = iced::widget::container(panel)
+                .height(Length::FillPortion(1))
+                .clip(true);
+            iced::widget::column![cell].height(Length::Fill).into()
+        };
+
+        // The retained fit at the region's size (the render the host
+        // committed before the gesture — the fold does not change it: the
+        // layer key's bounds are the band's own).
+        let transform = committed_fit(iced::Rectangle::with_size(Size::new(322.0, 240.0)));
+        let origin = region_canvas_origin();
+
+        let mut sim = iced_test::simulator::Simulator::with_size(
+            iced_test::core::Settings::default(),
+            Size::new(360.0, 300.0), // SHORT viewport: the stack is below the fold
+            composed(),
+        );
+
+        // SCROLL DOWN one wheel line = 60 px (iced's Lines delta × 60): the
+        // scene band's top cuts off, the card (pixel y ≈ 83 in the band)
+        // stays visible, the translation is NONZERO.
+        sim.point_at(Point::new(origin.x + 150.0, 250.0));
+        sim.simulate([iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
+            delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
+        })]);
+        let translation = 60.0_f32;
+
+        // PRESS + DRAG + RELEASE at the card's VISIBLE window pixel.
+        let press = Point::new(
+            origin.x + transform.apply(Point::new(100.0, 64.0)).x,
+            origin.y + transform.apply(Point::new(100.0, 64.0)).y - translation,
+        );
+        sim.point_at(press);
+        sim.simulate([
+            iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: press }),
+            iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+        ]);
+        assert_eq!(
+            with_test_registry(|r| r.scene_drag_slot_read_owned(sid(200)))
+                .map(|s| s.borrow().session.phase().clone()),
+            Some(DragPhase::Armed),
+            "the card armed below the fold (SCN-037: pre-fix this press routed nothing)"
+        );
+
+        let move_to = Point::new(press.x + 60.0, press.y + 10.0);
+        sim.point_at(move_to);
+        sim.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+            position: move_to,
+        })]);
+        assert_eq!(
+            with_test_registry(|r| r.scene_drag_slot_read_owned(sid(200)))
+                .map(|s| s.borrow().session.phase().clone()),
+            Some(DragPhase::InFlight),
+            "the drag is live under the scroll translation"
+        );
+
+        sim.point_at(move_to);
+        sim.simulate([iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        ))]);
+        assert_eq!(
+            with_test_registry(|r| r.scene_drag_slot_read_owned(sid(200)))
+                .map(|s| s.borrow().pending_events.clone())
+                .unwrap(),
+            vec![WidgetEvent::CommandInvoked {
+                surface_id: sid(200),
+                command_id: SCENE_DRAG_SETTLE_COMMAND.to_string(),
+                target_ids: vec![sid(600)],
+            }],
+            "the settle parked EXACTLY ONE CommandInvoked below the fold"
+        );
+    }
+
+
     /// THE LAYOUT PIN (scene-only edition): the region IS the body — the
     /// padded body container's single child resolves to exactly
     /// [`SCENE_REGION_V1_HEIGHT`] (nothing else competes for the band).
@@ -12969,6 +13260,109 @@ mod tests {
             MountRegistry::counters().mount_event_forwards,
             forwards_before + 1,
             "the second release forwards nothing"
+        );
+    }
+
+    /// THE SCN-037 REGRESSION PIN (the live defect, decision level): the
+    /// SAME press→move→release gesture as the interaction pin above, but
+    /// with the region's REAL geometry — its canvas at a NONZERO window
+    /// origin (the docked pane + panel chrome + body padding put it at
+    /// (18, 35) in the live host; any offset exposes it) and the pointer
+    /// cursors in WINDOW coordinates. The defect: the program read the
+    /// cursor through `position_over` — iced answers the WINDOW-ABSOLUTE
+    /// point there — and inverted the fit in the WRONG frame, so the mapped
+    /// scene point landed off the card and every press routed NOTHING
+    /// (synthetic AND manual, live-verified on host 50b8bc40a). The
+    /// origin-bounds pins above could never see it: at the window origin
+    /// absolute == local. The fix under pin: the REGION-LOCAL read
+    /// (`position_in`), which is the bounds-relative pixel the custody law
+    /// (invert through the render's committed transform) requires.
+    #[test]
+    fn scene_pointer_events_map_through_the_region_origin() {
+        attach_drag_panel();
+        // The live-shape offset: the region's canvas does NOT sit at the
+        // window origin.
+        let bounds = iced::Rectangle {
+            x: 200.0,
+            y: 120.0,
+            width: 240.0,
+            height: 240.0,
+        };
+        let transform = committed_fit(iced::Rectangle::with_size(bounds.size()));
+        let (program, slot) = drag_program();
+
+        // A press OUTSIDE the region routes nothing even at the offset
+        // geometry (the guard: the bounds are really where we think).
+        pointer_event(
+            &program,
+            iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+            Point::new(bounds.x - 6.0, bounds.y + 20.0),
+            bounds,
+        );
+        assert_eq!(slot.borrow().session.phase(), DragPhase::Idle, "outside");
+
+        // PRESS at the card's WINDOW pixel (origin + the card's region
+        // pixel): the program must map it BACK through the origin before
+        // inverting the fit.
+        let press = Point::new(
+            bounds.x + transform.apply(Point::new(100.0, 64.0)).x,
+            bounds.y + transform.apply(Point::new(100.0, 64.0)).y,
+        );
+        pointer_event(
+            &program,
+            iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left),
+            press,
+            bounds,
+        );
+        {
+            let slot = slot.borrow();
+            assert_eq!(
+                slot.session.phase(),
+                DragPhase::Armed,
+                "the card armed through the region origin (SCN-037)"
+            );
+            assert_eq!(slot.session.counters().begins, 1);
+        }
+
+        // MOVES in window coordinates cross the threshold and park (the
+        // same scene-space targets as the interaction pin, offset by the
+        // region origin).
+        for step in 1..=3u32 {
+            let pixel = transform.apply(Point::new(100.0 + 60.0 * step as f32, 64.0));
+            let local = Point::new(bounds.x + pixel.x, bounds.y + pixel.y);
+            pointer_event(
+                &program,
+                iced::mouse::Event::CursorMoved { position: local },
+                local,
+                bounds,
+            );
+        }
+        {
+            let slot = slot.borrow();
+            assert_eq!(slot.session.phase(), DragPhase::InFlight, "live");
+            assert_eq!(slot.session.counters().moves_parked, 3);
+        }
+
+        // RELEASE in window coordinates: the settle binds EXACTLY ONE
+        // CommandInvoked — the settle point mapped through the SAME frame.
+        let release = Point::new(
+            bounds.x + transform.apply(Point::new(280.0, 64.0)).x,
+            bounds.y + transform.apply(Point::new(280.0, 64.0)).y,
+        );
+        pointer_event(
+            &program,
+            iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left),
+            release,
+            bounds,
+        );
+        assert_eq!(
+            slot.borrow().pending_events.clone(),
+            vec![WidgetEvent::CommandInvoked {
+                surface_id: sid(200),
+                command_id: SCENE_DRAG_SETTLE_COMMAND.to_string(),
+                target_ids: vec![sid(600)],
+            }],
+            "ONE CommandInvoked through the region origin"
         );
     }
 

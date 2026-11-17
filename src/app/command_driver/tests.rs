@@ -10168,3 +10168,88 @@ mod select_by_handle_tests {
         assert!(selected.contains(&line) && selected.contains(&insert), "{selected:?}");
     }
 }
+
+
+// The Block Definition dialog's whole flow is message-driven: BLOCK opens the
+// band over the current selection, the typed fields update its state, and
+// applying commits through the same CreateBlockWithOptions result as -BLOCK.
+mod block_definition_dialog_tests {
+    use super::super::*;
+    use crate::app::Message;
+    use document::entities::Line;
+    use document::types::Vector3;
+
+    #[test]
+    fn block_def_apply_defines_the_block_and_consumes_the_preselected_objects() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let line = app.tabs[i].scene.add_entity(document::EntityType::Line(
+            Line::from_points(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0)),
+        ));
+        app.tabs[i].scene.select_entity(line, true);
+
+        let _ = app.run_command_line("BLOCK");
+
+        let state = app
+            .block_definition
+            .as_ref()
+            .expect("BLOCK opens the definition dialog");
+        assert_eq!(
+            state.selected_handles,
+            vec![line],
+            "the current selection carries into the dialog"
+        );
+        assert_eq!(
+            app.active_modal,
+            Some(crate::app::ModalKind::BlockDefinition)
+        );
+
+        let _ = app.update(Message::BlockDefName("PANEL".into()));
+        let _ = app.update(Message::BlockDefBaseX("2".into()));
+        let _ = app.update(Message::BlockDefBaseY("3".into()));
+
+        let _ = app.update(Message::BlockDefApply);
+
+        assert!(
+            app.block_definition.is_none(),
+            "applying closes the dialog"
+        );
+        assert_eq!(app.active_modal, None);
+
+        let record = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PANEL")
+            .expect("applying defines the named block");
+        assert!(
+            !record.entity_handles.is_empty(),
+            "the definition holds the converted objects"
+        );
+        assert!(
+            app.tabs[i].scene.document.get_entity(line).is_none(),
+            "convert mode consumes the source objects"
+        );
+
+        let insert = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Insert(ins) if ins.block_name == "PANEL" => Some(ins.clone()),
+                _ => None,
+            })
+            .expect("convert mode leaves a reference where the objects were");
+        assert_eq!(
+            insert.insert_point,
+            Vector3::new(2.0, 3.0, 0.0),
+            "the reference sits at the picked base point"
+        );
+        assert!(
+            app.tabs[i].scene.selected.contains(&insert.common.handle),
+            "the new reference is selected"
+        );
+    }
+}
+

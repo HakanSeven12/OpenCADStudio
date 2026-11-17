@@ -1047,6 +1047,9 @@ impl OpenCADStudio {
             "FIND" => {
                 return Some(Task::done(Message::FindReplaceOpen));
             }
+            "FIND_OBJECTS_GATHERED" => {
+                self.find_objects_gathered(i);
+            }
             "FINDALL" => {
                 use crate::command::ValuePromptCommand;
                 let c = ValuePromptCommand::new(

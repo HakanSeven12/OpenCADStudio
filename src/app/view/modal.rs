@@ -423,14 +423,7 @@ impl OpenCADStudio {
                 })
             }
             super::super::ModalKind::FindReplace => automatic_flow(ex, |flow| {
-                crate::ui::window::find_replace::view_window(
-                    &self.find_replace.search,
-                    &self.find_replace.replacement,
-                    &self.find_replace.status,
-                    &self.find_replace.results,
-                    self.find_replace.current_match,
-                    flow,
-                )
+                crate::ui::window::find_replace::view_window(&self.find_replace, flow)
             }),
             super::super::ModalKind::PluginManager => {
                 #[cfg(not(target_arch = "wasm32"))]

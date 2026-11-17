@@ -87,6 +87,7 @@ mod dwg_native_constraints;
 mod entity;
 pub(crate) use entity::wire_thumbnail_bgra;
 pub use camera_ops::named_view_center;
+pub use camera_ops::FindZoom;
 pub(crate) use entity::gradient_tint_color;
 pub(crate) use entity::normalize_block_terminators;
 pub use entity::CreateBlockOptions;

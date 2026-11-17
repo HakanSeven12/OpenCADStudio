@@ -62,6 +62,7 @@ mod drafting_settings;
 mod drawing_properties;
 pub(crate) mod filter_dialog;
 mod find_replace;
+pub(crate) mod text_match;
 mod geographic_location;
 pub(crate) mod helpers;
 mod history;
@@ -639,36 +640,66 @@ impl From<&QSelectState> for QSelectSettings {
     }
 }
 
+/// The Find and Replace window. Its texts, history and options outlive the
+/// window; the search position and the result list belong to one opening.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FindReplaceState {
     pub search: String,
     pub replacement: String,
-    pub status: String,
+    /// Earlier searches and replacements, the newest first.
+    pub search_history: Vec<String>,
+    pub replace_history: Vec<String>,
+    pub scope: crate::ui::window::find_replace::FindScope,
+    /// The objects picked for "Selected objects", in the order picked.
+    pub selection: Vec<document::Handle>,
+    pub options: crate::ui::window::find_replace::FindOptions,
+    pub list_results: bool,
+    pub more_options: bool,
+    /// The match on show: Replace works on it and Find goes on after it.
     pub current_match: Option<FindMatchKey>,
-    /// The last Find All list; picking a row visits it without searching again.
+    /// The matches of the running search, in search order.
+    pub matches: Vec<FindResult>,
+    /// The listed matches (List results).
     pub results: Vec<FindResult>,
+    /// Objects changed since the search started, counted once each.
+    pub changed: Vec<(document::Handle, Option<usize>)>,
+    /// One undo step for the whole window.
+    pub undo_pushed: bool,
+    pub notice: Option<crate::ui::window::find_replace::FindNotice>,
+    /// A replacement waiting for an answer about locked layers, a block or an
+    /// external reference.
+    pub run: Option<crate::ui::window::find_replace::ReplaceRun>,
 }
 
-/// One Find All row: the match plus enough context to tell repeats apart.
+/// One match: where it shows, what kind of text it is and the text.
 #[derive(Clone, Debug)]
 pub(crate) struct FindResult {
     pub key: FindMatchKey,
+    /// "Model" or the layout's name.
+    pub location: String,
+    pub kind: crate::ui::window::find_replace::FindKind,
     pub text: String,
-    pub kind: String,
-    pub layer: String,
+    /// The text's height, for zooming to it (0 for a hyperlink).
+    pub height: f64,
+}
+
+/// Where a match sits: `owner` is the object in its space (the insert for a
+/// text in a block or an external reference), `target` the object holding the
+/// text and `part` which of its texts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FindMatchKey {
+    pub owner: document::Handle,
+    pub target: document::Handle,
+    pub part: FindPart,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum FindMatchKey {
-    Entity(document::Handle),
-    BlockEntityInInsert {
-        entity: document::Handle,
-        insert: document::Handle,
-    },
-    InsertAttribute {
-        insert: document::Handle,
-        index: usize,
-    },
+pub(crate) enum FindPart {
+    Text,
+    Attribute(usize),
+    LinkText,
+    LinkUrl,
+    Cell(usize, usize),
 }
 use crate::snap::Snapper;
 use crate::ui::{CommandLine, Ribbon, StatusBar};
@@ -1826,6 +1857,9 @@ pub(super) struct OpenCADStudio {
     plotstyle_parent_plot_geometry: Option<(iced::Vector, iced::Vector)>,
     /// FIND dialog inputs and current result cursor.
     find_replace: FindReplaceState,
+    /// The text editor's Find and Replace options, kept between openings:
+    /// match case, whole words, wildcards, diacritics, half/full width.
+    mtext_find_prefs: Option<[bool; 5]>,
     overkill_dialog: Option<crate::ui::window::overkill::State>,
     /// Set once the user acknowledges the AEC-drop warning, so re-entering the
     /// save path proceeds instead of re-showing the warning.
@@ -3601,13 +3635,7 @@ pub enum Message {
     SelectAllShortcut,
     /// Open the shared Find and Replace dialog (Ctrl/Cmd+F or Ctrl/Cmd+H).
     FindReplaceOpen,
-    FindReplaceSearchChanged(String),
-    FindReplaceReplacementChanged(String),
-    FindReplaceNext,
-    FindReplaceOne,
-    FindReplaceAll,
-    FindReplaceFindAll,
-    FindReplaceSelectResult(usize),
+    Find(crate::ui::window::find_replace::FindMsg),
     OverkillSettingsChanged(crate::modules::draw::modify::overkill::Settings),
     OverkillToleranceChanged(String),
     OverkillOk,
@@ -6721,6 +6749,7 @@ impl OpenCADStudio {
             gpu_warning_silenced: String::new(),
             plotstyle_parent_plot_geometry: None,
             find_replace: FindReplaceState::default(),
+            mtext_find_prefs: None,
             overkill_dialog: None,
             aec_drop_acknowledged: false,
             aec_drop_count: 0,

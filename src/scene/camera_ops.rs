@@ -796,7 +796,7 @@ impl Scene {
     /// Bring one rendered entity into view: centre on it, keeping zoom
     /// distance, orientation and viewport scale, or with `zoom` also fit the
     /// view around it with room for its surroundings.
-    pub fn focus_camera_on_entity(&mut self, handle: Handle, zoom: bool) -> bool {
+    pub fn focus_camera_on_entity(&mut self, handle: Handle, zoom: FindZoom) -> bool {
         let fallback_z = self.active_camera_target().z;
         let wires = self.wire_models_for(&[handle]);
         let Some(bounds) = rendered_wire_bounds(&wires, fallback_z) else {
@@ -808,16 +808,26 @@ impl Scene {
     fn focus_active_camera_on(
         &mut self,
         (min, max): (glam::DVec3, glam::DVec3),
-        zoom: bool,
+        zoom: FindZoom,
     ) -> bool {
         let center = (min + max) * 0.5;
-        if !zoom {
-            return self.center_active_camera_on(center);
+        match zoom {
+            FindZoom::Center => self.center_active_camera_on(center),
+            // The view is 24 text heights tall, centred on the text.
+            FindZoom::TextHeight(height) => {
+                let half = glam::DVec3::new(0.0, 12.0 * height.max(1e-6), 0.0);
+                self.fit_active_view(center - half, center + half)
+            }
+            // An object without a text height (a hyperlink): a view 20 times
+            // its size, the object in the upper part where the link's tip
+            // leaves room below it.
+            FindZoom::Object => {
+                let size = (max - min).max_element().max(0.5);
+                let at = center - glam::DVec3::new(0.0, 5.0 * size, 0.0);
+                let half = glam::DVec3::new(0.0, 10.0 * size, 0.0);
+                self.fit_active_view(at - half, at + half)
+            }
         }
-        // Three times the object's size keeps a short text readable while
-        // the drawing around it still shows where it is.
-        let half = ((max - min) * 1.5).max(glam::DVec3::splat(0.5));
-        self.fit_active_view(center - half, center + half)
     }
 
     /// Focus on one concrete attribute value attached to an INSERT rather
@@ -826,7 +836,7 @@ impl Scene {
         &mut self,
         insert: Handle,
         index: usize,
-        zoom: bool,
+        zoom: FindZoom,
     ) -> bool {
         let (attribute, fallback) = {
             let Some(EntityType::Insert(entity)) = self.document.get_entity(insert) else {
@@ -855,7 +865,7 @@ impl Scene {
         &mut self,
         insert: Handle,
         entity: Handle,
-        zoom: bool,
+        zoom: FindZoom,
     ) -> bool {
         let (source, transform) = {
             let Some(EntityType::Insert(insert_entity)) = self.document.get_entity(insert) else {
@@ -2353,4 +2363,15 @@ mod far_view_center_tests {
             cam.target
         );
     }
+}
+
+/// How Find and Replace brings a match into view.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FindZoom {
+    /// Keep the zoom, centre on the match.
+    Center,
+    /// Zoom to a text of this height.
+    TextHeight(f64),
+    /// Zoom to an object that has no text height.
+    Object,
 }

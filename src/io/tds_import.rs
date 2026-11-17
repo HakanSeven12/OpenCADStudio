@@ -10,6 +10,7 @@ use document::types::Vector3;
 
 use crate::scene::sanitized_table_name;
 
+#[derive(Debug)]
 pub struct TdsMaterial {
     pub name: String,
     pub ambient: Option<[u8; 3]>,
@@ -25,6 +26,7 @@ pub struct TdsMaterial {
     pub map: Option<(String, f32)>,
 }
 
+#[derive(Debug)]
 pub struct TdsMesh {
     pub vertices: Vec<[f64; 3]>,
     pub faces: Vec<[usize; 3]>,
@@ -34,12 +36,14 @@ pub struct TdsMesh {
     pub color: Option<u8>,
 }
 
+#[derive(Debug)]
 pub struct TdsCamera {
     pub position: [f64; 3],
     pub target: [f64; 3],
     pub lens: f64,
 }
 
+#[derive(Debug)]
 pub struct TdsLight {
     pub position: [f64; 3],
     /// Red, green and blue from 0 to 1 (single precision, as the file
@@ -49,6 +53,7 @@ pub struct TdsLight {
     pub spot: Option<([f64; 3], f64, f64)>,
 }
 
+#[derive(Debug)]
 pub enum TdsObject {
     Mesh(TdsMesh),
     Light(TdsLight),
@@ -66,6 +71,7 @@ impl TdsObject {
     }
 }
 
+#[derive(Debug)]
 pub struct TdsScene {
     pub materials: Vec<TdsMaterial>,
     pub objects: Vec<(String, TdsObject)>,
@@ -375,6 +381,7 @@ pub struct TdsOptions {
 }
 
 /// One imported mesh.
+#[derive(Debug, Clone)]
 pub struct TdsPart {
     pub layer: String,
     pub material: Option<String>,
@@ -393,6 +400,7 @@ const OBJECT_ACI: [u8; 64] = [
 ];
 
 /// What the import adds, in order.
+#[derive(Debug, Clone)]
 pub enum TdsStep {
     /// The part at this index of [`TdsImport::parts`].
     Part(usize),
@@ -409,6 +417,7 @@ pub enum TdsStep {
     },
 }
 
+#[derive(Debug, Clone)]
 pub struct TdsCameraView {
     pub name: String,
     pub target: [f64; 3],
@@ -418,6 +427,7 @@ pub struct TdsCameraView {
     pub lens: f64,
 }
 
+#[derive(Debug, Clone)]
 pub struct TdsImport {
     pub parts: Vec<TdsPart>,
     /// The parts, materials and lights in the order they are added.

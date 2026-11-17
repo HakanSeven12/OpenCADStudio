@@ -486,6 +486,14 @@ fn read_picture_source(format: PictureFormat, source: PictureSource, fit: [f64; 
     }
 }
 
+/// The reader of the 3D Studio Import window: the file at `path` (a source
+/// registered this session, else the disk) as a 3D Studio model; none when
+/// it is missing or no 3D Studio file.
+fn read_tds_file(path: &str) -> Option<crate::io::tds_import::TdsScene> {
+    crate::scene::model::pdf_raster::source_bytes(path)
+        .and_then(|bytes| crate::io::tds_import::read(&bytes))
+}
+
 /// The command a picture import runs for: it names the undo step and a
 /// failed read.
 fn picture_command(pasted: bool, format: PictureFormat, prompt: bool) -> &'static str {
@@ -498,12 +506,59 @@ fn picture_command(pasted: bool, format: PictureFormat, prompt: bool) -> &'stati
 }
 
 impl OpenCADStudio {
-    /// The 3D Studio Import window for a file; an error when it is no 3D
-    /// Studio file.
-    pub(in crate::app) fn open_tds_import_dialog(&mut self, path: &str) -> Result<(), String> {
-        let scene = crate::scene::model::pdf_raster::source_bytes(path)
-            .and_then(|bytes| crate::io::tds_import::read(&bytes))
-            .ok_or_else(|| format!("{path} is not a valid 3D Studio file."))?;
+    /// Reads a 3D Studio file off the UI thread for the 3D Studio Import
+    /// window, which opens when the read ends
+    /// ([`Self::open_tds_import_dialog`]). A panic in the reader becomes an
+    /// error on the command line.
+    pub(in crate::app) fn read_tds_for_dialog(&mut self, path: &str) -> Task<Message> {
+        self.read_tds_for_dialog_with(path, read_tds_file)
+    }
+
+    /// [`Self::read_tds_for_dialog`] with the reader given, so a test can
+    /// give one that panics.
+    fn read_tds_for_dialog_with(
+        &mut self,
+        path: &str,
+        reader: fn(&str) -> Option<crate::io::tds_import::TdsScene>,
+    ) -> Task<Message> {
+        use crate::ui::window::import_dialogs::ImportDialogMsg;
+        self.command_line.push_info(&format!("Reading {path}…"));
+        let path = path.to_string();
+        let worker_path = path.clone();
+        crate::app::update::background_task(
+            "IMPORT",
+            move || reader(&worker_path).map(std::sync::Arc::new),
+            move |scene| Message::ImportDialog(ImportDialogMsg::TdsRead(path, scene)),
+        )
+    }
+
+    /// The 3D Studio Import window for a file read off the UI thread; an
+    /// error when it is no 3D Studio file. It takes the place of the Import
+    /// File window (which a script or the automation `run` operation leaves
+    /// open: they send IMPORT and the file name apart) and of its own older
+    /// copy (Change…). If a different window opened during the read, the 3D
+    /// Studio Import window does not open.
+    pub(in crate::app) fn open_tds_import_dialog(
+        &mut self,
+        path: &str,
+        scene: Option<std::sync::Arc<crate::io::tds_import::TdsScene>>,
+    ) {
+        let Some(scene) = scene else {
+            self.command_line
+                .push_error(&format!("{path} is not a valid 3D Studio file."));
+            return;
+        };
+        if self.active_modal.is_some_and(|modal| {
+            !matches!(
+                modal,
+                crate::app::ModalKind::TdsImport | crate::app::ModalKind::ImportFile
+            )
+        }) {
+            self.command_line.push_error(
+                "3D Studio Import cancelled: a different window opened while the file was read.",
+            );
+            return;
+        }
         let mut objects: Vec<(String, &'static str, usize)> = scene
             .objects
             .iter()
@@ -531,9 +586,9 @@ impl OpenCADStudio {
             search: String::new(),
             layers: previous.as_ref().map_or(0, |s| s.layers),
             multi: previous.as_ref().map_or(0, |s| s.multi),
+            scene,
         });
         self.active_modal = Some(crate::app::ModalKind::TdsImport);
-        Ok(())
     }
 
     /// The window's choices as an import: asked mesh by mesh first when set
@@ -545,11 +600,7 @@ impl OpenCADStudio {
     ) -> Task<Message> {
         use crate::io::tds_import::{LayerMode, MultiMaterial, TdsObject};
         use crate::modules::insert::tds_import::TdsImportRequest;
-        let Some(scene) = crate::scene::model::pdf_raster::source_bytes(&state.path)
-            .and_then(|bytes| crate::io::tds_import::read(&bytes))
-        else {
-            return Task::none();
-        };
+        let scene = state.scene.clone();
         let selected: Vec<String> = state
             .objects
             .iter()
@@ -617,22 +668,22 @@ impl OpenCADStudio {
                         material: 0,
                         list_open: false,
                         remember: false,
+                        scene,
                     });
                 self.active_modal = Some(crate::app::ModalKind::TdsMaterial);
                 return Task::none();
             }
             None => {}
         }
-        self.run_tds_import(i, request);
-        Task::none()
+        self.run_tds_import(i, request, scene)
     }
 
     /// The answer for the asked mesh (and, when the choice is kept, for the
     /// rest); the import runs once no mesh is left to ask about.
-    pub(in crate::app) fn answer_tds_material(&mut self) {
+    pub(in crate::app) fn answer_tds_material(&mut self) -> Task<Message> {
         use crate::io::tds_import::MultiMaterial;
         let Some(mut state) = self.import_dialogs.tds_material.take() else {
-            return;
+            return Task::none();
         };
         let choice = |state: &crate::ui::window::import_dialogs::TdsMaterialState,
                       materials: &[(String, Option<[u8; 3]>)],
@@ -661,13 +712,13 @@ impl OpenCADStudio {
         }
         if state.queue.is_empty() {
             self.close_active_modal();
-            self.run_tds_import(state.tab, state.request);
-        } else {
-            // The next mesh is offered the same choice, without a material.
-            state.material = 0;
-            state.list_open = false;
-            self.import_dialogs.tds_material = Some(state);
+            return self.run_tds_import(state.tab, state.request, state.scene);
         }
+        // The next mesh is offered the same choice, without a material.
+        state.material = 0;
+        state.list_open = false;
+        self.import_dialogs.tds_material = Some(state);
+        Task::none()
     }
 
     /// Cancel: the import stops at the asked mesh; the objects before it
@@ -675,42 +726,84 @@ impl OpenCADStudio {
     pub(in crate::app) fn stop_tds_import(
         &mut self,
         mut state: crate::ui::window::import_dialogs::TdsMaterialState,
-    ) {
+    ) -> Task<Message> {
         state.request.stop_at = state.queue.first().map(|(name, _)| name.clone());
-        self.run_tds_import(state.tab, state.request);
+        self.run_tds_import(state.tab, state.request, state.scene)
     }
 
-    /// The import itself, one undo step: the meshes on their layers with
-    /// their materials, the cameras as named views.
+    /// The import itself: the file's model converted off the UI thread
+    /// with the window's choices; [`Self::finish_tds_import`] places the
+    /// result when it arrives. A panic in the conversion becomes an error
+    /// on the command line.
     pub(in crate::app) fn run_tds_import(
         &mut self,
         i: usize,
         request: crate::modules::insert::tds_import::TdsImportRequest,
+        scene: std::sync::Arc<crate::io::tds_import::TdsScene>,
+    ) -> Task<Message> {
+        self.run_tds_import_with(i, request, scene, crate::io::tds_import::convert)
+    }
+
+    /// [`Self::run_tds_import`] with the conversion given, so a test can
+    /// give one that panics.
+    fn run_tds_import_with(
+        &mut self,
+        i: usize,
+        request: crate::modules::insert::tds_import::TdsImportRequest,
+        scene: std::sync::Arc<crate::io::tds_import::TdsScene>,
+        converter: fn(
+            &crate::io::tds_import::TdsScene,
+            &crate::io::tds_import::TdsOptions,
+        ) -> crate::io::tds_import::TdsImport,
+    ) -> Task<Message> {
+        use crate::ui::window::import_dialogs::ImportDialogMsg;
+        let tab_id = self.tabs[i].id;
+        let generation = self.tabs[i].document_generation;
+        let options = crate::io::tds_import::TdsOptions {
+            selected: request.selected.clone(),
+            layers: request.layers,
+            multi: request.multi.clone(),
+            compact: request.compact,
+            single_layer: self.tabs[i]
+                .scene
+                .document
+                .header
+                .current_layer_name
+                .clone(),
+            stop_at: request.stop_at.clone(),
+        };
+        let worker_scene = scene.clone();
+        crate::app::update::background_task(
+            "IMPORT",
+            move || converter(&worker_scene, &options),
+            move |import| {
+                Message::ImportDialog(ImportDialogMsg::TdsConverted(
+                    tab_id,
+                    generation,
+                    Box::new(request),
+                    scene,
+                    Box::new(import),
+                ))
+            },
+        )
+    }
+
+    /// Places a finished 3D Studio import on the UI thread, one undo step:
+    /// the meshes on their layers with their materials, the cameras as
+    /// named views. A result for a drawing that was closed, replaced or
+    /// cleared is dropped.
+    pub(in crate::app) fn finish_tds_import(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        request: crate::modules::insert::tds_import::TdsImportRequest,
+        scene: std::sync::Arc<crate::io::tds_import::TdsScene>,
+        import: crate::io::tds_import::TdsImport,
     ) {
         use document::objects::ObjectType;
-        let Some(scene) = crate::scene::model::pdf_raster::source_bytes(&request.path)
-            .and_then(|bytes| crate::io::tds_import::read(&bytes))
-        else {
-            self.command_line
-                .push_error(&format!("{} is not a valid 3D Studio file.", request.path));
+        let Some(i) = self.import_target(tab_id, generation) else {
             return;
         };
-        let import = crate::io::tds_import::convert(
-            &scene,
-            &crate::io::tds_import::TdsOptions {
-                selected: request.selected.clone(),
-                layers: request.layers,
-                multi: request.multi.clone(),
-                compact: request.compact,
-                single_layer: self.tabs[i]
-                    .scene
-                    .document
-                    .header
-                    .current_layer_name
-                    .clone(),
-                stop_at: request.stop_at.clone(),
-            },
-        );
         // Named views take the current view's proportions.
         let (_, size, _) = self.tabs[i].scene.view_window();
         let aspect = if size[0] > 0.0 && size[1] > 0.0 {

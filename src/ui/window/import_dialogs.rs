@@ -61,6 +61,23 @@ pub enum ImportDialogMsg {
     TdsMatPick(usize),
     TdsMatRemember(bool),
     TdsMatApply,
+    /// A 3D Studio file read off the UI thread for the 3D Studio Import
+    /// window: the file, and its model (none when it is no 3D Studio
+    /// file).
+    TdsRead(
+        String,
+        Option<std::sync::Arc<crate::io::tds_import::TdsScene>>,
+    ),
+    /// A 3D Studio import converted off the UI thread: the tab it was
+    /// started for, that document's generation, the import's choices, the
+    /// file's model, and the conversion.
+    TdsConverted(
+        u64,
+        u64,
+        Box<crate::modules::insert::tds_import::TdsImportRequest>,
+        std::sync::Arc<crate::io::tds_import::TdsScene>,
+        Box<crate::io::tds_import::TdsImport>,
+    ),
     Help(&'static str),
 }
 
@@ -207,6 +224,8 @@ pub struct TdsImportState {
     pub layers: usize,
     /// 0 always ask, 1 split by material, 2 first material, 3 no material.
     pub multi: usize,
+    /// The file's model, read once when the window opened.
+    pub scene: std::sync::Arc<crate::io::tds_import::TdsScene>,
 }
 
 /// A 3D Studio import set to ask: the meshes with several materials still to
@@ -227,6 +246,8 @@ pub struct TdsMaterialState {
     pub list_open: bool,
     /// The choice answers the remaining meshes too.
     pub remember: bool,
+    /// The file's model, read once when the 3D Studio Import window opened.
+    pub scene: std::sync::Arc<crate::io::tds_import::TdsScene>,
 }
 
 /// The windows' working copies and the files imported this session.

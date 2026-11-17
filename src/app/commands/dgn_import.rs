@@ -294,10 +294,7 @@ impl OpenCADStudio {
             // The options window opens whatever FILEDIA is.
             Ok(Route::Tds) => {
                 self.remember_import(path);
-                if let Err(error) = self.open_tds_import_dialog(path) {
-                    self.command_line.push_error(&error);
-                }
-                Task::none()
+                self.read_tds_for_dialog(path)
             }
             Ok(Route::Obj) => {
                 self.remember_import(path);
@@ -435,9 +432,7 @@ impl OpenCADStudio {
                     Ok(Route::Tds) => {
                         self.remember_import(&path);
                         self.close_active_modal();
-                        if let Err(error) = self.open_tds_import_dialog(&path) {
-                            self.command_line.push_error(&error);
-                        }
+                        return self.read_tds_for_dialog(&path);
                     }
                     Ok(Route::Obj) => {
                         self.remember_import(&path);
@@ -454,10 +449,10 @@ impl OpenCADStudio {
                     Message::ImportDialog(ImportDialogMsg::TdsPicked(path))
                 });
             }
-            ImportDialogMsg::TdsPicked(Some(path)) => {
-                if let Err(error) = self.open_tds_import_dialog(&path) {
-                    self.command_line.push_error(&error);
-                }
+            ImportDialogMsg::TdsPicked(Some(path)) => return self.read_tds_for_dialog(&path),
+            ImportDialogMsg::TdsRead(path, scene) => self.open_tds_import_dialog(&path, scene),
+            ImportDialogMsg::TdsConverted(tab_id, generation, request, scene, import) => {
+                self.finish_tds_import(tab_id, generation, *request, scene, *import)
             }
             ImportDialogMsg::TdsPicked(None) => {}
             ImportDialogMsg::TdsCheck(k, on) => {
@@ -532,7 +527,7 @@ impl OpenCADStudio {
                     s.remember = on;
                 }
             }
-            ImportDialogMsg::TdsMatApply => self.answer_tds_material(),
+            ImportDialogMsg::TdsMatApply => return self.answer_tds_material(),
             // ── DGN Import ───────────────────────────────────────────────
             ImportDialogMsg::DgnChange => return self.pick_dgn_file(),
             ImportDialogMsg::DgnPicked(Some(path)) => {

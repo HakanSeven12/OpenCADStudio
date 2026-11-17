@@ -461,7 +461,8 @@ fn a_3d_studio_import_runs_through_its_window() {
         &format!("IMPORT {}", fixture("tds/two_materials.3ds")),
     );
     import_rows(&mut app, &["Crate"]);
-    let _ = app.update(Message::CloseModal);
+    let task = app.update(Message::CloseModal);
+    app.drive_headless_task(task).expect("the import task");
     assert_eq!(app.active_modal, None);
     assert!(!layers(&app).contains(&"CRATE".to_string()));
 }

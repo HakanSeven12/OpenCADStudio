@@ -481,6 +481,8 @@ fn list_view<'a>(palette: &'a CountPalette, instances: &[BlockInstance]) -> Elem
                     .all(|r| checked.contains(&r.name.to_ascii_uppercase()));
             row![
                 checkbox(every)
+                    .label(crate::t!("Select all").into_owned())
+                    .text_size(12)
                     .size(km::CHECK)
                     .on_toggle(|v| msg(CountMsg::TableAll(v))),
                 Space::new().width(Fill),

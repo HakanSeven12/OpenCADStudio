@@ -712,12 +712,29 @@ impl OpenCADStudio {
         };
         names.sort_by_key(|n| n.to_ascii_uppercase());
         names.dedup_by_key(|n| n.to_ascii_uppercase());
+        // The grid follows the current table style's text: rows as the
+        // TABLE command sizes them, columns scaled from the 0.18 default.
+        let style = crate::app::annotation_data::current_table_style(doc);
+        let heights = crate::modules::annotate::table_cmd::row_heights_for(
+            style.as_ref().map(|c| &c.style),
+            ["Header", "Data", "Data"],
+            false,
+            true,
+            names.len(),
+            1,
+        );
+        let data_height = heights.last().copied().unwrap_or(0.36);
+        let k = (data_height / 0.36).max(1e-6);
         let mut table = document::entities::TableBuilder::new(names.len() + 1, 2)
             .at(document::types::Vector3::new(point[0], point[1], point[2]))
-            .row_height(0.36)
-            .column_width(3.6)
+            .row_height(data_height)
+            .column_width(3.6 * k)
             .build();
-        table.set_column_width(1, 1.08);
+        table.set_column_width(1, 1.08 * k);
+        for (row, h) in table.rows.iter_mut().zip(&heights) {
+            row.height = *h;
+        }
+        table.table_style_handle = style.map(|c| c.handle);
         // As the reference writes it: no title row, data rows centred
         // (table and cell overrides), header cells without overrides.
         table.value_flags = 22;
@@ -1001,5 +1018,156 @@ impl OpenCADStudio {
             }
         }
         Task::none()
+    }
+}
+
+#[cfg(test)]
+mod count_table_tests {
+    use crate::app::OpenCADStudio;
+    use document::entities::{Insert, Line};
+    use document::types::Vector3;
+    use document::EntityType;
+
+    /// A drawing with three CHAIR and one DESK references.
+    fn app() -> (OpenCADStudio, usize) {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        for name in ["CHAIR", "DESK"] {
+            app.tabs[i].scene.define_block_raw(
+                name,
+                Vector3::ZERO,
+                vec![EntityType::Line(Line::from_points(
+                    Vector3::ZERO,
+                    Vector3::new(1.0, 0.0, 0.0),
+                ))],
+            );
+        }
+        for (k, name) in ["CHAIR", "CHAIR", "CHAIR", "DESK"].iter().enumerate() {
+            let insert = Insert::new(*name, Vector3::new(k as f64 * 5.0, 0.0, 0.0));
+            app.tabs[i].scene.add_entity(EntityType::Insert(insert));
+        }
+        (app, i)
+    }
+
+    fn count_table(app: &OpenCADStudio, i: usize) -> document::entities::Table {
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| match e {
+                EntityType::Table(t) => Some((**t).clone()),
+                _ => None,
+            })
+            .expect("count table")
+    }
+
+    /// While a placed count table is dragged by a grip, the
+    /// drag-start picture shows each cell text in its own cell. A grid made
+    /// for 0.18 text under a 2.5 text style wrapped every text into one
+    /// small box at the table's corner.
+    #[test]
+    fn count_table_grip_preview_keeps_texts_apart() {
+        use crate::entities::traits::Grippable;
+        use document::objects::{ObjectType, TableStyle};
+        let (mut app, i) = app();
+        app.snapper.snap_enabled = false;
+        app.snapper.grid_snap_on = false;
+        app.snapper.otrack_enabled = false;
+        app.ortho_mode = false;
+        app.polar_mode = false;
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        let doc = &mut app.tabs[i].scene.document;
+        let style_handle = doc.allocate_handle();
+        doc.header.current_table_style_name = "Standard".into();
+        let mut style = TableStyle::standard();
+        style.handle = style_handle;
+        style.title_row_style.text_height = 3.5;
+        style.header_row_style.text_height = 2.5;
+        style.data_row_style.text_height = 2.5;
+        style.vertical_margin = 1.0;
+        doc.objects
+            .insert(style_handle, ObjectType::TableStyle(style));
+        app.place_count_table(i, [100.0, 0.0, 0.0], Vec::new());
+        let table = count_table(&app, i);
+        let handle = table.common.handle;
+        let origin = table
+            .grips()
+            .into_iter()
+            .find(|g| g.id == 1)
+            .expect("width grip")
+            .world;
+        let cursor = app.tabs[i]
+            .scene
+            .camera
+            .borrow()
+            .project(
+                origin + glam::DVec3::new(10.0, 0.0, 0.0),
+                iced::Rectangle::with_size(iced::Size::new(800.0, 600.0)),
+            )
+            .unwrap();
+        app.tabs[i].active_grip = Some(crate::scene::pick::grip::GripEdit::single(
+            handle, 1, false, origin,
+        ));
+        let _ = app.on_viewport_move(iced::Point::new(cursor.x, cursor.y));
+        // The faded drag-start picture: one box per cell text.
+        let boxes: Vec<[f32; 4]> = app.tabs[i]
+            .scene
+            .preview_wires
+            .iter()
+            .filter(|w| w.color[3] < 1.0 && !w.text_verts.is_empty())
+            .map(|w| {
+                w.text_verts.iter().fold(
+                    [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
+                    |b, v| {
+                        [
+                            b[0].min(v.pos[0]),
+                            b[1].min(v.pos[1]),
+                            b[2].max(v.pos[0]),
+                            b[3].max(v.pos[1]),
+                        ]
+                    },
+                )
+            })
+            .collect();
+        assert_eq!(boxes.len(), 6, "six cell texts in the drag-start picture");
+        for (a, x) in boxes.iter().enumerate() {
+            for y in &boxes[a + 1..] {
+                let overlap = x[0] < y[2] && y[0] < x[2] && x[1] < y[3] && y[1] < x[3];
+                assert!(!overlap, "cell texts overlap: {x:?} {y:?} of {boxes:?}");
+            }
+        }
+        assert!(app.cancel_active_grip_edit());
+    }
+
+    /// The count table takes the current table style and sizes
+    /// its grid to that style's text, as TABLE does (a metric style's 2.5
+    /// text in a grid made for 0.18 text overflowed every cell).
+    #[test]
+    fn count_table_grid_fits_the_current_table_style_text() {
+        use document::objects::{ObjectType, TableStyle};
+        let (mut app, i) = app();
+        let doc = &mut app.tabs[i].scene.document;
+        let handle = doc.allocate_handle();
+        doc.header.current_table_style_name = "Metric".into();
+        let mut style = TableStyle::standard();
+        style.name = "Metric".into();
+        style.handle = handle;
+        style.title_row_style.text_height = 3.5;
+        style.header_row_style.text_height = 2.5;
+        style.data_row_style.text_height = 2.5;
+        style.vertical_margin = 1.0;
+        doc.objects.insert(handle, ObjectType::TableStyle(style));
+        app.place_count_table(i, [100.0, 0.0, 0.0], Vec::new());
+        let table = count_table(&app, i);
+        assert_eq!(table.table_style_handle, Some(handle), "current table style");
+        let text = crate::entities::table::data_text_height(&table, &app.tabs[i].scene.document);
+        assert!((text - 2.5).abs() < 1e-9, "drawn with the style's text: {text}");
+        for row in &table.rows {
+            assert!(row.height >= 2.5 * 4.0 / 3.0 + 2.0, "row {} too low", row.height);
+        }
+        // The item column holds about twenty characters, the count column six.
+        assert!(table.columns[0].width >= 20.0 * 2.5 - 1e-9, "{}", table.columns[0].width);
+        assert!(table.columns[1].width >= 6.0 * 2.5 - 1e-9, "{}", table.columns[1].width);
     }
 }

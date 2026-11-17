@@ -1,10 +1,10 @@
 //! OpenCADStudio model import benchmark suite.
 //!
-//! STEP, IGES and SAT imports currently read, parse and place the model in
-//! one go on the UI thread; this measures what the app is busy with while it
-//! handles one import of a fixed file into a fresh drawing, through the
-//! `#[doc(hidden)]` `ModelImportBenchHarness` bridge, and separately the
-//! reader alone — the part a background import moves off the UI thread.
+//! STEP, IGES and SAT imports read and parse the model off the UI thread and
+//! place it when the result arrives. This measures both halves through the
+//! `#[doc(hidden)]` `ModelImportBenchHarness` bridge, which runs the read
+//! inline (a bench cannot drive the returned `iced::Task`): the placement the
+//! UI thread performs, the read it hands to a worker, and the two together.
 //!
 //! Fixtures (deterministic, written once to the temp directory):
 //!   * STEP — the synthesized AP203 tessellation shared with the tokenizer
@@ -13,8 +13,8 @@
 //!   * IGES — the repository's rational-spline fixture (one curve).
 //!
 //! Metrics, times in milliseconds per import:
-//!   * `<format>_ui`    — the UI-thread time of the import.
-//!   * `<format>_total` — the whole import (parse included).
+//!   * `<format>_ui`    — the UI-thread work: placing a finished import.
+//!   * `<format>_total` — the whole import (read and placement).
 //!   * `<format>_read`  — the reader alone on the same bytes.
 //!
 //! Sink (semantic-equivalence proof): entity and block counts, block names,
@@ -85,8 +85,8 @@ fn report(name: &str, samples: &mut [u64], sink: u64) {
     );
 }
 
-/// One import per sample through the production entry, split into the
-/// UI-thread time and the whole call.
+/// One import per sample: the read inline, then the placement the UI thread
+/// performs when the result arrives.
 fn bench_import(
     harness: &mut ModelImportBenchHarness,
     name: &str,
@@ -114,8 +114,8 @@ fn bench_import(
     report(&format!("{name}_total"), &mut total, expected);
 }
 
-/// The reader alone on the fixture's bytes, as the background worker would
-/// call it.
+/// The reader alone on the fixture's bytes, without the file read the
+/// worker's `model_import::load` performs.
 fn bench_read(name: &str, bytes: &[u8], format: ModelFormat, drawing_mm: Option<f64>) {
     let stem = "bench";
     let mut expected = None;

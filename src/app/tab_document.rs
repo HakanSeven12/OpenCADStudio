@@ -173,6 +173,11 @@ pub(super) struct DocumentTab {
     /// Monotonic committed-edit/undo/redo revision. Background save completion
     /// uses it with scene epochs so an older snapshot never clears newer work.
     pub(super) edit_revision: u64,
+    /// Bumped whenever a whole document replaces this tab's content. Work
+    /// started against the old document (a model import being read off the UI
+    /// thread) checks it before touching the drawing: the tab keeps its id,
+    /// the document does not.
+    pub(super) document_generation: u64,
     /// A whole document replaced this tab's content (file open, template new,
     /// system open) and native plugins have not been told yet: the
     /// message boundary (`OpenCADStudio::notify_plugins_document_opened`,
@@ -829,6 +834,7 @@ impl DocumentTab {
             ifccad_alpha_acknowledged: false,
             ifccad_session: None,
             edit_revision: 0,
+            document_generation: 0,
             document_opened_pending: true,
             prev_selection: Vec::new(),
             tab_title: format!("Drawing{}", n),
@@ -948,8 +954,16 @@ impl DocumentTab {
         // gone, and its coordinates are not the new document's.
         crate::modules::draw::draw::attdef::session().forget_place_of(self.id);
         crate::modules::annotate::text::forget_place_of(self.id);
+        self.document_generation = self.document_generation.wrapping_add(1);
         self.ifccad_session = ifccad_session;
         self.document_opened_pending = true;
+    }
+
+    /// A fresh drawing replaced this tab's content in place, without a file
+    /// load to announce (CLEAR and its ribbon tool): work started against the
+    /// cleared drawing sees the new generation and drops its result.
+    pub(super) fn note_drawing_cleared(&mut self) {
+        self.document_generation = self.document_generation.wrapping_add(1);
     }
 
     pub(super) fn tab_display_name(&self) -> String {

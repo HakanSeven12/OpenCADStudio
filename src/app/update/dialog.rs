@@ -151,6 +151,7 @@ impl OpenCADStudio {
             ModuleEvent::ClearModels => {
                 let i = self.active_tab;
                 self.tabs[i].scene.clear();
+                self.tabs[i].note_drawing_cleared();
                 self.tabs[i].properties = PropertiesPanel::empty();
                 self.command_line
                     .push_output(crate::t!("Scene cleared.").as_ref());

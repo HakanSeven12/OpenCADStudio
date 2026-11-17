@@ -45,6 +45,8 @@ pub(crate) use command_driver::{
 };
 mod assistant;
 pub(crate) mod commands;
+#[doc(hidden)]
+pub use commands::ModelImportBenchHarness;
 #[cfg(test)]
 mod dim_constraint_value_tests;
 mod dim_variables;
@@ -65,8 +67,6 @@ mod layer_filter_store;
 mod layer_filters;
 #[doc(hidden)]
 pub use layer_filters::LayerRefreshBenchHarness;
-#[doc(hidden)]
-pub use commands::ModelImportBenchHarness;
 pub(crate) mod layer_groups;
 pub(crate) mod layer_import;
 mod layer_walk;
@@ -6171,6 +6171,18 @@ pub enum Message {
         u64,
         std::path::PathBuf,
         Result<Vec<document::entities::mesh::Mesh>, String>,
+    ),
+    // ── Model import (ACIS/STEP/IGES) ─────────────────────────────────────
+    /// Completion of a model import read off the UI thread: the tab it was
+    /// started for, that document's generation (the id survives a document
+    /// replacement; the generation does not), the file, its format, and the
+    /// reader's result.
+    ModelImportFinished(
+        u64,
+        u64,
+        String,
+        crate::io::model_import::ModelFormat,
+        Result<crate::io::model_import::Imported, crate::io::model_import::ImportFailure>,
     ),
     /// An edit in the Import File or DGN Import window.
     ImportDialog(crate::ui::window::import_dialogs::ImportDialogMsg),

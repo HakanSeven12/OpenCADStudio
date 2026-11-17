@@ -3076,6 +3076,10 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::ModelImportFinished(tab_id, generation, path, format, result) => {
+                self.finish_model_import(tab_id, generation, &path, format, result)
+            }
+
             Message::SaveFile => self.on_save_file(),
             Message::ExtractionOutdated(choice) => self.on_extraction_outdated(choice),
 
@@ -3127,6 +3131,7 @@ impl OpenCADStudio {
                 }
                 self.push_undo_snapshot(i, "CLEAR");
                 self.tabs[i].scene.reset_to_new_drawing();
+                self.tabs[i].note_drawing_cleared();
                 self.tabs[i].properties = PropertiesPanel::empty();
                 let doc_layers = self.tabs[i].scene.document.layers.clone();
                 let vp_info = self.tabs[i].scene.viewport_list();

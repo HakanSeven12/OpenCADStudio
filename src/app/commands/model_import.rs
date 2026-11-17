@@ -118,32 +118,68 @@ impl OpenCADStudio {
         }
     }
 
-    /// Reads a model file into drawing `i`.
+    /// Reads a model file into drawing `i`: the file is read and parsed off
+    /// the UI thread (inline where the platform has no threads), and the
+    /// objects are placed when the result arrives
+    /// ([`Self::finish_model_import`]).
     pub(in crate::app) fn import_model(
         &mut self,
         i: usize,
         path: &str,
         format: ModelFormat,
     ) -> Task<Message> {
-        let Some(bytes) = crate::scene::model::pdf_raster::source_bytes(path) else {
-            self.command_line
-                .push_error(&format!("File {path} does not exist."));
-            return Task::none();
-        };
-        let translated = format != ModelFormat::Sat;
+        let tab_id = self.tabs[i].id;
+        let generation = self.tabs[i].document_generation;
         let drawing_mm = crate::app::properties::insunits_to_mm(
             self.tabs[i].scene.document.header.insertion_units,
         );
-        let stem = std::path::Path::new(&path.replace('\\', "/"))
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let Some(imported) = model_import::read(format, &bytes, drawing_mm, &stem) else {
-            self.command_line.push_error(&format!(
-                "Import failed: {path} has no model the importer reads."
-            ));
+        let path = path.to_string();
+        let worker_path = path.clone();
+        crate::app::update::background_task(
+            "IMPORT",
+            move || model_import::load(format, &worker_path, drawing_mm),
+            move |result| Message::ModelImportFinished(tab_id, generation, path, format, result),
+        )
+    }
+
+    /// Places a finished import on the UI thread: its blocks under names the
+    /// drawing does not use yet, then its objects, as one undo step.
+    pub(in crate::app) fn finish_model_import(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        path: &str,
+        format: ModelFormat,
+        result: Result<model_import::Imported, model_import::ImportFailure>,
+    ) -> Task<Message> {
+        let Some(i) = self
+            .tabs
+            .iter()
+            .position(|tab| tab.id == tab_id && tab.document_generation == generation)
+        else {
+            let message = if self.tabs.iter().any(|tab| tab.id == tab_id) {
+                "Import: the drawing it was headed for was replaced or cleared."
+            } else {
+                "Import: the drawing it was headed for was closed."
+            };
+            self.command_line.push_info(message);
             return Task::none();
         };
+        let imported = match result {
+            Ok(imported) => imported,
+            Err(model_import::ImportFailure::Missing) => {
+                self.command_line
+                    .push_error(&format!("File {path} does not exist."));
+                return Task::none();
+            }
+            Err(model_import::ImportFailure::Unreadable) => {
+                self.command_line.push_error(&format!(
+                    "Import failed: {path} has no model the importer reads."
+                ));
+                return Task::none();
+            }
+        };
+        let translated = format != ModelFormat::Sat;
         self.push_undo_snapshot(i, "IMPORT");
         let scene = &mut self.tabs[i].scene;
         // Each block goes under a name the drawing does not use yet (a
@@ -1037,16 +1073,26 @@ impl ModelImportBenchHarness {
     }
 
     /// Imports `path` as `format` into a fresh drawing and reports
-    /// `(ui, total, sink)` in nanoseconds: the time the UI thread spends on
-    /// the import, the whole import from the caller's point of view, and a
-    /// hash of what the drawing holds afterwards.
+    /// `(ui, total, sink)` in nanoseconds: the UI-thread work once the parsed
+    /// result arrives, the whole import, and a hash of what the drawing holds
+    /// afterwards. The read runs here rather than on the worker the
+    /// production entry hands it to, because a bench cannot drive the
+    /// returned task.
     pub fn import(&mut self, path: &str, format: ModelFormat) -> (u64, u64, u64) {
         self.reset();
         let i = self.app.active_tab;
+        let tab_id = self.app.tabs[i].id;
+        let generation = self.app.tabs[i].document_generation;
+        let drawing_mm = self.drawing_mm();
         let started = std::time::Instant::now();
-        let _ = self.app.import_model(i, path, format);
-        let elapsed = started.elapsed().as_nanos() as u64;
-        (elapsed, elapsed, self.sink())
+        let result = model_import::load(format, path, drawing_mm);
+        let loaded = started.elapsed().as_nanos() as u64;
+        let apply = std::time::Instant::now();
+        let _ = self
+            .app
+            .finish_model_import(tab_id, generation, path, format, result);
+        let ui = apply.elapsed().as_nanos() as u64;
+        (ui, loaded + ui, self.sink())
     }
 
     /// A fresh drawing with no history carried from the previous sample.
@@ -1103,6 +1149,336 @@ impl ModelImportBenchHarness {
             }
         }
         hasher.finish()
+    }
+}
+
+#[cfg(test)]
+mod import_tests {
+    use super::*;
+
+    fn app_with_new_drawing() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    /// The import places nothing itself: the file is read and parsed on a
+    /// worker, and only the finished result changes the drawing.
+    #[test]
+    fn an_import_is_not_applied_before_its_result_arrives() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/step/box.step");
+        let blocks = app.tabs[i].scene.document.block_records.len();
+        let _task = app.import_model(i, path, ModelFormat::Step);
+        assert_eq!(
+            app.tabs[i].scene.document.entity_count(),
+            0,
+            "the worker reads the file; nothing is placed until its result arrives"
+        );
+        assert_eq!(app.tabs[i].scene.document.block_records.len(), blocks);
+    }
+
+    /// The message the reader sends is what places the import: driving the
+    /// task `import_model` returns runs the whole seam, worker and message
+    /// included.
+    #[test]
+    fn a_finished_import_reaches_its_drawing_through_its_message() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/step/box.step");
+        let task = app.import_model(i, path, ModelFormat::Step);
+        app.drive_headless_task(task).expect("the import task");
+        assert!(
+            app.tabs[i].scene.document.entity_count() > 0,
+            "the result the worker sends is placed by its message"
+        );
+        assert!(app.tabs[i].dirty);
+    }
+
+    fn line(y: f64) -> document::EntityType {
+        document::EntityType::Line(document::entities::Line::from_coords(
+            0.0, y, 0.0, 10.0, y, 0.0,
+        ))
+    }
+
+    fn direct_insert(block: &str) -> document::EntityType {
+        document::EntityType::Insert(document::entities::Insert::new(
+            block,
+            document::types::Vector3::ZERO,
+        ))
+    }
+
+    fn inserts(app: &OpenCADStudio, i: usize) -> Vec<String> {
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Insert(insert) => Some(insert.block_name.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The finished result is placed as one undoable edit: the block, then
+    /// the objects that reference it.
+    #[test]
+    fn a_finished_import_places_its_blocks_and_objects() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let tab_id = app.tabs[i].id;
+        let generation = app.tabs[i].document_generation;
+        let imported = model_import::Imported {
+            blocks: vec![("Part".to_string(), vec![line(0.0)])],
+            entities: vec![line(1.0), direct_insert("Part")],
+        };
+        let _ = app.finish_model_import(
+            tab_id,
+            generation,
+            "model.step",
+            ModelFormat::Step,
+            Ok(imported),
+        );
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("Part")
+            .is_some());
+        // The two objects, plus the block's own line.
+        assert_eq!(app.tabs[i].scene.document.entity_count(), 3);
+        assert_eq!(inserts(&app, i), vec!["Part".to_string()]);
+        assert!(app.tabs[i].dirty);
+    }
+
+    /// A block the drawing already has is not redefined: the imported one
+    /// takes a name of its own and its inserts are pointed at that name.
+    #[test]
+    fn a_block_name_the_drawing_uses_is_not_redefined() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let tab_id = app.tabs[i].id;
+        let generation = app.tabs[i].document_generation;
+        app.tabs[i]
+            .scene
+            .define_block_from_owned_entities(vec![line(5.0)], "Part", glam::DVec3::ZERO)
+            .expect("the existing block");
+        let existing = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("Part")
+            .map(|block| block.entity_handles.len());
+        let imported = model_import::Imported {
+            blocks: vec![("Part".to_string(), vec![line(0.0)])],
+            entities: vec![direct_insert("Part")],
+        };
+        let _ = app.finish_model_import(
+            tab_id,
+            generation,
+            "model.step",
+            ModelFormat::Step,
+            Ok(imported),
+        );
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("Part_1")
+            .is_some());
+        assert_eq!(inserts(&app, i), vec!["Part_1".to_string()]);
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .block_records
+                .get("Part")
+                .map(|block| block.entity_handles.len()),
+            existing
+        );
+    }
+
+    #[test]
+    fn a_missing_file_reports_and_leaves_the_drawing_alone() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let tab_id = app.tabs[i].id;
+        let generation = app.tabs[i].document_generation;
+        let _ = app.finish_model_import(
+            tab_id,
+            generation,
+            "missing.step",
+            ModelFormat::Step,
+            Err(model_import::ImportFailure::Missing),
+        );
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("File missing.step does not exist.")
+        );
+        assert_eq!(app.tabs[i].scene.document.entity_count(), 0);
+        assert!(!app.tabs[i].dirty);
+    }
+
+    #[test]
+    fn an_unreadable_file_reports_and_leaves_the_drawing_alone() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let tab_id = app.tabs[i].id;
+        let generation = app.tabs[i].document_generation;
+        let _ = app.finish_model_import(
+            tab_id,
+            generation,
+            "notes.step",
+            ModelFormat::Step,
+            Err(model_import::ImportFailure::Unreadable),
+        );
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Import failed: notes.step has no model the importer reads.")
+        );
+        assert_eq!(app.tabs[i].scene.document.entity_count(), 0);
+        assert!(!app.tabs[i].dirty);
+    }
+
+    #[test]
+    fn a_finished_import_into_a_closed_drawing_is_dropped() {
+        let mut app = app_with_new_drawing();
+        let imported = model_import::Imported {
+            blocks: Vec::new(),
+            entities: vec![line(0.0)],
+        };
+        let _ = app.finish_model_import(u64::MAX, 0, "model.step", ModelFormat::Step, Ok(imported));
+        assert_eq!(
+            app.tabs[app.active_tab].scene.document.entity_count(),
+            0,
+            "the drawing is gone; nothing is added to another one"
+        );
+        assert!(app.command_line.last_error.is_none());
+        assert!(
+            app.command_line
+                .history
+                .iter()
+                .any(|entry| entry.text.contains("was closed")),
+            "the command line says the drawing was closed, not replaced"
+        );
+    }
+
+    /// A stale import's file error does not blame the file: the drawing it
+    /// was reading for is already gone.
+    #[test]
+    fn a_stale_import_error_names_the_lost_drawing() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let tab_id = app.tabs[i].id;
+        let generation = app.tabs[i].document_generation;
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.finish_model_import(
+            tab_id,
+            generation,
+            "missing.step",
+            ModelFormat::Step,
+            Err(model_import::ImportFailure::Missing),
+        );
+        assert!(app.command_line.last_error.is_none());
+        assert!(app
+            .command_line
+            .history
+            .iter()
+            .any(|entry| entry.text.contains("was replaced")));
+    }
+
+    /// A tab keeps its id when a whole document replaces its content (open
+    /// into an empty tab, template, `new`, CLEAR), so a result headed for the
+    /// old document must not land in the new one.
+    #[test]
+    fn a_finished_import_into_a_replaced_drawing_is_dropped() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let tab_id = app.tabs[i].id;
+        let generation = app.tabs[i].document_generation;
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let imported = model_import::Imported {
+            blocks: Vec::new(),
+            entities: vec![line(0.0)],
+        };
+        let _ = app.finish_model_import(
+            tab_id,
+            generation,
+            "model.step",
+            ModelFormat::Step,
+            Ok(imported),
+        );
+        assert_eq!(
+            app.tabs[i].scene.document.entity_count(),
+            0,
+            "the document the import was reading for is gone; nothing is added to its successor"
+        );
+        assert!(!app.tabs[i].dirty);
+        assert!(
+            app.command_line
+                .history
+                .iter()
+                .any(|entry| entry.text.contains("was replaced")),
+            "the command line says which drawing was lost"
+        );
+    }
+
+    /// CLEAR empties the drawing in place, without a file load; a result
+    /// headed for what was cleared must not land in the cleared drawing.
+    #[test]
+    fn a_finished_import_into_a_cleared_drawing_is_dropped() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let tab_id = app.tabs[i].id;
+        let generation = app.tabs[i].document_generation;
+        let _ = app.update(crate::app::Message::ClearScene);
+        let imported = model_import::Imported {
+            blocks: Vec::new(),
+            entities: vec![line(0.0)],
+        };
+        let _ = app.finish_model_import(
+            tab_id,
+            generation,
+            "model.step",
+            ModelFormat::Step,
+            Ok(imported),
+        );
+        assert_eq!(
+            app.tabs[i].scene.document.entity_count(),
+            0,
+            "the drawing the import was reading for was cleared; nothing is added"
+        );
+    }
+
+    /// The ribbon's Clear tool empties the drawing by its own route; a
+    /// result in flight for the cleared drawing is dropped there too.
+    #[test]
+    fn a_finished_import_into_a_drawing_cleared_from_the_ribbon_is_dropped() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let tab_id = app.tabs[i].id;
+        let generation = app.tabs[i].document_generation;
+        let _ = app.update(crate::app::Message::RibbonToolClick {
+            tool_id: "CLEAR".to_string(),
+            event: crate::modules::ModuleEvent::ClearModels,
+        });
+        let imported = model_import::Imported {
+            blocks: Vec::new(),
+            entities: vec![line(0.0)],
+        };
+        let _ = app.finish_model_import(
+            tab_id,
+            generation,
+            "model.step",
+            ModelFormat::Step,
+            Ok(imported),
+        );
+        assert_eq!(
+            app.tabs[i].scene.document.entity_count(),
+            0,
+            "the ribbon cleared the drawing the import was reading for; nothing is added"
+        );
     }
 }
 

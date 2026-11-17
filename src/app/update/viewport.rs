@@ -1110,7 +1110,14 @@ impl OpenCADStudio {
             self.box_preview_pending = None;
             self.box_preview_due = None;
             self.box_preview_cache = None;
-            self.tabs[i].scene.set_box_hover_highlights(&[]);
+            // A Fence / polygon being picked keeps its own preview.
+            let path = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.selection_path().is_some());
+            if !path {
+                self.tabs[i].scene.set_box_hover_highlights(&[]);
+            }
         }
     }
 
@@ -2251,6 +2258,14 @@ impl OpenCADStudio {
         }
         self.refresh_ducs_face_highlight(i, p);
         self.queue_box_selection_preview(i, p);
+        if self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|command| command.selection_path().is_some())
+        {
+            let world = self.cursor_world_at(i, p);
+            self.refresh_path_selection_preview(i, world);
+        }
         // Modifier-driven selection must be known before cursor_plane/axis and
         // drafting constraints are read, not merely before the final callback.
         if let Some(command) = self.tabs[i].active_cmd.as_mut() {
@@ -8574,6 +8589,8 @@ was_selected={}",
                                 if !sel.gesture.box_crossing_locked {
                                     sel.gesture.box_crossing = false;
                                 }
+                                drop(sel);
+                                self.push_box_corner_prompt();
                             }
                         }
                     }

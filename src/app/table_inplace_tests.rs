@@ -1104,6 +1104,55 @@ fn the_cell_editor_marks_its_table_for_the_labels() {
     app.close_table_cell_editor();
     assert_eq!(app.tabs[i].scene.table_cell_editing, None);
 }
+
+/// Opening a formula cell again shows the formula, not its
+/// value, and an edit of that formula is stored as the new formula.
+#[test]
+fn reopening_a_formula_cell_shows_the_formula() {
+    let (mut app, handle) = fixture("x");
+    {
+        let i = app.active_tab;
+        let Some(EntityType::Table(table)) = app.tabs[i].scene.document.get_entity_mut(handle)
+        else {
+            panic!("table")
+        };
+        table.cell_mut(0, 2).unwrap().set_text("2");
+        table.cell_mut(0, 3).unwrap().set_text("3");
+    }
+    let _ = app.run_command_line("TABLEDIT 10,-5 =C1+D1");
+    assert_eq!(source(&app, handle), "5");
+    start(&mut app, handle);
+    let shown = app.mtext_editor.as_ref().unwrap().content.text();
+    assert_eq!(
+        shown, "=C1+D1",
+        "the editor should show the formula, not its value"
+    );
+    // Unchanged: closing keeps the formula field.
+    let _ = app.update(Message::TableEditorClick(iced::Point::new(
+        -1000.0, -1000.0,
+    )));
+    assert_eq!(
+        formula_code(&app, handle).as_deref(),
+        Some(r"\AcExpr (C1+D1)")
+    );
+    assert_eq!(source(&app, handle), "5");
+    // Edited: the new formula replaces the old one.
+    start(&mut app, handle);
+    for _ in 0..3 {
+        let _ = app.update(Message::CommandBackspace);
+    }
+    let _ = app.update(Message::CommandAppendChar("*".into()));
+    let _ = app.update(Message::CommandAppendChar("D1".into()));
+    let _ = app.update(Message::TableEditorClick(iced::Point::new(
+        -1000.0, -1000.0,
+    )));
+    assert_eq!(
+        formula_code(&app, handle).as_deref(),
+        Some(r"\AcExpr (C1*D1)")
+    );
+    assert_eq!(source(&app, handle), "6");
+}
+
 /// A formula entered on the command line (TABLEDIT, scripts) is stored as
 /// a formula field too, and undo brings back the cell as it was.
 #[test]

@@ -3179,6 +3179,7 @@ mod tests {
             instance_color: None,
             edge_color: None,
             instance_aabb: None,
+            display_lods: Default::default(),
         }
     }
 }

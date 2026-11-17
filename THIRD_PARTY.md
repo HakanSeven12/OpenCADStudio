@@ -19,3 +19,7 @@ CORPORATION & AFFILIATES, Apache-2.0).
   fuzz test its `solidcore-step/tests/panic_fuzz.rs`.
 - `src/io/step.rs`: the kernel body to STEP model adapter follows
   solidcore's `step-export/src/brep_to_model.rs`.
+- `tests/fixtures/step/solidcore/*.step`: the STEP fixtures of
+  `crates/solidcore-step/tests/fixtures/`, unchanged.
+- `examples/step_eval.rs` writes the `eval FILE --json-out OUT` form that
+  Solidcore's `bench/step/run.py` reads; no Solidcore code is copied.

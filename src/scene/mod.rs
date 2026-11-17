@@ -2526,6 +2526,7 @@ fn transform_block_mesh_lod_set(
             .iter()
             .all(|value| value.is_finite())
             .then_some(bounds),
+        display_lods: Default::default(),
     }
 }
 

@@ -209,6 +209,7 @@ pub fn tessellate_sat(
         ]);
     }
     set.complete = loss.is_empty() && undrawn == 0;
+    set.build_display_lods();
     Some(set)
 }
 

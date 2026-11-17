@@ -394,6 +394,15 @@ pub struct Pipeline {
     /// Draw ranges for each entity inside the resident mesh chunks. Highlight
     /// overlays reuse these buffers instead of uploading duplicate geometry.
     mesh_ranges_by_handle: rustc_hash::FxHashMap<document::Handle, Vec<MeshResidentRange>>,
+    /// Eye-relative view-projection, eye and viewport size of the last
+    /// uniform upload: what display LODs are chosen by.
+    mesh_lod_view: Option<(glam::Mat4, glam::DVec3, [f32; 2])>,
+    /// Each LOD chunk's current level per entry (by active chunk index), kept
+    /// across frames for hysteresis.
+    mesh_lod_levels: rustc_hash::FxHashMap<usize, Vec<u8>>,
+    /// This frame's opaque draws of each LOD chunk: `(level, start, count)`.
+    /// A chunk without an entry draws `index_buffer` whole.
+    mesh_lod_draws: rustc_hash::FxHashMap<usize, Vec<(u8, u32, u32)>>,
     mesh_highlight_draws: Vec<MeshHighlightDraw>,
     /// `(geometry_epoch, selection_generation)` the highlight overlay was built for.
     pub cached_highlight_key: (u64, u64),
@@ -2568,6 +2577,9 @@ impl Pipeline {
             mesh_dynamic_handles: rustc_hash::FxHashSet::default(),
             cached_mesh_content_id: u64::MAX,
             mesh_ranges_by_handle: rustc_hash::FxHashMap::default(),
+            mesh_lod_view: None,
+            mesh_lod_levels: rustc_hash::FxHashMap::default(),
+            mesh_lod_draws: rustc_hash::FxHashMap::default(),
             mesh_highlight_draws: vec![],
             cached_highlight_key: (u64::MAX, u64::MAX),
             gpu_face3d_fill: None,
@@ -4254,6 +4266,8 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.mesh_disabled_chunks.clear();
         self.mesh_dynamic_handles.clear();
         self.gpu_mesh_batch = chunks;
+        self.mesh_lod_levels.clear();
+        self.mesh_lod_draws.clear();
         let indexed_at = iced::time::Instant::now();
         if crate::perf::enabled() {
             let instances: u64 = self
@@ -4383,6 +4397,8 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             &mut chunks,
         );
         self.gpu_mesh_dynamic = chunks;
+        self.mesh_lod_levels.clear();
+        self.mesh_lod_draws.clear();
         self.rebuild_mesh_range_map();
         if crate::perf::enabled() {
             crate::perf_record!(
@@ -4514,6 +4530,66 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             joined.push(draw);
         }
         joined
+    }
+
+    /// Chooses each LOD chunk's opaque draws for this frame from the view of
+    /// the last uniform upload. Call after the mesh batch is current; the
+    /// GPU buffers are not touched.
+    pub fn select_mesh_lods(&mut self) {
+        let Some((view_rot, eye, viewport)) = self.mesh_lod_view else {
+            self.mesh_lod_draws.clear();
+            return;
+        };
+        let mut levels = std::mem::take(&mut self.mesh_lod_levels);
+        let mut draws = std::mem::take(&mut self.mesh_lod_draws);
+        draws.clear();
+        for (index, chunk) in self.active_mesh_chunks_indexed() {
+            if chunk.lod_entries.is_empty() || chunk.lod_index_buffers.len() != 2 {
+                continue;
+            }
+            let current = levels.entry(index).or_default();
+            if current.len() != chunk.lod_entries.len() {
+                current.clear();
+            }
+            // Ranges per level; opaque draw order does not matter (depth
+            // test), so each level's touching ranges merge into one draw.
+            let mut per_level: [Vec<(u32, u32)>; 3] = Default::default();
+            for (at, entry) in chunk.lod_entries.iter().enumerate() {
+                let pixels =
+                    mesh_gpu::projected_diagonal(entry.aabb, &view_rot, eye, viewport);
+                let level = mesh_gpu::lod_level(pixels, current.get(at).copied());
+                if at < current.len() {
+                    current[at] = level;
+                } else {
+                    current.push(level);
+                }
+                let level = if entry.ranges[level as usize].1 == 0 {
+                    0
+                } else {
+                    level as usize
+                };
+                let (start, count) = entry.ranges[level];
+                match per_level[level].last_mut() {
+                    Some(last) if last.0 + last.1 == start => last.1 += count,
+                    _ => per_level[level].push((start, count)),
+                }
+            }
+            draws.insert(
+                index,
+                per_level
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(level, ranges)| {
+                        ranges
+                            .iter()
+                            .map(move |&(start, count)| (level as u8, start, count))
+                    })
+                    .collect(),
+            );
+        }
+        levels.retain(|index, _| draws.contains_key(index));
+        self.mesh_lod_levels = levels;
+        self.mesh_lod_draws = draws;
     }
 
     fn active_mesh_chunks_indexed(
@@ -4735,6 +4811,14 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         if self.shadow_full.is_none() {
             uniforms.shadow_params[0] = 0.0;
         }
+        let eye = |high: [f32; 3], low: [f32; 3]| {
+            glam::DVec3::from(high.map(f64::from)) + glam::DVec3::from(low.map(f64::from))
+        };
+        self.mesh_lod_view = Some((
+            uniforms.view_rot,
+            eye(uniforms.eye_high, uniforms.eye_low),
+            uniforms.viewport_size,
+        ));
         let mut selection = uniforms;
         selection.transparency_enable = 1.0;
         uniforms.highlight_widen = 0.0;
@@ -5212,8 +5296,9 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                             pass.draw(0..chunk.vertex_count, 0..chunk.instance_count);
                         }
                     } else {
-                        // Opaque fills first (they write depth).
-                        for (_, c) in self.active_mesh_chunks_indexed() {
+                        // Opaque fills first (they write depth), each LOD
+                        // chunk at the levels `select_mesh_lods` chose.
+                        for (index, c) in self.active_mesh_chunks_indexed() {
                             pass.set_pipeline(if c.compact_vertices {
                                 &self.mesh_plain_pipeline
                             } else {
@@ -5231,11 +5316,33 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                             }
                             pass.set_vertex_buffer(0, c.vertex_buffer.slice(..));
                             pass.set_vertex_buffer(1, c.instance_buffer.slice(..));
-                            pass.set_index_buffer(
-                                c.index_buffer.slice(..),
-                                wgpu::IndexFormat::Uint32,
-                            );
-                            pass.draw_indexed(0..c.index_count, 0, 0..c.instance_count);
+                            let Some(draws) = self.mesh_lod_draws.get(&index) else {
+                                pass.set_index_buffer(
+                                    c.index_buffer.slice(..),
+                                    wgpu::IndexFormat::Uint32,
+                                );
+                                pass.draw_indexed(0..c.index_count, 0, 0..c.instance_count);
+                                continue;
+                            };
+                            let mut bound = None;
+                            for &(level, start, count) in draws {
+                                if bound != Some(level) {
+                                    let buffer = match level {
+                                        0 => &c.index_buffer,
+                                        level => &c.lod_index_buffers[level as usize - 1],
+                                    };
+                                    pass.set_index_buffer(
+                                        buffer.slice(..),
+                                        wgpu::IndexFormat::Uint32,
+                                    );
+                                    bound = Some(level);
+                                }
+                                pass.draw_indexed(
+                                    start..start + count,
+                                    0,
+                                    0..c.instance_count,
+                                );
+                            }
                         }
                         // Transparent fills last, with depth writes disabled, so they
                         // blend over the opaque geometry behind them instead of
@@ -6189,6 +6296,8 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.mesh_disabled_chunks.clear();
         self.mesh_dynamic_handles.clear();
         self.mesh_ranges_by_handle.clear();
+        self.mesh_lod_levels.clear();
+        self.mesh_lod_draws.clear();
         self.mesh_highlight_draws.clear();
         self.silhouette_chunks.clear();
         self.silhouette_source_groups.clear();

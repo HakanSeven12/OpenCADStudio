@@ -456,6 +456,10 @@ name = "wires_build_visible"
 harness = false
 
 [[bench]]
+name = "wires_rebuild_stages"
+harness = false
+
+[[bench]]
 name = "large_overlay_interaction"
 harness = false
 

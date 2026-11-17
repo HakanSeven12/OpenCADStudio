@@ -10398,3 +10398,82 @@ mod dash_insert_placement_tests {
     }
 }
 
+
+// The Scale option presets the factor before the insertion point, so the
+// placement completes with that scale instead of asking the classic scale
+// prompts.
+mod dash_insert_scale_option_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::entities::{EntityType, Line};
+    use document::types::Vector3;
+    use glam::DVec3;
+
+    #[test]
+    fn dash_insert_scale_option_places_the_block_at_the_preset_scale() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "GEAR",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+
+        let _ = app.run_command_line("-INSERT");
+        let _ = app.feed_command(StepInput::Text("GEAR".into()));
+        let _ = app.feed_command(StepInput::Text("S".into()));
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("the Scale option asks for the factor")
+                .prompt(),
+            "Specify scale factor for XYZ axes <1>:"
+        );
+        let _ = app.feed_command(StepInput::Text("2".into()));
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("the preset scale returns to the insertion point")
+                .prompt(),
+            "Specify insertion point or [Basepoint/Scale/X/Y/Z/Rotate/Explode/REpeat]:"
+        );
+        let _ = app.feed_command(StepInput::Point(DVec3::new(5.0, 5.0, 0.0)));
+        let _ = app.feed_command(StepInput::Enter);
+
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "the preset scale places the block without the scale prompts: prompt={:?} err={:?}",
+            app.tabs[i].active_cmd.as_ref().map(|c| (c.name(), c.prompt())),
+            app.command_line.last_error
+        );
+        assert!(app.command_line.last_error.is_none());
+        let insert = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Insert(ins) if ins.block_name == "GEAR" => Some(ins.clone()),
+                _ => None,
+            })
+            .expect("the option sequence places a reference");
+        let base = crate::scene::render_graph::block_base_point(
+            &app.tabs[i].scene.document,
+            "GEAR",
+        );
+        let xform =
+            crate::scene::render_graph::insert_transform_with_base(&insert, base);
+        let end = xform.apply(Vector3::new(10.0, 0.0, 0.0));
+        assert_eq!(
+            (end.x, end.y),
+            (25.0, 5.0),
+            "the 10-unit member is drawn twice as long from the typed point: {end:?}"
+        );
+    }
+}
+

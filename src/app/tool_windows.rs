@@ -1024,10 +1024,16 @@ impl OpenCADStudio {
                 // A remembered size never makes the dialog smaller than its
                 // content needs: one saved before the dialog grew would hide
                 // what the dialog has added since (its buttons, a full page).
-                .map(|placement| WindowPlacement {
-                    w: placement.w.max(natural_w),
-                    h: placement.h.max(natural_h),
-                    ..placement
+                // The text editor's windows share one key, so its remembered
+                // size belongs to whichever of them was last open: they keep
+                // only its place.
+                .map(|placement| {
+                    let shared = kind == ModalKind::MTextDialog;
+                    WindowPlacement {
+                        w: if shared { natural_w } else { placement.w.max(natural_w) },
+                        h: if shared { natural_h } else { placement.h.max(natural_h) },
+                        ..placement
+                    }
                 })
                 .filter(|placement| fits(placement.w, placement.h))
                 .unwrap_or_else(|| {

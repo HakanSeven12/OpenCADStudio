@@ -3082,6 +3082,9 @@ impl OpenCADStudio {
                 self.finish_model_import(tab_id, generation, &path, format, result)
             }
 
+            Message::PictureImportFinished(tab_id, generation, path, format, prompt, read) => self
+                .finish_picture_import(tab_id, generation, path.as_deref(), format, prompt, read),
+
             Message::SaveFile => self.on_save_file(),
             Message::ExtractionOutdated(choice) => self.on_extraction_outdated(choice),
 

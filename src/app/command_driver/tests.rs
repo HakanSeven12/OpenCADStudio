@@ -10477,3 +10477,97 @@ mod dash_insert_scale_option_tests {
     }
 }
 
+
+// BEDIT entered from the command line with a single reference preselected
+// jumps straight into that block's editor; BSAVE saves and stays, and BCLOSE
+// leaves.
+mod bedit_command_line_entry_tests {
+    use super::super::*;
+    use document::entities::{EntityType, Insert, Line};
+    use document::types::Vector3;
+
+    #[test]
+    fn a_preselected_reference_enters_the_editor_and_bsave_bclose_drive_it() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "VALVE",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+        let reference = app.tabs[i]
+            .scene
+            .document
+            .add_entity(EntityType::Insert(Insert::new(
+                "VALVE",
+                Vector3::new(20.0, 0.0, 0.0),
+            )))
+            .unwrap();
+        app.tabs[i].scene.select_entity(reference, true);
+        app.tabs[i].dirty = false;
+
+        let _ = app.run_command_line("BEDIT");
+
+        let session = app.tabs[i]
+            .active_block_edit_session()
+            .expect("a preselected reference enters the editor without the pick prompt");
+        assert_eq!(
+            session.br_handle,
+            app.tabs[i]
+                .scene
+                .document
+                .block_records
+                .get("VALVE")
+                .unwrap()
+                .handle,
+            "the editor opens on the referenced definition"
+        );
+        assert!(app.tabs[i].active_cmd.is_none(), "no pick step is installed");
+
+        let result = app.automation_op(r#"{"op":"run","cmd":"CIRCLE 3,0 2"}"#);
+        assert_eq!(result["ok"], true, "{result}");
+        app.finish_pending_history(i);
+        assert!(app.block_edit_dirty(i), "the drawn circle marks the editor dirty");
+
+        let _ = app.dispatch_command("BSAVE");
+        assert!(
+            app.tabs[i].active_block_edit_session().is_some(),
+            "BSAVE saves and stays in the editor"
+        );
+        assert!(!app.block_edit_dirty(i), "BSAVE clears the dirty flag");
+        let members: Vec<_> = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("VALVE")
+            .unwrap()
+            .entity_handles
+            .clone();
+        assert_eq!(members.len(), 2, "the saved circle joins the definition");
+
+        let _ = app.dispatch_command("BCLOSE");
+        assert!(
+            app.tabs[i].active_block_edit_session().is_none(),
+            "BCLOSE leaves the editor"
+        );
+        assert_eq!(app.active_modal, None);
+        let members: Vec<_> = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("VALVE")
+            .unwrap()
+            .entity_handles
+            .clone();
+        assert_eq!(
+            members.len(),
+            2,
+            "the saved definition keeps its members after the editor closes"
+        );
+    }
+}
+

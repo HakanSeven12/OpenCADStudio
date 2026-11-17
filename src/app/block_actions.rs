@@ -179,7 +179,7 @@ impl OpenCADStudio {
         self.tabs[self.active_tab].active_cmd = Some(Box::new(command));
         Task::none()
     }
-    fn apply_action_document_diff(
+    pub(super) fn apply_action_document_diff(
         &mut self,
         i: usize,
         mut staged: document::Document,
@@ -207,17 +207,24 @@ impl OpenCADStudio {
                     .iter()
                     .filter_map(|&handle| staged.get_entity(handle)),
             )
-            .filter(|e| seen_handles.insert(e.common().handle))
-            .filter(|e| doc.get_entity(e.common().handle) != Some(*e))
-            .map(|e| {
+            .filter_map(|e| {
                 let handle = e.common().handle;
-                let kind = if doc.get_entity(handle).is_some() {
-                    ChangeKind::Modified
-                } else {
-                    ChangeKind::Added
-                };
-                delta_changes.push((handle, kind));
-                e.clone()
+                if !seen_handles.insert(handle) {
+                    return None;
+                }
+                let next_arc = staged.get_entity_arc(handle)?;
+                match doc.get_entity_arc(handle) {
+                    Some(prev_arc) if std::sync::Arc::ptr_eq(&prev_arc, &next_arc) => None,
+                    Some(prev_arc) if *prev_arc == *next_arc => None,
+                    Some(_) => {
+                        delta_changes.push((handle, ChangeKind::Modified));
+                        Some(e.clone())
+                    }
+                    None => {
+                        delta_changes.push((handle, ChangeKind::Added));
+                        Some(e.clone())
+                    }
+                }
             })
             .collect::<Vec<_>>();
         seen_handles.clear();
@@ -256,6 +263,7 @@ impl OpenCADStudio {
         (delta_changes, touched_blocks)
     }
 
+    #[cfg(test)]
     pub(super) fn apply_action_document(&mut self, i: usize, staged: document::Document) {
         let _ = self.apply_action_document_diff(i, staged);
     }
@@ -1720,5 +1728,218 @@ fn parameter_grip_shape(p: &actions::Parameter) -> crate::scene::model::object::
         GripShape::Triangle
     } else {
         GripShape::Square
+    }
+}
+
+#[cfg(test)]
+mod item1_incremental_tests {
+    use super::*;
+
+    fn first_top_level_line(app: &OpenCADStudio) -> Handle {
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| matches!(e, EntityType::Line(_)).then(|| e.common().handle))
+            .expect("top-level line")
+    }
+
+    #[test]
+    fn invalidate_property_targets_or_blocks_is_incremental_for_block_members() {
+        let (mut harness, member) = BlockBenchHarness::setup_block_prop_edit(5, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        let edit_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("EditBenchBlock")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.prop_edit_in_block(member, 1);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("OtherBlock_0")
+                .unwrap()
+        );
+        assert_ne!(
+            edit_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("EditBenchBlock")
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn bedit_save_preserves_unrelated_blocks_and_top_level_cache() {
+        let (mut harness, member) = BlockBenchHarness::setup_bedit_save(5, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("SaveOtherBlock_0")
+            .unwrap();
+        let insert_block = harness.0.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| match e {
+                EntityType::Insert(ins) if !ins.block_name.starts_with("SaveOtherBlock") => {
+                    Some(ins.block_name.clone())
+                }
+                _ => None,
+            })
+            .expect("dynamic insert");
+        let dyn_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr(&insert_block)
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.bedit_save_step(member, 1);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("SaveOtherBlock_0")
+                .unwrap()
+        );
+        let insert_block_after = harness.0.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| match e {
+                EntityType::Insert(ins) if !ins.block_name.starts_with("SaveOtherBlock") => {
+                    Some(ins.block_name.clone())
+                }
+                _ => None,
+            })
+            .expect("dynamic insert");
+        assert_ne!(
+            Some(dyn_before),
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr(&insert_block_after)
+        );
+    }
+
+    #[test]
+    fn find_replace_preserves_unrelated_blocks_and_top_level_cache() {
+        let mut harness = BlockBenchHarness::setup_find_replace(5, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("FindOtherBlock_0")
+            .unwrap();
+        let edited_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("FindBenchBlock")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.find_replace_cycle(0);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("FindOtherBlock_0")
+                .unwrap()
+        );
+        assert_ne!(
+            edited_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("FindBenchBlock")
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn battman_sync_preserves_unrelated_blocks_and_top_level_cache() {
+        let mut harness = BlockBenchHarness::setup_battman(5, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("AttOtherBlock_0")
+            .unwrap();
+        let att_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("AttBenchBlock")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.battman_apply(0);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("AttOtherBlock_0")
+                .unwrap()
+        );
+        assert_ne!(
+            att_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("AttBenchBlock")
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn bcycleorder_apply_preserves_unrelated_blocks_and_top_level_cache() {
+        let mut harness = BlockBenchHarness::setup_bcycleorder(5, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("CycleOtherBlock_0")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.bcycleorder_apply();
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("CycleOtherBlock_0")
+                .unwrap()
+        );
     }
 }

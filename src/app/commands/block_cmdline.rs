@@ -213,6 +213,21 @@ impl OpenCADStudio {
 
     /// [`Self::attsync_block`], opening its own undo step only when `undo`.
     pub(in crate::app) fn attsync_block_with(&mut self, i: usize, block: &str, undo: bool) {
+        let changes = self.attsync_block_collect(i, block, undo);
+        if !changes.is_empty() {
+            self.tabs[i].scene.bump_entities(&changes);
+            self.tabs[i].dirty = true;
+        }
+    }
+
+    /// Apply attribute synchronization to unlocked references of `block` and
+    /// return the modified reference handles without publishing a scene bump.
+    pub(in crate::app) fn attsync_block_collect(
+        &mut self,
+        i: usize,
+        block: &str,
+        undo: bool,
+    ) -> Vec<(document::Handle, crate::scene::ChangeKind)> {
         let doc = &self.tabs[i].scene.document;
         let attdefs = block_attribute_definitions(doc, block);
         let base = crate::scene::render_graph::block_base_point(doc, block);
@@ -234,7 +249,7 @@ impl OpenCADStudio {
             })
             .collect();
         if inserts.is_empty() {
-            return;
+            return Vec::new();
         }
         // A definition that hosts a field hands it to every reference's
         // attribute. The rebuild below creates fresh attributes, which do not
@@ -257,8 +272,10 @@ impl OpenCADStudio {
                 changes.push((handle, crate::scene::ChangeKind::Modified));
             }
         }
-        self.tabs[i].scene.bump_entities(&changes);
-        self.tabs[i].dirty = true;
+        if !changes.is_empty() {
+            self.tabs[i].dirty = true;
+        }
+        changes
     }
 
     /// Rebuild one reference's attributes from the definitions, in their

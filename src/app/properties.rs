@@ -4339,9 +4339,40 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         self.invalidate_property_targets_with_driven(i, handles, &[]);
     }
 
-    /// Invalidate property targets incrementally when all handles are in top-level
-    /// spaces, falling back to `bump_geometry()` if any handle belongs to a block
-    /// definition (whose assembled cache and references must rebuild).
+    /// Prepare per-handle derived caches before publishing an incremental
+    /// property invalidation (dimension picture blocks, annotation context,
+    /// fills, and solid/mesh colors).
+    fn prepare_property_target_caches(&mut self, i: usize, handles: &[Handle]) {
+        let mut context_object_changed = false;
+        for &handle in handles {
+            // A dimension is drawn from the block holding its picture, and that
+            // picture was made under the settings just edited. Drop it so the
+            // dimension is drawn afresh — otherwise the edit changes the stored
+            // variables and nothing on screen.
+            if matches!(
+                self.tabs[i].scene.document.get_entity(handle),
+                Some(document::EntityType::Dimension(_))
+            ) {
+                self.tabs[i].scene.invalidate_dim_block_recorded(handle);
+            }
+            context_object_changed |= self.tabs[i].scene.sync_displayed_annotation_context(handle);
+            // Hatch / SOLID fills render from prebuilt cached models; rebuild
+            // them or pattern edits (scale, background, …) stay invisible
+            // (#415).
+            self.tabs[i].scene.refresh_fill_model(handle);
+        }
+        if context_object_changed {
+            self.tabs[i].scene.poison_undo_recording();
+        }
+        // Solid (ACIS) meshes bake their colour into the mesh, so a colour /
+        // layer change needs an explicit recolour — re-tessellating wires
+        // alone wouldn't update them.
+        self.tabs[i].scene.recolor_meshes_for_handles(handles);
+    }
+
+    /// Invalidate property targets incrementally for both top-level spaces
+    /// and block-definition members (scoping block invalidation to touched
+    /// definitions and their dependent references).
     pub(super) fn invalidate_property_targets_or_blocks(&mut self, i: usize, handles: &[Handle]) {
         if handles.is_empty() {
             return;
@@ -4352,7 +4383,13 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             .map(|h| (h, crate::scene::ChangeKind::Modified))
             .collect();
         if self.tabs[i].scene.changes_touch_block_definition(&changes) {
-            self.tabs[i].scene.bump_geometry();
+            for &handle in handles {
+                self.tabs[i].scene.reseed_derived_caches(handle);
+            }
+            self.prepare_property_target_caches(i, handles);
+            self.tabs[i]
+                .scene
+                .bump_entities_with_block_deps(&changes, &[], &[], false);
         } else {
             self.invalidate_property_targets(i, handles);
         }
@@ -4380,31 +4417,7 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         retain_size: bool,
         retained_originals: &[(Handle, document::EntityType)],
     ) {
-        let mut context_object_changed = false;
-        for &handle in handles {
-            // A dimension is drawn from the block holding its picture, and that
-            // picture was made under the settings just edited. Drop it so the
-            // dimension is drawn afresh — otherwise the edit changes the stored
-            // variables and nothing on screen.
-            if matches!(
-                self.tabs[i].scene.document.get_entity(handle),
-                Some(document::EntityType::Dimension(_))
-            ) {
-                self.tabs[i].scene.invalidate_dim_block_recorded(handle);
-            }
-            context_object_changed |= self.tabs[i].scene.sync_displayed_annotation_context(handle);
-            // Hatch / SOLID fills render from prebuilt cached models; rebuild
-            // them or pattern edits (scale, background, …) stay invisible
-            // (#415).
-            self.tabs[i].scene.refresh_fill_model(handle);
-        }
-        if context_object_changed {
-            self.tabs[i].scene.poison_undo_recording();
-        }
-        // Solid (ACIS) meshes bake their colour into the mesh, so a colour /
-        // layer change needs an explicit recolour — re-tessellating wires
-        // alone wouldn't update them.
-        self.tabs[i].scene.recolor_meshes_for_handles(handles);
+        self.prepare_property_target_caches(i, handles);
         let changes: Vec<_> = handles
             .iter()
             .map(|&handle| (handle, crate::scene::ChangeKind::Modified))

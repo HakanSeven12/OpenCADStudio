@@ -1231,8 +1231,8 @@ impl OpenCADStudio {
         self.visibility_popup = None;
         self.table_popup = None;
         // Entering BEDIT changes which block is assembled, not the
-        // cached geometry of that block's entities.
-        self.tabs[i].scene.bump_geometry_no_blocks();
+        // cached geometry of that block's entities or Model space.
+        self.tabs[i].scene.bump_active_space();
         // Frame the camera on the block's own geometry (block-local, near
         // origin) — fit_all() goes through current_layout_block_handle so
         // it already scopes to the edited block. Without this the view

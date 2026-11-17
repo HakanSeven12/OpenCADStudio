@@ -47,6 +47,10 @@ impl OpenCADStudio {
         state.matches.clear();
         state.results.clear();
         state.changed.clear();
+        state.pending_entities.clear();
+        state.pending_blocks.clear();
+        state.pending_unlocked_layers.clear();
+        state.pending_xref_reload = false;
         state.notice = None;
         state.run = None;
     }
@@ -381,14 +385,33 @@ impl OpenCADStudio {
                     }
                     Some(LockChoice::Unlock) => {
                         self.ensure_find_undo(i);
+                        let layer_names: Vec<String> = {
+                            let doc = &self.tabs[i].scene.document;
+                            layer
+                                .iter()
+                                .chain(
+                                    doc.get_entity(key.owner)
+                                        .map(|e| &e.common().layer),
+                                )
+                                .cloned()
+                                .collect()
+                        };
                         let doc = &mut self.tabs[i].scene.document;
-                        for name in layer.iter().chain(
-                            doc.get_entity(key.owner)
-                                .map(|e| e.common().layer.clone())
-                                .iter(),
-                        ) {
+                        for name in &layer_names {
                             if let Some(l) = doc.layers.get_mut(name) {
-                                l.flags.locked = false;
+                                if l.flags.locked {
+                                    l.flags.locked = false;
+                                    if !self
+                                        .find_replace
+                                        .pending_unlocked_layers
+                                        .iter()
+                                        .any(|n| n.eq_ignore_ascii_case(name))
+                                    {
+                                        self.find_replace
+                                            .pending_unlocked_layers
+                                            .push(name.clone());
+                                    }
+                                }
                             }
                         }
                     }
@@ -451,6 +474,9 @@ impl OpenCADStudio {
                         if !self.find_replace.changed.contains(&counted) {
                             self.find_replace.changed.push(counted);
                         }
+                        if !self.find_replace.pending_entities.contains(&key.target) {
+                            self.find_replace.pending_entities.push(key.target);
+                        }
                         if result.kind == FindKind::Dimension {
                             self.tabs[i].scene.invalidate_dim_block_recorded(key.target);
                         }
@@ -460,6 +486,15 @@ impl OpenCADStudio {
                                     xref_writes.push(name);
                                 }
                             }
+                        } else if let Some(name) = definition {
+                            if !self
+                                .find_replace
+                                .pending_blocks
+                                .iter()
+                                .any(|n| n.eq_ignore_ascii_case(&name))
+                            {
+                                self.find_replace.pending_blocks.push(name);
+                            }
                         }
                     }
                 }
@@ -468,6 +503,9 @@ impl OpenCADStudio {
         }
         for name in &xref_writes {
             self.write_back_find_xref(i, name, &pattern, &with);
+        }
+        if !xref_writes.is_empty() {
+            self.find_replace.pending_xref_reload = true;
         }
         self.after_find_changes();
         if run.single {
@@ -511,11 +549,43 @@ impl OpenCADStudio {
     }
 
     fn after_find_changes(&mut self) {
-        if self.find_replace.changed.is_empty() {
+        let pending_entities = std::mem::take(&mut self.find_replace.pending_entities);
+        let pending_blocks = std::mem::take(&mut self.find_replace.pending_blocks);
+        let pending_unlocked = std::mem::take(&mut self.find_replace.pending_unlocked_layers);
+        let xref_reload = std::mem::take(&mut self.find_replace.pending_xref_reload);
+        if self.find_replace.changed.is_empty()
+            && pending_entities.is_empty()
+            && pending_unlocked.is_empty()
+            && !xref_reload
+        {
             return;
         }
         let i = self.active_tab;
-        self.tabs[i].scene.bump_geometry();
+        if xref_reload {
+            self.tabs[i].scene.bump_geometry();
+        } else {
+            if !pending_unlocked.is_empty() {
+                self.tabs[i]
+                    .scene
+                    .invalidate_layer_dependencies(&pending_unlocked);
+            }
+            if !pending_entities.is_empty() || !pending_blocks.is_empty() {
+                let changes: Vec<_> = pending_entities
+                    .iter()
+                    .copied()
+                    .map(|h| (h, crate::scene::ChangeKind::Modified))
+                    .collect();
+                for &handle in &pending_entities {
+                    self.tabs[i].scene.reseed_derived_caches(handle);
+                }
+                self.tabs[i].scene.bump_entities_with_block_deps(
+                    &changes,
+                    &[],
+                    &pending_blocks,
+                    false,
+                );
+            }
+        }
         self.tabs[i].dirty = true;
         self.refresh_properties();
     }

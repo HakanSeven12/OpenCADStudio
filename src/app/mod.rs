@@ -670,6 +670,14 @@ pub(crate) struct FindReplaceState {
     /// A replacement waiting for an answer about locked layers, a block or an
     /// external reference.
     pub run: Option<crate::ui::window::find_replace::ReplaceRun>,
+    /// Handles changed since the last `after_find_changes` sync.
+    pub pending_entities: Vec<document::Handle>,
+    /// Non-xref block definitions whose members changed since last sync.
+    pub pending_blocks: Vec<String>,
+    /// Layers unlocked during replacement whose entities need appearance refresh.
+    pub pending_unlocked_layers: Vec<String>,
+    /// True if any external reference file was rewritten and reloaded.
+    pub pending_xref_reload: bool,
 }
 
 /// One match: where it shows, what kind of text it is and the text.

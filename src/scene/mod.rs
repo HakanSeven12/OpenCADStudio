@@ -4992,18 +4992,54 @@ impl Scene {
         extra_block_names: &[String],
         solve_parametric: bool,
     ) {
+        self.bump_entities_with_block_deps_inner(
+            changes,
+            extra_block_handles,
+            extra_block_names,
+            solve_parametric,
+            false,
+        );
+    }
+
+    /// Variant of [`Self::bump_entities_with_block_deps`] that skips native
+    /// constraint-graph synchronization (matching `bump_geometry()` for callers
+    /// like `save_block_edit_as` that already copied/preserved native graphs).
+    pub(crate) fn bump_entities_restyled_with_block_deps(
+        &mut self,
+        changes: &[(Handle, ChangeKind)],
+        extra_block_handles: &[Handle],
+        extra_block_names: &[String],
+    ) {
+        self.bump_entities_with_block_deps_inner(
+            changes,
+            extra_block_handles,
+            extra_block_names,
+            false,
+            true,
+        );
+    }
+
+    fn bump_entities_with_block_deps_inner(
+        &mut self,
+        changes: &[(Handle, ChangeKind)],
+        extra_block_handles: &[Handle],
+        extra_block_names: &[String],
+        solve_parametric: bool,
+        appearance_only: bool,
+    ) {
         let touched_names =
             self.touched_block_definition_names(changes, extra_block_handles, extra_block_names);
         if touched_names.is_empty() {
             if !changes.is_empty() {
-                self.bump_entities_with_solve_policy(
+                self.bump_entities_with_solve_policy_inner(
                     changes,
                     &[],
                     false,
                     &[],
                     &[],
                     solve_parametric,
-                    false,
+                    appearance_only,
+                    !appearance_only,
                     None,
                 );
             }
@@ -5018,14 +5054,15 @@ impl Scene {
             }
         }
         self.mark_block_definitions_dirty(touched_names);
-        self.bump_entities_with_solve_policy(
+        self.bump_entities_with_solve_policy_inner(
             &all_changes,
             &[],
             false,
             &[],
             &[],
             solve_parametric,
-            false,
+            appearance_only,
+            !appearance_only,
             None,
         );
     }
@@ -5109,6 +5146,32 @@ impl Scene {
         fixed_refs: &[parametric_constraints::ParametricRef],
         solve_parametric: bool,
         appearance_only: bool,
+        report_before: Option<&[(Handle, EntityType)]>,
+    ) {
+        self.bump_entities_with_solve_policy_inner(
+            changes,
+            driven_refs,
+            retain_size,
+            retained_originals,
+            fixed_refs,
+            solve_parametric,
+            appearance_only,
+            true,
+            report_before,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn bump_entities_with_solve_policy_inner(
+        &mut self,
+        changes: &[(Handle, ChangeKind)],
+        driven_refs: &[parametric_constraints::ParametricRef],
+        retain_size: bool,
+        retained_originals: &[(Handle, EntityType)],
+        fixed_refs: &[parametric_constraints::ParametricRef],
+        solve_parametric: bool,
+        appearance_only: bool,
+        sync_native_graph: bool,
         report_before: Option<&[(Handle, EntityType)]>,
     ) {
         // A solve can name an entity it then leaves untouched — a neighbour
@@ -5320,7 +5383,9 @@ impl Scene {
                 Self::absorb_refreshed(&mut changes, &mut refreshed_handles, refreshed);
             }
         }
-        if !self.parametric_constraints.is_empty() || !self.named_parameters.is_empty() {
+        if sync_native_graph
+            && (!self.parametric_constraints.is_empty() || !self.named_parameters.is_empty())
+        {
             self.refresh_dynamic_dimension_texts();
             // The stored associative graph rebuilds only when the constraint
             // model actually changed since the last sync — never for a pure
@@ -5865,6 +5930,18 @@ impl Scene {
     /// cache falls back to a whole-drawing rebuild. Kept for migration and for
     /// callers whose changed set is genuinely unknowable.
     pub fn bump_geometry_no_blocks(&mut self) {
+        self.bump_geometry_no_blocks_with(true);
+    }
+
+    /// Advance the geometry epoch when switching the active edited block space
+    /// (`block_edit_block`) without invalidating cached block definitions or
+    /// poisoning other spaces' resident wire sets with a full journal delta.
+    pub fn bump_active_space(&mut self) {
+        *self.entity_index_cache.borrow_mut() = None;
+        self.bump_geometry_no_blocks_with(false);
+    }
+
+    fn bump_geometry_no_blocks_with(&mut self, full: bool) {
         let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
         self.geometry_epoch = epoch;
         self.invalidate_projection_bounds();
@@ -5877,7 +5954,7 @@ impl Scene {
         self.has_section_objects.set(None);
         self.has_tables.set(None);
         self.invalidate_dependency_index();
-        self.push_geometry_delta(epoch, Vec::new(), true);
+        self.push_geometry_delta(epoch, Vec::new(), full);
     }
 
     /// Invalidate the cached document render environment (fog parameters and image).

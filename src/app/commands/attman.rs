@@ -476,10 +476,12 @@ impl OpenCADStudio {
         removed: &[Handle],
         sync: bool,
     ) {
+        let mut changes = Vec::new();
         let document = &mut self.tabs[i].scene.document;
-        for handle in removed {
-            if document.get_entity(*handle).is_some() {
-                document.remove_entity(*handle);
+        for &handle in removed {
+            if document.get_entity(handle).is_some() {
+                document.remove_entity(handle);
+                changes.push((handle, crate::scene::ChangeKind::Removed));
             }
         }
         // Each definition keeps its object; the definitions take the slots
@@ -490,6 +492,7 @@ impl OpenCADStudio {
                 def.common.handle = *handle;
                 def.common.owner_handle = slot.common.owner_handle;
                 *slot = def;
+                changes.push((*handle, crate::scene::ChangeKind::Modified));
             }
         }
         if let Some(br) = document.block_records.get_mut(block) {
@@ -542,12 +545,27 @@ impl OpenCADStudio {
                                 attribute.tag = new.clone();
                             }
                         }
+                        changes.push((handle, crate::scene::ChangeKind::Modified));
                     }
                 }
             }
-            self.attsync_block_with(i, block, false);
+            for change in self.attsync_block_collect(i, block, false) {
+                if !changes.iter().any(|(h, _)| *h == change.0) {
+                    changes.push(change);
+                }
+            }
         }
-        self.tabs[i].scene.bump_geometry();
+        for &(handle, kind) in &changes {
+            if !matches!(kind, crate::scene::ChangeKind::Removed) {
+                self.tabs[i].scene.reseed_derived_caches(handle);
+            }
+        }
+        self.tabs[i].scene.bump_entities_with_block_deps(
+            &changes,
+            &[],
+            &[block.to_string()],
+            false,
+        );
         self.tabs[i].dirty = true;
     }
 }

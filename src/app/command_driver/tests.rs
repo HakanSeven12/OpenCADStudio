@@ -10570,3 +10570,138 @@ mod bedit_command_line_entry_tests {
     }
 }
 
+
+// The whole dynamic-block chain - author a Linear parameter, attach a Move
+// action, save, close, then drag the placed reference's parameter grip - is
+// driven here through the public command surface rather than scene calls.
+mod dynamic_block_command_surface_tests {
+    use super::super::*;
+    use crate::app::Message;
+    use crate::command::StepInput;
+    use crate::scene::block_actions as actions;
+    use crate::scene::block_grips::runtime;
+    use document::entities::{EntityType, Insert, Line};
+    use document::types::Vector3;
+    use glam::DVec3;
+
+    fn authored_lines(app: &OpenCADStudio, insert: document::Handle) -> Vec<(DVec3, DVec3)> {
+        let document::EntityType::Insert(reference) = app.tabs[app.active_tab]
+            .scene
+            .document
+            .get_entity(insert)
+            .unwrap()
+        else {
+            panic!("the reference is an INSERT")
+        };
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities_in_block(&reference.block_name)
+            .filter_map(|entity| match entity {
+                document::EntityType::Line(line) => {
+                    Some((actions::v(line.start), actions::v(line.end)))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_command_authored_move_action_drives_the_placed_reference_grip() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "SLIDER",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+        let reference = app.tabs[i]
+            .scene
+            .document
+            .add_entity(EntityType::Insert(Insert::new("SLIDER", Vector3::ZERO)))
+            .unwrap();
+        app.tabs[i].dirty = false;
+        app.tabs[i].scene.select_entity(reference, true);
+
+        let _ = app.run_command_line("BEDIT");
+        let i = app.active_tab;
+        let definition = app.tabs[i]
+            .active_block_edit_session()
+            .unwrap()
+            .br_handle;
+        let member = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("SLIDER")
+            .unwrap()
+            .entity_handles[0];
+
+        let _ = app.run_command_line("BPARAMETER LINEAR 0,0 10,0 5,-2");
+        let parameter = actions::parameters(
+            &app.tabs[i].scene.document,
+            definition,
+            actions::Kind::Move,
+        )[0]
+        .clone();
+
+        let _ = app.dispatch_command("BACTION MOVE");
+        let _ = app.update(Message::CommandInput(parameter.name.clone()));
+        let _ = app.update(Message::CommandSubmit);
+        let _ = app.feed_command(StepInput::SelectionComplete(vec![member]));
+        let _ = app.feed_command(StepInput::Enter);
+        let _ = app.update(Message::CommandInput("3,4".into()));
+        let _ = app.update(Message::CommandSubmit);
+        assert!(app.tabs[i].active_cmd.is_none(), "the action was authored");
+        assert!(app.command_line.last_error.is_none());
+        assert_eq!(
+            actions::actions(&app.tabs[i].scene.document, definition).len(),
+            1,
+            "one Move action follows the Linear parameter"
+        );
+
+        let _ = app.dispatch_command("BSAVE");
+        let _ = app.dispatch_command("BCLOSE");
+        let i = app.active_tab;
+        let before = authored_lines(&app, reference);
+
+        app.tabs[i].scene.select_entity(reference, true);
+        app.tabs[i].selected_handle = Some(reference);
+        app.refresh_properties();
+        let grip_id = runtime::id(parameter.id, 1).expect("linear end grip");
+        let start = app.tabs[i]
+            .selected_grips
+            .iter()
+            .find(|grip| grip.id == grip_id)
+            .expect("the placed reference offers the linear end grip")
+            .clone();
+        let target = start.world + start.dir.expect("linear grip has a direction") * 5.0;
+        assert!(app.start_test_action_grip(reference, start.id));
+
+        let _ = app.feed_command(StepInput::Point(target));
+
+        assert!(app.tabs[i].active_cmd.is_none(), "the grip drag completes");
+        assert_eq!(app.command_line.last_error, None);
+        let after = authored_lines(&app, reference);
+        assert_eq!(
+            before,
+            vec![(DVec3::ZERO, DVec3::new(10.0, 0.0, 0.0))],
+            "the saved reference starts at the definition geometry"
+        );
+        assert_eq!(
+            after,
+            vec![(DVec3::new(5.0, 0.0, 0.0), target)],
+            "the grip delta moves the action target by the same amount"
+        );
+        let moved = after[0];
+        assert!(
+            (moved.1.x - target.x).abs() < 1e-6,
+            "the moved member follows the grip: {moved:?} target {target:?}"
+        );
+    }
+}
+

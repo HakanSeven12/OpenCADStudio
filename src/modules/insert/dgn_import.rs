@@ -2183,6 +2183,12 @@ pub fn parse_mapping_token(text: &str) -> Result<(String, Option<u16>), String> 
 
 /// Read the same design-model list, and apply the same first-model readability
 /// check, as the command's filename step.
+/// The read of a file named at the -DGNIMPORT prompt: its models, checked
+/// by a read of the first; or the error to report.
+pub fn read_models_for_prompt(path: &str) -> Result<Vec<String>, String> {
+    import_models(path).map_err(|error| error.to_string())
+}
+
 fn import_models(path: &str) -> Result<Vec<String>, DgnImportError> {
     crate::scene::model::underlay_vector::dgn_import_models(path)
         .filter(|models| {
@@ -2335,9 +2341,16 @@ impl DgnImportCommand {
         if path.is_empty() {
             return CmdResult::NeedPoint;
         }
-        let models = match import_models(&path) {
+        let read = read_models_for_prompt(&path);
+        self.take_models(path, read)
+    }
+
+    /// The command goes on with what the read of the file named at the
+    /// prompt found: the model prompt, or the error.
+    fn take_models(&mut self, path: String, read: Result<Vec<String>, String>) -> CmdResult {
+        let models = match read {
             Ok(models) => models,
-            Err(error) => return CmdResult::ReportError(error.to_string()),
+            Err(error) => return CmdResult::ReportError(error),
         };
         self.path = path;
         self.model = models[0].clone();

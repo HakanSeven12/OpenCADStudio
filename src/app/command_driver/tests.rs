@@ -11124,3 +11124,86 @@ mod wblock_normalized_export_tests {
     }
 }
 
+
+// Defining a block under a name that already exists asks for confirmation;
+// only confirming replaces the definition's body.
+mod block_redefinition_dialog_tests {
+    use super::super::*;
+    use crate::app::Message;
+    use document::entities::{EntityType, Line};
+    use document::types::Vector3;
+
+    #[test]
+    fn confirming_a_block_redefinition_replaces_the_definition_body() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "PANEL",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+        let old = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PANEL")
+            .unwrap()
+            .entity_handles[0];
+        let replacement = app.tabs[i].scene.add_entity(EntityType::Line(Line::from_points(
+            Vector3::new(30.0, 0.0, 0.0),
+            Vector3::new(40.0, 0.0, 0.0),
+        )));
+        app.tabs[i].scene.select_entity(replacement, true);
+
+        let _ = app.run_command_line("BLOCK");
+        let _ = app.update(Message::BlockDefName("PANEL".into()));
+        let _ = app.update(Message::BlockDefApply);
+
+        assert_eq!(
+            app.block_definition.as_ref().and_then(|s| s.confirm_redefine.as_deref()),
+            Some("PANEL"),
+            "the existing name asks for confirmation"
+        );
+        assert!(app.block_definition.is_some(), "the dialog stays open");
+        assert!(
+            app.tabs[i].scene.document.get_entity(old).is_some(),
+            "the old definition is intact while the dialog waits"
+        );
+
+        let _ = app.update(Message::BlockDefConfirmRedefine(false));
+        assert_eq!(
+            app.block_definition.as_ref().and_then(|s| s.confirm_redefine.as_deref()),
+            None,
+            "declining clears the prompt"
+        );
+        assert!(app.block_definition.is_some(), "declining keeps the dialog open");
+        assert!(app.tabs[i].scene.document.get_entity(old).is_some());
+
+        let _ = app.update(Message::BlockDefApply);
+        let _ = app.update(Message::BlockDefConfirmRedefine(true));
+
+        assert!(app.block_definition.is_none(), "confirming closes the dialog");
+        assert_eq!(app.active_modal, None);
+        let doc = &app.tabs[i].scene.document;
+        assert!(
+            doc.get_entity(old).is_none(),
+            "the old body entity was removed: old={old:?}"
+        );
+        let body: Vec<_> = doc.entities_in_block("PANEL").collect();
+        assert_eq!(body.len(), 1, "the new body replaces the old one");
+        assert!(
+            matches!(body[0], EntityType::Line(ref line) if line.start.x == 30.0),
+            "the replacement line is in the definition"
+        );
+        assert!(doc.get_entity(replacement).is_none(), "convert mode consumes the source");
+        assert!(
+            app.command_line.history_plain_text().contains("Block \"PANEL\" redefined"),
+            "the redefinition is reported"
+        );
+    }
+}
+

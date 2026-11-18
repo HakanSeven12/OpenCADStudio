@@ -1592,4 +1592,19 @@ mod point_cloud_attach_read_tests {
         let _ = std::fs::remove_file(first);
         let _ = std::fs::remove_file(second);
     }
+
+    /// The window shows the cloud the read gave, and does not read the
+    /// file again: here the file is gone when the window opens.
+    #[test]
+    fn the_window_shows_the_read_result_without_a_second_read() {
+        let mut app = new_app();
+        let path = test_scan_file("attach-no-second-read", 30);
+        let cloud = crate::scene::model::point_cloud::load(&path).expect("the scan reads");
+        std::fs::remove_file(&path).expect("remove the scan");
+        app.finish_point_cloud_attach_read(&path, Some(&cloud));
+        assert_eq!(app.active_modal, Some(ModalKind::PointCloudAttach));
+        let state = app.point_cloud_attach.as_ref().expect("the window's state");
+        assert!(state.summary.contains("30 points"), "{}", state.summary);
+        assert_eq!(app.command_line.last_error, None);
+    }
 }

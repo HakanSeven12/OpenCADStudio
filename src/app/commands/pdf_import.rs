@@ -1149,4 +1149,101 @@ mod pdfimport_tests {
         texts.sort();
         assert_eq!(texts, ["Hello PDF", "Tilted"]);
     }
+
+    /// The import reads and converts on a worker: nothing changes in the
+    /// drawing until the worker ends, then the result is one undo step.
+    #[test]
+    fn the_import_is_placed_only_when_the_worker_ends() {
+        let mut app = new_app();
+        let handle = attached(&mut app);
+        let i = app.active_tab;
+        let before = app.tabs[i].history.undo_stack.len();
+        let task = app.run_pdf_import(i, whole(handle, UnderlayMode::Keep));
+        assert_eq!(content(&app), (Vec::new(), Vec::new()));
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before);
+        app.drive_headless_task(task).expect("the import task");
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before + 1);
+        assert!(!content(&app).0.is_empty());
+    }
+
+    /// A worker that panics gives an error, the drawing does not change,
+    /// and the next import works.
+    #[test]
+    fn a_worker_panic_is_an_error_and_the_drawing_does_not_change() {
+        let mut app = new_app();
+        let handle = attached(&mut app);
+        let i = app.active_tab;
+        let before = app.tabs[i].history.undo_stack.len();
+        let task = app.run_pdf_import_with(i, whole(handle, UnderlayMode::Detach), |_, _| {
+            panic!("a reader bug")
+        });
+        app.drive_headless_task(task).expect("the import task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("PDFIMPORT failed: a reader bug")
+        );
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before);
+        assert_eq!(content(&app), (Vec::new(), Vec::new()));
+        assert_eq!(underlays(&app).len(), 1, "Detach did not run");
+        assert_eq!(import(&mut app, whole(handle, UnderlayMode::Keep)), 1);
+    }
+
+    /// A page that cannot be read is an error when the worker ends, and the
+    /// drawing does not change.
+    #[test]
+    fn a_page_that_cannot_be_read_is_an_error() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = "pdfimport-not-a-pdf.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(b"not a PDF".to_vec()));
+        let source = PdfImportSource::File(PdfFileImport {
+            path: path.to_string(),
+            page: "1".to_string(),
+            scale: 1.0,
+            rotation: 0.0,
+            insertion: DVec3::ZERO,
+        });
+        assert_eq!(import(&mut app, source), 0);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some(format!("{path} not found.").as_str())
+        );
+        assert_eq!(app.tabs[i].scene.document.entities().count(), 0);
+    }
+
+    /// A result for a drawing that was replaced during the read is
+    /// dropped; the new drawing gets nothing.
+    #[test]
+    fn a_result_for_a_replaced_drawing_is_dropped() {
+        let mut app = new_app();
+        let handle = attached(&mut app);
+        let i = app.active_tab;
+        let task = app.run_pdf_import(i, whole(handle, UnderlayMode::Keep));
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.drive_headless_task(task).expect("the import task");
+        let now = app.active_tab;
+        assert_eq!(app.tabs[now].scene.document.entities().count(), 0);
+        assert!(app.command_line.last_error.is_none());
+        assert!(history(&app).contains("was replaced"), "{}", history(&app));
+    }
+
+    /// A result for an underlay that was erased during the read is
+    /// dropped: nothing is added, and Detach does not run.
+    #[test]
+    fn a_result_for_an_erased_underlay_is_dropped() {
+        let mut app = new_app();
+        let handle = attached(&mut app);
+        let i = app.active_tab;
+        let task = app.run_pdf_import(i, whole(handle, UnderlayMode::Detach));
+        app.tabs[i].scene.erase_entities(&[handle]);
+        let before = app.tabs[i].history.undo_stack.len();
+        app.drive_headless_task(task).expect("the import task");
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before);
+        assert_eq!(content(&app), (Vec::new(), Vec::new()));
+        assert!(
+            history(&app).contains("PDFIMPORT: the underlay was erased while the file was read."),
+            "{}",
+            history(&app)
+        );
+    }
 }

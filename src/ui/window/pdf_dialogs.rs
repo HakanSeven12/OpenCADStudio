@@ -1745,6 +1745,29 @@ pub enum PdfImportFileRead {
     },
 }
 
+/// What the read of a PDF, DWF or DGN file for the Attach window found.
+#[derive(Debug)]
+pub enum UnderlayAttachRead {
+    /// The file cannot be read: the error.
+    Failed(String),
+    /// A DWF or DGN file that has no sheet or model.
+    NoItems,
+    /// The PDF file needs a password first.
+    Locked {
+        stage: crate::scene::model::pdf_password::Stage,
+        remembered: bool,
+    },
+    /// The pages (PDF), sheets (DWF) or models (DGN), with the size and the
+    /// sub units per master unit of the first; `remembered` when a password
+    /// supplied earlier opened the file.
+    Items {
+        pages: Vec<PageThumb>,
+        page_size: String,
+        sub_per_master: f64,
+        remembered: bool,
+    },
+}
+
 pub fn view_import_file<'a>(
     state: &'a PdfImportFileState,
     sizing: crate::ui::modal::ModalSizing,

@@ -7,7 +7,7 @@ use crate::modules::insert::pdf_import::{self, PdfFileImport};
 use crate::ui::window::pdf_dialogs::{
     click_page, item_thumbs, page_thumbs, LayerTarget, PdfAttachState, PdfDialogMsg,
     PdfImportFileRead, PdfImportFileState, PointCloudAttachState, RotationChoice,
-    UnderlayLayersState,
+    UnderlayAttachRead, UnderlayLayersState,
 };
 
 /// "7.8740 × 3.9369" (inches) for a page.
@@ -70,12 +70,8 @@ impl OpenCADStudio {
     /// PDFATTACH after the file is chosen; an encrypted file asks for its
     /// password first.
     pub(in crate::app) fn open_pdf_attach_dialog(&mut self, path: &str) -> Task<Message> {
-        use crate::ui::window::pdf_password_dialog::PdfPasswordThen;
-        if let Some(ask) = self.pdf_locked(path, PdfPasswordThen::Attach) {
-            return ask;
-        }
-        self.open_underlay_attach_dialog(document::entities::UnderlayType::Pdf, path);
-        Task::none()
+        let read = read_for_attach_window(document::entities::UnderlayType::Pdf, path, false);
+        self.open_attach_window(document::entities::UnderlayType::Pdf, path, &read)
     }
 
     /// PDFATTACH / DWFATTACH / DGNATTACH after the file is chosen.
@@ -84,6 +80,48 @@ impl OpenCADStudio {
         kind: document::entities::UnderlayType,
         path: &str,
     ) {
+        let read = read_for_attach_window(kind, path, false);
+        let _ = self.open_attach_window(kind, path, &read);
+    }
+
+    /// The Attach window for a file already read, or the password window,
+    /// or the error of the read.
+    fn open_attach_window(
+        &mut self,
+        kind: document::entities::UnderlayType,
+        path: &str,
+        read: &UnderlayAttachRead,
+    ) -> Task<Message> {
+        use crate::ui::window::pdf_password_dialog::PdfPasswordThen;
+        let (pages, page_size, sub_per_master) = match read {
+            UnderlayAttachRead::Failed(e) => {
+                self.command_line
+                    .push_error(crate::tf!("PDFATTACH: {e}").as_ref());
+                return Task::none();
+            }
+            UnderlayAttachRead::NoItems => {
+                self.command_line.push_error(&format!(
+                    "{} not found.",
+                    crate::entities::underlay::display_path(path)
+                ));
+                return Task::none();
+            }
+            UnderlayAttachRead::Locked { stage, remembered } => {
+                return self.open_pdf_password(path, *stage, *remembered, PdfPasswordThen::Attach);
+            }
+            UnderlayAttachRead::Items {
+                pages,
+                page_size,
+                sub_per_master,
+                remembered,
+            } => {
+                if *remembered {
+                    self.command_line
+                        .push_output(&crate::scene::model::pdf_password::remembered_notice(path));
+                }
+                (pages, page_size, *sub_per_master)
+            }
+        };
         let i = self.active_tab;
         let mut existing: Vec<(String, String)> = Vec::new();
         for object in self.tabs[i].scene.document.objects.values() {
@@ -99,7 +137,13 @@ impl OpenCADStudio {
         }
         let mut state = PdfAttachState::new(existing);
         state.kind = kind;
-        self.load_pdf_attach_file(&mut state, path);
+        self.set_pdf_attach_file(
+            &mut state,
+            path,
+            pages.clone(),
+            page_size.clone(),
+            sub_per_master,
+        );
         let plane = if self.tabs[i].editing_model_space() {
             self.tabs[i].ucs_xform().working_plane()
         } else {
@@ -108,22 +152,32 @@ impl OpenCADStudio {
         Self::refresh_pdf_attach_geopdf(&self.tabs[i].scene, plane, &mut state);
         self.pdf_attach = Some(state);
         self.active_modal = Some(crate::app::ModalKind::PdfAttach);
+        Task::none()
     }
 
     fn load_pdf_attach_file(&self, state: &mut PdfAttachState, path: &str) {
+        let pages = item_thumbs(state.kind, path);
+        let (page_size, sub_per_master) = first_item_size(state.kind, path, &pages);
+        self.set_pdf_attach_file(state, path, pages, page_size, sub_per_master);
+    }
+
+    /// Put a file that was read into the Attach window.
+    fn set_pdf_attach_file(
+        &self,
+        state: &mut PdfAttachState,
+        path: &str,
+        pages: Vec<crate::ui::window::pdf_dialogs::PageThumb>,
+        page_size: String,
+        sub_per_master: f64,
+    ) {
         state.path = path.to_string();
         state.name = file_stem(path);
-        state.pages = item_thumbs(state.kind, path);
+        state.pages = pages;
         state.selected = vec![0];
         state.anchor = 0;
         state.found_in = crate::entities::underlay::display_path(path);
-        let first = state
-            .page_labels()
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| "1".to_string());
-        state.page_size = item_size_text(state.kind, path, &first);
-        state.sub_per_master = sub_per_master(state.kind, path, &first);
+        state.page_size = page_size;
+        state.sub_per_master = sub_per_master;
         state.sub_units = false;
         state.saved_path =
             crate::entities::underlay::display_path(&self.pdf_stored_path(path, state.path_type.0));
@@ -1258,6 +1312,69 @@ fn read_pdf_for_import_window(path: &str) -> PdfImportFileRead {
     PdfImportFileRead::Pages {
         pages,
         page_sizes,
+        remembered,
+    }
+}
+
+/// The size text and the sub units per master unit of the first page,
+/// sheet or model.
+fn first_item_size(
+    kind: document::entities::UnderlayType,
+    path: &str,
+    pages: &[crate::ui::window::pdf_dialogs::PageThumb],
+) -> (String, f64) {
+    let first = pages
+        .first()
+        .map(|page| page.label.clone())
+        .unwrap_or_else(|| "1".to_string());
+    (
+        item_size_text(kind, path, &first),
+        sub_per_master(kind, path, &first),
+    )
+}
+
+/// The Attach window's read of a PDF, DWF or DGN file: the password the
+/// file needs, or its pages, sheets or models. `fresh` reads the file from
+/// the disk first, because a file picked again can have changed; else the
+/// bytes registered for `path` are used.
+fn read_for_attach_window(
+    kind: document::entities::UnderlayType,
+    path: &str,
+    fresh: bool,
+) -> UnderlayAttachRead {
+    use crate::scene::model::pdf_password::{gate, Gate};
+    use crate::scene::model::underlay_vector;
+    let pdf = kind == document::entities::UnderlayType::Pdf;
+    if fresh {
+        match std::fs::read(path) {
+            Ok(bytes) => {
+                crate::scene::model::pdf_raster::register_source(path, std::sync::Arc::new(bytes))
+            }
+            Err(error) if pdf => return UnderlayAttachRead::Failed(error.to_string()),
+            Err(_) => return UnderlayAttachRead::NoItems,
+        }
+        if !pdf {
+            underlay_vector::forget(path);
+        }
+    }
+    let mut remembered = false;
+    if pdf {
+        match gate(path, false) {
+            Gate::Open => {}
+            Gate::Remembered => remembered = true,
+            Gate::Ask { stage, remembered } => {
+                return UnderlayAttachRead::Locked { stage, remembered };
+            }
+        }
+    } else if !underlay_vector::item_names(kind, path).is_some_and(|names| !names.is_empty()) {
+        return UnderlayAttachRead::NoItems;
+    }
+    let pages = item_thumbs(kind, path);
+    let (page_size, sub_per_master) = first_item_size(kind, path, &pages);
+    UnderlayAttachRead::Items {
+        pages,
+        page_size,
+        sub_per_master,
         remembered,
     }
 }

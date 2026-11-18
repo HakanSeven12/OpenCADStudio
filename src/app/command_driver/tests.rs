@@ -11380,3 +11380,58 @@ mod attsync_prompt_flow_tests {
     }
 }
 
+
+// The dash form -OBJECTSCALE runs its own [Add/Delete/?] prompt session; its
+// option and scale-listing prompts were not covered.
+mod dash_objectscale_prompt_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+
+    #[test]
+    fn dash_objectscale_lists_scales_from_the_option_prompt() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let _ = app.run_command_line("TEXT 0,0 2 0 hello");
+        let _ = app.run_command_line("SELECTALL");
+        let handle = app.tabs[i]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .next()
+            .map(|(handle, _)| handle)
+            .unwrap();
+
+        let _ = app.run_command_line("-OBJECTSCALE");
+        let command = app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("the dash command gathers annotated objects first");
+        assert_eq!(command.name(), "-OBJECTSCALE");
+        assert!(command.is_selection_gathering(), "{}", command.prompt());
+        let _ = app.feed_command(StepInput::SelectionComplete(vec![handle]));
+        let _ = app.feed_command(StepInput::Enter);
+        let command = app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("the option prompt follows the selection");
+        assert!(
+            command.prompt().contains("Add") || command.prompt().contains("?"),
+            "the option prompt offers the scale list: {:?}",
+            command.prompt()
+        );
+        let _ = app.feed_command(StepInput::Text("?".into()));
+        assert!(
+            app.command_line.history_plain_text().contains("1:1")
+                || app.command_line.history_plain_text().contains("scale"),
+            "the listing shows the drawing's scales: {}",
+            app.command_line.history_plain_text()
+        );
+        assert!(
+            app.tabs[i].active_cmd.is_some(),
+            "the ? listing keeps the option prompt open"
+        );
+        assert!(app.command_line.last_error.is_none());
+    }
+}
+

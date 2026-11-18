@@ -3572,11 +3572,19 @@ impl OpenCADStudio {
             // construction handle non-linearly. Rebase each active target onto
             // the freshly rebuilt grip so the hot arrow remains attached to the
             // live surface and reverses immediately from a geometric limit.
+            // Only history-driven targets: a plain curve grip need not sit at
+            // the cursor (a circle quadrant is rebuilt at the new radius on its
+            // own axis), and rebasing it would drop the cursor offset (#3187).
+            let document = &self.tabs[i].scene.document;
             let refreshed_targets: Vec<_> = self.tabs[i]
                 .selected_grip_handles
                 .iter()
                 .copied()
                 .zip(self.tabs[i].selected_grips.iter())
+                .filter(|(handle, _)| {
+                    crate::scene::model::solid_history::edit_operand(document, *handle).is_some()
+                        || document.solid_history_operation(*handle).is_some()
+                })
                 .map(|(handle, grip)| ((handle, grip.id), grip.world))
                 .collect();
             if let Some(active) = self.tabs[i].active_grip.as_mut() {

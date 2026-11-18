@@ -10,10 +10,8 @@ thread_local! {
     static FILLET_RADIUS:   Cell<f64> = const { Cell::new(0.0) };
     static CHAMFER_DIST1:   Cell<f64> = const { Cell::new(10.0) };
     static CHAMFER_DIST2:   Cell<f64> = const { Cell::new(10.0) };
-    static ARRAY_ROWS:      Cell<f64> = const { Cell::new(2.0) };
-    static ARRAY_COLS:      Cell<f64> = const { Cell::new(2.0) };
-    static ARRAY_ROW_SP:    Cell<f64> = const { Cell::new(100.0) };
-    static ARRAY_COL_SP:    Cell<f64> = const { Cell::new(100.0) };
+    static ARRAY_ROWS:      Cell<f64> = const { Cell::new(3.0) };
+    static ARRAY_COLS:      Cell<f64> = const { Cell::new(4.0) };
     static ARRAY_P_COUNT:   Cell<f64> = const { Cell::new(6.0) };
     static ARRAY_P_ANGLE:   Cell<f64> = const { Cell::new(360.0) }; // degrees
     static ARRAY_PATH_COUNT: Cell<f64> = const { Cell::new(6.0) };
@@ -70,8 +68,6 @@ accessors!(get_chamfer_dist2, set_chamfer_dist2, CHAMFER_DIST2);
 accessors!(get_array_rows, set_array_rows, ARRAY_ROWS);
 accessors!(get_array_assoc, set_array_assoc, ARRAY_ASSOC);
 accessors!(get_array_cols, set_array_cols, ARRAY_COLS);
-accessors!(get_array_row_sp, set_array_row_sp, ARRAY_ROW_SP);
-accessors!(get_array_col_sp, set_array_col_sp, ARRAY_COL_SP);
 accessors!(get_array_p_count, set_array_p_count, ARRAY_P_COUNT);
 accessors!(get_array_p_angle, set_array_p_angle, ARRAY_P_ANGLE);
 accessors!(get_array_path_count, set_array_path_count, ARRAY_PATH_COUNT);

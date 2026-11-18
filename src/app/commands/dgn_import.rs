@@ -250,12 +250,13 @@ impl OpenCADStudio {
         } else {
             "IMPORT"
         };
+        let ticket = self.start_window_read(crate::app::ModalKind::DgnImport);
         let path = path.to_string();
         let worker_path = path.clone();
         crate::app::update::background_task(
             context,
             move || reader(&worker_path, code_page).map(Arc::new),
-            move |read| Message::ImportDialog(ImportDialogMsg::DgnRead(path, read, from)),
+            move |read| Message::ImportDialog(ImportDialogMsg::DgnRead(ticket, path, read, from)),
         )
     }
 
@@ -372,10 +373,14 @@ impl OpenCADStudio {
     /// not open.
     pub(in crate::app) fn open_dgn_import_dialog(
         &mut self,
+        ticket: crate::ui::window::import_dialogs::ReadTicket,
         path: &str,
         read: Option<Arc<DgnWindowRead>>,
         from: DgnReadFrom,
     ) {
+        if !self.window_read_current(ticket, crate::app::ModalKind::DgnImport) {
+            return;
+        }
         let import_file_open = self.active_modal == Some(crate::app::ModalKind::ImportFile);
         let Some(read) = read else {
             match from {
@@ -694,7 +699,9 @@ impl OpenCADStudio {
                 });
             }
             ImportDialogMsg::TdsPicked(Some(path)) => return self.read_tds_for_dialog(&path),
-            ImportDialogMsg::TdsRead(path, scene) => self.open_tds_import_dialog(&path, scene),
+            ImportDialogMsg::TdsRead(ticket, path, scene) => {
+                self.open_tds_import_dialog(ticket, &path, scene)
+            }
             ImportDialogMsg::TdsConverted(tab_id, generation, request, scene, import) => {
                 self.finish_tds_import(tab_id, generation, *request, scene, *import)
             }
@@ -777,8 +784,8 @@ impl OpenCADStudio {
             ImportDialogMsg::DgnPicked(Some(path)) => {
                 return self.read_dgn_for_dialog(&path, DgnReadFrom::DgnImport)
             }
-            ImportDialogMsg::DgnRead(path, read, from) => {
-                self.open_dgn_import_dialog(&path, read, from)
+            ImportDialogMsg::DgnRead(ticket, path, read, from) => {
+                self.open_dgn_import_dialog(ticket, &path, read, from)
             }
             ImportDialogMsg::DgnPromptRead(tab_id, path, read) => {
                 return self.finish_dgn_import_prompt_read(tab_id, &path, read);
@@ -1606,6 +1613,36 @@ mod dgn_worker_tests {
             .last_error
             .as_deref()
             .is_some_and(|e| e.starts_with("DGN Import cancelled")));
+    }
+
+    /// A window closed while its Change… read runs does not open again
+    /// when the read ends.
+    #[test]
+    fn a_window_closed_during_a_change_read_stays_closed() {
+        let mut app = app_with_new_drawing();
+        let first = app.read_dgn_for_dialog(&v7_file("closed-first"), DgnReadFrom::DgnImport);
+        app.drive_headless_task(first).expect("the first read");
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::DgnImport));
+        let task = app.read_dgn_for_dialog(&v7_file("closed-change"), DgnReadFrom::DgnImport);
+        let _ = app.update(Message::CloseModal);
+        app.drive_headless_task(task).expect("the change read");
+        assert_eq!(app.active_modal, None);
+    }
+
+    /// When two reads overlap, the window shows the newer file, also when
+    /// the older read ends last.
+    #[test]
+    fn only_the_newest_read_fills_the_window() {
+        let mut app = app_with_new_drawing();
+        let older_path = v7_file("older");
+        let newer_path = v7_file("newer");
+        let older = app.read_dgn_for_dialog(&older_path, DgnReadFrom::DgnImport);
+        let newer = app.read_dgn_for_dialog(&newer_path, DgnReadFrom::DgnImport);
+        app.drive_headless_task(newer).expect("the newer read");
+        app.drive_headless_task(older).expect("the older read");
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::DgnImport));
+        let s = app.import_dialogs.dgn.as_ref().expect("window state");
+        assert_eq!(s.path, newer_path);
     }
 
     /// IMPORT in the Import File window: the window stays open during the

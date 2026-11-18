@@ -1013,6 +1013,9 @@ pub(super) struct OpenCADStudio {
     /// The read that the -POINTCLOUDATTACH file name prompt started: the
     /// tab and the file. A failed read ends that command when it ends.
     point_cloud_prompt_read: Option<(u64, std::path::PathBuf)>,
+    /// The number of the newest read of an import window (3D Studio
+    /// Import, DGN Import, Import PDF); see `ReadTicket`.
+    import_window_read: u64,
     /// ATTDEF dialog and Edit Attribute Definition dialog; `None` while closed.
     attdef_dialog: Option<crate::ui::window::attdef_dialog::AttdefDialogState>,
     attdef_edit: Option<crate::ui::window::attdef_dialog::AttdefEditState>,
@@ -6481,6 +6484,7 @@ impl OpenCADStudio {
             pdf_attach: None,
             point_cloud_attach: None,
             point_cloud_prompt_read: None,
+            import_window_read: 0,
             attdef_dialog: None,
             insert_attr_dialog: None,
             attman: None,

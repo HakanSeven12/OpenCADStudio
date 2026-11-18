@@ -168,9 +168,13 @@ pub enum PdfDialogMsg {
     ImportScale(String),
     ImportRotation(RotationChoice),
     ImportOk,
-    /// A PDF read off the UI thread for the Import PDF window: the file,
-    /// and what the read found.
-    ImportRead(String, std::sync::Arc<PdfImportFileRead>),
+    /// A PDF read off the UI thread for the Import PDF window: the read's
+    /// ticket, the file, and what the read found.
+    ImportRead(
+        crate::ui::window::import_dialogs::ReadTicket,
+        String,
+        std::sync::Arc<PdfImportFileRead>,
+    ),
     /// The file named at the -PDFIMPORT prompt, read off the UI thread: the
     /// tab of the command, the file, and what the read found.
     ImportPromptRead(

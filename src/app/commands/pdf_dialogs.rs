@@ -792,12 +792,13 @@ impl OpenCADStudio {
         reader: fn(&str) -> PdfImportFileRead,
     ) -> Task<Message> {
         self.command_line.push_info(&format!("Reading {path}…"));
+        let ticket = self.start_window_read(crate::app::ModalKind::PdfImportFile);
         let path = path.to_string();
         let worker_path = path.clone();
         crate::app::update::background_task(
             "PDFIMPORT",
             move || std::sync::Arc::new(reader(&worker_path)),
-            move |read| Message::PdfDialog(PdfDialogMsg::ImportRead(path, read)),
+            move |read| Message::PdfDialog(PdfDialogMsg::ImportRead(ticket, path, read)),
         )
     }
 
@@ -806,7 +807,15 @@ impl OpenCADStudio {
     /// Import File window (which IMPORT from a script or the automation
     /// `run` operation leaves open) and of its own older copy (Browse). If a
     /// different window opened during the read, neither window opens.
-    fn open_pdf_import_window(&mut self, path: &str, read: &PdfImportFileRead) -> Task<Message> {
+    fn open_pdf_import_window(
+        &mut self,
+        ticket: crate::ui::window::import_dialogs::ReadTicket,
+        path: &str,
+        read: &PdfImportFileRead,
+    ) -> Task<Message> {
+        if !self.window_read_current(ticket, crate::app::ModalKind::PdfImportFile) {
+            return Task::none();
+        }
         use crate::ui::window::pdf_password_dialog::PdfPasswordThen;
         if self.active_modal.is_some_and(|modal| {
             !matches!(
@@ -1395,8 +1404,8 @@ impl OpenCADStudio {
             PdfDialogMsg::ImportPromptRead(tab_id, path, read) => {
                 return self.finish_pdf_import_prompt_read(tab_id, &path, read);
             }
-            PdfDialogMsg::ImportRead(path, read) => {
-                return self.open_pdf_import_window(&path, &read)
+            PdfDialogMsg::ImportRead(ticket, path, read) => {
+                return self.open_pdf_import_window(ticket, &path, &read)
             }
             PdfDialogMsg::ImportConverted(tab_id, generation, job, converted) => {
                 self.finish_pdf_import(tab_id, generation, *job, *converted);
@@ -1832,6 +1841,35 @@ mod import_window_tests {
             assert_eq!(app.active_modal, Some(ModalKind::PdfImportFile), "{open:?}");
             assert!(app.command_line.last_error.is_none(), "{open:?}");
         }
+    }
+
+    /// A window closed while its Browse read runs does not open again when
+    /// the read ends.
+    #[test]
+    fn a_window_closed_during_a_browse_read_stays_closed() {
+        let mut app = new_app();
+        let task = app.open_pdf_import_file(&two_sizes("pdf-window-closed-first.pdf"));
+        app.drive_headless_task(task).expect("the first read");
+        assert_eq!(app.active_modal, Some(ModalKind::PdfImportFile));
+        let task = app.open_pdf_import_file(&two_sizes("pdf-window-closed-browse.pdf"));
+        let _ = app.update(Message::CloseModal);
+        app.drive_headless_task(task).expect("the browse read");
+        assert_eq!(app.active_modal, None);
+    }
+
+    /// When two reads overlap, the window shows the newer file, also when
+    /// the older read ends last.
+    #[test]
+    fn only_the_newest_read_fills_the_window() {
+        let mut app = new_app();
+        let older = app.open_pdf_import_file(&two_sizes("pdf-window-older.pdf"));
+        let newer_path = two_sizes("pdf-window-newer.pdf");
+        let newer = app.open_pdf_import_file(&newer_path);
+        app.drive_headless_task(newer).expect("the newer read");
+        app.drive_headless_task(older).expect("the older read");
+        assert_eq!(app.active_modal, Some(ModalKind::PdfImportFile));
+        let state = app.pdf_import_file.as_ref().expect("the window's state");
+        assert_eq!(state.path, newer_path);
     }
 
     /// An encrypted file opens the password window when the read ends, not

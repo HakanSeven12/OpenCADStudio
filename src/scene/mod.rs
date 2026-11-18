@@ -3378,10 +3378,13 @@ pub struct Scene {
         )>,
     >,
     /// Viewport wire sets with the block lines on their frozen layers left
-    /// out, per frozen-set signature: the resident set they were made from
-    /// (held weakly) and the result.
-    viewport_frozen_member_cache:
-        RefCell<HashMap<u64, (std::sync::Weak<Vec<WireModel>>, Arc<Vec<WireModel>>)>>,
+    /// out, one for each resident set and frozen-set signature: the resident
+    /// set they were made from (held weakly, its address in the key) and the
+    /// result, `None` when the set holds no such line.
+    #[allow(clippy::type_complexity)]
+    viewport_frozen_member_cache: RefCell<
+        HashMap<(usize, u64), (std::sync::Weak<Vec<WireModel>>, Option<Arc<Vec<WireModel>>>)>,
+    >,
     /// Camera-independent model tessellation, separate from the culled memo.
     resident_tess_memo: RefCell<HashMap<Handle, MemoRun>>,
     /// The resident set `resident_tess_memo`'s `InSet` runs read from.

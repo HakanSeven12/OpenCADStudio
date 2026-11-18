@@ -418,6 +418,24 @@ pub(super) fn fully_georeferenced_pdf_pages(
     page_names: &[String],
     plane: crate::command::WorkingPlane,
 ) -> Option<Vec<(String, document::EntityType)>> {
+    georeferenced_pages_in(
+        geo_context(scene, kind, true).as_ref(),
+        kind,
+        path,
+        page_names,
+        plane,
+    )
+}
+
+/// [`fully_georeferenced_pdf_pages`] with the drawing's part given
+/// ([`geo_context`]): it reads only the PDF, so a worker can run it.
+pub(super) fn georeferenced_pages_in(
+    context: Option<&GeoContext>,
+    kind: document::entities::UnderlayType,
+    path: &str,
+    page_names: &[String],
+    plane: crate::command::WorkingPlane,
+) -> Option<Vec<(String, document::EntityType)>> {
     if kind != document::entities::UnderlayType::Pdf || page_names.is_empty() {
         return None;
     }
@@ -431,7 +449,7 @@ pub(super) fn fully_georeferenced_pdf_pages(
     .into_iter()
     .map(|(page, entity)| (page, plane.place_entity(entity)))
     .collect::<Vec<_>>();
-    let placements = auto_pdf_placements(scene, kind, path, &pages, true);
+    let placements = placements_in(context, path, &pages);
     if placements.iter().any(Option::is_none) {
         return None;
     }
@@ -443,14 +461,27 @@ pub(super) fn fully_georeferenced_pdf_pages(
     Some(pages)
 }
 
-fn auto_pdf_placements(
+/// The drawing's coordinate system and its millimetres per drawing unit.
+pub(super) type GeoContext = (crate::io::crs::CrsDefinition, f64);
+
+/// A GeoPDF check without the drawing: [`georeferenced_pages_in`], or a
+/// test's check.
+pub(super) type GeoPdfCheck = fn(
+    Option<&GeoContext>,
+    document::entities::UnderlayType,
+    &str,
+    &[String],
+    crate::command::WorkingPlane,
+) -> Option<Vec<(String, document::EntityType)>>;
+
+/// The part of a GeoPDF placement that comes from the drawing: `None` when
+/// PDF pages cannot be placed by their geospatial data here.
+pub(super) fn geo_context(
     scene: &crate::scene::Scene,
     kind: document::entities::UnderlayType,
-    path: &str,
-    pages: &[(String, document::EntityType)],
     enabled: bool,
-) -> Vec<Option<crate::io::geopdf::GeoPlacement>> {
-    let context = (enabled
+) -> Option<GeoContext> {
+    (enabled
         && kind == document::entities::UnderlayType::Pdf
         && scene.current_layout == "Model"
         && scene.block_edit_block.is_none())
@@ -465,11 +496,30 @@ fn auto_pdf_placements(
         };
         Some((crs, unit_mm))
     })
-    .flatten();
+    .flatten()
+}
+
+fn auto_pdf_placements(
+    scene: &crate::scene::Scene,
+    kind: document::entities::UnderlayType,
+    path: &str,
+    pages: &[(String, document::EntityType)],
+    enabled: bool,
+) -> Vec<Option<crate::io::geopdf::GeoPlacement>> {
+    placements_in(geo_context(scene, kind, enabled).as_ref(), path, pages)
+}
+
+/// The GeoPDF placement of each page for a drawing context; it reads only
+/// the PDF.
+fn placements_in(
+    context: Option<&GeoContext>,
+    path: &str,
+    pages: &[(String, document::EntityType)],
+) -> Vec<Option<crate::io::geopdf::GeoPlacement>> {
     pages
         .iter()
         .map(|(page, entity)| {
-            let (crs, unit_mm) = context.as_ref()?;
+            let (crs, unit_mm) = context?;
             let document::EntityType::Underlay(underlay) = entity else {
                 return None;
             };
@@ -726,10 +776,11 @@ mod geo_attach_tests {
         let read = app.open_pdf_attach_dialog(path);
         app.drive_headless_task(read).expect("the read task");
         app.ctrl_down = true;
-        let _ = app.update(crate::app::Message::PdfDialog(
+        let check = app.update(crate::app::Message::PdfDialog(
             crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachPage(1),
         ));
         app.ctrl_down = false;
+        app.drive_headless_task(check).expect("the GeoPDF check");
         let state = app.pdf_attach.as_mut().expect("attach dialog");
         assert_eq!(state.selected, vec![0, 1]);
         assert!(!state.geopdf_available);
@@ -749,6 +800,89 @@ mod geo_attach_tests {
         assert!(attached(&app).is_empty());
         let command = app.tabs[i].active_cmd.as_ref().expect("manual fallback");
         assert_eq!(command.prompt(), "Specify insertion point:");
+    }
+
+    /// A GeoPDF check that panics gives an error, and the window stays
+    /// without GeoPDF placement.
+    #[test]
+    fn a_geopdf_check_that_panics_is_an_error() {
+        let mut app = app();
+        set_crs(&mut app);
+        let path = "dialog-geopdf-panic.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let read = app.open_pdf_attach_dialog(path);
+        app.drive_headless_task(read).expect("the read task");
+        assert!(app.pdf_attach.as_ref().unwrap().geopdf_available);
+        app.pdf_attach.as_mut().unwrap().selected = vec![1];
+        let check = app.check_pdf_attach_geopdf_with(|_, _, _, _, _| panic!("a reader bug"));
+        app.drive_headless_task(check).expect("the GeoPDF check");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("PDFATTACH failed: a reader bug")
+        );
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::PdfAttach));
+        assert!(
+            app.pdf_attach.as_ref().unwrap().geopdf_available,
+            "no answer, no change"
+        );
+    }
+
+    /// The answer of a check is taken only for the file and the pages that
+    /// the open window shows.
+    #[test]
+    fn a_geopdf_answer_for_other_pages_or_a_closed_window_changes_nothing() {
+        use crate::ui::window::pdf_dialogs::PdfDialogMsg;
+        let mut app = app();
+        let path = "dialog-geopdf-answers.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let read = app.open_pdf_attach_dialog(path);
+        app.drive_headless_task(read).expect("the read task");
+        let available = |app: &OpenCADStudio| app.pdf_attach.as_ref().unwrap().geopdf_available;
+        assert!(!available(&app), "no coordinate system");
+        let answer = |path: &str, page: &str| {
+            crate::app::Message::PdfDialog(PdfDialogMsg::AttachGeoChecked(
+                path.to_string(),
+                vec![page.to_string()],
+                true,
+            ))
+        };
+        let _ = app.update(answer(path, "2"));
+        assert!(!available(&app), "other pages");
+        let _ = app.update(answer("other.pdf", "1"));
+        assert!(!available(&app), "another file");
+        app.active_modal = None;
+        let _ = app.update(answer(path, "1"));
+        assert!(!available(&app), "a closed window");
+        app.active_modal = Some(crate::app::ModalKind::PdfAttach);
+        let _ = app.update(answer(path, "1"));
+        let state = app.pdf_attach.as_ref().unwrap();
+        assert!(state.geopdf_available, "the pages shown");
+        assert!(state.geopdf_auto);
+    }
+
+    /// A name change checks the new file: a file with no page shows no
+    /// GeoPDF placement, also after a GeoPDF file.
+    #[test]
+    fn a_name_change_checks_the_new_file_for_geopdf() {
+        use crate::ui::window::pdf_dialogs::PdfDialogMsg;
+        let mut app = app();
+        set_crs(&mut app);
+        let (geo, empty) = ("dialog-geopdf-name.pdf", "dialog-geopdf-name-empty.pdf");
+        crate::scene::model::pdf_raster::register_source(geo, Arc::new(two_page_pdf()));
+        crate::scene::model::pdf_raster::register_source(empty, Arc::new(b"not a PDF".to_vec()));
+        let read = app.open_pdf_attach_dialog(geo);
+        app.drive_headless_task(read).expect("the read task");
+        let state = app.pdf_attach.as_mut().unwrap();
+        assert!(state.geopdf_available);
+        state.existing = vec![("empty".to_string(), empty.to_string())];
+        let read = app.update(crate::app::Message::PdfDialog(PdfDialogMsg::AttachName(
+            "empty".to_string(),
+        )));
+        app.drive_headless_task(read).expect("the name read");
+        let state = app.pdf_attach.as_ref().unwrap();
+        assert_eq!(state.path, empty);
+        assert!(!state.geopdf_available);
+        assert!(!state.geopdf_auto);
     }
 
     fn unit_geographic_pdf() -> Vec<u8> {

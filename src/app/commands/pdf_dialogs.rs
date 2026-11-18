@@ -190,15 +190,9 @@ impl OpenCADStudio {
             sizes.clone(),
             units.clone(),
         );
-        let plane = if self.tabs[i].editing_model_space() {
-            self.tabs[i].ucs_xform().working_plane()
-        } else {
-            crate::command::WorkingPlane::default()
-        };
-        Self::refresh_pdf_attach_geopdf(&self.tabs[i].scene, plane, &mut state);
         self.pdf_attach = Some(state);
         self.active_modal = Some(crate::app::ModalKind::PdfAttach);
-        Task::none()
+        self.check_pdf_attach_geopdf()
     }
 
     /// A file chosen in the Attach window's name list: it is read off the
@@ -228,16 +222,16 @@ impl OpenCADStudio {
     /// shows it, if the window is still open and that file is still the
     /// one chosen. A file with no page, sheet or model, or one that needs
     /// a password, shows no pages, as before.
-    fn finish_attach_name_read(&mut self, path: &str, read: &UnderlayAttachRead) {
+    fn finish_attach_name_read(&mut self, path: &str, read: &UnderlayAttachRead) -> Task<Message> {
         if !self.dialog_open(crate::app::ModalKind::PdfAttach) {
-            return;
+            return Task::none();
         }
         let Some(mut state) = self.pdf_attach.take() else {
-            return;
+            return Task::none();
         };
         if state.pending_path.as_deref() != Some(path) {
             self.pdf_attach = Some(state);
-            return;
+            return Task::none();
         }
         state.pending_path = None;
         let (pages, sizes, units) = match read {
@@ -250,14 +244,8 @@ impl OpenCADStudio {
             _ => (Vec::new(), Vec::new(), Vec::new()),
         };
         self.set_pdf_attach_file(&mut state, path, pages, sizes, units);
-        let i = self.active_tab;
-        let plane = if self.tabs[i].editing_model_space() {
-            self.tabs[i].ucs_xform().working_plane()
-        } else {
-            crate::command::WorkingPlane::default()
-        };
-        Self::refresh_pdf_attach_geopdf(&self.tabs[i].scene, plane, &mut state);
         self.pdf_attach = Some(state);
+        self.check_pdf_attach_geopdf()
     }
 
     /// Put a file that was read into the Attach window.
@@ -284,23 +272,61 @@ impl OpenCADStudio {
             crate::entities::underlay::display_path(&self.pdf_stored_path(path, state.path_type.0));
     }
 
-    fn refresh_pdf_attach_geopdf(
-        scene: &crate::scene::Scene,
-        plane: crate::command::WorkingPlane,
-        state: &mut PdfAttachState,
-    ) {
-        let was_available = state.geopdf_available;
-        state.geopdf_available = super::pdf_import::fully_georeferenced_pdf_pages(
-            scene,
-            state.kind,
-            &state.path,
-            &state.page_labels(),
-            plane,
+    /// The GeoPDF check of the Attach window: can every selected page be
+    /// placed by its geospatial data in this drawing? The drawing's part is
+    /// taken here; the PDF is read off the UI thread, and the window takes
+    /// the answer when the read ends ([`Self::finish_pdf_attach_geopdf`]).
+    /// Without a coordinate system, for a DWF or DGN file or with no page,
+    /// the answer is no at once, without a read.
+    fn check_pdf_attach_geopdf(&mut self) -> Task<Message> {
+        self.check_pdf_attach_geopdf_with(super::pdf_import::georeferenced_pages_in)
+    }
+
+    /// [`Self::check_pdf_attach_geopdf`] with the check given, so a test can
+    /// give one that panics.
+    pub(in crate::app) fn check_pdf_attach_geopdf_with(
+        &mut self,
+        check: super::pdf_import::GeoPdfCheck,
+    ) -> Task<Message> {
+        let i = self.active_tab;
+        let plane = if self.tabs[i].editing_model_space() {
+            self.tabs[i].ucs_xform().working_plane()
+        } else {
+            crate::command::WorkingPlane::default()
+        };
+        let Some(state) = self.pdf_attach.as_mut() else {
+            return Task::none();
+        };
+        let kind = state.kind;
+        let pages = state.page_labels();
+        let context = super::pdf_import::geo_context(&self.tabs[i].scene, kind, true);
+        if context.is_none() || pages.is_empty() || kind != document::entities::UnderlayType::Pdf {
+            apply_geopdf(state, false);
+            return Task::none();
+        }
+        let path = state.path.clone();
+        let (worker_path, worker_pages) = (path.clone(), pages.clone());
+        crate::app::update::background_task(
+            "PDFATTACH",
+            move || check(context.as_ref(), kind, &worker_path, &worker_pages, plane).is_some(),
+            move |available| {
+                Message::PdfDialog(PdfDialogMsg::AttachGeoChecked(path, pages, available))
+            },
         )
-        .is_some();
-        // Preserve a deliberate manual choice while eligibility stays true.
-        // A newly eligible selection starts in automatic mode again.
-        state.geopdf_auto = state.geopdf_available && (state.geopdf_auto || !was_available);
+    }
+
+    /// The end of a GeoPDF check: the window takes the answer if it still
+    /// shows that file with those pages selected.
+    fn finish_pdf_attach_geopdf(&mut self, path: &str, pages: &[String], available: bool) {
+        if !self.dialog_open(crate::app::ModalKind::PdfAttach) {
+            return;
+        }
+        let Some(state) = self.pdf_attach.as_mut() else {
+            return;
+        };
+        if state.path == path && state.page_labels() == pages {
+            apply_geopdf(state, available);
+        }
     }
 
     /// POINTCLOUDATTACH after the file is chosen: the file is read off the
@@ -954,15 +980,13 @@ impl OpenCADStudio {
                 return self.read_attach_name_with(kind, &path, read_for_attach_window);
             }
             PdfDialogMsg::AttachNameRead(path, read) => {
-                self.finish_attach_name_read(&path, &read);
+                return self.finish_attach_name_read(&path, &read);
+            }
+            PdfDialogMsg::AttachGeoChecked(path, pages, available) => {
+                self.finish_pdf_attach_geopdf(&path, &pages, available);
             }
             PdfDialogMsg::AttachPage(page) => {
                 let (ctrl, shift) = (self.ctrl_down, self.shift_down);
-                let plane = if self.tabs[i].editing_model_space() {
-                    self.tabs[i].ucs_xform().working_plane()
-                } else {
-                    crate::command::WorkingPlane::default()
-                };
                 if let Some(state) = self.pdf_attach.as_mut() {
                     if state.kind == document::entities::UnderlayType::Pdf {
                         click_page(&mut state.selected, &mut state.anchor, page, ctrl, shift);
@@ -979,8 +1003,8 @@ impl OpenCADStudio {
                     state.sub_per_master = first
                         .and_then(|item| state.item_units.get(item).copied())
                         .unwrap_or(1.0);
-                    Self::refresh_pdf_attach_geopdf(&self.tabs[i].scene, plane, state);
                 }
+                return self.check_pdf_attach_geopdf();
             }
             PdfDialogMsg::AttachPathType(choice) => {
                 let Some(mut state) = self.pdf_attach.take() else {
@@ -1514,6 +1538,15 @@ fn read_pdf_for_import_window(path: &str) -> PdfImportFileRead {
         page_sizes,
         remembered,
     }
+}
+
+/// The answer of a GeoPDF check for the Attach window. A deliberate manual
+/// choice stays while the pages stay eligible; newly eligible pages start
+/// in automatic mode again.
+fn apply_geopdf(state: &mut PdfAttachState, available: bool) {
+    let was_available = state.geopdf_available;
+    state.geopdf_available = available;
+    state.geopdf_auto = available && (state.geopdf_auto || !was_available);
 }
 
 /// The name of the command that a read for the Attach window reports a

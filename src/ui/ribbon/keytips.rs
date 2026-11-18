@@ -442,6 +442,8 @@ const CODES: &[(&str, &str, &str)] = &[
     ("draw", "Groups", "GR"),
     ("draw", "GROUP", "GG"),
     ("draw", "UNGROUP", "GU"),
+    ("draw", "GROUPEDIT", "GE"),
+    ("draw", "TOGGLEGROUPS", "GS"),
     ("draw", "PASTE_MENU", "PA"),
     ("draw", "COPYCLIP", "CC"),
     ("draw", "CUTCLIP", "CX"),

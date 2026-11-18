@@ -1257,6 +1257,9 @@ impl OpenCADStudio {
                 }
             }
 
+            // The Groups panel's Group Selection button.
+            "TOGGLEGROUPS" => return Some(self.run_action("TOGGLEGROUPS")),
+
             "GROUP" => {
                 let handles: Vec<_> = self.tabs[i]
                     .scene

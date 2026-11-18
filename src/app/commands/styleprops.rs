@@ -3789,6 +3789,10 @@ impl OpenCADStudio {
                                 self.delete_objects = value;
                             }
                             if changed {
+                                if name == "PICKSTYLE" {
+                                    self.ribbon.group_selection =
+                                        self.tabs[i].scene.document.header.pick_style & 1 != 0;
+                                }
                                 if name == "INSUNITS" {
                                     self.tabs[i].scene.sync_annotation_scale_from_header();
                                     self.tabs[i].scene.invalidate_annotation_dependencies();

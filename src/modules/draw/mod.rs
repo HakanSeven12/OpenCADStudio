@@ -205,6 +205,8 @@ impl CadModule for DrawModule {
                     tools: vec![
                         RibbonItem::LargeTool(group::tool()),
                         RibbonItem::LargeTool(ungroup::tool()),
+                        RibbonItem::LabeledTool(groups::edit_tool()),
+                        RibbonItem::LabeledTool(groups::selection_tool()),
                     ],
                 },
                 RibbonGroup {

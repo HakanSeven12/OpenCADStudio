@@ -435,7 +435,9 @@ impl OpenCADStudio {
             "TOGGLEGROUPS" => {
                 let header = &mut self.tabs[self.active_tab].scene.document.header;
                 header.pick_style ^= 1;
-                let state = if header.pick_style & 1 != 0 { "on" } else { "off" };
+                let on = header.pick_style & 1 != 0;
+                self.ribbon.group_selection = on;
+                let state = if on { "on" } else { "off" };
                 self.command_line.push_info(&format!("<Groups {state}>"));
                 return Task::none();
             }
@@ -563,5 +565,9 @@ mod tests {
         assert_eq!(style(&app), before ^ 1);
         let _ = app.update(Message::ShortcutPressed(key));
         assert_eq!(style(&app), before);
+        // The Groups panel's Group Selection button, and its light.
+        let _ = app.dispatch_command("TOGGLEGROUPS");
+        assert_eq!(style(&app), before ^ 1);
+        assert_eq!(app.ribbon.group_selection, before & 1 == 0);
     }
 }

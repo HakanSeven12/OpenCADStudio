@@ -898,6 +898,32 @@ impl OpenCADStudio {
                 }
             }
 
+            // ZOOM CENTER x y z <nX | height>: the view centred on the point,
+            // magnified by n or showing `height` drawing units top to bottom.
+            cmd if cmd.starts_with("ZOOM CENTER ") => {
+                let words: Vec<&str> = cmd["ZOOM CENTER ".len()..].split_whitespace().collect();
+                let coord = |k: usize| words.get(k).and_then(|w| w.parse::<f32>().ok());
+                let (Some(x), Some(y), Some(z), Some(value)) =
+                    (coord(0), coord(1), coord(2), words.get(3))
+                else {
+                    return Some(Task::none());
+                };
+                let current = 2.0 * self.tabs[i].scene.navigation_camera().ortho_size();
+                let value = value.to_ascii_uppercase();
+                let height = match value.strip_suffix('X') {
+                    Some(n) => crate::app::expr_eval::eval_number(n.trim())
+                        .map(|n| current / n as f32),
+                    None => crate::app::expr_eval::eval_number(&value).map(|h| h as f32),
+                }
+                .filter(|h| h.is_finite() && *h > 0.0);
+                if let Some(h) = height {
+                    let half = glam::Vec3::new(h, h, 0.0) * 0.5;
+                    let c = glam::Vec3::new(x, y, z);
+                    self.tabs[i].scene.remember_current_view();
+                    self.tabs[i].scene.zoom_to_window(c - half, c + half);
+                }
+            }
+
             "PLOTWINDOW" => {
                 use crate::modules::view::plot_window::PlotWindowCommand;
                 let mut cmd = PlotWindowCommand::new();

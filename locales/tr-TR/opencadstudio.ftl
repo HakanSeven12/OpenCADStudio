@@ -5484,6 +5484,8 @@ view =
     .xdata-set-app-val-on-entity-entities = XDATA: __ocs_fmt_2__ nesnede [__ocs_fmt_0__] = "__ocs_fmt_1__" olarak ayarlandı.
     .zoom-window-extents-extents-all-all-in-out-sca = ZOOM  [Pencere / Sınırlar / Tüm Sınırlar / Tümü / Yakınlaştır / Uzaklaştır / Ölçek]:
     .zoom-window-specify-first-corner = ZOOM WINDOW  İlk köşeyi belirtin:
+    .zoom-center-specify-center-point = ZOOM CENTER  Merkez noktasını belirtin:
+    .zoom-center-enter-magnification-or-height = ZOOM CENTER  Büyütme oranını veya yüksekliği girin:
     .zoom-window-specify-opposite-corner = ZOOM WINDOW  Karşı köşeyi belirtin:
     .zoom-extents = Sınırlara Yakınlaştır
     .cmd-no-hatch-objects = __ocs_fmt_0__: Tarama nesnesi yok.

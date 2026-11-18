@@ -5530,6 +5530,8 @@ view =
     .xdata-set-app-val-on-entity-entities = XDATA: __ocs_fmt_2__ 個の図形に [__ocs_fmt_0__] =「__ocs_fmt_1__」を設定しました。
     .zoom-window-extents-extents-all-all-in-out-sca = ZOOM  [窓 / オブジェクト範囲 / 全オブジェクト範囲 / 全体 / 拡大 / 縮小 / 倍率]:
     .zoom-window-specify-first-corner = ZOOM WINDOW  最初のコーナーを指定:
+    .zoom-center-specify-center-point = ZOOM CENTER  Specify center point:
+    .zoom-center-enter-magnification-or-height = ZOOM CENTER  Enter magnification or height:
     .zoom-window-specify-opposite-corner = ZOOM WINDOW  反対側のコーナーを指定:
     .zoom-extents =
         全体表示

@@ -5543,6 +5543,8 @@ view =
     .xdata-set-app-val-on-entity-entities = XDATA: ຕັ້ງຄ່າ [__ocs_fmt_0__] = "__ocs_fmt_1__" ໃນ __ocs_fmt_2__ ວັດຖຸ.
     .zoom-window-extents-extents-all-all-in-out-sca = ZOOM  [ໜ້າຕ່າງ / ຂອບເຂດທັງໝົດ / ທັງໝົດ / ຂະຫຍາຍເຂົ້າ / ຫຍໍ້ອອກ / ມາດຕາສ່ວນ]:
     .zoom-window-specify-first-corner = ZOOM WINDOW  ກໍານົດແຈທໍາອິດ:
+    .zoom-center-specify-center-point = ZOOM CENTER  Specify center point:
+    .zoom-center-enter-magnification-or-height = ZOOM CENTER  Enter magnification or height:
     .zoom-window-specify-opposite-corner = ZOOM WINDOW  ກໍານົດແຈກົງກັນຂ້າມ:
     .zoom-extents =
         ຊູມຂອບເຂດ

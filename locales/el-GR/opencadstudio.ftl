@@ -5542,6 +5542,8 @@ view =
     .xdata-set-app-val-on-entity-entities = XDATA: ορίστηκε [__ocs_fmt_0__] = "__ocs_fmt_1__" σε __ocs_fmt_2__ οντότητα/οντότητες.
     .zoom-window-extents-extents-all-all-in-out-sca = ZOOM  [Παράθυρο / Όρια / Όρια όλων / Όλα / Μεγέθυνση / Σμίκρυνση / Κλίμακα]:
     .zoom-window-specify-first-corner = ZOOM WINDOW  Ορίστε πρώτη γωνία:
+    .zoom-center-specify-center-point = ZOOM CENTER  Specify center point:
+    .zoom-center-enter-magnification-or-height = ZOOM CENTER  Enter magnification or height:
     .zoom-window-specify-opposite-corner = ZOOM WINDOW  Ορίστε απέναντι γωνία:
     .zoom-extents =
         Ζουμ

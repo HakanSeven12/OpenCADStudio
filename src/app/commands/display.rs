@@ -12,6 +12,19 @@ impl OpenCADStudio {
                     crate::t!("PAN: drag with the left mouse button. Press Esc to exit.").as_ref(),
                 );
             }
+            // View menu steps: move the view a quarter of its height that way.
+            "PANLEFT" | "PANRIGHT" | "PANUP" | "PANDOWN" => {
+                let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
+                let step = self.tabs[i].scene.active_model_tile_bounds(vw, vh).height * 0.25;
+                let (dx, dy) = match cmd {
+                    "PANLEFT" => (step, 0.0),
+                    "PANRIGHT" => (-step, 0.0),
+                    "PANUP" => (0.0, step),
+                    _ => (0.0, -step),
+                };
+                self.tabs[i].scene.remember_current_view();
+                self.pan_active_view(i, dx, dy, std::time::Instant::now());
+            }
 
             // ── TABLE structure and cell editing ───────────────────────────────
             cmd if cmd.starts_with("TABLE ") => {

@@ -5544,6 +5544,8 @@ view =
     .xdata-set-app-val-on-entity-entities = XDATA: nastaveno [__ocs_fmt_0__] = „__ocs_fmt_1__“ u objektů: __ocs_fmt_2__.
     .zoom-window-extents-extents-all-all-in-out-sca = ZOOM  [Okno / Meze / Meze vše / Vše / Přiblížit / Oddálit / Měřítko]:
     .zoom-window-specify-first-corner = ZOOM WINDOW  Určete první roh:
+    .zoom-center-specify-center-point = ZOOM CENTER  Specify center point:
+    .zoom-center-enter-magnification-or-height = ZOOM CENTER  Enter magnification or height:
     .zoom-window-specify-opposite-corner = ZOOM WINDOW  Určete protilehlý roh:
     .zoom-extents =
         Zoom

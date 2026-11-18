@@ -5014,6 +5014,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "ZOOM  [Window / Extents / Extents All / All / In / Out / Scale]:" => Some(("view", "zoom-window-extents-extents-all-all-in-out-sca")),
         "ZOOM  scale factor (e.g. 2 or 0.5):" => Some(("annotate", "zoom-scale-factor-e-g-2-or-0-5")),
         "ZOOM WINDOW  Specify first corner:" => Some(("view", "zoom-window-specify-first-corner")),
+        "ZOOM CENTER  Specify center point:" => Some(("view", "zoom-center-specify-center-point")),
+        "ZOOM CENTER  Enter magnification or height:" => Some(("view", "zoom-center-enter-magnification-or-height")),
         "DVIEW  Enter option [TWist/Undo]:" => Some(("view", "dview-enter-option-twist-undo")),
         "DVIEW  Specify view twist angle <{current}>:" => Some(("view", "dview-specify-view-twist-angle")),
         "TWist" => Some(("view", "twist-option")),

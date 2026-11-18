@@ -5543,6 +5543,8 @@ view =
     .xdata-set-app-val-on-entity-entities = XDATA: [__ocs_fmt_0__] = «__ocs_fmt_1__» задано для объектов: __ocs_fmt_2__.
     .zoom-window-extents-extents-all-all-in-out-sca = ZOOM  [Рамка / Границы / Все границы / Всё / Увеличить / Уменьшить / Масштаб]:
     .zoom-window-specify-first-corner = ZOOM WINDOW Укажите первый угол:
+    .zoom-center-specify-center-point = ZOOM CENTER  Specify center point:
+    .zoom-center-enter-magnification-or-height = ZOOM CENTER  Enter magnification or height:
     .zoom-window-specify-opposite-corner = ZOOM WINDOW Укажите противоположный угол:
     .zoom-extents =
         Зум

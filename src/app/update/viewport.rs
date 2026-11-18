@@ -9329,7 +9329,7 @@ properties={:.1}ms picked={}",
 
     /// Pan the active view by `dx`/`dy` screen pixels: the body shared by the
     /// middle-button drag and the two-finger gesture.
-    fn pan_active_view(&mut self, i: usize, dx: f32, dy: f32, started: Instant) {
+    pub(in crate::app) fn pan_active_view(&mut self, i: usize, dx: f32, dy: f32, started: Instant) {
         // Pan scale uses the active tile's size (ortho size is relative to
         // viewport height), so a tiled pane pans at the correct rate.
         let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;

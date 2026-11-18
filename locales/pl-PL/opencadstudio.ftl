@@ -5541,6 +5541,8 @@ view =
     .xdata-set-app-val-on-entity-entities = XDATA: ustaw [__ocs_fmt_0__] = "__ocs_fmt_1__" na elemencie/elementach __ocs_fmt_2__.
     .zoom-window-extents-extents-all-all-in-out-sca = ZOOM [Okno / Zasięg / Zasięg Wszystkie / Wszystko / Wejście / Zewnętrze / Skala]:
     .zoom-window-specify-first-corner = ZOOM WINDOW Określ pierwszy narożnik:
+    .zoom-center-specify-center-point = ZOOM CENTER  Specify center point:
+    .zoom-center-enter-magnification-or-height = ZOOM CENTER  Enter magnification or height:
     .zoom-window-specify-opposite-corner = ZOOM WINDOW Określ przeciwny narożnik:
     .zoom-extents =
         Powiększ

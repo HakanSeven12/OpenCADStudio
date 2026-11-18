@@ -5537,6 +5537,8 @@ view =
     .xdata-set-app-val-on-entity-entities = XDATA：已在 __ocs_fmt_2__ 個物件上設定 [__ocs_fmt_0__] = “__ocs_fmt_1__”。
     .zoom-window-extents-extents-all-all-in-out-sca = ZOOM  [視窗(W)/範圍(E)/全部範圍/全部(A)/放大(I)/縮小(O)/比例(S)]：
     .zoom-window-specify-first-corner = ZOOM WINDOW  指定第一個角點：
+    .zoom-center-specify-center-point = ZOOM CENTER  Specify center point:
+    .zoom-center-enter-magnification-or-height = ZOOM CENTER  Enter magnification or height:
     .zoom-window-specify-opposite-corner = ZOOM WINDOW  指定對角點：
     .zoom-extents =
         縮放

@@ -5530,6 +5530,8 @@ view =
     .xdata-set-app-val-on-entity-entities = XDATA: [__ocs_fmt_0__] = "__ocs_fmt_1__" __ocs_fmt_2__ ऑब्जेक्ट पर सेट किया गया।
     .zoom-window-extents-extents-all-all-in-out-sca = ZOOM  [विंडो / एक्स्टेंट्स / एक्स्टेंट्स ऑल / ऑल / इन / आउट / स्केल]:
     .zoom-window-specify-first-corner = ZOOM WINDOW पहले कोने को निर्दिष्ट करें:
+    .zoom-center-specify-center-point = ZOOM CENTER  Specify center point:
+    .zoom-center-enter-magnification-or-height = ZOOM CENTER  Enter magnification or height:
     .zoom-window-specify-opposite-corner = ZOOM WINDOW विपरीत कोने निर्दिष्ट करें:
     .zoom-extents =
         ज़ूम

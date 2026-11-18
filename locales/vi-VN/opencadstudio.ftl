@@ -5549,6 +5549,8 @@ view =
     .xdata-set-app-val-on-entity-entities = XDATA: đã đặt [__ocs_fmt_0__] = "__ocs_fmt_1__" trên __ocs_fmt_2__ đối tượng.
     .zoom-window-extents-extents-all-all-in-out-sca = ZOOM  [Cửa sổ / Phạm vi / Phạm vi tất cả / Tất cả / Phóng to / Thu nhỏ / Tỷ lệ]:
     .zoom-window-specify-first-corner = ZOOM WINDOW Xác định góc đầu tiên:
+    .zoom-center-specify-center-point = ZOOM CENTER  Specify center point:
+    .zoom-center-enter-magnification-or-height = ZOOM CENTER  Enter magnification or height:
     .zoom-window-specify-opposite-corner = ZOOM WINDOW Xác định góc đối diện:
     .zoom-extents =
         Thu phóng

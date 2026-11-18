@@ -5541,6 +5541,8 @@ view =
     .xdata-set-app-val-on-entity-entities = XDATA: __ocs_fmt_2__ 엔터티/엔티티에 [__ocs_fmt_0__] = "__ocs_fmt_1__"를 설정합니다.
     .zoom-window-extents-extents-all-all-in-out-sca = ZOOM [창 / 범위 / 전체 범위 / 전체 / 내부 / 외부 / 배율]:
     .zoom-window-specify-first-corner = ZOOM WINDOW 첫 번째 구석 지정:
+    .zoom-center-specify-center-point = ZOOM CENTER  Specify center point:
+    .zoom-center-enter-magnification-or-height = ZOOM CENTER  Enter magnification or height:
     .zoom-window-specify-opposite-corner = ZOOM WINDOW 반대쪽 모서리를 지정합니다.
     .zoom-extents =
         줌

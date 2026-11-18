@@ -1785,3 +1785,284 @@ mod point_cloud_attach_read_tests {
         assert_eq!(app.command_line.last_error, None);
     }
 }
+
+#[cfg(test)]
+mod underlay_attach_read_tests {
+    use super::*;
+    use crate::app::ModalKind;
+    use document::entities::UnderlayType;
+    use std::sync::Arc;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    fn last_line(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .last()
+            .map(|entry| entry.text.clone())
+            .unwrap_or_default()
+    }
+
+    /// A PDF with a 10 × 5 inch page and a 2 × 1 inch page.
+    fn two_pages() -> Vec<u8> {
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 720 360] >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 144 72] >>",
+        ];
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(bytes.len());
+            bytes.extend(format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes());
+        }
+        let xref = bytes.len();
+        bytes.extend(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
+        bytes.extend(b"0000000000 65535 f \n");
+        for offset in offsets {
+            bytes.extend(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        bytes.extend(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
+        );
+        bytes
+    }
+
+    /// A file in the temporary folder, with a name for this process.
+    fn temp_file(name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("ocs-underlay-attach-{}-{name}", std::process::id()));
+        std::fs::write(&path, bytes).expect("write the test file");
+        path
+    }
+
+    /// The window opens only when the read ends, after a `Reading` line,
+    /// with the pages and the size of the first.
+    #[test]
+    fn the_window_opens_only_when_the_read_ends() {
+        let mut app = new_app();
+        let path = "underlay-attach-read.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_pages()));
+        let task = app.open_pdf_attach_dialog(path);
+        assert_eq!(app.active_modal, None, "nothing opens during the read");
+        assert_eq!(last_line(&app), format!("ⓘ Reading {path}…"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::PdfAttach));
+        let state = app.pdf_attach.as_ref().expect("the window's state");
+        assert_eq!(state.pages.len(), 2);
+        assert_eq!(state.page_size, "10.0000 × 5.0000");
+    }
+
+    /// A reader that panics gives an error with the command's name, no
+    /// window opens, and the next read works.
+    #[test]
+    fn a_reader_panic_is_an_error_and_no_window_opens() {
+        let mut app = new_app();
+        for (kind, name) in [
+            (UnderlayType::Pdf, "PDFATTACH"),
+            (UnderlayType::Dwf, "DWFATTACH"),
+            (UnderlayType::Dgn, "DGNATTACH"),
+        ] {
+            let task = app.read_underlay_for_attach_with(kind, "panics", true, |_, _, _| {
+                panic!("a reader bug")
+            });
+            app.drive_headless_task(task).expect("the read task");
+            assert_eq!(
+                app.command_line.last_error.as_deref(),
+                Some(format!("{name} failed: a reader bug").as_str())
+            );
+            assert_eq!(app.active_modal, None);
+            assert!(app.pdf_attach.is_none());
+        }
+        let path = "underlay-attach-after-panic.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_pages()));
+        let task = app.open_pdf_attach_dialog(path);
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::PdfAttach));
+    }
+
+    /// The ATTACH picker's result for a PDF and for a DGN file starts the
+    /// read from the disk, and the window opens when it ends.
+    #[test]
+    fn the_attach_picker_reads_pdf_and_dgn_files_on_a_worker() {
+        let pdf = temp_file("picked.pdf", &two_pages());
+        let dgn = temp_file(
+            "picked.dgn",
+            &crate::modules::insert::dgn_import::test_files::minimal_v7_line(),
+        );
+        for (path, kind, pages) in [(&pdf, UnderlayType::Pdf, 2), (&dgn, UnderlayType::Dgn, 1)] {
+            let mut app = new_app();
+            let task = app.update(Message::AttachPickResult(Ok(path.clone())));
+            assert_eq!(app.active_modal, None, "nothing opens during the read");
+            assert!(
+                last_line(&app).starts_with("ⓘ Reading "),
+                "{}",
+                last_line(&app)
+            );
+            app.drive_headless_task(task).expect("the read task");
+            assert_eq!(app.active_modal, Some(ModalKind::PdfAttach), "{path:?}");
+            let state = app.pdf_attach.as_ref().expect("the window's state");
+            assert_eq!(state.kind, kind);
+            assert_eq!(state.pages.len(), pages, "{path:?}");
+        }
+        let _ = std::fs::remove_file(pdf);
+        let _ = std::fs::remove_file(dgn);
+    }
+
+    /// A file picked again is read from the disk again: a DGN file that
+    /// became damaged since the first read gives `not found`.
+    #[test]
+    fn a_file_picked_again_is_read_again() {
+        let mut app = new_app();
+        let dgn = temp_file(
+            "picked-again.dgn",
+            &crate::modules::insert::dgn_import::test_files::minimal_v7_line(),
+        );
+        let task = app.update(Message::AttachPickResult(Ok(dgn.clone())));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::PdfAttach));
+        app.active_modal = None;
+        app.pdf_attach = None;
+        std::fs::write(&dgn, b"not a design file").expect("damage the file");
+        let task = app.update(Message::AttachPickResult(Ok(dgn.clone())));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, None);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some(
+                format!(
+                    "{} not found.",
+                    crate::entities::underlay::display_path(&dgn.to_string_lossy())
+                )
+                .as_str()
+            )
+        );
+        let _ = std::fs::remove_file(dgn);
+    }
+
+    /// A DGN file that changed since its first read shows its new units
+    /// when it is picked again: the read forgets what it read before.
+    #[test]
+    fn a_changed_file_picked_again_shows_its_new_units() {
+        let mut app = new_app();
+        let mut bytes = crate::modules::insert::dgn_import::test_files::minimal_v7_line();
+        let dgn = temp_file("changed-units.dgn", &bytes);
+        let task = app.update(Message::AttachPickResult(Ok(dgn.clone())));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.pdf_attach.as_ref().map(|s| s.sub_per_master),
+            Some(1000.0)
+        );
+        app.active_modal = None;
+        app.pdf_attach = None;
+        // Subunits per master unit: high word, then low word.
+        bytes[1112..1116].copy_from_slice(&[0, 0, 0xf4, 0x01]);
+        std::fs::write(&dgn, &bytes).expect("change the file");
+        let task = app.update(Message::AttachPickResult(Ok(dgn.clone())));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.pdf_attach.as_ref().map(|s| s.sub_per_master),
+            Some(500.0)
+        );
+        let _ = std::fs::remove_file(dgn);
+    }
+
+    /// A PDF file that cannot be read gives the read's error.
+    #[test]
+    fn a_pdf_that_cannot_be_read_gives_the_error() {
+        let mut app = new_app();
+        let missing =
+            std::env::temp_dir().join(format!("ocs-underlay-missing-{}.pdf", std::process::id()));
+        let task = app.update(Message::AttachPickResult(Ok(missing)));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, None);
+        let error = app.command_line.last_error.clone().unwrap_or_default();
+        assert!(error.starts_with("PDFATTACH: "), "{error}");
+    }
+
+    /// A DGN or DWF file that cannot be read gives `not found`, not the
+    /// PDF read error.
+    #[test]
+    fn a_dgn_that_cannot_be_read_gives_not_found() {
+        let mut app = new_app();
+        let missing =
+            std::env::temp_dir().join(format!("ocs-underlay-missing-{}.dgn", std::process::id()));
+        let task = app.update(Message::AttachPickResult(Ok(missing.clone())));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, None);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some(
+                format!(
+                    "{} not found.",
+                    crate::entities::underlay::display_path(&missing.to_string_lossy())
+                )
+                .as_str()
+            )
+        );
+    }
+
+    /// An encrypted file opens the password window when the read ends.
+    #[test]
+    fn an_encrypted_file_asks_for_its_password_after_the_read() {
+        let mut app = new_app();
+        let path = "underlay-attach-locked.pdf";
+        let file = "%PDF-1.4\ntrailer\n<< /Encrypt << /Filter /Standard /V 1 /R 2 \
+            /O <95fe1f4219662a774442fb072e3d9f19e9d130ec09a4d0061e78fe920f7ab62f> \
+            /U <0102030405060708090a0b0c0d0e0f100102030405060708090a0b0c0d0e0f10> /P -44 >> >>\n%%EOF\n";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(file.as_bytes().to_vec()));
+        let task = app.open_pdf_attach_dialog(path);
+        assert_eq!(app.active_modal, None, "nothing opens during the read");
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::PdfPassword));
+        assert!(app.pdf_attach.is_none());
+    }
+
+    /// A different window opened during the read stays, and the Attach
+    /// window does not open.
+    #[test]
+    fn a_window_opened_during_the_read_stays() {
+        let mut app = new_app();
+        let path = "underlay-attach-other-window.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_pages()));
+        let task = app.open_pdf_attach_dialog(path);
+        app.active_modal = Some(ModalKind::PointCloudAttach);
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::PointCloudAttach));
+        assert!(app.pdf_attach.is_none());
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Attach underlay cancelled: a different window opened while the file was read.")
+        );
+    }
+
+    /// The window of a second read (Browse) takes the place of the first.
+    #[test]
+    fn the_window_of_a_second_read_takes_the_place_of_the_first() {
+        let mut app = new_app();
+        let first = "underlay-attach-first.pdf";
+        let second = "underlay-attach-second.pdf";
+        for path in [first, second] {
+            crate::scene::model::pdf_raster::register_source(path, Arc::new(two_pages()));
+        }
+        let task = app.open_pdf_attach_dialog(first);
+        app.drive_headless_task(task).expect("the read task");
+        let task = app.open_pdf_attach_dialog(second);
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::PdfAttach));
+        assert_eq!(
+            app.pdf_attach.as_ref().map(|s| s.path.as_str()),
+            Some(second)
+        );
+        assert!(app.command_line.last_error.is_none());
+    }
+}

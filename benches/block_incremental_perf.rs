@@ -18,6 +18,8 @@
 //! 14. `laydel_in_block`: `LAYDEL` erasing entities inside a block definition
 //! 15. `update_block_member`: `Scene::update_entity` on a block member entity
 //! 16. `paste_new_block`: `finalize_paste` bringing in an unseen block definition
+//! 17. `toggle_visibility_reveal`: `Scene::set_block_visibility_reveal` in BEDIT
+//! 18. `toggle_construction_shown`: `Scene::set_construction_shown` in BEDIT
 //!
 //! Run: `cargo bench --bench block_incremental_perf`
 
@@ -219,6 +221,30 @@ fn run() {
         let s = seq;
         seq += 1;
         paste_app.paste_new_block_step(&paste_snaps[s], s)
+    });
+
+    let mut reveal_app = BlockBenchHarness::setup_visibility_reveal(
+        BACKGROUND_LINES,
+        OTHER_BLOCKS,
+        ENTITIES_PER_BLOCK,
+    );
+    seq = 0;
+    bench_op("toggle_visibility_reveal", |_| {
+        let s = seq;
+        seq += 1;
+        reveal_app.toggle_visibility_reveal_step(s)
+    });
+
+    let (mut const_app, const_def) = BlockBenchHarness::setup_construction_shown(
+        BACKGROUND_LINES,
+        OTHER_BLOCKS,
+        ENTITIES_PER_BLOCK,
+    );
+    seq = 0;
+    bench_op("toggle_construction_shown", |_| {
+        let s = seq;
+        seq += 1;
+        const_app.toggle_construction_shown_step(const_def, s)
     });
 }
 

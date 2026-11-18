@@ -1987,6 +1987,70 @@ impl BlockBenchHarness {
         );
         self.0.tabs[i].scene.entity_wires().len()
     }
+
+    pub fn setup_visibility_reveal(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> Self {
+        let (mut scene, _insert, def, _param) = crate::scene::Scene::bench_setup_visibility_scene(
+            bg_lines,
+            other_blocks,
+            entities_per_block,
+        );
+        let _ = scene.entity_wires();
+        scene.block_edit_block = Some(def);
+        let _ = scene.entity_wires();
+        let mut app = Self::new_app();
+        let i = app.active_tab;
+        app.tabs[i].scene = scene;
+        Self(app)
+    }
+
+    pub fn toggle_visibility_reveal_step(&mut self, step: usize) -> usize {
+        let i = self.0.active_tab;
+        self.0.tabs[i]
+            .scene
+            .set_block_visibility_reveal(step % 2 == 0);
+        self.0.tabs[i].scene.entity_wires().len()
+    }
+
+    pub fn setup_construction_shown(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> (Self, Handle) {
+        let (mut app, _) = Self::setup_edit_block_app(bg_lines, other_blocks, entities_per_block);
+        let i = app.active_tab;
+        let record = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("EditBenchBlock")
+            .expect("EditBenchBlock exists");
+        let def = record.handle;
+        let members = record.entity_handles.clone();
+        let half = members.len() / 2;
+        crate::scene::block_construction::set(
+            &mut app.tabs[i].scene.document,
+            def,
+            &members[half..],
+            true,
+            "0",
+        )
+        .expect("mark construction geometry");
+        app.tabs[i].scene.block_edit_block = Some(def);
+        let _ = app.tabs[i].scene.entity_wires();
+        (Self(app), def)
+    }
+
+    pub fn toggle_construction_shown_step(&mut self, def_block: Handle, step: usize) -> usize {
+        let i = self.0.active_tab;
+        self.0.tabs[i]
+            .scene
+            .set_construction_shown(def_block, step % 2 == 1);
+        self.0.tabs[i].scene.entity_wires().len()
+    }
 }
 
 /// Grip shape by parameter kind: flip = arrow, rotation = circle,

@@ -9,6 +9,17 @@ pub const DISPLAY_ANGLE: f64 = PI / 9.0;
 /// Finest display angle: 5 degrees.
 pub const FINE_ANGLE: f64 = PI / 36.0;
 
+/// Whether a knot span is a sliver of the widest span, `widths` being every
+/// span's parameter width. A sliver is crossed with one chord to its end
+/// instead of being sampled: a span a thousandth of its neighbours' width
+/// with far-off control points (a closing span some exporters append) would
+/// otherwise draw a long spike that the curve's sampling by parameter never
+/// shows (#3221).
+pub fn sliver_span(width: f64, widths: impl IntoIterator<Item = f64>) -> bool {
+    let widest = widths.into_iter().fold(0.0_f64, f64::max);
+    width < 1e-3 * widest
+}
+
 /// Returns a finite angular threshold in radians.
 pub fn angle(value: f64) -> f64 {
     if value.is_finite() && value > 0.0 {

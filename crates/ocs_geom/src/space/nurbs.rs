@@ -930,7 +930,12 @@ impl NurbsCurve3 {
         }
         boundaries.push(to);
         let mut points = vec![self.point_at_knot(from)];
+        let widths = || boundaries.windows(2).map(|pair| pair[1] - pair[0]);
         for pair in boundaries.windows(2) {
+            if crate::tessellation::sliver_span(pair[1] - pair[0], widths()) {
+                points.push(self.point_at_knot(pair[1]));
+                continue;
+            }
             self.refine_angle(pair[0], pair[1], max_angle, 0, &mut points);
         }
         points

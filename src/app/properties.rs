@@ -3763,8 +3763,8 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
     /// Drive the Home-ribbon Layer / Color / Linetype / Lineweight dropdowns
     /// from the current entity selection. With no selection the ribbon falls
     /// back to the active creation defaults (per-tab active_layer + ByLayer).
-    /// Mixed selections keep the prior value (we'd need a UI "*Varies*"
-    /// marker to do better).
+    /// A selection on several layers shows *VARIES* in the layer combo; mixed colors,
+    /// linetypes and lineweights keep the prior value.
     pub(super) fn sync_ribbon_from_selection(&mut self) {
         let i = self.active_tab;
         // The Start (welcome) tab has no document — keep the ribbon's
@@ -3850,10 +3850,12 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 _ => {}
             }
         }
-        if !layer_mixed {
-            if let Some(l) = layer {
-                self.ribbon.active_layer = l;
-            }
+        if layer_mixed {
+            // Different layers: *VARIES* (as in Properties), not the current
+            // layer's name. A layer name cannot hold '*', so no layer matches.
+            self.ribbon.active_layer = VARIES_LABEL.to_string();
+        } else if let Some(l) = layer {
+            self.ribbon.active_layer = l;
         }
         if !color_mixed {
             if let Some(c) = color {
@@ -7021,6 +7023,32 @@ mod aggregation_tests {
         let sections = aggregate_sections(&selected, &[]);
         let layer = row(&sections, "layer").expect("a layer row");
         assert!(format!("{:?}", layer.value).contains("WALLS"));
+    }
+
+    // Objects on two layers: the toolbar layer combo shows *VARIES* instead of
+    // showing the current layer (0) as if both were on it.
+    #[test]
+    fn a_selection_on_two_layers_shows_varies_in_the_toolbar_layer_combo() {
+        let mut app = crate::app::OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        assert!(!app.tabs[i].is_start);
+        let a = app.tabs[i].scene.add_entity(line("WALLS", 1));
+        let b = app.tabs[i].scene.add_entity(line("DOORS", 1));
+        app.tabs[i].scene.select_entity(a, true);
+        app.sync_ribbon_from_selection();
+        assert_eq!(app.ribbon.active_layer, "WALLS");
+        app.tabs[i].scene.select_entity(b, false);
+        app.sync_ribbon_from_selection();
+        assert_eq!(app.ribbon.active_layer, "*VARIES*");
+        // Back to one layer, and to nothing selected: the current layer.
+        app.tabs[i].scene.deselect_all();
+        app.tabs[i].scene.select_entity(b, true);
+        app.sync_ribbon_from_selection();
+        assert_eq!(app.ribbon.active_layer, "DOORS");
+        app.tabs[i].scene.deselect_all();
+        app.sync_ribbon_from_selection();
+        assert_eq!(app.ribbon.active_layer, "0");
     }
 }
 

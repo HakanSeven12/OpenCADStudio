@@ -1128,7 +1128,7 @@ impl<'a> HostSession<'a> {
                 if !closed {
                     return Err("the profile must be closed".into());
                 }
-                let body = ocs_brep::planar_region(plane, &loops)
+                let body = ocs_solid::model::planar_region(plane, &loops)
                     .ok_or("the geometry kernel could not build a region from this profile")?;
                 let sat = crate::scene::convert::acis_export::solid_to_sat(&body)
                     .ok_or("the region could not be exported losslessly")?;
@@ -1161,7 +1161,7 @@ impl<'a> HostSession<'a> {
                 if !closed {
                     return Err("the profile must be closed".into());
                 }
-                let body = ocs_brep::planar_region(plane, &loops)
+                let body = ocs_solid::model::planar_region(plane, &loops)
                     .ok_or("the geometry kernel could not build a surface from this profile")?;
                 let sat = crate::scene::convert::acis_export::solid_to_sat(&body)
                     .ok_or("the surface could not be exported losslessly")?;
@@ -1289,7 +1289,7 @@ impl<'a> HostSession<'a> {
                     }
                 }
                 let lift = |solid: &document::entities::Solid3D, which: &str| {
-                    crate::scene::convert::solid3d_tess::kernel_acis_body(&solid.acis_data).ok_or_else(|| {
+                    crate::scene::convert::solid3d_tess::acis_record(&solid.acis_data).ok_or_else(|| {
                         format!("the {which} solid's payload cannot be lifted losslessly, so nothing was changed")
                     })
                 };
@@ -1299,14 +1299,14 @@ impl<'a> HostSession<'a> {
                     SolidBoolean::Subtract => model::Bool::Subtract,
                     SolidBoolean::Intersect => model::Bool::Intersect,
                 };
-                let combined = model::boolean_result(kind, &body_a, &body_b).map_err(|snag| {
-                    let reason = match snag {
-                        ocs_brep::Snag::Coincident => "two faces lie on the same surface, which the kernel cannot resolve",
-                        ocs_brep::Snag::CutRefused => "a face could not be cut along the intersection curve",
-                        ocs_brep::Snag::NoClosedForm => "the surfaces meet along a curve the kernel has no closed form for",
-                    };
-                    format!("the geometry kernel refused this {operation:?} ({snag:?}): {reason}; nothing was changed")
-                })?;
+                let combined = model::boolean_result(kind, &body_a, &body_b)
+                    .map_err(|error| {
+                        format!(
+                            "the geometry kernel refused this {operation:?}: {}; nothing was changed",
+                            super::model_ops::modelling_error(&error)
+                        )
+                    })?
+                    .ok_or_else(|| format!("nothing is left after this {operation:?}, so nothing was changed"))?;
                 let sat = crate::scene::convert::acis_export::solid_to_sat(&combined)
                     .ok_or("the result could not be exported losslessly, so nothing was changed")?;
                 let mut solid = document::entities::Solid3D::new();
@@ -1362,7 +1362,7 @@ impl<'a> HostSession<'a> {
                 }
                 macro_rules! retarget {
                     ($value:expr) => {{
-                        let body = crate::scene::convert::solid3d_tess::kernel_acis_body(&$value.acis_data)
+                        let body = crate::scene::convert::solid3d_tess::acis_record(&$value.acis_data)
                             .ok_or("this body's payload cannot be lifted losslessly, so it is left untouched")?;
                         let moved = model::by_matrix(&body, matrix)
                             .ok_or("the geometry kernel refused this transform")?;
@@ -1379,7 +1379,7 @@ impl<'a> HostSession<'a> {
                     EntityType::Body(value) => retarget!(value),
                     EntityType::Region(value) => retarget!(value),
                     EntityType::Surface(value) => {
-                        let body = crate::scene::convert::solid3d_tess::kernel_acis_body(&value.acis_data)
+                        let body = crate::scene::convert::solid3d_tess::acis_record(&value.acis_data)
                             .ok_or("this surface's payload cannot be lifted losslessly, so it is left untouched")?;
                         let moved = model::by_matrix(&body, matrix)
                             .ok_or("the geometry kernel refused this transform")?;
@@ -11311,9 +11311,9 @@ mod tests {
     #[test]
     #[ignore = "kernel spike; slow in debug builds"]
     fn spike_kernel_body_round_trip() {
-        use crate::scene::convert::solid3d_tess::{kernel_acis_body, kernel_body};
+        use crate::scene::convert::solid3d_tess::{acis_record, solid_record};
         use crate::scene::model::solid_model as sm;
-        let make = |body: &ocs_brep::Body| -> document::entities::Solid3D {
+        let make = |body: &ocs_solid::model::Brep| -> document::entities::Solid3D {
             let sat = crate::scene::convert::acis_export::solid_to_sat(body).expect("solid_to_sat");
             let mut solid = document::entities::Solid3D::new();
             solid.wires = sm::edge_wires(body);
@@ -11321,7 +11321,7 @@ mod tests {
             solid
         };
         let report = |label: &str, solid: &document::entities::Solid3D| {
-            let body = kernel_body(solid);
+            let body = solid_record(solid);
             eprintln!(
                 "SPIKE {label}: lift={} volume={:?} wires={} sat_bytes={} binary={}",
                 body.is_some(),
@@ -11380,7 +11380,7 @@ mod tests {
                 "SPIKE {label}: volume={:.3} extent={:?} lifts_back={}",
                 sm::volume(body),
                 extent,
-                kernel_body(&solid).is_some()
+                solid_record(&solid).is_some()
             );
         }
 
@@ -11392,13 +11392,14 @@ mod tests {
             ("intersect", sm::Bool::Intersect),
         ] {
             match sm::boolean_result(op, &boxed, &cyl) {
-                Ok(result) => {
+                Ok(None) => eprintln!("SPIKE box {label} cylinder: nothing left"),
+                Ok(Some(result)) => {
                     let solid = make(&result);
                     eprintln!(
                         "SPIKE box {label} cylinder: volume={:.3} faces_wires={} lifts_back={}",
                         sm::volume(&result),
                         solid.wires.len(),
-                        kernel_body(&solid).is_some()
+                        solid_record(&solid).is_some()
                     );
                 }
                 Err(snag) => eprintln!("SPIKE box {label} cylinder: refused {snag:?}"),
@@ -11416,7 +11417,7 @@ mod tests {
                     eprintln!(
                         "SPIKE {label}: volume={:.3} lifts_back={}",
                         sm::volume(&body),
-                        kernel_body(&solid).is_some()
+                        solid_record(&solid).is_some()
                     );
                 }
                 None => eprintln!("SPIKE {label}: kernel returned None"),
@@ -11427,7 +11428,7 @@ mod tests {
         let mut body_entity = document::entities::Body::new();
         body_entity
             .set_sat_document(&crate::scene::convert::acis_export::solid_to_sat(&boxed).unwrap());
-        let lifted = kernel_acis_body(&body_entity.acis_data);
+        let lifted = acis_record(&body_entity.acis_data);
         eprintln!(
             "SPIKE Body entity: lift={} volume={:?}",
             lifted.is_some(),
@@ -11445,7 +11446,7 @@ mod tests {
             match reopened.get_entity(bh) {
                 Some(EntityType::Body(back)) => eprintln!(
                     "SPIKE Body {label}: lift={}",
-                    kernel_acis_body(&back.acis_data).is_some()
+                    acis_record(&back.acis_data).is_some()
                 ),
                 other => eprintln!(
                     "SPIKE Body {label}: came back as {:?}",
@@ -11514,7 +11515,7 @@ mod tests {
                 sm::boolean_result(sm::Bool::Intersect, &boxed, &cyl).is_ok()
             )
         });
-        let result = sm::boolean_result(sm::Bool::Union, &boxed, &cyl).unwrap();
+        let result = sm::boolean_result(sm::Bool::Union, &boxed, &cyl).unwrap().unwrap();
         time("solid_to_sat(union)", &mut || {
             format!(
                 "{}",
@@ -11531,7 +11532,7 @@ mod tests {
 
     #[test]
     fn audit_python_solid3d_lifecycle_over_real_ipc() {
-        use crate::scene::convert::solid3d_tess::kernel_body;
+        use crate::scene::convert::solid3d_tess::solid_record;
         use crate::scene::model::solid_model as sm;
         let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {
             return;
@@ -11569,7 +11570,7 @@ mod tests {
             let Some(EntityType::Solid3D(solid)) = host.document().get_entity(handle) else {
                 panic!("no solid {handle:?}")
             };
-            kernel_body(solid).expect("payload lifts losslessly")
+            solid_record(solid).expect("payload lifts losslessly")
         };
         let volume = |host: &HostSession<'_>, handle: Handle| sm::volume(&body_of(host, handle));
         let extent =
@@ -11765,7 +11766,7 @@ mod tests {
                 panic!("{format} lost the solid")
             };
             let body =
-                kernel_body(back).unwrap_or_else(|| panic!("{format} payload does not lift"));
+                solid_record(back).unwrap_or_else(|| panic!("{format} payload does not lift"));
             assert!(close(sm::volume(&body), moved_volume, 1e-6), "{format}");
             let reopened_extent = sm::extent(&body).unwrap();
             for axis in 0..3 {
@@ -11853,7 +11854,7 @@ mod tests {
                 panic!("no body")
             };
             sm::extent(
-                &crate::scene::convert::solid3d_tess::kernel_acis_body(&b.acis_data).unwrap(),
+                &crate::scene::convert::solid3d_tess::acis_record(&b.acis_data).unwrap(),
             )
             .unwrap()
         };
@@ -11890,7 +11891,7 @@ mod tests {
         let Some(EntityType::Body(back)) = reopened.get_entity(handle) else {
             panic!("DWG lost the body")
         };
-        let lifted = crate::scene::convert::solid3d_tess::kernel_acis_body(&back.acis_data)
+        let lifted = crate::scene::convert::solid3d_tess::acis_record(&back.acis_data)
             .expect("DWG body lifts");
         assert!((sm::volume(&lifted) - 64.0).abs() < 1e-6);
         // Scripts cannot create a Body and get the explanatory message.
@@ -11913,7 +11914,7 @@ mod tests {
 
     #[test]
     fn audit_python_region_lifecycle_over_real_ipc() {
-        use crate::scene::convert::solid3d_tess::kernel_acis_body;
+        use crate::scene::convert::solid3d_tess::acis_record;
         use crate::scene::model::solid_model as sm;
         let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {
             return;
@@ -11952,7 +11953,7 @@ mod tests {
                 panic!("no region {handle:?}")
             };
             let body =
-                kernel_acis_body(&region.acis_data).expect("region payload lifts losslessly");
+                acis_record(&region.acis_data).expect("region payload lifts losslessly");
             sm::extent(&body).unwrap()
         };
         let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
@@ -12195,7 +12196,7 @@ mod tests {
 
     #[test]
     fn audit_python_surface_lifecycle_over_real_ipc() {
-        use crate::scene::convert::solid3d_tess::kernel_acis_body;
+        use crate::scene::convert::solid3d_tess::acis_record;
         use crate::scene::model::solid_model as sm;
         use document::entities::SurfaceKind;
         let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {
@@ -12246,10 +12247,10 @@ mod tests {
         };
         let body_of = |document: &Document, handle: Handle| match document.get_entity(handle) {
             Some(EntityType::Surface(s)) => {
-                kernel_acis_body(&s.acis_data).expect("surface payload lifts losslessly")
+                acis_record(&s.acis_data).expect("surface payload lifts losslessly")
             }
             Some(EntityType::Solid3D(s)) => {
-                kernel_acis_body(&s.acis_data).expect("solid payload lifts losslessly")
+                acis_record(&s.acis_data).expect("solid payload lifts losslessly")
             }
             other => panic!("no surface or solid {handle:?}: {other:?}"),
         };
@@ -12593,7 +12594,7 @@ mod tests {
 
     #[test]
     fn audit_python_boolean_lifecycle_over_real_ipc() {
-        use crate::scene::convert::solid3d_tess::kernel_body;
+        use crate::scene::convert::solid3d_tess::solid_record;
         use crate::scene::model::solid_model as sm;
         let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {
             return;
@@ -12630,7 +12631,7 @@ mod tests {
             let Some(EntityType::Solid3D(solid)) = document.get_entity(handle) else {
                 panic!("no solid {handle:?}")
             };
-            kernel_body(solid).expect("payload lifts losslessly")
+            solid_record(solid).expect("payload lifts losslessly")
         };
         let volume_in =
             |document: &Document, handle: Handle| sm::volume(&body_in(document, handle));

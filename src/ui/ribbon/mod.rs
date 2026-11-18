@@ -373,6 +373,9 @@ pub struct Ribbon {
     pub show_file_tabs: bool,
     /// Layout tabs (LAYOUTTAB) visibility — drives the Layout Tabs button highlight.
     pub show_layout_tabs: bool,
+    /// PICKSTYLE group selection of the drawing — drives the Group Selection
+    /// button highlight.
+    pub group_selection: bool,
     pub open_dropdown: Option<String>,
     /// Title of the collapsed or minimized panel whose peek is open, if any.
     pub collapsed_open: Option<String>,
@@ -568,6 +571,7 @@ impl Ribbon {
             show_parameters_manager: false,
             show_file_tabs: true,
             show_layout_tabs: true,
+            group_selection: true,
             open_dropdown: None,
             collapsed_open: None,
             last_cmd: HashMap::default(),
@@ -1111,6 +1115,7 @@ impl Ribbon {
             show_sheet_set: self.show_sheet_set,
             show_file_tabs: self.show_file_tabs,
             show_layout_tabs: self.show_layout_tabs,
+            group_selection: self.group_selection,
         }
     }
 

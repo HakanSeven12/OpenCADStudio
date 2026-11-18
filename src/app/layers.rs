@@ -104,6 +104,7 @@ impl OpenCADStudio {
 
     pub(super) fn sync_ribbon_layers(&mut self) {
         let i = self.active_tab;
+        self.ribbon.group_selection = self.tabs[i].scene.document.header.pick_style & 1 != 0;
         // The Start (welcome) tab has no document — leave the layer and
         // linetype dropdowns empty instead of showing a placeholder "0".
         if self.tabs[i].is_start {

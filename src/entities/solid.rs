@@ -1,4 +1,4 @@
-// SOLID geometry comes from the kernel; entity coordinates stay in WCS here.
+// SOLID geometry comes from Solidcore; entity coordinates stay in WCS here.
 
 use crate::t;
 use document::entities::Solid;
@@ -92,7 +92,7 @@ fn extrusion_body(
     base: &[[f64; 3]],
     tolerance: f64,
     profile_valid: bool,
-) -> Option<ocs_brep::Body> {
+) -> Option<ocs_solid::model::Brep> {
     if solid.thickness.abs() <= 1.0e-10 || !profile_valid {
         return None;
     }
@@ -108,19 +108,9 @@ fn extrusion_body(
     if base.iter().any(|point| !plane.contains(*point, tolerance)) {
         return None;
     }
-    let projected = base
-        .iter()
-        .map(|point| plane.project(*point))
-        .collect::<Option<Vec<_>>>()?;
-    let profile = (0..projected.len())
-        .map(|index| {
-            ocs_geom::geom2d::Curve::Line(ocs_geom::geom2d::Line {
-                start: projected[index],
-                end: projected[(index + 1) % projected.len()],
-            })
-        })
-        .collect::<Vec<_>>();
-    ocs_brep::extrude(plane, &profile, (normal * solid.thickness).to_array())
+    let direction = (normal * solid.thickness.signum()).to_array();
+    let profile = ocs_solid::model::polygon(base);
+    ocs_solid::model::extrude(&profile, direction, solid.thickness.abs(), 0.0, true).ok()
 }
 
 fn solid_geometry(solid: &Solid) -> Option<SolidGeometry> {
@@ -142,28 +132,25 @@ fn solid_geometry(solid: &Solid) -> Option<SolidGeometry> {
             extruded: false,
         });
     };
-    let mesh = ocs_brep::mesh::tessellate(
+    let mesh = crate::scene::model::solid_model::tessellate(
         &body,
-        ocs_brep::mesh::TessellationTolerance::new(
-            ocs_geom::tessellation::DEFAULT_ANGLE,
-            tolerance,
-        ),
+        crate::scene::model::solid_model::DisplayTolerance::new(ocs_geom::tessellation::DEFAULT_ANGLE),
     );
-    if !mesh.missing_faces.is_empty() || mesh.mesh.is_empty() {
+    let Some(mesh) = mesh.filter(|mesh| mesh.missing_faces.is_empty() && !mesh.triangles.is_empty()) else {
         return Some(SolidGeometry {
             edges: boundary_edges(&base),
             fill_tris: Vec::new(),
             extruded: false,
         });
-    }
+    };
     let edges = mesh
         .edges
         .iter()
-        .flat_map(|edge| edge.positions.windows(2).map(|pair| (pair[0], pair[1])))
+        .flat_map(|(_, points)| points.windows(2).map(|pair| (pair[0], pair[1])))
         .collect();
-    let mut fill_tris = Vec::with_capacity(mesh.mesh.triangles.len() * 3);
-    for triangle in mesh.mesh.triangles {
-        fill_tris.extend(triangle.map(|index| mesh.mesh.positions[index]));
+    let mut fill_tris = Vec::with_capacity(mesh.triangles.len() * 3);
+    for triangle in &mesh.triangles {
+        fill_tris.extend(triangle.map(|index| mesh.positions[index]));
     }
     Some(SolidGeometry {
         edges,
@@ -172,15 +159,15 @@ fn solid_geometry(solid: &Solid) -> Option<SolidGeometry> {
     })
 }
 
-pub(crate) fn wcs_bounds(solid: &Solid) -> Option<ocs_brep::Aabb> {
+pub(crate) fn wcs_bounds(solid: &Solid) -> Option<ocs_solid::geometry::Aabb> {
     let base = boundary(solid);
     let tolerance = kernel_tolerance(&base);
     let profile_valid =
         !ocs_geom::space::polygon::triangulate(&base, ocs_geom::geom2d::Tolerance::new(tolerance))
             .is_empty();
     extrusion_body(solid, &base, tolerance, profile_valid)
-        .and_then(|body| ocs_brep::body_bounds(&body))
-        .or_else(|| ocs_brep::Aabb::around(base))
+        .and_then(|body| ocs_solid::model::aabb(&body))
+        .or_else(|| ocs_solid::geometry::Aabb::around(base))
 }
 
 impl RenderConvertible for Solid {

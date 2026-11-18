@@ -85,6 +85,8 @@ pub(super) mod clipboard;
 mod constraint;
 mod dim_edit;
 mod entity_commit;
+#[cfg(test)]
+mod fence_prompt_tests;
 mod modify;
 #[cfg(test)]
 mod mtext_preview_tests;
@@ -243,6 +245,9 @@ impl OpenCADStudio {
             CmdResult::Relaunch(..)
                 | CmdResult::Dispatch(..)
                 | CmdResult::Script(..)
+                // A picked path hands its set on through the selection step
+                // it completes, which decides what stays selected.
+                | CmdResult::SelectByPath { .. }
                 | CmdResult::QSelectSample { .. }
                 | CmdResult::FilterSample { .. }
                 | CmdResult::SolidEdgeBlend { .. }
@@ -271,6 +276,23 @@ impl OpenCADStudio {
         // A transparent zoom that just finished hands control back to the
         // command it interrupted before the "command ended" bookkeeping below.
         self.resume_transparent_parent(i);
+        // A path's preview highlights go with the path (Enter, Esc, the
+        // command ending); a box still being drawn keeps its own.
+        if self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .and_then(|command| command.selection_path())
+            .is_none()
+            && self.tabs[i]
+                .scene
+                .selection
+                .borrow()
+                .gesture
+                .box_anchor
+                .is_none()
+        {
+            self.tabs[i].scene.set_box_hover_highlights(&[]);
+        }
         if self.table_cell_editor.is_some()
             && self.field_dialog.is_some()
             && self.tabs[i].active_cmd.is_none()
@@ -578,6 +600,9 @@ impl OpenCADStudio {
         // Task produced by a command the arm dispatches; it must reach the
         // runtime or messages such as a chosen render mode are dropped.
         let mut dispatched = Task::none();
+        // SELECT, or a path picked from a clicked box, leaves a plain
+        // selection behind.
+        let mut selection_left = false;
         match result {
             CmdResult::QSelectSample {
                 state,
@@ -924,14 +949,21 @@ impl OpenCADStudio {
                     crate::app::commands::pdf_import::PdfImportSource::File(import),
                 );
             }
+            CmdResult::ReadPointCloud(path) => {
+                let read = self.read_point_cloud_for_prompt(i, path);
+                return match self.handle_need_point() {
+                    Some(task) => Task::batch([read, task]),
+                    None => read,
+                };
+            }
             CmdResult::AttachPointCloud { placement, message } => {
                 let label = self.history_label_from_active_cmd(i, "POINTCLOUDATTACH");
                 self.tabs[i].scene.clear_preview_wire();
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.command_line.push_output(&message);
-                self.attach_point_cloud(i, label, placement);
                 self.restore_pre_cmd_tangent();
+                return self.attach_point_cloud(i, label, placement);
             }
             CmdResult::AttachPdfPages {
                 kind,
@@ -1177,6 +1209,8 @@ impl OpenCADStudio {
                 crossing,
             } => return self.handle_select_by_path(path, closed, crossing),
             CmdResult::Relaunch(cmd, handles) => {
+                selection_left =
+                    cmd == "_SELECT_DONE" || cmd == crate::modules::draw::select::IMPLIED_PATH_DONE;
                 dispatched = self.handle_relaunch(cmd, handles);
             }
             CmdResult::Dispatch(cmd) => {
@@ -1490,7 +1524,10 @@ impl OpenCADStudio {
         // The rich text canvas owns keyboard editing itself. Leaving the
         // hidden command input focused would make it consume Left/Right before
         // the editor can handle them.
-        let focus = if self.mtext_editor.is_some() {
+        // A selection left for the next shortcut is in the same case: a
+        // focused command field would take Ctrl+C for itself, as it does
+        // after SELECTALL.
+        let focus = if self.mtext_editor.is_some() || selection_left {
             self.unfocus_widgets()
         } else if self.text_inline.is_some() {
             // The in-place TEXT editor needs keyboard focus on its own field.
@@ -1798,16 +1835,16 @@ impl OpenCADStudio {
         self.feed_command(StepInput::SelectionComplete(selected))
     }
 
-    fn handle_select_by_path(
+    /// What a Fence / WPolygon / CPolygon catches. The hit test lives here,
+    /// where the camera and the drawing's geometry are; everything after it
+    /// matches what a lasso does, Remove included.
+    fn path_pick_handles(
         &mut self,
-        path: Vec<[f64; 2]>,
+        i: usize,
+        path: &[[f64; 2]],
         closed: bool,
         crossing: bool,
-    ) -> Task<Message> {
-        let i = self.active_tab;
-        // The command picked the path; the hit test lives here, where
-        // the camera and the drawing's geometry are. Everything after
-        // matches what a lasso does, Remove included.
+    ) -> Vec<Handle> {
         let canvas = self.tabs[i].scene.selection.borrow().view.vp_size;
         let bounds = iced::Rectangle {
             x: 0.0,
@@ -1831,7 +1868,7 @@ impl OpenCADStudio {
                 )
             })
             .collect();
-        let handles = self.tabs[i].scene.path_hit_handles(
+        self.tabs[i].scene.path_hit_handles(
             &screen,
             crossing,
             !closed,
@@ -1840,7 +1877,50 @@ impl OpenCADStudio {
             eye,
             bounds,
             |point| self.cursor_model_point(i, &edit_cam, point, bounds),
+        )
+    }
+
+    /// SELECTIONPREVIEW while a path is picked: highlight what it would
+    /// catch with the cursor as its next vertex, as a box does while drawn.
+    pub(in crate::app) fn refresh_path_selection_preview(&mut self, i: usize, cursor: glam::DVec3) {
+        let Some(path) = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .and_then(|command| command.selection_path())
+        else {
+            return;
+        };
+        let bit = if path.implied { 1 } else { 2 };
+        let navigating =
+            self.tabs[i].orbit_mode || self.tabs[i].pan_mode || self.tabs[i].zoom_dynamic_mode;
+        let mut points = path.points;
+        points.push([cursor.x, cursor.y]);
+        let enough = if path.closed { 3 } else { 2 };
+        if self.model_space.selection_preview & bit == 0 || navigating || points.len() < enough {
+            self.tabs[i].scene.set_box_hover_highlights(&[]);
+            return;
+        }
+        if path.closed {
+            points.push(points[0]);
+        }
+        let mut handles = self.path_pick_handles(i, &points, path.closed, path.crossing);
+        handles.retain(|&h| self.tabs[i].scene.passes_selection_filter(h));
+        self.filter_handles_reject_locked(i, &mut handles);
+        self.tabs[i].scene.set_box_hover_highlights_limited(
+            &handles,
+            self.model_space.selection_preview_limit as usize,
         );
+    }
+
+    fn handle_select_by_path(
+        &mut self,
+        path: Vec<[f64; 2]>,
+        closed: bool,
+        crossing: bool,
+    ) -> Task<Message> {
+        let i = self.active_tab;
+        self.tabs[i].scene.set_box_hover_highlights(&[]);
+        let handles = self.path_pick_handles(i, &path, closed, crossing);
         self.last_pick = Some((handles.clone(), self.select_remove_mode));
         if self.select_remove_mode {
             for h in &handles {

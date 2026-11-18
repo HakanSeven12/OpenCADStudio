@@ -2282,6 +2282,7 @@ bg={bg_ms:.1}ms n={view_count}"
         #[cfg(target_arch = "wasm32")]
         let plugin_grip_active = false;
         let dyn_input_overlay: Option<Element<'_, Message>> = if self.dyn_input
+            && tab.scene.drawing_feedback_shown()
             && (tab.active_cmd.is_some() || tab.active_grip.is_some() || plugin_grip_active)
             && (!tab.dyn_fields.is_empty() || dyn_picks_object)
         {
@@ -3483,8 +3484,7 @@ bg={bg_ms:.1}ms n={view_count}"
         // collecting its own input. A pending Lengthen / Radius / Arc Length
         // value is numeric input, not the prefix of a new command (for example,
         // `3` must not open the 3DALIGN / 3DARRAY suggestions).
-        let allow_autocomplete = self.grip_pending.is_none()
-            && (tab.active_cmd.is_none() || self.command_line.has_contextual_suggestions());
+        let allow_autocomplete = self.autocomplete_allowed();
         let dyn_capturing = self.dyn_capturing();
         // The workspace row is: left edge stack, viewport, right edge stack.
         let mut parts: Vec<Element<'_, Message>> = Vec::new();
@@ -4368,6 +4368,13 @@ impl OpenCADStudio {
         #[cfg(target_arch = "wasm32")]
         let control = iced::time::every(std::time::Duration::from_millis(50))
             .map(|_| Message::PollWebControl);
+        // The ends of the point cloud reads that the drawing starts (the
+        // web build reads in place).
+        #[cfg(not(target_arch = "wasm32"))]
+        let point_cloud_reads = Subscription::run(crate::scene::model::point_cloud::read_results)
+            .map(Message::PointCloudRead);
+        #[cfg(target_arch = "wasm32")]
+        let point_cloud_reads = Subscription::none();
         iced::Subscription::batch([
             if self.spacemouse.moving() && self.spacemouse_focused && !self.spacemouse_paused {
                 crate::app::tool_windows::main_window_frames().map(Message::SpaceMouseFrame)
@@ -4389,6 +4396,7 @@ impl OpenCADStudio {
                 _ => None,
             }),
             control,
+            point_cloud_reads,
             frames,
             history_tick,
             layout_settle,
@@ -4418,6 +4426,16 @@ impl OpenCADStudio {
             ui_font_changes(),
             terminate_requests(),
         ])
+    }
+
+    /// Whether typed text may open the command suggestions. A clicked box
+    /// waiting for its opposite corner takes the text as its answer (Fence /
+    /// WPolygon / CPolygon), not as the start of a command name.
+    pub(in crate::app) fn autocomplete_allowed(&self) -> bool {
+        let tab = &self.tabs[self.active_tab];
+        self.grip_pending.is_none()
+            && !self.box_corner_prompt_pending()
+            && (tab.active_cmd.is_none() || self.command_line.has_contextual_suggestions())
     }
 
     pub(super) fn focus_cmd_input(&self) -> Task<Message> {

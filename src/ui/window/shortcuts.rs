@@ -13,8 +13,28 @@ pub enum ShortcutField {
     Command,
 }
 
+/// Indices of the rows a search query keeps visible. The match is a
+/// case-insensitive substring of the key or the command; an empty query keeps
+/// every row. The unfinished draft row (index 0 while `pending_add`) is always
+/// kept so adding stays possible while a filter is typed. Only the display is
+/// filtered: the rows themselves, and so what Apply saves, are untouched.
+pub fn visible_rows(rows: &[(String, String)], query: &str, pending_add: bool) -> Vec<usize> {
+    let q = query.trim().to_lowercase();
+    rows.iter()
+        .enumerate()
+        .filter(|(idx, (key, command))| {
+            q.is_empty()
+                || (pending_add && *idx == 0)
+                || key.to_lowercase().contains(&q)
+                || command.to_lowercase().contains(&q)
+        })
+        .map(|(idx, _)| idx)
+        .collect()
+}
+
 pub fn view_window<'a>(
     rows: &'a [(String, String)],
+    filter: &str,
     capture_row: Option<usize>,
     pending_add: bool,
     reset_confirm: bool,
@@ -48,7 +68,8 @@ pub fn view_window<'a>(
     .padding(gutter);
 
     let mut list = column![].spacing(3);
-    for (idx, (key, command)) in rows.iter().enumerate() {
+    for idx in visible_rows(rows, filter, pending_add) {
+        let (key, command) = &rows[idx];
         // Key cell: click to arm capture, then press the combination. The
         // armed cell shows what is expected and highlights until a key
         // arrives; clicking it again cancels. A key that already exists in
@@ -249,6 +270,7 @@ pub fn view_window<'a>(
         column![
             title,
             hint,
+            crate::ui::kit::search_field(t!("Search…").as_ref(), filter, Message::ShortcutEditorFilter),
             Space::new().height(6),
             head,
             scrollable(container(list).padding(gutter)).height(sizing.height),
@@ -330,4 +352,48 @@ pub fn view_window<'a>(
         .align_x(iced::alignment::Horizontal::Center)
         .align_y(iced::alignment::Vertical::Center);
     iced::widget::stack![content, iced::widget::opaque(shield), centered].into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::visible_rows;
+
+    fn rows() -> Vec<(String, String)> {
+        vec![
+            ("CTRL+D".to_owned(), "DIST".to_owned()),
+            ("CTRL+SHIFT+L".to_owned(), "LAYER".to_owned()),
+            ("F3".to_owned(), "OSNAP".to_owned()),
+        ]
+    }
+
+    #[test]
+    fn empty_query_keeps_all_rows() {
+        assert_eq!(visible_rows(&rows(), "", false), vec![0, 1, 2]);
+        assert_eq!(visible_rows(&rows(), "  ", false), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn query_matches_command_name_case_insensitive() {
+        assert_eq!(visible_rows(&rows(), "layer", false), vec![1]);
+        assert_eq!(visible_rows(&rows(), "OSN", false), vec![2]);
+    }
+
+    #[test]
+    fn query_matches_key_text() {
+        assert_eq!(visible_rows(&rows(), "ctrl", false), vec![0, 1]);
+        assert_eq!(visible_rows(&rows(), "f3", false), vec![2]);
+    }
+
+    #[test]
+    fn query_matching_nothing_shows_no_rows() {
+        assert!(visible_rows(&rows(), "zzz", false).is_empty());
+    }
+
+    #[test]
+    fn draft_row_stays_visible_and_indices_stay_original() {
+        let mut r = rows();
+        r.insert(0, (String::new(), String::new()));
+        assert_eq!(visible_rows(&r, "osnap", true), vec![0, 3]);
+        assert_eq!(visible_rows(&r, "osnap", false), vec![3]);
+    }
 }

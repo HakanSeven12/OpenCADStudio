@@ -335,8 +335,13 @@ impl OpenCADStudio {
         } else {
             String::new()
         };
+        let document = &self.tabs[self.active_tab].scene.document;
         if let Some(state) = self.field_dialog.as_mut() {
             state.preview = preview;
+            state.operand_labels = crate::ui::formula_input::operand_spans(&state.formula)
+                .into_iter()
+                .map(|span| operand_label(&state.formula[span], document))
+                .collect();
         }
     }
 
@@ -704,6 +709,41 @@ pub(super) fn column_letters(mut column: usize) -> String {
     }
     letters.reverse();
     String::from_utf8(letters).unwrap_or_default()
+}
+
+/// The short name a formula operand shows as in the formula box: its
+/// object's type and property ("Polyline Area"), the object a reference
+/// reads (a table), or the field's own name.
+fn operand_label(operand: &str, document: &document::Document) -> String {
+    let inner = operand
+        .strip_prefix("%<")
+        .and_then(|inner| inner.strip_suffix(">%"))
+        .unwrap_or(operand)
+        .trim();
+    let object = inner.find("\\_ObjId ").and_then(|at| {
+        let hex = inner[at + "\\_ObjId ".len()..]
+            .split(|c: char| !c.is_ascii_hexdigit())
+            .next()?;
+        let handle = document::Handle::new(u64::from_str_radix(hex, 16).ok()?);
+        let entity = document.get_entity(handle)?;
+        Some(crate::t!(crate::entities::names::ui_name(entity)).into_owned())
+    });
+    let (evaluator, rest) = inner.split_once(' ').unwrap_or((inner, ""));
+    let rest = rest.split(" \\f").next().unwrap_or_default().trim();
+    if evaluator == "\\_ObjId" {
+        object.unwrap_or_else(|| crate::t!("Object").into_owned())
+    } else if evaluator.starts_with("\\AcObjProp") {
+        let property = rest.rsplit_once(").").map_or("", |(_, property)| property.trim());
+        format!("{} {}", object.unwrap_or_default(), crate::t!(property))
+            .trim()
+            .to_string()
+    } else if evaluator.starts_with("\\AcExpr") {
+        crate::t!("Formula").into_owned()
+    } else if rest.is_empty() {
+        evaluator.trim_start_matches('\\').to_string()
+    } else {
+        rest.to_string()
+    }
 }
 
 /// The Field dialog's text cases: (none), Uppercase, Lowercase, First capital, Title case.

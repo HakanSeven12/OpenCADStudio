@@ -1117,6 +1117,17 @@ impl OpenCADStudio {
             .find(|style| style.handle == handle)
     }
 
+    /// The open manager's transaction keeps `handle` as it is now: Close
+    /// restores it and Apply puts it in the undo step.
+    pub(super) fn style_stage_keep_entity(&mut self, tab: usize, handle: Handle) {
+        if let (Some(stage), Some(before)) = (
+            self.style_stage.as_mut(),
+            self.tabs[tab].scene.document.get_entity_arc(handle),
+        ) {
+            stage.entities.entry(handle).or_insert(before);
+        }
+    }
+
     /// Begin a staging transaction for a freshly-opened style manager.
     pub(super) fn style_stage_begin(&mut self) {
         self.begin_style_stage(false);

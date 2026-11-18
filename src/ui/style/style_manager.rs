@@ -84,6 +84,10 @@ pub struct Scaffold<'a, 'b> {
     /// Manager-specific actions after New / Copy / Delete (Override…,
     /// Compare…); `None` leaves one off.
     pub extra_actions: Vec<(Cow<'static, str>, Option<Message>)>,
+    /// Card layout: the list as a titled card with its count beside the
+    /// editor's own cards, the toolbar on a raised strip. `None` keeps the
+    /// plain frame.
+    pub list_title: Option<Cow<'static, str>>,
     pub editor: Element<'a, Message>,
 }
 
@@ -184,13 +188,18 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
         ))
         .spacing(4)
         .align_y(iced::Center);
+    let card_mode = s.list_title.is_some();
     let toolbar = container(bar)
-        .style(|theme: &Theme| container::Style {
+        .style(move |theme: &Theme| container::Style {
             background: Some(Background::Color(theme.palette().background.weak.color)),
+            border: Border {
+                radius: if card_mode { 6.0 } else { 0.0 }.into(),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .width(width)
-        .padding([5, 8]);
+        .padding(if card_mode { [7, 8] } else { [5, 8] });
 
     // ── Left: style list (single click selects, double click renames) ─────
     let rows: Vec<Element<'_, Message>> = s
@@ -246,6 +255,17 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
             .into(),
         None => Space::new().height(0).into(),
     };
+    if let Some(title) = s.list_title {
+        return card_frame(
+            width,
+            height,
+            title,
+            rows,
+            s.in_use_filter,
+            toolbar.into(),
+            s.editor,
+        );
+    }
     let custom_list = s.list.is_some();
     let list_panel = if let Some(list) = s.list {
         container(
@@ -312,6 +332,78 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
         .width(width)
         .height(height)
         .into()
+}
+
+/// The card layout: the toolbar on a raised strip, the list as a titled
+/// card with its count, the editor's cards beside it.
+fn card_frame<'a>(
+    width: Length,
+    height: Length,
+    title: Cow<'static, str>,
+    rows: Vec<Element<'a, Message>>,
+    in_use_filter: Option<(bool, fn(bool) -> Message)>,
+    toolbar: Element<'a, Message>,
+    editor: Element<'a, Message>,
+) -> Element<'a, Message> {
+    use crate::ui::window::pdf_dialogs::{accent_text, card_style, well_style};
+    let count = rows.len();
+    let mut list = column![row![
+        text(title.to_uppercase()).size(10).style(accent_text),
+        Space::new().width(Length::Fill),
+        container(text(count.to_string()).size(10).style(accent_text))
+            .padding([0, 7])
+            .style(well_style),
+    ]
+    .align_y(iced::Center)]
+    .spacing(8);
+    if let Some((on, message)) = in_use_filter {
+        list = list.push(
+            checkbox(on)
+                .label(crate::tr!("style-manager", "only-used"))
+                .on_toggle(message)
+                .size(13)
+                .text_size(11),
+        );
+    }
+    let list = list.push(
+        container(scrollable(column(rows).spacing(2)).spacing(2).height(height))
+            .padding(4)
+            .width(Length::Fill)
+            .height(height)
+            .style(well_style),
+    );
+    let list = container(list)
+        .padding(10)
+        .width(Length::Fixed(200.0))
+        .height(height)
+        .style(card_style);
+    container(
+        column![
+            container(toolbar).padding(iced::Padding {
+                top: 12.0,
+                right: 16.0,
+                bottom: 0.0,
+                left: 16.0,
+            }),
+            row![list, editor]
+                .spacing(14)
+                .height(height)
+                .padding(iced::Padding {
+                    top: 14.0,
+                    right: 16.0,
+                    bottom: 16.0,
+                    left: 16.0,
+                }),
+        ]
+        .height(height),
+    )
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(theme.palette().background.base.color)),
+        ..Default::default()
+    })
+    .width(width)
+    .height(height)
+    .into()
 }
 
 /// Choose source styles, then confirm each name collision individually.

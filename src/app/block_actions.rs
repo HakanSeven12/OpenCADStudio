@@ -1287,6 +1287,12 @@ impl OpenCADStudio {
 #[doc(hidden)]
 pub struct BlockBenchHarness(OpenCADStudio);
 
+#[doc(hidden)]
+pub struct BlockBenchClipboard {
+    entities: Vec<EntityType>,
+    deps: crate::app::ClipboardDeps,
+}
+
 impl BlockBenchHarness {
     fn new_app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new();
@@ -1714,6 +1720,337 @@ impl BlockBenchHarness {
         self.0.close_block_edit(i, false);
         self.0.tabs[i].scene.entity_wires().len()
     }
+
+    pub fn setup_background(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> Self {
+        let mut app = Self::new_app();
+        let i = app.active_tab;
+        Self::populate_background(
+            &mut app.tabs[i].scene,
+            bg_lines,
+            other_blocks,
+            entities_per_block,
+            "OtherBlock",
+        );
+        let _ = app.tabs[i].scene.entity_wires();
+        Self(app)
+    }
+
+    pub fn setup_edit_block(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> (Self, Handle) {
+        let (app, member) =
+            Self::setup_edit_block_app(bg_lines, other_blocks, entities_per_block);
+        (Self(app), member)
+    }
+
+    pub fn define_block_owned_step(&mut self, step: usize, entities_per_block: usize) -> usize {
+        use document::entities::Line;
+        use document::types::Vector3;
+
+        let i = self.0.active_tab;
+        let ents = (0..entities_per_block)
+            .map(|j| {
+                EntityType::Line(Line::from_points(
+                    Vector3::new(0.0, (j as f64) * 0.5, 0.0),
+                    Vector3::new(6.0, (j as f64) * 0.5, 0.0),
+                ))
+            })
+            .collect();
+        let name = format!("OwnedBench_{step}");
+        self.0.tabs[i]
+            .scene
+            .define_block_from_owned_entities(ents, &name, glam::DVec3::ZERO)
+            .expect("define_block_from_owned_entities should succeed");
+        self.0.tabs[i].scene.entity_wires().len()
+    }
+
+    pub fn redefine_block_step(&mut self, step: usize, entities_per_block: usize) -> usize {
+        use document::entities::Line;
+        use document::types::Vector3;
+
+        let i = self.0.active_tab;
+        let delta = ((step + 1) as f64) * 0.1;
+        let ents = (0..entities_per_block)
+            .map(|j| {
+                EntityType::Line(Line::from_points(
+                    Vector3::new(0.0, (j as f64) * 0.5 + delta, 0.0),
+                    Vector3::new(8.0, (j as f64) * 0.5 + delta, 0.0),
+                ))
+            })
+            .collect();
+        self.0.tabs[i]
+            .scene
+            .redefine_block_raw("EditBenchBlock", Vector3::ZERO, ents)
+            .expect("redefine_block_raw should succeed");
+        self.0.tabs[i].scene.entity_wires().len()
+    }
+
+    pub fn rename_block_step(&mut self, step: usize) -> usize {
+        let i = self.0.active_tab;
+        let old = if step == 0 {
+            "EditBenchBlock".to_string()
+        } else {
+            format!("EditBenchBlock_{step}")
+        };
+        let new = format!("EditBenchBlock_{}", step + 1);
+        crate::scene::block_service::rename(&mut self.0.tabs[i].scene, &old, &new, &[])
+            .expect("block_service::rename should succeed");
+        self.0.tabs[i].scene.entity_wires().len()
+    }
+
+    pub fn setup_delete_blocks(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+        count: usize,
+    ) -> Self {
+        use document::entities::{Insert, Line};
+        use document::types::Vector3;
+
+        let mut app = Self::new_app();
+        let i = app.active_tab;
+        Self::populate_background(
+            &mut app.tabs[i].scene,
+            bg_lines,
+            other_blocks,
+            entities_per_block,
+            "OtherBlock",
+        );
+        for d in 0..count {
+            let name = format!("DelBench_{d}");
+            let ents = (0..entities_per_block)
+                .map(|j| {
+                    EntityType::Line(Line::from_points(
+                        Vector3::new(0.0, (j as f64) * 0.5, 0.0),
+                        Vector3::new(4.0, (j as f64) * 0.5, 0.0),
+                    ))
+                })
+                .collect();
+            app.tabs[i]
+                .scene
+                .define_block_raw(&name, Vector3::ZERO, ents);
+            let mut ins = Insert::new(&name, Vector3::new((d as f64) * 10.0, -90.0, 0.0));
+            ins.common.handle = Handle::NULL;
+            app.tabs[i].scene.add_entity(EntityType::Insert(ins));
+        }
+        let _ = app.tabs[i].scene.entity_wires();
+        Self(app)
+    }
+
+    pub fn delete_block_step(&mut self, step: usize) -> usize {
+        let i = self.0.active_tab;
+        let name = format!("DelBench_{step}");
+        crate::scene::block_service::delete(
+            &mut self.0.tabs[i].scene,
+            &name,
+            crate::scene::block_service::DeleteOptions {
+                force: true,
+                open_edits: &[],
+            },
+        )
+        .expect("block_service::delete should succeed");
+        self.0.tabs[i].scene.entity_wires().len()
+    }
+
+    pub fn setup_laydel_in_block(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+        count: usize,
+    ) -> Self {
+        use document::entities::{Insert, Line};
+        use document::tables::Layer;
+        use document::types::Vector3;
+
+        let mut app = Self::new_app();
+        let i = app.active_tab;
+        Self::populate_background(
+            &mut app.tabs[i].scene,
+            bg_lines,
+            other_blocks,
+            entities_per_block,
+            "OtherBlock",
+        );
+        let mut ents = Vec::with_capacity(count);
+        for k in 0..count {
+            let layer_name = format!("DelLayer_{k}");
+            let mut layer = Layer::new(&layer_name);
+            let lh = app.tabs[i].scene.document.allocate_handle();
+            layer.handle = lh;
+            let _ = app.tabs[i].scene.document.layers.add(layer);
+
+            let mut line = Line::from_points(
+                Vector3::new(0.0, (k as f64) * 0.5, 0.0),
+                Vector3::new(6.0, (k as f64) * 0.5, 0.0),
+            );
+            line.common.layer = layer_name;
+            ents.push(EntityType::Line(line));
+        }
+        app.tabs[i]
+            .scene
+            .define_block_raw("LaydelBenchBlock", Vector3::ZERO, ents);
+        let mut ins = Insert::new("LaydelBenchBlock", Vector3::new(0.0, -75.0, 0.0));
+        ins.common.handle = Handle::NULL;
+        app.tabs[i].scene.add_entity(EntityType::Insert(ins));
+        let _ = app.tabs[i].scene.entity_wires();
+        Self(app)
+    }
+
+    pub fn laydel_in_block_step(&mut self, step: usize) -> usize {
+        let cmd = format!("LAYDEL DelLayer_{step}");
+        let _ = self.0.dispatch_command(&cmd);
+        let i = self.0.active_tab;
+        self.0.tabs[i].scene.entity_wires().len()
+    }
+
+    pub fn update_block_member_step(&mut self, member: Handle, step: usize) -> usize {
+        let i = self.0.active_tab;
+        let mut updated = self.0.tabs[i]
+            .scene
+            .document
+            .get_entity(member)
+            .expect("block member exists")
+            .clone();
+        if let EntityType::Line(ref mut l) = updated {
+            l.end.y = ((step % 17) as f64) + 1.5;
+        }
+        self.0.tabs[i].scene.update_entity(updated);
+        self.0.tabs[i].scene.entity_wires().len()
+    }
+
+    pub fn setup_paste_new_block(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+        count: usize,
+    ) -> (Self, Vec<BlockBenchClipboard>) {
+        use document::entities::{Insert, Line};
+        use document::types::Vector3;
+
+        let mut app = Self::new_app();
+        let target = app.active_tab;
+        Self::populate_background(
+            &mut app.tabs[target].scene,
+            bg_lines,
+            other_blocks,
+            entities_per_block,
+            "OtherBlock",
+        );
+        let _ = app.tabs[target].scene.entity_wires();
+
+        app.tabs
+            .push(crate::app::tab_document::DocumentTab::new_drawing(99));
+        let source = app.tabs.len() - 1;
+        let mut snapshots = Vec::with_capacity(count);
+        for k in 0..count {
+            let name = format!("PasteBench_{k}");
+            let ents = (0..entities_per_block)
+                .map(|j| {
+                    EntityType::Line(Line::from_points(
+                        Vector3::new(0.0, (j as f64) * 0.5, 0.0),
+                        Vector3::new(7.0, (j as f64) * 0.5, 0.0),
+                    ))
+                })
+                .collect();
+            app.tabs[source]
+                .scene
+                .define_block_raw(&name, Vector3::ZERO, ents);
+            let mut ins = Insert::new(&name, Vector3::ZERO);
+            ins.common.handle = Handle::NULL;
+            let ins_h = app.tabs[source].scene.add_entity(EntityType::Insert(ins));
+            let (entities, deps) = crate::app::command_driver::clipboard::copy_to_clipboard_kernel(
+                &app.tabs[source].scene.document,
+                &[ins_h],
+            );
+            snapshots.push(BlockBenchClipboard { entities, deps });
+        }
+        app.tabs.pop();
+        app.active_tab = target;
+        (Self(app), snapshots)
+    }
+
+    pub fn paste_new_block_step(&mut self, snap: &BlockBenchClipboard, step: usize) -> usize {
+        let i = self.0.active_tab;
+        self.0.clipboard = snap.entities.clone();
+        self.0.clipboard_deps = snap.deps.clone();
+        let _ = self.0.finalize_paste(
+            i,
+            Some(crate::command::EntityTransform::Translate(
+                glam::DVec3::new((step as f64) * 15.0, 20.0, 0.0),
+            )),
+        );
+        self.0.tabs[i].scene.entity_wires().len()
+    }
+
+    pub fn setup_visibility_reveal(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> Self {
+        let (mut scene, _insert, def, _param) = crate::scene::Scene::bench_setup_visibility_scene(
+            bg_lines,
+            other_blocks,
+            entities_per_block,
+        );
+        let _ = scene.entity_wires();
+        scene.block_edit_block = Some(def);
+        let _ = scene.entity_wires();
+        let mut app = Self::new_app();
+        let i = app.active_tab;
+        app.tabs[i].scene = scene;
+        Self(app)
+    }
+
+    pub fn toggle_visibility_reveal_step(&mut self, step: usize) -> usize {
+        let i = self.0.active_tab;
+        self.0.tabs[i]
+            .scene
+            .set_block_visibility_reveal(step % 2 == 0);
+        self.0.tabs[i].scene.entity_wires().len()
+    }
+
+    pub fn setup_construction_shown(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> (Self, Handle) {
+        let (mut app, _) = Self::setup_edit_block_app(bg_lines, other_blocks, entities_per_block);
+        let i = app.active_tab;
+        let record = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("EditBenchBlock")
+            .expect("EditBenchBlock exists");
+        let def = record.handle;
+        let members = record.entity_handles.clone();
+        let half = members.len() / 2;
+        crate::scene::block_construction::set(
+            &mut app.tabs[i].scene.document,
+            def,
+            &members[half..],
+            true,
+            "0",
+        )
+        .expect("mark construction geometry");
+        app.tabs[i].scene.block_edit_block = Some(def);
+        let _ = app.tabs[i].scene.entity_wires();
+        (Self(app), def)
+    }
+
+    pub fn toggle_construction_shown_step(&mut self, def_block: Handle, step: usize) -> usize {
+        let i = self.0.active_tab;
+        self.0.tabs[i]
+            .scene
+            .set_construction_shown(def_block, step % 2 == 1);
+        self.0.tabs[i].scene.entity_wires().len()
+    }
 }
 
 /// Grip shape by parameter kind: flip = arrow, rotation = circle,
@@ -1941,5 +2278,424 @@ mod item1_incremental_tests {
                 .defn_ptr("CycleOtherBlock_0")
                 .unwrap()
         );
+    }
+}
+
+#[cfg(test)]
+mod tier1_group1_incremental_tests {
+    use super::*;
+
+    fn first_top_level_line(app: &OpenCADStudio) -> Handle {
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| match e {
+                EntityType::Line(l) if l.start.x == 100.0 => Some(l.common.handle),
+                _ => None,
+            })
+            .expect("top-level line exists")
+    }
+
+    #[test]
+    fn define_block_owned_preserves_unrelated_blocks_and_top_level_cache() {
+        let mut harness = BlockBenchHarness::setup_background(5, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.define_block_owned_step(0, 3);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        let cache_after = harness.0.tabs[i].scene.active_block_cache_arc();
+        assert_eq!(keep_before, cache_after.defn_ptr("OtherBlock_0").unwrap());
+        assert!(cache_after.defn_ptr("OwnedBench_0").is_some());
+    }
+
+    #[test]
+    fn redefine_block_preserves_unrelated_blocks_and_rebuilds_target() {
+        let (mut harness, _) = BlockBenchHarness::setup_edit_block(5, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        let target_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("EditBenchBlock")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.redefine_block_step(0, 3);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        let cache_after = harness.0.tabs[i].scene.active_block_cache_arc();
+        assert_eq!(keep_before, cache_after.defn_ptr("OtherBlock_0").unwrap());
+        assert_ne!(
+            target_before,
+            cache_after.defn_ptr("EditBenchBlock").unwrap()
+        );
+        let inc_non_empty = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        harness.0.tabs[i].scene.bump_geometry();
+        let full_non_empty = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        assert_eq!(inc_non_empty, full_non_empty);
+    }
+
+    #[test]
+    fn rename_block_preserves_unrelated_blocks_and_top_level_cache() {
+        let (mut harness, _) = BlockBenchHarness::setup_edit_block(5, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.rename_block_step(0);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        let cache_after = harness.0.tabs[i].scene.active_block_cache_arc();
+        assert_eq!(keep_before, cache_after.defn_ptr("OtherBlock_0").unwrap());
+        assert!(cache_after.defn_ptr("EditBenchBlock").is_none());
+        assert!(cache_after.defn_ptr("EditBenchBlock_1").is_some());
+    }
+
+    #[test]
+    fn delete_block_preserves_unrelated_blocks_and_top_level_cache() {
+        let mut harness = BlockBenchHarness::setup_delete_blocks(5, 2, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.delete_block_step(0);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        let cache_after = harness.0.tabs[i].scene.active_block_cache_arc();
+        assert_eq!(keep_before, cache_after.defn_ptr("OtherBlock_0").unwrap());
+        assert!(cache_after.defn_ptr("DelBench_0").is_none());
+        assert!(cache_after.defn_ptr("DelBench_1").is_some());
+        let inc_non_empty = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        harness.0.tabs[i].scene.bump_geometry();
+        let full_non_empty = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        assert_eq!(inc_non_empty, full_non_empty);
+    }
+}
+
+#[cfg(test)]
+mod tier1_group2_incremental_tests {
+    use super::*;
+
+    fn first_top_level_line(app: &OpenCADStudio) -> Handle {
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| match e {
+                EntityType::Line(l) if l.start.x == 100.0 => Some(l.common.handle),
+                _ => None,
+            })
+            .expect("top-level line exists")
+    }
+
+    #[test]
+    fn laydel_in_block_preserves_unrelated_blocks_and_top_level_cache() {
+        let mut harness = BlockBenchHarness::setup_laydel_in_block(5, 2, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        let target_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("LaydelBenchBlock")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.laydel_in_block_step(0);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        let cache_after = harness.0.tabs[i].scene.active_block_cache_arc();
+        assert_eq!(keep_before, cache_after.defn_ptr("OtherBlock_0").unwrap());
+        assert_ne!(
+            target_before,
+            cache_after.defn_ptr("LaydelBenchBlock").unwrap()
+        );
+        let inc_non_empty = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        harness.0.tabs[i].scene.bump_geometry();
+        let full_non_empty = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        assert_eq!(inc_non_empty, full_non_empty);
+    }
+
+    #[test]
+    fn update_block_member_updates_block_cache_and_preserves_unrelated() {
+        let (mut harness, member) = BlockBenchHarness::setup_edit_block(5, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        let target_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("EditBenchBlock")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.update_block_member_step(member, 1);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        let cache_after = harness.0.tabs[i].scene.active_block_cache_arc();
+        assert_eq!(keep_before, cache_after.defn_ptr("OtherBlock_0").unwrap());
+        assert_ne!(
+            target_before,
+            cache_after.defn_ptr("EditBenchBlock").unwrap()
+        );
+    }
+
+    #[test]
+    fn erase_entities_in_block_updates_block_cache_and_preserves_unrelated() {
+        let (mut harness, member) = BlockBenchHarness::setup_edit_block(5, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        let target_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("EditBenchBlock")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.0.tabs[i].scene.erase_entities(&[member]);
+        let _ = harness.0.tabs[i].scene.entity_wires();
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        let cache_after = harness.0.tabs[i].scene.active_block_cache_arc();
+        assert_eq!(keep_before, cache_after.defn_ptr("OtherBlock_0").unwrap());
+        assert_ne!(
+            target_before,
+            cache_after.defn_ptr("EditBenchBlock").unwrap()
+        );
+    }
+
+    #[test]
+    fn paste_new_block_preserves_unrelated_blocks_and_top_level_cache() {
+        let (mut harness, snaps) = BlockBenchHarness::setup_paste_new_block(5, 2, 2, 1);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.paste_new_block_step(&snaps[0], 0);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        let cache_after = harness.0.tabs[i].scene.active_block_cache_arc();
+        assert_eq!(keep_before, cache_after.defn_ptr("OtherBlock_0").unwrap());
+        assert!(cache_after.defn_ptr("PasteBench_0").is_some());
+        let inc_non_empty = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        harness.0.tabs[i].scene.bump_geometry();
+        let full_non_empty = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        assert_eq!(inc_non_empty, full_non_empty);
+    }
+}
+
+#[cfg(test)]
+mod tier2_bedit_authoring_toggle_tests {
+    use super::*;
+
+    fn first_top_level_line(app: &OpenCADStudio) -> Handle {
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| match e {
+                EntityType::Line(l) if l.start.x == 100.0 => Some(l.common.handle),
+                _ => None,
+            })
+            .expect("top-level line exists")
+    }
+
+    #[test]
+    fn toggle_visibility_reveal_preserves_unrelated_blocks_and_top_level_cache() {
+        let mut harness = BlockBenchHarness::setup_visibility_reveal(5, 2, 4);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.toggle_visibility_reveal_step(0);
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("OtherBlock_0")
+                .unwrap()
+        );
+        let revealed_count = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+
+        harness.toggle_visibility_reveal_step(1);
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("OtherBlock_0")
+                .unwrap()
+        );
+        let hidden_inc = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        assert!(revealed_count > hidden_inc);
+
+        harness.0.tabs[i].scene.bump_geometry();
+        let hidden_full = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        assert_eq!(hidden_inc, hidden_full);
+    }
+
+    #[test]
+    fn toggle_construction_shown_preserves_unrelated_blocks_and_top_level_cache() {
+        let (mut harness, def) = BlockBenchHarness::setup_construction_shown(5, 2, 4);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.toggle_construction_shown_step(def, 0);
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("OtherBlock_0")
+                .unwrap()
+        );
+        let hidden_inc = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+
+        harness.toggle_construction_shown_step(def, 1);
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("OtherBlock_0")
+                .unwrap()
+        );
+        let shown_inc = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        assert!(shown_inc > hidden_inc);
+
+        harness.0.tabs[i].scene.bump_geometry();
+        let shown_full = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        assert_eq!(shown_inc, shown_full);
     }
 }

@@ -1800,6 +1800,119 @@ impl OpenCADStudio {
         Some(self.feed_command(StepInput::SelectionComplete(handles)))
     }
 
+    /// The prompt a box clicked in empty space shows while it waits for its
+    /// opposite corner: the corner, or a Fence / WPolygon / CPolygon that
+    /// starts from the clicked point.
+    pub(in crate::app) fn push_box_corner_prompt(&mut self) {
+        self.command_line.push_info(&Self::box_corner_prompt());
+    }
+
+    fn box_corner_prompt() -> String {
+        crate::t!("Specify opposite corner or [Fence/WPolygon/CPolygon]:").into_owned()
+    }
+
+    /// Whether a clicked box waits for its opposite corner where a Fence,
+    /// WPolygon or CPolygon may still take its place: with no command
+    /// running, or in the generic object gathering. A box opened by a typed
+    /// corner offers none, and a command with a Fence of its own (TRIM) reads
+    /// the word itself.
+    pub(in crate::app) fn box_corner_prompt_pending(&self) -> bool {
+        if self.typed_window_corner.is_some() {
+            return false;
+        }
+        let tab = &self.tabs[self.active_tab];
+        let open = {
+            let selection = tab.scene.selection.borrow();
+            let gesture = &selection.gesture;
+            gesture.box_anchor.is_some()
+                && gesture.box_anchor_world.is_some()
+                && !gesture.poly_active
+        };
+        open && match tab.active_cmd.as_ref() {
+            None => true,
+            Some(command) => command.name() == "SELECT" && command.is_selection_gathering(),
+        }
+    }
+
+    /// The prompt and the options of that box, for the command line to pin
+    /// and to show as it does a command step's: the three paths as buttons,
+    /// their shortcuts marked.
+    pub(in crate::app) fn box_corner_step(
+        &self,
+    ) -> Option<(String, Vec<crate::command::CmdOption>)> {
+        use crate::command::CmdOption;
+        self.box_corner_prompt_pending().then(|| {
+            (
+                Self::box_corner_prompt(),
+                vec![
+                    CmdOption::new(crate::t!("Fence").as_ref(), "F"),
+                    CmdOption::new(crate::t!("WPolygon").as_ref(), "WP"),
+                    CmdOption::new(crate::t!("CPolygon").as_ref(), "CP"),
+                ],
+            )
+        })
+    }
+
+    /// Fence / WPolygon / CPolygon typed while a clicked box waits for its
+    /// opposite corner: the box goes and the path starts at the clicked
+    /// point, the next clicks adding its vertices and Enter applying it, as
+    /// the reference does. With no command running the path is picked by a
+    /// SELECT that ends with it, so the objects stay selected as a box would
+    /// leave them. `None` when no clicked box is open or the token is none of
+    /// the three; a box opened by a typed corner refuses them, as the
+    /// reference does.
+    pub(in crate::app) fn try_box_path_keyword(&mut self) -> Option<Task<Message>> {
+        use crate::modules::draw::select::{SelectObjectsCommand, IMPLIED_PATH_DONE};
+        let i = self.active_tab;
+        let word = self
+            .command_line
+            .input
+            .trim()
+            .trim_start_matches('_')
+            .to_ascii_uppercase();
+        if !matches!(
+            word.as_str(),
+            "F" | "FENCE" | "WP" | "WPOLYGON" | "CP" | "CPOLYGON"
+        ) || !self.box_corner_prompt_pending()
+        {
+            return None;
+        }
+        let anchor = self.tabs[i]
+            .scene
+            .selection
+            .borrow()
+            .gesture
+            .box_anchor_world?;
+        let implied = self.tabs[i].active_cmd.is_none();
+        let mut command: Box<dyn crate::command::CadCommand> = match self.tabs[i].active_cmd.take()
+        {
+            Some(command) => command,
+            None => Box::new(SelectObjectsCommand::routed("SELECT", IMPLIED_PATH_DONE)),
+        };
+        let started = command.on_text_input(&word).is_some() && !command.is_selection_gathering();
+        if !started {
+            if !implied {
+                self.tabs[i].active_cmd = Some(command);
+            }
+            return None;
+        }
+        let _ = command.on_point(anchor);
+        self.tabs[i].active_cmd = Some(command);
+        self.tabs[i]
+            .scene
+            .selection
+            .borrow_mut()
+            .gesture
+            .clear_left();
+        self.last_point = Some(anchor);
+        self.command_line.input.clear();
+        self.command_line.answer_last_prompt(&word);
+        if let Some(prompt) = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt()) {
+            self.command_line.push_info(&prompt);
+        }
+        Some(Task::none())
+    }
+
     /// A typed coordinate in world space: relative to the last point when it
     /// starts with `@`, through the active UCS otherwise.
     fn typed_wcs(&self, i: usize, token: &str) -> Option<glam::DVec3> {

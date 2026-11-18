@@ -1078,7 +1078,7 @@ fn region_from_loops(spec: &Value) -> Parsed<document::EntityType> {
         curves.append(&mut pieces);
     }
     let plane = plane.expect("at least one loop");
-    let body = ocs_brep::planar_region(plane, &curves).ok_or_else(|| {
+    let body = ocs_solid::model::planar_region(plane, &curves).ok_or_else(|| {
         invalid("the loops do not bound a region (self-intersecting, or a hole outside the boundary)")
     })?;
     let sat = crate::scene::convert::acis_export::solid_to_sat(&body)

@@ -39,34 +39,12 @@ pub fn config_dir() -> Option<PathBuf> {
 }
 
 /// The drawing templates folder (`templates` in the config folder), created
-/// on first use with the shipped starter templates: NEW opens its template
-/// picker here unless the default template lives somewhere else.
+/// on first use: NEW opens its template picker here unless the default
+/// template lives somewhere else.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn templates_dir() -> Option<PathBuf> {
-    const SHIPPED: [(&str, &[u8]); 5] = [
-        ("OCS.dwt", include_bytes!("../assets/templates/OCS.dwt")),
-        ("OCSISO.dwt", include_bytes!("../assets/templates/OCSISO.dwt")),
-        (
-            "OCSISO_millimeters.dwt",
-            include_bytes!("../assets/templates/OCSISO_millimeters.dwt"),
-        ),
-        (
-            "OCSISO_centimeters.dwt",
-            include_bytes!("../assets/templates/OCSISO_centimeters.dwt"),
-        ),
-        (
-            "OCSISO_meters.dwt",
-            include_bytes!("../assets/templates/OCSISO_meters.dwt"),
-        ),
-    ];
     let dir = config_dir()?.join("templates");
     std::fs::create_dir_all(&dir).ok()?;
-    for (name, bytes) in SHIPPED {
-        let path = dir.join(name);
-        if !path.exists() {
-            let _ = std::fs::write(path, bytes);
-        }
-    }
     Some(dir)
 }
 

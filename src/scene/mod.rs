@@ -196,8 +196,8 @@ pub(crate) fn tessellate_entity(
                 // wire converter emits nothing. Decode every exact boundary,
                 // including holes, then sample only for this cached display.
                 let mut boundaries = Vec::new();
-                if let Ok(ocs_brep::LoftSection::Profile { plane, wires, .. }) =
-                    ocs_acis::loft_section_geometry(&[
+                if let Ok(ocs_solid::LoftSection::Profile { plane, wires, .. }) =
+                    ocs_solid::loft_section_geometry(&[
                         document::entities::EmbeddedEntity::Region(region.clone()),
                     ])
                 {
@@ -328,9 +328,9 @@ impl Scene {
     /// profile of the mesh build at the same epoch. No body ⇒ no centres.
     fn solid_face_centers(
         entity: &EntityType,
-        cached: Option<&ocs_brep::Body>,
+        cached: Option<&ocs_solid::model::Brep>,
     ) -> Vec<glam::DVec3> {
-        use crate::scene::convert::solid3d_tess::{kernel_body, kernel_region_body};
+        use crate::scene::convert::solid3d_tess::{solid_record, region_record};
         use crate::scene::model::solid_model::face_centers;
         if let Some(body) = cached {
             return face_centers(body)
@@ -339,8 +339,8 @@ impl Scene {
                 .collect();
         }
         match entity {
-            EntityType::Solid3D(s) => kernel_body(s),
-            EntityType::Region(r) => kernel_region_body(r),
+            EntityType::Solid3D(s) => solid_record(s),
+            EntityType::Region(r) => region_record(r),
             _ => None,
         }
         .map(|body| face_centers(&body))
@@ -2773,7 +2773,7 @@ pub struct Scene {
     constraint_hover_wires: Vec<WireModel>,
     /// Dynamic UCS: the outline of the planar solid face a first point
     /// would align the UCS to, with the solid and face it outlines.
-    ducs_face: Option<(Handle, ocs_brep::FaceKey)>,
+    ducs_face: Option<(Handle, u32)>,
     ducs_face_wires: Vec<WireModel>,
     /// Control nets shown by CVSHOW, by surface.
     cv_net_wires: HashMap<Handle, Vec<WireModel>>,
@@ -3056,7 +3056,7 @@ pub struct Scene {
     /// INSERT scale renders at the right size. (#123)
     pub block_meshes: HashMap<Handle, MeshLodSet>,
     /// Kernel B-reps used by solid operations and exact-geometry saves.
-    pub solid_models: HashMap<Handle, ocs_brep::Body>,
+    pub solid_models: HashMap<Handle, ocs_solid::model::Brep>,
     /// GPU render data for raster images (RasterImage entities), keyed by handle.
     pub images: HashMap<Handle, ImageModel>,
     /// The viewport that is currently "entered" (MSPACE mode).
@@ -3591,13 +3591,14 @@ fn section_plane(
 }
 
 fn keep_section_positive(
-    body: &ocs_brep::Body,
+    body: &ocs_solid::model::Brep,
     plane: ocs_geom::space::Plane,
-) -> Result<Option<ocs_brep::Body>, ()> {
-    match ocs_brep::slice_by_plane(body, plane) {
-        Ok(Some(result)) => Ok(Some(result.positive)),
+) -> Result<Option<ocs_solid::model::Brep>, ()> {
+    let normal = plane.normal().ok_or(())?;
+    match ocs_solid::model::slice(body, plane.origin, normal) {
+        Ok(Some((_, front))) => Ok(Some(front)),
         Ok(None) => {
-            let bounds = ocs_brep::body_bounds(body).ok_or(())?;
+            let bounds = ocs_solid::model::aabb(body).ok_or(())?;
             let centre = [
                 (bounds.min[0] + bounds.max[0]) * 0.5,
                 (bounds.min[1] + bounds.max[1]) * 0.5,
@@ -6064,7 +6065,7 @@ impl Scene {
     pub(crate) fn prepare_solid_model_display(
         &self,
         handle: Handle,
-        solid: &ocs_brep::Body,
+        solid: &ocs_solid::model::Brep,
     ) -> Option<(MeshLodSet, Vec<document::entities::Wire>, [f64; 3])> {
         let color = self
             .document
@@ -6122,7 +6123,7 @@ impl Scene {
     pub(crate) fn register_prepared_solid_model(
         &mut self,
         handle: Handle,
-        solid: ocs_brep::Body,
+        solid: ocs_solid::model::Brep,
         display: (MeshLodSet, Vec<document::entities::Wire>, [f64; 3]),
     ) -> bool {
         let (mut set, wires, center) = display;
@@ -6177,7 +6178,7 @@ impl Scene {
 
     /// Cache and display a Model-tab kernel solid. A failed preparation leaves
     /// the previous entity, body and mesh untouched.
-    pub fn register_solid_model(&mut self, handle: Handle, solid: ocs_brep::Body) -> bool {
+    pub fn register_solid_model(&mut self, handle: Handle, solid: ocs_solid::model::Brep) -> bool {
         let Some(display) = self.prepare_solid_model_display(handle, &solid) else {
             return false;
         };
@@ -8933,6 +8934,11 @@ impl Scene {
         handles.extend(self.box_hover_highlights.iter().copied());
         handles.extend(self.filter_preview_highlights.iter().copied());
         handles
+    }
+
+    #[cfg(test)]
+    pub(crate) fn box_hover_highlights(&self) -> &HashSet<Handle> {
+        &self.box_hover_highlights
     }
 
     /// Roll over everything a selection box still being drawn would catch,
@@ -11996,7 +12002,7 @@ impl Scene {
         let mut redo: HashSet<Handle> = HashSet::default();
         let mut inserts: HashSet<Handle> = HashSet::default();
         for (handle, _) in &changes {
-            if self.meshes.contains_key(handle) {
+            if self.meshes.contains_key(handle) || self.block_meshes.contains_key(handle) {
                 return None;
             }
             match self.document.get_entity(*handle) {
@@ -12652,7 +12658,7 @@ impl Scene {
         &self,
         handle: Handle,
         section: &LiveSection,
-    ) -> Result<Option<ocs_brep::Body>, ()> {
+    ) -> Result<Option<ocs_solid::model::Brep>, ()> {
         let body = self.section_source_body(handle).ok_or(())?;
         Self::section_body(&body, &section.data, section.slice_depth, None)
     }
@@ -12708,22 +12714,22 @@ impl Scene {
     fn section_source_body(
         &self,
         handle: Handle,
-    ) -> Option<std::borrow::Cow<'_, ocs_brep::Body>> {
+    ) -> Option<std::borrow::Cow<'_, ocs_solid::model::Brep>> {
         if let Some(body) = self.solid_models.get(&handle) {
             return Some(std::borrow::Cow::Borrowed(body));
         }
         let body = match self.document.get_entity(handle) {
             Some(EntityType::Solid3D(solid)) => {
-                crate::scene::convert::solid3d_tess::kernel_body(solid)
+                crate::scene::convert::solid3d_tess::solid_record(solid)
             }
             Some(EntityType::Region(region)) => {
-                crate::scene::convert::solid3d_tess::kernel_region_body(region)
+                crate::scene::convert::solid3d_tess::region_record(region)
             }
             Some(EntityType::Body(body)) => {
-                crate::scene::convert::solid3d_tess::kernel_acis_body(&body.acis_data)
+                crate::scene::convert::solid3d_tess::acis_record(&body.acis_data)
             }
             Some(EntityType::Surface(surface)) => {
-                crate::scene::convert::solid3d_tess::kernel_surface_body(surface)
+                crate::scene::convert::solid3d_tess::surface_record(surface)
             }
             // A mesh that closes a volume is cut as the solid it bounds.
             Some(
@@ -12737,11 +12743,11 @@ impl Scene {
     }
 
     fn section_body(
-        body: &ocs_brep::Body,
+        body: &ocs_solid::model::Brep,
         data: &document::entities::SectionObjectData,
         slice_depth: Option<f64>,
         body_to_world: Option<&document::types::Transform>,
-    ) -> Result<Option<ocs_brep::Body>, ()> {
+    ) -> Result<Option<ocs_solid::model::Brep>, ()> {
         let planes = Self::section_planes(data, slice_depth, body_to_world).ok_or(())?;
         let mut current = body.clone();
         for plane in planes {
@@ -18492,10 +18498,10 @@ mod section_tests {
         }
     }
 
-    fn bounds(body: Option<ocs_brep::Body>) -> ([f64; 3], [f64; 3]) {
+    fn bounds(body: Option<ocs_solid::model::Brep>) -> ([f64; 3], [f64; 3]) {
         let body = body.expect("section should retain material");
-        assert!(body.validate().is_empty());
-        let bounds = ocs_brep::body_bounds(&body).expect("sectioned body should be bounded");
+        assert!(ocs_solid::model::check(&body).is_empty());
+        let bounds = ocs_solid::model::aabb(&body).expect("sectioned body should be bounded");
         (bounds.min, bounds.max)
     }
 
@@ -18507,7 +18513,7 @@ mod section_tests {
 
     #[test]
     fn kernel_clipping_obeys_plane_slice_boundary_and_volume_limits() {
-        let body = ocs_brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
+        let body = ocs_solid::model::make_box([0.0; 3], [10.0; 3]).unwrap();
 
         let (min, max) = bounds(Scene::section_body(&body, &section(1, 0.0), None, None).unwrap());
         assert_near(min, [0.0, 0.0, 0.0]);
@@ -18529,7 +18535,7 @@ mod section_tests {
 
     #[test]
     fn instance_transform_pulls_the_section_plane_into_body_space() {
-        let body = ocs_brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
+        let body = ocs_solid::model::make_box([0.0; 3], [10.0; 3]).unwrap();
         let transform =
             document::types::Transform::from_scaling(document::types::Vector3::new(2.0, 1.0, 1.0))
                 .then(&document::types::Transform::from_translation(
@@ -18595,7 +18601,7 @@ mod section_tests {
 
     #[test]
     fn live_section_rebuilds_an_uncached_persisted_solid() {
-        let body = ocs_brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
+        let body = ocs_solid::model::make_box([0.0; 3], [10.0; 3]).unwrap();
         let sat = crate::scene::convert::acis_export::solid_to_sat(&body).unwrap();
         let mut solid = Solid3D::new();
         solid.set_sat_document(&sat);
@@ -21363,7 +21369,7 @@ mod update_entities_batch_tests {
     }
 
     #[test]
-    fn update_entities_batch_of_block_sentinels_collapses_to_one_full_delta() {
+    fn update_entities_batch_of_block_sentinels_collapses_to_one_delta() {
         // Batched path: one coarse publish for the whole set.
         let (mut batched, bh, be, _) = scene_with_sentinels_and_line();
         let before = delta_count(&batched);
@@ -21377,10 +21383,13 @@ mod update_entities_batch_tests {
                 1,
                 "batched sentinels must publish exactly one geometry delta"
             );
-            assert!(
-                ring.back().unwrap().full,
-                "the batched delta must be full (bump_geometry)"
-            );
+            let delta = ring.back().unwrap();
+            for h in [bh, be] {
+                assert!(
+                    delta.full || delta.changes.iter().any(|(c, _)| *c == h),
+                    "the batched delta must name sentinel {h:?}"
+                );
+            }
         }
 
         // Legacy path: each sentinel bumps on its own.
@@ -21407,9 +21416,9 @@ mod update_entities_batch_tests {
     }
 
     #[test]
-    fn update_entities_mixed_batch_matches_legacy_states_with_one_coarse_delta() {
-        // Batched: the sentinel's coarse (full) delta subsumes the line's
-        // would-be per-entity delta, and both slots are still written.
+    fn update_entities_mixed_batch_matches_legacy_states_with_one_delta() {
+        // Batched: one delta covers the sentinel and the line, and both slots
+        // are still written.
         let (mut batched, bh, _, lh) = scene_with_sentinels_and_line();
         let before = delta_count(&batched);
         let updates = vec![snapshot(&batched, bh), edited_line(&batched, lh)];
@@ -21422,10 +21431,16 @@ mod update_entities_batch_tests {
                 1,
                 "mixed batch with a sentinel must publish one coarse delta"
             );
-            assert!(ring.back().unwrap().full, "coarse delta must be full");
+            let delta = ring.back().unwrap();
+            for h in [bh, lh] {
+                assert!(
+                    delta.full || delta.changes.iter().any(|(c, _)| *c == h),
+                    "the batched delta must name {h:?}"
+                );
+            }
         }
 
-        // Legacy: full delta for the sentinel + per-entity delta for the line.
+        // Legacy: one delta for the sentinel + one for the line.
         let (mut legacy, bh, _, lh) = scene_with_sentinels_and_line();
         let before = delta_count(&legacy);
         let u1 = snapshot(&legacy, bh);

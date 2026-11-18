@@ -638,6 +638,11 @@ impl CommandLine {
         self.step_options = opts;
     }
 
+    #[cfg(test)]
+    pub fn step_options(&self) -> &[CmdOption] {
+        &self.step_options
+    }
+
     pub fn set_cliprompt_lines(&mut self, n: u8) {
         self.cliprompt_lines = n.min(50);
     }

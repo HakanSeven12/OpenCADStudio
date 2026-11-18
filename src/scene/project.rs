@@ -856,17 +856,13 @@ impl Scene {
                     let axes = [Vector3::UNIT_X, Vector3::UNIT_Y, Vector3::UNIT_Z]
                         .map(|axis| xform.apply_rotation(axis))
                         .map(|v| [v.x, v.y, v.z]);
-                    ocs_brep::mesh::transform_silhouette_affine(
-                        &generator.source,
-                        axes,
-                        [origin.x, origin.y, origin.z],
-                    )
+                    generator.source.transformed(axes, [origin.x, origin.y, origin.z])
                 });
                 if set.instance_transform.is_some() && placed.is_none() {
                     continue;
                 }
                 let source = placed.as_ref().unwrap_or(&generator.source);
-                for pair in ocs_brep::mesh::silhouette(source, view).chunks_exact(2) {
+                for pair in source.outline(view).chunks_exact(2) {
                     points.extend([pair[0], pair[1], [f64::NAN; 3]]);
                 }
             }

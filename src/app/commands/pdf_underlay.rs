@@ -109,7 +109,7 @@ impl OpenCADStudio {
                 continue;
             };
             let cloud = crate::scene::model::point_cloud::resolve_source(document, data)
-                .and_then(|path| crate::scene::model::point_cloud::load(&path));
+                .and_then(|path| crate::scene::model::point_cloud::cached(&path));
             let supported = match (stylization, &cloud) {
                 (6, _) => false,
                 (_, None) => true,

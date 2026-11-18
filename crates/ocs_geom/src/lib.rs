@@ -21,3 +21,7 @@ pub mod tessellation;
 
 #[cfg(feature = "geom2d")]
 pub mod geom2d;
+
+/// 2D curves of every kind as rational B-splines, and placed in space.
+#[cfg(feature = "geom2d")]
+pub mod rational;

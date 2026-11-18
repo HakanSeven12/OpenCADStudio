@@ -262,6 +262,18 @@ impl Scene {
         true
     }
 
+    fn block_def_owner_if_not_model(&self, owner: Handle) -> Option<Handle> {
+        if owner.is_null() || owner == self.model_space_block_handle() {
+            return None;
+        }
+        let layout_blocks = self.layout_block_handles();
+        self.document
+            .block_records
+            .iter()
+            .find(|r| r.handle == owner && Self::is_block_definition_record(r, &layout_blocks))
+            .map(|r| r.handle)
+    }
+
     pub fn add_entity(&mut self, entity: EntityType) -> Handle {
         self.add_entity_internal(entity, true)
     }
@@ -272,24 +284,41 @@ impl Scene {
     pub fn add_entities(&mut self, entities: Vec<EntityType>) -> Vec<Handle> {
         let mut handles = Vec::with_capacity(entities.len());
         let mut changes = Vec::with_capacity(entities.len());
-        let mut needs_geometry_bump = false;
+        let mut block_owners = Vec::new();
+        let in_bedit = self.block_edit_block.is_some();
 
         for entity in entities {
             let affects_blocks = matches!(&entity, EntityType::Block(_) | EntityType::BlockEnd(_));
+            let explicit_owner = entity.common().owner_handle;
+            let explicit_block_owner = if !affects_blocks && !in_bedit {
+                self.block_def_owner_if_not_model(explicit_owner)
+            } else {
+                None
+            };
             let handle = self.add_entity_internal(entity, false);
             handles.push(handle);
             if handle.is_null() {
                 continue;
             }
+            changes.push((handle, ChangeKind::Added));
             if affects_blocks {
-                needs_geometry_bump = true;
-            } else {
-                changes.push((handle, ChangeKind::Added));
+                if !explicit_owner.is_null() {
+                    block_owners.push(explicit_owner);
+                } else if let Some(owner) = self
+                    .document
+                    .get_entity(handle)
+                    .map(|e| e.common().owner_handle)
+                    .filter(|oh| !oh.is_null())
+                {
+                    block_owners.push(owner);
+                }
+            } else if let Some(br) = explicit_block_owner {
+                block_owners.push(br);
             }
         }
 
-        if needs_geometry_bump {
-            self.bump_geometry();
+        if !block_owners.is_empty() {
+            self.bump_entities_restyled_with_block_deps(&changes, &block_owners, &[]);
         } else if !changes.is_empty() {
             self.bump_entities(&changes);
         }
@@ -436,6 +465,11 @@ impl Scene {
         // the block cache. A top-level INSERT merely references an existing
         // definition, so adding it can patch just that new render handle.
         let affects_blocks = matches!(&entity, EntityType::Block(_) | EntityType::BlockEnd(_));
+        let explicit_block_owner = if !affects_blocks && self.block_edit_block.is_none() {
+            self.block_def_owner_if_not_model(entity.common().owner_handle)
+        } else {
+            None
+        };
         // INSERT invalidates rendered block instances, but it does not mutate
         // the referenced block definition. Only block sentinels require a
         // structure image for undo; ordinary owner membership is intrinsic add
@@ -610,7 +644,31 @@ impl Scene {
             }
             if bump {
                 if affects_blocks {
-                    self.bump_geometry();
+                    let owner = self
+                        .document
+                        .get_entity(handle)
+                        .map(|e| e.common().owner_handle)
+                        .filter(|oh| !oh.is_null());
+                    if let Some(br) = owner {
+                        self.bump_entities_restyled_with_block_deps(
+                            &[(handle, ChangeKind::Added)],
+                            &[br],
+                            &[],
+                        );
+                    } else {
+                        self.bump_entities_restyled_with_block_deps(
+                            &[(handle, ChangeKind::Added)],
+                            &[],
+                            &[],
+                        );
+                    }
+                } else if let Some(br) = explicit_block_owner {
+                    self.bump_entities_with_block_deps(
+                        &[(handle, ChangeKind::Added)],
+                        &[br],
+                        &[],
+                        false,
+                    );
                 } else {
                     // Plain top-level add: name the new handle so every derived cache
                     // patches in just this one entity instead of rebuilding.
@@ -684,15 +742,21 @@ impl Scene {
             b.name = new.to_string();
         }
         // Repoint every INSERT reference so all instances keep resolving.
+        let mut repointed = Vec::new();
         for e in self.document.entities_mut() {
             if let EntityType::Insert(ins) = e {
                 if ins.block_name.eq_ignore_ascii_case(old) {
                     ins.block_name = new.to_string();
+                    repointed.push((ins.common.handle, ChangeKind::Modified));
                 }
             }
         }
         self.invalidate_dependency_index();
-        self.bump_geometry();
+        self.bump_entities_restyled_with_block_deps(
+            &repointed,
+            &[record],
+            &[old.to_string(), new.to_string()],
+        );
         true
     }
 
@@ -740,7 +804,7 @@ impl Scene {
     ) -> usize {
         let mut moved = 0usize;
         let mut changed = Vec::with_capacity(updates.len());
-        let mut block_change = false;
+        let mut block_owners = Vec::new();
         for entity in updates {
             if !allow_reference_only
                 && (self.is_reference_only(entity.common().handle)
@@ -748,22 +812,26 @@ impl Scene {
             {
                 continue;
             }
-            if self.update_entity_impl(entity, &mut changed, &mut block_change) {
+            if self.update_entity_impl(entity, &mut changed, &mut block_owners) {
                 moved += 1;
             }
         }
-        if !changed.is_empty() || block_change {
-            self.publish_entity_updates(changed, block_change);
+        if !changed.is_empty() || !block_owners.is_empty() {
+            self.publish_entity_updates(changed, block_owners);
         }
         moved
     }
 
     /// One geometry bump for a set of slot writes already reflected in
-    /// `changed` / `block_change`.
-    fn publish_entity_updates(&mut self, changed: Vec<(Handle, ChangeKind)>, block_change: bool) {
-        if block_change {
-            self.bump_geometry();
-        } else {
+    /// `changed` / `block_owners`.
+    fn publish_entity_updates(
+        &mut self,
+        changed: Vec<(Handle, ChangeKind)>,
+        block_owners: Vec<Handle>,
+    ) {
+        if !block_owners.is_empty() {
+            self.bump_entities_with_block_deps(&changed, &block_owners, &[], false);
+        } else if !changed.is_empty() {
             self.bump_entities(&changed);
         }
     }
@@ -775,7 +843,7 @@ impl Scene {
         &mut self,
         mut entity: EntityType,
         changed: &mut Vec<(Handle, ChangeKind)>,
-        block_change: &mut bool,
+        block_owners: &mut Vec<Handle>,
     ) -> bool {
         let handle = entity.common().handle;
         if self.is_layer_locked(handle) {
@@ -788,13 +856,16 @@ impl Scene {
         // entities). Preserve them when replacing a clone from a plugin.
         entity.preserve_storage_data_from(existing);
         // The caller edited a snapshot copy; keep the live entity in its block.
-        entity.common_mut().owner_handle = existing.common().owner_handle;
+        let owner_handle = existing.common().owner_handle;
+        entity.common_mut().owner_handle = owner_handle;
 
-        // Replacing (or becoming) a block sentinel forces a full block-cache
-        // rebuild. INSERT edits (including retargeting to another existing
-        // definition) only change that top-level render handle.
         let affects_blocks = matches!(existing, EntityType::Block(_) | EntityType::BlockEnd(_))
             || matches!(&entity, EntityType::Block(_) | EntityType::BlockEnd(_));
+        let touched_block_owner = if affects_blocks && !owner_handle.is_null() {
+            Some(owner_handle)
+        } else {
+            self.block_def_owner_if_not_model(owner_handle)
+        };
 
         // A plugin edit may retarget the entity to a novel layer; register it
         // so the edited entity keeps that layer on save instead of collapsing
@@ -901,13 +972,11 @@ impl Scene {
 
         if affects_blocks {
             self.mark_entity_dirty(handle);
-            *block_change = true;
-        } else {
-            // One entity changed in place: report just this handle so every
-            // derived cache patches it instead of rebuilding (bump_entities also
-            // drops it from the tessellation memos).
-            changed.push((handle, ChangeKind::Modified));
         }
+        if let Some(br) = touched_block_owner {
+            block_owners.push(br);
+        }
+        changed.push((handle, ChangeKind::Modified));
         true
     }
 
@@ -988,9 +1057,11 @@ impl Scene {
 
     pub fn restore_solid_models(&mut self, handles: &[Handle]) {
         /// The box around a body's surface, from a coarse tessellation.
-        fn body_box(body: &ocs_brep::Body) -> Option<([f64; 3], [f64; 3])> {
-            let tolerance = ocs_brep::mesh::TessellationTolerance::new(0.5, 1e-3);
-            let mesh = ocs_brep::mesh::tessellate(body, tolerance).mesh;
+        fn body_box(body: &ocs_solid::model::Brep) -> Option<([f64; 3], [f64; 3])> {
+            if let Ok(found) = ocs_solid::model::bounds(body) {
+                return Some(found);
+            }
+            let mesh = crate::scene::model::solid_model::tessellate(body, crate::scene::model::solid_model::DisplayTolerance::new(0.5))?;
             let mut points = mesh.positions.iter().copied();
             let first = points.next()?;
             Some(points.fold((first, first), |(lo, hi), p| {
@@ -1002,7 +1073,7 @@ impl Scene {
         }
         /// Whether two bodies fill the same box, to a hundredth of its size
         /// (the coarse tessellation cuts curved sides differently).
-        fn same_place(a: &ocs_brep::Body, b: &ocs_brep::Body) -> bool {
+        fn same_place(a: &ocs_solid::model::Brep, b: &ocs_solid::model::Brep) -> bool {
             let (Some((alo, ahi)), Some((blo, bhi))) = (body_box(a), body_box(b)) else {
                 return true;
             };
@@ -1011,24 +1082,24 @@ impl Scene {
             (0..3).all(|k| (alo[k] - blo[k]).abs() <= slack && (ahi[k] - bhi[k]).abs() <= slack)
         }
 
-        let bodies: Vec<(Handle, ocs_brep::Body)> = handles
+        let bodies: Vec<(Handle, ocs_solid::model::Brep)> = handles
             .iter()
             .filter(|handle| !self.solid_models.contains_key(handle))
             .filter_map(|&handle| {
                 let tree = self.document.solid_history_tree(handle);
                 let rebuilt = || {
                     tree.as_ref()
-                        .and_then(|tree| ocs_acis::rebuild_history_tree(tree).ok())
+                        .and_then(|tree| ocs_solid::rebuild_history_tree(tree).ok())
                 };
                 let stored = || match self.document.get_entity(handle) {
                     Some(EntityType::Solid3D(solid)) => {
-                        crate::scene::convert::solid3d_tess::kernel_body(solid)
+                        crate::scene::convert::solid3d_tess::solid_record(solid)
                     }
                     Some(EntityType::Region(region)) => {
-                        crate::scene::convert::solid3d_tess::kernel_region_body(region)
+                        crate::scene::convert::solid3d_tess::region_record(region)
                     }
                     Some(EntityType::Surface(surface)) => {
-                        crate::scene::convert::solid3d_tess::kernel_surface_body(surface)
+                        crate::scene::convert::solid3d_tess::surface_record(surface)
                     }
                     _ => None,
                 };
@@ -1237,6 +1308,7 @@ impl Scene {
             .get(name)
             .map(|br| (br.handle, br.block_entity_handle));
 
+        let mut member_changes: Vec<(Handle, ChangeKind)> = Vec::new();
         let (br_handle, block_handle, stale_end) =
             if let Some((existing_br_h, existing_blk_h)) = existing {
                 if !options.redefine {
@@ -1255,6 +1327,8 @@ impl Scene {
                 for h in owned {
                     self.remove_image_definition_reactor(h);
                     self.document.remove_entity(h);
+                    self.clear_derived_caches_for(h);
+                    member_changes.push((h, ChangeKind::Removed));
                 }
                 // Update existing BlockRecord fields
                 if let Some(br) = self.document.block_records.get_mut(name) {
@@ -1340,6 +1414,7 @@ impl Scene {
             };
             // An image draws from its cached model, not the entity (#2149).
             self.reseed_derived_caches(handle);
+            member_changes.push((handle, ChangeKind::Added));
             if options.mode != crate::ui::window::block_definition::BlockObjectMode::Retain {
                 self.erase_entities(&[old_handle]);
             }
@@ -1390,8 +1465,12 @@ impl Scene {
             br.preview_data = thumbnail;
         }
 
-        // Advance the block epoch so all consumers and viewport renderers re-tessellate
-        self.bump_geometry();
+        // Advance the block epoch for the touched definition and any consumers.
+        self.bump_entities_restyled_with_block_deps(
+            &member_changes,
+            &[br_handle],
+            &[name.to_string()],
+        );
         Ok(insert_handle)
     }
 
@@ -1712,12 +1791,44 @@ impl Scene {
         }
     }
 
+    pub(crate) fn clear_derived_caches_for(&mut self, handle: Handle) {
+        self.hatches.remove(&handle);
+        self.images.remove(&handle);
+        self.meshes.remove(&handle);
+        self.block_meshes.remove(&handle);
+        self.solid_models.remove(&handle);
+    }
+
+    /// Create a block definition from already-owned entities (no source
+    /// entities in the document are read or erased). Entities are translated by
+    /// `-base` into block-local coordinates, added into the new block record,
+    /// and sealed with a BlockEnd terminator.
     pub fn define_block_from_owned_entities(
         &mut self,
         entities: Vec<EntityType>,
         name: &str,
         base: glam::DVec3,
     ) -> Result<Vec<Handle>, String> {
+        let (_, handles) = self.define_block_from_owned_entities_with_bump(entities, name, base, true)?;
+        Ok(handles)
+    }
+
+    pub(crate) fn define_block_from_owned_entities_unbumped(
+        &mut self,
+        entities: Vec<EntityType>,
+        name: &str,
+        base: glam::DVec3,
+    ) -> Result<(Handle, Vec<Handle>), String> {
+        self.define_block_from_owned_entities_with_bump(entities, name, base, false)
+    }
+
+    fn define_block_from_owned_entities_with_bump(
+        &mut self,
+        entities: Vec<EntityType>,
+        name: &str,
+        base: glam::DVec3,
+        bump: bool,
+    ) -> Result<(Handle, Vec<Handle>), String> {
         let name = name.trim();
         if name.is_empty() {
             return Err("Block name cannot be empty.".into());
@@ -1782,10 +1893,21 @@ impl Scene {
         // Solids, surfaces and meshes of a definition draw through their
         // instanced block meshes, which only a tessellation pass creates.
         self.refresh_meshes_for_handles(&entity_handles);
-        // Block defns don't render on their own, but the geometry cache must
-        // pick up the new definition so the interactive insert can preview it.
-        self.bump_geometry();
-        Ok(entity_handles)
+        if bump {
+            let changes: Vec<(Handle, ChangeKind)> = entity_handles
+                .iter()
+                .copied()
+                .map(|h| (h, ChangeKind::Added))
+                .collect();
+            // Block defns don't render on their own, but the geometry cache must
+            // pick up the new definition so the interactive insert can preview it.
+            self.bump_entities_restyled_with_block_deps(
+                &changes,
+                &[br_handle],
+                &[name.to_string()],
+            );
+        }
+        Ok((br_handle, entity_handles))
     }
 
     /// Recreate a block definition verbatim — the entities are already in
@@ -1857,7 +1979,16 @@ impl Scene {
         Self::sync_attribute_flag(&mut self.document, name);
         self.refresh_meshes_for_handles(&added);
         if bump {
-            self.bump_geometry();
+            let changes: Vec<(Handle, ChangeKind)> = added
+                .iter()
+                .copied()
+                .map(|h| (h, ChangeKind::Added))
+                .collect();
+            self.bump_entities_restyled_with_block_deps(
+                &changes,
+                &[br_handle],
+                &[name.to_string()],
+            );
         }
     }
 
@@ -1916,23 +2047,32 @@ impl Scene {
         for h in &owned {
             self.remove_image_definition_reactor(*h);
             self.document.remove_entity(*h);
+            self.clear_derived_caches_for(*h);
         }
         if let Some(EntityType::Block(block)) = self.document.get_entity_mut(block_handle) {
             block.base_point = base_point;
         }
         // The old contents' meshes go with them; the new ones are built.
-        let mut changed = owned;
+        let mut added = Vec::with_capacity(entities.len());
+        let mut changes: Vec<(Handle, ChangeKind)> = owned
+            .iter()
+            .copied()
+            .map(|h| (h, ChangeKind::Removed))
+            .collect();
         for mut entity in entities {
             Self::reset_clone_subhandles(&mut self.document, &mut entity);
             entity.common_mut().handle = Handle::NULL;
             entity.common_mut().owner_handle = br_handle;
             self.ensure_image_definition(&mut entity);
-            changed.extend(self.document.add_entity(entity).ok());
+            if let Ok(h) = self.document.add_entity(entity) {
+                added.push(h);
+                changes.push((h, ChangeKind::Added));
+            }
         }
         self.close_block_definition(name, br_handle, stale_end)?;
         Self::sync_attribute_flag(&mut self.document, name);
-        self.refresh_meshes_for_handles(&changed);
-        self.bump_geometry();
+        self.refresh_meshes_for_handles(&added);
+        self.bump_entities_restyled_with_block_deps(&changes, &[br_handle], &[name.to_string()]);
         Ok(())
     }
 

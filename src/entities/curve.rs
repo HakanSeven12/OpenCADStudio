@@ -919,12 +919,11 @@ mod tests {
     /// where it happens rather than the next time somebody reaches for it.
     #[test]
     fn the_solid_layer_and_the_acis_bridge_are_reachable() {
-        let solid = ocs_brep::make::cuboid([0.0; 3], [1.0; 3])
-            .expect("the kernel builds its own primitives");
-        assert!(solid.validate().is_empty());
-        assert_eq!(solid.euler_characteristic(), 2);
+        let solid = ocs_solid::model::make_box([0.0; 3], [1.0; 3]).expect("Solidcore builds a box");
+        assert!(ocs_solid::model::check(&solid).is_empty());
+        assert_eq!(solid.vertices.len() + solid.faces.len() - solid.edges.len(), 2);
         let document = document::entities::acis::types::SatDocument::new();
-        let (bodies, loss) = ocs_acis::lift(&document);
+        let (bodies, loss) = ocs_solid::lift(&document);
         assert!(
             bodies.is_empty() && loss.is_empty(),
             "an empty document lifts to nothing"

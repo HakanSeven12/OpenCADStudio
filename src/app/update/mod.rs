@@ -179,6 +179,7 @@ pub(in crate::app) use plugin_grips::SETTLE_WATCHDOG;
 mod plugin_grips_tests;
 mod qselect;
 mod style;
+pub(in crate::app) mod table_style_cells;
 pub(crate) mod style_import;
 pub(in crate::app) mod util;
 mod viewport;
@@ -254,6 +255,16 @@ impl OpenCADStudio {
                 self.active_modal = Some(parent);
                 return;
             }
+        }
+        // The Cell Data Format window and the Text Style manager opened from
+        // the table style window return to it.
+        if self.active_modal == Some(TableCellFormat) && self.ts_format_return {
+            self.table_style_format_back(None);
+            return;
+        }
+        if self.active_modal == Some(TextStyle) && self.ts_text_return {
+            self.table_style_back_from_text_styles();
+            return;
         }
         // The Text Style manager opened from the multileader style window
         // returns to it.
@@ -1167,16 +1178,27 @@ impl OpenCADStudio {
             }),
             other => other,
         };
+        // A clicked box waiting for its opposite corner asks for it, with the
+        // paths that may take its place as its options.
+        let box_step = self.box_corner_step();
+        let prompt = match &box_step {
+            Some((text, _)) => Some(text.clone()),
+            None => prompt,
+        };
         // After each "N found" line the selection step asks again, under it.
         if std::mem::take(&mut self.selection_reprompt) && gathering {
             self.command_line.set_step_prompt(None);
         }
         self.command_line.set_step_prompt(prompt);
         // Mirror the step's clickable options so they render as buttons (#304).
-        let opts = self.tabs[self.active_tab]
-            .active_cmd
-            .as_ref()
-            .map(|c| c.options())
+        let opts = box_step
+            .map(|(_, options)| options)
+            .or_else(|| {
+                self.tabs[self.active_tab]
+                    .active_cmd
+                    .as_ref()
+                    .map(|c| c.options())
+            })
             .or_else(|| {
                 self.graphic_attributes
                     .pending_fill_close
@@ -4504,6 +4526,7 @@ impl OpenCADStudio {
                 }
                 let i = self.active_tab;
                 if !self.command_line.history_navigation_active()
+                    && !self.box_corner_prompt_pending()
                     && (self.tabs[i].active_cmd.is_none()
                         || self.command_line.has_contextual_suggestions())
                     && self.command_line.autocomplete_prev()
@@ -4532,6 +4555,7 @@ impl OpenCADStudio {
                 }
                 let i = self.active_tab;
                 if !self.command_line.history_navigation_active()
+                    && !self.box_corner_prompt_pending()
                     && (self.tabs[i].active_cmd.is_none()
                         || self.command_line.has_contextual_suggestions())
                     && self.command_line.autocomplete_next()
@@ -4845,6 +4869,15 @@ impl OpenCADStudio {
                 }
                 if kw.is_empty() {
                     return self.feed_command(crate::command::StepInput::Enter);
+                }
+                // A path picked at a clicked box starts from the clicked
+                // point, as the typed word does.
+                if self.box_corner_prompt_pending() {
+                    self.command_line.input = kw.clone();
+                    if let Some(task) = self.try_box_path_keyword() {
+                        return task;
+                    }
+                    self.command_line.input.clear();
                 }
                 self.feed_active_cmd(&kw)
             }
@@ -6645,7 +6678,7 @@ impl OpenCADStudio {
                 sel.orbit.pivot = None;
                 drop(sel);
                 self.arm_hover_after_navigation(i);
-                Task::none()
+                self.refresh_pointer_after_navigation(i)
             }
 
             Message::ViewportScroll(delta) => self.on_viewport_scroll(delta),
@@ -11496,11 +11529,16 @@ impl OpenCADStudio {
                     .collect();
                 rows.sort_by(|a, b| a.0.cmp(&b.0));
                 self.shortcut_editor_rows = rows;
+                self.shortcut_filter.clear();
                 self.shortcut_capture_row = None;
                 self.shortcut_pending_add = false;
                 self.shortcut_reset_confirm = false;
                 self.shortcut_close_confirm = false;
                 self.active_modal = Some(super::ModalKind::Shortcuts);
+                Task::none()
+            }
+            Message::ShortcutEditorFilter(value) => {
+                self.shortcut_filter = value;
                 Task::none()
             }
             Message::ShortcutsPanelClose => {
@@ -14997,6 +15035,10 @@ impl OpenCADStudio {
                     .push_error(crate::tf!("{context} failed: {detail}").as_ref());
                 Task::none()
             }
+            Message::PointCloudRead(done) => {
+                self.finish_point_cloud_display_read(&done);
+                Task::none()
+            }
 
             // ── Print to system printer ───────────────────────────────────────
             Message::PrintToPrinter => self.on_print_to_printer(),
@@ -15573,6 +15615,7 @@ impl OpenCADStudio {
                     .or(names.first())
                     .map_or_else(|| "Standard".to_string(), |name| (*name).clone());
                 self.tablestyle_parent_table = false;
+                self.ts_cards = Default::default();
                 self.load_tablestyle_bufs(i);
                 self.active_modal = Some(super::ModalKind::TableStyle);
                 self.style_stage_begin();
@@ -15588,6 +15631,7 @@ impl OpenCADStudio {
             }
             Message::TableStyleDialogSelect(name) => {
                 self.stage_tablestyle_bufs();
+                self.ts_cards = Default::default();
                 self.tablestyle_selected = name;
                 let i = self.active_tab;
                 self.load_tablestyle_bufs(i);
@@ -15605,6 +15649,9 @@ impl OpenCADStudio {
             Message::TableStyleEdit { field, value } => {
                 if field == "description" {
                     self.ts_description = value;
+                    // Written at once like the other fields: picking another
+                    // cell style reloads the buffers from the style.
+                    self.stage_tablestyle_bufs();
                 }
                 Task::none()
             }
@@ -15625,6 +15672,7 @@ impl OpenCADStudio {
                     };
                     s.sync_rows_from_cell_styles();
                 }
+                self.drop_table_style_pictures(i);
                 Task::none()
             }
 
@@ -15643,15 +15691,10 @@ impl OpenCADStudio {
                 self.load_tablestyle_bufs(i);
                 Task::none()
             }
-            Message::TableStyleCellNew => self.on_table_cell_style_new(),
-            Message::TableStyleCellRename => self.on_table_cell_style_rename(),
-            Message::TableStyleCellDelete => self.on_table_cell_style_delete(),
+            Message::TableStyleCells(message) => self.on_table_style_cells(message),
             Message::TableStyleCellEdit { field, value } => {
                 self.ts_color_open = None;
                 self.on_table_cell_style_edit(field, value)
-            }
-            Message::TableStyleEdgeEdit { edge, field, value } => {
-                self.on_table_cell_edge_edit(edge, field, value)
             }
             Message::TableStyleTemplatePick => self.on_table_style_template_pick(),
             Message::TableStyleTemplateRemove => self.on_table_style_template_remove(),

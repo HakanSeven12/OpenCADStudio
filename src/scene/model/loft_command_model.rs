@@ -5,7 +5,6 @@ use crate::command::{ExtrudeMode, LoftOptions, LoftSectionSelection};
 use document::entities::{EmbeddedEntity, Point, Surface, SurfaceData, SurfaceKind};
 use document::objects::{SolidHistoryLoft, SolidHistoryLoftParameters, SolidHistoryNodeBase};
 use document::{EntityType, Handle};
-use ocs_brep::Body;
 
 pub(crate) fn embedded_section(entity: &EntityType) -> Option<EmbeddedEntity> {
     match entity {
@@ -23,11 +22,11 @@ pub(crate) fn embedded_section(entity: &EntityType) -> Option<EmbeddedEntity> {
 
 pub fn is_section(entity: &EntityType) -> bool {
     embedded_section(entity)
-        .is_some_and(|entity| ocs_acis::loft_section_geometry(&[entity]).is_ok())
+        .is_some_and(|entity| ocs_solid::loft_section_geometry(&[entity]).is_ok())
 }
 
 pub fn is_guide_or_path(entity: &EntityType) -> bool {
-    embedded_path(entity).is_some_and(|entity| ocs_acis::loft_path_geometry(&entity).is_ok())
+    embedded_path(entity).is_some_and(|entity| ocs_solid::loft_path_geometry(&entity).is_ok())
 }
 
 pub fn record(
@@ -64,8 +63,8 @@ pub fn record(
                 })
                 .collect::<Result<Vec<_>, _>>()?,
         };
-        if let ocs_brep::LoftSection::Profile { closed, .. } =
-            ocs_acis::loft_section_geometry(&members)?
+        if let ocs_solid::LoftSection::Profile { closed, .. } =
+            ocs_solid::loft_section_geometry(&members)?
         {
             surface |= !closed;
         }
@@ -116,8 +115,8 @@ pub fn build_body(
     available: &[(Handle, EntityType)],
     mode: ExtrudeMode,
     options: LoftOptions,
-) -> Result<Body, String> {
-    ocs_acis::rebuild_loft_with_options(&record(
+) -> Result<ocs_solid::model::Brep, String> {
+    ocs_solid::rebuild_loft_with_options(&record(
         sections, guides, path, available, mode, options,
     )?)
 }

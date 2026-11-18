@@ -2901,7 +2901,7 @@ impl OpenCADStudio {
                         else {
                             continue;
                         };
-                        let Some(body) = ocs_brep::planar_region(plane, &loops) else {
+                        let Some(body) = ocs_solid::model::planar_region(plane, &loops) else {
                             continue;
                         };
                         let mut region = Region::new();
@@ -2958,7 +2958,7 @@ impl OpenCADStudio {
                         else {
                             continue;
                         };
-                        let Some(body) = ocs_brep::planar_region(plane, &[curves]) else {
+                        let Some(body) = ocs_solid::model::planar_region(plane, &[curves]) else {
                             continue;
                         };
                         let mut region = Region::new();

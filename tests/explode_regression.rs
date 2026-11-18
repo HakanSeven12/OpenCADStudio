@@ -499,7 +499,6 @@ fn apply_explode_replacements_matches_legacy_loop() {
 fn explode_region_acis_sat_and_binary_sab_with_hole_and_style() {
     use document::entities::acis::{SabWriter, SatDocument};
     use document::entities::{AcisData, Region};
-    use ocs_brep as brep;
     use ocs_geom::geom2d::{Arc as KArc, Curve as KCurve, Line as KLine};
     use ocs_geom::space::Plane;
 
@@ -534,9 +533,9 @@ fn explode_region_acis_sat_and_binary_sab_with_hole_and_style() {
         })
         .collect();
 
-    let body = brep::planar_region(plane, &[outer, hole]).expect("planar region with hole");
+    let body = ocs_solid::model::planar_region(plane, &[outer, hole]).expect("planar region with hole");
     let mut sat = SatDocument::new();
-    ocs_acis::append(&body, &mut sat).expect("sat append");
+    ocs_solid::append(&body, &mut sat).expect("sat append");
     let sat_text = sat.to_sat_string();
     let parsed_sat = SatDocument::parse(&sat_text).expect("sat parse");
     let sab_bytes = SabWriter::write(&parsed_sat);
@@ -614,7 +613,6 @@ fn explode_region_acis_sat_and_binary_sab_with_hole_and_style() {
 fn explode_region_tilted_plane_arc_and_multi_island() {
     use document::entities::acis::SatDocument;
     use document::entities::{AcisData, Region};
-    use ocs_brep as brep;
     use ocs_geom::geom2d::{Arc as KArc, Curve as KCurve, Line as KLine};
     use ocs_geom::space::Plane;
 
@@ -632,9 +630,9 @@ fn explode_region_tilted_plane_arc_and_multi_island() {
             end_angle: std::f64::consts::PI,
         }),
     ];
-    let body = brep::planar_region(plane, &[d_loop]).expect("tilted D region");
+    let body = ocs_solid::model::planar_region(plane, &[d_loop]).expect("tilted D region");
     let mut sat = SatDocument::new();
-    ocs_acis::append(&body, &mut sat).expect("sat append");
+    ocs_solid::append(&body, &mut sat).expect("sat append");
     let mut region = Region::new();
     region.acis_data = AcisData::from_sat(&sat.to_sat_string());
 
@@ -687,11 +685,11 @@ fn explode_region_tilted_plane_arc_and_multi_island() {
             }),
         ]
     };
-    let r1 = brep::planar_region(xy, &[rect_loop(0.0, 5.0)]).unwrap();
-    let r2 = brep::planar_region(xy, &[rect_loop(10.0, 15.0)]).unwrap();
-    let union_body = brep::union_planar_regions(&[r1, r2], 1e-6).unwrap();
+    let r1 = ocs_solid::model::planar_region(xy, &[rect_loop(0.0, 5.0)]).unwrap();
+    let r2 = ocs_solid::model::planar_region(xy, &[rect_loop(10.0, 15.0)]).unwrap();
+    let union_body = ocs_solid::model::union_regions(&[r1, r2]).unwrap();
     let mut union_sat = SatDocument::new();
-    ocs_acis::append(&union_body, &mut union_sat).unwrap();
+    ocs_solid::append(&union_body, &mut union_sat).unwrap();
     let mut multi_region = Region::new();
     multi_region.acis_data = AcisData::from_sat(&union_sat.to_sat_string());
     let multi_pieces = explode_entity(&EntityType::Region(multi_region), &doc);
@@ -721,7 +719,6 @@ fn explode_region_tilted_plane_arc_and_multi_island() {
 fn explode_region_acis_with_body_transform() {
     use document::entities::acis::SatDocument;
     use document::entities::{AcisData, Region};
-    use ocs_brep as brep;
     use ocs_geom::geom2d::{Curve as KCurve, Line as KLine};
     use ocs_geom::space::Plane;
 
@@ -744,9 +741,9 @@ fn explode_region_acis_with_body_transform() {
             end: [0.0, 0.0],
         }),
     ];
-    let body = brep::planar_region(plane, &[rect]).expect("planar region");
+    let body = ocs_solid::model::planar_region(plane, &[rect]).expect("planar region");
     let mut sat = SatDocument::new();
-    ocs_acis::append(&body, &mut sat).expect("sat append");
+    ocs_solid::append(&body, &mut sat).expect("sat append");
 
     // A placed region carries a body transform record.
     // Translate by [50.0, 100.0, 0.0].
@@ -788,7 +785,6 @@ fn explode_region_acis_with_body_transform() {
 fn explode_region_elliptical_and_spline_boundaries() {
     use document::entities::acis::SatDocument;
     use document::entities::{AcisData, Region};
-    use ocs_brep as brep;
     use ocs_geom::geom2d::{
         Curve as KCurve, Ellipse as KEllipse, EllipseArc as KEllipseArc, Line as KLine,
         NurbsCurve as KNurbs,
@@ -805,9 +801,9 @@ fn explode_region_elliptical_and_spline_boundaries() {
         minor_radius: 4.0,
         major_axis: [1.0, 0.0],
     }))];
-    let body = brep::planar_region(plane, &[ell_loop]).expect("ellipse region");
+    let body = ocs_solid::model::planar_region(plane, &[ell_loop]).expect("ellipse region");
     let mut sat = SatDocument::new();
-    ocs_acis::append(&body, &mut sat).expect("sat append");
+    ocs_solid::append(&body, &mut sat).expect("sat append");
     let mut region = Region::new();
     region.acis_data = AcisData::from_sat(&sat.to_sat_string());
     region.common.layer = "ELLIPSES".to_string();
@@ -844,9 +840,9 @@ fn explode_region_elliptical_and_spline_boundaries() {
             end: [0.0, 0.0],
         }),
     ];
-    let body_spline = brep::planar_region(plane, &[spline_loop]).expect("spline region");
+    let body_spline = ocs_solid::model::planar_region(plane, &[spline_loop]).expect("spline region");
     let mut sat_spline = SatDocument::new();
-    ocs_acis::append(&body_spline, &mut sat_spline).expect("sat append");
+    ocs_solid::append(&body_spline, &mut sat_spline).expect("sat append");
     let mut region_spline = Region::new();
     region_spline.acis_data = AcisData::from_sat(&sat_spline.to_sat_string());
     region_spline.common.layer = "SPLINES".to_string();
@@ -892,9 +888,9 @@ fn explode_region_elliptical_and_spline_boundaries() {
             end: [0.0, 0.0],
         }),
     ];
-    let body_arc = brep::planar_region(plane, &[d_equal_loop]).expect("equal-radii ellipse region");
+    let body_arc = ocs_solid::model::planar_region(plane, &[d_equal_loop]).expect("equal-radii ellipse region");
     let mut sat_arc = SatDocument::new();
-    ocs_acis::append(&body_arc, &mut sat_arc).expect("sat append");
+    ocs_solid::append(&body_arc, &mut sat_arc).expect("sat append");
     let mut region_arc = Region::new();
     region_arc.acis_data = AcisData::from_sat(&sat_arc.to_sat_string());
 

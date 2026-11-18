@@ -344,7 +344,7 @@ fn metafiles_and_svg_drawings_come_in_as_blocks() {
 #[test]
 fn acisin_reads_a_sat_file() {
     // A box, written as SAT by the app's own writer.
-    let body = ocs_brep::make::cuboid([0.0, 0.0, 0.0], [10.0, 20.0, 30.0]).unwrap();
+    let body = ocs_solid::model::make_box([0.0, 0.0, 0.0], [10.0, 20.0, 30.0]).unwrap();
     let sat = crate::scene::convert::acis_export::solid_to_sat(&body)
         .expect("a box writes")
         .to_sat_string();

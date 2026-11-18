@@ -2346,8 +2346,8 @@ pub(crate) fn set_wire_aabb(w: &mut WireModel, entity_box: [f32; 4]) {
 pub(crate) fn entity_bounds(e: &document::EntityType) -> ([f64; 3], [f64; 3]) {
     if let document::EntityType::Region(region) = e {
         if region.wires.is_empty() {
-            if let Some(bounds) = super::solid3d_tess::kernel_region_body(region)
-                .and_then(|body| ocs_brep::body_bounds(&body))
+            if let Some(bounds) = super::solid3d_tess::region_record(region)
+                .and_then(|body| ocs_solid::model::aabb(&body))
             {
                 return (bounds.min, bounds.max);
             }

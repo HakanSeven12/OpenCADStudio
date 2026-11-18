@@ -39,10 +39,12 @@
 //! [`write_with_metadata`] (or [`write_faceted_with_metadata`]), which emits those
 //! entities directly; no post-write text rewriting is required.
 
+pub mod brep_to_model;
 pub mod geom;
 pub mod map;
 pub mod validate;
 
+pub use brep_to_model::{brep_to_model, ExportModelError};
 pub use map::{import, Limits};
 
 #[cfg(test)]

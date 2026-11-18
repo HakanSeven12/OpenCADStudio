@@ -6,7 +6,7 @@ use document::objects::{
     SolidHistoryRevolve, SolidHistorySphere, SolidHistorySweep, SolidHistoryTorus,
 };
 use document::EntityType;
-use ocs_brep::{Body, Surface};
+use ocs_solid::model::Brep;
 
 use crate::entities::traits::EntityTypeOps;
 use crate::entities::transform::EntityTransform;
@@ -152,7 +152,7 @@ pub fn select_operand_at(
     let operands = placed_operands(document, handle);
     let size = operands
         .iter()
-        .filter_map(|(_, body)| ocs_brep::body_bounds(body))
+        .filter_map(|(_, body)| ocs_solid::model::aabb(body))
         .map(|bounds| {
             (0..3)
                 .map(|axis| bounds.max[axis] - bounds.min[axis])
@@ -161,8 +161,7 @@ pub fn select_operand_at(
         .fold(0.0_f64, f64::max);
     for reach in [1e-6, 1e-4, 1e-3, 1e-2] {
         let found = operands.iter().find(|(_, body)| {
-            ocs_brep::contains_point(body, point.to_array(), reach * size)
-                == ocs_brep::Containment::OnBoundary
+            ocs_solid::model::face_at_point(body, point.to_array(), reach * size).is_some()
         });
         if let Some((id, _)) = found {
             EDIT_OPERANDS.with(|operands| operands.borrow_mut().insert(handle, *id));
@@ -177,7 +176,7 @@ pub fn select_operand_at(
 fn placed_operands(
     document: &document::Document,
     handle: document::Handle,
-) -> Vec<(i32, ocs_brep::Body)> {
+) -> Vec<(i32, ocs_solid::model::Brep)> {
     let Some(tree) = document
         .solid_history_tree(handle)
         .filter(|tree| tree.has_boolean())
@@ -192,7 +191,7 @@ fn placed_operands(
             let mut placed = operation.clone();
             let base = placed.base_mut()?;
             base.transform = (frame * matrix(base.transform)?).to_cols_array();
-            Some((id, ocs_acis::rebuild_body(&placed).ok()?))
+            Some((id, ocs_solid::rebuild_body(&placed).ok()?))
         })
         .collect()
 }
@@ -211,18 +210,7 @@ pub fn composite_history_edges(
     }
     placed_operands(document, handle)
         .iter()
-        .flat_map(|(_, body)| {
-            ocs_brep::mesh::tessellate_wireframe(
-                body,
-                ocs_brep::mesh::TessellationTolerance::new(
-                    ocs_geom::tessellation::DEFAULT_ANGLE,
-                    1e-9,
-                ),
-            )
-            .edges
-        })
-        .map(|edge| edge.positions)
-        .filter(|positions| positions.len() >= 2)
+        .flat_map(|(_, body)| super::solid_model::preview_curves(body, 0))
         .collect()
 }
 
@@ -492,7 +480,7 @@ pub fn reference_point(operation: &SolidHistoryOperation) -> Option<glam::DVec3>
         SolidHistoryOperation::Sphere(value) => world_point(value.base.transform, [0.0, 0.0, 0.0]),
         SolidHistoryOperation::Cone(value) => world_point(value.base.transform, [0.0; 3]),
         SolidHistoryOperation::Cylinder(value) => world_point(value.base.transform, [0.0; 3]),
-        SolidHistoryOperation::Sweep(value) => ocs_acis::sweep_history_reference_point(value)
+        SolidHistoryOperation::Sweep(value) => ocs_solid::sweep_history_reference_point(value)
             .ok()
             .map(glam::DVec3::from_array),
         SolidHistoryOperation::Extrusion(value) => world_point(
@@ -888,7 +876,7 @@ fn sweep_properties(
     let (show_history, show_history_editable) =
         displayed_history_state(object_show_history, show_history_mode);
     let show_value = if show_history { "Yes" } else { "No" };
-    let length = ocs_acis::sweep_history_path_length(value)
+    let length = ocs_solid::sweep_history_path_length(value)
         .ok()
         .map(crate::entities::common::format_length)
         .unwrap_or_default();
@@ -1178,7 +1166,7 @@ fn sweep_path_length(value: &SolidHistorySweep) -> Option<f64> {
     {
         return None;
     }
-    let placement = ocs_brep::Placement {
+    let placement = ocs_solid::model::Placement {
         x_axis: [transform[0], transform[1], transform[2]],
         y_axis: [transform[4], transform[5], transform[6]],
         z_axis: [transform[8], transform[9], transform[10]],
@@ -3169,8 +3157,8 @@ fn apply_extrusion_profile_grip(
 }
 
 fn sweep_placement_matrices(value: &SolidHistorySweep) -> Option<(glam::DMat4, glam::DMat4)> {
-    let (profile, path) = ocs_acis::sweep_history_placements(value).ok()?;
-    let matrix = |place: ocs_brep::Placement| {
+    let (profile, path) = ocs_solid::sweep_history_placements(value).ok()?;
+    let matrix = |place: ocs_solid::model::Placement| {
         glam::DMat4::from_cols(
             glam::DVec3::from_array(place.x_axis).extend(0.0),
             glam::DVec3::from_array(place.y_axis).extend(0.0),
@@ -3540,11 +3528,11 @@ fn extrusion_draft_rebuilds(value: &SolidHistorySweep, angle: f64) -> bool {
         return false;
     };
     let Ok((_, _, closed)) =
-        ocs_acis::sweep_profile_geometry(profile, candidate.sweep_entity_transform)
+        ocs_solid::sweep_profile_geometry(profile, candidate.sweep_entity_transform)
     else {
         return false;
     };
-    ocs_acis::rebuild_extrusion_with_mode(&candidate, !closed).is_ok()
+    ocs_solid::rebuild_extrusion_with_mode(&candidate, !closed).is_ok()
 }
 
 fn grip(id: usize, world: glam::DVec3, shape: GripShape, axis: Option<glam::DVec3>) -> GripDef {
@@ -3558,26 +3546,27 @@ fn grip(id: usize, world: glam::DVec3, shape: GripShape, axis: Option<glam::DVec
     }
 }
 
-pub fn fillet_radius_grip(body: &Body, radius: f64) -> Option<GripDef> {
+pub fn fillet_radius_grip(body: &Brep, radius: f64) -> Option<GripDef> {
     if !radius.is_finite() || radius <= 0.0 {
         return None;
     }
-    for (face_key, face) in body.faces.iter() {
-        let Some(Surface::Cylinder(cylinder)) = body.surfaces.get(face.surface) else {
+    for (face_key, face) in body.faces.iter().enumerate() {
+        let ocs_solid::model::r::Surface::Cylinder { frame, radius: cylinder_radius } = &face.surface
+        else {
             continue;
         };
-        if (cylinder.radius.abs() - radius).abs() > radius.max(1.0) * 1.0e-7 {
+        if (cylinder_radius.abs() - radius).abs() > radius.max(1.0) * 1.0e-7 {
             continue;
         }
-        let axis = glam::DVec3::from_array(cylinder.base.normal()?).try_normalize()?;
-        let origin = glam::DVec3::from_array(cylinder.base.origin);
-        let points = body
-            .face_coedges(face_key)
+        let axis = glam::DVec3::from_array(frame.x_axis)
+            .cross(glam::DVec3::from_array(frame.y_axis))
+            .try_normalize()?;
+        let origin = glam::DVec3::from_array(frame.origin);
+        let points = ocs_solid::model::face_edges(body, face_key as u32)
             .into_iter()
-            .filter_map(|coedge| body.coedges.get(coedge))
-            .filter_map(|coedge| body.edges.get(coedge.edge))
-            .flat_map(|edge| [edge.start, edge.end])
-            .filter_map(|vertex| body.vertices.get(vertex))
+            .filter_map(|(edge, _)| body.edges.get(edge as usize))
+            .flat_map(|edge| edge.vertices)
+            .filter_map(|vertex| body.vertices.get(vertex as usize))
             .map(|vertex| glam::DVec3::from_array(vertex.point))
             .collect::<Vec<_>>();
         let minimum = points
@@ -3612,44 +3601,31 @@ pub fn chamfer_distance_grips(
     let Some(source) = document
         .solid_history_tree(handle)
         .and_then(|tree| tree.find(value.base.node_id())?.operands.first().cloned())
-        .and_then(|operand| ocs_acis::rebuild_history_tree(&operand).ok())
+        .and_then(|operand| ocs_solid::rebuild_history_tree(&operand).ok())
     else {
         return Vec::new();
     };
-    let edges = source.edge_keys().collect::<Vec<_>>();
-    let faces = source.face_keys().collect::<Vec<_>>();
     let Some(edge) = value
         .edges
         .first()
         .and_then(|ordinal| usize::try_from(*ordinal).ok())
-        .and_then(|ordinal| edges.get(ordinal).copied())
-        .and_then(|edge| source.edges.get(edge))
+        .and_then(|ordinal| source.edges.get(ordinal))
     else {
         return Vec::new();
     };
-    let Some(base_face) = usize::try_from(value.base_face)
+    let Some(base_face) = u32::try_from(value.base_face)
         .ok()
-        .and_then(|ordinal| faces.get(ordinal).copied())
+        .filter(|face| (*face as usize) < source.faces.len())
     else {
         return Vec::new();
     };
-    let adjacent = edge
-        .coedges
-        .iter()
-        .filter_map(|coedge| source.coedges.get(*coedge))
-        .filter_map(|coedge| source.loops.get(coedge.owner))
-        .map(|edge_loop| edge_loop.owner)
-        .collect::<Vec<_>>();
-    let Some(other_face) = adjacent.iter().copied().find(|face| *face != base_face) else {
+    let Some(other_face) = edge.uses.iter().map(|edge_use| edge_use.face).find(|face| *face != base_face)
+    else {
         return Vec::new();
     };
-    let outward = |face_key| {
-        let face = source.faces.get(face_key)?;
-        let Surface::Plane(plane) = source.surfaces.get(face.surface)? else {
-            return None;
-        };
-        let normal = glam::DVec3::from_array(plane.normal()?).try_normalize()?;
-        Some(if face.forward { normal } else { -normal })
+    let outward = |face| {
+        let (_, normal) = ocs_solid::model::face_plane(&source, face)?;
+        glam::DVec3::from_array(normal).try_normalize()
     };
     let Some(base_normal) = outward(base_face) else {
         return Vec::new();
@@ -3664,10 +3640,10 @@ pub fn chamfer_distance_grips(
     let Some(other_inward) = (-(base_normal - other_normal * dot)).try_normalize() else {
         return Vec::new();
     };
-    let Some(start) = source.vertices.get(edge.start) else {
+    let Some(start) = source.vertices.get(edge.vertices[0] as usize) else {
         return Vec::new();
     };
-    let Some(end) = source.vertices.get(edge.end) else {
+    let Some(end) = source.vertices.get(edge.vertices[1] as usize) else {
         return Vec::new();
     };
     let midpoint =
@@ -3704,7 +3680,7 @@ pub fn primitive_grips(document: &document::Document, handle: document::Handle) 
         let Some(EntityType::Solid3D(solid)) = document.get_entity(handle) else {
             return Vec::new();
         };
-        return crate::scene::convert::solid3d_tess::kernel_body(solid)
+        return crate::scene::convert::solid3d_tess::solid_record(solid)
             .and_then(|body| fillet_radius_grip(&body, radius))
             .into_iter()
             .collect();
@@ -4307,7 +4283,7 @@ pub fn pyramid_op(
     })
 }
 
-pub fn brep_op(body: &Body) -> SolidHistoryOperation {
+pub fn brep_op(body: &Brep) -> SolidHistoryOperation {
     let acis_data = crate::scene::convert::acis_export::solid_to_sat(body)
         .map(|document| {
             let mut solid = Solid3D::new();

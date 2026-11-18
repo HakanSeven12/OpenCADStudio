@@ -1032,10 +1032,10 @@ fn explode_region(region: &document::entities::Region) -> Vec<EntityType> {
                 .flatten()
         });
         if let Some(sat) = sat {
-            let (bodies, _loss) = ocs_acis::lift(&sat);
+            let (bodies, _loss) = ocs_solid::lift(&sat);
             for body in &bodies {
-                for face in body.face_keys() {
-                    if let Some(profile) = ocs_brep::planar_face_profile(body, face) {
+                for face in 0..body.brep.faces.len() as u32 {
+                    if let Some(profile) = ocs_solid::model::planar_face_profile(&body.brep, face) {
                         append_region_loops(&profile.plane, &profile.loops, &common, &mut out);
                     }
                 }

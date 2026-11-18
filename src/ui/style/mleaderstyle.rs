@@ -731,6 +731,7 @@ fn editor_window<'a>(v: &View<'a>, sizing: crate::ui::modal::ModalSizing) -> Ele
         context_menu: None,
         list: Some(style_list_pane(v)),
         extra_actions: Vec::new(),
+        list_title: None,
         editor,
     })
 }

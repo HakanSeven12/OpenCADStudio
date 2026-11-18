@@ -196,7 +196,12 @@ fn angular_curve(
         return Vec::new();
     };
     let mut out = vec![curve.point_at(first)];
+    let widths = || boundaries.windows(2).map(|pair| pair[1] - pair[0]);
     for pair in boundaries.windows(2) {
+        if crate::tessellation::sliver_span(pair[1] - pair[0], widths()) {
+            out.push(curve.point_at(pair[1]));
+            continue;
+        }
         subdivide_angle(
             curve,
             pair[0],
@@ -343,7 +348,12 @@ fn nurbs_within(curve: &NurbsCurve, tolerance: f64) -> Vec<[f64; 2]> {
     let tolerance = if usable(tolerance) { tolerance } else { 0.0 };
     let mut out = vec![curve.point_at(0.0)];
     let spans = span_boundaries(curve);
+    let widths = || spans.windows(2).map(|pair| pair[1] - pair[0]);
     for pair in spans.windows(2) {
+        if crate::tessellation::sliver_span(pair[1] - pair[0], widths()) {
+            out.push(curve.point_at(pair[1]));
+            continue;
+        }
         subdivide(curve, pair[0], pair[1], tolerance, 0, &mut out);
     }
     out

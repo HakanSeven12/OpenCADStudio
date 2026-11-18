@@ -6272,7 +6272,7 @@ DEAD
         let stale = document::Handle::from(9999);
         app.tabs[app.active_tab].scene.solid_models.insert(
             stale,
-            ocs_brep::make::cuboid([0.0; 3], [1.0; 3]).unwrap(),
+            ocs_solid::model::make_box([0.0; 3], [1.0; 3]).unwrap(),
         );
         let path = std::env::temp_dir().join(format!(
             "ocs_automation_finalize_test_{}.dxf",
@@ -6306,7 +6306,7 @@ DEAD
 
         app.tabs[i].scene.solid_models.insert(
             stale,
-            ocs_brep::make::cuboid([0.0; 3], [1.0; 3]).unwrap(),
+            ocs_solid::model::make_box([0.0; 3], [1.0; 3]).unwrap(),
         );
         assert_eq!(app.automation_op(r#"{"op":"new"}"#)["ok"], true);
         assert!(app.tabs[i].scene.solid_models.is_empty());

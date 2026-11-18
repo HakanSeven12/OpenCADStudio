@@ -1966,7 +1966,7 @@ impl Scene {
         target: Handle,
         first: Handle,
         steps: &[(Handle, u8)],
-        bodies: &std::collections::HashMap<Handle, ocs_brep::Body>,
+        bodies: &std::collections::HashMap<Handle, ocs_solid::model::Brep>,
     ) -> bool {
         let solids = std::iter::once(target)
             .chain(std::iter::once(first))
@@ -2087,20 +2087,20 @@ impl Scene {
         &self,
         handle: Handle,
         operation: &document::objects::SolidHistoryOperation,
-    ) -> Option<ocs_brep::Body> {
+    ) -> Option<ocs_solid::model::Brep> {
         use document::objects::SolidHistoryOperation;
 
         match (self.document.get_entity(handle)?, operation) {
             (EntityType::Surface(_), SolidHistoryOperation::Extrusion(value)) => {
-                ocs_acis::rebuild_extrusion_with_mode(value, true).ok()
+                ocs_solid::rebuild_extrusion_with_mode(value, true).ok()
             }
             (EntityType::Surface(_), SolidHistoryOperation::Loft(_)) => {
-                ocs_acis::rebuild_body(operation).ok()
+                ocs_solid::rebuild_body(operation).ok()
             }
             (EntityType::Solid3D(_), _) => {
                 let mut tree = self.document.solid_history_tree(handle)?;
                 tree.find_mut(operation.base()?.node_id())?.operation = operation.clone();
-                ocs_acis::rebuild_history_tree(&tree).ok()
+                ocs_solid::rebuild_history_tree(&tree).ok()
             }
             _ => None,
         }
@@ -2173,7 +2173,7 @@ impl Scene {
             if !changed {
                 continue;
             }
-            let Ok(body) = ocs_acis::rebuild_sweep_with_mode(&record, true) else {
+            let Ok(body) = ocs_solid::rebuild_sweep_with_mode(&record, true) else {
                 continue;
             };
             let Some(document) = crate::scene::convert::acis_export::solid_to_sat(&body) else {
@@ -2323,7 +2323,7 @@ impl Scene {
             let made: Option<
                 Result<
                     SolidHistoryOperation,
-                    (ocs_brep::Body, document::entities::SurfaceData),
+                    (ocs_solid::model::Brep, document::entities::SurfaceData),
                 >,
             > = match &sources {
                 SurfaceSources::Extrude {
@@ -3105,7 +3105,7 @@ impl Scene {
         let document::objects::SolidHistoryOperation::Sweep(record) = &operation else {
             return None;
         };
-        ocs_acis::sweep_history_refusal(record)
+        ocs_solid::sweep_history_refusal(record)
             .map(crate::scene::model::sweep_model::sweep_refusal_code)
     }
 
@@ -3150,9 +3150,9 @@ impl Scene {
         if delta.iter().all(|value| value.abs() <= f64::EPSILON) {
             return;
         }
-        let placement = ocs_brep::Placement::at(delta);
+        let placement = ocs_solid::model::Placement { origin: delta, ..ocs_solid::model::Placement::IDENTITY };
         if let Some(body) = self.solid_models.get(&handle).cloned() {
-            if let Some(moved) = ocs_brep::transform(&body, &placement) {
+            if let Ok(moved) = ocs_solid::model::placed(&body, &placement) {
                 self.solid_models.insert(handle, moved);
             }
         }
@@ -3187,9 +3187,7 @@ impl Scene {
             translate_split(high, low);
         }
         for generator in &mut set.curved_gens {
-            if let Some(source) =
-                ocs_brep::mesh::transform_silhouette(&generator.source, &placement)
-            {
+            if let Some(source) = generator.source.transformed([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], delta) {
                 generator.source = source;
             }
         }

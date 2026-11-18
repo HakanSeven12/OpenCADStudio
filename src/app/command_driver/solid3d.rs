@@ -255,14 +255,14 @@ impl OpenCADStudio {
                 .solid_models
                 .get(&handle)
                 .cloned()
-                .or_else(|| crate::scene::convert::solid3d_tess::kernel_surface_body(surface));
+                .or_else(|| crate::scene::convert::solid3d_tess::surface_record(surface));
             let Some(body) = body else {
                 failed += 1;
                 continue;
             };
-            let solid = match ocs_brep::thicken(&body, kernel_distance) {
+            let solid = match ocs_solid::model::thicken(&body, kernel_distance) {
                 Ok(solid) => solid,
-                Err(ocs_brep::ThickenError::SelfIntersection) => {
+                Err(ocs_solid::model::Error::WallFolds { .. } | ocs_solid::model::Error::WallsTouch) => {
                     failed += 1;
                     self_intersections += 1;
                     continue;
@@ -416,7 +416,7 @@ impl OpenCADStudio {
             } else {
                 let result = sweep_model::revolve_history(&entity, from, to, angle, start_angle)
                     .and_then(|history| {
-                        ocs_acis::rebuild_body(&history)
+                        ocs_solid::rebuild_body(&history)
                             .ok()
                             .map(|solid| (solid, history))
                     })
@@ -535,21 +535,21 @@ impl OpenCADStudio {
                 if sweep_model::spatial_profile(&profile).is_some() {
                     let record = sweep_model::spatial_sweep_record(&profile, path, options)?;
                     let body =
-                        ocs_acis::rebuild_sweep_with_mode(&record, true).map_err(|_| None)?;
+                        ocs_solid::rebuild_sweep_with_mode(&record, true).map_err(|_| None)?;
                     return Ok((body, record, true));
                 }
                 let mut record = sweep_model::sweep_record(&profile, path, options).ok_or(None)?;
                 record.flags_294_296[0] |= picked_base;
-                let (_, _, closed) = ocs_acis::sweep_profile_geometry(
+                let (_, _, closed) = ocs_solid::sweep_profile_geometry(
                     record.sweep_entity.as_ref().ok_or(None)?,
                     record.sweep_entity_transform,
                 )
                 .map_err(|_| None)?;
                 let surface = mode == ExtrudeMode::Surface || !closed;
                 let body =
-                    ocs_acis::rebuild_sweep_with_mode(&record, surface).map_err(|error| {
+                    ocs_solid::rebuild_sweep_with_mode(&record, surface).map_err(|error| {
                         match error {
-                            ocs_acis::HistoryRebuildError::Refused(why) => {
+                            ocs_solid::HistoryRebuildError::Refused(why) => {
                                 Some(sweep_model::sweep_refusal_code(why))
                             }
                             _ => None,
@@ -708,7 +708,7 @@ impl OpenCADStudio {
         } else {
             loft_command_model::record(&sections, &guides, path, &available, mode, options)
                 .and_then(|record| {
-                    ocs_acis::rebuild_loft_with_options(&record).map(|body| (body, record))
+                    ocs_solid::rebuild_loft_with_options(&record).map(|body| (body, record))
                 })
         };
         match result {
@@ -911,7 +911,7 @@ impl OpenCADStudio {
     pub(super) fn handle_slice_surface_entities(
         &mut self,
         targets: Vec<Handle>,
-        cutter: Box<ocs_brep::Body>,
+        cutter: Box<ocs_solid::model::Brep>,
         keep_point: Option<glam::DVec3>,
     ) -> Task<Message> {
         let i = self.active_tab;

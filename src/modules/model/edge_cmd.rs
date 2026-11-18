@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use document::Handle;
 use glam::DVec3;
-use ocs_brep::{Body, EdgeKey, FaceKey};
+use ocs_solid::model::Brep;
 
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DynAnchor, DynFieldSpec, DynGuide, DynRole, DynSpec,
@@ -46,16 +46,16 @@ enum EdgeStep {
 pub struct SolidEdgeCommand {
     operation: EdgeOperation,
     target: Option<Handle>,
-    bodies: Vec<(Handle, Body)>,
+    bodies: Vec<(Handle, Brep)>,
     handle: Option<Handle>,
-    selected_edges: Vec<EdgeKey>,
-    base_face: Option<FaceKey>,
-    selection_batches: Vec<(Vec<EdgeKey>, DVec3)>,
+    selected_edges: Vec<u32>,
+    base_face: Option<u32>,
+    selection_batches: Vec<(Vec<u32>, DVec3)>,
     selection_mode: EdgeSelectionMode,
     step: EdgeStep,
     value_return: EdgeStep,
     expression_return: EdgeStep,
-    loop_candidates: Vec<(FaceKey, Vec<EdgeKey>)>,
+    loop_candidates: Vec<(u32, Vec<u32>)>,
     loop_index: usize,
     last_pick: Option<DVec3>,
     default_value: f64,
@@ -69,7 +69,7 @@ impl SolidEdgeCommand {
     pub fn new(
         operation: EdgeOperation,
         target: Option<Handle>,
-        bodies: Vec<(Handle, Body)>,
+        bodies: Vec<(Handle, Brep)>,
         preview_color: [f32; 4],
     ) -> Self {
         Self {
@@ -101,7 +101,7 @@ impl SolidEdgeCommand {
 
     pub fn new_chamfer(
         target: Option<Handle>,
-        bodies: Vec<(Handle, Body)>,
+        bodies: Vec<(Handle, Brep)>,
         preview_color: [f32; 4],
         distances: (f64, f64),
     ) -> Self {
@@ -115,13 +115,13 @@ impl SolidEdgeCommand {
         (self.default_value, self.other_value)
     }
 
-    fn body(&self, handle: Handle) -> Option<&Body> {
+    fn body(&self, handle: Handle) -> Option<&Brep> {
         self.bodies
             .iter()
             .find_map(|(candidate, body)| (*candidate == handle).then_some(body))
     }
 
-    fn active_body(&self) -> Option<(Handle, &Body)> {
+    fn active_body(&self) -> Option<(Handle, &Brep)> {
         let handle = self.handle?;
         self.body(handle).map(|body| (handle, body))
     }
@@ -133,7 +133,7 @@ impl SolidEdgeCommand {
             && self.body(handle).is_some()
     }
 
-    fn add_batch(&mut self, edges: Vec<EdgeKey>, anchor: DVec3) -> bool {
+    fn add_batch(&mut self, edges: Vec<u32>, anchor: DVec3) -> bool {
         let batch = edges
             .into_iter()
             .filter(|edge| !self.selected_edges.contains(edge))
@@ -146,19 +146,19 @@ impl SolidEdgeCommand {
         true
     }
 
-    fn current_loop(&self) -> Option<&[EdgeKey]> {
+    fn current_loop(&self) -> Option<&[u32]> {
         self.loop_candidates
             .get(self.loop_index)
             .map(|(_, edges)| edges.as_slice())
     }
 
-    fn current_loop_face(&self) -> Option<FaceKey> {
+    fn current_loop_face(&self) -> Option<u32> {
         self.loop_candidates
             .get(self.loop_index)
             .map(|(face, _)| *face)
     }
 
-    fn preview_edges(&self) -> Vec<EdgeKey> {
+    fn preview_edges(&self) -> Vec<u32> {
         let mut edges = self.selected_edges.clone();
         if self.step == EdgeStep::LoopConfirm {
             if let Some(loop_edges) = self.current_loop() {
@@ -196,8 +196,8 @@ impl SolidEdgeCommand {
         }
         let (handle, body) = self.active_body()?;
         let result = match self.operation {
-            EdgeOperation::Fillet => ocs_brep::fillet_edges(body, &edges, value).ok()?,
-            EdgeOperation::Chamfer => ocs_brep::chamfer_edges(
+            EdgeOperation::Fillet => ocs_solid::model::fillet(body, &edges, value).ok()?,
+            EdgeOperation::Chamfer => ocs_solid::model::chamfer(
                 body,
                 &edges,
                 self.base_face.or_else(|| self.current_loop_face())?,
@@ -794,24 +794,20 @@ impl CadCommand for SolidEdgeCommand {
     }
 }
 
-fn edge_loops(body: &Body, seed: EdgeKey) -> Vec<(FaceKey, Vec<EdgeKey>)> {
-    let Some(edge) = body.edges.get(seed) else {
+fn edge_loops(body: &Brep, seed: u32) -> Vec<(u32, Vec<u32>)> {
+    let Some(edge) = body.edges.get(seed as usize) else {
         return Vec::new();
     };
     let mut candidates = Vec::new();
-    for coedge_key in &edge.coedges {
-        let Some(coedge) = body.coedges.get(*coedge_key) else {
+    for edge_use in &edge.uses {
+        let Some(face) = body.faces.get(edge_use.face as usize) else {
             continue;
         };
-        let Some(edge_loop) = body.loops.get(coedge.owner) else {
+        let Some(ocs_solid::model::r::Loop::Edges { edges }) = face.loops.get(edge_use.r#loop as usize)
+        else {
             continue;
         };
-        let edges = edge_loop
-            .coedges
-            .iter()
-            .filter_map(|key| body.coedges.get(*key).map(|coedge| coedge.edge))
-            .collect::<Vec<_>>();
-        let candidate = (edge_loop.owner, edges);
+        let candidate = (edge_use.face, edges.iter().map(|oriented| oriented.edge).collect::<Vec<_>>());
         if !candidate.1.is_empty() && !candidates.contains(&candidate) {
             candidates.push(candidate);
         }
@@ -819,30 +815,15 @@ fn edge_loops(body: &Body, seed: EdgeKey) -> Vec<(FaceKey, Vec<EdgeKey>)> {
     candidates
 }
 
-fn edge_belongs_to_face(body: &Body, edge: EdgeKey, face: FaceKey) -> bool {
-    body.edges.get(edge).is_some_and(|edge| {
-        edge.coedges.iter().any(|coedge| {
-            body.coedges
-                .get(*coedge)
-                .and_then(|coedge| body.loops.get(coedge.owner))
-                .is_some_and(|edge_loop| edge_loop.owner == face)
-        })
-    })
+fn edge_belongs_to_face(body: &Brep, edge: u32, face: u32) -> bool {
+    body.edges
+        .get(edge as usize)
+        .is_some_and(|edge| edge.uses.iter().any(|edge_use| edge_use.face == face))
 }
 
-fn nearest_edge_face(body: &Body, edge: EdgeKey, point: [f64; 3]) -> Option<FaceKey> {
-    let edge = body.edges.get(edge)?;
-    edge.coedges
-        .iter()
-        .filter_map(|coedge| {
-            let edge_loop = body.loops.get(body.coedges.get(*coedge)?.owner)?;
-            let face = body.faces.get(edge_loop.owner)?;
-            let surface = body.surfaces.get(face.surface)?;
-            let distance = surface.distance_to(point).abs();
-            distance.is_finite().then_some((edge_loop.owner, distance))
-        })
-        .min_by(|first, second| first.1.total_cmp(&second.1))
-        .map(|(face, _)| face)
+fn nearest_edge_face(body: &Brep, edge: u32, point: [f64; 3]) -> Option<u32> {
+    let faces = body.edges.get(edge as usize)?.uses.iter().map(|edge_use| edge_use.face).collect::<Vec<_>>();
+    ocs_solid::model::nearest_face(body, &faces, point).map(|(face, _)| face)
 }
 
 fn positive_default(value: f64) -> f64 {
@@ -853,27 +834,22 @@ fn positive_default(value: f64) -> f64 {
     }
 }
 
-fn edge_chain(body: &Body, seed: EdgeKey) -> Vec<EdgeKey> {
+fn edge_chain(body: &Brep, seed: u32) -> Vec<u32> {
     let mut chain = vec![seed];
     let mut next = 0;
     while next < chain.len() {
         let current_key = chain[next];
         next += 1;
-        let Some(current) = body.edges.get(current_key) else {
+        let Some(current) = body.edges.get(current_key as usize) else {
             continue;
         };
-        for vertex in [current.start, current.end] {
+        for vertex in current.vertices {
             let Some(current_tangent) = edge_tangent_from_vertex(body, current_key, vertex) else {
                 continue;
             };
-            for candidate_key in body.edge_keys() {
-                if chain.contains(&candidate_key) {
-                    continue;
-                }
-                let Some(candidate) = body.edges.get(candidate_key) else {
-                    continue;
-                };
-                if candidate.start != vertex && candidate.end != vertex {
+            for (candidate_key, candidate) in body.edges.iter().enumerate() {
+                let candidate_key = candidate_key as u32;
+                if chain.contains(&candidate_key) || !candidate.vertices.contains(&vertex) {
                     continue;
                 }
                 let Some(candidate_tangent) = edge_tangent_from_vertex(body, candidate_key, vertex)
@@ -889,26 +865,23 @@ fn edge_chain(body: &Body, seed: EdgeKey) -> Vec<EdgeKey> {
     chain
 }
 
-fn edge_tangent_from_vertex(
-    body: &Body,
-    edge_key: EdgeKey,
-    vertex: ocs_brep::VertexKey,
-) -> Option<DVec3> {
-    let edge = body.edges.get(edge_key)?;
-    let curve = body.curves.get(edge.curve)?;
-    let span = edge.end_parameter - edge.start_parameter;
+fn edge_tangent_from_vertex(body: &Brep, edge_key: u32, vertex: u32) -> Option<DVec3> {
+    let edge = body.edges.get(edge_key as usize)?;
+    let [low, high] = edge.interval;
+    let span = high - low;
     if !span.is_finite() || span.abs() <= f64::EPSILON {
         return None;
     }
     let step = span * 1.0e-6;
-    let (at, inside) = if edge.start == vertex {
-        (edge.start_parameter, edge.start_parameter + step)
-    } else if edge.end == vertex {
-        (edge.end_parameter, edge.end_parameter - step)
+    let (at, inside) = if edge.vertices[0] == vertex {
+        (low, low + step)
+    } else if edge.vertices[1] == vertex {
+        (high, high - step)
     } else {
         return None;
     };
-    let tangent = DVec3::from(curve.point_at(inside)) - DVec3::from(curve.point_at(at));
+    let point = |t| ocs_solid::geometry::point_on(edge.parameters(), t).map(DVec3::from);
+    let tangent = point(inside)? - point(at)?;
     (tangent.length_squared() > 0.0 && tangent.is_finite()).then(|| tangent.normalize())
 }
 

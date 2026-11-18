@@ -823,6 +823,18 @@ fn image_cache() -> &'static Mutex<BudgetedRasterCache<String, ImageCacheEntry>>
     CACHE.get_or_init(|| Mutex::new(BudgetedRasterCache::new()))
 }
 
+/// The decode of each reference that is still alive somewhere (a scene's
+/// models hold their pixels), so a resolve after the budgeted cache dropped
+/// it hands the same buffer back instead of decoding a second copy. Without
+/// it, a drawing with more raster than the budget decoded every image again
+/// for each viewport and each yes/no probe, and never settled (#3225).
+type LiveDecodes = Mutex<HashMap<String, (std::sync::Weak<Vec<u8>>, DecodedImage)>>;
+
+fn live_decodes() -> &'static LiveDecodes {
+    static LIVE: OnceLock<LiveDecodes> = OnceLock::new();
+    LIVE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Insertion order of the source cache's keys, so by-name resolution has a
 /// deterministic winner (the MOST RECENT registration) instead of HashMap's
 /// unspecified iteration order.
@@ -878,6 +890,10 @@ pub fn register_source(path: &str, bytes: Arc<Vec<u8>>) {
     if let Ok(mut cache) = image_cache().lock() {
         cache.retain(|cached| !same_file_name(cached, path));
     }
+    live_decodes()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .retain(|cached, _| !same_file_name(cached, path));
 }
 
 /// Is a source registered under exactly this reference? The web paste path
@@ -954,6 +970,10 @@ pub fn clear_image_cache() {
     if let Ok(mut cache) = image_cache().lock() {
         cache.clear();
     }
+    live_decodes()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clear();
 }
 
 /// Brightness and contrast (0–100, 50 = unchanged) as one lookup table per
@@ -1079,7 +1099,7 @@ pub fn resolve_image(path: &str) -> Option<DecodedImage> {
             }
         }
     };
-    let decoded = entry.get_or_init(|| decode_reference(path)).clone();
+    let decoded = entry.get_or_init(|| live_decode(path)).clone();
     if fresh {
         // A hit's cost is already settled; only a fresh decode needs re-registering.
         let cost = size_of::<String>()
@@ -1103,6 +1123,35 @@ pub fn resolve_image(path: &str) -> Option<DecodedImage> {
         }
     }
     decoded
+}
+
+/// The live decode of `path` when one is still held, else a fresh decode
+/// that is then remembered as live. The remembered copy holds the buffer
+/// weakly, so the memory it costs is only the dimensions.
+fn live_decode(path: &str) -> Option<DecodedImage> {
+    let mut live = live_decodes()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some((weak, image)) = live.get(path) {
+        if let Some(pixels) = weak.upgrade() {
+            return Some(DecodedImage {
+                pixels,
+                ..image.clone()
+            });
+        }
+    }
+    live.retain(|_, (weak, _)| weak.strong_count() > 0);
+    drop(live);
+    let decoded = decode_reference(path)?;
+    let remembered = DecodedImage {
+        pixels: Arc::new(Vec::new()),
+        ..decoded.clone()
+    };
+    live_decodes()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .insert(path.to_string(), (Arc::downgrade(&decoded.pixels), remembered));
+    Some(decoded)
 }
 
 /// Decode a reference to RGBA pixels. Priority: registered bytes (picked or
@@ -2063,14 +2112,13 @@ mod tests {
         let _lock = IMAGE_BUDGET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let _budget = ImageBudgetEnvGuard::set("1");
         let oldest = budget_image("evict-oldest");
-        let first = resolve_image(&oldest).expect("first decode");
+        let first = Arc::downgrade(&resolve_image(&oldest).expect("first decode").pixels);
         for i in 0..8 {
             let path = budget_image(&format!("evict-sweep-{i}"));
             drop(resolve_image(&path).expect("sweep decode"));
         }
-        let again = resolve_image(&oldest).expect("re-decode");
         assert!(
-            !Arc::ptr_eq(&first.pixels, &again.pixels),
+            first.upgrade().is_none(),
             "the oldest decoded image must be evicted once the sweep passes the budget"
         );
     }
@@ -2152,6 +2200,19 @@ mod tests {
         );
     }
 
+    /// A decode still held elsewhere comes back as the same buffer after the
+    /// cache dropped it, instead of a second decoded copy (#3225).
+    #[test]
+    fn an_evicted_image_still_held_is_not_decoded_again() {
+        let _lock = IMAGE_BUDGET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _budget = ImageBudgetEnvGuard::set("1");
+        let path = "memory://image-budget-held.png".to_string();
+        register_source(&path, Arc::new(png_bytes(1024, 1024, 0x7f)));
+        let first = resolve_image(&path).expect("first decode");
+        let again = resolve_image(&path).expect("second resolve");
+        assert!(Arc::ptr_eq(&first.pixels, &again.pixels));
+    }
+
     /// An image whose decode exceeds the whole budget must not linger in the
     /// cache at zero accounted cost: it is returned once, then re-decoded.
     #[test]
@@ -2160,10 +2221,9 @@ mod tests {
         let _budget = ImageBudgetEnvGuard::set("1");
         let path = "memory://image-budget-oversized.png".to_string();
         register_source(&path, Arc::new(png_bytes(1024, 1024, 0x7f)));
-        let first = resolve_image(&path).expect("first decode");
-        let again = resolve_image(&path).expect("second decode");
+        let first = Arc::downgrade(&resolve_image(&path).expect("first decode").pixels);
         assert!(
-            !Arc::ptr_eq(&first.pixels, &again.pixels),
+            first.upgrade().is_none(),
             "an image bigger than the budget must not linger in the cache"
         );
     }

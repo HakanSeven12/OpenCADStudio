@@ -16,6 +16,10 @@ use crate::command::{CadCommand, CmdOption, CmdResult};
 use crate::modules::draw::fence::FencePick;
 use crate::scene::model::wire_model::WireModel;
 
+/// The step a path picked from a box clicked at the empty command prompt
+/// relaunches into: it only records the set as the Previous selection.
+pub const IMPLIED_PATH_DONE: &str = "_SELECT_PATH_DONE";
+
 pub struct SelectObjectsCommand {
     prompt_cmd: String,
     pending_cmd: String,
@@ -261,6 +265,17 @@ impl CadCommand for SelectObjectsCommand {
         self.pick.is_none()
     }
 
+    fn selection_path(&self) -> Option<crate::command::SelectionPath> {
+        self.pick
+            .as_ref()
+            .map(|pick| crate::command::SelectionPath {
+                points: pick.points.clone(),
+                closed: pick.closed,
+                crossing: self.pick_crossing,
+                implied: self.pending_cmd == IMPLIED_PATH_DONE,
+            })
+    }
+
     fn entity_pick_highlights_hover(&self) -> bool {
         self.pick.is_none()
     }
@@ -318,6 +333,15 @@ impl CadCommand for SelectObjectsCommand {
     }
 
     fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
+        // A path started from a box clicked with no command running is the
+        // whole selection: it ends with the path, leaving the objects
+        // selected, as a box picked there would.
+        if self.pending_cmd == IMPLIED_PATH_DONE {
+            if handles.is_empty() {
+                return CmdResult::Cancel;
+            }
+            return CmdResult::Relaunch(std::mem::take(&mut self.pending_cmd), handles);
+        }
         if self.commit_on_enter {
             // Keep gathering: remember the running set and update the prompt.
             // The command is applied when the user presses Enter / right-clicks.
@@ -406,7 +430,8 @@ impl CadCommand for SelectObjectsCommand {
     fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
         match &self.pick {
             Some(pick) if !pick.is_empty() => {
-                vec![pick.preview([pt.x, pt.y], "select_fence")]
+                let window_polygon = pick.closed && !self.pick_crossing;
+                vec![pick.preview_styled([pt.x, pt.y], "select_fence", !window_polygon)]
             }
             _ => vec![],
         }

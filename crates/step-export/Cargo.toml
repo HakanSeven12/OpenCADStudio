@@ -7,4 +7,5 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
+solidcore = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
 solidcore-record = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }

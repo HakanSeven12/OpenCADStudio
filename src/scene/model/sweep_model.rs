@@ -7,7 +7,7 @@ use document::objects::{
 };
 use document::types::{Vector2, Vector3};
 use document::EntityType;
-use ocs_brep::{self as brep, Body};
+use ocs_solid::model::Brep;
 use ocs_geom::geom2d::{Arc, Curve, EllipseArc, Line};
 use ocs_geom::space::{PlanarCurve, Plane, Vec3};
 
@@ -326,7 +326,7 @@ fn split_ellipse(arc: EllipseArc) -> Vec<Curve> {
 ///
 /// `None` for a profile that does not close, encloses nothing, or holds a
 /// piece with no analytic side wall.
-pub fn extruded(entity: &EntityType, height: f64) -> Option<Body> {
+pub fn extruded(entity: &EntityType, height: f64) -> Option<Brep> {
     let profile = profile_of(entity)?;
     let normal = profile.plane.normal()?;
     extruded_direction(
@@ -340,36 +340,36 @@ pub fn extruded_direction(
     entity: &EntityType,
     direction: [f64; 3],
     taper_angle: f64,
-) -> Option<Body> {
+) -> Option<Brep> {
     if let Some((plane, profiles)) =
         region_profiles(entity).filter(|(_, profiles)| profiles.len() > 1)
     {
         if taper_angle.abs() > 1e-12 {
             return None;
         }
-        return brep::extrude_region(plane, &profiles, direction);
+        return ocs_solid::extrude_region(&plane, &profiles, direction, 0.0, false).ok();
     }
     let profile = profile_of(entity)?;
-    brep::extrude_tapered(profile.plane, &profile.pieces, direction, taper_angle)
+    ocs_solid::extrude_region(&profile.plane, &[profile.pieces], direction, taper_angle, false).ok()
 }
 
 pub fn extruded_surface(
     entity: &EntityType,
     direction: [f64; 3],
     taper_angle: f64,
-) -> Option<Body> {
+) -> Option<Brep> {
     if region_with_holes(entity) {
         return None;
     }
     let (profile, _) = extrusion_profile_of(entity)?;
-    brep::extrude_surface_tapered(profile.plane, &profile.pieces, direction, taper_angle)
+    ocs_solid::extrude_region(&profile.plane, &[profile.pieces], direction, taper_angle, true).ok()
 }
 
 pub fn extruded_along_path(
     entity: &EntityType,
     path: &EntityType,
     taper_angle: f64,
-) -> Option<Body> {
+) -> Option<Brep> {
     if region_with_holes(entity) {
         if taper_angle.abs() > 1e-12 {
             return None;
@@ -387,14 +387,25 @@ pub fn extruded_along_path(
             if points.len() != 2 {
                 return None;
             }
-            return brep::extrude_tapered(
-                profile.plane,
-                &profile.pieces,
+            return ocs_solid::extrude_region(
+                &profile.plane,
+                &[profile.pieces],
                 (Vec3::from(points[1]) - Vec3::from(points[0])).to_array(),
                 taper_angle,
-            );
+                false,
+            )
+            .ok();
         }
-        return brep::sweep_along_polyline3d(profile.plane, &profile.pieces, &points);
+        // The path moves to the profile, which keeps its own orientation.
+        let shift = profile_center(&profile)? - Vec3::from(*points.first()?);
+        let points = points.iter().map(|point| (Vec3::from(*point) + shift).to_array()).collect::<Vec<_>>();
+        return ocs_solid::sweep::sweep_path(
+            profile.plane,
+            &[profile.pieces],
+            ocs_solid::sweep::SweepPath::Polyline3d { points: &points, closed: false },
+            ocs_solid::sweep::SweepOptions { align: false, base_point: Some(points[0]), ..Default::default() },
+        )
+        .ok();
     }
     if taper_angle.abs() <= 1e-12 {
         return swept(entity, path);
@@ -405,12 +416,7 @@ pub fn extruded_along_path(
     };
     let direction =
         Vec3::from(curve.plane.point_at(line.end)) - Vec3::from(curve.plane.point_at(line.start));
-    brep::extrude_tapered(
-        profile.plane,
-        &profile.pieces,
-        direction.to_array(),
-        taper_angle,
-    )
+    ocs_solid::extrude_region(&profile.plane, &[profile.pieces], direction.to_array(), taper_angle, false).ok()
 }
 
 pub fn straight_path_direction(path: &EntityType) -> Option<[f64; 3]> {
@@ -451,15 +457,17 @@ pub fn revolved(
     to: [f64; 3],
     angle: f64,
     start_angle: f64,
-) -> Option<Body> {
+) -> Option<Brep> {
     let axis = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
     let body = if let Some((plane, profiles)) =
         region_profiles(entity).filter(|(_, profiles)| profiles.len() > 1)
     {
-        brep::revolve_region(plane, &profiles, from, axis, angle)?
+        axis_in_plane(&plane, from, axis).then_some(())?;
+        revolve_region(plane, &profiles, from, axis, angle, true)?
     } else {
         let profile = profile_of(entity)?;
-        brep::revolve(profile.plane, &profile.pieces, from, axis, angle)?
+        axis_in_plane(&profile.plane, from, axis).then_some(())?;
+        ocs_solid::revolve(&profile.plane, &profile.pieces, from, axis, angle, true).ok()?
     };
     turn_revolved_body(body, from, axis, start_angle)
 }
@@ -471,20 +479,51 @@ pub fn revolved_surface(
     to: [f64; 3],
     angle: f64,
     start_angle: f64,
-) -> Option<Body> {
+) -> Option<Brep> {
     let axis = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
     let body = if let Some((plane, profiles)) =
         region_profiles(entity).filter(|(_, profiles)| profiles.len() > 1)
     {
-        brep::revolve_surface_region(plane, &profiles, from, axis, angle)?
+        revolve_region(plane, &profiles, from, axis, angle, false)?
     } else {
         let (profile, _) = extrusion_profile_of(entity)?;
-        brep::revolve_surface(profile.plane, &profile.pieces, from, axis, angle)?
+        ocs_solid::revolve(&profile.plane, &profile.pieces, from, axis, angle, false).ok()?
     };
     turn_revolved_body(body, from, axis, start_angle)
 }
 
-fn turn_revolved_body(body: Body, pivot: [f64; 3], axis: [f64; 3], angle: f64) -> Option<Body> {
+/// Whether the axis through `origin` along `axis` lies in `plane`: one off it sweeps the
+/// profile into surfaces with no closed form, which are refused rather than approximated.
+fn axis_in_plane(plane: &Plane, origin: [f64; 3], axis: [f64; 3]) -> bool {
+    let (Some(normal), Some(axis)) = (plane.normal(), Vec3::from(axis).normalize()) else {
+        return false;
+    };
+    let size = Vec3::from(origin).length().max(1.0);
+    axis.dot(Vec3::from(normal)).abs() <= 1e-9 && plane.distance_to(origin).is_some_and(|gap| gap.abs() <= 1e-9 * size)
+}
+
+/// A region's outer loop revolved less its revolved holes (`solid`), or each loop's
+/// revolved sheet.
+fn revolve_region(
+    plane: Plane,
+    loops: &[Vec<Curve>],
+    origin: [f64; 3],
+    axis: [f64; 3],
+    angle: f64,
+    solid: bool,
+) -> Option<Brep> {
+    let bodies = loops
+        .iter()
+        .map(|ring| ocs_solid::revolve(&plane, ring, origin, axis, angle, solid).ok())
+        .collect::<Option<Vec<_>>>()?;
+    if solid {
+        ocs_solid::model::subtract_all(bodies.first()?, &bodies[1..]).ok()?
+    } else {
+        ocs_solid::model::sewn(&bodies.iter().collect::<Vec<_>>(), 1e-9).ok()
+    }
+}
+
+fn turn_revolved_body(body: Brep, pivot: [f64; 3], axis: [f64; 3], angle: f64) -> Option<Brep> {
     if !angle.is_finite() {
         return None;
     }
@@ -497,13 +536,13 @@ fn turn_revolved_body(body: Body, pivot: [f64; 3], axis: [f64; 3], angle: f64) -
         vector * cos + axis.cross(vector) * sin + axis * axis.dot(vector) * (1.0 - cos)
     };
     let pivot = Vec3::from(pivot);
-    let placement = brep::Placement {
+    let placement = ocs_solid::model::Placement {
         x_axis: rotate(Vec3::X).to_array(),
         y_axis: rotate(Vec3::Y).to_array(),
         z_axis: rotate(Vec3::Z).to_array(),
         origin: (pivot - rotate(pivot)).to_array(),
     };
-    brep::transform(&body, &placement)
+    ocs_solid::model::placed(&body, &placement).ok()
 }
 
 fn profile_center(profile: &Profile) -> Option<Vec3> {
@@ -562,7 +601,7 @@ pub fn revolve_history(
 }
 
 /// SWEEP as an exact B-rep along straight and circular path pieces.
-pub fn swept(profile: &EntityType, path: &EntityType) -> Option<Body> {
+pub fn swept(profile: &EntityType, path: &EntityType) -> Option<Brep> {
     let profile = profile_of(profile)?;
     let mut path = entity_curve(path)?;
     let pieces = match &path.curve {
@@ -600,11 +639,19 @@ pub fn swept(profile: &EntityType, path: &EntityType) -> Option<Body> {
         / profile.pieces.len() as f64;
     let path_start = Vec3::from(path.plane.point_at(path.curve.point_at(0.0)));
     path.plane.origin = (Vec3::from(path.plane.origin) + profile_center - path_start).to_array();
-    brep::sweep_along(profile.plane, &profile.pieces, path.plane, &pieces)
+    let path = ocs_solid::sweep::SweepPath::Planar { plane: path.plane, curves: &pieces };
+    let start = ocs_solid::sweep::sweep_path_start(path)?;
+    ocs_solid::sweep::sweep_path(
+        profile.plane,
+        &[profile.pieces],
+        path,
+        ocs_solid::sweep::SweepOptions { align: false, base_point: Some(start), ..Default::default() },
+    )
+    .ok()
 }
 
 /// LOFT as an exact B-rep through compatible closed sections.
-pub fn lofted(profiles: &[EntityType]) -> Option<Body> {
+pub fn lofted(profiles: &[EntityType]) -> Option<Brep> {
     if let Some(body) = circular_loft(profiles) {
         return Some(body);
     }
@@ -612,10 +659,14 @@ pub fn lofted(profiles: &[EntityType]) -> Option<Body> {
         .iter()
         .map(|entity| {
             let profile = profile_of(entity)?;
-            Some((profile.plane, profile.pieces))
+            Some(ocs_solid::LoftSection::Profile {
+                plane: profile.plane,
+                wires: vec![profile.pieces],
+                closed: true,
+            })
         })
         .collect::<Option<Vec<_>>>()?;
-    brep::loft(&sections)
+    ocs_solid::loft_sections(&sections, &[], false, false, false).ok()
 }
 
 /// Stores the source sections required to rebuild and edit a loft.
@@ -962,7 +1013,7 @@ pub fn polysolid(
     width: f64,
     height: f64,
     justification: PolysolidJustification,
-) -> Option<(Body, SolidHistoryOperation)> {
+) -> Option<(Brep, SolidHistoryOperation)> {
     if !width.is_finite() || !height.is_finite() || width <= 0.0 || height.abs() <= 1e-12 {
         return None;
     }
@@ -1016,11 +1067,11 @@ pub fn polysolid(
         reference_point: Vector3::new(start.x, start.y, start.z),
         ..SolidHistorySweep::default()
     });
-    let body = ocs_acis::rebuild_body(&operation).ok()?;
+    let body = ocs_solid::rebuild_body(&operation).ok()?;
     Some((body, operation))
 }
 
-fn circular_loft(profiles: &[EntityType]) -> Option<Body> {
+fn circular_loft(profiles: &[EntityType]) -> Option<Brep> {
     if profiles.len() < 2 {
         return None;
     }
@@ -1084,13 +1135,15 @@ fn circular_loft(profiles: &[EntityType]) -> Option<Body> {
             })
         })
         .collect::<Vec<_>>();
-    brep::revolve(
-        profile_plane,
+    ocs_solid::revolve(
+        &profile_plane,
         &profile,
         first.0.to_array(),
         direction.to_array(),
         std::f64::consts::TAU,
+        true,
     )
+    .ok()
 }
 
 #[cfg(test)]
@@ -1108,7 +1161,7 @@ mod tests {
         EntityType::LwPolyline(polyline)
     }
 
-    fn volume(body: &Body) -> f64 {
+    fn volume(body: &Brep) -> f64 {
         crate::scene::model::solid_model::volume(body)
     }
 

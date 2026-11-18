@@ -692,8 +692,12 @@ impl OpenCADStudio {
             }
             super::super::ModalKind::TableCellFormat => {
                 let state = self.table_cell_format.as_ref()?;
-                sized_flow(ex, 520, 470, |flow| {
-                    crate::ui::window::table_cell_dialog::view_format(state, flow)
+                let badges = crate::app::commands::table_cells::format_badges(
+                    &self.tabs[self.active_tab].scene.document,
+                    state,
+                );
+                sized_flow(ex, 720, 470, |flow| {
+                    crate::ui::window::table_cell_dialog::view_format(state, badges.clone(), flow)
                 })
             }
             super::super::ModalKind::RefEdit => {
@@ -1427,7 +1431,38 @@ impl OpenCADStudio {
                 }
                 let in_use =
                     self.style_in_use(crate::app::StyleKind::Table, &self.tablestyle_selected);
-                sized_flow(ex, 960, 680, |flow| {
+                // The edited cell style's data format with a sample.
+                let format_sample = selected_style
+                    .and_then(|style| style.cell_style(&self.ts_cell))
+                    .map(|cell| {
+                        let format = &cell.cell_style.content_format;
+                        let state =
+                            crate::app::update::table_style_cells::cell_format_state(format);
+                        format!(
+                            "{} · {}",
+                            crate::i18n::translate(crate::ui::window::table_cell_dialog::FORMAT_KINDS
+                                [state.kind.min(8)]),
+                            // General and Text have no format of their own:
+                            // their sample as the type list shows it.
+                            if matches!(state.kind, 4 | 7) {
+                                crate::app::commands::table_cells::format_badges(
+                                    &tab.scene.document,
+                                    &state,
+                                )[state.kind]
+                                    .clone()
+                            } else {
+                                crate::app::commands::table_cells::format_preview(
+                                    &tab.scene.document,
+                                    &state,
+                                )
+                            }
+                        )
+                    })
+                    .unwrap_or_default();
+                let manage_in_use = self.ts_cards.manage.as_ref().is_some_and(|manage| {
+                    self.table_cell_style_in_use(self.active_tab, &manage.selected)
+                });
+                sized_flow(ex, 1240, 760, |flow| {
                     crate::ui::style::tablestyle::view_window(
                         crate::ui::style::tablestyle::TableStyleView {
                             styles: styles.clone(),
@@ -1442,13 +1477,20 @@ impl OpenCADStudio {
                             in_use_only: self.tablestyle_in_use_only,
                             description: &self.ts_description,
                             cell: &self.ts_cell,
-                            cell_name: &self.ts_cell_name,
                             cell_height: &self.ts_cell_height,
                             cell_angle: &self.ts_cell_angle,
                             cell_hmargin: &self.ts_cell_hmargin,
                             cell_vmargin: &self.ts_cell_vmargin,
-                            cell_format: &self.ts_cell_format,
-                            edge_spacing: &self.ts_edge_spacing,
+                            border: &self.ts_border,
+                            cards: &self.ts_cards,
+                            linetype_rows: table_style_linetype_rows(&tab.scene.document),
+                            linetype_names: tab
+                                .scene
+                                .document
+                                .line_types
+                                .iter()
+                                .map(|linetype| linetype.name.clone())
+                                .collect(),
                             text_styles: tab
                                 .scene
                                 .document
@@ -1473,6 +1515,8 @@ impl OpenCADStudio {
                             rename_active: self.style_rename.as_deref(),
                             rename_buf: &self.style_rename_buf,
                             color_open: self.ts_color_open,
+                            format_sample: format_sample.clone(),
+                            manage_in_use,
                         },
                         flow,
                     )
@@ -1907,6 +1951,7 @@ impl OpenCADStudio {
         sized_flow(ex, 720, 520, |flow| {
             crate::ui::window::shortcuts::view_window(
                 &self.shortcut_editor_rows,
+                &self.shortcut_filter,
                 self.shortcut_capture_row,
                 self.shortcut_pending_add,
                 self.shortcut_reset_confirm,
@@ -2718,4 +2763,33 @@ fn default_assoc_dialog_window(sizing: crate::ui::modal::ModalSizing) -> Element
     .center_y(sizing.height)
     .padding([24, 28])
     .into()
+}
+
+/// Select Linetype rows of the table style window: ByLayer, ByBlock and
+/// the drawing's linetypes.
+fn table_style_linetype_rows(
+    doc: &document::Document,
+) -> Vec<crate::ui::style::mleaderstyle::LinetypeRow> {
+    use crate::ui::style::mleaderstyle::LinetypeRow;
+    let mut rows: Vec<LinetypeRow> = ["ByLayer", "ByBlock"]
+        .into_iter()
+        .map(|name| LinetypeRow {
+            name: name.into(),
+            description: String::new(),
+            pattern: Vec::new(),
+        })
+        .collect();
+    rows.extend(
+        doc.line_types
+            .iter()
+            .filter(|lt| {
+                !lt.name.eq_ignore_ascii_case("ByLayer") && !lt.name.eq_ignore_ascii_case("ByBlock")
+            })
+            .map(|lt| LinetypeRow {
+                name: lt.name.clone(),
+                description: lt.description.clone(),
+                pattern: lt.elements.iter().map(|e| e.length).collect(),
+            }),
+    );
+    rows
 }

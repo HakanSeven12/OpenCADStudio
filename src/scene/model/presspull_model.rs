@@ -1,10 +1,10 @@
-//! PRESSPULL selection and curve-only previews. Geometry operations stay in the kernel.
+//! PRESSPULL selection and curve-only previews. Geometry operations go through Solidcore.
 
 use document::entities::{AcisData, EmbeddedEntity, Region, Wire};
 use document::types::Vector3;
 use document::{EntityType, Handle};
 use glam::DVec3;
-use ocs_brep::{self as brep, Body, FaceKey};
+use ocs_solid::model::{self, Brep};
 use ocs_geom::geom2d::{contains, ring_nesting_depths, signed_area, Curve, Line, Tolerance};
 use ocs_geom::space::Plane;
 use rustc_hash::FxHashMap;
@@ -24,8 +24,8 @@ pub enum PresspullTargetKind {
     },
     Face {
         handle: Handle,
-        face: FaceKey,
-        body: Body,
+        face: u32,
+        body: Brep,
         offset: bool,
     },
 }
@@ -52,7 +52,7 @@ pub fn profile_geometry(entity: &EntityType) -> Option<(Plane, Vec<Vec<Curve>>, 
         _ => sweep_model::embedded_revolve_profile(entity),
     };
     if let Some((entity, transform)) = embedded {
-        if let Ok(geometry) = ocs_acis::sweep_profile_geometry(&entity, transform) {
+        if let Ok(geometry) = ocs_solid::sweep_profile_geometry(&entity, transform) {
             return Some(geometry);
         }
         // Exact modeler data is authoritative, not a hint to replace by chords.
@@ -65,15 +65,12 @@ pub fn profile_geometry(entity: &EntityType) -> Option<(Plane, Vec<Vec<Curve>>, 
 }
 
 /// Builds the final solid or surface without discarding exact REGION loops.
-pub fn extrusion_body(entity: &EntityType, direction: [f64; 3]) -> Option<Body> {
+pub fn extrusion_body(entity: &EntityType, direction: [f64; 3]) -> Option<Brep> {
     let (plane, loops, closed) = profile_geometry(entity)?;
-    if closed {
-        brep::extrude_region(plane, &loops, direction)
-    } else if loops.len() == 1 {
-        brep::extrude_surface(plane, &loops[0], direction)
-    } else {
-        None
+    if !closed && loops.len() != 1 {
+        return None;
     }
+    ocs_solid::extrude_region(&plane, &loops, direction, 0.0, !closed).ok()
 }
 
 fn eligible(scene: &Scene, entity: &EntityType) -> bool {
@@ -246,7 +243,7 @@ pub(crate) fn region_from_loops(loops: &[Vec<Curve>], plane: WorkingPlane) -> Op
         plane.x.to_array(),
         plane.y.to_array(),
     );
-    let sheet = brep::planar_region(kernel_plane, loops)?;
+    let sheet = model::planar_region(kernel_plane, loops)?;
     let document = crate::scene::convert::acis_export::solid_to_sat(&sheet)?;
     let mut region = Region::new();
     region.acis_data = AcisData::from_sat(&document.to_sat_string());
@@ -278,7 +275,7 @@ fn face_at_point(
     scene: &Scene,
     point: DVec3,
     preferred: Option<Handle>,
-) -> Option<(Handle, FaceKey, &Body)> {
+) -> Option<(Handle, u32, &Brep)> {
     let mut handles = scene.solid_models.keys().copied().collect::<Vec<_>>();
     handles.sort_by_key(|handle| handle.value());
     for handle in handles {
@@ -292,7 +289,7 @@ fn face_at_point(
             continue;
         }
         let body = &scene.solid_models[&handle];
-        if let Some(face) = brep::planar_face_at_point(body, point.to_array(), BOUNDARY_TOLERANCE) {
+        if let Some(face) = model::planar_face_at_point(body, point.to_array(), BOUNDARY_TOLERANCE) {
             return Some((handle, face, body));
         }
     }
@@ -310,8 +307,8 @@ fn profile_owner(scene: &Scene, plane: WorkingPlane, anchor: DVec3) -> Option<(H
             continue;
         }
         let body = &scene.solid_models[&handle];
-        for face in body.face_keys() {
-            let Some(profile) = brep::planar_face_profile(body, face) else {
+        for face in 0..body.faces.len() as u32 {
+            let Some(profile) = model::planar_face_profile(body, face) else {
                 continue;
             };
             let outward = DVec3::from_array(profile.outward);
@@ -343,8 +340,8 @@ pub fn edge_on_face_point(
     let body = scene.solid_models.get(&handle)?;
     let view = view.try_normalize()?;
     let mut best: Option<(f64, DVec3)> = None;
-    for face in body.face_keys() {
-        let Some(profile) = brep::planar_face_profile(body, face) else {
+    for face in 0..body.faces.len() as u32 {
+        let Some(profile) = model::planar_face_profile(body, face) else {
             continue;
         };
         let Some(normal) = profile.plane.normal().map(DVec3::from_array) else {
@@ -444,7 +441,7 @@ pub fn resolve_target(
     }
 
     if let Some((owner, face, body)) = face_at_point(scene, point, handle) {
-        let profile = brep::planar_face_profile(body, face)
+        let profile = model::planar_face_profile(body, face)
             .ok_or("PRESSPULL: the selected solid face has no valid planar boundary.")?;
         let face_plane = working_plane(profile.plane);
         let local = face_plane.to_local(point);
@@ -519,7 +516,7 @@ pub fn detached_target(target: &PresspullTarget) -> Option<PresspullTarget> {
     let (entity, source) = match &target.kind {
         PresspullTargetKind::Profile { entity, source, .. } => (entity.clone(), *source),
         PresspullTargetKind::Face { body, face, .. } => {
-            let profile = brep::planar_face_profile(body, *face)?;
+            let profile = model::planar_face_profile(body, *face)?;
             let plane = working_plane(profile.plane);
             (region_from_loops(&profile.loops, plane)?, None)
         }
@@ -557,7 +554,7 @@ pub fn preview_wires(
         // The kernel's analytic offset performs no Boolean or triangulation;
         // the command memoizes this candidate by selected targets and distance.
         // Only return an overlay: failure never hides or edits the resident body.
-        return brep::presspull_face(body, *face, distance, brep::PresspullMode::Offset)
+        return model::offset_faces(body, &[*face], distance)
             .map(|candidate| preview_body_wires(&candidate, color, isolines))
             .unwrap_or_default();
     }
@@ -569,7 +566,7 @@ pub fn preview_wires(
             // exact extrusion cage; its Boolean merge happens only on commit,
             // never inside pointer movement. Unrelated faces and lumps need
             // no rebuilding for a normal face-extrusion preview.
-            brep::planar_face_profile(body, *face).map(|profile| {
+            model::planar_face_profile(body, *face).map(|profile| {
                 (
                     profile.plane,
                     profile.loops,
@@ -585,8 +582,7 @@ pub fn preview_wires(
     // Each loop is a lateral sheet. This wire-only overlay does not need the
     // planar caps or complete solid topology of extrude_region.
     for ring in loops {
-        let ring = brep::extrusion_profile_pieces(&ring);
-        let Some(body) = brep::extrude_surface(plane, &ring, direction) else {
+        let Ok(body) = ocs_solid::extrude_region(&plane, &[ring], direction, 0.0, true) else {
             continue;
         };
         wires.extend(preview_body_wires(&body, color, isolines));
@@ -594,18 +590,9 @@ pub fn preview_wires(
     wires
 }
 
-fn preview_body_wires(body: &Body, color: [f32; 4], isolines: usize) -> Vec<WireModel> {
-    let wireframe = brep::mesh::tessellate_wireframe(
-        body,
-        brep::mesh::TessellationTolerance::new(ocs_geom::tessellation::DEFAULT_ANGLE, 1e-9)
-            .with_solid_isolines(isolines),
-    );
-    wireframe
-        .edges
+fn preview_body_wires(body: &Brep, color: [f32; 4], isolines: usize) -> Vec<WireModel> {
+    super::solid_model::preview_curves(body, isolines)
         .into_iter()
-        .map(|edge| edge.positions)
-        .chain(wireframe.isolines.into_iter().map(|line| line.positions))
-        .filter(|points| points.len() >= 2)
         .map(|points| WireModel::solid_f64("PRESSPULL-PREVIEW".to_owned(), points, color, false))
         .collect()
 }
@@ -614,7 +601,7 @@ fn preview_body_wires(body: &Body, color: [f32; 4], isolines: usize) -> Vec<Wire
 mod tests {
     use super::*;
 
-    fn box_body() -> Body {
+    fn box_body() -> Brep {
         let plane = Plane::from_axes([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let corners = [[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]];
         let ring = (0..4)
@@ -625,13 +612,13 @@ mod tests {
                 })
             })
             .collect::<Vec<_>>();
-        brep::extrude_region(plane, &[ring], [0.0, 0.0, 2.0]).unwrap()
+        ocs_solid::extrude_region(&plane, &[ring], [0.0, 0.0, 2.0], 0.0, false).unwrap()
     }
 
     #[test]
     fn detached_face_extrudes_a_separate_solid() {
         let body = box_body();
-        let face = brep::planar_face_at_point(&body, [2.0, 2.0, 2.0], 1e-6).unwrap();
+        let face = model::planar_face_at_point(&body, [2.0, 2.0, 2.0], 1e-6).unwrap();
         let target = PresspullTarget {
             kind: PresspullTargetKind::Face {
                 handle: Handle::new(1),

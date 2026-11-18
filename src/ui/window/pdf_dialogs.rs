@@ -49,6 +49,27 @@ pub enum PdfDialogMsg {
     CloudLock(bool),
     CloudZoom(bool),
     CloudOk,
+    /// A point cloud read off the UI thread for the Attach Point Cloud
+    /// window: the file, and the cloud (None: no scan could be read).
+    CloudRead(
+        std::path::PathBuf,
+        Option<std::sync::Arc<crate::scene::model::point_cloud::CloudPoints>>,
+    ),
+    /// A point cloud read off the UI thread for the -POINTCLOUDATTACH file
+    /// name prompt: the tab, the file, and whether a scan could be read.
+    CloudPromptRead(u64, std::path::PathBuf, bool),
+    /// A point cloud read off the UI thread for its attach: the tab it was
+    /// started for, that document's generation, the undo label and the
+    /// placement, and the cloud (None: no scan could be read).
+    CloudAttachRead(
+        u64,
+        u64,
+        Box<(
+            String,
+            crate::modules::insert::pc_attach::PointCloudPlacement,
+        )>,
+        Option<std::sync::Arc<crate::scene::model::point_cloud::CloudPoints>>,
+    ),
     // Point Cloud Color Map
     /// Elevation tab (else intensity).
     MapTab(bool),
@@ -380,7 +401,7 @@ pub(crate) fn chip<'a>(label: String, on: bool, message: Message) -> Element<'a,
     chip_enabled(label, on, message, true)
 }
 
-fn chip_enabled<'a>(
+pub(crate) fn chip_enabled<'a>(
     label: String,
     on: bool,
     message: Message,

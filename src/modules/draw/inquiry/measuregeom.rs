@@ -715,9 +715,9 @@ impl MeasureGeomCommand {
             EntityType::Body(body) => &body.acis_data,
             _ => return None,
         };
-        crate::scene::convert::solid3d_tess::kernel_acis_body(acis)
-            .and_then(|body| ocs_brep::mass_properties(&body))
-            .map(|properties| properties.volume.abs())
+        crate::scene::convert::solid3d_tess::acis_record(acis)
+            .and_then(|body| ocs_solid::model::volume(&body).ok())
+            .map(f64::abs)
     }
 
     /// eXit at the first-corner prompt: Add / Subtract print the total once

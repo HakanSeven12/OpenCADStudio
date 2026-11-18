@@ -141,6 +141,36 @@ impl super::Scene {
         })
     }
 
+    fn construction_member_handles(&self, definition: Handle) -> Vec<Handle> {
+        if let Some(record) = self
+            .document
+            .block_records
+            .iter()
+            .find(|r| r.handle == definition && !r.entity_handles.is_empty())
+        {
+            record
+                .entity_handles
+                .iter()
+                .copied()
+                .filter(|&h| {
+                    self.document.get_entity(h).is_some_and(|e| {
+                        let common = e.common();
+                        common.owner_handle == definition && is_construction(common)
+                    })
+                })
+                .collect()
+        } else {
+            self.document
+                .entities()
+                .filter_map(|e| {
+                    let common = e.common();
+                    (common.owner_handle == definition && is_construction(common))
+                        .then_some(common.handle)
+                })
+                .collect()
+        }
+    }
+
     pub(crate) fn set_construction_shown(&mut self, definition: Handle, shown: bool) {
         let changed = if shown {
             self.block_construction_hidden.remove(&definition)
@@ -149,8 +179,15 @@ impl super::Scene {
         };
         if changed {
             self.deselect_all();
-            self.recolor_meshes();
-            self.bump_geometry();
+            let affected = self.construction_member_handles(definition);
+            if !affected.is_empty() {
+                self.recolor_meshes_for_handles(&affected);
+                let changes: Vec<(Handle, super::ChangeKind)> = affected
+                    .into_iter()
+                    .map(|h| (h, super::ChangeKind::Modified))
+                    .collect();
+                self.bump_entities_restyled(&changes);
+            }
         }
     }
 }

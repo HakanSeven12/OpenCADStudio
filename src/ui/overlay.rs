@@ -3879,6 +3879,9 @@ struct GridProjection {
     row_x_norm: f32,
     row_y_norm: f32,
     row_w_norm: f32,
+    /// Line indices of the grid node nearest the eye; `grid_clip_origin` sits
+    /// on that node, so `project_line` values stay small.
+    line_shift: [i32; 2],
     grid_clip_origin: glam::Vec4,
     grid_clip_axis1: glam::Vec4,
     grid_clip_axis2: glam::Vec4,
@@ -3922,7 +3925,23 @@ impl GridProjection {
         // intersect it with the viewport rectangle. This remains valid across the
         // perspective horizon; projecting a finite world-space bounding rectangle
         // is only correct for the perpendicular/top view.
-        let grid_clip_origin = view_rot * (grid_origin - eye).as_vec3().extend(1.0);
+        // In f64, from the grid node nearest the eye: at UTM-scale coordinates
+        // an f32 `i * step` away from the true origin rounds lines off by
+        // pixels, so they no longer meet the (f64) grid snap points (#3240).
+        let rel = eye - grid_origin;
+        let nearest = |axis: Vec3, step: f32| {
+            let k = (rel.dot(axis.as_dvec3()) / f64::from(step)).round();
+            if k.is_finite() {
+                k.clamp(-1e9, 1e9) as i32
+            } else {
+                0
+            }
+        };
+        let line_shift = [nearest(axis1, step_x), nearest(axis2, step_y)];
+        let node = grid_origin
+            + axis1.as_dvec3() * (f64::from(line_shift[0]) * f64::from(step_x))
+            + axis2.as_dvec3() * (f64::from(line_shift[1]) * f64::from(step_y));
+        let grid_clip_origin = view_rot * (node - eye).as_vec3().extend(1.0);
         let grid_clip_axis1 = view_rot * axis1.extend(0.0);
         let grid_clip_axis2 = view_rot * axis2.extend(0.0);
 
@@ -3944,6 +3963,7 @@ impl GridProjection {
             row_x_norm,
             row_y_norm,
             row_w_norm,
+            line_shift,
             grid_clip_origin,
             grid_clip_axis1,
             grid_clip_axis2,
@@ -4561,7 +4581,7 @@ impl GridProjection {
                     let anchor1 = (anchor_world - self.grid_origin).as_vec3().dot(self.axis1);
                     let (start, end) = self.line_range(min1, max1, anchor1, self.step_x);
                     for i in start..=end {
-                        let value = i as f32 * self.step_x;
+                        let value = i.saturating_sub(self.line_shift[0]) as f32 * self.step_x;
                         if let Some((p0, p1)) = self.project_line(0, value) {
                             if self.is_major(i) {
                                 self.trim_line(0, p0, p1, &mut all_major);
@@ -4587,7 +4607,7 @@ impl GridProjection {
                     let anchor2 = (anchor_world - self.grid_origin).as_vec3().dot(self.axis2);
                     let (start, end) = self.line_range(min2, max2, anchor2, self.step_y);
                     for i in start..=end {
-                        let value = i as f32 * self.step_y;
+                        let value = i.saturating_sub(self.line_shift[1]) as f32 * self.step_y;
                         if let Some((p0, p1)) = self.project_line(1, value) {
                             if self.is_major(i) {
                                 self.trim_line(1, p0, p1, &mut all_major);
@@ -5164,6 +5184,14 @@ struct DynInputCanvas {
 }
 
 impl DynInputCanvas {
+    /// The dotted legs a guide draws from the anchor along its axes to the
+    /// cursor. A rectangle draws none: its rubber band is that same box, and
+    /// dotted strokes laid over its edges make them read as dashed. Its
+    /// width and height boxes stay where they were.
+    fn axis_legs(guide: DynGuide, base: Point, corner: Point, cursor: Point) -> Option<[Point; 3]> {
+        (guide == DynGuide::AxisDelta).then_some([base, corner, cursor])
+    }
+
     fn dotted(theme: &Theme) -> canvas::Stroke<'static> {
         canvas::Stroke {
             width: 1.0,
@@ -5515,24 +5543,13 @@ impl DynInputCanvas {
                 }
             }
             DynGuide::AxisDelta | DynGuide::RectSides => {
-                // Dotted legs from the anchor along its axes to the cursor.
-                let legs = canvas::Path::new(|p| {
-                    p.move_to(base);
-                    p.line_to(corner);
-                    p.line_to(cursor);
-                });
-                frame.stroke(&legs, Self::dotted(theme));
-                if self.guide == DynGuide::RectSides {
-                    // Close the rectangle so both side pairs read as a box.
-                    let rest = canvas::Path::new(|p| {
-                        p.move_to(base);
-                        p.line_to(Point {
-                            x: base.x,
-                            y: cursor.y,
-                        });
-                        p.line_to(cursor);
+                if let Some([from, via, to]) = Self::axis_legs(self.guide, base, corner, cursor) {
+                    let legs = canvas::Path::new(|p| {
+                        p.move_to(from);
+                        p.line_to(via);
+                        p.line_to(to);
                     });
-                    frame.stroke(&rest, Self::dotted(theme));
+                    frame.stroke(&legs, Self::dotted(theme));
                 }
             }
             DynGuide::None => {}
@@ -5762,6 +5779,28 @@ impl canvas::Program<Message> for DynInputCanvas {
             (_, Some(base)) => self.draw_guided(&mut frame, bounds, base, theme),
         }
         vec![frame.into_geometry()]
+    }
+}
+
+#[cfg(test)]
+mod dyn_guide_tests {
+    use super::*;
+
+    #[test]
+    fn a_rectangle_guide_strokes_nothing_over_its_rubber_band() {
+        let (base, corner, cursor) = (
+            Point::new(10.0, 10.0),
+            Point::new(60.0, 10.0),
+            Point::new(60.0, 40.0),
+        );
+        assert_eq!(
+            DynInputCanvas::axis_legs(DynGuide::AxisDelta, base, corner, cursor),
+            Some([base, corner, cursor])
+        );
+        assert_eq!(
+            DynInputCanvas::axis_legs(DynGuide::RectSides, base, corner, cursor),
+            None
+        );
     }
 }
 

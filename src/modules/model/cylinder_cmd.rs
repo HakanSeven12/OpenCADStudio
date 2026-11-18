@@ -2,7 +2,6 @@ use document::entities::Solid3D;
 use document::objects::SolidHistoryOperation;
 use document::EntityType;
 use glam::DVec3;
-use ocs_brep::Body;
 
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DynAnchor, DynFieldSpec, DynGuide, DynRole, DynSpec,
@@ -176,7 +175,7 @@ impl CylinderCommand {
         .to_cols_array()
     }
 
-    fn build(&self, axis: DVec3) -> Option<(Body, SolidHistoryOperation, f64)> {
+    fn build(&self, axis: DVec3) -> Option<(ocs_solid::model::Brep, SolidHistoryOperation, f64)> {
         let (frame, height) = self.axis_frame(axis)?;
         let local = solid_model::elliptical_cylinder_solid(
             [0.0; 3],

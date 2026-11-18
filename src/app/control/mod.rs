@@ -1982,8 +1982,8 @@ impl OpenCADStudio {
                 })
             };
             let solid_bounds = if let document::EntityType::Solid3D(solid) = entity {
-                crate::scene::convert::solid3d_tess::kernel_body(solid)
-                    .and_then(|body| ocs_brep::body_bounds(&body))
+                crate::scene::convert::solid3d_tess::solid_record(solid)
+                    .and_then(|body| ocs_solid::model::aabb(&body))
                     .map(|bounds| (bounds.min, bounds.max))
                     .filter(valid_bounds)
                     .or_else(|| {
@@ -4651,7 +4651,7 @@ mod tests {
 
         let measured = app.control_measure(&json!({"handles":[handle_text]}));
         let mesh = &measured["measurements"][0]["mesh"];
-        assert!((mesh["volume"].as_f64().unwrap() - 50.0).abs() < 1e-9);
+        assert!((mesh["volume"].as_f64().unwrap() - 50.0).abs() < 1e-9, "{}", mesh["volume"]);
         assert_eq!(mesh["principal_moments"].as_array().unwrap().len(), 3);
         assert!(matches!(
             app.tabs[app.active_tab]

@@ -932,7 +932,7 @@ impl AppHost<'_> {
                     else {
                         return None;
                     };
-                    Some((plane.origin, ocs_brep::planar_region(plane, &loops)?))
+                    Some((plane.origin, ocs_solid::model::planar_region(plane, &loops)?))
                 });
                 one(match body {
                     Some((origin, body)) => {
@@ -1650,7 +1650,7 @@ impl AppHost<'_> {
     /// A solid from `body` with `history`, as the solid commands commit one.
     fn solid(
         &mut self,
-        body: ocs_brep::Body,
+        body: ocs_solid::model::Brep,
         history: document::objects::SolidHistoryOperation,
     ) -> Value {
         let Some(sat) = crate::scene::convert::acis_export::solid_to_sat(&body) else {
@@ -1667,7 +1667,7 @@ impl AppHost<'_> {
 
     /// A primitive solid whose history keeps its sizes editable.
     fn primitive(&mut self, history: document::objects::SolidHistoryOperation) -> Value {
-        match ocs_acis::rebuild_body(&history) {
+        match ocs_solid::rebuild_body(&history) {
             Ok(body) => self.solid(body, history),
             Err(_) => Value::Null,
         }

@@ -270,7 +270,9 @@ pub enum FindMsg {
     ReplaceAll,
     Done,
     Help,
-    Row(usize),
+    /// A click on a list row; `Some((ctrl, shift))` stands for held keys
+    /// (automation), `None` reads the keyboard.
+    Row(usize, Option<(bool, bool)>),
     ZoomToResult,
     SelectHighlighted,
     SelectAll,
@@ -280,49 +282,6 @@ pub enum FindMsg {
 
 fn msg(m: FindMsg) -> Message {
     Message::Find(m)
-}
-
-const LABEL_W: f32 = 96.0;
-
-/// A text field with its history behind a drop-down.
-fn history_field<'a>(
-    label: String,
-    value: &'a str,
-    history: &'a [String],
-    on: fn(String) -> FindMsg,
-    id: Option<&'static str>,
-    submit: Option<FindMsg>,
-) -> Element<'a, Message> {
-    let mut input = text_input("", value)
-        .size(12)
-        .padding([5, 8])
-        .width(Fill)
-        .style(field_style)
-        .on_input(move |v| msg(on(v)));
-    if let Some(id) = id {
-        input = input.id(iced::widget::Id::new(id));
-    }
-    if let Some(submit) = submit {
-        input = input.on_submit(msg(submit));
-    }
-    let picker = crate::ui::dropdown_list::pick_list(None::<String>, history.to_vec(), |s: &String| {
-        s.clone()
-    })
-    .on_select(move |v| msg(on(v)))
-    .text_size(11)
-    .padding([4, 6])
-    .width(Length::Fixed(34.0));
-    row![
-        text(label)
-            .size(11)
-            .style(muted_style)
-            .width(Length::Fixed(LABEL_W)),
-        input,
-        picker,
-    ]
-    .spacing(6)
-    .align_y(iced::Center)
-    .into()
 }
 
 fn scope_switch<'a>(scope: FindScope) -> Element<'a, Message> {
@@ -348,7 +307,7 @@ fn scope_switch<'a>(scope: FindScope) -> Element<'a, Message> {
 }
 
 fn option_chips<'a>(state: &'a FindReplaceState, opts: &[FindOpt]) -> Element<'a, Message> {
-    let mut list = column![].spacing(4);
+    let mut list = Vec::new();
     for opt in opts {
         let mut options = state.options;
         let on = *opt.slot(&mut options);
@@ -364,13 +323,104 @@ fn option_chips<'a>(state: &'a FindReplaceState, opts: &[FindOpt]) -> Element<'a
         let chip = button(content.push(text(opt.label()).size(11)))
             .style(button_style(on && enabled))
             .padding([4, 10]);
-        list = list.push(if enabled {
+        list.push(Element::from(if enabled {
             chip.on_press(msg(FindMsg::Option(*opt, !on)))
         } else {
             chip
-        });
+        }));
     }
-    list.into()
+    iced::widget::Row::with_children(list)
+        .spacing(6)
+        .wrap()
+        .vertical_spacing(6)
+        .into()
+}
+
+/// A search option as a small toggle beside the search field, its name on
+/// hover. Whole words is off while wildcards are on.
+fn option_toggle<'a>(state: &'a FindReplaceState, opt: FindOpt, glyph: &'static str) -> Element<'a, Message> {
+    let mut options = state.options;
+    let on = *opt.slot(&mut options);
+    let enabled = !(opt == FindOpt::WholeWords && state.options.wildcards);
+    let toggle = button(text(glyph).size(12).width(Fill).align_x(iced::Center))
+        .style(button_style(on && enabled))
+        .padding([5, 0])
+        .width(Length::Fixed(32.0));
+    let toggle = if enabled {
+        toggle.on_press(msg(FindMsg::Option(opt, !on)))
+    } else {
+        toggle
+    };
+    tip(toggle, opt.label())
+}
+
+/// `content` with `label` shown under it on hover.
+fn tip<'a>(content: impl Into<Element<'a, Message>>, label: String) -> Element<'a, Message> {
+    iced::widget::tooltip(
+        content,
+        container(text(label).size(11))
+            .padding([4, 8])
+            .style(container::rounded_box),
+        iced::widget::tooltip::Position::Bottom,
+    )
+    .into()
+}
+
+/// A text field with its history behind a drop-down.
+fn history_input<'a>(
+    placeholder: String,
+    value: &'a str,
+    history: &'a [String],
+    on: fn(String) -> FindMsg,
+    id: Option<&'static str>,
+    submit: Option<FindMsg>,
+) -> Element<'a, Message> {
+    let mut input = text_input(&placeholder, value)
+        .size(12)
+        .padding([7, 8])
+        .width(Fill)
+        .style(field_style)
+        .on_input(move |v| msg(on(v)));
+    if let Some(id) = id {
+        input = input.id(iced::widget::Id::new(id));
+    }
+    if let Some(submit) = submit {
+        input = input.on_submit(msg(submit));
+    }
+    let picker = crate::ui::dropdown_list::pick_list(None::<String>, history.to_vec(), |s: &String| {
+        s.clone()
+    })
+    .on_select(move |v| msg(on(v)))
+    .text_size(11)
+    .padding([6, 6])
+    .width(Length::Fixed(30.0));
+    row![input, picker].spacing(4).align_y(iced::Center).into()
+}
+
+/// A result's text with every match shaded.
+fn marked_text<'a>(value: &str, state: &FindReplaceState, selected: bool) -> Element<'a, Message> {
+    let ranges = crate::app::text_match::str_ranges(value, &state.search, &state.options.matching());
+    let mut spans: Vec<iced::widget::text::Span<'a, Message>> = Vec::new();
+    let mut at = 0;
+    for (start, end) in ranges {
+        if start > at {
+            spans.push(iced::widget::span(value[at..start].to_string()));
+        }
+        let span = iced::widget::span(value[start..end].to_string());
+        spans.push(if selected {
+            span.underline(true)
+        } else {
+            span.background(iced::Color::from_rgba8(0x00, 0xB4, 0xFF, 0.28))
+        });
+        at = end;
+    }
+    if at < value.len() {
+        spans.push(iced::widget::span(value[at..].to_string()));
+    }
+    iced::widget::rich_text(spans)
+        .size(11)
+        .wrapping(iced::advanced::text::Wrapping::None)
+        .into()
 }
 
 fn results_card<'a>(state: &'a FindReplaceState, busy: bool) -> Element<'a, Message> {
@@ -388,15 +438,13 @@ fn results_card<'a>(state: &'a FindReplaceState, busy: bool) -> Element<'a, Mess
     .spacing(8);
     let mut rows = column![].spacing(1);
     for (index, result) in state.results.iter().enumerate() {
-        let selected = state.current_match == Some(result.key);
+        let selected = state.highlighted.contains(&result.key);
         let line = row![
             text(result.location.clone())
                 .size(11)
                 .width(Length::Fixed(90.0)),
             text(result.kind.label()).size(11).width(Length::Fixed(150.0)),
-            text(result.text.clone())
-                .size(11)
-                .wrapping(iced::advanced::text::Wrapping::None),
+            marked_text(&result.text, state, selected),
         ]
         .spacing(8);
         let b = button(line)
@@ -406,49 +454,66 @@ fn results_card<'a>(state: &'a FindReplaceState, busy: bool) -> Element<'a, Mess
         rows = rows.push(if busy {
             b
         } else {
-            b.on_press(msg(FindMsg::Row(index)))
+            b.on_press(msg(FindMsg::Row(index, None)))
         });
     }
-    let has_row = state.current_match.is_some() && !busy;
+    let has_row = !state.highlighted.is_empty() && !busy;
     let has_any = !state.results.is_empty() && !busy;
-    let side = |label: String, on: bool, m: FindMsg| {
-        let b = button(text(label).size(11).width(Fill).align_x(iced::Center))
+    let tool = |icon: &'static [u8], label: String, on: bool, m: FindMsg| {
+        let b = button(crate::ui::icons::themed(icon, 16.0))
             .style(button_style(false))
-            .padding([4, 8])
-            .width(Length::Fixed(150.0));
-        if on {
-            b.on_press(msg(m))
-        } else {
-            b
-        }
+            .padding([4, 6]);
+        tip(if on { b.on_press(msg(m)) } else { b }, label)
     };
-    card(
-        crate::tr!("find", "results"),
-        row![
+    let title = row![
+        text(crate::tr!("find", "results").to_uppercase())
+            .size(10)
+            .style(crate::ui::window::pdf_dialogs::accent_text),
+        container(text(state.results.len().to_string()).size(10))
+            .padding([1, 7])
+            .style(well_style),
+        Space::new().width(Fill),
+        tool(
+            ICON_ZOOM,
+            crate::tr!("find", "zoom-result"),
+            has_row && state.highlighted.len() == 1,
+            FindMsg::ZoomToResult,
+        ),
+        tool(
+            ICON_SELECT,
+            crate::tr!("find", "select-highlighted"),
+            has_row,
+            FindMsg::SelectHighlighted,
+        ),
+        tool(ICON_SELECT_ALL, crate::tr!("find", "select-all"), has_any, FindMsg::SelectAll),
+    ]
+    .spacing(6)
+    .align_y(iced::Center);
+    container(
+        column![
+            title,
             container(
                 column![
                     container(header).padding([0, 6]),
-                    scrollable(rows).height(Length::Fixed(180.0)),
+                    scrollable(rows).height(Length::Fixed(220.0)),
                 ]
                 .spacing(4),
             )
             .padding(4)
             .width(Fill)
             .style(well_style),
-            column![
-                side(crate::tr!("find", "zoom-result"), has_row, FindMsg::ZoomToResult),
-                side(
-                    crate::tr!("find", "select-highlighted"),
-                    has_row,
-                    FindMsg::SelectHighlighted
-                ),
-                side(crate::tr!("find", "select-all"), has_any, FindMsg::SelectAll),
-            ]
-            .spacing(6),
         ]
         .spacing(8),
     )
+    .padding([10, 12])
+    .width(Fill)
+    .style(crate::ui::window::pdf_dialogs::card_style)
+    .into()
 }
+
+static ICON_ZOOM: &[u8] = include_bytes!("../../../assets/icons/zoom_window.svg");
+static ICON_SELECT: &[u8] = include_bytes!("../../../assets/icons/blocks/select_objects.svg");
+static ICON_SELECT_ALL: &[u8] = include_bytes!("../../../assets/icons/blocks/quick_select.svg");
 
 fn band_style(warning: bool) -> impl Fn(&Theme) -> container::Style {
     move |theme: &Theme| container::Style {
@@ -596,46 +661,83 @@ fn message_card<'a>(state: &'a FindReplaceState) -> Option<Element<'a, Message>>
     )
 }
 
-/// Build the window.
+/// Build the window: a search bar (the text, its match switches; the
+/// replacement and its two actions), where to look with the list and
+/// options switches, the remaining options when open, the results, and the
+/// footer.
 pub(crate) fn view_window<'a>(
     state: &'a FindReplaceState,
     _sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
     let busy = state.notice.is_some() || state.run.as_ref().is_some_and(|r| r.prompt.is_some());
-    let texts = card(
-        crate::tr!("find", "texts"),
-        column![
-            history_field(
-                crate::tr!("find", "find-what"),
-                &state.search,
-                &state.search_history,
-                FindMsg::Search,
-                Some(FIND_INPUT_ID),
-                (!busy).then_some(FindMsg::Find),
-            ),
-            history_field(
-                crate::tr!("find", "replace-with"),
-                &state.replacement,
-                &state.replace_history,
-                FindMsg::Replacement,
-                None,
-                None,
-            ),
-        ]
-        .spacing(6),
-    );
-    let mut where_col = column![row![
-        scope_switch(state.scope),
+    let has_search = !state.search.trim().is_empty() && !busy;
+    let search_row = row![
+        history_input(
+            crate::tr!("find", "find-what"),
+            &state.search,
+            &state.search_history,
+            FindMsg::Search,
+            Some(FIND_INPUT_ID),
+            (!busy).then_some(FindMsg::Find),
+        ),
+        option_toggle(state, FindOpt::MatchCase, "Aa"),
+        option_toggle(state, FindOpt::WholeWords, "ab|"),
+        option_toggle(state, FindOpt::Wildcards, ".*"),
+        option_toggle(state, FindOpt::Diacritics, "é"),
+        option_toggle(state, FindOpt::HalfFull, "Ａ"),
+    ]
+    .spacing(4)
+    .align_y(iced::Center);
+    let replace_row = row![
+        history_input(
+            crate::tr!("find", "replace-with"),
+            &state.replacement,
+            &state.replace_history,
+            FindMsg::Replacement,
+            None,
+            None,
+        ),
+        dialog_button_styled_opt(
+            crate::tr!("find", "replace"),
+            (has_search && state.current_match.is_some()).then_some(msg(FindMsg::Replace)),
+            button::secondary,
+        ),
+        dialog_button_styled_opt(
+            crate::tr!("find", "replace-all"),
+            has_search.then_some(msg(FindMsg::ReplaceAll)),
+            button::secondary,
+        ),
+    ]
+    .spacing(4)
+    .align_y(iced::Center);
+    let bar = container(column![search_row, replace_row].spacing(8))
+        .padding([10, 12])
+        .width(Fill)
+        .style(crate::ui::window::pdf_dialogs::card_style);
+
+    let where_row = row![
+        container(scope_switch(state.scope)).width(Length::Fixed(330.0)),
         button(text(crate::tr!("find", "select-objects")).size(11))
             .on_press(msg(FindMsg::SelectObjects))
             .style(button_style(false))
             .padding([5, 10]),
+        Space::new().width(Fill),
+        chip(
+            crate::tr!("find", "list-results"),
+            state.list_results,
+            msg(FindMsg::ListResults(!state.list_results)),
+        ),
+        chip(
+            crate::tr!("find", "options"),
+            state.more_options,
+            msg(FindMsg::MoreOptions(!state.more_options)),
+        ),
     ]
     .spacing(6)
-    .align_y(iced::Center)]
-    .spacing(4);
+    .align_y(iced::Center);
+    let mut body = column![bar, where_row].spacing(10);
     if state.scope == FindScope::Selection {
-        where_col = where_col.push(
+        body = body.push(
             text(crate::i18n::plain(crate::tr!(
                 "find",
                 "selected-count",
@@ -645,32 +747,15 @@ pub(crate) fn view_window<'a>(
             .style(muted_style),
         );
     }
-    let where_card = card(crate::tr!("find", "where"), where_col);
-    let toggles = row![
-        chip(
-            crate::tr!("find", "list-results"),
-            state.list_results,
-            msg(FindMsg::ListResults(!state.list_results)),
-        ),
-        Space::new().width(Fill),
-        chip(
-            crate::tr!("find", "more-options"),
-            state.more_options,
-            msg(FindMsg::MoreOptions(!state.more_options)),
-        ),
-    ]
-    .spacing(6)
-    .align_y(iced::Center);
-    let mut body = column![texts, where_card, toggles].spacing(10);
-    if state.list_results {
-        body = body.push(results_card(state, busy));
-    }
     if state.more_options {
         body = body.push(
             row![
                 card(
                     crate::tr!("find", "search-options"),
-                    option_chips(state, &FindOpt::ALL[..8]),
+                    option_chips(
+                        state,
+                        &[FindOpt::Xrefs, FindOpt::Blocks, FindOpt::IgnoreHidden]
+                    ),
                 ),
                 card(
                     crate::tr!("find", "text-types"),
@@ -680,7 +765,9 @@ pub(crate) fn view_window<'a>(
             .spacing(10),
         );
     }
-    let has_search = !state.search.trim().is_empty() && !busy;
+    if state.list_results {
+        body = body.push(results_card(state, busy));
+    }
     let find_label = if state.current_match.is_some() && !state.list_results {
         crate::tr!("find", "find-next")
     } else {
@@ -692,16 +779,6 @@ pub(crate) fn view_window<'a>(
             .style(button_style(false))
             .padding([5, 11]),
         Space::new().width(Fill),
-        dialog_button_styled_opt(
-            crate::tr!("find", "replace"),
-            (has_search && state.current_match.is_some()).then_some(msg(FindMsg::Replace)),
-            button::secondary,
-        ),
-        dialog_button_styled_opt(
-            crate::tr!("find", "replace-all"),
-            has_search.then_some(msg(FindMsg::ReplaceAll)),
-            button::secondary,
-        ),
         dialog_button_styled_opt(
             find_label,
             has_search.then_some(msg(FindMsg::Find)),
@@ -716,14 +793,14 @@ pub(crate) fn view_window<'a>(
     .spacing(6)
     .align_y(iced::Center);
     // A steady window: the cards scroll while the footer stays put.
-    let mut window = column![scrollable(body).height(Fill)].spacing(10);
+    let mut window = column![scrollable(body).spacing(6).height(Fill)].spacing(10);
     if let Some(message) = message_card(state) {
         window = window.push(message);
     }
     window
         .push(footer)
         .padding([10, 12])
-        .width(Length::Fixed(660.0))
+        .width(Length::Fixed(720.0))
         .height(Length::Fixed(720.0))
         .into()
 }

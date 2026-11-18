@@ -1922,7 +1922,7 @@ pub enum CmdResult {
     /// rendering). Ends the command.
     CommitSolid {
         entity: EntityType,
-        solid: Box<ocs_brep::Body>,
+        solid: Box<ocs_solid::model::Brep>,
         history: document::objects::SolidHistoryOperation,
         erase_source: Option<Handle>,
     },
@@ -2029,6 +2029,10 @@ pub enum CmdResult {
     },
     /// Import a page of a file (PDFIMPORT File); ends the command.
     PdfImportFile(crate::modules::insert::pdf_import::PdfFileImport),
+    /// Read a point cloud file off the UI thread and ask for the next
+    /// point: the command continues. If no scan can be read, the host ends
+    /// the command with the reference's two lines when the read ends.
+    ReadPointCloud(std::path::PathBuf),
     /// Attach a point cloud: the host creates or reuses its definition,
     /// commits the cloud in one undo step, then ends the command. The
     /// message is the last prompt's echo.
@@ -2687,8 +2691,8 @@ pub enum CmdResult {
     /// Round or bevel one or more resolved B-rep edges on a solid.
     SolidEdgeBlend {
         handle: Handle,
-        edges: Vec<ocs_brep::EdgeKey>,
-        base_face: Option<ocs_brep::FaceKey>,
+        edges: Vec<u32>,
+        base_face: Option<u32>,
         value: f64,
         other_value: f64,
         fillet: bool,
@@ -2720,7 +2724,7 @@ pub enum CmdResult {
     /// Split selected solids or surfaces with one selected analytic sheet.
     SliceSurfaceEntities {
         targets: Vec<Handle>,
-        cutter: Box<ocs_brep::Body>,
+        cutter: Box<ocs_solid::model::Brep>,
         keep_point: Option<DVec3>,
     },
     /// INSERT landed on a block that has AttributeDefinitions.
@@ -3057,6 +3061,19 @@ impl CommandSuggestion {
             locked: None,
         }
     }
+}
+
+/// The path a command is picking objects with; see
+/// [`CadCommand::selection_path`].
+pub struct SelectionPath {
+    /// Vertices placed so far, in drawing coordinates.
+    pub points: Vec<[f64; 2]>,
+    /// A polygon (closed) rather than a fence.
+    pub closed: bool,
+    /// Also catch what crosses the edge, not only what lies inside.
+    pub crossing: bool,
+    /// Picked with no command running, from a clicked box.
+    pub implied: bool,
 }
 
 pub trait CadCommand: Send {
@@ -3688,6 +3705,13 @@ pub trait CadCommand: Send {
 
     fn is_selection_gathering(&self) -> bool {
         false
+    }
+
+    /// A Fence / WPolygon / CPolygon being picked: its placed vertices, so
+    /// what the path would catch with the cursor as its next vertex can be
+    /// highlighted before Enter applies it.
+    fn selection_path(&self) -> Option<SelectionPath> {
+        None
     }
 
     /// Enable a lightweight hover pick while gathering entities. Commands can

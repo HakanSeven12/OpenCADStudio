@@ -12,7 +12,7 @@ mod array_grips;
 mod block_action_bars;
 mod block_actions;
 #[doc(hidden)]
-pub use block_actions::BlockBenchHarness;
+pub use block_actions::{BlockBenchClipboard, BlockBenchHarness};
 mod block_alignment;
 mod block_authoring_edit;
 mod block_constraint_status;
@@ -283,7 +283,8 @@ impl SnapDwell {
     }
 }
 
-/// How long the cursor must sit still before the idle rollover pick runs.
+/// How long the cursor must sit still before the idle rollover pick runs
+/// when the moving pick (`hover_pick_due`) has not already answered it.
 pub const HOVER_DWELL_MS: u128 = 500;
 /// How long the cursor must sit still before the active-command object-snap pass runs.
 pub const SNAP_DWELL_MS: u128 = 60;
@@ -298,9 +299,6 @@ pub const SNAP_PREVIEW_INTERVAL_MS: u128 = 16;
 /// frame already answers faster than the display can show, and the queue it
 /// leaves behind is empty.
 pub const MOVE_COALESCE_FROM_MS: u64 = 8;
-/// Dense resident sets also retain the previous rollover while moving; this
-/// threshold gates that extra redraw-avoidance behavior.
-pub const HOVER_DWELL_DENSE_WIRES: usize = 50_000;
 
 /// Keyboard navigation inside the open right-click context menu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -663,6 +661,10 @@ pub(crate) struct FindReplaceState {
     pub matches: Vec<FindResult>,
     /// The listed matches (List results).
     pub results: Vec<FindResult>,
+    /// The highlighted rows of the list: a click picks one, Ctrl+click adds
+    /// or removes one, Shift+click a run from `anchor`.
+    pub highlighted: Vec<FindMatchKey>,
+    pub anchor: Option<usize>,
     /// Objects changed since the search started, counted once each.
     pub changed: Vec<(document::Handle, Option<usize>)>,
     /// One undo step for the whole window.
@@ -1008,6 +1010,9 @@ pub(super) struct OpenCADStudio {
     /// PDF dialogs' working copies; `None` while closed.
     pdf_attach: Option<crate::ui::window::pdf_dialogs::PdfAttachState>,
     point_cloud_attach: Option<crate::ui::window::pdf_dialogs::PointCloudAttachState>,
+    /// The read that the -POINTCLOUDATTACH file name prompt started: the
+    /// tab and the file. A failed read ends that command when it ends.
+    point_cloud_prompt_read: Option<(u64, std::path::PathBuf)>,
     /// ATTDEF dialog and Edit Attribute Definition dialog; `None` while closed.
     attdef_dialog: Option<crate::ui::window::attdef_dialog::AttdefDialogState>,
     attdef_edit: Option<crate::ui::window::attdef_dialog::AttdefEditState>,
@@ -1538,6 +1543,10 @@ pub(super) struct OpenCADStudio {
     /// `HOVER_DWELL_MS`. Skipping the pick mid-stroke avoids the per-frame
     /// O(N) wire+hatch+mesh sweep that froze the cursor on large drawings.
     hover_dwell: Option<HoverDwell>,
+    /// When a moving cursor may next run the rollover pick, so the highlight
+    /// follows the pointer instead of waiting for it to stop. Spaced like the
+    /// moving snap pass: `SNAP_MOVING_MS`, or four times the last pick's cost.
+    hover_pick_due: iced::time::Instant,
     /// The pointer position a coalesced move withheld, with its tab.
     ///
     /// Nothing used to drop a pointer move: every position the mouse reported
@@ -2221,17 +2230,20 @@ pub(super) struct OpenCADStudio {
     /// The cell style being edited ("_DATA", "_HEADER", "_TITLE" or a
     /// user cell style).
     ts_cell: String,
-    /// Text buffers of the edited cell style: name (new / rename), text
-    /// height, text angle, margins and format.
-    ts_cell_name: String,
+    /// Text buffers of the edited cell style: text height, text angle and
+    /// margins.
     ts_cell_height: String,
     ts_cell_angle: String,
     ts_cell_hmargin: String,
     ts_cell_vmargin: String,
-    ts_cell_format: String,
-    /// Double-line spacing buffers of its six edges (top, inside
-    /// horizontal, bottom, left, inside vertical, right).
-    ts_edge_spacing: [String; 6],
+    /// The Borders page's line properties and the cards over the window
+    /// (New / Manage cell styles, Select Linetype, Load).
+    ts_border: crate::ui::style::tablestyle::BorderDraft,
+    ts_cards: crate::ui::style::tablestyle::TsCards,
+    /// The Cell Data Format window / Text Style manager is open from the
+    /// table style window and returns to it.
+    ts_format_return: bool,
+    ts_text_return: bool,
     /// Colour field ("textcolor" / "fillcolor") whose expanded palette is
     /// open.
     ts_color_open: Option<&'static str>,
@@ -2293,6 +2305,8 @@ pub(super) struct OpenCADStudio {
     shortcut_bindings: rustc_hash::FxHashMap<String, String>,
     /// Working rows shown by the shortcut editor until Apply is pressed.
     shortcut_editor_rows: Vec<(String, String)>,
+    /// Search text of the shortcut editor; filters the displayed rows only.
+    shortcut_filter: String,
     /// Row whose Key cell is armed for capture: the next key combination
     /// pressed anywhere fills that row's key. While set, the keyboard
     /// subscription swallows every key so captured shortcuts do not run in
@@ -5321,6 +5335,7 @@ pub enum Message {
         field: crate::ui::window::shortcuts::ShortcutField,
         value: String,
     },
+    ShortcutEditorFilter(String),
     ShortcutEditorAdd,
     ShortcutEditorRemove(usize),
     ShortcutEditorApply,
@@ -5876,6 +5891,9 @@ pub enum Message {
     /// A background worker thread panicked or stopped without reporting a
     /// result. Surfaced on the command line instead of taking the whole
     /// process down with it.
+    /// A point cloud read that the drawing started ended: its clouds draw
+    /// again with the points.
+    PointCloudRead(crate::scene::model::point_cloud::ReadDone),
     BackgroundTaskFailed {
         /// Which operation the worker was running (e.g. "STL export").
         context: String,
@@ -6029,24 +6047,13 @@ pub enum Message {
     TableStyleApply,
     /// Edit the named cell style.
     TableStyleCellSelect(String),
-    /// Add a cell style (named by the name buffer) copying the edited one.
-    TableStyleCellNew,
-    /// Rename the edited user cell style to the name buffer.
-    TableStyleCellRename,
-    /// Delete the edited user cell style.
-    TableStyleCellDelete,
-    /// A field of the edited cell style: a text buffer ("name", "height",
-    /// "angle", "hmargin", "vmargin", "format") or a choice ("align",
-    /// "class", "datatype", "textstyle", "textcolor", "fillcolor",
-    /// "merge").
+    /// The cell style cards (New / Manage), the Borders page's line
+    /// properties and buttons, and the Format / Text style "…" windows.
+    TableStyleCells(crate::ui::style::tablestyle::TsCellMsg),
+    /// A field of the edited cell style: a text buffer ("height", "angle",
+    /// "hmargin", "vmargin") or a choice ("align", "class", "textstyle",
+    /// "textcolor", "fillcolor", "merge").
     TableStyleCellEdit {
-        field: &'static str,
-        value: String,
-    },
-    /// A field ("visible", "lw", "linetype", "color", "double",
-    /// "spacing") of one edge of the edited cell style.
-    TableStyleEdgeEdit {
-        edge: u8,
         field: &'static str,
         value: String,
     },
@@ -6499,6 +6506,7 @@ impl OpenCADStudio {
             block_dependency_cache: std::cell::RefCell::new(None),
             pdf_attach: None,
             point_cloud_attach: None,
+            point_cloud_prompt_read: None,
             attdef_dialog: None,
             insert_attr_dialog: None,
             attman: None,
@@ -6724,6 +6732,7 @@ impl OpenCADStudio {
             grip_ctrl_cycle: None,
             grip_preview_handles: Vec::new(),
             hover_dwell: None,
+            hover_pick_due: iced::time::Instant::now(),
             move_owed: None,
             box_preview_pending: None,
             box_preview_due: None,
@@ -7041,6 +7050,7 @@ impl OpenCADStudio {
             // Keyboard shortcuts
             shortcut_bindings: rustc_hash::FxHashMap::default(),
             shortcut_editor_rows: Vec::new(),
+            shortcut_filter: String::new(),
             shortcut_capture_row: None,
             shortcut_pending_add: false,
             shortcut_reset_confirm: false,
@@ -7113,13 +7123,14 @@ impl OpenCADStudio {
             tablestyle_compare: String::new(),
             ts_description: String::new(),
             ts_cell: document::objects::DATA_CELL_STYLE.to_string(),
-            ts_cell_name: String::new(),
             ts_cell_height: String::new(),
             ts_cell_angle: String::new(),
             ts_cell_hmargin: String::new(),
             ts_cell_vmargin: String::new(),
-            ts_cell_format: String::new(),
-            ts_edge_spacing: Default::default(),
+            ts_border: Default::default(),
+            ts_cards: Default::default(),
+            ts_format_return: false,
+            ts_text_return: false,
             ts_color_open: None,
             // MLineStyle dialog
             linetype_selected: String::new(),

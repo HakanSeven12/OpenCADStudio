@@ -47,6 +47,7 @@ pub(super) struct ToggleState {
     pub show_sheet_set: bool,
     pub show_file_tabs: bool,
     pub show_layout_tabs: bool,
+    pub group_selection: bool,
 }
 
 // ── Layout constants ──────────────────────────────────────────────────────
@@ -485,6 +486,7 @@ pub(super) fn is_active_tool(id: &str, active_tool: &Option<String>, state: &Tog
         "SHEETSET" => state.show_sheet_set,
         "FILETAB" => state.show_file_tabs,
         "LAYOUTTAB" => state.show_layout_tabs,
+        "TOGGLEGROUPS" => state.group_selection,
         id => active_tool.as_deref() == Some(id) || super::text_editor::lit(id),
     }
 }

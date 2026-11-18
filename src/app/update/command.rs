@@ -601,6 +601,11 @@ impl OpenCADStudio {
         if !self.is_free_text_active() && self.command_line.input.starts_with('>') {
             self.command_line.input.remove(0);
         }
+        // Fence / WPolygon / CPolygon typed while a clicked box waits for
+        // its opposite corner turn the box into that path.
+        if let Some(task) = self.try_box_path_keyword() {
+            return task;
+        }
         // Grip-menu value prompt — consume the typed number and
         // route it through `apply_grip_menu_value`.
         // Interactive grip prompts are valid only while their matching
@@ -1704,7 +1709,15 @@ impl OpenCADStudio {
         if self.tabs[i].active_cmd.is_some() {
             let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_escape());
             if let Some(r) = result {
-                return self.apply_cmd_result(r);
+                let task = self.apply_cmd_result(r);
+                // Ending a command refocuses the command line; Esc that ended
+                // it gives the keyboard back to the drawing, so a Shift+key
+                // shortcut runs at once. A command that keeps running on Esc
+                // (a multi-stage command's first Esc) keeps the focus.
+                if self.tabs[self.active_tab].active_cmd.is_none() {
+                    return task.chain(self.unfocus_widgets());
+                }
+                return task;
             }
         } else {
             // In a viewport's model space Esc deselects too and the viewport

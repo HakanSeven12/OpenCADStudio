@@ -914,13 +914,21 @@ impl Scene {
         if frozen.is_empty() {
             return wires;
         }
-        let sig = Self::frozen_layers_sig(frozen);
-        if let Some((source, kept)) = self.viewport_frozen_member_cache.borrow().get(&sig) {
+        // One result for each resident set, named by its address beside the
+        // frozen layers. By the frozen layers alone, two viewports freezing the
+        // same ones at different scales, each with a resident set of its own,
+        // replaced each other's result on every frame: both were made again
+        // each time, and the first had lost its wires before it was drawn.
+        let key = (
+            Arc::as_ptr(&wires) as usize,
+            Self::frozen_layers_sig(frozen),
+        );
+        if let Some((source, kept)) = self.viewport_frozen_member_cache.borrow().get(&key) {
             if source
                 .upgrade()
                 .is_some_and(|source| Arc::ptr_eq(&source, &wires))
             {
-                return Arc::clone(kept);
+                return kept.clone().unwrap_or(wires);
             }
         }
         let layer_frozen = |layer: &str| {
@@ -931,14 +939,16 @@ impl Scene {
                     .get(layer)
                     .is_some_and(|record| frozen.contains(&record.handle))
         };
-        let kept = match crate::scene::model::instance_model::without_layers(&wires, layer_frozen) {
-            Some(kept) => Arc::new(kept),
-            None => Arc::clone(&wires),
-        };
-        self.viewport_frozen_member_cache
-            .borrow_mut()
-            .insert(sig, (Arc::downgrade(&wires), Arc::clone(&kept)));
-        kept
+        // `None`: no block line to leave out, the set is drawn as it is. The
+        // set itself is not kept here: an edit patches it in place only while
+        // the scene alone holds it (#358).
+        let kept =
+            crate::scene::model::instance_model::without_layers(&wires, layer_frozen).map(Arc::new);
+        let mut cache = self.viewport_frozen_member_cache.borrow_mut();
+        // A set that was replaced takes its result along.
+        cache.retain(|_, (source, _)| source.strong_count() > 0);
+        cache.insert(key, (Arc::downgrade(&wires), kept.clone()));
+        kept.unwrap_or(wires)
     }
 
     /// PSLTSCALE's factor on linetypes in a viewport: 1 / viewport scale, which

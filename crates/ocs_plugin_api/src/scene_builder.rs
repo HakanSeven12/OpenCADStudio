@@ -23,13 +23,17 @@
 //! Fluent chains need somewhere to hang per-element accessories without a
 //! growing parameter list. [`SceneBuilder`] therefore tracks the
 //! **most-recently-added element** as the *active element*:
-//! [`SceneBuilder::name`], [`SceneBuilder::actions`], and
-//! [`SceneBuilder::drag`] apply to it and to nothing else. A subsequent
+//! [`SceneBuilder::name`], [`SceneBuilder::actions`],
+//! [`SceneBuilder::drag`], and the paint setters [`SceneBuilder::fill`] /
+//! [`SceneBuilder::stroke`] apply to it and to nothing else. A subsequent
 //! add re-points the active element at the new element; closing a group with
 //! [`SceneBuilder::end_group`] re-points it at the just-closed group. Calling
 //! an accessor before any element has been added is a documented no-op (the
 //! error vocabulary of [`SceneError`] is frozen, so there is nothing to
-//! report it with; the typed adds are the paths that report).
+//! report it with; the typed adds are the paths that report). The paint
+//! setters follow the same convention on elements that take no such paint
+//! (a `fill` on a Group, a `stroke` on a Text): documented no-ops, never
+//! errors.
 //!
 //! # Group nesting
 //!
@@ -129,8 +133,8 @@ impl SceneBuilder {
         self
     }
 
-    /// Append a filled and/or stroked rectangle (defaults `fill: None`,
-    /// `stroke: None`).
+    /// Append a rectangle (defaults `fill: None`, `stroke: None` — paint it
+    /// fluently with [`SceneBuilder::fill`] / [`SceneBuilder::stroke`]).
     pub fn rect(
         &mut self,
         id: u64,
@@ -151,7 +155,9 @@ impl SceneBuilder {
         Ok(self)
     }
 
-    /// Append an open or closed polyline.
+    /// Append an open or closed polyline (defaults `fill: None`,
+    /// `stroke: None` — paint it fluently with [`SceneBuilder::fill`] /
+    /// [`SceneBuilder::stroke`]).
     pub fn path(
         &mut self,
         id: u64,
@@ -172,7 +178,9 @@ impl SceneBuilder {
         Ok(self)
     }
 
-    /// Append an open or closed cubic Bézier chain.
+    /// Append an open or closed cubic Bézier chain (defaults `fill: None`,
+    /// `stroke: None` — paint it fluently with [`SceneBuilder::fill`] /
+    /// [`SceneBuilder::stroke`]).
     pub fn cubic(
         &mut self,
         id: u64,
@@ -276,7 +284,9 @@ impl SceneBuilder {
 
     /// Append a route between two element ids. Endpoint existence is NOT
     /// checked (matching the wire vocabulary); the ids are the same `u64`
-    /// values given to earlier adds.
+    /// values given to earlier adds. The route defaults `stroke: None`
+    /// (legally invisible); stroke it fluently with
+    /// [`SceneBuilder::stroke`].
     pub fn edge(
         &mut self,
         id: u64,
@@ -335,6 +345,29 @@ impl SceneBuilder {
     pub fn drag(&mut self, drag: Option<DragMeta>) -> &mut Self {
         if let Some(accessories) = self.active_element_mut().and_then(accessories_mut) {
             *accessories.2 = drag;
+        }
+        self
+    }
+
+    /// Set the active element's fill color (a paintable Rect, Path, or
+    /// CubicPath). Follows the accessory convention — a documented no-op
+    /// when no element has been added yet or the active element takes no
+    /// fill (Group, Text, Asset, Port, Marker, Edge).
+    pub fn fill(&mut self, color: SceneColor) -> &mut Self {
+        if let Some(fill) = self.active_element_mut().and_then(fill_mut) {
+            *fill = Some(color);
+        }
+        self
+    }
+
+    /// Set the active element's outline stroke (a paintable Rect, Path, or
+    /// CubicPath, or an Edge's route stroke). Follows the accessory
+    /// convention — a documented no-op when no element has been added yet
+    /// or the active element takes no stroke (Group, Text, Asset, Port,
+    /// Marker).
+    pub fn stroke(&mut self, stroke: Stroke) -> &mut Self {
+        if let Some(line) = self.active_element_mut().and_then(stroke_mut) {
+            *line = Some(stroke);
         }
         self
     }
@@ -450,6 +483,31 @@ fn accessories_mut(
         SceneElement::Port { name, actions, drag, .. } => Some((name, actions, drag)),
         SceneElement::Marker { name, actions, drag, .. } => Some((name, actions, drag)),
         SceneElement::Edge { name, actions, drag, .. } => Some((name, actions, drag)),
+    }
+}
+
+/// Mutable view of the active element's `fill` field — the variants that
+/// paint an enclosed area (Rect, Path, CubicPath). `None` on every other
+/// variant (the [`SceneBuilder::fill`] no-op arm).
+fn fill_mut(element: &mut SceneElement) -> Option<&mut Option<SceneColor>> {
+    match element {
+        SceneElement::Rect { fill, .. }
+        | SceneElement::Path { fill, .. }
+        | SceneElement::CubicPath { fill, .. } => Some(fill),
+        _ => None,
+    }
+}
+
+/// Mutable view of the active element's `stroke` field — the variants that
+/// stroke a line or outline (Rect, Path, CubicPath, Edge). `None` on every
+/// other variant (the [`SceneBuilder::stroke`] no-op arm).
+fn stroke_mut(element: &mut SceneElement) -> Option<&mut Option<Stroke>> {
+    match element {
+        SceneElement::Rect { stroke, .. }
+        | SceneElement::Path { stroke, .. }
+        | SceneElement::CubicPath { stroke, .. }
+        | SceneElement::Edge { stroke, .. } => Some(stroke),
+        _ => None,
     }
 }
 
@@ -1170,6 +1228,173 @@ mod tests {
         // Accessors with no active element are the documented no-ops.
         let mut builder = SceneBuilder::new(1);
         builder.name(Some("lost")).actions(&["unheard"]).drag(None);
+        assert_eq!(builder.finish().map(|scene| scene.elements.len()), Ok(0));
+    }
+
+    /// The fluent paint setters (SCN-042): a rect built
+    /// `rect(..)?.fill(..)?.stroke(..)` equals the documented
+    /// `element(literal)` workaround byte for byte — the gap the demo
+    /// plugin worked around is closed with no wire change.
+    #[test]
+    fn builder_paint_setters_match_the_literal() {
+        let fill = SceneColor::Theme(ThemeColor::Strong);
+        let stroke = Stroke {
+            color: SceneColor::Theme(ThemeColor::Normal),
+            width: 1.0,
+        };
+
+        // The chained shape...
+        let chained = SceneBuilder::new(1)
+            .rect(1, [0.0, 0.0], [10.0, 10.0])
+            .expect("rect add")
+            .fill(fill)
+            .stroke(stroke)
+            .name(Some("card"))
+            .finish()
+            .expect("valid scene");
+        // ...must equal the literal the escape hatch used to require.
+        let literal = PanelScene {
+            revision: SceneRevision(1),
+            elements: vec![SceneElement::Rect {
+                id: StableId(1),
+                name: Some("card".to_string()),
+                actions: Vec::new(),
+                drag: None,
+                pos: Vec2([0.0, 0.0]),
+                size: Vec2([10.0, 10.0]),
+                fill: Some(fill),
+                stroke: Some(stroke),
+            }],
+        };
+        assert_eq!(chained, literal, "chained paint == the literal element");
+        assert_eq!(
+            bincode::serialize(&chained).expect("serialize chained"),
+            bincode::serialize(&literal).expect("serialize literal"),
+            "the parity holds on the wire bytes too"
+        );
+
+        // Path + CubicPath: both paints land, in either accessory order.
+        let painted_path = SceneBuilder::new(1)
+            .path(2, vec![v2(0.0, 0.0), v2(4.0, 0.0), v2(4.0, 4.0)], true)
+            .expect("path add")
+            .stroke(stroke)
+            .fill(fill)
+            .finish()
+            .expect("valid scene");
+        match &painted_path.elements[0] {
+            SceneElement::Path { stroke: s, fill: f, .. } => {
+                assert_eq!(*s, Some(stroke));
+                assert_eq!(*f, Some(fill));
+            }
+            other => panic!("expected the path, got {other:?}"),
+        }
+        let painted_cubic = SceneBuilder::new(1)
+            .cubic(
+                3,
+                vec![CubicSegment {
+                    start: v2(0.0, 0.0),
+                    ctrl_a: v2(1.0, 0.0),
+                    ctrl_b: v2(2.0, 1.0),
+                    end: v2(3.0, 1.0),
+                }],
+                false,
+            )
+            .expect("cubic add")
+            .fill(fill)
+            .stroke(stroke)
+            .finish()
+            .expect("valid scene");
+        match &painted_cubic.elements[0] {
+            SceneElement::CubicPath { stroke: s, fill: f, .. } => {
+                assert_eq!(*s, Some(stroke));
+                assert_eq!(*f, Some(fill));
+            }
+            other => panic!("expected the cubic path, got {other:?}"),
+        }
+
+        // Edge: the stroke lands on the route; `fill` has no Edge arm and
+        // is the documented no-op there (an Edge stays fill-less).
+        let stroked_edge = SceneBuilder::new(1)
+            .port(10, [0.0, 0.0])
+            .expect("port add")
+            .port(11, [8.0, 0.0])
+            .expect("port add")
+            .edge(12, 10, 11, vec![v2(0.0, 0.0), v2(8.0, 0.0)])
+            .expect("edge add")
+            .fill(fill) // no-op on the Edge
+            .stroke(stroke)
+            .finish()
+            .expect("valid scene");
+        match &stroked_edge.elements[2] {
+            SceneElement::Edge { stroke: s, .. } => assert_eq!(*s, Some(stroke)),
+            other => panic!("expected the edge, got {other:?}"),
+        }
+
+        // The setters re-point with the active element: paint applies to
+        // the MOST-RECENT add only, and end_group re-points at the group.
+        let re_pointed = SceneBuilder::new(1)
+            .rect(20, [0.0, 0.0], [1.0, 1.0])
+            .expect("rect add")
+            .rect(21, [2.0, 0.0], [1.0, 1.0])
+            .expect("rect add")
+            .fill(fill)
+            .finish()
+            .expect("valid scene");
+        for (index, expected_fill) in [(0usize, None), (1, Some(fill))] {
+            match &re_pointed.elements[index] {
+                SceneElement::Rect { fill: f, .. } => assert_eq!(*f, expected_fill),
+                other => panic!("expected a rect at {index}, got {other:?}"),
+            }
+        }
+    }
+
+    /// Off the paintable variants the paint setters follow the accessory
+    /// convention: documented no-ops, never errors — on a Group, on a Text
+    /// (whose color is fixed at add time), and before any element exists.
+    #[test]
+    fn builder_paint_setters_are_noops_off_the_paintable_variants() {
+        let fill = SceneColor::Theme(ThemeColor::Strong);
+        let stroke = Stroke {
+            color: SceneColor::Theme(ThemeColor::Normal),
+            width: 1.0,
+        };
+
+        // A Group and a Text stay untouched by fill/stroke...
+        let scene = SceneBuilder::new(1)
+            .group(1)
+            .expect("group add")
+            .fill(fill)
+            .stroke(stroke)
+            .end_group()
+            .text(
+                2,
+                "hello",
+                [0.0, 0.0],
+                11.0,
+                SceneColor::Theme(ThemeColor::Accent),
+            )
+            .expect("text add")
+            .fill(fill)
+            .stroke(stroke)
+            .finish()
+            .expect("valid scene");
+        match &scene.elements[0] {
+            SceneElement::Group { name, actions, drag, clip, .. } => {
+                assert!(name.is_none() && actions.is_empty() && drag.is_none() && clip.is_none());
+            }
+            other => panic!("expected the group, got {other:?}"),
+        }
+        match &scene.elements[1] {
+            SceneElement::Text { color, .. } => {
+                assert_eq!(*color, SceneColor::Theme(ThemeColor::Accent));
+            }
+            other => panic!("expected the text, got {other:?}"),
+        }
+
+        // ...and with no active element at all the setters are the same
+        // documented no-op (an empty scene still finishes clean).
+        let mut builder = SceneBuilder::new(1);
+        builder.fill(fill).stroke(stroke);
         assert_eq!(builder.finish().map(|scene| scene.elements.len()), Ok(0));
     }
 

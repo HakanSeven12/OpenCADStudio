@@ -4965,7 +4965,8 @@ pub(crate) fn mount_table_key_route(
 ///   Bool draft toggles it.
 /// - **Characters/Backspace with a draft open** compose the editing
 ///   buffer and offer each candidate to the machine's `draft_cell_value`
-///   (Text: append/pop; Number: the buffer must parse; Bool drafts take
+///   (Text: append/pop; Number: the buffer must parse — a `-` keyed FIRST
+///   starts a negative, anywhere else it is ignored; Bool drafts take
 ///   only Space). The buffer advances ONLY on acceptance — the machine's
 ///   gates (kind class + delegated crate validation) are the authority and
 ///   their refusals leave the pending EXACTLY as-was. Without a draft the
@@ -5324,6 +5325,16 @@ fn table_scope_tab_step_owned(
 /// acceptance (the machine's gates are the authority; a refusal leaves the
 /// pending and the buffer EXACTLY as-was). Without a draft, or on a Bool
 /// draft (Space toggles), the keys route nothing.
+///
+/// The minus law (the SCN-028 follow-up): on a Number draft, a `-` keyed as
+/// the FIRST keystroke of the edit — before any composed content exists —
+/// PREPENDS to the seeded display, starting a negative the append-only
+/// compose could never spell (the seed always carries the cell's current
+/// digits, so plain appending could never put a `-` in the lead). Anywhere
+/// else the `-` is ignored BEFORE composing: after the edit began (the
+/// digits-then-minus shape), on a seed that already leads with `-` (a
+/// double sign), and on Text drafts (there it is an ordinary character and
+/// appends). The machine's parse gate stays the authority either way.
 fn table_scope_edit_keys_owned(
     machine: &mut TableUiState,
     scope: &mut TableKeyScope,
@@ -5346,12 +5357,27 @@ fn table_scope_edit_keys_owned(
     // One composed edit: `Some(ch)` appends the character; `None` is the
     // Backspace pop.
     let edit_once = |machine: &mut TableUiState, scope: &mut TableKeyScope, ch: Option<char>| {
+        // `seeded` = nothing composed yet (the buffer IS the machine's
+        // pending display) — the only window where the minus law opens.
+        let seeded = scope.edit.is_none();
         let seed = scope
             .edit
             .clone()
             .unwrap_or_else(|| pending_display(&machine.draft().map(|draft| draft.pending.clone()).unwrap_or(WidgetCellValue::Bool(false))));
         let mut candidate = seed;
         match ch {
+            // The minus law (see the fn docs): a '-' keyed as the FIRST
+            // keystroke of a Number edit prepends the sign; anywhere else
+            // — after composing began, or on a seed that already leads
+            // with '-' (a double sign) — it is ignored BEFORE composing,
+            // so the buffer and the machine's counters stay exactly as-was.
+            // Text drafts take '-' as an ordinary character (the arm below).
+            Some('-') if kind == CellKind::Number => {
+                if !seeded || candidate.starts_with('-') {
+                    return;
+                }
+                candidate.insert(0, '-');
+            }
             Some(ch) => candidate.push(ch),
             None => {
                 if candidate.pop().is_none() || candidate.is_empty() {
@@ -10617,6 +10643,114 @@ mod tests {
             Some(false),
             "the draft cleared on commit"
         );
+    }
+
+    /// The NUMBER draft's minus law (the SCN-028 follow-up): a `-` keyed as
+    /// the FIRST keystroke prepends the sign ('-' then digits commits a
+    /// NEGATIVE — impossible under plain append-only composure, whose seed
+    /// always carries the cell's digits); a `-` anywhere else is ignored
+    /// BEFORE composing (the digits-then-'-' shape and a '-' on an
+    /// already-negative seed leave the buffer and the machine's counters
+    /// exactly as-was); and a SEEDED NEGATIVE draft ("-0.5") keeps
+    /// composing digits and popping Backspace exactly as a positive one
+    /// does.
+    #[test]
+    fn table_number_draft_minus_law() {
+        let _app = OpenCADStudio::new_for_test();
+        let key = |key: Key| {
+            with_test_registry_mut(|registry| {
+                bench_handle_mount_key_owned(registry, key, Modifiers::NONE)
+            })
+        };
+        let char_key = |text: &str| Key::Character(text.to_string().into());
+        let number_pending = || {
+            table_read(120, 200, |machine| {
+                machine.draft().map(|draft| match draft.pending.clone() {
+                    WidgetCellValue::Number(value) => value,
+                    other => panic!("a Number draft's pending, got {other:?}"),
+                })
+            })
+        };
+        let refusals = || {
+            table_read(120, 200, |machine| machine.mutations().invalid_cell_refusals)
+        };
+        // Arm the NUMBER cell (300, 202) on a fresh registration: dive,
+        // walk the cursor text → number, Enter arms the seeded draft. The
+        // registration guard is RETURNED so the surface stays registered
+        // for the leg's keystrokes (it unregisters on drop).
+        let arm = |panel: &str, def: PanelTableDef| -> RegisteredGuard {
+            let guard = register_test_surface(panel, demo_surface(def));
+            with_test_registry_mut(|registry| {
+                registry.set_mount_key_target_owned(Some(sid(120)));
+            });
+            let _ = key(Key::Named(keyboard_key::Named::Tab)); // dive
+            let _ = key(Key::Named(keyboard_key::Named::ArrowRight)); // → 201
+            let _ = key(Key::Named(keyboard_key::Named::ArrowRight)); // → 202
+            let _ = key(Key::Named(keyboard_key::Named::Enter)); // arm
+            guard
+        };
+
+        // Leg 1 — the SEEDED NEGATIVE draft ("-0.5") keeps composing:
+        // digits append, a '-' past the first keystroke is ignored, and
+        // Backspace pops the buffer (the pending follows it exactly).
+        let mut def = demo_table_def(4, None);
+        def.rows[0].cells[1] = TableCell::Number(-0.5);
+        {
+            let _leg = arm("scn042_minus_seeded", def);
+            assert_eq!(number_pending(), Some(Some(-0.5)), "the negative seed");
+            let _ = key(char_key("7")); // "-0.57"
+            assert_eq!(number_pending(), Some(Some(-0.57)));
+            let _ = key(char_key("-")); // composing began: ignored
+            assert_eq!(number_pending(), Some(Some(-0.57)), "'-' elsewhere ignored");
+            let _ = key(char_key("5")); // "-0.575"
+            assert_eq!(number_pending(), Some(Some(-0.575)));
+            let _ = key(Key::Named(keyboard_key::Named::Backspace)); // "-0.57"
+            assert_eq!(number_pending(), Some(Some(-0.57)));
+            let _ = key(Key::Named(keyboard_key::Named::Escape)); // free cancel
+            assert_eq!(number_pending(), Some(None), "the draft cancelled free");
+        }
+
+        // Leg 2 — '-' FIRST then digits COMMITS A NEGATIVE.
+        {
+            let _leg = arm("scn042_minus_first", demo_table_def(4, None));
+            let _ = key(char_key("-")); // seed "0" → "-0"
+            assert_eq!(number_pending(), Some(Some(-0.0)), "the sign prepended");
+            let _ = key(char_key("5")); // "-05" → -5
+            assert_eq!(number_pending(), Some(Some(-5.0)));
+            let commits = key(Key::Named(keyboard_key::Named::Enter));
+            assert_eq!(
+                commits,
+                vec![WidgetMountMsg::TableCellCommitted {
+                    surface_id: sid(120),
+                    table_id: sid(200),
+                    key: sid(300),
+                    column: sid(202),
+                    value: WidgetCellValue::Number(-5.0),
+                }],
+                "'-' first then digits committed the negative"
+            );
+        }
+
+        // Leg 3 — digits then '-': the '-' is ignored BEFORE composing (no
+        // refusal counted, no buffer movement), and a later Backspace
+        // proves no sign ever entered the buffer.
+        {
+            let _leg = arm("scn042_minus_late", demo_table_def(4, None));
+            let _ = key(char_key("4")); // "04"
+            assert_eq!(number_pending(), Some(Some(4.0)));
+            let refusals_before = refusals();
+            let _ = key(char_key("-")); // ignored: composing began
+            assert_eq!(number_pending(), Some(Some(4.0)), "the '-' landed nowhere");
+            assert_eq!(refusals(), refusals_before, "ignored BEFORE the gates");
+            let _ = key(char_key("2")); // "042"
+            assert_eq!(number_pending(), Some(Some(42.0)));
+            let _ = key(Key::Named(keyboard_key::Named::Backspace)); // "04"
+            assert_eq!(
+                number_pending(),
+                Some(Some(4.0)),
+                "no sign ever entered the buffer"
+            );
+        }
     }
 
     // -- 17e. the one-path discipline + the live arm --------------------------

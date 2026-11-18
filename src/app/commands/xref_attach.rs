@@ -736,3 +736,181 @@ impl OpenCADStudio {
 fn read_reference(raw_path: &str, base_dir: &std::path::Path) -> crate::io::xref::XrefRead {
     crate::io::xref::read_xref_file(raw_path, base_dir, None)
 }
+
+#[cfg(test)]
+mod xref_attach_read_tests {
+    use super::*;
+    use glam::DVec3;
+
+    /// An app with a saved source drawing (one line) and a new host drawing
+    /// as the current tab; the source's path.
+    fn source_and_host(stem: &str) -> (OpenCADStudio, String) {
+        let dir =
+            std::env::temp_dir().join(format!("ocs-xattach-read-{stem}-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let source = dir.join(format!("{stem}.dwg"));
+        let path = source.display().to_string().replace('\\', "/");
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+        let _ = app.automation_op(&format!(r#"{{"op":"save","path":"{path}"}}"#));
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        (app, path)
+    }
+
+    /// The request and the INSERT for an attach of `path` at the origin.
+    fn attach(path: &str) -> (XrefAttachRequest, document::EntityType) {
+        let request = XrefAttachRequest {
+            path: path.to_string(),
+            overlay: false,
+            path_type: Pathtype::Full,
+        };
+        let placement = XrefPlacement {
+            insert: Some(DVec3::ZERO),
+            scale: Some([1.0; 3]),
+            rotation: Some(0.0),
+        };
+        let entity = XAttachCommand::new(request.clone(), placement, "XATTACH")
+            .immediate()
+            .expect("a placed INSERT");
+        (request, entity)
+    }
+
+    fn references(app: &OpenCADStudio, i: usize) -> usize {
+        app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .iter()
+            .filter(|record| record.flags.is_xref || record.flags.is_xref_overlay)
+            .count()
+    }
+
+    fn inserts(app: &OpenCADStudio, i: usize) -> usize {
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter(|entity| matches!(entity, document::EntityType::Insert(_)))
+            .count()
+    }
+
+    /// The attach waits for the read: nothing is attached until the worker
+    /// ends, then the reference and its INSERT come in one undo step.
+    #[test]
+    fn the_attach_waits_for_the_read() {
+        let (mut app, path) = source_and_host("waits");
+        let i = app.active_tab;
+        let undo = app.tabs[i].history.undo_stack.len();
+        let (request, entity) = attach(&path);
+        let task = app.commit_xref_attach(i, request, entity);
+        assert_eq!(
+            references(&app, i),
+            0,
+            "nothing is attached during the read"
+        );
+        assert!(app
+            .command_line
+            .history
+            .iter()
+            .any(|entry| entry.text.contains("Reading ")));
+        app.drive_headless_task(task).expect("the attach's task");
+        assert_eq!(references(&app, i), 1);
+        assert_eq!(inserts(&app, i), 1);
+        app.finish_all_pending_history();
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo + 1);
+    }
+
+    /// A reader that panics gives an error, and nothing is attached.
+    #[test]
+    fn a_reader_panic_attaches_nothing() {
+        let (mut app, path) = source_and_host("panics");
+        let i = app.active_tab;
+        let (request, entity) = attach(&path);
+        let task = app.commit_xref_attach_with(i, request, entity, |_, _| panic!("a reader bug"));
+        app.drive_headless_task(task).expect("the attach's task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("XATTACH failed: a reader bug")
+        );
+        assert_eq!(references(&app, i), 0);
+        assert_eq!(inserts(&app, i), 0);
+    }
+
+    /// A result for a drawing that was replaced during the read is dropped.
+    #[test]
+    fn a_result_for_a_replaced_drawing_is_dropped() {
+        let (mut app, path) = source_and_host("replaced");
+        let i = app.active_tab;
+        let (request, entity) = attach(&path);
+        let task = app.commit_xref_attach(i, request, entity);
+        app.tabs[i].document_generation += 1;
+        app.drive_headless_task(task).expect("the attach's task");
+        assert_eq!(references(&app, i), 0);
+    }
+
+    /// A result for a drawing that is no longer the current one is dropped
+    /// with a message: the commit writes to the current drawing.
+    #[test]
+    fn a_result_for_a_drawing_that_is_not_current_is_dropped() {
+        let (mut app, path) = source_and_host("not-current");
+        let i = app.active_tab;
+        let (request, entity) = attach(&path);
+        let task = app.commit_xref_attach(i, request, entity);
+        app.push_test_document();
+        app.active_tab = app.tabs.len() - 1;
+        app.drive_headless_task(task).expect("the attach's task");
+        assert_eq!(references(&app, i), 0);
+        assert_eq!(references(&app, app.active_tab), 0);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Attach cancelled: a different drawing became current while the reference was read.")
+        );
+    }
+
+    /// The attach merges the worker's read and reads no file itself: a
+    /// file that is gone when the read ends still gives its content.
+    #[test]
+    fn the_attach_merges_the_workers_read() {
+        let (mut app, path) = source_and_host("merges");
+        let i = app.active_tab;
+        let (request, entity) = attach(&path);
+        let task = app.commit_xref_attach_with(i, request, entity, |raw_path, base_dir| {
+            let read = crate::io::xref::read_xref_file(raw_path, base_dir, None);
+            let _ = std::fs::remove_file(raw_path);
+            read
+        });
+        app.drive_headless_task(task).expect("the attach's task");
+        let record = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .iter()
+            .find(|record| record.flags.is_xref)
+            .map(|record| record.handle)
+            .expect("the reference");
+        let content = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter(|entity| entity.common().owner_handle == record)
+            .count();
+        assert_eq!(content, 1, "the source's line, from the worker's read");
+    }
+
+    /// A reference that is already in the drawing is attached at once,
+    /// without a read.
+    #[test]
+    fn an_existing_reference_is_attached_at_once() {
+        let (mut app, path) = source_and_host("existing");
+        let i = app.active_tab;
+        let (request, entity) = attach(&path);
+        let task = app.commit_xref_attach(i, request, entity);
+        app.drive_headless_task(task)
+            .expect("the first attach's task");
+        let (request, entity) = attach(&path);
+        let _ = app.commit_xref_attach_with(i, request, entity, |_, _| panic!("no read"));
+        assert_eq!(references(&app, i), 1);
+        assert_eq!(inserts(&app, i), 2, "the second INSERT is placed at once");
+    }
+}

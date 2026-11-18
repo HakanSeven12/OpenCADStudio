@@ -127,6 +127,13 @@ pub struct ViewportData {
     /// in the previous shader Primitive prevented the next UI event from
     /// splicing a changed entity in place and forced a full rebuild.
     pub(in crate::scene) wires: std::sync::Weak<Vec<WireModel>>,
+    /// Keeps `wires` alive when they are a copy made for display (the set
+    /// without its 3D faces, recoloured by a plot style, the sheet's own)
+    /// and not the resident set. Only a bounded cache owns such a copy, and
+    /// it can let the copy go while the frame's other viewports are built:
+    /// the viewport was then left out of the frame and kept showing the
+    /// image it had.
+    pub(in crate::scene) _wires_copy: Option<Arc<Vec<WireModel>>>,
     /// This content viewport's non-rectangular clip boundary (paper layouts
     /// only), as a polygon already projected into the viewport's render-target
     /// NDC. The GPU stamps it into the stencil so content is clipped to the
@@ -3615,6 +3622,24 @@ impl Scene {
         self.document.header.lineweight_display
     }
 
+    /// How many wire sets one frame of the shown layout draws at most: the
+    /// sheet's and one for every content viewport, each of which can have a
+    /// set of its own (a scale, a set of frozen layers). A cache of the
+    /// copies made from those sets has to hold that many, or it empties and
+    /// fills again on every frame, as the resident sets did (#1769).
+    pub(in crate::scene) fn frame_wire_set_count(&self) -> usize {
+        if self.current_layout == "Model" {
+            1
+        } else {
+            self.paper_viewport_handles().2.len() + 1
+        }
+    }
+
+    /// Entries the display plot style caches hold before they are emptied.
+    fn display_style_cache_limit(&self) -> usize {
+        DISPLAY_STYLE_CACHE_LIMIT.max(self.frame_wire_set_count() + 1)
+    }
+
     fn display_plot_style(&self) -> Option<Arc<crate::io::plot_style::PlotStyleTable>> {
         if self.current_layout == "Model" {
             return None;
@@ -3699,8 +3724,9 @@ impl Scene {
         }
         let wires = Arc::new(wires);
         let gen = crate::scene::WIRE_CONTENT_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let limit = self.display_style_cache_limit();
         let mut cache = self.styled_wire_cache.borrow_mut();
-        if cache.len() >= DISPLAY_STYLE_CACHE_LIMIT {
+        if cache.len() >= limit {
             cache.clear();
         }
         cache.insert(key, (gen, Arc::clone(&wires)));
@@ -3759,9 +3785,10 @@ impl Scene {
             hatches.extend(wire_fills.iter().cloned());
         }
         let hatches = Arc::new(hatches);
+        let limit = self.display_style_cache_limit() * 2;
         let mut cache = self.styled_hatch_cache.borrow_mut();
         cache.retain(|(epoch, _, _, _, _), _| *epoch == self.geometry_epoch);
-        if cache.len() >= DISPLAY_STYLE_CACHE_LIMIT * 2 {
+        if cache.len() >= limit {
             cache.clear();
         }
         cache.insert(key, Arc::clone(&hatches));
@@ -3850,8 +3877,9 @@ impl Scene {
             }
         }
         let hatches = Arc::new(hatches);
+        let limit = self.display_style_cache_limit();
         let mut cache = self.styled_wire_fill_cache.borrow_mut();
-        if cache.len() >= DISPLAY_STYLE_CACHE_LIMIT {
+        if cache.len() >= limit {
             cache.clear();
         }
         cache.insert(key, Arc::clone(&hatches));
@@ -5154,10 +5182,12 @@ impl Scene {
                         (Arc::new(Vec::new()), None)
                     }
                 };
-                let mut c = self.split_cache.borrow_mut();
                 // Ids change on rebuild, so old keys die naturally; the cap
-                // just bounds pathological churn.
-                if c.len() > 8 {
+                // just bounds pathological churn. It stays above what one
+                // frame draws: below it, the cache emptied on every frame.
+                let cap = 8.max(self.frame_wire_set_count() + 1);
+                let mut c = self.split_cache.borrow_mut();
+                if c.len() > cap {
                     c.clear();
                 }
                 c.insert(base_wire_content_id, (fa.clone(), oa.clone()));
@@ -5574,6 +5604,7 @@ impl Scene {
             instance_id,
             force_rasterize,
             wires: Arc::downgrade(&all_wires),
+            _wires_copy: (!self.is_resident_wire_set(&all_wires)).then(|| Arc::clone(&all_wires)),
             clip_boundary_ndc,
             preview_wires,
             annotation_context_wires,

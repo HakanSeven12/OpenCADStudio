@@ -9782,6 +9782,16 @@ impl Scene {
         v
     }
 
+    /// Whether `wires` is one of the resident sets themselves, which only the
+    /// scene may hold (see [`Self::try_resident_patch`]), and not a copy made
+    /// from one.
+    pub(in crate::scene) fn is_resident_wire_set(&self, wires: &Arc<Vec<WireModel>>) -> bool {
+        self.resident_wire_sets
+            .borrow()
+            .values()
+            .any(|set| Arc::ptr_eq(&set.wires, wires))
+    }
+
     fn resident_wires_for(
         &self,
         block: Handle,

@@ -1558,6 +1558,10 @@ pub(super) struct OpenCADStudio {
     move_owed: Option<(iced::Point, usize)>,
     /// Latest box-preview position awaiting a frame, and its tab.
     box_preview_pending: Option<(iced::Point, usize, u64)>,
+    /// Tab whose Properties panel rebuild was deferred off the commit event
+    /// (a huge selection's build can take ~100 ms). Drives the
+    /// `PropertiesRefreshTick` frame subscription; cleared when it runs.
+    properties_refresh_pending: Option<usize>,
     /// Adaptive earliest time for the next expensive preview calculation.
     box_preview_due: Option<Instant>,
     box_preview_cache: Option<BoxPreviewCache>,
@@ -4733,6 +4737,10 @@ pub enum Message {
     /// full pass at the position the gate withheld.
     MoveCoalesceTick,
     BoxPreviewTick,
+    /// Frame pulse while a huge selection's Properties rebuild is queued, so
+    /// the click / box release that committed the selection is not blocked by
+    /// the (potentially hundred-millisecond) panel build.
+    PropertiesRefreshTick,
     /// Large projected interaction index finished preparing off the UI thread.
     InteractionIndexReady {
         tab_id: u64,
@@ -6697,6 +6705,7 @@ impl OpenCADStudio {
             hover_pick_due: iced::time::Instant::now(),
             move_owed: None,
             box_preview_pending: None,
+            properties_refresh_pending: None,
             box_preview_due: None,
             box_preview_cache: None,
             move_pass_due: None,

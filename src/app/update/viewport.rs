@@ -8565,7 +8565,7 @@ properties={:.1}ms picked={}",
                                             .select_entity(handle, !selection_pick_add);
                                         self.tabs[i].scene.expand_selection_for_groups(&[handle]);
                                     }
-                                    self.refresh_properties();
+                                    self.queue_properties_refresh(i);
                                     selection_just_completed = true;
                                 }
                             } else {
@@ -8582,7 +8582,7 @@ properties={:.1}ms picked={}",
                                     }
                                     self.tabs[i].scene.deselect_all();
                                     self.tabs[i].last_crossing_window = None;
-                                    self.refresh_properties();
+                                    self.queue_properties_refresh(i);
                                 }
                                 // Pin the anchor to the world point under it
                                 // so a zoom/pan mid-drag re-projects it
@@ -8727,7 +8727,7 @@ was_selected={}",
                     let apply_ms = t_apply.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
                     let t_props = crate::perf::enabled().then(Instant::now);
                     self.pick_authoring_box(a, p, crossing, !handles.is_empty());
-                    self.refresh_properties();
+                    self.queue_properties_refresh(i);
                     if crate::perf::enabled() {
                         crate::perf_record!(
                             "[perf] select-commit kind=window crossing={crossing} \

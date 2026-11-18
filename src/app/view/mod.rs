@@ -3993,6 +3993,13 @@ impl OpenCADStudio {
         } else {
             Subscription::none()
         };
+        // A deferred Properties rebuild (huge selection commit) runs on the
+        // next frame instead of blocking the click that committed it.
+        let properties_refresh = if self.properties_refresh_pending.is_some() {
+            crate::app::tool_windows::main_window_frames().map(|_| Message::PropertiesRefreshTick)
+        } else {
+            Subscription::none()
+        };
         let snap_dwell = if self
             .snap_dwell
             .as_ref()
@@ -4216,6 +4223,7 @@ impl OpenCADStudio {
             snap_dwell,
             move_coalesce,
             box_preview,
+            properties_refresh,
             nav_settle,
             gpu_probe,
             thumbnail_capture,

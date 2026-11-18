@@ -2313,6 +2313,30 @@ impl OpenCADStudio {
         })
     }
 
+    /// Selection-commit callers go through this: below the aggregate cap the
+    /// panel rebuilds inline (cheap, and immediate for automation tests); over
+    /// it — where the build can cost ~100 ms on a 186 k-entity selection — the
+    /// rebuild is deferred to the next frame so the committing click or box
+    /// release is not blocked behind it.
+    pub(super) fn queue_properties_refresh(&mut self, i: usize) {
+        if self.tabs[i].scene.selected.len() > MAX_PROP_AGGREGATE {
+            self.properties_refresh_pending = Some(i);
+            return;
+        }
+        self.refresh_properties();
+    }
+
+    /// Runs the deferred Properties rebuild queued by
+    /// [`Self::queue_properties_refresh`].
+    pub(super) fn on_properties_refresh_tick(&mut self) -> iced::Task<super::Message> {
+        if let Some(i) = self.properties_refresh_pending.take() {
+            if i < self.tabs.len() {
+                self.refresh_properties();
+            }
+        }
+        iced::Task::none()
+    }
+
     pub(super) fn refresh_properties(&mut self) {
         // A 186 468-entity selection spends ~112 ms in here. Split it into the
         // three phases that can own that: resolving the selected handles,

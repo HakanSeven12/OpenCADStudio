@@ -85,6 +85,9 @@ pub enum ImportDialogMsg {
     /// IMPORT with FILEDIA off: whether the file is a DGN model, checked off
     /// the UI thread; the error to show when it is not.
     DgnChecked(String, bool, String),
+    /// The file named at the -DGNIMPORT prompt, read off the UI thread: the
+    /// tab of the command, the file, and its models or the error.
+    DgnPromptRead(u64, String, Result<Vec<String>, String>),
     /// A model read off the UI thread again after the window chose a model
     /// or a code page: the file, the model, the code page and the model
     /// (none when it cannot be read).

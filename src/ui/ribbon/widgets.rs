@@ -65,12 +65,6 @@ pub(super) const LARGE_H: f32 = metrics::LARGE_H;
 pub(super) const LARGE_ICON: f32 = metrics::LARGE_ICON;
 /// Icon size inside a small button.
 pub(super) const SMALL_ICON: f32 = metrics::SMALL_ICON;
-
-/// Icons in front of the Properties panel's Color / Linetype / Lineweight
-/// combos.
-const PROP_COLOR_ICON: &[u8] = include_bytes!("../../../assets/icons/color_palette.svg");
-const PROP_LINETYPE_ICON: &[u8] = include_bytes!("../../../assets/icons/attributes/linetype.svg");
-const PROP_LW_ICON: &[u8] = include_bytes!("../../../assets/icons/attributes/lineweight.svg");
 /// Narrowest large button.
 pub(super) const LARGE_W: f32 = 52.0;
 /// Horizontal button padding surrounding a large tool's label.
@@ -407,6 +401,11 @@ pub(crate) const LAYER_SEARCH_ID: &str = "LAYER_SEARCH";
 pub(super) const PROP_COLOR_ID: &str = "PROP_COLOR";
 pub(super) const PROP_LINETYPE_ID: &str = "PROP_LINETYPE";
 pub(super) const PROP_LW_ID: &str = "PROP_LW";
+/// Icons in front of the Properties panel's Color / Linetype / Lineweight
+/// combos.
+const PROP_COLOR_ICON: &[u8] = include_bytes!("../../../assets/icons/color_palette.svg");
+const PROP_LINETYPE_ICON: &[u8] = include_bytes!("../../../assets/icons/attributes/linetype.svg");
+const PROP_LW_ICON: &[u8] = include_bytes!("../../../assets/icons/attributes/lineweight.svg");
 
 // ── Style context (passed from Ribbon to render_large) ────────────────────
 

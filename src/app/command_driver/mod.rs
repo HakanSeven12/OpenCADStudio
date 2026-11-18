@@ -949,14 +949,21 @@ impl OpenCADStudio {
                     crate::app::commands::pdf_import::PdfImportSource::File(import),
                 );
             }
+            CmdResult::ReadPointCloud(path) => {
+                let read = self.read_point_cloud_for_prompt(i, path);
+                return match self.handle_need_point() {
+                    Some(task) => Task::batch([read, task]),
+                    None => read,
+                };
+            }
             CmdResult::AttachPointCloud { placement, message } => {
                 let label = self.history_label_from_active_cmd(i, "POINTCLOUDATTACH");
                 self.tabs[i].scene.clear_preview_wire();
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.command_line.push_output(&message);
-                self.attach_point_cloud(i, label, placement);
                 self.restore_pre_cmd_tangent();
+                return self.attach_point_cloud(i, label, placement);
             }
             CmdResult::AttachPdfPages {
                 kind,

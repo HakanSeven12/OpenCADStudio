@@ -4179,6 +4179,13 @@ impl OpenCADStudio {
         #[cfg(target_arch = "wasm32")]
         let control = iced::time::every(std::time::Duration::from_millis(50))
             .map(|_| Message::PollWebControl);
+        // The ends of the point cloud reads that the drawing starts (the
+        // web build reads in place).
+        #[cfg(not(target_arch = "wasm32"))]
+        let point_cloud_reads = Subscription::run(crate::scene::model::point_cloud::read_results)
+            .map(Message::PointCloudRead);
+        #[cfg(target_arch = "wasm32")]
+        let point_cloud_reads = Subscription::none();
         iced::Subscription::batch([
             if self.spacemouse.moving() && self.spacemouse_focused && !self.spacemouse_paused {
                 crate::app::tool_windows::main_window_frames().map(Message::SpaceMouseFrame)
@@ -4200,6 +4207,7 @@ impl OpenCADStudio {
                 _ => None,
             }),
             control,
+            point_cloud_reads,
             frames,
             history_tick,
             layout_settle,

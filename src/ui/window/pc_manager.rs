@@ -93,7 +93,7 @@ pub fn clouds(document: &Document, selected: &[Handle]) -> Vec<Cloud> {
             };
             let common = entity.common();
             let scans = point_cloud::resolve_source(document, data)
-                .and_then(|path| point_cloud::load(&path))
+                .and_then(|path| point_cloud::cached(&path))
                 .map(|cloud| {
                     cloud
                         .scan_ranges

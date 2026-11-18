@@ -1010,6 +1010,9 @@ pub(super) struct OpenCADStudio {
     /// PDF dialogs' working copies; `None` while closed.
     pdf_attach: Option<crate::ui::window::pdf_dialogs::PdfAttachState>,
     point_cloud_attach: Option<crate::ui::window::pdf_dialogs::PointCloudAttachState>,
+    /// The read that the -POINTCLOUDATTACH file name prompt started: the
+    /// tab and the file. A failed read ends that command when it ends.
+    point_cloud_prompt_read: Option<(u64, std::path::PathBuf)>,
     /// ATTDEF dialog and Edit Attribute Definition dialog; `None` while closed.
     attdef_dialog: Option<crate::ui::window::attdef_dialog::AttdefDialogState>,
     attdef_edit: Option<crate::ui::window::attdef_dialog::AttdefEditState>,
@@ -5856,6 +5859,9 @@ pub enum Message {
     /// A background worker thread panicked or stopped without reporting a
     /// result. Surfaced on the command line instead of taking the whole
     /// process down with it.
+    /// A point cloud read that the drawing started ended: its clouds draw
+    /// again with the points.
+    PointCloudRead(crate::scene::model::point_cloud::ReadDone),
     BackgroundTaskFailed {
         /// Which operation the worker was running (e.g. "STL export").
         context: String,
@@ -6445,6 +6451,7 @@ impl OpenCADStudio {
             block_dependency_cache: std::cell::RefCell::new(None),
             pdf_attach: None,
             point_cloud_attach: None,
+            point_cloud_prompt_read: None,
             attdef_dialog: None,
             insert_attr_dialog: None,
             attman: None,

@@ -15008,6 +15008,10 @@ impl OpenCADStudio {
                     .push_error(crate::tf!("{context} failed: {detail}").as_ref());
                 Task::none()
             }
+            Message::PointCloudRead(done) => {
+                self.finish_point_cloud_display_read(&done);
+                Task::none()
+            }
 
             // ── Print to system printer ───────────────────────────────────────
             Message::PrintToPrinter => self.on_print_to_printer(),

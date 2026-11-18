@@ -2029,6 +2029,10 @@ pub enum CmdResult {
     },
     /// Import a page of a file (PDFIMPORT File); ends the command.
     PdfImportFile(crate::modules::insert::pdf_import::PdfFileImport),
+    /// Read a point cloud file off the UI thread and ask for the next
+    /// point: the command continues. If no scan can be read, the host ends
+    /// the command with the reference's two lines when the read ends.
+    ReadPointCloud(std::path::PathBuf),
     /// Attach a point cloud: the host creates or reuses its definition,
     /// commits the cloud in one undo step, then ends the command. The
     /// message is the last prompt's echo.

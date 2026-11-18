@@ -220,6 +220,44 @@ impl OpenCADStudio {
         ))
     }
 
+    /// The end of a read that the drawing started
+    /// ([`point_cloud::cached`]): each open drawing with a cloud of that
+    /// file draws it again, now with its points, and the clouds that no
+    /// open drawing refers to are let go. A reader that panicked gives an
+    /// error; the drawing keeps the extents box.
+    pub(in crate::app) fn finish_point_cloud_display_read(&mut self, done: &point_cloud::ReadDone) {
+        if let Some(detail) = &done.failure {
+            let shown = crate::entities::underlay::display_path(&done.path.to_string_lossy());
+            self.command_line
+                .push_error(&format!("Point cloud {shown} cannot be read: {detail}"));
+        }
+        let mut referenced = std::collections::HashSet::new();
+        for tab in &mut self.tabs {
+            let document = &tab.scene.document;
+            let mut changed = Vec::new();
+            for entity in document.entities() {
+                let document::EntityType::Extended(extended) = entity else {
+                    continue;
+                };
+                let document::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data
+                else {
+                    continue;
+                };
+                let Some(path) = point_cloud::resolve_source(document, data) else {
+                    continue;
+                };
+                if path == done.path {
+                    changed.push((entity.common().handle, crate::scene::ChangeKind::Modified));
+                }
+                referenced.insert(path);
+            }
+            if !changed.is_empty() {
+                tab.scene.bump_entities(&changed);
+            }
+        }
+        point_cloud::release_unreferenced(|path| referenced.contains(path));
+    }
+
     /// Places a cloud read off the UI thread, one undo step. A result for
     /// a drawing that was closed, replaced or cleared is dropped, and so is
     /// one for a drawing that is not the current one now (the commit

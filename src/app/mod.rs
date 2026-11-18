@@ -5856,6 +5856,9 @@ pub enum Message {
     /// A background worker thread panicked or stopped without reporting a
     /// result. Surfaced on the command line instead of taking the whole
     /// process down with it.
+    /// A point cloud read that the drawing started ended: its clouds draw
+    /// again with the points.
+    PointCloudRead(crate::scene::model::point_cloud::ReadDone),
     BackgroundTaskFailed {
         /// Which operation the worker was running (e.g. "STL export").
         context: String,

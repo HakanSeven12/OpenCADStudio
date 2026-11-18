@@ -3372,6 +3372,152 @@ mod tests {
 }
 
 #[cfg(test)]
+mod datalink_read_tests {
+    use crate::app::OpenCADStudio;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    /// A CSV file with a header row and two rows, written under `name`.
+    fn csv_file(name: &str) -> String {
+        let path =
+            std::env::temp_dir().join(format!("ocs-datalink-{name}-{}.csv", std::process::id()));
+        std::fs::write(&path, "NAME,QTY\nBolt,12\nNut,30\n").expect("write the CSV file");
+        path.to_string_lossy().replace('\\', "/")
+    }
+
+    fn command_name(app: &OpenCADStudio, i: usize) -> Option<&'static str> {
+        app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .map(|command| command.name())
+    }
+
+    fn last_line(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .last()
+            .map(|entry| entry.text.clone())
+            .unwrap_or_default()
+    }
+
+    /// The placement starts only when the read ends.
+    #[test]
+    fn the_placement_starts_only_when_the_read_ends() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = csv_file("placed");
+        let task = app.dispatch_command(&format!("DATALINK {path}"));
+        assert_eq!(command_name(&app, i), None, "no placement during the read");
+        assert_eq!(last_line(&app), format!("ⓘ Reading {path}…"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(command_name(&app, i), Some("DATALINK"));
+        assert_eq!(
+            app.tabs[i].last_cmd.as_deref(),
+            Some(format!("DATALINK {path}").as_str())
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A file that cannot be read gives the error when the read ends.
+    #[test]
+    fn a_missing_file_is_an_error() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let task = app.dispatch_command("DATALINK /no/such/table.csv");
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(command_name(&app, i), None);
+        assert!(app
+            .command_line
+            .last_error
+            .as_deref()
+            .is_some_and(|e| e.starts_with("DATALINK: cannot read \"/no/such/table.csv\"")));
+    }
+
+    /// A reader that panics gives an error, and no placement starts.
+    #[test]
+    fn a_reader_panic_is_an_error() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let task = app.read_data_link_csv_with(i, "DATALINK panics.csv", "panics.csv", |_| {
+            panic!("a reader bug")
+        });
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("DATALINK failed: a reader bug")
+        );
+        assert_eq!(command_name(&app, i), None);
+    }
+
+    /// A command started during the read stays; the table is not placed.
+    #[test]
+    fn a_command_started_during_the_read_stays() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = csv_file("other-command");
+        let task = app.dispatch_command(&format!("DATALINK {path}"));
+        let _ = app.dispatch_command("LINE");
+        let started = command_name(&app, i);
+        assert!(
+            started.is_some_and(|name| name != "DATALINK"),
+            "{started:?}"
+        );
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(command_name(&app, i), started);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("DATALINK cancelled: a different command started while the file was read.")
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// When a different drawing became current during the read, neither
+    /// drawing starts the placement.
+    #[test]
+    fn a_drawing_made_current_during_the_read_gets_no_placement() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = csv_file("other-drawing");
+        let task = app.dispatch_command(&format!("DATALINK {path}"));
+        app.push_test_document();
+        app.active_tab = app.tabs.len() - 1;
+        let j = app.active_tab;
+        assert_ne!(i, j);
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(command_name(&app, i), None);
+        assert_eq!(command_name(&app, j), None);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("DATALINK cancelled: a different drawing became current while the file was read.")
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A result for a drawing that was replaced during the read is
+    /// dropped.
+    #[test]
+    fn a_read_for_a_replaced_drawing_is_dropped() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = csv_file("replaced");
+        let task = app.dispatch_command(&format!("DATALINK {path}"));
+        app.tabs[i].document_generation += 1;
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(command_name(&app, i), None);
+        assert!(app
+            .command_line
+            .history
+            .iter()
+            .any(|entry| entry.text.contains("was replaced or cleared")));
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[cfg(test)]
 mod printers_command_tests {
     use crate::app::OpenCADStudio;
 

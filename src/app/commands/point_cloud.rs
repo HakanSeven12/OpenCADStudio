@@ -832,10 +832,8 @@ mod display_read_tests {
             .expect("touch the scan");
         let data = cloud_data(&app);
         let document = &app.tabs[app.active_tab].scene.document;
-        assert!(
-            point_cloud::placed(document, &data, [255; 3], None, &[]).is_none(),
-            "no points during the read"
-        );
+        // Only the first look is sure to come before the read that it
+        // starts: a second look can find the cloud already read.
         assert!(
             point_cloud::shows_no_points(document, &data),
             "the box shows during the read"

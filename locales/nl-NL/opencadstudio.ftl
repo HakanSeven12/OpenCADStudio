@@ -10350,3 +10350,37 @@ surface-cmd =
     .analysis-on = Analysis on.
     .analysis-off = Analysis off.
     .unknown-surface-command = Unknown surface command.
+
+ribbon-label =
+    .fillet-edge = Fillet Edge
+    .action-parameters = Action Parameters
+    .construction-geometry = Construction Geometry
+    .make-invisible = Make Invisible
+    .make-visible = Make Visible
+    .visibility = Visibility
+    .visibility-mode = Visibility Mode
+    .visibility-states = Visibility States
+    .close-block-editor = Close Block Editor
+    .close-test-block = Close Test Block
+    .cell-format = Cell Format
+    .cell-styles = Cell Styles
+    .merge = Merge
+    .align-bottom = Align Bottom
+    .align-horizontal-centers = Align Horizontal Centers
+    .align-left = Align Left
+    .align-right = Align Right
+    .align-top = Align Top
+    .align-vertical-centers = Align Vertical Centers
+    .break-at-point = Break at Point
+    .copy-nested-objects = Copy Nested Objects
+    .set-to-bylayer = Set to ByLayer
+    .spline-cv = Spline CV
+    .spline-fit = Spline Fit
+    .collect = Collect
+    .equal-distance = Equal Distance
+    .point-on-curve = Point on Curve
+    .center-point = Center Point
+    .assistant = Assistant
+    .hover-outline =
+        Hover
+        Outline

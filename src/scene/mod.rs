@@ -108,6 +108,7 @@ mod page_setup;
 mod paper;
 mod preview;
 mod project;
+mod viewport_color;
 pub mod reference_only;
 mod scene_markers;
 mod selection;

@@ -361,13 +361,11 @@ impl Scene {
                     .collect();
 
                 let adapted = view::render::adapt_to_bg(wire.color, self.paper_bg_color);
-                let [r, g, b, a] = adapted;
-                // Glyphs carry their own per-vertex colour, so dim them through
-                // the same adapt + 0.80/0.85 the wire colour below gets, or the
-                // text reads brighter than its own dimension lines.
+                // Glyphs carry their own colour: use the same screen-only
+                // dimming as wires, preserving source RGBA when plotting.
                 for v in &mut projected_text {
                     let [tr, tg, tb, ta] = view::render::adapt_to_bg(v.color, self.paper_bg_color);
-                    v.color = [tr * 0.80, tg * 0.80, tb * 0.80, ta * 0.85];
+                    v.color = super::viewport_color::projected_color([tr, tg, tb, ta], plot);
                 }
                 let mut out = wire.clone();
                 out.points = clipped;
@@ -449,7 +447,7 @@ impl Scene {
                 } else {
                     WireModel::UNBOUNDED_AABB
                 };
-                out.color = [r * 0.80, g * 0.80, b * 0.80, a * 0.85];
+                out.color = super::viewport_color::projected_color(adapted, plot);
                 out.line_weight_px = wire.line_weight_px;
                 // Wire patterns stay in their base model units. Projection
                 // normally scales them with the geometry; PSLTSCALE instead

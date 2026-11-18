@@ -51,6 +51,8 @@ pub enum TableCellDialogMsg {
     FormatKind(usize),
     FormatUnit(usize),
     Precision(String),
+    /// "Use current units and precision" in Cell Data Format.
+    UseCurrent(bool),
     Symbol(String),
     Append(bool),
     Negative(bool),
@@ -458,6 +460,7 @@ pub const DATE_EXAMPLES: [&str; 8] = [
     "HH:mm:ss",
 ];
 
+#[derive(Clone)]
 pub struct CellFormatState {
     pub kind: usize,
     pub unit: usize,
@@ -784,24 +787,6 @@ pub fn view_block<'a>(
         .into()
 }
 
-fn choice_list<'a>(
-    names: &[&'static str],
-    selected: usize,
-    on: fn(usize) -> TableCellDialogMsg,
-) -> Element<'a, Message> {
-    let mut list = column![].spacing(2);
-    for (index, name) in names.iter().enumerate() {
-        list = list.push(
-            button(text(crate::t!(*name).to_string()).size(11))
-                .on_press(msg(on(index)))
-                .style(button_style(selected == index))
-                .padding([3, 8])
-                .width(Fill),
-        );
-    }
-    list.into()
-}
-
 /// The invalid data type warning: the cells whose values read as no value
 /// of the chosen type, which converting empties; Cancel leaves every cell
 /// as it was.
@@ -932,28 +917,38 @@ pub fn view_entry<'a>(
 
 pub fn view_format<'a>(
     state: &'a CellFormatState,
+    badges: Vec<String>,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
+    use crate::ui::window::pdf_dialogs::{card_style, well_style};
     use TableCellDialogMsg as M;
-    let preview = container(text(state.preview.clone()).size(15))
-        .padding([8, 10])
-        .width(Fill)
-        .style(|theme: &iced::Theme| container::Style {
-            background: Some(iced::Background::Color(
-                theme.palette().background.weak.color,
-            )),
-            border: iced::Border {
-                radius: 4.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        });
-    let mut settings = column![preview].spacing(8);
+    let kind_name = crate::t!(FORMAT_KINDS[state.kind.min(8)]).to_string();
+    // The type's card: its name over a big sample.
+    let sample = card(
+        kind_name,
+        container(text(state.preview.clone()).size(22))
+            .padding([12, 14])
+            .width(Fill)
+            .center_x(Fill)
+            .style(well_style),
+    );
+    let mut settings = column![].spacing(8);
     let units = state.units();
     if !units.is_empty() {
+        let labels: Vec<String> = units.iter().map(|name| crate::t!(*name).to_string()).collect();
+        let selected = labels.get(state.unit).cloned();
+        let options = labels.clone();
         settings = settings.push(labelled(
             crate::tr!("table-cells", "format"),
-            choice_list(&units, state.unit, M::FormatUnit),
+            pick_list(selected, labels, |value: &String| value.clone())
+                .on_select(move |value: String| {
+                    msg(M::FormatUnit(
+                        options.iter().position(|label| *label == value).unwrap_or(0),
+                    ))
+                })
+                .text_size(11)
+                .padding([3, 6])
+                .width(Fill),
         ));
     }
     if matches!(state.kind, 0 | 1 | 3 | 5 | 6) {
@@ -978,6 +973,17 @@ pub fn view_format<'a>(
             text(selected).size(11).style(muted_style).into()
         };
         settings = settings.push(labelled(crate::tr!("table-cells", "precision"), precision));
+    }
+    if matches!(state.kind, 0 | 3 | 6) {
+        let current = state.unit == 1 && state.precision == 0;
+        settings = settings.push(row![
+            Space::new().width(Length::Fixed(118.0)),
+            iced::widget::checkbox(current)
+                .label(crate::tr!("table-cells", "use-current"))
+                .on_toggle(|on| msg(M::UseCurrent(on)))
+                .size(14)
+                .text_size(11),
+        ]);
     }
     if state.kind == 1 {
         let symbol_input: Option<fn(String) -> TableCellDialogMsg> = Some(M::Symbol);
@@ -1049,6 +1055,7 @@ pub fn view_format<'a>(
         }
         settings = settings.push(examples);
     }
+    let mut additional: Option<Element<'a, Message>> = None;
     if state.has_additional() {
         let conversion: Option<fn(String) -> TableCellDialogMsg> = Some(M::Conversion);
         let prefix: Option<fn(String) -> TableCellDialogMsg> = Some(M::Prefix);
@@ -1086,7 +1093,7 @@ pub fn view_format<'a>(
                 text(label).size(11).style(muted_style).into()
             }
         };
-        settings = settings.push(card(
+        additional = Some(card(
             crate::tr!("table-cells", "additional-format"),
             column![
                 labelled(
@@ -1130,18 +1137,67 @@ pub fn view_format<'a>(
                 .style(muted_style),
         );
     }
+    // The data types, each with its sample as a badge.
+    let mut types = column![].spacing(2);
+    for (index, name) in FORMAT_KINDS.iter().enumerate() {
+        let on = state.kind == index;
+        let badge = badges.get(index).cloned().unwrap_or_default();
+        types = types.push(
+            button(
+                row![
+                    text(crate::t!(*name).to_string()).size(11).width(Fill),
+                    container(text(badge).size(10))
+                        .padding([1, 7])
+                        .style(move |theme: &iced::Theme| container::Style {
+                            background: Some(iced::Background::Color(if on {
+                                iced::Color::BLACK.scale_alpha(0.18)
+                            } else {
+                                theme.palette().background.weak.color
+                            })),
+                            border: iced::Border {
+                                radius: 8.0.into(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }),
+                ]
+                .spacing(8)
+                .align_y(iced::Center),
+            )
+            .on_press(msg(M::FormatKind(index)))
+            .style(button_style(on))
+            .padding([5, 10])
+            .width(Fill),
+        );
+    }
+    let types = card(
+        crate::tr!("table-cells", "data-type"),
+        container(types).padding(4).width(Fill).style(well_style),
+    );
+    let settings = container(settings)
+        .padding([12, 14])
+        .width(Fill)
+        .style(card_style);
     let body = row![
-        container(card(
-            crate::tr!("table-cells", "data-type"),
-            choice_list(&FORMAT_KINDS, state.kind, M::FormatKind)
-        ))
-        .width(Length::Fixed(160.0)),
-        container(card(crate::tr!("table-cells", "format-settings"), settings)).width(Fill),
+        container(types).width(Length::Fixed(270.0)),
+        iced::widget::scrollable(
+            container(
+                column![sample, settings]
+                    .push(additional)
+                    .spacing(10)
+                    .width(Fill),
+            )
+                .padding(iced::Padding::ZERO.right(10)),
+        )
+        .width(Fill)
+        .height(Fill),
     ]
-    .spacing(10);
+    .spacing(12)
+    .height(Fill);
     column![body, footer()]
-        .spacing(10)
-        .padding([10, 12])
+        .spacing(12)
+        .padding([12, 14])
         .width(sizing.width)
+        .height(sizing.height)
         .into()
 }

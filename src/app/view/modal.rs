@@ -686,8 +686,12 @@ impl OpenCADStudio {
             }
             super::super::ModalKind::TableCellFormat => {
                 let state = self.table_cell_format.as_ref()?;
-                sized_flow(ex, 520, 470, |flow| {
-                    crate::ui::window::table_cell_dialog::view_format(state, flow)
+                let badges = crate::app::commands::table_cells::format_badges(
+                    &self.tabs[self.active_tab].scene.document,
+                    state,
+                );
+                sized_flow(ex, 720, 470, |flow| {
+                    crate::ui::window::table_cell_dialog::view_format(state, badges.clone(), flow)
                 })
             }
             super::super::ModalKind::RefEdit => {
@@ -1421,7 +1425,38 @@ impl OpenCADStudio {
                 }
                 let in_use =
                     self.style_in_use(crate::app::StyleKind::Table, &self.tablestyle_selected);
-                sized_flow(ex, 960, 680, |flow| {
+                // The edited cell style's data format with a sample.
+                let format_sample = selected_style
+                    .and_then(|style| style.cell_style(&self.ts_cell))
+                    .map(|cell| {
+                        let format = &cell.cell_style.content_format;
+                        let state =
+                            crate::app::update::table_style_cells::cell_format_state(format);
+                        format!(
+                            "{} · {}",
+                            crate::i18n::translate(crate::ui::window::table_cell_dialog::FORMAT_KINDS
+                                [state.kind.min(8)]),
+                            // General and Text have no format of their own:
+                            // their sample as the type list shows it.
+                            if matches!(state.kind, 4 | 7) {
+                                crate::app::commands::table_cells::format_badges(
+                                    &tab.scene.document,
+                                    &state,
+                                )[state.kind]
+                                    .clone()
+                            } else {
+                                crate::app::commands::table_cells::format_preview(
+                                    &tab.scene.document,
+                                    &state,
+                                )
+                            }
+                        )
+                    })
+                    .unwrap_or_default();
+                let manage_in_use = self.ts_cards.manage.as_ref().is_some_and(|manage| {
+                    self.table_cell_style_in_use(self.active_tab, &manage.selected)
+                });
+                sized_flow(ex, 1240, 760, |flow| {
                     crate::ui::style::tablestyle::view_window(
                         crate::ui::style::tablestyle::TableStyleView {
                             styles: styles.clone(),
@@ -1474,6 +1509,8 @@ impl OpenCADStudio {
                             rename_active: self.style_rename.as_deref(),
                             rename_buf: &self.style_rename_buf,
                             color_open: self.ts_color_open,
+                            format_sample: format_sample.clone(),
+                            manage_in_use,
                         },
                         flow,
                     )

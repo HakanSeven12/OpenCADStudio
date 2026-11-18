@@ -671,7 +671,7 @@ impl OpenCADStudio {
     }
 
     /// Whether a table of the selected style uses the named cell style.
-    pub(super) fn table_cell_style_in_use(&self, tab: usize, name: &str) -> bool {
+    pub(in crate::app) fn table_cell_style_in_use(&self, tab: usize, name: &str) -> bool {
         use document::objects::ObjectType;
         let document = &self.tabs[tab].scene.document;
         let found = document

@@ -401,7 +401,7 @@ pub(crate) fn chip<'a>(label: String, on: bool, message: Message) -> Element<'a,
     chip_enabled(label, on, message, true)
 }
 
-fn chip_enabled<'a>(
+pub(crate) fn chip_enabled<'a>(
     label: String,
     on: bool,
     message: Message,

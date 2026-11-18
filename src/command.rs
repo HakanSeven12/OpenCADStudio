@@ -2037,6 +2037,10 @@ pub enum CmdResult {
     /// UI thread; the command waits, and the host gives it the read with
     /// `on_pdf_import_read` when it ends.
     ReadPdfForImport(String),
+    /// Read the DGN file named at the -DGNIMPORT file name prompt off the
+    /// UI thread; the command waits, and the host gives it the read with
+    /// `on_dgn_import_read` when it ends.
+    ReadDgnForImport(String),
     /// Attach a point cloud: the host creates or reuses its definition,
     /// commits the cloud in one undo step, then ends the command. The
     /// message is the last prompt's echo.
@@ -3366,6 +3370,17 @@ pub trait CadCommand: Send {
         &mut self,
         _path: &str,
         _read: crate::modules::insert::pdf_import::PdfPromptRead,
+    ) -> Option<CmdResult> {
+        None
+    }
+
+    /// The end of a read asked for with `CmdResult::ReadDgnForImport`: the
+    /// file's models or the error. `None` when the command does not wait
+    /// for that file.
+    fn on_dgn_import_read(
+        &mut self,
+        _path: &str,
+        _read: Result<Vec<String>, String>,
     ) -> Option<CmdResult> {
         None
     }

@@ -259,6 +259,87 @@ impl OpenCADStudio {
         )
     }
 
+    /// The -DGNIMPORT file name prompt: the file is read off the UI thread,
+    /// and the command waits for the read
+    /// ([`Self::finish_dgn_import_prompt_read`]). A panic in the reader is
+    /// the read's error (`DGNIMPORT failed: <message>`), so the command
+    /// goes back to the file name prompt and does not wait for ever.
+    pub(in crate::app) fn read_dgn_for_import_prompt(
+        &mut self,
+        i: usize,
+        path: String,
+    ) -> Task<Message> {
+        self.read_dgn_for_import_prompt_with(
+            i,
+            path,
+            crate::modules::insert::dgn_import::read_models_for_prompt,
+        )
+    }
+
+    /// [`Self::read_dgn_for_import_prompt`] with the reader given, so a test
+    /// can give one that panics.
+    pub(in crate::app) fn read_dgn_for_import_prompt_with(
+        &mut self,
+        i: usize,
+        path: String,
+        reader: fn(&str) -> Result<Vec<String>, String>,
+    ) -> Task<Message> {
+        self.command_line.push_info(&format!("Reading {path}…"));
+        let tab_id = self.tabs[i].id;
+        let worker_path = path.clone();
+        crate::app::update::background_task(
+            "DGNIMPORT",
+            move || {
+                // The web build runs the read in place, without unwinding.
+                #[cfg(target_arch = "wasm32")]
+                {
+                    reader(&worker_path)
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| reader(&worker_path)))
+                        .unwrap_or_else(|payload| {
+                            Err(format!(
+                                "DGNIMPORT failed: {}",
+                                crate::app::update::panic_detail(payload)
+                            ))
+                        })
+                }
+            },
+            move |read| Message::ImportDialog(ImportDialogMsg::DgnPromptRead(tab_id, path, read)),
+        )
+    }
+
+    /// The end of the prompt's read: the command of that drawing takes it,
+    /// if it still waits for that file. In the current drawing the command
+    /// goes on (the model prompt or the error); in another drawing it only
+    /// takes the models, or goes back to the file name prompt, and its
+    /// messages are not shown.
+    fn finish_dgn_import_prompt_read(
+        &mut self,
+        tab_id: u64,
+        path: &str,
+        read: Result<Vec<String>, String>,
+    ) -> Task<Message> {
+        let Some(j) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            return Task::none();
+        };
+        let Some(result) = self.tabs[j]
+            .active_cmd
+            .as_mut()
+            .and_then(|command| command.on_dgn_import_read(path, read))
+        else {
+            return Task::none();
+        };
+        if j != self.active_tab {
+            return Task::none();
+        }
+        // The rest of a script line goes on after the read.
+        let applied = self.apply_cmd_result(result);
+        let rest = self.drain_pending_pause_tokens(j);
+        Task::batch([applied, rest])
+    }
+
     /// IMPORT with FILEDIA off: finds off the UI thread if the file is a
     /// DGN model; if so, -DGNIMPORT continues with it, else the command
     /// line shows `not_dgn`.
@@ -698,6 +779,9 @@ impl OpenCADStudio {
             }
             ImportDialogMsg::DgnRead(path, read, from) => {
                 self.open_dgn_import_dialog(&path, read, from)
+            }
+            ImportDialogMsg::DgnPromptRead(tab_id, path, read) => {
+                return self.finish_dgn_import_prompt_read(tab_id, &path, read);
             }
             ImportDialogMsg::DgnChecked(path, dgn, not_dgn) => {
                 if !dgn {

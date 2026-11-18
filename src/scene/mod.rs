@@ -9000,8 +9000,8 @@ impl Scene {
                 .copied()
                 .collect::<HashSet<_>>()
         };
-        let changed =
-            contribution(&self.hover_expanded, &self.selected) != contribution(&expanded, &self.selected);
+        let changed = contribution(&self.hover_expanded, &self.selected)
+            != contribution(&expanded, &self.selected);
         self.hover_highlight = handle;
         self.hover_expanded = expanded;
         if changed {

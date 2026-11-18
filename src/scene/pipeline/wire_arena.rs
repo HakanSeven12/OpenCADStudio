@@ -1652,7 +1652,8 @@ pub struct DenseHighlightConst {
     pub(super) written: Vec<(u32, u32)>,
 }
 
-impl PersistentWireArena {    pub fn build(
+impl PersistentWireArena {
+    pub fn build(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         wires: &[&WireModel],
@@ -1835,8 +1836,9 @@ impl PersistentWireArena {    pub fn build(
                 None => {
                     // A stale entry for this arena slot (rebuilt arena) is
                     // replaced; per-tint entries for other arenas stay.
-                    overlay_consts
-                        .retain(|entry| !(entry.color == color && entry.arena_index == arena_index));
+                    overlay_consts.retain(|entry| {
+                        !(entry.color == color && entry.arena_index == arena_index)
+                    });
                     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
                         label: Some("wire.dense_highlight.const"),
                         size: (consts_len.max(1) as u64)

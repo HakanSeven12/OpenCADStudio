@@ -7,7 +7,7 @@ use crate::modules::insert::pdf_import::{self, PdfFileImport};
 use crate::ui::window::pdf_dialogs::{
     click_page, item_thumbs, page_thumbs, LayerTarget, PdfAttachState, PdfDialogMsg,
     PdfImportFileRead, PdfImportFileState, PointCloudAttachState, RotationChoice,
-    UnderlayLayersState,
+    UnderlayAttachRead, UnderlayLayersState,
 };
 
 /// "7.8740 × 3.9369" (inches) for a page.
@@ -67,23 +67,111 @@ impl OpenCADStudio {
         }
     }
 
-    /// PDFATTACH after the file is chosen; an encrypted file asks for its
-    /// password first.
+    /// PDFATTACH after the file is chosen, with its bytes registered; an
+    /// encrypted file asks for its password first.
     pub(in crate::app) fn open_pdf_attach_dialog(&mut self, path: &str) -> Task<Message> {
-        use crate::ui::window::pdf_password_dialog::PdfPasswordThen;
-        if let Some(ask) = self.pdf_locked(path, PdfPasswordThen::Attach) {
-            return ask;
-        }
-        self.open_underlay_attach_dialog(document::entities::UnderlayType::Pdf, path);
-        Task::none()
+        self.read_underlay_for_attach(document::entities::UnderlayType::Pdf, path, false)
     }
 
-    /// PDFATTACH / DWFATTACH / DGNATTACH after the file is chosen.
-    pub(in crate::app) fn open_underlay_attach_dialog(
+    /// PDFATTACH / DWFATTACH / DGNATTACH after the file is chosen: the file
+    /// is read off the UI thread (from the disk first when `fresh`), and
+    /// the Attach window opens when the read ends. A panic in the reader
+    /// becomes an error on the command line.
+    pub(in crate::app) fn read_underlay_for_attach(
         &mut self,
         kind: document::entities::UnderlayType,
         path: &str,
-    ) {
+        fresh: bool,
+    ) -> Task<Message> {
+        self.read_underlay_for_attach_with(kind, path, fresh, read_for_attach_window)
+    }
+
+    /// [`Self::read_underlay_for_attach`] with the reader given, so a test
+    /// can give one that panics.
+    fn read_underlay_for_attach_with(
+        &mut self,
+        kind: document::entities::UnderlayType,
+        path: &str,
+        fresh: bool,
+        reader: fn(document::entities::UnderlayType, &str, bool) -> UnderlayAttachRead,
+    ) -> Task<Message> {
+        self.command_line.push_info(&format!(
+            "Reading {}…",
+            crate::entities::underlay::display_path(path)
+        ));
+        let context = match kind {
+            document::entities::UnderlayType::Dwf => "DWFATTACH",
+            document::entities::UnderlayType::Dgn => "DGNATTACH",
+            _ => "PDFATTACH",
+        };
+        let path = path.to_string();
+        let worker_path = path.clone();
+        crate::app::update::background_task(
+            context,
+            move || std::sync::Arc::new(reader(kind, &worker_path, fresh)),
+            move |read| Message::PdfDialog(PdfDialogMsg::AttachRead(kind, path, read)),
+        )
+    }
+
+    /// The end of the read for the Attach window. The window takes the
+    /// place of its own older copy (Browse); if a different window opened
+    /// during the read, it does not open.
+    fn finish_underlay_attach_read(
+        &mut self,
+        kind: document::entities::UnderlayType,
+        path: &str,
+        read: &UnderlayAttachRead,
+    ) -> Task<Message> {
+        if self
+            .active_modal
+            .is_some_and(|modal| modal != crate::app::ModalKind::PdfAttach)
+        {
+            self.command_line.push_error(
+                "Attach underlay cancelled: a different window opened while the file was read.",
+            );
+            return Task::none();
+        }
+        self.open_attach_window(kind, path, read)
+    }
+
+    /// The Attach window for a file already read, or the password window,
+    /// or the error of the read.
+    fn open_attach_window(
+        &mut self,
+        kind: document::entities::UnderlayType,
+        path: &str,
+        read: &UnderlayAttachRead,
+    ) -> Task<Message> {
+        use crate::ui::window::pdf_password_dialog::PdfPasswordThen;
+        let (pages, page_size, sub_per_master) = match read {
+            UnderlayAttachRead::Failed(e) => {
+                self.command_line
+                    .push_error(crate::tf!("PDFATTACH: {e}").as_ref());
+                return Task::none();
+            }
+            UnderlayAttachRead::NoItems => {
+                self.command_line.push_error(&format!(
+                    "{} not found.",
+                    crate::entities::underlay::display_path(path)
+                ));
+                return Task::none();
+            }
+            UnderlayAttachRead::Locked { stage, remembered } => {
+                return self.open_pdf_password(path, *stage, *remembered, PdfPasswordThen::Attach);
+            }
+            UnderlayAttachRead::Items {
+                pages,
+                page_size,
+                sub_per_master,
+                remembered,
+            } => {
+                if *remembered {
+                    self.command_line
+                        .push_output(&crate::scene::model::pdf_password::remembered_notice(path));
+                }
+                (pages, page_size, *sub_per_master)
+            }
+        };
         let i = self.active_tab;
         let mut existing: Vec<(String, String)> = Vec::new();
         for object in self.tabs[i].scene.document.objects.values() {
@@ -99,7 +187,13 @@ impl OpenCADStudio {
         }
         let mut state = PdfAttachState::new(existing);
         state.kind = kind;
-        self.load_pdf_attach_file(&mut state, path);
+        self.set_pdf_attach_file(
+            &mut state,
+            path,
+            pages.clone(),
+            page_size.clone(),
+            sub_per_master,
+        );
         let plane = if self.tabs[i].editing_model_space() {
             self.tabs[i].ucs_xform().working_plane()
         } else {
@@ -108,22 +202,32 @@ impl OpenCADStudio {
         Self::refresh_pdf_attach_geopdf(&self.tabs[i].scene, plane, &mut state);
         self.pdf_attach = Some(state);
         self.active_modal = Some(crate::app::ModalKind::PdfAttach);
+        Task::none()
     }
 
     fn load_pdf_attach_file(&self, state: &mut PdfAttachState, path: &str) {
+        let pages = item_thumbs(state.kind, path);
+        let (page_size, sub_per_master) = first_item_size(state.kind, path, &pages);
+        self.set_pdf_attach_file(state, path, pages, page_size, sub_per_master);
+    }
+
+    /// Put a file that was read into the Attach window.
+    fn set_pdf_attach_file(
+        &self,
+        state: &mut PdfAttachState,
+        path: &str,
+        pages: Vec<crate::ui::window::pdf_dialogs::PageThumb>,
+        page_size: String,
+        sub_per_master: f64,
+    ) {
         state.path = path.to_string();
         state.name = file_stem(path);
-        state.pages = item_thumbs(state.kind, path);
+        state.pages = pages;
         state.selected = vec![0];
         state.anchor = 0;
         state.found_in = crate::entities::underlay::display_path(path);
-        let first = state
-            .page_labels()
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| "1".to_string());
-        state.page_size = item_size_text(state.kind, path, &first);
-        state.sub_per_master = sub_per_master(state.kind, path, &first);
+        state.page_size = page_size;
+        state.sub_per_master = sub_per_master;
         state.sub_units = false;
         state.saved_path =
             crate::entities::underlay::display_path(&self.pdf_stored_path(path, state.path_type.0));
@@ -791,6 +895,9 @@ impl OpenCADStudio {
             // ── Attach Point Cloud ────────────────────────────────────────
             PdfDialogMsg::CloudBrowse => return Task::done(Message::PointCloudAttachPick),
             PdfDialogMsg::CloudOk => return self.point_cloud_attach_ok(i),
+            PdfDialogMsg::AttachRead(kind, path, read) => {
+                return self.finish_underlay_attach_read(kind, &path, &read);
+            }
             PdfDialogMsg::CloudRead(path, cloud) => {
                 self.finish_point_cloud_attach_read(&path, cloud.as_deref());
             }
@@ -1262,6 +1369,69 @@ fn read_pdf_for_import_window(path: &str) -> PdfImportFileRead {
     }
 }
 
+/// The size text and the sub units per master unit of the first page,
+/// sheet or model.
+fn first_item_size(
+    kind: document::entities::UnderlayType,
+    path: &str,
+    pages: &[crate::ui::window::pdf_dialogs::PageThumb],
+) -> (String, f64) {
+    let first = pages
+        .first()
+        .map(|page| page.label.clone())
+        .unwrap_or_else(|| "1".to_string());
+    (
+        item_size_text(kind, path, &first),
+        sub_per_master(kind, path, &first),
+    )
+}
+
+/// The Attach window's read of a PDF, DWF or DGN file: the password the
+/// file needs, or its pages, sheets or models. `fresh` reads the file from
+/// the disk first, because a file picked again can have changed; else the
+/// bytes registered for `path` are used.
+fn read_for_attach_window(
+    kind: document::entities::UnderlayType,
+    path: &str,
+    fresh: bool,
+) -> UnderlayAttachRead {
+    use crate::scene::model::pdf_password::{gate, Gate};
+    use crate::scene::model::underlay_vector;
+    let pdf = kind == document::entities::UnderlayType::Pdf;
+    if fresh {
+        match std::fs::read(path) {
+            Ok(bytes) => {
+                crate::scene::model::pdf_raster::register_source(path, std::sync::Arc::new(bytes))
+            }
+            Err(error) if pdf => return UnderlayAttachRead::Failed(error.to_string()),
+            Err(_) => return UnderlayAttachRead::NoItems,
+        }
+        if !pdf {
+            underlay_vector::forget(path);
+        }
+    }
+    let mut remembered = false;
+    if pdf {
+        match gate(path, false) {
+            Gate::Open => {}
+            Gate::Remembered => remembered = true,
+            Gate::Ask { stage, remembered } => {
+                return UnderlayAttachRead::Locked { stage, remembered };
+            }
+        }
+    } else if !underlay_vector::item_names(kind, path).is_some_and(|names| !names.is_empty()) {
+        return UnderlayAttachRead::NoItems;
+    }
+    let pages = item_thumbs(kind, path);
+    let (page_size, sub_per_master) = first_item_size(kind, path, &pages);
+    UnderlayAttachRead::Items {
+        pages,
+        page_size,
+        sub_per_master,
+        remembered,
+    }
+}
+
 /// "200 × 100 mm" for a page.
 fn page_size_mm(path: &str, page: &str) -> String {
     crate::scene::model::pdf_raster::page_size_inches(path, page)
@@ -1613,5 +1783,286 @@ mod point_cloud_attach_read_tests {
         let state = app.point_cloud_attach.as_ref().expect("the window's state");
         assert!(state.summary.contains("30 points"), "{}", state.summary);
         assert_eq!(app.command_line.last_error, None);
+    }
+}
+
+#[cfg(test)]
+mod underlay_attach_read_tests {
+    use super::*;
+    use crate::app::ModalKind;
+    use document::entities::UnderlayType;
+    use std::sync::Arc;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    fn last_line(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .last()
+            .map(|entry| entry.text.clone())
+            .unwrap_or_default()
+    }
+
+    /// A PDF with a 10 × 5 inch page and a 2 × 1 inch page.
+    fn two_pages() -> Vec<u8> {
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 720 360] >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 144 72] >>",
+        ];
+        let mut bytes = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, object) in objects.iter().enumerate() {
+            offsets.push(bytes.len());
+            bytes.extend(format!("{} 0 obj\n{object}\nendobj\n", index + 1).as_bytes());
+        }
+        let xref = bytes.len();
+        bytes.extend(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
+        bytes.extend(b"0000000000 65535 f \n");
+        for offset in offsets {
+            bytes.extend(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        bytes.extend(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
+        );
+        bytes
+    }
+
+    /// A file in the temporary folder, with a name for this process.
+    fn temp_file(name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("ocs-underlay-attach-{}-{name}", std::process::id()));
+        std::fs::write(&path, bytes).expect("write the test file");
+        path
+    }
+
+    /// The window opens only when the read ends, after a `Reading` line,
+    /// with the pages and the size of the first.
+    #[test]
+    fn the_window_opens_only_when_the_read_ends() {
+        let mut app = new_app();
+        let path = "underlay-attach-read.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_pages()));
+        let task = app.open_pdf_attach_dialog(path);
+        assert_eq!(app.active_modal, None, "nothing opens during the read");
+        assert_eq!(last_line(&app), format!("ⓘ Reading {path}…"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::PdfAttach));
+        let state = app.pdf_attach.as_ref().expect("the window's state");
+        assert_eq!(state.pages.len(), 2);
+        assert_eq!(state.page_size, "10.0000 × 5.0000");
+    }
+
+    /// A reader that panics gives an error with the command's name, no
+    /// window opens, and the next read works.
+    #[test]
+    fn a_reader_panic_is_an_error_and_no_window_opens() {
+        let mut app = new_app();
+        for (kind, name) in [
+            (UnderlayType::Pdf, "PDFATTACH"),
+            (UnderlayType::Dwf, "DWFATTACH"),
+            (UnderlayType::Dgn, "DGNATTACH"),
+        ] {
+            let task = app.read_underlay_for_attach_with(kind, "panics", true, |_, _, _| {
+                panic!("a reader bug")
+            });
+            app.drive_headless_task(task).expect("the read task");
+            assert_eq!(
+                app.command_line.last_error.as_deref(),
+                Some(format!("{name} failed: a reader bug").as_str())
+            );
+            assert_eq!(app.active_modal, None);
+            assert!(app.pdf_attach.is_none());
+        }
+        let path = "underlay-attach-after-panic.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_pages()));
+        let task = app.open_pdf_attach_dialog(path);
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::PdfAttach));
+    }
+
+    /// The ATTACH picker's result for a PDF and for a DGN file starts the
+    /// read from the disk, and the window opens when it ends.
+    #[test]
+    fn the_attach_picker_reads_pdf_and_dgn_files_on_a_worker() {
+        let pdf = temp_file("picked.pdf", &two_pages());
+        let dgn = temp_file(
+            "picked.dgn",
+            &crate::modules::insert::dgn_import::test_files::minimal_v7_line(),
+        );
+        for (path, kind, pages) in [(&pdf, UnderlayType::Pdf, 2), (&dgn, UnderlayType::Dgn, 1)] {
+            let mut app = new_app();
+            let task = app.update(Message::AttachPickResult(Ok(path.clone())));
+            assert_eq!(app.active_modal, None, "nothing opens during the read");
+            assert!(
+                last_line(&app).starts_with("ⓘ Reading "),
+                "{}",
+                last_line(&app)
+            );
+            app.drive_headless_task(task).expect("the read task");
+            assert_eq!(app.active_modal, Some(ModalKind::PdfAttach), "{path:?}");
+            let state = app.pdf_attach.as_ref().expect("the window's state");
+            assert_eq!(state.kind, kind);
+            assert_eq!(state.pages.len(), pages, "{path:?}");
+        }
+        let _ = std::fs::remove_file(pdf);
+        let _ = std::fs::remove_file(dgn);
+    }
+
+    /// A file picked again is read from the disk again: a DGN file that
+    /// became damaged since the first read gives `not found`.
+    #[test]
+    fn a_file_picked_again_is_read_again() {
+        let mut app = new_app();
+        let dgn = temp_file(
+            "picked-again.dgn",
+            &crate::modules::insert::dgn_import::test_files::minimal_v7_line(),
+        );
+        let task = app.update(Message::AttachPickResult(Ok(dgn.clone())));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::PdfAttach));
+        app.active_modal = None;
+        app.pdf_attach = None;
+        std::fs::write(&dgn, b"not a design file").expect("damage the file");
+        let task = app.update(Message::AttachPickResult(Ok(dgn.clone())));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, None);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some(
+                format!(
+                    "{} not found.",
+                    crate::entities::underlay::display_path(&dgn.to_string_lossy())
+                )
+                .as_str()
+            )
+        );
+        let _ = std::fs::remove_file(dgn);
+    }
+
+    /// A DGN file that changed since its first read shows its new units
+    /// when it is picked again: the read forgets what it read before.
+    #[test]
+    fn a_changed_file_picked_again_shows_its_new_units() {
+        let mut app = new_app();
+        let mut bytes = crate::modules::insert::dgn_import::test_files::minimal_v7_line();
+        let dgn = temp_file("changed-units.dgn", &bytes);
+        let task = app.update(Message::AttachPickResult(Ok(dgn.clone())));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.pdf_attach.as_ref().map(|s| s.sub_per_master),
+            Some(1000.0)
+        );
+        app.active_modal = None;
+        app.pdf_attach = None;
+        // Subunits per master unit: high word, then low word.
+        bytes[1112..1116].copy_from_slice(&[0, 0, 0xf4, 0x01]);
+        std::fs::write(&dgn, &bytes).expect("change the file");
+        let task = app.update(Message::AttachPickResult(Ok(dgn.clone())));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.pdf_attach.as_ref().map(|s| s.sub_per_master),
+            Some(500.0)
+        );
+        let _ = std::fs::remove_file(dgn);
+    }
+
+    /// A PDF file that cannot be read gives the read's error.
+    #[test]
+    fn a_pdf_that_cannot_be_read_gives_the_error() {
+        let mut app = new_app();
+        let missing =
+            std::env::temp_dir().join(format!("ocs-underlay-missing-{}.pdf", std::process::id()));
+        let task = app.update(Message::AttachPickResult(Ok(missing)));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, None);
+        let error = app.command_line.last_error.clone().unwrap_or_default();
+        assert!(error.starts_with("PDFATTACH: "), "{error}");
+    }
+
+    /// A DGN or DWF file that cannot be read gives `not found`, not the
+    /// PDF read error.
+    #[test]
+    fn a_dgn_that_cannot_be_read_gives_not_found() {
+        let mut app = new_app();
+        let missing =
+            std::env::temp_dir().join(format!("ocs-underlay-missing-{}.dgn", std::process::id()));
+        let task = app.update(Message::AttachPickResult(Ok(missing.clone())));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, None);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some(
+                format!(
+                    "{} not found.",
+                    crate::entities::underlay::display_path(&missing.to_string_lossy())
+                )
+                .as_str()
+            )
+        );
+    }
+
+    /// An encrypted file opens the password window when the read ends.
+    #[test]
+    fn an_encrypted_file_asks_for_its_password_after_the_read() {
+        let mut app = new_app();
+        let path = "underlay-attach-locked.pdf";
+        let file = "%PDF-1.4\ntrailer\n<< /Encrypt << /Filter /Standard /V 1 /R 2 \
+            /O <95fe1f4219662a774442fb072e3d9f19e9d130ec09a4d0061e78fe920f7ab62f> \
+            /U <0102030405060708090a0b0c0d0e0f100102030405060708090a0b0c0d0e0f10> /P -44 >> >>\n%%EOF\n";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(file.as_bytes().to_vec()));
+        let task = app.open_pdf_attach_dialog(path);
+        assert_eq!(app.active_modal, None, "nothing opens during the read");
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::PdfPassword));
+        assert!(app.pdf_attach.is_none());
+    }
+
+    /// A different window opened during the read stays, and the Attach
+    /// window does not open.
+    #[test]
+    fn a_window_opened_during_the_read_stays() {
+        let mut app = new_app();
+        let path = "underlay-attach-other-window.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_pages()));
+        let task = app.open_pdf_attach_dialog(path);
+        app.active_modal = Some(ModalKind::PointCloudAttach);
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::PointCloudAttach));
+        assert!(app.pdf_attach.is_none());
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Attach underlay cancelled: a different window opened while the file was read.")
+        );
+    }
+
+    /// The window of a second read (Browse) takes the place of the first.
+    #[test]
+    fn the_window_of_a_second_read_takes_the_place_of_the_first() {
+        let mut app = new_app();
+        let first = "underlay-attach-first.pdf";
+        let second = "underlay-attach-second.pdf";
+        for path in [first, second] {
+            crate::scene::model::pdf_raster::register_source(path, Arc::new(two_pages()));
+        }
+        let task = app.open_pdf_attach_dialog(first);
+        app.drive_headless_task(task).expect("the read task");
+        let task = app.open_pdf_attach_dialog(second);
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::PdfAttach));
+        assert_eq!(
+            app.pdf_attach.as_ref().map(|s| s.path.as_str()),
+            Some(second)
+        );
+        assert!(app.command_line.last_error.is_none());
     }
 }

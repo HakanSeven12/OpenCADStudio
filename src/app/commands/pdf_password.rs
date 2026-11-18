@@ -2,7 +2,7 @@
 //! what runs once the file is unlocked and the messages when it is not.
 
 use crate::app::{Message, OpenCADStudio};
-use crate::scene::model::pdf_password::{self, Check, Gate, Stage};
+use crate::scene::model::pdf_password::{self, Check, Stage};
 use crate::ui::window::pdf_password_dialog::{PdfPasswordMsg, PdfPasswordState, PdfPasswordThen};
 use iced::Task;
 
@@ -29,27 +29,6 @@ impl OpenCADStudio {
         iced::widget::operation::focus(iced::widget::Id::new(
             crate::ui::window::pdf_password_dialog::INPUT_ID,
         ))
-    }
-
-    /// A PDF chosen in a file dialog: `None` when it can be read now, else
-    /// the window is open (the task focuses its field) and `then` runs once
-    /// the file is unlocked.
-    pub(in crate::app) fn pdf_locked(
-        &mut self,
-        path: &str,
-        then: PdfPasswordThen,
-    ) -> Option<Task<Message>> {
-        match pdf_password::gate(path, !then.attach()) {
-            Gate::Open => None,
-            Gate::Remembered => {
-                self.command_line
-                    .push_output(&pdf_password::remembered_notice(path));
-                None
-            }
-            Gate::Ask { stage, remembered } => {
-                Some(self.open_pdf_password(path, stage, remembered, then))
-            }
-        }
     }
 
     pub(in crate::app) fn update_pdf_password(&mut self, message: PdfPasswordMsg) -> Task<Message> {

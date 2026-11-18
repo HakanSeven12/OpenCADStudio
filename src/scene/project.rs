@@ -109,6 +109,17 @@ impl Scene {
             let vp_y0 = pcy - hh;
             let vp_y1 = pcy + hh;
 
+            let plot_clip = if plot && crate::entities::viewport::is_clipped(vp) {
+                let ring = self.clip_boundary_polygon(vp.clip_boundary_handle, pcz);
+                (ring.len() >= 3).then(|| {
+                    ring.into_iter()
+                        .map(|[x, y, _]| [x, y])
+                        .collect::<std::sync::Arc<[[f32; 2]]>>()
+                })
+            } else {
+                None
+            };
+
             // camera_dist: how far the camera is from the target plane.
             let use_perspective = vp.status.perspective && vp.lens_length > 1.0;
             let camera_dist = if use_perspective {
@@ -371,6 +382,7 @@ impl Scene {
                 }
                 let mut out = wire.clone();
                 out.points = clipped;
+                out.plot_clip = plot_clip.clone();
                 // A wide polyline's band width is a geometric width in model
                 // units; the points were just projected into paper units, so
                 // the band (and any per-point taper) must follow the same

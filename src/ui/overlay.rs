@@ -5164,6 +5164,14 @@ struct DynInputCanvas {
 }
 
 impl DynInputCanvas {
+    /// The dotted legs a guide draws from the anchor along its axes to the
+    /// cursor. A rectangle draws none: its rubber band is that same box, and
+    /// dotted strokes laid over its edges make them read as dashed. Its
+    /// width and height boxes stay where they were.
+    fn axis_legs(guide: DynGuide, base: Point, corner: Point, cursor: Point) -> Option<[Point; 3]> {
+        (guide == DynGuide::AxisDelta).then_some([base, corner, cursor])
+    }
+
     fn dotted(theme: &Theme) -> canvas::Stroke<'static> {
         canvas::Stroke {
             width: 1.0,
@@ -5515,24 +5523,13 @@ impl DynInputCanvas {
                 }
             }
             DynGuide::AxisDelta | DynGuide::RectSides => {
-                // Dotted legs from the anchor along its axes to the cursor.
-                let legs = canvas::Path::new(|p| {
-                    p.move_to(base);
-                    p.line_to(corner);
-                    p.line_to(cursor);
-                });
-                frame.stroke(&legs, Self::dotted(theme));
-                if self.guide == DynGuide::RectSides {
-                    // Close the rectangle so both side pairs read as a box.
-                    let rest = canvas::Path::new(|p| {
-                        p.move_to(base);
-                        p.line_to(Point {
-                            x: base.x,
-                            y: cursor.y,
-                        });
-                        p.line_to(cursor);
+                if let Some([from, via, to]) = Self::axis_legs(self.guide, base, corner, cursor) {
+                    let legs = canvas::Path::new(|p| {
+                        p.move_to(from);
+                        p.line_to(via);
+                        p.line_to(to);
                     });
-                    frame.stroke(&rest, Self::dotted(theme));
+                    frame.stroke(&legs, Self::dotted(theme));
                 }
             }
             DynGuide::None => {}
@@ -5762,6 +5759,28 @@ impl canvas::Program<Message> for DynInputCanvas {
             (_, Some(base)) => self.draw_guided(&mut frame, bounds, base, theme),
         }
         vec![frame.into_geometry()]
+    }
+}
+
+#[cfg(test)]
+mod dyn_guide_tests {
+    use super::*;
+
+    #[test]
+    fn a_rectangle_guide_strokes_nothing_over_its_rubber_band() {
+        let (base, corner, cursor) = (
+            Point::new(10.0, 10.0),
+            Point::new(60.0, 10.0),
+            Point::new(60.0, 40.0),
+        );
+        assert_eq!(
+            DynInputCanvas::axis_legs(DynGuide::AxisDelta, base, corner, cursor),
+            Some([base, corner, cursor])
+        );
+        assert_eq!(
+            DynInputCanvas::axis_legs(DynGuide::RectSides, base, corner, cursor),
+            None
+        );
     }
 }
 

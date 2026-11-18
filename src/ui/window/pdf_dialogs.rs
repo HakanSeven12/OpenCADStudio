@@ -55,6 +55,9 @@ pub enum PdfDialogMsg {
         std::path::PathBuf,
         Option<std::sync::Arc<crate::scene::model::point_cloud::CloudPoints>>,
     ),
+    /// A point cloud read off the UI thread for the -POINTCLOUDATTACH file
+    /// name prompt: the tab, the file, and whether a scan could be read.
+    CloudPromptRead(u64, std::path::PathBuf, bool),
     /// A point cloud read off the UI thread for its attach: the tab it was
     /// started for, that document's generation, the undo label and the
     /// placement, and the cloud (None: no scan could be read).

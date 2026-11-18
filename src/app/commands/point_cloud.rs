@@ -153,6 +153,73 @@ impl OpenCADStudio {
         )
     }
 
+    /// The -POINTCLOUDATTACH file name prompt: the file is read off the UI
+    /// thread while the command asks for the insertion point. A panic in
+    /// the reader becomes an error on the command line.
+    pub(in crate::app) fn read_point_cloud_for_prompt(
+        &mut self,
+        i: usize,
+        path: std::path::PathBuf,
+    ) -> Task<Message> {
+        self.read_point_cloud_for_prompt_with(i, path, point_cloud::load)
+    }
+
+    /// [`Self::read_point_cloud_for_prompt`] with the reader given, so a
+    /// test can give one that panics.
+    pub(in crate::app) fn read_point_cloud_for_prompt_with(
+        &mut self,
+        i: usize,
+        path: std::path::PathBuf,
+        reader: fn(&std::path::Path) -> Option<Arc<point_cloud::CloudPoints>>,
+    ) -> Task<Message> {
+        self.command_line.push_info(&format!(
+            "Reading {}…",
+            crate::entities::underlay::display_path(&path.to_string_lossy())
+        ));
+        let tab_id = self.tabs[i].id;
+        self.point_cloud_prompt_read = Some((tab_id, path.clone()));
+        let worker_path = path.clone();
+        crate::app::update::background_task(
+            "POINTCLOUDATTACH",
+            move || reader(&worker_path).is_some(),
+            move |found| Message::PdfDialog(PdfDialogMsg::CloudPromptRead(tab_id, path, found)),
+        )
+    }
+
+    /// The end of the prompt's read. If no scan could be read, and the
+    /// command that asked is still the current command of the current
+    /// drawing, the command ends with the two lines that the prompt gave
+    /// before the read moved to a worker. If not, the attach reads the file
+    /// again and reports there.
+    pub(in crate::app) fn finish_point_cloud_prompt_read(
+        &mut self,
+        tab_id: u64,
+        path: &std::path::Path,
+        found: bool,
+    ) -> Task<Message> {
+        if self
+            .point_cloud_prompt_read
+            .as_ref()
+            .is_none_or(|(tab, read)| *tab != tab_id || read != path)
+        {
+            return Task::none();
+        }
+        self.point_cloud_prompt_read = None;
+        let i = self.active_tab;
+        let asked = !found
+            && self.tabs[i].id == tab_id
+            && self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.name() == "POINTCLOUDATTACH");
+        if !asked {
+            return Task::none();
+        }
+        self.apply_cmd_result(crate::command::CmdResult::Measurement(
+            "All scans are not found or invalid.\nAttach point cloud failed".to_string(),
+        ))
+    }
+
     /// Places a cloud read off the UI thread, one undo step. A result for
     /// a drawing that was closed, replaced or cleared is dropped, and so is
     /// one for a drawing that is not the current one now (the commit

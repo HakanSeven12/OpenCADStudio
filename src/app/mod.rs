@@ -1010,6 +1010,9 @@ pub(super) struct OpenCADStudio {
     /// PDF dialogs' working copies; `None` while closed.
     pdf_attach: Option<crate::ui::window::pdf_dialogs::PdfAttachState>,
     point_cloud_attach: Option<crate::ui::window::pdf_dialogs::PointCloudAttachState>,
+    /// The read that the -POINTCLOUDATTACH file name prompt started: the
+    /// tab and the file. A failed read ends that command when it ends.
+    point_cloud_prompt_read: Option<(u64, std::path::PathBuf)>,
     /// ATTDEF dialog and Edit Attribute Definition dialog; `None` while closed.
     attdef_dialog: Option<crate::ui::window::attdef_dialog::AttdefDialogState>,
     attdef_edit: Option<crate::ui::window::attdef_dialog::AttdefEditState>,
@@ -6442,6 +6445,7 @@ impl OpenCADStudio {
             block_dependency_cache: std::cell::RefCell::new(None),
             pdf_attach: None,
             point_cloud_attach: None,
+            point_cloud_prompt_read: None,
             attdef_dialog: None,
             insert_attr_dialog: None,
             attman: None,

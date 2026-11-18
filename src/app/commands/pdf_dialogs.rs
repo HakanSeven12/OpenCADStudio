@@ -794,6 +794,9 @@ impl OpenCADStudio {
             PdfDialogMsg::CloudRead(path, cloud) => {
                 self.finish_point_cloud_attach_read(&path, cloud.as_deref());
             }
+            PdfDialogMsg::CloudPromptRead(tab_id, path, found) => {
+                return self.finish_point_cloud_prompt_read(tab_id, &path, found);
+            }
             PdfDialogMsg::CloudAttachRead(tab_id, generation, attach, cloud) => {
                 let (label, placement) = *attach;
                 self.finish_point_cloud_attach(tab_id, generation, label, placement, cloud);

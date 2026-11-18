@@ -123,15 +123,11 @@ impl PointCloudAttachCommand {
         if !path.is_file() {
             return CmdResult::NeedPoint;
         }
-        if crate::scene::model::point_cloud::load(&path).is_none() {
-            // Said, and the command ends.
-            return CmdResult::Measurement(
-                "All scans are not found or invalid.\nAttach point cloud failed".to_string(),
-            );
-        }
-        self.path = path;
+        // The host reads the file off the UI thread; if no scan can be read,
+        // it says so and the command ends.
+        self.path = path.clone();
         self.step = Step::Insertion;
-        CmdResult::NeedPoint
+        CmdResult::ReadPointCloud(path)
     }
 
     fn accept_insertion(&mut self, point: DVec3) -> CmdResult {

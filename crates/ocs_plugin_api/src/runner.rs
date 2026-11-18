@@ -73,14 +73,29 @@ pub fn run_with_plugin(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::version_info::{wire_schema, SELF_HOSTED_API_VERSION, WIRE_SCHEMA_ENV};
     if version >= SELF_HOSTED_API_VERSION {
-        if let Ok(host) = std::env::var(WIRE_SCHEMA_ENV) {
-            if host != wire_schema() {
-                return Err(format!(
-                    "plugin reads codec types of wire schema {}, but the host writes {host}; \
-                     rebuild the plugin against this host's ocs_plugin_api",
-                    wire_schema()
-                )
-                .into());
+        let host_env = std::env::var(WIRE_SCHEMA_ENV).ok();
+        match host_env.as_deref() {
+            Some(host) => {
+                if host != wire_schema() {
+                    return Err(format!(
+                        "plugin reads codec types of wire schema {}, but the host writes {host}; \
+                         rebuild the plugin against this host's ocs_plugin_api",
+                        wire_schema()
+                    )
+                    .into());
+                }
+            }
+            None => {
+                // The gate was SKIPPED, not passed: the plugin was not
+                // launched by the host (a standalone dev loop), so the wire
+                // schema was never compared. Say so ONCE, loudly — a codec
+                // mismatch will otherwise surface as a decode error far
+                // from its cause.
+                if let Some(warning) = crate::version_info::wire_schema_gate_skip_warning(
+                    host_env.as_deref(),
+                ) {
+                    eprintln!("{warning}");
+                }
             }
         }
     }

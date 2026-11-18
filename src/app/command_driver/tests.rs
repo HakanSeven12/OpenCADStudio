@@ -11551,3 +11551,61 @@ mod annotation_visibility_command_tests {
     }
 }
 
+
+// An annotative block definition carries its flag through the BLOCK dialog
+// into the file, and a placed reference reports the same state in Properties.
+mod annotative_block_end_to_end_tests {
+    use super::super::*;
+    use crate::app::Message;
+    use document::entities::{EntityType, Insert, Line};
+    use document::types::Vector3;
+
+    #[test]
+    fn an_annotative_block_definition_marks_its_reference_annotative() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let line = app.tabs[i].scene.add_entity(EntityType::Line(Line::from_points(
+            Vector3::ZERO,
+            Vector3::new(10.0, 0.0, 0.0),
+        )));
+        app.tabs[i].scene.select_entity(line, true);
+
+        let _ = app.run_command_line("BLOCK");
+        let _ = app.update(Message::BlockDefName("ANNOBLOCK".into()));
+        let _ = app.update(Message::BlockDefAnnotative(true));
+        let _ = app.update(Message::BlockDefApply);
+
+        assert!(app.block_definition.is_none(), "the dialog applied");
+        assert!(
+            crate::scene::annotative::block_is_annotative(
+                &app.tabs[i].scene.document,
+                "ANNOBLOCK"
+            ),
+            "the Annotative checkbox marked the definition"
+        );
+
+        let reference = app.tabs[i].scene.add_entity(EntityType::Insert(Insert::new(
+            "ANNOBLOCK",
+            Vector3::new(5.0, 5.0, 0.0),
+        )));
+        app.tabs[i].scene.select_entity(reference, true);
+        app.tabs[i].selected_handle = Some(reference);
+        app.refresh_properties();
+
+        let row = app.tabs[i]
+            .properties
+            .sections
+            .iter()
+            .flat_map(|section| &section.props)
+            .find(|property| property.field == "annotative")
+            .expect("the reference offers an Annotative row");
+        let shown = match &row.value {
+            crate::scene::model::object::PropValue::Choice { selected, .. } => selected.clone(),
+            crate::scene::model::object::PropValue::ReadOnly(value) => value.clone(),
+            other => panic!("unexpected Annotative row: {other:?}"),
+        };
+        assert_eq!(shown, "Yes", "the reference is annotative through its definition");
+    }
+}
+

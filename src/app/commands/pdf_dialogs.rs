@@ -67,21 +67,71 @@ impl OpenCADStudio {
         }
     }
 
-    /// PDFATTACH after the file is chosen; an encrypted file asks for its
-    /// password first.
+    /// PDFATTACH after the file is chosen, with its bytes registered; an
+    /// encrypted file asks for its password first.
     pub(in crate::app) fn open_pdf_attach_dialog(&mut self, path: &str) -> Task<Message> {
-        let read = read_for_attach_window(document::entities::UnderlayType::Pdf, path, false);
-        self.open_attach_window(document::entities::UnderlayType::Pdf, path, &read)
+        self.read_underlay_for_attach(document::entities::UnderlayType::Pdf, path, false)
     }
 
-    /// PDFATTACH / DWFATTACH / DGNATTACH after the file is chosen.
-    pub(in crate::app) fn open_underlay_attach_dialog(
+    /// PDFATTACH / DWFATTACH / DGNATTACH after the file is chosen: the file
+    /// is read off the UI thread (from the disk first when `fresh`), and
+    /// the Attach window opens when the read ends. A panic in the reader
+    /// becomes an error on the command line.
+    pub(in crate::app) fn read_underlay_for_attach(
         &mut self,
         kind: document::entities::UnderlayType,
         path: &str,
-    ) {
-        let read = read_for_attach_window(kind, path, false);
-        let _ = self.open_attach_window(kind, path, &read);
+        fresh: bool,
+    ) -> Task<Message> {
+        self.read_underlay_for_attach_with(kind, path, fresh, read_for_attach_window)
+    }
+
+    /// [`Self::read_underlay_for_attach`] with the reader given, so a test
+    /// can give one that panics.
+    fn read_underlay_for_attach_with(
+        &mut self,
+        kind: document::entities::UnderlayType,
+        path: &str,
+        fresh: bool,
+        reader: fn(document::entities::UnderlayType, &str, bool) -> UnderlayAttachRead,
+    ) -> Task<Message> {
+        self.command_line.push_info(&format!(
+            "Reading {}…",
+            crate::entities::underlay::display_path(path)
+        ));
+        let context = match kind {
+            document::entities::UnderlayType::Dwf => "DWFATTACH",
+            document::entities::UnderlayType::Dgn => "DGNATTACH",
+            _ => "PDFATTACH",
+        };
+        let path = path.to_string();
+        let worker_path = path.clone();
+        crate::app::update::background_task(
+            context,
+            move || std::sync::Arc::new(reader(kind, &worker_path, fresh)),
+            move |read| Message::PdfDialog(PdfDialogMsg::AttachRead(kind, path, read)),
+        )
+    }
+
+    /// The end of the read for the Attach window. The window takes the
+    /// place of its own older copy (Browse); if a different window opened
+    /// during the read, it does not open.
+    fn finish_underlay_attach_read(
+        &mut self,
+        kind: document::entities::UnderlayType,
+        path: &str,
+        read: &UnderlayAttachRead,
+    ) -> Task<Message> {
+        if self
+            .active_modal
+            .is_some_and(|modal| modal != crate::app::ModalKind::PdfAttach)
+        {
+            self.command_line.push_error(
+                "Attach underlay cancelled: a different window opened while the file was read.",
+            );
+            return Task::none();
+        }
+        self.open_attach_window(kind, path, read)
     }
 
     /// The Attach window for a file already read, or the password window,
@@ -845,6 +895,9 @@ impl OpenCADStudio {
             // ── Attach Point Cloud ────────────────────────────────────────
             PdfDialogMsg::CloudBrowse => return Task::done(Message::PointCloudAttachPick),
             PdfDialogMsg::CloudOk => return self.point_cloud_attach_ok(i),
+            PdfDialogMsg::AttachRead(kind, path, read) => {
+                return self.finish_underlay_attach_read(kind, &path, &read);
+            }
             PdfDialogMsg::CloudRead(path, cloud) => {
                 self.finish_point_cloud_attach_read(&path, cloud.as_deref());
             }

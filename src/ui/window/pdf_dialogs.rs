@@ -37,6 +37,13 @@ pub enum PdfDialogMsg {
     AttachRotation(String),
     AttachDetails(bool),
     AttachOk,
+    /// A PDF, DWF or DGN file read off the UI thread for the Attach window:
+    /// the underlay type, the file, and what the read found.
+    AttachRead(
+        document::entities::UnderlayType,
+        String,
+        std::sync::Arc<UnderlayAttachRead>,
+    ),
     // Attach Point Cloud
     CloudBrowse,
     CloudPathType(PathTypeChoice),

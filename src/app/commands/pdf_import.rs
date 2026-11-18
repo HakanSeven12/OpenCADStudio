@@ -645,7 +645,8 @@ mod geo_attach_tests {
         app.tabs[i].scene.selected.insert(selected);
         let path = "/virtual/dialog-geopdf.pdf";
         crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
-        let _ = app.open_pdf_attach_dialog(path);
+        let read = app.open_pdf_attach_dialog(path);
+        app.drive_headless_task(read).expect("the read task");
         let state = app.pdf_attach.as_mut().expect("attach dialog");
         state.path_type =
             crate::ui::window::pdf_dialogs::PathTypeChoice(crate::io::xref_model::Pathtype::None);
@@ -682,7 +683,8 @@ mod geo_attach_tests {
         set_crs(&mut app);
         let path = "dialog-manual-geopdf.pdf";
         crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
-        let _ = app.open_pdf_attach_dialog(path);
+        let read = app.open_pdf_attach_dialog(path);
+        app.drive_headless_task(read).expect("the read task");
         assert!(app.pdf_attach.as_ref().unwrap().geopdf_auto);
 
         let _ = app.update(crate::app::Message::PdfDialog(
@@ -721,7 +723,8 @@ mod geo_attach_tests {
         set_crs(&mut app);
         let path = "dialog-mixed-geopdf.pdf";
         crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
-        let _ = app.open_pdf_attach_dialog(path);
+        let read = app.open_pdf_attach_dialog(path);
+        app.drive_headless_task(read).expect("the read task");
         app.ctrl_down = true;
         let _ = app.update(crate::app::Message::PdfDialog(
             crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachPage(1),

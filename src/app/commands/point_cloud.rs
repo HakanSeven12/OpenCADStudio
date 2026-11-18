@@ -768,3 +768,154 @@ mod prompt_read_tests {
         let _ = std::fs::remove_file(path);
     }
 }
+
+#[cfg(test)]
+mod display_read_tests {
+    use super::*;
+    use crate::modules::insert::pc_attach::AttachOptions;
+    use crate::scene::model::point_cloud::{
+        test_held_lock, test_is_held, test_scan_file, test_wait_for_read,
+    };
+    use glam::DVec3;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    /// A drawing with an attached cloud of a new scan file of `points`
+    /// points, and that file.
+    fn attached(app: &mut OpenCADStudio, tag: &str, points: u32) -> std::path::PathBuf {
+        let i = app.active_tab;
+        let path = test_scan_file(tag, points);
+        let placement = PointCloudPlacement {
+            path: path.clone(),
+            insertion: DVec3::ZERO,
+            axes: [DVec3::X, DVec3::Y, DVec3::Z],
+            options: AttachOptions::default(),
+        };
+        let task = app.attach_point_cloud(i, "POINTCLOUDATTACH".into(), placement);
+        app.drive_headless_task(task).expect("the attach task");
+        path
+    }
+
+    fn cloud_data(app: &OpenCADStudio) -> document::entities::PointCloudExData {
+        let document = &app.tabs[app.active_tab].scene.document;
+        document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Extended(extended) => match &extended.data {
+                    document::entities::ExtendedEntityData::PointCloudEx(data) => {
+                        Some(data.clone())
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("the attached cloud")
+    }
+
+    /// A new version of the file: the drawing has nothing for it until a
+    /// worker reads it, so it shows the extents box. When the read ends,
+    /// the drawing has the points.
+    #[test]
+    fn the_drawing_shows_the_points_when_the_read_ends() {
+        let _held = test_held_lock();
+        let mut app = new_app();
+        let path = attached(&mut app, "display-app", 25);
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .and_then(|file| file.set_modified(later))
+            .expect("touch the scan");
+        let data = cloud_data(&app);
+        let document = &app.tabs[app.active_tab].scene.document;
+        assert!(
+            point_cloud::placed(document, &data, [255; 3], None, &[]).is_none(),
+            "no points during the read"
+        );
+        assert!(
+            point_cloud::shows_no_points(document, &data),
+            "the box shows during the read"
+        );
+        test_wait_for_read(&path);
+        let epoch = app.tabs[app.active_tab].scene.geometry_epoch;
+        let _ = app.update(Message::PointCloudRead(point_cloud::ReadDone {
+            path: path.clone(),
+            failure: None,
+        }));
+        assert_ne!(
+            app.tabs[app.active_tab].scene.geometry_epoch, epoch,
+            "the drawing draws the cloud again"
+        );
+        let document = &app.tabs[app.active_tab].scene.document;
+        assert!(!point_cloud::shows_no_points(document, &data));
+        let placed = point_cloud::placed(document, &data, [255; 3], None, &[])
+            .expect("the points after the read");
+        assert_eq!(placed.instances.len(), 25);
+        assert!(test_is_held(&path), "a cloud the drawing shows is held");
+        assert_eq!(app.command_line.last_error, None);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// The Point Cloud Manager's list does not read: it shows no scans
+    /// until the read ends.
+    #[test]
+    fn the_manager_list_does_not_read() {
+        let _held = test_held_lock();
+        let mut app = new_app();
+        let path = attached(&mut app, "display-manager", 15);
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .and_then(|file| file.set_modified(later))
+            .expect("touch the scan");
+        let scans = |app: &OpenCADStudio| {
+            crate::ui::window::pc_manager::clouds(&app.tabs[app.active_tab].scene.document, &[])
+                .iter()
+                .map(|cloud| cloud.scans.len())
+                .sum::<usize>()
+        };
+        assert_eq!(scans(&app), 0, "no scans before the read ends");
+        test_wait_for_read(&path);
+        assert_eq!(scans(&app), 1);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// The end of a read lets go of the clouds that no open drawing refers
+    /// to.
+    #[test]
+    fn the_end_of_a_read_lets_go_of_unreferenced_clouds() {
+        let _held = test_held_lock();
+        let mut app = new_app();
+        let unused = test_scan_file("display-unused", 10);
+        assert!(point_cloud::cached(&unused).is_none());
+        test_wait_for_read(&unused);
+        assert!(test_is_held(&unused));
+        let _ = app.update(Message::PointCloudRead(point_cloud::ReadDone {
+            path: unused.clone(),
+            failure: None,
+        }));
+        assert!(!test_is_held(&unused));
+        let _ = std::fs::remove_file(unused);
+    }
+
+    /// A read that panicked gives one error with the file and the message.
+    #[test]
+    fn a_read_that_panicked_gives_an_error() {
+        let _held = test_held_lock();
+        let mut app = new_app();
+        let path = std::path::PathBuf::from("display-panic.rcs");
+        let _ = app.update(Message::PointCloudRead(point_cloud::ReadDone {
+            path,
+            failure: Some("a reader bug".into()),
+        }));
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Point cloud display-panic.rcs cannot be read: a reader bug")
+        );
+    }
+}

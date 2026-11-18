@@ -1205,6 +1205,35 @@ pub(crate) fn test_scan_file(tag: &str, points: u32) -> PathBuf {
     tests::budget_scan(tag, points)
 }
 
+/// Waits (up to 10 s) until no read of `path` that [`cached`] started
+/// runs, for the tests of other modules.
+#[cfg(test)]
+pub(crate) fn test_wait_for_read(path: &Path) {
+    let start = std::time::Instant::now();
+    while reads_running().contains(path) {
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(10),
+            "the read of {} did not end",
+            path.display()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+/// Whether the held clouds have `path`, for the tests of other modules.
+#[cfg(test)]
+pub(crate) fn test_is_held(path: &Path) -> bool {
+    held_clouds().contains_key(path)
+}
+
+/// The held clouds are one set for the process: a test that lets go of
+/// clouds, or that looks at what is held, takes this lock first.
+#[cfg(test)]
+pub(crate) fn test_held_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1472,5 +1501,126 @@ mod tests {
         let cloud = load(&path).expect("the scan reads after the poison");
         assert_eq!(cloud.positions.len(), 100);
         let _ = std::fs::remove_file(path);
+    }
+
+    /// The drawing's lookup does not read: the first call gives None and
+    /// starts a read on a worker, and the cloud is there when it ends.
+    #[test]
+    fn cached_does_not_read_and_a_worker_fills_it() {
+        let _held = test_held_lock();
+        let path = budget_scan("display-read", 50);
+        assert!(cached(&path).is_none(), "nothing is read on this thread");
+        test_wait_for_read(&path);
+        let cloud = cached(&path).expect("the worker read the scan");
+        assert_eq!(cloud.positions.len(), 50);
+        assert!(test_is_held(&path));
+        release_unreferenced(|held| held != path);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A held cloud is for one version of its file: when the file
+    /// changes, the drawing gets nothing until a new read ends.
+    #[test]
+    fn a_held_cloud_of_an_older_file_version_is_not_used() {
+        let _held = test_held_lock();
+        let path = budget_scan("display-changed", 10);
+        assert!(cached(&path).is_none());
+        test_wait_for_read(&path);
+        assert!(test_is_held(&path));
+        cloud_cache().pop(&path);
+        set_modified(&path, SystemTime::now() + std::time::Duration::from_secs(5));
+        assert!(cached(&path).is_none(), "the old version is not used");
+        test_wait_for_read(&path);
+        assert!(cached(&path).is_some(), "the new version after its read");
+        release_unreferenced(|held| held != path);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// The message of a panic, from a literal or a formatted message.
+    #[test]
+    fn panic_text_gives_the_message() {
+        let literal = std::panic::catch_unwind(|| panic!("a reader bug")).unwrap_err();
+        assert_eq!(panic_text(literal.as_ref()), "a reader bug");
+        let formatted = std::panic::catch_unwind(|| panic!("byte {} is bad", 7)).unwrap_err();
+        assert_eq!(panic_text(formatted.as_ref()), "byte 7 is bad");
+        let other = std::panic::catch_unwind(|| std::panic::panic_any(7_u8)).unwrap_err();
+        assert_eq!(panic_text(other.as_ref()), "the reader stopped");
+    }
+
+    static SLOW_READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    fn slow_reader(_: &Path) {
+        SLOW_READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+
+    /// Many lookups during a read start one read, not one for each frame.
+    #[test]
+    fn many_misses_during_a_read_start_one_read() {
+        let path = budget_scan("display-one-read", 10);
+        for _ in 0..20 {
+            request_with(path.clone(), slow_reader);
+        }
+        test_wait_for_read(&path);
+        assert_eq!(SLOW_READS.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let _ = std::fs::remove_file(path);
+    }
+
+    fn panicking_reader(_: &Path) {
+        panic!("a reader bug");
+    }
+
+    /// A read that panics is remembered as a file that failed: the next
+    /// lookup gives None and does not start a read again.
+    #[test]
+    fn a_read_that_panics_is_remembered_as_a_failure() {
+        let path = budget_scan("display-panic", 10);
+        request_with(path.clone(), panicking_reader);
+        test_wait_for_read(&path);
+        assert!(cached(&path).is_none());
+        // A second read would succeed: the file is a good scan.
+        test_wait_for_read(&path);
+        assert!(
+            cached(&path).is_none(),
+            "no read starts again for the same file version"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// The clouds a drawing shows stay past the budget of the cache, and
+    /// go when no drawing refers to their file.
+    #[test]
+    fn held_clouds_stay_past_the_budget_until_released() {
+        let _held = test_held_lock();
+        let _lock = POINTCLOUD_BUDGET_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _budget = PointCloudBudgetEnvGuard::set("1");
+        let paths: Vec<PathBuf> = (0..5)
+            .map(|n| budget_scan(&format!("display-held-{n}"), 7000))
+            .collect();
+        for path in &paths {
+            assert!(cached(path).is_none());
+            test_wait_for_read(path);
+        }
+        let first: Vec<Arc<CloudPoints>> = paths
+            .iter()
+            .map(|path| cached(path).expect("held past the budget"))
+            .collect();
+        for (path, cloud) in paths.iter().zip(&first) {
+            let again = cached(path).expect("still held");
+            assert!(Arc::ptr_eq(cloud, &again), "no second read");
+        }
+        let keep = paths[0].clone();
+        release_unreferenced(|path| path == keep);
+        assert!(test_is_held(&paths[0]));
+        for path in &paths[1..] {
+            assert!(!test_is_held(path));
+        }
+        release_unreferenced(|_| false);
+        for path in paths {
+            test_wait_for_read(&path);
+            let _ = std::fs::remove_file(path);
+        }
     }
 }

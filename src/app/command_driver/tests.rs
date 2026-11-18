@@ -10936,3 +10936,64 @@ mod placed_reference_lookup_property_tests {
     }
 }
 
+
+// BPARAMETERSET composes an authored parameter with its action editor. An
+// unrecognised label must be refused with the advertised message and must
+// leave the editor document and its history untouched.
+mod unsupported_parameter_set_tests {
+    use super::super::*;
+    use document::entities::{EntityType, Insert, Line};
+    use document::types::Vector3;
+
+    #[test]
+    fn an_unsupported_parameter_set_label_is_refused_without_changing_the_editor() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "PANEL",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+        let reference = app.tabs[i]
+            .scene
+            .document
+            .add_entity(EntityType::Insert(Insert::new("PANEL", Vector3::ZERO)))
+            .unwrap();
+        app.tabs[i].dirty = false;
+        app.tabs[i].scene.select_entity(reference, true);
+        let _ = app.run_command_line("BEDIT");
+        let i = app.active_tab;
+        assert!(app.tabs[i].active_block_edit_session().is_some());
+
+        let before = app.tabs[i].scene.document.clone();
+        let history = app.tabs[i].history.undo_stack.len();
+
+        let _ = app.run_command_line("BPARAMETERSET Radar Set");
+
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("This Parameter Set is not supported yet."),
+            "the unsupported label is refused with the advertised message"
+        );
+        assert_eq!(app.tabs[i].scene.document, before, "nothing was authored");
+        assert_eq!(
+            app.tabs[i].history.undo_stack.len(),
+            history,
+            "the refusal is not an undo step"
+        );
+        assert!(
+            app.tabs[i].pending_parameter_set_follow_up.is_none(),
+            "no follow-up action is armed"
+        );
+        assert!(app.tabs[i].active_cmd.is_none(), "no prompt is installed");
+
+        // A label the palette actually offers still starts its workflow.
+        let _ = app.run_command_line("BPARAMETERSET Visibility Set");
+        assert!(app.tabs[i].active_cmd.is_some());
+    }
+}
+

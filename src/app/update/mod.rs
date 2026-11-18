@@ -11502,11 +11502,16 @@ impl OpenCADStudio {
                     .collect();
                 rows.sort_by(|a, b| a.0.cmp(&b.0));
                 self.shortcut_editor_rows = rows;
+                self.shortcut_filter.clear();
                 self.shortcut_capture_row = None;
                 self.shortcut_pending_add = false;
                 self.shortcut_reset_confirm = false;
                 self.shortcut_close_confirm = false;
                 self.active_modal = Some(super::ModalKind::Shortcuts);
+                Task::none()
+            }
+            Message::ShortcutEditorFilter(value) => {
+                self.shortcut_filter = value;
                 Task::none()
             }
             Message::ShortcutsPanelClose => {

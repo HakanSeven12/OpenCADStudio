@@ -2281,6 +2281,8 @@ pub(super) struct OpenCADStudio {
     shortcut_bindings: rustc_hash::FxHashMap<String, String>,
     /// Working rows shown by the shortcut editor until Apply is pressed.
     shortcut_editor_rows: Vec<(String, String)>,
+    /// Search text of the shortcut editor; filters the displayed rows only.
+    shortcut_filter: String,
     /// Row whose Key cell is armed for capture: the next key combination
     /// pressed anywhere fills that row's key. While set, the keyboard
     /// subscription swallows every key so captured shortcuts do not run in
@@ -5298,6 +5300,7 @@ pub enum Message {
         field: crate::ui::window::shortcuts::ShortcutField,
         value: String,
     },
+    ShortcutEditorFilter(String),
     ShortcutEditorAdd,
     ShortcutEditorRemove(usize),
     ShortcutEditorApply,
@@ -6980,6 +6983,7 @@ impl OpenCADStudio {
             // Keyboard shortcuts
             shortcut_bindings: rustc_hash::FxHashMap::default(),
             shortcut_editor_rows: Vec::new(),
+            shortcut_filter: String::new(),
             shortcut_capture_row: None,
             shortcut_pending_add: false,
             shortcut_reset_confirm: false,

@@ -2181,14 +2181,14 @@ pub fn parse_mapping_token(text: &str) -> Result<(String, Option<u16>), String> 
     parse_mapping(text).map_err(|error| error.to_string())
 }
 
-/// Read the same design-model list, and apply the same first-model readability
-/// check, as the command's filename step.
 /// The read of a file named at the -DGNIMPORT prompt: its models, checked
 /// by a read of the first; or the error to report.
 pub fn read_models_for_prompt(path: &str) -> Result<Vec<String>, String> {
     import_models(path).map_err(|error| error.to_string())
 }
 
+/// Read the same design-model list, and apply the same first-model readability
+/// check, as the command's filename step.
 fn import_models(path: &str) -> Result<Vec<String>, DgnImportError> {
     crate::scene::model::underlay_vector::dgn_import_models(path)
         .filter(|models| {

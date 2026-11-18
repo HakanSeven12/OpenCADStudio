@@ -44,9 +44,9 @@ const SAT_EDGES: usize = 1200;
 /// with as many edges and vertices.
 fn sat_fixture() -> String {
     use document::entities::acis::SatDocument;
-    use kernel::brep;
-    use kernel::geom2d::{Curve as KCurve, Line as KLine};
-    use kernel::space::Plane;
+    use ocs_brep as brep;
+    use ocs_geom::geom2d::{Curve as KCurve, Line as KLine};
+    use ocs_geom::space::Plane;
 
     let plane = Plane::from_axes([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
     let outer: Vec<KCurve> = (0..SAT_EDGES)

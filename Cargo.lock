@@ -53,13 +53,14 @@ dependencies = [
  "objc2-app-kit 0.2.2",
  "objc2-foundation 0.2.2",
  "ocs_acis",
+ "ocs_brep",
+ "ocs_constraints",
+ "ocs_geom",
  "ocs_plugin_api",
  "ocs_save",
  "open",
  "opencaddocument",
  "opencadgraph",
- "opencadkernel",
- "opencadkernel-constraints",
  "pollster",
  "printpdf",
  "proj4rs",
@@ -75,7 +76,11 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "skrifa 0.42.1",
+ "solidcore",
+ "solidcore-convert",
+ "solidcore-ops",
  "solidcore-record",
+ "solidcore-tess",
  "step-export",
  "svgtypes",
  "tiny-skia",
@@ -4443,8 +4448,40 @@ dependencies = [
 name = "ocs_acis"
 version = "0.1.0"
 dependencies = [
+ "ocs_brep",
+ "ocs_geom",
  "opencaddocument",
- "opencadkernel",
+]
+
+[[package]]
+name = "ocs_brep"
+version = "0.1.0"
+dependencies = [
+ "ocs_geom",
+ "rustc-hash 2.1.3",
+ "solidcore",
+ "solidcore-ops",
+ "solidcore-record",
+ "solidcore-step",
+ "spade",
+ "ssi",
+]
+
+[[package]]
+name = "ocs_constraints"
+version = "0.1.0"
+dependencies = [
+ "nalgebra",
+]
+
+[[package]]
+name = "ocs_geom"
+version = "0.1.0"
+dependencies = [
+ "cavalier_contours",
+ "rustc-hash 2.1.3",
+ "solidcore",
+ "spade",
 ]
 
 [[package]]
@@ -4543,36 +4580,6 @@ source = "git+https://github.com/HakanSeven12/opencadgraph.git?rev=5e4dc20#5e4dc
 dependencies = [
  "serde_json",
 ]
-
-[[package]]
-name = "opencadkernel"
-version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=7b5ed9d#7b5ed9d701502ebc3bf45226cc3fcd6857bb3f7a"
-dependencies = [
- "cavalier_contours",
- "opencadkernel-nlib",
- "opencadkernel-ssi",
- "rustc-hash 2.1.3",
- "spade",
-]
-
-[[package]]
-name = "opencadkernel-constraints"
-version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=7b5ed9d#7b5ed9d701502ebc3bf45226cc3fcd6857bb3f7a"
-dependencies = [
- "nalgebra",
-]
-
-[[package]]
-name = "opencadkernel-nlib"
-version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=7b5ed9d#7b5ed9d701502ebc3bf45226cc3fcd6857bb3f7a"
-
-[[package]]
-name = "opencadkernel-ssi"
-version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=7b5ed9d#7b5ed9d701502ebc3bf45226cc3fcd6857bb3f7a"
 
 [[package]]
 name = "openssl-probe"
@@ -6326,9 +6333,65 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore"
+version = "1.0.1"
+source = "git+https://github.com/tangency-labs/solidcore.git?rev=e261b7d#e261b7d948d08939c6b37da67323ba3b842e234e"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "solidcore-convert"
+version = "0.1.0"
+source = "git+https://github.com/tangency-labs/solidcore.git?rev=e261b7d#e261b7d948d08939c6b37da67323ba3b842e234e"
+dependencies = [
+ "solidcore",
+ "solidcore-record",
+]
+
+[[package]]
+name = "solidcore-ops"
+version = "0.1.0"
+source = "git+https://github.com/tangency-labs/solidcore.git?rev=e261b7d#e261b7d948d08939c6b37da67323ba3b842e234e"
+dependencies = [
+ "solidcore",
+ "solidcore-convert",
+ "solidcore-record",
+]
+
+[[package]]
 name = "solidcore-record"
 version = "0.1.0"
+source = "git+https://github.com/tangency-labs/solidcore.git?rev=e261b7d#e261b7d948d08939c6b37da67323ba3b842e234e"
 dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "solidcore-step"
+version = "0.1.0"
+source = "git+https://github.com/tangency-labs/solidcore.git?rev=e261b7d#e261b7d948d08939c6b37da67323ba3b842e234e"
+dependencies = [
+ "solidcore",
+ "solidcore-convert",
+ "solidcore-ops",
+ "solidcore-record",
+]
+
+[[package]]
+name = "solidcore-tess"
+version = "0.1.0"
+source = "git+https://github.com/tangency-labs/solidcore.git?rev=e261b7d#e261b7d948d08939c6b37da67323ba3b842e234e"
+dependencies = [
+ "rayon",
+ "serde",
+ "solidcore",
+ "solidcore-convert",
+ "solidcore-record",
+ "spade",
  "thiserror 2.0.18",
 ]
 
@@ -6352,6 +6415,11 @@ checksum = "d9571ea910ebd84c86af4b3ed27f9dbdc6ad06f17c5f96146b2b671e2976744f"
 dependencies = [
  "bitflags 2.13.1",
 ]
+
+[[package]]
+name = "ssi"
+version = "0.1.0"
+source = "git+https://github.com/tangency-labs/solidcore.git?rev=e261b7d#e261b7d948d08939c6b37da67323ba3b842e234e"
 
 [[package]]
 name = "stable_deref_trait"

@@ -4,8 +4,8 @@ use document::entities::Solid3D;
 use document::objects::SolidHistoryOperation;
 use document::EntityType;
 use glam::DVec3;
-use kernel::brep::Body;
-use kernel::geom2d::{
+use ocs_brep::Body;
+use ocs_geom::geom2d::{
     fillets_between, Circle as KernelCircle, Curve as KernelCurve, Line as KernelLine, Tolerance,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -310,8 +310,8 @@ fn sphere_tangent_curve(object: TangentObject) -> KernelCurve {
             } else {
                 [1.0, 0.0]
             };
-            KernelCurve::Ellipse(kernel::geom2d::EllipseArc {
-                ellipse: kernel::geom2d::Ellipse {
+            KernelCurve::Ellipse(ocs_geom::geom2d::EllipseArc {
+                ellipse: ocs_geom::geom2d::Ellipse {
                     centre: [center.x, center.y],
                     major_radius: a,
                     minor_radius: a * minor_axis_ratio,
@@ -346,7 +346,7 @@ fn closest_sphere_center(candidates: &[DVec3], hint: DVec3) -> Option<DVec3> {
 }
 
 fn sphere_through_three_points(first: DVec3, second: DVec3, third: DVec3) -> Option<(DVec3, f64)> {
-    let circle = kernel::geom2d::arc_through_points(
+    let circle = ocs_geom::geom2d::arc_through_points(
         [first.x, first.y],
         [second.x, second.y],
         [third.x, third.y],
@@ -659,7 +659,7 @@ impl PrimitiveCommand {
         let plane = WorkingPlane::new(a, first_axis, second_axis);
         let local_b = plane.to_local(b);
         let local_c = plane.to_local(c);
-        let circle = kernel::geom2d::arc_through_points(
+        let circle = ocs_geom::geom2d::arc_through_points(
             [0.0, 0.0],
             [local_b.x, local_b.y],
             [local_c.x, local_c.y],

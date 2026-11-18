@@ -103,7 +103,7 @@ pub fn flatten_entity_z(entity: &document::EntityType) -> Option<document::Entit
 
 fn flatten_curve_entity(entity: &document::EntityType) -> Option<document::EntityType> {
     use document::types::{Vector2, Vector3};
-    use kernel::geom2d::Curve;
+    use ocs_geom::geom2d::Curve;
 
     match entity {
         document::EntityType::Ellipse(source)
@@ -224,7 +224,7 @@ fn flatten_curve_entity(entity: &document::EntityType) -> Option<document::Entit
 
 fn flattened_ellipse(
     common: document::entities::EntityCommon,
-    curve: kernel::geom2d::EllipseArc,
+    curve: ocs_geom::geom2d::EllipseArc,
 ) -> Option<document::EntityType> {
     use document::types::Vector3;
 
@@ -252,14 +252,14 @@ fn flatten_point(point: document::types::Vector3) -> Option<document::types::Vec
 }
 
 fn flatten_array(point: [f64; 3]) -> Option<document::types::Vector3> {
-    use kernel::space::Plane;
+    use ocs_geom::space::Plane;
 
     let point = Plane::XY.point_at(Plane::XY.project(point)?);
     Some(document::types::Vector3::new(point[0], point[1], point[2]))
 }
 
 fn flatten_vector(vector: document::types::Vector3) -> Option<document::types::Vector3> {
-    use kernel::space::Plane;
+    use ocs_geom::space::Plane;
 
     let vector = Plane::XY.vector_at(Plane::XY.project_vector([vector.x, vector.y, vector.z])?);
     Some(document::types::Vector3::new(

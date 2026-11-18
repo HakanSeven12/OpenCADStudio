@@ -8,7 +8,7 @@ use crate::scene::model::wire_model::WireModel;
 use crate::t;
 use document::Handle;
 use glam::DVec3;
-use kernel::geom2d::{
+use ocs_geom::geom2d::{
     bounded_faces, contains, ring_nesting_depths, signed_area, Curve, Line, Tolerance,
 };
 
@@ -461,7 +461,7 @@ fn bulged_ring(points: &[[f64; 2]], bulges: &[f64]) -> Vec<[f64; 2]> {
     for (index, &start) in points.iter().enumerate() {
         let end = points[(index + 1) % count];
         let bulge = bulges.get(index).copied().unwrap_or(0.0);
-        match kernel::geom2d::BulgeArc::from_bulge(start, end, bulge)
+        match ocs_geom::geom2d::BulgeArc::from_bulge(start, end, bulge)
             .filter(|_| bulge.abs() > 1.0e-12)
         {
             Some(arc) => {
@@ -501,7 +501,7 @@ fn offset_rail(
             moved.push(([a[0] + n[0], a[1] + n[1]], [b[0] + n[0], b[1] + n[1]], 0.0));
             continue;
         }
-        let arc = kernel::geom2d::BulgeArc::from_bulge(a, b, bulge)?;
+        let arc = ocs_geom::geom2d::BulgeArc::from_bulge(a, b, bulge)?;
         // A counter-clockwise arc has its centre on the left.
         let radius = if bulge > 0.0 {
             arc.radius - distance
@@ -956,13 +956,13 @@ impl HatchCommand {
         self.arc_sub = Sub::None;
     }
 
-    fn drawn_polyline(&self, closed: bool) -> kernel::geom2d::Polyline {
-        kernel::geom2d::Polyline {
+    fn drawn_polyline(&self, closed: bool) -> ocs_geom::geom2d::Polyline {
+        ocs_geom::geom2d::Polyline {
             vertices: self
                 .manual_pts
                 .iter()
                 .enumerate()
-                .map(|(index, point)| kernel::geom2d::PolylineVertex {
+                .map(|(index, point)| ocs_geom::geom2d::PolylineVertex {
                     position: [point.x, point.y],
                     bulge: self.manual_bulges.get(index).copied().unwrap_or(0.0),
                 })
@@ -1068,7 +1068,7 @@ impl HatchCommand {
             ];
             let mid = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
             let probe = [mid[0] + normal[0] * width, mid[1] + normal[1] * width];
-            match kernel::geom2d::offset_polyline(&source, width * 0.5, probe)
+            match ocs_geom::geom2d::offset_polyline(&source, width * 0.5, probe)
                 .into_iter()
                 .next()
             {
@@ -1081,10 +1081,10 @@ impl HatchCommand {
         } else {
             source.vertices.len() - 1
         };
-        let band = kernel::geom2d::polyline_band_boundary(
+        let band = ocs_geom::geom2d::polyline_band_boundary(
             &source,
             &vec![[width, width]; segments],
-            kernel::tessellation::DEFAULT_ANGLE,
+            ocs_geom::tessellation::DEFAULT_ANGLE,
         );
         chain_loops(band.edges.into_iter().map(|edge| edge.points).collect())
     }
@@ -1318,7 +1318,7 @@ impl HatchCommand {
             x_axis: self.plane.x.to_array(),
             y_axis: self.plane.y.to_array(),
         };
-        let exterior: Vec<bool> = kernel::geom2d::ring_nesting_depths(&rings)
+        let exterior: Vec<bool> = ocs_geom::geom2d::ring_nesting_depths(&rings)
             .into_iter()
             .map(|depth| depth == 0)
             .collect();

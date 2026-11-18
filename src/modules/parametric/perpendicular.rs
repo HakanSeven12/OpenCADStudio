@@ -39,10 +39,10 @@ impl PerpendicularConstraintCommand {
     }
 
     fn distance_to_axis(point: DVec3, endpoints: [document::types::Vector3; 2]) -> f64 {
-        kernel::space::Vec3::from(point.to_array())
+        ocs_geom::space::Vec3::from(point.to_array())
             .distance_to_line(
-                kernel::space::Vec3::new(endpoints[0].x, endpoints[0].y, endpoints[0].z),
-                kernel::space::Vec3::new(endpoints[1].x, endpoints[1].y, endpoints[1].z),
+                ocs_geom::space::Vec3::new(endpoints[0].x, endpoints[0].y, endpoints[0].z),
+                ocs_geom::space::Vec3::new(endpoints[1].x, endpoints[1].y, endpoints[1].z),
             )
             .unwrap_or(f64::INFINITY)
     }

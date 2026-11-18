@@ -4,7 +4,7 @@ use document::entities::{Surface, SurfaceData, SurfaceKind, SurfaceSweepOptions}
 use document::objects::{SolidHistoryNodeBase, SolidHistorySweep};
 use document::types::Vector3;
 use document::EntityType;
-use kernel::brep::Body;
+use ocs_brep::Body;
 
 use super::sweep_model::{embedded_path, embedded_revolve_profile};
 use crate::command::{ExtrudeMode, SweepOptions};
@@ -139,11 +139,11 @@ pub fn spatial_sweep_record(
 }
 
 /// The modeling error code the reference reports for a refused sweep.
-pub fn sweep_refusal_code(refusal: kernel::brep::SweepRefusal) -> u32 {
+pub fn sweep_refusal_code(refusal: ocs_brep::SweepRefusal) -> u32 {
     match refusal {
-        kernel::brep::SweepRefusal::Scale => 5016,
-        kernel::brep::SweepRefusal::Twist => 115065,
-        kernel::brep::SweepRefusal::Bank => 115007,
+        ocs_brep::SweepRefusal::Scale => 5016,
+        ocs_brep::SweepRefusal::Twist => 115065,
+        ocs_brep::SweepRefusal::Bank => 115007,
     }
 }
 
@@ -226,7 +226,7 @@ pub fn sweep_selection_options(
         })
         .collect::<Option<Vec<_>>>()?;
     options.base_point = Some(glam::DVec3::from_array(
-        kernel::brep::sweep_profile_group_base(&geometry)?,
+        ocs_brep::sweep_profile_group_base(&geometry)?,
     ));
     Some(options)
 }
@@ -871,7 +871,7 @@ pub type AssocCurve = (
 /// normal, elliptical arcs (17) and NURBS curves (42).
 pub fn region_edge_curves(entity: &EntityType) -> Option<Vec<Vec<AssocCurve>>> {
     use document::objects::{AssocCurveValue as V, AssocSubcurveKind as K};
-    use kernel::geom2d::Curve;
+    use ocs_geom::geom2d::Curve;
     let EntityType::Region(_) = entity else {
         return None;
     };

@@ -300,8 +300,8 @@ pub(crate) fn constraint_records_json(
                 .iter()
                 .find(|(id, _)| *id == constraint.id)
                 .map(|(_, kind)| match kind {
-                    kernel_constraints::diagnosis::RedundancyKind::Redundant => "Redundant",
-                    kernel_constraints::diagnosis::RedundancyKind::Conflicting => "Conflicting",
+                    ocs_constraints::diagnosis::RedundancyKind::Redundant => "Redundant",
+                    ocs_constraints::diagnosis::RedundancyKind::Conflicting => "Conflicting",
                 });
             // A dimensional constraint's form lives on the dimension it
             // draws; a geometric constraint has none.
@@ -1476,10 +1476,10 @@ impl OpenCADStudio {
             let Some(second_curve) = crate::entities::curve::entity_curve_xy(second_entity) else {
                 return err("query intersections second entity is not a planar curve");
             };
-            let crossings = kernel::geom2d::intersect(
+            let crossings = ocs_geom::geom2d::intersect(
                 &first_curve,
                 &second_curve,
-                kernel::geom2d::Tolerance::default(),
+                ocs_geom::geom2d::Tolerance::default(),
             );
             return json!({
                 "ok":true,
@@ -1680,10 +1680,10 @@ impl OpenCADStudio {
                 let Some(curve) = curve.as_ref().filter(|curve| curve.is_closed()) else {
                     continue;
                 };
-                if !kernel::geom2d::contains(
+                if !ocs_geom::geom2d::contains(
                     std::slice::from_ref(curve),
                     point,
-                    kernel::geom2d::Tolerance::default(),
+                    ocs_geom::geom2d::Tolerance::default(),
                 ) {
                     continue;
                 }
@@ -1691,7 +1691,7 @@ impl OpenCADStudio {
             let nearest = near.and_then(|point| {
                 curve
                     .as_ref()
-                    .map(|curve| kernel::geom2d::closest_point(curve, point))
+                    .map(|curve| ocs_geom::geom2d::closest_point(curve, point))
             });
             if near.is_some() && nearest.is_none() {
                 continue;
@@ -6272,7 +6272,7 @@ DEAD
         let stale = document::Handle::from(9999);
         app.tabs[app.active_tab].scene.solid_models.insert(
             stale,
-            kernel::brep::make::cuboid([0.0; 3], [1.0; 3]).unwrap(),
+            ocs_brep::make::cuboid([0.0; 3], [1.0; 3]).unwrap(),
         );
         let path = std::env::temp_dir().join(format!(
             "ocs_automation_finalize_test_{}.dxf",
@@ -6306,7 +6306,7 @@ DEAD
 
         app.tabs[i].scene.solid_models.insert(
             stale,
-            kernel::brep::make::cuboid([0.0; 3], [1.0; 3]).unwrap(),
+            ocs_brep::make::cuboid([0.0; 3], [1.0; 3]).unwrap(),
         );
         assert_eq!(app.automation_op(r#"{"op":"new"}"#)["ok"], true);
         assert!(app.tabs[i].scene.solid_models.is_empty());

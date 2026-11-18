@@ -222,7 +222,7 @@ fn segment_intersection_xy(
     second: (glam::DVec3, glam::DVec3),
     half_gap: f64,
 ) -> Option<(glam::DVec3, glam::DVec3)> {
-    let gap = kernel::space::segment_break_gap_xy(
+    let gap = ocs_geom::space::segment_break_gap_xy(
         [first.0.to_array(), first.1.to_array()],
         [second.0.to_array(), second.1.to_array()],
         half_gap,
@@ -607,7 +607,7 @@ pub(super) fn apply_dim_overlap(
                 let Some((axis, normal, definition)) = spacing_axis(scene, handle) else {
                     continue;
                 };
-                let Some(frame) = kernel::space::dimension_spacing_frame(axis, normal, definition)
+                let Some(frame) = ocs_geom::space::dimension_spacing_frame(axis, normal, definition)
                 else {
                     continue;
                 };
@@ -629,7 +629,7 @@ pub(super) fn apply_dim_overlap(
                     scene.document.get_entity_mut(handle)
                 {
                     let slide = |point: &mut document::types::Vector3| {
-                        let moved = kernel::space::move_to_dimension_spacing(
+                        let moved = ocs_geom::space::move_to_dimension_spacing(
                             [point.x, point.y, point.z],
                             frame,
                             target,
@@ -790,7 +790,7 @@ fn apply_dim_distribute(
     let Some((axis, normal, definition)) = spacing_axis(scene, reference) else {
         return false;
     };
-    let Some(frame) = kernel::space::dimension_spacing_frame(axis, normal, definition) else {
+    let Some(frame) = ocs_geom::space::dimension_spacing_frame(axis, normal, definition) else {
         return false;
     };
     let p = frame.perpendicular;
@@ -863,7 +863,7 @@ fn apply_dim_distribute(
 /// with its dimension line instead of being left behind (#3102).
 fn slide_dimension_line(
     dim: &mut document::entities::Dimension,
-    frame: kernel::space::DimensionSpacingFrame,
+    frame: ocs_geom::space::DimensionSpacingFrame,
     target: f64,
 ) -> bool {
     use document::entities::Dimension;
@@ -873,7 +873,7 @@ fn slide_dimension_line(
         return false;
     };
     let p = *definition_point;
-    let moved = kernel::space::move_to_dimension_spacing([p.x, p.y, p.z], frame, target);
+    let moved = ocs_geom::space::move_to_dimension_spacing([p.x, p.y, p.z], frame, target);
     let delta = document::types::Vector3::new(moved[0] - p.x, moved[1] - p.y, moved[2] - p.z);
     *definition_point = p + delta;
     let point = *definition_point;
@@ -935,7 +935,7 @@ fn apply_dimspace(
         }
         _ => return false,
     };
-    let Some(frame) = kernel::space::dimension_spacing_frame(axis, normal, definition) else {
+    let Some(frame) = ocs_geom::space::dimension_spacing_frame(axis, normal, definition) else {
         return false;
     };
 

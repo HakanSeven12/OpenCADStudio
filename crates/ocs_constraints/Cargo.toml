@@ -1,0 +1,9 @@
+[package]
+name = "ocs_constraints"
+version = "0.1.0"
+edition = "2021"
+description = "Two-dimensional geometric constraint solver"
+license = "LGPL-2.1-or-later"
+
+[dependencies]
+nalgebra = "0.33"

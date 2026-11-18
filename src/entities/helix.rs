@@ -1,7 +1,7 @@
 use document::entities::{Helix, HelixConstraint, Spline};
 use document::types::Vector3;
 use glam::DVec3;
-use kernel::space::{HelixCurve, HelixDirection, NurbsCurve3, Vec3};
+use ocs_geom::space::{HelixCurve, HelixDirection, NurbsCurve3, Vec3};
 
 use crate::entities::common::{
     center_grip, edit_prop as edit, format_angle, format_length, parse_f64, ro_prop as ro,

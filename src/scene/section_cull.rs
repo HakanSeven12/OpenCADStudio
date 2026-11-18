@@ -14,7 +14,7 @@ use super::Scene;
 #[derive(Default)]
 pub struct SectionCull {
     /// Bodies the section crosses, with what stays of each.
-    pub cut: Vec<(Handle, kernel::brep::Body)>,
+    pub cut: Vec<(Handle, ocs_brep::Body)>,
     /// Open meshes the section crosses, clipped to it.
     pub clipped: Vec<EntityType>,
     /// Objects wholly outside the section.
@@ -29,7 +29,7 @@ enum Place {
 
 const TOLERANCE: f64 = 1e-9;
 
-fn place(planes: &[kernel::space::Plane], points: &[[f64; 3]]) -> Place {
+fn place(planes: &[ocs_geom::space::Plane], points: &[[f64; 3]]) -> Place {
     let mut inside = true;
     for plane in planes {
         let behind = points
@@ -48,8 +48,8 @@ fn place(planes: &[kernel::space::Plane], points: &[[f64; 3]]) -> Place {
     }
 }
 
-fn same_extent(a: &kernel::brep::Body, b: &kernel::brep::Body) -> bool {
-    match (kernel::brep::body_bounds(a), kernel::brep::body_bounds(b)) {
+fn same_extent(a: &ocs_brep::Body, b: &ocs_brep::Body) -> bool {
+    match (ocs_brep::body_bounds(a), ocs_brep::body_bounds(b)) {
         (Some(a), Some(b)) => (0..3).all(|axis| {
             (a.min[axis] - b.min[axis]).abs() <= 1e-7 && (a.max[axis] - b.max[axis]).abs() <= 1e-7
         }),

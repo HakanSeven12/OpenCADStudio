@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use document::Handle;
 use glam::DVec3;
-use kernel::brep::{Body, EdgeKey, FaceKey};
+use ocs_brep::{Body, EdgeKey, FaceKey};
 
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DynAnchor, DynFieldSpec, DynGuide, DynRole, DynSpec,
@@ -196,8 +196,8 @@ impl SolidEdgeCommand {
         }
         let (handle, body) = self.active_body()?;
         let result = match self.operation {
-            EdgeOperation::Fillet => kernel::brep::fillet_edges(body, &edges, value).ok()?,
-            EdgeOperation::Chamfer => kernel::brep::chamfer_edges(
+            EdgeOperation::Fillet => ocs_brep::fillet_edges(body, &edges, value).ok()?,
+            EdgeOperation::Chamfer => ocs_brep::chamfer_edges(
                 body,
                 &edges,
                 self.base_face.or_else(|| self.current_loop_face())?,
@@ -892,7 +892,7 @@ fn edge_chain(body: &Body, seed: EdgeKey) -> Vec<EdgeKey> {
 fn edge_tangent_from_vertex(
     body: &Body,
     edge_key: EdgeKey,
-    vertex: kernel::brep::VertexKey,
+    vertex: ocs_brep::VertexKey,
 ) -> Option<DVec3> {
     let edge = body.edges.get(edge_key)?;
     let curve = body.curves.get(edge.curve)?;

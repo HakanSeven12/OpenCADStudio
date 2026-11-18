@@ -3522,12 +3522,12 @@ fn apply_dimension_jog(
         .map(|(_, segment)| *segment)
         .collect::<Vec<_>>();
     let Some((candidate, center)) =
-        kernel::space::nearest_segment_point(&coordinates, requested.to_array().map(f64::from))
+        ocs_geom::space::nearest_segment_point(&coordinates, requested.to_array().map(f64::from))
     else {
         return;
     };
     let target = segments[candidate].0;
-    let Some(jog) = kernel::space::dimension_jog_points(
+    let Some(jog) = ocs_geom::space::dimension_jog_points(
         coordinates[candidate],
         center,
         normal.to_array().map(f64::from),
@@ -4955,13 +4955,13 @@ fn dimtmove_leader_endpoints(
             let (near, far) = jogged_radial_break(chord, jog, override_center, d.jog_angle as f32);
             let curves =
                 [(chord, near), (near, far), (far, override_center)].map(|(start, end)| {
-                    kernel::geom2d::Curve::Line(kernel::geom2d::Line {
+                    ocs_geom::geom2d::Curve::Line(ocs_geom::geom2d::Line {
                         start: [start.x as f64, start.y as f64],
                         end: [end.x as f64, end.y as f64],
                     })
                 });
             let (_, closest) =
-                kernel::geom2d::nearest_of(curves.iter(), [txt.x as f64, txt.y as f64])?;
+                ocs_geom::geom2d::nearest_of(curves.iter(), [txt.x as f64, txt.y as f64])?;
             Vec3::new(closest.point[0] as f32, closest.point[1] as f32, chord.z)
         }
         _ => return None,
@@ -5539,11 +5539,11 @@ fn add_segment_with_text_break(
         add_segment(points, start, end);
         return;
     };
-    let segment_curve = kernel::geom2d::Curve::Line(kernel::geom2d::Line {
+    let segment_curve = ocs_geom::geom2d::Curve::Line(ocs_geom::geom2d::Line {
         start: [start.x as f64, start.y as f64],
         end: [end.x as f64, end.y as f64],
     });
-    let tolerance = kernel::geom2d::Tolerance::new((length as f64 * 1.0e-9).max(1.0e-9));
+    let tolerance = ocs_geom::geom2d::Tolerance::new((length as f64 * 1.0e-9).max(1.0e-9));
     let inside = |padding: f32| {
         let (sin, cos) = text_break.rotation.sin_cos();
         let x_axis = Vec3::new(cos as f32, sin as f32, 0.0);
@@ -5559,13 +5559,13 @@ fn add_segment_with_text_break(
         let boundary: Vec<_> = (0..4)
             .map(|index| {
                 let next = (index + 1) % 4;
-                kernel::geom2d::Curve::Line(kernel::geom2d::Line {
+                ocs_geom::geom2d::Curve::Line(ocs_geom::geom2d::Line {
                     start: [corners[index].x as f64, corners[index].y as f64],
                     end: [corners[next].x as f64, corners[next].y as f64],
                 })
             })
             .collect();
-        kernel::geom2d::inside_spans(&boundary, &segment_curve, tolerance)
+        ocs_geom::geom2d::inside_spans(&boundary, &segment_curve, tolerance)
     };
     if inside(0.0).is_empty() {
         add_segment(points, start, end);
@@ -6118,7 +6118,7 @@ pub(crate) fn two_line_angle_frame_f64(
     arc_point: DVec3,
 ) -> Option<(DVec3, f64, f64)> {
     let (u, v) = (a2 - a1, b2 - b1);
-    let (t, _) = kernel::geom2d::line_line([a1.x, a1.y], [u.x, u.y], [b1.x, b1.y], [v.x, v.y])?;
+    let (t, _) = ocs_geom::geom2d::line_line([a1.x, a1.y], [u.x, u.y], [b1.x, b1.y], [v.x, v.y])?;
     let vertex = a1 + u * t;
 
     // Two lines cross at four angles; the arc point picks one. Each line
@@ -6685,13 +6685,13 @@ fn sample_angular_arc(vertex: Vec3, radius: f32, start: f32, sweep: f32) -> Vec<
     } else {
         (end, start, true)
     };
-    let mut points: Vec<_> = kernel::geom2d::tessellate::arc(
+    let mut points: Vec<_> = ocs_geom::geom2d::tessellate::arc(
         [vertex.x as f64, vertex.y as f64],
         radius as f64,
         from as f64,
         to as f64,
         vertex.z as f64,
-        kernel::geom2d::tessellate::DEFAULT_SEGMENTS_PER_RADIAN,
+        ocs_geom::geom2d::tessellate::DEFAULT_SEGMENTS_PER_RADIAN,
     )
     .into_iter()
     .map(|point| Vec3::new(point[0] as f32, point[1] as f32, point[2] as f32))

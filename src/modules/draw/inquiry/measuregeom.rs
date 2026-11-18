@@ -716,7 +716,7 @@ impl MeasureGeomCommand {
             _ => return None,
         };
         crate::scene::convert::solid3d_tess::kernel_acis_body(acis)
-            .and_then(|body| kernel::brep::mass_properties(&body))
+            .and_then(|body| ocs_brep::mass_properties(&body))
             .map(|properties| properties.volume.abs())
     }
 
@@ -2049,7 +2049,7 @@ mod measurement_tests {
     #[test]
     fn region_radius_uses_the_hovered_and_picked_boundary() {
         units();
-        use kernel::geom2d::{Circle as KernelCircle, Curve};
+        use ocs_geom::geom2d::{Circle as KernelCircle, Curve};
         let region = crate::scene::model::presspull_model::region_from_loops(
             &[
                 vec![Curve::Circle(KernelCircle {

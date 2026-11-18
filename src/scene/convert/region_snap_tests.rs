@@ -129,7 +129,7 @@ fn region_snap_insert_keeps_boundary_wires_hidden() {
 use document::{Document, EntityType, Handle};
 use glam::{DVec3, Mat4, Vec3};
 use iced::{Point, Rectangle};
-use kernel::geom2d::{Circle, Curve, Line};
+use ocs_geom::geom2d::{Circle, Curve, Line};
 
 use crate::entities::transform::WorkingPlane;
 use crate::scene::model::{presspull_model::region_from_loops, wire_model::WireModel};
@@ -179,8 +179,8 @@ fn native_region_binary_without_wires_is_pickable_at_circular_boundary() {
             radius: 5.0,
         })],
     ];
-    let body = kernel::brep::planar_region(
-        kernel::space::Plane::from_axes([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+    let body = ocs_brep::planar_region(
+        ocs_geom::space::Plane::from_axes([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
         &loops,
     )
     .unwrap();
@@ -536,7 +536,7 @@ fn region_snap_tilted_plane_keeps_world_coordinates() {
 
 #[test]
 fn region_snap_arcs_ellipses_and_splines_reuse_curve_modes() {
-    use kernel::geom2d::{Arc, Ellipse, EllipseArc, NurbsCurve};
+    use ocs_geom::geom2d::{Arc, Ellipse, EllipseArc, NurbsCurve};
     let arc = vec![
         Curve::Arc(Arc {
             centre: [0.0, 0.0],

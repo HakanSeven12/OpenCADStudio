@@ -2347,7 +2347,7 @@ pub(crate) fn entity_bounds(e: &document::EntityType) -> ([f64; 3], [f64; 3]) {
     if let document::EntityType::Region(region) = e {
         if region.wires.is_empty() {
             if let Some(bounds) = super::solid3d_tess::kernel_region_body(region)
-                .and_then(|body| kernel::brep::body_bounds(&body))
+                .and_then(|body| ocs_brep::body_bounds(&body))
             {
                 return (bounds.min, bounds.max);
             }

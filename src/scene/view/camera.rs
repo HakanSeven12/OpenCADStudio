@@ -367,7 +367,7 @@ impl Camera {
                 (origin, forward)
             }
         };
-        kernel::space::plane::intersect_line_plane(
+        ocs_geom::space::plane::intersect_line_plane(
             (ray_origin - (plane_point - eye)).to_array(),
             ray_dir.to_array(),
             [0.0; 3],

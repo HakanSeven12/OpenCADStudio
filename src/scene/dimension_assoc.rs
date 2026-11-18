@@ -5,11 +5,11 @@ use document::objects::{
 };
 use document::types::{Handle, Transform, Vector3};
 use document::EntityType;
-use kernel::geom2d::{
+use ocs_geom::geom2d::{
     angle_within_arc, arc as tessellate_arc, arc_span, closest_point, Arc as KernelArc, BulgeArc,
     Circle as KernelCircle, Curve as KernelCurve, DEFAULT_SEGMENTS_PER_RADIAN,
 };
-use kernel::space::Plane;
+use ocs_geom::space::Plane;
 use std::f64::consts::TAU;
 
 use crate::command::DimensionAssociationSource;
@@ -122,7 +122,7 @@ struct RegionBoundaryPiece {
 }
 
 fn certified_rational_quadratic_circle(
-    nurbs: &kernel::geom2d::NurbsCurve,
+    nurbs: &ocs_geom::geom2d::NurbsCurve,
 ) -> Option<([f64; 2], f64, f64, f64)> {
     if nurbs.degree() != 2 {
         return None;
@@ -310,7 +310,7 @@ fn loop_is_full_circle(pieces: &[KernelCurve]) -> bool {
 fn region_boundary_pieces(entity: &EntityType) -> Option<(Plane, Vec<RegionBoundaryPiece>)> {
     let (plane, loops, _) = crate::scene::model::presspull_model::profile_geometry(entity)?;
     let unit = Plane::orthonormal(plane.origin, plane.x_axis, plane.normal()?)?;
-    let transform = kernel::geom2d::Transform {
+    let transform = ocs_geom::geom2d::Transform {
         origin: unit.project(plane.origin)?.into(),
         x_axis: unit.project_vector(plane.x_axis)?.into(),
         y_axis: unit.project_vector(plane.y_axis)?.into(),

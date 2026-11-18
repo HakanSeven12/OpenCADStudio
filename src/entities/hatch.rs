@@ -1,7 +1,7 @@
 use crate::t;
 use document::entities::{BoundaryEdge, Hatch};
 use glam::Vec3;
-use kernel::geom2d::{
+use ocs_geom::geom2d::{
     Arc as KernelArc, Curve as KernelCurve, Ellipse as KernelEllipse,
     EllipseArc as KernelEllipseArc, Line as KernelLine, NurbsCurve as KernelNurbs,
     Parameterization, Polyline as KernelPolyline, PolylineVertex as KernelVertex,
@@ -1164,7 +1164,7 @@ impl FallbackTess for Hatch {
                 let Some(curve) = edge_curve(edge) else {
                     continue;
                 };
-                let local = curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE);
+                let local = curve.tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE);
                 if local.len() < 2 {
                     continue;
                 }

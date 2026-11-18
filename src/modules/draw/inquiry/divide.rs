@@ -4,7 +4,7 @@ use document::entities::{Insert, Point as PointEnt};
 use document::types::Vector3;
 use document::{Entity, EntityType, Handle};
 use glam::DVec3;
-use kernel::space::PlanarCurve;
+use ocs_geom::space::PlanarCurve;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, CurveMarker, WorkingPlane};
 use crate::entities::curve::{entity_curve, entity_spatial_measurement};
@@ -209,7 +209,7 @@ impl<const MEASURE: bool> CadCommand for CurveMarkerCommand<MEASURE> {
         }
         let origin = self.value_origin?;
         let distance =
-            kernel::space::Vec3::from(cursor.to_array()).distance(origin.to_array().into());
+            ocs_geom::space::Vec3::from(cursor.to_array()).distance(origin.to_array().into());
         (distance.is_finite() && distance > 0.0).then_some(distance)
     }
 
@@ -318,7 +318,7 @@ fn make_marker(
 
 enum MeasuredCurve {
     Planar(PlanarCurve),
-    Spatial(kernel::space::ArcLengthCurve3),
+    Spatial(ocs_geom::space::ArcLengthCurve3),
 }
 
 impl MeasuredCurve {

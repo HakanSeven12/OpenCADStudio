@@ -3,7 +3,7 @@
 use crate::t;
 use document::types::Vector3;
 use document::{Arc as CadArc, EntityType};
-use kernel::geom2d::{self, Curve as KernelCurve};
+use ocs_geom::geom2d::{self, Curve as KernelCurve};
 
 use super::apollonius::{self, Circle2D};
 use crate::command::{CadCommand, CmdResult, TangentObject, WorkingPlane};

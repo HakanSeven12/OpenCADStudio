@@ -71,9 +71,9 @@ fn clip_triangles_px(img: &document::entities::RasterImage) -> Vec<[f64; 2]> {
     };
     // Inside mode shows the image with the boundary cut out.
     let (points, triangles) = if img.clip_boundary.clip_mode == ClipMode::Inside {
-        kernel::geom2d::triangulate(&[[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]], &[poly])
+        ocs_geom::geom2d::triangulate(&[[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]], &[poly])
     } else {
-        kernel::geom2d::triangulate(&poly, &[])
+        ocs_geom::geom2d::triangulate(&poly, &[])
     };
     let tris: Vec<[f64; 2]> = triangles
         .into_iter()
@@ -604,9 +604,9 @@ fn underlay_visible_uv(u: &document::entities::Underlay, rect: [f64; 4]) -> Vec<
         .map(|p| [(p[0] - rect[0]) / page_w, (p[1] - rect[1]) / page_h])
         .collect();
     let (points, triangles) = if u.clip_inverted {
-        kernel::geom2d::triangulate(&page, &[ring])
+        ocs_geom::geom2d::triangulate(&page, &[ring])
     } else {
-        kernel::geom2d::triangulate(&ring, &[])
+        ocs_geom::geom2d::triangulate(&ring, &[])
     };
     triangles
         .into_iter()

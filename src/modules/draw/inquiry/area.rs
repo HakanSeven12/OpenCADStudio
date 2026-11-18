@@ -1,6 +1,6 @@
 use document::{EntityType, Handle};
 use glam::DVec3;
-use kernel::space::polygon;
+use ocs_geom::space::polygon;
 
 use crate::command::{
     AreaPreviewRegion, AreaPreviewSource, CadCommand, CmdOption, CmdResult, SelectionEntity,

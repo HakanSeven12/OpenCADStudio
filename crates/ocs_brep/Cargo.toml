@@ -1,0 +1,22 @@
+[package]
+name = "ocs_brep"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+description = "OpenCADStudio's B-rep model: topology, geometry and the operations on solids (from opencadkernel)"
+publish = false
+
+[features]
+default = ["offset"]
+# Shell, thicken and offset faces, which offset 2D sections.
+offset = ["ocs_geom/offset"]
+
+[dependencies]
+ocs_geom = { path = "../ocs_geom" }
+spade = { version = "=2.15.1" }
+rustc-hash = "2"
+nlib = { package = "solidcore", git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
+ssi = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
+solidcore-record = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
+solidcore-ops = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
+solidcore-step = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }

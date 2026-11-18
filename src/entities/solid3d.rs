@@ -11,7 +11,7 @@ use crate::scene::model::object::{GripApply, GripDef, PropSection};
 use crate::t;
 use document::entities::{Body, Region, Solid3D, Surface};
 use document::xdata::{ExtendedDataRecord, XDataValue};
-use kernel::space::polygon;
+use ocs_geom::space::polygon;
 
 /// Shared transform for the ACIS volume entities. Translate / rotate / scale
 /// delegate to document (which composes the move into the solid's ACIS
@@ -291,8 +291,8 @@ fn region_area_perimeter(region: &Region) -> (f64, f64) {
         else {
             return None;
         };
-        let unit = kernel::space::Plane::orthonormal(plane.origin, plane.x_axis, plane.normal()?)?;
-        let transform = kernel::geom2d::Transform {
+        let unit = ocs_geom::space::Plane::orthonormal(plane.origin, plane.x_axis, plane.normal()?)?;
+        let transform = ocs_geom::geom2d::Transform {
             origin: unit.project(plane.origin)?.into(),
             x_axis: unit.project_vector(plane.x_axis)?.into(),
             y_axis: unit.project_vector(plane.y_axis)?.into(),
@@ -999,7 +999,7 @@ pub fn tessellate_volume(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kernel::geom2d::{Curve, Line};
+    use ocs_geom::geom2d::{Curve, Line};
 
     fn ring(points: &[[f64; 2]]) -> Vec<Curve> {
         points

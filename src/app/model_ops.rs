@@ -6,7 +6,7 @@ use document::{
     EntityType, Handle,
 };
 use iced::Task;
-use kernel::brep::{Body, EdgeKey, FaceKey};
+use ocs_brep::{Body, EdgeKey, FaceKey};
 use std::collections::{HashMap, HashSet};
 
 use super::Message;
@@ -57,7 +57,7 @@ struct PreparedUnion {
 
 struct SubtractGroup {
     kind: UnionEntityKind,
-    plane: Option<kernel::space::Plane>,
+    plane: Option<ocs_geom::space::Plane>,
     bases: Vec<Handle>,
     cutters: Vec<Handle>,
 }
@@ -83,7 +83,7 @@ struct PreparedSlice {
 }
 
 enum ModelSliceTool {
-    Plane(kernel::space::Plane),
+    Plane(ocs_geom::space::Plane),
     Surface(Body),
 }
 
@@ -91,21 +91,21 @@ impl ModelSliceTool {
     fn side(&self, point: [f64; 3]) -> Option<f64> {
         match self {
             Self::Plane(plane) => plane.distance_to(point),
-            Self::Surface(surface) => kernel::brep::surface_side(surface, point),
+            Self::Surface(surface) => ocs_brep::surface_side(surface, point),
         }
     }
 
-    fn split(&self, body: &Body) -> Result<Option<kernel::brep::PlaneSlice>, kernel::brep::Snag> {
+    fn split(&self, body: &Body) -> Result<Option<ocs_brep::PlaneSlice>, ocs_brep::Snag> {
         match self {
-            Self::Plane(plane) => kernel::brep::slice_by_plane(body, *plane),
-            Self::Surface(surface) => kernel::brep::slice_by_surface(body, surface),
+            Self::Plane(plane) => ocs_brep::slice_by_plane(body, *plane),
+            Self::Surface(surface) => ocs_brep::slice_by_surface(body, surface),
         }
     }
 }
 
 struct IntersectGroup {
     kind: UnionEntityKind,
-    plane: Option<kernel::space::Plane>,
+    plane: Option<ocs_geom::space::Plane>,
     handles: Vec<Handle>,
 }
 
@@ -147,32 +147,32 @@ fn inherited_common(source: &EntityCommon) -> EntityCommon {
     result
 }
 
-fn union_bodies(kind: UnionEntityKind, bodies: Vec<Body>) -> Result<Body, kernel::brep::Snag> {
+fn union_bodies(kind: UnionEntityKind, bodies: Vec<Body>) -> Result<Body, ocs_brep::Snag> {
     if kind == UnionEntityKind::Solid {
         let references = bodies.iter().collect::<Vec<_>>();
-        let tolerance = kernel::brep::operation_tolerance(&references);
+        let tolerance = ocs_brep::operation_tolerance(&references);
         let mut operands = bodies.into_iter();
-        let first = operands.next().ok_or(kernel::brep::Snag::CutRefused)?;
-        return kernel::brep::combine_all(
+        let first = operands.next().ok_or(ocs_brep::Snag::CutRefused)?;
+        return ocs_brep::combine_all(
             first,
             operands.collect(),
-            kernel::brep::Operation::Union,
+            ocs_brep::Operation::Union,
             tolerance,
         );
     }
     let references = bodies.iter().collect::<Vec<_>>();
-    let tolerance = kernel::brep::operation_tolerance(&references);
-    kernel::brep::union_planar_regions(&bodies, tolerance)
+    let tolerance = ocs_brep::operation_tolerance(&references);
+    ocs_brep::union_planar_regions(&bodies, tolerance)
 }
 
-fn planar_body_plane(body: &Body) -> Option<kernel::space::Plane> {
+fn planar_body_plane(body: &Body) -> Option<ocs_geom::space::Plane> {
     let mut faces = body.face_keys();
-    let first = kernel::brep::planar_face_profile(body, faces.next()?)?.plane;
+    let first = ocs_brep::planar_face_profile(body, faces.next()?)?.plane;
     let first_normal = glam::DVec3::from_array(first.normal()?);
-    let tolerance = kernel::brep::operation_tolerance(&[body]);
+    let tolerance = ocs_brep::operation_tolerance(&[body]);
     faces
         .all(|face| {
-            let Some(profile) = kernel::brep::planar_face_profile(body, face) else {
+            let Some(profile) = ocs_brep::planar_face_profile(body, face) else {
                 return false;
             };
             let Some(normal) = profile.plane.normal() else {
@@ -186,7 +186,7 @@ fn planar_body_plane(body: &Body) -> Option<kernel::space::Plane> {
         .then_some(first)
 }
 
-fn coplanar_bodies(plane: kernel::space::Plane, body: &Body) -> bool {
+fn coplanar_bodies(plane: ocs_geom::space::Plane, body: &Body) -> bool {
     let Some(other) = planar_body_plane(body) else {
         return false;
     };
@@ -196,7 +196,7 @@ fn coplanar_bodies(plane: kernel::space::Plane, body: &Body) -> bool {
     let Some(other_normal) = other.normal().map(glam::DVec3::from_array) else {
         return false;
     };
-    let tolerance = kernel::brep::operation_tolerance(&[body]);
+    let tolerance = ocs_brep::operation_tolerance(&[body]);
     one_normal.dot(other_normal).abs() >= 1.0 - 1e-9
         && plane
             .distance_to(other.origin)
@@ -205,35 +205,35 @@ fn coplanar_bodies(plane: kernel::space::Plane, body: &Body) -> bool {
 
 fn subtract_bodies(
     kind: UnionEntityKind,
-    plane: Option<kernel::space::Plane>,
+    plane: Option<ocs_geom::space::Plane>,
     bases: Vec<Body>,
     cutters: Vec<Body>,
-) -> Result<Body, kernel::brep::Snag> {
+) -> Result<Body, ocs_brep::Snag> {
     if kind != UnionEntityKind::Solid && plane.is_none() {
-        return Err(kernel::brep::Snag::NoClosedForm);
+        return Err(ocs_brep::Snag::NoClosedForm);
     }
     if kind != UnionEntityKind::Solid && plane.is_some() {
         let references = bases.iter().chain(&cutters).collect::<Vec<_>>();
-        let tolerance = kernel::brep::operation_tolerance(&references);
-        return kernel::brep::subtract_planar_regions(&bases, &cutters, tolerance);
+        let tolerance = ocs_brep::operation_tolerance(&references);
+        return ocs_brep::subtract_planar_regions(&bases, &cutters, tolerance);
     }
 
     // Cutters that keep clear of each other are taken away in one pass: a
     // plate drilled with a hundred holes is cut once, not a hundred times.
     let references = bases.iter().chain(&cutters).collect::<Vec<_>>();
-    let tolerance = kernel::brep::operation_tolerance(&references);
+    let tolerance = ocs_brep::operation_tolerance(&references);
     let mut bases = bases.into_iter();
-    let first = bases.next().ok_or(kernel::brep::Snag::CutRefused)?;
+    let first = bases.next().ok_or(ocs_brep::Snag::CutRefused)?;
     let united =
-        kernel::brep::combine_all(first, bases.collect(), kernel::brep::Operation::Union, tolerance)?;
-    kernel::brep::combine_all(united, cutters, kernel::brep::Operation::Difference, tolerance)
+        ocs_brep::combine_all(first, bases.collect(), ocs_brep::Operation::Union, tolerance)?;
+    ocs_brep::combine_all(united, cutters, ocs_brep::Operation::Difference, tolerance)
 }
 
 inventory::submit!(crate::command::CommandRegistration {
     names: &["SECTIONCULL"]
 });
 
-fn entity_with_boolean_body(mut source: EntityType, body: &Body) -> Option<EntityType> {
+pub(super) fn entity_with_boolean_body(mut source: EntityType, body: &Body) -> Option<EntityType> {
     let document = crate::scene::convert::acis_export::solid_to_sat(body)?;
     let wires = solid_model::edge_wires(body);
     if matches!(
@@ -304,10 +304,10 @@ enum IntersectBodyOutcome {
 fn intersect_bodies(
     kind: UnionEntityKind,
     bodies: Vec<Body>,
-) -> Result<IntersectBodyOutcome, kernel::brep::Snag> {
+) -> Result<IntersectBodyOutcome, ocs_brep::Snag> {
     if kind == UnionEntityKind::Solid {
         let mut operands = bodies.into_iter();
-        let mut result = operands.next().ok_or(kernel::brep::Snag::CutRefused)?;
+        let mut result = operands.next().ok_or(ocs_brep::Snag::CutRefused)?;
         for operand in operands {
             result = solid_model::boolean_result(Bool::Intersect, &result, &operand)?;
             if result.faces.is_empty() {
@@ -318,12 +318,12 @@ fn intersect_bodies(
     }
 
     let references = bodies.iter().collect::<Vec<_>>();
-    let tolerance = kernel::brep::operation_tolerance(&references);
+    let tolerance = ocs_brep::operation_tolerance(&references);
     Ok(
-        match kernel::brep::intersect_planar_regions(&bodies, tolerance)? {
-            kernel::brep::PlanarIntersection::Area(body) => IntersectBodyOutcome::Area(body),
-            kernel::brep::PlanarIntersection::Touching => IntersectBodyOutcome::Touching,
-            kernel::brep::PlanarIntersection::Disjoint => IntersectBodyOutcome::Disjoint,
+        match ocs_brep::intersect_planar_regions(&bodies, tolerance)? {
+            ocs_brep::PlanarIntersection::Area(body) => IntersectBodyOutcome::Area(body),
+            ocs_brep::PlanarIntersection::Touching => IntersectBodyOutcome::Touching,
+            ocs_brep::PlanarIntersection::Disjoint => IntersectBodyOutcome::Disjoint,
         },
     )
 }
@@ -821,12 +821,12 @@ impl super::OpenCADStudio {
             return Task::none();
         };
         let result = if fillet {
-            match kernel::brep::fillet_edges(&body, edges, value) {
+            match ocs_brep::fillet_edges(&body, edges, value) {
                 Ok(result) => Some(result),
                 Err(error) => {
-                    use kernel::brep::FilletError::{InvalidResult, RadiusTooLargeOrInteracting};
+                    use ocs_brep::FilletError::{InvalidResult, RadiusTooLargeOrInteracting};
                     let fit = matches!(error, RadiusTooLargeOrInteracting | InvalidResult)
-                        .then(|| kernel::brep::fillet_fit(&body, edges, value))
+                        .then(|| ocs_brep::fillet_fit(&body, edges, value))
                         .flatten();
                     self.command_line
                         .push_error(&format!("FILLETEDGE: {error}{}", fit_hint("radius", fit)));
@@ -839,13 +839,13 @@ impl super::OpenCADStudio {
                     .push_error(crate::t!("CHAMFEREDGE: select a base face edge.").as_ref());
                 return Task::none();
             };
-            match kernel::brep::chamfer_edges(&body, edges, base_face, value, other_value) {
+            match ocs_brep::chamfer_edges(&body, edges, base_face, value, other_value) {
                 Ok(result) => Some(result),
                 Err(error) => {
-                    use kernel::brep::ChamferError::{DistanceTooLargeOrInteracting, InvalidResult};
+                    use ocs_brep::ChamferError::{DistanceTooLargeOrInteracting, InvalidResult};
                     let fit = matches!(error, DistanceTooLargeOrInteracting | InvalidResult)
                         .then(|| {
-                            kernel::brep::chamfer_fit(&body, edges, base_face, value, other_value)
+                            ocs_brep::chamfer_fit(&body, edges, base_face, value, other_value)
                         })
                         .flatten();
                     self.command_line
@@ -924,7 +924,7 @@ impl super::OpenCADStudio {
         for action in actions {
             match *action {
                 ShellFaceAction::Remove(point) => {
-                    let Some(face) = kernel::brep::shell_face_at_point(&body, point.to_array())
+                    let Some(face) = ocs_brep::shell_face_at_point(&body, point.to_array())
                     else {
                         self.command_line.push_error(
                             crate::t!("A selected face could not be resolved.").as_ref(),
@@ -934,7 +934,7 @@ impl super::OpenCADStudio {
                     removed.insert(face);
                 }
                 ShellFaceAction::Add(point) => {
-                    let Some(face) = kernel::brep::shell_face_at_point(&body, point.to_array())
+                    let Some(face) = ocs_brep::shell_face_at_point(&body, point.to_array())
                     else {
                         self.command_line.push_error(
                             crate::t!("A selected face could not be resolved.").as_ref(),
@@ -949,34 +949,34 @@ impl super::OpenCADStudio {
         }
         let removed = removed.into_iter().collect::<Vec<_>>();
 
-        let result = match kernel::brep::shell(&body, &removed, distance) {
+        let result = match ocs_brep::shell(&body, &removed, distance) {
             Ok(result) => result,
-            Err(kernel::brep::ShellError::InvalidDistance) => {
+            Err(ocs_brep::ShellError::InvalidDistance) => {
                 self.command_line
                     .push_error(crate::t!("The shell offset distance must be nonzero.").as_ref());
                 return Task::none();
             }
-            Err(kernel::brep::ShellError::UnsupportedSolid) => {
+            Err(ocs_brep::ShellError::UnsupportedSolid) => {
                 self.command_line.push_error(
                     crate::t!("SHELL supports rectangular boxes, circular cylinders, and spheres.")
                         .as_ref(),
                 );
                 return Task::none();
             }
-            Err(kernel::brep::ShellError::UnknownFace) => {
+            Err(ocs_brep::ShellError::UnknownFace) => {
                 self.command_line.push_error(
                     crate::t!("A selected face does not belong to the solid.").as_ref(),
                 );
                 return Task::none();
             }
-            Err(kernel::brep::ShellError::NoMaterial) => {
+            Err(ocs_brep::ShellError::NoMaterial) => {
                 self.command_line.push_error(
                     crate::t!("The offset removes all material. Use a smaller distance or add a face back.")
                         .as_ref(),
                 );
                 return Task::none();
             }
-            Err(kernel::brep::ShellError::Kernel(_)) => {
+            Err(ocs_brep::ShellError::Kernel(_)) => {
                 self.command_line.push_error(
                     crate::t!(
                         "The shell could not be constructed from the selected solid and distance."
@@ -1088,21 +1088,21 @@ impl super::OpenCADStudio {
                 .collect::<Vec<_>>();
             let outcome = match intersect_bodies(group.kind, operands) {
                 Ok(outcome) => outcome,
-                Err(kernel::brep::Snag::NoClosedForm) => {
+                Err(ocs_brep::Snag::NoClosedForm) => {
                     self.command_line.push_error(
                         crate::t!("INTERSECT: the selected objects do not have a supported coplanar surface intersection.")
                             .as_ref(),
                     );
                     return Task::none();
                 }
-                Err(kernel::brep::Snag::Coincident) => {
+                Err(ocs_brep::Snag::Coincident) => {
                     self.command_line.push_error(
                         crate::t!("INTERSECT: the selected coincident geometry is ambiguous.")
                             .as_ref(),
                     );
                     return Task::none();
                 }
-                Err(kernel::brep::Snag::CutRefused) => {
+                Err(ocs_brep::Snag::CutRefused) => {
                     self.command_line.push_error(
                         crate::t!(
                             "INTERSECT: the selected topology could not be intersected safely."
@@ -1331,20 +1331,20 @@ impl super::OpenCADStudio {
                 .collect::<Vec<_>>();
             let result = match union_bodies(group.kind, bodies) {
                 Ok(result) => result,
-                Err(kernel::brep::Snag::NoClosedForm) => {
+                Err(ocs_brep::Snag::NoClosedForm) => {
                     self.command_line.push_error(
                         crate::t!("UNION: the selected geometry includes an unsupported surface intersection.")
                             .as_ref(),
                     );
                     return Task::none();
                 }
-                Err(kernel::brep::Snag::Coincident) => {
+                Err(ocs_brep::Snag::Coincident) => {
                     self.command_line.push_error(
                         crate::t!("UNION: the selected coincident geometry is ambiguous.").as_ref(),
                     );
                     return Task::none();
                 }
-                Err(kernel::brep::Snag::CutRefused) => {
+                Err(ocs_brep::Snag::CutRefused) => {
                     self.command_line.push_error(
                         crate::t!("UNION: the selected topology could not be closed safely.")
                             .as_ref(),
@@ -1619,21 +1619,21 @@ impl super::OpenCADStudio {
             let result = match subtract_bodies(group.kind, group.plane, base_bodies, cutter_bodies)
             {
                 Ok(result) => result,
-                Err(kernel::brep::Snag::NoClosedForm) => {
+                Err(ocs_brep::Snag::NoClosedForm) => {
                     self.command_line.push_error(
                         crate::t!("SUBTRACT: the selected geometry includes an unsupported surface intersection.")
                             .as_ref(),
                     );
                     return Task::none();
                 }
-                Err(kernel::brep::Snag::Coincident) => {
+                Err(ocs_brep::Snag::Coincident) => {
                     self.command_line.push_error(
                         crate::t!("SUBTRACT: the selected coincident geometry is ambiguous.")
                             .as_ref(),
                     );
                     return Task::none();
                 }
-                Err(kernel::brep::Snag::CutRefused) => {
+                Err(ocs_brep::Snag::CutRefused) => {
                     self.command_line.push_error(
                         crate::t!("SUBTRACT: the selected topology could not be cut safely.")
                             .as_ref(),
@@ -1744,7 +1744,7 @@ impl super::OpenCADStudio {
     pub(super) fn solid_slice(
         &mut self,
         requested: &[Handle],
-        plane: kernel::space::Plane,
+        plane: ocs_geom::space::Plane,
         keep_point: Option<glam::DVec3>,
     ) -> Task<Message> {
         self.solid_slice_with_tool(requested, ModelSliceTool::Plane(plane), keep_point)
@@ -1902,7 +1902,7 @@ impl super::OpenCADStudio {
         }
 
         let keep_positive = if let Some(point) = keep_point {
-            let tolerance = kernel::brep::operation_tolerance(
+            let tolerance = ocs_brep::operation_tolerance(
                 &handles
                     .iter()
                     .map(|handle| &bodies[handle])
@@ -1935,21 +1935,21 @@ impl super::OpenCADStudio {
                     );
                     return Task::none();
                 }
-                Err(kernel::brep::Snag::NoClosedForm) => {
+                Err(ocs_brep::Snag::NoClosedForm) => {
                     self.command_line.push_error(
                         crate::t!("SLICE: the selected geometry has an unsupported surface intersection; no object was changed.")
                             .as_ref(),
                     );
                     return Task::none();
                 }
-                Err(kernel::brep::Snag::Coincident) => {
+                Err(ocs_brep::Snag::Coincident) => {
                     self.command_line.push_error(
                         crate::t!("SLICE: the cutting plane is coincident with source geometry; no object was changed.")
                             .as_ref(),
                     );
                     return Task::none();
                 }
-                Err(kernel::brep::Snag::CutRefused) => {
+                Err(ocs_brep::Snag::CutRefused) => {
                     self.command_line.push_error(
                         crate::t!("SLICE: the selected topology could not be split safely; no object was changed.")
                             .as_ref(),
@@ -2091,7 +2091,7 @@ impl super::OpenCADStudio {
 
     pub(super) fn slice_selected(
         &mut self,
-        plane: kernel::space::Plane,
+        plane: ocs_geom::space::Plane,
         keep_point: Option<glam::DVec3>,
     ) -> Task<Message> {
         let handles = self.tabs[self.active_tab].scene.selected_handles_in_order();
@@ -2482,7 +2482,7 @@ impl super::OpenCADStudio {
                     return None;
                 };
                 let curve = crate::entities::curve::entity_curve(e)?;
-                let kernel::geom2d::Curve::Polyline(polyline) = &curve.curve else {
+                let ocs_geom::geom2d::Curve::Polyline(polyline) = &curve.curve else {
                     return None;
                 };
                 Some((
@@ -2508,11 +2508,11 @@ impl super::OpenCADStudio {
         let n = fit.len();
         // The C² cubic through every vertex, chord-length parameterised: the
         // same interpolation the stored fit points describe.
-        let Some(curve) = kernel::space::NurbsCurve3::interpolate_fit(
+        let Some(curve) = ocs_geom::space::NurbsCurve3::interpolate_fit(
             &fit,
             None,
             None,
-            kernel::space::Parameterization::Chord,
+            ocs_geom::space::Parameterization::Chord,
         ) else {
             self.command_line
                 .push_error(crate::t!("SPLINEFIT: need at least 3 points.").as_ref());

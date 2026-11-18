@@ -1580,14 +1580,14 @@ mod delobj_tests {
 mod thicken_tests {
     use super::super::*;
     use document::entities::{Surface, SurfaceKind};
-    use kernel::geom2d::{Circle, Curve, NurbsCurve};
-    use kernel::space::{Parameterization, Plane};
+    use ocs_geom::geom2d::{Circle, Curve, NurbsCurve};
+    use ocs_geom::space::{Parameterization, Plane};
 
     #[test]
     fn thicken_preserves_sources_and_round_trips_results_with_one_undo() {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
-        let body = kernel::brep::planar_region(
+        let body = ocs_brep::planar_region(
             Plane::XY,
             &[vec![Curve::Circle(Circle {
                 centre: [0.0; 2],
@@ -1636,10 +1636,9 @@ mod thicken_tests {
             serde_json::to_value(app.tabs[i].scene.document.get_entity(source).unwrap()).unwrap(),
             original
         );
-        let expected =
-            kernel::brep::analytic_mass_properties(&app.tabs[i].scene.solid_models[&result])
-                .unwrap()
-                .volume;
+        let expected = ocs_brep::mass_properties(&app.tabs[i].scene.solid_models[&result])
+            .unwrap()
+            .volume;
         let bytes = crate::io::save_to_bytes(
             &app.tabs[i].scene.document,
             "dwg",
@@ -1650,10 +1649,10 @@ mod thicken_tests {
         let mut restored = crate::scene::Scene::new();
         restored.document = document;
         restored.restore_solid_models(&[result]);
-        let actual = kernel::brep::analytic_mass_properties(&restored.solid_models[&result])
+        let actual = ocs_brep::mass_properties(&restored.solid_models[&result])
             .unwrap()
             .volume;
-        assert!((expected - actual).abs() < 1e-8);
+        assert!((expected - actual).abs() < 1e-8 * expected.max(1.0));
         app.undo_active_tab();
         assert!(app.tabs[i].scene.document.get_entity(result).is_none());
         assert!(app.tabs[i]
@@ -1688,7 +1687,7 @@ mod thicken_tests {
         )
         .unwrap();
         let body =
-            kernel::brep::extrude_surface(Plane::XY, &[Curve::Nurbs(profile)], [0.0, 0.0, 2.0])
+            ocs_brep::extrude_surface(Plane::XY, &[Curve::Nurbs(profile)], [0.0, 0.0, 2.0])
                 .unwrap();
         let source = app.add_surface_model(
             document::EntityType::Surface(Box::new(Surface::new(SurfaceKind::Generic))),

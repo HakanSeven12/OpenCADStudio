@@ -1,6 +1,6 @@
 use super::*;
 
-use kernel::geom2d::{
+use ocs_geom::geom2d::{
     bounded_faces, closest_point, contains, distance_to, gap_bridges, intersect,
     ring_nesting_depths, segment_crossing, signed_area, triangulate, Curve, Line, SegmentCrossing,
     Tolerance, Transform as CurveTransform,
@@ -90,12 +90,12 @@ fn entity_curves_on_plane(entity: &EntityType, plane: WorkingPlane, tolerance: f
             }
             let direction = [direction.x, direction.y];
             if ray {
-                Curve::Ray(kernel::geom2d::Ray {
+                Curve::Ray(ocs_geom::geom2d::Ray {
                     origin: start,
                     direction,
                 })
             } else {
-                Curve::XLine(kernel::geom2d::XLine {
+                Curve::XLine(ocs_geom::geom2d::XLine {
                     base: start,
                     direction,
                 })
@@ -248,7 +248,7 @@ pub(crate) fn live_segments_for_curves(
                 .into_iter()
                 .collect::<Vec<_>>(),
             _ => curve
-                .tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
+                .tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE)
                 .windows(2)
                 .filter_map(|pair| {
                     let start = pair[0];
@@ -269,7 +269,7 @@ fn hatch_path_seed(path: &document::entities::BoundaryPath) -> Option<[f64; 2]> 
     let mut edges = Vec::with_capacity(path.edges.len());
     for edge in &path.edges {
         let curve = crate::entities::hatch::edge_curve(edge)?;
-        edges.push(curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE));
+        edges.push(curve.tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE));
     }
     let ring = super::entity::chain_path_edges(edges);
     if ring.len() < 3 {
@@ -789,7 +789,7 @@ pub(crate) fn new_hatch_paths(
     tolerance: f64,
 ) -> Vec<document::entities::BoundaryPath> {
     use document::entities::BoundaryPathFlags;
-    let depths = kernel::geom2d::ring_nesting_depths(rings);
+    let depths = ocs_geom::geom2d::ring_nesting_depths(rings);
     let exterior: Vec<bool> = depths.iter().map(|depth| *depth == 0).collect();
     let paths = exact_hatch_paths_by_ring(rings, &exterior, sources, tolerance);
     let base = |depth: usize| match depth {
@@ -922,7 +922,7 @@ pub(crate) fn drawn_hatch_path(vertices: &[[f64; 3]]) -> document::entities::Bou
     let arc = |index: usize| {
         let [x, y, bulge] = vertices[index];
         let [nx, ny, _] = vertices[(index + 1) % count];
-        kernel::geom2d::BulgeArc::from_bulge([x, y], [nx, ny], bulge)
+        ocs_geom::geom2d::BulgeArc::from_bulge([x, y], [nx, ny], bulge)
             .filter(|_| bulge.abs() > 1.0e-12)
     };
     // Two half circles of one circle: the reference writes a circle edge.
@@ -2012,7 +2012,7 @@ fn hatch_path_geometry(path: &document::entities::BoundaryPath) -> (Vec<[f64; 2]
         .edges
         .iter()
         .filter_map(crate::entities::hatch::edge_curve)
-        .map(|curve| curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE))
+        .map(|curve| curve.tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE))
         .collect();
     super::entity::chain_path_edges_with_directions(edges)
 }

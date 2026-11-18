@@ -98,7 +98,7 @@ impl SmoothConstraintCommand {
                 let planar = crate::entities::curve::entity_curve(entity)?;
                 let local = planar.plane.project(point.to_array())?;
                 let segments = planar.curve.segments();
-                let (segment, _) = kernel::geom2d::nearest_of(segments.iter(), local)?;
+                let (segment, _) = ocs_geom::geom2d::nearest_of(segments.iter(), local)?;
                 let points = crate::scene::dimension_assoc::source_points(entity);
                 let closed = match entity {
                     EntityType::LwPolyline(polyline) => polyline.is_closed,

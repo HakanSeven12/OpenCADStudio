@@ -1,7 +1,7 @@
 use document::entities::Point;
 use document::EntityType;
-use kernel::geom2d::{Circle, Curve, Line};
-use kernel::space::{curve::bezier_points, PlanarCurve, Plane, Vec3};
+use ocs_geom::geom2d::{Circle, Curve, Line};
+use ocs_geom::space::{curve::bezier_points, PlanarCurve, Plane, Vec3};
 
 use crate::entities::common::{edit_prop as edit, parse_f64, square_grip};
 use crate::entities::traits::RenderConvertible;

@@ -9,8 +9,8 @@
 
 use std::collections::HashMap;
 
-use kernel::brep::{Body, Circle3, Curve3, EdgeKey, Line3, Surface, VertexKey};
-use kernel::space::{NurbsCurve3, NurbsSurface3, Plane, Vec3};
+use ocs_brep::{Body, Circle3, Curve3, EdgeKey, Line3, Surface, VertexKey};
+use ocs_geom::space::{NurbsCurve3, NurbsSurface3, Plane, Vec3};
 
 use super::brep_build::{Builder, FaceSpec};
 use super::step_import::compose;
@@ -431,7 +431,7 @@ impl Doc {
             {
                 return None;
             }
-            Surface::Sphere(kernel::brep::Sphere {
+            Surface::Sphere(ocs_brep::Sphere {
                 frame: frame(centre, x)?,
                 radius,
             })
@@ -441,7 +441,7 @@ impl Doc {
             if out.length() <= radius + tolerance || at(a0).distance(outermost) > tolerance {
                 return None;
             }
-            Surface::Torus(kernel::brep::Torus {
+            Surface::Torus(ocs_brep::Torus {
                 frame: frame(foot, x)?,
                 major_radius: out.length(),
                 minor_radius: radius,
@@ -461,7 +461,7 @@ impl Doc {
         let x = match reference.and_then(|r| self.direction_of(r)) {
             Some(x) => x,
             None => {
-                super::iges_surfaces::any_perpendicular(kernel::space::Vec3::from(axis)).to_array()
+                super::iges_surfaces::any_perpendicular(ocs_geom::space::Vec3::from(axis)).to_array()
             }
         };
         Plane::orthonormal(origin, x, axis)
@@ -510,21 +510,21 @@ impl Doc {
                     Some(m) => [0, 1, 2].map(|r| m[r][0] * n[0] + m[r][1] * n[1] + m[r][2] * n[2]),
                     None => n,
                 };
-                let x = build::any_perpendicular(kernel::space::Vec3::from(normal)).to_array();
+                let x = build::any_perpendicular(ocs_geom::space::Vec3::from(normal)).to_array();
                 Some((
                     Surface::Plane(Plane::orthonormal(self.place(entity)(at), x, normal)?),
                     None,
                 ))
             }
             192 => Some((
-                Surface::Cylinder(kernel::brep::Cylinder {
+                Surface::Cylinder(ocs_brep::Cylinder {
                     base: self.frame(v(1), Some(v(2)), form1(4))?,
                     radius: v(3) * self.scale,
                 }),
                 None,
             )),
             194 => Some((
-                Surface::Cone(kernel::brep::Cone {
+                Surface::Cone(ocs_brep::Cone {
                     base: self.frame(v(1), Some(v(2)), form1(5))?,
                     radius: v(3) * self.scale,
                     // The file's cone widens along its axis.
@@ -533,14 +533,14 @@ impl Doc {
                 None,
             )),
             196 => Some((
-                Surface::Sphere(kernel::brep::Sphere {
+                Surface::Sphere(ocs_brep::Sphere {
                     frame: self.frame(v(1), form1(3), form1(4))?,
                     radius: v(2) * self.scale,
                 }),
                 None,
             )),
             198 => Some((
-                Surface::Torus(kernel::brep::Torus {
+                Surface::Torus(ocs_brep::Torus {
                     frame: self.frame(v(1), Some(v(2)), form1(5))?,
                     major_radius: v(3) * self.scale,
                     minor_radius: v(4) * self.scale,
@@ -645,9 +645,9 @@ impl Doc {
                     return None;
                 };
                 let distance = v(4) * self.scale;
-                if let Some((Surface::Plane(plane), agrees)) = kernel::brep::analytic_surface(&base)
+                if let Some((Surface::Plane(plane), agrees)) = ocs_brep::analytic_surface(&base)
                 {
-                    let n = kernel::space::Vec3::from(plane.normal()?)
+                    let n = ocs_geom::space::Vec3::from(plane.normal()?)
                         * (if agrees { 1.0 } else { -1.0 });
                     return spline(build::translated(&base, (n * distance).to_array())?);
                 }
@@ -655,33 +655,33 @@ impl Doc {
                 // A point of the offset, to read the new radius off.
                 let ((u0, u1), (v0, v1)) = net.domain();
                 let p =
-                    kernel::space::Vec3::from(net.point_at_knot(0.5 * (u0 + u1), 0.5 * (v0 + v1)));
+                    ocs_geom::space::Vec3::from(net.point_at_knot(0.5 * (u0 + u1), 0.5 * (v0 + v1)));
                 let around = |frame: &Plane| {
                     let (o, k) = (
-                        kernel::space::Vec3::from(frame.origin),
-                        kernel::space::Vec3::from(frame.normal()?),
+                        ocs_geom::space::Vec3::from(frame.origin),
+                        ocs_geom::space::Vec3::from(frame.normal()?),
                     );
                     let q = p - o;
                     Some((q - k * q.dot(k)).length())
                 };
                 let offset = match surface {
-                    Surface::Cylinder(c) => Surface::Cylinder(kernel::brep::Cylinder {
+                    Surface::Cylinder(c) => Surface::Cylinder(ocs_brep::Cylinder {
                         radius: around(&c.base)?,
                         ..c
                     }),
-                    Surface::Sphere(s) => Surface::Sphere(kernel::brep::Sphere {
-                        radius: (p - kernel::space::Vec3::from(s.frame.origin)).length(),
+                    Surface::Sphere(s) => Surface::Sphere(ocs_brep::Sphere {
+                        radius: (p - ocs_geom::space::Vec3::from(s.frame.origin)).length(),
                         ..s
                     }),
                     Surface::Torus(t) => {
                         let (o, k) = (
-                            kernel::space::Vec3::from(t.frame.origin),
-                            kernel::space::Vec3::from(t.frame.normal()?),
+                            ocs_geom::space::Vec3::from(t.frame.origin),
+                            ocs_geom::space::Vec3::from(t.frame.normal()?),
                         );
                         let q = p - o;
                         let radial = q - k * q.dot(k);
                         let tube = o + radial.normalize()? * t.major_radius;
-                        Surface::Torus(kernel::brep::Torus {
+                        Surface::Torus(ocs_brep::Torus {
                             minor_radius: (p - tube).length(),
                             ..t
                         })
@@ -690,7 +690,7 @@ impl Doc {
                     // distance), drawn through its approximation.
                     _ => {
                         return Some((
-                            Surface::Offset(kernel::brep::OffsetSurface {
+                            Surface::Offset(ocs_brep::OffsetSurface {
                                 base,
                                 distance,
                                 approximation: net.clone(),
@@ -724,7 +724,7 @@ impl Doc {
                 .collect::<Option<Vec<[f64; 3]>>>()?;
             let (a, b) = (samples[0], samples[24]);
             let straight = samples.iter().all(|p| {
-                kernel::space::Vec3::from(*p).distance_to_segment(a.into(), b.into())
+                ocs_geom::space::Vec3::from(*p).distance_to_segment(a.into(), b.into())
                     <= self.resolution
             });
             let curve = if straight {
@@ -737,7 +737,7 @@ impl Doc {
                     &samples,
                     None,
                     None,
-                    kernel::space::Parameterization::Chord,
+                    ocs_geom::space::Parameterization::Chord,
                 )?)
             };
             out.push((curve, a, b));
@@ -1230,10 +1230,10 @@ impl Assembly<'_> {
 /// What an IGES file holds.
 pub struct IgesModel {
     /// Each solid, scaled to the drawing, with its colour and layer.
-    pub bodies: Vec<(kernel::brep::Body, document::types::Color, String)>,
+    pub bodies: Vec<(ocs_brep::Body, document::types::Color, String)>,
     /// Each trimmed or bounded surface, a one-face sheet, with its colour
     /// and layer.
-    pub sheets: Vec<(kernel::brep::Body, document::types::Color, String)>,
+    pub sheets: Vec<(ocs_brep::Body, document::types::Color, String)>,
     /// Each spline curve no other entity uses, with its colour and layer.
     pub curves: Vec<(NurbsCurve3, document::types::Color, String)>,
 }
@@ -1562,12 +1562,12 @@ fn analytic_revolution(
     let x_axis = turned(x, k, start).to_array();
     let base = Plane::orthonormal(foot(far).to_array(), x_axis, k.to_array())?;
     Some(if (r_far - r_near).abs() <= tolerance {
-        Surface::Cylinder(kernel::brep::Cylinder {
+        Surface::Cylinder(ocs_brep::Cylinder {
             base,
             radius: r_far,
         })
     } else {
-        Surface::Cone(kernel::brep::Cone {
+        Surface::Cone(ocs_brep::Cone {
             base,
             radius: r_far,
             half_angle: ((r_far - r_near) / along).atan(),
@@ -1595,11 +1595,11 @@ fn arc_angles(entity: &Entity) -> (f64, f64) {
 /// Whether a closed body's faces point inward: the volume its mesh encloses
 /// comes out negative.
 fn inside_out(body: &Body) -> bool {
-    let Some(bounds) = kernel::brep::body_bounds(body) else {
+    let Some(bounds) = ocs_brep::body_bounds(body) else {
         return false;
     };
     let size = Vec3::from(bounds.min).distance(Vec3::from(bounds.max));
-    let mesh = kernel::brep::mesh_body(body, 0.5, size * 1e-2);
+    let mesh = ocs_brep::mesh_body(body, 0.5, size * 1e-2);
     let volume: f64 = mesh
         .triangles
         .iter()
@@ -1627,7 +1627,7 @@ mod tests {
         include_bytes!("../../tests/fixtures/iges/revolution_large_angle.igs");
 
     fn bounds(body: &Body) -> ([f64; 3], [f64; 3]) {
-        let b = kernel::brep::body_bounds(body).expect("a body with geometry");
+        let b = ocs_brep::body_bounds(body).expect("a body with geometry");
         (b.min, b.max)
     }
 
@@ -1644,7 +1644,7 @@ mod tests {
     fn volume(body: &Body) -> f64 {
         let (min, max) = bounds(body);
         let size = Vec3::from(min).distance(Vec3::from(max));
-        let mesh = kernel::brep::mesh_body(body, 0.1, size * 1e-3);
+        let mesh = ocs_brep::mesh_body(body, 0.1, size * 1e-3);
         mesh.triangles
             .iter()
             .map(|t| {

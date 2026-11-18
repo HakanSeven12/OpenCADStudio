@@ -14,7 +14,7 @@ use document::entities::Insert;
 use document::objects::{ObjectType, SpatialFilter};
 use document::types::{Handle, Transform, Vector3};
 use document::Document;
-use kernel::geom2d::{contains, Curve, Line, Tolerance};
+use ocs_geom::geom2d::{contains, Curve, Line, Tolerance};
 
 use crate::scene::model::wire_model::{
     decode_pattern_station_map, encode_pattern_stations, pattern_station_values, WireModel,

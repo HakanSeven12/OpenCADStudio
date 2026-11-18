@@ -840,6 +840,9 @@ impl OpenCADStudio {
         if let Some(t) = self.dispatch_ole(cmd, i) {
             return Some(t);
         }
+        if let Some(t) = self.dispatch_surface(cmd, i) {
+            return Some(t);
+        }
         if let Some(t) = self.dispatch_mtext_toolbar(cmd) {
             return Some(t);
         }

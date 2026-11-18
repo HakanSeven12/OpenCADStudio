@@ -5231,6 +5231,7 @@ impl Scene {
                 && self.preview_wires.is_empty()
                 && self.constraint_hover_wires.is_empty()
                 && self.ducs_face_wires.is_empty()
+                && self.cv_net_wires.is_empty()
                 && cloud_2d_wires.is_empty()
                 && indicator_wires.is_empty())
         {
@@ -5248,6 +5249,7 @@ impl Scene {
             v.extend(self.preview_wires.iter().cloned());
             v.extend(self.constraint_hover_wires.iter().cloned());
             v.extend(self.ducs_face_wires.iter().cloned());
+            v.extend(self.cv_net_wires.values().flatten().cloned());
             v.extend(cloud_2d_wires);
             v.extend(indicator_wires);
             Arc::new(v)

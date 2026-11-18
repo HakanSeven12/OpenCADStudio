@@ -18,8 +18,10 @@ members = [
     "crates/ocs_web_worker",
     "crates/dwg-thumbnailer",
     "crates/dwg-thumbnailer-win",
-    "crates/solidcore-record",
     "crates/step-export",
+    "crates/ocs_geom",
+    "crates/ocs_brep",
+    "crates/ocs_constraints",
 ]
 
 [target.'cfg(windows)'.build-dependencies]
@@ -46,13 +48,20 @@ env_logger = "0.11"
 log = "0.4"
 svgtypes = "0.15.3"
 document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "6ac42925a5c5b35d705ae9a66b818446a78bc00e", features = ["serde"] }
-kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "7b5ed9d", features = ["brep", "offset"] }
+# 2D curve algebra, the B-rep model and the constraint solver (from
+# opencadkernel); the operations on solids are Solidcore's.
+ocs_geom = { path = "crates/ocs_geom" }
+ocs_brep = { path = "crates/ocs_brep" }
+ocs_constraints = { path = "crates/ocs_constraints" }
+solidcore = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
+solidcore-ops = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
+solidcore-convert = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
+solidcore-tess = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
 ocs_acis = { path = "crates/ocs_acis" }
-# STEP exchange structure and exact B-rep writer, vendored from solidcore
-# (Apache-2.0; see crates/step-export/VENDORED.md).
-solidcore-record = { path = "crates/solidcore-record" }
+# Solidcore's record model (B-rep, STEP exchange structure); the STEP writer
+# is vendored with OCS changes (Apache-2.0; see crates/step-export/VENDORED.md).
+solidcore-record = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
 step-export = { path = "crates/step-export" }
-kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "7b5ed9d" }
 graph = { package = "opencadgraph", git = "https://github.com/HakanSeven12/opencadgraph.git", rev = "5e4dc20" }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 # Shared SAVE serialization dispatch + web-worker wire format: one

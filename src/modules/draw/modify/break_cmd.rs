@@ -88,12 +88,12 @@ fn break_line(line: &LineEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
     result
 }
 
-fn picked_spans(curve: &kernel::space::PlanarCurve, p1: DVec3, p2: DVec3) -> Option<Vec<[f64; 2]>> {
+fn picked_spans(curve: &ocs_geom::space::PlanarCurve, p1: DVec3, p2: DVec3) -> Option<Vec<[f64; 2]>> {
     let first = curve.plane.project(p1.to_array())?;
     let second = curve.plane.project(p2.to_array())?;
-    let a = kernel::geom2d::closest_point(&curve.curve, first).t;
-    let b = kernel::geom2d::closest_point(&curve.curve, second).t;
-    kernel::geom2d::break_spans(&curve.curve, a, b, kernel::geom2d::Tolerance::new(1e-9))
+    let a = ocs_geom::geom2d::closest_point(&curve.curve, first).t;
+    let b = ocs_geom::geom2d::closest_point(&curve.curve, second).t;
+    ocs_geom::geom2d::break_spans(&curve.curve, a, b, ocs_geom::geom2d::Tolerance::new(1e-9))
 }
 
 fn break_arc(arc: &ArcEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
@@ -101,7 +101,7 @@ fn break_arc(arc: &ArcEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
     let Some(spans) = picked_spans(&curve, p1, p2) else {
         return vec![EntityType::Arc(arc.clone())];
     };
-    let kernel::geom2d::Curve::Arc(geometry) = &curve.curve else {
+    let ocs_geom::geom2d::Curve::Arc(geometry) = &curve.curve else {
         unreachable!()
     };
     spans
@@ -147,7 +147,7 @@ fn break_lwpolyline(p: &LwPolyline, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
     let Some(spans) = picked_spans(&curve, p1, p2) else {
         return unchanged();
     };
-    let kernel::geom2d::Curve::Polyline(geometry) = &curve.curve else {
+    let ocs_geom::geom2d::Curve::Polyline(geometry) = &curve.curve else {
         unreachable!()
     };
     let mut result = Vec::with_capacity(spans.len());
@@ -196,7 +196,7 @@ fn break_ellipse(ell: &EllipseEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
     let Some(spans) = picked_spans(&curve, p1, p2) else {
         return vec![EntityType::Ellipse(ell.clone())];
     };
-    let kernel::geom2d::Curve::Ellipse(geometry) = &curve.curve else {
+    let ocs_geom::geom2d::Curve::Ellipse(geometry) = &curve.curve else {
         unreachable!()
     };
     spans

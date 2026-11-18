@@ -1922,7 +1922,7 @@ pub enum CmdResult {
     /// rendering). Ends the command.
     CommitSolid {
         entity: EntityType,
-        solid: Box<kernel::brep::Body>,
+        solid: Box<ocs_brep::Body>,
         history: document::objects::SolidHistoryOperation,
         erase_source: Option<Handle>,
     },
@@ -2636,6 +2636,8 @@ pub enum CmdResult {
         handles: Vec<Handle>,
         distance: f64,
     },
+    /// A surface modelling command's gathered input, carried out by the app.
+    Surfacing(Box<crate::modules::surface::command::SurfaceRequest>),
     /// Resolve a profile, bounded area, or solid face for PRESSPULL.
     PresspullPick {
         handle: Option<Handle>,
@@ -2685,8 +2687,8 @@ pub enum CmdResult {
     /// Round or bevel one or more resolved B-rep edges on a solid.
     SolidEdgeBlend {
         handle: Handle,
-        edges: Vec<kernel::brep::EdgeKey>,
-        base_face: Option<kernel::brep::FaceKey>,
+        edges: Vec<ocs_brep::EdgeKey>,
+        base_face: Option<ocs_brep::FaceKey>,
         value: f64,
         other_value: f64,
         fillet: bool,
@@ -2712,13 +2714,13 @@ pub enum CmdResult {
     /// containing that WCS point.
     SliceEntities {
         targets: Vec<Handle>,
-        plane: kernel::space::Plane,
+        plane: ocs_geom::space::Plane,
         keep_point: Option<DVec3>,
     },
     /// Split selected solids or surfaces with one selected analytic sheet.
     SliceSurfaceEntities {
         targets: Vec<Handle>,
-        cutter: Box<kernel::brep::Body>,
+        cutter: Box<ocs_brep::Body>,
         keep_point: Option<DVec3>,
     },
     /// INSERT landed on a block that has AttributeDefinitions.

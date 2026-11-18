@@ -1,7 +1,7 @@
 // Kernel B-rep construction and display tessellation.
 
 use glam::DVec3;
-use kernel::brep::{self, Body, Curve3, EdgeKey, FaceKey, Surface};
+use ocs_brep::{self as brep, Body, Curve3, EdgeKey, FaceKey, Surface};
 
 use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
 use crate::scene::model::wire_model::WireModel;
@@ -12,7 +12,7 @@ const TOL: f64 = 1e-9;
 fn tessellation(body: &Body) -> brep::mesh::BodyMesh {
     brep::mesh::tessellate(
         body,
-        brep::mesh::TessellationTolerance::new(kernel::tessellation::DEFAULT_ANGLE, TOL),
+        brep::mesh::TessellationTolerance::new(ocs_geom::tessellation::DEFAULT_ANGLE, TOL),
     )
 }
 
@@ -45,8 +45,8 @@ fn display_tessellation(
         1.0
     };
     let max_angle = chordal_deflection.map_or_else(
-        || kernel::tessellation::angle_for_resolution(resolution),
-        |_| kernel::tessellation::display_angle_for_resolution(resolution),
+        || ocs_geom::tessellation::angle_for_resolution(resolution),
+        |_| ocs_geom::tessellation::display_angle_for_resolution(resolution),
     );
     let mut tolerance = with_isolines(
         brep::mesh::TessellationTolerance::new(max_angle, TOL),
@@ -293,7 +293,7 @@ pub fn grip_preview_wires(
 ) -> Vec<WireModel> {
     let tessellation = brep::mesh::tessellate(
         body,
-        brep::mesh::TessellationTolerance::new(kernel::tessellation::DEFAULT_ANGLE, TOL)
+        brep::mesh::TessellationTolerance::new(ocs_geom::tessellation::DEFAULT_ANGLE, TOL)
             .with_uv_isolines(isolines[0], isolines[1])
             .with_planar_isolines(planar_isolines),
     );
@@ -321,14 +321,14 @@ pub fn grip_preview_wires(
 
 /// B-rep edge nearest a world-space surface pick.
 pub fn nearest_edge(body: &Body, pick: [f64; 3]) -> Option<EdgeKey> {
-    let pick = kernel::space::Vec3::from(pick);
+    let pick = ocs_geom::space::Vec3::from(pick);
     body.edge_keys()
         .filter_map(|key| {
             let edge = body.edges.get(key)?;
             let curve = body.curves.get(edge.curve)?;
             let nearest = if matches!(curve, Curve3::Line(_)) {
-                let start = kernel::space::Vec3::from(curve.point_at(edge.start_parameter));
-                let end = kernel::space::Vec3::from(curve.point_at(edge.end_parameter));
+                let start = ocs_geom::space::Vec3::from(curve.point_at(edge.start_parameter));
+                let end = ocs_geom::space::Vec3::from(curve.point_at(edge.end_parameter));
                 let span = end - start;
                 let length2 = span.dot(span);
                 let along = if length2 > 0.0 {
@@ -343,7 +343,7 @@ pub fn nearest_edge(body: &Body, pick: [f64; 3]) -> Option<EdgeKey> {
                     .map(|step| {
                         let t = edge.start_parameter
                             + (edge.end_parameter - edge.start_parameter) * step as f64 / 64.0;
-                        pick.distance(kernel::space::Vec3::from(curve.point_at(t)))
+                        pick.distance(ocs_geom::space::Vec3::from(curve.point_at(t)))
                     })
                     .fold(f64::INFINITY, f64::min)
             };
@@ -396,7 +396,7 @@ pub fn planar_face_normal(body: &Body, face: FaceKey) -> Option<[f64; 3]> {
     let Surface::Plane(plane) = body.surfaces.get(face.surface)? else {
         return None;
     };
-    let normal = kernel::space::Vec3::from(plane.normal()?);
+    let normal = ocs_geom::space::Vec3::from(plane.normal()?);
     Some(if face.forward { normal } else { -normal }.to_array())
 }
 
@@ -418,7 +418,7 @@ pub fn planar_face_ucs(
     let pick_vec = DVec3::from_array(pick);
 
     // 1. Origin: snap to nearest face vertex to the pick point.
-    let mut best_origin: Option<(kernel::brep::VertexKey, DVec3, f64)> = None;
+    let mut best_origin: Option<(ocs_brep::VertexKey, DVec3, f64)> = None;
     for coedge_key in body.face_coedges(face) {
         let Some((va, vb)) = body.coedge_vertices(coedge_key) else {
             continue;
@@ -690,7 +690,7 @@ pub fn display_from_solid(
         })
         .collect();
     let mut mesh = mesh_from_tessellation(tessellation, color)?;
-    if let Some(properties) = kernel::brep::analytic_mass_properties(body) {
+    if let Some(properties) = ocs_brep::analytic_mass_properties(body) {
         mesh.apply_mass_properties(properties);
     }
     Some((mesh, wires, center))
@@ -732,7 +732,7 @@ fn mesh_center(mesh: &brep::mesh::Mesh) -> Option<[f64; 3]> {
 /// exists to test with.
 #[cfg(test)]
 pub fn volume(body: &Body) -> f64 {
-    use kernel::space::Vec3;
+    use ocs_geom::space::Vec3;
     let mesh = tessellation(body).mesh;
     let Some(middle) = centre(body) else {
         return 0.0;

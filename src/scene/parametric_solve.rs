@@ -7,28 +7,28 @@ use std::rc::Rc;
 use document::entities::EntityType;
 use document::types::{Handle, Vector3};
 
-use kernel_constraints::constraints::angle_distance::L2LAngle;
-use kernel_constraints::constraints::bspline::{Coord as SplineCoord, PointOnBSpline};
-use kernel_constraints::constraints::circle_arc::{C2LDistance, P2CDistance, TangentCircumf};
-use kernel_constraints::constraints::conic::{
+use ocs_constraints::constraints::angle_distance::L2LAngle;
+use ocs_constraints::constraints::bspline::{Coord as SplineCoord, PointOnBSpline};
+use ocs_constraints::constraints::circle_arc::{C2LDistance, P2CDistance, TangentCircumf};
+use ocs_constraints::constraints::conic::{
     EqualMajorAxesConic, PointOnEllipse, TangentEllipseLine,
 };
-use kernel_constraints::constraints::curve_generic::{BoundedArcValue, CurveValue};
-use kernel_constraints::constraints::point_line::{
+use ocs_constraints::constraints::curve_generic::{BoundedArcValue, CurveValue};
+use ocs_constraints::constraints::point_line::{
     CenterOfGravity, Difference, Equal, EqualLineLength, MidpointOnLine, P2PDistance,
     Parallel as ParallelConstraint, Perpendicular as PerpendicularConstraint, PointOnLine,
     ProjectedDistance, ProjectedDistanceAlongLine, SymmetricLineDirections,
 };
-use kernel_constraints::constraints::Constraint;
-use kernel_constraints::geo::{
+use ocs_constraints::constraints::Constraint;
+use ocs_constraints::geo::{
     Arc as GArc, BSpline as GBSpline, Circle as GCircle, Conic as GConic, Ellipse as GEllipse,
     Line as GLine, Point as GPoint,
 };
-use kernel_constraints::solvers::dogleg::solve_dl;
-use kernel_constraints::solvers::lm::solve_lm;
-use kernel_constraints::solvers::SolveStatus;
-use kernel_constraints::system::System;
-use kernel_constraints::util::ParamId;
+use ocs_constraints::solvers::dogleg::solve_dl;
+use ocs_constraints::solvers::lm::solve_lm;
+use ocs_constraints::solvers::SolveStatus;
+use ocs_constraints::system::System;
+use ocs_constraints::util::ParamId;
 
 use super::named_parameters::ParameterTable;
 use super::parametric_constraints::{
@@ -39,7 +39,7 @@ use super::{ChangeKind, Scene};
 
 pub(crate) mod status;
 
-/// One referenced entity's geometry, registered into an `kernel_constraints::System`'s
+/// One referenced entity's geometry, registered into an `ocs_constraints::System`'s
 /// parameter store.
 #[derive(Clone)]
 enum EntityGeom {
@@ -78,7 +78,7 @@ struct PolylineArc {
 }
 
 impl EntityGeom {
-    /// The `kernel_constraints::geo::Point` for a marker on this entity — `None` for
+    /// The `ocs_constraints::geo::Point` for a marker on this entity — `None` for
     /// a marker this entity type/value doesn't support (see
     /// `parametric_constraints::resolve_point` for the same convention on the
     /// read side).
@@ -251,7 +251,7 @@ fn register_entity_geom(
                         return None;
                     };
                     let bulge = polyline.vertices[index].bulge;
-                    let shape = kernel::geom2d::BulgeArc::from_bulge(
+                    let shape = ocs_geom::geom2d::BulgeArc::from_bulge(
                         [source[index].x, source[index].y],
                         [source[next].x, source[next].y],
                         bulge,
@@ -305,7 +305,7 @@ fn register_entity_geom(
                         return None;
                     };
                     let bulge = polyline.vertices[index].bulge;
-                    let shape = kernel::geom2d::BulgeArc::from_bulge(
+                    let shape = ocs_geom::geom2d::BulgeArc::from_bulge(
                         [source[index].x, source[index].y],
                         [source[next].x, source[next].y],
                         bulge,
@@ -418,7 +418,7 @@ fn register_entity_geom(
         }
         EntityType::Ellipse(el) => {
             // document's `Ellipse` is center + major-axis vector (its length
-            // is the major radius) + minor/major ratio; `kernel_constraints::geo::
+            // is the major radius) + minor/major ratio; `ocs_constraints::geo::
             // Ellipse` is center + one focus + minor radius. Converting:
             // minor_radius = major_radius * ratio, then the focus distance
             // c follows from a² = b² + c² (standard ellipse identity), and
@@ -589,7 +589,7 @@ fn resolve_constraint_point(
             vec![segment.arc.start_angle, segment.arc.end_angle],
             vec![0.5, 0.5],
         )));
-        let value = kernel_constraints::geo::Curve::value(
+        let value = ocs_constraints::geo::Curve::value(
             &segment.arc,
             sys.store(),
             parameter_value,
@@ -637,7 +637,7 @@ fn resolve_constraint_point(
                 vec![0.5, 0.5],
             )));
             let point = {
-                let value = kernel_constraints::geo::Curve::value(
+                let value = ocs_constraints::geo::Curve::value(
                     &arc,
                     sys.store(),
                     parameter_value,
@@ -664,7 +664,7 @@ fn resolve_constraint_point(
                 return None;
             }
             let parameter_value = (source.start_parameter + source.end_parameter) * 0.5;
-            let value = kernel_constraints::geo::Curve::value(
+            let value = ocs_constraints::geo::Curve::value(
                 &ellipse,
                 sys.store(),
                 parameter_value,
@@ -687,7 +687,7 @@ fn resolve_constraint_point(
             let from = curve.knots[curve.degree];
             let to = curve.knots[curve.poles.len()];
             let parameter_value = (from + to) * 0.5;
-            let value = kernel_constraints::geo::Curve::value(
+            let value = ocs_constraints::geo::Curve::value(
                 &curve,
                 sys.store(),
                 parameter_value,
@@ -817,7 +817,7 @@ fn refs_share_supported_plane(document: &document::Document, refs: &[ParametricR
 fn concentric_reference_geometry(
     document: &document::Document,
     reference: ParametricRef,
-) -> Option<(Vector3, kernel::space::Plane)> {
+) -> Option<(Vector3, ocs_geom::space::Plane)> {
     let marker = reference.marker?;
     if marker != -3 && reference.segment_center_index().is_none() {
         return None;
@@ -857,7 +857,7 @@ fn concentric_refs_share_plane(document: &document::Document, refs: &[Parametric
         [first_center.x, first_center.y, first_center.z],
         [second_center.x, second_center.y, second_center.z],
     ];
-    let tolerance = kernel::space::coplanarity_tolerance(&points);
+    let tolerance = ocs_geom::space::coplanarity_tolerance(&points);
     parallel
         && first_plane
             .distance_to(second_plane.origin)
@@ -951,9 +951,9 @@ fn apply_spatial_concentric_constraints(
     }
     fixed.sort_unstable();
     fixed.dedup();
-    let tolerance = kernel::space::coplanarity_tolerance(&points).max(MOVE_EPS);
+    let tolerance = ocs_geom::space::coplanarity_tolerance(&points).max(MOVE_EPS);
     let Some(translations) =
-        kernel::space::solve_rigid_point_coincidence(handles.len(), &relations, &fixed, tolerance)
+        ocs_geom::space::solve_rigid_point_coincidence(handles.len(), &relations, &fixed, tolerance)
     else {
         return;
     };
@@ -1029,9 +1029,9 @@ fn retained_tangent_side(
             .map(|index| curve.segments().into_iter().nth(index))
             .unwrap_or(Some(curve))
     };
-    let circle_center = |curve: &kernel::geom2d::Curve| match curve {
-        kernel::geom2d::Curve::Circle(circle) => Some(circle.centre),
-        kernel::geom2d::Curve::Arc(arc) => Some(arc.centre),
+    let circle_center = |curve: &ocs_geom::geom2d::Curve| match curve {
+        ocs_geom::geom2d::Curve::Circle(circle) => Some(circle.centre),
+        ocs_geom::geom2d::Curve::Arc(arc) => Some(arc.centre),
         _ => None,
     };
     let (a, b) = (curve(*a)?, curve(*b)?);
@@ -1958,25 +1958,25 @@ fn smooth_refs(refs: &[ParametricRef]) -> Option<(ParametricRef, ParametricRef, 
 fn smooth_target_planar_curve(
     entity: &EntityType,
     curve_reference: ParametricRef,
-) -> Option<kernel::space::PlanarCurve> {
+) -> Option<ocs_geom::space::PlanarCurve> {
     let planar = crate::entities::curve::entity_curve(entity)?;
     let Some(segment) = curve_reference.segment_index() else {
         return (!planar.is_closed()).then_some(planar);
     };
     let curve = planar.curve.segments().into_iter().nth(segment)?;
-    Some(kernel::space::PlanarCurve::new(planar.plane, curve))
+    Some(ocs_geom::space::PlanarCurve::new(planar.plane, curve))
 }
 
 fn smooth_endpoint_parameter(
     entity: &EntityType,
     endpoint_reference: ParametricRef,
-    curve: &kernel::space::PlanarCurve,
+    curve: &ocs_geom::space::PlanarCurve,
 ) -> Option<f64> {
     let marker = endpoint_reference.marker?;
     let endpoint = super::parametric_constraints::resolve_point(entity, marker)?;
-    let endpoint = kernel::space::Vec3::new(endpoint.x, endpoint.y, endpoint.z);
-    let start = kernel::space::Vec3::from(curve.point_at(0.0));
-    let end = kernel::space::Vec3::from(curve.point_at(1.0));
+    let endpoint = ocs_geom::space::Vec3::new(endpoint.x, endpoint.y, endpoint.z);
+    let start = ocs_geom::space::Vec3::from(curve.point_at(0.0));
+    let end = ocs_geom::space::Vec3::from(curve.point_at(1.0));
     Some(if endpoint.distance(start) <= endpoint.distance(end) {
         0.0
     } else {
@@ -1988,16 +1988,16 @@ fn smooth_target_jet(
     entity: &EntityType,
     endpoint_reference: ParametricRef,
     curve_reference: ParametricRef,
-) -> Option<kernel::space::CurveJet> {
+) -> Option<ocs_geom::space::CurveJet> {
     if curve_reference.segment_index().is_none() {
         if let EntityType::Spline(spline) = entity {
             let endpoint = match endpoint_reference.marker {
-                Some(0) => kernel::space::SplineEnd::Start,
-                Some(1) => kernel::space::SplineEnd::End,
+                Some(0) => ocs_geom::space::SplineEnd::Start,
+                Some(1) => ocs_geom::space::SplineEnd::End,
                 _ => return None,
             };
             let nurbs = crate::entities::spline::nurbs3(spline)?;
-            return kernel::space::CurveJet::from_nurbs(&nurbs, endpoint);
+            return ocs_geom::space::CurveJet::from_nurbs(&nurbs, endpoint);
         }
     }
 
@@ -2007,34 +2007,34 @@ fn smooth_target_jet(
     let point = curve.point_at(parameter);
     let tangent = curve.tangent_at(parameter);
     match &curve.curve {
-        kernel::geom2d::Curve::Line(_) => kernel::space::CurveJet::linear(point, tangent),
-        kernel::geom2d::Curve::Arc(arc) => {
-            kernel::space::CurveJet::circular(point, tangent, curve.plane.point_at(arc.centre))
+        ocs_geom::geom2d::Curve::Line(_) => ocs_geom::space::CurveJet::linear(point, tangent),
+        ocs_geom::geom2d::Curve::Arc(arc) => {
+            ocs_geom::space::CurveJet::circular(point, tangent, curve.plane.point_at(arc.centre))
         }
         _ => None,
     }
 }
 
-fn smooth_spline_plane(spline: &document::entities::Spline) -> Option<kernel::space::Plane> {
+fn smooth_spline_plane(spline: &document::entities::Spline) -> Option<ocs_geom::space::Plane> {
     let source = if crate::entities::spline::uses_fit_method(spline) {
         &spline.fit_points
     } else {
         &spline.control_points
     };
     let origin = source.first()?;
-    let origin_vector = kernel::space::Vec3::new(origin.x, origin.y, origin.z);
+    let origin_vector = ocs_geom::space::Vec3::new(origin.x, origin.y, origin.z);
     let along = source
         .iter()
         .skip(1)
-        .map(|point| kernel::space::Vec3::new(point.x, point.y, point.z) - origin_vector)
+        .map(|point| ocs_geom::space::Vec3::new(point.x, point.y, point.z) - origin_vector)
         .find(|vector| vector.length_squared() > 1.0e-24)?;
     let normal = source
         .iter()
         .skip(1)
-        .map(|point| kernel::space::Vec3::new(point.x, point.y, point.z) - origin_vector)
+        .map(|point| ocs_geom::space::Vec3::new(point.x, point.y, point.z) - origin_vector)
         .map(|vector| along.cross(vector))
         .find(|vector| vector.length_squared() > 1.0e-24)?;
-    let plane = kernel::space::Plane::orthonormal(
+    let plane = ocs_geom::space::Plane::orthonormal(
         origin_vector.to_array(),
         along.to_array(),
         normal.to_array(),
@@ -2043,7 +2043,7 @@ fn smooth_spline_plane(spline: &document::entities::Spline) -> Option<kernel::sp
         .iter()
         .map(|point| [point.x, point.y, point.z])
         .collect();
-    let tolerance = kernel::space::coplanarity_tolerance(&points);
+    let tolerance = ocs_geom::space::coplanarity_tolerance(&points);
     source
         .iter()
         .all(|point| plane.contains([point.x, point.y, point.z], tolerance))
@@ -2053,7 +2053,7 @@ fn smooth_spline_plane(spline: &document::entities::Spline) -> Option<kernel::sp
 fn smooth_entity_plane(
     entity: &EntityType,
     curve_reference: ParametricRef,
-) -> Option<kernel::space::Plane> {
+) -> Option<ocs_geom::space::Plane> {
     if let EntityType::Spline(spline) = entity {
         return crate::entities::curve::entity_curve(entity)
             .map(|curve| curve.plane)
@@ -2082,7 +2082,7 @@ fn smooth_refs_share_plane(
         return false;
     };
     let points = [source_plane.origin, target_plane.origin];
-    let tolerance = kernel::space::coplanarity_tolerance(&points);
+    let tolerance = ocs_geom::space::coplanarity_tolerance(&points);
     if let EntityType::Line(line) = target_entity {
         return source_plane.contains([line.start.x, line.start.y, line.start.z], tolerance)
             && source_plane.contains([line.end.x, line.end.y, line.end.z], tolerance);
@@ -2091,8 +2091,8 @@ fn smooth_refs_share_plane(
     else {
         return false;
     };
-    kernel::space::Vec3::from(source_normal)
-        .cross(kernel::space::Vec3::from(target_normal))
+    ocs_geom::space::Vec3::from(source_normal)
+        .cross(ocs_geom::space::Vec3::from(target_normal))
         .length()
         <= 1.0e-9
         && source_plane.contains(target_plane.origin, tolerance)
@@ -2125,8 +2125,8 @@ fn apply_smooth_constraints(
             continue;
         };
         let endpoint = match source_ref.marker {
-            Some(0) => kernel::space::SplineEnd::Start,
-            Some(1) => kernel::space::SplineEnd::End,
+            Some(0) => ocs_geom::space::SplineEnd::Start,
+            Some(1) => ocs_geom::space::SplineEnd::End,
             _ => continue,
         };
         let Some(target_jet) = smooth_target_jet(&target, target_ref, target_curve_ref) else {
@@ -2135,7 +2135,7 @@ fn apply_smooth_constraints(
         let Some(curve) = crate::entities::spline::nurbs3(&spline) else {
             continue;
         };
-        let Some(smoothed) = kernel::space::smooth_nurbs_endpoint(&curve, endpoint, target_jet)
+        let Some(smoothed) = ocs_geom::space::smooth_nurbs_endpoint(&curve, endpoint, target_jet)
         else {
             continue;
         };
@@ -2156,7 +2156,7 @@ const MOVE_EPS: f64 = 1e-9;
 /// The fixpoint gate for `solve_scope`: a scope whose every constraint row
 /// already evaluates to zero at the current values is not iterated at all.
 /// Mirrors the kernel solvers' own convergence tolerance (`TOLF = 1e-10` in
-/// `kernel_constraints::solvers::dogleg`, the bound `solve_dl` exits on) so
+/// `ocs_constraints::solvers::dogleg`, the bound `solve_dl` exits on) so
 /// "already converged" means exactly what the solver itself would conclude.
 const FIXPOINT_TOLF: f64 = 1.0e-10;
 /// How far a constraint may be off after a solve and still count as held.
@@ -2164,7 +2164,7 @@ const SATISFIED_TOL: f64 = 1.0e-7;
 type SolveResult = (
     Vec<(Handle, EntityType)>,
     usize,
-    Vec<(ConstraintId, kernel_constraints::diagnosis::RedundancyKind)>,
+    Vec<(ConstraintId, ocs_constraints::diagnosis::RedundancyKind)>,
     // Whether the scope's own constraints hold after the solve.
     bool,
 );
@@ -3109,7 +3109,7 @@ fn solve_scope(
     status::add_intrinsic_arc_rules(&mut sys, &cache);
 
     // Ellipse rules (same motivation as arc rules, different mechanism):
-    // `kernel_constraints::geo::Ellipse` stores `focus1` as an absolute point, not an
+    // `ocs_constraints::geo::Ellipse` stores `focus1` as an absolute point, not an
     // offset from `center`. If some constraint (e.g. Concentric) pulls only
     // on `center` and nothing references `focus1`/`radmin`, the solver
     // correctly leaves `focus1`'s *absolute* coordinates untouched — but
@@ -3326,7 +3326,7 @@ fn solve_scope(
         // line's X after only a Horizontal constraint pins its Ys) is invisible
         // to `diagnose` entirely, undercounting DOF. Every such untouched free
         // param is unconstrained on its own, i.e. exactly 1 DOF each — added
-        // back here rather than fixed in `kernel_constraints::diagnosis`, which correctly
+        // back here rather than fixed in `ocs_constraints::diagnosis`, which correctly
         // has no opinion on params outside the `SubSystem` it was handed.
         let total_free: usize = cache
             .values()
@@ -3354,10 +3354,10 @@ fn solve_scope(
             .sum();
         let touched_free: usize = partitions.iter().map(|s| s.p_size()).sum();
         let mut dof = total_free.saturating_sub(touched_free);
-        let mut conflicts: Vec<(ConstraintId, kernel_constraints::diagnosis::RedundancyKind)> =
+        let mut conflicts: Vec<(ConstraintId, ocs_constraints::diagnosis::RedundancyKind)> =
             Vec::new();
         for sub in &partitions {
-            let diag = kernel_constraints::diagnosis::diagnose(sub, sys.store());
+            let diag = ocs_constraints::diagnosis::diagnose(sub, sys.store());
             dof += diag.dof;
             if diag.redundant.is_empty() {
                 continue;
@@ -3375,7 +3375,7 @@ fn solve_scope(
                 })
                 .collect();
             for (row, kind) in
-                kernel_constraints::diagnosis::classify_redundant(sub, sys.store(), &reportable)
+                ocs_constraints::diagnosis::classify_redundant(sub, sys.store(), &reportable)
             {
                 let row_constraint = &sub.constraints()[row];
                 if let Some(&(_, id)) = owner.iter().find(|(rc, _)| Rc::ptr_eq(rc, row_constraint))
@@ -3680,7 +3680,7 @@ fn solve_scope(
                 // Converting back to document's center + major-axis-vector +
                 // minor/major-ratio parametrization — the inverse of
                 // `register_entity`'s `Ellipse` arm. `rad_maj_at` (already
-                // provided by `kernel_constraints::geo::Ellipse`) does the a²=b²+c²
+                // provided by `ocs_constraints::geo::Ellipse`) does the a²=b²+c²
                 // algebra; only the major-axis *direction* needs deriving
                 // here, from the (possibly moved) focus relative to center.
                 let (cx, cy) = (store.get(g.center.x), store.get(g.center.y));
@@ -3804,8 +3804,8 @@ impl Scene {
                 return Err("Smooth requires an open spline.");
             }
             let endpoint = match source_ref.marker {
-                Some(0) => kernel::space::SplineEnd::Start,
-                Some(1) => kernel::space::SplineEnd::End,
+                Some(0) => ocs_geom::space::SplineEnd::Start,
+                Some(1) => ocs_geom::space::SplineEnd::End,
                 _ => return Err("Smooth requires a spline endpoint."),
             };
             let Some(_) = target_ref.marker else {
@@ -3823,7 +3823,7 @@ impl Scene {
             let Some(curve) = crate::entities::spline::nurbs3(spline) else {
                 return Err("The selected spline cannot be evaluated.");
             };
-            if kernel::space::smooth_nurbs_endpoint(&curve, endpoint, target_jet).is_none() {
+            if ocs_geom::space::smooth_nurbs_endpoint(&curve, endpoint, target_jet).is_none() {
                 return Err("The selected spline cannot satisfy curvature continuity.");
             }
             return Ok(());
@@ -4775,7 +4775,7 @@ mod tests {
             document::entities::LwVertex::from_coords(10.0, 0.0),
         ];
         let handle = scene.add_entity(EntityType::LwPolyline(polyline));
-        let mut system = kernel_constraints::system::System::new();
+        let mut system = ocs_constraints::system::System::new();
         let geometry = super::register_entity(&scene.document, &mut system, handle).unwrap();
         let segment = geometry.arc_segment(0).expect("expected an arc segment");
 
@@ -5174,7 +5174,7 @@ mod tests {
             Vector3::new(3.0, 2.0, 0.0),
             Vector3::new(5.0, 3.0, 0.0),
         ];
-        spline.knots = kernel::space::clamped_uniform_knots(3, 4);
+        spline.knots = ocs_geom::space::clamped_uniform_knots(3, 4);
         let spline = scene.add_entity(EntityType::Spline(spline));
         scene
             .parametric_constraint_set_mut(ParametricScope::ModelSpace)
@@ -5198,11 +5198,11 @@ mod tests {
         };
         let curve = crate::entities::spline::nurbs3(spline).unwrap();
         let jet =
-            kernel::space::CurveJet::from_nurbs(&curve, kernel::space::SplineEnd::Start).unwrap();
+            ocs_geom::space::CurveJet::from_nurbs(&curve, ocs_geom::space::SplineEnd::Start).unwrap();
         assert!((jet.point[0] - 0.0).abs() < 1e-9);
         assert!((jet.point[1] - 1.0).abs() < 1e-9);
         assert!(jet.tangent[1].abs() < 1e-9, "jet={jet:?}");
-        assert!(kernel::space::Vec3::from(jet.curvature).length() < 5e-3);
+        assert!(ocs_geom::space::Vec3::from(jet.curvature).length() < 5e-3);
     }
 
     #[test]
@@ -5222,7 +5222,7 @@ mod tests {
             Vector3::new(4.0, 3.0, 0.0),
             Vector3::new(5.0, 3.0, 0.0),
         ];
-        spline.knots = kernel::space::clamped_uniform_knots(3, 4);
+        spline.knots = ocs_geom::space::clamped_uniform_knots(3, 4);
         let spline = scene.add_entity(EntityType::Spline(spline));
         scene
             .parametric_constraint_set_mut(ParametricScope::ModelSpace)
@@ -5243,11 +5243,11 @@ mod tests {
         };
         let curve = crate::entities::spline::nurbs3(spline).unwrap();
         let jet =
-            kernel::space::CurveJet::from_nurbs(&curve, kernel::space::SplineEnd::Start).unwrap();
-        assert!(kernel::space::Vec3::from(jet.point).length() < 1.0e-9);
+            ocs_geom::space::CurveJet::from_nurbs(&curve, ocs_geom::space::SplineEnd::Start).unwrap();
+        assert!(ocs_geom::space::Vec3::from(jet.point).length() < 1.0e-9);
         assert!(jet.tangent[0].abs() < 1.0e-9, "jet={jet:?}");
         assert!(
-            (kernel::space::Vec3::from(jet.curvature).length() - 0.2).abs() < 2.0e-4,
+            (ocs_geom::space::Vec3::from(jet.curvature).length() - 0.2).abs() < 2.0e-4,
             "jet={jet:?}"
         );
     }
@@ -5268,7 +5268,7 @@ mod tests {
             Vector3::new(4.0, 0.0, 2.0),
             Vector3::new(5.0, 0.0, 3.0),
         ];
-        source.knots = kernel::space::clamped_uniform_knots(3, 4);
+        source.knots = ocs_geom::space::clamped_uniform_knots(3, 4);
         let source = scene.add_entity(EntityType::Spline(source));
         let refs = vec![
             ParametricRef::point(source, 0),
@@ -5288,9 +5288,9 @@ mod tests {
         };
         let curve = crate::entities::spline::nurbs3(source).unwrap();
         let jet =
-            kernel::space::CurveJet::from_nurbs(&curve, kernel::space::SplineEnd::Start).unwrap();
+            ocs_geom::space::CurveJet::from_nurbs(&curve, ocs_geom::space::SplineEnd::Start).unwrap();
         assert!(
-            kernel::space::Vec3::from(jet.point).distance(kernel::space::Vec3::new(0.0, 0.0, 1.0))
+            ocs_geom::space::Vec3::from(jet.point).distance(ocs_geom::space::Vec3::new(0.0, 0.0, 1.0))
                 < 1.0e-9
         );
         assert!(jet.tangent[1].abs() < 1.0e-9 && jet.tangent[2].abs() < 1.0e-9);

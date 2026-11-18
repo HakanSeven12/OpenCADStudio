@@ -2,8 +2,8 @@ use document::entities::MLine;
 use document::objects::MLineStyle;
 use document::{EntityType, Handle};
 use glam::DVec3;
-use kernel::geom2d::{Curve, Line};
-use kernel::space::{PlanarCurve, Plane, Vec3 as KernelVec3};
+use ocs_geom::geom2d::{Curve, Line};
+use ocs_geom::space::{PlanarCurve, Plane, Vec3 as KernelVec3};
 use rustc_hash::FxHashMap as HashMap;
 
 use crate::command::{CadCommand, CmdOption, CmdResult};
@@ -1083,26 +1083,26 @@ fn segment_intersection(
     second: (DVec3, DVec3),
     normal: DVec3,
 ) -> Option<(DVec3, f64, f64, f64)> {
-    let axis = (kernel::space::Vec3::from(first.1.to_array())
-        - kernel::space::Vec3::from(first.0.to_array()))
+    let axis = (ocs_geom::space::Vec3::from(first.1.to_array())
+        - ocs_geom::space::Vec3::from(first.0.to_array()))
     .normalize()?
     .to_array();
-    let plane = kernel::space::Plane::orthonormal(first.0.to_array(), axis, normal.to_array())?;
+    let plane = ocs_geom::space::Plane::orthonormal(first.0.to_array(), axis, normal.to_array())?;
     let points = [
         first.0.to_array(),
         first.1.to_array(),
         second.0.to_array(),
         second.1.to_array(),
     ];
-    let tolerance = kernel::space::coplanarity_tolerance(&points);
+    let tolerance = ocs_geom::space::coplanarity_tolerance(&points);
     if !plane.contains(points[2], tolerance) || !plane.contains(points[3], tolerance) {
         return None;
     }
-    let p = kernel::geom2d::Vec2::from(plane.project(points[0])?);
-    let q = kernel::geom2d::Vec2::from(plane.project(points[2])?);
-    let r = kernel::geom2d::Vec2::from(plane.project(points[1])?) - p;
-    let s = kernel::geom2d::Vec2::from(plane.project(points[3])?) - q;
-    let (t, u) = kernel::geom2d::intersect::line_line(
+    let p = ocs_geom::geom2d::Vec2::from(plane.project(points[0])?);
+    let q = ocs_geom::geom2d::Vec2::from(plane.project(points[2])?);
+    let r = ocs_geom::geom2d::Vec2::from(plane.project(points[1])?) - p;
+    let s = ocs_geom::geom2d::Vec2::from(plane.project(points[3])?) - q;
+    let (t, u) = ocs_geom::geom2d::intersect::line_line(
         p.to_array(),
         r.to_array(),
         q.to_array(),

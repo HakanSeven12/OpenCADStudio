@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use document::types::{Color as AcadColor, LineWeight, Transform, Vector3};
 use document::{Document, EntityType, Handle};
-use kernel::space::{Plane as KernelPlane, Vec3 as KernelVec3};
+use ocs_geom::space::{Plane as KernelPlane, Vec3 as KernelVec3};
 
 use crate::scene::convert::tessellate;
 use crate::scene::model::wire_model::{

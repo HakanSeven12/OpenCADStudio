@@ -848,7 +848,7 @@ fn parse_angle_deg_unbounded(value: &str) -> Option<f64> {
 /// Re-exported rather than imported at each call site so the twelve modules
 /// that already reach for `entities::common::BulgeArc` keep working, and so
 /// there is one obvious place to see that the maths moved out.
-pub use kernel::geom2d::BulgeArc;
+pub use ocs_geom::geom2d::BulgeArc;
 
 /// Convert a 2D BulgeArc into a 3D TangentGeom::Arc with its world center,
 /// plane axes, radius, and counter-clockwise start/end sweep angles.
@@ -1047,7 +1047,7 @@ pub(crate) fn tapered_band_points(
         if bulge.abs() < 1e-9 {
             push(Some((p1[0], p1[1])), ew0 as f32);
         } else if let Some(arc) = BulgeArc::from_bulge(p0, p1, bulge) {
-            let samples = arc.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE);
+            let samples = arc.tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE);
             let segments = samples.len().saturating_sub(1).max(1);
             for (index, s) in samples.into_iter().enumerate().skip(1) {
                 let t = index as f64 / segments as f64;
@@ -1073,10 +1073,10 @@ pub(crate) fn wide_band_outline(
     restart_per_segment: bool,
     to_wcs: &dyn Fn(f64, f64) -> (f64, f64, f64),
 ) -> WideBandOutline {
-    let source = kernel::geom2d::Polyline {
+    let source = ocs_geom::geom2d::Polyline {
         vertices: verts
             .iter()
-            .map(|(position, bulge, _, _)| kernel::geom2d::PolylineVertex {
+            .map(|(position, bulge, _, _)| ocs_geom::geom2d::PolylineVertex {
                 position: *position,
                 bulge: *bulge,
             })
@@ -1093,10 +1093,10 @@ pub(crate) fn wide_band_outline(
         .take(segment_count)
         .map(|(_, _, start, end)| [*start, *end])
         .collect();
-    let boundary = kernel::geom2d::polyline_band_boundary(
+    let boundary = ocs_geom::geom2d::polyline_band_boundary(
         &source,
         &widths,
-        kernel::tessellation::DEFAULT_ANGLE,
+        ocs_geom::tessellation::DEFAULT_ANGLE,
     );
     let mut points = Vec::new();
     let mut stations = Vec::new();

@@ -4,7 +4,7 @@
 
 use document::entities::acis::{SabReader, SabWriter, SatDocument};
 use ocs_acis::append;
-use kernel::brep::Body;
+use ocs_brep::Body;
 
 /// Returns `None` when the body contains an unsupported record form.
 pub fn solid_to_sat(body: &Body) -> Option<SatDocument> {
@@ -25,8 +25,8 @@ pub fn solid_to_sat(body: &Body) -> Option<SatDocument> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kernel::geom2d::{Arc, Curve};
-    use kernel::space::Plane;
+    use ocs_geom::geom2d::{Arc, Curve};
+    use ocs_geom::space::Plane;
 
     fn circle_section(z: f64, radius: f64) -> (Plane, Vec<Curve>) {
         let curves = (0..4)
@@ -49,7 +49,7 @@ mod tests {
     #[test]
     fn a_curved_loft_round_trips_through_text_and_binary_acis() {
         let body =
-            kernel::brep::loft(&[circle_section(0.0, 5.0), circle_section(10.0, 2.0)]).unwrap();
+            ocs_brep::loft(&[circle_section(0.0, 5.0), circle_section(10.0, 2.0)]).unwrap();
         assert!(body.validate().is_empty());
 
         let mut document = SatDocument::new();

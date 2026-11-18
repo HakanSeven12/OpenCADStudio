@@ -10,4 +10,5 @@ publish = false
 
 [dependencies]
 document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "6ac42925a5c5b35d705ae9a66b818446a78bc00e" }
-kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "7b5ed9d", features = ["brep"] }
+ocs_geom = { path = "../ocs_geom" }
+ocs_brep = { path = "../ocs_brep" }

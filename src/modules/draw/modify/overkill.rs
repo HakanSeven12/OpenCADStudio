@@ -346,7 +346,7 @@ pub fn optimize(entity: &mut EntityType, tolerance: f64) {
             .iter()
             .map(|v| [v.location.x, v.location.y, p.elevation])
             .collect();
-        let indices = kernel::space::simplify_linear_chain(&points, tolerance);
+        let indices = ocs_geom::space::simplify_linear_chain(&points, tolerance);
         if indices.len() >= if p.is_closed { 3 } else { 2 } {
             p.vertices = indices.into_iter().map(|i| p.vertices[i]).collect();
         }
@@ -448,8 +448,8 @@ fn compare(
     b: &Entry,
     s: &Settings,
 ) -> Option<Outcome> {
-    use kernel::space::arc_union::{circular_arc_union, ArcUnionKind, CircularArc};
-    use kernel::space::LineUnionKind;
+    use ocs_geom::space::arc_union::{circular_arc_union, ArcUnionKind, CircularArc};
+    use ocs_geom::space::LineUnionKind;
     let tolerance = s.tolerance;
     let circular = |e: &EntityType| matches!(e, EntityType::Arc(_) | EntityType::Circle(_));
     if std::mem::discriminant(first) != std::mem::discriminant(second)
@@ -471,7 +471,7 @@ fn compare(
         (EntityType::Arc(_), EntityType::Circle(_)) => Some(Outcome::DropFirst),
         (EntityType::Line(l), EntityType::Line(r)) => {
             let point = |p: document::types::Vector3| [p.x, p.y, p.z];
-            let union = kernel::space::line_union(
+            let union = ocs_geom::space::line_union(
                 [point(l.start), point(l.end)],
                 [point(r.start), point(r.end)],
                 tolerance,

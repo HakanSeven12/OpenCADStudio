@@ -4,12 +4,12 @@
 
 use document::entities::acis::types::{SatDocument, SatPointer, SatRecord, SatToken};
 use document::entities::acis::SplineNet;
-use kernel::brep::{
+use ocs_brep::{
     Body, CoedgeKey, Curve3, CurveKey, EdgeKey, FaceKey, LoopKey, LumpKey, ShellKey, Surface,
     SurfaceKey, VertexKey,
 };
-use kernel::geom2d::Curve as Curve2;
-use kernel::space::Vec3;
+use ocs_geom::geom2d::Curve as Curve2;
+use ocs_geom::space::Vec3;
 use std::collections::HashMap;
 
 /// Why a body could not be written.
@@ -45,7 +45,7 @@ pub fn append(body: &Body, document: &mut SatDocument) -> Result<Written, Unappe
     if body
         .validate()
         .iter()
-        .any(|flaw| !matches!(flaw, kernel::brep::Flaw::NonManifoldEdge(_)))
+        .any(|flaw| !matches!(flaw, ocs_brep::Flaw::NonManifoldEdge(_)))
     {
         return Err(Unappendable::Inconsistent);
     }
@@ -284,7 +284,7 @@ pub fn append_polyline_wire(
         let (start, end) = (Vec3::from(points[index]), Vec3::from(points[(index + 1) % points.len()]));
         let length = start.distance(end);
         let direction = (end - start).normalize().ok_or(Unappendable::Inconsistent)?;
-        let line = Curve3::Line(kernel::brep::Line3 { origin: start.to_array(), direction: direction.to_array() });
+        let line = Curve3::Line(ocs_brep::Line3 { origin: start.to_array(), direction: direction.to_array() });
         curves.push(add_curve(document, &line).ok_or(Unappendable::Curve)?);
         lengths.push(length);
     }
@@ -434,7 +434,7 @@ struct Net {
 }
 
 impl Net {
-    fn of(surface: &kernel::space::NurbsSurface3) -> Self {
+    fn of(surface: &ocs_geom::space::NurbsSurface3) -> Self {
         let (u_degree, v_degree) = surface.degrees();
         let (u_knots, v_knots) = surface.knots();
         let controls = surface.control_points();
@@ -484,7 +484,7 @@ impl Net {
     }
 }
 
-fn add_nurbs_surface(document: &mut SatDocument, surface: &kernel::space::NurbsSurface3) -> i32 {
+fn add_nurbs_surface(document: &mut SatDocument, surface: &ocs_geom::space::NurbsSurface3) -> i32 {
     let net = Net::of(surface);
     let view = net.view();
     document.add_spline_surface(
@@ -504,7 +504,7 @@ fn add_nurbs_surface(document: &mut SatDocument, surface: &kernel::space::NurbsS
 
 /// An offset surface as its ACIS 7 `offsur` record: the base, the distance
 /// and the approximation the kernel evaluates.
-fn add_offset_surface(document: &mut SatDocument, offset: &kernel::brep::OffsetSurface) -> i32 {
+fn add_offset_surface(document: &mut SatDocument, offset: &ocs_brep::OffsetSurface) -> i32 {
     let (base, approximation) = (Net::of(&offset.base), Net::of(&offset.approximation));
     document.add_offset_spline_surface(
         offset.approximation.v_reversed(),
@@ -528,7 +528,7 @@ fn add_curve(document: &mut SatDocument, curve: &Curve3) -> Option<i32> {
                 .iter()
                 .map(|knot| (knot - start) / width)
                 .collect();
-            kernel::space::NurbsCurve3::new_strict(
+            ocs_geom::space::NurbsCurve3::new_strict(
                 curve.degree(),
                 curve
                     .control_points()
@@ -564,11 +564,11 @@ fn add_curve(document: &mut SatDocument, curve: &Curve3) -> Option<i32> {
 /// the loop's direction, which the reference rejects as an invalid solid.
 fn acis_pcurve(
     body: &Body,
-    coedge: &kernel::brep::Coedge,
+    coedge: &ocs_brep::Coedge,
     surface: SurfaceKey,
     pcurve: &Curve2,
 ) -> Option<Curve2> {
-    use kernel::geom2d::NurbsCurve;
+    use ocs_geom::geom2d::NurbsCurve;
     let nurbs = match pcurve {
         Curve2::Line(line) => NurbsCurve::new_strict(1, vec![line.start, line.end], vec![0.0, 0.0, 1.0, 1.0], vec![1.0, 1.0])?,
         Curve2::Nurbs(curve) => curve.clone(),

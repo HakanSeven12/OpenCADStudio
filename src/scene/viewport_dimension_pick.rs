@@ -318,11 +318,11 @@ fn wire_polyline_nearest(
             continue;
         }
         let nearest = previous.map_or(current, |start| {
-            let segment = kernel::geom2d::Curve::Line(kernel::geom2d::Line {
+            let segment = ocs_geom::geom2d::Curve::Line(ocs_geom::geom2d::Line {
                 start: start.truncate().to_array(),
                 end: current.truncate().to_array(),
             });
-            let near = kernel::geom2d::closest_point(&segment, point.truncate().to_array());
+            let near = ocs_geom::geom2d::closest_point(&segment, point.truncate().to_array());
             start.lerp(current, near.t)
         });
         let distance = (nearest - point).truncate().length();
@@ -361,7 +361,7 @@ pub fn planar_pick_distance(entity: &EntityType, point: DVec3) -> Option<f64> {
         return None;
     }
     let uv = planar.plane.project(point.to_array())?;
-    let nearest = kernel::geom2d::closest_point(&planar.curve, uv);
+    let nearest = ocs_geom::geom2d::closest_point(&planar.curve, uv);
     Some(
         (DVec3::from_array(planar.plane.point_at(nearest.point)) - point)
             .truncate()
@@ -425,11 +425,11 @@ pub(crate) fn feature_pick_distance(
         },
         Some(S::Midpoint | S::Quadrant) => {
             let planar = crate::entities::curve::entity_curve(entity)?;
-            kernel::geom2d::snap::characteristic_points(&planar.curve)
+            ocs_geom::geom2d::snap::characteristic_points(&planar.curve)
                 .into_iter()
                 .filter(|p| match kind {
-                    Some(S::Midpoint) => p.kind == kernel::geom2d::snap::SnapKind::Midpoint,
-                    _ => p.kind == kernel::geom2d::snap::SnapKind::Quadrant,
+                    Some(S::Midpoint) => p.kind == ocs_geom::geom2d::snap::SnapKind::Midpoint,
+                    _ => p.kind == ocs_geom::geom2d::snap::SnapKind::Quadrant,
                 })
                 .map(|p| {
                     let p = planar.plane.point_at(p.point);

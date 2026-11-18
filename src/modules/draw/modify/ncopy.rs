@@ -200,14 +200,14 @@ impl CadCommand for NcopyCommand {
                     let distance = if let Some(curve) = crate::entities::curve::entity_curve(entity)
                     {
                         let projected = curve.plane.project([point.x, point.y, point.z])?;
-                        kernel::geom2d::closest_point(&curve.curve, projected)
+                        ocs_geom::geom2d::closest_point(&curve.curve, projected)
                             .distance
                             .hypot(curve.plane.distance_to(point.to_array())?)
                     } else {
                         let path = self.hit_paths.get(&handle)?.get(index)?;
-                        let point = kernel::space::Vec3::from(point.to_array());
+                        let point = ocs_geom::space::Vec3::from(point.to_array());
                         if path.len() == 1 {
-                            point.distance(kernel::space::Vec3::from(path[0]))
+                            point.distance(ocs_geom::space::Vec3::from(path[0]))
                         } else {
                             path.windows(2)
                                 .filter(|segment| segment.iter().flatten().all(|v| v.is_finite()))

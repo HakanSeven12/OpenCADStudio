@@ -202,7 +202,7 @@ fn assert_region(app: &OpenCADStudio, fixture: &Fixture, min_x: f64, max_x: f64)
     for x in [-1.0, 1.0, 4.0, 6.0, 7.5, 9.0, 11.0, 15.0, 19.0, 21.0] {
         for y in [-1.0, 1.0, 5.0, 9.0, 11.0] {
             let inside =
-                kernel::geom2d::contains(&boundary, [x, y], kernel::geom2d::Tolerance::new(1e-8));
+                ocs_geom::geom2d::contains(&boundary, [x, y], ocs_geom::geom2d::Tolerance::new(1e-8));
             assert_eq!(
                 inside,
                 x > min_x && x < max_x && y > 0.0 && y < 10.0,

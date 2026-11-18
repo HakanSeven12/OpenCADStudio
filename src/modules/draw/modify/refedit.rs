@@ -244,12 +244,12 @@ pub fn hit_paths(
 
 /// Distance from `point` to a set of paths.
 pub fn paths_distance(paths: &[Vec<[f64; 3]>], point: DVec3) -> Option<f64> {
-    let p = kernel::space::Vec3::from(point.to_array());
+    let p = ocs_geom::space::Vec3::from(point.to_array());
     paths
         .iter()
         .filter_map(|path| {
             if path.len() == 1 {
-                return Some(p.distance(kernel::space::Vec3::from(path[0])));
+                return Some(p.distance(ocs_geom::space::Vec3::from(path[0])));
             }
             path.windows(2)
                 .filter(|s| s.iter().flatten().all(|v| v.is_finite()))

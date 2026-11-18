@@ -1,5 +1,5 @@
 use document::entities::{LwPolyline, LwVertex};
-use kernel::geom2d::{Curve, Polyline, PolylineVertex, RectangleFrame, Tolerance, Vec2};
+use ocs_geom::geom2d::{Curve, Polyline, PolylineVertex, RectangleFrame, Tolerance, Vec2};
 
 use crate::t;
 
@@ -369,7 +369,7 @@ fn to_render(pline: &LwPolyline, fill_mode: bool) -> RenderEntity {
                     &arc, &to_wcs, normal,
                 ));
                 for s in arc
-                    .tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
+                    .tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE)
                     .into_iter()
                     .skip(1)
                 {
@@ -468,7 +468,7 @@ fn to_render(pline: &LwPolyline, fill_mode: bool) -> RenderEntity {
                 crate::entities::common::BulgeArc::from_bulge([ox0, oy0], [ox1, oy1], bulge)
             {
                 for s in arc
-                    .tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
+                    .tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE)
                     .into_iter()
                     .skip(1)
                 {
@@ -636,7 +636,7 @@ pub(crate) fn is_revision_cloud(pline: &LwPolyline) -> bool {
 
 pub(crate) fn rectangle_frame(
     pline: &LwPolyline,
-) -> Option<(RectangleFrame, kernel::space::Plane)> {
+) -> Option<(RectangleFrame, ocs_geom::space::Plane)> {
     let planar = crate::entities::curve::lwpolyline_curve(pline)?;
     let Curve::Polyline(polyline) = &planar.curve else {
         return None;
@@ -974,7 +974,7 @@ fn edit_polyline_geometry(polyline: &mut LwPolyline, edit: impl FnOnce(&mut Poly
 
 fn move_segment_parallel(polyline: &mut LwPolyline, segment: usize, offset: f64) {
     edit_polyline_geometry(polyline, |geometry| {
-        kernel::geom2d::move_polyline_segment_parallel(geometry, segment, offset)
+        ocs_geom::geom2d::move_polyline_segment_parallel(geometry, segment, offset)
     });
 }
 
@@ -982,14 +982,14 @@ fn move_segment_parallel(polyline: &mut LwPolyline, segment: usize, offset: f64)
 fn resize_arc_concentrically(polyline: &mut LwPolyline, segment: usize, offset: f64) {
     edit_polyline_geometry(polyline, |geometry| {
         geometry.segment_arc(segment).is_some_and(|arc| {
-            kernel::geom2d::resize_polyline_arc(geometry, segment, arc.radius + offset)
+            ocs_geom::geom2d::resize_polyline_arc(geometry, segment, arc.radius + offset)
         })
     });
 }
 
 fn resize_arc_segment_radius(polyline: &mut LwPolyline, segment: usize, radius: f64) {
     edit_polyline_geometry(polyline, |geometry| {
-        kernel::geom2d::resize_polyline_arc(geometry, segment, radius)
+        ocs_geom::geom2d::resize_polyline_arc(geometry, segment, radius)
     });
 }
 fn apply_transform(pline: &mut LwPolyline, t: &EntityTransform) {
@@ -1182,7 +1182,7 @@ impl crate::entities::traits::Grippable for LwPolyline {
             let seg = grip_id.checked_sub(n)?;
             let plane = crate::entities::curve::lwpolyline_curve(self)?.plane;
             let point = Vec2::from(plane.project(point.to_array())?);
-            return kernel::geom2d::polyline_arc_radius_from_point(
+            return ocs_geom::geom2d::polyline_arc_radius_from_point(
                 &kernel_polyline(self),
                 seg,
                 point.into(),
@@ -1193,7 +1193,7 @@ impl crate::entities::traits::Grippable for LwPolyline {
             let seg = grip_id.checked_sub(n)?;
             let plane = crate::entities::curve::lwpolyline_curve(self)?.plane;
             let point = Vec2::from(plane.project(point.to_array())?);
-            return kernel::geom2d::polyline_segment_parallel_offset(
+            return ocs_geom::geom2d::polyline_segment_parallel_offset(
                 &kernel_polyline(self),
                 seg,
                 point.into(),

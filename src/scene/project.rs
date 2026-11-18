@@ -856,7 +856,7 @@ impl Scene {
                     let axes = [Vector3::UNIT_X, Vector3::UNIT_Y, Vector3::UNIT_Z]
                         .map(|axis| xform.apply_rotation(axis))
                         .map(|v| [v.x, v.y, v.z]);
-                    kernel::brep::mesh::transform_silhouette_affine(
+                    ocs_brep::mesh::transform_silhouette_affine(
                         &generator.source,
                         axes,
                         [origin.x, origin.y, origin.z],
@@ -866,7 +866,7 @@ impl Scene {
                     continue;
                 }
                 let source = placed.as_ref().unwrap_or(&generator.source);
-                for pair in kernel::brep::mesh::silhouette(source, view).chunks_exact(2) {
+                for pair in ocs_brep::mesh::silhouette(source, view).chunks_exact(2) {
                     points.extend([pair[0], pair[1], [f64::NAN; 3]]);
                 }
             }
@@ -1050,7 +1050,7 @@ where
         output.extend(clipped);
     };
     if let (Some(plane), Some(boundary)) = (fill.fill_plane, fill.fill_plane_boundary.as_deref()) {
-        let plane = kernel::space::Plane::from_axes(plane.origin, plane.x_axis, plane.y_axis);
+        let plane = ocs_geom::space::Plane::from_axes(plane.origin, plane.x_axis, plane.y_axis);
         for &[x, y] in boundary {
             if x.is_nan() || y.is_nan() {
                 flush_ring(&mut ring, &mut output);

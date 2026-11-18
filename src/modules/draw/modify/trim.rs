@@ -27,8 +27,8 @@ use document::entities::{
 use document::types::Vector3;
 use document::{EntityType, Handle};
 use glam::DVec3;
-use kernel::geom2d::nurbs::clamped_uniform_knots;
-use kernel::geom2d::{
+use ocs_geom::geom2d::nurbs::clamped_uniform_knots;
+use ocs_geom::geom2d::{
     intersect as kernel_intersect, trim_spans as kernel_trim_spans, Arc as KernelArc, BulgeArc,
     Circle as KernelCircle, Curve, Ellipse as KernelEllipse, EllipseArc as KernelEllipseArc,
     Extent as KernelExtent, Line as KernelLine, NurbsCurve, Ray as KernelRay,
@@ -82,7 +82,7 @@ const TRIM_EXTENT: f64 = 1_000_000.0;
 /// Sampling density for the plan-view point lists the fence and preview
 /// passes walk. The renderer's own figure, so a preview cut lands where the
 /// drawn geometry is rather than a chord away from it.
-const SAMPLE_SEGMENTS_PER_RADIAN: f64 = kernel::geom2d::DEFAULT_SEGMENTS_PER_RADIAN;
+const SAMPLE_SEGMENTS_PER_RADIAN: f64 = ocs_geom::geom2d::DEFAULT_SEGMENTS_PER_RADIAN;
 /// If a trim interval endpoint is beyond this threshold it is treated as "infinite".
 
 #[derive(Clone)]
@@ -3017,7 +3017,7 @@ fn trim_hatch_at(
         .iter()
         .map(crate::scene::hatch_path_ring)
         .collect::<Option<Vec<_>>>()?;
-    let depths = kernel::geom2d::ring_nesting_depths(&rings);
+    let depths = ocs_geom::geom2d::ring_nesting_depths(&rings);
     let outer: Vec<usize> = depths
         .iter()
         .enumerate()
@@ -3608,7 +3608,7 @@ fn drag_selected_handles(
                 // Lasso: edges crossing it or lying wholly inside it.
                 return !fence_cross_points(entity, &fence_geos).is_empty()
                     || fence_sample_xy(entity).first().is_some_and(|point| {
-                        kernel::geom2d::contains(
+                        ocs_geom::geom2d::contains(
                             &lasso,
                             *point,
                             KernelTolerance::new(CUT_TOLERANCE),
@@ -8187,11 +8187,11 @@ mod tests {
         let p_ext2 = glam::DVec3::new(50.0, -20.0, 0.0);
 
         let get_tangents = |p: glam::DVec3| {
-            let k_curve = kernel::geom2d::Curve::Circle(kernel::geom2d::Circle {
+            let k_curve = ocs_geom::geom2d::Curve::Circle(ocs_geom::geom2d::Circle {
                 centre: [c_center.x, c_center.y],
                 radius: c_radius,
             });
-            let pts = kernel::geom2d::tangent_from(&k_curve, [p.x, p.y]);
+            let pts = ocs_geom::geom2d::tangent_from(&k_curve, [p.x, p.y]);
             (
                 glam::DVec3::new(pts[0].point[0], pts[0].point[1], 0.0),
                 glam::DVec3::new(pts[1].point[0], pts[1].point[1], 0.0),

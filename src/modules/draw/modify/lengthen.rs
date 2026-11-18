@@ -13,7 +13,7 @@ use document::entities::Spline as SplineEnt;
 use document::types::Vector3;
 use document::{EntityType, Handle};
 use glam::{DVec3, Vec3};
-use kernel::geom2d::Curve;
+use ocs_geom::geom2d::Curve;
 
 use crate::command::{CadCommand, CmdResult};
 
@@ -393,7 +393,7 @@ pub fn lengthen_entity(entity: &EntityType, pick_pt: Vec3, mode: &LenMode) -> Op
 }
 
 fn lengthen_entity_precise(entity: &EntityType, pick: DVec3, mode: &LenMode) -> Option<EntityType> {
-    use kernel::space::lengthen::{lengthen_arc, lengthen_line, LengthChange};
+    use ocs_geom::space::lengthen::{lengthen_arc, lengthen_line, LengthChange};
     let change = match mode {
         LenMode::Delta(value) => LengthChange::Delta(*value),
         LenMode::Total(value) => LengthChange::Total(*value),
@@ -431,7 +431,7 @@ fn lengthen_entity_precise(entity: &EntityType, pick: DVec3, mode: &LenMode) -> 
         EntityType::Ellipse(ellipse) => {
             let curve = crate::entities::curve::ellipse_curve(ellipse)?;
             let (start, end) =
-                kernel::space::lengthen::lengthen_ellipse(&curve, pick.to_array(), change)?;
+                ocs_geom::space::lengthen::lengthen_ellipse(&curve, pick.to_array(), change)?;
             let mut result = ellipse.clone();
             result.start_parameter = start;
             result.end_parameter = end;
@@ -441,7 +441,7 @@ fn lengthen_entity_precise(entity: &EntityType, pick: DVec3, mode: &LenMode) -> 
         EntityType::LwPolyline(polyline) => {
             let curve = crate::entities::curve::lwpolyline_curve(polyline)?;
             let vertices =
-                kernel::space::lengthen::lengthen_polyline(&curve, pick.to_array(), change)?;
+                ocs_geom::space::lengthen::lengthen_polyline(&curve, pick.to_array(), change)?;
             let mut result = polyline.clone();
             result.vertices = vertices
                 .into_iter()

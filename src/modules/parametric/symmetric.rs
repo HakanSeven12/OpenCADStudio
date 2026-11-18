@@ -89,7 +89,7 @@ impl SymmetricConstraintCommand {
         let planar = crate::entities::curve::entity_curve(entity)?;
         let local = planar.plane.project(point.to_array())?;
         let segments = planar.curve.segments();
-        let (index, _) = kernel::geom2d::nearest_of(segments.iter(), local)?;
+        let (index, _) = ocs_geom::geom2d::nearest_of(segments.iter(), local)?;
         Some((index, Self::segment_family(entity, index)?))
     }
 

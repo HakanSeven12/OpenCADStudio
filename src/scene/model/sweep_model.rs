@@ -7,9 +7,9 @@ use document::objects::{
 };
 use document::types::{Vector2, Vector3};
 use document::EntityType;
-use kernel::brep::{self, Body};
-use kernel::geom2d::{Arc, Curve, EllipseArc, Line};
-use kernel::space::{PlanarCurve, Plane, Vec3};
+use ocs_brep::{self as brep, Body};
+use ocs_geom::geom2d::{Arc, Curve, EllipseArc, Line};
+use ocs_geom::space::{PlanarCurve, Plane, Vec3};
 
 pub use super::sweep_command_model::{
     assoc_edge_curve, assoc_source_supported, is_sweep_path, is_sweep_profile,
@@ -209,7 +209,7 @@ fn planar_polygon_entity(entity: &EntityType) -> Option<PlanarCurve> {
         .map(|point| {
             plane
                 .project(*point)
-                .map(|position| kernel::geom2d::PolylineVertex {
+                .map(|position| ocs_geom::geom2d::PolylineVertex {
                     position,
                     bulge: 0.0,
                 })
@@ -217,7 +217,7 @@ fn planar_polygon_entity(entity: &EntityType) -> Option<PlanarCurve> {
         .collect::<Option<Vec<_>>>()?;
     Some(PlanarCurve::new(
         plane,
-        Curve::Polyline(kernel::geom2d::Polyline { vertices, closed }),
+        Curve::Polyline(ocs_geom::geom2d::Polyline { vertices, closed }),
     ))
 }
 
@@ -261,14 +261,14 @@ fn region_profiles(entity: &EntityType) -> Option<(Plane, Vec<Vec<Curve>>)> {
             .map(|point| {
                 plane
                     .project(*point)
-                    .map(|position| kernel::geom2d::PolylineVertex {
+                    .map(|position| ocs_geom::geom2d::PolylineVertex {
                         position,
                         bulge: 0.0,
                     })
             })
             .collect::<Option<Vec<_>>>()?;
         profiles.push(
-            Curve::Polyline(kernel::geom2d::Polyline {
+            Curve::Polyline(ocs_geom::geom2d::Polyline {
                 vertices,
                 closed: true,
             })

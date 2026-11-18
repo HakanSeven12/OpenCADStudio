@@ -15,7 +15,7 @@ use glam::DVec3;
 use graph::ops::{b, l, n, s, v};
 use graph::value::{list, num, number, point, point_value, text};
 use graph::{Eval, NodeId, Spec};
-use kernel::geom2d::{cross, Tolerance};
+use ocs_geom::geom2d::{cross, Tolerance};
 use serde_json::{json, Value};
 
 pub const CATEGORIES: &[&str] = &["Select", "Query", "Create", "Modify", "Model", "Curve"];
@@ -622,7 +622,7 @@ fn placed(origin: DVec3) -> [f64; 16] {
     glam::DMat4::from_translation(origin).to_cols_array()
 }
 
-fn same_plane(a: &kernel::space::Plane, b: &kernel::space::Plane) -> bool {
+fn same_plane(a: &ocs_geom::space::Plane, b: &ocs_geom::space::Plane) -> bool {
     let close = |p: [f64; 3], q: [f64; 3]| p.iter().zip(q).all(|(x, y)| (x - y).abs() <= 1e-9);
     close(a.origin, b.origin) && close(a.x_axis, b.x_axis) && close(a.y_axis, b.y_axis)
 }
@@ -781,10 +781,10 @@ impl AppHost<'_> {
             "Revision Cloud" => {
                 let points: Vec<[f64; 3]> = list(&a[0]).iter().filter_map(point).collect();
                 let closed = graph::value::boolean(&a[2]).unwrap_or(true);
-                let curve = kernel::geom2d::Curve::Polyline(kernel::geom2d::Polyline {
+                let curve = ocs_geom::geom2d::Curve::Polyline(ocs_geom::geom2d::Polyline {
                     vertices: points
                         .iter()
-                        .map(|p| kernel::geom2d::PolylineVertex::straight([p[0], p[1]]))
+                        .map(|p| ocs_geom::geom2d::PolylineVertex::straight([p[0], p[1]]))
                         .collect(),
                     closed,
                 });
@@ -932,7 +932,7 @@ impl AppHost<'_> {
                     else {
                         return None;
                     };
-                    Some((plane.origin, kernel::brep::planar_region(plane, &loops)?))
+                    Some((plane.origin, ocs_brep::planar_region(plane, &loops)?))
                 });
                 one(match body {
                     Some((origin, body)) => {
@@ -1496,7 +1496,7 @@ impl AppHost<'_> {
         self.scene().document.get_entity(handle(value)?)
     }
 
-    fn curve(&self, value: &Value) -> Option<kernel::space::PlanarCurve> {
+    fn curve(&self, value: &Value) -> Option<ocs_geom::space::PlanarCurve> {
         crate::entities::curve::entity_curve(self.entity(value)?)
     }
 
@@ -1650,7 +1650,7 @@ impl AppHost<'_> {
     /// A solid from `body` with `history`, as the solid commands commit one.
     fn solid(
         &mut self,
-        body: kernel::brep::Body,
+        body: ocs_brep::Body,
         history: document::objects::SolidHistoryOperation,
     ) -> Value {
         let Some(sat) = crate::scene::convert::acis_export::solid_to_sat(&body) else {

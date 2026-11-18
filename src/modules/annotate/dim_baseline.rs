@@ -7,10 +7,10 @@ use document::entities::{
 use document::types::Vector3;
 use document::{EntityType, Handle};
 use glam::DVec3;
-use kernel::geom2d::{
+use ocs_geom::geom2d::{
     arc_span, intersect, nearest_of, Arc, Curve, Line, Tolerance, Transform, Vec2, XLine,
 };
-use kernel::space::Plane;
+use ocs_geom::space::Plane;
 
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionPreview,

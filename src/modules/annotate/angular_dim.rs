@@ -1,7 +1,7 @@
 use document::entities::{Dimension, DimensionAngular2Ln, DimensionAngular3Pt};
 use document::types::{Handle, Vector3};
 use document::EntityType;
-use kernel::geom2d::{
+use ocs_geom::geom2d::{
     closest_point, line_line, Arc as KernelArc, BulgeArc, Curve as KernelCurve, Line as KernelLine,
 };
 
@@ -1259,13 +1259,13 @@ fn angular_preview_with_frame(
     let second_end = vertex + DVec3::new(end.cos(), end.sin(), 0.0) * radius;
     let mut points = vec![first, first_end, nan(), second, second_end, nan()];
     points.extend(
-        kernel::geom2d::tessellate::arc(
+        ocs_geom::geom2d::tessellate::arc(
             [vertex.x, vertex.y],
             radius,
             start,
             end,
             vertex.z,
-            kernel::geom2d::tessellate::DEFAULT_SEGMENTS_PER_RADIAN,
+            ocs_geom::geom2d::tessellate::DEFAULT_SEGMENTS_PER_RADIAN,
         )
         .into_iter()
         .map(DVec3::from_array),

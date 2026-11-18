@@ -3,7 +3,7 @@
 use crate::t;
 use document::types::Vector3;
 use document::{Circle, EntityType};
-use kernel::geom2d::{
+use ocs_geom::geom2d::{
     fillets_between, Circle as KernelCircle, Curve as KernelCurve, Line as KernelLine, Tolerance,
 };
 
@@ -90,7 +90,7 @@ fn make_circle(center: DVec3, radius: f64, plane: WorkingPlane) -> EntityType {
 
 fn circumcircle(a: DVec3, b: DVec3, c: DVec3, plane: WorkingPlane) -> Option<(DVec3, f64)> {
     let (a, b, c) = (plane.to_local(a), plane.to_local(b), plane.to_local(c));
-    let circle = kernel::geom2d::arc_through_points([a.x, a.y], [b.x, b.y], [c.x, c.y])?;
+    let circle = ocs_geom::geom2d::arc_through_points([a.x, a.y], [b.x, b.y], [c.x, c.y])?;
     let center = plane.to_world(DVec3::new(circle.centre[0], circle.centre[1], a.z));
     Some((center, circle.radius))
 }
@@ -1051,8 +1051,8 @@ fn tangent_curve(object: TangentObject) -> KernelCurve {
             } else {
                 [1.0, 0.0]
             };
-            KernelCurve::Ellipse(kernel::geom2d::EllipseArc {
-                ellipse: kernel::geom2d::Ellipse {
+            KernelCurve::Ellipse(ocs_geom::geom2d::EllipseArc {
+                ellipse: ocs_geom::geom2d::Ellipse {
                     centre: [center.x, center.y],
                     major_radius: a,
                     minor_radius: a * minor_axis_ratio,

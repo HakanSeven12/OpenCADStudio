@@ -988,9 +988,9 @@ impl Scene {
 
     pub fn restore_solid_models(&mut self, handles: &[Handle]) {
         /// The box around a body's surface, from a coarse tessellation.
-        fn body_box(body: &kernel::brep::Body) -> Option<([f64; 3], [f64; 3])> {
-            let tolerance = kernel::brep::mesh::TessellationTolerance::new(0.5, 1e-3);
-            let mesh = kernel::brep::mesh::tessellate(body, tolerance).mesh;
+        fn body_box(body: &ocs_brep::Body) -> Option<([f64; 3], [f64; 3])> {
+            let tolerance = ocs_brep::mesh::TessellationTolerance::new(0.5, 1e-3);
+            let mesh = ocs_brep::mesh::tessellate(body, tolerance).mesh;
             let mut points = mesh.positions.iter().copied();
             let first = points.next()?;
             Some(points.fold((first, first), |(lo, hi), p| {
@@ -1002,7 +1002,7 @@ impl Scene {
         }
         /// Whether two bodies fill the same box, to a hundredth of its size
         /// (the coarse tessellation cuts curved sides differently).
-        fn same_place(a: &kernel::brep::Body, b: &kernel::brep::Body) -> bool {
+        fn same_place(a: &ocs_brep::Body, b: &ocs_brep::Body) -> bool {
             let (Some((alo, ahi)), Some((blo, bhi))) = (body_box(a), body_box(b)) else {
                 return true;
             };
@@ -1011,7 +1011,7 @@ impl Scene {
             (0..3).all(|k| (alo[k] - blo[k]).abs() <= slack && (ahi[k] - bhi[k]).abs() <= slack)
         }
 
-        let bodies: Vec<(Handle, kernel::brep::Body)> = handles
+        let bodies: Vec<(Handle, ocs_brep::Body)> = handles
             .iter()
             .filter(|handle| !self.solid_models.contains_key(handle))
             .filter_map(|&handle| {
@@ -2867,7 +2867,7 @@ impl Scene {
         wo: &document::entities::Wipeout,
     ) -> ([f64; 2], Vec<[f32; 2]>) {
         let origin = [wo.insertion_point.x, wo.insertion_point.y];
-        let plane = kernel::space::Plane::from_axes(
+        let plane = ocs_geom::space::Plane::from_axes(
             [
                 wo.insertion_point.x,
                 wo.insertion_point.y,
@@ -2932,7 +2932,7 @@ impl Scene {
         ];
         let x_axis = [wipeout.u_vector.x, wipeout.u_vector.y, wipeout.u_vector.z];
         let y_axis = [wipeout.v_vector.x, wipeout.v_vector.y, wipeout.v_vector.z];
-        kernel::space::Plane::from_axes(origin, x_axis, y_axis).normal()?;
+        ocs_geom::space::Plane::from_axes(origin, x_axis, y_axis).normal()?;
         let boundary = Self::wipeout_local_boundary(wipeout)
             .into_iter()
             .map(|point| [point[0] as f32, point[1] as f32])
@@ -2952,7 +2952,7 @@ impl Scene {
         world_origin: [f64; 2],
         boundary: &[[f32; 2]],
     ) -> Option<Vec<[f32; 2]>> {
-        let plane = kernel::space::Plane::from_axes(plane.origin, plane.x_axis, plane.y_axis);
+        let plane = ocs_geom::space::Plane::from_axes(plane.origin, plane.x_axis, plane.y_axis);
         boundary
             .iter()
             .map(|point| {
@@ -3009,7 +3009,7 @@ impl Scene {
             let mut edge_polys: Vec<Vec<[f64; 2]>> = Vec::new();
             for edge in &path.edges {
                 if let Some(curve) = crate::entities::hatch::edge_curve(edge) {
-                    edge_polys.push(curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE));
+                    edge_polys.push(curve.tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE));
                 }
             }
             let mut local_ring = chain_path_edges(edge_polys);
@@ -3043,7 +3043,7 @@ impl Scene {
         // hundreds of thousands of folded-back segments into minutes per
         // hatch while opening.
         let depths = if rings.len() > 1 {
-            kernel::geom2d::ring_nesting_depths(&rings)
+            ocs_geom::geom2d::ring_nesting_depths(&rings)
         } else {
             vec![0]
         };
@@ -3334,7 +3334,7 @@ impl Scene {
                     .filter_map(crate::entities::hatch::edge_curve)
                     .collect()
             };
-            if let Some(refined) = kernel::geom2d::refine_spline_boundary(&ring, curves, project) {
+            if let Some(refined) = ocs_geom::geom2d::refine_spline_boundary(&ring, curves, project) {
                 if boundary.len() - range.len() + refined.len() > MAX_HATCH_MODEL_VERTS {
                     continue;
                 }

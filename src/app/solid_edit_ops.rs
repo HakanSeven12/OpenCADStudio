@@ -10,7 +10,7 @@ use document::{
 };
 use glam::DVec3;
 use iced::Task;
-use kernel::brep::{Body, Curve3, EdgeKey, FaceKey, Placement, Surface as KernelSurface};
+use ocs_brep::{Body, Curve3, EdgeKey, FaceKey, Placement, Surface as KernelSurface};
 
 use super::Message;
 use crate::command::{FacePick, SolidEditAction, SolidEditRequest};
@@ -55,13 +55,13 @@ fn picked_faces(body: &Body, picks: &[FacePick]) -> Option<Vec<FaceKey>> {
     for pick in picks {
         match *pick {
             FacePick::Add(point) => {
-                let face = kernel::brep::face_at_point(body, point.to_array())?;
+                let face = ocs_brep::face_at_point(body, point.to_array())?;
                 if !faces.contains(&face) {
                     faces.push(face);
                 }
             }
             FacePick::Remove(point) => {
-                let face = kernel::brep::face_at_point(body, point.to_array())?;
+                let face = ocs_brep::face_at_point(body, point.to_array())?;
                 faces.retain(|other| *other != face);
             }
             FacePick::All => faces = body.face_keys().collect(),
@@ -108,7 +108,7 @@ fn ocs_axes(normal: DVec3) -> (DVec3, DVec3) {
 
 /// An edge's curve between `span` as the drawing object that draws it, moved
 /// by `shift`.
-fn curve_entity(curve: &Curve3, span: (f64, f64), shift: DVec3) -> Option<EntityType> {
+pub(super) fn curve_entity(curve: &Curve3, span: (f64, f64), shift: DVec3) -> Option<EntityType> {
     let at = |t: f64| DVec3::from_array(curve.point_at(t)) + shift;
     let whole = span.1 - span.0 >= std::f64::consts::TAU - 1e-9;
     Some(match curve {
@@ -172,7 +172,7 @@ fn curve_entity(curve: &Curve3, span: (f64, f64), shift: DVec3) -> Option<Entity
         Curve3::PlanarSpline { .. } | Curve3::Nurbs(_) => {
             let spatial = match curve {
                 Curve3::Nurbs(nurbs) => nurbs.clone(),
-                Curve3::PlanarSpline { plane, curve } => kernel::space::NurbsCurve3::new(
+                Curve3::PlanarSpline { plane, curve } => ocs_geom::space::NurbsCurve3::new(
                     curve.degree(),
                     curve.control_points().iter().map(|point| plane.point_at(*point)).collect(),
                     curve.knots().to_vec(),
@@ -284,33 +284,33 @@ impl super::OpenCADStudio {
                 };
                 faces.clear();
                 edges.clear();
-                kernel::brep::extrude_faces(&body, &picked, *height, *taper)
+                ocs_brep::extrude_faces(&body, &picked, *height, *taper)
             }
             SolidEditAction::MoveFaces { from, to } => {
                 let Some(picked) = picked_faces(&body, &request.picks) else {
                     return unresolved(self);
                 };
                 let place = Placement::at((*to - *from).to_array());
-                kernel::brep::move_faces(&body, &picked, &place)
+                ocs_brep::move_faces(&body, &picked, &place)
             }
             SolidEditAction::RotateFaces { origin, axis, angle } => {
                 let Some(picked) = picked_faces(&body, &request.picks) else {
                     return unresolved(self);
                 };
-                kernel::brep::rotation(origin.to_array(), axis.to_array(), *angle)
-                    .and_then(|place| kernel::brep::move_faces(&body, &picked, &place))
+                ocs_brep::rotation(origin.to_array(), axis.to_array(), *angle)
+                    .and_then(|place| ocs_brep::move_faces(&body, &picked, &place))
             }
             SolidEditAction::OffsetFaces { distance } => {
                 let Some(picked) = picked_faces(&body, &request.picks) else {
                     return unresolved(self);
                 };
-                kernel::brep::offset_faces(&body, &picked, *distance)
+                ocs_brep::offset_faces(&body, &picked, *distance)
             }
             SolidEditAction::TaperFaces { base, toward, angle } => {
                 let Some(picked) = picked_faces(&body, &request.picks) else {
                     return unresolved(self);
                 };
-                kernel::brep::taper_faces(
+                ocs_brep::taper_faces(
                     &body,
                     &picked,
                     base.to_array(),
@@ -322,7 +322,7 @@ impl super::OpenCADStudio {
                 let Some(picked) = picked_faces(&body, &request.picks) else {
                     return unresolved(self);
                 };
-                kernel::brep::delete_faces(&body, &picked)
+                ocs_brep::delete_faces(&body, &picked)
             }
             SolidEditAction::ColorFaces(color) => {
                 let Some(picked) = picked_faces(&body, &request.picks) else {
@@ -350,7 +350,7 @@ impl super::OpenCADStudio {
             }
             SolidEditAction::Clean => {
                 faces.retain(|face, _| body.faces.contains(*face));
-                Some(kernel::brep::clean(&body))
+                Some(ocs_brep::clean(&body))
             }
             SolidEditAction::Imprint { tool, delete_tool } => {
                 return self.solid_imprint(handle, &source, body, faces, edges, *tool, *delete_tool);
@@ -377,7 +377,7 @@ impl super::OpenCADStudio {
                 return self.separate_solid(handle, &source, &body, &faces, &edges);
             }
             SolidEditAction::Check => {
-                let problems = kernel::brep::check(&body);
+                let problems = ocs_brep::check(&body);
                 if problems.is_empty() {
                     self.command_line
                         .push_output(crate::t!("This object is a valid solid.").as_ref());
@@ -475,7 +475,7 @@ impl super::OpenCADStudio {
         Some(handle)
     }
 
-    fn commit_new_curves(&mut self, entities: Vec<EntityType>) -> usize {
+    pub(super) fn commit_new_curves(&mut self, entities: Vec<EntityType>) -> usize {
         let i = self.active_tab;
         let mut count = 0;
         for entity in entities {
@@ -507,8 +507,8 @@ impl super::OpenCADStudio {
         let result = if let Some(tool_body) = acis_of(&tool_entity).and_then(painted) {
             let mut target = body.clone();
             let mut other = tool_body.body;
-            let tolerance = kernel::brep::operation_tolerance(&[&target, &other]);
-            kernel::brep::imprint(&mut target, &mut other, tolerance)
+            let tolerance = ocs_brep::operation_tolerance(&[&target, &other]);
+            ocs_brep::imprint(&mut target, &mut other, tolerance)
                 .ok()
                 .filter(|imprint| imprint.cuts > 0)
                 .map(|_| target)
@@ -517,7 +517,7 @@ impl super::OpenCADStudio {
                 let mut target = body.clone();
                 let mut cut = false;
                 for (curve, span) in curves {
-                    if let Some(next) = kernel::brep::imprint_curve(&target, &curve, span) {
+                    if let Some(next) = ocs_brep::imprint_curve(&target, &curve, span) {
                         target = next;
                         cut = true;
                     }
@@ -556,8 +556,8 @@ impl super::OpenCADStudio {
         let place = Placement::at(shift.to_array());
         let mut count = 0;
         for face in picked {
-            let Some(sheet) = kernel::brep::face_sheet(body, &[*face])
-                .and_then(|sheet| kernel::brep::transform(&sheet, &place))
+            let Some(sheet) = ocs_brep::face_sheet(body, &[*face])
+                .and_then(|sheet| ocs_brep::transform(&sheet, &place))
             else {
                 continue;
             };
@@ -600,7 +600,7 @@ impl super::OpenCADStudio {
         edges: &EdgeColors,
     ) -> Task<Message> {
         let i = self.active_tab;
-        let pieces = kernel::brep::separate(body);
+        let pieces = ocs_brep::separate(body);
         if pieces.len() < 2 {
             self.command_line.push_output(
                 crate::t!("The solid is one piece; there is nothing to separate.").as_ref(),
@@ -659,7 +659,7 @@ impl super::OpenCADStudio {
 
 /// The curves an object draws, each with the span it covers, for imprinting.
 fn entity_curves(entity: &EntityType) -> Option<Vec<(Curve3, (f64, f64))>> {
-    use kernel::brep::{Circle3, Line3};
+    use ocs_brep::{Circle3, Line3};
     let tau = std::f64::consts::TAU;
     let point = |vector: &Vector3| DVec3::new(vector.x, vector.y, vector.z);
     let circle = |center: &Vector3, normal: &Vector3, radius: f64| -> Option<Circle3> {
@@ -667,7 +667,7 @@ fn entity_curves(entity: &EntityType) -> Option<Vec<(Curve3, (f64, f64))>> {
         let (x, y) = ocs_axes(normal);
         let centre = x * center.x + y * center.y + normal * center.z;
         Some(Circle3 {
-            plane: kernel::space::Plane::orthonormal(centre.to_array(), x.to_array(), normal.to_array())?,
+            plane: ocs_geom::space::Plane::orthonormal(centre.to_array(), x.to_array(), normal.to_array())?,
             radius,
         })
     };

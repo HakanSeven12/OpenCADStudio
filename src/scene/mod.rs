@@ -5,6 +5,7 @@
 //   pick    — hit-testing, selection, grips, spatial index, xclip
 //   view    — camera, transforms, viewport, render pipeline driver
 //   cache   — block-definition and property caches
+pub mod analysis;
 pub mod annotative;
 pub mod assoc_array;
 pub mod assoc_array_grips;
@@ -194,7 +195,7 @@ pub(crate) fn tessellate_entity(
                 // wire converter emits nothing. Decode every exact boundary,
                 // including holes, then sample only for this cached display.
                 let mut boundaries = Vec::new();
-                if let Ok(kernel::brep::LoftSection::Profile { plane, wires, .. }) =
+                if let Ok(ocs_brep::LoftSection::Profile { plane, wires, .. }) =
                     ocs_acis::loft_section_geometry(&[
                         document::entities::EmbeddedEntity::Region(region.clone()),
                     ])
@@ -326,7 +327,7 @@ impl Scene {
     /// profile of the mesh build at the same epoch. No body ⇒ no centres.
     fn solid_face_centers(
         entity: &EntityType,
-        cached: Option<&kernel::brep::Body>,
+        cached: Option<&ocs_brep::Body>,
     ) -> Vec<glam::DVec3> {
         use crate::scene::convert::solid3d_tess::{kernel_body, kernel_region_body};
         use crate::scene::model::solid_model::face_centers;
@@ -2771,8 +2772,10 @@ pub struct Scene {
     constraint_hover_wires: Vec<WireModel>,
     /// Dynamic UCS: the outline of the planar solid face a first point
     /// would align the UCS to, with the solid and face it outlines.
-    ducs_face: Option<(Handle, kernel::brep::FaceKey)>,
+    ducs_face: Option<(Handle, ocs_brep::FaceKey)>,
     ducs_face_wires: Vec<WireModel>,
+    /// Control nets shown by CVSHOW, by surface.
+    cv_net_wires: HashMap<Handle, Vec<WireModel>>,
     /// Color used to draw the selection highlight overlay wires (SELECTIONEFFECTCOLOR).
     pub selection_color: [f32; 4],
     /// Whether selection visual effect (glow/highlight) is enabled (SELECTIONEFFECT).
@@ -3052,7 +3055,7 @@ pub struct Scene {
     /// INSERT scale renders at the right size. (#123)
     pub block_meshes: HashMap<Handle, MeshLodSet>,
     /// Kernel B-reps used by solid operations and exact-geometry saves.
-    pub solid_models: HashMap<Handle, kernel::brep::Body>,
+    pub solid_models: HashMap<Handle, ocs_brep::Body>,
     /// GPU render data for raster images (RasterImage entities), keyed by handle.
     pub images: HashMap<Handle, ImageModel>,
     /// The viewport that is currently "entered" (MSPACE mode).
@@ -3555,9 +3558,9 @@ fn section_plane(
     tangent: glam::DVec3,
     normal: glam::DVec3,
     body_to_world: Option<&document::types::Transform>,
-) -> Option<kernel::space::Plane> {
+) -> Option<ocs_geom::space::Plane> {
     let Some(transform) = body_to_world else {
-        return kernel::space::Plane::orthonormal(
+        return ocs_geom::space::Plane::orthonormal(
             origin.to_array(),
             tangent.to_array(),
             normal.to_array(),
@@ -3579,7 +3582,7 @@ fn section_plane(
     let normal = linear
         .transpose()
         .transform_point(document::types::Vector3::new(normal.x, normal.y, normal.z));
-    kernel::space::Plane::orthonormal(
+    ocs_geom::space::Plane::orthonormal(
         [origin.x, origin.y, origin.z],
         [tangent.x, tangent.y, tangent.z],
         [normal.x, normal.y, normal.z],
@@ -3587,13 +3590,13 @@ fn section_plane(
 }
 
 fn keep_section_positive(
-    body: &kernel::brep::Body,
-    plane: kernel::space::Plane,
-) -> Result<Option<kernel::brep::Body>, ()> {
-    match kernel::brep::slice_by_plane(body, plane) {
+    body: &ocs_brep::Body,
+    plane: ocs_geom::space::Plane,
+) -> Result<Option<ocs_brep::Body>, ()> {
+    match ocs_brep::slice_by_plane(body, plane) {
         Ok(Some(result)) => Ok(Some(result.positive)),
         Ok(None) => {
-            let bounds = kernel::brep::body_bounds(body).ok_or(())?;
+            let bounds = ocs_brep::body_bounds(body).ok_or(())?;
             let centre = [
                 (bounds.min[0] + bounds.max[0]) * 0.5,
                 (bounds.min[1] + bounds.max[1]) * 0.5,
@@ -3661,6 +3664,7 @@ impl Scene {
             constraint_hover_wires: Vec::new(),
             ducs_face: None,
             ducs_face_wires: Vec::new(),
+            cv_net_wires: HashMap::default(),
             selection_color: crate::scene::model::wire_model::WireModel::SELECTED,
             selection_widen: 0.0,
             edge_color: None,
@@ -6059,7 +6063,7 @@ impl Scene {
     pub(crate) fn prepare_solid_model_display(
         &self,
         handle: Handle,
-        solid: &kernel::brep::Body,
+        solid: &ocs_brep::Body,
     ) -> Option<(MeshLodSet, Vec<document::entities::Wire>, [f64; 3])> {
         let color = self
             .document
@@ -6117,7 +6121,7 @@ impl Scene {
     pub(crate) fn register_prepared_solid_model(
         &mut self,
         handle: Handle,
-        solid: kernel::brep::Body,
+        solid: ocs_brep::Body,
         display: (MeshLodSet, Vec<document::entities::Wire>, [f64; 3]),
     ) -> bool {
         let (mut set, wires, center) = display;
@@ -6172,7 +6176,7 @@ impl Scene {
 
     /// Cache and display a Model-tab kernel solid. A failed preparation leaves
     /// the previous entity, body and mesh untouched.
-    pub fn register_solid_model(&mut self, handle: Handle, solid: kernel::brep::Body) -> bool {
+    pub fn register_solid_model(&mut self, handle: Handle, solid: ocs_brep::Body) -> bool {
         let Some(display) = self.prepare_solid_model_display(handle, &solid) else {
             return false;
         };
@@ -6242,7 +6246,45 @@ impl Scene {
                     entity,
                 );
             }
+            crate::scene::analysis::apply(set);
         }
+    }
+
+    /// Re-tessellates the shaded models and recolours them: the surface analysis turned on or
+    /// off, or its options changed.
+    pub fn invalidate_solid_meshes(&mut self) {
+        self.populate_meshes_from_document();
+        self.recolor_meshes();
+        self.bump_geometry();
+    }
+
+    /// Shows the control net of the NURBS surface `handle` (CVSHOW): its rows and columns of
+    /// control vertices drawn over the model until hidden.
+    pub fn show_control_net(&mut self, handle: Handle, net: &solidcore_ops::surface_cvs::Net) {
+        let mut wires = Vec::new();
+        let at = |i: usize, j: usize| net.points[i * net.cols + j];
+        let line = |points: Vec<[f64; 3]>, k: usize| {
+            let mut wire = WireModel::solid_f64(format!("cv-net:{}:{k}", handle.value()), points, WireModel::HOVER, false);
+            wire.set_fixed_screen_width(1.5);
+            wire
+        };
+        for i in 0..net.rows {
+            wires.push(line((0..net.cols).map(|j| at(i, j)).collect(), wires.len()));
+        }
+        for j in 0..net.cols {
+            wires.push(line((0..net.rows).map(|i| at(i, j)).collect(), wires.len()));
+        }
+        self.cv_net_wires.insert(handle, wires);
+    }
+
+    /// Hides every control net shown (CVHIDE).
+    pub fn hide_control_nets(&mut self) {
+        self.cv_net_wires.clear();
+    }
+
+    /// Whether the control net of `handle` is shown.
+    pub fn control_net_shown(&self, handle: Handle) -> bool {
+        self.cv_net_wires.contains_key(&handle)
     }
 
     /// Recolour only the named cached solids after a property edit.
@@ -6296,6 +6338,7 @@ impl Scene {
                         entity,
                     );
                 }
+                crate::scene::analysis::apply(set);
             } else if let Some(set) = self.block_meshes.get_mut(handle) {
                 material.apply_to_with_face_overrides(
                     set,
@@ -12577,7 +12620,7 @@ impl Scene {
         &self,
         handle: Handle,
         section: &LiveSection,
-    ) -> Result<Option<kernel::brep::Body>, ()> {
+    ) -> Result<Option<ocs_brep::Body>, ()> {
         let body = self.section_source_body(handle).ok_or(())?;
         Self::section_body(&body, &section.data, section.slice_depth, None)
     }
@@ -12633,7 +12676,7 @@ impl Scene {
     fn section_source_body(
         &self,
         handle: Handle,
-    ) -> Option<std::borrow::Cow<'_, kernel::brep::Body>> {
+    ) -> Option<std::borrow::Cow<'_, ocs_brep::Body>> {
         if let Some(body) = self.solid_models.get(&handle) {
             return Some(std::borrow::Cow::Borrowed(body));
         }
@@ -12662,11 +12705,11 @@ impl Scene {
     }
 
     fn section_body(
-        body: &kernel::brep::Body,
+        body: &ocs_brep::Body,
         data: &document::entities::SectionObjectData,
         slice_depth: Option<f64>,
         body_to_world: Option<&document::types::Transform>,
-    ) -> Result<Option<kernel::brep::Body>, ()> {
+    ) -> Result<Option<ocs_brep::Body>, ()> {
         let planes = Self::section_planes(data, slice_depth, body_to_world).ok_or(())?;
         let mut current = body.clone();
         for plane in planes {
@@ -12685,7 +12728,7 @@ impl Scene {
         data: &document::entities::SectionObjectData,
         slice_depth: Option<f64>,
         body_to_world: Option<&document::types::Transform>,
-    ) -> Option<Vec<kernel::space::Plane>> {
+    ) -> Option<Vec<ocs_geom::space::Plane>> {
         let (origin, tangent, vertical, viewing) = section_frame(data)?;
         let mut planes = vec![section_plane(origin, tangent, viewing, body_to_world)?];
         if data.state == 1 && slice_depth.is_none() {
@@ -18417,10 +18460,10 @@ mod section_tests {
         }
     }
 
-    fn bounds(body: Option<kernel::brep::Body>) -> ([f64; 3], [f64; 3]) {
+    fn bounds(body: Option<ocs_brep::Body>) -> ([f64; 3], [f64; 3]) {
         let body = body.expect("section should retain material");
         assert!(body.validate().is_empty());
-        let bounds = kernel::brep::body_bounds(&body).expect("sectioned body should be bounded");
+        let bounds = ocs_brep::body_bounds(&body).expect("sectioned body should be bounded");
         (bounds.min, bounds.max)
     }
 
@@ -18432,7 +18475,7 @@ mod section_tests {
 
     #[test]
     fn kernel_clipping_obeys_plane_slice_boundary_and_volume_limits() {
-        let body = kernel::brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
+        let body = ocs_brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
 
         let (min, max) = bounds(Scene::section_body(&body, &section(1, 0.0), None, None).unwrap());
         assert_near(min, [0.0, 0.0, 0.0]);
@@ -18454,7 +18497,7 @@ mod section_tests {
 
     #[test]
     fn instance_transform_pulls_the_section_plane_into_body_space() {
-        let body = kernel::brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
+        let body = ocs_brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
         let transform =
             document::types::Transform::from_scaling(document::types::Vector3::new(2.0, 1.0, 1.0))
                 .then(&document::types::Transform::from_translation(
@@ -18520,7 +18563,7 @@ mod section_tests {
 
     #[test]
     fn live_section_rebuilds_an_uncached_persisted_solid() {
-        let body = kernel::brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
+        let body = ocs_brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
         let sat = crate::scene::convert::acis_export::solid_to_sat(&body).unwrap();
         let mut solid = Solid3D::new();
         solid.set_sat_document(&sat);

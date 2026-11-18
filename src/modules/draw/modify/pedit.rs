@@ -4,8 +4,8 @@ use document::entities::LwVertex;
 use document::types::{Vector2, Vector3};
 use document::{EntityType, Handle};
 use glam::DVec3;
-use kernel::geom2d::nurbs::clamped_uniform_knots;
-use kernel::geom2d::NurbsCurve;
+use ocs_geom::geom2d::nurbs::clamped_uniform_knots;
+use ocs_geom::geom2d::NurbsCurve;
 use rustc_hash::FxHashMap as HashMap;
 
 use crate::command::{CadCommand, CmdResult};
@@ -13,7 +13,7 @@ use crate::scene::model::wire_model::WireModel;
 use crate::t;
 
 const TAU: f64 = std::f64::consts::TAU;
-pub use kernel::space::endpoint_join::JoinType;
+pub use ocs_geom::space::endpoint_join::JoinType;
 static JOIN_TYPE: std::sync::Mutex<JoinType> = std::sync::Mutex::new(JoinType::Extend);
 static JOIN_FUZZ: std::sync::Mutex<f64> = std::sync::Mutex::new(0.0);
 
@@ -1037,7 +1037,7 @@ impl CadCommand for PeditCommand {
             else {
                 return CmdResult::NeedPoint;
             };
-            let delta = kernel::geom2d::Vec2::new(local[0] - location[0], local[1] - location[1]);
+            let delta = ocs_geom::geom2d::Vec2::new(local[0] - location[0], local[1] - location[1]);
             if !delta.length_squared().is_finite() || delta.length_squared() <= 1e-24 {
                 return CmdResult::NeedPoint;
             }
@@ -1530,7 +1530,7 @@ pub fn convert_to_polyline(entity: &EntityType) -> Option<EntityType> {
             let end = [l.end.x, l.end.y, l.end.z];
             let elevation = DVec3::from_array(start).dot(DVec3::new(normal.x, normal.y, normal.z));
             let plane = crate::entities::curve::ocs_plane(normal, elevation);
-            let tolerance = kernel::space::coplanarity_tolerance(&[start, end]);
+            let tolerance = ocs_geom::space::coplanarity_tolerance(&[start, end]);
             if !plane.contains(end, tolerance) {
                 return None;
             }
@@ -1697,7 +1697,7 @@ pub(crate) fn fit_entity(entity: &EntityType, overrides: &[(usize, f64)]) -> Opt
         .iter()
         .map(|v| (v.flags.bits() & 2 != 0).then(|| [v.curve_tangent.cos(), v.curve_tangent.sin()]))
         .collect();
-    let fitted = kernel::geom2d::fit_arc_chain(&points, polyline.flags.is_closed(), &directions)?;
+    let fitted = ocs_geom::geom2d::fit_arc_chain(&points, polyline.flags.is_closed(), &directions)?;
     let mut vertices = Vec::with_capacity(fitted.len());
     for (i, fitted_vertex) in fitted.iter().enumerate() {
         let original = &originals[fitted_vertex.source];
@@ -2339,7 +2339,7 @@ pub fn join_selection_extend(
                 let a_points = a_ends.iter().map(|(_, points)| *points).collect::<Vec<_>>();
                 let b_points = b_ends.iter().map(|(_, points)| *points).collect::<Vec<_>>();
                 if let Some((a_index, b_index, joint)) =
-                    kernel::space::endpoint_join::closest_line_end_join(
+                    ocs_geom::space::endpoint_join::closest_line_end_join(
                         &a_points,
                         &b_points,
                         fuzz,
@@ -2439,7 +2439,7 @@ pub fn selection_connector_distance(entities: &[(Handle, EntityType)], fuzz: f64
             return None;
         }
         let plane = crate::entities::curve::ocs_plane(*normal, z);
-        let normal = kernel::space::Vec3::from(plane.normal()?);
+        let normal = ocs_geom::space::Vec3::from(plane.normal()?);
         let points = vertices
             .into_iter()
             .map(|point| plane.point_at(point))
@@ -2457,10 +2457,10 @@ pub fn selection_connector_distance(entities: &[(Handle, EntityType)], fuzz: f64
         .iter()
         .flat_map(|(_, points)| points.iter().copied())
         .collect::<Vec<_>>();
-    let tolerance = kernel::space::coplanarity_tolerance(&world);
+    let tolerance = ocs_geom::space::coplanarity_tolerance(&world);
     let shared = crate::entities::curve::ocs_plane(
         Vector3::new(normal.x, normal.y, normal.z),
-        kernel::space::Vec3::from(world[0]).dot(*normal),
+        ocs_geom::space::Vec3::from(world[0]).dot(*normal),
     );
     if world
         .iter()
@@ -2472,5 +2472,5 @@ pub fn selection_connector_distance(entities: &[(Handle, EntityType)], fuzz: f64
         .into_iter()
         .map(|point| shared.project(point))
         .collect::<Option<Vec<_>>>()?;
-    kernel::space::endpoint_join::planar_connector_distance(&points, fuzz)
+    ocs_geom::space::endpoint_join::planar_connector_distance(&points, fuzz)
 }

@@ -19,7 +19,7 @@ use document::entities::EntityCommon;
 use document::types::Vector3;
 use document::{EntityType, Handle};
 use glam::DVec3;
-use kernel::geom2d::{
+use ocs_geom::geom2d::{
     circle_circle_points as circle_circle_pts, fillet_between_rays, fillets_between, line_circle,
     Arc as KernelArc, Curve as KernelCurve, Fillet as KernelFillet, Line as KernelLine, Tolerance,
 };

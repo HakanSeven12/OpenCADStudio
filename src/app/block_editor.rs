@@ -20,7 +20,7 @@ pub(super) struct BlockEditCheckpoint {
     images: FxHashMap<document::Handle, crate::scene::ImageModel>,
     meshes: FxHashMap<document::Handle, crate::scene::MeshLodSet>,
     block_meshes: FxHashMap<document::Handle, crate::scene::MeshLodSet>,
-    solid_models: FxHashMap<document::Handle, kernel::brep::Body>,
+    solid_models: FxHashMap<document::Handle, ocs_brep::Body>,
 }
 
 pub(super) struct BlockEditHistory {

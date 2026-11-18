@@ -4,8 +4,8 @@ use document::entities::hatch::{
     BoundaryEdge, BoundaryPath, BoundaryPathFlags, Hatch, LineEdge, PolylineEdge, SplineEdge,
 };
 use document::types::{Vector2, Vector3};
-use kernel::geom2d::{refine_spline_boundary, Curve, NurbsCurve};
-use kernel::tessellation::DEFAULT_ANGLE;
+use ocs_geom::geom2d::{refine_spline_boundary, Curve, NurbsCurve};
+use ocs_geom::tessellation::DEFAULT_ANGLE;
 
 #[test]
 fn gradient_stops_keep_entity_transparency() {
@@ -166,7 +166,7 @@ fn narrow_fill_preserves_corners_holes_and_shared_origin() {
             .map(|p| project(p).map(f64::from))
             .collect();
         // The plain sampling crosses itself: as one polygon it has no inside.
-        assert!(kernel::geom2d::triangulate(&original, &[]).1.is_empty());
+        assert!(ocs_geom::geom2d::triangulate(&original, &[]).1.is_empty());
         for i in 0..=6 {
             assert!(model
                 .boundary

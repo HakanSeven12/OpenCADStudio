@@ -12,7 +12,7 @@
 use crate::t;
 use document::Handle;
 use glam::DVec3;
-use kernel::geom2d::{self, Curve as KernelCurve};
+use ocs_geom::geom2d::{self, Curve as KernelCurve};
 
 use crate::command::{CadCommand, CmdResult, DynField, EntityTransform, WorkingPlane};
 use crate::modules::draw::defaults;

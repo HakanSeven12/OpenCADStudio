@@ -1365,6 +1365,11 @@ impl OpenCADStudio {
                 }
             }
 
+            // Carried out at once; the command then ends as any other does.
+            CmdResult::Surfacing(request) => {
+                let _ = self.handle_surfacing(*request);
+            }
+
             CmdResult::ThickenEntities { handles, distance } => {
                 if let Some(task) = self.handle_thicken_entities(handles, distance) {
                     return task;

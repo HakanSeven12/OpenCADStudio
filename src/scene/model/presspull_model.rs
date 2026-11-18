@@ -4,9 +4,9 @@ use document::entities::{AcisData, EmbeddedEntity, Region, Wire};
 use document::types::Vector3;
 use document::{EntityType, Handle};
 use glam::DVec3;
-use kernel::brep::{self, Body, FaceKey};
-use kernel::geom2d::{contains, ring_nesting_depths, signed_area, Curve, Line, Tolerance};
-use kernel::space::Plane;
+use ocs_brep::{self as brep, Body, FaceKey};
+use ocs_geom::geom2d::{contains, ring_nesting_depths, signed_area, Curve, Line, Tolerance};
+use ocs_geom::space::Plane;
 use rustc_hash::FxHashMap;
 
 use super::{sweep_model, wire_model::WireModel};
@@ -108,7 +108,7 @@ fn curves_on_plane(source: Plane, curves: &[Curve], plane: WorkingPlane) -> Vec<
     let origin = plane.to_local(DVec3::from_array(source.origin));
     let x_axis = plane.vector_to_local(DVec3::from_array(source.x_axis));
     let y_axis = plane.vector_to_local(DVec3::from_array(source.y_axis));
-    let transform = kernel::geom2d::Transform {
+    let transform = ocs_geom::geom2d::Transform {
         origin: [origin.x, origin.y].into(),
         x_axis: [x_axis.x, x_axis.y].into(),
         y_axis: [y_axis.x, y_axis.y].into(),
@@ -148,7 +148,7 @@ fn boundary_source(curves: Vec<Curve>) -> Option<BoundarySource> {
         .iter()
         .flat_map(|curve| {
             curve
-                .tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
+                .tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE)
                 .windows(2)
                 .filter_map(|pair| {
                     let start = pair[0];
@@ -259,7 +259,7 @@ pub(crate) fn region_from_loops(loops: &[Vec<Curve>], plane: WorkingPlane) -> Op
                 let skip = usize::from(!points.is_empty());
                 points.extend(
                     curve
-                        .tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
+                        .tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE)
                         .into_iter()
                         .skip(skip)
                         .map(|point| {
@@ -365,7 +365,7 @@ pub fn edge_on_face_point(
         let boundary = profile.loops.into_iter().flatten().collect::<Vec<_>>();
         let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
         for curve in &boundary {
-            for local in curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE) {
+            for local in curve.tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE) {
                 let t = (DVec3::from_array(profile.plane.point_at(local)) - base).dot(view);
                 low = low.min(t);
                 high = high.max(t);
@@ -597,7 +597,7 @@ pub fn preview_wires(
 fn preview_body_wires(body: &Body, color: [f32; 4], isolines: usize) -> Vec<WireModel> {
     let wireframe = brep::mesh::tessellate_wireframe(
         body,
-        brep::mesh::TessellationTolerance::new(kernel::tessellation::DEFAULT_ANGLE, 1e-9)
+        brep::mesh::TessellationTolerance::new(ocs_geom::tessellation::DEFAULT_ANGLE, 1e-9)
             .with_solid_isolines(isolines),
     );
     wireframe

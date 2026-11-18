@@ -161,11 +161,11 @@ fn preview_sized(
         rgb(&state.color_2)
     };
     let angle = state.angle_radians();
-    let frame = kernel::geom2d::gradient_frame(
+    let frame = ocs_geom::geom2d::gradient_frame(
         &[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
         angle,
         if state.centered { 0.0 } else { 1.0 },
-        kernel::geom2d::Tolerance::default(),
+        ocs_geom::geom2d::Tolerance::default(),
     )?;
     let (sin, cos) = angle.sin_cos();
     let radial = state.kind.radial();

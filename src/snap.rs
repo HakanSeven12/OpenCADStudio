@@ -9,7 +9,7 @@ use iced::time::Instant;
 use iced::{Point, Rectangle};
 
 use document::types::Handle;
-use kernel::geom2d::Curve;
+use ocs_geom::geom2d::Curve;
 
 use crate::command::{DimensionAssociationSource, TangentObject};
 use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
@@ -3891,7 +3891,7 @@ fn tangent_line_endpoints(
 }
 
 fn curves_in_frame(wire: &WireModel, frame: &WirePlane, tol: f64) -> Option<Vec<Curve>> {
-    use kernel::geom2d::{
+    use ocs_geom::geom2d::{
         Arc as KArc, Circle as KCircle, Ellipse as KEllipse, EllipseArc as KEllipseArc,
         Line as KLine,
     };
@@ -4060,7 +4060,7 @@ fn exact_perpendicular_feet(wire: &WireModel, from: DVec3) -> Option<Vec<DVec3>>
     Some(
         curves
             .iter()
-            .flat_map(|curve| kernel::geom2d::perpendicular_from(curve, from))
+            .flat_map(|curve| ocs_geom::geom2d::perpendicular_from(curve, from))
             .map(|foot| frame.to_3d(foot.point))
             .collect(),
     )
@@ -4084,11 +4084,11 @@ pub(crate) fn exact_curve_intersections(
         return None;
     }
 
-    let tolerance = kernel::geom2d::Tolerance::new(1e-9_f64.max(PLANE_TOL));
+    let tolerance = ocs_geom::geom2d::Tolerance::new(1e-9_f64.max(PLANE_TOL));
     let mut points: Vec<DVec3> = Vec::new();
     for ca in &curves_a {
         for cb in &curves_b {
-            let crossings = kernel::geom2d::intersect(ca, cb, tolerance);
+            let crossings = ocs_geom::geom2d::intersect(ca, cb, tolerance);
             for c in crossings {
                 let pt = frame.to_3d(c.point);
                 if !points
@@ -4195,11 +4195,11 @@ fn seg_intersect_2d(a0: Point, a1: Point, b0: Point, b1: Point) -> Option<(f32, 
 
 /// Returns the two external tangent points on an XY circle.
 fn circle_tangent_points(p: Vec3, center: Vec3, radius: f32) -> Option<(Vec3, Vec3)> {
-    let curve = kernel::geom2d::Curve::Circle(kernel::geom2d::Circle {
+    let curve = ocs_geom::geom2d::Curve::Circle(ocs_geom::geom2d::Circle {
         centre: [center.x as f64, center.y as f64],
         radius: radius as f64,
     });
-    let points = kernel::geom2d::tangent_from(&curve, [p.x as f64, p.y as f64]);
+    let points = ocs_geom::geom2d::tangent_from(&curve, [p.x as f64, p.y as f64]);
     let [first, second] = points.as_slice() else {
         return None;
     };
@@ -4216,15 +4216,15 @@ fn planar_circle_tangent_points(
     axis_y: [f64; 3],
     radius: f64,
 ) -> Vec<DVec3> {
-    let plane = kernel::space::Plane::from_axes(center, axis_x, axis_y);
+    let plane = ocs_geom::space::Plane::from_axes(center, axis_x, axis_y);
     let Some(from) = plane.project(from.to_array()) else {
         return Vec::new();
     };
-    let curve = kernel::geom2d::Curve::Circle(kernel::geom2d::Circle {
+    let curve = ocs_geom::geom2d::Curve::Circle(ocs_geom::geom2d::Circle {
         centre: [0.0, 0.0],
         radius,
     });
-    kernel::geom2d::tangent_from(&curve, from)
+    ocs_geom::geom2d::tangent_from(&curve, from)
         .into_iter()
         .map(|point| DVec3::from_array(plane.point_at(point.point)))
         .collect()
@@ -4239,17 +4239,17 @@ fn arc_tangent_points(
     start_angle: f64,
     end_angle: f64,
 ) -> Vec<DVec3> {
-    let plane = kernel::space::Plane::from_axes(center, axis_x, axis_y);
+    let plane = ocs_geom::space::Plane::from_axes(center, axis_x, axis_y);
     let Some(from) = plane.project(from.to_array()) else {
         return Vec::new();
     };
-    let curve = kernel::geom2d::Curve::Arc(kernel::geom2d::Arc {
+    let curve = ocs_geom::geom2d::Curve::Arc(ocs_geom::geom2d::Arc {
         centre: [0.0, 0.0],
         radius,
         start_angle,
         end_angle,
     });
-    kernel::geom2d::tangent_from(&curve, from)
+    ocs_geom::geom2d::tangent_from(&curve, from)
         .into_iter()
         .map(|point| DVec3::from_array(plane.point_at(point.point)))
         .collect()

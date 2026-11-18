@@ -12,8 +12,8 @@
 use document::entities::Spline;
 use document::types::Vector3;
 use document::Handle;
-use kernel::geom2d::{NurbsCurve, Parameterization};
-use kernel::space::Plane;
+use ocs_geom::geom2d::{NurbsCurve, Parameterization};
+use ocs_geom::space::Plane;
 
 /// The drawing plane a spline sits on.
 ///

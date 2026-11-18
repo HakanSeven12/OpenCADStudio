@@ -1965,7 +1965,7 @@ impl OpenCADStudio {
             };
             let solid_bounds = if let document::EntityType::Solid3D(solid) = entity {
                 crate::scene::convert::solid3d_tess::kernel_body(solid)
-                    .and_then(|body| kernel::brep::body_bounds(&body))
+                    .and_then(|body| ocs_brep::body_bounds(&body))
                     .map(|bounds| (bounds.min, bounds.max))
                     .filter(valid_bounds)
                     .or_else(|| {

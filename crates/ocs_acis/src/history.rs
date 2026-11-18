@@ -5,12 +5,12 @@ use document::objects::{
 };
 use document::types::{Matrix3, Vector3};
 
-use kernel::brep::{self, Body, Placement};
-use kernel::geom2d::{
+use ocs_brep::{self as brep, Body, Placement};
+use ocs_geom::geom2d::{
     Arc, Circle, Curve, Ellipse, EllipseArc, Line, NurbsCurve, Parameterization, Polyline,
     PolylineVertex,
 };
-use kernel::space::{coplanarity_tolerance, NurbsCurve3, PlanarCurve, Plane, Vec3};
+use ocs_geom::space::{coplanarity_tolerance, NurbsCurve3, PlanarCurve, Plane, Vec3};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HistoryRebuildError {
@@ -1002,7 +1002,7 @@ fn embedded_sweep_path(
             1 => Parameterization::Centripetal,
             _ => Parameterization::Chord,
         };
-        let (controls, knots) = kernel::space::spline::interpolate_open(
+        let (controls, knots) = ocs_geom::space::spline::interpolate_open(
             &points,
             Some([value.begin_tangent.x, value.begin_tangent.y, value.begin_tangent.z]),
             Some([value.end_tangent.x, value.end_tangent.y, value.end_tangent.z]),
@@ -1883,7 +1883,7 @@ mod tests {
     }
 
     fn volume(body: &Body) -> f64 {
-        let mesh = brep::mesh::body(body, kernel::tessellation::DEFAULT_ANGLE, 1e-9);
+        let mesh = brep::mesh::body(body, ocs_geom::tessellation::DEFAULT_ANGLE, 1e-9);
         mesh.mass_properties().expect("a closed result").0
     }
 

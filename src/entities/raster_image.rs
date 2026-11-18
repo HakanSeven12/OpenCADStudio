@@ -472,8 +472,8 @@ fn wipeout_is_polygonal(wipeout: &Wipeout) -> bool {
         )
 }
 
-fn wipeout_plane(wipeout: &Wipeout) -> kernel::space::Plane {
-    kernel::space::Plane::from_axes(
+fn wipeout_plane(wipeout: &Wipeout) -> ocs_geom::space::Plane {
+    ocs_geom::space::Plane::from_axes(
         [
             wipeout.insertion_point.x,
             wipeout.insertion_point.y,
@@ -637,7 +637,7 @@ impl Grippable for Wipeout {
             return;
         }
         let resize_plane =
-            kernel::space::Plane::from_axes([0.0; 3], u_hat.to_array(), v_hat.to_array());
+            ocs_geom::space::Plane::from_axes([0.0; 3], u_hat.to_array(), v_hat.to_array());
         let (width, height, insertion) = match grip_id {
             0 => {
                 let fixed = glam::DVec3::from(corners[2]);

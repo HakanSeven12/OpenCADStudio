@@ -91,7 +91,7 @@ impl DimJogLineCommand {
         } else {
             [f64::NAN; 3]
         };
-        kernel::space::default_dimension_jog_position(
+        ocs_geom::space::default_dimension_jog_position(
             [first.x, first.y, first.z],
             [second.x, second.y, second.z],
             [definition.x, definition.y, definition.z],
@@ -236,7 +236,7 @@ impl CadCommand for DimJogLineCommand {
             ),
             _ => return None,
         };
-        let points = kernel::space::dimension_jog_points(
+        let points = ocs_geom::space::dimension_jog_points(
             segment,
             point.to_array(),
             normal,

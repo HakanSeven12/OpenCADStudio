@@ -6,7 +6,7 @@
 use document::entities::acis::types::{
     SatDocument, SatEdge, SatFace, SatPointer, SatRecord, SatToken, SatVertex,
 };
-use kernel::brep::{Body, Curve3, Provenance, Surface};
+use ocs_brep::{Body, Curve3, Provenance, Surface};
 
 /// Why a body could not be written back.
 #[derive(Debug, Clone, PartialEq, Eq)]

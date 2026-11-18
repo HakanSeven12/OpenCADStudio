@@ -250,6 +250,8 @@ enum Step {
     Mode,
     // The File option on the command line (-PDFIMPORT, or FILEDIA 0).
     FileName,
+    /// The file named at the prompt is read off the UI thread.
+    Reading,
     Page,
     PageList,
     Insertion,
@@ -259,6 +261,65 @@ enum Step {
 
 /// What a file name that is no readable PDF (damaged, empty, not a PDF)
 /// prints before the name is asked for again.
+/// The file a name typed at the -PDFIMPORT prompt names: a name without
+/// an extension is a .pdf file.
+fn prompt_file_path(typed: &str) -> String {
+    if std::path::Path::new(typed).extension().is_none() {
+        format!("{typed}.pdf")
+    } else {
+        typed.to_string()
+    }
+}
+
+/// What the read of a file named at the -PDFIMPORT file name prompt found.
+#[derive(Debug, Clone)]
+pub enum PdfPromptRead {
+    /// The file cannot be read: the error to report.
+    Error(String),
+    /// The file needs a password first.
+    Password {
+        stage: crate::scene::model::pdf_password::Stage,
+        remembered: bool,
+    },
+    /// The number of pages, and the notice when a password supplied
+    /// earlier opened the file.
+    Pages {
+        pages: usize,
+        notice: Option<String>,
+    },
+}
+
+/// The read of a file named at the -PDFIMPORT prompt: the file, the check
+/// that it can be opened, the password it needs, and its pages.
+pub fn read_for_prompt(path: &str) -> PdfPromptRead {
+    use crate::scene::model::pdf_password::{gate, remembered_notice, Gate};
+    let shown = crate::entities::underlay::display_path(path);
+    let Ok(bytes) = std::fs::read(path) else {
+        return PdfPromptRead::Error(format!("File {shown} does not exist."));
+    };
+    // A damaged file is repaired only when it still has its trailer (the
+    // `trailer` dictionary or a cross-reference stream); a cut-off one
+    // cannot be opened.
+    // ponytail: byte search; a compressed stream holding these bytes
+    // would pass the test.
+    let has = |key: &[u8]| bytes.windows(key.len()).any(|w| w == key);
+    if !has(b"trailer") && !has(b"/XRef") {
+        return PdfPromptRead::Error(UNREADABLE_FILE.to_string());
+    }
+    crate::scene::model::pdf_raster::register_source(path, std::sync::Arc::new(bytes));
+    let notice = match gate(path, true) {
+        Gate::Open => None,
+        Gate::Remembered => Some(remembered_notice(path)),
+        Gate::Ask { stage, remembered } => {
+            return PdfPromptRead::Password { stage, remembered };
+        }
+    };
+    match crate::scene::model::pdf_raster::page_count(path).filter(|&pages| pages > 0) {
+        Some(pages) => PdfPromptRead::Pages { pages, notice },
+        None => PdfPromptRead::Error(UNREADABLE_FILE.to_string()),
+    }
+}
+
 const UNREADABLE_FILE: &str = "This file cannot be opened.\n\
 The problem can be caused by several things:\n\
 - The data in the file is corrupted\n\
@@ -290,6 +351,8 @@ pub struct PdfImportCommand {
     dash: bool,
     file: PdfFileImport,
     pages: usize,
+    /// The file read off the UI thread, and the text typed for it.
+    reading: Option<(String, String)>,
 }
 
 impl PdfImportCommand {
@@ -319,6 +382,7 @@ impl PdfImportCommand {
                 insertion: DVec3::ZERO,
             },
             pages: 0,
+            reading: None,
         }
     }
 
@@ -345,39 +409,31 @@ impl PdfImportCommand {
         if typed.is_empty() {
             return CmdResult::ReportError("Filename cannot be blank".to_string());
         }
-        // A name without an extension is a .pdf file.
-        let path = if std::path::Path::new(typed).extension().is_none() {
-            format!("{typed}.pdf")
-        } else {
-            typed.to_string()
-        };
-        let shown = crate::entities::underlay::display_path(&path);
-        let Ok(bytes) = std::fs::read(&path) else {
-            return CmdResult::ReportError(format!("File {shown} does not exist."));
-        };
-        // A damaged file is repaired only when it still has its trailer (the
-        // `trailer` dictionary or a cross-reference stream); a cut-off one
-        // cannot be opened.
-        // ponytail: byte search; a compressed stream holding these bytes
-        // would pass the test.
-        let has = |key: &[u8]| bytes.windows(key.len()).any(|w| w == key);
-        if !has(b"trailer") && !has(b"/XRef") {
-            return CmdResult::ReportError(UNREADABLE_FILE.to_string());
+        let path = prompt_file_path(typed);
+        self.step = Step::Reading;
+        self.reading = Some((path.clone(), text.to_string()));
+        CmdResult::ReadPdfForImport(path)
+    }
+
+    /// The command goes on with what the read of the file named at the
+    /// prompt found: the page prompt, the password, or the error.
+    fn take_read(&mut self, path: &str, input: &str, read: PdfPromptRead) -> CmdResult {
+        match read {
+            PdfPromptRead::Error(error) => CmdResult::ReportError(error),
+            PdfPromptRead::Password { stage, remembered } => CmdResult::PdfPassword {
+                path: path.to_string(),
+                input: input.to_string(),
+                stage,
+                remembered,
+                attach: false,
+            },
+            PdfPromptRead::Pages { pages, notice } => {
+                self.pages = pages;
+                self.file.path = path.to_string();
+                self.step = Step::Page;
+                notice.map_or(CmdResult::NeedPoint, CmdResult::ReportMeasurement)
+            }
         }
-        crate::scene::model::pdf_raster::register_source(&path, std::sync::Arc::new(bytes));
-        let notice = match crate::scene::model::pdf_password::prompt_gate(&path, text, false) {
-            Ok(notice) => notice,
-            Err(ask) => return ask,
-        };
-        let Some(pages) =
-            crate::scene::model::pdf_raster::page_count(&path).filter(|&pages| pages > 0)
-        else {
-            return CmdResult::ReportError(UNREADABLE_FILE.to_string());
-        };
-        self.pages = pages;
-        self.file.path = path;
-        self.step = Step::Page;
-        notice.map_or(CmdResult::NeedPoint, CmdResult::ReportMeasurement)
     }
 
     fn page(&mut self, text: &str) -> CmdResult {
@@ -498,6 +554,7 @@ impl CadCommand for PdfImportCommand {
                 "Keep, Detach or Unload PDF underlay? [Keep/Detach/Unload] <Unload>:".to_string()
             }
             Step::FileName => "Enter filename for PDF import:".to_string(),
+            Step::Reading => "Reading the file…".to_string(),
             Step::Page => "Enter page number or [?] <1>:".to_string(),
             Step::PageList => "Enter page to list <*>:".to_string(),
             Step::Insertion => "Specify insertion point <0,0>:".to_string(),
@@ -527,7 +584,7 @@ impl CadCommand for PdfImportCommand {
     fn input_kind(&self) -> InputKind {
         match self.step {
             Step::Mode | Step::Page | Step::PageList => InputKind::SingleToken,
-            Step::FileName => InputKind::FreeText,
+            Step::FileName | Step::Reading => InputKind::FreeText,
             _ => InputKind::Point,
         }
     }
@@ -616,6 +673,8 @@ impl CadCommand for PdfImportCommand {
             }
             Step::Mode => self.mode_choice(&token),
             Step::FileName => self.file_name(text),
+            // Input waits until the read ends.
+            Step::Reading => CmdResult::NeedPoint,
             Step::Page => self.page(text),
             Step::PageList => self.page_list(text),
             Step::Scale => match token.parse::<f64>() {
@@ -649,12 +708,23 @@ impl CadCommand for PdfImportCommand {
             Step::Mode => self.mode_choice(""),
             Step::Opposite => CmdResult::NeedPoint,
             Step::FileName => self.file_name(""),
+            Step::Reading => CmdResult::NeedPoint,
             Step::Page => self.page(""),
             Step::PageList => self.page_list(""),
             Step::Insertion => self.on_point(DVec3::ZERO),
             Step::Scale => self.scale(1.0),
             Step::Rotation => self.rotation(0.0),
         }
+    }
+
+    fn on_pdf_import_read(&mut self, path: &str, read: PdfPromptRead) -> Option<CmdResult> {
+        // `reading` is set only with the Reading step, and taken here.
+        if self.reading.as_ref().map(|(p, _)| p.as_str()) != Some(path) {
+            return None;
+        }
+        let (path, input) = self.reading.take()?;
+        self.step = Step::FileName;
+        Some(self.take_read(&path, &input, read))
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {

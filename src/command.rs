@@ -2033,6 +2033,10 @@ pub enum CmdResult {
     /// point: the command continues. If no scan can be read, the host ends
     /// the command with the reference's two lines when the read ends.
     ReadPointCloud(std::path::PathBuf),
+    /// Read the PDF file named at the -PDFIMPORT file name prompt off the
+    /// UI thread; the command waits, and the host gives it the read with
+    /// `on_pdf_import_read` when it ends.
+    ReadPdfForImport(String),
     /// Attach a point cloud: the host creates or reuses its definition,
     /// commits the cloud in one undo step, then ends the command. The
     /// message is the last prompt's echo.
@@ -3346,6 +3350,16 @@ pub trait CadCommand: Send {
 
     /// Return modal dialog definition if this command requires a GUI dialog.
     fn modal_dialog(&self) -> Option<ocs_plugin_api::dialog::DialogDef> {
+        None
+    }
+
+    /// The end of a read asked for with `CmdResult::ReadPdfForImport`:
+    /// `None` when the command does not wait for that file.
+    fn on_pdf_import_read(
+        &mut self,
+        _path: &str,
+        _read: crate::modules::insert::pdf_import::PdfPromptRead,
+    ) -> Option<CmdResult> {
         None
     }
 

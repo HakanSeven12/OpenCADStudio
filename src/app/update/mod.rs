@@ -169,6 +169,8 @@ pub(super) mod tool_palettes;
 pub(in crate::app) use file::background_task;
 #[cfg(not(target_arch = "wasm32"))]
 pub(in crate::app) use file::native_paths_match;
+#[cfg(not(target_arch = "wasm32"))]
+pub(in crate::app) use file::panic_detail;
 mod page_setup_import;
 #[cfg(not(target_arch = "wasm32"))]
 mod plugin_grips;

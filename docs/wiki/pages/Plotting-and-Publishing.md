@@ -20,6 +20,10 @@
 
 **Preview** shows the result on the sheet before you print. **Save changes to layout** keeps the settings with the layout.
 
+When **What to plot** is **Layout**, Studio applies any saved X and Y plot
+offset from the printable corner. The drawing moves within the same printable
+area. Negative offsets can move drawing content past a margin.
+
 Other ways to print:
 
 | Command | What it does |

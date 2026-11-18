@@ -6106,18 +6106,21 @@ impl OpenCADStudio {
         });
     }
 
+    fn dialog_plot_offsets_mm(&self) -> (f64, f64) {
+        let d = &self.plot_dialog;
+        let millimetres = |offset: &str| {
+            d.paper_units
+                .to_mm(offset.trim().parse::<f64>().unwrap_or(0.0))
+        };
+        (millimetres(&d.offset_x), millimetres(&d.offset_y))
+    }
+
     /// The plot origin in millimetres from the sheet's corner: the dialog's
     /// offsets in the page-setup unit, counted from the printable area's
     /// corner unless `PLOTOFFSET` says from the paper edge.
     fn dialog_plot_origin_mm(&self) -> (f64, f64) {
-        let d = &self.plot_dialog;
-        let x = d
-            .paper_units
-            .to_mm(d.offset_x.trim().parse::<f64>().unwrap_or(0.0));
-        let y = d
-            .paper_units
-            .to_mm(d.offset_y.trim().parse::<f64>().unwrap_or(0.0));
-        if d.plot_offset_from_edge {
+        let (x, y) = self.dialog_plot_offsets_mm();
+        if self.plot_dialog.plot_offset_from_edge {
             return (x, y);
         }
         let ps = self.plot_settings_from_dialog(self.dialog_base_settings());
@@ -6219,17 +6222,9 @@ impl OpenCADStudio {
             }
         }
         ps.flags.plot_centered = d.center && !layout_area;
-        // Offsets are typed in the page-setup unit; the file keeps millimetres.
-        let (origin_x, origin_y) = if layout_area {
-            (0.0, 0.0)
-        } else {
-            (
-                d.paper_units
-                    .to_mm(d.offset_x.trim().parse::<f64>().unwrap_or(0.0)),
-                d.paper_units
-                    .to_mm(d.offset_y.trim().parse::<f64>().unwrap_or(0.0)),
-            )
-        };
+        // The file keeps millimetres. A Layout offset is relative to the
+        // printable corner, like the saved CAD page setup it came from.
+        let (origin_x, origin_y) = self.dialog_plot_offsets_mm();
         ps.origin_x = origin_x;
         ps.origin_y = origin_y;
         ps.paper_units = match d.paper_units {
@@ -7069,7 +7064,11 @@ impl OpenCADStudio {
             // Only the explicit upside-down choice rotates layout content here.
             let rotation = dialog_rotation;
             let centered = self.plot_dialog.center;
-            let (origin_x, origin_y) = self.dialog_plot_origin_mm();
+            let (origin_x, origin_y) = if plot_layout {
+                self.dialog_plot_offsets_mm()
+            } else {
+                self.dialog_plot_origin_mm()
+            };
 
             let (scale, offset_x, offset_y) = if plot_extents {
                 let (min_x, min_y, max_x, max_y) =
@@ -7151,6 +7150,13 @@ impl OpenCADStudio {
                     })
             } else {
                 None
+            };
+            // Move the ink relative to the printable corner. Keep the clip
+            // anchored to the physical page.
+            let (offset_x, offset_y) = if plot_layout {
+                (offset_x + origin_x / scale, offset_y + origin_y / scale)
+            } else {
+                (offset_x, offset_y)
             };
             return PdfPageInput {
                 content,
@@ -7973,7 +7979,7 @@ impl OpenCADStudio {
                 if self.plot_dialog.area == "Layout" && s != "Layout" {
                     self.normalize_common_plot_dialog();
                 }
-                if s == "Layout" {
+                if s == "Layout" && self.plot_dialog.area != "Layout" {
                     self.plot_dialog.center = false;
                     self.plot_dialog.offset_x = "0.0".into();
                     self.plot_dialog.offset_y = "0.0".into();
@@ -8523,8 +8529,16 @@ impl OpenCADStudio {
             document::objects::PlotPaperUnits::Inches => PaperUnits::Inches,
             _ => PaperUnits::Millimeters,
         };
-        d.offset_x = trim_decimals(&format!("{:.4}", d.paper_units.from_mm(ps.origin_x)));
-        d.offset_y = trim_decimals(&format!("{:.4}", d.paper_units.from_mm(ps.origin_y)));
+        let format_offset = |origin_mm| {
+            let offset = d.paper_units.from_mm(origin_mm);
+            if d.area == "Layout" {
+                offset.to_string()
+            } else {
+                trim_decimals(&format!("{offset:.4}"))
+            }
+        };
+        d.offset_x = format_offset(ps.origin_x);
+        d.offset_y = format_offset(ps.origin_y);
         d.hide_paperspace = ps.flags.plot_hidden;
         let deg = ps.rotation.to_degrees() as i32;
         if matches!(deg, 90 | 270) {
@@ -10424,6 +10438,24 @@ mod plot_paper_tests {
             (at.0 - 50.0).abs() < 1e-6 && (at.1 - 40.0).abs() < 1e-6,
             "paper (50,40) plots at {at:?}"
         );
+    }
+
+    #[test]
+    fn layout_plot_moves_the_content_and_keeps_the_printable_clip_on_the_sheet() {
+        use document::objects::PlotRotation;
+
+        let mut app =
+            layout_with_margins_and_stale_limmin((5.0, 7.0, 11.0, 13.0), PlotRotation::None);
+        edit_layout_settings(&mut app, |ps| {
+            ps.origin_x = 7.0;
+            ps.origin_y = -10.0;
+        });
+        let _ = app.on_plot_dialog_open();
+        let page = app.layout_plot_page_for("Layout");
+        assert_eq!((page.offset_x, page.offset_y), (12.0, -3.0));
+        assert_eq!(page.clip, Some((5.0, 7.0, 194.0, 277.0)));
+        let saved = app.dialog_to_plotsettings();
+        assert_eq!((saved.origin_x, saved.origin_y), (7.0, -10.0));
     }
 
     /// With margins the sheet starts at minus the margins as they land on the

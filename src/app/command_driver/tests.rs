@@ -11435,3 +11435,66 @@ mod dash_objectscale_prompt_tests {
     }
 }
 
+
+// A selected annotation object exposes an Annotative Yes/No row in
+// Properties; picking Yes drives the per-object annotative toggle.
+mod annotative_properties_row_tests {
+    use super::super::*;
+    use document::entities::MText;
+    use document::types::Vector3;
+    use document::EntityType;
+
+    fn row(app: &OpenCADStudio) -> crate::scene::model::object::Property {
+        app.tabs[app.active_tab]
+            .properties
+            .sections
+            .iter()
+            .flat_map(|section| &section.props)
+            .find(|property| property.field == "annotative")
+            .expect("the Annotative row is in Properties")
+            .clone()
+    }
+
+    #[test]
+    fn the_annotative_properties_choice_toggles_the_object() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let handle = app.tabs[i].scene.add_entity(EntityType::MText(Box::new(
+            MText::with_value("hello".to_string(), Vector3::ZERO),
+        )));
+        app.tabs[i].scene.select_entity(handle, true);
+        app.tabs[i].selected_handle = Some(handle);
+        app.refresh_properties();
+
+        let before = row(&app);
+        assert_eq!(before.label, "Annotative");
+        assert!(
+            matches!(&before.value, crate::scene::model::object::PropValue::Choice { selected, options } if selected == "No" && options.contains(&"Yes".to_string())),
+            "the row offers Yes/No and starts at No: {:?}",
+            before.value
+        );
+
+        let _ = app
+            .set_property_value(before, &serde_json::json!("Yes"))
+            .unwrap();
+        app.finish_pending_history(i);
+
+        let document::EntityType::MText(text) = app.tabs[i]
+            .scene
+            .document
+            .get_entity(handle)
+            .unwrap()
+        else {
+            panic!("the entity stays an MTEXT")
+        };
+        assert!(text.is_annotative, "the Properties choice toggled the object");
+
+        app.refresh_properties();
+        assert!(
+            matches!(&row(&app).value, crate::scene::model::object::PropValue::Choice { selected, .. } if selected == "Yes"),
+            "the row reads back the new state"
+        );
+    }
+}
+

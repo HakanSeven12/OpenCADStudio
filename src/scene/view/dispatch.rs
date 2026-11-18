@@ -266,7 +266,19 @@ pub fn set_entity_xdata(
     let Some(entity) = doc.get_entity_mut(handle) else {
         return;
     };
-    let common = entity.common_mut();
+    replace_xdata_record(entity.common_mut(), app, app_handle, values);
+}
+
+/// Replace one application's XDATA record on an object (`None` drops it).
+/// `app_handle` is the application's registered handle, whose raw DWG copy
+/// goes with it. Used directly for an INSERT's attributes, which are not
+/// document entities of their own.
+pub fn replace_xdata_record(
+    common: &mut document::entities::EntityCommon,
+    app: &str,
+    app_handle: Option<u64>,
+    values: Option<Vec<document::xdata::XDataValue>>,
+) {
     let mut rebuilt = document::xdata::ExtendedData::new();
     for r in common.extended_data.records() {
         if r.application_name != app {
@@ -359,7 +371,23 @@ pub fn apply_line_weight(entity: &mut EntityType, lw: LineWeight) {
 }
 
 pub fn apply_geom_prop(entity: &mut EntityType, field: &str, value: &str) {
+    let before = saved_leader_before_edit(entity);
     EntityTypeOps::apply_geom_prop(entity, field, value);
+    invalidate_changed_leader_picture(entity, before);
+}
+
+// A picture belongs to the old definition. Keep it for a no-op, but let the
+// ordinary history snapshot restore it together with the definition on undo.
+fn saved_leader_before_edit(entity: &EntityType) -> Option<EntityType> {
+    (matches!(entity, EntityType::Leader(_) | EntityType::MultiLeader(_) | EntityType::Tolerance(_))
+        && entity.common().graphic_data.is_some())
+        .then(|| entity.clone())
+}
+
+fn invalidate_changed_leader_picture(entity: &mut EntityType, before: Option<EntityType>) {
+    if before.as_ref().is_some_and(|original| original != entity) {
+        entity.common_mut().graphic_data = None;
+    }
 }
 
 pub fn apply_grip(
@@ -382,7 +410,9 @@ pub fn apply_grip(
         }
         (None, a) => a,
     };
+    let before = saved_leader_before_edit(entity);
     EntityTypeOps::apply_grip(entity, grip_id, apply);
+    invalidate_changed_leader_picture(entity, before);
 }
 
 /// Rebuild an arc from its drag-start control points and the point grips moved

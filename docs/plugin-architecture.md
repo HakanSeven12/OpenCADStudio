@@ -317,6 +317,13 @@ set `needs_object_pick() -> true`; the host then calls
 XDATA/geometry via `HostApi`). Over `--serve` the pick is supplied as a hex
 handle: `run "MY_CMD 2F 30"`.
 
+A command that collects several points can take a mid-command Ctrl+Z itself
+(API v24): implement `on_undo_step` to drop the last point and return the next
+step (usually `NeedPoint`); the prompt and preview then follow the shortened
+state, as when PLINE pops its last vertex. Returning `None` (the default)
+leaves Ctrl+Z to the document undo. Plugins whose manifest declares an older
+API are never asked.
+
 ### XDATA — domain persistence
 
 Store domain data on entities as XDATA (under your `xdata_apps` ids), not in a

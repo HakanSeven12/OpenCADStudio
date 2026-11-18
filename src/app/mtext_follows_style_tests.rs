@@ -102,6 +102,10 @@ fn typing_the_style_oblique_writes_no_code_and_zero_writes_one() {
 fn a_new_style_brings_its_height_and_oblique_to_the_fields_that_follow() {
     let mut app = editing("Text", 2.5);
     let _ = app.update(Message::MTextStyle("Tall".to_string()));
+    // With nothing selected the style change is asked about first.
+    let _ = app.update(Message::MTextDialog(
+        crate::ui::window::mtext_dialogs::MTextDialogMsg::StyleYes,
+    ));
     let shown = ed(&app);
     assert_eq!(
         (shown.height.as_str(), shown.oblique.as_str()),

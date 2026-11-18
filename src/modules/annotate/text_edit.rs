@@ -786,6 +786,23 @@ impl CadCommand for ScaleTextCommand {
         true
     }
 
+    // The heights, the factor and the reference lengths are typed numbers:
+    // one value box, committed as text, not an X/Y point.
+    fn dyn_field(&self) -> crate::command::DynField {
+        match self.step {
+            ScaleStep::Height
+            | ScaleStep::Paper
+            | ScaleStep::Factor
+            | ScaleStep::RefLength
+            | ScaleStep::NewLength => crate::command::DynField::Scalar,
+            _ => crate::command::DynField::Point,
+        }
+    }
+
+    fn dyn_commit_as_text(&self) -> bool {
+        self.dyn_field() == crate::command::DynField::Scalar
+    }
+
     fn needs_entity_pick(&self) -> bool {
         self.step == ScaleStep::Match
     }

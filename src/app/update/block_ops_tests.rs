@@ -1698,6 +1698,12 @@ fn locked_attedit_attribute_flags_cases() {
         linetype: "ByLayer".to_string(),
         line_weight: document::types::LineWeight::ByLayer,
         is_constant: false,
+        index: 0,
+        multiline: false,
+        boundary_width: "0".to_string(),
+        annotative: false,
+        field: None,
+        field_changed: false,
     };
     assert!(!normal_row.is_constant);
 

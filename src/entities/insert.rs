@@ -241,10 +241,12 @@ fn properties(ins: &Insert) -> Vec<PropSection> {
             ],
         },
     ];
-    // The Attributes group appears only when the block actually has attributes.
+    // The attributes appear only when the block actually has attributes,
+    // under the block's name: references of different blocks share no
+    // attribute group.
     if !attrs.is_empty() {
         sections.push(PropSection {
-            title: "Attributes".into(),
+            title: format!("Block:{}", ins.block_name),
             props: attrs,
         });
     }

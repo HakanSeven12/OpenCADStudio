@@ -148,14 +148,20 @@ jobs:
 
       # Attach the bundle to the release so a version can be pinned and
       # self-hosted; it expects to be served from /app/. Taken before the
-      # site data below is added, and skipped for hotfixes built from main.
+      # site data below is added. A hotfix built from main attaches only when
+      # the release has no bundle (its own web build failed).
       - name: Attach web bundle to the release
-        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.build_main) }}
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.source.outputs.tag }}
+          HOTFIX: ${{ github.event_name == 'workflow_dispatch' && inputs.build_main }}
         run: |
           ASSET="OpenCADStudio-$RELEASE_TAG-web.zip"
+          if [ "$HOTFIX" = "true" ] && gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --json assets --jq '.assets[].name' | grep -qxF "$ASSET"; then
+            echo "The release already has $ASSET; a hotfix leaves it as released."
+            exit 0
+          fi
           (cd dist && zip -qr "../$ASSET" app)
           gh release upload "$RELEASE_TAG" "$ASSET" --clobber --repo "$GITHUB_REPOSITORY"
 

@@ -221,6 +221,11 @@ impl Builder {
                         loops = vec![self.sphere_seam(sphere)?];
                     }
                 }
+                // A vertex loop bounds nothing; only a sphere, cone or torus
+                // keeps one, as the point its surface closes to.
+                if !matches!(surface, Surface::Sphere(_) | Surface::Cone(_) | Surface::Torus(_)) {
+                    loops.retain(|ring| !ring.is_empty());
+                }
                 let surface = self.body.surfaces.insert(surface);
                 let face = self.body.faces.insert(Face {
                     surface,
@@ -256,5 +261,29 @@ impl Builder {
         }
         self.body.roots.push(lump);
         Some(())
+    }
+
+    /// Sews faces whose boundaries meet within `tolerance` (the file's; a
+    /// ten-millionth of the body's size when it states none) into shared
+    /// edges, growing it while a solid's shell stays open, and puts the loops
+    /// of a body that is still flawed in order.
+    pub fn heal(&mut self, tolerance: Option<f64>, solid: bool) {
+        let tolerance = tolerance
+            .filter(|t| t.is_finite() && *t > 0.0)
+            .or_else(|| {
+                let bounds = kernel::brep::body_bounds(&self.body)?;
+                Some(1e-7 * (Vec3::from(bounds.max) - Vec3::from(bounds.min)).length())
+            });
+        let Some(tolerance) = tolerance.filter(|t| *t > 0.0) else {
+            return;
+        };
+        if solid {
+            kernel::brep::heal::sew_into_solid(&mut self.body, tolerance);
+        } else {
+            kernel::brep::heal::sew(&mut self.body, tolerance);
+        }
+        if !self.body.validate().is_empty() {
+            kernel::brep::heal::fix_loops(&mut self.body);
+        }
     }
 }

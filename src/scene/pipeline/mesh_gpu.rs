@@ -357,6 +357,25 @@ pub struct MeshBatchChunk {
     pub material: Option<crate::scene::model::material_model::MeshMaterial>,
     pub face_color: [f32; 4],
     pub material_bind_group: Option<wgpu::BindGroup>,
+    pub(super) material_memory: Option<MaterialMemory>,
+    /// Display LODs of the opaque triangles, when any mesh here has them:
+    /// one entry per opaque part, in `index_buffer` order, covering it all.
+    /// Empty draws `index_buffer` whole.
+    pub lod_entries: Vec<MeshLodEntry>,
+    /// The LOD 1 and LOD 2 index buffers the entries' ranges point into,
+    /// over this chunk's own vertex buffer.
+    pub lod_index_buffers: Vec<wgpu::Buffer>,
+}
+
+/// One opaque part of a chunk at each display LOD: `ranges[level]` is
+/// `(start, count)` in `index_buffer` for level 0 and in
+/// `lod_index_buffers[level - 1]` above it; a count of 0 means the part has
+/// no such level and draws level 0.
+#[derive(Clone, Copy, Debug)]
+pub struct MeshLodEntry {
+    /// World bounds `[min_x, min_y, min_z, max_x, max_y, max_z]`.
+    pub aabb: [f32; 6],
+    pub ranges: [(u32, u32); 3],
 }
 
 #[derive(Clone, Copy)]
@@ -511,6 +530,8 @@ fn make_chunk(
         edge_vertex_buffer: edge_buffer_override
             .unwrap_or_else(|| mk_edge_vertex(edge_verts, "mesh.batch.edge_vbuf")),
         edge_vertex_count: edge_verts.len() as u32,
+        lod_entries: Vec::new(),
+        lod_index_buffers: Vec::new(),
         instance_buffer: {
             let buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("mesh.batch.instances"),
@@ -527,6 +548,7 @@ fn make_chunk(
         material: material.cloned(),
         face_color,
         material_bind_group: None,
+        material_memory: None,
     }
 }
 
@@ -652,6 +674,31 @@ fn upload_rgba_texture(
         },
     );
     texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
+#[derive(Clone)]
+pub(super) struct MaterialMemory {
+    resources: std::sync::Arc<MeshMaterialResources>,
+    surface: wgpu::Buffer,
+}
+
+impl MaterialMemory {
+    pub(super) fn gpu_bytes<'a>(&'a self, counter: &mut super::gpu_memory::ResourceCounter<'a>) -> u64 {
+        let resources = &self.resources;
+        let mut bytes = counter.buffer(&resources.params_buffer) + counter.buffer(&self.surface);
+        for view in [
+            &resources.diffuse_view,
+            &resources.specular_view,
+            &resources.reflection_view,
+            &resources.opacity_view,
+            &resources.bump_view,
+            &resources.refraction_view,
+            &resources.normal_view,
+        ] {
+            bytes += counter.texture(view.texture());
+        }
+        bytes
+    }
 }
 
 pub struct MeshMaterialResources {
@@ -918,7 +965,7 @@ pub fn create_material_bind_group_from_resources(
     resources: &MeshMaterialResources,
     material: Option<&crate::scene::model::material_model::MeshMaterial>,
     face_color: [f32; 4],
-) -> wgpu::BindGroup {
+) -> (wgpu::BindGroup, wgpu::Buffer) {
     let surface = surface_params(material, face_color);
     let surface_buffer = super::gpu_upload::upload_buffer(
         device,
@@ -927,7 +974,7 @@ pub fn create_material_bind_group_from_resources(
         std::slice::from_ref(&surface),
         wgpu::BufferUsages::UNIFORM,
     );
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("mesh.material.bind_group"),
         layout,
         entries: &[
@@ -996,18 +1043,22 @@ pub fn create_material_bind_group_from_resources(
                 resource: surface_buffer.as_entire_binding(),
             },
         ],
-    })
+    });
+    (bind_group, surface_buffer)
 }
 
-pub fn create_material_bind_group(
+pub(super) fn create_material_bind_group(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     material: Option<&crate::scene::model::material_model::MeshMaterial>,
-) -> wgpu::BindGroup {
-    let resources = create_material_resources(device, queue, material);
+) -> (wgpu::BindGroup, MaterialMemory) {
+    let resources = std::sync::Arc::new(create_material_resources(device, queue, material));
     let color = material.map_or([0.8, 0.8, 0.8, 1.0], |material| material.diffuse);
-    create_material_bind_group_from_resources(device, queue, layout, &resources, material, color)
+    let (group, surface) = create_material_bind_group_from_resources(
+        device, queue, layout, &resources, material, color,
+    );
+    (group, MaterialMemory { resources, surface })
 }
 
 /// Give every chunk its material bind group. Chunks are split by geometry
@@ -1024,12 +1075,14 @@ pub fn upload_chunk_material_bind_groups(
     // Resources by material handle; a material without one, and without
     // images, by its map parameters. Thousands of coloured meshes carry such
     // a material, and one set each ran D3D12 out of memory (#2343).
-    let mut materials: rustc_hash::FxHashMap<(Option<u64>, Vec<u32>), MeshMaterialResources> =
-        rustc_hash::FxHashMap::default();
+    let mut materials: rustc_hash::FxHashMap<
+        (Option<u64>, Vec<u32>),
+        std::sync::Arc<MeshMaterialResources>,
+    > = Default::default();
     let mut bind_groups: rustc_hash::FxHashMap<
         ((Option<u64>, Vec<u32>), [u32; 24]),
-        wgpu::BindGroup,
-    > = rustc_hash::FxHashMap::default();
+        (wgpu::BindGroup, MaterialMemory),
+    > = Default::default();
     for chunk in chunks {
         let material = chunk.material.as_ref();
         let key = match material {
@@ -1043,38 +1096,48 @@ pub fn upload_chunk_material_bind_groups(
                         bytemuck::cast_slice(std::slice::from_ref(&params)).to_vec(),
                     )
                 }
-                // Images but no handle to identify them by: keep it private.
                 None => {
-                    let resources = create_material_resources(device, queue, Some(material));
-                    chunk.material_bind_group = Some(create_material_bind_group_from_resources(
+                    let resources = std::sync::Arc::new(create_material_resources(
+                        device,
+                        queue,
+                        Some(material),
+                    ));
+                    let (group, surface) = create_material_bind_group_from_resources(
                         device,
                         queue,
                         layout,
                         &resources,
                         Some(material),
                         chunk.face_color,
-                    ));
+                    );
+                    chunk.material_bind_group = Some(group);
+                    chunk.material_memory = Some(MaterialMemory { resources, surface });
                     continue;
                 }
             },
         };
         let surface = bytemuck::cast(surface_params(material, chunk.face_color));
-        let bind_group = bind_groups
+        let (bind_group, memory) = bind_groups
             .entry((key.clone(), surface))
             .or_insert_with(|| {
                 let resources = materials
                     .entry(key)
-                    .or_insert_with(|| create_material_resources(device, queue, material));
-                create_material_bind_group_from_resources(
+                    .or_insert_with(|| {
+                        std::sync::Arc::new(create_material_resources(device, queue, material))
+                    })
+                    .clone();
+                let (group, surface) = create_material_bind_group_from_resources(
                     device,
                     queue,
                     layout,
-                    resources,
+                    &resources,
                     material,
                     chunk.face_color,
-                )
+                );
+                (group, MaterialMemory { resources, surface })
             });
         chunk.material_bind_group = Some(bind_group.clone());
+        chunk.material_memory = Some(memory.clone());
     }
 }
 
@@ -1190,6 +1253,8 @@ struct MeshBatchPart<'a> {
     color: [f32; 4],
     indices: std::sync::Arc<[u32]>,
     index_hash: u64,
+    /// The part's triangles at display LODs 1 and 2, where it has them.
+    lods: [Option<std::sync::Arc<[u32]>>; 2],
     include_faces: bool,
     include_edges: bool,
     part_slot: u32,
@@ -1213,6 +1278,7 @@ struct CachedFacePart<'a> {
     color: [f32; 4],
     indices: std::sync::Arc<[u32]>,
     index_hash: u64,
+    lods: [Option<std::sync::Arc<[u32]>>; 2],
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1231,6 +1297,142 @@ fn index_hash(indices: &[u32]) -> u64 {
     let mut hasher = rustc_hash::FxHasher::default();
     indices.hash(&mut hasher);
     hasher.finish()
+}
+
+/// An opaque part on its way into a chunk's [`MeshLodEntry`] list.
+struct PendingLod {
+    chunk: usize,
+    aabb: [f32; 6],
+    range: (u32, u32),
+    lods: [Option<Vec<u32>>; 2],
+}
+
+/// Gives each chunk holding a part with display LODs its LOD index buffers
+/// and entries. A chunk whose entries would not cover its whole opaque index
+/// buffer keeps none, and so draws level 0 as before.
+fn attach_lods(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    chunks: &mut [MeshBatchChunk],
+    pending: Vec<PendingLod>,
+) {
+    let mut pending = pending.into_iter().peekable();
+    while let Some(first) = pending.next() {
+        let at = first.chunk;
+        let mut group = vec![first];
+        while let Some(next) = pending.next_if(|next| next.chunk == at) {
+            group.push(next);
+        }
+        let Some(chunk) = chunks.get_mut(at) else {
+            continue;
+        };
+        let covered: u64 = group.iter().map(|part| part.range.1 as u64).sum();
+        if group.iter().all(|part| part.lods.iter().all(Option::is_none))
+            || covered != chunk.index_count as u64
+        {
+            continue;
+        }
+        let mut buffers: [Vec<u32>; 2] = [Vec::new(), Vec::new()];
+        chunk.lod_entries = group
+            .into_iter()
+            .map(|part| {
+                let mut ranges = [part.range, (0, 0), (0, 0)];
+                for (level, lod) in part.lods.into_iter().enumerate() {
+                    if let Some(lod) = lod.filter(|lod| !lod.is_empty()) {
+                        ranges[level + 1] = (buffers[level].len() as u32, lod.len() as u32);
+                        buffers[level].extend(lod);
+                    }
+                }
+                MeshLodEntry {
+                    aabb: part.aabb,
+                    ranges,
+                }
+            })
+            .collect();
+        chunk.lod_index_buffers = buffers
+            .iter()
+            .map(|data| {
+                // A level no part has still gets a (never drawn) buffer, so
+                // `lod_index_buffers[level - 1]` always exists.
+                let bytes: &[u8] = if data.is_empty() {
+                    &[0; 4]
+                } else {
+                    bytemuck::cast_slice(data)
+                };
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("mesh.batch.lod_ibuf"),
+                    size: bytes.len() as u64,
+                    usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                queue.write_buffer(&buffer, 0, bytes);
+                buffer
+            })
+            .collect();
+    }
+}
+
+/// Screen-size thresholds of the LOD ladder, in pixels of projected
+/// bounding-box diagonal: above the first draws level 0, below the second
+/// level 2.
+const LOD_THRESHOLDS: [f32; 2] = [200.0, 50.0];
+/// How far past a threshold a mesh must move before its level changes, as a
+/// fraction of the threshold, so one sitting on it does not flicker.
+const LOD_HYSTERESIS: f32 = 0.15;
+
+/// The display level for a projected diagonal of `pixels`, kept at
+/// `previous` while the size is within the hysteresis band around the
+/// threshold between them.
+pub fn lod_level(pixels: f32, previous: Option<u8>) -> u8 {
+    let plain = |margin: f32| {
+        if pixels > LOD_THRESHOLDS[0] * margin {
+            0
+        } else if pixels > LOD_THRESHOLDS[1] * margin {
+            1
+        } else {
+            2
+        }
+    };
+    let Some(previous) = previous else {
+        return plain(1.0);
+    };
+    // Coarser only once clearly below a threshold, finer only once clearly
+    // above it.
+    let coarser = plain(1.0 - LOD_HYSTERESIS);
+    if coarser > previous {
+        return coarser;
+    }
+    let finer = plain(1.0 + LOD_HYSTERESIS);
+    if finer < previous {
+        return finer;
+    }
+    previous
+}
+
+/// Projected diagonal, in pixels, of a world box under the eye-relative
+/// view-projection `view_rot`; infinite when part of it is behind the eye.
+pub fn projected_diagonal(
+    aabb: [f32; 6],
+    view_rot: &glam::Mat4,
+    eye: glam::DVec3,
+    viewport: [f32; 2],
+) -> f32 {
+    let (mut low, mut high) = (glam::Vec2::splat(f32::INFINITY), glam::Vec2::splat(f32::NEG_INFINITY));
+    for corner in 0..8 {
+        let world = glam::DVec3::new(
+            aabb[if corner & 1 == 0 { 0 } else { 3 }] as f64,
+            aabb[if corner & 2 == 0 { 1 } else { 4 }] as f64,
+            aabb[if corner & 4 == 0 { 2 } else { 5 }] as f64,
+        );
+        let clip = *view_rot * (world - eye).as_vec3().extend(1.0);
+        if !(clip.w > 1e-6) || !clip.is_finite() {
+            return f32::INFINITY;
+        }
+        let pixel = glam::Vec2::new(clip.x, clip.y) / clip.w * glam::Vec2::from(viewport) * 0.5;
+        low = low.min(pixel);
+        high = high.max(pixel);
+    }
+    (high - low).length()
 }
 
 fn optimize_triangle_indices(indices: &[u32], vertex_count: usize) -> std::sync::Arc<[u32]> {
@@ -1997,7 +2199,12 @@ pub fn build_mesh_batch_filtered(
         rustc_hash::FxHashSet::default();
     let mut total_tris = 0u64;
     let mut ordered: Vec<MeshBatchPart<'_>> = Vec::new();
-    let mut source_indices: rustc_hash::FxHashMap<(bool, u64), (std::sync::Arc<[u32]>, u64)> =
+    type SourceIndices = (
+        std::sync::Arc<[u32]>,
+        u64,
+        [Option<std::sync::Arc<[u32]>>; 2],
+    );
+    let mut source_indices: rustc_hash::FxHashMap<(bool, u64), SourceIndices> =
         rustc_hash::FxHashMap::default();
     let mut face_partitions: rustc_hash::FxHashMap<FacePartitionKey, Vec<CachedFacePart<'_>>> =
         rustc_hash::FxHashMap::default();
@@ -2042,12 +2249,16 @@ pub fn build_mesh_batch_filtered(
                 .visual_style
                 .as_ref()
                 .map_or(base_color, |style| style.face_color(base_color));
-            let (shared_indices, shared_hash) = source_indices
+            let (shared_indices, shared_hash, lods) = source_indices
                 .entry(source_identity)
                 .or_insert_with(|| {
                     let indices = optimize_triangle_indices(&mesh.indices, mesh.verts.len());
                     let hash = index_hash(indices.as_ref());
-                    (indices, hash)
+                    let lods = [1, 2].map(|level| {
+                        set.display_lod(level)
+                            .map(|lod| optimize_triangle_indices(&lod.indices, mesh.verts.len()))
+                    });
+                    (indices, hash, lods)
                 })
                 .clone();
             ordered.push(MeshBatchPart {
@@ -2060,6 +2271,7 @@ pub fn build_mesh_batch_filtered(
                 color,
                 indices: shared_indices,
                 index_hash: shared_hash,
+                lods,
                 include_faces,
                 include_edges,
                 part_slot: 0,
@@ -2098,9 +2310,16 @@ pub fn build_mesh_batch_filtered(
                     Vec<u32>,
                 ),
             > = std::collections::BTreeMap::new();
-            for (triangle, indices) in mesh.indices.chunks_exact(3).enumerate() {
+            // A triangle's material and colour, from the per-triangle lists
+            // of the full mesh or of a display LOD.
+            let style = |handles: &[Option<document::Handle>],
+                         colors: &[Option<[f32; 4]>],
+                         triangle: usize| {
                 let material = if has_face_materials {
-                    mesh.triangle_material_handles[triangle]
+                    handles
+                        .get(triangle)
+                        .copied()
+                        .flatten()
                         .and_then(|handle| set.face_materials.get(&handle))
                         .or(set.material.as_ref())
                 } else {
@@ -2108,7 +2327,11 @@ pub fn build_mesh_batch_filtered(
                 };
                 let base_color = material.map_or(display_color, |material| material.diffuse);
                 let base_color = if has_face_colors {
-                    mesh.triangle_colors[triangle].unwrap_or(base_color)
+                    colors
+                        .get(triangle)
+                        .copied()
+                        .flatten()
+                        .unwrap_or(base_color)
                 } else {
                     base_color
                 };
@@ -2116,22 +2339,53 @@ pub fn build_mesh_batch_filtered(
                     .visual_style
                     .as_ref()
                     .map_or(base_color, |style| style.face_color(base_color));
+                (material, color)
+            };
+            for (triangle, indices) in mesh.indices.chunks_exact(3).enumerate() {
+                let (material, color) = style(
+                    &mesh.triangle_material_handles,
+                    &mesh.triangle_colors,
+                    triangle,
+                );
                 groups
                     .entry(material_key(material, color))
                     .or_insert_with(|| (material, color, Vec::new()))
                     .2
                     .extend_from_slice(indices);
             }
+            // The same grouping of each display LOD's triangles.
+            let lod_groups = [1, 2].map(|level| {
+                let lod = set.display_lod(level)?;
+                let mut by_key: rustc_hash::FxHashMap<MaterialBatchKey, Vec<u32>> =
+                    rustc_hash::FxHashMap::default();
+                for (triangle, indices) in lod.indices.chunks_exact(3).enumerate() {
+                    let (material, color) = style(
+                        &lod.triangle_material_handles,
+                        &lod.triangle_colors,
+                        triangle,
+                    );
+                    by_key
+                        .entry(material_key(material, color))
+                        .or_default()
+                        .extend_from_slice(indices);
+                }
+                Some(by_key)
+            });
             let parts: Vec<_> = groups
-                .into_values()
-                .map(|(material, color, indices)| {
+                .into_iter()
+                .map(|(key, (material, color, indices))| {
                     let indices = optimize_triangle_indices(&indices, mesh.verts.len());
                     let index_hash = index_hash(indices.as_ref());
+                    let lods = [0, 1].map(|level| {
+                        let lod = lod_groups[level].as_ref()?.get(&key)?;
+                        Some(optimize_triangle_indices(lod, mesh.verts.len()))
+                    });
                     CachedFacePart {
                         material,
                         color,
                         indices,
                         index_hash,
+                        lods,
                     }
                 })
                 .collect();
@@ -2149,6 +2403,7 @@ pub fn build_mesh_batch_filtered(
                 color: part.color,
                 indices: part.indices,
                 index_hash: part.index_hash,
+                lods: part.lods,
                 include_faces,
                 include_edges: include_edges && part_index == 0,
                 part_slot: part_index as u32,
@@ -2223,6 +2478,10 @@ pub fn build_mesh_batch_filtered(
     });
     let grouped_at = iced::time::Instant::now();
     let ordered = direct_parts;
+    // Opaque parts of the accumulating chunk, with their display LODs: the
+    // chunk they land in is the one pushed next (every other push flushes
+    // the accumulator first), so `chunks.len()` names it.
+    let mut lod_pending: Vec<PendingLod> = Vec::new();
     let mut active_key: Option<MaterialBatchKey> = None;
     let mut active_material: Option<&crate::scene::model::material_model::MeshMaterial> = None;
     let mut active_color = [1.0; 4];
@@ -2372,9 +2631,17 @@ pub fn build_mesh_batch_filtered(
                     continue;
                 }
                 for i in edge_start..edge_start + take {
+                    // An edge's own colour, unless a visual style draws
+                    // every edge in one.
+                    let own = set
+                        .edge_vert_colors
+                        .get(i)
+                        .copied()
+                        .flatten()
+                        .filter(|_| edge_color == edge_base);
                     edge_verts.push(MeshEdgeVertex {
                         position: set.edge_verts[i],
-                        color: edge_color,
+                        color: own.unwrap_or(edge_color),
                         position_low: set.edge_verts_low.get(i).copied().unwrap_or([0.0; 3]),
                     });
                 }
@@ -2594,6 +2861,24 @@ pub fn build_mesh_batch_filtered(
             for &idx in part.indices.iter() {
                 fill.push(base + idx);
             }
+            if !is_transp {
+                lod_pending.push(PendingLod {
+                    chunk: chunks.len(),
+                    aabb: [
+                        set.world_aabb[0],
+                        set.world_aabb[1],
+                        set.z_aabb[0],
+                        set.world_aabb[2],
+                        set.world_aabb[3],
+                        set.z_aabb[1],
+                    ],
+                    range: (index_start, part.indices.len() as u32),
+                    lods: part
+                        .lods
+                        .clone()
+                        .map(|lod| lod.map(|lod| lod.iter().map(|idx| base + idx).collect())),
+                });
+            }
             if let Some(handle) = entity_handle {
                 highlight_ranges.push(MeshBatchRange {
                     handle,
@@ -2636,6 +2921,7 @@ pub fn build_mesh_batch_filtered(
             None,
         ));
     }
+    attach_lods(device, queue, &mut chunks, lod_pending);
     let direct_at = iced::time::Instant::now();
     let mut instanced_profile = InstancedBuildProfile::default();
     let mut instanced_buffers = InstancedBufferCache::default();
@@ -2682,6 +2968,50 @@ pub fn build_mesh_batch_filtered(
         );
     }
     (chunks, total_tris)
+}
+
+#[cfg(test)]
+mod lod_selection_tests {
+    use super::{lod_level, projected_diagonal};
+
+    #[test]
+    fn a_mesh_on_a_threshold_keeps_its_level_until_clearly_past_it() {
+        assert_eq!(lod_level(300.0, None), 0);
+        assert_eq!(lod_level(100.0, None), 1);
+        assert_eq!(lod_level(20.0, None), 2);
+        // Just under 200 px: a fresh mesh drops to 1, one already at 0 stays.
+        assert_eq!(lod_level(195.0, None), 1);
+        assert_eq!(lod_level(195.0, Some(0)), 0);
+        assert_eq!(lod_level(165.0, Some(0)), 1);
+        // And back up only once clearly above.
+        assert_eq!(lod_level(205.0, Some(1)), 1);
+        assert_eq!(lod_level(240.0, Some(1)), 0);
+        // A jump across both thresholds lands in one step.
+        assert_eq!(lod_level(10.0, Some(0)), 2);
+        assert_eq!(lod_level(1000.0, Some(2)), 0);
+    }
+
+    #[test]
+    fn a_box_projects_to_its_pixel_diagonal() {
+        // Orthographic: 1 world unit = 1 px across a 200 px viewport.
+        let ortho = glam::Mat4::orthographic_rh(-100.0, 100.0, -100.0, 100.0, -1000.0, 1000.0);
+        let size = projected_diagonal(
+            [10.0, 10.0, 0.0, 40.0, 50.0, 5.0],
+            &ortho,
+            glam::DVec3::ZERO,
+            [200.0, 200.0],
+        );
+        assert!((size - 50.0).abs() < 1e-3, "{size}");
+        // A box straddling the eye in perspective is as large as can be.
+        let perspective = glam::Mat4::perspective_rh(1.0, 1.0, 0.1, 100.0);
+        let behind = projected_diagonal(
+            [-1.0, -1.0, -1.0, 1.0, 1.0, 1.0],
+            &perspective,
+            glam::DVec3::ZERO,
+            [200.0, 200.0],
+        );
+        assert!(behind.is_infinite());
+    }
 }
 
 #[cfg(test)]

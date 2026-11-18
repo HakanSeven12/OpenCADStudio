@@ -8,8 +8,26 @@
 use document::{EntityType, Handle};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::scene::convert::tess::entity_world_aabb_f64;
+use crate::scene::convert::tess::{entity_bounds, entity_world_aabb_f64};
 use crate::scene::pick::quadtree::QuadTree;
+
+/// [`entity_world_aabb_f64`], except that a dot-sized LINE, polyline or
+/// POINT keeps its one-point box. The shared helper reads a zero box as "no
+/// box", so every zero-length polyline counted as unbounded and TRIM tested
+/// it against all boundaries of the drawing on each hover (#3184).
+pub(super) fn modify_aabb(entity: &EntityType) -> Option<[f64; 4]> {
+    entity_world_aabb_f64(entity).or_else(|| {
+        if !matches!(
+            entity,
+            EntityType::Line(_) | EntityType::LwPolyline(_) | EntityType::Point(_)
+        ) {
+            return None;
+        }
+        let (min, max) = entity_bounds(entity);
+        let aabb = [min[0], min[1], max[0], max[1]];
+        aabb.iter().all(|value| value.is_finite()).then_some(aabb)
+    })
+}
 
 pub(super) struct ModifyEntityIndex {
     by_handle: FxHashMap<Handle, usize>,
@@ -40,7 +58,7 @@ impl ModifyEntityIndex {
         for (index, entity) in entities.iter().enumerate() {
             let handle = entity.common().handle;
             by_handle.insert(handle, index);
-            if let Some(aabb) = entity_world_aabb_f64(entity) {
+            if let Some(aabb) = modify_aabb(entity) {
                 world[0] = world[0].min(aabb[0]);
                 world[1] = world[1].min(aabb[1]);
                 world[2] = world[2].max(aabb[2]);
@@ -106,7 +124,7 @@ impl ModifyEntityIndex {
     pub(super) fn push(&mut self, entities: &mut Vec<EntityType>, entity: EntityType) {
         let handle = entity.common().handle;
         self.by_handle.insert(handle, entities.len());
-        match entity_world_aabb_f64(&entity) {
+        match modify_aabb(&entity) {
             // Outside the tree's bounds it lands in the tree's overflow list,
             // which every query still returns.
             Some(aabb) => self
@@ -137,7 +155,7 @@ impl ModifyEntityIndex {
         handle: Handle,
     ) -> Option<FxHashSet<Handle>> {
         let entity = self.get(entities, handle)?;
-        let aabb = entity_world_aabb_f64(entity)?;
+        let aabb = modify_aabb(entity)?;
         let span = (aabb[2] - aabb[0]).max(aabb[3] - aabb[1]).max(1.0);
         let pad = span * 1.0e-10 + 1.0e-7;
         let query = [aabb[0] - pad, aabb[1] - pad, aabb[2] + pad, aabb[3] + pad];

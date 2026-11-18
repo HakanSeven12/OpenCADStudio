@@ -594,16 +594,14 @@ impl PlineCommand {
     /// Rubber-band wire for the arc a → e with `bulge` (falls back to a line
     /// for a degenerate bulge).
     fn arc_wire(&self, a: DVec2, e: DVec2, z: f64, bulge: f64) -> WireModel {
-        let last = Vec3::new(a.x as f32, a.y as f32, z as f32);
-        let pt = Vec3::new(e.x as f32, e.y as f32, z as f32);
-        let mut pts: Vec<[f32; 3]> = Vec::new();
+        let mut pts: Vec<[f64; 3]> = Vec::new();
         let mut tangent_geom = None;
         if bulge.abs() >= 1e-9 && (e - a).length_squared() >= 1e-12 {
             if let Some(arc) =
                 crate::entities::common::BulgeArc::from_bulge([a.x, a.y], [e.x, e.y], bulge)
             {
                 for s in arc.tessellate_angle(std::f64::consts::TAU / 64.0) {
-                    pts.push([s[0] as f32, s[1] as f32, last.z]);
+                    pts.push([s[0], s[1], z]);
                 }
                 let (sa, ea) = if arc.sweep >= 0.0 {
                     (arc.start_angle, arc.end_angle)
@@ -629,22 +627,19 @@ impl PlineCommand {
                     });
                 }
             } else {
-                pts.extend_from_slice(&arc_sample_points(last, bulge, pt, 64));
+                pts = vec![[a.x, a.y, z], [e.x, e.y, z]];
             }
         } else {
-            pts.push([last.x, last.y, last.z]);
-            pts.push([pt.x, pt.y, pt.z]);
+            pts = vec![[a.x, a.y, z], [e.x, e.y, z]];
         }
+        // Built in f64 so the band stays on the snapped point at survey
+        // coordinates (an f32 absolute point is ~0.5 m off at 7.5e6). (#3163)
         let world_points = pts
             .into_iter()
-            .map(|point| {
-                self.plane
-                    .to_world(Vec3::from_array(point).as_dvec3())
-                    .as_vec3()
-                    .to_array()
-            })
+            .map(|point| self.plane.to_world(DVec3::from_array(point)).to_array())
             .collect();
-        let mut wire = WireModel::solid("rubber_band".into(), world_points, WireModel::CYAN, false);
+        let mut wire =
+            WireModel::solid_f64("rubber_band".into(), world_points, WireModel::CYAN, false);
         if let Some(tg) = tangent_geom {
             wire.tangent_geoms.push(tg);
         }
@@ -652,9 +647,9 @@ impl PlineCommand {
     }
 
     fn line_wire(&self, a: DVec2, e: DVec2, z: f64) -> WireModel {
-        let a = self.plane.to_world(DVec3::new(a.x, a.y, z)).as_vec3();
-        let e = self.plane.to_world(DVec3::new(e.x, e.y, z)).as_vec3();
-        WireModel::solid(
+        let a = self.plane.to_world(DVec3::new(a.x, a.y, z));
+        let e = self.plane.to_world(DVec3::new(e.x, e.y, z));
+        WireModel::solid_f64(
             "rubber_band".into(),
             vec![a.to_array(), e.to_array()],
             WireModel::CYAN,

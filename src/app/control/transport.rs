@@ -5,10 +5,6 @@ use serde_json::{json, Value};
 use std::{
     io::{BufRead, BufReader, Read, Write},
     net::TcpListener,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
     time::Duration,
 };
 
@@ -54,21 +50,16 @@ fn listen(sender: mpsc::Sender<Envelope>) -> std::io::Result<()> {
     write!(file, "{descriptor}")?;
     drop(file);
     let _ = crate::mcp::sync_agent_tool_schemas();
-    let clients = Arc::new(AtomicUsize::new(0));
+    let workers = crate::io::connection_workers::ConnectionWorkers::new("ocs-control", 8)?;
     for stream in listener.incoming().flatten() {
         // Replies are one-shot request/response lines: Nagle would hold each
         // reply's tail segment for the peer's delayed ACK (the bridge sends
         // nothing back until the full reply arrives). Disable coalescing on
         // both ends of the exchange.
         let _ = stream.set_nodelay(true);
-        if clients.fetch_add(1, Ordering::SeqCst) >= 8 {
-            clients.fetch_sub(1, Ordering::SeqCst);
-            continue;
-        }
-        let clients = clients.clone();
         let mut sender = sender.clone();
         let token = token.clone();
-        std::thread::spawn(move || {
+        workers.try_execute(move || {
             let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
             let _ = stream.set_write_timeout(Some(Duration::from_secs(15)));
             if let Ok(write_half) = stream.try_clone() {
@@ -110,7 +101,6 @@ fn listen(sender: mpsc::Sender<Envelope>) -> std::io::Result<()> {
                     }
                 }
             }
-            clients.fetch_sub(1, Ordering::SeqCst);
         });
     }
     let _ = std::fs::remove_file(path);

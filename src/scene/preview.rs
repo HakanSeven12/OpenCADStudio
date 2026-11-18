@@ -698,7 +698,11 @@ impl Scene {
             // range it reaches is the cue, so it stays drawn.
             let fill_drag =
                 self.table_fill_drag == Some(handle) && self.preview_hidden.contains(&handle);
-            if self.entity_temporarily_hidden(handle) && !fill_drag {
+            // The cell editor hides the table behind its own picture; the
+            // labels stay so the edited cell can be placed.
+            let cell_edit = self.table_cell_editing == Some(handle)
+                && self.command_preview_hidden.contains(&handle);
+            if self.entity_temporarily_hidden(handle) && !fill_drag && !cell_edit {
                 continue;
             }
             let range = (picked == Some(handle))
@@ -966,5 +970,37 @@ mod table_fill_cue_tests {
             0,
             "a stale drag mark adds nothing once the drag ends"
         );
+    }
+
+    /// The cell editor hides the table behind its picture; the row and
+    /// column labels and the edited cell's band stay drawn.
+    #[test]
+    fn the_cell_editor_keeps_the_row_and_column_labels() {
+        let mut scene = Scene::new();
+        let table =
+            document::entities::Table::new(document::types::Vector3::new(0.0, 0.0, 0.0), 5, 4);
+        let handle = scene.add_entity(EntityType::Table(Box::new(table)));
+        scene.select_table_cells(crate::scene::TableCellSelection {
+            table: handle,
+            anchor: (2, 1),
+            end: (2, 1),
+        });
+        let picked = |scene: &Scene| {
+            scene
+                .table_indicator_overlay(0.01)
+                .1
+                .iter()
+                .filter(|hatch| hatch.color == INDICATOR_PICKED)
+                .count()
+        };
+        scene.set_command_preview_hidden(&[handle]);
+        assert_eq!(picked(&scene), 0, "a command preview hides the labels");
+
+        scene.table_cell_editing = Some(handle);
+        assert!(picked(&scene) > 0, "the cell editor keeps them");
+
+        scene.set_command_preview_hidden(&[]);
+        scene.table_cell_editing = None;
+        assert!(picked(&scene) > 0, "a shown table keeps them");
     }
 }

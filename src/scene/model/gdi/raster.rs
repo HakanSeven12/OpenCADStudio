@@ -16,10 +16,13 @@ pub struct Canvas {
     pub px: Vec<u8>,
     /// Current clip rectangle in canvas pixels (x0, y0, x1, y1), half-open.
     pub clip: (f32, f32, f32, f32),
+    /// Canvas pixels per output pixel, across and down.
+    pub ss: usize,
 }
 
 impl Canvas {
-    pub fn new(w: usize, h: usize) -> Self {
+    /// A canvas of `w`×`h` pixels, `ss` of them to an output pixel across.
+    pub fn new(w: usize, h: usize, ss: usize) -> Self {
         // White background — OLE presentations are recorded against a white
         // page, and AutoCAD draws OLE frames on white as well.
         Canvas {
@@ -27,6 +30,7 @@ impl Canvas {
             h,
             px: vec![255u8; w * h * 4],
             clip: (0.0, 0.0, w as f32, h as f32),
+            ss,
         }
     }
 
@@ -75,7 +79,7 @@ impl Canvas {
             if xs.len() < 2 {
                 continue;
             }
-            xs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            xs.sort_by(|a, b| a.total_cmp(b));
             for pair in xs.chunks_exact(2) {
                 let xa = pair[0].max(self.clip.0).max(0.0).round() as usize;
                 let xb = pair[1].min(self.clip.2).min(self.w as f32).round() as usize;
@@ -127,10 +131,27 @@ impl Canvas {
 
     /// Stroke an open polyline with the given width by expanding each segment
     /// into a quad (plus square joints at interior vertices).
+    ///
+    /// A horizontal or vertical stretch of a pen one output pixel wide or
+    /// thinner lights a whole row or column of output pixels, as the system
+    /// plays a picture at the size it is shown: it moves across to the
+    /// centres of the output pixels it falls in. Centred on a pixel edge,
+    /// such a line would cover two half pixels and show at half its colour.
+    /// Slanted and curved stretches keep their place, smoothed.
     pub fn stroke_polyline(&mut self, pts: &[[f32; 2]], width: f32, c: Rgba) {
+        let ss = self.ss as f32;
+        let hairline = width <= ss;
+        let centre = |v: f32| ((v / ss).floor() + 0.5) * ss;
         let w = width.max(1.0) * 0.5;
         for seg in pts.windows(2) {
-            let (a, b) = (seg[0], seg[1]);
+            let (mut a, mut b) = (seg[0], seg[1]);
+            if hairline && (a[1] - b[1]).abs() < 1e-3 {
+                let y = centre(a[1]);
+                (a[1], b[1]) = (y, y);
+            } else if hairline && (a[0] - b[0]).abs() < 1e-3 {
+                let x = centre(a[0]);
+                (a[0], b[0]) = (x, x);
+            }
             let dx = b[0] - a[0];
             let dy = b[1] - a[1];
             let len = (dx * dx + dy * dy).sqrt();

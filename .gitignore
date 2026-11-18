@@ -48,3 +48,7 @@ __pycache__/
 # Plugin template has its own Cargo project (not part of the workspace build);
 # its lock file is a locally generated build artifact
 docs/plugin-template-v2/Cargo.lock
+
+# Internal profiling data stays local; only the placeholder guide is versioned.
+/benches/local_measurements/*
+!/benches/local_measurements/README.md

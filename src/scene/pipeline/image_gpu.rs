@@ -112,6 +112,13 @@ pub struct ImageGpu {
 }
 
 impl ImageGpu {
+    pub(super) fn gpu_bytes<'a>(&'a self, counter: &mut super::gpu_memory::ResourceCounter<'a>) -> u64 {
+        counter.buffer(&self.vertex_buffer)
+            + counter.buffer(&self.instance_buffer)
+            + counter.buffer(&self._params_buf)
+            + counter.texture(&self._texture)
+    }
+
     pub fn from_models(
         device: &wgpu::Device,
         queue: &wgpu::Queue,

@@ -186,6 +186,7 @@ pub struct ViewportData {
     /// N/E/S/W stay aligned to world even as the cube reorients with the UCS.
     pub(in crate::scene) compass_rotation: Mat4,
     pub(in crate::scene) hover_region: Option<usize>,
+    pub(in crate::scene) viewcube_opacity: f32,
     pub(in crate::scene) show_viewcube: bool,
     /// Set when REDRAW/REDRAWALL requested a forced re-rasterize of this
     /// viewport this frame — bypasses the scene-render cache even if the
@@ -384,7 +385,39 @@ impl shader::Primitive for Primitive {
             }
         }
         let errors_at_entry = crate::scene::pipeline::gpu_errors_seen();
-        let recovering = pipeline.gpu_error_epoch != errors_at_entry;
+        let mut recovering = pipeline.gpu_error_epoch != errors_at_entry;
+        if recovering {
+            pipeline.gpu_error_streak = pipeline.gpu_error_streak.saturating_add(1);
+            pipeline.gpu_clean_frames = 0;
+        } else {
+            // Not every prepare is followed by a draw that can fail, so one
+            // clean prepare does not end a run of failing frames.
+            pipeline.gpu_clean_frames = pipeline.gpu_clean_frames.saturating_add(1);
+            if pipeline.gpu_clean_frames >= 8 {
+                pipeline.gpu_error_streak = 0;
+            }
+        }
+        // Rebuilding the caches answers a rejected allocation. When the
+        // frame keeps failing after that, the fault is in the draw itself:
+        // rebuilding again only re-uploads the whole scene every frame, and
+        // that memory piles up until the system runs out (#3189). Keep the
+        // caches then, and retry the rebuild only now and then.
+        const REBUILD_TRIES: u32 = 4;
+        const RETRY_EVERY: u32 = 256;
+        let streak = pipeline.gpu_error_streak;
+        if streak > REBUILD_TRIES && streak % RETRY_EVERY != 0 {
+            static REPORTED: std::sync::Once = std::sync::Once::new();
+            REPORTED.call_once(|| {
+                eprintln!(
+                    "[gpu] every frame fails the same way; keeping GPU caches instead of rebuilding them each frame"
+                );
+            });
+            pipeline.gpu_error_epoch = errors_at_entry;
+            for inner in &mut pipeline.inners {
+                inner.absorb_gpu_errors(errors_at_entry);
+            }
+            recovering = false;
+        }
         if recovering {
             pipeline.wire_buffer_cache.clear();
             pipeline.mesh_batch_cache.clear();
@@ -527,6 +560,7 @@ impl shader::Primitive for Primitive {
                         vp.cam_rotation,
                         vp.compass_rotation,
                         vp.hover_region,
+                        vp.viewcube_opacity,
                         self.viewcube_text_color,
                     );
                 }
@@ -1306,6 +1340,7 @@ retained_contributors={}",
                 inner.cached_mesh_source = Some(Arc::clone(&vp.meshes));
             }
             inner.cached_mesh_content_id = vp.wire_content_id;
+            inner.select_mesh_lods();
             // Selection / hover highlight overlay — tinted copies of just the
             // picked solids, rebuilt only when the highlight set (or geometry)
             // changes. Drawn over the static batch so the base never re-packs.
@@ -1436,6 +1471,7 @@ retained_contributors={}",
                     vp.cam_rotation,
                     vp.compass_rotation,
                     vp.hover_region,
+                    vp.viewcube_opacity,
                     self.viewcube_text_color,
                 );
             }
@@ -2414,6 +2450,11 @@ fn solar_direction(
 /// numbers move a handful of times. RSS is deliberately not used — the
 /// allocator and the driver both retain high-water memory that RSS cannot tell
 /// apart from live resources.
+#[cfg(all(test, feature = "performance-audit"))]
+pub(crate) fn performance_audit_report_gpu_live(pipeline: &crate::scene::pipeline::MultiPipeline) {
+    report_gpu_live(pipeline);
+}
+
 fn report_gpu_live(pipeline: &crate::scene::pipeline::MultiPipeline) {
     use std::cell::Cell;
     if !crate::perf::enabled() {
@@ -2440,6 +2481,17 @@ text_atlas={:.1} wire_arena={:.1} block_geometry={:.1}",
             mib(now.text_atlas),
             mib(now.wire_arena),
             mib(now.block_geometry),
+        );
+        // Exact byte counts for automated comparisons. The human-readable
+        // diagnostic above remains compatible with existing traces.
+        crate::perf_record!(
+            "[perf] gpu-live-json {}",
+            serde_json::json!({
+                "schema": 1,
+                "scope": "logical live resources; excludes driver heaps/alignment, staging, iced and ViewCube; Depth24Plus estimated",
+                "total_bytes": now.total(),
+                "categories": now,
+            })
         );
     });
 }
@@ -3639,8 +3691,9 @@ impl Scene {
                 if let Some(mm) = style.resolve_lineweight(wire.aci) {
                     wire.line_weight_px = (mm * MM_TO_PX).max(1.0);
                 }
+                let aci = wire.aci;
                 for vertex in &mut wire.text_verts {
-                    self.apply_display_plot_style(&mut vertex.color, wire.aci, &style);
+                    self.apply_display_plot_style(&mut vertex.color, aci, &style);
                 }
             }
         }
@@ -4376,8 +4429,9 @@ pub(crate) fn resolve_colors_for_bg(wires: &mut [WireModel], bg: [f32; 4]) {
         } else {
             adapt_to_bg(adapt.raw_color, contrast)
         };
-        if !adapt.preserve_color {
-            for (vertex, raw) in wire.text_verts.iter_mut().zip(&adapt.text_raw_colors) {
+        if !adapt.preserve_color && !wire.text_verts.is_empty() {
+            let geom = std::sync::Arc::make_mut(&mut wire.geom);
+            for (vertex, raw) in geom.text_verts.iter_mut().zip(&adapt.text_raw_colors) {
                 vertex.color = adapt_to_bg(*raw, contrast);
             }
         }
@@ -4487,7 +4541,7 @@ impl Scene {
         verts
     }
 
-    fn annotation_context_highlight_wires(
+    pub(in crate::scene) fn annotation_context_highlight_wires(
         &self,
         inst: &ViewportInstance,
         selected_part: bool,
@@ -4600,6 +4654,7 @@ impl Scene {
             }
         }
         let mut wires = Vec::new();
+        let mut edge_prototypes = rustc_hash::FxHashMap::default();
         for (handle, selected) in highlighted {
             let Some(entity) = self.document.get_entity(handle) else {
                 continue;
@@ -4632,35 +4687,19 @@ impl Scene {
                 continue;
             }
             for set in meshes_by_handle.get(&handle).into_iter().flatten() {
+                let name = format!("mesh-edge:{}", handle.value());
+                if let Some(stub) =
+                    moved_edge_outline(set, &mut edge_prototypes, &name, tint, selected)
+                {
+                    wires.push(stub);
+                    continue;
+                }
                 let (edges, edges_low) = set.geometry_edges();
                 if edges.len() < 2 {
                     continue;
                 }
-                let mut points = Vec::with_capacity(edges.len() / 2 * 3);
-                for pair_start in (0..edges.len() - 1).step_by(2) {
-                    for index in [pair_start, pair_start + 1] {
-                        let high = edges[index];
-                        let low = edges_low.get(index).copied().unwrap_or([0.0; 3]);
-                        let local = document::types::Vector3::new(
-                            high[0] as f64 + low[0] as f64,
-                            high[1] as f64 + low[1] as f64,
-                            high[2] as f64 + low[2] as f64,
-                        );
-                        let world = set
-                            .instance_transform
-                            .map_or(local, |transform| transform.apply(local));
-                        points.push([world.x, world.y, world.z]);
-                    }
-                    points.push([f64::NAN; 3]);
-                }
-                let mut edge_wire = WireModel::solid_f64(
-                    format!("mesh-edge:{}", handle.value()),
-                    points,
-                    tint,
-                    selected,
-                );
-                edge_wire.line_weight_px = 2.0;
-                wires.push(edge_wire);
+                let points = edge_outline_points(edges, edges_low, set.instance_transform.as_ref());
+                wires.push(edge_outline(name, points, tint, selected));
             }
 
             if matches!(entity, EntityType::Hatch(_)) {
@@ -5561,6 +5600,7 @@ impl Scene {
             compass_rotation: inst.camera.view_rotation_mat(),
             // Only the active viewport gets the hovered-region highlight.
             hover_region: if inst.active { hover_region } else { None },
+            viewcube_opacity: self.viewcube_opacity.get(),
             // The cube shows only on the active viewport, and only while the
             // caller (the widget) says there is room for it beside the render
             // bar — so it hides adaptively when the viewport gets narrow.
@@ -5570,12 +5610,14 @@ impl Scene {
             show_2d_solid_fills: flags.show_2d_solid_fills,
             mesh_fill: flags.mesh_fill,
             show_3d_edges: flags.show_3d_edges,
+            // The wireframe styles show silhouettes by DISPSILH alone; the
+            // style's silhouette edges apply to the shaded and hidden ones.
             display_silhouette: flags.hidden_line
-                || display
-                    .visual_style
-                    .as_ref()
-                    .is_some_and(|style| style.silhouette_width > 0 && style.edges_visible())
-                || self.document.header.display_silhouette,
+                || self.document.header.display_silhouette
+                || (!view_wireframe
+                    && display.visual_style.as_ref().is_some_and(|style| {
+                        style.silhouette_width > 0 && style.edges_visible()
+                    })),
             hidden_line: flags.hidden_line,
             // Interaction LOD: suppress the costly hatch pass while the view is
             // actively moving; the scene-render cache holds the full-quality
@@ -6182,4 +6224,91 @@ static DEVICE_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32
 /// Device pixels per logical pixel of the drawing viewport.
 pub fn device_scale() -> f32 {
     f32::from_bits(DEVICE_SCALE.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// The edge outline of a highlighted solid: its edge pairs as one line broken
+/// between pairs, placed by `transform` when the solid is a block's.
+fn edge_outline_points(
+    edges: &[[f32; 3]],
+    edges_low: &[[f32; 3]],
+    transform: Option<&document::types::Transform>,
+) -> Vec<[f64; 3]> {
+    let mut points = Vec::with_capacity(edges.len() / 2 * 3);
+    for pair_start in (0..edges.len().saturating_sub(1)).step_by(2) {
+        for index in [pair_start, pair_start + 1] {
+            let high = edges[index];
+            let low = edges_low.get(index).copied().unwrap_or([0.0; 3]);
+            let local = document::types::Vector3::new(
+                high[0] as f64 + low[0] as f64,
+                high[1] as f64 + low[1] as f64,
+                high[2] as f64 + low[2] as f64,
+            );
+            let world = transform.map_or(local, |transform| transform.apply(local));
+            points.push([world.x, world.y, world.z]);
+        }
+        points.push([f64::NAN; 3]);
+    }
+    points
+}
+
+fn edge_outline(name: String, points: Vec<[f64; 3]>, tint: [f32; 4], selected: bool) -> WireModel {
+    let mut wire = WireModel::solid_f64(name, points, tint, selected);
+    wire.line_weight_px = 2.0;
+    wire
+}
+
+/// The edge outline of a solid that a block reference only moves: the block's
+/// own outline, built once for every reference that shares its geometry, and
+/// a stub that moves it. The GPU draws such stubs as instances of the one
+/// outline, as it draws the references themselves, instead of each reference
+/// carrying a copy of every edge point (#1872). `None` when the solid is not
+/// a block's, or the reference turns, scales or mirrors it.
+fn moved_edge_outline(
+    set: &crate::scene::model::mesh_model::MeshLodSet,
+    prototypes: &mut rustc_hash::FxHashMap<(usize, bool), Arc<Vec<WireModel>>>,
+    name: &str,
+    tint: [f32; 4],
+    selected: bool,
+) -> Option<WireModel> {
+    let source = set.instance_source.as_ref()?;
+    let delta = translation_only(set.instance_transform.as_ref()?)?;
+    if source.edge_verts.len() < 2 {
+        return None;
+    }
+    let prototype = prototypes
+        // The tint follows `selected`, so a hovered and a selected
+        // reference of one block each get their own shape.
+        .entry((Arc::as_ptr(source) as usize, selected))
+        .or_insert_with(|| {
+            let points = edge_outline_points(&source.edge_verts, &source.edge_verts_low, None);
+            let mut outline = edge_outline(name.to_string(), points, tint, selected);
+            outline.render_instance = Some(crate::scene::model::instance_model::RenderInstance {
+                source_id: crate::scene::model::instance_model::next_source_id(),
+                translation: [0.0; 3],
+            });
+            Arc::new(vec![outline])
+        });
+    let mut stub = WireModel::solid_f64(name.to_string(), Vec::new(), tint, selected);
+    stub.line_weight_px = 2.0;
+    stub.stub = Some(Arc::new(
+        crate::scene::model::instance_model::InstanceStub {
+            prototype: Arc::clone(prototype),
+            delta,
+            depth_delta: 0.0,
+        },
+    ));
+    Some(stub)
+}
+
+/// The move of a transform that only moves.
+fn translation_only(transform: &document::types::Transform) -> Option<[f64; 3]> {
+    let m = &transform.matrix.m;
+    let identity = (0..3).all(|row| {
+        (0..3).all(|column| {
+            let expected = if row == column { 1.0 } else { 0.0 };
+            (m[row][column] - expected).abs() <= 1e-12
+        })
+    }) && m[3] == [0.0, 0.0, 0.0, 1.0];
+    let delta = [m[0][3], m[1][3], m[2][3]];
+    (identity && delta.iter().all(|value| value.is_finite())).then_some(delta)
 }

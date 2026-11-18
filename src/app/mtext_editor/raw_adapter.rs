@@ -496,18 +496,21 @@ fn valid_argument(code: char, value: &str) -> bool {
 fn stack_width(value: &str) -> Option<usize> {
     let (split, sep) = value
         .char_indices()
-        .find(|(_, c)| matches!(c, '/' | '#' | '^'))?;
+        .find(|(_, c)| matches!(c, '/' | '#' | '^' | '~'))?;
     let numerator = &value[..split];
     let denominator = &value[split + 1..];
-    let denominator = if sep == '^' {
-        denominator.strip_prefix(' ').unwrap_or(denominator)
-    } else {
-        denominator
+    let denominator = match sep {
+        '^' => denominator.strip_prefix(' ').unwrap_or(denominator),
+        // A decimal stack names the point it lines up on after its `~`.
+        '~' => denominator
+            .strip_prefix(['.', ','])
+            .unwrap_or(denominator),
+        _ => denominator,
     };
     if (numerator.is_empty() && denominator.is_empty())
         || (sep != '^' && (numerator.is_empty() || denominator.is_empty()))
-        || numerator.contains(['/', '#', '^', '%'])
-        || denominator.contains(['/', '#', '^', '%'])
+        || numerator.contains(['/', '#', '^', '~', '%'])
+        || denominator.contains(['/', '#', '^', '~', '%'])
     {
         return None;
     }

@@ -81,6 +81,7 @@ pub enum ComplexWalk {
 
 #[derive(Clone, Debug)]
 pub struct LocalWire {
+    plot_member: Option<Handle>,
     pub points: Vec<[f32; 3]>,
     /// Low-bit residual paired with `points` so block-instance wires keep
     /// sub-f32 precision once the renderer translates them to world space.
@@ -179,6 +180,12 @@ pub struct LocalWire {
     /// Composed at expand time into a `depth_override` for wide-polyline
     /// bands so a band orders against its block siblings.
     pub local_rank: f32,
+    /// Set when this stroke may be drawn at the depth of the stroke before it
+    /// in the definition without changing the picture: both are plain strokes,
+    /// each is all its entity draws, and no other member of the block ranks
+    /// between them or level with either. Strokes that then also look alike
+    /// at expand time share that depth, and with it a batch (`emit_wire`).
+    pub follows_previous_stroke: bool,
 }
 
 /// The linetype side of a nested INSERT's style, resolved the way
@@ -1245,13 +1252,17 @@ fn build_defn_from_record(
 
     let cap = br.entity_handles.len();
     let mut subs: Vec<LocalSub> = Vec::with_capacity(cap);
+    // How many subs each member contributed, in member order.
+    let mut produced: Vec<u32> = Vec::with_capacity(cap);
     if cap >= 128 {
-        let chunks: Vec<Vec<LocalSub>> = br
+        let chunks: Vec<(Vec<LocalSub>, Vec<u32>)> = br
             .entity_handles
             .par_chunks(64)
             .map(|chunk| {
                 let mut local = Vec::with_capacity(chunk.len());
+                let mut counts = Vec::with_capacity(chunk.len());
                 for &eh in chunk {
+                    let before = local.len();
                     append_defn_entity(
                         doc,
                         eh,
@@ -1267,15 +1278,18 @@ fn build_defn_from_record(
                         complex_possible,
                         &mut local,
                     );
+                    counts.push((local.len() - before) as u32);
                 }
-                local
+                (local, counts)
             })
             .collect();
-        for chunk in chunks {
+        for (chunk, counts) in chunks {
             subs.extend(chunk);
+            produced.extend(counts);
         }
     } else {
         for &eh in &br.entity_handles {
+            let before = subs.len();
             append_defn_entity(
                 doc,
                 eh,
@@ -1291,8 +1305,10 @@ fn build_defn_from_record(
                 complex_possible,
                 &mut subs,
             );
+            produced.push((subs.len() - before) as u32);
         }
     }
+    mark_stroke_runs(&mut subs, &br.entity_handles, &produced, depth_map);
 
     let mut has_nested = false;
     let mut has_masks = false;
@@ -1331,6 +1347,90 @@ fn build_defn_from_record(
         is_xref: br.flags.is_xref || br.flags.is_xref_overlay,
         is_prototype,
         prototypes: BlockPrototypeCache::default(),
+    }
+}
+
+/// A stroke and nothing else: no fill, band, text, marker or pattern walk of
+/// its own, and not a curve the analytical pipelines draw. Its depth then
+/// matters only where something else crosses it.
+fn is_plain_stroke(wire: &LocalWire) -> bool {
+    wire.points.len() >= 2
+        && !wire.is_point
+        && wire.point_marker.is_none()
+        && wire.text_verts.is_empty()
+        && wire.fill_tris.is_empty()
+        && wire.pick_tris.is_empty()
+        && wire
+            .tangent_geoms
+            .iter()
+            .all(|tangent| matches!(tangent, TangentGeom::Line { .. }))
+        && wire.world_width == 0.0
+        && wire.taper_widths.is_empty()
+        && wire.pattern_stations.is_empty()
+        && !wire.is_fill_only
+        && !wire.snap_only
+        && !wire.canvas_color
+        && !wire.hide_unselected
+        && matches!(wire.complex_walk, ComplexWalk::None)
+}
+
+/// Mark the strokes that may take the depth of the stroke before them.
+///
+/// Every member of a block keeps its own draw rank, so that a line orders
+/// correctly against the fills and masks of its block. Two strokes of the same
+/// look next to each other in that order need no rank between them: nothing
+/// can be drawn over one and under the other. Giving them one depth lets them
+/// share a batch, which is what keeps a block of thousands of lines from
+/// becoming thousands of wires.
+///
+/// `produced` holds how many subs each of `members` contributed. A stroke
+/// qualifies when it and the sub before it are plain strokes, each the only
+/// sub of its member, and their two ranks are neighbours among every rank a
+/// member of the block holds, with no other member level with either.
+fn mark_stroke_runs(
+    subs: &mut [LocalSub],
+    members: &[Handle],
+    produced: &[u32],
+    depth_map: &HashMap<u64, [f32; 2]>,
+) {
+    // `+ 0.0` folds a negative zero into the positive one.
+    let rank_of = |member: &Handle| depth_map.get(&member.value()).map_or(0.0, |d| d[0]) + 0.0;
+    // Every rank something of this block may be drawn at. A member without a
+    // rank of its own is drawn at 0, and so are an insert's attributes.
+    let mut taken: Vec<f32> = members.iter().map(rank_of).chain([0.0]).collect();
+    taken.sort_unstable_by(f32::total_cmp);
+    // Where a rank sits among the taken ones, when one member alone holds it.
+    let alone = |rank: f32| -> Option<usize> {
+        let rank = rank + 0.0;
+        let at = taken.partition_point(|other| other.total_cmp(&rank).is_lt());
+        let held = |index: usize| taken.get(index).is_some_and(|other| *other == rank);
+        (held(at) && !held(at + 1)).then_some(at)
+    };
+    let mut first = 0usize;
+    // Rank of the member before, when the plain stroke just before is all it drew.
+    let mut before: Option<f32> = None;
+    for &count in produced.iter().take(members.len()) {
+        let count = count as usize;
+        if count == 0 {
+            // Draws nothing here; its rank still counts as taken.
+            continue;
+        }
+        let stroke = match subs.get_mut(first) {
+            Some(LocalSub::Wire(wire)) if count == 1 && is_plain_stroke(wire) => Some(wire),
+            _ => None,
+        };
+        before = match stroke {
+            Some(wire) => {
+                let neighbours = before
+                    .and_then(alone)
+                    .zip(alone(wire.local_rank))
+                    .is_some_and(|(a, b)| a.abs_diff(b) == 1);
+                wire.follows_previous_stroke = neighbours;
+                Some(wire.local_rank)
+            }
+            None => None,
+        };
+        first += count;
     }
 }
 
@@ -1718,6 +1818,7 @@ fn tessellate_sub_local(
         if wire.points.len() > 100_000 {
             continue;
         }
+        let geom = std::sync::Arc::unwrap_or_clone(wire.geom);
 
         // Geometry is stored absolute; the double-single (high/low) render path
         // keeps it precise at UTM scale, so no per-defn offset is subtracted.
@@ -1729,14 +1830,14 @@ fn tessellate_sub_local(
         // only around `points` would make a block child's thickness wall or wide
         // polyline band unpickable — `points` merely bounds those.
         let aabb_local = aabb_from_points_iter(
-            wire.points
+            geom.points
                 .iter()
                 .copied()
-                .chain(wire.fill_tris.iter().copied())
-                .chain(wire.pick_tris.iter().copied())
-                .chain(wire.text_verts.iter().map(|v| v.pos)),
+                .chain(geom.fill_tris.iter().copied())
+                .chain(geom.pick_tris.iter().copied())
+                .chain(geom.text_verts.iter().map(|v| v.pos)),
         );
-        let is_fill_only = wire.points.is_empty() && !wire.fill_tris.is_empty();
+        let is_fill_only = geom.points.is_empty() && !geom.fill_tris.is_empty();
         let mtext_has_background = matches!(
             sub,
             EntityType::MText(text) if text.background_fill_flags & 0x01 != 0
@@ -1748,7 +1849,7 @@ fn tessellate_sub_local(
                 EntityType::MText(text) if text.background_fill_flags & 0x02 != 0
             );
         let contrast_bg =
-            if !preserve_color && (!wire.text_verts.is_empty() || !wire.points.is_empty()) {
+            if !preserve_color && (!geom.text_verts.is_empty() || !geom.points.is_empty()) {
                 tessellate::explicit_mtext_background(sub)
             } else {
                 None
@@ -1765,9 +1866,9 @@ fn tessellate_sub_local(
         // walk.
         let complex_walk = if !(walks_complex || walks_whole_path)
             || wire.snap_only
-            || wire.points.len() < 2
-            || (!walks_whole_path && (wire.world_width != 0.0 || !wire.taper_widths.is_empty()))
-            || !wire.fill_tris.is_empty()
+            || geom.points.len() < 2
+            || (!walks_whole_path && (wire.world_width != 0.0 || !geom.taper_widths.is_empty()))
+            || !geom.fill_tris.is_empty()
         {
             ComplexWalk::None
         } else if let Some((path, closure, band)) = polyline_path.take() {
@@ -1825,7 +1926,7 @@ fn tessellate_sub_local(
                         )
                     };
                     let inherited_l0 = bylayer && on_l0;
-                    let walks = wire.points.len() >= 2
+                    let walks = geom.points.len() >= 2
                         && (own.is_some() || (complex_possible && (byblock || inherited_l0)));
                     (
                         byblock,
@@ -1841,22 +1942,23 @@ fn tessellate_sub_local(
                 None => (lt_is_byblock, lt_l0, own_complex.clone(), complex_walk),
             };
         result.push(LocalWire {
-            points: wire.points,
-            points_low: wire.points_low,
+            plot_member: (!doc.header.plotstyle_mode).then_some(sub.common().handle),
+            points: geom.points,
+            points_low: geom.points_low,
             is_point: matches!(sub, EntityType::Point(_)),
             point_marker: wire.point_marker,
-            text_verts: wire.text_verts,
-            searchable_text: wire.searchable_text,
-            key_vertices: wire.key_vertices,
-            snap_pts: wire.snap_pts,
-            tangent_geoms: wire.tangent_geoms,
-            fill_tris: wire.fill_tris,
-            fill_tris_low: wire.fill_tris_low,
+            text_verts: geom.text_verts,
+            searchable_text: geom.searchable_text,
+            key_vertices: geom.key_vertices,
+            snap_pts: geom.snap_pts,
+            tangent_geoms: geom.tangent_geoms,
+            fill_tris: geom.fill_tris,
+            fill_tris_low: geom.fill_tris_low,
             fill_is_3d: wire.fill_is_3d,
             fill_is_2d_solid: wire.fill_is_2d_solid,
             solid_normal: wire.solid_normal,
-            pick_tris: wire.pick_tris,
-            pick_tris_low: wire.pick_tris_low,
+            pick_tris: geom.pick_tris,
+            pick_tris_low: geom.pick_tris_low,
             color: wire_color,
             layer_locked,
             contrast_bg,
@@ -1866,9 +1968,9 @@ fn tessellate_sub_local(
             pattern_length: wire_pattern_length,
             pattern: wire_pattern,
             line_weight_px: lw_px,
-            pattern_stations: wire.pattern_stations,
+            pattern_stations: geom.pattern_stations,
             world_width: wire.world_width,
-            taper_widths: wire.taper_widths,
+            taper_widths: geom.taper_widths,
             plinegen: wire.plinegen,
             snap_only: wire.snap_only,
             region_boundary_click: wire.region_boundary_click,
@@ -1894,6 +1996,7 @@ fn tessellate_sub_local(
             lw_l0,
             aabb_local,
             local_rank: depth_map.get(&h.value()).map_or(0.0, |d| d[0]),
+            follows_previous_stroke: false,
         });
     }
     result
@@ -2458,9 +2561,10 @@ pub(crate) fn translated_prototype_wire(
             instance.translation[axis] += delta[axis];
         }
     }
-    translate_double_single(&mut wire.points, &mut wire.points_low, delta);
-    translate_double_single(&mut wire.fill_tris, &mut wire.fill_tris_low, delta);
-    translate_double_single(&mut wire.pick_tris, &mut wire.pick_tris_low, delta);
+    let geom = wire.geom_mut();
+    translate_double_single(&mut geom.points, &mut geom.points_low, delta);
+    translate_double_single(&mut geom.fill_tris, &mut geom.fill_tris_low, delta);
+    translate_double_single(&mut geom.pick_tris, &mut geom.pick_tris_low, delta);
     if let Some(marker) = &mut wire.point_marker {
         marker.origin += glam::DVec3::from_array(delta);
     }
@@ -2743,6 +2847,7 @@ pub(crate) fn xref_fade(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
 /// f32 fields are bit-cast to u32 to make the key Hash + Eq.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct StyleKey {
+    plot_member: Option<Handle>,
     /// Keep identical geometry on different effective layers in distinct
     /// batches; a finalized WireModel has only one layer attribution.
     effective_layer: Option<Arc<str>>,
@@ -2795,6 +2900,7 @@ struct PointMarkerKey {
 
 #[derive(Default, Debug)]
 struct BatchEntry {
+    plot_member: Option<Handle>,
     effective_layer: Option<Arc<str>>,
     color: [f32; 4],
     contrast_bg: Option<[f32; 4]>,
@@ -2890,6 +2996,17 @@ struct Batches {
     /// name/selected flag are stamped to match the host insert).
     extra_wires: Vec<WireModel>,
     nested_prototypes: HashMap<NestedPrototypeKey, NestedPrototype>,
+    /// The plain stroke batched last, for the stroke after it to join.
+    stroke_run: Option<StrokeRun>,
+}
+
+/// Where the last plain stroke went: which definition wire it was (by
+/// address, compared and never read), the batch it landed in and its depth.
+#[derive(Debug)]
+struct StrokeRun {
+    wire: usize,
+    key: StyleKey,
+    depth: Option<f32>,
 }
 
 impl BatchEntry {
@@ -3018,8 +3135,6 @@ impl Batches {
                 WireModel {
                     bg_adapt,
                     point_marker: b.point_marker,
-                    taper_widths: b.taper_widths,
-                    pattern_stations: b.pattern_stations,
                     world_width: b.world_width,
                     depth_override: b.local_depth,
                     display_visible: !b.snap_only && (!b.hide_unselected || selected),
@@ -3032,31 +3147,37 @@ impl Batches {
                     solid_normal: b.solid_normal,
                     render_instance: None,
                     stub: None,
-                    pick_tris: b.pick_tris,
-                    pick_tris_low: b.pick_tris_low,
                     dash_from_start: false,
                     element_linetype: None,
                     element_color: None,
                     dash_closure: b.dash_closure,
-                    text_verts: b.text_verts,
-                    searchable_text: b.searchable_text,
                     name: name.to_string(),
                     effective_layer: b.effective_layer,
-                    points: b.points,
-                    points_low: b.points_low,
+                    block_member: b.plot_member,
                     color,
                     selected,
                     pattern_length: b.pattern_length,
                     pattern: b.pattern,
                     line_weight_px: b.line_weight_px,
                     aci: b.aci,
-                    snap_pts: b.snap_pts,
-                    tangent_geoms: b.tangent_geoms,
-                    key_vertices: b.key_vertices,
                     aabb,
                     plinegen: b.plinegen,
-                    fill_tris: b.fill_tris,
-                    fill_tris_low: b.fill_tris_low,
+                    geom: std::sync::Arc::new(crate::scene::WireGeom {
+                        taper_widths: b.taper_widths,
+                        pattern_stations: b.pattern_stations,
+                        pick_tris: b.pick_tris,
+                        pick_tris_low: b.pick_tris_low,
+                        text_verts: b.text_verts,
+                        searchable_text: b.searchable_text,
+                        points: b.points,
+                        points_low: b.points_low,
+                        snap_pts: b.snap_pts,
+                        tangent_geoms: b.tangent_geoms,
+                        key_vertices: b.key_vertices,
+                        fill_tris: b.fill_tris,
+                        fill_tris_low: b.fill_tris_low,
+                        ..crate::scene::WireGeom::default()
+                    }),
                 }
             })
             .collect();
@@ -3093,6 +3214,7 @@ fn style_key(
     local_depth: Option<f32>,
 ) -> StyleKey {
     StyleKey {
+        plot_member: None,
         effective_layer: Some(effective_layer),
         color: [
             color[0].to_bits(),
@@ -3156,7 +3278,9 @@ fn expand_defn(
         eprintln!("block_cache: nested-block depth > {MAX_NESTING_DEPTH}, truncating");
         return;
     }
-    for sub in &defn.subs {
+    // A run of strokes belongs to one walk of one definition.
+    out.stroke_run = None;
+    for (index, sub) in defn.subs.iter().enumerate() {
         match sub {
             LocalSub::Wire(lw) => {
                 if suppress_root_points && lw.is_point {
@@ -3186,9 +3310,14 @@ fn expand_defn(
                         continue;
                     }
                 }
-                emit_wire(lw, accum_xform, ctx, out, d_range);
+                let previous = match index.checked_sub(1).map(|before| &defn.subs[before]) {
+                    Some(LocalSub::Wire(previous)) if lw.follows_previous_stroke => Some(previous),
+                    _ => None,
+                };
+                emit_wire(lw, accum_xform, ctx, out, d_range, previous);
             }
             LocalSub::Nested(nref) => {
+                out.stroke_run = None;
                 let parent_style = crate::scene::render_graph::BlockStyle {
                     insert: (
                         ctx.ins_color,
@@ -3240,7 +3369,14 @@ fn expand_defn(
                     let attachment_transform =
                         nested_attachment_transform(nref, *offset).then(accum_xform);
                     for attachment in &nref.attachments {
-                        emit_wire(attachment, &attachment_transform, &inner_ctx, out, d_range);
+                        emit_wire(
+                            attachment,
+                            &attachment_transform,
+                            &inner_ctx,
+                            out,
+                            d_range,
+                            None,
+                        );
                     }
                 }
                 if visited
@@ -3742,18 +3878,19 @@ fn emit_complex_walk(
     let Some(walked) = walked else {
         // Nothing to walk (pattern blow-up guard): the whole path, solid.
         set_path_points(&mut plain, &path, band.as_deref());
-        emit_wire(&plain, &identity, ctx, out, d_range);
+        emit_wire(&plain, &identity, ctx, out, d_range, None);
         return;
     };
     for wire in walked {
         let mut piece = plain.clone();
-        piece.points = wire.points;
-        piece.points_low = wire.points_low;
+        let geom = std::sync::Arc::unwrap_or_clone(wire.geom);
+        piece.points = geom.points;
+        piece.points_low = geom.points_low;
         piece.world_width = wire.world_width;
-        piece.taper_widths = wire.taper_widths;
-        piece.text_verts = wire.text_verts;
-        piece.searchable_text = wire.searchable_text;
-        emit_wire(&piece, &identity, ctx, out, d_range);
+        piece.taper_widths = geom.taper_widths;
+        piece.text_verts = geom.text_verts;
+        piece.searchable_text = geom.searchable_text;
+        emit_wire(&piece, &identity, ctx, out, d_range, None);
     }
 }
 
@@ -3778,7 +3915,7 @@ fn emit_inherited_dash_path(
     piece.pattern = pattern;
     piece.plinegen = !path.iter().any(|p| p[0].is_nan());
     piece.dash_closure = closure;
-    emit_wire(&piece, &Transform::identity(), ctx, out, d_range);
+    emit_wire(&piece, &Transform::identity(), ctx, out, d_range, None);
 }
 
 fn set_path_points(wire: &mut LocalWire, path: &[[f64; 3]], band: Option<&[f32]>) {
@@ -3825,7 +3962,7 @@ fn emit_path_reference(
     let mut reference = plain.clone();
     reference.snap_only = true;
     reference.plot_visible = false;
-    emit_wire(&reference, accum_xform, ctx, out, d_range);
+    emit_wire(&reference, accum_xform, ctx, out, d_range, None);
 
     let to_world = |x: f64, y: f64, z: f64| {
         let point = accum_xform.apply(Vector3::new(x, y, z));
@@ -4123,6 +4260,9 @@ fn emit_wire(
     ctx: &ExpandCtx,
     out: &mut Batches,
     d_range: (f32, f32),
+    // The definition wire before this one, when this one is marked as
+    // following it (`LocalWire::follows_previous_stroke`).
+    previous: Option<&LocalWire>,
 ) {
     if lw.points.is_empty()
         && lw.fill_tris.is_empty()
@@ -4319,8 +4459,6 @@ fn emit_wire(
                 let wire = WireModel {
                     bg_adapt,
                     point_marker: lw.point_marker,
-                    taper_widths: final_taper_widths,
-                    pattern_stations: Vec::new(),
                     world_width: final_world_width,
                     depth_override: local_depth,
                     display_visible: !lw.snap_only && (!lw.hide_unselected || ctx.selected),
@@ -4331,29 +4469,34 @@ fn emit_wire(
                     fill_is_2d_solid: false,
                     solid_normal: None,
                     render_instance: None,
-                    pick_tris: Vec::new(),
-                    pick_tris_low: Vec::new(),
                     dash_from_start: false,
                     dash_closure: lw.dash_closure,
-                    text_verts: Vec::new(),
                     name: String::new(),
                     effective_layer: Some(Arc::clone(&effective_layer)),
-                    points,
-                    points_low,
+                    block_member: lw.plot_member,
                     color,
                     selected: ctx.selected,
                     pattern_length: final_pat_len,
                     pattern: final_pat,
                     line_weight_px: final_lw_px,
                     aci: final_aci,
-                    snap_pts,
-                    tangent_geoms: tangents,
-                    key_vertices,
                     aabb,
                     plinegen: lw.plinegen,
-                    fill_tris: Vec::new(),
-                    fill_tris_low: Vec::new(),
-
+                    geom: std::sync::Arc::new(crate::scene::WireGeom {
+                        taper_widths: final_taper_widths,
+                        pattern_stations: Vec::new(),
+                        pick_tris: Vec::new(),
+                        pick_tris_low: Vec::new(),
+                        text_verts: Vec::new(),
+                        points,
+                        points_low,
+                        snap_pts,
+                        tangent_geoms: tangents,
+                        key_vertices,
+                        fill_tris: Vec::new(),
+                        fill_tris_low: Vec::new(),
+                        ..crate::scene::WireGeom::default()
+                    }),
                     ..Default::default()
                 };
                 out.extra_wires.push(wire);
@@ -4441,7 +4584,7 @@ fn emit_wire(
     // wipeout/hatch fills were positioned at the member rank. COPY and grip
     // moves rebuild instance batches and exposed this mismatch in model,
     // paper-space and PDF output.
-    let local_depth = Some(d_range.0 + lw.local_rank * d_range.1);
+    let mut local_depth = Some(d_range.0 + lw.local_rank * d_range.1);
     let plot_visible = ctx.plot_visible && lw.plot_visible && (!lw.plot_l0 || ctx.l0_plottable);
 
     // Batched wires share one dash distance, which runs on across the NaN
@@ -4474,6 +4617,7 @@ fn emit_wire(
         lw.hide_unselected,
         local_depth,
     );
+    key.plot_member = lw.plot_member;
     key.solid_normal = lw.solid_normal.map(|normal| normal.map(f32::to_bits));
     // Never fold reference-only boundaries into a visible geometry batch.
     key.snap_only = lw.snap_only;
@@ -4485,6 +4629,26 @@ fn emit_wire(
     };
     key.dash_closure = dash_closure;
     key.region_boundary_click = lw.region_boundary_click;
+
+    // A stroke that follows the one batched just before it, and looks the
+    // same here, takes that one's depth and so joins its batch: one wire for
+    // a run of lines, where their own ranks would make a wire of each line.
+    // Nothing ranks between the two, so nothing can tell the difference.
+    if let Some(run) = out.stroke_run.as_ref().filter(|run| {
+        previous.is_some_and(|previous| run.wire == std::ptr::from_ref(previous) as usize)
+    }) {
+        let own = std::mem::replace(&mut key.depth_bits, run.key.depth_bits);
+        if key == run.key {
+            local_depth = run.depth;
+        } else {
+            key.depth_bits = own;
+        }
+    }
+    out.stroke_run = is_plain_stroke(lw).then(|| StrokeRun {
+        wire: std::ptr::from_ref(lw) as usize,
+        key: key.clone(),
+        depth: local_depth,
+    });
 
     // Keep snap-only edges separate: concatenating key_vertices across
     // disconnected boundaries would invent midpoint references between them.
@@ -4525,6 +4689,7 @@ fn emit_wire(
             lw.hide_unselected,
         )
     });
+    entry.plot_member = lw.plot_member;
     entry.local_depth = local_depth;
     entry.solid_normal = lw.solid_normal;
     entry.snap_only = lw.snap_only;
@@ -5001,6 +5166,7 @@ mod bg_resolution_tests {
             ],
             extra_wires: Vec::new(),
             nested_prototypes: HashMap::default(),
+            stroke_run: None,
         }
     }
 
@@ -5610,5 +5776,239 @@ mod picture_preview_tests {
         );
         assert_eq!(complete.defn("CELL_PREVIEW").unwrap().subs.len(), 2);
         assert!(handles.iter().all(|h| doc.get_entity(*h).is_some()));
+    }
+}
+
+#[cfg(test)]
+mod stroke_run_tests {
+    use super::*;
+    use crate::scene::view::render::InheritStyle;
+    use document::entities::{Insert, Line, LwPolyline};
+    use document::tables::BlockRecord;
+    use document::types::Vector2;
+
+    const RED: AcadColor = AcadColor::Index(1);
+    const BLUE: AcadColor = AcadColor::Index(5);
+
+    fn add_block(document: &mut Document, name: &str) -> Handle {
+        let mut block = BlockRecord::new(name);
+        block.handle = document.allocate_handle();
+        let handle = block.handle;
+        document.block_records.add(block).unwrap();
+        handle
+    }
+
+    fn add_member(document: &mut Document, owner: Handle, mut entity: EntityType) -> Handle {
+        entity.common_mut().owner_handle = owner;
+        document.add_entity(entity).unwrap()
+    }
+
+    /// A horizontal unit line at height `y`.
+    fn line(y: usize, color: AcadColor) -> EntityType {
+        let mut line = EntityType::Line(Line::from_points(
+            Vector3::new(0.0, y as f64, 0.0),
+            Vector3::new(1.0, y as f64, 0.0),
+        ));
+        line.common_mut().color = color;
+        line
+    }
+
+    /// A wide polyline: a band, which covers what lies under it.
+    fn band(y: usize) -> EntityType {
+        let mut band = LwPolyline::from_points(vec![
+            Vector2::new(0.0, y as f64),
+            Vector2::new(1.0, y as f64),
+        ]);
+        band.constant_width = 0.5;
+        let mut band = EntityType::LwPolyline(band);
+        band.common_mut().color = RED;
+        band
+    }
+
+    /// The rank of the member at `place` of `members`: all below zero, where
+    /// members without a rank of their own are drawn.
+    fn rank(members: usize, place: usize) -> f32 {
+        -0.9 + 0.8 * place as f32 / (members as f32 + 1.0)
+    }
+
+    /// Ranks in member order.
+    fn ranks(members: &[Handle]) -> HashMap<u64, [f32; 2]> {
+        members
+            .iter()
+            .enumerate()
+            .map(|(place, member)| (member.value(), [rank(members.len(), place), 0.001]))
+            .collect()
+    }
+
+    /// Block `B` holding `members`, placed once; the wires it expands to, as
+    /// `(lines, depth)` sorted by depth.
+    fn expand(
+        members: Vec<EntityType>,
+        ranks: impl Fn(&[Handle]) -> HashMap<u64, [f32; 2]>,
+    ) -> Vec<(usize, f32)> {
+        let mut document = Document::new();
+        let block = add_block(&mut document, "B");
+        let handles: Vec<Handle> = members
+            .into_iter()
+            .map(|member| add_member(&mut document, block, member))
+            .collect();
+        let insert = Insert::new("B", Vector3::ZERO);
+        let handle = document
+            .add_entity(EntityType::Insert(insert.clone()))
+            .unwrap();
+        let cache = BlockCache::build(
+            &document,
+            1.0,
+            None,
+            true,
+            [0.0, 0.0, 0.0, 1.0],
+            None,
+            &ranks(&handles),
+        );
+        let wires = expand_insert(
+            &document,
+            &cache,
+            &insert,
+            handle,
+            [1.0; 4],
+            0,
+            0.0,
+            [0.0; 8],
+            1.0,
+            InheritStyle {
+                color: [1.0; 4],
+                pat_len: 0.0,
+                pat: [0.0; 8],
+                lw_px: 1.0,
+            },
+            0,
+            true,
+            false,
+            1.0,
+            None,
+            None,
+            false,
+            [0.0, 0.0, 0.0, 1.0],
+            1.0,
+            crate::scene::BlockScalePolicy::FromInsert,
+            false,
+            1.0,
+        )
+        .unwrap();
+        let mut strokes: Vec<(usize, f32)> = wires
+            .iter()
+            .filter(|wire| wire.world_width == 0.0 && !wire.points.is_empty())
+            .map(|wire| {
+                let lines = wire
+                    .points
+                    .split(|point| point[0].is_nan())
+                    .filter(|part| part.len() >= 2)
+                    .count();
+                (
+                    lines,
+                    wire.depth_override.expect("a block member keeps a rank"),
+                )
+            })
+            .collect();
+        strokes.sort_by(|a, b| a.1.total_cmp(&b.1));
+        strokes
+    }
+
+    #[test]
+    fn lines_alike_and_next_in_draw_order_share_one_wire() {
+        let strokes = expand((0..500).map(|y| line(y, RED)).collect(), ranks);
+        // One wire at the first line's rank, not a wire for every line.
+        assert_eq!(strokes, vec![(500, rank(500, 0))]);
+    }
+
+    #[test]
+    fn a_line_of_another_look_ends_the_run_and_keeps_its_place() {
+        let strokes = expand(
+            vec![
+                line(0, RED),
+                line(1, RED),
+                line(2, BLUE),
+                line(3, RED),
+                line(4, RED),
+            ],
+            ranks,
+        );
+        // The blue line stays above the first two red ones and below the
+        // last two, which is why the last two cannot join the first.
+        assert_eq!(
+            strokes,
+            vec![(2, rank(5, 0)), (1, rank(5, 2)), (2, rank(5, 3))]
+        );
+    }
+
+    #[test]
+    fn a_member_that_covers_keeps_the_lines_on_either_side_apart() {
+        let strokes = expand(
+            vec![
+                line(0, RED),
+                line(1, RED),
+                band(2),
+                line(3, RED),
+                line(4, RED),
+            ],
+            ranks,
+        );
+        // The band is drawn over the first two lines and under the last two.
+        assert_eq!(strokes, vec![(2, rank(5, 0)), (2, rank(5, 3))]);
+        assert!(rank(5, 0) < rank(5, 2) && rank(5, 2) < rank(5, 3));
+    }
+
+    #[test]
+    fn lines_out_of_draw_order_keep_their_own_ranks() {
+        // Ranks handed out against member order: places 1, 0, 3, 2.
+        let shuffled = |members: &[Handle]| {
+            let order = [1usize, 0, 3, 2];
+            members
+                .iter()
+                .zip(order)
+                .map(|(member, place)| (member.value(), [rank(4, place), 0.05]))
+                .collect()
+        };
+        let strokes = expand((0..4).map(|y| line(y, RED)).collect(), shuffled);
+        // The first two are neighbours in rank and so are the last two, each
+        // pair at the depth of its first member. The second and third are
+        // three places apart, with both others between them.
+        assert_eq!(strokes, vec![(2, rank(4, 1)), (2, rank(4, 3))]);
+    }
+
+    #[test]
+    fn a_run_stops_at_the_depth_of_members_without_a_rank() {
+        // An insert's attributes are drawn at 0: a line below it may not be
+        // moved above it, nor one above it below.
+        let straddling = |members: &[Handle]| {
+            let around_zero = [-0.2f32, -0.1, 0.1, 0.2];
+            members
+                .iter()
+                .zip(around_zero)
+                .map(|(member, rank)| (member.value(), [rank, 0.01]))
+                .collect()
+        };
+        let strokes = expand((0..4).map(|y| line(y, RED)).collect(), straddling);
+        assert_eq!(strokes, vec![(2, -0.2), (2, 0.1)]);
+    }
+
+    #[test]
+    fn lines_level_with_another_member_keep_their_own_ranks() {
+        // No ranks at all: every member sits at 0, level with the others.
+        let strokes = expand((0..3).map(|y| line(y, RED)).collect(), |_| {
+            HashMap::default()
+        });
+        assert_eq!(strokes, vec![(3, 0.0)]);
+        // A rank shared with a band: the line may not leave it for another.
+        let level = |members: &[Handle]| {
+            let places = [0usize, 1, 1];
+            members
+                .iter()
+                .zip(places)
+                .map(|(member, place)| (member.value(), [rank(3, place), 0.05]))
+                .collect()
+        };
+        let strokes = expand(vec![line(0, RED), line(1, RED), band(2)], level);
+        assert_eq!(strokes, vec![(1, rank(3, 0)), (1, rank(3, 1))]);
     }
 }

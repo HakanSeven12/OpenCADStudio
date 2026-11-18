@@ -1210,7 +1210,10 @@ impl Assembly<'_> {
             .map(|n| {
                 let face_agrees = p(3 + 2 * n)? != 0.0;
                 let mut face = self.face(p(2 + 2 * n)?, face_agrees == agrees)?;
-                if !agrees {
+                // A face turned against its surface (by its own flag or its
+                // shell's) runs its loops the other way too, so its edges
+                // meet its neighbours' in opposite senses.
+                if !face.forward {
                     for ring in &mut face.loops {
                         ring.reverse();
                         for (_, f) in ring.iter_mut() {
@@ -1400,6 +1403,9 @@ pub fn read(bytes: &[u8], drawing_mm: Option<f64>) -> Option<IgesModel> {
             shells.push(outer);
             shells.extend(voids);
             if assembly.build.lump(shells).is_some() {
+                // Faces of trimmed surfaces share their corners but not
+                // their edges: sewing makes the shell one.
+                assembly.build.heal(Some(doc.resolution), true);
                 bodies.push((assembly.build.body, doc.color(entity.color), layer(entity)));
             }
         }
@@ -1433,6 +1439,9 @@ pub fn read(bytes: &[u8], drawing_mm: Option<f64>) -> Option<IgesModel> {
             143 | 144 => assembly.sheet(entity).map(|_| false),
             _ => assembly.whole(number as f64),
         };
+        if let Some(closed) = made {
+            assembly.build.heal(Some(doc.resolution), closed);
+        }
         match made {
             Some(true) => {
                 bodies.push((assembly.build.body, doc.color(entity.color), layer(entity)))
@@ -1853,6 +1862,23 @@ mod tests {
         // A directory section with nothing the reader keeps is an empty model.
         let model = read(&SPLINE[..SPLINE.len() / 2], Some(1.0));
         assert!(model.is_none_or(|m| m.bodies.is_empty() && m.sheets.is_empty()));
+    }
+
+    /// FreeCAD's solids are sound bodies facing out: each edge is met by
+    /// its two faces in opposite senses, also where a face is turned
+    /// against its surface in its shell (as the box's and cylinder's are).
+    #[test]
+    fn solids_are_sound_and_face_out() {
+        let mut solids = 0;
+        for file in [BOX, CYLINDER, INCH_CUBE, TWO_SOLIDS] {
+            for (body, _, _) in &read(file, Some(1.0)).expect("an IGES file").bodies {
+                let problems = body.validate();
+                assert!(problems.is_empty(), "{problems:?}");
+                assert!(!inside_out(body));
+                solids += 1;
+            }
+        }
+        assert_eq!(solids, 5);
     }
 
     /// Damaged copies of every fixture: cut at each line, each line left

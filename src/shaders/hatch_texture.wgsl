@@ -93,6 +93,7 @@ struct VIn  {
     @location(1) translation: vec2<f32>,
     @location(2) translation_low: vec2<f32>,
     @location(3) draw_depth: f32,
+    @location(4) translation_z: f32,
 }
 struct VOut {
     @invariant @builtin(position) clip: vec4<f32>,
@@ -103,9 +104,11 @@ struct VOut {
     var o: VOut;
     // Double-single relative-to-eye: anchor high cancels eye_high (Sterbenz);
     // boundary-local v.pos + anchor low + (−eye_low) carry the residual.
+    // v.pos.z is the fill plane's height over the vertex; a block copy adds
+    // its own rise.
     let hi = vec3<f32>(h.origin.x - u.eye_high.x + v.translation.x,
                        h.origin.y - u.eye_high.y + v.translation.y,
-                       -u.eye_high.z);
+                       v.translation_z - u.eye_high.z);
     let lo = vec3<f32>(v.pos.x + h.origin_low.x + v.translation_low.x - u.eye_low.x,
                        v.pos.y + h.origin_low.y + v.translation_low.y - u.eye_low.y,
                        v.pos.z - u.eye_low.z);
@@ -205,6 +208,41 @@ fn shown(color: vec4<f32>) -> vec4<f32> {
     return vec4<f32>(color.rgb, select(1.0, color.a, u.transparency_enable > 0.5));
 }
 
+// Ordered 4x4 threshold in (0, 1) for the pixel at `frag` — see hatch.wgsl.
+fn dither_threshold(frag: vec2<f32>) -> f32 {
+    var bayer = array<f32, 16>(
+        0.0, 8.0, 2.0, 10.0,
+        12.0, 4.0, 14.0, 6.0,
+        3.0, 11.0, 1.0, 9.0,
+        15.0, 7.0, 13.0, 5.0,
+    );
+    let x = u32(floor(frag.x)) % 4u;
+    let y = u32(floor(frag.y)) % 4u;
+    return (bayer[y * 4u + x] + 0.5) / 16.0;
+}
+
+// Share of the area one family's lines cover on screen — see hatch.wgsl.
+fn family_coverage(fam: LineFamily, scale: f32) -> f32 {
+    let spacing_px = abs(fam.perp_step) * scale / u.world_per_pixel;
+    let width_px = select(1.0, display_lineweight(fam.line_width), u.lwdisplay_enable > 0.5);
+    var along = 1.0;
+    let period = abs(fam.period) * scale;
+    if fam.n_dashes > 0u && period > 0.0 {
+        var lit = 0.0;
+        for (var j = 0u; j < fam.n_dashes; j++) {
+            let idx = fam.dash_off + j;
+            let sv = texel(h.dash_off + idx / 4u)[idx % 4u] * scale;
+            if sv > 0.0 {
+                lit = lit + sv;
+            } else if sv == 0.0 {
+                lit = lit + width_px * u.world_per_pixel;
+            }
+        }
+        along = clamp(lit / period, 0.0, 1.0);
+    }
+    return clamp(width_px / spacing_px, 0.0, 1.0) * along;
+}
+
 @fragment fn fs_main(v: VOut) -> @location(0) vec4<f32> {
     // Taken here, in uniform control flow — see check_family.
     let ddx_xz = dpdx(v.xz);
@@ -243,8 +281,9 @@ fn shown(color: vec4<f32>) -> vec4<f32> {
     }
 
     // Keep every family visible until all family spacings project below 2 px,
-    // then substitute one solid fill. A single dense family must neither hide
-    // itself nor turn a complex hatch solid.
+    // then substitute an even tone covering the share of the area the lines
+    // cover — see hatch.wgsl. A single dense family must neither hide itself
+    // nor turn a complex hatch solid.
     var all_families_subpixel = h.n_families > 0u && u.world_per_pixel > 0.0;
     if all_families_subpixel {
         for (var i = 0u; i < h.n_families; i++) {
@@ -257,7 +296,14 @@ fn shown(color: vec4<f32>) -> vec4<f32> {
         }
     }
     if all_families_subpixel {
-        return shown(h.color);
+        var uncovered = 1.0;
+        for (var i = 0u; i < h.n_families; i++) {
+            uncovered = uncovered * (1.0 - family_coverage(load_family(i), h.scale));
+        }
+        if dither_threshold(v.clip.xy) < 1.0 - uncovered {
+            return shown(h.color);
+        }
+        discard;
     }
 
     let cos_off = cos(h.angle_offset);

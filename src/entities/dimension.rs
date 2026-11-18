@@ -1699,6 +1699,16 @@ pub(crate) fn resolved_dimension_style(
             style.dimtxsty = record.name.clone();
         }
     }
+    // A text style with a fixed height sizes the dimension text instead of
+    // DIMTXT (#3116).
+    if let Some(record) = document
+        .text_styles
+        .iter()
+        .find(|record| record.name.eq_ignore_ascii_case(&style.dimtxsty))
+        .filter(|record| record.has_fixed_height())
+    {
+        style.dimtxt = record.height;
+    }
 
     // The dimension's own annotation context decides whether it scales with
     // the annotation scale; the style only seeds new dimensions. A dimension
@@ -3885,9 +3895,11 @@ fn tessellate_dimension_inner(
             text_lifted: style.map(|s| s.dimtad).unwrap_or(1) != 0 || text_splits_at_line(dim),
             text_movement,
             text_break: text_layout.break_box,
-            leader_anchor: style
-                .filter(|s| s.dimtmove == 1)
-                .and_then(|_| stored_text_point(dim))
+            leader_anchor: stored_text_point(dim)
+                .filter(|point| {
+                    style.is_some_and(|s| s.dimtmove == 1)
+                        || radius_hook_point(dim, style, *point, dim_txt as f64)
+                })
                 .map(vec3_local),
         },
         SuppressFlags {
@@ -4062,8 +4074,6 @@ fn tessellate_dimension_inner(
                 wires.push(WireModel {
                     bg_adapt: None,
                     point_marker: None,
-                    taper_widths: Vec::new(),
-                    pattern_stations: Vec::new(),
                     world_width: 0.0,
                     depth_override: None,
                     display_visible: true,
@@ -4073,27 +4083,31 @@ fn tessellate_dimension_inner(
                     fill_is_2d_solid: false,
                     solid_normal: None,
                     render_instance: None,
-                    pick_tris: Vec::new(),
-                    pick_tris_low: Vec::new(),
                     dash_from_start: false,
-                    text_verts: Vec::new(),
                     name: name.clone(),
-                    points: ext1,
-                    points_low: Vec::new(),
                     color: ext_color,
                     selected,
                     aci: 0,
                     pattern_length: ext1_pat_len,
                     pattern: ext1_pat,
                     line_weight_px: lw_ext,
-                    snap_pts: vec![],
-                    tangent_geoms: vec![],
-                    key_vertices: vec![],
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
-                    fill_tris: vec![],
-                    fill_tris_low: Vec::new(),
-
+                    geom: std::sync::Arc::new(crate::scene::WireGeom {
+                        taper_widths: Vec::new(),
+                        pattern_stations: Vec::new(),
+                        pick_tris: Vec::new(),
+                        pick_tris_low: Vec::new(),
+                        text_verts: Vec::new(),
+                        points: ext1,
+                        points_low: Vec::new(),
+                        snap_pts: vec![],
+                        tangent_geoms: vec![],
+                        key_vertices: vec![],
+                        fill_tris: vec![],
+                        fill_tris_low: Vec::new(),
+                        ..crate::scene::WireGeom::default()
+                    }),
                     ..Default::default()
                 });
             }
@@ -4101,8 +4115,6 @@ fn tessellate_dimension_inner(
                 wires.push(WireModel {
                     bg_adapt: None,
                     point_marker: None,
-                    taper_widths: Vec::new(),
-                    pattern_stations: Vec::new(),
                     world_width: 0.0,
                     depth_override: None,
                     display_visible: true,
@@ -4112,27 +4124,31 @@ fn tessellate_dimension_inner(
                     fill_is_2d_solid: false,
                     solid_normal: None,
                     render_instance: None,
-                    pick_tris: Vec::new(),
-                    pick_tris_low: Vec::new(),
                     dash_from_start: false,
-                    text_verts: Vec::new(),
                     name: name.clone(),
-                    points: ext2,
-                    points_low: Vec::new(),
                     color: ext_color,
                     selected,
                     aci: 0,
                     pattern_length: ext2_pat_len,
                     pattern: ext2_pat,
                     line_weight_px: lw_ext,
-                    snap_pts: vec![],
-                    tangent_geoms: vec![],
-                    key_vertices: vec![],
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
-                    fill_tris: vec![],
-                    fill_tris_low: Vec::new(),
-
+                    geom: std::sync::Arc::new(crate::scene::WireGeom {
+                        taper_widths: Vec::new(),
+                        pattern_stations: Vec::new(),
+                        pick_tris: Vec::new(),
+                        pick_tris_low: Vec::new(),
+                        text_verts: Vec::new(),
+                        points: ext2,
+                        points_low: Vec::new(),
+                        snap_pts: vec![],
+                        tangent_geoms: vec![],
+                        key_vertices: vec![],
+                        fill_tris: vec![],
+                        fill_tris_low: Vec::new(),
+                        ..crate::scene::WireGeom::default()
+                    }),
                     ..Default::default()
                 });
             }
@@ -4140,8 +4156,6 @@ fn tessellate_dimension_inner(
             wires.push(WireModel {
                 bg_adapt: None,
                 point_marker: None,
-                taper_widths: Vec::new(),
-                pattern_stations: Vec::new(),
                 world_width: 0.0,
                 depth_override: None,
                 display_visible: true,
@@ -4151,27 +4165,31 @@ fn tessellate_dimension_inner(
                 fill_is_2d_solid: false,
                 solid_normal: None,
                 render_instance: None,
-                pick_tris: Vec::new(),
-                pick_tris_low: Vec::new(),
                 dash_from_start: false,
-                text_verts: Vec::new(),
                 name: name.clone(),
-                points: geom.ext_lines,
-                points_low: Vec::new(),
                 color: ext_color,
                 selected,
                 aci: 0,
                 pattern_length: ext1_pat_len,
                 pattern: ext1_pat,
                 line_weight_px: lw_ext,
-                snap_pts: vec![],
-                tangent_geoms: vec![],
-                key_vertices: vec![],
                 aabb: WireModel::UNBOUNDED_AABB,
                 plinegen: true,
-                fill_tris: vec![],
-                fill_tris_low: Vec::new(),
-
+                geom: std::sync::Arc::new(crate::scene::WireGeom {
+                    taper_widths: Vec::new(),
+                    pattern_stations: Vec::new(),
+                    pick_tris: Vec::new(),
+                    pick_tris_low: Vec::new(),
+                    text_verts: Vec::new(),
+                    points: geom.ext_lines,
+                    points_low: Vec::new(),
+                    snap_pts: vec![],
+                    tangent_geoms: vec![],
+                    key_vertices: vec![],
+                    fill_tris: vec![],
+                    fill_tris_low: Vec::new(),
+                    ..crate::scene::WireGeom::default()
+                }),
                 ..Default::default()
             });
         }
@@ -4180,8 +4198,6 @@ fn tessellate_dimension_inner(
     wires.push(WireModel {
         bg_adapt: None,
         point_marker: None,
-        taper_widths: Vec::new(),
-        pattern_stations: Vec::new(),
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
@@ -4191,32 +4207,36 @@ fn tessellate_dimension_inner(
         fill_is_2d_solid: false,
         solid_normal: None,
         render_instance: None,
-        pick_tris: Vec::new(),
-        pick_tris_low: Vec::new(),
         dash_from_start: false,
-        text_verts: Vec::new(),
         name: name.clone(),
-        points: geom.dim_lines,
-        points_low: Vec::new(),
         color: dim_color,
         selected,
         aci: 0,
         pattern_length: dim_pat_len,
         pattern: dim_pat,
         line_weight_px: lw_dim,
-        snap_pts,
-        tangent_geoms: vec![],
-        key_vertices,
         aabb: WireModel::UNBOUNDED_AABB,
         plinegen: true,
-        fill_tris: geom.arrow_fill,
-        // fill_tris_low intentionally empty: this fill renders on the top-level
-        // path, where consumers (face3d_gpu, xclip) treat a short low half as
-        // all-zero, so it draws at f32 precision (sub-metre error at UTM scale)
-        // — not a crash. Follow-up: double-single-split via points_to_ds to
-        // match emit_wire's paired fill path.
-        fill_tris_low: Vec::new(),
-
+        geom: std::sync::Arc::new(crate::scene::WireGeom {
+            taper_widths: Vec::new(),
+            pattern_stations: Vec::new(),
+            pick_tris: Vec::new(),
+            pick_tris_low: Vec::new(),
+            text_verts: Vec::new(),
+            points: geom.dim_lines,
+            points_low: Vec::new(),
+            snap_pts,
+            tangent_geoms: vec![],
+            key_vertices,
+            fill_tris: geom.arrow_fill,
+            // fill_tris_low intentionally empty: this fill renders on the top-level
+            // path, where consumers (face3d_gpu, xclip) treat a short low half as
+            // all-zero, so it draws at f32 precision (sub-metre error at UTM scale)
+            // — not a crash. Follow-up: double-single-split via points_to_ds to
+            // match emit_wire's paired fill path.
+            fill_tris_low: Vec::new(),
+            ..crate::scene::WireGeom::default()
+        }),
         ..Default::default()
     });
     // Arrowheads and ticks: the dimension line's colour and weight, never
@@ -4250,8 +4270,6 @@ fn tessellate_dimension_inner(
         wires.push(WireModel {
             bg_adapt: None,
             point_marker: None,
-            taper_widths: Vec::new(),
-            pattern_stations: Vec::new(),
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
@@ -4261,13 +4279,8 @@ fn tessellate_dimension_inner(
             fill_is_2d_solid: false,
             solid_normal: None,
             render_instance: None,
-            pick_tris: Vec::new(),
-            pick_tris_low: Vec::new(),
             dash_from_start: false,
-            text_verts: Vec::new(),
             name: name.clone(),
-            points,
-            points_low: Vec::new(),
             color: if selected {
                 WireModel::SELECTED
             } else {
@@ -4278,14 +4291,23 @@ fn tessellate_dimension_inner(
             pattern_length: 0.0,
             pattern: [0.0; 8],
             line_weight_px: 1.0,
-            snap_pts: vec![],
-            tangent_geoms: vec![],
-            key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
-            fill_tris: vec![],
-            fill_tris_low: Vec::new(),
-
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                taper_widths: Vec::new(),
+                pattern_stations: Vec::new(),
+                pick_tris: Vec::new(),
+                pick_tris_low: Vec::new(),
+                text_verts: Vec::new(),
+                points,
+                points_low: Vec::new(),
+                snap_pts: vec![],
+                tangent_geoms: vec![],
+                key_vertices: vec![],
+                fill_tris: vec![],
+                fill_tris_low: Vec::new(),
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         });
     }
@@ -4306,8 +4328,6 @@ fn tessellate_dimension_inner(
                 wires.push(WireModel {
                     bg_adapt: None,
                     point_marker: None,
-                    taper_widths: Vec::new(),
-                    pattern_stations: Vec::new(),
                     world_width: 0.0,
                     depth_override: None,
                     display_visible: true,
@@ -4317,32 +4337,36 @@ fn tessellate_dimension_inner(
                     fill_is_2d_solid: false,
                     solid_normal: None,
                     render_instance: None,
-                    pick_tris: Vec::new(),
-                    pick_tris_low: Vec::new(),
                     dash_from_start: false,
-                    text_verts: Vec::new(),
                     name: name.clone(),
-                    points: vec![],
-                    points_low: Vec::new(),
                     color: fill_color,
                     selected,
                     aci: 0,
                     pattern_length: 0.0,
                     pattern: [0.0; 8],
                     line_weight_px: 1.0,
-                    snap_pts: vec![],
-                    tangent_geoms: vec![],
-                    key_vertices: vec![],
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
-                    fill_tris: rect,
-                    // fill_tris_low intentionally empty: this fill renders on the
-                    // top-level path, where consumers (face3d_gpu, xclip) treat a
-                    // short low half as all-zero, so it draws at f32 precision
-                    // (sub-metre error at UTM scale) — not a crash. Follow-up:
-                    // double-single-split via points_to_ds to match emit_wire.
-                    fill_tris_low: Vec::new(),
-
+                    geom: std::sync::Arc::new(crate::scene::WireGeom {
+                        taper_widths: Vec::new(),
+                        pattern_stations: Vec::new(),
+                        pick_tris: Vec::new(),
+                        pick_tris_low: Vec::new(),
+                        text_verts: Vec::new(),
+                        points: vec![],
+                        points_low: Vec::new(),
+                        snap_pts: vec![],
+                        tangent_geoms: vec![],
+                        key_vertices: vec![],
+                        fill_tris: rect,
+                        // fill_tris_low intentionally empty: this fill renders on the
+                        // top-level path, where consumers (face3d_gpu, xclip) treat a
+                        // short low half as all-zero, so it draws at f32 precision
+                        // (sub-metre error at UTM scale) — not a crash. Follow-up:
+                        // double-single-split via points_to_ds to match emit_wire.
+                        fill_tris_low: Vec::new(),
+                        ..crate::scene::WireGeom::default()
+                    }),
                     ..Default::default()
                 });
             }
@@ -4362,8 +4386,6 @@ fn tessellate_dimension_inner(
             wires.push(WireModel {
                 bg_adapt: None,
                 point_marker: None,
-                taper_widths: Vec::new(),
-                pattern_stations: Vec::new(),
                 world_width: 0.0,
                 depth_override: None,
                 display_visible: true,
@@ -4373,13 +4395,8 @@ fn tessellate_dimension_inner(
                 fill_is_2d_solid: false,
                 solid_normal: None,
                 render_instance: None,
-                pick_tris: Vec::new(),
-                pick_tris_low: Vec::new(),
                 dash_from_start: false,
-                text_verts: Vec::new(),
                 name: name.clone(),
-                points: vec![p1, p2, p2, p3, p3, p4, p4, p1],
-                points_low: Vec::new(),
                 color: if selected {
                     WireModel::SELECTED
                 } else {
@@ -4390,14 +4407,23 @@ fn tessellate_dimension_inner(
                 pattern_length: 0.0,
                 pattern: [0.0; 8],
                 line_weight_px: 1.0,
-                snap_pts: vec![],
-                tangent_geoms: vec![],
-                key_vertices: vec![],
                 aabb: WireModel::UNBOUNDED_AABB,
                 plinegen: true,
-                fill_tris: vec![],
-                fill_tris_low: Vec::new(),
-
+                geom: std::sync::Arc::new(crate::scene::WireGeom {
+                    taper_widths: Vec::new(),
+                    pattern_stations: Vec::new(),
+                    pick_tris: Vec::new(),
+                    pick_tris_low: Vec::new(),
+                    text_verts: Vec::new(),
+                    points: vec![p1, p2, p2, p3, p3, p4, p4, p1],
+                    points_low: Vec::new(),
+                    snap_pts: vec![],
+                    tangent_geoms: vec![],
+                    key_vertices: vec![],
+                    fill_tris: vec![],
+                    fill_tris_low: Vec::new(),
+                    ..crate::scene::WireGeom::default()
+                }),
                 ..Default::default()
             });
         }
@@ -6323,10 +6349,11 @@ fn map_wire_ocs_to_wcs(wire: &mut WireModel, normal: Vector3) {
         *low = mapped_low;
     };
 
-    map_split(&mut wire.points, &mut wire.points_low);
-    map_split(&mut wire.fill_tris, &mut wire.fill_tris_low);
-    map_split(&mut wire.pick_tris, &mut wire.pick_tris_low);
-    wire.text_verts = crate::scene::model::wire_model::map_text_verts(&wire.text_verts, map);
+    let geom = wire.geom_mut();
+    map_split(&mut geom.points, &mut geom.points_low);
+    map_split(&mut geom.fill_tris, &mut geom.fill_tris_low);
+    map_split(&mut geom.pick_tris, &mut geom.pick_tris_low);
+    geom.text_verts = crate::scene::model::wire_model::map_text_verts(&geom.text_verts, map);
     // OCS→WCS is rigid: unit height scale, no in-plane rotation change.
     wire.map_searchable_runs(
         &|p| {
@@ -8279,9 +8306,10 @@ fn translate_wire_from_origin(wire: &mut WireModel, origin: Vector3) {
             low.push([lx, ly, lz]);
         }
     };
-    translate(&mut wire.points, &mut wire.points_low);
-    translate(&mut wire.fill_tris, &mut wire.fill_tris_low);
-    translate(&mut wire.pick_tris, &mut wire.pick_tris_low);
+    let geom = wire.geom_mut();
+    translate(&mut geom.points, &mut geom.points_low);
+    translate(&mut geom.fill_tris, &mut geom.fill_tris_low);
+    translate(&mut geom.pick_tris, &mut geom.pick_tris_low);
     for point in &mut wire.key_vertices {
         point[0] += origin.x;
         point[1] += origin.y;
@@ -8366,14 +8394,15 @@ fn text_on_dim_line(
                 _ => text_w > span,
             };
         if text_outside {
-            // Past the two-arrow stub the dimension line grows outside the
-            // extension line, then the gap that `text_w` already carries.
-            along = hi + 2.0 * arrow + text_w * 0.5;
+            // Past the second extension line (the side picked last), the
+            // two-arrow stub the dimension line grows outside it, then the
+            // gap that `text_w` already carries.
+            along = t2 + inward * (2.0 * arrow + text_w * 0.5);
             if horizontal_outside && ay.abs() > 1e-3 {
                 // Horizontal text beside a hook: the line runs out two arrow
                 // lengths, the hook turns one arrow toward the text-up side
                 // and the text sits against it, centred on the hook.
-                let elbow_along = hi + 2.0 * arrow;
+                let elbow_along = t2 + inward * 2.0 * arrow;
                 let side = if px >= 0.0 { 1.0 } else { -1.0 };
                 let elbow_x = defpt.x + ax * elbow_along;
                 let elbow_y = defpt.y + ay * elbow_along;
@@ -8441,7 +8470,8 @@ fn text_on_single_arrow_dim_line(
             _ => text_width > available,
         };
     let along = if text_outside {
-        high + 2.0 * arrow + text_width * 0.5
+        let outward = if second_along >= first_along { 1.0 } else { -1.0 };
+        second_along + outward * (2.0 * arrow + text_width * 0.5)
     } else {
         (first_along + second_along) * 0.5
     };
@@ -8676,6 +8706,28 @@ fn diameter_point_on_leader(
 
 /// Whether `point` lies on the line through `a` and `b` rather than an
 /// `offset` (a DIMTAD lift) away from it.
+/// A radius with horizontal text placed by a point on its line through the
+/// centre, as DIMRADIUS stores the click: the point is where the leader's
+/// hook starts, so the leader runs straight from the arc point along that
+/// line and the text sits beside the hook (#3149). A file saved elsewhere
+/// stores the text's own middle, which stands off that line; a leader within
+/// 15° of horizontal runs straight to the text either way.
+fn radius_hook_point(
+    dim: &Dimension,
+    style: Option<&DimStyle>,
+    point: Vector3,
+    text_height: f64,
+) -> bool {
+    let Dimension::Radius(d) = dim else {
+        return false;
+    };
+    let (dx, dy) = (point.x - d.definition_point.x, point.y - d.definition_point.y);
+    dimension_text_reads_horizontal(dim, style)
+        && d.angle_vertex.distance(&point) > d.angle_vertex.distance(&d.definition_point)
+        && dy.abs().atan2(dx.abs()) > 15.0_f64.to_radians()
+        && point_on_line(d.angle_vertex, d.definition_point, point, text_height * 0.1)
+}
+
 fn point_on_line(a: Vector3, b: Vector3, point: Vector3, offset: f64) -> bool {
     let (dx, dy) = (b.x - a.x, b.y - a.y);
     let length = dx.hypot(dy);
@@ -8764,7 +8816,8 @@ fn dimension_text_pos_f64(
             // Measured on 39 such dimensions the stored point sits 2.4 text
             // heights before the text, which is DIMASZ plus DIMGAP.
             Dimension::Radius(_) | Dimension::Diameter(_)
-                if style.is_some_and(|s| s.dimtmove == 1) =>
+                if style.is_some_and(|s| s.dimtmove == 1)
+                    || radius_hook_point(dim, style, point, text_height) =>
             {
                 let tip = radial_leader_tip(dim, point);
                 let side = if point.x >= tip.x { 1.0 } else { -1.0 };

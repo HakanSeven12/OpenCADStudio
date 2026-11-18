@@ -155,7 +155,7 @@ fn reorder_insertion_index(from: usize, to: usize, after: bool, len: usize) -> O
 #[cfg(test)]
 mod block_ops_tests;
 pub(super) mod blocks_palette;
-mod command;
+pub(in crate::app) mod command;
 pub(crate) mod context_menu;
 mod dialog;
 mod dynamic;
@@ -363,14 +363,8 @@ impl OpenCADStudio {
             Some(AssocPrompt) => self.mark_assoc_prompted(),
             // Cancel: leave the layer (and its objects) untouched.
             Some(LayerDeleteWarning) => self.layer_delete_pending = None,
-            // Cancel: drop the working copy without touching the block.
-            Some(AttributeEditor) => {
-                self.attr_editor_handle = None;
-                self.attr_editor_block.clear();
-                self.attr_editor_rows.clear();
-                self.attr_editor_selected = 0;
-                self.attr_editor_tab = crate::ui::window::attribute_editor::AttrTab::Attribute;
-            }
+            // ✕ is Cancel: what was not applied is taken back.
+            Some(AttributeEditor) => self.attr_editor_end(false),
             Some(GeometricTolerance) => self.geometric_tolerance = None,
             Some(BlockDefinition) => self.block_definition = None,
             Some(AttMan) => self.attman = None,
@@ -423,6 +417,12 @@ impl OpenCADStudio {
             // Cancel or ✕ leaves the cells as they were.
             Some(TableCellWarning) => self.table_cell_warning = None,
             Some(AnnotationScalePrompt) => self.anno_scale_prompt = None,
+            // Esc or ✕ on the text style question changes the style, as Yes.
+            Some(MTextDialog) => {
+                if let Some(dialog) = self.mtext_dialog.take() {
+                    self.mtext_style_question_closed(dialog);
+                }
+            }
             // Cancel drops the typed value; the cell keeps its value and type.
             Some(TableCellEntry) => self.table_cell_entry = None,
             Some(HatchBoundaryWarning) => self.close_hatch_boundary_warning(),
@@ -632,6 +632,10 @@ impl OpenCADStudio {
                 tab.layers.keys_active = false;
             }
         }
+        // The attribute editor checks a field as the cursor leaves it.
+        if let Some(task) = self.attr_editor_leave_check(&msg) {
+            return task;
+        }
         // Pickers offer the catalog linetypes the drawing lacks; the one
         // picked is loaded before it is assigned.
         if let Message::LayerLinetypeSet(name)
@@ -733,6 +737,10 @@ impl OpenCADStudio {
                 .get(self.active_tab)
                 .is_some_and(|tab| tab.scene.table_cells.is_some());
         self.ribbon.set_table_cell_context(cells_picked);
+        // The Text Editor tab follows the in-place text editor.
+        if !pointer_motion {
+            self.sync_text_editor_ribbon();
+        }
         // The ribbon light follows the pane that is actually rendered, so a
         // session ending, a clean screen or another tab closes the light with it.
         self.ribbon.show_parameters_manager =
@@ -1325,12 +1333,19 @@ impl OpenCADStudio {
                     }
                     // Moving between the app's own windows sends Unfocused then
                     // Focused, so they end up floating again.
-                    crate::app::tool_windows::float_os_windows(&self.os_windows, focused)
+                    crate::app::tool_windows::float_os_windows(
+                        &self.os_windows,
+                        focused,
+                        self.focused_window,
+                    )
                 };
                 #[cfg(target_arch = "wasm32")]
                 let float = Task::none();
                 if Some(id) == self.main_window {
                     self.spacemouse_focused = focused;
+                    if !focused {
+                        self.release_pointer_navigation();
+                    }
                 }
                 // Key tips close when the window loses focus, and an Alt
                 // held while it left or arrived (Alt+Tab, window activation)
@@ -1512,6 +1527,8 @@ impl OpenCADStudio {
 
             Message::ControlToggle => {
                 self.control.enabled = !self.control.enabled;
+                self.control.start_enabled = self.control.enabled;
+                self.persist_settings_if_changed();
                 Task::none()
             }
             Message::ControlCopySetup => {
@@ -2434,6 +2451,15 @@ impl OpenCADStudio {
                 }
                 self.missing_fonts_path = None;
                 self.close_active_modal();
+                // Later drawings list their missing fonts on the command line.
+                if std::mem::take(&mut self.missing_fonts_silence) {
+                    self.check_missing_fonts = false;
+                    self.persist_settings_if_changed();
+                }
+                Task::none()
+            }
+            Message::MissingFontsSilence(on) => {
+                self.missing_fonts_silence = on;
                 Task::none()
             }
             Message::MissingFontsResult(result) => {
@@ -3070,6 +3096,13 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::ModelImportFinished(tab_id, generation, path, format, result) => {
+                self.finish_model_import(tab_id, generation, &path, format, result)
+            }
+
+            Message::PictureImportFinished(tab_id, generation, path, format, prompt, read) => self
+                .finish_picture_import(tab_id, generation, path.as_deref(), format, prompt, read),
+
             Message::SaveFile => self.on_save_file(),
             Message::ExtractionOutdated(choice) => self.on_extraction_outdated(choice),
 
@@ -3113,7 +3146,11 @@ impl OpenCADStudio {
 
             Message::ClearScene => {
                 let i = self.active_tab;
-                if self.tabs[i].ifccad_session.is_some() {
+                if self.tabs[i]
+                    .ifccad_session
+                    .as_ref()
+                    .is_some_and(ocs_save::IfccadSession::has_native_context)
+                {
                     self.command_line.push_info(
                         crate::t!("This drawing has retained IFCCAD content. Create a new drawing instead.").as_ref(),
                     );
@@ -3121,6 +3158,7 @@ impl OpenCADStudio {
                 }
                 self.push_undo_snapshot(i, "CLEAR");
                 self.tabs[i].scene.reset_to_new_drawing();
+                self.tabs[i].note_drawing_cleared();
                 self.tabs[i].properties = PropertiesPanel::empty();
                 let doc_layers = self.tabs[i].scene.document.layers.clone();
                 let vp_info = self.tabs[i].scene.viewport_list();
@@ -3193,6 +3231,7 @@ impl OpenCADStudio {
             Message::DimInspect(message) => self.update_dim_inspect(message),
             Message::TableCellDialog(message) => self.update_table_cell_dialog(message),
             Message::AnnoScalePrompt(message) => self.on_anno_scale_prompt(message),
+            Message::MTextDialog(message) => self.on_mtext_dialog(message),
             Message::HyperlinkDialog(message) => self.update_hyperlink_dialog(message),
             Message::Spell(message) => self.update_spell(message),
             Message::PdfShxDialog(message) => self.update_pdf_shx_dialog(message),
@@ -3947,6 +3986,7 @@ impl OpenCADStudio {
                 self.doc_tab_layouts = None;
                 if idx != self.active_tab {
                     self.close_table_cell_editor();
+                    self.release_pointer_navigation();
                 }
                 if self.dialog_open(super::ModalKind::Recovery) {
                     return Task::none();
@@ -4163,6 +4203,7 @@ impl OpenCADStudio {
                 }
                 self.hovered_doc_tab = None;
                 self.doc_tab_layouts = None;
+                self.release_pointer_navigation();
                 // Resolve the stable id when the message is handled, not when
                 // it was built: an earlier close in the same batch may have
                 // shifted or removed the tab a captured index referred to.
@@ -8986,10 +9027,7 @@ impl OpenCADStudio {
                 if search.is_empty() {
                     return Task::none();
                 }
-                self.find_replace_search_changed(search);
-                let task = self.open_find_replace();
-                self.find_replace_find_all();
-                task
+                self.find_text_from_ribbon(search)
             }
             Message::RibbonTextHeight(value) => {
                 self.ribbon.text_height = value;
@@ -9216,7 +9254,11 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::MTextStyle(s) => {
-                self.mtext_object_style(s);
+                self.mtext_pick_style(s);
+                Task::none()
+            }
+            Message::MTextImport(path) => {
+                self.mtext_import(&path);
                 Task::none()
             }
             Message::MTextFontPicker(event) => {
@@ -9400,6 +9442,35 @@ impl OpenCADStudio {
                 self.mtext_box_drag(width);
                 Task::none()
             }
+            Message::MTextContextOpen(at, offset) => {
+                self.mtext_context_open(at, offset);
+                Task::none()
+            }
+            Message::MTextContextGroup(group) => {
+                if let Some(menu) = self.mtext_editor.as_mut().and_then(|ed| ed.context_menu.as_mut()) {
+                    menu.open = if menu.open == group { None } else { group };
+                }
+                Task::none()
+            }
+            Message::MTextContextClose => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.context_menu = None;
+                    ed.smart_tag_open = false;
+                }
+                Task::none()
+            }
+            Message::MTextContextRun(command) => self.mtext_context_run(&command),
+            Message::MTextSmartTag(open) => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.smart_tag_open = open;
+                    ed.context_menu = None;
+                }
+                Task::none()
+            }
+            Message::MTextPasteAs(mode, text) => {
+                self.mtext_paste_as(&mode, text);
+                Task::none()
+            }
             Message::MTextMenuPick(message) => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
                     ed.menu = None;
@@ -9577,6 +9648,10 @@ impl OpenCADStudio {
                     ed.caret = off;
                     ed.caret_blink_on = true;
                 }
+                Task::none()
+            }
+            Message::MTextSelEnd => {
+                self.mtext_match_apply();
                 Task::none()
             }
             Message::MTextCaretMove(d) => {
@@ -9764,34 +9839,7 @@ impl OpenCADStudio {
                 }
             }
             Message::FindReplaceOpen => self.open_find_replace(),
-            Message::FindReplaceSearchChanged(value) => {
-                self.find_replace_search_changed(value);
-                Task::none()
-            }
-            Message::FindReplaceReplacementChanged(value) => {
-                self.find_replace_replacement_changed(value);
-                Task::none()
-            }
-            Message::FindReplaceNext => {
-                self.find_replace_next();
-                Task::none()
-            }
-            Message::FindReplaceOne => {
-                self.find_replace_one();
-                Task::none()
-            }
-            Message::FindReplaceAll => {
-                self.find_replace_all();
-                Task::none()
-            }
-            Message::FindReplaceFindAll => {
-                self.find_replace_find_all();
-                Task::none()
-            }
-            Message::FindReplaceSelectResult(index) => {
-                self.find_replace_select_result(index);
-                Task::none()
-            }
+            Message::Find(message) => self.on_find_message(message),
             Message::OverkillSettingsChanged(settings) => {
                 if let Some(state) = &mut self.overkill_dialog {
                     state.settings = settings;
@@ -12429,6 +12477,11 @@ impl OpenCADStudio {
                 self.persist_settings_if_changed();
                 Task::none()
             }
+            Message::CheckMissingFontsChanged(enabled) => {
+                self.check_missing_fonts = enabled;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
 
             Message::TextFillChanged(filled) => {
                 crate::scene::text::sdf_atlas::set_textfill(filled);
@@ -12938,6 +12991,16 @@ impl OpenCADStudio {
                 }
                 if self.active_modal == Some(super::ModalKind::InsertAttributes) {
                     let i = self.active_tab;
+                    // ATTEDIT's Cancel leaves the values as they were.
+                    if self
+                        .insert_attr_dialog
+                        .as_ref()
+                        .is_some_and(|d| d.edit.is_some())
+                    {
+                        self.insert_attr_dialog = None;
+                        self.close_active_modal();
+                        return Task::none();
+                    }
                     if self.tabs[i]
                         .active_cmd
                         .as_ref()
@@ -13191,13 +13254,19 @@ impl OpenCADStudio {
             Message::AttrEditorInput { idx, value } => {
                 if let Some(r) = self.attr_editor_rows.get_mut(idx) {
                     r.value = value;
+                    // Retyping a picked field drops it.
+                    if r.field.take().is_some() {
+                        r.field_changed = false;
+                    }
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorTextStyle(s) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.text_style = s;
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorJustify(label) => {
@@ -13209,71 +13278,112 @@ impl OpenCADStudio {
                         r.v_align = v;
                     }
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorHeight(s) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.height = s;
                 }
+                self.attr_editor_editing =
+                    Some(crate::ui::window::attribute_editor::AttrField::Height);
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorRotation(s) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.rotation = s;
                 }
+                self.attr_editor_editing =
+                    Some(crate::ui::window::attribute_editor::AttrField::Rotation);
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorWidth(s) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.width_factor = s;
                 }
+                self.attr_editor_editing =
+                    Some(crate::ui::window::attribute_editor::AttrField::Width);
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorOblique(s) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.oblique = s;
                 }
+                self.attr_editor_editing =
+                    Some(crate::ui::window::attribute_editor::AttrField::Oblique);
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorBackwards(b) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.backwards = b;
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorUpsideDown(b) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.upside_down = b;
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorLayer(s) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.layer = s;
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorLinetype(s) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.linetype = if s == "ByLayer" { String::new() } else { s };
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorColor(label) => {
+                if label == crate::ui::window::attribute_editor::SELECT_COLOR {
+                    let current = self
+                        .attr_editor_rows
+                        .get(self.attr_editor_selected)
+                        .map(|r| r.color)
+                        .unwrap_or(document::types::Color::ByLayer);
+                    return self.update(Message::OpenColorWindow(
+                        crate::app::ColorPickTarget::AttrEditor,
+                        current,
+                    ));
+                }
                 if let Some(c) = crate::ui::window::attribute_editor::color_from_label(&label) {
                     if let Some(r) = self.attr_row_selected_mut() {
                         r.color = c;
                     }
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
             Message::AttrEditorLineweight(lw) => {
                 if let Some(r) = self.attr_row_selected_mut() {
                     r.line_weight = lw;
                 }
+                self.attr_editor_preview();
                 Task::none()
             }
-            Message::AttrEditorApply => self.on_attr_editor_apply(),
+            Message::AttrEditorApply
+            | Message::AttrEditorOk
+            | Message::AttrEditorCancel
+            | Message::AttrEditorHelp
+            | Message::AttrEditorSelectBlock
+            | Message::AttrEditorAnswer(_)
+            | Message::AttrEditorDismissError
+            | Message::AttrEditorEditValue
+            | Message::AttrEditorInsertField
+            | Message::AttrEditorBoundary(_)
+            | Message::AttrEditorAnnotative(_)
+            | Message::AttrEditorColorValue(_) => self.on_attr_editor_msg(msg),
             Message::ToolWindow(kind, inner) => {
                 // Working in a dialog gives it the keyboard; its own layout
                 // pass measuring it does not.
@@ -14082,7 +14192,8 @@ impl OpenCADStudio {
             Message::ExitViewport => {
                 let i = self.active_tab;
                 let context_changed = self.tabs[i].scene.active_viewport.is_some();
-                let cancel_task = if context_changed {
+                let keep_command = std::mem::take(&mut self.viewport_switch_keeps_command);
+                let cancel_task = if context_changed && !keep_command {
                     self.cancel_active_command_for_space_change()
                 } else {
                     Task::none()
@@ -14910,10 +15021,27 @@ impl OpenCADStudio {
             }
             Message::LinetypeLoaded(None) => Task::none(),
             Message::PlotStyleLoad => {
-                Task::perform(crate::io::pick_plot_style(), Message::PlotStyleLoaded)
+                let tab = &self.tabs[self.active_tab];
+                let id = tab.id;
+                let layout = tab.scene.current_layout.clone();
+                Task::perform(crate::io::pick_plot_style(), move |result| {
+                    Message::PlotStyleLoaded(id, layout.clone(), result)
+                })
             }
-            Message::PlotStyleLoaded(Ok(Some(table))) => {
+            Message::PlotStyleLoaded(id, layout, Ok(Some(picked))) => {
+                let Some(i) = self.tabs.iter().position(|tab| tab.id == id) else {
+                    return Task::none();
+                };
+                if let Err(error) = self.bind_picked_plot_style(i, &layout, &picked) {
+                    self.command_line.push_error(&error);
+                    return Task::none();
+                }
+                if i != self.active_tab || self.tabs[i].scene.current_layout != layout {
+                    return Task::none();
+                }
+                let table = picked.table;
                 self.plot_dialog.style_name = table.name.clone();
+                self.plot_dialog.apply_plot_styles = true;
                 self.plot_dialog.style_missing = false;
                 self.plot_dialog.style_error = None;
                 self.report_plot_style_warnings(&table);
@@ -14936,13 +15064,15 @@ impl OpenCADStudio {
                 self.plot_dialog.plot_styles = crate::io::plot_style::available_table_names();
                 Task::none()
             }
-            Message::PlotStyleLoaded(Ok(None)) => Task::none(),
-            Message::PlotStyleLoaded(Err(error)) => {
+            Message::PlotStyleLoaded(_, _, Ok(None)) => Task::none(),
+            Message::PlotStyleLoaded(id, layout, Err(error)) => {
                 // The file the user pointed at could not be read: say why,
                 // in the dialog as well as on the command line.
                 self.command_line.push_error(&error);
-                self.plot_dialog.style_missing = true;
-                self.plot_dialog.style_error = Some(error);
+                let tab = &self.tabs[self.active_tab];
+                if tab.id == id && tab.scene.current_layout == layout {
+                    self.plot_dialog.style_error = Some(error);
+                }
                 Task::none()
             }
             Message::PlotStyleClear => {

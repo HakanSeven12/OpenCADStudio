@@ -61,7 +61,12 @@ mod inquiry;
 mod layerprops;
 mod layers;
 mod model_import;
+#[doc(hidden)]
+#[cfg(any(test, not(target_arch = "wasm32")))]
+pub use model_import::ModelImportBenchHarness;
 mod ole;
+mod mtext_toolbar;
+pub(crate) use mtext_toolbar::{mtext_toolbar, set_mtext_toolbar};
 pub(crate) use ole::{ole_quality, set_ole_quality};
 mod pc_colormap;
 mod pc_extract;
@@ -75,6 +80,10 @@ mod point_cloud;
 mod refedit;
 pub(crate) mod sheet_set;
 mod spell;
+pub(crate) use spell::{
+    custom_words, dictionary_languages, misspelled, read_word_file, spelling_suggestions,
+    write_word_file,
+};
 mod styleprops;
 pub(in crate::app) mod table_cells;
 mod table_style_var;
@@ -158,6 +167,10 @@ impl OpenCADStudio {
     }
 
     pub(super) fn dispatch_command(&mut self, cmd: &str) -> Task<Message> {
+        // A Text Editor tool works on the open editor, which stays open.
+        if let Some(task) = self.dispatch_text_editor_tool(cmd) {
+            return task;
+        }
         self.remember_selection_before_command(cmd);
         let task = self.dispatch_command_inner(cmd, false);
         self.ask_annotation_scale_if_first();
@@ -189,6 +202,9 @@ impl OpenCADStudio {
     /// part answers the running command's prompt, or starts a command when
     /// none runs (`PDFIMPORT;FILE`).
     pub(super) fn dispatch_ribbon_command(&mut self, cmd: &str) -> Task<Message> {
+        if let Some(task) = self.dispatch_text_editor_tool(cmd) {
+            return task;
+        }
         if self.mtext_editor.is_some() {
             self.mtext_cancel();
         }
@@ -824,6 +840,9 @@ impl OpenCADStudio {
         if let Some(t) = self.dispatch_ole(cmd, i) {
             return Some(t);
         }
+        if let Some(t) = self.dispatch_mtext_toolbar(cmd) {
+            return Some(t);
+        }
         if let Some(t) = self.dispatch_sheet_set(cmd, i) {
             return Some(t);
         }
@@ -1377,6 +1396,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "CLIPROMPTLINES",
         "COMMANDLINEFADETIME",
         "COMMANDLINEOPACITY",
+        "NAVVCUBEOPACITY",
         "MENUBAR",
         "RIBBON",
         "RIBBONCLOSE",
@@ -1470,6 +1490,10 @@ inventory::submit!(crate::command::CommandRegistration {
         "EXPORT",
         "EXPORTSTEP",
         "EXPORTSTL",
+        "PNGOUT",
+        "JPGOUT",
+        "BMPOUT",
+        "TIFOUT",
         "EXTERNALREFERENCES",
         "EXTERNALREFERENCESCLOSE",
         "ERSTATE",
@@ -1511,6 +1535,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "MS",
         "MSPACE",
         "CHSPACE",
+        "ALIGNSPACE",
         "NAVVCUBE",
         "NEW",
         "QNEW",

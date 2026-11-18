@@ -10,7 +10,7 @@ use std::io::Read;
 use super::model::{
     arc_cubics, bspline_points, dgn_color_table, paths_bounds, scaled_elements, By, DgnCollector,
     DgnColor, DgnDimLook, DgnDimStyle, DgnElement, DgnGeom, DgnImport, DgnReference, Path,
-    PathBuilder, Segment, Sheet, SubPath, Text, DGN_DEFAULT_COLORS,
+    PathBuilder, Segment, Sheet, SubPath, Text, DGN_DEFAULT_COLORS, DGN_PLACEMENT_BUDGET,
 };
 
 // ── Compound file ───────────────────────────────────────────────────────────
@@ -482,6 +482,39 @@ fn marked_string(e: &[u8], from: usize) -> Option<String> {
         .map(|n| i + n)
         .unwrap_or(e.len());
     Some(String::from_utf8_lossy(&e[i..end]).to_string())
+}
+
+/// The text of an element's first string linkage (id 0x56d2). Linkages
+/// start at the attribute offset (words, at byte 8), each opening with its
+/// size in words less one, the id and, for a string, its number and byte
+/// length. The string is UTF-16LE after an "ff fd" marker, otherwise single
+/// bytes (#3093).
+fn string_linkage(e: &[u8]) -> Option<String> {
+    let mut at = u32_at(e, 8)? as usize * 2;
+    while at + 12 <= e.len() {
+        let size = (usize::from(e[at]) + 1) * 2;
+        if e[at + 2..at + 4] == [0xd2, 0x56] {
+            let len = u32_at(e, at + 8)? as usize;
+            let data = e.get(at + 12..(at + 12).saturating_add(len).min(e.len()))?;
+            return Some(match data {
+                [0xff, 0xfd, rest @ ..] => {
+                    let units: Vec<u16> = rest
+                        .chunks_exact(2)
+                        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                        .take_while(|&u| u != 0)
+                        .collect();
+                    String::from_utf16_lossy(&units)
+                }
+                _ => data
+                    .iter()
+                    .take_while(|&&b| b != 0)
+                    .map(|&b| char::from(b))
+                    .collect(),
+            });
+        }
+        at += size;
+    }
+    None
 }
 
 struct Styles {
@@ -1412,7 +1445,8 @@ fn apply(m: &Affine, p: [f64; 2]) -> [f64; 2] {
 }
 
 /// Places plan geometry through the sheet mapping `m`, and the shared cells
-/// it instances (each definition read through its own placement).
+/// it instances (each definition read through its own placement); the
+/// instances spend `budget` (see [`DGN_PLACEMENT_BUDGET`]).
 fn place(
     raw: &Raw,
     m: &Affine,
@@ -1420,6 +1454,7 @@ fn place(
     styles: &Styles,
     depth: usize,
     out: &mut Sheet,
+    budget: &mut usize,
 ) {
     let map = |p: [f64; 2]| apply(m, p);
     for path in &raw.paths {
@@ -1462,6 +1497,11 @@ fn place(
         let Some(def) = defs.get(&inst.name) else {
             continue;
         };
+        // Each instance reads its definition's elements again.
+        let Some(left) = budget.checked_sub(1 + def.len()) else {
+            return;
+        };
+        *budget = left;
         place(
             &read_run(def, styles, &inst.xf),
             m,
@@ -1469,6 +1509,7 @@ fn place(
             styles,
             depth + 1,
             out,
+            budget,
         );
     }
 }
@@ -1601,7 +1642,9 @@ fn level_table_raw(nm: &[&[u8]]) -> Vec<(u32, String, u32)> {
                 let (Some(id), Some(color)) = (u32_at(e, 32), u32_at(e, 72)) else {
                     continue;
                 };
-                let name = marked_string(e, 32).unwrap_or_default();
+                let name = marked_string(e, 32)
+                    .or_else(|| string_linkage(e))
+                    .unwrap_or_default();
                 out.push((id, name, color));
             }
             _ => {}
@@ -1610,12 +1653,25 @@ fn level_table_raw(nm: &[&[u8]]) -> Vec<(u32, String, u32)> {
     out
 }
 
-fn non_model(cfb: &Cfb) -> Vec<u8> {
-    cfb.streams()
+/// The non-model element streams `Dgn^Nm/$1`, `$2`, … in number order. A
+/// file can keep its tables in a later stream, the level table in `$23`
+/// with `$1` holding others (#3093).
+fn non_model(cfb: &Cfb) -> Vec<Vec<u8>> {
+    let streams = cfb.streams();
+    let mut found: Vec<(u32, &Entry)> = streams
         .iter()
-        .find(|(p, _)| p == "Dgn^Nm/$1")
-        .map(|(_, e)| inflate(&cfb.stream(e)))
-        .unwrap_or_default()
+        .filter_map(|(p, e)| Some((p.strip_prefix("Dgn^Nm/$")?.parse().ok()?, *e)))
+        .collect();
+    found.sort_by_key(|(n, _)| *n);
+    found
+        .into_iter()
+        .map(|(_, e)| element_stream(&cfb.stream(e)))
+        .collect()
+}
+
+/// The elements of every non-model stream, in stream order.
+fn non_model_elements(streams: &[Vec<u8>]) -> Vec<&[u8]> {
+    streams.iter().flat_map(|s| elements(s)).collect()
 }
 
 /// Level names of the file, for the underlay layers list.
@@ -1623,7 +1679,7 @@ pub fn layer_names(bytes: &[u8]) -> Option<Vec<String>> {
     let cfb = Cfb::open(bytes)?;
     let nm = non_model(&cfb);
     Some(
-        level_table(&elements(&nm))
+        level_table(&non_model_elements(&nm))
             .into_iter()
             .map(|l| l.1)
             .filter(|n| !n.is_empty())
@@ -1639,7 +1695,7 @@ pub fn model(bytes: &[u8], name: &str, hidden: &[String]) -> Option<Sheet> {
         .find(|m| m.0.eq_ignore_ascii_case(name))
         .or_else(|| all.first())?;
     let non_model = non_model(&cfb);
-    let nm = elements(&non_model);
+    let nm = non_model_elements(&non_model);
     // Colours 0-254 from byte 37, the background (255) opening the table.
     let color_table = nm
         .iter()
@@ -1696,7 +1752,8 @@ pub fn model(bytes: &[u8], name: &str, hidden: &[String]) -> Option<Sheet> {
         table_colors,
         ..Default::default()
     };
-    place(&raw, &m, &defs, &styles, 0, &mut sheet);
+    let mut budget = DGN_PLACEMENT_BUDGET;
+    place(&raw, &m, &defs, &styles, 0, &mut sheet, &mut budget);
     // The model's extent is its elements' stored ranges (text by its full
     // box), as the reference sizes a model.
     sheet.rect = match stored_range(&graphics) {
@@ -1875,7 +1932,7 @@ pub fn import(bytes: &[u8], name: &str) -> Option<DgnImport> {
         .or_else(|| designs.first().copied())?;
     let (_, graphics, header) = &all[k];
     let non_model = non_model(&cfb);
-    let nm = elements(&non_model);
+    let nm = non_model_elements(&non_model);
     let colors = nm
         .iter()
         .find(|e| kind(e) == 5)
@@ -2270,4 +2327,91 @@ mod mesh_tests {
         assert!(super::element_stream(&[]).is_empty());
     }
 
+}
+
+#[cfg(test)]
+mod cell_tests {
+    use super::*;
+
+    /// An element of `kind` and `len` bytes, a component when `part`.
+    fn element(kind: u8, len: usize, part: bool) -> Vec<u8> {
+        let mut e = vec![0u8; len];
+        e[0] = kind;
+        e[2..4].copy_from_slice(&(if part { 0x4000u16 } else { 0 }).to_le_bytes());
+        e[4..8].copy_from_slice(&(((len - 4) / 2) as u32).to_le_bytes());
+        e
+    }
+
+    fn put_f64(e: &mut [u8], at: usize, v: f64) {
+        e[at..at + 8].copy_from_slice(&v.to_le_bytes());
+    }
+
+    /// A 2D line component from 0,0 to 10,10.
+    fn line() -> Vec<u8> {
+        let mut e = element(3, 136, true);
+        put_f64(&mut e, 120, 10.0);
+        put_f64(&mut e, 128, 10.0);
+        e
+    }
+
+    /// An instance of the shared cell `name`, unscaled, `dx` along x.
+    fn instance(part: bool, name: &str, dx: f64) -> Vec<u8> {
+        let mut e = element(35, 264, part);
+        for k in [0, 4, 8] {
+            put_f64(&mut e, 160 + k * 8, 1.0);
+        }
+        put_f64(&mut e, 232, dx);
+        e[248..252].copy_from_slice(&[0xff, 0xfe, 0x01, 0x00]);
+        e[252..252 + name.len()].copy_from_slice(name.as_bytes());
+        e
+    }
+
+    /// The paths placing one instance of the shared cell `A` gives, when `A`
+    /// holds a line (when `line`) and `n` instances of `A` itself.
+    fn self_placing(n: usize, line_too: bool) -> usize {
+        let parts: Vec<Vec<u8>> = line_too
+            .then(line)
+            .into_iter()
+            .chain((0..n).map(|k| instance(true, "A", k as f64 * 20.0)))
+            .collect();
+        let defs = HashMap::from([(
+            "A".to_string(),
+            parts.iter().map(Vec::as_slice).collect::<Vec<_>>(),
+        )]);
+        let styles = Styles {
+            colors: DGN_DEFAULT_COLORS.to_vec(),
+            levels: HashMap::new(),
+            hidden: Default::default(),
+            extended: Vec::new(),
+            cells: HashMap::new(),
+        };
+        let top = instance(false, "A", 0.0);
+        let raw = read_run(&[&top], &styles, &IDENTITY);
+        let (mut sheet, mut budget) = (Sheet::default(), DGN_PLACEMENT_BUDGET);
+        let identity = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        place(&raw, &identity, &defs, &styles, 0, &mut sheet, &mut budget);
+        sheet.paths.len()
+    }
+
+    /// `f`'s result, run on its own thread, so that a placement that never
+    /// ends fails the test instead of stopping the run.
+    fn within_ten_seconds<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || tx.send(f()));
+        rx.recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the placement did not end")
+    }
+
+    #[test]
+    fn a_cell_that_places_itself_stops_when_the_budget_is_spent() {
+        let paths = |n: usize, line: bool| within_ten_seconds(move || self_placing(n, line));
+        // One copy of the line at each of the eight levels nesting reads.
+        assert_eq!(paths(1, true), 8);
+        assert_eq!(paths(2, true), 255);
+        // 11,111,111 copies before; each instance costs 12 (itself and the
+        // eleven elements of the definition it reads again).
+        assert_eq!(paths(10, true), DGN_PLACEMENT_BUDGET / 12);
+        // A cell that draws nothing still spends: 100⁷ placements before.
+        assert_eq!(paths(100, false), 0);
+    }
 }

@@ -57,6 +57,7 @@ pub fn tessellate_sat(
     let mut normals: Vec<[f32; 3]> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
     let mut edges: Vec<[f64; 3]> = Vec::new();
+    let mut edge_colors: Vec<Option<[f32; 4]>> = Vec::new();
     let mut triangle_materials = Vec::new();
     let mut triangle_colors = Vec::new();
     let mut curved_gens = Vec::new();
@@ -155,8 +156,14 @@ pub fn tessellate_sat(
             ]
         }));
         for edge in tessellation.edges {
+            let own = body
+                .edges
+                .get(edge.edge)
+                .and_then(|node| node.provenance.source())
+                .and_then(|source| face_colors.get(&(source.index() as i32)).copied());
             for segment in edge.positions.windows(2) {
                 edges.extend_from_slice(segment);
+                edge_colors.extend([own, own]);
             }
         }
         for isoline in tessellation.isolines {
@@ -189,6 +196,9 @@ pub fn tessellate_sat(
         }
     }
     set.curved_gens = curved_gens;
+    if edge_colors.iter().any(Option::is_some) {
+        set.edge_vert_colors = edge_colors;
+    }
     for point in edges {
         let high = [point[0] as f32, point[1] as f32, point[2] as f32];
         set.edge_verts.push(high);
@@ -199,6 +209,7 @@ pub fn tessellate_sat(
         ]);
     }
     set.complete = loss.is_empty() && undrawn == 0;
+    set.build_display_lods();
     Some(set)
 }
 

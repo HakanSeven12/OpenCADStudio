@@ -23,7 +23,7 @@ pub(crate) static TRI_DOWN: &[u8] = include_bytes!("../../assets/icons/ui/tri_do
 pub(crate) static TRI_UP: &[u8] = include_bytes!("../../assets/icons/ui/tri_up.svg");
 pub(crate) static TRI_RIGHT: &[u8] = include_bytes!("../../assets/icons/ui/tri_right.svg");
 static TRI_LEFT: &[u8] = include_bytes!("../../assets/icons/ui/tri_left.svg");
-static HOME: &[u8] = include_bytes!("../../assets/icons/ui/home.svg");
+pub(crate) static HOME: &[u8] = include_bytes!("../../assets/icons/ui/home.svg");
 pub static UNDO: &[u8] = include_bytes!("../../assets/icons/ui/undo.svg");
 static REDO: &[u8] = include_bytes!("../../assets/icons/ui/redo.svg");
 

@@ -639,8 +639,6 @@ pub fn frame_wire(
     WireModel {
         bg_adapt: None,
         point_marker: None,
-        taper_widths: Vec::new(),
-        pattern_stations: Vec::new(),
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
@@ -650,27 +648,31 @@ pub fn frame_wire(
         fill_is_2d_solid: false,
         solid_normal: None,
         render_instance: None,
-        pick_tris: Vec::new(),
-        pick_tris_low: Vec::new(),
         dash_from_start: false,
-        text_verts: Vec::new(),
         name,
-        points: hi,
-        points_low: lo,
         color,
         selected,
         aci: 0,
         pattern_length: 0.0,
         pattern: [0.0; 8],
         line_weight_px,
-        snap_pts: vec![],
-        tangent_geoms: vec![],
-        key_vertices: vec![],
         aabb: WireModel::UNBOUNDED_AABB,
         plinegen: true,
-        fill_tris: vec![],
-        fill_tris_low: Vec::new(),
-
+        geom: std::sync::Arc::new(crate::scene::WireGeom {
+            taper_widths: Vec::new(),
+            pattern_stations: Vec::new(),
+            pick_tris: Vec::new(),
+            pick_tris_low: Vec::new(),
+            text_verts: Vec::new(),
+            points: hi,
+            points_low: lo,
+            snap_pts: vec![],
+            tangent_geoms: vec![],
+            key_vertices: vec![],
+            fill_tris: vec![],
+            fill_tris_low: Vec::new(),
+            ..crate::scene::WireGeom::default()
+        }),
         ..Default::default()
     }
 }
@@ -968,7 +970,7 @@ fn clip_segment_params(p0: [f32; 3], p1: [f32; 3], poly: &[[f32; 2]]) -> Vec<(f3
         }
         j = i;
     }
-    ts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    ts.sort_by(|a, b| a.total_cmp(b));
     ts.dedup_by(|a, b| (*a - *b).abs() < 1e-7);
 
     let point = |t: f32| {
@@ -1199,8 +1201,11 @@ mod tests {
 
         // A polyline half inside, half outside the 0..10 square.
         let mut wires = vec![WireModel {
-            text_verts: Vec::new(),
-            points: vec![[5.0, 5.0, 0.0], [15.0, 5.0, 0.0]],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                text_verts: Vec::new(),
+                points: vec![[5.0, 5.0, 0.0], [15.0, 5.0, 0.0]],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         }];
         clip_wires(&mut wires, &poly);

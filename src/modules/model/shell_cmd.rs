@@ -5,8 +5,6 @@ use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, ShellFaceActio
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShellStep {
-    SolidEditOption,
-    BodyOption,
     SelectSolid,
     RemoveFaces,
     AddFaces,
@@ -14,7 +12,6 @@ enum ShellStep {
 }
 
 pub struct ShellCommand {
-    entry_name: &'static str,
     step: ShellStep,
     target: Option<Handle>,
     actions: Vec<ShellFaceAction>,
@@ -24,22 +21,11 @@ pub struct ShellCommand {
 impl ShellCommand {
     pub fn direct(target: Option<Handle>) -> Self {
         Self {
-            entry_name: "SHELL",
             step: if target.is_some() {
                 ShellStep::RemoveFaces
             } else {
                 ShellStep::SelectSolid
             },
-            target,
-            actions: Vec::new(),
-            default_distance: 1.0,
-        }
-    }
-
-    pub fn solid_edit(target: Option<Handle>) -> Self {
-        Self {
-            entry_name: "SOLIDEDIT",
-            step: ShellStep::SolidEditOption,
             target,
             actions: Vec::new(),
             default_distance: 1.0,
@@ -81,17 +67,11 @@ impl ShellCommand {
 
 impl CadCommand for ShellCommand {
     fn name(&self) -> &'static str {
-        self.entry_name
+        "SHELL"
     }
 
     fn prompt(&self) -> String {
         match self.step {
-            ShellStep::SolidEditOption => {
-                crate::t!("Enter a solid editing option [Body/eXit]:").into_owned()
-            }
-            ShellStep::BodyOption => {
-                crate::t!("Enter a body editing option [Shell/eXit]:").into_owned()
-            }
             ShellStep::SelectSolid => crate::t!("Select a 3D solid:").into_owned(),
             ShellStep::RemoveFaces => {
                 crate::t!("Select faces to remove [Undo/Add/ALL] <done>:").into_owned()
@@ -109,14 +89,6 @@ impl CadCommand for ShellCommand {
 
     fn options(&self) -> Vec<CmdOption> {
         match self.step {
-            ShellStep::SolidEditOption => vec![
-                CmdOption::new("Body", "BODY"),
-                CmdOption::new("eXit", "EXIT"),
-            ],
-            ShellStep::BodyOption => vec![
-                CmdOption::new("Shell", "SHELL"),
-                CmdOption::new("eXit", "EXIT"),
-            ],
             ShellStep::RemoveFaces => Self::face_options(false),
             ShellStep::AddFaces => Self::face_options(true),
             _ => Vec::new(),
@@ -170,26 +142,6 @@ impl CadCommand for ShellCommand {
         let value = text.trim();
         let keyword = value.to_ascii_uppercase();
         let result = match self.step {
-            ShellStep::SolidEditOption => match keyword.as_str() {
-                "B" | "BODY" => {
-                    self.step = ShellStep::BodyOption;
-                    CmdResult::NeedPoint
-                }
-                "X" | "EXIT" => CmdResult::Cancel,
-                _ => return Some(CmdResult::NeedPoint),
-            },
-            ShellStep::BodyOption => match keyword.as_str() {
-                "S" | "SHELL" => {
-                    self.step = if self.target.is_some() {
-                        ShellStep::RemoveFaces
-                    } else {
-                        ShellStep::SelectSolid
-                    };
-                    CmdResult::NeedPoint
-                }
-                "X" | "EXIT" => CmdResult::Cancel,
-                _ => return Some(CmdResult::NeedPoint),
-            },
             ShellStep::RemoveFaces => match keyword.as_str() {
                 "U" | "UNDO" => return Some(self.undo_face_action()),
                 "A" | "ADD" => {
@@ -259,7 +211,7 @@ impl CadCommand for ShellCommand {
 }
 
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["SHELL", "SOLIDEDIT"]
+    names: &["SHELL"]
 });
 
 #[cfg(test)]

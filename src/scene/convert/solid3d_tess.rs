@@ -167,8 +167,13 @@ pub fn kernel_surface_body(surface: &Surface) -> Option<KernelBody> {
     kernel_acis_body(&surface.acis_data)
 }
 
+/// An object's ACIS data as a document, from its text or its binary form.
+pub(crate) fn acis_document(acis: &document::entities::AcisData) -> Option<SatDocument> {
+    parse_acis(|| acis.parse(), acis.is_binary, &acis.sab_data)
+}
+
 pub(crate) fn kernel_acis_body(acis: &document::entities::AcisData) -> Option<KernelBody> {
-    let sat = parse_acis(|| acis.parse(), acis.is_binary, &acis.sab_data)?;
+    let sat = acis_document(acis)?;
     let (mut bodies, loss) = ocs_acis::lift(&sat);
     if !loss.is_empty() || bodies.len() != 1 {
         return None;

@@ -1319,7 +1319,7 @@ impl ViewCubePipeline {
             device,
             queue,
             "vc.composite_uniform",
-            &[1.0f32, 1.0, 0.0, 0.0],
+            &[1.0f32, 1.0, 1.0, 0.0],
             wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         );
         let composite_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -1421,6 +1421,7 @@ impl ViewCubePipeline {
         cam_rotation: Mat4,
         compass_rotation: Mat4,
         hover: Option<usize>,
+        opacity: f32,
         text_color: [f32; 4],
     ) {
         let render_size = VIEWCUBE_RENDER_PX.ceil() as u32;
@@ -1454,7 +1455,7 @@ impl ViewCubePipeline {
             bytemuck::cast_slice(&[
                 self.depth_texture_size.width as f32 / alloc_w,
                 self.depth_texture_size.height as f32 / alloc_h,
-                0.0,
+                opacity.clamp(0.0, 1.0),
                 0.0,
             ]),
         );
@@ -1791,6 +1792,18 @@ pub fn hit_test(
 }
 
 /// Returns the hovered region id (0-25), or None.
+/// The cube's opacity with the cursor at (`mx`, `my`) in a viewport `vp_w`
+/// wide: opaque over the navigation corner, else NAVVCUBEOPACITY percent.
+pub fn viewcube_opacity(mx: f32, my: f32, vp_w: f32, inactive_percent: u8) -> f32 {
+    let over = (vp_w - VIEWCUBE_RENDER_PX..=vp_w).contains(&mx)
+        && (0.0..=VIEWCUBE_RENDER_PX).contains(&my);
+    if over {
+        1.0
+    } else {
+        f32::from(inactive_percent.min(100)) / 100.0
+    }
+}
+
 pub fn hover_id(
     mx: f32,
     my: f32,

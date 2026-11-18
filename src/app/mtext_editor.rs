@@ -25,6 +25,15 @@ mod raw_edit;
 mod raw_field;
 mod raw_geometry;
 mod raw_list;
+pub(crate) mod context_menu;
+mod raw_paragraph_codes;
+pub(crate) mod prefs;
+mod raw_tools;
+mod import_text;
+mod tool_dialogs;
+pub(in crate::app) use raw_tools::ClearMode;
+mod ribbon;
+mod dialogs;
 mod raw_operations;
 mod raw_span;
 mod raw_stack;
@@ -53,10 +62,14 @@ pub enum MTextFmt {
 /// Paragraph alignment written as `\pxq<l|c|r|j>;`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParaAlign {
+    /// Back to the attachment's alignment (`\pq*;`).
+    Default,
     Left,
     Center,
     Right,
     Justify,
+    /// Letters spread over the whole line, the last one too (`\pqd;`).
+    Distribute,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -263,6 +276,28 @@ pub struct MTextEditorState {
     pub original: Option<MText>,
     /// Tab owning the existing MTEXT hidden while its draft is displayed.
     pub(super) hidden_source_tab: Option<u64>,
+    /// The ruler above the text shows (Text Editor > Options > Ruler).
+    pub ruler: bool,
+    /// Letters typed come in upper case (Text Editor > Tools > All CAPS).
+    pub auto_caps: bool,
+    /// Match is on: the formatting each pointer selection takes.
+    pub matching: Option<SpanProperties>,
+    /// The visible ranges of the misspelled words, and the text and
+    /// dictionary they were found for.
+    pub spell_marks: Vec<(usize, usize)>,
+    pub(super) spell_key: String,
+    /// Words Ignore All took off the marks while this text is edited.
+    pub(super) spell_ignored: Vec<String>,
+    /// The misspelled word the right-click menu was opened on.
+    pub(super) spell_word: Option<(usize, usize)>,
+    /// The tag AutoStack or an automatic list left, and whether its menu
+    /// is open.
+    pub smart_tag: Option<context_menu::SmartTag>,
+    pub smart_tag_open: bool,
+    /// The list tag's Remove ran: its Redo puts the list back.
+    pub(super) list_tag_removed: bool,
+    /// The right-click menu while it is open.
+    pub context_menu: Option<context_menu::EditorContextMenu>,
 }
 
 impl MTextEditorState {
@@ -338,6 +373,17 @@ impl MTextEditorState {
             toolbar_offset: iced::Vector::ZERO,
             toolbar_drag_last: None,
             toolbar_dragging: false,
+            ruler: true,
+            auto_caps: false,
+            matching: None,
+            spell_marks: Vec::new(),
+            spell_key: String::new(),
+            spell_ignored: Vec::new(),
+            spell_word: None,
+            smart_tag: None,
+            smart_tag_open: false,
+            list_tag_removed: false,
+            context_menu: None,
             original: None,
             hidden_source_tab: None,
         }
@@ -378,7 +424,7 @@ impl MTextEditorState {
         let unit = if heights.is_empty() {
             self.height_value() as f32
         } else {
-            heights.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            heights.sort_by(|a, b| a.total_cmp(b));
             let (mut best_height, mut best_count, mut index) = (heights[0], 0usize, 0usize);
             while index < heights.len() {
                 let mut end = index;
@@ -495,6 +541,7 @@ fn flatten_stack(st: &StackingData) -> String {
         StackingType::Limit => '^',
         StackingType::Diagonal => '#',
         StackingType::Horizontal => '/',
+        StackingType::Decimal => '~',
     };
     let mut flat = st.numerator.clone();
     if !st.denominator.is_empty() {
@@ -1102,11 +1149,33 @@ impl super::OpenCADStudio {
     /// Insert text (or replace the current selection) at the preview caret,
     /// patching the raw source in place (a line break goes in as `\P`).
     pub(super) fn mtext_type(&mut self, s: &str) {
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            // A list tag stays while its item is typed on (measured); a
+            // paragraph break or a stack's next character takes a tag away.
+            if s == "\n" || !matches!(ed.smart_tag, Some(context_menu::SmartTag::List(_))) {
+                ed.smart_tag = None;
+            }
+            ed.smart_tag_open = false;
+            ed.list_tag_removed = false;
+        }
         // Enter in a list item continues the list or leaves it.
         if s == "\n" && self.mtext_list_enter() {
             return;
         }
-        self.raw_type(s, true);
+        // A tab after a marker that opens a paragraph makes a list item.
+        if s == "\t" && self.mtext_list_auto() {
+            return;
+        }
+        // All CAPS: letters typed come in upper case.
+        if self.mtext_editor.as_ref().is_some_and(|ed| ed.auto_caps) {
+            self.raw_type(&s.to_uppercase(), true);
+        } else {
+            self.raw_type(s, true);
+        }
+        // AutoStack: a space after `1/2` stacks it.
+        if s == " " {
+            self.mtext_autostack();
+        }
     }
 
     /// Delete the selection, or the visible character before the caret.

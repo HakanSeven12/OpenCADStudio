@@ -7,6 +7,7 @@ use crate::io::tds_import::TdsStep;
 use std::collections::HashMap;
 
 use crate::io::model_import::{self, ModelFormat};
+use crate::io::picture_import::{self, PictureFormat, PictureRead};
 
 impl OpenCADStudio {
     /// ACISIN and WMFIN; `None` defers to the other families.
@@ -118,32 +119,78 @@ impl OpenCADStudio {
         }
     }
 
-    /// Reads a model file into drawing `i`.
+    /// Reads a model file into drawing `i`: the file is read and parsed off
+    /// the UI thread (inline where the platform has no threads), and the
+    /// objects are placed when the result arrives
+    /// ([`Self::finish_model_import`]).
     pub(in crate::app) fn import_model(
         &mut self,
         i: usize,
         path: &str,
         format: ModelFormat,
     ) -> Task<Message> {
-        let Some(bytes) = crate::scene::model::pdf_raster::source_bytes(path) else {
-            self.command_line
-                .push_error(&format!("File {path} does not exist."));
-            return Task::none();
-        };
-        let translated = format != ModelFormat::Sat;
+        let tab_id = self.tabs[i].id;
+        let generation = self.tabs[i].document_generation;
         let drawing_mm = crate::app::properties::insunits_to_mm(
             self.tabs[i].scene.document.header.insertion_units,
         );
-        let stem = std::path::Path::new(&path.replace('\\', "/"))
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let Some(imported) = model_import::read(format, &bytes, drawing_mm, &stem) else {
-            self.command_line.push_error(&format!(
-                "Import failed: {path} has no model the importer reads."
-            ));
+        let path = path.to_string();
+        let worker_path = path.clone();
+        self.command_line.push_info(&format!("Reading {path}…"));
+        crate::app::update::background_task(
+            "IMPORT",
+            move || model_import::load(format, &worker_path, drawing_mm),
+            move |result| Message::ModelImportFinished(tab_id, generation, path, format, result),
+        )
+    }
+
+    /// The tab a finished import goes to: the one it was started for, while
+    /// that tab still holds the same document. If not, the command line says
+    /// why the result is dropped.
+    fn import_target(&mut self, tab_id: u64, generation: u64) -> Option<usize> {
+        let found = self
+            .tabs
+            .iter()
+            .position(|tab| tab.id == tab_id && tab.document_generation == generation);
+        if found.is_none() {
+            let message = if self.tabs.iter().any(|tab| tab.id == tab_id) {
+                "Import: the drawing it was headed for was replaced or cleared."
+            } else {
+                "Import: the drawing it was headed for was closed."
+            };
+            self.command_line.push_info(message);
+        }
+        found
+    }
+
+    /// Places a finished import on the UI thread: its blocks under names the
+    /// drawing does not use yet, then its objects, as one undo step.
+    pub(in crate::app) fn finish_model_import(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        path: &str,
+        format: ModelFormat,
+        result: Result<model_import::Imported, model_import::ImportFailure>,
+    ) -> Task<Message> {
+        let Some(i) = self.import_target(tab_id, generation) else {
             return Task::none();
         };
+        let imported = match result {
+            Ok(imported) => imported,
+            Err(model_import::ImportFailure::Missing) => {
+                self.command_line
+                    .push_error(&format!("File {path} does not exist."));
+                return Task::none();
+            }
+            Err(model_import::ImportFailure::Unreadable) => {
+                self.command_line.push_error(&format!(
+                    "Import failed: {path} has no model the importer reads."
+                ));
+                return Task::none();
+            }
+        };
+        let translated = format != ModelFormat::Sat;
         self.push_undo_snapshot(i, "IMPORT");
         let scene = &mut self.tabs[i].scene;
         // Each block goes under a name the drawing does not use yet (a
@@ -197,26 +244,150 @@ impl OpenCADStudio {
 
     /// A metafile as a new block `WMF<n>`, fitted to half the current view:
     /// placed at the view's top-left corner (IMPORT), or by the insertion
-    /// prompts (WMFIN).
+    /// prompts (WMFIN). The file is read off the UI thread.
     pub(in crate::app) fn import_wmf(
         &mut self,
         i: usize,
         path: &str,
         prompt: bool,
     ) -> Task<Message> {
-        let Some(bytes) = crate::scene::model::pdf_raster::source_bytes(path) else {
-            self.command_line
-                .push_error(&format!("File {path} does not exist."));
-            return Task::none();
-        };
+        self.read_picture(
+            i,
+            PictureFormat::Wmf,
+            PictureSource::File(path.to_string()),
+            prompt,
+        )
+    }
+
+    /// An SVG drawing as a new block `SVG<n>`, fitted to half the current
+    /// view: placed at the view's top-left corner (IMPORT), or by the
+    /// insertion prompts (SVGIN). The file is read off the UI thread.
+    pub(in crate::app) fn import_svg(
+        &mut self,
+        i: usize,
+        path: &str,
+        prompt: bool,
+    ) -> Task<Message> {
+        self.read_picture(
+            i,
+            PictureFormat::Svg,
+            PictureSource::File(path.to_string()),
+            prompt,
+        )
+    }
+
+    /// SVG markup pasted from the system clipboard, as a block placed by
+    /// the insertion prompts. The markup is read off the UI thread.
+    pub(in crate::app) fn paste_svg_text(&mut self, i: usize, text: String) -> Task<Message> {
+        self.read_picture(i, PictureFormat::Svg, PictureSource::Clipboard(text), true)
+    }
+
+    /// Reads a picture for drawing `i` on a worker (inline where the
+    /// platform has no threads). A panic in the reader becomes an error on
+    /// the command line. The result is placed when it arrives
+    /// ([`Self::finish_picture_import`]).
+    fn read_picture(
+        &mut self,
+        i: usize,
+        format: PictureFormat,
+        source: PictureSource,
+        prompt: bool,
+    ) -> Task<Message> {
+        self.read_picture_with(i, format, source, prompt, read_picture_source)
+    }
+
+    /// [`Self::read_picture`] with the reader given, so a test can give one
+    /// that panics.
+    fn read_picture_with(
+        &mut self,
+        i: usize,
+        format: PictureFormat,
+        source: PictureSource,
+        prompt: bool,
+        reader: fn(PictureFormat, PictureSource, [f64; 2]) -> PictureRead,
+    ) -> Task<Message> {
+        let tab_id = self.tabs[i].id;
+        let generation = self.tabs[i].document_generation;
         let (_, size, _) = self.tabs[i].scene.view_window();
-        let Some(mut picture) = crate::io::wmf_import::read(&bytes, [0.5 * size[0], 0.5 * size[1]])
-        else {
-            self.command_line
-                .push_error(&format!("{path} is not a valid Windows metafile."));
+        let fit = [0.5 * size[0], 0.5 * size[1]];
+        let path = match &source {
+            PictureSource::File(path) => {
+                self.command_line.push_info(&format!("Reading {path}…"));
+                Some(path.clone())
+            }
+            PictureSource::Clipboard(_) => None,
+        };
+        crate::app::update::background_task(
+            picture_command(path.is_none(), format, prompt),
+            move || reader(format, source, fit),
+            move |read| {
+                Message::PictureImportFinished(tab_id, generation, path, format, prompt, read)
+            },
+        )
+    }
+
+    /// Places a finished picture read on the UI thread, as one undo step.
+    /// When the insertion prompts must place it but a different command
+    /// started during the read, the picture is not placed: that command
+    /// stays.
+    pub(in crate::app) fn finish_picture_import(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        path: Option<&str>,
+        format: PictureFormat,
+        prompt: bool,
+        read: PictureRead,
+    ) -> Task<Message> {
+        let Some(i) = self.import_target(tab_id, generation) else {
             return Task::none();
         };
-        self.push_undo_snapshot(i, if prompt { "WMFIN" } else { "IMPORT" });
+        let command = picture_command(path.is_none(), format, prompt);
+        let (metafile, entities) = match (read, path) {
+            (PictureRead::Wmf(picture), _) => (Some(picture), Vec::new()),
+            (PictureRead::Svg(entities), _) => (None, entities),
+            (failure, path) => {
+                let message = match (failure, path) {
+                    (_, None) => crate::tr!("clipboard", "no-supported-content"),
+                    (PictureRead::Missing, Some(path)) => format!("File {path} does not exist."),
+                    (PictureRead::Empty, Some(path)) => {
+                        format!("{path} has no shapes to import.")
+                    }
+                    (_, Some(path)) => match format {
+                        PictureFormat::Wmf => format!("{path} is not a valid Windows metafile."),
+                        PictureFormat::Svg => format!("{path} is not a valid SVG file."),
+                    },
+                };
+                self.command_line.push_error(&message);
+                return Task::none();
+            }
+        };
+        if prompt && self.tabs[i].active_cmd.is_some() {
+            self.command_line.push_error(&format!(
+                "{command} cancelled: a different command started while the picture was read."
+            ));
+            return Task::none();
+        }
+        self.push_undo_snapshot(i, command);
+        let entities = match metafile {
+            Some(picture) => self.add_metafile_text_styles(i, picture),
+            None => entities,
+        };
+        let prefix = match format {
+            PictureFormat::Wmf => "WMF",
+            PictureFormat::Svg => "SVG",
+        };
+        self.place_picture_block(i, prefix, entities, prompt)
+    }
+
+    /// Gives each face a metafile's text uses a text style in drawing `i`,
+    /// and returns the metafile's objects with their texts set to those
+    /// styles.
+    fn add_metafile_text_styles(
+        &mut self,
+        i: usize,
+        mut picture: crate::io::wmf_import::Picture,
+    ) -> Vec<document::EntityType> {
         let scene = &mut self.tabs[i].scene;
         // A text style per face, `WMF-<face><n>` with `n` counting the
         // face's bold and italic variants; the style's font is the
@@ -245,56 +416,7 @@ impl OpenCADStudio {
                 text.style = styles[*font].clone();
             }
         }
-        self.place_picture_block(i, "WMF", picture.entities, prompt)
-    }
-
-    /// An SVG drawing as a new block `SVG<n>`, fitted to half the current
-    /// view: placed at the view's top-left corner (IMPORT), or by the
-    /// insertion prompts (SVGIN).
-    pub(in crate::app) fn import_svg(
-        &mut self,
-        i: usize,
-        path: &str,
-        prompt: bool,
-    ) -> Task<Message> {
-        let Some(bytes) = crate::scene::model::pdf_raster::source_bytes(path) else {
-            self.command_line
-                .push_error(&format!("File {path} does not exist."));
-            return Task::none();
-        };
-        let (_, size, _) = self.tabs[i].scene.view_window();
-        let picture = match crate::io::svg_import::read(&bytes, [0.5 * size[0], 0.5 * size[1]]) {
-            Ok(picture) => picture,
-            Err(crate::io::svg_import::Error::NotSvg) => {
-                self.command_line
-                    .push_error(&format!("{path} is not a valid SVG file."));
-                return Task::none();
-            }
-            Err(crate::io::svg_import::Error::Empty) => {
-                self.command_line
-                    .push_error(&format!("{path} has no shapes to import."));
-                return Task::none();
-            }
-        };
-        self.push_undo_snapshot(i, if prompt { "SVGIN" } else { "IMPORT" });
-        self.place_picture_block(i, "SVG", picture.entities, prompt)
-    }
-
-    /// SVG markup pasted from the system clipboard, as a block placed by
-    /// the insertion prompts.
-    pub(in crate::app) fn paste_svg_text(&mut self, i: usize, text: String) -> Task<Message> {
-        let (_, size, _) = self.tabs[i].scene.view_window();
-        match crate::io::svg_import::read(text.as_bytes(), [0.5 * size[0], 0.5 * size[1]]) {
-            Ok(picture) => {
-                self.push_undo_snapshot(i, "PASTECLIP");
-                self.place_picture_block(i, "SVG", picture.entities, true)
-            }
-            Err(_) => {
-                self.command_line
-                    .push_error(crate::tr!("clipboard", "no-supported-content").as_ref());
-                Task::none()
-            }
-        }
+        picture.entities
     }
 
     /// Defines `entities` as a new block `<prefix><n>` and puts it in the
@@ -344,6 +466,34 @@ impl OpenCADStudio {
             self.refresh_properties();
         }
         Task::none()
+    }
+}
+
+/// Where the bytes of a picture import come from.
+enum PictureSource {
+    /// A file, by path.
+    File(String),
+    /// SVG markup pasted from the system clipboard.
+    Clipboard(String),
+}
+
+/// The reader of a picture import: the file, or the pasted markup, read
+/// as `format` and fitted to `fit`.
+fn read_picture_source(format: PictureFormat, source: PictureSource, fit: [f64; 2]) -> PictureRead {
+    match source {
+        PictureSource::File(path) => picture_import::load(format, &path, fit),
+        PictureSource::Clipboard(text) => picture_import::read(format, text.as_bytes(), fit),
+    }
+}
+
+/// The command a picture import runs for: it names the undo step and a
+/// failed read.
+fn picture_command(pasted: bool, format: PictureFormat, prompt: bool) -> &'static str {
+    match (pasted, format, prompt) {
+        (true, _, _) => "PASTECLIP",
+        (false, PictureFormat::Wmf, true) => "WMFIN",
+        (false, PictureFormat::Svg, true) => "SVGIN",
+        (false, _, false) => "IMPORT",
     }
 }
 
@@ -1003,6 +1153,719 @@ impl OpenCADStudio {
     }
 }
 
+/// Bench bridge for the UI-thread cost of a model import
+/// (`benches/model_import.rs`). Holds a hermetic app and imports a file into
+/// a fresh drawing, reporting what the UI thread runs of the import.
+#[doc(hidden)]
+#[cfg(any(test, not(target_arch = "wasm32")))]
+pub struct ModelImportBenchHarness {
+    app: OpenCADStudio,
+}
+
+#[cfg(any(test, not(target_arch = "wasm32")))]
+impl ModelImportBenchHarness {
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new();
+        app.apply_config(crate::app::config::AppConfig::default());
+        app.last_saved_config = Some(app.current_config());
+        app
+    }
+
+    pub fn setup() -> Self {
+        let mut app = Self::new_app();
+        app.automation_op(r#"{"op":"new"}"#);
+        Self { app }
+    }
+
+    /// The drawing's unit in millimetres, as the import scales to it.
+    pub fn drawing_mm(&self) -> Option<f64> {
+        crate::app::properties::insunits_to_mm(
+            self.app.tabs[self.app.active_tab]
+                .scene
+                .document
+                .header
+                .insertion_units,
+        )
+    }
+
+    /// Imports `path` as `format` into a fresh drawing and reports
+    /// `(ui, total, sink)` in nanoseconds: the UI-thread work once the parsed
+    /// result arrives, the whole import, and a hash of what the drawing holds
+    /// afterwards. The read runs here rather than on the worker the
+    /// production entry hands it to, because a bench cannot drive the
+    /// returned task.
+    pub fn import(&mut self, path: &str, format: ModelFormat) -> (u64, u64, u64) {
+        self.reset();
+        let i = self.app.active_tab;
+        let tab_id = self.app.tabs[i].id;
+        let generation = self.app.tabs[i].document_generation;
+        let drawing_mm = self.drawing_mm();
+        let started = std::time::Instant::now();
+        let result = model_import::load(format, path, drawing_mm);
+        let loaded = started.elapsed().as_nanos() as u64;
+        let apply = std::time::Instant::now();
+        let _ = self
+            .app
+            .finish_model_import(tab_id, generation, path, format, result);
+        let ui = apply.elapsed().as_nanos() as u64;
+        (ui, loaded + ui, self.sink())
+    }
+
+    /// A fresh drawing with no history carried from the previous sample.
+    fn reset(&mut self) {
+        self.app.automation_op(r#"{"op":"new"}"#);
+        let i = self.app.active_tab;
+        self.app.tabs[i].history = Default::default();
+        self.app.tabs[i].dirty = false;
+    }
+
+    /// Everything the import leaves in the drawing: entity and block counts,
+    /// block names, and each object's type, layer, colour and geometry.
+    fn sink(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let document = &self.app.tabs[self.app.active_tab].scene.document;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        document.entity_count().hash(&mut hasher);
+        let mut names: Vec<&str> = document
+            .block_records
+            .iter()
+            .map(|block| block.name.as_str())
+            .collect();
+        names.sort();
+        names.hash(&mut hasher);
+        for block in document.block_records.iter() {
+            block.entity_handles.len().hash(&mut hasher);
+        }
+        for entity in document.entities() {
+            std::mem::discriminant(entity).hash(&mut hasher);
+            entity.common().layer.hash(&mut hasher);
+            entity.common().color.index().hash(&mut hasher);
+            match entity {
+                document::EntityType::Region(region) => {
+                    region.acis_data.sat_data.hash(&mut hasher);
+                }
+                document::EntityType::Surface(surface) => {
+                    surface.acis_data.sat_data.hash(&mut hasher);
+                }
+                document::EntityType::Spline(spline) => {
+                    spline.degree.hash(&mut hasher);
+                    for point in &spline.control_points {
+                        point.x.to_bits().hash(&mut hasher);
+                        point.y.to_bits().hash(&mut hasher);
+                        point.z.to_bits().hash(&mut hasher);
+                    }
+                }
+                document::EntityType::Insert(insert) => {
+                    insert.block_name.hash(&mut hasher);
+                    insert.insert_point.x.to_bits().hash(&mut hasher);
+                    insert.insert_point.y.to_bits().hash(&mut hasher);
+                    insert.rotation.to_bits().hash(&mut hasher);
+                }
+                _ => {}
+            }
+        }
+        hasher.finish()
+    }
+}
+
+#[cfg(test)]
+mod import_tests {
+    use super::*;
+
+    fn app_with_new_drawing() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    /// The import places nothing itself: the file is read and parsed on a
+    /// worker, and only the finished result changes the drawing.
+    #[test]
+    fn an_import_is_not_applied_before_its_result_arrives() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/step/box.step");
+        let blocks = app.tabs[i].scene.document.block_records.len();
+        let _task = app.import_model(i, path, ModelFormat::Step);
+        assert_eq!(
+            app.tabs[i].scene.document.entity_count(),
+            0,
+            "the worker reads the file; nothing is placed until its result arrives"
+        );
+        assert_eq!(app.tabs[i].scene.document.block_records.len(), blocks);
+    }
+
+    /// The message the reader sends is what places the import: driving the
+    /// task `import_model` returns runs the whole seam, worker and message
+    /// included.
+    #[test]
+    fn a_finished_import_reaches_its_drawing_through_its_message() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/step/box.step");
+        let task = app.import_model(i, path, ModelFormat::Step);
+        app.drive_headless_task(task).expect("the import task");
+        assert!(
+            app.tabs[i].scene.document.entity_count() > 0,
+            "the result the worker sends is placed by its message"
+        );
+        assert!(app.tabs[i].dirty);
+    }
+
+    fn line(y: f64) -> document::EntityType {
+        document::EntityType::Line(document::entities::Line::from_coords(
+            0.0, y, 0.0, 10.0, y, 0.0,
+        ))
+    }
+
+    fn direct_insert(block: &str) -> document::EntityType {
+        document::EntityType::Insert(document::entities::Insert::new(
+            block,
+            document::types::Vector3::ZERO,
+        ))
+    }
+
+    fn inserts(app: &OpenCADStudio, i: usize) -> Vec<String> {
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Insert(insert) => Some(insert.block_name.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The finished result is placed as one undoable edit: the block, then
+    /// the objects that reference it.
+    #[test]
+    fn a_finished_import_places_its_blocks_and_objects() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let tab_id = app.tabs[i].id;
+        let generation = app.tabs[i].document_generation;
+        let imported = model_import::Imported {
+            blocks: vec![("Part".to_string(), vec![line(0.0)])],
+            entities: vec![line(1.0), direct_insert("Part")],
+        };
+        let _ = app.finish_model_import(
+            tab_id,
+            generation,
+            "model.step",
+            ModelFormat::Step,
+            Ok(imported),
+        );
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("Part")
+            .is_some());
+        // The two objects, plus the block's own line.
+        assert_eq!(app.tabs[i].scene.document.entity_count(), 3);
+        assert_eq!(inserts(&app, i), vec!["Part".to_string()]);
+        assert!(app.tabs[i].dirty);
+    }
+
+    /// A block the drawing already has is not redefined: the imported one
+    /// takes a name of its own and its inserts are pointed at that name.
+    #[test]
+    fn a_block_name_the_drawing_uses_is_not_redefined() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let tab_id = app.tabs[i].id;
+        let generation = app.tabs[i].document_generation;
+        app.tabs[i]
+            .scene
+            .define_block_from_owned_entities(vec![line(5.0)], "Part", glam::DVec3::ZERO)
+            .expect("the existing block");
+        let existing = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("Part")
+            .map(|block| block.entity_handles.len());
+        let imported = model_import::Imported {
+            blocks: vec![("Part".to_string(), vec![line(0.0)])],
+            entities: vec![direct_insert("Part")],
+        };
+        let _ = app.finish_model_import(
+            tab_id,
+            generation,
+            "model.step",
+            ModelFormat::Step,
+            Ok(imported),
+        );
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("Part_1")
+            .is_some());
+        assert_eq!(inserts(&app, i), vec!["Part_1".to_string()]);
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .block_records
+                .get("Part")
+                .map(|block| block.entity_handles.len()),
+            existing
+        );
+    }
+
+    #[test]
+    fn a_missing_file_reports_and_leaves_the_drawing_alone() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let tab_id = app.tabs[i].id;
+        let generation = app.tabs[i].document_generation;
+        let _ = app.finish_model_import(
+            tab_id,
+            generation,
+            "missing.step",
+            ModelFormat::Step,
+            Err(model_import::ImportFailure::Missing),
+        );
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("File missing.step does not exist.")
+        );
+        assert_eq!(app.tabs[i].scene.document.entity_count(), 0);
+        assert!(!app.tabs[i].dirty);
+    }
+
+    #[test]
+    fn an_unreadable_file_reports_and_leaves_the_drawing_alone() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let tab_id = app.tabs[i].id;
+        let generation = app.tabs[i].document_generation;
+        let _ = app.finish_model_import(
+            tab_id,
+            generation,
+            "notes.step",
+            ModelFormat::Step,
+            Err(model_import::ImportFailure::Unreadable),
+        );
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Import failed: notes.step has no model the importer reads.")
+        );
+        assert_eq!(app.tabs[i].scene.document.entity_count(), 0);
+        assert!(!app.tabs[i].dirty);
+    }
+
+    #[test]
+    fn a_finished_import_into_a_closed_drawing_is_dropped() {
+        let mut app = app_with_new_drawing();
+        let imported = model_import::Imported {
+            blocks: Vec::new(),
+            entities: vec![line(0.0)],
+        };
+        let _ = app.finish_model_import(u64::MAX, 0, "model.step", ModelFormat::Step, Ok(imported));
+        assert_eq!(
+            app.tabs[app.active_tab].scene.document.entity_count(),
+            0,
+            "the drawing is gone; nothing is added to another one"
+        );
+        assert!(app.command_line.last_error.is_none());
+        assert!(
+            app.command_line
+                .history
+                .iter()
+                .any(|entry| entry.text.contains("was closed")),
+            "the command line says the drawing was closed, not replaced"
+        );
+    }
+
+    /// A stale import's file error does not blame the file: the drawing it
+    /// was reading for is already gone.
+    #[test]
+    fn a_stale_import_error_names_the_lost_drawing() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let tab_id = app.tabs[i].id;
+        let generation = app.tabs[i].document_generation;
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.finish_model_import(
+            tab_id,
+            generation,
+            "missing.step",
+            ModelFormat::Step,
+            Err(model_import::ImportFailure::Missing),
+        );
+        assert!(app.command_line.last_error.is_none());
+        assert!(app
+            .command_line
+            .history
+            .iter()
+            .any(|entry| entry.text.contains("was replaced")));
+    }
+
+    /// A tab keeps its id when a whole document replaces its content (open
+    /// into an empty tab, template, `new`, CLEAR), so a result headed for the
+    /// old document must not land in the new one.
+    #[test]
+    fn a_finished_import_into_a_replaced_drawing_is_dropped() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let tab_id = app.tabs[i].id;
+        let generation = app.tabs[i].document_generation;
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let imported = model_import::Imported {
+            blocks: Vec::new(),
+            entities: vec![line(0.0)],
+        };
+        let _ = app.finish_model_import(
+            tab_id,
+            generation,
+            "model.step",
+            ModelFormat::Step,
+            Ok(imported),
+        );
+        assert_eq!(
+            app.tabs[i].scene.document.entity_count(),
+            0,
+            "the document the import was reading for is gone; nothing is added to its successor"
+        );
+        assert!(!app.tabs[i].dirty);
+        assert!(
+            app.command_line
+                .history
+                .iter()
+                .any(|entry| entry.text.contains("was replaced")),
+            "the command line says which drawing was lost"
+        );
+    }
+
+    /// CLEAR empties the drawing in place, without a file load; a result
+    /// headed for what was cleared must not land in the cleared drawing.
+    #[test]
+    fn a_finished_import_into_a_cleared_drawing_is_dropped() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let tab_id = app.tabs[i].id;
+        let generation = app.tabs[i].document_generation;
+        let _ = app.update(crate::app::Message::ClearScene);
+        let imported = model_import::Imported {
+            blocks: Vec::new(),
+            entities: vec![line(0.0)],
+        };
+        let _ = app.finish_model_import(
+            tab_id,
+            generation,
+            "model.step",
+            ModelFormat::Step,
+            Ok(imported),
+        );
+        assert_eq!(
+            app.tabs[i].scene.document.entity_count(),
+            0,
+            "the drawing the import was reading for was cleared; nothing is added"
+        );
+    }
+
+    /// The ribbon's Clear tool empties the drawing by its own route; a
+    /// result in flight for the cleared drawing is dropped there too.
+    #[test]
+    fn a_finished_import_into_a_drawing_cleared_from_the_ribbon_is_dropped() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let tab_id = app.tabs[i].id;
+        let generation = app.tabs[i].document_generation;
+        let _ = app.update(crate::app::Message::RibbonToolClick {
+            tool_id: "CLEAR".to_string(),
+            event: crate::modules::ModuleEvent::ClearModels,
+        });
+        let imported = model_import::Imported {
+            blocks: Vec::new(),
+            entities: vec![line(0.0)],
+        };
+        let _ = app.finish_model_import(
+            tab_id,
+            generation,
+            "model.step",
+            ModelFormat::Step,
+            Ok(imported),
+        );
+        assert_eq!(
+            app.tabs[i].scene.document.entity_count(),
+            0,
+            "the ribbon cleared the drawing the import was reading for; nothing is added"
+        );
+    }
+}
+
+#[cfg(test)]
+mod picture_import_tests {
+    use super::*;
+
+    fn app_with_new_drawing() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    fn fixture(name: &str) -> String {
+        format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"))
+    }
+
+    fn last_line(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .last()
+            .map(|entry| entry.text.clone())
+            .unwrap_or_default()
+    }
+
+    fn has_block(app: &OpenCADStudio, i: usize, name: &str) -> bool {
+        app.tabs[i].scene.document.block_records.get(name).is_some()
+    }
+
+    fn undo_steps(app: &mut OpenCADStudio, i: usize) -> usize {
+        app.finish_all_pending_history();
+        app.tabs[i].history.undo_stack.len()
+    }
+
+    /// The import places nothing itself: the metafile is read on a worker,
+    /// the command line says so, and only the result places the block.
+    #[test]
+    fn a_metafile_is_placed_only_when_its_read_ends() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let path = fixture("wmf/shapes.wmf");
+        let task = app.import_wmf(i, &path, false);
+        assert!(
+            !has_block(&app, i, "WMF0"),
+            "nothing is placed during the read"
+        );
+        assert_eq!(last_line(&app), format!("ⓘ Reading {path}…"));
+        app.drive_headless_task(task).expect("the import task");
+        assert!(has_block(&app, i, "WMF0"), "the result places the block");
+        assert!(app.tabs[i].dirty);
+    }
+
+    /// The same for an SVG file.
+    #[test]
+    fn an_svg_drawing_is_placed_only_when_its_read_ends() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let path = "picture-import-test-square.svg";
+        crate::scene::model::pdf_raster::register_source(
+            path,
+            std::sync::Arc::new(
+                br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="8" height="8"/></svg>"#
+                    .to_vec(),
+            ),
+        );
+        let task = app.import_svg(i, path, false);
+        assert!(
+            !has_block(&app, i, "SVG0"),
+            "nothing is placed during the read"
+        );
+        assert_eq!(last_line(&app), format!("ⓘ Reading {path}…"));
+        app.drive_headless_task(task).expect("the import task");
+        assert!(has_block(&app, i, "SVG0"), "the result places the block");
+    }
+
+    /// The picture fits half the view in which it was started: a wide one
+    /// by the width of the view, a tall one by its height.
+    #[test]
+    fn a_picture_fits_half_the_view() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let (_, view, _) = app.tabs[i].scene.view_window();
+        for (n, (name, svg)) in [
+            ("wide", r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="10"><rect width="100" height="10" fill="none" stroke="black"/></svg>"#),
+            ("tall", r#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="100"><rect width="10" height="100" fill="none" stroke="black"/></svg>"#),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let path = format!("picture-import-test-{name}.svg");
+            crate::scene::model::pdf_raster::register_source(
+                &path,
+                std::sync::Arc::new(svg.as_bytes().to_vec()),
+            );
+            let task = app.import_svg(i, &path, false);
+            app.drive_headless_task(task).expect("the import task");
+            let wires = app.tabs[i].scene.block_preview_wires(&format!("SVG{n}"));
+            assert!(!wires.is_empty(), "{name}: the block has objects");
+            let [x0, y0, x1, y1] = wires.iter().fold(
+                [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
+                |[a, b, c, d], w| [a.min(w.aabb[0]), b.min(w.aabb[1]), c.max(w.aabb[2]), d.max(w.aabb[3])],
+            );
+            let (long, side) = if name == "wide" {
+                (f64::from(x1 - x0), view[0])
+            } else {
+                (f64::from(y1 - y0), view[1])
+            };
+            // The wire boxes are a little larger than the shapes (1 % here); a fit
+            // from the wrong view size is about twice as large or near zero.
+            assert!(
+                long <= 0.5 * side * 1.05 && long >= 0.25 * side,
+                "{name}: {long} against half of the view side {side}"
+            );
+        }
+    }
+
+    /// A model import also says that it reads the file (TODO 2.2).
+    #[test]
+    fn a_model_import_says_that_it_reads_the_file() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let path = fixture("step/box.step");
+        let _task = app.import_model(i, &path, ModelFormat::Step);
+        assert_eq!(last_line(&app), format!("ⓘ Reading {path}…"));
+    }
+
+    /// A reader that panics gives an error on the command line. The drawing
+    /// does not change, no undo step is added, and the next import works.
+    #[test]
+    fn a_reader_panic_is_an_error_and_the_app_continues() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let undo = undo_steps(&mut app, i);
+        let blocks = app.tabs[i].scene.document.block_records.len();
+        let task = app.read_picture_with(
+            i,
+            PictureFormat::Wmf,
+            PictureSource::File("panics.wmf".to_string()),
+            false,
+            |_, _, _| panic!("a reader bug"),
+        );
+        app.drive_headless_task(task).expect("the import task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("IMPORT failed: a reader bug")
+        );
+        assert_eq!(app.tabs[i].scene.document.block_records.len(), blocks);
+        assert_eq!(app.tabs[i].scene.document.entity_count(), 0);
+        assert_eq!(undo_steps(&mut app, i), undo);
+        let task = app.import_wmf(i, &fixture("wmf/shapes.wmf"), false);
+        app.drive_headless_task(task).expect("the next import task");
+        assert!(has_block(&app, i, "WMF0"), "the next import works");
+    }
+
+    /// A result for a drawing that was replaced during the read is dropped.
+    #[test]
+    fn a_picture_read_for_a_replaced_drawing_is_dropped() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let task = app.import_wmf(i, &fixture("wmf/shapes.wmf"), false);
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.drive_headless_task(task).expect("the import task");
+        assert!(!has_block(&app, i, "WMF0"));
+        assert!(!app.tabs[i].dirty);
+        assert!(last_line(&app).contains("was replaced"));
+    }
+
+    /// A result for a drawing that was closed during the read is dropped.
+    #[test]
+    fn a_picture_read_for_a_closed_drawing_is_dropped() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let read = picture_import::read(
+            PictureFormat::Wmf,
+            &std::fs::read(fixture("wmf/shapes.wmf")).unwrap(),
+            [100.0, 100.0],
+        );
+        let _ = app.finish_picture_import(
+            u64::MAX,
+            0,
+            Some("shapes.wmf"),
+            PictureFormat::Wmf,
+            false,
+            read,
+        );
+        assert!(!has_block(&app, i, "WMF0"));
+        assert!(app.command_line.last_error.is_none());
+        assert!(last_line(&app).contains("was closed"));
+    }
+
+    /// WMFIN places the block with the insertion prompts. If a different
+    /// command started during the read, the block is not placed, and that
+    /// command stays.
+    #[test]
+    fn a_command_started_during_the_read_stays_and_the_picture_is_not_placed() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let undo = undo_steps(&mut app, i);
+        let task = app.import_wmf(i, &fixture("wmf/shapes.wmf"), true);
+        let _ = app.update(Message::Command("LINE".to_string()));
+        app.drive_headless_task(task).expect("the import task");
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|command| command.name()),
+            Some("LINE")
+        );
+        assert!(!has_block(&app, i, "WMF0"));
+        assert_eq!(undo_steps(&mut app, i), undo);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("WMFIN cancelled: a different command started while the picture was read.")
+        );
+    }
+
+    /// The file name typed at WMFIN's prompt (FILEDIA off) ends that prompt
+    /// before the read, so the insertion prompts place the block.
+    #[test]
+    fn a_file_name_typed_at_the_prompt_is_placed_by_the_insertion_prompts() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        app.tabs[i].active_cmd = Some(Box::new(crate::command::FreeTextValuePromptCommand::new(
+            "_WMFINFILE",
+            "Enter name of WMF file to import (no extension):",
+        )));
+        let task = app.feed_command(crate::command::StepInput::Text(fixture("wmf/shapes.wmf")));
+        app.drive_headless_task(task).expect("the import task");
+        assert!(has_block(&app, i, "WMF0"));
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|command| command.name()),
+            Some("-INSERT"),
+            "the insertion prompts place the block"
+        );
+    }
+
+    /// Pasted markup that is not SVG gives the clipboard's message.
+    #[test]
+    fn pasted_markup_that_is_not_svg_gives_the_clipboard_message() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let blocks = app.tabs[i].scene.document.block_records.len();
+        let task = app.update(Message::SystemClipboardPaste(
+            crate::app::SystemClipboardText::Text("<svg this is not markup".to_string()),
+        ));
+        app.drive_headless_task(task).expect("the paste task");
+        assert_eq!(app.tabs[i].scene.document.block_records.len(), blocks);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some(crate::tr!("clipboard", "no-supported-content").as_str())
+        );
+    }
+
+    /// A file that is not there gives the same message as before.
+    #[test]
+    fn a_missing_picture_file_is_reported() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let task = app.import_svg(i, "picture-import-test-not-here.svg", true);
+        app.drive_headless_task(task).expect("the import task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("File picture-import-test-not-here.svg does not exist.")
+        );
+        assert!(app.tabs[i].active_cmd.is_none());
+    }
+}
+
 #[cfg(test)]
 mod svg_paste_tests {
     #[test]
@@ -1016,9 +1879,11 @@ mod svg_paste_tests {
         let svg = crate::io::svg_clipboard::selection_svg(&app.tabs[i].scene, &[line])
             .expect("the line draws");
         let blocks = app.tabs[i].scene.document.block_records.len();
-        let _ = app.update(crate::app::Message::SystemClipboardPaste(
+        // The markup is read on a worker; its result places the block.
+        let task = app.update(crate::app::Message::SystemClipboardPaste(
             crate::app::SystemClipboardText::Text(svg),
         ));
+        app.drive_headless_task(task).expect("the paste task");
         assert_eq!(app.tabs[i].scene.document.block_records.len(), blocks + 1);
         assert!(
             app.tabs[i].active_cmd.is_some(),

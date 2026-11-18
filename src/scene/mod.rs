@@ -35,6 +35,7 @@ pub(crate) mod hyperlink;
 pub mod model;
 pub mod pick;
 pub mod pipeline;
+pub(crate) mod raster_scale;
 pub(crate) mod render_graph;
 pub mod section_cull;
 pub mod sub_select;
@@ -61,6 +62,8 @@ mod block_solid_fill_tests;
 #[cfg(test)]
 mod dwg_edit_after_open_tests;
 #[cfg(test)]
+mod ole_resolution_tests;
+#[cfg(test)]
 mod layer_visibility_block_cache_tests;
 mod boundary;
 mod camera_ops;
@@ -70,6 +73,8 @@ mod reference_only_tests;
 mod resident_patch_shorter_runs_tests;
 #[cfg(test)]
 mod solid_box_select_tests;
+#[cfg(test)]
+mod solid_highlight_outline_tests;
 pub use camera_ops::{add_background, copy_background, erase_background};
 pub(crate) mod center_native;
 pub(crate) mod centerline;
@@ -82,6 +87,7 @@ mod dwg_native_constraints;
 mod entity;
 pub(crate) use entity::wire_thumbnail_bgra;
 pub use camera_ops::named_view_center;
+pub use camera_ops::FindZoom;
 pub(crate) use entity::gradient_tint_color;
 pub(crate) use entity::normalize_block_terminators;
 pub use entity::CreateBlockOptions;
@@ -118,6 +124,8 @@ pub mod viewport_dimension_pick;
 mod viewport_depth_tests;
 #[cfg(test)]
 mod viewport_freeze_block_member_tests;
+#[cfg(test)]
+mod paper_sheet_depth_tests;
 pub mod viewport_ref;
 pub(crate) use selection::pe_url_of;
 pub mod parametric_constraints;
@@ -866,7 +874,7 @@ pub use model::hatch_model::HatchModel;
 pub use model::image_model::ImageModel;
 pub use model::mesh_model::MeshLodSet;
 pub use model::object::{GripApply, GripDef};
-pub use model::wire_model::WireModel;
+pub use model::wire_model::{WireGeom, WireModel};
 use pick::interaction_index::{InteractionCandidates, InteractionIndex, SnapQueryCategory};
 pub use pick::selection_state::SelectionState;
 pub use pipeline::uniforms::Uniforms;
@@ -1464,9 +1472,14 @@ const DRAW_DEPTH_LABEL_SCALE: f32 = 1.0 / 1_073_741_824.0;
 // thousands of Adds before a full rebuild.
 const DRAW_DEPTH_EMPTY_BLOCK_STRIDE: i32 = 1 << 18;
 
+/// Labels map into (0, 2): draw order only ever moves 2D geometry towards
+/// the camera. A negative bias pushed lines lying on a solid's face behind
+/// that face in shaded views (#3119); 0 stays the true depth of 3D geometry.
+/// The scale stays 2^-30 so neighbours (and a block's text over its own
+/// wipeout) keep their depth separation (#3138).
 fn draw_depth_value(label: i32, half_label: i32) -> [f32; 2] {
     [
-        label as f32 * DRAW_DEPTH_LABEL_SCALE,
+        (label as i64 + (1_i64 << 30)) as f32 * DRAW_DEPTH_LABEL_SCALE,
         half_label as f32 * DRAW_DEPTH_LABEL_SCALE,
     ]
 }
@@ -2256,11 +2269,11 @@ fn cluster_extent_from_centers(
     // dense cluster while leaving room for legitimate outliers (sparse leaders,
     // dimensions, scattered annotations).
     let median = |v: &mut Vec<f64>| -> f64 {
-        v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        v.sort_by(|a, b| a.total_cmp(b));
         v[v.len() / 2]
     };
     let percentile = |v: &mut Vec<f64>, frac: f64| -> f64 {
-        v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        v.sort_by(|a, b| a.total_cmp(b));
         let i = ((v.len() as f64 - 1.0) * frac).round() as usize;
         v[i]
     };
@@ -2494,6 +2507,7 @@ fn transform_block_mesh_lod_set(
         complete: set.complete,
         edge_verts: Vec::new(),
         edge_verts_low: Vec::new(),
+        edge_vert_colors: Vec::new(),
         curved_gens: Vec::new(),
         metrics: set.metrics,
         world_aabb: [
@@ -2512,6 +2526,7 @@ fn transform_block_mesh_lod_set(
             .iter()
             .all(|value| value.is_finite())
             .then_some(bounds),
+        display_lods: Default::default(),
     }
 }
 
@@ -2721,6 +2736,9 @@ pub struct Scene {
     /// The table whose fill grip is being dragged: its picked range stays
     /// drawn over the grip preview that hides it.
     pub table_fill_drag: Option<Handle>,
+    /// The table whose cell is open in the in-place editor: the editor's
+    /// picture hides it, but its row and column labels stay drawn.
+    pub table_cell_editing: Option<Handle>,
     /// Source handles replaced by an active command preview. Kept separate
     /// from grip state so either interaction can clean up only its own hides.
     command_preview_hidden: HashSet<Handle>,
@@ -3150,6 +3168,8 @@ pub struct Scene {
     has_dimension_associations: std::cell::Cell<Option<bool>>,
     /// Conservative hint for whether any Underlay entities exist in the document.
     pub(crate) has_underlays: std::cell::Cell<Option<bool>>,
+    /// Conservative hint for whether any OLE2FRAME entities exist in the document.
+    pub(crate) has_ole_frames: std::cell::Cell<Option<bool>>,
     /// Conservative hint for whether any Face3D entities exist in the document.
     pub(crate) has_face3d: std::cell::Cell<Option<bool>>,
     /// Conservative hint for whether any section object exists in the
@@ -3193,15 +3213,10 @@ pub struct Scene {
     hidden_dynamic_dimensions: HashSet<Handle>,
     /// The camera generation the dynamic dimensions were last scaled for.
     dynamic_dimension_camera_gen: Option<u64>,
-    /// The view scale (world units per pixel, in quarter-octave steps) the
-    /// underlay rasters are made for, and a new step waiting for the view
-    /// to settle.
-    underlay_world_per_pixel: Option<f64>,
-    underlay_scale_pending: Option<((i32, u64), iced::time::Instant)>,
-    /// World rectangle the zoomed-in underlay regions are drawn for (the
-    /// plan view with a margin), and whether any underlay drew one.
-    underlay_view: Option<[f64; 4]>,
-    underlay_region_used: std::cell::Cell<bool>,
+    /// The view scale the underlay rasters are made for (model space).
+    underlay_scale: raster_scale::RasterScale,
+    /// The view scale the OLE pictures of the current layout are made for.
+    ole_scale: raster_scale::RasterScale,
     /// Session-only visibility overrides for constraint glyphs.
     hidden_parametric_constraints: HashSet<(
         parametric_constraints::ParametricScope,
@@ -3264,6 +3279,9 @@ pub struct Scene {
     /// without depending on the shader widget's internal `Program::State`
     /// (which can miss events under overlapping overlays).
     pub viewcube_hover: std::cell::Cell<Option<usize>>,
+    /// The cube's opacity this frame: 1 while the cursor is over the
+    /// navigation corner, else NAVVCUBEOPACITY.
+    pub viewcube_opacity: std::cell::Cell<f32>,
     /// Pending REDRAW force set, keyed by viewport `instance_id`. Populated by
     /// `request_refresh` and drained per-id by `refresh_consume` from whichever
     /// builder owns that instance. Never touches geometry_epoch/block_epoch.
@@ -3629,6 +3647,7 @@ impl Scene {
             reference_only: Default::default(),
             preview_hidden: HashSet::default(),
             table_fill_drag: None,
+            table_cell_editing: None,
             command_preview_hidden: HashSet::default(),
             mtext_editor_hidden: None,
             refedit_keep: None,
@@ -3755,10 +3774,8 @@ impl Scene {
             dynamic_constraint_display: true,
             hidden_dynamic_dimensions: HashSet::default(),
             dynamic_dimension_camera_gen: None,
-            underlay_world_per_pixel: None,
-            underlay_scale_pending: None,
-            underlay_view: None,
-            underlay_region_used: std::cell::Cell::new(false),
+            underlay_scale: raster_scale::RasterScale::default(),
+            ole_scale: raster_scale::RasterScale::default(),
             hidden_parametric_constraints: HashSet::default(),
             shown_parametric_constraints: HashSet::default(),
             constraints_epoch: 0,
@@ -3768,6 +3785,7 @@ impl Scene {
             has_associative_centers: std::cell::Cell::new(None),
             has_dimension_associations: std::cell::Cell::new(None),
             has_underlays: std::cell::Cell::new(None),
+            has_ole_frames: std::cell::Cell::new(None),
             has_face3d: std::cell::Cell::new(None),
             has_section_objects: std::cell::Cell::new(None),
             has_tables: std::cell::Cell::new(None),
@@ -3780,6 +3798,8 @@ impl Scene {
             last_world_per_pixel: std::cell::Cell::new(0.0),
             last_view_aspect: std::cell::Cell::new(0.0),
             viewcube_hover: std::cell::Cell::new(None),
+            // NAVVCUBEOPACITY default until the first cursor move.
+            viewcube_opacity: std::cell::Cell::new(0.5),
             pending_refresh: std::cell::RefCell::new(rustc_hash::FxHashSet::default()),
             last_tess_ms: std::cell::Cell::new(0.0),
             last_tess_wires: std::cell::Cell::new(0),
@@ -3830,76 +3850,54 @@ impl Scene {
     /// Paper-space callers use their own scale instead.
     /// Rasterise the underlays again when the view's scale has moved to
     /// another quarter-octave step and stayed there briefly (not on every
-    /// frame of a zoom).
+    /// frame of a zoom), and likewise the OLE pictures of the current layout.
     pub fn refresh_underlay_resolution(&mut self, now: iced::time::Instant) {
-        let Some(wpp) = self.world_per_pixel() else {
-            return;
-        };
-        let step = (f64::from(wpp).log2() * 4.0).ceil() as i32;
-        let current = self
-            .underlay_world_per_pixel
-            .map(|w| (w.log2() * 4.0).round() as i32);
-        if current == Some(step) && !self.underlay_view_moved() {
-            self.underlay_scale_pending = None;
-            return;
-        }
-        // Wait for the camera to rest, not only for the scale step to hold.
-        let key = (step, self.camera_generation);
-        match self.underlay_scale_pending {
-            Some((pending, since)) if pending == key => {
-                if now.duration_since(since) < std::time::Duration::from_millis(150) {
-                    return;
-                }
-            }
-            _ => {
-                self.underlay_scale_pending = Some((key, now));
-                return;
+        let generation = self.camera_generation;
+        if let Some(wpp) = self.world_per_pixel() {
+            let view = self.plan_view_rect();
+            if self
+                .underlay_scale
+                .settle(wpp, view, "Model", generation, now)
+                && self
+                    .document
+                    .entities()
+                    .any(|e| matches!(e, EntityType::Underlay(_)))
+            {
+                self.reseed_underlays();
             }
         }
-        self.underlay_scale_pending = None;
-        self.underlay_world_per_pixel = Some(2f64.powf(step as f64 / 4.0));
-        self.underlay_view = self.plan_view_rect().map(|[x0, y0, x1, y1]| {
-            let (mx, my) = ((x1 - x0) * 0.5, (y1 - y0) * 0.5);
-            [x0 - mx, y0 - my, x1 + mx, y1 + my]
-        });
-        self.underlay_region_used.set(false);
-        if self
-            .document
-            .entities()
-            .any(|e| matches!(e, EntityType::Underlay(_)))
-        {
-            self.reseed_underlays();
+        if let Some(wpp) = self.layout_world_per_pixel() {
+            let view = self.layout_plan_view_rect();
+            let layout = self.current_layout.clone();
+            if self.ole_scale.settle(wpp, view, &layout, generation, now) && self.has_ole_frames() {
+                self.reseed_ole_frames();
+            }
         }
     }
 
-    /// The view has moved to another scale step than the underlay rasters
-    /// were made for, or out of their sharp region (frames are requested
-    /// until they are made again).
+    /// The view has moved to another scale step than the underlay or OLE
+    /// rasters were made for, or out of their sharp region (frames are
+    /// requested until they are made again).
     pub fn underlay_resolution_stale(&self) -> bool {
-        if !self.has_underlays() {
-            return false;
-        }
-        let Some(wpp) = self.world_per_pixel() else {
-            return false;
-        };
-        let step = (f64::from(wpp).log2() * 4.0).ceil() as i32;
-        self.underlay_world_per_pixel
-            .map(|w| (w.log2() * 4.0).round() as i32)
-            != Some(step)
-            || self.underlay_view_moved()
+        let underlays = self.has_underlays()
+            && self.world_per_pixel().is_some_and(|wpp| {
+                self.underlay_scale
+                    .stale(wpp, self.plan_view_rect(), "Model")
+            });
+        underlays
+            || (self.has_ole_frames()
+                && self.layout_world_per_pixel().is_some_and(|wpp| {
+                    self.ole_scale
+                        .stale(wpp, self.layout_plan_view_rect(), &self.current_layout)
+                }))
     }
 
-    /// A zoomed-in underlay region was drawn and the view has left it.
-    fn underlay_view_moved(&self) -> bool {
-        if !self.underlay_region_used.get() {
-            return false;
-        }
-        match (self.underlay_view, self.plan_view_rect()) {
-            (Some(have), Some(now)) => {
-                now[0] < have[0] || now[1] < have[1] || now[2] > have[2] || now[3] > have[3]
-            }
-            _ => true,
-        }
+    /// World units per screen pixel of the current layout's view: the model
+    /// camera's in Model, the sheet camera's in a paper layout. `None` until
+    /// a render captured real bounds.
+    fn layout_world_per_pixel(&self) -> Option<f32> {
+        let v = self.last_world_per_pixel.get();
+        (v > 0.0 && v.is_finite()).then_some(v)
     }
 
     /// World XY rectangle of the model view when it looks straight down
@@ -3908,6 +3906,13 @@ impl Scene {
         if self.current_layout != "Model" {
             return None;
         }
+        self.layout_plan_view_rect()
+    }
+
+    /// World XY rectangle of the current layout's view when it looks straight
+    /// down (orthographic plan view) — model space in Model, the sheet in a
+    /// paper layout; `None` otherwise.
+    fn layout_plan_view_rect(&self) -> Option<[f64; 4]> {
         let cam = self.camera.borrow();
         if !matches!(cam.projection, view::camera::Projection::Orthographic) {
             return None;
@@ -4597,6 +4602,19 @@ impl Scene {
         any
     }
 
+    /// Fast check for whether any OLE2FRAME entities exist in the document.
+    pub(crate) fn has_ole_frames(&self) -> bool {
+        if let Some(known) = self.has_ole_frames.get() {
+            return known;
+        }
+        let any = self
+            .document
+            .entities()
+            .any(|e| matches!(e, EntityType::Ole2Frame(_)));
+        self.has_ole_frames.set(Some(any));
+        any
+    }
+
     /// Fast check for whether any Underlay entities exist in the document.
     pub(crate) fn has_underlays(&self) -> bool {
         if let Some(known) = self.has_underlays.get() {
@@ -4974,18 +4992,54 @@ impl Scene {
         extra_block_names: &[String],
         solve_parametric: bool,
     ) {
+        self.bump_entities_with_block_deps_inner(
+            changes,
+            extra_block_handles,
+            extra_block_names,
+            solve_parametric,
+            false,
+        );
+    }
+
+    /// Variant of [`Self::bump_entities_with_block_deps`] that skips native
+    /// constraint-graph synchronization (matching `bump_geometry()` for callers
+    /// like `save_block_edit_as` that already copied/preserved native graphs).
+    pub(crate) fn bump_entities_restyled_with_block_deps(
+        &mut self,
+        changes: &[(Handle, ChangeKind)],
+        extra_block_handles: &[Handle],
+        extra_block_names: &[String],
+    ) {
+        self.bump_entities_with_block_deps_inner(
+            changes,
+            extra_block_handles,
+            extra_block_names,
+            false,
+            true,
+        );
+    }
+
+    fn bump_entities_with_block_deps_inner(
+        &mut self,
+        changes: &[(Handle, ChangeKind)],
+        extra_block_handles: &[Handle],
+        extra_block_names: &[String],
+        solve_parametric: bool,
+        appearance_only: bool,
+    ) {
         let touched_names =
             self.touched_block_definition_names(changes, extra_block_handles, extra_block_names);
         if touched_names.is_empty() {
             if !changes.is_empty() {
-                self.bump_entities_with_solve_policy(
+                self.bump_entities_with_solve_policy_inner(
                     changes,
                     &[],
                     false,
                     &[],
                     &[],
                     solve_parametric,
-                    false,
+                    appearance_only,
+                    !appearance_only,
                     None,
                 );
             }
@@ -5000,14 +5054,15 @@ impl Scene {
             }
         }
         self.mark_block_definitions_dirty(touched_names);
-        self.bump_entities_with_solve_policy(
+        self.bump_entities_with_solve_policy_inner(
             &all_changes,
             &[],
             false,
             &[],
             &[],
             solve_parametric,
-            false,
+            appearance_only,
+            !appearance_only,
             None,
         );
     }
@@ -5091,6 +5146,32 @@ impl Scene {
         fixed_refs: &[parametric_constraints::ParametricRef],
         solve_parametric: bool,
         appearance_only: bool,
+        report_before: Option<&[(Handle, EntityType)]>,
+    ) {
+        self.bump_entities_with_solve_policy_inner(
+            changes,
+            driven_refs,
+            retain_size,
+            retained_originals,
+            fixed_refs,
+            solve_parametric,
+            appearance_only,
+            true,
+            report_before,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn bump_entities_with_solve_policy_inner(
+        &mut self,
+        changes: &[(Handle, ChangeKind)],
+        driven_refs: &[parametric_constraints::ParametricRef],
+        retain_size: bool,
+        retained_originals: &[(Handle, EntityType)],
+        fixed_refs: &[parametric_constraints::ParametricRef],
+        solve_parametric: bool,
+        appearance_only: bool,
+        sync_native_graph: bool,
         report_before: Option<&[(Handle, EntityType)]>,
     ) {
         // A solve can name an entity it then leaves untouched — a neighbour
@@ -5302,7 +5383,9 @@ impl Scene {
                 Self::absorb_refreshed(&mut changes, &mut refreshed_handles, refreshed);
             }
         }
-        if !self.parametric_constraints.is_empty() || !self.named_parameters.is_empty() {
+        if sync_native_graph
+            && (!self.parametric_constraints.is_empty() || !self.named_parameters.is_empty())
+        {
             self.refresh_dynamic_dimension_texts();
             // The stored associative graph rebuilds only when the constraint
             // model actually changed since the last sync — never for a pure
@@ -5427,6 +5510,20 @@ impl Scene {
                 .is_some_and(|e| matches!(e, EntityType::Underlay(_)))
         }) {
             self.has_underlays.set(Some(true));
+        }
+        if let Some(true) = self.has_ole_frames.get() {
+            if changes
+                .iter()
+                .any(|(_, k)| matches!(k, ChangeKind::Removed))
+            {
+                self.has_ole_frames.set(None);
+            }
+        } else if changes.iter().any(|(h, _)| {
+            self.document
+                .get_entity(*h)
+                .is_some_and(|e| matches!(e, EntityType::Ole2Frame(_)))
+        }) {
+            self.has_ole_frames.set(Some(true));
         }
         let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
         self.geometry_epoch = epoch;
@@ -5727,6 +5824,7 @@ impl Scene {
         *self.document_render_env_cache.borrow_mut() = None;
         self.background_image_cache.borrow_mut().clear();
         self.has_underlays.set(None);
+        self.has_ole_frames.set(None);
         self.has_face3d.set(None);
         self.has_section_objects.set(None);
         self.has_tables.set(None);
@@ -5832,6 +5930,18 @@ impl Scene {
     /// cache falls back to a whole-drawing rebuild. Kept for migration and for
     /// callers whose changed set is genuinely unknowable.
     pub fn bump_geometry_no_blocks(&mut self) {
+        self.bump_geometry_no_blocks_with(true);
+    }
+
+    /// Advance the geometry epoch when switching the active edited block space
+    /// (`block_edit_block`) without invalidating cached block definitions or
+    /// poisoning other spaces' resident wire sets with a full journal delta.
+    pub fn bump_active_space(&mut self) {
+        *self.entity_index_cache.borrow_mut() = None;
+        self.bump_geometry_no_blocks_with(false);
+    }
+
+    fn bump_geometry_no_blocks_with(&mut self, full: bool) {
         let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
         self.geometry_epoch = epoch;
         self.invalidate_projection_bounds();
@@ -5839,11 +5949,12 @@ impl Scene {
         *self.document_render_env_cache.borrow_mut() = None;
         self.background_image_cache.borrow_mut().clear();
         self.has_underlays.set(None);
+        self.has_ole_frames.set(None);
         self.has_face3d.set(None);
         self.has_section_objects.set(None);
         self.has_tables.set(None);
         self.invalidate_dependency_index();
-        self.push_geometry_delta(epoch, Vec::new(), true);
+        self.push_geometry_delta(epoch, Vec::new(), full);
     }
 
     /// Invalidate the cached document render environment (fog parameters and image).
@@ -6964,9 +7075,10 @@ impl Scene {
             angle_offset: 0.0,
             scale: 1.0,
             // Draw-order bias is signed: entity fills/wires land in (-1, 1)
-            // (0 = neutral). A value below -1 forces the sheet strictly behind
-            // EVERY object, in every case, with a tiny z offset (BIAS = 0.001,
-            // so no far-plane clipping). The sheet is the canvas, never on top.
+            // (0 = neutral). A value below -1 marks the page: the draw-order
+            // shader puts it at the far end of the depth range, behind every
+            // object the sheet holds, whatever its Z. The sheet is the
+            // canvas, never on top.
             draw_depth: -2.0,
         })
     }
@@ -7192,15 +7304,47 @@ impl Scene {
         // (plot_paper_units == 0) is 25.4 mm, a millimetre page is 1 mm.
         let page_unit_mm = if l.plot_paper_units == 0 { 25.4 } else { 1.0 };
         let (num, den) = (l.plot_scale_numerator, l.plot_scale_denominator);
-        if num > 1e-12 && den > 1e-12 {
+        // Scale type 0 is "scaled to fit" only with the standard-scale flag; a
+        // custom scale leaves it 0 too. A fitted plot's stored ratio is not the
+        // unit paper space is laid out in: trusting it scaled the layout's
+        // lineweights by that ratio after a fitted window plot (#3103).
+        let fitted = l.plot_flags.use_standard_scale && l.plot_scale_type == 0;
+        let (wx0, wy0, wx1, wy1) = (
+            l.plot_window_min_x,
+            l.plot_window_min_y,
+            l.plot_window_max_x,
+            l.plot_window_max_y,
+        );
+        if fitted && l.plot_type == 4 && wx1 > wx0 && wy1 > wy0 {
+            // The plot scales the window onto the sheet, so the sheet spans
+            // the window at that scale.
+            let (pw, ph) = if l.plot_rotation == 1 || l.plot_rotation == 3 {
+                (l.paper_height, l.paper_width)
+            } else {
+                (l.paper_width, l.paper_height)
+            };
+            if pw > 1e-6 && ph > 1e-6 {
+                let (mm_per_unit, ..) = crate::io::paper_catalog::window_to_sheet(
+                    (wx1 - wx0, wy1 - wy0),
+                    (pw, ph),
+                    crate::io::paper_catalog::PlotScale::Fit,
+                );
+                return 1.0 / mm_per_unit.max(1e-9);
+            }
+        }
+        if !fitted && num > 1e-12 && den > 1e-12 {
             // One paper-space unit spans this many millimetres on the page.
             let mm_per_unit = (num / den) * page_unit_mm;
             if mm_per_unit > 1e-9 {
                 return 1.0 / mm_per_unit;
             }
         }
-        // No usable plot scale — assume the paper space is already millimetres.
-        1.0
+        // No usable plot scale — assume one unit per page unit (mm or inch).
+        if fitted {
+            1.0 / page_unit_mm
+        } else {
+            1.0
+        }
     }
 
     pub fn paper_limits(&self) -> Option<((f64, f64), (f64, f64))> {
@@ -7245,22 +7389,7 @@ impl Scene {
                             l.plot_window_max_y,
                         );
                         let window_plot = l.plot_type == 4 && wx1 > wx0 && wy1 > wy0;
-                        // Scale type 0 is "scaled to fit" only with the
-                        // standard-scale flag; a custom scale leaves it 0 too.
-                        let fitted = l.plot_flags.use_standard_scale && l.plot_scale_type == 0;
-                        let f = if window_plot && fitted {
-                            // Fitted to the paper: the plot scales the window
-                            // to the sheet, so the sheet spans the window at
-                            // that scale, not at the layout's stored one.
-                            let (mm_per_unit, ..) = crate::io::paper_catalog::window_to_sheet(
-                                (wx1 - wx0, wy1 - wy0),
-                                (pw, ph),
-                                crate::io::paper_catalog::PlotScale::Fit,
-                            );
-                            1.0 / mm_per_unit.max(1e-9)
-                        } else {
-                            Self::layout_unit_factor(l)
-                        };
+                        let f = Self::layout_unit_factor(l);
                         let (pw, ph) = (pw * f, ph * f);
                         // A window plot maps that window onto the sheet, so the
                         // sheet sits around it rather than at the origin.
@@ -7759,7 +7888,7 @@ impl Scene {
                 _ => None,
             })
             .collect();
-        list.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+        list.sort_by(|a, b| a.2.total_cmp(&b.2));
         if list.is_empty() {
             // Many drawings (and minimal DXF/DWG exports) carry no
             // ACAD_SCALELIST Scale objects at all. Without a fallback the
@@ -7834,7 +7963,7 @@ impl Scene {
             }
         }
 
-        visible.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+        visible.sort_by(|a, b| a.2.total_cmp(&b.2));
         visible
     }
 
@@ -20399,7 +20528,7 @@ mod layout_cache_tests {
                     only,
                 )
                 .into_iter()
-                .map(|wire| (wire.name, wire.points))
+                .map(|wire| (wire.name, std::sync::Arc::unwrap_or_clone(wire.geom).points))
                 .collect();
             wires.sort_by(|a, b| a.0.cmp(&b.0));
             wires

@@ -3,7 +3,7 @@
 // an embedded enhanced metafile (the form Office writes into OlePres000).
 
 use super::raster::{Canvas, Rgba};
-use super::{canvas_for_box, colorref, dib, text, Brush, Dc, Font, Obj, Pen};
+use super::{canvas_for_box, colorref, dib, text, Brush, Dc, Font, Obj, Pen, Rendered, Target};
 
 #[inline]
 fn u16_at(d: &[u8], o: usize) -> u16 {
@@ -152,7 +152,7 @@ fn blit_dib(
     );
 }
 
-pub fn render(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
+pub fn render(data: &[u8], target: Target) -> Option<Rendered> {
     let (data, placeable_box) = strip_placeable(data);
     let first = header_ok(data)?;
 
@@ -186,7 +186,12 @@ pub fn render(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
         return None;
     }
 
-    let (mut canvas, _) = canvas_for_box(we, he)?;
+    let super::Frame {
+        mut canvas,
+        dev_scale,
+        offset,
+        full,
+    } = canvas_for_box(we, he, target)?;
     let mut p = Player {
         dc: Dc::new(),
         objects: Vec::new(),
@@ -199,7 +204,9 @@ pub fn render(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     p.dc.win_org = (wx, wy);
     p.dc.win_ext = (we, he);
     p.dc.vp_org = (0.0, 0.0);
-    p.dc.vp_ext = (canvas.w as f32, canvas.h as f32);
+    p.dc.vp_ext = full;
+    p.dc.canvas_off = offset;
+    p.dc.ss = canvas.ss as f32;
 
     for (func, prm) in (Records {
         d: data,
@@ -493,8 +500,15 @@ pub fn render(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
         }
     }
 
-    let (px, w, h) = canvas.downsample(super::SS);
-    Some((px, w, h))
+    Some(
+        super::Frame {
+            canvas,
+            dev_scale,
+            offset,
+            full,
+        }
+        .finish(),
+    )
 }
 
 #[cfg(test)]
@@ -538,7 +552,12 @@ mod tests {
             // part in y-up coordinates.
             (0x041B, vec![60, 100, 100, 0]),
         ]);
-        let (px, w, h) = super::render(&data).expect("renders");
+        let super::super::Rendered {
+            pixels: px,
+            width: w,
+            height: h,
+            ..
+        } = super::render(&data, super::super::Target::DEFAULT).expect("renders");
         let red = |x: u32, y: u32| {
             let i = ((y * w + x) * 4) as usize;
             px[i] > 200 && px[i + 1] < 60 && px[i + 2] < 60

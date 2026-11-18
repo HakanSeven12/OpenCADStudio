@@ -1561,7 +1561,10 @@ impl OpenCADStudio {
         // Open MText editor swallows Escape (cancel without committing). An
         // open menu or the colour list closes first, one per Escape.
         if let Some(ed) = self.mtext_editor.as_mut() {
-            if ed.menu.take().is_some() || std::mem::take(&mut ed.color_picker_open) {
+            if ed.menu.take().is_some()
+                || std::mem::take(&mut ed.color_picker_open)
+                || ed.matching.take().is_some()
+            {
                 return Task::none();
             }
             self.mtext_cancel();
@@ -2612,29 +2615,18 @@ impl OpenCADStudio {
     /// The filter tree's live parts: the layers of the selected objects and
     /// what each LAYERFILTER filter matches. Set only when they changed.
     fn refresh_layer_tree(&mut self, i: usize) {
-        self.load_layer_filters(i);
-        self.tabs[i].layers.ribbon_follows = self.ribbon_layers_follow_filter;
-        use std::hash::{Hash, Hasher};
-        let scene = &self.tabs[i].scene;
-        // This runs on every message while the panel shows: work the tree
-        // out again only when what it reads has changed.
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        scene.selected.len().hash(&mut hasher);
-        scene
-            .selected
-            .iter()
-            .fold(0u64, |acc, h| {
-                acc ^ h.value().wrapping_mul(0x9E37_79B9_7F4A_7C15)
-            })
-            .hash(&mut hasher);
-        for layer in scene.document.layers.iter() {
-            format!("{layer:?}").hash(&mut hasher);
-        }
-        format!("{:?}", self.layer_filters).hash(&mut hasher);
-        let key = hasher.finish();
+        // This runs on every message while the panel shows. Its inputs are the
+        // selected objects' layers, the layer table, the filters the drawing
+        // keeps and the ribbon setting; folding them into one key keeps an idle
+        // message from reloading the filters or walking the layers.
+        let key = layer_tree_key(&self.tabs[i].scene, self.ribbon_layers_follow_filter);
         if self.tabs[i].layers.tree_key == Some(key) {
             return;
         }
+        #[cfg(test)]
+        TREE_EXPENSIVE_RUNS.with(|runs| runs.set(runs.get() + 1));
+        self.load_layer_filters(i);
+        self.tabs[i].layers.ribbon_follows = self.ribbon_layers_follow_filter;
         self.tabs[i].layers.tree_key = Some(key);
         let scene = &self.tabs[i].scene;
         let mut selected: Vec<String> = scene
@@ -3349,7 +3341,7 @@ impl OpenCADStudio {
         Task::none()
     }
 
-    pub(super) fn on_paste_shortcut(&mut self) -> Task<Message> {
+    pub(in crate::app) fn on_paste_shortcut(&mut self) -> Task<Message> {
         if self.mtext_editor.is_some() {
             // Web reads via the browser's async Clipboard API (iced's
             // sync clipboard read returns nothing there); native uses
@@ -6252,117 +6244,13 @@ impl OpenCADStudio {
         Task::none()
     }
 
-    /// Open the attribute editor dialog for the given INSERT, loading a working
-    /// copy of its attribute values. No-op (with a hint) when the block has no
-    /// attributes. Entry points: double-clicking such a block, or ATTEDIT.
-    pub(crate) fn open_attribute_editor(&mut self, handle: document::Handle) {
-        let i = self.active_tab;
-        if self.reject_locked_edit(i, handle) {
-            return;
-        }
-        let doc = &self.tabs[i].scene.document;
-        // Ok((block, rows)) to open; Err(msg) to report and stay closed. The
-        // borrow of `doc` ends with this match, before any `self` mutation.
-        let result = match doc.get_entity(handle) {
-            Some(document::EntityType::Insert(ins)) if !ins.attributes.is_empty() => {
-                // The prompt text lives on the block's ATTDEFs, not on the
-                // attribute instances — map tag → prompt from the definition.
-                let meta = block_attr_meta(doc, &ins.block_name);
-                let rows = ins
-                    .attributes
-                    .iter()
-                    .map(|a| attr_row_from_entity(a, &meta))
-                    .collect::<Vec<_>>();
-                Ok((ins.block_name.clone(), rows))
-            }
-            Some(document::EntityType::Insert(_)) => Err("ATTEDIT  This block has no attributes."),
-            _ => Err("ATTEDIT  Select a block with attributes."),
-        };
-        match result {
-            Ok((block, rows)) => {
-                self.attr_editor_block = block;
-                self.attr_editor_rows = rows;
-                self.attr_editor_selected = 0;
-                self.attr_editor_tab = AttrTab::Attribute;
-                self.attr_editor_handle = Some(handle);
-                self.active_modal = Some(crate::app::ModalKind::AttributeEditor);
-                self.modal_offset = iced::Vector::ZERO;
-                self.modal_resize = iced::Vector::ZERO;
-            }
-            Err(msg) => self.command_line.push_error(msg),
-        }
-    }
-
     /// The currently-selected editor row, for the Text Options / Properties
     /// edit handlers (which all act on that one attribute).
-    pub(super) fn attr_row_selected_mut(&mut self) -> Option<&mut AttrRow> {
+    pub(in crate::app) fn attr_row_selected_mut(&mut self) -> Option<&mut AttrRow> {
         let sel = self.attr_editor_selected;
         self.attr_editor_rows.get_mut(sel)
     }
 
-    /// Close the attribute editor without applying, if it is open. Used when
-    /// the tab it belongs to closes or the active tab switches — its handle is
-    /// document-local and must not outlive its tab.
-    pub(in crate::app) fn cancel_attr_editor(&mut self) {
-        if self.focus_dialog(crate::app::ModalKind::AttributeEditor) {
-            self.active_modal = None;
-            self.reset_modal_geometry();
-        }
-        self.attr_editor_handle = None;
-        self.attr_editor_block.clear();
-        self.attr_editor_rows.clear();
-        self.attr_editor_selected = 0;
-        self.attr_editor_tab = AttrTab::Attribute;
-    }
-
-    /// Commit every edited attribute (value, text options, common properties)
-    /// back to the block, keeping the dialog open (Apply). Closing is the frame
-    /// ✕ (`CloseModal`), which discards any un-applied edits — matching the
-    /// other modal windows. Applied positionally so blocks with duplicate tags
-    /// stay correct; guarded on block name + count so an edit can never land on
-    /// a different entity if the selection changed under the open dialog.
-    pub(super) fn on_attr_editor_apply(&mut self) -> Task<Message> {
-        let i = self.active_tab;
-        let Some(handle) = self.attr_editor_handle else {
-            return Task::none();
-        };
-        // The block's layer may have been locked while the editor was open —
-        // refuse to write attributes to a locked-layer block.
-        if let Some(layer) = self.tabs[i].scene.locked_layer_name(handle) {
-            self.command_line.push_info(
-                crate::tf!(
-                "Object is on locked layer \"{layer}\" — unlock the layer to edit its attributes."
-            )
-                .as_ref(),
-            );
-            return Task::none();
-        }
-        // Snapshot the working copy so the document can be mutated while the
-        // dialog's rows stay put (it remains open for further edits).
-        let rows = self.attr_editor_rows.clone();
-        let block = self.attr_editor_block.clone();
-
-        self.push_undo_snapshot(i, "ATTEDIT");
-        let mut changed = false;
-        if let Some(document::EntityType::Insert(ins)) =
-            self.tabs[i].scene.document.get_entity_mut(handle)
-        {
-            if ins.block_name == block && rows.len() == ins.attributes.len() {
-                for (attr, row) in ins.attributes.iter_mut().zip(rows.iter()) {
-                    changed |= apply_attr_row(attr, row);
-                }
-            }
-        }
-        if changed {
-            self.invalidate_property_targets(i, &[handle]);
-            self.tabs[i].dirty = true;
-        } else {
-            // Nothing changed — drop the snapshot pushed a moment ago.
-            self.discard_last_undo_entry(i);
-        }
-        self.refresh_properties();
-        Task::none()
-    }
 }
 
 pub(crate) struct BlockAttrMeta {
@@ -6399,21 +6287,34 @@ pub(crate) fn attr_row_from_entity(
     a: &document::entities::AttributeEntity,
     meta: &rustc_hash::FxHashMap<String, BlockAttrMeta>,
 ) -> AttrRow {
-    let fmt = |v: f64| format!("{v}");
+    // Shown as the reference prints them: no trailing zeros.
+    let fmt = |v: f64| crate::app::attr_editor::number(v);
     let ad_meta = meta.get(&a.tag);
     let prompt = ad_meta.map(|m| m.prompt.clone()).unwrap_or_default();
     let is_constant = a.flags.constant || ad_meta.is_some_and(|m| m.constant);
     AttrRow {
         tag: a.tag.clone(),
         prompt,
-        value: a.get_value().to_string(),
+        value: a
+            .embedded_mtext
+            .as_ref()
+            .map_or_else(|| a.get_value().to_string(), |m| m.value.clone()),
         text_style: a.text_style.clone(),
         height: fmt(a.height),
         rotation: fmt(a.rotation.to_degrees()),
         width_factor: fmt(a.width_factor),
         oblique: fmt(a.oblique_angle.to_degrees()),
-        h_align: a.horizontal_alignment,
-        v_align: a.vertical_alignment,
+        // A multi-line attribute is placed by its text box's attachment.
+        h_align: a
+            .embedded_mtext
+            .as_ref()
+            .map(|m| crate::app::attr_editor::alignment_of(m.attachment_point).0)
+            .unwrap_or(a.horizontal_alignment),
+        v_align: a
+            .embedded_mtext
+            .as_ref()
+            .map(|m| crate::app::attr_editor::alignment_of(m.attachment_point).1)
+            .unwrap_or(a.vertical_alignment),
         backwards: a.text_generation_flags & 0x2 != 0,
         upside_down: a.text_generation_flags & 0x4 != 0,
         layer: a.common.layer.clone(),
@@ -6421,6 +6322,16 @@ pub(crate) fn attr_row_from_entity(
         linetype: a.common.linetype.clone(),
         line_weight: a.common.line_weight,
         is_constant,
+        index: 0,
+        multiline: a.is_multiline || a.embedded_mtext.is_some(),
+        boundary_width: a
+            .embedded_mtext
+            .as_ref()
+            .map(|m| fmt(m.rectangle_width))
+            .unwrap_or_else(|| "0".to_string()),
+        annotative: crate::app::attr_editor::attribute_is_annotative(a),
+        field: None,
+        field_changed: false,
     }
 }
 
@@ -6429,45 +6340,70 @@ pub(crate) fn attr_row_from_entity(
 /// field is left as-is. Constant attributes ignore edits to their value.
 pub(crate) fn apply_attr_row(a: &mut document::entities::AttributeEntity, row: &AttrRow) -> bool {
     let mut ch = false;
-    if !row.is_constant && a.get_value() != row.value {
+    let active_value = a
+        .embedded_mtext
+        .as_ref()
+        .map_or(a.get_value(), |m| m.value.as_str());
+    if !row.is_constant && active_value != row.value {
+        // An explicit edit updates both forms. An unchanged row preserves its fallback.
         a.set_value(row.value.clone());
+        if let Some(m) = a.embedded_mtext.as_mut() {
+            m.value = row.value.clone();
+        }
         ch = true;
     }
     if a.text_style != row.text_style {
         a.text_style = row.text_style.clone();
         ch = true;
     }
-    if let Ok(h) = row.height.trim().parse::<f64>() {
+    // A zero height is ignored, as the reference does; the window refuses a
+    // negative one, an unreadable one, and the out-of-range factors.
+    if let Ok(h) = row.height.trim().parse::<f64>().map_err(|_| ()).and_then(|h| if h > 0.0 { Ok(h) } else { Err(()) }) {
         if a.height != h {
             a.height = h;
             ch = true;
         }
     }
     if let Ok(deg) = row.rotation.trim().parse::<f64>() {
-        let rad = deg.to_radians();
+        // 400 is kept as 40.
+        let rad = deg.rem_euclid(360.0).to_radians();
         if (a.rotation - rad).abs() > 1e-12 {
             a.rotation = rad;
             ch = true;
         }
     }
-    if let Ok(w) = row.width_factor.trim().parse::<f64>() {
+    if let Some(w) = row
+        .width_factor
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|w| (0.01..=100.0).contains(w) && !row.multiline)
+    {
         if a.width_factor != w {
             a.width_factor = w;
             ch = true;
         }
     }
-    if let Ok(deg) = row.oblique.trim().parse::<f64>() {
+    if let Some(deg) = row
+        .oblique
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|d| d.abs() <= 85.0 && !row.multiline)
+    {
         let rad = deg.to_radians();
         if (a.oblique_angle - rad).abs() > 1e-12 {
             a.oblique_angle = rad;
             ch = true;
         }
     }
-    if a.horizontal_alignment != row.h_align {
+    // A multi-line attribute is placed by its text box's attachment (below);
+    // its own single-line justification stays as it is.
+    if !row.multiline && a.horizontal_alignment != row.h_align {
         a.horizontal_alignment = row.h_align;
         ch = true;
     }
-    if a.vertical_alignment != row.v_align {
+    if !row.multiline && a.vertical_alignment != row.v_align {
         a.vertical_alignment = row.v_align;
         ch = true;
     }
@@ -6496,6 +6432,33 @@ pub(crate) fn apply_attr_row(a: &mut document::entities::AttributeEntity, row: &
     if a.common.line_weight != row.line_weight {
         a.common.line_weight = row.line_weight;
         ch = true;
+    }
+    // A multi-line attribute draws from its embedded text: it follows.
+    if let Some(m) = a.embedded_mtext.as_mut() {
+        if let Some(w) = row
+            .boundary_width
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|w| *w >= 0.0)
+        {
+            if m.rectangle_width != w {
+                m.rectangle_width = w;
+                ch = true;
+            }
+        }
+        if m.height != a.height || m.rotation != a.rotation || m.style != a.text_style {
+            m.height = a.height;
+            m.rotation = a.rotation;
+            m.style = a.text_style.clone();
+            ch = true;
+        }
+        if let Some(p) = crate::app::attr_editor::attachment_for(row.h_align, row.v_align) {
+            if m.attachment_point != p {
+                m.attachment_point = p;
+                ch = true;
+            }
+        }
     }
     ch
 }
@@ -8702,4 +8665,346 @@ pub(super) fn layer_rename_problem(
 /// Layers the Layer manager never deletes; the rule lives with the table.
 pub(super) fn layer_is_protected(name: &str, current: &str) -> bool {
     crate::ui::window::layers::layer_is_protected(name, current)
+}
+
+/// The inputs of `refresh_layer_tree`, folded into one value: the layers the
+/// selected objects sit on, the layer fields the filter engine reads, the
+/// filters the drawing keeps and the ribbon setting. Entity geometry and the
+/// selection handles themselves are not inputs — the tree shows layers — so an
+/// edit or a selection change that leaves those layers alone must not rebuild it.
+fn layer_tree_key(scene: &Scene, ribbon_follows: bool) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    ribbon_follows.hash(&mut hasher);
+    // The tree lists the distinct lowercased layers of the selected objects, so
+    // the key folds that set: one more object on a layer already listed changes
+    // nothing, while the set itself hashes in order like the rebuilt row does.
+    let mut selected: Vec<String> = scene
+        .selected
+        .iter()
+        .filter_map(|handle| scene.document.get_entity(*handle))
+        .map(|entity| entity.common().layer.to_lowercase())
+        .collect();
+    selected.sort();
+    selected.dedup();
+    selected.hash(&mut hasher);
+    for layer in scene.document.layers.iter() {
+        layer.name.hash(&mut hasher);
+        layer.description.hash(&mut hasher);
+        layer.color.index().hash(&mut hasher);
+        layer.line_type.hash(&mut hasher);
+        layer.is_off().hash(&mut hasher);
+        layer.is_frozen().hash(&mut hasher);
+        layer.is_locked().hash(&mut hasher);
+        layer.is_plottable.hash(&mut hasher);
+        layer.flags.xref_dependent.hash(&mut hasher);
+    }
+    super::super::layer_filter_store::filter_table_fingerprint(&scene.document).hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Test-only tally of how often `refresh_layer_tree` entered its expensive
+/// rebuild (reload the drawing's filters + walk them over every layer). The
+/// idle-refresh test asserts it does not move when nothing changed.
+#[cfg(test)]
+std::thread_local! {
+    static TREE_EXPENSIVE_RUNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+mod layer_refresh_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+
+    /// The tally is per thread, so tests running in parallel do not see each
+    /// other's rebuilds.
+    fn expensive_runs() -> usize {
+        TREE_EXPENSIVE_RUNS.with(std::cell::Cell::get)
+    }
+
+    fn reset_expensive_runs() {
+        TREE_EXPENSIVE_RUNS.with(|runs| runs.set(0));
+    }
+
+    fn app_with_layer_panel() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        for k in 0..6u8 {
+            let mut layer = document::tables::Layer::new(format!("L{k}"));
+            layer.handle = app.tabs[i].scene.document.allocate_handle();
+            layer.color = document::types::Color::Index(k + 1);
+            let _ = app.tabs[i].scene.document.layers.add(layer);
+        }
+        for k in 1..6u8 {
+            let mut entity = document::EntityType::Line(document::entities::Line::new());
+            entity.common_mut().layer = format!("L{k}");
+            app.tabs[i].scene.add_entity(entity);
+        }
+        app.show_layers = true;
+        app.dock.float(crate::ui::dock::FloatPanel::new(
+            crate::ui::dock::PanelId::Layers,
+            50.0,
+            50.0,
+            1300.0,
+            700.0,
+        ));
+        assert!(
+            app.dock_panel_visible(crate::ui::dock::PanelId::Layers),
+            "the harness must have the Layers panel showing",
+        );
+        app
+    }
+
+    /// #11: an idle message (nothing changed since the last refresh) must not
+    /// rerun the filter-tree rebuild. Before the gate every message reloaded
+    /// the drawing's filters and Debug-formatted every layer for the key.
+    #[test]
+    fn idle_layer_refresh_skips_the_expensive_rebuild() {
+        let mut app = app_with_layer_panel();
+        app.refresh_layer_counts();
+        assert!(
+            expensive_runs() > 0,
+            "the first refresh must build the tree"
+        );
+        reset_expensive_runs();
+        app.refresh_layer_counts();
+        assert_eq!(
+            expensive_runs(),
+            0,
+            "an idle refresh must not rerun the filter-tree rebuild",
+        );
+    }
+
+    /// The gate must read layer content, not just `geometry_epoch`: a property
+    /// change on a layer with no entities bumps no geometry epoch, yet it can
+    /// move the layer into a property filter.
+    #[test]
+    fn a_layer_property_change_still_refreshes_the_tree() {
+        let mut app = app_with_layer_panel();
+        let i = app.active_tab;
+        {
+            let mut empty = document::tables::Layer::new("EMPTY");
+            empty.handle = app.tabs[i].scene.document.allocate_handle();
+            empty.color = document::types::Color::Index(1);
+            let _ = app.tabs[i].scene.document.layers.add(empty);
+        }
+        app.layer_filters = vec![crate::app::layer_filters::LayerFilter {
+            name: "REDS".into(),
+            predicates: vec![crate::app::layer_filters::LayerPredicate::Color(5)],
+            ..Default::default()
+        }];
+        app.persist_layer_filters(i, "TEST FILTERS");
+        app.refresh_layer_counts();
+        let in_reds = |app: &OpenCADStudio| {
+            app.tabs[i]
+                .layers
+                .filters
+                .iter()
+                .find(|(name, _)| name == "REDS")
+                .map(|(_, members)| members.iter().any(|n| n == "EMPTY"))
+                .unwrap_or(false)
+        };
+        assert!(!in_reds(&app), "a colour-1 layer is not in the reds filter");
+        app.edit_layers(i, "TEST COLOR", &["EMPTY".to_string()], |layer| {
+            layer.color = document::types::Color::Index(5);
+        });
+        app.refresh_layer_counts();
+        assert!(
+            in_reds(&app),
+            "recolouring an empty layer must carry it into the filter",
+        );
+    }
+
+    /// `edit_layers` bumps the geometry epoch even when the edit writes back
+    /// the value the layer already had. The tree shows layer properties, not
+    /// geometry, so that edit must not rebuild it.
+    #[test]
+    fn an_edit_that_leaves_the_tree_inputs_alone_skips_the_rebuild() {
+        let mut app = app_with_layer_panel();
+        let i = app.active_tab;
+        app.refresh_layer_counts();
+        assert!(
+            expensive_runs() > 0,
+            "the first refresh must build the tree"
+        );
+        reset_expensive_runs();
+        app.edit_layers(i, "TEST NOOP", &["L2".to_string()], |layer| {
+            let color = layer.color;
+            layer.color = color;
+        });
+        app.refresh_layer_counts();
+        assert_eq!(
+            expensive_runs(),
+            0,
+            "an edit that changes nothing the tree shows must not rebuild it",
+        );
+    }
+
+    /// The selected-objects row follows the objects' layers, so carrying a
+    /// selected object to another layer must rebuild the tree.
+    #[test]
+    fn moving_a_selected_object_to_another_layer_refreshes_the_tree() {
+        let mut app = app_with_layer_panel();
+        let i = app.active_tab;
+        let mut line = document::entities::Line::new();
+        line.common.layer = "L1".into();
+        let handle = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(line));
+        app.tabs[i].scene.selected.insert(handle);
+        app.refresh_layer_counts();
+        assert!(
+            app.tabs[i]
+                .layers
+                .selected_object_layers
+                .contains(&"l1".to_string()),
+            "the row must start on l1",
+        );
+        let entity = app.tabs[i].scene.document.get_entity_mut(handle).unwrap();
+        entity.common_mut().layer = "L3".into();
+        app.refresh_layer_counts();
+        assert_eq!(
+            app.tabs[i].layers.selected_object_layers,
+            vec!["l3".to_string()],
+            "the row must follow the object to l3",
+        );
+    }
+
+    /// Selecting one more object on a layer the row already lists leaves the
+    /// row as it was, so the panel must not rebuild for it.
+    #[test]
+    fn selecting_another_object_on_the_same_layer_skips_the_rebuild() {
+        let mut app = app_with_layer_panel();
+        let i = app.active_tab;
+        let mut first = document::entities::Line::new();
+        first.common.layer = "L1".into();
+        let first = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(first));
+        let mut second = document::entities::Line::new();
+        second.common.layer = "L1".into();
+        let second = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(second));
+        app.tabs[i].scene.selected.insert(first);
+        app.refresh_layer_counts();
+        assert!(
+            expensive_runs() > 0,
+            "the first selection must build the tree"
+        );
+        reset_expensive_runs();
+        app.tabs[i].scene.selected.insert(second);
+        app.refresh_layer_counts();
+        assert_eq!(
+            expensive_runs(),
+            0,
+            "another object on the same layer must not rebuild the tree",
+        );
+    }
+
+    /// The drawing's filter table can change behind the session's back: a file
+    /// just opened into the tab, another part of the app writing it. The panel
+    /// shows the drawing's filters, so the gate must reload them when that
+    /// table moves.
+    #[test]
+    fn a_drawing_side_filter_change_reloads_the_filters() {
+        let mut app = app_with_layer_panel();
+        let i = app.active_tab;
+        app.layer_filters = vec![crate::app::layer_filters::LayerFilter {
+            name: "KEEP".into(),
+            pattern: "L*".into(),
+            ..Default::default()
+        }];
+        app.persist_layer_filters(i, "TEST FILTERS");
+        app.refresh_layer_counts();
+        assert_eq!(app.tabs[i].layers.filters.len(), 1);
+        crate::app::layer_filter_store::write_layer_filters(&mut app.tabs[i].scene.document, &[]);
+        app.refresh_layer_counts();
+        assert!(
+            app.tabs[i].layers.filters.is_empty(),
+            "the panel must drop a filter the drawing no longer has",
+        );
+        reset_expensive_runs();
+        app.refresh_layer_counts();
+        assert_eq!(
+            expensive_runs(),
+            0,
+            "the reload must settle: the next message has nothing to do",
+        );
+    }
+
+    /// The filter records the drawing holds, by handle, to see the allocator
+    /// hand one out again.
+    fn filter_record_handles(app: &OpenCADStudio, i: usize) -> Vec<u64> {
+        let mut handles: Vec<u64> = app.tabs[i]
+            .scene
+            .document
+            .objects
+            .iter()
+            .filter(|(_, object)| {
+                matches!(object,
+                document::objects::ObjectType::XRecord(record)
+                    if record.entries.first().is_some_and(|entry| {
+                        entry.code == 1 && entry.value.as_string() == Some("AcLyLayerFilter")
+                    }))
+            })
+            .map(|(handle, _)| handle.value())
+            .collect();
+        handles.sort_unstable();
+        handles
+    }
+
+    /// A filter write is an undo step, and undo rewinds the drawing's handle
+    /// allocator: the next write can hand out the same record handle again
+    /// with another expression. The panel is not refreshed while it is hidden,
+    /// so the cached key must follow the records' content, not their handles.
+    #[test]
+    fn a_filter_rewritten_after_undo_reloads_the_filters() {
+        let mut app = app_with_layer_panel();
+        let i = app.active_tab;
+        let set = |app: &mut OpenCADStudio, colour: u16, label: &str| {
+            app.layer_filters = vec![crate::app::layer_filters::LayerFilter {
+                name: "REDS".into(),
+                predicates: vec![crate::app::layer_filters::LayerPredicate::Color(colour)],
+                ..Default::default()
+            }];
+            app.persist_layer_filters(i, label);
+        };
+        {
+            let mut red = document::tables::Layer::new("L7");
+            red.handle = app.tabs[i].scene.document.allocate_handle();
+            red.color = document::types::Color::Index(7);
+            let _ = app.tabs[i].scene.document.layers.add(red);
+        }
+        set(&mut app, 5, "TEST FILTERS 5");
+        app.refresh_layer_counts();
+        set(&mut app, 7, "TEST FILTERS 7");
+        app.refresh_layer_counts();
+        let in_reds = |app: &OpenCADStudio, name: &str| {
+            app.tabs[i]
+                .layers
+                .filters
+                .iter()
+                .find(|(filter, _)| filter == "REDS")
+                .map(|(_, members)| members.iter().any(|member| member == name))
+                .unwrap_or(false)
+        };
+        assert!(in_reds(&app, "L7"), "the row follows the colour-7 filter");
+        let rewritten = filter_record_handles(&app, i);
+        app.show_layers = false;
+        let _ = app.update(crate::app::Message::Undo);
+        set(&mut app, 8, "TEST FILTERS 8");
+        assert_eq!(
+            filter_record_handles(&app, i),
+            rewritten,
+            "the scenario needs undo to rewind the allocator into the same handle",
+        );
+        app.show_layers = true;
+        app.refresh_layer_counts();
+        assert!(
+            !in_reds(&app, "L7"),
+            "a filter rewritten onto a reused record handle must reload",
+        );
+    }
 }

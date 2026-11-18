@@ -26,9 +26,8 @@ pub enum XrefStatus {
     Failed,
     /// File path is set but the file could not be found or read.
     NotFound,
-    /// XRef is marked Unloaded in the host DWG — we honor that and
-    /// skip resolving the external file. The user can re-load via UI.
-    #[allow(dead_code)]
+    /// XRef is marked Unloaded in the host DWG — opening honors that and
+    /// skips resolving the external file. The user can re-load via UI.
     Unloaded,
 }
 
@@ -289,7 +288,7 @@ fn read_outcome_from_bytes(
 ///
 /// Returns a list of [`XrefInfo`] describing each xref block found.
 pub fn resolve_xrefs(doc: &mut Document, base_dir: &Path) -> Vec<XrefInfo> {
-    resolve_xrefs_with_filter(doc, base_dir, None, None)
+    resolve_xrefs_with_filter(doc, base_dir, None, None, false)
 }
 
 /// Reload only the direct xref block records identified by `keys`.
@@ -302,10 +301,11 @@ pub fn resolve_xrefs_for_keys(
     base_dir: &Path,
     keys: &HashSet<Handle>,
 ) -> Vec<XrefInfo> {
-    resolve_xrefs_with_filter(doc, base_dir, None, Some(keys))
+    resolve_xrefs_with_filter(doc, base_dir, None, Some(keys), false)
 }
 
-/// Resolve XREFs while reporting completed work units.
+/// Resolve XREFs while reporting completed work units. This is the open
+/// path: a reference the file stores as unloaded stays unloaded.
 ///
 /// Each reference contributes 1000 parse units and 1000 merge units. Parsing
 /// progress comes directly from the DWG reader when available, so one large
@@ -315,7 +315,7 @@ pub fn resolve_xrefs_with_progress(
     base_dir: &Path,
     progress: Option<std::sync::Arc<dyn Fn(usize, usize) + Send + Sync>>,
 ) -> Vec<XrefInfo> {
-    resolve_xrefs_with_filter(doc, base_dir, progress, None)
+    resolve_xrefs_with_filter(doc, base_dir, progress, None, true)
 }
 
 fn resolve_xrefs_with_filter(
@@ -323,15 +323,31 @@ fn resolve_xrefs_with_filter(
     base_dir: &Path,
     progress: Option<std::sync::Arc<dyn Fn(usize, usize) + Send + Sync>>,
     only: Option<&HashSet<Handle>>,
+    honor_unloaded: bool,
 ) -> Vec<XrefInfo> {
+    let mut result = Vec::new();
     // Auto-resolve every xref — frustum + LOD culling keep GPU cost bounded.
-    let xref_entries: Vec<(String, String, Handle)> = doc
-        .block_records
-        .iter()
-        .filter(|br| (br.flags.is_xref || br.flags.is_xref_overlay) && !br.xref_path.is_empty())
-        .filter(|br| only.is_none_or(|keys| keys.contains(&br.handle)))
-        .map(|br| (br.name.clone(), br.xref_path.clone(), br.handle))
-        .collect();
+    let mut xref_entries: Vec<(String, String, Handle)> = Vec::new();
+    for br in doc.block_records.iter() {
+        if !(br.flags.is_xref || br.flags.is_xref_overlay)
+            || br.xref_path.is_empty()
+            || !only.is_none_or(|keys| keys.contains(&br.handle))
+        {
+            continue;
+        }
+        if honor_unloaded && br.flags.is_xref_unloaded {
+            result.push(XrefInfo {
+                name: br.name.clone(),
+                path: br.xref_path.clone(),
+                status: XrefStatus::Unloaded,
+                diagnostics: Vec::new(),
+                read_stats: None,
+                source_sha256: None,
+            });
+            continue;
+        }
+        xref_entries.push((br.name.clone(), br.xref_path.clone(), br.handle));
+    }
     let xref_count = xref_entries.len();
     let total_units = xref_count.saturating_mul(2000);
     if let Some(progress) = &progress {
@@ -437,7 +453,7 @@ fn resolve_xrefs_with_filter(
 
     // Phase 2 — merge each parsed xref into the host document, in the original
     // block order (par_iter preserves it), so handle allocation is deterministic.
-    let mut result = Vec::with_capacity(parsed.len());
+    result.reserve(parsed.len());
     #[allow(unused_mut, unused_variables)]
     for (
         merge_index,
@@ -1731,6 +1747,14 @@ fn collect_entries_impl(
             .filter(|e| e.parent_key.is_some())
             .filter_map(|e| e.found_at.as_deref().map(normalize_lexical))
             .collect();
+        // The host's copy of a nested record keeps the path it had where the
+        // parent was last saved (another machine's folder), so it may resolve
+        // to another file than the walk did; its name is the nested row's.
+        let nested_names: HashSet<String> = entries
+            .iter()
+            .filter(|e| e.parent_key.is_some())
+            .map(|e| e.name.to_uppercase())
+            .collect();
         let inserted: HashSet<String> = doc
             .entities()
             .filter_map(|e| match e {
@@ -1742,10 +1766,10 @@ fn collect_entries_impl(
             e.parent_key.is_some()
                 || e.kind != RefKind::DwgXref
                 || inserted.contains(&e.name.to_uppercase())
-                || !e
-                    .found_at
-                    .as_deref()
-                    .is_some_and(|found| nested_files.contains(&normalize_lexical(found)))
+                || !(nested_names.contains(&e.name.to_uppercase())
+                    || e.found_at
+                        .as_deref()
+                        .is_some_and(|found| nested_files.contains(&normalize_lexical(found))))
         });
     }
 
@@ -4541,3 +4565,4 @@ mod web_registry_tests {
         assert!(unresolved_xref_names(&[]).is_empty());
     }
 }
+

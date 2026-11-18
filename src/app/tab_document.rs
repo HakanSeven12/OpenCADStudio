@@ -173,6 +173,11 @@ pub(super) struct DocumentTab {
     /// Monotonic committed-edit/undo/redo revision. Background save completion
     /// uses it with scene epochs so an older snapshot never clears newer work.
     pub(super) edit_revision: u64,
+    /// Bumped whenever a whole document replaces this tab's content. Work
+    /// started against the old document (a model import being read off the UI
+    /// thread) checks it before touching the drawing: the tab keeps its id,
+    /// the document does not.
+    pub(super) document_generation: u64,
     /// A whole document replaced this tab's content (file open, template new,
     /// system open) and native plugins have not been told yet: the
     /// message boundary (`OpenCADStudio::notify_plugins_document_opened`,
@@ -803,6 +808,13 @@ impl DocumentTab {
         (origin, xf.rotation_mat())
     }
 
+    /// The document as a save writes it, with this session's xref load state.
+    pub(super) fn document_for_save(&self) -> document::Document {
+        let mut document = self.scene.document_for_save();
+        self.xref_unloaded.write_flags(&mut document);
+        document
+    }
+
     pub(super) fn new_drawing(n: usize) -> Self {
         let mut scene = Scene::new();
         scene.populate_new_drawing_defaults();
@@ -822,6 +834,7 @@ impl DocumentTab {
             ifccad_alpha_acknowledged: false,
             ifccad_session: None,
             edit_revision: 0,
+            document_generation: 0,
             document_opened_pending: true,
             prev_selection: Vec::new(),
             tab_title: format!("Drawing{}", n),
@@ -941,8 +954,16 @@ impl DocumentTab {
         // gone, and its coordinates are not the new document's.
         crate::modules::draw::draw::attdef::session().forget_place_of(self.id);
         crate::modules::annotate::text::forget_place_of(self.id);
+        self.document_generation = self.document_generation.wrapping_add(1);
         self.ifccad_session = ifccad_session;
         self.document_opened_pending = true;
+    }
+
+    /// A fresh drawing replaced this tab's content in place, without a file
+    /// load to announce (CLEAR and its ribbon tool): work started against the
+    /// cleared drawing sees the new generation and drops its result.
+    pub(super) fn note_drawing_cleared(&mut self) {
+        self.document_generation = self.document_generation.wrapping_add(1);
     }
 
     pub(super) fn tab_display_name(&self) -> String {
@@ -1093,10 +1114,8 @@ impl HistorySnapshot {
         }
     }
 
-    /// Approximate retained history memory. Entity images are shared through
-    /// `Arc`; the estimate conservatively budgets their payloads and optional
-    /// structure state to keep pathological histories bounded.
-    pub(super) fn estimated_bytes(&self) -> usize {
+    #[cfg(all(test, feature = "performance-audit"))]
+    pub(super) fn performance_audit_legacy_bytes(&self) -> usize {
         match self {
             HistorySnapshot::Delta(d) => d
                 .entities
@@ -1150,6 +1169,80 @@ impl HistorySnapshot {
                 .saturating_mul(16)
                 .saturating_add(v.label.estimated_bytes()),
         }
+    }
+
+    /// Snapshot-owned bookkeeping and structural estimates. Shared entity
+    /// images and raw records are charged separately across both history stacks.
+    pub(super) fn estimated_overhead_bytes(&self) -> usize {
+        let bytes = match self {
+            HistorySnapshot::Delta(d) => d
+                .entities
+                .capacity()
+                .saturating_mul(std::mem::size_of::<(
+                    Handle,
+                    Option<Arc<EntityType>>,
+                    Option<Arc<EntityType>>,
+                )>())
+                .saturating_add(std::mem::size_of::<DeltaSnapshot>())
+                .saturating_add(d.current_layout_before.capacity())
+                .saturating_add(d.current_layout_after.capacity())
+                .saturating_add(
+                    d.structure
+                        .as_ref()
+                        .map_or(0, StructureSnapshot::estimated_bytes),
+                )
+                .saturating_add(
+                    d.selected_before
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<Handle>()),
+                )
+                .saturating_add(
+                    d.selected_after
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<Handle>()),
+                )
+                .saturating_add(d.active_layer.as_ref().map_or(0, |(before, after)| {
+                    before.len().saturating_add(after.len())
+                }))
+                .saturating_add(
+                    d.parametric_constraints
+                        .iter()
+                        .map(|entry| {
+                            entry
+                                .before
+                                .constraints
+                                .len()
+                                .saturating_add(entry.after.constraints.len())
+                        })
+                        .sum::<usize>()
+                        .saturating_mul(96),
+                )
+                .saturating_add(d.named_parameters.as_ref().map_or(0, |(before, after)| {
+                    before.len().saturating_add(after.len()).saturating_mul(128)
+                }))
+                .saturating_add(d.visibility_states.as_ref().map_or(0, |(before, after)| {
+                    (before.len() + after.len()).saturating_mul(32)
+                }))
+                .saturating_add(d.reference_designations.len().saturating_mul(16))
+                .saturating_add(d.reference_session.as_ref().map_or(0, |(before, after)| {
+                    before
+                        .estimated_bytes()
+                        .saturating_add(after.estimated_bytes())
+                }))
+                .saturating_add(d.label.estimated_bytes()),
+            HistorySnapshot::ObjectVisibility(v) => v
+                .before
+                .hidden
+                .len()
+                .saturating_add(v.before.keep.as_ref().map_or(0, rustc_hash::FxHashSet::len))
+                .saturating_add(v.after.hidden.len())
+                .saturating_add(v.after.keep.as_ref().map_or(0, rustc_hash::FxHashSet::len))
+                .saturating_add(v.selected_before.len())
+                .saturating_add(v.selected_after.len())
+                .saturating_mul(16)
+                .saturating_add(v.label.estimated_bytes()),
+        };
+        bytes.saturating_add(std::mem::size_of::<Self>())
     }
 }
 
@@ -1336,8 +1429,9 @@ pub(super) struct ReferenceDesignationDelta {
 
 #[derive(Default)]
 pub(super) struct HistoryState {
-    pub(super) undo_stack: Vec<HistorySnapshot>,
-    pub(super) redo_stack: Vec<HistorySnapshot>,
+    pub(super) undo_stack: super::history::memory::HistoryStack,
+    pub(super) redo_stack: super::history::memory::HistoryStack,
+    pub(super) budget: Option<super::history::memory::HistoryBudget>,
     pub(super) pending: Option<PendingHistorySnapshot>,
 }
 

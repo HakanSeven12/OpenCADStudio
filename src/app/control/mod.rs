@@ -106,6 +106,9 @@ pub(super) struct State {
     completed: VecDeque<(String, Value, Value)>,
     owner: Option<(u64, String)>,
     pub enabled: bool,
+    /// The MCP button's last state, restored at the next start (#3126). Only
+    /// the button writes it: a client's `stop` must not outlive the session.
+    pub start_enabled: bool,
     /// Set by the first control request of the session (or by a web host's
     /// boot-time opt-in): while control is enabled, startup prompts that
     /// would block automation — the donation prompt — are suppressed (#1349).
@@ -171,6 +174,7 @@ impl State {
     pub(super) fn new() -> Self {
         Self {
             enabled: true,
+            start_enabled: true,
             ..Self::default()
         }
     }
@@ -1631,7 +1635,8 @@ impl OpenCADStudio {
                 }
                 let ext = if is_dxf { "dxf" } else { "dwg" };
                 if let Some(session) = &self.tabs[i].ifccad_session {
-                    session.check_destination(ext)
+                    session
+                        .check_destination(&self.tabs[i].scene.document, ext)
                         .map_err(|error| failure("save_failed", error))?;
                 }
                 self.sync_view_state_for_save(i);
@@ -2317,7 +2322,7 @@ pub(crate) mod spellcheck;
 pub(crate) mod text_ops;
 
 // SWG-005: the semantic plugin-panel MCP ops' host half (reads + the ONE
-// machine-path invoke) — desktop-only, like the v24 store it reads.
+// machine-path invoke) — desktop-only, like the v25 store it reads.
 #[cfg(not(target_arch = "wasm32"))]
 mod mcp_panel_semantics;
 

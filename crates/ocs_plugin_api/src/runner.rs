@@ -351,14 +351,16 @@ fn notification_api_version(notification: &crate::host::HostNotification) -> u32
     use crate::host::HostNotification as N;
     match notification {
         N::QuadAction { .. } => 15,
-        // V24 scene/widget wire tails (the crossing re-versioned from 23 to
-        // 24 at the SCN-026 upstream merge: upstream's v23 = the
-        // `TableOperation::LayoutSetTabOrder` append, so our scene/widget
-        // crossing claims 24 — see `manifest::API_VERSION`): the
+        // V25 scene/widget wire tails (the crossing re-versioned twice at
+        // upstream merges: 23→24 at SCN-026 — upstream's v23 = the
+        // `TableOperation::LayoutSetTabOrder` append — and 24→25 at SCN-038,
+        // the V24 label collision: upstream consumed v24 for THEIR
+        // `HostRequest::UndoStep` crossing, so our scene/widget crossing
+        // claims 25 — see `manifest::API_VERSION`): the
         // mount/publisher attach is LIVE (SCN-025), and the runner
         // conversational gate was in place BEFORE the publisher existed (a
-        // pre-24 cdylib has no such variants and must never see the frames).
-        N::PanelSceneEvents { .. } | N::PanelStoreDemand { .. } => 24,
+        // pre-25 cdylib has no such variants and must never see the frames).
+        N::PanelSceneEvents { .. } | N::PanelStoreDemand { .. } => 25,
         N::SelectionChangedDigest { .. } => 22,
         N::DocumentChangedRegions { .. } => 13,
         N::DocumentOpened { .. } => 9,
@@ -385,6 +387,37 @@ fn run_dialog_action(
                 .ok()
         })
         .unwrap_or(crate::dialog::DialogActionResponse::None)
+}
+
+/// `on_undo_step` of the interactive command `command_id` (API v24): `None`
+/// when the plugin predates the slot, the command is gone, declines, or
+/// panics. A step that ends the command releases it, as for an input event.
+fn run_undo_step(
+    interactive: &InteractiveRegistry,
+    command_id: u64,
+    api_version: u32,
+) -> Option<Box<CommandStep>> {
+    // A cdylib built against API v23 or older has no slot for this method.
+    if api_version < 24 {
+        return None;
+    }
+    let step = {
+        let mut registry = interactive.borrow_mut();
+        let cmd = registry.get_mut(&command_id)?;
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cmd.on_undo_step()))
+            .ok()
+            .flatten()?
+    };
+    if matches!(
+        step,
+        CommandStep::Done
+            | CommandStep::Cancel
+            | CommandStep::CommitAndEnd(_)
+            | CommandStep::CommitManyAndEnd(_)
+    ) {
+        interactive.borrow_mut().remove(&command_id);
+    }
+    Some(Box::new(step))
 }
 
 fn handle_host_request(
@@ -583,6 +616,8 @@ fn handle_host_request(
         HostRequest::DialogAction { command_id, event } => {
             HostResponse::DialogAction(run_dialog_action(interactive, command_id, event))
         }
+        // The V3 path serves plugins far older than v24.
+        HostRequest::UndoStep { .. } => HostResponse::UndoStep(None),
         HostRequest::ExecuteCode { .. } => {
             HostResponse::Error("ExecuteCode requires V4 protocol".to_string())
         }
@@ -835,6 +870,11 @@ fn handle_host_request_v4(
         HostRequest::DialogAction { command_id, event } => Some(HostResponse::DialogAction(
             run_dialog_action(interactive, command_id, event),
         )),
+        HostRequest::UndoStep { command_id } => Some(HostResponse::UndoStep(run_undo_step(
+            interactive,
+            command_id,
+            api_version,
+        ))),
         HostRequest::ExecuteCode {
             command_id,
             source,
@@ -1138,6 +1178,160 @@ mod tests {
         drop(host_stream);
     }
 
+    /// A command that collects points and drops the last one on Ctrl+Z.
+    struct CollectPoints {
+        points: Vec<[f64; 3]>,
+        undo_calls: std::sync::Arc<AtomicU64>,
+    }
+
+    impl InteractiveCommand for CollectPoints {
+        fn prompt(&self) -> String {
+            format!("Point {}", self.points.len() + 1)
+        }
+        fn on_point(&mut self, pt: [f64; 3]) -> CommandStep {
+            self.points.push(pt);
+            CommandStep::NeedPoint
+        }
+        fn on_undo_step(&mut self) -> Option<CommandStep> {
+            self.undo_calls.fetch_add(1, Ordering::SeqCst);
+            self.points.pop().map(|_| CommandStep::NeedPoint)
+        }
+    }
+
+    /// A command whose step back ends it.
+    struct UndoEnds;
+
+    impl InteractiveCommand for UndoEnds {
+        fn prompt(&self) -> String {
+            String::new()
+        }
+        fn on_point(&mut self, _pt: [f64; 3]) -> CommandStep {
+            CommandStep::NeedPoint
+        }
+        fn on_undo_step(&mut self) -> Option<CommandStep> {
+            Some(CommandStep::Cancel)
+        }
+    }
+
+    fn registry_with_two_points(undo_calls: &std::sync::Arc<AtomicU64>) -> InteractiveRegistry {
+        let interactive: InteractiveRegistry = Rc::new(RefCell::new(HashMap::new()));
+        interactive.borrow_mut().insert(
+            7,
+            Box::new(CollectPoints {
+                points: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+                undo_calls: undo_calls.clone(),
+            }) as Box<dyn InteractiveCommand>,
+        );
+        interactive
+    }
+
+    fn prompt_of(
+        plugin: &mut dyn BuiltinPlugin,
+        interactive: &InteractiveRegistry,
+        client: &V4Client,
+    ) -> String {
+        match handle_host_request_v4(
+            plugin,
+            interactive,
+            client,
+            50,
+            24,
+            HostRequest::GetPrompt { command_id: 7 },
+        ) {
+            Some(HostResponse::Text(prompt)) => prompt,
+            other => panic!("expected the prompt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn undo_step_reaches_a_v24_command_and_returns_its_step() {
+        let (host_stream, runner_stream) = connect_pair();
+        let client = V4Client::from_stream_for_test(runner_stream);
+        let undo_calls = std::sync::Arc::new(AtomicU64::new(0));
+        let interactive = registry_with_two_points(&undo_calls);
+        let mut plugin = UnsupportedReplPlugin;
+        let undo = |plugin: &mut UnsupportedReplPlugin, command_id: u64| {
+            handle_host_request_v4(
+                plugin,
+                &interactive,
+                &client,
+                1,
+                24,
+                HostRequest::UndoStep { command_id },
+            )
+        };
+        assert!(matches!(
+            undo(&mut plugin, 7),
+            Some(HostResponse::UndoStep(Some(ref step))) if matches!(**step, CommandStep::NeedPoint)
+        ));
+        assert_eq!(prompt_of(&mut plugin, &interactive, &client), "Point 2");
+        assert!(matches!(
+            undo(&mut plugin, 7),
+            Some(HostResponse::UndoStep(Some(_)))
+        ));
+        // Nothing left to drop: the command declines and stays registered.
+        assert!(matches!(
+            undo(&mut plugin, 7),
+            Some(HostResponse::UndoStep(None))
+        ));
+        assert!(interactive.borrow().contains_key(&7));
+        // An unknown command answers None instead of failing.
+        assert!(matches!(
+            undo(&mut plugin, 8),
+            Some(HostResponse::UndoStep(None))
+        ));
+        assert_eq!(undo_calls.load(Ordering::SeqCst), 3);
+        drop(host_stream);
+    }
+
+    #[test]
+    fn undo_step_that_ends_the_command_releases_it() {
+        let (host_stream, runner_stream) = connect_pair();
+        let client = V4Client::from_stream_for_test(runner_stream);
+        let interactive: InteractiveRegistry = Rc::new(RefCell::new(HashMap::new()));
+        interactive
+            .borrow_mut()
+            .insert(3, Box::new(UndoEnds) as Box<dyn InteractiveCommand>);
+        let mut plugin = UnsupportedReplPlugin;
+        let resp = handle_host_request_v4(
+            &mut plugin,
+            &interactive,
+            &client,
+            1,
+            24,
+            HostRequest::UndoStep { command_id: 3 },
+        );
+        assert!(matches!(
+            resp,
+            Some(HostResponse::UndoStep(Some(ref step))) if matches!(**step, CommandStep::Cancel)
+        ));
+        assert!(!interactive.borrow().contains_key(&3));
+        drop(host_stream);
+    }
+
+    /// A plugin built against API v23 has no `on_undo_step` slot: the runner
+    /// never calls it and answers that the command declines.
+    #[test]
+    fn undo_step_is_never_asked_of_a_pre_v24_command() {
+        let (host_stream, runner_stream) = connect_pair();
+        let client = V4Client::from_stream_for_test(runner_stream);
+        let undo_calls = std::sync::Arc::new(AtomicU64::new(0));
+        let interactive = registry_with_two_points(&undo_calls);
+        let mut plugin = UnsupportedReplPlugin;
+        let resp = handle_host_request_v4(
+            &mut plugin,
+            &interactive,
+            &client,
+            1,
+            23,
+            HostRequest::UndoStep { command_id: 7 },
+        );
+        assert!(matches!(resp, Some(HostResponse::UndoStep(None))));
+        assert_eq!(undo_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(prompt_of(&mut plugin, &interactive, &client), "Point 3");
+        drop(host_stream);
+    }
+
     static V10_MANIFEST: PluginManifest = PluginManifest {
         id: "test.classed",
         name: "Test Classed",
@@ -1259,7 +1453,7 @@ mod tests {
     }
 
     #[test]
-    fn notification_gate_rows_hold_the_v24_tails_back_from_pre_v24_plugins() {
+    fn notification_gate_rows_hold_the_v25_tails_back_from_pre_v25_plugins() {
         use crate::host::HostNotification as N;
 
         let events = || N::PanelSceneEvents {
@@ -1273,14 +1467,14 @@ mod tests {
             parent_id: None,
             range: crate::widgets::WidgetRange { start: 0, len: 4 },
         };
-        // The v24 wire tails gate at 24 (SCN-026 re-version: 23 stays
-        // upstream's LayoutSetTabOrder era): a runner serving an
-        // api_version < 24 plugin must DROP both frames (the cdylib has no
-        // such variants — upstream's v23 plugins included).
-        assert_eq!(notification_api_version(&events()), 24);
-        assert_eq!(notification_api_version(&demand()), 24);
-        assert!(notification_api_version(&events()) > 23);
-        assert!(notification_api_version(&demand()) > 23);
+        // The v25 wire tails gate at 25 (SCN-038 re-version: 24 stays
+        // upstream's UndoStep era): a runner serving an
+        // api_version < 25 plugin must DROP both frames (the cdylib has no
+        // such variants — upstream's v24 plugins included).
+        assert_eq!(notification_api_version(&events()), 25);
+        assert_eq!(notification_api_version(&demand()), 25);
+        assert!(notification_api_version(&events()) > 24);
+        assert!(notification_api_version(&demand()) > 24);
 
         // The v22 row is UNTOUCHED by the crossing: the digest still gates
         // at 22 (this is the exact row the v22 selection router relies on).

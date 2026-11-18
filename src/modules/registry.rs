@@ -25,6 +25,7 @@ pub fn all_modules() -> Vec<Box<dyn CadModule>> {
         Box::new(super::layout::LayoutModule),
         Box::new(super::block_editor::BlockEditorModule),
         Box::new(super::table_cell::TableCellModule),
+        Box::new(super::text_editor::TextEditorModule),
     ]
 }
 
@@ -51,7 +52,6 @@ const COMMAND_ICON_ALIASES: &[(&str, &str)] = &[
     ("-BOUNDARY", "BPOLY"),
     ("IMAGE", "IMAGEATTACH"),
     ("-IMAGE", "IMAGEATTACH"),
-    ("BMPOUT", "IMAGEATTACH"),
     // Modify & clipboard
     ("PASTE", "PASTECLIP"),
     ("ARRAY", "ARRAYRECT"),
@@ -288,6 +288,7 @@ const COMMAND_ICON_ALIASES: &[(&str, &str)] = &[
     ("PSPACE", "MVIEW"),
     ("PS", "MVIEW"),
     ("CHSPACE", "MVIEW"),
+    ("ALIGNSPACE", "MVIEW"),
     ("MVSETUP", "MVIEW"),
     ("LAYOUTMANAGER", "LAYOUT"),
     ("LAYOUTPANEL", "LAYOUT"),
@@ -331,6 +332,10 @@ const COMMAND_ICON_ALIASES: &[(&str, &str)] = &[
     ("STLOUT", "EXPORT"),
     ("FBXEXPORT", "EXPORT"),
     ("EXPORTSVG", "EXPORT"),
+    ("PNGOUT", "EXPORT"),
+    ("JPGOUT", "EXPORT"),
+    ("BMPOUT", "EXPORT"),
+    ("TIFOUT", "EXPORT"),
     ("ETRANSMIT", "EXPORT"),
     ("ARCHIVE", "EXPORT"),
     ("IMPORT", "IMPORTOBJ"),
@@ -892,6 +897,7 @@ const SYSTEM_VARIABLES: &[&str] = &[
     "LOGFILEPATH",
     "SAVEFILEPATH",
     "MSOLESCALE",
+    "NAVVCUBEOPACITY",
     "OLEFRAME",
     "OLEHIDE",
     "OLEQUALITY",

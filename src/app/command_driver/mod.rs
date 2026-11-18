@@ -113,7 +113,15 @@ impl OpenCADStudio {
     /// pick-first selector relaunching MOVE on the picked set works this way).
     /// Pure-selection commands (SELECTALL, QSELECT, …) run without an active
     /// command, so `was_active` is false and their selection is preserved.
-    pub(super) fn apply_cmd_result(&mut self, mut result: CmdResult) -> Task<Message> {
+    pub(super) fn apply_cmd_result(&mut self, result: CmdResult) -> Task<Message> {
+        let task = self.apply_cmd_result_outer(result);
+        if self.result_depth == 0 {
+            self.ask_annotation_scale_after_first_point();
+        }
+        task
+    }
+
+    fn apply_cmd_result_outer(&mut self, mut result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
         // A constraint addition records the geometry its solve moved outside
         // the command's own list. Only the outermost result owns the record:
@@ -1402,6 +1410,10 @@ impl OpenCADStudio {
                 distance,
             } => return self.handle_solid_shell(handle, actions, distance),
 
+            CmdResult::SolidEdit(request) => return self.handle_solid_edit(*request),
+
+            CmdResult::ExtractEdges(handles) => return self.handle_extract_edges(handles),
+
             CmdResult::SolidSubtract {
                 bases,
                 cutters,
@@ -1508,6 +1520,36 @@ impl OpenCADStudio {
             .as_ref()
             .and_then(|c| c.attedit_pending_handle());
         if let Some(ins_handle) = attedit_handle {
+            let mode = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .and_then(|c| c.attedit_mode());
+            if let Some((kind, current)) = mode {
+                // Back to the window's block (Enter / Esc at Select block),
+                // or a pick the prompt refuses: say why and ask again.
+                let back = current == Some(ins_handle);
+                let refusal = (!back)
+                    .then(|| self.attedit_refusal(i, ins_handle, kind, current.is_some()))
+                    .flatten();
+                if let Some(msg) = refusal {
+                    if !msg.is_empty() {
+                        self.command_line.push_output(crate::t!(msg).as_ref());
+                    }
+                    self.start_attedit_pick(kind, current);
+                    return Some(Task::none());
+                }
+                self.tabs[i].active_cmd = None;
+                self.command_line.set_step_options(Vec::new());
+                match kind {
+                    crate::modules::draw::modify::attedit::AtteditKind::Enhanced => {
+                        self.open_attribute_editor(ins_handle)
+                    }
+                    crate::modules::draw::modify::attedit::AtteditKind::Classic => {
+                        self.open_attribute_value_form(ins_handle)
+                    }
+                }
+                return Some(Task::none());
+            }
             self.tabs[i].active_cmd = None;
             self.command_line.set_step_options(Vec::new());
             self.open_attribute_editor(ins_handle);
@@ -2473,7 +2515,7 @@ fn apply_mleader_align(
                 .filter_map(|&h| leader(scene, h).map(|ml| (h, mleader_base(&ml))))
                 .map(|(h, base)| ((base - a).dot(span), h, base))
                 .collect();
-            order.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+            order.sort_by(|x, y| x.0.total_cmp(&y.0));
             let last = order.len().saturating_sub(1).max(1) as f64;
             for (k, (_, h, base)) in order.into_iter().enumerate() {
                 let target = a + span * (k as f64 / last);
@@ -2538,7 +2580,7 @@ fn apply_mleader_align(
                     moves.push((h, origin + dir * t - base));
                 }
             } else {
-                along.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+                along.sort_by(|x, y| x.0.total_cmp(&y.0));
                 let reference_extent = mleader_extent_along(&reference, dir);
                 // Ahead of the reference, then behind it, each content one
                 // spacing clear of the one before.

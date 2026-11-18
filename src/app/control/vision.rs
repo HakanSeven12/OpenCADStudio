@@ -310,11 +310,9 @@ pub(crate) fn compute_grounding(
 
     // Selected entities prioritized, then larger visual area first
     candidates.sort_by(|a, b| {
-        b.selected.cmp(&a.selected).then_with(|| {
-            b.area
-                .partial_cmp(&a.area)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
+        b.selected
+            .cmp(&a.selected)
+            .then_with(|| b.area.total_cmp(&a.area))
     });
 
     candidates.truncate(64);

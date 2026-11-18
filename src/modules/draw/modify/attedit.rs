@@ -1,11 +1,11 @@
-// ATTEDIT command — pick a block reference with attributes, then open the
-// attribute editor dialog on it.
+// EATTEDIT / ATTEDIT block pick: ask for a block reference, then the host
+// opens the attribute window on it (EATTEDIT: the enhanced editor; ATTEDIT:
+// the attribute value form).
 //
-// This command only performs the entity pick. Once a block is chosen it
-// reports the handle through `attedit_pending_handle`; the command host
-// (`command_driver`) ends the command and opens the editor dialog. When a
-// suitable block is already selected, the ATTEDIT dispatch opens the dialog
-// directly and never starts this command (see `app::commands::inquiry`).
+// The command only picks. The host reads the pick through
+// `attedit_pending_handle`, says why an object cannot be edited in the
+// prompt's own words and asks again, or ends the command and opens the
+// window (see `command_driver`).
 
 use crate::t;
 use glam::DVec3;
@@ -13,58 +13,120 @@ use glam::DVec3;
 use crate::command::{CadCommand, CmdResult, InputKind};
 use crate::scene::model::wire_model::WireModel;
 
+/// Which window the pick opens.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AtteditKind {
+    /// EATTEDIT: the enhanced attribute editor.
+    Enhanced,
+    /// ATTEDIT: the attribute value form.
+    Classic,
+}
+
 pub struct AtteditCommand {
-    /// The picked block reference, once the user clicks one.
+    kind: AtteditKind,
+    /// The block the open window is on, when Select block asks for another
+    /// one: Enter or Esc goes back to it.
+    current: Option<document::Handle>,
+    /// The pick, once made (a null handle: nothing was there).
     picked: Option<document::Handle>,
 }
 
-impl Default for AtteditCommand {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl AtteditCommand {
-    pub fn new() -> Self {
-        Self { picked: None }
+    pub fn new(kind: AtteditKind, current: Option<document::Handle>) -> Self {
+        Self {
+            kind,
+            current,
+            picked: None,
+        }
     }
 }
 
 impl CadCommand for AtteditCommand {
     fn name(&self) -> &'static str {
-        "ATTEDIT"
+        match self.kind {
+            AtteditKind::Enhanced => "EATTEDIT",
+            AtteditKind::Classic => "ATTEDIT",
+        }
     }
 
     fn prompt(&self) -> String {
-        t!("ATTEDIT  Select block with attributes:").into_owned()
+        match self.kind {
+            AtteditKind::Enhanced => t!("Select a block:").into_owned(),
+            AtteditKind::Classic => t!("Select block reference:").into_owned(),
+        }
     }
 
     fn needs_entity_pick(&self) -> bool {
         self.picked.is_none()
     }
 
+    fn entity_pick_accepts_last(&self) -> bool {
+        true
+    }
+
     fn on_entity_pick(&mut self, handle: document::Handle, _pt: DVec3) -> CmdResult {
-        if handle.is_null() {
-            return CmdResult::NeedPoint;
-        }
-        // Record the pick and yield: the host reads `attedit_pending_handle`
-        // and opens the editor dialog for this block.
+        // Yield to the host, which checks the object (`attedit_pending_handle`).
         self.picked = Some(handle);
         CmdResult::NeedPoint
+    }
+
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        // Typed points and `L` are picks the host makes; any other word is
+        // refused.
+        let word = text.trim();
+        if word.is_empty()
+            || word.chars().any(|c| c.is_ascii_digit())
+            || matches!(word.to_ascii_uppercase().as_str(), "L" | "LAST")
+        {
+            return None;
+        }
+        Some(CmdResult::ReportMessage(format!(
+            "{}\n{}",
+            t!("*Invalid selection*"),
+            t!("Expects a point or Last")
+        )))
     }
 
     fn on_point(&mut self, _pt: DVec3) -> CmdResult {
         CmdResult::NeedPoint
     }
+
     fn on_enter(&mut self) -> CmdResult {
-        CmdResult::Cancel
+        self.end()
     }
+
+    fn on_escape(&mut self) -> CmdResult {
+        self.end()
+    }
+
     fn on_preview_wires(&mut self, _pt: DVec3) -> Vec<WireModel> {
         vec![]
     }
 
     fn attedit_pending_handle(&self) -> Option<document::Handle> {
         self.picked
+    }
+
+    fn attedit_mode(&self) -> Option<(AtteditKind, Option<document::Handle>)> {
+        Some((self.kind, self.current))
+    }
+}
+
+impl AtteditCommand {
+    /// Enter or Esc: back to the open window's block when Select block was
+    /// asking; otherwise the command ends (EATTEDIT says the drawing has no
+    /// attributed blocks to edit, as the reference does).
+    fn end(&mut self) -> CmdResult {
+        if let Some(current) = self.current {
+            self.picked = Some(current);
+            return CmdResult::NeedPoint;
+        }
+        match self.kind {
+            AtteditKind::Enhanced => CmdResult::Measurement(
+                t!("This drawing contains no attributed blocks.").into_owned(),
+            ),
+            AtteditKind::Classic => CmdResult::Cancel,
+        }
     }
 }
 

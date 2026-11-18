@@ -48,6 +48,7 @@ mod qat;
 mod ribbon_menu;
 mod search;
 mod stretch_column;
+pub mod text_editor;
 use crate::t;
 use crate::ui::style::{chrome, ribbon_metrics as metrics, text as ui_text};
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
@@ -339,7 +340,7 @@ fn panel_height(titles: bool) -> f32 {
 /// Whether module `id`'s tab is contextual: shown only while its context
 /// lasts (a block being edited).
 fn is_contextual(id: &str) -> bool {
-    matches!(id, "block_editor" | "table_cell")
+    matches!(id, "block_editor" | "table_cell" | "text_editor")
 }
 
 // ── Ribbon state ───────────────────────────────────────────────────────────
@@ -445,6 +446,9 @@ pub struct Ribbon {
     /// While table cells are picked: the tab that was active before the
     /// Table Cell tab came up.
     table_cell_open: Option<usize>,
+    /// The tab shown before the Text Editor tab opened, while a multiline
+    /// text is edited.
+    text_editor_open: Option<usize>,
     block_testing: Option<usize>,
     /// XDWGFADECTL as the Reference slide-out shows it (negative = off).
     pub xref_fade: i32,
@@ -608,6 +612,7 @@ impl Ribbon {
             point_cloud_ctx: None,
             block_editing: None,
             table_cell_open: None,
+            text_editor_open: None,
             block_testing: None,
             xref_fade: 50,
             text_find: String::new(),
@@ -835,6 +840,38 @@ impl Ribbon {
         }
     }
 
+    /// Show the Text Editor tab while a multiline text is edited, and return
+    /// to the previous tab when the editor closes.
+    pub fn set_text_editor_context(&mut self, editing: bool) {
+        let Some(index) = self
+            .modules
+            .iter()
+            .position(|module| module.id() == "text_editor")
+        else {
+            return;
+        };
+        match (editing, self.text_editor_open) {
+            (true, None) => {
+                self.text_editor_open = Some(self.active);
+                self.active = index;
+            }
+            (false, Some(previous)) => {
+                self.text_editor_open = None;
+                if self.active == index {
+                    self.active = previous.min(self.modules.len().saturating_sub(1));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Whether the Text Editor tab is on show (the in-place editor then
+    /// leaves out its own toolbar, MTEXTTOOLBAR 2).
+    pub fn text_editor_tab_shown(&self) -> bool {
+        self.text_editor_open.is_some()
+            && self.modules.get(self.active).is_some_and(|m| m.id() == "text_editor")
+    }
+
     /// The id of the tab shown now, and whether the tab `id` is in the bar.
     #[cfg(test)]
     pub(crate) fn tab_state(&self, id: &str) -> (&'static str, bool) {
@@ -846,6 +883,7 @@ impl Ribbon {
     fn contextual_off(&self, id: &str) -> bool {
         (id == "block_editor" && self.block_editing.is_none())
             || (id == "table_cell" && self.table_cell_open.is_none())
+            || (id == "text_editor" && self.text_editor_open.is_none())
     }
 
     pub fn set_block_testing(&mut self, testing: bool) {
@@ -2422,7 +2460,13 @@ fn dropdown_list<'a>(
     for (cmd, label, item_icon) in items {
         let is_current = *cmd == last_cmd;
         let disabled = widgets::is_disabled_item(cmd);
-        let icon_el: Element<Message> = container(make_icon(*item_icon, LARGE_ICON))
+        // A setting the item switches shows a check mark while it is on.
+        let item_icon = if text_editor::lit(cmd) {
+            IconKind::Glyph("✓")
+        } else {
+            *item_icon
+        };
+        let icon_el: Element<Message> = container(make_icon(item_icon, LARGE_ICON))
             .width(Length::Fixed(LARGE_ICON))
             .into();
         let translated = t!(*label).into_owned();
@@ -2574,6 +2618,11 @@ fn render_group<'a>(
         }
     }
     flush_small_col(&mut small_buf, &mut items_row);
+    // The Text Editor's Style and Formatting panels end with lists and boxes
+    // drawn from the open editor.
+    if let Some(trail) = text_editor::trail(key) {
+        items_row.push(trail);
+    }
 
     let tools_el = items_row.into_iter().fold(
         row![]

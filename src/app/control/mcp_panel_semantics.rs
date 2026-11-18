@@ -45,7 +45,7 @@
 //! `StoreReadOutcome::default` / empty-snapshot shape, structured. Scope
 //! assertions that name a CLOSED document are refused by the ordinary
 //! document gate before this module runs (`document_closed` — the real
-//! close path's answer; a per-tab store identity does not exist in the v24
+//! close path's answer; a per-tab store identity does not exist in the v25
 //! store, machines read-only, so tab scoping rides the caller's
 //! `document_id` assertion exactly like every other automation op).
 //!
@@ -58,7 +58,7 @@
 //! mount's table placeholder is non-interactive), so a same-path MCP arm
 //! cannot exist — recorded, skipped per the ONE-path rule.
 
-// The v24 store vocabulary is desktop-only machinery (the plugin-host attach
+// The v25 store vocabulary is desktop-only machinery (the plugin-host attach
 // is); the whole module joins its cfg so the web build's control bridge
 // answers `unknown_operation` for these op names (an honest absence — the
 // store itself does not exist there).

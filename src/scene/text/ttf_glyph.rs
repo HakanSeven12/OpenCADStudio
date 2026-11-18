@@ -176,7 +176,11 @@ fn hinter_for(
     use skrifa::outline::{Engine, HintingInstance, HintingOptions, Target};
     use skrifa::MetadataProvider;
 
-    if let Some(hit) = hint_cache().lock().unwrap().get(&key) {
+    if let Some(hit) = hint_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+    {
         return hit.clone();
     }
     let outlines = font.outline_glyphs();
@@ -206,7 +210,10 @@ fn hinter_for(
     } else {
         None
     };
-    hint_cache().lock().unwrap().insert(key, built.clone());
+    hint_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, built.clone());
     built
 }
 
@@ -325,13 +332,13 @@ fn cache() -> &'static Mutex<GlyphCache> {
 /// cached per `(family, char)`.
 pub fn glyph(family: &str, ch: char) -> Option<Arc<Glyph>> {
     let key = (family.to_string(), ch);
-    if let Some(hit) = cache().lock().unwrap().get(&key) {
+    if let Some(hit) = cache().lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
         return hit.clone();
     }
 
     let built = sysfont::with_face_data(family, |data, index| {
         let face = ttf_parser::Face::parse(data, index).ok()?;
-        let gid = face.glyph_index(ch)?;
+        let gid = glyph_id(&face, ch)?;
         let k = cap_scale(&face);
 
         let advance = face.glyph_hor_advance(gid).unwrap_or(0) as f32 * k;
@@ -349,7 +356,10 @@ pub fn glyph(family: &str, ch: char) -> Option<Arc<Glyph>> {
     })
     .flatten();
 
-    cache().lock().unwrap().insert(key, built.clone());
+    cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, built.clone());
     built
 }
 
@@ -393,6 +403,21 @@ pub(crate) fn is_full_width(ch: char) -> bool {
 /// [`capital_units`]).
 fn cap_scale(face: &ttf_parser::Face) -> f32 {
     CAP_UNITS / capital_units(face)
+}
+
+/// The glyph of `ch`. A symbol font maps its characters at U+F000 + code
+/// (the Symbol font's bullet `·` is U+F0B7), so a character of the first 256
+/// codes it has not at its own code is looked up there.
+pub(crate) fn glyph_id(face: &ttf_parser::Face, ch: char) -> Option<ttf_parser::GlyphId> {
+    face.glyph_index(ch).or_else(|| {
+        let code = u32::from(ch);
+        (code <= 0xFF).then_some(())?;
+        face.tables()
+            .cmap?
+            .subtables
+            .into_iter()
+            .find_map(|table| table.glyph_index(0xF000 + code))
+    })
 }
 
 /// The font units a TrueType text height spans, as the reference measures
@@ -477,7 +502,12 @@ fn triangulate_contours_cached(key: GlyphTopologyKey, contours: &[Vec<[f32; 2]>]
         return Vec::new();
     }
 
-    if let Some(cached) = glyph_topology_cache().lock().unwrap().get(&key).cloned() {
+    if let Some(cached) = glyph_topology_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+        .cloned()
+    {
         match cached.indices {
             None => return triangulate_contours(contours),
             Some(indices) if cached.pt_count == pt_count => {
@@ -599,7 +629,10 @@ fn triangulate_contours_cached(key: GlyphTopologyKey, contours: &[Vec<[f32; 2]>]
     });
 
     if let Some(cached) = topo {
-        glyph_topology_cache().lock().unwrap().put(key, cached);
+        glyph_topology_cache()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .put(key, cached);
     }
     tris
 }
@@ -708,7 +741,7 @@ fn blob_for(data: &[u8], index: u32) -> Option<Arc<FontBlob>> {
     let mut blobs = BLOBS
         .get_or_init(|| Mutex::new(HashMap::default()))
         .lock()
-        .unwrap();
+        .unwrap_or_else(|e| e.into_inner());
     Some(
         blobs
             .entry(key)
@@ -747,16 +780,19 @@ pub fn glyph_source(family: &str, ch: char) -> Option<GlyphSource> {
     static CACHE: OnceLock<Mutex<SourceCache>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::default()));
     let key = (family.to_string(), ch);
-    if let Some(hit) = cache.lock().unwrap().get(&key) {
+    if let Some(hit) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
         return hit.clone();
     }
     let built = sysfont::with_face_data(family, |data, index| {
         let face = ttf_parser::Face::parse(data, index).ok()?;
-        let gid = face.glyph_index(ch)?;
+        let gid = glyph_id(&face, ch)?;
         source_for(data, index, &face, gid, cap_scale(&face))
     })
     .flatten();
-    cache.lock().unwrap().insert(key, built.clone());
+    cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, built.clone());
     built
 }
 
@@ -766,11 +802,14 @@ pub fn glyph_source(family: &str, ch: char) -> Option<GlyphSource> {
 pub fn fallback_source(ch: char) -> Option<GlyphSource> {
     static CACHE: OnceLock<Mutex<HashMap<char, Option<GlyphSource>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::default()));
-    if let Some(hit) = cache.lock().unwrap().get(&ch) {
+    if let Some(hit) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&ch) {
         return hit.clone();
     }
     let built = pick_fallback(ch, true).and_then(|(_, source)| source);
-    cache.lock().unwrap().insert(ch, built.clone());
+    cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(ch, built.clone());
     built
 }
 
@@ -1233,15 +1272,22 @@ pub fn shape_run(family: &str, text: &str) -> Option<Arc<ShapedRun>> {
     if text.is_empty() {
         return None;
     }
-    if let Some(hit) = shape_cache().lock().unwrap().get(family, text) {
+    if let Some(hit) = shape_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(family, text)
+    {
         return hit;
     }
 
     let built = build_shaped(family, text).map(Arc::new);
-    shape_cache().lock().unwrap().insert(
-        ShapeKey(family.to_string(), text.to_string()),
-        built.clone(),
-    );
+    shape_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(
+            ShapeKey(family.to_string(), text.to_string()),
+            built.clone(),
+        );
     built
 }
 
@@ -1261,11 +1307,18 @@ fn fallback_cache() -> &'static Mutex<FallbackCache> {
 /// surrounding single-stroke text — accepted as the price of covering scripts
 /// no stroke font provides.
 pub fn fallback_glyph(ch: char) -> Option<Arc<Glyph>> {
-    if let Some(hit) = fallback_cache().lock().unwrap().get(&ch) {
+    if let Some(hit) = fallback_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&ch)
+    {
         return hit.clone();
     }
     let built = build_fallback(ch);
-    fallback_cache().lock().unwrap().insert(ch, built.clone());
+    fallback_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(ch, built.clone());
     built
 }
 
@@ -1281,7 +1334,11 @@ fn primary_metrics_cache() -> &'static Mutex<PrimaryMetricsCache> {
 }
 
 fn cached_primary_metrics(family: &str) -> Option<(f32, f32)> {
-    if let Some(&hit) = primary_metrics_cache().lock().unwrap().get(family) {
+    if let Some(&hit) = primary_metrics_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(family)
+    {
         return hit;
     }
     let computed = sysfont::with_face_data(family, |data, idx| {
@@ -1291,25 +1348,40 @@ fn cached_primary_metrics(family: &str) -> Option<(f32, f32)> {
     .flatten();
     primary_metrics_cache()
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .insert(family.to_string(), computed);
     computed
 }
 
 pub fn clear_fallback_cache() {
-    fallback_cache().lock().unwrap().clear();
-    shape_cache().lock().unwrap().clear();
-    primary_metrics_cache().lock().unwrap().clear();
+    fallback_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
+    shape_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
+    primary_metrics_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
     #[cfg(not(target_arch = "wasm32"))]
-    positioned_glyph_cache().lock().unwrap().clear();
+    positioned_glyph_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
     #[cfg(not(target_arch = "wasm32"))]
-    glyph_topology_cache().lock().unwrap().clear();
+    glyph_topology_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
     // Web only: the per-family outline cache can also hold stale `None`s —
     // the family only became resolvable when the font joined the sysfont
     // database (`register_web_font`). On desktop the font set never changes,
     // so the cache is kept.
     #[cfg(target_arch = "wasm32")]
-    cache().lock().unwrap().clear();
+    cache().lock().unwrap_or_else(|e| e.into_inner()).clear();
     #[cfg(target_arch = "wasm32")]
     crate::scene::text::sdf_atlas::reset_font_entries();
 }
@@ -1372,7 +1444,7 @@ fn outline_char(
     ch: char,
     with_source: bool,
 ) -> Option<(Glyph, Option<GlyphSource>)> {
-    let gid = face.glyph_index(ch)?;
+    let gid = glyph_id(face, ch)?;
     let k = if is_full_width(ch) {
         em_scale(face)
     } else {
@@ -1406,7 +1478,7 @@ fn outline_from_fallback_face(
     with_source: bool,
 ) -> Option<(Arc<Glyph>, Option<GlyphSource>)> {
     use cosmic_text::{Attrs, Buffer, Metrics, Shaping};
-    let mut fs = font_system().lock().unwrap();
+    let mut fs = font_system().lock().unwrap_or_else(|e| e.into_inner());
     // Default family → cosmic's own fallback search chooses a covering font.
     let attrs = Attrs::new();
     let mut buf = Buffer::new(&mut fs, Metrics::new(SHAPE_FS, SHAPE_FS));
@@ -1607,7 +1679,7 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
 
     let mut primary_metrics = cached_primary_metrics(family);
 
-    let mut fs = font_system().lock().unwrap();
+    let mut fs = font_system().lock().unwrap_or_else(|e| e.into_inner());
     // A styled family shapes with the bold / italic face it names.
     let (name, bold, italic) = sysfont::split_style(family);
     let attrs = if name.is_empty() {
@@ -1630,7 +1702,7 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
     let mut scratch_guard = SHAPE_SCRATCH
         .get_or_init(|| Mutex::new(None))
         .lock()
-        .unwrap();
+        .unwrap_or_else(|e| e.into_inner());
     let (buf, marked) = scratch_guard.get_or_insert_with(|| {
         let mut buf = Buffer::new(&mut fs, Metrics::new(SHAPE_FS, SHAPE_FS));
         // No wrapping: a run is a single line.
@@ -1729,7 +1801,11 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
                 x: pen_x.to_bits(),
                 y: pen_y.to_bits(),
             };
-            if let Some(glyph) = positioned_glyph_cache().lock().unwrap().get(&key) {
+            if let Some(glyph) = positioned_glyph_cache()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&key)
+            {
                 glyphs.push(glyph);
                 continue;
             }
@@ -1761,7 +1837,7 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
                 });
                 positioned_glyph_cache()
                     .lock()
-                    .unwrap()
+                    .unwrap_or_else(|e| e.into_inner())
                     .insert(key, glyph.clone());
                 glyphs.push(glyph);
             }

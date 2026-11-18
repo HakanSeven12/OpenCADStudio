@@ -37,6 +37,7 @@ fn page(images: Vec<PlotImage>) -> PdfPageInput {
         offset_x: 0.0,
         offset_y: 0.0,
         rotation_deg: 0,
+        content_rotation: 0.0,
         scale: 1.0,
         clip: None,
         options: PdfPlotOptions::default(),

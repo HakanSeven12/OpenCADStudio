@@ -3418,6 +3418,21 @@ fn keep_stable_snap(
     }
 }
 
+/// The snap that moves the drawn point. A marker farther than the aperture
+/// (the hovered object's nearest point, #1914) is only shown: the rubber band
+/// stays on the cursor until the cursor comes near it, and a click still takes
+/// it (#2882). Grid snap always moves the point. `cursor` and the marker must
+/// share one pixel frame.
+pub(crate) fn pulling_snap(
+    snap: Option<SnapResult>,
+    cursor: Point,
+    radius_px: f32,
+) -> Option<SnapResult> {
+    snap.filter(|hit| {
+        hit.snap_type == SnapType::Grid || dist2(hit.screen, cursor) <= radius_px * radius_px
+    })
+}
+
 /// Merge paper and viewport snaps using the engine's ordering.
 /// Both screen positions must use canvas pixels.
 pub fn merge_snap(
@@ -4365,7 +4380,7 @@ fn extension_bases_screen(
     }
     // Nearest-fit first, then keep up to two with distinct origins (collinear
     // segments sharing an endpoint must not draw the same guide twice).
-    found.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+    found.sort_by(|x, y| x.0.total_cmp(&y.0));
     let mut bases: [Option<Point>; 2] = [None, None];
     let mut origins: Vec<glam::DVec3> = Vec::new();
     let mut directions: Vec<glam::DVec3> = Vec::new();
@@ -4818,7 +4833,10 @@ mod ext_tests {
         // The view/grid spacing must not merge two real vertices 10m apart.
         snapper.grid_spacing = 1000.0;
         let wire = WireModel {
-            points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let wires = [wire];
@@ -4963,8 +4981,11 @@ mod ext_tests {
         // A single line segment (0,0)-(10,0): its endpoints are vertices, its
         // midpoint and any extension foot are not.
         let wire = WireModel {
-            text_verts: Vec::new(),
-            points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                text_verts: Vec::new(),
+                points: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let wires = [wire];
@@ -5302,21 +5323,27 @@ mod ext_tests {
     #[test]
     fn exact_curve_intersections_matches_the_3_4_5_report() {
         let c1 = WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarCircle {
-                center: [0.0, 0.0, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, 1.0, 0.0],
-                radius: 4.0,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarCircle {
+                    center: [0.0, 0.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius: 4.0,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let c2 = WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarCircle {
-                center: [3.0, 0.0, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, 1.0, 0.0],
-                radius: 5.0,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarCircle {
+                    center: [3.0, 0.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius: 5.0,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let pts =
@@ -5346,23 +5373,29 @@ mod ext_tests {
     #[test]
     fn exact_curve_intersections_respects_an_arcs_own_sweep() {
         let arc = WireModel {
-            tangent_geoms: vec![TangentGeom::Arc {
-                center: [0.0, 0.0, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, 1.0, 0.0],
-                radius: 4.0,
-                start_angle: 0.0,
-                end_angle: std::f64::consts::FRAC_PI_2,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::Arc {
+                    center: [0.0, 0.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius: 4.0,
+                    start_angle: 0.0,
+                    end_angle: std::f64::consts::FRAC_PI_2,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let circle = WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarCircle {
-                center: [3.0, 0.0, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, 1.0, 0.0],
-                radius: 5.0,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarCircle {
+                    center: [3.0, 0.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius: 5.0,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         // Full-circle math gives (0,4,0) [on the 0..90° arc] and (0,-4,0)
@@ -5375,21 +5408,27 @@ mod ext_tests {
     #[test]
     fn exact_curve_intersections_is_none_for_non_coplanar_circles() {
         let flat = WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarCircle {
-                center: [0.0, 0.0, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, 1.0, 0.0],
-                radius: 4.0,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarCircle {
+                    center: [0.0, 0.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius: 4.0,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let tilted = WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarCircle {
-                center: [0.0, 0.0, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, 0.0, 1.0],
-                radius: 4.0,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarCircle {
+                    center: [0.0, 0.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 0.0, 1.0],
+                    radius: 4.0,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         assert!(
@@ -5401,21 +5440,27 @@ mod ext_tests {
     #[test]
     fn exact_curve_intersections_resolves_disjoint_circles() {
         let near = WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarCircle {
-                center: [0.0, 0.0, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, 1.0, 0.0],
-                radius: 1.0,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarCircle {
+                    center: [0.0, 0.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius: 1.0,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let far = WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarCircle {
-                center: [100.0, 0.0, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, 1.0, 0.0],
-                radius: 1.0,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarCircle {
+                    center: [100.0, 0.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius: 1.0,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         assert!(exact_curve_intersections(&near, &far).unwrap().is_empty());
@@ -5425,25 +5470,31 @@ mod ext_tests {
     fn exact_curve_intersections_handles_two_arcs_in_differently_rotated_frames() {
         // Arc A: quarter circle 0..90°, axis_x along world +X.
         let arc_a = WireModel {
-            tangent_geoms: vec![TangentGeom::Arc {
-                center: [0.0, 0.0, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, 1.0, 0.0],
-                radius: 4.0,
-                start_angle: 0.0,
-                end_angle: std::f64::consts::FRAC_PI_2,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::Arc {
+                    center: [0.0, 0.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius: 4.0,
+                    start_angle: 0.0,
+                    end_angle: std::f64::consts::FRAC_PI_2,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let arc_b = WireModel {
-            tangent_geoms: vec![TangentGeom::Arc {
-                center: [3.0, 0.0, 0.0],
-                axis_x: [0.0, 1.0, 0.0],
-                axis_y: [-1.0, 0.0, 0.0],
-                radius: 5.0,
-                start_angle: std::f64::consts::FRAC_PI_2,
-                end_angle: 3.0 * std::f64::consts::FRAC_PI_2,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::Arc {
+                    center: [3.0, 0.0, 0.0],
+                    axis_x: [0.0, 1.0, 0.0],
+                    axis_y: [-1.0, 0.0, 0.0],
+                    radius: 5.0,
+                    start_angle: std::f64::consts::FRAC_PI_2,
+                    end_angle: 3.0 * std::f64::consts::FRAC_PI_2,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         assert!(exact_curve_intersections(&arc_a, &arc_b)
@@ -5454,14 +5505,17 @@ mod ext_tests {
         // (0,-4,0) is on both A's and B's own sweep, independently checked
         // in each one's own (differently rotated) frame.
         let arc_a_lower = WireModel {
-            tangent_geoms: vec![TangentGeom::Arc {
-                center: [0.0, 0.0, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, 1.0, 0.0],
-                radius: 4.0,
-                start_angle: 3.0 * std::f64::consts::FRAC_PI_2,
-                end_angle: std::f64::consts::TAU,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::Arc {
+                    center: [0.0, 0.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius: 4.0,
+                    start_angle: 3.0 * std::f64::consts::FRAC_PI_2,
+                    end_angle: std::f64::consts::TAU,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let pts =
@@ -5476,11 +5530,14 @@ mod ext_tests {
 
     fn plain_line(a: [f64; 3], b: [f64; 3]) -> WireModel {
         WireModel {
-            points: vec![
-                [a[0] as f32, a[1] as f32, a[2] as f32],
-                [b[0] as f32, b[1] as f32, b[2] as f32],
-            ],
-            points_low: vec![],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points: vec![
+                    [a[0] as f32, a[1] as f32, a[2] as f32],
+                    [b[0] as f32, b[1] as f32, b[2] as f32],
+                ],
+                points_low: vec![],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         }
     }
@@ -5489,12 +5546,15 @@ mod ext_tests {
     fn exact_curve_intersections_handles_a_line_against_a_circle() {
         let line = plain_line([-10.0, 0.0, 0.0], [10.0, 0.0, 0.0]);
         let circle = WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarCircle {
-                center: [0.0, 0.0, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, 1.0, 0.0],
-                radius: 5.0,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarCircle {
+                    center: [0.0, 0.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius: 5.0,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let pts = exact_curve_intersections(&line, &circle)
@@ -5514,14 +5574,17 @@ mod ext_tests {
     #[test]
     fn exact_curve_intersections_handles_a_line_against_an_arcs_own_sweep() {
         let arc = WireModel {
-            tangent_geoms: vec![TangentGeom::Arc {
-                center: [0.0, 0.0, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, 1.0, 0.0],
-                radius: 4.0,
-                start_angle: 0.0,
-                end_angle: std::f64::consts::FRAC_PI_2,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::Arc {
+                    center: [0.0, 0.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius: 4.0,
+                    start_angle: 0.0,
+                    end_angle: std::f64::consts::FRAC_PI_2,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let line = plain_line([0.0, -10.0, 0.0], [0.0, 10.0, 0.0]);
@@ -5536,14 +5599,17 @@ mod ext_tests {
         // x^2/16 + y^2/4 = 1 -- a vertical line at x=0 crosses it exactly at
         // y = +-2.
         let ellipse = WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarEllipse {
-                center: [0.0, 0.0, 0.0],
-                major_axis: [4.0, 0.0, 0.0],
-                normal: [0.0, 0.0, 1.0],
-                minor_axis_ratio: 0.5,
-                start_param: 0.0,
-                end_param: std::f64::consts::TAU,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarEllipse {
+                    center: [0.0, 0.0, 0.0],
+                    major_axis: [4.0, 0.0, 0.0],
+                    normal: [0.0, 0.0, 1.0],
+                    minor_axis_ratio: 0.5,
+                    start_param: 0.0,
+                    end_param: std::f64::consts::TAU,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let line = plain_line([0.0, -10.0, 0.0], [0.0, 10.0, 0.0]);
@@ -5564,23 +5630,29 @@ mod ext_tests {
         // independently (not via this module's own math) as crossing at
         // exactly x = 3.75, y = +-sqrt(63)/4.
         let ellipse = WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarEllipse {
-                center: [0.0, 0.0, 0.0],
-                major_axis: [5.0, 0.0, 0.0],
-                normal: [0.0, 0.0, 1.0],
-                minor_axis_ratio: 0.6,
-                start_param: 0.0,
-                end_param: std::f64::consts::TAU,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarEllipse {
+                    center: [0.0, 0.0, 0.0],
+                    major_axis: [5.0, 0.0, 0.0],
+                    normal: [0.0, 0.0, 1.0],
+                    minor_axis_ratio: 0.6,
+                    start_param: 0.0,
+                    end_param: std::f64::consts::TAU,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let circle = WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarCircle {
-                center: [6.0, 0.0, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, 1.0, 0.0],
-                radius: 3.0,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarCircle {
+                    center: [6.0, 0.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius: 3.0,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let pts =
@@ -5602,26 +5674,32 @@ mod ext_tests {
         // 1.0, i.e. a circle) at (6,0,0) — same pair as the full-ellipse
         // test above, crossing at (3.75, +-1.9843...).
         let ellipse = WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarEllipse {
-                center: [0.0, 0.0, 0.0],
-                major_axis: [5.0, 0.0, 0.0],
-                normal: [0.0, 0.0, 1.0],
-                minor_axis_ratio: 0.6,
-                start_param: 0.0,
-                end_param: std::f64::consts::TAU,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarEllipse {
+                    center: [0.0, 0.0, 0.0],
+                    major_axis: [5.0, 0.0, 0.0],
+                    normal: [0.0, 0.0, 1.0],
+                    minor_axis_ratio: 0.6,
+                    start_param: 0.0,
+                    end_param: std::f64::consts::TAU,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let deg = std::f64::consts::PI / 180.0;
         let make_arc = |normal_z: f64| WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarEllipse {
-                center: [6.0, 0.0, 0.0],
-                major_axis: [3.0, 0.0, 0.0],
-                normal: [0.0, 0.0, normal_z],
-                minor_axis_ratio: 1.0,
-                start_param: 100.0 * deg,
-                end_param: 170.0 * deg,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarEllipse {
+                    center: [6.0, 0.0, 0.0],
+                    major_axis: [3.0, 0.0, 0.0],
+                    normal: [0.0, 0.0, normal_z],
+                    minor_axis_ratio: 1.0,
+                    start_param: 100.0 * deg,
+                    end_param: 170.0 * deg,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
 
@@ -5650,28 +5728,34 @@ mod ext_tests {
     #[test]
     fn exact_curve_intersections_arc_respects_normal_direction_against_an_ellipse_frame() {
         let ellipse = WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarEllipse {
-                center: [0.0, 0.0, 0.0],
-                major_axis: [5.0, 0.0, 0.0],
-                normal: [0.0, 0.0, 1.0],
-                minor_axis_ratio: 0.6,
-                start_param: 0.0,
-                end_param: std::f64::consts::TAU,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarEllipse {
+                    center: [0.0, 0.0, 0.0],
+                    major_axis: [5.0, 0.0, 0.0],
+                    normal: [0.0, 0.0, 1.0],
+                    minor_axis_ratio: 0.6,
+                    start_param: 0.0,
+                    end_param: std::f64::consts::TAU,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let deg = std::f64::consts::PI / 180.0;
         // normal=-Z arc: axis_x/axis_y chosen so axis_x x axis_y = (0,0,-1),
         // mirroring the ellipse test's make_arc(-1.0) exactly.
         let arc_minus_z = WireModel {
-            tangent_geoms: vec![TangentGeom::Arc {
-                center: [6.0, 0.0, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, -1.0, 0.0],
-                radius: 3.0,
-                start_angle: 100.0 * deg,
-                end_angle: 170.0 * deg,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::Arc {
+                    center: [6.0, 0.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, -1.0, 0.0],
+                    radius: 3.0,
+                    start_angle: 100.0 * deg,
+                    end_angle: 170.0 * deg,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let pts =
@@ -5799,21 +5883,27 @@ mod ext_tests {
             })
             .collect();
         let line = WireModel {
-            points: points.to_vec(),
-            points_low: low,
-            tangent_geoms: vec![TangentGeom::Line {
-                p1: points[0],
-                p2: points[1],
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points: points.to_vec(),
+                points_low: low,
+                tangent_geoms: vec![TangentGeom::Line {
+                    p1: points[0],
+                    p2: points[1],
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let circle = WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarCircle {
-                center: [origin, origin, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, 1.0, 0.0],
-                radius: 3.0,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarCircle {
+                    center: [origin, origin, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius: 3.0,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let points = exact_curve_intersections(&line, &circle).unwrap();
@@ -5832,13 +5922,16 @@ mod ext_tests {
             .collect();
 
         let line = WireModel {
-            points: vec![[0.0, 0.0, 0.0], [100.0, 100.0, 0.0]],
-            key_vertices: vec![[0.0, 0.0, 0.0], [100.0, 100.0, 0.0]],
             aabb: [0.0, 0.0, 100.0, 100.0],
-            tangent_geoms: vec![TangentGeom::Line {
-                p1: [0.0, 0.0, 0.0],
-                p2: [100.0, 100.0, 0.0],
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points: vec![[0.0, 0.0, 0.0], [100.0, 100.0, 0.0]],
+                key_vertices: vec![[0.0, 0.0, 0.0], [100.0, 100.0, 0.0]],
+                tangent_geoms: vec![TangentGeom::Line {
+                    p1: [0.0, 0.0, 0.0],
+                    p2: [100.0, 100.0, 0.0],
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let wires = vec![line];
@@ -5899,13 +5992,19 @@ mod ext_tests {
             .into_iter()
             .collect();
         let line = WireModel {
-            points: vec![[0.0, 0.0, 0.0], [100.0, 100.0, 0.0]],
-            key_vertices: vec![[0.0, 0.0, 0.0], [100.0, 100.0, 0.0]],
             aabb: [0.0, 0.0, 100.0, 100.0],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points: vec![[0.0, 0.0, 0.0], [100.0, 100.0, 0.0]],
+                key_vertices: vec![[0.0, 0.0, 0.0], [100.0, 100.0, 0.0]],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let node = WireModel {
-            snap_pts: vec![(DVec3::new(50.0, 50.0, 0.0), SnapHint::Node)],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                snap_pts: vec![(DVec3::new(50.0, 50.0, 0.0), SnapHint::Node)],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let wires = vec![line, node];
@@ -5949,9 +6048,12 @@ mod ext_tests {
         snapper.enable_all();
 
         let line = WireModel {
-            points: vec![[0.0, 0.0, 0.0], [10.0, 10.0, 0.0]],
-            key_vertices: vec![[0.0, 0.0, 0.0], [10.0, 10.0, 0.0]],
             aabb: [0.0, 0.0, 10.0, 10.0],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points: vec![[0.0, 0.0, 0.0], [10.0, 10.0, 0.0]],
+                key_vertices: vec![[0.0, 0.0, 0.0], [10.0, 10.0, 0.0]],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let wires = vec![line];
@@ -5989,15 +6091,21 @@ mod ext_tests {
         snapper.enabled = [SnapType::Intersection].into_iter().collect();
 
         let line1 = WireModel {
-            points: vec![[0.0, 0.0, 0.0], [100.0, 100.0, 0.0]],
-            key_vertices: vec![[0.0, 0.0, 0.0], [100.0, 100.0, 0.0]],
             aabb: [0.0, 0.0, 100.0, 100.0],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points: vec![[0.0, 0.0, 0.0], [100.0, 100.0, 0.0]],
+                key_vertices: vec![[0.0, 0.0, 0.0], [100.0, 100.0, 0.0]],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let line2 = WireModel {
-            points: vec![[0.0, 100.0, 0.0], [100.0, 0.0, 0.0]],
-            key_vertices: vec![[0.0, 100.0, 0.0], [100.0, 0.0, 0.0]],
             aabb: [0.0, 0.0, 100.0, 100.0],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points: vec![[0.0, 100.0, 0.0], [100.0, 0.0, 0.0]],
+                key_vertices: vec![[0.0, 100.0, 0.0], [100.0, 0.0, 0.0]],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let wires = vec![line1, line2];
@@ -6050,14 +6158,17 @@ mod ext_tests {
             let p1_f64 = [0.0f64, 0.0, 0.0];
             let p2_f64 = [angle.cos() * 50.0, angle.sin() * 50.0, 0.0];
             wires.push(WireModel {
-                points: vec![p1, p2],
-                key_vertices: vec![p1_f64, p2_f64],
                 aabb: [
                     p1[0].min(p2[0]),
                     p1[1].min(p2[1]),
                     p1[0].max(p2[0]),
                     p1[1].max(p2[1]),
                 ],
+                geom: std::sync::Arc::new(crate::scene::WireGeom {
+                    points: vec![p1, p2],
+                    key_vertices: vec![p1_f64, p2_f64],
+                    ..crate::scene::WireGeom::default()
+                }),
                 ..Default::default()
             });
         }
@@ -6143,26 +6254,32 @@ mod ext_tests {
     #[test]
     fn exact_curve_intersections_handles_multisegment_polyline_against_circle_at_vertex() {
         let polyline = WireModel {
-            key_vertices: vec![[-10.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 10.0, 0.0]],
-            tangent_geoms: vec![
-                TangentGeom::Line {
-                    p1: [-10.0, 0.0, 0.0],
-                    p2: [0.0, 0.0, 0.0],
-                },
-                TangentGeom::Line {
-                    p1: [0.0, 0.0, 0.0],
-                    p2: [0.0, 10.0, 0.0],
-                },
-            ],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                key_vertices: vec![[-10.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 10.0, 0.0]],
+                tangent_geoms: vec![
+                    TangentGeom::Line {
+                        p1: [-10.0, 0.0, 0.0],
+                        p2: [0.0, 0.0, 0.0],
+                    },
+                    TangentGeom::Line {
+                        p1: [0.0, 0.0, 0.0],
+                        p2: [0.0, 10.0, 0.0],
+                    },
+                ],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let circle = WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarCircle {
-                center: [0.0, 5.0, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, 1.0, 0.0],
-                radius: 5.0,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarCircle {
+                    center: [0.0, 5.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius: 5.0,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let pts = exact_curve_intersections(&polyline, &circle)
@@ -6193,29 +6310,35 @@ mod ext_tests {
     #[test]
     fn exact_curve_intersections_handles_polyline_with_bulge_arc_against_circle() {
         let polyline = WireModel {
-            tangent_geoms: vec![
-                TangentGeom::Line {
-                    p1: [-10.0, 0.0, 0.0],
-                    p2: [0.0, 0.0, 0.0],
-                },
-                TangentGeom::Arc {
-                    center: [0.0, 4.0, 0.0],
-                    axis_x: [1.0, 0.0, 0.0],
-                    axis_y: [0.0, 1.0, 0.0],
-                    radius: 4.0,
-                    start_angle: -std::f64::consts::FRAC_PI_2,
-                    end_angle: std::f64::consts::FRAC_PI_2,
-                },
-            ],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![
+                    TangentGeom::Line {
+                        p1: [-10.0, 0.0, 0.0],
+                        p2: [0.0, 0.0, 0.0],
+                    },
+                    TangentGeom::Arc {
+                        center: [0.0, 4.0, 0.0],
+                        axis_x: [1.0, 0.0, 0.0],
+                        axis_y: [0.0, 1.0, 0.0],
+                        radius: 4.0,
+                        start_angle: -std::f64::consts::FRAC_PI_2,
+                        end_angle: std::f64::consts::FRAC_PI_2,
+                    },
+                ],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let circle = WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarCircle {
-                center: [0.0, 0.0, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, 1.0, 0.0],
-                radius: 5.0,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarCircle {
+                    center: [0.0, 0.0, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius: 5.0,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let pts = exact_curve_intersections(&polyline, &circle)
@@ -6232,12 +6355,15 @@ mod ext_tests {
 
     fn xy_circle(cx: f64, cy: f64, radius: f64) -> WireModel {
         WireModel {
-            tangent_geoms: vec![TangentGeom::PlanarCircle {
-                center: [cx, cy, 0.0],
-                axis_x: [1.0, 0.0, 0.0],
-                axis_y: [0.0, 1.0, 0.0],
-                radius,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                tangent_geoms: vec![TangentGeom::PlanarCircle {
+                    center: [cx, cy, 0.0],
+                    axis_x: [1.0, 0.0, 0.0],
+                    axis_y: [0.0, 1.0, 0.0],
+                    radius,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         }
     }
@@ -6294,17 +6420,20 @@ mod ext_tests {
         let (a0, a1) = ([-10.0, 0.0, 0.0], [10.0, 0.0, 0.0]);
         let (b0, b1) = ([20.0, -10.0, 0.0], [20.0, 10.0, 0.0]);
         let block = WireModel {
-            key_vertices: vec![a0, a1, b0, b1],
-            tangent_geoms: vec![
-                line_geom(a0, a1),
-                line_geom(b0, b1),
-                TangentGeom::PlanarCircle {
-                    center: [30.0, 0.0, 0.0],
-                    axis_x: [1.0, 0.0, 0.0],
-                    axis_y: [0.0, 1.0, 0.0],
-                    radius: 1.0,
-                },
-            ],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                key_vertices: vec![a0, a1, b0, b1],
+                tangent_geoms: vec![
+                    line_geom(a0, a1),
+                    line_geom(b0, b1),
+                    TangentGeom::PlanarCircle {
+                        center: [30.0, 0.0, 0.0],
+                        axis_x: [1.0, 0.0, 0.0],
+                        axis_y: [0.0, 1.0, 0.0],
+                        radius: 1.0,
+                    },
+                ],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
 
@@ -6335,8 +6464,11 @@ mod ext_tests {
             [ox, oy, 0.0],
         ];
         let square = WireModel {
-            key_vertices: v.to_vec(),
-            tangent_geoms: (0..4).map(|i| line_geom(v[i], v[(i + 1) % 4])).collect(),
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                key_vertices: v.to_vec(),
+                tangent_geoms: (0..4).map(|i| line_geom(v[i], v[(i + 1) % 4])).collect(),
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
 
@@ -6359,8 +6491,11 @@ mod ext_tests {
         let n = 64;
         let verts: Vec<[f64; 3]> = (0..=n).map(|i| [i as f64, (i % 3) as f64, 0.0]).collect();
         let wire = WireModel {
-            key_vertices: verts.clone(),
-            tangent_geoms: (0..n).map(|i| line_geom(verts[i], verts[i + 1])).collect(),
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                key_vertices: verts.clone(),
+                tangent_geoms: (0..n).map(|i| line_geom(verts[i], verts[i + 1])).collect(),
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let mut cursor = 0usize;
@@ -6451,13 +6586,16 @@ mod ext_tests {
             })
             .collect();
         let circle = WireModel {
-            points,
             aabb: [-50.0, -50.0, 50.0, 50.0],
-            snap_pts: vec![(DVec3::ZERO, SnapHint::Center)],
-            tangent_geoms: vec![TangentGeom::Circle {
-                center: [0.0, 0.0, 0.0],
-                radius: 50.0,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points,
+                snap_pts: vec![(DVec3::ZERO, SnapHint::Center)],
+                tangent_geoms: vec![TangentGeom::Circle {
+                    center: [0.0, 0.0, 0.0],
+                    radius: 50.0,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let wires = vec![circle];
@@ -6509,23 +6647,29 @@ mod ext_tests {
             })
             .collect();
         let circle = WireModel {
-            points,
             aabb: [-50.0, -50.0, 50.0, 50.0],
-            // The quadrant hint marks it closed: its seam is no endpoint.
-            snap_pts: vec![
-                (DVec3::ZERO, SnapHint::Center),
-                (DVec3::new(0.0, 50.0, 0.0), SnapHint::Quadrant),
-            ],
-            tangent_geoms: vec![TangentGeom::Circle {
-                center: [0.0, 0.0, 0.0],
-                radius: 50.0,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points,
+                // The quadrant hint marks it closed: its seam is no endpoint.
+                snap_pts: vec![
+                    (DVec3::ZERO, SnapHint::Center),
+                    (DVec3::new(0.0, 50.0, 0.0), SnapHint::Quadrant),
+                ],
+                tangent_geoms: vec![TangentGeom::Circle {
+                    center: [0.0, 0.0, 0.0],
+                    radius: 50.0,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         // Ends 3 px left of the foot (1 px = 1 unit at this zoom).
         let line = WireModel {
-            points: vec![[47.0, -30.0, 0.0], [47.0, 0.0, 0.0]],
             aabb: [47.0, -30.0, 47.0, 0.0],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points: vec![[47.0, -30.0, 0.0], [47.0, 0.0, 0.0]],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let wires = vec![circle, line];
@@ -6583,16 +6727,19 @@ mod ext_tests {
         }
 
         let ellipse_arc = WireModel {
-            points,
             aabb: [-100.0, -50.0, 100.0, 50.0],
-            tangent_geoms: vec![TangentGeom::PlanarEllipse {
-                center,
-                major_axis,
-                normal,
-                minor_axis_ratio,
-                start_param,
-                end_param,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points,
+                tangent_geoms: vec![TangentGeom::PlanarEllipse {
+                    center,
+                    major_axis,
+                    normal,
+                    minor_axis_ratio,
+                    start_param,
+                    end_param,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
         let wires = vec![ellipse_arc];

@@ -11,6 +11,78 @@ use std::path::PathBuf;
 
 pub use document::plot_style::{decode_plot_style_text, PlotStyleEntry, PlotStyleTable, LW_TABLE};
 
+#[derive(Clone, Debug)]
+pub struct PickedPlotStyle {
+    pub table: PlotStyleTable,
+    pub source: document::ifccad::IfccadPlotStyleSource,
+    bytes: Arc<Vec<u8>>,
+}
+
+impl PickedPlotStyle {
+    pub fn from_bytes(name: String, bytes: Vec<u8>) -> Result<Self, String> {
+        use document::ifccad::IfccadPlotStyleTableKind;
+        use sha2::{Digest, Sha256};
+
+        let named = name.to_ascii_lowercase().ends_with(".stb");
+        let table = parse_external_table(&name, named, &bytes)?;
+        let source = document::ifccad::IfccadPlotStyleSource {
+            file_name: name,
+            kind: if named {
+                IfccadPlotStyleTableKind::Stb
+            } else {
+                IfccadPlotStyleTableKind::Ctb
+            },
+            sha256: Some(format!("{:x}", Sha256::digest(&bytes))),
+        };
+        Ok(Self {
+            table,
+            source,
+            bytes: Arc::new(bytes),
+        })
+    }
+
+    pub fn remember(&self) -> Result<(), String> {
+        let hash = self
+            .source
+            .sha256
+            .as_deref()
+            .expect("a picked table has a hash");
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let path = picked_table_path(&self.source.file_name, hash)?;
+            cache_picked_table(&path, &self.bytes)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let bytes = self.bytes.clone();
+            register_session_table(&format!("{hash}/{}", self.source.file_name), bytes.clone());
+            register_session_table(&self.source.file_name, bytes);
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn picked_table_path(name: &str, hash: &str) -> Result<PathBuf, String> {
+    let dir = crate::config::config_dir()
+        .ok_or_else(|| "Plot styles folder could not be resolved".to_string())?;
+    Ok(dir
+        .join("plotstyles")
+        .join("by-sha256")
+        .join(hash)
+        .join(name.to_ascii_lowercase()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn cache_picked_table(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    if std::fs::read(path).is_ok_and(|cached| cached == bytes) {
+        return Ok(());
+    }
+    std::fs::create_dir_all(path.parent().expect("table cache directory"))
+        .and_then(|_| std::fs::write(path, bytes))
+        .map_err(|error| format!("Cannot retain the selected plot table: {error}"))
+}
+
 pub const DEFAULT_PLOT_STYLE: &str = "ocad.ctb";
 pub const MONOCHROME_PLOT_STYLE: &str = "monochrome.ctb";
 pub const GRAYSCALE_PLOT_STYLE: &str = "Grayscale.ctb";
@@ -170,6 +242,7 @@ fn session_table_names() -> Vec<String> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .keys()
+        .filter(|name| !name.contains('/'))
         .cloned()
         .collect()
 }
@@ -292,6 +365,66 @@ pub fn with_object_style(table: &PlotStyleTable, style: &str) -> Option<PlotStyl
     narrowed.named_entries.clear();
     narrowed.named_entries.insert("Normal".to_string(), entry);
     Some(narrowed)
+}
+
+/// Resolve a stored basename against the external files provided for this plot.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn resolve_external_table(
+    name: &str,
+    named: bool,
+    sha256: Option<&str>,
+    files: &[PathBuf],
+) -> Result<PlotStyleTable, String> {
+    use sha2::{Digest, Sha256};
+
+    let mut contents = None;
+    let mut found_name = false;
+    for path in files.iter().filter(|path| {
+        path.file_name()
+            .and_then(|file| file.to_str())
+            .is_some_and(|file| file.eq_ignore_ascii_case(name))
+    }) {
+        found_name = true;
+        let bytes = std::fs::read(path)
+            .map_err(|error| format!("Cannot read plot style table {name:?}: {error}"))?;
+        if sha256.is_some_and(|expected| format!("{:x}", Sha256::digest(&bytes)) != expected) {
+            continue;
+        }
+        if contents.as_ref().is_some_and(|previous| *previous != bytes) {
+            return Err(format!(
+                "Multiple different plot style tables match {name:?}."
+            ));
+        }
+        contents = Some(bytes);
+    }
+    let bytes = contents.ok_or_else(|| {
+        if found_name && sha256.is_some() {
+            format!("No supplied plot style table {name:?} matches the SHA-256 in the drawing.")
+        } else {
+            format!("Missing external plot style table {name:?}.")
+        }
+    })?;
+    parse_external_table(name, named, &bytes)
+}
+
+pub(crate) fn parse_external_table(
+    name: &str,
+    named: bool,
+    bytes: &[u8],
+) -> Result<PlotStyleTable, String> {
+    let expected_tag = match bytes.get(19..26) {
+        Some(b"CTBVER1") => !named && name.to_ascii_lowercase().ends_with(".ctb"),
+        Some(b"STBVER1" | b"TTBVER1") => named && name.to_ascii_lowercase().ends_with(".stb"),
+        _ => false,
+    };
+    if !expected_tag {
+        return Err(format!(
+            "Plot style table {name:?} is incompatible with the drawing mode."
+        ));
+    }
+    let table = PlotStyleTable::from_bytes(name, bytes)
+        .map_err(|error| format!("Invalid plot style table {name:?}: {error}"))?;
+    Ok(table)
 }
 
 /// Where Open CAD Studio finds plot style tables: on disk, in this session's

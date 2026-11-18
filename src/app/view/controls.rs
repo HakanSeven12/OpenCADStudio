@@ -297,6 +297,9 @@ pub(super) fn viewport_controls<'a>(
             text_color: Some(chrome::text(theme)),
             ..Default::default()
         });
+    // Leaving the list drops the hover preview: the drawing shows its own
+    // style again while the menu stays open (#3135).
+    let popup = mouse_area(popup).on_exit(Message::PreviewRenderMode(render_mode));
     let picker: Element<'a, Message> =
         iced_aw::DropDown::new(picker_head, popup, render_mode_menu_open)
             .width(Length::Fixed(dropdown_w))

@@ -63,7 +63,8 @@ impl OpenCADStudio {
             .map(|row| (row.handle, row.enabled))
             .collect::<Vec<_>>();
         let mut staged = tab.scene.document.clone();
-        match crate::scene::block_grips::set_cycle_order(&mut staged, state.definition, &rows) {
+        let definition = state.definition;
+        match crate::scene::block_grips::set_cycle_order(&mut staged, definition, &rows) {
             Ok(changed) => {
                 if changed {
                     let i = self.active_tab;
@@ -72,7 +73,7 @@ impl OpenCADStudio {
                         super::tab_document::HistoryLabel::Message("Change insertion grip order"),
                     );
                     self.tabs[i].scene.document = staged;
-                    self.tabs[i].scene.bump_geometry();
+                    self.tabs[i].scene.bump_block_definition(definition);
                     self.tabs[i].dirty = true;
                     self.finish_pending_history(i);
                     self.refresh_properties();

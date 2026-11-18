@@ -1,3 +1,4 @@
+mod gpu_memory;
 // WGSL has no includes. Compose one shared draw-order function into each 2D
 // shader at compile time, including the sources used by shader validation tests.
 macro_rules! draw_order_shader {
@@ -32,6 +33,8 @@ pub mod gpu_budget;
 mod gpu_tests;
 pub mod gpu_upload;
 pub mod hatch_gpu;
+#[cfg(test)]
+mod hatch_tone_tests;
 pub mod image_gpu;
 pub mod mesh_gpu;
 pub mod point_cloud_gpu;
@@ -84,7 +87,31 @@ struct SilhouetteSourceGroup {
 use device_capabilities::DeviceCapabilities;
 
 /// MSAA sample count for the main drawing pipelines.
-const MSAA_SAMPLES: u32 = 4;
+///
+/// Defaults to 4. `OCS_MSAA=1` (or `4`) overrides it at startup so low-end
+/// integrated GPUs, which are fill-rate and bandwidth bound, can trade edge
+/// smoothing for frame time and GPU memory. With 1 the scene renders straight
+/// into the resolve texture and the resolve pass is skipped. Only 1 and 4 are
+/// accepted: WebGPU guarantees just those counts for `Bgra8Unorm` and
+/// `Depth24PlusStencil8`; 2 and 8 need `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`,
+/// which the device is not requested with.
+pub(crate) fn msaa_samples() -> u32 {
+    static SAMPLES: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *SAMPLES.get_or_init(|| {
+        let n = msaa_samples_from(std::env::var("OCS_MSAA").ok().as_deref());
+        crate::perf_record!("[perf] msaa samples={n}");
+        n
+    })
+}
+
+/// The sample count an `OCS_MSAA` value asks for: 1 or 4, and 4 for any
+/// other value or none.
+fn msaa_samples_from(value: Option<&str>) -> u32 {
+    value
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .filter(|n| matches!(n, 1 | 4))
+        .unwrap_or(4)
+}
 const SHADOW_MAP_SIZE: u32 = 2048;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -207,6 +234,7 @@ pub struct Pipeline {
     mesh_plain_depth_pipeline: wgpu::RenderPipeline,
     mesh_material_bgl: wgpu::BindGroupLayout,
     mesh_default_material_bind_group: wgpu::BindGroup,
+    mesh_default_material_memory: mesh_gpu::MaterialMemory,
     face3d_pipeline: wgpu::RenderPipeline,
     block_face3d_pipeline: wgpu::RenderPipeline,
     /// Depth-only variant of the face3d pipeline (no color writes,
@@ -390,6 +418,15 @@ pub struct Pipeline {
     /// Draw ranges for each entity inside the resident mesh chunks. Highlight
     /// overlays reuse these buffers instead of uploading duplicate geometry.
     mesh_ranges_by_handle: rustc_hash::FxHashMap<document::Handle, Vec<MeshResidentRange>>,
+    /// Eye-relative view-projection, eye and viewport size of the last
+    /// uniform upload: what display LODs are chosen by.
+    mesh_lod_view: Option<(glam::Mat4, glam::DVec3, [f32; 2])>,
+    /// Each LOD chunk's current level per entry (by active chunk index), kept
+    /// across frames for hysteresis.
+    mesh_lod_levels: rustc_hash::FxHashMap<usize, Vec<u8>>,
+    /// This frame's opaque draws of each LOD chunk: `(level, start, count)`.
+    /// A chunk without an entry draws `index_buffer` whole.
+    mesh_lod_draws: rustc_hash::FxHashMap<usize, Vec<(u8, u32, u32)>>,
     mesh_highlight_draws: Vec<MeshHighlightDraw>,
     /// `(geometry_epoch, selection_generation)` the highlight overlay was built for.
     pub cached_highlight_key: (u64, u64),
@@ -779,7 +816,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -819,7 +856,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -898,7 +935,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -940,7 +977,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -983,7 +1020,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -1068,7 +1105,7 @@ impl Pipeline {
                         bias: wgpu::DepthBiasState::default(),
                     }),
                     multisample: wgpu::MultisampleState {
-                        count: MSAA_SAMPLES,
+                        count: msaa_samples(),
                         mask: !0,
                         alpha_to_coverage_enabled: false,
                     },
@@ -1175,7 +1212,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -1381,7 +1418,7 @@ impl Pipeline {
                 },
             ],
         });
-        let mesh_default_material_bind_group =
+        let (mesh_default_material_bind_group, mesh_default_material_memory) =
             mesh_gpu::create_material_bind_group(device, queue, &mesh_material_bgl, None);
 
         let mesh_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1498,7 +1535,7 @@ impl Pipeline {
                 },
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -1544,7 +1581,7 @@ impl Pipeline {
                 },
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -1596,7 +1633,7 @@ impl Pipeline {
                     },
                 }),
                 multisample: wgpu::MultisampleState {
-                    count: MSAA_SAMPLES,
+                    count: msaa_samples(),
                     mask: !0,
                     alpha_to_coverage_enabled: false,
                 },
@@ -1643,7 +1680,7 @@ impl Pipeline {
                     },
                 }),
                 multisample: wgpu::MultisampleState {
-                    count: MSAA_SAMPLES,
+                    count: msaa_samples(),
                     mask: !0,
                     alpha_to_coverage_enabled: false,
                 },
@@ -1690,7 +1727,7 @@ impl Pipeline {
                         bias: wgpu::DepthBiasState::default(),
                     }),
                     multisample: wgpu::MultisampleState {
-                        count: MSAA_SAMPLES,
+                        count: msaa_samples(),
                         mask: !0,
                         alpha_to_coverage_enabled: false,
                     },
@@ -1766,7 +1803,7 @@ impl Pipeline {
                         bias: wgpu::DepthBiasState::default(),
                     }),
                     multisample: wgpu::MultisampleState {
-                        count: MSAA_SAMPLES,
+                        count: msaa_samples(),
                         mask: !0,
                         alpha_to_coverage_enabled: false,
                     },
@@ -1831,7 +1868,7 @@ impl Pipeline {
                     bias: wgpu::DepthBiasState::default(),
                 }),
                 multisample: wgpu::MultisampleState {
-                    count: MSAA_SAMPLES,
+                    count: msaa_samples(),
                     mask: !0,
                     alpha_to_coverage_enabled: false,
                 },
@@ -1886,7 +1923,7 @@ impl Pipeline {
                 },
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -1933,7 +1970,7 @@ impl Pipeline {
                     },
                 }),
                 multisample: wgpu::MultisampleState {
-                    count: MSAA_SAMPLES,
+                    count: msaa_samples(),
                     mask: !0,
                     alpha_to_coverage_enabled: false,
                 },
@@ -1997,7 +2034,7 @@ impl Pipeline {
                 },
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -2045,7 +2082,7 @@ impl Pipeline {
                     },
                 }),
                 multisample: wgpu::MultisampleState {
-                    count: MSAA_SAMPLES,
+                    count: msaa_samples(),
                     mask: !0,
                     alpha_to_coverage_enabled: false,
                 },
@@ -2092,7 +2129,7 @@ impl Pipeline {
                     },
                 }),
                 multisample: wgpu::MultisampleState {
-                    count: MSAA_SAMPLES,
+                    count: msaa_samples(),
                     mask: !0,
                     alpha_to_coverage_enabled: false,
                 },
@@ -2193,7 +2230,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -2247,7 +2284,7 @@ impl Pipeline {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: MSAA_SAMPLES,
+                count: msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -2278,7 +2315,7 @@ impl Pipeline {
             &frame_bgl,
             &text_atlas_bgl,
             format,
-            MSAA_SAMPLES,
+            msaa_samples(),
             &content_stencil,
         );
 
@@ -2286,7 +2323,7 @@ impl Pipeline {
             device,
             &frame_bgl,
             format,
-            MSAA_SAMPLES,
+            msaa_samples(),
             &content_stencil,
         );
 
@@ -2294,17 +2331,22 @@ impl Pipeline {
             device,
             &frame_bgl,
             format,
-            MSAA_SAMPLES,
+            msaa_samples(),
             &content_stencil,
         );
 
         let viewcube = ViewCubePipeline::new(device, queue, format);
 
         let init_size = Size::new(1, 1);
-        let msaa_view = create_msaa_texture(device, init_size, format)
-            .create_view(&wgpu::TextureViewDescriptor::default());
         let resolve_tex = create_resolve_texture(device, init_size, format);
         let resolve_view = resolve_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        // At 1 sample there is nothing to resolve: draw into the resolve texture.
+        let msaa_view = if msaa_samples() > 1 {
+            create_msaa_texture(device, init_size, format)
+                .create_view(&wgpu::TextureViewDescriptor::default())
+        } else {
+            resolve_tex.create_view(&wgpu::TextureViewDescriptor::default())
+        };
 
         // ── Blit pipeline (resolve texture → surface target) ──────────────
         let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -2484,6 +2526,7 @@ impl Pipeline {
             mesh_plain_depth_pipeline,
             mesh_material_bgl,
             mesh_default_material_bind_group,
+            mesh_default_material_memory,
             face3d_pipeline,
             block_face3d_pipeline,
             face3d_depth_pipeline,
@@ -2563,6 +2606,9 @@ impl Pipeline {
             mesh_dynamic_handles: rustc_hash::FxHashSet::default(),
             cached_mesh_content_id: u64::MAX,
             mesh_ranges_by_handle: rustc_hash::FxHashMap::default(),
+            mesh_lod_view: None,
+            mesh_lod_levels: rustc_hash::FxHashMap::default(),
+            mesh_lod_draws: rustc_hash::FxHashMap::default(),
             mesh_highlight_draws: vec![],
             cached_highlight_key: (u64::MAX, u64::MAX),
             gpu_face3d_fill: None,
@@ -2655,17 +2701,9 @@ impl Pipeline {
                 #[cfg(not(target_arch = "wasm32"))]
                 use rayon::prelude::*;
                 #[cfg(not(target_arch = "wasm32"))]
-                sorted.par_sort_by(|a, b| {
-                    a.params[2]
-                        .partial_cmp(&b.params[2])
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                sorted.par_sort_by(|a, b| a.params[2].total_cmp(&b.params[2]));
                 #[cfg(target_arch = "wasm32")]
-                sorted.sort_by(|a, b| {
-                    a.params[2]
-                        .partial_cmp(&b.params[2])
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                sorted.sort_by(|a, b| a.params[2].total_cmp(&b.params[2]));
             }
             vec![CircleGpu::from_instances(
                 device,
@@ -2712,17 +2750,9 @@ impl Pipeline {
                 #[cfg(not(target_arch = "wasm32"))]
                 use rayon::prelude::*;
                 #[cfg(not(target_arch = "wasm32"))]
-                sorted.par_sort_by(|a, b| {
-                    a.params[2]
-                        .partial_cmp(&b.params[2])
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                sorted.par_sort_by(|a, b| a.params[2].total_cmp(&b.params[2]));
                 #[cfg(target_arch = "wasm32")]
-                sorted.sort_by(|a, b| {
-                    a.params[2]
-                        .partial_cmp(&b.params[2])
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                sorted.sort_by(|a, b| a.params[2].total_cmp(&b.params[2]));
             }
             vec![EllipseGpu::from_instances(
                 device,
@@ -3178,16 +3208,28 @@ impl Pipeline {
             let gpu = WireGpu::from_highlight_refs(
                 device, queue, group, color, depth_map, self.wire_const_bgl.as_ref(),
             );
-            let bytes = gpu.iter().fold(0usize, |sum, wire| {
-                sum.saturating_add(usize::try_from(wire.instance_buffer.size()).unwrap_or(usize::MAX))
-            }).saturating_add(group.len().saturating_mul(std::mem::size_of::<wire_gpu::WireConst>()));
+            let bytes = gpu
+                .iter()
+                .fold(0usize, |sum, wire| {
+                    sum.saturating_add(
+                        usize::try_from(wire.instance_buffer.size()).unwrap_or(usize::MAX),
+                    )
+                })
+                .saturating_add(
+                    group
+                        .len()
+                        .saturating_mul(std::mem::size_of::<wire_gpu::WireConst>()),
+                );
             if bytes <= MAX_BYTES.saturating_sub(self.highlight_wire_chunk_bytes) {
                 self.highlight_wire_chunk_bytes += bytes;
-                self.highlight_wire_chunks.insert(key, HighlightWireChunk {
-                    members,
-                    gpu: gpu.clone(),
-                    bytes,
-                });
+                self.highlight_wire_chunks.insert(
+                    key,
+                    HighlightWireChunk {
+                        members,
+                        gpu: gpu.clone(),
+                        bytes,
+                    },
+                );
             }
             output.extend(gpu);
             rebuilt += 1;
@@ -3210,7 +3252,14 @@ impl Pipeline {
         const MIN_POINTS: usize = 8192;
         const MAX_CACHE_BYTES: usize = 128 * 1024 * 1024;
         if self.highlight_wire_cache_key.is_none() {
-            return WireGpu::from_highlight_refs(device, queue, wires, color, depth_map, self.wire_const_bgl.as_ref());
+            return WireGpu::from_highlight_refs(
+                device,
+                queue,
+                wires,
+                color,
+                depth_map,
+                self.wire_const_bgl.as_ref(),
+            );
         }
 
         // Annotation outlines are transient and can share an entity handle
@@ -3231,12 +3280,21 @@ impl Pipeline {
                 }
             }
         }
-        wire_counts.retain(|handle, _| !ineligible.contains(handle)
-            && counts.get(&handle.value()).copied().unwrap_or(0) >= MIN_POINTS);
-        let (mut output, reused) = match (&self.wire_arena, &self.wire_const_bgl, self.highlight_wire_cache_key) {
+        wire_counts.retain(|handle, _| {
+            !ineligible.contains(handle)
+                && counts.get(&handle.value()).copied().unwrap_or(0) >= MIN_POINTS
+        });
+        let (mut output, reused) = match (
+            &self.wire_arena,
+            &self.wire_const_bgl,
+            self.highlight_wire_cache_key,
+        ) {
             (Some(arena), Some(bgl), Some((wire_id, depth_generation)))
-                if self.wire_arena_id == wire_id && self.wire_arena_depth_generation == depth_generation =>
-                    arena.highlight_dense(device, queue, bgl, &wire_counts, color),
+                if self.wire_arena_id == wire_id
+                    && self.wire_arena_depth_generation == depth_generation =>
+            {
+                arena.highlight_dense(device, queue, bgl, &wire_counts, color)
+            }
             _ => (Vec::new(), rustc_hash::FxHashSet::default()),
         };
         let mut groups = rustc_hash::FxHashMap::<u64, Vec<&WireModel>>::default();
@@ -3247,16 +3305,16 @@ impl Pipeline {
                 continue;
             }
             match wire_gpu::fast_parse_u64(&wire.name) {
-                Some(handle) if reused.contains(&document::Handle::new(handle)) => {},
+                Some(handle) if reused.contains(&document::Handle::new(handle)) => {}
                 Some(handle) if counts.get(&handle).copied().unwrap_or(0) >= MIN_POINTS => {
                     groups.entry(handle).or_default().push(wire);
                 }
                 _ => small.push(wire),
             }
         }
-        output.extend(self.highlight_small_wire_chunks(
-            device, queue, &small, color, depth_map, &transient,
-        ));
+        output.extend(
+            self.highlight_small_wire_chunks(device, queue, &small, color, depth_map, &transient),
+        );
         for (handle, group) in groups {
             let key = (handle, color.map(f32::to_bits));
             if let Some(cached) = self.highlight_wire_cache.get(&key) {
@@ -3266,9 +3324,18 @@ impl Pipeline {
             let gpu = WireGpu::from_highlight_refs(
                 device, queue, &group, color, depth_map, self.wire_const_bgl.as_ref(),
             );
-            let bytes = gpu.iter().fold(0usize, |total, wire| {
-                total.saturating_add(usize::try_from(wire.instance_buffer.size()).unwrap_or(usize::MAX))
-            }).saturating_add(group.len().saturating_mul(std::mem::size_of::<wire_gpu::WireConst>()));
+            let bytes = gpu
+                .iter()
+                .fold(0usize, |total, wire| {
+                    total.saturating_add(
+                        usize::try_from(wire.instance_buffer.size()).unwrap_or(usize::MAX),
+                    )
+                })
+                .saturating_add(
+                    group
+                        .len()
+                        .saturating_mul(std::mem::size_of::<wire_gpu::WireConst>()),
+                );
             if bytes <= MAX_CACHE_BYTES.saturating_sub(self.highlight_wire_cache_bytes) {
                 self.highlight_wire_cache_bytes += bytes;
                 self.highlight_wire_cache.insert(key, gpu.clone());
@@ -3476,7 +3543,14 @@ impl Pipeline {
         };
         let t_split = perf_started.map(|t| t.elapsed().as_secs_f64() * 1000.0);
         let mut gpu = if let Some(tint) = selected_tint {
-            self.highlight_regular_wires(device, queue, &selected_regular, tint, depth_map, annotation_context_wires)
+            self.highlight_regular_wires(
+                device,
+                queue,
+                &selected_regular,
+                tint,
+                depth_map,
+                annotation_context_wires,
+            )
         } else {
             Vec::new()
         };
@@ -4221,6 +4295,8 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.mesh_disabled_chunks.clear();
         self.mesh_dynamic_handles.clear();
         self.gpu_mesh_batch = chunks;
+        self.mesh_lod_levels.clear();
+        self.mesh_lod_draws.clear();
         let indexed_at = iced::time::Instant::now();
         if crate::perf::enabled() {
             let instances: u64 = self
@@ -4350,6 +4426,8 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             &mut chunks,
         );
         self.gpu_mesh_dynamic = chunks;
+        self.mesh_lod_levels.clear();
+        self.mesh_lod_draws.clear();
         self.rebuild_mesh_range_map();
         if crate::perf::enabled() {
             crate::perf_record!(
@@ -4481,6 +4559,66 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             joined.push(draw);
         }
         joined
+    }
+
+    /// Chooses each LOD chunk's opaque draws for this frame from the view of
+    /// the last uniform upload. Call after the mesh batch is current; the
+    /// GPU buffers are not touched.
+    pub fn select_mesh_lods(&mut self) {
+        let Some((view_rot, eye, viewport)) = self.mesh_lod_view else {
+            self.mesh_lod_draws.clear();
+            return;
+        };
+        let mut levels = std::mem::take(&mut self.mesh_lod_levels);
+        let mut draws = std::mem::take(&mut self.mesh_lod_draws);
+        draws.clear();
+        for (index, chunk) in self.active_mesh_chunks_indexed() {
+            if chunk.lod_entries.is_empty() || chunk.lod_index_buffers.len() != 2 {
+                continue;
+            }
+            let current = levels.entry(index).or_default();
+            if current.len() != chunk.lod_entries.len() {
+                current.clear();
+            }
+            // Ranges per level; opaque draw order does not matter (depth
+            // test), so each level's touching ranges merge into one draw.
+            let mut per_level: [Vec<(u32, u32)>; 3] = Default::default();
+            for (at, entry) in chunk.lod_entries.iter().enumerate() {
+                let pixels =
+                    mesh_gpu::projected_diagonal(entry.aabb, &view_rot, eye, viewport);
+                let level = mesh_gpu::lod_level(pixels, current.get(at).copied());
+                if at < current.len() {
+                    current[at] = level;
+                } else {
+                    current.push(level);
+                }
+                let level = if entry.ranges[level as usize].1 == 0 {
+                    0
+                } else {
+                    level as usize
+                };
+                let (start, count) = entry.ranges[level];
+                match per_level[level].last_mut() {
+                    Some(last) if last.0 + last.1 == start => last.1 += count,
+                    _ => per_level[level].push((start, count)),
+                }
+            }
+            draws.insert(
+                index,
+                per_level
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(level, ranges)| {
+                        ranges
+                            .iter()
+                            .map(move |&(start, count)| (level as u8, start, count))
+                    })
+                    .collect(),
+            );
+        }
+        levels.retain(|index, _| draws.contains_key(index));
+        self.mesh_lod_levels = levels;
+        self.mesh_lod_draws = draws;
     }
 
     fn active_mesh_chunks_indexed(
@@ -4702,6 +4840,14 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         if self.shadow_full.is_none() {
             uniforms.shadow_params[0] = 0.0;
         }
+        let eye = |high: [f32; 3], low: [f32; 3]| {
+            glam::DVec3::from(high.map(f64::from)) + glam::DVec3::from(low.map(f64::from))
+        };
+        self.mesh_lod_view = Some((
+            uniforms.view_rot,
+            eye(uniforms.eye_high, uniforms.eye_low),
+            uniforms.viewport_size,
+        ));
         let mut selection = uniforms;
         selection.transparency_enable = 1.0;
         uniforms.highlight_widen = 0.0;
@@ -5179,8 +5325,9 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                             pass.draw(0..chunk.vertex_count, 0..chunk.instance_count);
                         }
                     } else {
-                        // Opaque fills first (they write depth).
-                        for (_, c) in self.active_mesh_chunks_indexed() {
+                        // Opaque fills first (they write depth), each LOD
+                        // chunk at the levels `select_mesh_lods` chose.
+                        for (index, c) in self.active_mesh_chunks_indexed() {
                             pass.set_pipeline(if c.compact_vertices {
                                 &self.mesh_plain_pipeline
                             } else {
@@ -5198,11 +5345,33 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                             }
                             pass.set_vertex_buffer(0, c.vertex_buffer.slice(..));
                             pass.set_vertex_buffer(1, c.instance_buffer.slice(..));
-                            pass.set_index_buffer(
-                                c.index_buffer.slice(..),
-                                wgpu::IndexFormat::Uint32,
-                            );
-                            pass.draw_indexed(0..c.index_count, 0, 0..c.instance_count);
+                            let Some(draws) = self.mesh_lod_draws.get(&index) else {
+                                pass.set_index_buffer(
+                                    c.index_buffer.slice(..),
+                                    wgpu::IndexFormat::Uint32,
+                                );
+                                pass.draw_indexed(0..c.index_count, 0, 0..c.instance_count);
+                                continue;
+                            };
+                            let mut bound = None;
+                            for &(level, start, count) in draws {
+                                if bound != Some(level) {
+                                    let buffer = match level {
+                                        0 => &c.index_buffer,
+                                        level => &c.lod_index_buffers[level as usize - 1],
+                                    };
+                                    pass.set_index_buffer(
+                                        buffer.slice(..),
+                                        wgpu::IndexFormat::Uint32,
+                                    );
+                                    bound = Some(level);
+                                }
+                                pass.draw_indexed(
+                                    start..start + count,
+                                    0,
+                                    0..c.instance_count,
+                                );
+                            }
                         }
                         // Transparent fills last, with depth writes disabled, so they
                         // blend over the opaque geometry behind them instead of
@@ -5938,7 +6107,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             // resolve never touches the surface. Only the drawn [0, render_size]
             // corner holds content; the rounded border stays the cleared bg color
             // and is never sampled (the blit UV is scaled to render/alloc).
-            {
+            if msaa_samples() > 1 {
                 let _resolve = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("msaa.resolve_pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -6089,6 +6258,11 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.partition_depth_generation = u64::MAX;
     }
 
+    /// Accept the errors seen so far without dropping this slot's caches.
+    pub(crate) fn absorb_gpu_errors(&mut self, errors: usize) {
+        self.gpu_error_epoch = errors;
+    }
+
     /// Catch errors delivered after the previous upload/submit completed.
     pub(crate) fn sync_gpu_error_epoch(&mut self) {
         let errors = gpu_errors_seen();
@@ -6156,6 +6330,8 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.mesh_disabled_chunks.clear();
         self.mesh_dynamic_handles.clear();
         self.mesh_ranges_by_handle.clear();
+        self.mesh_lod_levels.clear();
+        self.mesh_lod_draws.clear();
         self.mesh_highlight_draws.clear();
         self.silhouette_chunks.clear();
         self.silhouette_source_groups.clear();
@@ -6193,10 +6369,14 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             let size = alloc;
             let depth_tex = create_depth_texture(device, size);
             self.depth_view = depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
-            let msaa_tex = create_msaa_texture(device, size, self.surface_format);
-            self.msaa_view = msaa_tex.create_view(&wgpu::TextureViewDescriptor::default());
             let resolve_tex = create_resolve_texture(device, size, self.surface_format);
             let resolve_view = resolve_tex.create_view(&wgpu::TextureViewDescriptor::default());
+            self.msaa_view = if msaa_samples() > 1 {
+                create_msaa_texture(device, size, self.surface_format)
+                    .create_view(&wgpu::TextureViewDescriptor::default())
+            } else {
+                resolve_tex.create_view(&wgpu::TextureViewDescriptor::default())
+            };
             self.blit_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("blit.bind_group"),
                 layout: &self.blit_bind_group_layout,
@@ -6230,11 +6410,12 @@ fn round_up_tex(n: u32) -> u32 {
 }
 
 /// `true` when the world-XY AABB projects entirely outside the
-/// viewport rect (extended by `MARGIN_FRAC` to absorb pan inertia and
-/// avoid edge pop-in). Phase 2.2 mesh-frustum / Phase 2.3 hatch +
+/// viewport rect (extended by [`OFFSCREEN_MARGIN_FRAC`] to absorb pan inertia
+/// and avoid edge pop-in). Phase 2.2 mesh-frustum / Phase 2.3 hatch +
 /// wipeout cull. Equivalent to a 2D bounding-box rejection test in
 /// NDC; uses the same 4-corner projection that LOD picking already
-/// does, so the extra cost is negligible.
+/// does, so the extra cost is negligible. Geometry with a known depth
+/// extent calls [`box_offscreen`] instead.
 ///
 /// IMPORTANT: the AABB must be in the same local space (world_offset
 /// subtracted) that `view_proj` expects. `WipeoutGpu.world_aabb` rebuilds
@@ -6254,7 +6435,9 @@ fn aabb_offscreen(
     let w = clip_w as f32;
     let h = clip_h as f32;
     // A corner behind the perspective eye mirrors across the screen, so the
-    // projected union bounds nothing: never cull in that case (#64).
+    // projected union bounds nothing: never cull in that case (#64). Without a
+    // depth extent there is no telling where this geometry really sits, so a
+    // box entirely behind the eye is kept too.
     let corners = [(x0, y0), (x1, y0), (x0, y1), (x1, y1)].map(|(x, y)| {
         crate::scene::view::projection::project_ndc(view_rot, eye, glam::DVec3::new(x, y, 0.0))
     });
@@ -6279,13 +6462,129 @@ fn aabb_offscreen(
             max_py = py;
         }
     }
-    // 25% pad on each side — matches `view_world_aabb` (wire path),
-    // keeps edge geometry rendered while panning before the next
-    // upload reaches the GPU.
-    const MARGIN_FRAC: f32 = 0.25;
-    let mx = w * MARGIN_FRAC;
-    let my = h * MARGIN_FRAC;
+    let mx = w * OFFSCREEN_MARGIN_FRAC;
+    let my = h * OFFSCREEN_MARGIN_FRAC;
     max_px < -mx || min_px > w + mx || max_py < -my || min_py > h + my
+}
+
+/// 25% pad on each side — matches `view_world_aabb` (wire path), keeps edge
+/// geometry rendered while panning before the next upload reaches the GPU.
+const OFFSCREEN_MARGIN_FRAC: f32 = 0.25;
+
+/// [`aabb_offscreen`] for a box that has a real depth extent. A tilted or
+/// perspective view maps the far face to a different screen rect than the near
+/// one, so the test needs all eight corners: projecting the footprint alone
+/// would cull geometry that the camera can still see. `depth_ignored` is the
+/// caller's [`parallel_view_ignores_depth`] answer, passed in so it is decided
+/// once per view rather than once per box.
+fn box_offscreen(
+    bounds: [f64; 6],
+    depth_ignored: bool,
+    view_rot: glam::Mat4,
+    eye: glam::DVec3,
+    clip_w: u32,
+    clip_h: u32,
+) -> bool {
+    let [x0, y0, z0, x1, y1, z1] = bounds;
+    if ![x0, y0, z0, x1, y1, z1].into_iter().all(f64::is_finite) {
+        return false;
+    }
+    let (z0, z1) = if z0 <= z1 { (z0, z1) } else { (z1, z0) };
+    let w = clip_w as f32;
+    let h = clip_h as f32;
+    let corners = [
+        (x0, y0, z0),
+        (x1, y0, z0),
+        (x0, y1, z0),
+        (x1, y1, z0),
+        (x0, y0, z1),
+        (x1, y0, z1),
+        (x0, y1, z1),
+        (x1, y1, z1),
+    ];
+    // The footprint alone bounds the box when the far face lands on the near
+    // one: flat geometry, or a view that depth cannot move on screen.
+    let corners = if z0 == z1 || depth_ignored {
+        &corners[..4]
+    } else {
+        &corners[..]
+    };
+    let mut min_px = f32::INFINITY;
+    let mut max_px = f32::NEG_INFINITY;
+    let mut min_py = f32::INFINITY;
+    let mut max_py = f32::NEG_INFINITY;
+    let mut behind = 0usize;
+    for &(x, y, z) in corners {
+        // A corner behind the perspective eye mirrors across the screen, so the
+        // projected union bounds nothing: never cull a box that straddles the
+        // eye plane (#64). One whose every corner is behind it is out of sight.
+        let Some(clip) =
+            crate::scene::view::projection::project_clip(view_rot, eye, glam::DVec3::new(x, y, z))
+        else {
+            return false;
+        };
+        if crate::scene::view::projection::behind_eye(clip) {
+            behind += 1;
+            continue;
+        }
+        let c = clip.truncate() / clip.w;
+        if !c.is_finite() {
+            return false;
+        }
+        let px = (c.x + 1.0) * 0.5 * w;
+        let py = (1.0 - c.y) * 0.5 * h;
+        if px < min_px {
+            min_px = px;
+        }
+        if px > max_px {
+            max_px = px;
+        }
+        if py < min_py {
+            min_py = py;
+        }
+        if py > max_py {
+            max_py = py;
+        }
+    }
+    if behind == corners.len() {
+        return true;
+    }
+    if behind > 0 {
+        return false;
+    }
+    let mx = w * OFFSCREEN_MARGIN_FRAC;
+    let my = h * OFFSCREEN_MARGIN_FRAC;
+    max_px < -mx || min_px > w + mx || max_py < -my || min_py > h + my
+}
+
+/// Whether a point's Z cannot move it on screen: a parallel projection looking
+/// straight down the world Z axis at the drawing plane, i.e. the usual plan view.
+///
+/// `view_proj_rte` zeroes the bottom row for a parallel projection, and a
+/// translated view keeps it zero, so `(0, 0, 0, 1)` proves one. Perspective
+/// never qualifies — there depth also changes the scale. The tolerance is
+/// relative and sits far above the f32 cosine noise of an exact plan rotation
+/// (~4e-8), while keeping a view tilted by up to 1e-6 rad on the fast path.
+fn parallel_view_ignores_depth(view_rot: glam::Mat4) -> bool {
+    if view_rot.row(3) != glam::Vec4::W {
+        return false;
+    }
+    let along = view_rot
+        .transform_vector3(glam::Vec3::Z)
+        .truncate()
+        .length();
+    let across = view_rot
+        .transform_vector3(glam::Vec3::X)
+        .truncate()
+        .length()
+        .max(
+            view_rot
+                .transform_vector3(glam::Vec3::Y)
+                .truncate()
+                .length(),
+        )
+        .max(f32::MIN_POSITIVE);
+    along <= across * 1e-6
 }
 
 /// Return `true` when the world-XY AABB's screen-space size is below the
@@ -6334,13 +6633,10 @@ fn aabb_below_pixel(
     (max_px - min_px).max(max_py - min_py) < threshold_px
 }
 
-/// Device bytes a renderer is holding, counted from the sizes it allocated
-/// rather than from process RSS — the allocator and the driver both keep
-/// high-water memory that RSS cannot distinguish from live resources.
-///
-/// Partial by construction: it covers the categories large enough to decide
-/// where the next fix goes, and says so rather than pretending to be a total.
-#[derive(Default, Clone, Copy, PartialEq)]
+/// Logical sizes of live resources held by viewport slots and shared caches.
+/// Shared handles count once. Excludes driver heaps/alignment, staging, iced
+/// and ViewCube resources; Depth24Plus storage is estimated at 4 bytes/texel.
+#[derive(Default, Clone, Copy, PartialEq, serde::Serialize)]
 pub(crate) struct GpuLiveBytes {
     pub slots: usize,
     pub shadow: u64,
@@ -6348,48 +6644,176 @@ pub(crate) struct GpuLiveBytes {
     pub text_atlas: u64,
     pub wire_arena: u64,
     pub block_geometry: u64,
+    pub wires: u64,
+    pub meshes: u64,
+    pub images: u64,
+    pub materials: u64,
+    pub text: u64,
+    pub overlays: u64,
+    pub hatches: u64,
+    pub point_clouds: u64,
+    pub other: u64,
 }
 
 impl GpuLiveBytes {
     pub(crate) fn total(&self) -> u64 {
-        self.shadow + self.render_targets + self.text_atlas + self.wire_arena + self.block_geometry
+        self.shadow
+            + self.render_targets
+            + self.text_atlas
+            + self.wire_arena
+            + self.block_geometry
+            + self.wires
+            + self.meshes
+            + self.images
+            + self.materials
+            + self.text
+            + self.overlays
+            + self.hatches
+            + self.point_clouds
+            + self.other
+    }
+    fn accumulate(&mut self, other: Self) {
+        self.slots += other.slots;
+        self.shadow += other.shadow;
+        self.render_targets += other.render_targets;
+        self.text_atlas += other.text_atlas;
+        self.wire_arena += other.wire_arena;
+        self.block_geometry += other.block_geometry;
+        self.wires += other.wires;
+        self.meshes += other.meshes;
+        self.images += other.images;
+        self.materials += other.materials;
+        self.text += other.text;
+        self.overlays += other.overlays;
+        self.hatches += other.hatches;
+        self.point_clouds += other.point_clouds;
+        self.other += other.other;
     }
 }
 
 impl Pipeline {
-    /// This slot's share. `alloc_size` is the real allocation, which is rounded
-    /// up from the requested size and grows only.
-    fn gpu_live_bytes(&self) -> GpuLiveBytes {
-        // 4x MSAA colour (4 B/sample) + 4x MSAA depth-stencil (4 B/sample) +
-        // one single-sample resolve target.
-        const BYTES_PER_PIXEL: u64 = (MSAA_SAMPLES as u64) * 4 + (MSAA_SAMPLES as u64) * 4 + 4;
-        let pixels = u64::from(self.alloc_size.width) * u64::from(self.alloc_size.height);
-        GpuLiveBytes {
+    fn collect_gpu_live<'a>(&'a self, counter: &mut gpu_memory::ResourceCounter<'a>) -> GpuLiveBytes {
+        let mut bytes = GpuLiveBytes {
             slots: 1,
-            // Only while this viewport casts shadows; the placeholder that
-            // stands in otherwise is 4 bytes.
-            shadow: match &self.shadow_full {
-                Some(_) => u64::from(SHADOW_MAP_SIZE) * u64::from(SHADOW_MAP_SIZE) * 4,
-                None => 4,
-            },
-            render_targets: pixels * BYTES_PER_PIXEL,
-            text_atlas: self
-                .text_atlas_gpu
+            ..Default::default()
+        };
+        bytes.shadow = counter.texture(&self._shadow_fallback_texture)
+            + self
+                .shadow_full
                 .as_ref()
-                .map(text_gpu::TextAtlasGpu::gpu_bytes)
-                .unwrap_or(0),
-            wire_arena: self
-                .wire_arena
-                .as_ref()
-                .map(wire_arena::PersistentWireArena::gpu_bytes)
-                .unwrap_or(0)
-                + self
-                    .wire_arena_mesh
-                    .as_ref()
-                    .map(wire_arena::PersistentWireArena::gpu_bytes)
-                    .unwrap_or(0),
-            block_geometry: 0,
+                .map_or(0, |(texture, _)| counter.texture(texture));
+        bytes.render_targets = counter.texture(self.depth_view.texture())
+            + counter.texture(self.msaa_view.texture())
+            + counter.texture(self.resolve_view.texture());
+        bytes.text_atlas = self
+            .text_atlas_gpu
+            .as_ref()
+            .map_or(0, |atlas| atlas.counted_gpu_bytes(counter));
+        // Arenas first: draw-range WireGpu clones below must not charge them again.
+        for arena in [&self.wire_arena, &self.wire_arena_mesh]
+            .into_iter()
+            .flatten()
+        {
+            bytes.wire_arena += arena.gpu_bytes(counter);
         }
+        bytes.wires += counter.wires(&self.gpu_wires)
+            + counter.wires(&self.wire_arena_fallback)
+            + counter.wires(&self.gpu_face3d_edges);
+        for circle in self.gpu_circles.iter() {
+            bytes.wires += counter.buffer(&circle.instance_buffer);
+        }
+        for ellipse in self.gpu_ellipses.iter() {
+            bytes.wires += counter.buffer(&ellipse.instance_buffer);
+        }
+        bytes.block_geometry += counter.blocks(&self.gpu_block_wires);
+        bytes.text += counter.text(&self.text_gpu) + counter.block_text(&self.block_text_gpu);
+        for chunks in [
+            self.gpu_mesh_batch.as_slice(),
+            self.gpu_mesh_dynamic.as_slice(),
+        ] {
+            let (meshes, materials) = counter.meshes(chunks);
+            bytes.meshes += meshes;
+            bytes.materials += materials;
+        }
+        bytes.materials += self.mesh_default_material_memory.gpu_bytes(counter);
+        for image in &self.gpu_images {
+            bytes.images += image.gpu_bytes(counter);
+        }
+        bytes.point_clouds += self.gpu_point_clouds.gpu_bytes(counter);
+        bytes.hatches +=
+            self.hatch_gpu.gpu_bytes(counter) + self.hatch_translucent_gpu.gpu_bytes(counter);
+        for wipeout in &self.gpu_wipeouts {
+            bytes.hatches +=
+                counter.buffer(&wipeout.vertex_buffer) + counter.buffer(&wipeout.instance_buffer)
+                + counter.buffer(&wipeout.uniform_buffers[0])
+                + counter.buffer(&wipeout.uniform_buffers[1]);
+        }
+        if let Some(fill) = &self.gpu_face3d_fill {
+            for chunk in fill.chunks_3d.iter().chain(&fill.chunks_2d) {
+                bytes.meshes += counter.buffer(&chunk.vertex_buffer);
+            }
+            for chunk in fill.block_chunks_3d.iter().chain(&fill.block_chunks_2d) {
+                bytes.meshes +=
+                    counter.buffer(&chunk.vertex_buffer) + counter.buffer(&chunk.instance_buffer);
+            }
+        }
+        bytes.overlays += counter.wires(&self.gpu_selected_wires)
+            + counter.wires(&self.gpu_preview_wires)
+            + counter.text(&self.text_highlight_gpu)
+            + counter.text(&self.text_preview_gpu)
+            + counter.block_text(&self.block_text_highlight_gpu);
+        bytes.block_geometry += counter.blocks(&self.gpu_selected_block_wires)
+            + counter.blocks(&self.gpu_preview_block_wires);
+        for circle in self
+            .gpu_selected_circles
+            .iter()
+            .chain(&self.gpu_preview_circles)
+        {
+            bytes.overlays += counter.buffer(&circle.instance_buffer);
+        }
+        for ellipse in self
+            .gpu_selected_ellipses
+            .iter()
+            .chain(&self.gpu_preview_ellipses)
+        {
+            bytes.overlays += counter.buffer(&ellipse.instance_buffer);
+        }
+        for wires in self.highlight_wire_cache.values() {
+            bytes.overlays += counter.wires(wires);
+        }
+        for chunk in self.highlight_wire_chunks.values() {
+            bytes.overlays += counter.wires(&chunk.gpu);
+        }
+        if let Some(cache) = &self.selected_highlight_gpu_cache {
+            bytes.overlays += counter.wires(&cache.wires)
+                + counter.text(&cache.text)
+                + counter.block_text(&cache.block_text);
+            bytes.block_geometry += counter.blocks(&cache.blocks);
+            for circle in &cache.circles {
+                bytes.overlays += counter.buffer(&circle.instance_buffer);
+            }
+            for ellipse in &cache.ellipses {
+                bytes.overlays += counter.buffer(&ellipse.instance_buffer);
+            }
+        }
+        for chunk in &self.silhouette_chunks {
+            bytes.overlays +=
+                counter.buffer(&chunk.vertex_buffer) + counter.buffer(&chunk.instance_buffer);
+        }
+        for group in &self.silhouette_source_groups {
+            for (buffer, _) in &group.instance_buffers {
+                bytes.overlays += counter.buffer(buffer);
+            }
+        }
+        if let Some((buffer, _)) = &self.clip_boundary {
+            bytes.other += counter.buffer(buffer);
+        }
+        bytes.other += counter.buffer(&self.uniform_buffer)
+            + counter.buffer(&self.selection_uniform_buffer)
+            + counter.buffer(&self.blit_uniform_buffer)
+            + counter.texture(&self.background_texture)
+            + counter.texture(&self.environment_texture);
+        bytes
     }
 }
 
@@ -6417,9 +6841,9 @@ impl MultiPipeline {
             }
             // Nothing to give back — releasing again would only churn the
             // render targets it just rebuilt at their smallest size.
-            let held = self.inners[index].gpu_live_bytes();
-            if held.wire_arena == 0
-                && held.shadow <= 4
+            if self.inners[index].wire_arena.is_none()
+                && self.inners[index].wire_arena_mesh.is_none()
+                && self.inners[index].shadow_full.is_none()
                 && self.inners[index].alloc_size == Size::new(0, 0)
             {
                 continue;
@@ -6445,22 +6869,25 @@ impl MultiPipeline {
     /// Sum across slots, plus the caches held once for all of them.
     pub(crate) fn gpu_live_bytes(&self) -> GpuLiveBytes {
         let mut total = GpuLiveBytes::default();
-        // Block arenas belong to the batches, and a cached build hands the same
-        // arenas to several slots, so each one is counted once.
-        let mut counted = rustc_hash::FxHashSet::default();
+        let mut counter = gpu_memory::ResourceCounter::default();
         for inner in &self.inners {
-            let slot = inner.gpu_live_bytes();
-            total.slots += slot.slots;
-            total.shadow += slot.shadow;
-            total.render_targets += slot.render_targets;
-            total.text_atlas += slot.text_atlas;
-            total.wire_arena += slot.wire_arena;
-            total.block_geometry +=
-                wire_gpu::block_arena_bytes(&inner.gpu_block_wires, &mut counted)
-                    + wire_gpu::block_arena_bytes(&inner.gpu_selected_block_wires, &mut counted);
+            total.accumulate(inner.collect_gpu_live(&mut counter));
         }
+        // Cold cached resources are still live even without an active slot.
         for entry in self.wire_buffer_cache.values() {
-            total.block_geometry += wire_gpu::block_arena_bytes(&entry.1, &mut counted);
+            total.wires += counter.wires(&entry.0);
+            total.block_geometry += counter.blocks(&entry.1);
+            for circle in entry.3.iter() {
+                total.wires += counter.buffer(&circle.instance_buffer);
+            }
+            for ellipse in entry.4.iter() {
+                total.wires += counter.buffer(&ellipse.instance_buffer);
+            }
+        }
+        for entry in self.mesh_batch_cache.values() {
+            let (meshes, materials) = counter.meshes(&entry.1);
+            total.meshes += meshes;
+            total.materials += materials;
         }
         total
     }
@@ -6520,7 +6947,7 @@ fn create_depth_texture(device: &wgpu::Device, size: Size<u32>) -> wgpu::Texture
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: MSAA_SAMPLES,
+        sample_count: msaa_samples(),
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Depth24PlusStencil8,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -6562,7 +6989,7 @@ fn create_msaa_texture(
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
-        sample_count: MSAA_SAMPLES,
+        sample_count: msaa_samples(),
         dimension: wgpu::TextureDimension::D2,
         format,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -6598,6 +7025,10 @@ pub struct MultiPipeline {
     slot_clock: u64,
     pub(crate) frame_rendered: std::sync::atomic::AtomicBool,
     pub(crate) gpu_error_epoch: usize,
+    /// Consecutive frames that each reported new device errors.
+    pub(crate) gpu_error_streak: u32,
+    /// Consecutive frames without new device errors.
+    pub(crate) gpu_clean_frames: u32,
     /// Definition geometry shared across viewport slots.
     pub(crate) block_geometry: wire_gpu::BlockGeometryCache,
     /// Solid-mesh batches shared across slots, keyed by mesh-set identity.
@@ -6992,6 +7423,8 @@ impl iced::widget::shader::Pipeline for MultiPipeline {
             slot_clock: 0,
             frame_rendered: std::sync::atomic::AtomicBool::new(false),
             gpu_error_epoch: gpu_errors_seen(),
+            gpu_error_streak: 0,
+            gpu_clean_frames: 0,
             mesh_batch_cache: Default::default(),
             wire_buffer_cache: rustc_hash::FxHashMap::default(),
         }
@@ -7108,11 +7541,10 @@ mod mesh_highlight_draw_tests {
             } else {
                 continue;
             };
-            out.extend(
-                ranges
-                    .iter()
-                    .map(|range| MeshHighlightDraw { range: *range, kind }),
-            );
+            out.extend(ranges.iter().map(|range| MeshHighlightDraw {
+                range: *range,
+                kind,
+            }));
         }
         out
     }
@@ -7395,4 +7827,22 @@ mod highlight_classification_tests {
 /// edit (`OCS_ANALYTIC_PATCH=0` turns it off).
 pub(crate) fn analytic_patch_enabled() -> bool {
     analytic_slots::enabled()
+}
+
+#[cfg(test)]
+mod msaa_sample_tests {
+    use super::msaa_samples_from;
+
+    /// `OCS_MSAA` takes 1 or 4; anything else, or nothing, keeps the 4 the
+    /// pipelines always used.
+    #[test]
+    fn ocs_msaa_takes_one_or_four_and_keeps_four_otherwise() {
+        assert_eq!(msaa_samples_from(Some("1")), 1);
+        assert_eq!(msaa_samples_from(Some(" 1 ")), 1);
+        assert_eq!(msaa_samples_from(Some("4")), 4);
+        for other in ["2", "8", "0", "", "x", "-1"] {
+            assert_eq!(msaa_samples_from(Some(other)), 4, "OCS_MSAA={other:?}");
+        }
+        assert_eq!(msaa_samples_from(None), 4);
+    }
 }

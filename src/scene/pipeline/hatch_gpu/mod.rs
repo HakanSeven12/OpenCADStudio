@@ -53,6 +53,34 @@ pub struct HatchGpu {
 }
 
 impl HatchGpu {
+    pub(super) fn gpu_bytes<'a>(&'a self, counter: &mut super::gpu_memory::ResourceCounter<'a>) -> u64 {
+        match &self.backend {
+            HatchBackend::Storage { resident, preview } => resident
+                .iter()
+                .chain(preview)
+                .map(|batch| {
+                    [
+                        &batch.vertex_buffer,
+                        &batch.index_buffer,
+                        &batch.placement_buffer,
+                        &batch.instance_buffer,
+                        &batch.family_buffer,
+                        &batch.dash_buffer,
+                        &batch.visibility_buffer,
+                    ]
+                    .into_iter()
+                    .map(|buffer| counter.buffer(buffer))
+                    .sum::<u64>()
+                })
+                .sum(),
+            HatchBackend::Texture { resident, preview } => resident
+                .iter()
+                .chain(preview)
+                .map(|batch| batch.gpu_bytes(counter))
+                .sum(),
+        }
+    }
+
     pub fn new(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
@@ -126,7 +154,7 @@ impl HatchGpu {
                 },
             }),
             multisample: wgpu::MultisampleState {
-                count: super::MSAA_SAMPLES,
+                count: super::msaa_samples(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },

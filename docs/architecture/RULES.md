@@ -8,7 +8,7 @@ The crate's top-level modules are arranged in layers. Code may use modules in it
 
 | Layer | Modules | What lives here |
 | --- | --- | --- |
-| 0 foundations | `par`, `perf`, `sys`, `sysinfo`, `i18n`, `config`, `network`, `schema_validation` | Helpers with no knowledge of CAD or of the app |
+| 0 foundations | `par`, `perf`, `sys`, `sysinfo`, `i18n`, `config`, `network`, `schema_validation`, `xml_depth` | Helpers with no knowledge of CAD or of the app |
 | 1 drawing model | `entities`, `snap`, `parametric`, `entity_creation`, `filter` | Entities and their geometry behaviour |
 | 2 files and rendering | `io`, `scene`, `gpu_backend` | Reading and writing files; turning the model into pictures |
 | 3 tool contract | `command`, `plugin` | What a command or plugin is, and how it runs |
@@ -22,7 +22,7 @@ The rule of thumb: code that many things depend on sits low and changes rarely; 
 
 - **`ui` may use `app::Message`.** iced views return the application's message type, so every view names it. Anything else `ui` takes from `app` still counts.
 - **`scene` must not use `io`**, although both are layer 2. Rendering should not depend on file formats; the two would otherwise grow into a cycle.
-- **`network`, `schema_validation` and `gpu_backend` sit low** because they depend on almost nothing: `network` is a shared HTTP agent, `schema_validation` a small validator, and `gpu_backend` depends only on `sys` and `config`.
+- **`network`, `schema_validation`, `xml_depth` and `gpu_backend` sit low** because they depend on almost nothing: `network` is a shared HTTP agent, `schema_validation` a small validator, `xml_depth` the nesting check the XML readers in `io`, `scene` and `ui` run before parsing, and `gpu_backend` depends only on `sys` and `config`.
 - **`sys` stays a foundation module** even though it holds platform glue for the web build. Its calls into `io` and `scene` are reported as upward dependencies until they are restructured.
 
 ## What counts

@@ -17,11 +17,26 @@ mod wmf;
 
 pub use raster::{Canvas, Rgba};
 
-/// Output long-side target in pixels for a rasterized metafile.
-const TARGET_DIM: usize = 1600;
-/// Supersampling factor; the canvas renders at TARGET_DIM×SS and is
-/// box-downsampled once at the end for uniform anti-aliasing.
+/// A 100×100 EMF with a one-pixel line across it at y = 50, for tests.
+#[cfg(test)]
+pub(crate) use emf::size_tests::hairline as test_hairline_emf;
+
+/// Output long-side target in pixels for a rasterized metafile, when the
+/// view's scale is unknown, and the most a whole picture is drawn at.
+pub const TARGET_DIM: usize = 1600;
+/// Longest side of a zoomed-in region raster, output pixels.
+pub const REGION_SIDE: usize = 4096;
+/// Supersampling factor; the canvas renders at SS× the output size and is
+/// box-downsampled once at the end for uniform anti-aliasing. A small picture
+/// takes more samples (see [`supersampling`]), so its text stays smooth.
 const SS: usize = 2;
+
+/// Canvas samples per output pixel, across, for a raster whose long side is
+/// `side` output pixels: more for a small raster, whose small text needs
+/// them, within the canvas a whole picture drawn at [`TARGET_DIM`] takes.
+fn supersampling(side: usize) -> usize {
+    (TARGET_DIM * SS / side.max(1)).clamp(SS, 4)
+}
 
 /// 2-D affine transform (GDI XFORM layout).
 #[derive(Clone, Copy, Debug)]
@@ -122,6 +137,11 @@ pub struct Dc {
     /// device → canvas mapping.
     pub dev_org: (f32, f32),
     pub dev_scale: (f32, f32),
+    /// Canvas pixels per output pixel.
+    pub ss: f32,
+    /// Where the canvas starts inside the whole picture, canvas pixels: not
+    /// zero when only a region of the picture is drawn.
+    pub canvas_off: (f32, f32),
     pub pen: Pen,
     pub brush: Brush,
     pub font: Font,
@@ -168,6 +188,8 @@ impl Dc {
             vp_ext: (1.0, 1.0),
             dev_org: (0.0, 0.0),
             dev_scale: (1.0, 1.0),
+            ss: SS as f32,
+            canvas_off: (0.0, 0.0),
             pen: Pen {
                 color: Rgba([0, 0, 0, 255]),
                 width: 0.0,
@@ -193,8 +215,8 @@ impl Dc {
         let dx = (px - self.win_org.0) * (self.vp_ext.0 / self.win_ext.0) + self.vp_org.0;
         let dy = (py - self.win_org.1) * (self.vp_ext.1 / self.win_ext.1) + self.vp_org.1;
         [
-            (dx - self.dev_org.0) * self.dev_scale.0,
-            (dy - self.dev_org.1) * self.dev_scale.1,
+            (dx - self.dev_org.0) * self.dev_scale.0 - self.canvas_off.0,
+            (dy - self.dev_org.1) * self.dev_scale.1 - self.canvas_off.1,
         ]
     }
 
@@ -218,10 +240,10 @@ impl Dc {
     pub fn pen_px(&self) -> f32 {
         if self.pen.width <= 0.0 {
             // Cosmetic pen: one device pixel regardless of transforms — at the
-            // supersampled canvas resolution that's SS pixels.
-            SS as f32
+            // supersampled canvas resolution that's `ss` pixels.
+            self.ss
         } else {
-            (self.pen.width * self.scale_avg()).max(SS as f32)
+            (self.pen.width * self.scale_avg()).max(self.ss)
         }
     }
 
@@ -324,27 +346,145 @@ pub fn stock_obj(idx: u32) -> Option<Obj> {
     })
 }
 
-/// Size the supersampled canvas for a device-space content box, and yield the
-/// device→canvas mapping. Returns `(canvas, dev_org, dev_scale)`.
-fn canvas_for_box(w: f32, h: f32) -> Option<(Canvas, (f32, f32))> {
+/// Where a metafile picture is rasterised: the whole picture with its long
+/// side `long_side` output pixels, or only `region` of it at that scale.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Target {
+    /// Long side of the whole picture, output pixels. A whole picture is
+    /// never drawn larger than [`TARGET_DIM`].
+    pub long_side: usize,
+    /// Part of the picture to draw, as fractions of its width and height from
+    /// its top-left corner (x0, y0, x1, y1). Its long side is kept within
+    /// [`REGION_SIDE`].
+    pub region: Option<[f64; 4]>,
+}
+
+impl Target {
+    /// The whole picture at the size used when the view is unknown.
+    pub const DEFAULT: Target = Target {
+        long_side: TARGET_DIM,
+        region: None,
+    };
+}
+
+/// A rasterised picture: RGBA pixels, their size, and the part of the whole
+/// picture they cover (fractions from its top-left corner, x0, y0, x1, y1).
+#[derive(Clone, Debug)]
+pub struct Rendered {
+    pub pixels: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub region: [f64; 4],
+}
+
+/// The supersampled canvas for a device-space content box drawn at `target`.
+struct Frame {
+    canvas: Canvas,
+    /// device → canvas scale.
+    dev_scale: (f32, f32),
+    /// The canvas's top-left inside the whole picture, canvas pixels.
+    offset: (f32, f32),
+    /// The whole picture's size, canvas pixels.
+    full: (f32, f32),
+}
+
+impl Frame {
+    /// The part of the whole picture the canvas covers, as fractions.
+    fn region(&self) -> [f64; 4] {
+        let (fw, fh) = (f64::from(self.full.0), f64::from(self.full.1));
+        [
+            f64::from(self.offset.0) / fw,
+            f64::from(self.offset.1) / fh,
+            (f64::from(self.offset.0) + self.canvas.w as f64) / fw,
+            (f64::from(self.offset.1) + self.canvas.h as f64) / fh,
+        ]
+    }
+
+    /// Downsample to output pixels.
+    fn finish(self) -> Rendered {
+        let region = self.region();
+        let (pixels, width, height) = self.canvas.downsample(self.canvas.ss);
+        Rendered {
+            pixels,
+            width,
+            height,
+            region,
+        }
+    }
+}
+
+/// Size the supersampled canvas for a device-space content box of `w`×`h`
+/// drawn at `target`. A region starts and ends on whole output pixels of
+/// the whole picture, so the two line up pixel for pixel.
+fn canvas_for_box(w: f32, h: f32, target: Target) -> Option<Frame> {
     if !(w.is_finite() && h.is_finite()) || w.abs() < 1e-9 || h.abs() < 1e-9 {
         return None;
     }
     let long = w.abs().max(h.abs());
-    let k = (TARGET_DIM * SS) as f32 / long;
-    let cw = ((w.abs() * k).round() as usize).clamp(SS, TARGET_DIM * SS);
-    let ch = ((h.abs() * k).round() as usize).clamp(SS, TARGET_DIM * SS);
-    Some((Canvas::new(cw, ch), (k * w.signum(), k * h.signum())))
+    let side = match target.region {
+        None => target.long_side.clamp(1, TARGET_DIM),
+        Some(_) => target.long_side.max(1),
+    };
+    // Output pixels of the whole picture, and of the part drawn.
+    let k = side as f32 / long;
+    let (ow, oh) = (
+        ((w.abs() * k).round() as usize).max(1),
+        ((h.abs() * k).round() as usize).max(1),
+    );
+    let Some(r) = target.region else {
+        let ss = supersampling(ow.max(oh));
+        let k = k * ss as f32;
+        return Some(Frame {
+            canvas: Canvas::new(ow * ss, oh * ss, ss),
+            dev_scale: (k * w.signum(), k * h.signum()),
+            offset: (0.0, 0.0),
+            full: ((ow * ss) as f32, (oh * ss) as f32),
+        });
+    };
+    if !r.iter().all(|v| v.is_finite()) || r[2] <= r[0] || r[3] <= r[1] {
+        return None;
+    }
+    // Whole output pixels: `edge` rounds a fraction of `full` output pixels
+    // down (or up) inside the picture.
+    let edge = |f: f64, full: usize, up: bool| -> usize {
+        let px = f.clamp(0.0, 1.0) * full as f64;
+        let px = if up { px.ceil() } else { px.floor() };
+        (px as usize).min(full)
+    };
+    let (x0, x1) = (edge(r[0], ow, false), edge(r[2], ow, true));
+    let (y0, y1) = (edge(r[1], oh, false), edge(r[3], oh, true));
+    let (cw, ch) = ((x1 - x0).min(REGION_SIDE), (y1 - y0).min(REGION_SIDE));
+    if cw == 0 || ch == 0 {
+        return None;
+    }
+    let ss = supersampling(cw.max(ch));
+    let k = k * ss as f32;
+    Some(Frame {
+        canvas: Canvas::new(cw * ss, ch * ss, ss),
+        dev_scale: (k * w.signum(), k * h.signum()),
+        offset: ((x0 * ss) as f32, (y0 * ss) as f32),
+        full: ((ow * ss) as f32, (oh * ss) as f32),
+    })
 }
 
 /// Rasterize an EMF picture. Returns RGBA pixels + dimensions.
 pub fn render_emf(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
-    emf::render(data)
+    emf::render(data, Target::DEFAULT).map(|r| (r.pixels, r.width, r.height))
+}
+
+/// Rasterize an EMF picture, or a region of it, at `target`.
+pub fn render_emf_at(data: &[u8], target: Target) -> Option<Rendered> {
+    emf::render(data, target)
 }
 
 /// Rasterize a WMF picture, placeable or standard. WMFC-wrapped enhanced
 /// metafiles never reach here — document's presentation extraction already
 /// reassembles those to EMF.
 pub fn render_wmf(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
-    wmf::render(data)
+    wmf::render(data, Target::DEFAULT).map(|r| (r.pixels, r.width, r.height))
+}
+
+/// Rasterize a WMF picture, or a region of it, at `target`.
+pub fn render_wmf_at(data: &[u8], target: Target) -> Option<Rendered> {
+    wmf::render(data, target)
 }

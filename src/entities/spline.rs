@@ -58,11 +58,15 @@ pub(crate) fn fit_nurbs3(spline: &Spline) -> Option<NurbsCurve3> {
             > 1e-18)
             .then_some(value)
     };
-    NurbsCurve3::interpolate_fit(
+    // A fit tolerance lets the curve pass near the fit points rather than
+    // through them: the interpolant with every knot removed that keeps it
+    // within the tolerance.
+    NurbsCurve3::fit_within(
         &points,
         tangent(spline.begin_tangent),
         tangent(spline.end_tangent),
         parameterization,
+        spline.fit_tolerance,
     )
 }
 
@@ -319,6 +323,9 @@ fn to_render(spl: &Spline) -> RenderEntity {
                 // so the kernel has nothing to say about it and the solve
                 // here remains the only description of its shape.
                 None if spl.flags.periodic => periodic_fit_spline_polyline(spl),
+                None if spl.fit_tolerance > 0.0 => fit_nurbs3(spl)
+                    .map(|curve| curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE))
+                    .unwrap_or_else(|| fit_spline_polyline(spl)),
                 None if spl.flags.closed => catmull_rom_polyline(&spl.fit_points, true),
                 None => fit_spline_polyline(spl),
             };

@@ -119,7 +119,7 @@ fn one_property_of_one_style() {
     assert_eq!(changes[0].properties.len(), 1);
     assert_eq!(
         lines(&changes[0]),
-        ["Height: 2.5 → 3.5. 2 texts that follow the style are updated."]
+        ["Height: 2.5 → 3.5. 2 texts with their own value keep them."]
     );
 }
 
@@ -239,12 +239,12 @@ fn texts_that_follow_and_texts_with_their_own_value() {
     assert_eq!(
         lines(&pending(&app)[0]),
         [
-            "Width factor: 1 → 0.8. 2 texts that follow the style are updated. \
-             2 texts with their own value keep them."
+            "Width factor: 1 → 0.8. 1 text that follows the style is updated. \
+             3 texts with their own value keep them."
         ]
     );
     let _ = app.update(Message::TextStyleApply);
-    assert_eq!(text(&app, follows).1, 0.8);
+    assert_eq!(text(&app, follows).1, 1.0);
     assert_eq!(text(&app, own).1, 0.7);
 }
 
@@ -261,18 +261,18 @@ fn changes_to_several_styles_apply_and_undo_in_one_step() {
     edit(&mut app, "width", "0.8");
     let _ = app.update(Message::TextStyleApply);
     app.close_active_modal();
-    assert_eq!(text(&app, note), (3.5, 1.0));
-    assert_eq!(text(&app, title), (2.5, 0.8));
-
-    let _ = app.update(Message::Undo);
     assert_eq!(text(&app, note), (2.5, 1.0));
     assert_eq!(text(&app, title), (2.5, 1.0));
+    assert_eq!(style(&app, "Notes").height, 3.5);
+    assert_eq!(style(&app, "Titles").width_factor, 0.8);
+
+    let _ = app.update(Message::Undo);
     assert_eq!(style(&app, "Notes").height, 2.5);
     assert_eq!(style(&app, "Titles").width_factor, 1.0);
 
     let _ = app.update(Message::Redo);
-    assert_eq!(text(&app, note), (3.5, 1.0));
-    assert_eq!(text(&app, title), (2.5, 0.8));
+    assert_eq!(style(&app, "Notes").height, 3.5);
+    assert_eq!(style(&app, "Titles").width_factor, 0.8);
 }
 
 #[test]

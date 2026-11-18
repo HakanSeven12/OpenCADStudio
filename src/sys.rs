@@ -166,11 +166,15 @@ pub fn set_unsaved_changes_warning(active: bool) {
 /// Reveal a saved drawing in the native platform's file manager.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn reveal_in_file_manager(path: &std::path::Path) -> Result<(), String> {
+    // Explorer exits with code 1 even when it opened the folder, so only a
+    // failure to start it is an error.
     #[cfg(target_os = "windows")]
-    let status = std::process::Command::new("explorer.exe")
+    return std::process::Command::new("explorer.exe")
         .arg("/select,")
         .arg(path)
-        .status();
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string());
 
     #[cfg(target_os = "macos")]
     let status = std::process::Command::new("open")
@@ -186,7 +190,7 @@ pub fn reveal_in_file_manager(path: &std::path::Path) -> Result<(), String> {
         return open::that(folder).map_err(|e| e.to_string());
     }
 
-    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[cfg(target_os = "macos")]
     match status {
         Ok(status) if status.success() => Ok(()),
         Ok(status) => Err(format!("File manager exited with {status}")),

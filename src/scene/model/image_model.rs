@@ -449,62 +449,18 @@ impl ImageModel {
                 (pixels, raster.width, raster.height, verts)
             }
             Some((r, sharp)) => {
-                // One texture: the whole page on top, a transparent gap row
-                // pair, the region below it. The region is cut out of the
-                // whole page's triangles so the two never draw over each other.
                 let sharp_pixels = pdf_raster::adjusted_pixels_uncached(&sharp, adjust);
-                let (fw, fh) = (raster.width as usize, raster.height as usize);
-                let (rw, rh) = (sharp.width as usize, sharp.height as usize);
-                let (w, h) = (fw.max(rw), fh + 2 + rh);
-                let mut atlas = vec![0u8; w * h * 4];
-                for y in 0..fh {
-                    atlas[y * w * 4..][..fw * 4].copy_from_slice(&pixels[y * fw * 4..][..fw * 4]);
-                }
-                for y in 0..rh {
-                    atlas[(fh + 2 + y) * w * 4..][..rw * 4]
-                        .copy_from_slice(&sharp_pixels[y * rw * 4..][..rw * 4]);
-                }
-                let (wf, hf) = (w as f64, h as f64);
-                let whole = |p: [f64; 2]| {
-                    [
-                        (p[0] * fw as f64 / wf) as f32,
-                        ((1.0 - p[1]) * fh as f64 / hf) as f32,
-                    ]
-                };
-                let inside = |p: [f64; 2]| {
-                    let x = (p[0] - r[0]) / (r[2] - r[0]);
-                    let y = (p[1] - r[1]) / (r[3] - r[1]);
-                    [
-                        (x * rw as f64 / wf) as f32,
-                        ((fh + 2) as f64 + (1.0 - y) * rh as f64) as f32 / hf as f32,
-                    ]
-                };
-                let rect_ccw = |x0: f64, y0: f64, x1: f64, y1: f64| {
-                    [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
-                };
-                let outside = [
-                    rect_ccw(-1.0, -1.0, r[0], 2.0),
-                    rect_ccw(r[2], -1.0, 2.0, 2.0),
-                    rect_ccw(r[0], -1.0, r[2], r[1]),
-                    rect_ccw(r[0], r[3], r[2], 2.0),
-                ];
-                let region_rect = rect_ccw(r[0], r[1], r[2], r[3]);
-                let mut verts = Vec::new();
-                for tri in tris_uv.chunks_exact(3) {
-                    let mut fan = |clip: &[[f64; 2]], tex: &dyn Fn([f64; 2]) -> [f32; 2]| {
-                        let poly = super::pdf_vector::clip_to_convex(tri, clip);
-                        for k in 1..poly.len().saturating_sub(1) {
-                            for p in [poly[0], poly[k], poly[k + 1]] {
-                                verts.push(vertex(p, tex(p)));
-                            }
-                        }
-                    };
-                    for strip in &outside {
-                        fan(strip, &whole);
-                    }
-                    fan(&region_rect, &inside);
-                }
-                (Arc::new(atlas), w as u32, h as u32, verts)
+                atlas_with_region(
+                    (&pixels[..], raster.width as usize, raster.height as usize),
+                    (
+                        &sharp_pixels[..],
+                        sharp.width as usize,
+                        sharp.height as usize,
+                    ),
+                    r,
+                    &tris_uv,
+                    &vertex,
+                )
             }
         };
         let sharpened = width != raster.width || height != raster.height;
@@ -557,6 +513,71 @@ fn underlay_view_uv(
     (uv[2] > uv[0] && uv[3] > uv[1] && uv.iter().all(|v| v.is_finite())).then_some(uv)
 }
 
+/// One texture for a picture drawn whole and, sharper, in part: the whole
+/// raster on top, a transparent gap row pair, the region's raster below it.
+/// `r` is the region in picture UV (min u, min v, max u, max v, y up) and
+/// `tris_uv` the picture's visible triangles in the same UV; the region is
+/// cut out of the whole picture's triangles so the two never draw over each
+/// other. `vertex` places a picture UV point with its texture coordinate.
+fn atlas_with_region(
+    whole_raster: (&[u8], usize, usize),
+    region_raster: (&[u8], usize, usize),
+    r: [f64; 4],
+    tris_uv: &[[f64; 2]],
+    vertex: &dyn Fn([f64; 2], [f32; 2]) -> ImageQuadVertex,
+) -> (Arc<Vec<u8>>, u32, u32, Vec<ImageQuadVertex>) {
+    let (pixels, fw, fh) = whole_raster;
+    let (sharp_pixels, rw, rh) = region_raster;
+    let (w, h) = (fw.max(rw), fh + 2 + rh);
+    let mut atlas = vec![0u8; w * h * 4];
+    for y in 0..fh {
+        atlas[y * w * 4..][..fw * 4].copy_from_slice(&pixels[y * fw * 4..][..fw * 4]);
+    }
+    for y in 0..rh {
+        atlas[(fh + 2 + y) * w * 4..][..rw * 4]
+            .copy_from_slice(&sharp_pixels[y * rw * 4..][..rw * 4]);
+    }
+    let (wf, hf) = (w as f64, h as f64);
+    let whole = |p: [f64; 2]| {
+        [
+            (p[0] * fw as f64 / wf) as f32,
+            ((1.0 - p[1]) * fh as f64 / hf) as f32,
+        ]
+    };
+    let inside = |p: [f64; 2]| {
+        let x = (p[0] - r[0]) / (r[2] - r[0]);
+        let y = (p[1] - r[1]) / (r[3] - r[1]);
+        [
+            (x * rw as f64 / wf) as f32,
+            ((fh + 2) as f64 + (1.0 - y) * rh as f64) as f32 / hf as f32,
+        ]
+    };
+    let rect_ccw = |x0: f64, y0: f64, x1: f64, y1: f64| [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+    let outside = [
+        rect_ccw(-1.0, -1.0, r[0], 2.0),
+        rect_ccw(r[2], -1.0, 2.0, 2.0),
+        rect_ccw(r[0], -1.0, r[2], r[1]),
+        rect_ccw(r[0], r[3], r[2], 2.0),
+    ];
+    let region_rect = rect_ccw(r[0], r[1], r[2], r[3]);
+    let mut verts = Vec::new();
+    for tri in tris_uv.chunks_exact(3) {
+        let mut fan = |clip: &[[f64; 2]], tex: &dyn Fn([f64; 2]) -> [f32; 2]| {
+            let poly = super::pdf_vector::clip_to_convex(tri, clip);
+            for k in 1..poly.len().saturating_sub(1) {
+                for p in [poly[0], poly[k], poly[k + 1]] {
+                    verts.push(vertex(p, tex(p)));
+                }
+            }
+        };
+        for strip in &outside {
+            fan(strip, &whole);
+        }
+        fan(&region_rect, &inside);
+    }
+    (Arc::new(atlas), w as u32, h as u32, verts)
+}
+
 /// Visible region of an underlay page as triangles in page UV (0..1, y up):
 /// the whole page, the clip polygon, or — for an inverted clip — the page
 /// with the polygon cut out.
@@ -600,22 +621,95 @@ impl ImageModel {
     /// the frame is degenerate or nothing in the blob decodes, so the caller
     /// falls back to the frame placeholder.
     pub fn from_ole2frame(ole: &document::entities::Ole2Frame) -> Option<Self> {
+        Self::from_ole2frame_in_view(ole, None, None).map(|(model, _)| model)
+    }
+
+    /// [`Self::from_ole2frame`] for a plan view at `world_per_pixel` showing
+    /// the world rectangle `view` (min x, min y, max x, max y). A metafile
+    /// picture is drawn near the size it shows on screen, so its one-pixel
+    /// lines stay whole pixels when zoomed out; zoomed in past the whole
+    /// picture's raster, the part inside `view` is drawn again at screen
+    /// resolution. The flag tells whether it was. Stored pixels show as they
+    /// are.
+    pub fn from_ole2frame_in_view(
+        ole: &document::entities::Ole2Frame,
+        world_per_pixel: Option<f64>,
+        view: Option<[f64; 4]>,
+    ) -> Option<(Self, bool)> {
         if crate::entities::ole2frame::hidden(ole) {
             return None;
         }
-        let payload = ole.encoded_payload();
-        let (pixels, width, height) = super::ole_pres::decode(&payload)?;
-
+        let picture = super::ole_pres::picture(&ole.encoded_payload())?;
         // Frame rectangle in WCS. `upper_left`/`lower_right` name the diagonal;
         // normalise to left/right/top/bottom so the bitmap sits upright.
-        let left = ole.upper_left_corner.x.min(ole.lower_right_corner.x);
-        let right = ole.upper_left_corner.x.max(ole.lower_right_corner.x);
-        let bottom = ole.upper_left_corner.y.min(ole.lower_right_corner.y);
-        let top = ole.upper_left_corner.y.max(ole.lower_right_corner.y);
-        let z = ole.upper_left_corner.z;
-        if (right - left).abs() < 1e-9 || (top - bottom).abs() < 1e-9 {
+        let rect = [
+            ole.upper_left_corner.x.min(ole.lower_right_corner.x),
+            ole.upper_left_corner.y.min(ole.lower_right_corner.y),
+            ole.upper_left_corner.x.max(ole.lower_right_corner.x),
+            ole.upper_left_corner.y.max(ole.lower_right_corner.y),
+        ];
+        Self::from_ole_picture(
+            &picture,
+            rect,
+            ole.upper_left_corner.z,
+            world_per_pixel,
+            view,
+        )
+    }
+
+    /// An OLE picture filling the world rectangle `rect` (min x, min y, max x,
+    /// max y) at height `z`; see [`Self::from_ole2frame_in_view`].
+    fn from_ole_picture(
+        picture: &super::ole_pres::Picture,
+        rect: [f64; 4],
+        z: f64,
+        world_per_pixel: Option<f64>,
+        view: Option<[f64; 4]>,
+    ) -> Option<(Self, bool)> {
+        use super::gdi::{Target, REGION_SIDE, TARGET_DIM};
+        let [left, bottom, right, top] = rect;
+        let (w, h) = (right - left, top - bottom);
+        if w.abs() < 1e-9 || h.abs() < 1e-9 {
             return None;
         }
+        // The picture's longest side on screen, pixels (the view scale is
+        // taken a step coarser, so the raster is never reduced on screen and
+        // its one-pixel lines stay unbroken).
+        let screen_side = world_per_pixel
+            .filter(|wpp| *wpp > 0.0 && picture.is_metafile())
+            .map(|wpp| w.max(h) / wpp)
+            .filter(|side| side.is_finite());
+        let whole_side = screen_side.map_or(TARGET_DIM, |side| {
+            (side.floor() as usize).clamp(8, TARGET_DIM)
+        });
+        let whole = picture.render(Target {
+            long_side: whole_side,
+            region: None,
+        })?;
+        // Zoomed in past the whole picture's raster: the part inside the
+        // view again at screen resolution, as picture UV (y up) and its
+        // raster.
+        let region = match (view, screen_side) {
+            (Some(view), Some(side)) if side > whole_side as f64 * 1.2 => {
+                let uv = [
+                    ((view[0] - left) / w).max(0.0),
+                    ((view[1] - bottom) / h).max(0.0),
+                    ((view[2] - left) / w).min(1.0),
+                    ((view[3] - bottom) / h).min(1.0),
+                ];
+                let part = ((uv[2] - uv[0]) * w).max((uv[3] - uv[1]) * h) / w.max(h);
+                let side = side.min(REGION_SIDE as f64 / part);
+                (uv[2] > uv[0] && uv[3] > uv[1] && side > whole_side as f64 * 1.2)
+                    .then(|| {
+                        picture.render(Target {
+                            long_side: side as usize,
+                            region: Some([uv[0], 1.0 - uv[3], uv[2], 1.0 - uv[1]]),
+                        })
+                    })
+                    .flatten()
+            }
+            _ => None,
+        };
 
         // Double-single split per corner so the quad stays precise at UTM scale.
         let split = |x: f64, y: f64| -> ([f32; 3], [f32; 3]) {
@@ -634,24 +728,59 @@ impl ImageModel {
         let (c1, l1) = split(right, bottom);
         let (c2, l2) = split(right, top);
         let (c3, l3) = split(left, top);
-
         let corners = [c0, c1, c2, c3];
         let corners_low = [l0, l1, l2, l3];
-        let verts = quad_verts(&corners, &corners_low);
-        Some(Self {
-            render_instance: None,
-            file_path: "OLE2FRAME".to_string(),
-            pixels: Arc::new(pixels),
-            width,
-            height,
-            opacity: 1.0,
-            corners,
-            corners_low,
-            draw_depth: 0.0,
-            verts,
-            pixelated: false,
-            use_alpha: true,
-        })
+
+        let sharpened = region.is_some();
+        let (pixels, width, height, verts) = match region {
+            None => (
+                Arc::new(whole.pixels),
+                whole.width,
+                whole.height,
+                quad_verts(&corners, &corners_low),
+            ),
+            Some(sharp) => {
+                let r = sharp.region;
+                let r = [r[0], 1.0 - r[3], r[2], 1.0 - r[1]];
+                let tris_uv = [
+                    [0.0, 0.0],
+                    [1.0, 0.0],
+                    [1.0, 1.0],
+                    [0.0, 0.0],
+                    [1.0, 1.0],
+                    [0.0, 1.0],
+                ];
+                let vertex = |p: [f64; 2], uv: [f32; 2]| {
+                    let (x, y) = (left + p[0] * w, bottom + p[1] * h);
+                    let (pos, pos_low) = split(x, y);
+                    ImageQuadVertex { pos, uv, pos_low }
+                };
+                atlas_with_region(
+                    (&whole.pixels, whole.width as usize, whole.height as usize),
+                    (&sharp.pixels, sharp.width as usize, sharp.height as usize),
+                    r,
+                    &tris_uv,
+                    &vertex,
+                )
+            }
+        };
+        Some((
+            Self {
+                render_instance: None,
+                file_path: "OLE2FRAME".to_string(),
+                pixels,
+                width,
+                height,
+                opacity: 1.0,
+                corners,
+                corners_low,
+                draw_depth: 0.0,
+                verts,
+                pixelated: false,
+                use_alpha: true,
+            },
+            sharpened,
+        ))
     }
 }
 
@@ -2198,5 +2327,68 @@ mod tests {
             take_decode_refusals().is_empty(),
             "the drain cleared the queue"
         );
+    }
+
+    fn ole_metafile() -> crate::scene::model::ole_pres::Picture {
+        crate::scene::model::ole_pres::Picture::Emf(crate::scene::model::gdi::test_hairline_emf(
+            None,
+        ))
+    }
+
+    /// A metafile picture shown 250 pixels wide is drawn 250 pixels wide, not
+    /// at the size used when the view is unknown and then reduced on screen.
+    #[test]
+    fn an_ole_metafile_is_drawn_at_the_size_it_shows() {
+        let rect = [0.0, 0.0, 100.0, 100.0];
+        let (shown, sharp) =
+            ImageModel::from_ole_picture(&ole_metafile(), rect, 0.0, Some(0.4), None).unwrap();
+        assert_eq!((shown.width, shown.height), (250, 250));
+        assert!(!sharp);
+        let (unknown, _) =
+            ImageModel::from_ole_picture(&ole_metafile(), rect, 0.0, None, None).unwrap();
+        assert_eq!((unknown.width, unknown.height), (1600, 1600));
+    }
+
+    /// Zoomed in past the whole picture's raster, the part in view is drawn
+    /// again at screen resolution below it in the same texture, and the
+    /// picture's triangles are split between the two.
+    #[test]
+    fn zoomed_in_an_ole_metafile_draws_the_view_again_at_screen_resolution() {
+        let rect = [0.0, 0.0, 100.0, 100.0];
+        let view = [40.0, 40.0, 50.0, 50.0];
+        let (model, sharp) =
+            ImageModel::from_ole_picture(&ole_metafile(), rect, 0.0, Some(0.01), Some(view))
+                .unwrap();
+        assert!(sharp, "the region in view is drawn sharper");
+        // The whole picture at 1600, then 2 gap rows, then 10 units at
+        // 100 pixels per unit.
+        assert_eq!((model.width, model.height), (1600, 1600 + 2 + 1000));
+        assert!(model.verts.len() > 6, "the quad is split around the region");
+        let below_whole = model
+            .verts
+            .iter()
+            .filter(|v| v.uv[1] > 1601.0 / 2602.0)
+            .count();
+        assert!(
+            below_whole >= 3,
+            "the region's triangles use the sharp raster"
+        );
+    }
+
+    /// Stored pixels have no more to show: they are used as they are, at
+    /// any zoom.
+    #[test]
+    fn an_ole_picture_of_stored_pixels_shows_as_it_is() {
+        let picture = crate::scene::model::ole_pres::Picture::Pixels(vec![0; 4 * 30 * 20], 30, 20);
+        let (model, sharp) = ImageModel::from_ole_picture(
+            &picture,
+            [0.0, 0.0, 30.0, 20.0],
+            0.0,
+            Some(0.001),
+            Some([0.0, 0.0, 1.0, 1.0]),
+        )
+        .unwrap();
+        assert_eq!((model.width, model.height), (30, 20));
+        assert!(!sharp);
     }
 }

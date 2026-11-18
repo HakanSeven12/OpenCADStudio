@@ -82,7 +82,7 @@ The project is under active development. Keep backups of important production dr
 | SVG / SVGZ | Import vector shapes as a block (`SVGIN`, or `IMPORT`) |
 | LandXML | Import `CgPoint` survey points |
 | STL | Export 3D mesh data |
-| STEP AP203 | Export 3D mesh data |
+| STEP AP203 / AP214 / AP242 | Import B-rep solids; export solids as exact B-reps |
 | PDF | Plot layouts and selected geometry on desktop |
 | CSV | Extract entity property data |
 | CTB / STB | Load and edit plot style tables |

@@ -75,6 +75,8 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "skrifa 0.42.1",
+ "solidcore-record",
+ "step-export",
  "svgtypes",
  "tiny-skia",
  "ttf-parser",
@@ -108,7 +110,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.6.8"
-source = "git+https://github.com/hakanaktt/acadrust.git?rev=f946e8d#f946e8d0c15508c4581b228a1efe44c18dc96234"
+source = "git+https://github.com/hakanaktt/acadrust.git?rev=528917c012cd89386795543a348a29844602a99b#528917c012cd89386795543a348a29844602a99b"
 dependencies = [
  "anyhow",
  "bitflags 2.13.1",
@@ -2965,8 +2967,8 @@ dependencies = [
 
 [[package]]
 name = "ifccad"
-version = "2026.46.0"
-source = "git+https://github.com/OpenAEC-Foundation/ifccad.git?rev=a09aeb27c5964f39c2b94ac99ac49255339cb3ff#a09aeb27c5964f39c2b94ac99ac49255339cb3ff"
+version = "2026.46.1"
+source = "git+https://github.com/OpenAEC-Foundation/ifccad.git?rev=9ca1cf1ff4c71dad8d380677e9eb657818b03d80#9ca1cf1ff4c71dad8d380677e9eb657818b03d80"
 dependencies = [
  "base64",
  "fpmath",
@@ -4493,7 +4495,7 @@ dependencies = [
 [[package]]
 name = "opencaddocument"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=ae40a59#ae40a5921f678aa94bf143aaf39d01e739db58bb"
+source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=88f780e5ca3eb7ab06231bba2b1a4559b53879c6#88f780e5ca3eb7ab06231bba2b1a4559b53879c6"
 dependencies = [
  "acadrust",
  "ifccad",
@@ -4513,9 +4515,10 @@ dependencies = [
 [[package]]
 name = "opencadkernel"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=353ffb2#353ffb25c55a7fce4f09a22862fb1df4ca587a47"
+source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=7b5ed9d#7b5ed9d701502ebc3bf45226cc3fcd6857bb3f7a"
 dependencies = [
  "cavalier_contours",
+ "opencadkernel-nlib",
  "opencadkernel-ssi",
  "rustc-hash 2.1.3",
  "spade",
@@ -4524,15 +4527,20 @@ dependencies = [
 [[package]]
 name = "opencadkernel-constraints"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=353ffb2#353ffb25c55a7fce4f09a22862fb1df4ca587a47"
+source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=7b5ed9d#7b5ed9d701502ebc3bf45226cc3fcd6857bb3f7a"
 dependencies = [
  "nalgebra",
 ]
 
 [[package]]
+name = "opencadkernel-nlib"
+version = "0.1.0"
+source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=7b5ed9d#7b5ed9d701502ebc3bf45226cc3fcd6857bb3f7a"
+
+[[package]]
 name = "opencadkernel-ssi"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=353ffb2#353ffb25c55a7fce4f09a22862fb1df4ca587a47"
+source = "git+https://github.com/HakanSeven12/opencadkernel.git?rev=7b5ed9d#7b5ed9d701502ebc3bf45226cc3fcd6857bb3f7a"
 
 [[package]]
 name = "openssl-probe"
@@ -6238,6 +6246,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore-record"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "spade"
 version = "2.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6278,6 +6293,13 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "step-export"
+version = "0.1.0"
+dependencies = [
+ "solidcore-record",
+]
 
 [[package]]
 name = "strict-num"

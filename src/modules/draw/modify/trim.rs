@@ -44,11 +44,10 @@ use crate::modules::draw::modify::spline_ops::{
     spline_cut, spline_nearest_t, spline_pts_wire, spline_range, spline_to_nurbs, t_to_rel,
 };
 use crate::modules::IconKind;
-use crate::scene::convert::tess::entity_world_aabb_f64;
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
 
-use super::entity_index::ModifyEntityIndex;
+use super::entity_index::{modify_aabb, ModifyEntityIndex};
 
 #[path = "trim_hatch_region.rs"]
 mod hatch_region;
@@ -697,7 +696,7 @@ fn cut_params(target: &Curve, handle: Handle, geos: &[Geo]) -> Vec<f64> {
         }
     }
 
-    ts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    ts.sort_by(|a, b| a.total_cmp(b));
     ts.dedup_by(|a, b| {
         let diff = (*a - *b).abs();
         let cyclic = if is_closed {
@@ -779,7 +778,7 @@ fn polyline_seg_ts(
         } else {
             ts.into_iter().map(|t| (1.0 - t).clamp(0.0, 1.0)).collect()
         };
-        u_ts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        u_ts.sort_by(|a, b| a.total_cmp(b));
         u_ts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
         u_ts
     } else {
@@ -2404,7 +2403,7 @@ fn crossing_trim_lwpolyline(
         return None;
     }
 
-    removed.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    removed.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut merged = Vec::<(f64, f64)>::new();
     for span in removed {
         if let Some(last) = merged.last_mut() {
@@ -3539,7 +3538,7 @@ fn fence_cross_points(e: &EntityType, fence_geos: &[Geo]) -> Vec<[f64; 2]> {
             Handle::new(FENCE_PROBE),
             fence_geos,
         );
-        ts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        ts.sort_by(|a, b| a.total_cmp(b));
         for t in ts {
             out.push(lerp2(w[0], w[1], t));
         }
@@ -3871,7 +3870,7 @@ fn cutters_near<'a>(
     geos: &'a [Geo],
     local: bool,
 ) -> std::borrow::Cow<'a, [Geo]> {
-    let Some(bounds) = local.then(|| entity_world_aabb_f64(target)).flatten() else {
+    let Some(bounds) = local.then(|| modify_aabb(target)).flatten() else {
         return std::borrow::Cow::Borrowed(geos);
     };
     let pad = 1e-6
@@ -4424,7 +4423,7 @@ impl TrimCommand {
         let Some(target_entity) = self.entity_index.get(&self.all_entities, handle) else {
             return self.geos.clone();
         };
-        let Some(target_bounds) = entity_world_aabb_f64(target_entity) else {
+        let Some(target_bounds) = modify_aabb(target_entity) else {
             return self.geos.clone();
         };
         if !target_bounds.iter().all(|value| value.is_finite()) {
@@ -9212,7 +9211,7 @@ fn extrim_circle(orig: &CircleEnt, ts: &[f64], side: &dyn Fn([f64; 2]) -> bool) 
     }
     let (cx, cy, r) = (orig.center.x, orig.center.y, orig.radius);
     let mut s = ts.to_vec();
-    s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    s.sort_by(|a, b| a.total_cmp(b));
     let n = s.len();
     let mut out = Vec::new();
     for i in 0..n {
@@ -9383,8 +9382,6 @@ fn preview_wire(points: Vec<[f32; 3]>, color: [f32; 4], name: &str) -> WireModel
     WireModel {
         bg_adapt: None,
         point_marker: None,
-        taper_widths: Vec::new(),
-        pattern_stations: Vec::new(),
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
@@ -9394,27 +9391,31 @@ fn preview_wire(points: Vec<[f32; 3]>, color: [f32; 4], name: &str) -> WireModel
         fill_is_2d_solid: false,
         solid_normal: None,
         render_instance: None,
-        pick_tris: Vec::new(),
-        pick_tris_low: Vec::new(),
         dash_from_start: false,
-        text_verts: Vec::new(),
         name: name.into(),
-        points,
-        points_low: Vec::new(),
         color,
         selected: false,
         pattern_length: 0.0,
         pattern: [0.0; 8],
         line_weight_px: 1.0,
-        snap_pts: vec![],
-        tangent_geoms: vec![],
         aci: 0,
-        key_vertices: vec![],
         aabb: WireModel::UNBOUNDED_AABB,
         plinegen: true,
-        fill_tris: vec![],
-        fill_tris_low: Vec::new(),
-
+        geom: std::sync::Arc::new(crate::scene::WireGeom {
+            taper_widths: Vec::new(),
+            pattern_stations: Vec::new(),
+            pick_tris: Vec::new(),
+            pick_tris_low: Vec::new(),
+            text_verts: Vec::new(),
+            points,
+            points_low: Vec::new(),
+            snap_pts: vec![],
+            tangent_geoms: vec![],
+            key_vertices: vec![],
+            fill_tris: vec![],
+            fill_tris_low: Vec::new(),
+            ..crate::scene::WireGeom::default()
+        }),
         ..Default::default()
     }
 }
@@ -9433,7 +9434,7 @@ fn insert_boundary_crossings(pts: &[[f64; 2]], geos: &[Geo]) -> Vec<[f64; 2]> {
         let (a, b) = (w[0], w[1]);
         out.push(a);
         let mut ts = line_seg_ts(a[0], a[1], b[0], b[1], Handle::NULL, geos);
-        ts.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+        ts.sort_by(|x, y| x.total_cmp(y));
         for t in ts {
             if t > 1e-6 && t < 1.0 - 1e-6 {
                 out.push(lerp2(a, b, t));

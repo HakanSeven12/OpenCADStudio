@@ -1275,14 +1275,17 @@ mod ui_state_tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app.open_layers_pallet();
+        app.open_blocks_palette(None);
         let _ = app.update(Message::ToggleFileTabs);
         let saved = app.current_config();
         assert!(saved.show_layers);
+        assert!(saved.show_block_palette);
         assert!(!saved.show_file_tabs);
 
         let mut again = OpenCADStudio::new_for_test();
         again.apply_config(saved);
         assert!(again.show_layers);
+        assert!(again.show_block_palette);
         assert!(!again.show_file_tabs);
     }
 }

@@ -37,6 +37,7 @@ mod block_visibility;
 pub(crate) mod calc;
 mod command_driver;
 mod extraction_catalog;
+mod attr_editor;
 mod insert_attributes;
 #[cfg(test)]
 mod insert_attributes_tests;
@@ -45,6 +46,9 @@ pub(crate) use command_driver::{
 };
 mod assistant;
 pub(crate) mod commands;
+#[doc(hidden)]
+#[cfg(any(test, not(target_arch = "wasm32")))]
+pub use commands::ModelImportBenchHarness;
 #[cfg(test)]
 mod dim_constraint_value_tests;
 mod dim_variables;
@@ -58,11 +62,15 @@ mod drafting_settings;
 mod drawing_properties;
 pub(crate) mod filter_dialog;
 mod find_replace;
+pub(crate) mod text_match;
 mod geographic_location;
 pub(crate) mod helpers;
 mod history;
 mod layer_filter_store;
 mod layer_filters;
+#[doc(hidden)]
+#[cfg(any(test, not(target_arch = "wasm32")))]
+pub use layer_filters::LayerRefreshBenchHarness;
 pub(crate) mod layer_groups;
 pub(crate) mod layer_import;
 mod layer_walk;
@@ -73,7 +81,11 @@ mod layers;
 mod linetype_manager_tests;
 mod measurement;
 mod model_ops;
+mod solid_edit_ops;
 mod mtext_editor;
+pub(crate) use mtext_editor::prefs as mtext_prefs;
+#[cfg(test)]
+mod import_command_tests;
 #[cfg(test)]
 mod mtext_follows_style_tests;
 #[cfg(test)]
@@ -629,36 +641,74 @@ impl From<&QSelectState> for QSelectSettings {
     }
 }
 
+/// The Find and Replace window. Its texts, history and options outlive the
+/// window; the search position and the result list belong to one opening.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FindReplaceState {
     pub search: String,
     pub replacement: String,
-    pub status: String,
+    /// Earlier searches and replacements, the newest first.
+    pub search_history: Vec<String>,
+    pub replace_history: Vec<String>,
+    pub scope: crate::ui::window::find_replace::FindScope,
+    /// The objects picked for "Selected objects", in the order picked.
+    pub selection: Vec<document::Handle>,
+    pub options: crate::ui::window::find_replace::FindOptions,
+    pub list_results: bool,
+    pub more_options: bool,
+    /// The match on show: Replace works on it and Find goes on after it.
     pub current_match: Option<FindMatchKey>,
-    /// The last Find All list; picking a row visits it without searching again.
+    /// The matches of the running search, in search order.
+    pub matches: Vec<FindResult>,
+    /// The listed matches (List results).
     pub results: Vec<FindResult>,
+    /// Objects changed since the search started, counted once each.
+    pub changed: Vec<(document::Handle, Option<usize>)>,
+    /// One undo step for the whole window.
+    pub undo_pushed: bool,
+    pub notice: Option<crate::ui::window::find_replace::FindNotice>,
+    /// A replacement waiting for an answer about locked layers, a block or an
+    /// external reference.
+    pub run: Option<crate::ui::window::find_replace::ReplaceRun>,
+    /// Handles changed since the last `after_find_changes` sync.
+    pub pending_entities: Vec<document::Handle>,
+    /// Non-xref block definitions whose members changed since last sync.
+    pub pending_blocks: Vec<String>,
+    /// Layers unlocked during replacement whose entities need appearance refresh.
+    pub pending_unlocked_layers: Vec<String>,
+    /// True if any external reference file was rewritten and reloaded.
+    pub pending_xref_reload: bool,
 }
 
-/// One Find All row: the match plus enough context to tell repeats apart.
+/// One match: where it shows, what kind of text it is and the text.
 #[derive(Clone, Debug)]
 pub(crate) struct FindResult {
     pub key: FindMatchKey,
+    /// "Model" or the layout's name.
+    pub location: String,
+    pub kind: crate::ui::window::find_replace::FindKind,
     pub text: String,
-    pub kind: String,
-    pub layer: String,
+    /// The text's height, for zooming to it (0 for a hyperlink).
+    pub height: f64,
+}
+
+/// Where a match sits: `owner` is the object in its space (the insert for a
+/// text in a block or an external reference), `target` the object holding the
+/// text and `part` which of its texts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FindMatchKey {
+    pub owner: document::Handle,
+    pub target: document::Handle,
+    pub part: FindPart,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum FindMatchKey {
-    Entity(document::Handle),
-    BlockEntityInInsert {
-        entity: document::Handle,
-        insert: document::Handle,
-    },
-    InsertAttribute {
-        insert: document::Handle,
-        index: usize,
-    },
+pub(crate) enum FindPart {
+    Text,
+    Attribute(usize),
+    LinkText,
+    LinkUrl,
+    Cell(usize, usize),
 }
 use crate::snap::Snapper;
 use crate::ui::{CommandLine, Ribbon, StatusBar};
@@ -989,6 +1039,9 @@ pub(super) struct OpenCADStudio {
     table_cell_format: Option<crate::ui::window::table_cell_dialog::CellFormatState>,
     /// The annotation scale asked for before a session's first annotative text.
     anno_scale_prompt: Option<crate::ui::window::anno_scale_prompt::AnnoScalePrompt>,
+    /// The Paragraph, Column Settings, Background Mask or Find and Replace
+    /// window the Text Editor tab opened.
+    mtext_dialog: Option<crate::ui::window::mtext_dialogs::MTextDialog>,
     /// A data format waiting on the invalid data type warning, and the
     /// cells whose values read as no such type.
     table_cell_warning: Option<(
@@ -1391,6 +1444,8 @@ pub(super) struct OpenCADStudio {
     /// `MIRRTEXT`) — the next command-line entry is its new value, empty keeps
     /// the current one.
     pending_setvar: Option<String>,
+    /// The schema the next STEPOUT writes (`STEPOUT AP203|AP214|AP242`).
+    step_schema: crate::io::step::Schema,
     /// DELOBJ system variable (0–3), shared by every open drawing.
     delete_objects: i16,
     /// Cursor is hovering over the UCS icon body — drives the hover highlight.
@@ -1566,6 +1621,9 @@ pub(super) struct OpenCADStudio {
     ucs_icon_at_origin: bool,
     /// Whether the ViewCube 3D gizmo is visible in model space (NAVVCUBE).
     show_viewcube: bool,
+    /// NAVVCUBEOPACITY: the cube's opacity in percent while the cursor is
+    /// away from it.
+    navvcube_opacity: u8,
     /// Measured natural width (px, as `f32` bits) of the active viewport's
     /// render-mode control bar, written each frame by its `DensitySwap` and read
     /// next frame to decide whether the ViewCube still has room beside it — so
@@ -1831,6 +1889,9 @@ pub(super) struct OpenCADStudio {
     plotstyle_parent_plot_geometry: Option<(iced::Vector, iced::Vector)>,
     /// FIND dialog inputs and current result cursor.
     find_replace: FindReplaceState,
+    /// The text editor's Find and Replace options, kept between openings:
+    /// match case, whole words, wildcards, diacritics, half/full width.
+    mtext_find_prefs: Option<[bool; 5]>,
     overkill_dialog: Option<crate::ui::window::overkill::State>,
     /// Set once the user acknowledges the AEC-drop warning, so re-entering the
     /// save path proceeds instead of re-showing the warning.
@@ -1886,6 +1947,14 @@ pub(super) struct OpenCADStudio {
     attr_editor_tab: crate::ui::window::attribute_editor::AttrTab,
     /// Highlighted attribute row driving the Text Options / Properties tabs.
     attr_editor_selected: usize,
+    /// The editing session: what was last applied, for Cancel and Apply.
+    attr_editor_session: Option<attr_editor::AttrEditorSession>,
+    /// A refused value, shown in the window.
+    attr_editor_error: Option<String>,
+    /// "Keep the changes?" before Select block picks another block.
+    attr_editor_asking: bool,
+    /// The field last typed in, checked when the cursor leaves it.
+    attr_editor_editing: Option<crate::ui::window::attribute_editor::AttrField>,
     /// Plugin ids the user turned off in the Plugin Manager. Disabled plugins
     /// keep their manifest listed but drop their ribbon tab and command
     /// dispatch. Persisted via [`settings::UserSettings::disabled_plugins`].
@@ -2339,6 +2408,8 @@ pub(super) struct OpenCADStudio {
     /// Prevent duplicate download tasks and keep modal contents visible while
     /// the background request is running.
     missing_fonts_downloading: bool,
+    /// Missing fonts window: Skip turns the window off for good.
+    missing_fonts_silence: bool,
     /// Fonts skipped or unavailable during this process lifetime. Reopening a
     /// drawing must not repeatedly nag for the same unresolved file.
     suppressed_missing_fonts: rustc_hash::FxHashSet<String>,
@@ -2433,6 +2504,9 @@ pub(super) struct OpenCADStudio {
     viewport_switch_keeps_command: bool,
     /// CHSPACE from paper space waiting for its target viewport: the objects.
     chspace_pending: Option<Vec<document::Handle>>,
+    /// ALIGNSPACE between its model and paper halves: the viewport and the
+    /// model points picked in it.
+    alignspace_pending: Option<(document::Handle, Vec<glam::DVec2>)>,
 }
 
 /// What triggered the "unsaved changes" dialog.
@@ -2647,6 +2721,8 @@ pub enum ColorPickTarget {
     Interface(UiColor),
     /// A colour of the view Background dialog: 0 solid, 1 top, 2 middle, 3 bottom.
     ViewBackground(u8),
+    /// The selected attribute of the enhanced attribute editor.
+    AttrEditor,
 }
 
 /// Table records the clipboard entities depend on, snapshotted from the source
@@ -3350,6 +3426,8 @@ pub enum ModalKind {
     TableCellWarning,
     /// The annotation scale asked for before a session's first annotative text.
     AnnotationScalePrompt,
+    /// A window of the Text Editor tab (paragraph, columns, mask, find).
+    MTextDialog,
     /// A value typed into a cell that is not of the cell's data type.
     TableCellEntry,
     PdfShxSettings,
@@ -3602,13 +3680,7 @@ pub enum Message {
     SelectAllShortcut,
     /// Open the shared Find and Replace dialog (Ctrl/Cmd+F or Ctrl/Cmd+H).
     FindReplaceOpen,
-    FindReplaceSearchChanged(String),
-    FindReplaceReplacementChanged(String),
-    FindReplaceNext,
-    FindReplaceOne,
-    FindReplaceAll,
-    FindReplaceFindAll,
-    FindReplaceSelectResult(usize),
+    Find(crate::ui::window::find_replace::FindMsg),
     OverkillSettingsChanged(crate::modules::draw::modify::overkill::Settings),
     OverkillToleranceChanged(String),
     OverkillOk,
@@ -3826,6 +3898,7 @@ pub enum Message {
     SaveTimeChanged(i32),
     /// Toggle keeping a `.bak` copy when overwriting a drawing (ISAVEBAK).
     BackupOnSaveChanged(bool),
+    CheckMissingFontsChanged(bool),
     /// A drawing was picked to import page setups from (`PSETUPIN`).
     PageSetupImportFile(std::path::PathBuf),
     /// Options: open the Plot / Page Setup dialog for every new layout.
@@ -5398,9 +5471,25 @@ pub enum Message {
     AttrEditorLinetype(String),
     AttrEditorColor(String),
     AttrEditorLineweight(document::types::LineWeight),
-    /// Commit every attribute edit to the block, keeping the dialog open
-    /// (Apply); the frame ✕ closes and discards any un-applied edits.
+    /// Keep every attribute edit (Apply); the window stays open.
     AttrEditorApply,
+    /// Apply and close.
+    AttrEditorOk,
+    /// Take back what was not applied and close.
+    AttrEditorCancel,
+    AttrEditorHelp,
+    /// Pick another block (asks first when there are changes).
+    AttrEditorSelectBlock,
+    AttrEditorAnswer(crate::ui::window::attribute_editor::AttrAnswer),
+    AttrEditorDismissError,
+    /// Edit a multi-line value in the text editor.
+    AttrEditorEditValue,
+    /// Set the value from the Field dialog.
+    AttrEditorInsertField,
+    AttrEditorBoundary(String),
+    AttrEditorAnnotative(bool),
+    /// A colour chosen in the colour window.
+    AttrEditorColorValue(document::types::Color),
     /// Title-bar pressed: begin dragging the active modal.
     ModalGrab,
     /// Cursor moved while dragging the modal title bar.
@@ -5537,6 +5626,19 @@ pub enum Message {
     MTextMenu(Option<mtext_editor::EditorMenu>),
     /// A menu action: the menu closes, then the message runs.
     MTextMenuPick(Box<Message>),
+    /// Right-click on the in-place editor's text at a visible offset.
+    MTextContextOpen(iced::Point, usize),
+    /// Open (or close) a submenu of the editor's right-click menu.
+    MTextContextGroup(Option<mtext_editor::context_menu::ContextGroup>),
+    /// Close the editor's right-click menu and the tag menu.
+    MTextContextClose,
+    /// A row of the right-click menu or of a tag: a `_MTED` tool.
+    MTextContextRun(String),
+    /// Open or close the menu of the tag under the text.
+    MTextSmartTag(bool),
+    /// Paste Special: the clipboard text, pasted `PLAIN`, `NOCHAR` or
+    /// `NOPARA`.
+    MTextPasteAs(String, Option<String>),
     /// Bullets, numbering, or (`None`) plain paragraphs again.
     MTextList(Option<mtext_editor::ListKind>),
     /// Insert a tab at the caret.
@@ -5600,6 +5702,10 @@ pub enum Message {
     MTextSelTo(usize),
     /// Move the preview caret by N visible characters.
     MTextCaretMove(i32),
+    /// A pointer selection in the text editor is finished (Match takes it).
+    MTextSelEnd,
+    /// Import Text: the file picked.
+    MTextImport(String),
     /// Timer tick toggling the preview caret's blink phase.
     MTextCaretBlink,
     TableEditorClick(iced::Point),
@@ -5806,7 +5912,11 @@ pub enum Message {
     /// Callback when the user picks (or cancels) a CTB/STB file.
     /// The Load… picker finished: a table, nothing (cancelled), or why the
     /// file could not be read.
-    PlotStyleLoaded(Result<Option<crate::io::plot_style::PlotStyleTable>, String>),
+    PlotStyleLoaded(
+        u64,
+        String,
+        Result<Option<crate::io::plot_style::PickedPlotStyle>, String>,
+    ),
     /// Clear the active plot style table.
     PlotStyleClear,
     /// Open/close the Plot Style panel.
@@ -6012,6 +6122,7 @@ pub enum Message {
     MissingFontsSourceChanged(String),
     /// Close the missing-fonts prompt without downloading.
     MissingFontsDismiss,
+    MissingFontsSilence(bool),
     /// Fonts fetched (or failed); payload lists (name, saved-path) pairs.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     MissingFontsResult(Result<Vec<(String, std::path::PathBuf)>, String>),
@@ -6037,6 +6148,7 @@ pub enum Message {
     /// An edit in a picked table cell window (Cell Borders, Cell Contents).
     TableCellDialog(crate::ui::window::table_cell_dialog::TableCellDialogMsg),
     AnnoScalePrompt(crate::ui::window::anno_scale_prompt::AnnoScaleMsg),
+    MTextDialog(crate::ui::window::mtext_dialogs::MTextDialogMsg),
     HyperlinkDialog(crate::ui::window::hyperlink_dialog::HyperlinkMsg),
     /// Check Spelling window.
     Spell(crate::ui::window::spell_dialog::SpellMsg),
@@ -6176,6 +6288,31 @@ pub enum Message {
         u64,
         std::path::PathBuf,
         Result<Vec<document::entities::mesh::Mesh>, String>,
+    ),
+    // ── Model import (ACIS/STEP/IGES) ─────────────────────────────────────
+    /// Completion of a model import read off the UI thread: the tab it was
+    /// started for, that document's generation (the id survives a document
+    /// replacement; the generation does not), the file, its format, and the
+    /// reader's result.
+    ModelImportFinished(
+        u64,
+        u64,
+        String,
+        crate::io::model_import::ModelFormat,
+        Result<crate::io::model_import::Imported, crate::io::model_import::ImportFailure>,
+    ),
+    // ── Picture import (WMF/SVG) ──────────────────────────────────────────
+    /// Completion of a WMF or SVG import read off the UI thread: the tab it
+    /// was started for, that document's generation, the file (none for SVG
+    /// pasted from the clipboard), its format, whether the insertion prompts
+    /// place it, and the reader's result.
+    PictureImportFinished(
+        u64,
+        u64,
+        Option<String>,
+        crate::io::picture_import::PictureFormat,
+        bool,
+        crate::io::picture_import::PictureRead,
     ),
     /// An edit in the Import File or DGN Import window.
     ImportDialog(crate::ui::window::import_dialogs::ImportDialogMsg),
@@ -6355,6 +6492,7 @@ impl OpenCADStudio {
             table_cell_block: None,
             table_cell_format: None,
             anno_scale_prompt: None,
+            mtext_dialog: None,
             table_cell_warning: None,
             table_cell_entry: None,
             table_cell_entry_typed: false,
@@ -6530,6 +6668,7 @@ impl OpenCADStudio {
             awaiting_vports: false,
             vpmax_state: None,
             pending_setvar: None,
+            step_schema: crate::io::step::Schema::Ap214,
             delete_objects: 1,
             ucs_icon_hover: false,
             ucs_icon_selected: false,
@@ -6586,6 +6725,7 @@ impl OpenCADStudio {
             show_viewport_controls: true,
             ucs_icon_at_origin: true,
             show_viewcube: true,
+            navvcube_opacity: 50,
             render_bar_w: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             render_mode_menu_open: false,
             render_mode_preview: None,
@@ -6701,6 +6841,7 @@ impl OpenCADStudio {
             gpu_warning_silenced: String::new(),
             plotstyle_parent_plot_geometry: None,
             find_replace: FindReplaceState::default(),
+            mtext_find_prefs: None,
             overkill_dialog: None,
             aec_drop_acknowledged: false,
             aec_drop_count: 0,
@@ -6723,6 +6864,10 @@ impl OpenCADStudio {
             attr_editor_rows: Vec::new(),
             attr_editor_tab: crate::ui::window::attribute_editor::AttrTab::Attribute,
             attr_editor_selected: 0,
+            attr_editor_session: None,
+            attr_editor_error: None,
+            attr_editor_asking: false,
+            attr_editor_editing: None,
             disabled_plugins: rustc_hash::FxHashSet::default(),
             #[cfg(not(target_arch = "wasm32"))]
             last_plugin_selection: None,
@@ -6809,6 +6954,7 @@ impl OpenCADStudio {
             missing_fonts: None,
             missing_fonts_path: None,
             missing_fonts_downloading: false,
+            missing_fonts_silence: false,
             suppressed_missing_fonts: rustc_hash::FxHashSet::default(),
             pending_opens: std::collections::VecDeque::new(),
             pending_startup_script_lines: Vec::new(),
@@ -6982,6 +7128,7 @@ impl OpenCADStudio {
             dsd: Default::default(),
             viewport_switch_keeps_command: false,
             chspace_pending: None,
+            alignspace_pending: None,
         };
         crate::sys::startup_times::mark("App::new: struct built");
         // Restore the consolidated user config (settings.json) into live state
@@ -6989,6 +7136,12 @@ impl OpenCADStudio {
         // options survive across sessions (issue #68). `last_saved_config` is
         // seeded below so the first change — not the boot — triggers a write.
         app.apply_config(config);
+        // MCP control starts as the button was left (#3126); `--http` needs it.
+        #[cfg(not(target_arch = "wasm32"))]
+        let forced = crate::app::control::http_bridge::gui_http_requested();
+        #[cfg(target_arch = "wasm32")]
+        let forced = false;
+        app.control.enabled = app.control.start_enabled || forced;
         crate::sys::startup_times::mark("App::new: apply_config done");
         // Load command aliases from ocad.pgp (writes the shipped default file
         // on first launch). The hide-set keeps aliases out of autocomplete while
@@ -7455,6 +7608,9 @@ impl OpenCADStudio {
             s.script_queue.extend(cfg.script_lines);
             Task::done(Message::ScriptPump)
         };
+        // Unsaved drawings a crashed session left behind.
+        #[cfg(not(target_arch = "wasm32"))]
+        s.recover_ended_session_autosaves();
         // An unattended script must not stop at a startup dialog.
         if !has_script {
             s.queue_startup_prompts();

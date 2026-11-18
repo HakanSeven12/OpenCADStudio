@@ -216,6 +216,10 @@ struct Operation {
     /// Set when an interactive request (`getpoint`/`user_select`) was answered
     /// with a cancellation, so the final status reports "cancelled".
     cancelled: bool,
+    /// A failure found after the request returned (work off the UI thread):
+    /// the settled answer is this failure, as the request would have
+    /// answered it at once.
+    failure: Option<Value>,
 }
 fn failure(code: &str, error: impl ToString) -> Value {
     json!({"ok":false,"status":"failed","code":code,"error":error.to_string()})
@@ -1192,6 +1196,7 @@ impl OpenCADStudio {
             geometry_revision: tab.scene.geometry_epoch,
             result: json!({}),
             cancelled: false,
+            failure: None,
         });
         self.control.routing = true;
         let action = self.control_action(&req);
@@ -1752,6 +1757,15 @@ impl OpenCADStudio {
         }
     }
 
+    /// The pending request failed after it returned (work off the UI
+    /// thread): it settles with `value` (from `failure`), with its
+    /// `request_id`, as if it had failed at once.
+    pub(super) fn set_control_failure(&mut self, value: Value) {
+        if let Some(operation) = self.control.pending.as_mut() {
+            operation.failure = Some(value);
+        }
+    }
+
     pub(super) fn control_track(&mut self, task: Task<Message>) -> Task<Message> {
         let track_zero_unit = self.control.pending.as_ref().is_some_and(|p| {
             p.request["op"] == "run"
@@ -1792,18 +1806,22 @@ impl OpenCADStudio {
         self.control.routing = true;
         let task = self.update(msg);
         self.control.routing = false;
+        let mut moved_to_new_tab = false;
         if let Some(pending) = self.control.pending.as_mut() {
-            if pending.document_id.is_none()
-                && matches!(
-                    pending.request["op"].as_str(),
-                    Some("new" | "open" | "activate" | "switch_document")
-                )
-                && pending.origin_document != self.tabs[self.active_tab].id
-            {
+            let op = pending.request["op"].as_str();
+            // A DGN import into a new drawing opens it when its read ends:
+            // the request follows that drawing, as it does when the import
+            // places at once.
+            let follows = (pending.document_id.is_none()
+                && matches!(op, Some("new" | "open" | "activate" | "switch_document")))
+                || (op == Some("dgn_import")
+                    && pending.document_id == Some(pending.origin_document));
+            if follows && pending.origin_document != self.tabs[self.active_tab].id {
                 pending.document_id = Some(self.tabs[self.active_tab].id);
+                moved_to_new_tab = op == Some("dgn_import");
             }
         }
-        if target.is_some() && previous < self.tabs.len() {
+        if target.is_some() && !moved_to_new_tab && previous < self.tabs.len() {
             self.active_tab = previous;
         }
         self.control_track(task)
@@ -1871,7 +1889,7 @@ impl OpenCADStudio {
         {
             self.active_tab = index;
         }
-        let failed = self.command_line.error_revision != p.error_revision;
+        let failed = p.failure.is_some() || self.command_line.error_revision != p.error_revision;
         let waiting = self.tabs[self.active_tab].active_cmd.is_some()
             || self.active_modal.is_some()
             || self.mtext_editor.is_some()
@@ -1908,7 +1926,15 @@ impl OpenCADStudio {
                 })
                 .collect::<Vec<_>>()
         });
-        let response = json!({"ok":!failed,"status":status,"request_id":p.id,"error":if failed{self.command_line.last_error.clone()}else{None},"result":p.result,"changes":changes,"state":self.control_state()});
+        let response = match p.failure.clone() {
+            Some(mut reply) => {
+                reply["request_id"] = json!(p.id);
+                reply
+            }
+            None => {
+                json!({"ok":!failed,"status":status,"request_id":p.id,"error":if failed{self.command_line.last_error.clone()}else{None},"result":p.result,"changes":changes,"state":self.control_state()})
+            }
+        };
         self.control.serial += 1;
         self.control.events.push_back(json!({"sequence":self.control.serial,"request_id":p.id,"status":status,"document_id":self.tabs[self.active_tab].id,"revision":self.tabs[self.active_tab].edit_revision}));
         while self.control.events.len() > 128 {
@@ -4736,6 +4762,33 @@ mod tests {
         ));
     }
 
+    /// A request that fails after it returned settles with that failure
+    /// (its `code` and `error`) and its `request_id`, as if it had failed
+    /// at once.
+    #[test]
+    fn a_later_failure_settles_with_its_code_and_request_id() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.control.pending = Some(Operation {
+            id: "later-failure".to_string(),
+            request: json!({"op":"dgn_import"}),
+            pending: 0,
+            error_revision: app.command_line.error_revision,
+            document_id: None,
+            origin_document: app.tabs[app.active_tab].id,
+            geometry_revision: 0,
+            result: json!({}),
+            cancelled: false,
+            failure: None,
+        });
+        app.set_control_failure(failure("invalid_dgn", "Not a DGN file"));
+        app.control_settle();
+        let (_, _, response) = app.control.completed.back().expect("settled").clone();
+        assert_eq!(
+            response,
+            json!({"ok":false,"status":"failed","code":"invalid_dgn","error":"Not a DGN file","request_id":"later-failure"})
+        );
+    }
+
     #[test]
     fn controlled_open_recovers_instead_of_waiting_on_the_recovery_prompt() {
         let mut app = OpenCADStudio::new_for_test();
@@ -4750,6 +4803,7 @@ mod tests {
             geometry_revision: 0,
             result: json!({}),
             cancelled: false,
+            failure: None,
         });
         recoverable_open_failure(&mut app);
         assert!(app.opening.is_none());

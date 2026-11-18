@@ -794,6 +794,9 @@ impl OpenCADStudio {
             ImportDialogMsg::DgnDecoded(path, model, code_page, import) => {
                 self.apply_dgn_decode(&path, &model, code_page, import)
             }
+            ImportDialogMsg::DgnOpPrepared(tab_id, generation, read) => {
+                return self.finish_control_dgn_import(tab_id, generation, *read);
+            }
             ImportDialogMsg::DgnPrepared(tab_id, generation, request, prepared) => {
                 return self.finish_dgn_import(tab_id, generation, *request, *prepared);
             }
@@ -986,25 +989,12 @@ impl OpenCADStudio {
         }
     }
 
-    /// Fallible execution for semantic callers (the automation `dgn_import`
-    /// operation), in one step: it reads the files on the UI thread. On
-    /// success the count is the model's top-level converted entities,
-    /// excluding block-definition members and any reference entities
-    /// attached afterwards.
-    pub(in crate::app) fn try_run_dgn_import(
-        &mut self,
-        i: usize,
-        request: DgnImportRequest,
-    ) -> Result<(Task<Message>, usize), dgn_import::DgnImportError> {
-        let prepared = dgn_import::prepare_import(&request)?;
-        Ok(self.place_dgn_import(i, &request, prepared))
-    }
-
     /// Places a prepared import, one undo step: into a new drawing unless
     /// the request chose drawing `i`; then the model's reference
-    /// attachments as the request says. The count is as for
-    /// [`Self::try_run_dgn_import`].
-    fn place_dgn_import(
+    /// attachments as the request says. The count is the model's top-level
+    /// converted entities, excluding block-definition members and any
+    /// reference entities attached afterwards.
+    pub(in crate::app) fn place_dgn_import(
         &mut self,
         i: usize,
         request: &DgnImportRequest,

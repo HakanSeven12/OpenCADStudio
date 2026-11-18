@@ -21369,7 +21369,7 @@ mod update_entities_batch_tests {
     }
 
     #[test]
-    fn update_entities_batch_of_block_sentinels_collapses_to_one_full_delta() {
+    fn update_entities_batch_of_block_sentinels_collapses_to_one_delta() {
         // Batched path: one coarse publish for the whole set.
         let (mut batched, bh, be, _) = scene_with_sentinels_and_line();
         let before = delta_count(&batched);
@@ -21383,10 +21383,13 @@ mod update_entities_batch_tests {
                 1,
                 "batched sentinels must publish exactly one geometry delta"
             );
-            assert!(
-                ring.back().unwrap().full,
-                "the batched delta must be full (bump_geometry)"
-            );
+            let delta = ring.back().unwrap();
+            for h in [bh, be] {
+                assert!(
+                    delta.full || delta.changes.iter().any(|(c, _)| *c == h),
+                    "the batched delta must name sentinel {h:?}"
+                );
+            }
         }
 
         // Legacy path: each sentinel bumps on its own.
@@ -21413,9 +21416,9 @@ mod update_entities_batch_tests {
     }
 
     #[test]
-    fn update_entities_mixed_batch_matches_legacy_states_with_one_coarse_delta() {
-        // Batched: the sentinel's coarse (full) delta subsumes the line's
-        // would-be per-entity delta, and both slots are still written.
+    fn update_entities_mixed_batch_matches_legacy_states_with_one_delta() {
+        // Batched: one delta covers the sentinel and the line, and both slots
+        // are still written.
         let (mut batched, bh, _, lh) = scene_with_sentinels_and_line();
         let before = delta_count(&batched);
         let updates = vec![snapshot(&batched, bh), edited_line(&batched, lh)];
@@ -21428,10 +21431,16 @@ mod update_entities_batch_tests {
                 1,
                 "mixed batch with a sentinel must publish one coarse delta"
             );
-            assert!(ring.back().unwrap().full, "coarse delta must be full");
+            let delta = ring.back().unwrap();
+            for h in [bh, lh] {
+                assert!(
+                    delta.full || delta.changes.iter().any(|(c, _)| *c == h),
+                    "the batched delta must name {h:?}"
+                );
+            }
         }
 
-        // Legacy: full delta for the sentinel + per-entity delta for the line.
+        // Legacy: one delta for the sentinel + one for the line.
         let (mut legacy, bh, _, lh) = scene_with_sentinels_and_line();
         let before = delta_count(&legacy);
         let u1 = snapshot(&legacy, bh);

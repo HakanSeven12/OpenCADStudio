@@ -307,7 +307,7 @@ fn scope_switch<'a>(scope: FindScope) -> Element<'a, Message> {
 }
 
 fn option_chips<'a>(state: &'a FindReplaceState, opts: &[FindOpt]) -> Element<'a, Message> {
-    let mut list = column![].spacing(4);
+    let mut list = Vec::new();
     for opt in opts {
         let mut options = state.options;
         let on = *opt.slot(&mut options);
@@ -323,13 +323,17 @@ fn option_chips<'a>(state: &'a FindReplaceState, opts: &[FindOpt]) -> Element<'a
         let chip = button(content.push(text(opt.label()).size(11)))
             .style(button_style(on && enabled))
             .padding([4, 10]);
-        list = list.push(if enabled {
+        list.push(Element::from(if enabled {
             chip.on_press(msg(FindMsg::Option(*opt, !on)))
         } else {
             chip
-        });
+        }));
     }
-    list.into()
+    iced::widget::Row::with_children(list)
+        .spacing(6)
+        .wrap()
+        .vertical_spacing(6)
+        .into()
 }
 
 /// A search option as a small toggle beside the search field, its name on
@@ -789,7 +793,7 @@ pub(crate) fn view_window<'a>(
     .spacing(6)
     .align_y(iced::Center);
     // A steady window: the cards scroll while the footer stays put.
-    let mut window = column![scrollable(body).height(Fill)].spacing(10);
+    let mut window = column![scrollable(body).spacing(6).height(Fill)].spacing(10);
     if let Some(message) = message_card(state) {
         window = window.push(message);
     }

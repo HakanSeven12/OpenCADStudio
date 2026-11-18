@@ -7250,6 +7250,9 @@ impl Scene {
         layout.plot_view_handle = ps.plot_view_handle;
         layout.visual_style_handle = ps.visual_style_handle;
         layout.raw_plot_settings_codes = None;
+        if name != "Model" {
+            Self::place_centred_window_sheet(layout);
+        }
         self.display_plot_style_cache
             .borrow_mut()
             .retain(|(layout_name, _), _| layout_name != name);
@@ -7347,6 +7350,102 @@ impl Scene {
         }
     }
 
+    /// The sheet of a paper layout in paper-space units, from its plot
+    /// settings; none when the layout has no paper size.
+    pub fn layout_sheet(l: &document::objects::Layout) -> Option<((f64, f64), (f64, f64))> {
+        // Use the physical paper dimensions from PlotSettings if available
+        // (populated from DWG embedded plot settings or DXF codes 44/45/73).
+        // Rotation 1=90° or 3=270° → swap width and height.
+        if l.paper_width <= 1e-6 || l.paper_height <= 1e-6 {
+            return None;
+        }
+        let (pw, ph) = if l.plot_rotation == 1 || l.plot_rotation == 3 {
+            (l.paper_height, l.paper_width)
+        } else {
+            (l.paper_width, l.paper_height)
+        };
+        // paper_width/height are millimetres; scale them into
+        // the layout's paper-space units so the sheet lands in
+        // the same coordinate system as the viewports drawn on
+        // it. An inch-based paper space would otherwise get a
+        // 25.4× oversized sheet, shrinking the content into the
+        // corner.
+        let (wx0, wy0, wx1, wy1) = (
+            l.plot_window_min_x,
+            l.plot_window_min_y,
+            l.plot_window_max_x,
+            l.plot_window_max_y,
+        );
+        let window_plot = l.plot_type == 4 && wx1 > wx0 && wy1 > wy0;
+        let f = Self::layout_unit_factor(l);
+        let (pw, ph) = (pw * f, ph * f);
+        // A window plot maps that window onto the sheet, so the
+        // sheet sits around it rather than at the origin.
+        let (ox, oy) = if window_plot {
+            if l.plot_flags.plot_centered {
+                ((wx0 + wx1 - pw) / 2.0, (wy0 + wy1 - ph) / 2.0)
+            } else {
+                (wx0 - l.plot_origin_x * f, wy0 - l.plot_origin_y * f)
+            }
+        } else {
+            // The printable area's corner sits at minus the
+            // paper image origin (paper-space units, usually
+            // 0); the sheet starts the stored margins (turned
+            // with the plot) before it. LIMMIN is not used; it
+            // goes stale when the device or medium changes.
+            let (left, bottom, ..) = crate::scene::rotated_margins(
+                (
+                    l.plot_margin_left,
+                    l.plot_margin_bottom,
+                    l.plot_margin_right,
+                    l.plot_margin_top,
+                ),
+                l.plot_rotation,
+            );
+            (
+                -l.paper_image_origin_x - left * f,
+                -l.paper_image_origin_y - bottom * f,
+            )
+        };
+        Some(((ox, oy), (ox + pw, oy + ph)))
+    }
+
+    /// A centred window plot places the sheet around its window. The paper
+    /// image origin and the limits other programs open the sheet with follow
+    /// that window, or they keep the place of the window the layout had
+    /// before (#3209). Other layouts are left as they are. True when a value
+    /// changed.
+    pub fn place_centred_window_sheet(layout: &mut document::objects::Layout) -> bool {
+        let window_plot = layout.plot_type == 4
+            && layout.plot_window_max_x > layout.plot_window_min_x
+            && layout.plot_window_max_y > layout.plot_window_min_y;
+        if !window_plot || !layout.plot_flags.plot_centered {
+            return false;
+        }
+        let before = (
+            layout.paper_image_origin_x,
+            layout.paper_image_origin_y,
+            layout.min_limits,
+            layout.max_limits,
+        );
+        // ponytail: 1:1 layouts; a scaled window plot would need the window
+        // corner in paper units.
+        layout.paper_image_origin_x = -layout.plot_window_min_x;
+        layout.paper_image_origin_y = -layout.plot_window_min_y;
+        if let Some((min, max)) = Self::layout_sheet(layout) {
+            layout.min_limits = min;
+            layout.max_limits = max;
+        }
+        let close = |a: f64, b: f64| (a - b).abs() <= 1e-9;
+        let (x, y, min, max) = before;
+        !(close(x, layout.paper_image_origin_x)
+            && close(y, layout.paper_image_origin_y)
+            && close(min.0, layout.min_limits.0)
+            && close(min.1, layout.min_limits.1)
+            && close(max.0, layout.max_limits.0)
+            && close(max.1, layout.max_limits.1))
+    }
+
     pub fn paper_limits(&self) -> Option<((f64, f64), (f64, f64))> {
         if self.current_layout == "Model" {
             return None;
@@ -7367,59 +7466,8 @@ impl Scene {
                         return None;
                     }
 
-                    // Use the physical paper dimensions from PlotSettings if available
-                    // (populated from DWG embedded plot settings or DXF codes 44/45/73).
-                    // Rotation 1=90° or 3=270° → swap width and height.
-                    if l.paper_width > 1e-6 && l.paper_height > 1e-6 {
-                        let (pw, ph) = if l.plot_rotation == 1 || l.plot_rotation == 3 {
-                            (l.paper_height, l.paper_width)
-                        } else {
-                            (l.paper_width, l.paper_height)
-                        };
-                        // paper_width/height are millimetres; scale them into
-                        // the layout's paper-space units so the sheet lands in
-                        // the same coordinate system as the viewports drawn on
-                        // it. An inch-based paper space would otherwise get a
-                        // 25.4× oversized sheet, shrinking the content into the
-                        // corner.
-                        let (wx0, wy0, wx1, wy1) = (
-                            l.plot_window_min_x,
-                            l.plot_window_min_y,
-                            l.plot_window_max_x,
-                            l.plot_window_max_y,
-                        );
-                        let window_plot = l.plot_type == 4 && wx1 > wx0 && wy1 > wy0;
-                        let f = Self::layout_unit_factor(l);
-                        let (pw, ph) = (pw * f, ph * f);
-                        // A window plot maps that window onto the sheet, so the
-                        // sheet sits around it rather than at the origin.
-                        let (ox, oy) = if window_plot {
-                            if l.plot_flags.plot_centered {
-                                ((wx0 + wx1 - pw) / 2.0, (wy0 + wy1 - ph) / 2.0)
-                            } else {
-                                (wx0 - l.plot_origin_x * f, wy0 - l.plot_origin_y * f)
-                            }
-                        } else {
-                            // The printable area's corner sits at minus the
-                            // paper image origin (paper-space units, usually
-                            // 0); the sheet starts the stored margins (turned
-                            // with the plot) before it. LIMMIN is not used; it
-                            // goes stale when the device or medium changes.
-                            let (left, bottom, ..) = crate::scene::rotated_margins(
-                                (
-                                    l.plot_margin_left,
-                                    l.plot_margin_bottom,
-                                    l.plot_margin_right,
-                                    l.plot_margin_top,
-                                ),
-                                l.plot_rotation,
-                            );
-                            (
-                                -l.paper_image_origin_x - left * f,
-                                -l.paper_image_origin_y - bottom * f,
-                            )
-                        };
-                        return Some(((ox, oy), (ox + pw, oy + ph)));
+                    if let Some(sheet) = Self::layout_sheet(l) {
+                        return Some(sheet);
                     }
 
                     // Fall back to the Layout's drawing limits.

@@ -6324,10 +6324,17 @@ impl OpenCADStudio {
         for obj in self.tabs[i].scene.document.objects.values_mut() {
             if let document::objects::ObjectType::Layout(layout) = obj {
                 if layout.name == layout_name {
+                    // A centred window plot puts the sheet around the window.
+                    let ((x0, y0), (x1, y1)) = if layout.plot_type == 4 && center {
+                        crate::scene::Scene::layout_sheet(layout)
+                            .unwrap_or(((x0, y0), (x0 + lw, y0 + lh)))
+                    } else {
+                        ((x0, y0), (x0 + lw, y0 + lh))
+                    };
                     layout.min_limits = (x0, y0);
-                    layout.max_limits = (x0 + lw, y0 + lh);
+                    layout.max_limits = (x1, y1);
                     layout.min_extents = (x0, y0, 0.0);
-                    layout.max_extents = (x0 + lw, y0 + lh, 0.0);
+                    layout.max_extents = (x1, y1, 0.0);
                     break;
                 }
             }

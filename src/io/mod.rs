@@ -2938,6 +2938,15 @@ pub fn save_to_bytes(
 pub fn prepare_document_for_save(mut doc: Document, version: document::DxfVersion) -> Document {
     let perf = crate::perf::enabled();
     doc.version = version;
+    for object in doc.objects.values_mut() {
+        if let document::objects::ObjectType::Layout(layout) = object {
+            if !layout.name.eq_ignore_ascii_case("Model")
+                && crate::scene::Scene::place_centred_window_sheet(layout)
+            {
+                layout.raw_plot_settings_codes = None;
+            }
+        }
+    }
     let styles_started = perf.then(iced::time::Instant::now);
     sync_current_styles_on_save(&mut doc);
     let styles_ms = crate::perf::elapsed_ms(styles_started);

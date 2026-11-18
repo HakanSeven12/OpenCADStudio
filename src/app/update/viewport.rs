@@ -1866,8 +1866,12 @@ impl OpenCADStudio {
     pub(super) fn on_tick(&mut self, t: Instant) -> Task<Message> {
         let i = self.active_tab;
         self.tabs[i].scene.update(t - self.start);
-        // Dynamic dimensions keep their screen size across zoom bands.
-        self.tabs[i].scene.refresh_dynamic_dimension_scales(false);
+        // Dynamic dimensions keep their screen size across zoom bands. The
+        // rewrite edits entities (a full geometry bump), so it waits until
+        // the view settles; `is_settling` keeps ticks coming until then.
+        if !self.tabs[i].scene.navigating_lod() {
+            self.tabs[i].scene.refresh_dynamic_dimension_scales(false);
+        }
         // Underlays are rasterised again for the zoom once it settles.
         self.tabs[i].scene.refresh_underlay_resolution(t);
 

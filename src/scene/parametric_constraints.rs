@@ -2962,8 +2962,10 @@ impl super::Scene {
             }
             changes.push((handle, super::ChangeKind::Modified));
         }
+        // Only the dimensions' look changed: no solve, no associative pass
+        // (a full bump here froze every zoom for ~1 s on large drawings).
         if !changes.is_empty() {
-            self.bump_entities(&changes);
+            self.bump_entities_restyled(&changes);
         }
     }
 

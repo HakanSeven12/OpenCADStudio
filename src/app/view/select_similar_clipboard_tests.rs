@@ -309,3 +309,155 @@ fn copied_blocks_follow_cursor_when_pasted_via_iced_keyboard() {
         assert!((insert.insert_point.y - (90.0 - base.y)).abs() < 1e-6);
     }
 }
+
+#[test]
+fn a_polygon_picked_from_a_clicked_box_copies_via_iced_keyboard() {
+    let _guard = crate::headless_ui_lock();
+    let mut app = OpenCADStudio::new_for_test();
+    let _ = app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    let line = |a: [f64; 2], b: [f64; 2]| {
+        document::EntityType::Line(document::entities::Line::from_points(
+            document::types::Vector3::new(a[0], a[1], 0.0),
+            document::types::Vector3::new(b[0], b[1], 0.0),
+        ))
+    };
+    // One line inside the polygon below, one far away.
+    let handles = app.tabs[i].scene.add_entities(vec![
+        line([4.0, 4.0], [6.0, 6.0]),
+        line([30.0, 30.0], [32.0, 30.0]),
+    ]);
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600., 900.);
+    app.tabs[i].scene.camera.borrow_mut().fit_to_bounds_f64(
+        glam::DVec3::new(-2., -2., 0.),
+        glam::DVec3::new(34., 34., 0.),
+        1600. / 900.,
+    );
+    let mut renderer = block_on(iced::Renderer::new(
+        iced_test::core::renderer::Settings::default(),
+        Some("tiny-skia"),
+    ))
+    .expect("headless renderer");
+    let mut cache = Cache::default();
+    // The command field holds the keyboard, as it does while the path is
+    // typed and its vertices are entered.
+    let _ = apply_focus_task(&app, &mut renderer, &mut cache, app.focus_cmd_input());
+    let screen = |app: &OpenCADStudio, x: f64, y: f64| {
+        let scene = &app.tabs[app.active_tab].scene;
+        let (w, h) = scene.selection.borrow().view.vp_size;
+        let b = scene.active_model_tile_bounds(w, h);
+        let s = scene
+            .camera
+            .borrow()
+            .project(
+                glam::DVec3::new(x, y, 0.0),
+                iced::Rectangle {
+                    x: 0.,
+                    y: 0.,
+                    width: b.width,
+                    height: b.height,
+                },
+            )
+            .unwrap();
+        iced::Point::new(s.x + b.x, s.y + b.y)
+    };
+    let mut steps = vec![(2.0, 2.0, Some("CP"))];
+    steps.extend([(10.0, 2.0, None), (10.0, 8.0, None), (2.0, 8.0, Some(""))]);
+    for (x, y, typed) in steps {
+        let at = screen(&app, x, y);
+        let mut messages = vec![
+            Message::ViewportLeftPressAt(at),
+            Message::ViewportLeftRelease,
+        ];
+        if let Some(text) = typed {
+            messages.push(Message::CommandInput(text.to_string()));
+            messages.push(Message::CommandSubmit);
+        }
+        let mut pending = std::collections::VecDeque::from(messages);
+        while let Some(message) = pending.pop_front() {
+            let task = app.update(message);
+            pending.extend(apply_focus_task(&app, &mut renderer, &mut cache, task));
+        }
+    }
+    assert!(app.tabs[i].active_cmd.is_none());
+    assert_eq!(
+        app.tabs[i]
+            .scene
+            .selected
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
+        [handles[0]]
+    );
+    let (messages, statuses) = key_messages(&app, &mut renderer, &mut cache, &copy_events());
+    assert!(
+        messages
+            .iter()
+            .any(|m| matches!(m, Message::ShortcutPressed(_))),
+        "Ctrl+C did not reach the shortcut subscription; widget status: {:?}",
+        statuses[1]
+    );
+    for message in messages {
+        let _ = app.update(message);
+    }
+    assert_eq!(
+        app.clipboard.len(),
+        1,
+        "COPYCLIP must copy what the polygon selected"
+    );
+}
+
+#[test]
+fn objects_gathered_by_select_copy_via_iced_keyboard() {
+    let _guard = crate::headless_ui_lock();
+    let mut app = OpenCADStudio::new_for_test();
+    let _ = app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    let _ = app.tabs[i].scene.add_entities(
+        (0..2)
+            .map(|y| {
+                document::EntityType::Line(document::entities::Line::from_points(
+                    document::types::Vector3::new(0.0, y as f64, 0.0),
+                    document::types::Vector3::new(10.0, y as f64, 0.0),
+                ))
+            })
+            .collect(),
+    );
+    let mut renderer = block_on(iced::Renderer::new(
+        iced_test::core::renderer::Settings::default(),
+        Some("tiny-skia"),
+    ))
+    .expect("headless renderer");
+    let mut cache = Cache::default();
+    let _ = apply_focus_task(&app, &mut renderer, &mut cache, app.focus_cmd_input());
+    // SELECT, everything, Enter: all typed, so the command field holds the
+    // keyboard until the selection is handed over.
+    for typed in ["SELECT", "ALL", ""] {
+        let mut pending = std::collections::VecDeque::from([
+            Message::CommandInput(typed.to_string()),
+            Message::CommandSubmit,
+        ]);
+        while let Some(message) = pending.pop_front() {
+            let task = app.update(message);
+            pending.extend(apply_focus_task(&app, &mut renderer, &mut cache, task));
+        }
+    }
+    assert!(app.tabs[i].active_cmd.is_none());
+    assert_eq!(app.tabs[i].scene.selected.len(), 2);
+    let (messages, statuses) = key_messages(&app, &mut renderer, &mut cache, &copy_events());
+    assert!(
+        messages
+            .iter()
+            .any(|m| matches!(m, Message::ShortcutPressed(_))),
+        "Ctrl+C did not reach the shortcut subscription; widget status: {:?}",
+        statuses[1]
+    );
+    for message in messages {
+        let _ = app.update(message);
+    }
+    assert_eq!(
+        app.clipboard.len(),
+        2,
+        "COPYCLIP must copy what SELECT gathered"
+    );
+}

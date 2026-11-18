@@ -3353,8 +3353,7 @@ bg={bg_ms:.1}ms n={view_count}"
         // collecting its own input. A pending Lengthen / Radius / Arc Length
         // value is numeric input, not the prefix of a new command (for example,
         // `3` must not open the 3DALIGN / 3DARRAY suggestions).
-        let allow_autocomplete = self.grip_pending.is_none()
-            && (tab.active_cmd.is_none() || self.command_line.has_contextual_suggestions());
+        let allow_autocomplete = self.autocomplete_allowed();
         let dyn_capturing = self.dyn_capturing();
         // The workspace row is: left edge stack, viewport, right edge stack.
         let mut parts: Vec<Element<'_, Message>> = Vec::new();
@@ -4229,6 +4228,16 @@ impl OpenCADStudio {
             ui_font_changes(),
             terminate_requests(),
         ])
+    }
+
+    /// Whether typed text may open the command suggestions. A clicked box
+    /// waiting for its opposite corner takes the text as its answer (Fence /
+    /// WPolygon / CPolygon), not as the start of a command name.
+    pub(in crate::app) fn autocomplete_allowed(&self) -> bool {
+        let tab = &self.tabs[self.active_tab];
+        self.grip_pending.is_none()
+            && !self.box_corner_prompt_pending()
+            && (tab.active_cmd.is_none() || self.command_line.has_contextual_suggestions())
     }
 
     pub(super) fn focus_cmd_input(&self) -> Task<Message> {

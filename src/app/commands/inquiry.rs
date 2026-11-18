@@ -236,7 +236,7 @@ impl OpenCADStudio {
                     .push_output(crate::tf!("{found} found").as_ref());
                 self.tabs[i].prev_selection = self.tabs[i].scene.selected.iter().copied().collect();
             }
-            "_SELECT_DONE" => {
+            "_SELECT_DONE" | crate::modules::draw::select::IMPLIED_PATH_DONE => {
                 self.tabs[i].prev_selection = self.tabs[i].scene.selected.iter().copied().collect();
             }
 

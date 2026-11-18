@@ -77,6 +77,13 @@ impl FencePick {
 
     /// The path so far, trailing the cursor, dashed.
     pub fn preview(&self, cursor: [f64; 2], name: &str) -> WireModel {
+        self.preview_styled(cursor, name, true)
+    }
+
+    /// The path so far, trailing the cursor: dashed, or solid for a window
+    /// polygon, which takes only what lies wholly inside, as the reference
+    /// draws it.
+    pub fn preview_styled(&self, cursor: [f64; 2], name: &str, dashed_line: bool) -> WireModel {
         let mut path = self.points.clone();
         path.push(cursor);
         if self.closed {
@@ -84,7 +91,14 @@ impl FencePick {
                 path.push(first);
             }
         }
-        dashed(path, name, WireModel::CYAN)
+        if dashed_line {
+            return dashed(path, name, WireModel::CYAN);
+        }
+        let points: Vec<[f32; 3]> = path
+            .into_iter()
+            .map(|p| [p[0] as f32, p[1] as f32, 0.0])
+            .collect();
+        WireModel::solid(name.into(), points, WireModel::CYAN, false)
     }
 }
 

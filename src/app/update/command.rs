@@ -601,6 +601,11 @@ impl OpenCADStudio {
         if !self.is_free_text_active() && self.command_line.input.starts_with('>') {
             self.command_line.input.remove(0);
         }
+        // Fence / WPolygon / CPolygon typed while a clicked box waits for
+        // its opposite corner turn the box into that path.
+        if let Some(task) = self.try_box_path_keyword() {
+            return task;
+        }
         // Grip-menu value prompt — consume the typed number and
         // route it through `apply_grip_menu_value`.
         // Interactive grip prompts are valid only while their matching

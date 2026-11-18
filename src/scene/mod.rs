@@ -8935,6 +8935,11 @@ impl Scene {
         handles
     }
 
+    #[cfg(test)]
+    pub(crate) fn box_hover_highlights(&self) -> &HashSet<Handle> {
+        &self.box_hover_highlights
+    }
+
     /// Roll over everything a selection box still being drawn would catch,
     /// before the release commits it. An empty slice clears the preview.
     pub fn set_box_hover_highlights(&mut self, handles: &[Handle]) {

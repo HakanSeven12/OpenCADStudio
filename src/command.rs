@@ -3059,6 +3059,19 @@ impl CommandSuggestion {
     }
 }
 
+/// The path a command is picking objects with; see
+/// [`CadCommand::selection_path`].
+pub struct SelectionPath {
+    /// Vertices placed so far, in drawing coordinates.
+    pub points: Vec<[f64; 2]>,
+    /// A polygon (closed) rather than a fence.
+    pub closed: bool,
+    /// Also catch what crosses the edge, not only what lies inside.
+    pub crossing: bool,
+    /// Picked with no command running, from a clicked box.
+    pub implied: bool,
+}
+
 pub trait CadCommand: Send {
     /// The table cell this command edits (table, row, column): Tab and
     /// Shift+Tab move its editor to the next or previous cell.
@@ -3688,6 +3701,13 @@ pub trait CadCommand: Send {
 
     fn is_selection_gathering(&self) -> bool {
         false
+    }
+
+    /// A Fence / WPolygon / CPolygon being picked: its placed vertices, so
+    /// what the path would catch with the cursor as its next vertex can be
+    /// highlighted before Enter applies it.
+    fn selection_path(&self) -> Option<SelectionPath> {
+        None
     }
 
     /// Enable a lightweight hover pick while gathering entities. Commands can

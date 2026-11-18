@@ -2053,6 +2053,60 @@ mod underlay_attach_read_tests {
         );
     }
 
+    /// A page change shows the size that the read found for that page, and
+    /// does not read the file again: bytes that became bad after the read
+    /// change nothing.
+    #[test]
+    fn a_page_change_does_not_read_the_file() {
+        let mut app = new_app();
+        let path = "underlay-attach-page-change.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_pages()));
+        let task = app.open_pdf_attach_dialog(path);
+        app.drive_headless_task(task).expect("the read task");
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(b"not a PDF".to_vec()));
+        let _ = app.update(Message::PdfDialog(PdfDialogMsg::AttachPage(1)));
+        let state = app.pdf_attach.as_ref().expect("the window's state");
+        assert_eq!(state.selected, vec![1]);
+        assert_eq!(state.page_size, "2.0000 × 1.0000");
+        let _ = app.update(Message::PdfDialog(PdfDialogMsg::AttachPage(0)));
+        let state = app.pdf_attach.as_ref().expect("the window's state");
+        assert_eq!(state.page_size, "10.0000 × 5.0000");
+        assert_eq!(state.sub_per_master, 1.0);
+    }
+
+    /// A page change takes the units of that item from what the read
+    /// found (a DGN file has units for each model).
+    #[test]
+    fn a_page_change_takes_the_units_of_that_item() {
+        let mut app = new_app();
+        let task = app.read_underlay_for_attach_with(
+            UnderlayType::Dgn,
+            "two-models.dgn",
+            false,
+            |_, _, _| {
+                let thumb = |label: &str| crate::ui::window::pdf_dialogs::PageThumb {
+                    label: label.to_string(),
+                    image: None,
+                };
+                UnderlayAttachRead::Items {
+                    pages: vec![thumb("Default"), thumb("Detail")],
+                    sizes: vec!["1 × 1".to_string(), "2 × 2".to_string()],
+                    units: vec![1000.0, 250.0],
+                    remembered: false,
+                }
+            },
+        );
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.pdf_attach.as_ref().map(|s| s.sub_per_master),
+            Some(1000.0)
+        );
+        let _ = app.update(Message::PdfDialog(PdfDialogMsg::AttachPage(1)));
+        let state = app.pdf_attach.as_ref().expect("the window's state");
+        assert_eq!(state.sub_per_master, 250.0);
+        assert_eq!(state.page_size, "2 × 2");
+    }
+
     /// The window of a second read (Browse) takes the place of the first.
     #[test]
     fn the_window_of_a_second_read_takes_the_place_of_the_first() {

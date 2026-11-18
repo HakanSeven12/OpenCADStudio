@@ -2295,6 +2295,11 @@ pub(super) struct OpenCADStudio {
     /// only until its key and command are filled (success) or it is cancelled
     /// (Esc / ✕ / dialog close), so the list never keeps an empty row.
     shortcut_pending_add: bool,
+    /// The row whose Command box offers its suggestion list, with the text
+    /// the list was opened for. Typing in a Command box sets it; the list
+    /// shows only while that row still holds that text, so a row that moved
+    /// or changed in any other way never shows a stale list.
+    shortcut_suggest: Option<(usize, String)>,
     /// True while the "Reset to default" confirmation is showing.
     shortcut_reset_confirm: bool,
     /// True while the "unsaved changes will be discarded" confirmation
@@ -5303,6 +5308,14 @@ pub enum Message {
         field: crate::ui::window::shortcuts::ShortcutField,
         value: String,
     },
+    /// A row of a Command box's suggestion list was picked: the command
+    /// replaces the typed text of row `idx`.
+    ShortcutEditorSuggestionPick {
+        idx: usize,
+        command: String,
+    },
+    /// Close the suggestion list (Esc, or a click outside it).
+    ShortcutEditorSuggestionDismiss,
     ShortcutEditorFilter(String),
     ShortcutEditorAdd,
     ShortcutEditorRemove(usize),
@@ -6997,6 +7010,7 @@ impl OpenCADStudio {
             shortcut_filter: String::new(),
             shortcut_capture_row: None,
             shortcut_pending_add: false,
+            shortcut_suggest: None,
             shortcut_reset_confirm: false,
             shortcut_close_confirm: false,
             // Command aliases (populated from ocad.pgp just after construction)

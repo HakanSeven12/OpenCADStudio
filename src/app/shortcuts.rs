@@ -676,6 +676,249 @@ impl OpenCADStudio {
 }
 
 #[cfg(test)]
+mod suggestion_tests {
+    use crate::app::{Message, OpenCADStudio};
+    use crate::ui::window::shortcuts::{suggestions, ShortcutField};
+
+    /// Rows of the test table: more than the window shows at once.
+    const ROWS: usize = 40;
+
+    fn key(idx: usize) -> String {
+        format!("ALT+F{}", idx + 1)
+    }
+
+    /// The editor open on a full table, `typed` typed into the Command box
+    /// of row `idx`.
+    fn editor_with_typed(idx: usize, typed: &str) -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.update(Message::ShortcutsPanelOpen);
+        app.shortcut_editor_rows = (0..ROWS).map(|row| (key(row), "CIRCLE".to_string())).collect();
+        if !typed.is_empty() {
+            let _ = app.update(Message::ShortcutEditorInput {
+                idx,
+                field: ShortcutField::Command,
+                value: typed.to_string(),
+            });
+        }
+        app
+    }
+
+    fn offered(app: &OpenCADStudio, typed: &str) -> Vec<String> {
+        suggestions(
+            typed,
+            &app.command_line.dynamic_commands,
+            &app.command_aliases,
+        )
+    }
+
+    /// Where `label` shows in the drawn window, if it shows.
+    fn shown(app: &OpenCADStudio, label: &str) -> Option<iced::Rectangle> {
+        let mut ui = iced_test::Simulator::with_size(
+            iced::Settings::default(),
+            iced::Size::new(1280.0, 900.0),
+            app.view_main(),
+        );
+        ui.find(label.to_string())
+            .ok()
+            .and_then(|found| found.visible_bounds())
+    }
+
+    #[test]
+    fn the_list_is_the_command_lines_and_empty_for_a_finished_name() {
+        let app = OpenCADStudio::new_for_test();
+        let lin = offered(&app, "lin");
+        assert_eq!(lin.first().map(String::as_str), Some("LINE"), "{lin:?}");
+        assert!(lin.iter().all(|name| name.contains("LIN")), "{lin:?}");
+        assert!(offered(&app, "").is_empty());
+        assert!(offered(&app, "no such command").is_empty());
+        // A name nothing else contains has nothing left to offer.
+        let only = crate::ui::command_line::ranked_matches(
+            "LINETYPE",
+            &app.command_line.dynamic_commands,
+            &app.command_aliases,
+        );
+        if only == ["LINETYPE"] {
+            assert!(offered(&app, "linetype").is_empty());
+        }
+    }
+
+    /// Typing in a Command box shows the list in the drawn window, every row
+    /// of it whole, under the box, and no row of the table moves for it.
+    #[test]
+    fn typing_shows_the_list_and_moves_no_row() {
+        let plain = editor_with_typed(0, "");
+        let below_before = shown(&plain, &key(1)).expect("the second row shows");
+        let apply_before = shown(&plain, "Apply").expect("Apply shows");
+
+        let typed = editor_with_typed(0, "lin");
+        let wanted = offered(&typed, "lin");
+        assert!(wanted.len() > 1, "{wanted:?}");
+        let box_row = shown(&typed, &key(0)).expect("the typed row shows");
+        for name in &wanted {
+            let row = shown(&typed, name).unwrap_or_else(|| panic!("{name} does not show"));
+            assert!(row.height > 10.0, "{name} is cut off: {row:?}");
+            assert!(
+                row.y >= box_row.y + box_row.height - 1.0,
+                "{name} {row:?} is not under {box_row:?}"
+            );
+        }
+        assert_eq!(shown(&typed, &key(1)), Some(below_before), "the next row moved");
+        assert_eq!(shown(&typed, "Apply"), Some(apply_before), "Apply moved");
+    }
+
+    /// The lowest row the window shows has no room under it: its list still
+    /// shows whole, above the action bar.
+    #[test]
+    fn the_lowest_row_shows_its_whole_list() {
+        let plain = editor_with_typed(0, "");
+        let apply = shown(&plain, "Apply").expect("Apply shows");
+        let lowest = (0..ROWS)
+            .filter(|&row| shown(&plain, &key(row)).is_some_and(|at| at.height > 10.0))
+            .last()
+            .expect("a row shows");
+        assert!(lowest > 5 && lowest < ROWS - 1, "the table scrolls: {lowest}");
+
+        let typed = editor_with_typed(lowest, "lin");
+        for name in &offered(&typed, "lin") {
+            let row = shown(&typed, name).unwrap_or_else(|| panic!("{name} does not show"));
+            assert!(
+                row.height > 10.0 && row.y + row.height <= apply.y,
+                "{name} {row:?} is cut off or over the action bar {apply:?}"
+            );
+        }
+    }
+
+    /// A click on a row of the list puts that command in the box and closes
+    /// the list.
+    #[test]
+    fn a_click_on_a_row_fills_the_command() {
+        let mut app = editor_with_typed(0, "lin");
+        let last = offered(&app, "lin").last().expect("a suggestion").clone();
+        let messages: Vec<_> = {
+            let mut ui = iced_test::Simulator::with_size(
+                iced::Settings::default(),
+                iced::Size::new(1280.0, 900.0),
+                app.view_main(),
+            );
+            ui.click(last.clone()).expect("the last row can be clicked");
+            ui.into_messages().collect()
+        };
+        for message in messages {
+            let _ = app.update(message);
+        }
+        assert_eq!(app.shortcut_editor_rows[0].1, last);
+        assert_eq!(app.shortcut_editor_rows[1].1, "CIRCLE", "only that row");
+        assert_eq!(app.shortcut_suggest, None);
+        assert_eq!(shown(&app, "LINE"), None, "the list is closed");
+    }
+
+    /// The list belongs to the text it was opened for: it is gone when the
+    /// row moved, was removed, or the list was dismissed.
+    #[test]
+    fn the_list_closes_when_its_row_changes() {
+        let mut app = editor_with_typed(1, "lin");
+        assert!(shown(&app, "LINE").is_some());
+        let _ = app.update(Message::ShortcutEditorRemove(0));
+        assert_eq!(app.shortcut_suggest, None);
+
+        let mut app = editor_with_typed(1, "lin");
+        // Rows replaced behind the editor's back (an import, a reset).
+        app.shortcut_editor_rows
+            .insert(0, ("F4".to_string(), "ARC".to_string()));
+        assert_eq!(shown(&app, "LINE"), None, "a moved row shows no list");
+
+        let mut app = editor_with_typed(0, "lin");
+        let _ = app.update(Message::ShortcutEditorSuggestionDismiss);
+        assert_eq!(shown(&app, "LINE"), None);
+        assert_eq!(app.shortcut_editor_rows[0].1, "LIN", "the typed text stays");
+    }
+
+    /// Enter in the box leaves the typed text alone: no row of the list is
+    /// marked until an arrow key marks one. (The arrow and Esc keys are the
+    /// shared list's; pressing them here would set its process-wide capture
+    /// flags under the tests that read them.)
+    #[test]
+    fn enter_alone_keeps_the_typed_text() {
+        let mut app = editor_with_typed(0, "lin");
+        assert!(offered(&app, "lin").len() > 1);
+        let messages: Vec<_> = {
+            let mut ui = iced_test::Simulator::with_size(
+                iced::Settings::default(),
+                iced::Size::new(1280.0, 900.0),
+                app.view_main(),
+            );
+            let _ = ui.tap_key(iced::keyboard::key::Named::Enter);
+            ui.into_messages().collect()
+        };
+        for message in messages {
+            let _ = app.update(message);
+        }
+        assert_eq!(app.shortcut_editor_rows[0].1, "LIN");
+    }
+
+    /// The box being typed in keeps its focus when its list opens and
+    /// closes: the box stays at the same place in the widget tree.
+    #[test]
+    fn the_command_box_keeps_focus_when_its_list_opens_and_closes() {
+        use iced::advanced::widget::{tree, Tree};
+        type InputState = iced::widget::text_input::State<
+            <iced::Renderer as iced::advanced::text::Renderer>::Paragraph,
+        >;
+        fn inputs<'t>(tree: &'t mut Tree, found: &mut Vec<&'t mut InputState>) {
+            if tree.tag == tree::Tag::of::<InputState>() {
+                found.push(tree.state.downcast_mut::<InputState>());
+                return;
+            }
+            for child in &mut tree.children {
+                inputs(child, found);
+            }
+        }
+        /// The last text box of the window: the last row's Command box.
+        fn last_input(tree: &mut Tree) -> &mut InputState {
+            let mut found = Vec::new();
+            inputs(tree, &mut found);
+            found.pop().expect("a command box")
+        }
+
+        let rows = vec![
+            ("F2".to_string(), "CIRCLE".to_string()),
+            ("F3".to_string(), "LIN".to_string()),
+        ];
+        let none = rustc_hash::FxHashSet::default();
+        let list = vec!["LINE".to_string(), "LINETYPE".to_string()];
+        let view = |open: bool| {
+            crate::ui::window::shortcuts::view_window(
+                &rows,
+                "",
+                None,
+                open.then_some(1),
+                if open { &list } else { &[] },
+                false,
+                false,
+                &none,
+                &[],
+                &none,
+                false,
+                crate::ui::modal::ModalSizing::FILL,
+            )
+        };
+        let mut window = view(false);
+        let mut tree = Tree::new(window.as_widget());
+        tree.diff(window.as_widget_mut());
+        last_input(&mut tree).focus();
+        drop(window);
+        for open in [true, false, true] {
+            let mut window = view(open);
+            tree.diff(window.as_widget_mut());
+            assert!(
+                last_input(&mut tree).is_focused(),
+                "focus lost with the list open={open}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::app::OpenCADStudio;

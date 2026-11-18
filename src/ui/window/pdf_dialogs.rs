@@ -54,6 +54,13 @@ pub enum PdfDialogMsg {
     /// tab the attach was started for, that document's generation, and the
     /// pages with their placements.
     AttachPlaced(u64, u64, Box<PlacedPdfPages>),
+    /// OK's GeoPDF placement, read off the UI thread: the file, the pages,
+    /// and the placed underlays (None: a page has no placement here).
+    AttachOkChecked(
+        String,
+        Vec<String>,
+        Option<Vec<(String, document::EntityType)>>,
+    ),
     // Attach Point Cloud
     CloudBrowse,
     CloudPathType(PathTypeChoice),

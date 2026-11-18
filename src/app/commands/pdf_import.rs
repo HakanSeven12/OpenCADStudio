@@ -497,6 +497,7 @@ fn apply_geo_placement(
 
 /// Build final underlays without manual placement prompts only when every
 /// selected PDF page has an unambiguous transform in the current host context.
+#[cfg(test)]
 pub(super) fn fully_georeferenced_pdf_pages(
     scene: &crate::scene::Scene,
     kind: document::entities::UnderlayType,
@@ -802,9 +803,10 @@ mod geo_attach_tests {
         assert!(state.geopdf_available);
         assert!(state.geopdf_auto);
 
-        let _ = app.update(crate::app::Message::PdfDialog(
+        let ok = app.update(crate::app::Message::PdfDialog(
             crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachOk,
         ));
+        app.drive_headless_task(ok).expect("OK's GeoPDF read");
 
         assert!(app.tabs[i].active_cmd.is_none());
         assert!(app.pdf_attach.is_none());
@@ -1146,6 +1148,81 @@ mod geo_attach_tests {
                 "Attach PDF cancelled: a different drawing became current while the file was read."
             )
         );
+    }
+
+    /// The Attach window open on a GeoPDF file with the automatic choice
+    /// on and the placement on screen.
+    fn geopdf_window(app: &mut OpenCADStudio, path: &str) {
+        set_crs(app);
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let read = app.open_pdf_attach_dialog(path);
+        app.drive_headless_task(read).expect("the read task");
+        let state = app.pdf_attach.as_mut().expect("attach dialog");
+        state.path_type =
+            crate::ui::window::pdf_dialogs::PathTypeChoice(crate::io::xref_model::Pathtype::None);
+        state.insert_on_screen = true;
+        state.scale_on_screen = true;
+        state.rotation_on_screen = true;
+        assert!(state.geopdf_auto);
+    }
+
+    /// OK with the automatic GeoPDF choice reads the placement on a worker:
+    /// the window stays open and nothing is attached until the read ends.
+    #[test]
+    fn ok_reads_the_geopdf_placement_on_a_worker() {
+        let mut app = app();
+        geopdf_window(&mut app, "ok-on-a-worker.pdf");
+        let ok = app.update(crate::app::Message::PdfDialog(
+            crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachOk,
+        ));
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::PdfAttach));
+        assert!(
+            attached(&app).is_empty(),
+            "nothing is attached during the read"
+        );
+        app.drive_headless_task(ok).expect("OK's GeoPDF read");
+        assert!(app.pdf_attach.is_none());
+        assert_eq!(attached(&app).len(), 1);
+    }
+
+    /// OK's GeoPDF read that panics gives an error, and the window stays
+    /// open with nothing attached.
+    #[test]
+    fn an_ok_read_that_panics_keeps_the_window() {
+        let mut app = app();
+        let i = app.active_tab;
+        geopdf_window(&mut app, "ok-panics.pdf");
+        let ok = app.pdf_attach_ok_with(i, |_, _, _, _, _| panic!("a reader bug"));
+        app.drive_headless_task(ok).expect("OK's GeoPDF read");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("PDFATTACH failed: a reader bug")
+        );
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::PdfAttach));
+        assert!(app.pdf_attach.is_some());
+        assert!(attached(&app).is_empty());
+    }
+
+    /// An answer for a window that changed (the automatic choice turned
+    /// off, another page) or that closed during the read is dropped.
+    #[test]
+    fn an_ok_answer_for_a_changed_or_closed_window_is_dropped() {
+        for change in 0..3 {
+            let mut app = app();
+            geopdf_window(&mut app, "ok-changed.pdf");
+            let ok = app.update(crate::app::Message::PdfDialog(
+                crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachOk,
+            ));
+            let state = app.pdf_attach.as_mut().unwrap();
+            match change {
+                0 => state.geopdf_auto = false,
+                1 => state.selected = vec![1],
+                _ => app.active_modal = None,
+            }
+            app.drive_headless_task(ok).expect("OK's GeoPDF read");
+            assert!(attached(&app).is_empty(), "change {change}");
+            assert!(app.pdf_attach.is_some(), "change {change}");
+        }
     }
 
     fn unit_geographic_pdf() -> Vec<u8> {

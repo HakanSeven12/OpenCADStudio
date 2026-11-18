@@ -188,40 +188,14 @@ impl ExtrudeCommand {
 }
 
 fn preview_body_wires(
-    body: &ocs_brep::Body,
+    body: &ocs_solid::model::Brep,
     color: [f32; 4],
     isolines: usize,
 ) -> Vec<WireModel> {
-    // This overlay only consumes curves. Do not triangulate the body's faces
-    // on every cursor event just to discard the resulting surface mesh.
-    let wireframe = ocs_brep::mesh::tessellate_wireframe(
-        body,
-        ocs_brep::mesh::TessellationTolerance::new(ocs_geom::tessellation::DEFAULT_ANGLE, 1e-9)
-            .with_solid_isolines(isolines),
-    );
-    let mut wires = wireframe
-        .edges
+    crate::scene::model::solid_model::preview_curves(body, isolines)
         .into_iter()
-        .filter(|edge| edge.positions.len() >= 2)
-        .map(|edge| {
-            WireModel::solid_f64("EXTRUDE-PREVIEW".to_owned(), edge.positions, color, false)
-        })
-        .collect::<Vec<_>>();
-    wires.extend(
-        wireframe
-            .isolines
-            .into_iter()
-            .filter(|line| line.positions.len() >= 2)
-            .map(|line| {
-                WireModel::solid_f64(
-                    "REVOLVE-PREVIEW-ISOLINE".to_owned(),
-                    line.positions,
-                    color,
-                    false,
-                )
-            }),
-    );
-    wires
+        .map(|points| WireModel::solid_f64("EXTRUDE-PREVIEW".to_owned(), points, color, false))
+        .collect()
 }
 
 impl CadCommand for ExtrudeCommand {
@@ -1008,7 +982,7 @@ impl CadCommand for PresspullCommand {
                     .map(|(plane, loops, _)| (plane, loops))
             }
             PresspullTargetKind::Face { body, face, .. } => {
-                ocs_brep::planar_face_profile(&body, face)
+                ocs_solid::model::planar_face_profile(&body, face)
                     .map(|profile| (profile.plane, profile.loops))
             }
         };

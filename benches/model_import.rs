@@ -44,7 +44,6 @@ const SAT_EDGES: usize = 1200;
 /// with as many edges and vertices.
 fn sat_fixture() -> String {
     use document::entities::acis::SatDocument;
-    use ocs_brep as brep;
     use ocs_geom::geom2d::{Curve as KCurve, Line as KLine};
     use ocs_geom::space::Plane;
 
@@ -59,9 +58,9 @@ fn sat_fixture() -> String {
             })
         })
         .collect();
-    let body = brep::planar_region(plane, &[outer]).expect("planar profile");
+    let body = ocs_solid::model::planar_region(plane, &[outer]).expect("planar profile");
     let mut document = SatDocument::new();
-    ocs_acis::append(&body, &mut document).expect("sat append");
+    ocs_solid::append(&body, &mut document).expect("sat append");
     document.to_sat_string()
 }
 

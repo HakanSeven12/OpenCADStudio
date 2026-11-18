@@ -81,7 +81,7 @@ struct SilhouetteChunk {
 
 struct SilhouetteSourceGroup {
     color: [f32; 4],
-    sources: Vec<ocs_brep::mesh::SilhouetteSource>,
+    sources: Vec<crate::scene::model::silhouette::SilhouetteSource>,
     instance_buffers: Vec<(wgpu::Buffer, u32)>,
 }
 use device_capabilities::DeviceCapabilities;
@@ -3955,8 +3955,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                             transform.apply_rotation(document::types::Vector3::UNIT_Y),
                             transform.apply_rotation(document::types::Vector3::UNIT_Z),
                         ];
-                        if let Some(transformed) = ocs_brep::mesh::transform_silhouette_affine(
-                            &generator.source,
+                        if let Some(transformed) = generator.source.transformed(
                             vectors.map(|vector| [vector.x, vector.y, vector.z]),
                             [origin.x, origin.y, origin.z],
                         ) {
@@ -3980,10 +3979,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         let compute_group = |group: &SilhouetteSourceGroup| {
             let mut points = Vec::new();
             for source in &group.sources {
-                points.extend(ocs_brep::mesh::silhouette(
-                    source,
-                    [view.x, view.y, view.z],
-                ));
+                points.extend(source.outline([view.x, view.y, view.z]));
             }
             points
         };

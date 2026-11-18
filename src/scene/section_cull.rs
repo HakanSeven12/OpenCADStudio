@@ -14,7 +14,7 @@ use super::Scene;
 #[derive(Default)]
 pub struct SectionCull {
     /// Bodies the section crosses, with what stays of each.
-    pub cut: Vec<(Handle, ocs_brep::Body)>,
+    pub cut: Vec<(Handle, ocs_solid::model::Brep)>,
     /// Open meshes the section crosses, clipped to it.
     pub clipped: Vec<EntityType>,
     /// Objects wholly outside the section.
@@ -48,8 +48,8 @@ fn place(planes: &[ocs_geom::space::Plane], points: &[[f64; 3]]) -> Place {
     }
 }
 
-fn same_extent(a: &ocs_brep::Body, b: &ocs_brep::Body) -> bool {
-    match (ocs_brep::body_bounds(a), ocs_brep::body_bounds(b)) {
+fn same_extent(a: &ocs_solid::model::Brep, b: &ocs_solid::model::Brep) -> bool {
+    match (ocs_solid::model::aabb(a), ocs_solid::model::aabb(b)) {
         (Some(a), Some(b)) => (0..3).all(|axis| {
             (a.min[axis] - b.min[axis]).abs() <= 1e-7 && (a.max[axis] - b.max[axis]).abs() <= 1e-7
         }),

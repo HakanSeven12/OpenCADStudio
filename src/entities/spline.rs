@@ -298,9 +298,9 @@ pub(crate) fn replace_with_nurbs(spline: &mut Spline, curve: &NurbsCurve3) {
 /// constraints, not control-hull vertices, so their box can exclude the curve.
 /// The shared kernel reconstructs the same spatial interpolation used by the
 /// curve consumers, then its control hull bounds every point of that curve.
-pub(crate) fn fit_geometry_bounds(spline: &Spline) -> Option<ocs_brep::Aabb> {
+pub(crate) fn fit_geometry_bounds(spline: &Spline) -> Option<ocs_solid::geometry::Aabb> {
     let curve = fit_nurbs3(spline)?;
-    ocs_brep::Aabb::around(curve.control_points().iter().copied())
+    ocs_solid::geometry::Aabb::around(curve.control_points().iter().copied())
 }
 fn to_render(spl: &Spline) -> RenderEntity {
     let n = spl.control_points.len();

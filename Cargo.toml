@@ -12,7 +12,7 @@ performance-audit = []
 
 [workspace]
 members = [
-    "crates/ocs_acis",
+    "crates/ocs_solid",
     "crates/ocs_plugin_api",
     "crates/ocs_save",
     "crates/ocs_web_worker",
@@ -20,7 +20,6 @@ members = [
     "crates/dwg-thumbnailer-win",
     "crates/step-export",
     "crates/ocs_geom",
-    "crates/ocs_brep",
     "crates/ocs_constraints",
 ]
 
@@ -51,13 +50,13 @@ document = { package = "opencaddocument", git = "https://github.com/HakanSeven12
 # 2D curve algebra, the B-rep model and the constraint solver (from
 # opencadkernel); the operations on solids are Solidcore's.
 ocs_geom = { path = "crates/ocs_geom" }
-ocs_brep = { path = "crates/ocs_brep" }
 ocs_constraints = { path = "crates/ocs_constraints" }
 solidcore = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
 solidcore-ops = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
 solidcore-convert = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
 solidcore-tess = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
-ocs_acis = { path = "crates/ocs_acis" }
+solidcore-step = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
+ocs_solid = { path = "crates/ocs_solid" }
 # Solidcore's record model (B-rep, STEP exchange structure); the STEP writer
 # is vendored with OCS changes (Apache-2.0; see crates/step-export/VENDORED.md).
 solidcore-record = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }

@@ -38,7 +38,7 @@ pub struct SliceCommand {
     preview_center: DVec3,
     preview_radius: f64,
     picked: Option<EntityType>,
-    surface_tool: Option<ocs_brep::Body>,
+    surface_tool: Option<ocs_solid::model::Brep>,
     notice: Option<&'static str>,
 }
 
@@ -383,7 +383,7 @@ impl CadCommand for SliceCommand {
         if surface_only {
             let body = self.picked.as_ref().and_then(|entity| match entity {
                 EntityType::Surface(surface) => {
-                    crate::scene::convert::solid3d_tess::kernel_surface_body(surface)
+                    crate::scene::convert::solid3d_tess::surface_record(surface)
                 }
                 _ => None,
             });
@@ -391,7 +391,7 @@ impl CadCommand for SliceCommand {
                 if let Some(plane) = planar_body_plane(&body) {
                     return self.enter_side(plane);
                 }
-                if body.face_keys().count() == 1 {
+                if (0..body.faces.len() as u32).count() == 1 {
                     self.surface_tool = Some(body);
                     self.notice = None;
                     self.step = Step::SurfaceSide;
@@ -457,14 +457,14 @@ impl CadCommand for SliceCommand {
     }
 }
 
-fn planar_body_plane(body: &ocs_brep::Body) -> Option<Plane> {
-    let mut faces = body.face_keys();
-    let first = ocs_brep::planar_face_profile(body, faces.next()?)?.plane;
+fn planar_body_plane(body: &ocs_solid::model::Brep) -> Option<Plane> {
+    let mut faces = 0..body.faces.len() as u32;
+    let first = ocs_solid::model::planar_face_profile(body, faces.next()?)?.plane;
     let normal = DVec3::from_array(first.normal()?);
-    let tolerance = ocs_brep::operation_tolerance(&[body]);
+    let tolerance = ocs_solid::model::size(body).max(1.0) * 1e-9;
     faces
         .all(|face| {
-            let Some(profile) = ocs_brep::planar_face_profile(body, face) else {
+            let Some(profile) = ocs_solid::model::planar_face_profile(body, face) else {
                 return false;
             };
             profile.plane.normal().is_some_and(|other| {

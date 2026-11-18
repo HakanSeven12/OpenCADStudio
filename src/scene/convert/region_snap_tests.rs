@@ -179,13 +179,13 @@ fn native_region_binary_without_wires_is_pickable_at_circular_boundary() {
             radius: 5.0,
         })],
     ];
-    let body = ocs_brep::planar_region(
+    let body = ocs_solid::model::planar_region(
         ocs_geom::space::Plane::from_axes([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
         &loops,
     )
     .unwrap();
     let mut sat = SatDocument::new();
-    ocs_acis::append(&body, &mut sat).unwrap();
+    ocs_solid::append(&body, &mut sat).unwrap();
     let parsed = SatDocument::parse(&sat.to_sat_string()).unwrap();
     let mut region = Region::new();
     region.acis_data = AcisData {
@@ -429,9 +429,11 @@ fn snap<W: WireSource + ?Sized>(
     )
 }
 
+#[track_caller]
 fn assert_snap(wires: &[WireModel], kind: SnapType, point: DVec3, from: Option<DVec3>) {
-    let hit =
-        snap(wires, kind, point, from).unwrap_or_else(|| panic!("missing {kind:?} at {point:?}"));
+    let Some(hit) = snap(wires, kind, point, from) else {
+        panic!("missing {kind:?} at {point:?}");
+    };
     assert_eq!(hit.snap_type, kind);
     assert!(
         hit.world.distance(point) < 1e-6,

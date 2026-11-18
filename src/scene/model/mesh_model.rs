@@ -43,10 +43,12 @@ pub struct MeshModel {
 /// `lods[0]` is the full mesh every pick, snap, edit and measurement uses.
 /// Levels 1 and 2 are display-only index buffers over its vertices
 /// ([`MeshLodSet::display_lods`]); a missing level draws level 0.
-/// Kernel-owned source for a view-dependent silhouette.
+pub use super::mass::MassProperties;
+
+/// The source of a mesh's view-dependent silhouette.
 #[derive(Clone, Debug)]
 pub struct CurvedGen {
-    pub source: ocs_brep::mesh::SilhouetteSource,
+    pub source: super::silhouette::SilhouetteSource,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -64,7 +66,7 @@ pub struct MeshMetrics {
 }
 
 impl MeshMetrics {
-    fn apply_mass_properties(&mut self, properties: ocs_brep::MassProperties) {
+    fn apply_mass_properties(&mut self, properties: MassProperties) {
         self.volume = properties.volume;
         self.centroid = properties.centroid;
         self.moment_of_inertia = properties.moment_of_inertia;
@@ -77,7 +79,7 @@ impl MeshMetrics {
     pub fn translate(&mut self, delta: [f64; 3]) {
         if self.volume > 1e-18 {
             self.apply_mass_properties(
-                ocs_brep::MassProperties {
+                MassProperties {
                     volume: self.volume,
                     centroid: self.centroid,
                     moment_of_inertia: self.moment_of_inertia,
@@ -210,34 +212,21 @@ fn compute_mesh_metrics(lods: &[MeshModel]) -> MeshMetrics {
     let Some(mesh) = lods.iter().find(|mesh| !mesh.indices.is_empty()) else {
         return MeshMetrics::default();
     };
-    let kernel_mesh = ocs_brep::Mesh {
-        positions: mesh
-            .verts
-            .iter()
-            .enumerate()
-            .map(|(index, high)| {
-                let low = mesh.verts_low.get(index).copied().unwrap_or([0.0; 3]);
-                [
-                    high[0] as f64 + low[0] as f64,
-                    high[1] as f64 + low[1] as f64,
-                    high[2] as f64 + low[2] as f64,
-                ]
-            })
-            .collect(),
-        normals: Vec::new(),
-        triangles: mesh
-            .indices
-            .chunks_exact(3)
-            .map(|triangle| {
-                [
-                    triangle[0] as usize,
-                    triangle[1] as usize,
-                    triangle[2] as usize,
-                ]
-            })
-            .collect(),
-    };
-    let surface = kernel_mesh.surface_properties();
+    let positions: Vec<[f64; 3]> = mesh
+        .verts
+        .iter()
+        .enumerate()
+        .map(|(index, high)| {
+            let low = mesh.verts_low.get(index).copied().unwrap_or([0.0; 3]);
+            [0, 1, 2].map(|k| high[k] as f64 + low[k] as f64)
+        })
+        .collect();
+    let triangles: Vec<[usize; 3]> = mesh
+        .indices
+        .chunks_exact(3)
+        .map(|t| [t[0] as usize, t[1] as usize, t[2] as usize])
+        .collect();
+    let surface = super::mass::surface_properties(&positions, &triangles);
     let mut metrics = MeshMetrics {
         vertices: mesh.verts.len(),
         triangles: mesh.indices.len() / 3,
@@ -245,14 +234,14 @@ fn compute_mesh_metrics(lods: &[MeshModel]) -> MeshMetrics {
         centroid: surface.map_or([0.0; 3], |value| value.1),
         ..MeshMetrics::default()
     };
-    if let Some(properties) = kernel_mesh.inertial_properties() {
+    if let Some(properties) = MassProperties::of_mesh(&positions, &triangles) {
         metrics.apply_mass_properties(properties);
     }
     metrics
 }
 
 impl MeshLodSet {
-    pub fn apply_mass_properties(&mut self, properties: ocs_brep::MassProperties) {
+    pub fn apply_mass_properties(&mut self, properties: MassProperties) {
         self.metrics.apply_mass_properties(properties);
     }
 
@@ -630,12 +619,12 @@ mod solid_snap_tests {
 mod lod_tests {
     use super::{simplified_lods, MeshModel};
 
-    fn mesh_of(body: &ocs_brep::Body) -> MeshModel {
-        let tessellation = ocs_brep::mesh::tessellate(
+    fn mesh_of(body: &ocs_solid::model::Brep) -> MeshModel {
+        let mesh = crate::scene::model::solid_model::tessellate(
             body,
-            ocs_brep::mesh::TessellationTolerance::new(0.05, 1e-3),
-        );
-        let mesh = tessellation.mesh;
+            crate::scene::model::solid_model::DisplayTolerance::new(0.05),
+        )
+        .unwrap();
         MeshModel {
             name: "1".into(),
             verts: mesh
@@ -675,7 +664,7 @@ mod lod_tests {
 
     #[test]
     fn a_sphere_simplifies_to_half_and_quarter_within_a_small_error() {
-        let body = ocs_brep::make::sphere([0.0; 3], 10.0).unwrap();
+        let body = ocs_solid::model::make_sphere([0.0; 3], 10.0).unwrap();
         let mesh = mesh_of(&body);
         let lods = simplified_lods(&mesh);
         assert_eq!(lods.len(), 2);
@@ -696,7 +685,7 @@ mod lod_tests {
 
     #[test]
     fn a_torus_keeps_each_colour_group_and_its_attributes_aligned() {
-        let body = ocs_brep::make::torus([0.0; 3], 20.0, 5.0).unwrap();
+        let body = ocs_solid::model::make_torus([0.0; 3], 20.0, 5.0).unwrap();
         let mut mesh = mesh_of(&body);
         // Colour by side of the YZ plane: two groups sharing a boundary.
         let red = Some([1.0, 0.0, 0.0, 1.0]);

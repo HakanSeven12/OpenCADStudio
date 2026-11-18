@@ -144,7 +144,7 @@ fn a_window_around_every_reference_takes_them_without_looking_into_them() {
     );
 }
 
-fn solid(body: &ocs_brep::Body) -> EntityType {
+fn solid(body: &ocs_solid::model::Brep) -> EntityType {
     let sat = crate::scene::convert::acis_export::solid_to_sat(body).expect("sat");
     let mut solid = Solid3D::new();
     solid.acis_data = AcisData::from_sat(&sat.to_sat_string());

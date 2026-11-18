@@ -52,12 +52,11 @@ dependencies = [
  "objc2 0.5.2",
  "objc2-app-kit 0.2.2",
  "objc2-foundation 0.2.2",
- "ocs_acis",
- "ocs_brep",
  "ocs_constraints",
  "ocs_geom",
  "ocs_plugin_api",
  "ocs_save",
+ "ocs_solid",
  "open",
  "opencaddocument",
  "opencadgraph",
@@ -80,6 +79,7 @@ dependencies = [
  "solidcore-convert",
  "solidcore-ops",
  "solidcore-record",
+ "solidcore-step",
  "solidcore-tess",
  "step-export",
  "svgtypes",
@@ -4445,29 +4445,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ocs_acis"
-version = "0.1.0"
-dependencies = [
- "ocs_brep",
- "ocs_geom",
- "opencaddocument",
-]
-
-[[package]]
-name = "ocs_brep"
-version = "0.1.0"
-dependencies = [
- "ocs_geom",
- "rustc-hash 2.1.3",
- "solidcore",
- "solidcore-ops",
- "solidcore-record",
- "solidcore-step",
- "spade",
- "ssi",
-]
-
-[[package]]
 name = "ocs_constraints"
 version = "0.1.0"
 dependencies = [
@@ -4513,6 +4490,20 @@ dependencies = [
  "opencaddocument",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "ocs_solid"
+version = "0.1.0"
+dependencies = [
+ "ocs_geom",
+ "opencaddocument",
+ "solidcore",
+ "solidcore-convert",
+ "solidcore-ops",
+ "solidcore-record",
+ "solidcore-step",
+ "solidcore-tess",
 ]
 
 [[package]]
@@ -6417,11 +6408,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ssi"
-version = "0.1.0"
-source = "git+https://github.com/tangency-labs/solidcore.git?rev=e261b7d#e261b7d948d08939c6b37da67323ba3b842e234e"
-
-[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6446,6 +6432,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 name = "step-export"
 version = "0.1.0"
 dependencies = [
+ "solidcore",
  "solidcore-record",
 ]
 

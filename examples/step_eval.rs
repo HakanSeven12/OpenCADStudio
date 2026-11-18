@@ -15,8 +15,8 @@ use OpenCADStudio::io::step_import::{read, StepBody, StepModel};
 
 fn body_json(body: &StepBody, mm: f64) -> serde_json::Value {
     let solid = &body.body;
-    let closed = solid.edges.iter().all(|(_, edge)| edge.coedges.len() == 2);
-    let volume = ocs_brep::mass_properties(solid).map_or(0.0, |m| m.volume);
+    let closed = ocs_solid::model::is_solid(solid);
+    let volume = ocs_solid::model::volume(solid).unwrap_or(0.0);
     serde_json::json!({
         "volume_mm3": volume * mm.powi(3),
         "faces": solid.faces.len(),

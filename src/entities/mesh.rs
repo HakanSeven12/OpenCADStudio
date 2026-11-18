@@ -1053,14 +1053,14 @@ fn display_mesh(mesh: &Mesh) -> RefinedMesh {
 /// Convert a closed indexed mesh entity to an exact planar-faced B-rep.
 /// Open, non-manifold, non-planar, and degenerate meshes return `None` so a
 /// modelling command can leave the source untouched.
-pub(crate) fn closed_mesh_body(entity: &document::EntityType) -> Option<ocs_brep::Body> {
+pub(crate) fn closed_mesh_body(entity: &document::EntityType) -> Option<ocs_solid::model::Brep> {
     if let document::EntityType::PolygonMesh(mesh) = entity {
         if !mesh.is_closed_m() || !mesh.is_closed_n() {
             return None;
         }
     }
     let (vertices, faces) = mesh_polygons(entity)?;
-    ocs_brep::make::faceted_solid(&vertices, &faces)
+    ocs_solid::model::faceted_solid(&vertices, &faces)
 }
 
 /// The vertices and face loops (vertex indices) of a MESH, polygon mesh or

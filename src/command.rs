@@ -1922,7 +1922,7 @@ pub enum CmdResult {
     /// rendering). Ends the command.
     CommitSolid {
         entity: EntityType,
-        solid: Box<ocs_brep::Body>,
+        solid: Box<ocs_solid::model::Brep>,
         history: document::objects::SolidHistoryOperation,
         erase_source: Option<Handle>,
     },
@@ -2687,8 +2687,8 @@ pub enum CmdResult {
     /// Round or bevel one or more resolved B-rep edges on a solid.
     SolidEdgeBlend {
         handle: Handle,
-        edges: Vec<ocs_brep::EdgeKey>,
-        base_face: Option<ocs_brep::FaceKey>,
+        edges: Vec<u32>,
+        base_face: Option<u32>,
         value: f64,
         other_value: f64,
         fillet: bool,
@@ -2720,7 +2720,7 @@ pub enum CmdResult {
     /// Split selected solids or surfaces with one selected analytic sheet.
     SliceSurfaceEntities {
         targets: Vec<Handle>,
-        cutter: Box<ocs_brep::Body>,
+        cutter: Box<ocs_solid::model::Brep>,
         keep_point: Option<DVec3>,
     },
     /// INSERT landed on a block that has AttributeDefinitions.

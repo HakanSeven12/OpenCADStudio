@@ -1,5 +1,5 @@
 //! The surface modelling commands carried out: what each [`SurfaceRequest`] asks, done with
-//! Solidcore through [`ocs_brep::surfacing`], its results added to the drawing or put in place
+//! Solidcore through [`ocs_solid::surfacing`], its results added to the drawing or put in place
 //! of the objects they change, as one undo step.
 
 use std::sync::atomic::{AtomicI16, Ordering};
@@ -8,8 +8,9 @@ use document::entities::{Surface, SurfaceKind};
 use document::{EntityType, Handle};
 use glam::DVec3;
 use iced::Task;
-use ocs_brep::{surfacing, Body, Circle3, Curve3, EdgeKey, Ellipse3, FaceKey};
+use ocs_solid::model::Brep;
 use ocs_geom::space::{NurbsCurve3, Plane, PlanarCurve};
+use ocs_solid::surfacing::{self, Span};
 use solidcore_record::brep as r;
 
 use crate::app::{Message, OpenCADStudio};
@@ -41,40 +42,37 @@ fn v3(v: &document::types::Vector3) -> [f64; 3] {
     [v.x, v.y, v.z]
 }
 
-/// A curve lying in `plane`, as record curves (one per segment of a polyline with arcs).
-fn planar_record_curves(planar: &PlanarCurve) -> Option<Vec<r::Curve>> {
+/// A curve lying in `plane`, as record curve spans (one per segment of a polyline with arcs).
+fn planar_record_curves(planar: &PlanarCurve) -> Option<Vec<Span>> {
     use ocs_geom::geom2d::Curve as C;
     let plane = planar.plane;
     let lift = |p: [f64; 2]| plane.point_at(p);
-    let at = |centre: [f64; 2]| Plane {
-        origin: lift(centre),
-        x_axis: plane.x_axis,
-        y_axis: plane.y_axis,
+    let unit = |v: [f64; 3]| {
+        let length = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        (length > 0.0).then(|| v.map(|x| x / length))
     };
-    let circle = |centre: [f64; 2], radius: f64, from: f64, to: f64| {
-        surfacing::record_curve(&Curve3::Circle(Circle3 { plane: at(centre), radius }), [from, to])
+    let circle = |centre: [f64; 2], radius: f64, from: f64, to: f64| -> Option<Span> {
+        let frame = r::Frame { origin: lift(centre), x_axis: unit(plane.x_axis)?, y_axis: unit(plane.y_axis)? };
+        Some((r::Curve::Circle { frame, radius }, [from, to]))
     };
+    let line = |a: [f64; 2], b: [f64; 2]| (r::Curve::Line { start: lift(a), end: lift(b) }, [0.0, 1.0]);
     Some(match &planar.curve {
-        C::Line(l) => vec![r::Curve::Line { start: lift(l.start), end: lift(l.end) }],
+        C::Line(l) => vec![line(l.start, l.end)],
         C::Circle(c) => vec![circle(c.centre, c.radius, 0.0, std::f64::consts::TAU)?],
         C::Arc(a) => vec![circle(a.centre, a.radius, a.start_angle, a.start_angle + a.sweep())?],
         C::Ellipse(e) => {
             let el = &e.ellipse;
-            let frame = Plane {
+            let frame = r::Frame {
                 origin: lift(el.centre),
-                x_axis: plane.vector_at(el.major_axis),
-                y_axis: plane.vector_at(el.minor_axis()),
+                x_axis: unit(plane.vector_at(el.major_axis))?,
+                y_axis: unit(plane.vector_at(el.minor_axis()))?,
             };
             let mut to = e.end_parameter;
             while to <= e.start_parameter {
                 to += std::f64::consts::TAU;
             }
-            let curve = Curve3::Ellipse(Ellipse3 {
-                plane: frame,
-                major_radius: el.major_radius,
-                minor_radius: el.minor_radius,
-            });
-            vec![surfacing::record_curve(&curve, [e.start_parameter, to])?]
+            let curve = r::Curve::Ellipse { frame, radii: [el.major_radius, el.minor_radius] };
+            vec![(curve, [e.start_parameter, to])]
         }
         C::Polyline(p) => {
             let n = p.vertices.len();
@@ -84,7 +82,7 @@ fn planar_record_curves(planar: &PlanarCurve) -> Option<Vec<r::Curve>> {
                 if p.closed {
                     points.push(lift(p.vertices.first()?.position));
                 }
-                return Some(vec![r::Curve::Polyline { points }]);
+                return Some(vec![surfacing::whole(r::Curve::Polyline { points })]);
             }
             let mut out = Vec::new();
             for i in 0..segments {
@@ -99,7 +97,7 @@ fn planar_record_curves(planar: &PlanarCurve) -> Option<Vec<r::Curve>> {
                         };
                         out.push(circle(arc.center, arc.radius, from, to)?);
                     }
-                    None => out.push(r::Curve::Line { start: lift(a), end: lift(b) }),
+                    None => out.push(line(a, b)),
                 }
             }
             out
@@ -111,30 +109,32 @@ fn planar_record_curves(planar: &PlanarCurve) -> Option<Vec<r::Curve>> {
                 n.knots().to_vec(),
                 Some(n.weights().to_vec()),
             )?;
-            vec![surfacing::record_nurbs(&lifted)]
+            vec![surfacing::whole(surfacing::record_nurbs(&lifted))]
         }
         _ => return None,
     })
 }
 
-/// A drawing curve as record curves, each over its natural range.
-fn entity_record_curves(entity: &EntityType) -> Option<Vec<r::Curve>> {
+/// A drawing curve as record curve spans.
+fn entity_record_curves(entity: &EntityType) -> Option<Vec<Span>> {
     match entity {
-        EntityType::Line(l) => Some(vec![r::Curve::Line { start: v3(&l.start), end: v3(&l.end) }]),
+        EntityType::Line(l) => Some(vec![(r::Curve::Line { start: v3(&l.start), end: v3(&l.end) }, [0.0, 1.0])]),
         EntityType::Spline(s) if s.control_points.len() > s.degree.max(1) as usize => {
             let points: Vec<[f64; 3]> = s.control_points.iter().map(v3).collect();
             let weights = (s.weights.len() == points.len()).then(|| s.weights.clone());
             let curve = NurbsCurve3::new(s.degree.max(1) as usize, points, s.knots.clone(), weights)?;
-            Some(vec![surfacing::record_nurbs(&curve)])
+            Some(vec![surfacing::whole(surfacing::record_nurbs(&curve))])
         }
         // A spline held by the points it passes through.
-        EntityType::Spline(s) => Some(vec![surfacing::record_nurbs(&crate::entities::spline::fit_nurbs3(s)?)]),
+        EntityType::Spline(s) => {
+            Some(vec![surfacing::whole(surfacing::record_nurbs(&crate::entities::spline::fit_nurbs3(s)?))])
+        }
         EntityType::Polyline3D(p) => {
             let mut points: Vec<[f64; 3]> = p.vertices.iter().map(|v| v3(&v.position)).collect();
             if p.flags.closed {
                 points.push(*points.first()?);
             }
-            (points.len() >= 2).then(|| vec![r::Curve::Polyline { points }])
+            (points.len() >= 2).then(|| vec![surfacing::whole(r::Curve::Polyline { points })])
         }
         _ => planar_record_curves(&crate::entities::curve::entity_curve(entity)?),
     }
@@ -142,19 +142,19 @@ fn entity_record_curves(entity: &EntityType) -> Option<Vec<r::Curve>> {
 
 impl OpenCADStudio {
     /// The B-rep of a surface, solid or region.
-    fn surfacing_body(&mut self, i: usize, handle: Handle) -> Option<Body> {
+    fn surfacing_body(&mut self, i: usize, handle: Handle) -> Option<Brep> {
         self.tabs[i].scene.restore_solid_models(&[handle]);
         if let Some(body) = self.tabs[i].scene.solid_models.get(&handle) {
             return Some(body.clone());
         }
         match self.tabs[i].scene.document.get_entity(handle)? {
-            EntityType::Surface(surface) => crate::scene::convert::solid3d_tess::kernel_surface_body(surface),
+            EntityType::Surface(surface) => crate::scene::convert::solid3d_tess::surface_record(surface),
             _ => None,
         }
     }
 
     /// The record curves of the drawing curves `handles`, each object's on its own.
-    fn surfacing_curves(&self, i: usize, handles: &[Handle]) -> Result<Vec<Vec<r::Curve>>, String> {
+    fn surfacing_curves(&self, i: usize, handles: &[Handle]) -> Result<Vec<Vec<Span>>, String> {
         handles
             .iter()
             .map(|h| {
@@ -169,12 +169,12 @@ impl OpenCADStudio {
     }
 
     /// `body` as a new surface entity of `kind`.
-    fn surfacing_add_surface(&mut self, body: Body, kind: SurfaceKind) -> Handle {
+    fn surfacing_add_surface(&mut self, body: Brep, kind: SurfaceKind) -> Handle {
         self.add_surface_model(EntityType::Surface(Box::new(Surface::new(kind))), body)
     }
 
     /// `body` in place of the B-rep of `handle`, the entity a surface of `kind` where given.
-    fn surfacing_replace(&mut self, i: usize, handle: Handle, body: Body, kind: Option<SurfaceKind>) -> bool {
+    fn surfacing_replace(&mut self, i: usize, handle: Handle, body: Brep, kind: Option<SurfaceKind>) -> bool {
         let Some(display) = self.tabs[i]
             .scene
             .prepare_solid_model_display(handle, &body)
@@ -203,17 +203,17 @@ impl OpenCADStudio {
     }
 
     /// The edge of `handle`'s body nearest `point`.
-    fn surfacing_edge(&mut self, i: usize, handle: Handle, point: DVec3) -> Option<(Body, EdgeKey)> {
+    fn surfacing_edge(&mut self, i: usize, handle: Handle, point: DVec3) -> Option<(Brep, u32)> {
         let body = self.surfacing_body(i, handle)?;
         let edge = crate::scene::model::solid_model::nearest_edge(&body, point.to_array())?;
         Some((body, edge))
     }
 
     /// The face of `handle`'s body at `point` (its only face for a one-face surface).
-    fn surfacing_face(&mut self, i: usize, handle: Handle, point: DVec3) -> Option<(Body, FaceKey)> {
+    fn surfacing_face(&mut self, i: usize, handle: Handle, point: DVec3) -> Option<(Brep, u32)> {
         let body = self.surfacing_body(i, handle)?;
-        let face = ocs_brep::face_at_point(&body, point.to_array())
-            .or_else(|| (body.faces.len() == 1).then(|| body.face_keys().next()).flatten())?;
+        let face = ocs_solid::model::face_at_point(&body, point.to_array(), f64::INFINITY)
+            .or_else(|| (body.faces.len() == 1).then_some(0))?;
         Some((body, face))
     }
 
@@ -265,7 +265,7 @@ impl OpenCADStudio {
                     let loop_: Vec<Curve> = (0..4)
                         .map(|k| Curve::Line(Line { start: rect[k], end: rect[(k + 1) % 4] }))
                         .collect();
-                    bodies.push(ocs_brep::planar_region(plane, &[loop_]).ok_or("the corners make no area")?);
+                    bodies.push(ocs_solid::model::planar_region(plane, &[loop_]).ok_or("the corners make no area")?);
                 } else {
                     for handle in &req.objects[0] {
                         let Some(planar) = self.tabs[i]
@@ -276,7 +276,7 @@ impl OpenCADStudio {
                         else {
                             continue;
                         };
-                        if let Some(body) = ocs_brep::planar_region(planar.plane, &[vec![planar.curve.clone()]]) {
+                        if let Some(body) = ocs_solid::model::planar_region(planar.plane, &[vec![planar.curve.clone()]]) {
                             bodies.push(body);
                         }
                     }
@@ -292,16 +292,16 @@ impl OpenCADStudio {
                 Ok(crate::tf!("{count} planar surface(s) created.").into_owned())
             }
             "SURFNETWORK" => {
-                let us: Vec<r::Curve> = self.surfacing_curves(i, &req.objects[0])?.into_iter().flatten().collect();
-                let vs: Vec<r::Curve> = self.surfacing_curves(i, &req.objects[1])?.into_iter().flatten().collect();
-                let body = surfacing::network(&us, &vs, TOLERANCE).map_err(refused)?;
+                let us: Vec<Span> = self.surfacing_curves(i, &req.objects[0])?.into_iter().flatten().collect();
+                let vs: Vec<Span> = self.surfacing_curves(i, &req.objects[1])?.into_iter().flatten().collect();
+                let body = surfacing::network(&us, &vs).map_err(refused)?;
                 self.push_undo_snapshot(i, name);
                 self.surfacing_add_surface(body, new_surface_kind());
                 Ok(String::new())
             }
             "SURFPATCH" => {
-                let curves: Vec<r::Curve> = self.surfacing_curves(i, &req.objects[0])?.into_iter().flatten().collect();
-                let body = surfacing::patch(&curves, TOLERANCE).map_err(refused)?;
+                let curves: Vec<Span> = self.surfacing_curves(i, &req.objects[0])?.into_iter().flatten().collect();
+                let body = surfacing::patch(&curves).map_err(refused)?;
                 self.push_undo_snapshot(i, name);
                 self.surfacing_add_surface(body, new_surface_kind());
                 Ok(String::new())
@@ -336,7 +336,7 @@ impl OpenCADStudio {
             "SURFEXTEND" => {
                 let distance = req.value("distance", 1.0);
                 let stretch = req.value("stretch", 0.0) >= 0.5;
-                let mut changed: Vec<(Handle, Body)> = Vec::new();
+                let mut changed: Vec<(Handle, Brep)> = Vec::new();
                 for (handle, point) in &req.picks[0] {
                     let body = match changed.iter().position(|(h, _)| h == handle) {
                         Some(k) => changed[k].1.clone(),
@@ -362,11 +362,11 @@ impl OpenCADStudio {
                     return Err(crate::t!("The area picked is not on a surface being trimmed.").into_owned());
                 }
                 let (body, face) = self.surfacing_face(i, handle, point).ok_or("the pick is no surface")?;
-                let curves: Vec<r::Curve> = self.surfacing_curves(i, &req.objects[1])?.into_iter().flatten().collect();
+                let curves: Vec<Span> = self.surfacing_curves(i, &req.objects[1])?.into_iter().flatten().collect();
                 let z = self.surfacing_ucs_z(i).to_array();
                 // Projected onto the surface along the UCS z axis, or as they are where they lie on it.
-                let on: Vec<r::Curve> = match surfacing::project(&body, face, &curves, z) {
-                    Ok(projected) if !projected.is_empty() => projected.into_iter().map(|(c, _)| c).collect(),
+                let on: Vec<Span> = match surfacing::project(&body, face, &curves, z) {
+                    Ok(projected) if !projected.is_empty() => projected,
                     _ => curves,
                 };
                 let trimmed = surfacing::trim(&body, face, &on, point.to_array()).map_err(refused)?;
@@ -396,11 +396,11 @@ impl OpenCADStudio {
                 Ok(String::new())
             }
             "SURFSCULPT" => {
-                let bodies: Vec<Body> = req.objects[0]
+                let bodies: Vec<Brep> = req.objects[0]
                     .iter()
                     .map(|h| self.surfacing_body(i, *h).ok_or("an object is no surface"))
                     .collect::<Result<_, _>>()?;
-                let refs: Vec<&Body> = bodies.iter().collect();
+                let refs: Vec<&Brep> = bodies.iter().collect();
                 let (body, closed) = surfacing::sew(&refs, TOLERANCE).map_err(refused)?;
                 if !closed {
                     return Err(crate::t!("The surfaces do not enclose a volume.").into_owned());
@@ -416,14 +416,14 @@ impl OpenCADStudio {
                 let along_v = req.value("direction", 0.0) >= 0.5;
                 let curve = surfacing::isoline(&body, face, point.to_array(), along_v).ok_or("no isoline through the point")?;
                 let (a, b) = curve.domain();
-                let entity = super::solid_edit_ops::curve_entity(&Curve3::Nurbs(curve), (a, b), DVec3::ZERO)
+                let entity = super::solid_edit_ops::curve_entity(&surfacing::record_nurbs(&curve), [a, b], DVec3::ZERO)
                     .ok_or("the isoline makes no curve")?;
                 self.push_undo_snapshot(i, name);
                 self.commit_new_curves(vec![entity]);
                 Ok(String::new())
             }
             "CONVTONURBS" => {
-                let mut made: Vec<(Handle, Vec<Body>)> = Vec::new();
+                let mut made: Vec<(Handle, Vec<Brep>)> = Vec::new();
                 for handle in &req.objects[0] {
                     let body = self.surfacing_body(i, *handle).ok_or("an object has no B-rep")?;
                     made.push((*handle, surfacing::to_nurbs_sheets(&body).map_err(refused)?));
@@ -502,15 +502,12 @@ impl OpenCADStudio {
             "PROJECTGEOMETRY" => {
                 let (handle, point) = picked(0).ok_or("no target picked")?;
                 let (body, face) = self.surfacing_face(i, handle, point).ok_or("the target is no surface or solid face")?;
-                let curves: Vec<r::Curve> = self.surfacing_curves(i, &req.objects[0])?.into_iter().flatten().collect();
+                let curves: Vec<Span> = self.surfacing_curves(i, &req.objects[0])?.into_iter().flatten().collect();
                 let direction = self.surfacing_ucs_z(i).to_array();
                 let projected = surfacing::project(&body, face, &curves, direction).map_err(refused)?;
                 let entities: Vec<EntityType> = projected
                     .iter()
-                    .filter_map(|(c, interval)| {
-                        let (curve, span) = surfacing::model_curve(c, *interval)?;
-                        super::solid_edit_ops::curve_entity(&curve, (span[0], span[1]), DVec3::ZERO)
-                    })
+                    .filter_map(|(c, interval)| super::solid_edit_ops::curve_entity(c, *interval, DVec3::ZERO))
                     .collect();
                 if entities.is_empty() {
                     return Err(crate::t!("Nothing projects onto the target.").into_owned());

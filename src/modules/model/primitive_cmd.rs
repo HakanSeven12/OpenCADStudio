@@ -4,7 +4,6 @@ use document::entities::Solid3D;
 use document::objects::SolidHistoryOperation;
 use document::EntityType;
 use glam::DVec3;
-use ocs_brep::Body;
 use ocs_geom::geom2d::{
     fillets_between, Circle as KernelCircle, Curve as KernelCurve, Line as KernelLine, Tolerance,
 };
@@ -696,7 +695,7 @@ impl PrimitiveCommand {
         .to_cols_array()
     }
 
-    fn build_cone(&self, axis: DVec3) -> Option<(Body, SolidHistoryOperation, f64)> {
+    fn build_cone(&self, axis: DVec3) -> Option<(ocs_solid::model::Brep, SolidHistoryOperation, f64)> {
         let (frame, height) = self.cone_axis_frame(axis)?;
         let local = solid_model::cone_frustum_solid(
             [0.0; 3],
@@ -1353,7 +1352,7 @@ impl PrimitiveCommand {
         .to_cols_array()
     }
 
-    fn build_pyramid(&self, axis: DVec3) -> Option<(Body, SolidHistoryOperation, f64)> {
+    fn build_pyramid(&self, axis: DVec3) -> Option<(ocs_solid::model::Brep, SolidHistoryOperation, f64)> {
         let (frame, height) = self.pyramid_axis_frame(axis)?;
         let local = solid_model::pyramid_frustum_solid(
             [0.0; 3],
@@ -1876,7 +1875,7 @@ impl PrimitiveCommand {
         Some((origin, x_axis, y_axis, length, width, height_abs))
     }
 
-    fn build_box(&self, height: f64) -> Option<(Body, SolidHistoryOperation)> {
+    fn build_box(&self, height: f64) -> Option<(ocs_solid::model::Brep, SolidHistoryOperation)> {
         use crate::scene::model::solid_history;
 
         let (origin, x_axis, y_axis, length, width, height) = self.box_spec(height)?;
@@ -2009,7 +2008,7 @@ impl PrimitiveCommand {
         Some(self.place_preview(wire("primitive_height_preview", points)))
     }
 
-    fn build_wedge(&self, height: f64) -> Option<(Body, SolidHistoryOperation)> {
+    fn build_wedge(&self, height: f64) -> Option<(ocs_solid::model::Brep, SolidHistoryOperation)> {
         use crate::scene::model::solid_history;
 
         let (origin, x_axis, y_axis, length, width, height) = self.box_spec(height)?;
@@ -2037,7 +2036,7 @@ impl PrimitiveCommand {
     }
 
     /// Build the persistent kernel body and its history node.
-    fn build(&self, height: f64) -> Option<(Body, SolidHistoryOperation)> {
+    fn build(&self, height: f64) -> Option<(ocs_solid::model::Brep, SolidHistoryOperation)> {
         use crate::scene::model::solid_history;
 
         let (solid, history) = match self.shape {

@@ -847,8 +847,9 @@ impl OpenCADStudio {
                             };
                             if let Some(acis) = acis {
                                 let properties =
-                                    crate::scene::convert::solid3d_tess::kernel_acis_body(acis)
-                                        .and_then(|body| ocs_brep::mass_properties(&body));
+                                    crate::scene::convert::solid3d_tess::acis_record(acis)
+                                        .and_then(|body| ocs_solid::model::mass_properties(&body).ok())
+                                        .map(|estimate| crate::scene::model::mass::MassProperties::from_estimate(&estimate));
                                 let Some(p) = properties else {
                                     self.command_line.push_error(
                                         crate::tf!(

@@ -1057,9 +1057,11 @@ impl Scene {
 
     pub fn restore_solid_models(&mut self, handles: &[Handle]) {
         /// The box around a body's surface, from a coarse tessellation.
-        fn body_box(body: &ocs_brep::Body) -> Option<([f64; 3], [f64; 3])> {
-            let tolerance = ocs_brep::mesh::TessellationTolerance::new(0.5, 1e-3);
-            let mesh = ocs_brep::mesh::tessellate(body, tolerance).mesh;
+        fn body_box(body: &ocs_solid::model::Brep) -> Option<([f64; 3], [f64; 3])> {
+            if let Ok(found) = ocs_solid::model::bounds(body) {
+                return Some(found);
+            }
+            let mesh = crate::scene::model::solid_model::tessellate(body, crate::scene::model::solid_model::DisplayTolerance::new(0.5))?;
             let mut points = mesh.positions.iter().copied();
             let first = points.next()?;
             Some(points.fold((first, first), |(lo, hi), p| {
@@ -1071,7 +1073,7 @@ impl Scene {
         }
         /// Whether two bodies fill the same box, to a hundredth of its size
         /// (the coarse tessellation cuts curved sides differently).
-        fn same_place(a: &ocs_brep::Body, b: &ocs_brep::Body) -> bool {
+        fn same_place(a: &ocs_solid::model::Brep, b: &ocs_solid::model::Brep) -> bool {
             let (Some((alo, ahi)), Some((blo, bhi))) = (body_box(a), body_box(b)) else {
                 return true;
             };
@@ -1080,24 +1082,24 @@ impl Scene {
             (0..3).all(|k| (alo[k] - blo[k]).abs() <= slack && (ahi[k] - bhi[k]).abs() <= slack)
         }
 
-        let bodies: Vec<(Handle, ocs_brep::Body)> = handles
+        let bodies: Vec<(Handle, ocs_solid::model::Brep)> = handles
             .iter()
             .filter(|handle| !self.solid_models.contains_key(handle))
             .filter_map(|&handle| {
                 let tree = self.document.solid_history_tree(handle);
                 let rebuilt = || {
                     tree.as_ref()
-                        .and_then(|tree| ocs_acis::rebuild_history_tree(tree).ok())
+                        .and_then(|tree| ocs_solid::rebuild_history_tree(tree).ok())
                 };
                 let stored = || match self.document.get_entity(handle) {
                     Some(EntityType::Solid3D(solid)) => {
-                        crate::scene::convert::solid3d_tess::kernel_body(solid)
+                        crate::scene::convert::solid3d_tess::solid_record(solid)
                     }
                     Some(EntityType::Region(region)) => {
-                        crate::scene::convert::solid3d_tess::kernel_region_body(region)
+                        crate::scene::convert::solid3d_tess::region_record(region)
                     }
                     Some(EntityType::Surface(surface)) => {
-                        crate::scene::convert::solid3d_tess::kernel_surface_body(surface)
+                        crate::scene::convert::solid3d_tess::surface_record(surface)
                     }
                     _ => None,
                 };

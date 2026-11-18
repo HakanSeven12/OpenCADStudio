@@ -80,7 +80,7 @@ fn sink(model: &OpenCADStudio::io::step_import::StepModel) -> u64 {
                 }
             }
             mix(&mut hash, body.body.vertices.len() as u64);
-            for (_, vertex) in body.body.vertices.iter() {
+            for vertex in body.body.vertices.iter() {
                 for value in vertex.point {
                     mix(&mut hash, value.to_bits());
                 }

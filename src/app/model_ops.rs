@@ -1,4 +1,4 @@
-// Kernel B-rep solid modelling and exact ACIS persistence.
+// Solid modelling on Solidcore and exact ACIS persistence.
 
 use document::{
     entities::{AcisData, EntityCommon, Region, Solid3D, Surface, SurfaceData, SurfaceKind, Wire},
@@ -6,7 +6,7 @@ use document::{
     EntityType, Handle,
 };
 use iced::Task;
-use ocs_brep::{Body, EdgeKey, FaceKey};
+use ocs_solid::model::{self, Brep, Error as ModelError};
 use std::collections::{HashMap, HashSet};
 
 use super::Message;
@@ -51,7 +51,7 @@ struct UnionGroup {
 struct PreparedUnion {
     kind: UnionEntityKind,
     handles: Vec<Handle>,
-    body: Body,
+    body: Brep,
     common: EntityCommon,
 }
 
@@ -71,35 +71,46 @@ type PreparedSolidDisplay = (
 struct PreparedSubtract {
     bases: Vec<Handle>,
     cutters: Vec<Handle>,
-    result: Option<(Handle, EntityType, Body, PreparedSolidDisplay)>,
+    result: Option<(Handle, EntityType, Brep, PreparedSolidDisplay)>,
 }
 
 struct PreparedSlice {
     retained: Handle,
     entity: EntityType,
-    body: Body,
+    body: Brep,
     display: PreparedSolidDisplay,
-    extra: Option<(EntityType, Body)>,
+    extra: Option<(EntityType, Brep)>,
 }
 
 enum ModelSliceTool {
     Plane(ocs_geom::space::Plane),
-    Surface(Body),
+    Surface(Brep),
+}
+
+/// A body cut in two: the part on the tool's positive side (in front of it) and the part
+/// behind.
+struct Slice {
+    positive: Brep,
+    negative: Brep,
 }
 
 impl ModelSliceTool {
     fn side(&self, point: [f64; 3]) -> Option<f64> {
         match self {
             Self::Plane(plane) => plane.distance_to(point),
-            Self::Surface(surface) => ocs_brep::surface_side(surface, point),
+            Self::Surface(surface) => model::sheet_side(surface, point),
         }
     }
 
-    fn split(&self, body: &Body) -> Result<Option<ocs_brep::PlaneSlice>, ocs_brep::Snag> {
-        match self {
-            Self::Plane(plane) => ocs_brep::slice_by_plane(body, *plane),
-            Self::Surface(surface) => ocs_brep::slice_by_surface(body, surface),
-        }
+    fn split(&self, body: &Brep) -> Result<Option<Slice>, ModelError> {
+        let parts = match self {
+            Self::Plane(plane) => {
+                let normal = plane.normal().ok_or(ModelError::Argument)?;
+                model::slice(body, plane.origin, normal)?
+            }
+            Self::Surface(surface) => model::split_by_sheet(body, surface, 0)?,
+        };
+        Ok(parts.map(|(negative, positive)| Slice { positive, negative }))
     }
 }
 
@@ -113,7 +124,7 @@ enum PreparedIntersectOutcome {
     Replace {
         retained: Handle,
         entity: EntityType,
-        body: Body,
+        body: Brep,
         display: PreparedSolidDisplay,
     },
     Consume,
@@ -147,32 +158,26 @@ fn inherited_common(source: &EntityCommon) -> EntityCommon {
     result
 }
 
-fn union_bodies(kind: UnionEntityKind, bodies: Vec<Body>) -> Result<Body, ocs_brep::Snag> {
+fn union_bodies(kind: UnionEntityKind, bodies: Vec<Brep>) -> Result<Brep, ModelError> {
     if kind == UnionEntityKind::Solid {
-        let references = bodies.iter().collect::<Vec<_>>();
-        let tolerance = ocs_brep::operation_tolerance(&references);
-        let mut operands = bodies.into_iter();
-        let first = operands.next().ok_or(ocs_brep::Snag::CutRefused)?;
-        return ocs_brep::combine_all(
-            first,
-            operands.collect(),
-            ocs_brep::Operation::Union,
-            tolerance,
-        );
+        return model::union_all(&bodies);
     }
-    let references = bodies.iter().collect::<Vec<_>>();
-    let tolerance = ocs_brep::operation_tolerance(&references);
-    ocs_brep::union_planar_regions(&bodies, tolerance)
+    model::union_regions(&bodies)
 }
 
-fn planar_body_plane(body: &Body) -> Option<ocs_geom::space::Plane> {
-    let mut faces = body.face_keys();
-    let first = ocs_brep::planar_face_profile(body, faces.next()?)?.plane;
+/// How far apart two planes may lie and still be one, for a body of `size`.
+fn coplanar_tolerance(body: &Brep) -> f64 {
+    (model::size(body) * 1e-9).max(1e-9)
+}
+
+fn planar_body_plane(body: &Brep) -> Option<ocs_geom::space::Plane> {
+    let mut faces = 0..body.faces.len() as u32;
+    let first = model::planar_face_profile(body, faces.next()?)?.plane;
     let first_normal = glam::DVec3::from_array(first.normal()?);
-    let tolerance = ocs_brep::operation_tolerance(&[body]);
+    let tolerance = coplanar_tolerance(body);
     faces
         .all(|face| {
-            let Some(profile) = ocs_brep::planar_face_profile(body, face) else {
+            let Some(profile) = model::planar_face_profile(body, face) else {
                 return false;
             };
             let Some(normal) = profile.plane.normal() else {
@@ -186,7 +191,7 @@ fn planar_body_plane(body: &Body) -> Option<ocs_geom::space::Plane> {
         .then_some(first)
 }
 
-fn coplanar_bodies(plane: ocs_geom::space::Plane, body: &Body) -> bool {
+fn coplanar_bodies(plane: ocs_geom::space::Plane, body: &Brep) -> bool {
     let Some(other) = planar_body_plane(body) else {
         return false;
     };
@@ -196,7 +201,7 @@ fn coplanar_bodies(plane: ocs_geom::space::Plane, body: &Body) -> bool {
     let Some(other_normal) = other.normal().map(glam::DVec3::from_array) else {
         return false;
     };
-    let tolerance = ocs_brep::operation_tolerance(&[body]);
+    let tolerance = coplanar_tolerance(body);
     one_normal.dot(other_normal).abs() >= 1.0 - 1e-9
         && plane
             .distance_to(other.origin)
@@ -206,34 +211,38 @@ fn coplanar_bodies(plane: ocs_geom::space::Plane, body: &Body) -> bool {
 fn subtract_bodies(
     kind: UnionEntityKind,
     plane: Option<ocs_geom::space::Plane>,
-    bases: Vec<Body>,
-    cutters: Vec<Body>,
-) -> Result<Body, ocs_brep::Snag> {
+    bases: Vec<Brep>,
+    cutters: Vec<Brep>,
+) -> Result<Brep, ModelError> {
     if kind != UnionEntityKind::Solid && plane.is_none() {
-        return Err(ocs_brep::Snag::NoClosedForm);
+        return Err(ModelError::Unsupported("regions or surfaces that do not lie in one plane"));
     }
-    if kind != UnionEntityKind::Solid && plane.is_some() {
-        let references = bases.iter().chain(&cutters).collect::<Vec<_>>();
-        let tolerance = ocs_brep::operation_tolerance(&references);
-        return ocs_brep::subtract_planar_regions(&bases, &cutters, tolerance);
+    if kind != UnionEntityKind::Solid {
+        return model::subtract_regions(&bases, &cutters);
     }
-
-    // Cutters that keep clear of each other are taken away in one pass: a
-    // plate drilled with a hundred holes is cut once, not a hundred times.
-    let references = bases.iter().chain(&cutters).collect::<Vec<_>>();
-    let tolerance = ocs_brep::operation_tolerance(&references);
-    let mut bases = bases.into_iter();
-    let first = bases.next().ok_or(ocs_brep::Snag::CutRefused)?;
-    let united =
-        ocs_brep::combine_all(first, bases.collect(), ocs_brep::Operation::Union, tolerance)?;
-    ocs_brep::combine_all(united, cutters, ocs_brep::Operation::Difference, tolerance)
+    // Cutters are united and taken away in one pass: a plate drilled with a hundred holes is
+    // cut once, not a hundred times.
+    let united = model::union_all(&bases)?;
+    model::subtract_all(&united, &cutters)?.ok_or(ModelError::Empty)
 }
 
 inventory::submit!(crate::command::CommandRegistration {
     names: &["SECTIONCULL"]
 });
 
-pub(super) fn entity_with_boolean_body(mut source: EntityType, body: &Body) -> Option<EntityType> {
+/// Why Solidcore refused a modelling step, for the command line.
+pub(super) fn modelling_error(error: &ModelError) -> String {
+    match error {
+        ModelError::Empty => crate::t!("Nothing is left of the solid.").into_owned(),
+        ModelError::NotSolid => crate::t!("The result is not a valid solid.").into_owned(),
+        ModelError::NoRoom => crate::t!("There is no room for the result: use a smaller value.").into_owned(),
+        ModelError::WallsTouch => crate::t!("The walls of the result would touch: use a smaller value.").into_owned(),
+        ModelError::Unsupported(what) => crate::tf!("Not supported: {}", what).into_owned(),
+        other => format!("{other:?}"),
+    }
+}
+
+pub(super) fn entity_with_boolean_body(mut source: EntityType, body: &Brep) -> Option<EntityType> {
     let document = crate::scene::convert::acis_export::solid_to_sat(body)?;
     let wires = solid_model::edge_wires(body);
     if matches!(
@@ -272,7 +281,7 @@ pub(super) fn entity_with_boolean_body(mut source: EntityType, body: &Body) -> O
     Some(source)
 }
 
-fn entity_with_history_body(mut source: EntityType, body: &Body) -> Option<EntityType> {
+fn entity_with_history_body(mut source: EntityType, body: &Brep) -> Option<EntityType> {
     let document = crate::scene::convert::acis_export::solid_to_sat(body)?;
     let wires = solid_model::edge_wires(body);
     match &mut source {
@@ -296,36 +305,28 @@ fn entity_with_history_body(mut source: EntityType, body: &Body) -> Option<Entit
 }
 
 enum IntersectBodyOutcome {
-    Area(Body),
+    Area(Brep),
     Touching,
     Disjoint,
 }
 
-fn intersect_bodies(
-    kind: UnionEntityKind,
-    bodies: Vec<Body>,
-) -> Result<IntersectBodyOutcome, ocs_brep::Snag> {
+fn intersect_bodies(kind: UnionEntityKind, bodies: Vec<Brep>) -> Result<IntersectBodyOutcome, ModelError> {
     if kind == UnionEntityKind::Solid {
         let mut operands = bodies.into_iter();
-        let mut result = operands.next().ok_or(ocs_brep::Snag::CutRefused)?;
+        let mut result = operands.next().ok_or(ModelError::Empty)?;
         for operand in operands {
-            result = solid_model::boolean_result(Bool::Intersect, &result, &operand)?;
-            if result.faces.is_empty() {
-                return Ok(IntersectBodyOutcome::Disjoint);
+            match solid_model::boolean_result(Bool::Intersect, &result, &operand)? {
+                Some(shared) if !shared.faces.is_empty() => result = shared,
+                _ => return Ok(IntersectBodyOutcome::Disjoint),
             }
         }
         return Ok(IntersectBodyOutcome::Area(result));
     }
-
-    let references = bodies.iter().collect::<Vec<_>>();
-    let tolerance = ocs_brep::operation_tolerance(&references);
-    Ok(
-        match ocs_brep::intersect_planar_regions(&bodies, tolerance)? {
-            ocs_brep::PlanarIntersection::Area(body) => IntersectBodyOutcome::Area(body),
-            ocs_brep::PlanarIntersection::Touching => IntersectBodyOutcome::Touching,
-            ocs_brep::PlanarIntersection::Disjoint => IntersectBodyOutcome::Disjoint,
-        },
-    )
+    Ok(match model::intersect_regions(&bodies)? {
+        model::PlanarIntersection::Area(body) => IntersectBodyOutcome::Area(body),
+        model::PlanarIntersection::Touching => IntersectBodyOutcome::Touching,
+        model::PlanarIntersection::Disjoint => IntersectBodyOutcome::Disjoint,
+    })
 }
 
 impl super::OpenCADStudio {
@@ -333,7 +334,7 @@ impl super::OpenCADStudio {
     pub(super) fn add_solid_model(
         &mut self,
         entity: EntityType,
-        solid: Body,
+        solid: Brep,
         history: SolidHistoryOperation,
     ) -> Handle {
         self.add_solid_model_inner(entity, solid, history, true)
@@ -342,7 +343,7 @@ impl super::OpenCADStudio {
     fn add_solid_model_preserving_style(
         &mut self,
         entity: EntityType,
-        solid: Body,
+        solid: Brep,
         history: SolidHistoryOperation,
     ) -> Handle {
         self.add_solid_model_inner(entity, solid, history, false)
@@ -351,7 +352,7 @@ impl super::OpenCADStudio {
     fn add_solid_model_inner(
         &mut self,
         mut entity: EntityType,
-        solid: Body,
+        solid: Brep,
         history: SolidHistoryOperation,
         apply_creation_style: bool,
     ) -> Handle {
@@ -398,14 +399,14 @@ impl super::OpenCADStudio {
 
     /// Add an open sheet body as a persistent Surface entity and register its
     /// exact B-rep for shaded and wireframe display.
-    pub(super) fn add_surface_model(&mut self, entity: EntityType, surface: Body) -> Handle {
+    pub(super) fn add_surface_model(&mut self, entity: EntityType, surface: Brep) -> Handle {
         self.add_surface_model_inner(entity, surface, true)
     }
 
     pub(super) fn add_surface_model_with_history(
         &mut self,
         entity: EntityType,
-        surface: Body,
+        surface: Brep,
         history: SolidHistoryOperation,
     ) -> Handle {
         let i = self.active_tab;
@@ -420,14 +421,14 @@ impl super::OpenCADStudio {
         handle
     }
 
-    pub(super) fn add_surface_model_preserving_style(&mut self, entity: EntityType, surface: Body) -> Handle {
+    pub(super) fn add_surface_model_preserving_style(&mut self, entity: EntityType, surface: Brep) -> Handle {
         self.add_surface_model_inner(entity, surface, false)
     }
 
     fn add_surface_model_inner(
         &mut self,
         mut entity: EntityType,
-        surface: Body,
+        surface: Brep,
         apply_creation_style: bool,
     ) -> Handle {
         let i = self.active_tab;
@@ -468,18 +469,18 @@ impl super::OpenCADStudio {
         handle
     }
 
-    pub(super) fn add_region_model(&mut self, region: Region, body: Body) -> Handle {
+    pub(super) fn add_region_model(&mut self, region: Region, body: Brep) -> Handle {
         self.add_region_model_inner(region, body, false)
     }
 
-    pub(super) fn add_region_model_preserving_style(&mut self, region: Region, body: Body) -> Handle {
+    pub(super) fn add_region_model_preserving_style(&mut self, region: Region, body: Brep) -> Handle {
         self.add_region_model_inner(region, body, true)
     }
 
     fn add_region_model_inner(
         &mut self,
         mut region: Region,
-        body: Body,
+        body: Brep,
         preserve_style: bool,
     ) -> Handle {
         let i = self.active_tab;
@@ -580,7 +581,7 @@ impl super::OpenCADStudio {
     fn intersect_groups(
         &self,
         handles: &[Handle],
-        bodies: &HashMap<Handle, Body>,
+        bodies: &HashMap<Handle, Brep>,
     ) -> Vec<IntersectGroup> {
         let scene = &self.tabs[self.active_tab].scene;
         let mut groups = Vec::<IntersectGroup>::new();
@@ -625,9 +626,9 @@ impl super::OpenCADStudio {
     fn replace_solid_body_with_fillet(
         &mut self,
         handle: Handle,
-        source: &Body,
-        result: Body,
-        edges: &[EdgeKey],
+        source: &Brep,
+        result: Brep,
+        edges: &[u32],
         radius: f64,
     ) -> bool {
         let i = self.active_tab;
@@ -639,7 +640,7 @@ impl super::OpenCADStudio {
             self.command_line.push_error(crate::t!("The result could not be displayed completely. The original edge body was retained.").as_ref());
             return false;
         };
-        let ordered = source.edge_keys().collect::<Vec<_>>();
+        let ordered = (0..source.edges.len() as u32).collect::<Vec<_>>();
         let Some(history_edges) = edges
             .iter()
             .map(|edge| {
@@ -702,10 +703,10 @@ impl super::OpenCADStudio {
     fn replace_edge_body_with_chamfer(
         &mut self,
         handle: Handle,
-        source: &Body,
-        result: Body,
-        edges: &[EdgeKey],
-        base_face: FaceKey,
+        source: &Brep,
+        result: Brep,
+        edges: &[u32],
+        base_face: u32,
         base_distance: f64,
         other_distance: f64,
     ) -> bool {
@@ -718,7 +719,7 @@ impl super::OpenCADStudio {
             self.command_line.push_error(crate::t!("The result could not be displayed completely. The original edge body was retained.").as_ref());
             return false;
         };
-        let ordered_edges = source.edge_keys().collect::<Vec<_>>();
+        let ordered_edges = (0..source.edges.len() as u32).collect::<Vec<_>>();
         let Some(history_edges) = edges
             .iter()
             .map(|edge| {
@@ -733,8 +734,7 @@ impl super::OpenCADStudio {
                 .push_error(crate::t!("A selected edge no longer belongs to the body.").as_ref());
             return false;
         };
-        let Some(history_face) = source
-            .face_keys()
+        let Some(history_face) = (0..source.faces.len() as u32)
             .position(|candidate| candidate == base_face)
             .and_then(|ordinal| i32::try_from(ordinal).ok())
         else {
@@ -796,8 +796,8 @@ impl super::OpenCADStudio {
     pub(super) fn solid_edge_blend(
         &mut self,
         handle: Handle,
-        edges: &[EdgeKey],
-        base_face: Option<FaceKey>,
+        edges: &[u32],
+        base_face: Option<u32>,
         value: f64,
         other_value: f64,
         fillet: bool,
@@ -821,15 +821,10 @@ impl super::OpenCADStudio {
             return Task::none();
         };
         let result = if fillet {
-            match ocs_brep::fillet_edges(&body, edges, value) {
+            match model::fillet(&body, edges, value) {
                 Ok(result) => Some(result),
                 Err(error) => {
-                    use ocs_brep::FilletError::{InvalidResult, RadiusTooLargeOrInteracting};
-                    let fit = matches!(error, RadiusTooLargeOrInteracting | InvalidResult)
-                        .then(|| ocs_brep::fillet_fit(&body, edges, value))
-                        .flatten();
-                    self.command_line
-                        .push_error(&format!("FILLETEDGE: {error}{}", fit_hint("radius", fit)));
+                    self.command_line.push_error(&format!("FILLETEDGE: {}", modelling_error(&error)));
                     return Task::none();
                 }
             }
@@ -839,17 +834,10 @@ impl super::OpenCADStudio {
                     .push_error(crate::t!("CHAMFEREDGE: select a base face edge.").as_ref());
                 return Task::none();
             };
-            match ocs_brep::chamfer_edges(&body, edges, base_face, value, other_value) {
+            match model::chamfer(&body, edges, base_face, value, other_value) {
                 Ok(result) => Some(result),
                 Err(error) => {
-                    use ocs_brep::ChamferError::{DistanceTooLargeOrInteracting, InvalidResult};
-                    let fit = matches!(error, DistanceTooLargeOrInteracting | InvalidResult)
-                        .then(|| {
-                            ocs_brep::chamfer_fit(&body, edges, base_face, value, other_value)
-                        })
-                        .flatten();
-                    self.command_line
-                        .push_error(&format!("CHAMFEREDGE: {error}{}", fit_hint("distance", fit)));
+                    self.command_line.push_error(&format!("CHAMFEREDGE: {}", modelling_error(&error)));
                     return Task::none();
                 }
             }
@@ -919,12 +907,12 @@ impl super::OpenCADStudio {
             return Task::none();
         };
 
-        let all_faces = body.face_keys().collect::<Vec<_>>();
+        let all_faces = (0..body.faces.len() as u32).collect::<Vec<_>>();
         let mut removed = HashSet::new();
         for action in actions {
             match *action {
                 ShellFaceAction::Remove(point) => {
-                    let Some(face) = ocs_brep::shell_face_at_point(&body, point.to_array())
+                    let Some(face) = model::face_at_point(&body, point.to_array(), model::size(&body) * 1e-6 + 1e-9)
                     else {
                         self.command_line.push_error(
                             crate::t!("A selected face could not be resolved.").as_ref(),
@@ -934,7 +922,7 @@ impl super::OpenCADStudio {
                     removed.insert(face);
                 }
                 ShellFaceAction::Add(point) => {
-                    let Some(face) = ocs_brep::shell_face_at_point(&body, point.to_array())
+                    let Some(face) = model::face_at_point(&body, point.to_array(), model::size(&body) * 1e-6 + 1e-9)
                     else {
                         self.command_line.push_error(
                             crate::t!("A selected face could not be resolved.").as_ref(),
@@ -949,40 +937,21 @@ impl super::OpenCADStudio {
         }
         let removed = removed.into_iter().collect::<Vec<_>>();
 
-        let result = match ocs_brep::shell(&body, &removed, distance) {
+        // SHELL's distance is positive inward; Solidcore's thickness negative inward.
+        let result = match model::shell(&body, &removed, -distance) {
             Ok(result) => result,
-            Err(ocs_brep::ShellError::InvalidDistance) => {
-                self.command_line
-                    .push_error(crate::t!("The shell offset distance must be nonzero.").as_ref());
-                return Task::none();
-            }
-            Err(ocs_brep::ShellError::UnsupportedSolid) => {
+            Err(ModelError::NoRoom) => {
                 self.command_line.push_error(
-                    crate::t!("SHELL supports rectangular boxes, circular cylinders, and spheres.")
-                        .as_ref(),
+                    crate::t!("The offset removes all material. Use a smaller distance or add a face back.").as_ref(),
                 );
                 return Task::none();
             }
-            Err(ocs_brep::ShellError::UnknownFace) => {
-                self.command_line.push_error(
-                    crate::t!("A selected face does not belong to the solid.").as_ref(),
-                );
-                return Task::none();
-            }
-            Err(ocs_brep::ShellError::NoMaterial) => {
-                self.command_line.push_error(
-                    crate::t!("The offset removes all material. Use a smaller distance or add a face back.")
-                        .as_ref(),
-                );
-                return Task::none();
-            }
-            Err(ocs_brep::ShellError::Kernel(_)) => {
-                self.command_line.push_error(
-                    crate::t!(
-                        "The shell could not be constructed from the selected solid and distance."
-                    )
-                    .as_ref(),
-                );
+            Err(error) => {
+                self.command_line.push_error(&format!(
+                    "{} {}",
+                    crate::t!("The shell could not be constructed from the selected solid and distance."),
+                    modelling_error(&error)
+                ));
                 return Task::none();
             }
         };
@@ -1036,7 +1005,7 @@ impl super::OpenCADStudio {
         retained: Handle,
         entity: &mut EntityType,
         steps: &[(Handle, u8)],
-        bodies: &HashMap<Handle, Body>,
+        bodies: &HashMap<Handle, Brep>,
     ) -> bool {
         let scene = &mut self.tabs[self.active_tab].scene;
         let joined = scene.document.header.record_solid_history
@@ -1088,27 +1057,8 @@ impl super::OpenCADStudio {
                 .collect::<Vec<_>>();
             let outcome = match intersect_bodies(group.kind, operands) {
                 Ok(outcome) => outcome,
-                Err(ocs_brep::Snag::NoClosedForm) => {
-                    self.command_line.push_error(
-                        crate::t!("INTERSECT: the selected objects do not have a supported coplanar surface intersection.")
-                            .as_ref(),
-                    );
-                    return Task::none();
-                }
-                Err(ocs_brep::Snag::Coincident) => {
-                    self.command_line.push_error(
-                        crate::t!("INTERSECT: the selected coincident geometry is ambiguous.")
-                            .as_ref(),
-                    );
-                    return Task::none();
-                }
-                Err(ocs_brep::Snag::CutRefused) => {
-                    self.command_line.push_error(
-                        crate::t!(
-                            "INTERSECT: the selected topology could not be intersected safely."
-                        )
-                        .as_ref(),
-                    );
+                Err(error) => {
+                    self.command_line.push_error(&format!("INTERSECT: {}", modelling_error(&error)));
                     return Task::none();
                 }
             };
@@ -1331,24 +1281,8 @@ impl super::OpenCADStudio {
                 .collect::<Vec<_>>();
             let result = match union_bodies(group.kind, bodies) {
                 Ok(result) => result,
-                Err(ocs_brep::Snag::NoClosedForm) => {
-                    self.command_line.push_error(
-                        crate::t!("UNION: the selected geometry includes an unsupported surface intersection.")
-                            .as_ref(),
-                    );
-                    return Task::none();
-                }
-                Err(ocs_brep::Snag::Coincident) => {
-                    self.command_line.push_error(
-                        crate::t!("UNION: the selected coincident geometry is ambiguous.").as_ref(),
-                    );
-                    return Task::none();
-                }
-                Err(ocs_brep::Snag::CutRefused) => {
-                    self.command_line.push_error(
-                        crate::t!("UNION: the selected topology could not be closed safely.")
-                            .as_ref(),
-                    );
+                Err(error) => {
+                    self.command_line.push_error(&format!("UNION: {}", modelling_error(&error)));
                     return Task::none();
                 }
             };
@@ -1480,7 +1414,7 @@ impl super::OpenCADStudio {
         let mut operands = base_handles.clone();
         operands.extend(cutter_handles.iter().copied());
         self.tabs[i].scene.restore_solid_models(&operands);
-        let mut operand_bodies = std::collections::HashMap::<Handle, Body>::new();
+        let mut operand_bodies = std::collections::HashMap::<Handle, Brep>::new();
         for handle in &operands {
             if let Some(body) = self.tabs[i].scene.solid_models.get(handle).cloned() {
                 operand_bodies.insert(*handle, body);
@@ -1619,25 +1553,8 @@ impl super::OpenCADStudio {
             let result = match subtract_bodies(group.kind, group.plane, base_bodies, cutter_bodies)
             {
                 Ok(result) => result,
-                Err(ocs_brep::Snag::NoClosedForm) => {
-                    self.command_line.push_error(
-                        crate::t!("SUBTRACT: the selected geometry includes an unsupported surface intersection.")
-                            .as_ref(),
-                    );
-                    return Task::none();
-                }
-                Err(ocs_brep::Snag::Coincident) => {
-                    self.command_line.push_error(
-                        crate::t!("SUBTRACT: the selected coincident geometry is ambiguous.")
-                            .as_ref(),
-                    );
-                    return Task::none();
-                }
-                Err(ocs_brep::Snag::CutRefused) => {
-                    self.command_line.push_error(
-                        crate::t!("SUBTRACT: the selected topology could not be cut safely.")
-                            .as_ref(),
-                    );
+                Err(error) => {
+                    self.command_line.push_error(&format!("SUBTRACT: {}", modelling_error(&error)));
                     return Task::none();
                 }
             };
@@ -1753,7 +1670,7 @@ impl super::OpenCADStudio {
     pub(super) fn solid_slice_surface(
         &mut self,
         requested: &[Handle],
-        cutter: Body,
+        cutter: Brep,
         keep_point: Option<glam::DVec3>,
     ) -> Task<Message> {
         self.solid_slice_with_tool(requested, ModelSliceTool::Surface(cutter), keep_point)
@@ -1902,12 +1819,7 @@ impl super::OpenCADStudio {
         }
 
         let keep_positive = if let Some(point) = keep_point {
-            let tolerance = ocs_brep::operation_tolerance(
-                &handles
-                    .iter()
-                    .map(|handle| &bodies[handle])
-                    .collect::<Vec<_>>(),
-            );
+            let tolerance = handles.iter().map(|handle| coplanar_tolerance(&bodies[handle])).fold(1e-9, f64::max);
             let Some(distance) = tool.side(point.to_array()) else {
                 self.command_line
                     .push_error(crate::t!("SLICE: the cutting plane is invalid.").as_ref());
@@ -1935,25 +1847,8 @@ impl super::OpenCADStudio {
                     );
                     return Task::none();
                 }
-                Err(ocs_brep::Snag::NoClosedForm) => {
-                    self.command_line.push_error(
-                        crate::t!("SLICE: the selected geometry has an unsupported surface intersection; no object was changed.")
-                            .as_ref(),
-                    );
-                    return Task::none();
-                }
-                Err(ocs_brep::Snag::Coincident) => {
-                    self.command_line.push_error(
-                        crate::t!("SLICE: the cutting plane is coincident with source geometry; no object was changed.")
-                            .as_ref(),
-                    );
-                    return Task::none();
-                }
-                Err(ocs_brep::Snag::CutRefused) => {
-                    self.command_line.push_error(
-                        crate::t!("SLICE: the selected topology could not be split safely; no object was changed.")
-                            .as_ref(),
-                    );
+                Err(error) => {
+                    self.command_line.push_error(&format!("SLICE: {}", modelling_error(&error)));
                     return Task::none();
                 }
             };
@@ -2625,17 +2520,3 @@ impl super::OpenCADStudio {
     }
 }
 
-/// The size a refused blend would have fitted at, rounded down to three
-/// figures, as the end of its refusal: empty where none was found.
-fn fit_hint(size: &str, fit: Option<f64>) -> String {
-    let Some(fit) = fit.filter(|fit| *fit > 0.0) else {
-        return String::new();
-    };
-    let digits = (2 - fit.log10().floor() as i32).max(0);
-    let scale = 10f64.powi(digits);
-    format!(
-        "; the largest {size} that fits is about {:.*}",
-        digits as usize,
-        (fit * scale).floor() / scale
-    )
-}

@@ -11,12 +11,12 @@ use document::objects::{
 use document::types::Vector3;
 use document::{EntityType, Handle};
 use glam::DVec3;
-use ocs_brep::{self as brep, Body, PlanarFaceProfile, PresspullMode};
+use ocs_solid::model::{self, Brep};
 
 struct PreparedPresspull {
     owner: Option<Handle>,
     entity: EntityType,
-    body: Body,
+    body: Brep,
     history: SolidHistoryOperation,
     display: (MeshLodSet, Vec<Wire>, [f64; 3]),
 }
@@ -116,7 +116,7 @@ impl super::OpenCADStudio {
             return Err("PRESSPULL: enter a finite non-zero height.".into());
         }
         let scene = &self.tabs[self.active_tab].scene;
-        let mut results: Vec<(Option<Handle>, EntityType, Body, SolidHistoryOperation)> =
+        let mut results: Vec<(Option<Handle>, EntityType, Brep, SolidHistoryOperation)> =
             Vec::new();
         for target in targets {
             let owner = match &target.kind {
@@ -156,14 +156,14 @@ impl super::OpenCADStudio {
                         if !closed {
                             return Err("PRESSPULL: an attached region must be closed.".into());
                         }
-                        let profile = PlanarFaceProfile {
+                        let profile = model::PlanarFaceProfile {
                             plane,
                             loops,
                             outward: target.direction.to_array(),
                         };
-                        let body = brep::presspull_region(current, &profile, distance).ok_or(
-                            "PRESSPULL: the region could not be added to or cut from the solid.",
-                        )?;
+                        let body = model::pull_region(current, &profile, distance, 0.0).map_err(|_| {
+                            "PRESSPULL: the region could not be added to or cut from the solid."
+                        })?;
                         let history = solid_history::brep_op(&body);
                         (
                             body,
@@ -203,22 +203,17 @@ impl super::OpenCADStudio {
                         current.ok_or("PRESSPULL: the original solid could not be restored.")?;
                     // Earlier targets in the same batch may have rebuilt face keys.
                     let face = if previous.is_some() {
-                        brep::planar_face_at_point(current, target.anchor.to_array(), 1e-6)
+                        model::planar_face_at_point(current, target.anchor.to_array(), 1e-6)
                             .ok_or("PRESSPULL: an earlier selected region changed this face.")?
                     } else {
                         *face
                     };
-                    let body = brep::presspull_face(
-                        current,
-                        face,
-                        distance,
-                        if *offset {
-                            PresspullMode::Offset
-                        } else {
-                            PresspullMode::Extrude
-                        },
-                    )
-                    .ok_or("PRESSPULL: the requested face operation would invalidate the solid.")?;
+                    let body = if *offset {
+                        model::offset_faces(current, &[face], distance)
+                    } else {
+                        model::extrude_faces(current, &[face], distance, 0.0)
+                    }
+                    .map_err(|_| "PRESSPULL: the requested face operation would invalidate the solid.")?;
                     let history = solid_history::brep_op(&body);
                     (
                         body,

@@ -3389,7 +3389,7 @@ impl OpenCADStudio {
                     .into_iter()
                     .map(|(acis, solid, mesh, name, layer, color)| crate::io::step::StepItem {
                         body: acis.as_ref().and_then(
-                            crate::scene::convert::solid3d_tess::kernel_acis_body,
+                            crate::scene::convert::solid3d_tess::acis_record,
                         ),
                         solid,
                         mesh: Some(mesh),

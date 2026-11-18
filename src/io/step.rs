@@ -12,10 +12,7 @@
 
 use std::collections::HashMap;
 
-use ocs_brep::{
-    Body, Curve3, EdgeKey, FaceKey, LoopKey, ShellKey, Surface, VertexKey,
-};
-use ocs_geom::space::{NurbsSurface3, Plane, Vec3};
+use ocs_solid::model::Brep;
 use solidcore_record::step::model as m;
 pub use step_export::Schema;
 
@@ -24,7 +21,7 @@ use crate::scene::model::mesh_model::MeshModel;
 /// One object to export.
 pub struct StepItem {
     /// The exact B-rep, when the object has one.
-    pub body: Option<Body>,
+    pub body: Option<Brep>,
     /// Whether the body is a solid (a region or surface is a sheet).
     pub solid: bool,
     /// The display mesh, written when there is no body or it cannot be
@@ -87,475 +84,32 @@ pub fn parse_schema(text: &str) -> Option<Schema> {
 
 type Lifted<T> = Result<T, &'static str>;
 
-fn scaled(point: [f64; 3], scale: f64) -> Lifted<[f64; 3]> {
-    let out = point.map(|value| value * scale);
-    if out.iter().all(|value| value.is_finite()) {
-        Ok(out)
+/// A record as neutral bodies, by Solidcore's own mapping ([`step_export::brep_to_model`]): a
+/// solid per material region (a solid with voids where it has them), a shell model of each
+/// sheet; scaled from drawing units to millimetres first.
+fn body_models(body: &Brep, scale: f64, _solid: bool) -> Lifted<Vec<m::Body>> {
+    let scaled;
+    let body = if (scale - 1.0).abs() > 1e-12 {
+        let placement = ocs_solid::model::Placement {
+            x_axis: [scale, 0.0, 0.0],
+            y_axis: [0.0, scale, 0.0],
+            z_axis: [0.0, 0.0, scale],
+            origin: [0.0; 3],
+        };
+        scaled = ocs_solid::model::placed(body, &placement).map_err(|_| "the body could not be scaled to millimetres")?;
+        &scaled
     } else {
-        Err("non-finite coordinate")
-    }
-}
-
-/// A plane's frame squared up: its normal, its x axis made square to it, and
-/// y completing the right-handed set; the origin scaled.
-fn frame(plane: &Plane, scale: f64) -> Lifted<m::Frame> {
-    let z = Vec3::from(plane.normal().ok_or("degenerate frame")?);
-    let x = Vec3::from(plane.x_axis);
-    let x = (x - z * x.dot(z)).normalize().ok_or("degenerate frame")?;
-    let y = z.cross(x);
-    Ok(m::Frame {
-        origin: scaled(plane.origin, scale)?,
-        x: x.to_array(),
-        y: y.to_array(),
-        z: z.to_array(),
-    })
-}
-
-/// Turns a frame half a turn about its z axis: the same circle with its
-/// parameter moved by π, which is how a negative radius reads.
-fn half_turn(frame: m::Frame) -> m::Frame {
-    m::Frame {
-        x: frame.x.map(|value| -value),
-        y: frame.y.map(|value| -value),
-        ..frame
-    }
-}
-
-/// Distinct knots and their multiplicities.
-fn knot_form(knots: &[f64]) -> (Vec<f64>, Vec<u32>) {
-    let mut values: Vec<f64> = Vec::new();
-    let mut mults: Vec<u32> = Vec::new();
-    for &knot in knots {
-        match (values.last(), mults.last_mut()) {
-            (Some(&last), Some(mult)) if last == knot => *mult += 1,
-            _ => {
-                values.push(knot);
-                mults.push(1);
-            }
-        }
-    }
-    (values, mults)
-}
-
-fn bspline_curve(
-    degree: usize,
-    points: Vec<[f64; 3]>,
-    weights: Option<Vec<f64>>,
-    knots: &[f64],
-) -> Lifted<m::Curve> {
-    if points.iter().flatten().any(|value| !value.is_finite()) {
-        return Err("non-finite control point");
-    }
-    let (knots, mults) = knot_form(knots);
-    Ok(m::Curve::BSpline(m::BSplineCurve {
-        degree: degree as u32,
-        points,
-        weights,
-        knots,
-        mults,
-    }))
-}
-
-/// A curve in STEP's form, and the factor its parameter takes there (an
-/// angle is in degrees).
-fn curve(curve: &Curve3, scale: f64) -> Lifted<(m::Curve, f64)> {
-    Ok(match curve {
-        Curve3::Line(line) => {
-            let direction = Vec3::from(line.direction);
-            let dir = direction.normalize().ok_or("degenerate line")?;
-            (
-                m::Curve::Line {
-                    origin: scaled(line.origin, scale)?,
-                    dir: dir.to_array(),
-                    magnitude: direction.length() * scale,
-                },
-                1.0,
-            )
-        }
-        Curve3::Circle(circle) => {
-            let frame = frame(&circle.plane, scale)?;
-            let frame = if circle.radius < 0.0 {
-                half_turn(frame)
-            } else {
-                frame
-            };
-            let radius = circle.radius.abs() * scale;
-            (m::Curve::Circle { frame, radius }, 1f64.to_degrees())
-        }
-        Curve3::Ellipse(ellipse) => (
-            m::Curve::Ellipse {
-                frame: frame(&ellipse.plane, scale)?,
-                semi1: ellipse.major_radius.abs() * scale,
-                semi2: ellipse.minor_radius.abs() * scale,
-            },
-            1f64.to_degrees(),
-        ),
-        Curve3::PlanarSpline { plane, curve } => {
-            let points = curve
-                .control_points()
-                .iter()
-                .map(|&point| scaled(plane.point_at(point), scale))
-                .collect::<Lifted<Vec<_>>>()?;
-            let weights = curve.is_rational().then(|| curve.weights().to_vec());
-            (
-                bspline_curve(curve.degree(), points, weights, curve.knots())?,
-                1.0,
-            )
-        }
-        Curve3::Nurbs(curve) => {
-            let points = curve
-                .control_points()
-                .iter()
-                .map(|&point| scaled(point, scale))
-                .collect::<Lifted<Vec<_>>>()?;
-            let weights = curve.is_rational().then(|| curve.weights().to_vec());
-            (
-                bspline_curve(curve.degree(), points, weights, curve.knots())?,
-                1.0,
-            )
-        }
-    })
-}
-
-fn bspline_surface(surface: &NurbsSurface3, scale: f64) -> Lifted<m::Surface> {
-    let points = surface
-        .control_points()
-        .iter()
-        .map(|row| row.iter().map(|&point| scaled(point, scale)).collect())
-        .collect::<Lifted<Vec<Vec<_>>>>()?;
-    let rational = surface
-        .weights()
-        .iter()
-        .flatten()
-        .any(|weight| (weight - 1.0).abs() > 1e-12);
-    let (u_degree, v_degree) = surface.degrees();
-    let (u_knots, v_knots) = surface.knots();
-    let (u_knots, u_mults) = knot_form(u_knots);
-    let (v_knots, v_mults) = knot_form(v_knots);
-    Ok(m::Surface::BSpline(m::BSplineSurface {
-        u_degree: u_degree as u32,
-        v_degree: v_degree as u32,
-        points,
-        weights: rational.then(|| surface.weights().to_vec()),
-        u_knots,
-        u_mults,
-        v_knots,
-        v_mults,
-    }))
-}
-
-/// A surface in STEP's form. A spline whose `v` the kernel reads backwards
-/// is written with its own net, so its normal is the other way round: the
-/// flag says so.
-fn surface(surface: &Surface, scale: f64) -> Lifted<(m::Surface, bool)> {
-    Ok(match surface {
-        Surface::Plane(plane) => (
-            m::Surface::Plane {
-                frame: frame(plane, scale)?,
-            },
-            false,
-        ),
-        Surface::Cylinder(cylinder) => (
-            m::Surface::Cylinder {
-                frame: frame(&cylinder.base, scale)?,
-                radius: cylinder.radius.abs() * scale,
-            },
-            false,
-        ),
-        Surface::Cone(cone) => {
-            // The kernel's radius shrinks along the axis by tan(half_angle);
-            // STEP's grows by tan(semi_angle), from a radius that is not
-            // negative. A cone narrowing along its axis is written about the
-            // reversed axis, and one whose base radius is negative from its
-            // apex.
-            let tan = cone.half_angle.tan();
-            let mut base = cone.base;
-            let mut radius = cone.radius;
-            if radius < 0.0 && tan != 0.0 {
-                let normal = Vec3::from(base.normal().ok_or("degenerate frame")?);
-                base.origin = (Vec3::from(base.origin) + normal * (radius / tan)).to_array();
-                radius = 0.0;
-            }
-            let frame = frame(&base, scale)?;
-            let frame = if cone.half_angle > 0.0 {
-                m::Frame {
-                    y: frame.y.map(|value| -value),
-                    z: frame.z.map(|value| -value),
-                    ..frame
-                }
-            } else {
-                frame
-            };
-            (
-                m::Surface::Cone {
-                    frame,
-                    radius: radius.abs() * scale,
-                    semi_angle_deg: cone.half_angle.abs().to_degrees(),
-                },
-                false,
-            )
-        }
-        Surface::Sphere(sphere) => (
-            m::Surface::Sphere {
-                frame: frame(&sphere.frame, scale)?,
-                radius: sphere.radius.abs() * scale,
-            },
-            false,
-        ),
-        Surface::Torus(torus) => (
-            m::Surface::Torus {
-                frame: frame(&torus.frame, scale)?,
-                major: torus.major_radius.abs() * scale,
-                minor: torus.minor_radius.abs() * scale,
-            },
-            false,
-        ),
-        Surface::Nurbs(spline) => (bspline_surface(spline, scale)?, spline.v_reversed()),
-        Surface::Offset(offset) => (
-            bspline_surface(&offset.approximation, scale)?,
-            offset.approximation.v_reversed(),
-        ),
-    })
-}
-
-/// STEP's normal of an analytic surface at a point on it: away from the
-/// plane's front, the axis, the centre or the tube's core circle.
-fn step_normal(surface: &m::Surface, point: [f64; 3]) -> Option<Vec3> {
-    let radial = |frame: &m::Frame| {
-        let offset = Vec3::from(point) - Vec3::from(frame.origin);
-        let z = Vec3::from(frame.z);
-        (offset - z * offset.dot(z)).normalize()
+        body
     };
-    match surface {
-        m::Surface::Plane { frame } => Some(Vec3::from(frame.z)),
-        m::Surface::Cylinder { frame, .. } => radial(frame),
-        m::Surface::Cone {
-            frame,
-            semi_angle_deg,
-            ..
-        } => {
-            let angle = semi_angle_deg.to_radians();
-            Some(radial(frame)? * angle.cos() - Vec3::from(frame.z) * angle.sin())
-        }
-        m::Surface::Sphere { frame, .. } => {
-            (Vec3::from(point) - Vec3::from(frame.origin)).normalize()
-        }
-        m::Surface::Torus { frame, major, .. } => {
-            let core = Vec3::from(frame.origin) + radial(frame)? * *major;
-            (Vec3::from(point) - core).normalize()
-        }
-        _ => None,
-    }
-}
-
-/// One lump of a body, gathered into a neutral body.
-struct Lump<'a> {
-    body: &'a Body,
-    scale: f64,
-    vertices: Vec<m::Vertex>,
-    vertex_of: HashMap<VertexKey, usize>,
-    edges: Vec<m::Edge>,
-    edge_of: HashMap<EdgeKey, usize>,
-    faces: Vec<m::Face>,
-}
-
-impl Lump<'_> {
-    fn vertex(&mut self, key: VertexKey) -> Lifted<usize> {
-        if let Some(&index) = self.vertex_of.get(&key) {
-            return Ok(index);
-        }
-        let vertex = self.body.vertices.get(key).ok_or("missing vertex")?;
-        let index = self.vertices.len();
-        self.vertices.push(m::Vertex {
-            step_id: index as u64 + 1,
-            point: scaled(vertex.point, self.scale)?,
-        });
-        self.vertex_of.insert(key, index);
-        Ok(index)
-    }
-
-    fn edge(&mut self, key: EdgeKey) -> Lifted<usize> {
-        if let Some(&index) = self.edge_of.get(&key) {
-            return Ok(index);
-        }
-        let edge = self.body.edges.get(key).ok_or("missing edge")?;
-        let geometry = self.body.curves.get(edge.curve).ok_or("missing curve")?;
-        let (curve, factor) = curve(geometry, self.scale)?;
-        let start = self.vertex(edge.start)?;
-        let end = self.vertex(edge.end)?;
-        let index = self.edges.len();
-        self.edges.push(m::Edge {
-            step_id: index as u64 + 1,
-            start,
-            end,
-            curve,
-            same_sense: true,
-            t_start: edge.start_parameter * factor,
-            t_end: edge.end_parameter * factor,
-        });
-        self.edge_of.insert(key, index);
-        Ok(index)
-    }
-
-    /// Points of a face's boundary in the middle of its edges, where its
-    /// normal is compared.
-    fn boundary_samples(&self, loops: &[LoopKey]) -> Vec<[f64; 3]> {
-        let body = self.body;
-        loops
-            .iter()
-            .filter_map(|&key| body.loops.get(key))
-            .flat_map(|ring| ring.coedges.iter())
-            .filter_map(|&coedge| {
-                let edge = body.edges.get(body.coedges.get(coedge)?.edge)?;
-                let curve = body.curves.get(edge.curve)?;
-                Some(curve.point_at(0.5 * (edge.start_parameter + edge.end_parameter)))
-            })
-            .collect()
-    }
-
-    /// Adds a face; `reverse` turns it over (a void's faces, which STEP
-    /// reverses again through the void shell's orientation).
-    fn face(&mut self, key: FaceKey, reverse: bool) -> Lifted<usize> {
-        let face = self.body.faces.get(key).ok_or("missing face")?;
-        let geometry = self.body.surfaces.get(face.surface).ok_or("missing surface")?;
-        let (written, mut flipped) = surface(geometry, self.scale)?;
-        if !matches!(written, m::Surface::BSpline(_)) {
-            // Which way the analytic surface's normal runs against STEP's,
-            // seen at the first boundary point where both are clear.
-            let samples = self.boundary_samples(&face.loops);
-            flipped = samples
-                .iter()
-                .find_map(|&point| {
-                    let (u, v) = geometry.parameters_at(point)?;
-                    let kernel = Vec3::from(geometry.normal_at(u, v)?);
-                    let step = step_normal(&written, scaled(point, self.scale).ok()?)?;
-                    let agreement = kernel.dot(step);
-                    (agreement.abs() > 0.2).then_some(agreement < 0.0)
-                })
-                .unwrap_or(false);
-        }
-        let mut loops = Vec::new();
-        for &loop_key in &face.loops {
-            let ring = self.body.loops.get(loop_key).ok_or("missing loop")?;
-            let mut oriented = Vec::new();
-            for &coedge_key in &ring.coedges {
-                let coedge = self.body.coedges.get(coedge_key).ok_or("missing coedge")?;
-                oriented.push(m::OrientedEdge {
-                    edge: self.edge(coedge.edge)?,
-                    forward: coedge.forward,
-                });
-            }
-            if oriented.is_empty() {
-                continue;
-            }
-            if reverse {
-                oriented.reverse();
-                for edge in &mut oriented {
-                    edge.forward = !edge.forward;
-                }
-            }
-            loops.push(m::Loop {
-                outer: loops.is_empty(),
-                orientation: true,
-                bound: m::Bound::Edges(oriented),
-            });
-        }
-        if loops.is_empty() {
-            return Err("unbounded face");
-        }
-        let index = self.faces.len();
-        self.faces.push(m::Face {
-            step_id: index as u64 + 1,
-            surface: written,
-            same_sense: face.forward ^ flipped ^ reverse,
-            loops,
-        });
-        Ok(index)
-    }
-
-    /// Whether every edge of a shell's faces is used twice.
-    fn closed(&self, shell: ShellKey) -> bool {
-        let body = self.body;
-        body.shells.get(shell).is_some_and(|shell| {
-            shell
-                .faces
-                .iter()
-                .filter_map(|&face| body.faces.get(face))
-                .flat_map(|face| face.loops.iter())
-                .filter_map(|&ring| body.loops.get(ring))
-                .flat_map(|ring| ring.coedges.iter())
-                .all(|&coedge| {
-                    body.coedges
-                        .get(coedge)
-                        .and_then(|coedge| body.edges.get(coedge.edge))
-                        .is_some_and(|edge| edge.coedges.len() == 2)
-                })
-        })
-    }
-}
-
-/// A kernel body as neutral bodies, one per lump: a solid when `solid` and
-/// its shells close, otherwise a shell model.
-fn body_models(body: &Body, scale: f64, solid: bool) -> Lifted<Vec<m::Body>> {
-    let mut out = Vec::new();
-    for &lump_key in &body.roots {
-        let lump = body.lumps.get(lump_key).ok_or("missing lump")?;
-        let mut gathered = Lump {
-            body,
-            scale,
-            vertices: Vec::new(),
-            vertex_of: HashMap::new(),
-            edges: Vec::new(),
-            edge_of: HashMap::new(),
-            faces: Vec::new(),
-        };
-        let as_solid = solid && lump.shells.iter().all(|&shell| gathered.closed(shell));
-        let mut shells = Vec::new();
-        for (position, &shell_key) in lump.shells.iter().enumerate() {
-            let shell = body.shells.get(shell_key).ok_or("missing shell")?;
-            // A void's faces point out of the material, into the void; STEP
-            // keeps its closed shell pointing out of the void and reverses
-            // it through the oriented shell.
-            let void = as_solid && position > 0;
-            let faces = shell
-                .faces
-                .iter()
-                .map(|&face| gathered.face(face, void))
-                .collect::<Lifted<Vec<_>>>()?;
-            if faces.is_empty() {
-                continue;
-            }
-            shells.push(m::Shell {
-                step_id: shells.len() as u64 + 1,
-                closed: as_solid || gathered.closed(shell_key),
-                orientation: !void,
-                faces,
-            });
-        }
-        if shells.is_empty() {
-            continue;
-        }
-        let kind = match (as_solid, shells.len()) {
-            (false, _) => m::BodyKind::ShellModel,
-            (true, 1) => m::BodyKind::ManifoldSolid,
-            (true, _) => m::BodyKind::SolidWithVoids,
-        };
-        out.push(m::Body {
-            step_id: 0,
-            name: None,
-            kind,
-            unit_mm: 1.0,
-            uncertainty_mm: None,
-            shells,
-            faces: gathered.faces,
-            edges: gathered.edges,
-            vertices: gathered.vertices,
-        });
-    }
-    if out.is_empty() {
+    // ponytail: through Solidcore's working body (its doc-hidden `kernel()` bridge at the
+    // pinned revision); move to solidcore-step's record writer once it takes meshes, layers and
+    // a schema.
+    let (opened, _) = ocs_solid::model::open(body).map_err(|_| "the body could not be opened")?;
+    let model = step_export::brep_to_model(&opened.kernel()).map_err(|_| "the body could not be mapped to STEP")?;
+    if model.bodies.is_empty() {
         Err("empty body")
     } else {
-        Ok(out)
+        Ok(model.bodies)
     }
 }
 
@@ -895,7 +449,36 @@ fn outline(
 mod tests {
     use super::{build_step, mesh_body, Schema, StepItem};
     use crate::scene::model::mesh_model::MeshModel;
-    use ocs_brep::{make, Body};
+    use ocs_solid::model::{self, Brep};
+
+    /// The primitives the tests export, from Solidcore.
+    mod make {
+        use ocs_solid::model::{self, Brep};
+
+        pub fn cuboid(origin: [f64; 3], size: [f64; 3]) -> Option<Brep> {
+            model::make_box(origin, size).ok()
+        }
+
+        pub fn cylinder(base: [f64; 3], radius: f64, height: f64) -> Option<Brep> {
+            model::make_cylinder(base, radius, height).ok()
+        }
+
+        pub fn cone(base: [f64; 3], radius: f64, height: f64) -> Option<Brep> {
+            model::make_cone(base, radius, 0.0, height).ok()
+        }
+
+        pub fn frustum(base: [f64; 3], x_radius: f64, y_radius: f64, top: f64, height: f64) -> Option<Brep> {
+            model::make_frustum(base, x_radius, y_radius, top, height).ok()
+        }
+
+        pub fn sphere(centre: [f64; 3], radius: f64) -> Option<Brep> {
+            model::make_sphere(centre, radius).ok()
+        }
+
+        pub fn torus(centre: [f64; 3], major: f64, minor: f64) -> Option<Brep> {
+            model::make_torus(centre, major, minor).ok()
+        }
+    }
 
     fn mesh_step(mesh: MeshModel) -> String {
         let item = StepItem {
@@ -909,7 +492,7 @@ mod tests {
         build_step(&[item], 1.0, Schema::Ap214, "part").expect("step")
     }
 
-    fn body_step(body: Body, solid: bool, unit_mm: f64) -> String {
+    fn body_step(body: Brep, solid: bool, unit_mm: f64) -> String {
         let item = StepItem {
             body: Some(body),
             solid,
@@ -922,22 +505,22 @@ mod tests {
     }
 
     /// The bodies OCS's own reader makes of a STEP text, unscaled.
-    fn read_back(step: &str) -> Vec<Body> {
+    fn read_back(step: &str) -> Vec<Brep> {
         let model = crate::io::step_import::read(step.as_bytes()).expect("readable");
-        let mut bodies: Vec<Body> = model.direct.into_iter().map(|b| b.body).collect();
+        let mut bodies: Vec<Brep> = model.direct.into_iter().map(|b| b.body).collect();
         for product in model.products {
             bodies.extend(product.bodies.into_iter().map(|b| b.body));
         }
         bodies
     }
 
-    fn volume(body: &Body) -> f64 {
-        ocs_brep::mass_properties(body).expect("mass").volume
+    fn volume(body: &Brep) -> f64 {
+        ocs_solid::model::mass_properties(body).expect("mass").volume
     }
 
     /// Exports a solid, reads it back through both readers and compares
     /// volumes: the faces must point out of the material for that to hold.
-    fn round_trip(body: Body, expected: f64, kinds: &[&str]) -> String {
+    fn round_trip(body: Brep, expected: f64, kinds: &[&str]) -> String {
         let step = body_step(body, true, 1.0);
         for kind in kinds {
             assert!(step.contains(kind), "no {kind}:\n{step}");
@@ -1034,9 +617,9 @@ mod tests {
     fn a_solid_with_a_void_keeps_it() {
         let outer = make::cuboid([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
         let inner = make::cuboid([3.0, 3.0, 3.0], [4.0, 4.0, 4.0]).unwrap();
-        let hollow =
-            ocs_brep::combine(outer, inner, ocs_brep::Operation::Difference, 1e-6)
-                .expect("difference");
+        let hollow = model::boolean(&outer, &inner, model::BooleanOp::Subtract)
+            .expect("difference")
+            .expect("something left");
         round_trip(
             hollow,
             1000.0 - 64.0,
@@ -1056,8 +639,8 @@ mod tests {
     #[test]
     fn a_sheet_is_a_shell_based_surface_model() {
         let square = make::cuboid([0.0, 0.0, 0.0], [2.0, 2.0, 2.0]).unwrap();
-        let face = square.face_keys().next().unwrap();
-        let sheet = ocs_brep::face_sheet(&square, &[face]).expect("sheet");
+        let face = (0..square.faces.len() as u32).next().unwrap();
+        let sheet = model::face_sheet(&square, &[face]).expect("sheet");
         let step = body_step(sheet, false, 1.0);
         assert!(step.contains("SHELL_BASED_SURFACE_MODEL"), "{step}");
         assert!(step.contains("OPEN_SHELL"), "{step}");
@@ -1102,7 +685,15 @@ mod tests {
     #[test]
     fn a_body_that_cannot_be_written_falls_back_to_its_mesh() {
         let item = StepItem {
-            body: Some(Body::new()),
+            body: Some(Brep {
+                version: 1,
+                tolerance: 1e-6,
+                regions: Vec::new(),
+                shells: Vec::new(),
+                faces: Vec::new(),
+                edges: Vec::new(),
+                vertices: Vec::new(),
+            }),
             solid: true,
             mesh: Some(cube()),
             name: String::new(),

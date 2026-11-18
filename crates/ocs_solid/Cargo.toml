@@ -1,0 +1,18 @@
+[package]
+name = "ocs_solid"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# OpenCADStudio on Solidcore: its records read from and written to ACIS (SAT/SAB),
+# solids rebuilt from their history, and what the app asks of Solidcore beside.
+
+[dependencies]
+ocs_geom = { path = "../ocs_geom" }
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "5bea682a56220742c50558e852ef72c33c448198" }
+solidcore = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
+solidcore-convert = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
+solidcore-ops = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
+solidcore-record = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
+solidcore-tess = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
+solidcore-step = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }

@@ -14,11 +14,10 @@ port of NVIDIA's USD BRep SMLib and SM_API (Apache-2.0).
 
 ## Changes from upstream
 
-- `step-export`: `src/brep_to_model.rs` (and its test) are not copied, and the
-  two lines of `lib.rs` that declared and re-exported it are removed; it maps
-  solidcore's own kernel B-rep, which OpenCADStudio does not use (OCS's
-  adapter is `src/io/step.rs`). With it gone the crate needs only
-  `solidcore-record`.
+- `step-export`: `src/brep_to_model.rs` is copied too: OpenCADStudio holds its solids as
+  solidcore records and writes them through it. Changed there: a cone the kernel holds with
+  a negative semi-angle (narrowing along its axis) is written with its axis turned over and
+  the angle positive, as STEP requires, and its pcurves negated in both parameters to match.
 - `step-export/src/lib.rs`, marked `OCS:` in the source:
   - shell models (`BodyKind::ShellModel`) are written as
     `SHELL_BASED_SURFACE_MODEL`s of `OPEN_SHELL`s (or `CLOSED_SHELL`s) in a

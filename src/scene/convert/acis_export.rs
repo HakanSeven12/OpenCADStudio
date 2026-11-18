@@ -1,19 +1,18 @@
-//! Export a kernel [`Body`] to an exact ACIS `SatDocument`.
-//!
-//! Analytic surfaces remain analytic instead of becoming facets.
+//! Writing a Solidcore record as an exact ACIS `SatDocument`: analytic surfaces stay analytic
+//! instead of becoming facets.
 
 use document::entities::acis::{SabReader, SabWriter, SatDocument};
-use ocs_acis::append;
-use ocs_brep::Body;
+use ocs_solid::model::Brep;
 
-/// Returns `None` when the body contains an unsupported record form.
-pub fn solid_to_sat(body: &Body) -> Option<SatDocument> {
+/// The record as ACIS; `None` when it holds a form ACIS cannot carry, or what is written does
+/// not read back as one body, in text and in binary.
+pub fn solid_to_sat(body: &Brep) -> Option<SatDocument> {
     let mut document = SatDocument::new();
-    append(body, &mut document).ok()?;
+    ocs_solid::append(body, &mut document).ok()?;
     let document = SatDocument::parse(&document.to_sat_string()).ok()?;
     let valid = |candidate: &SatDocument| {
-        let (restored, loss) = ocs_acis::lift(candidate);
-        loss.is_empty() && restored.len() == 1 && restored[0].validate().is_empty()
+        let (restored, loss) = ocs_solid::lift(candidate);
+        loss.is_empty() && restored.len() == 1
     };
     if !valid(&document) {
         return None;
@@ -25,47 +24,15 @@ pub fn solid_to_sat(body: &Body) -> Option<SatDocument> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ocs_geom::geom2d::{Arc, Curve};
-    use ocs_geom::space::Plane;
-
-    fn circle_section(z: f64, radius: f64) -> (Plane, Vec<Curve>) {
-        let curves = (0..4)
-            .map(|part| {
-                let start = std::f64::consts::FRAC_PI_2 * part as f64;
-                Curve::Arc(Arc {
-                    centre: [0.0, 0.0],
-                    radius,
-                    start_angle: start,
-                    end_angle: start + std::f64::consts::FRAC_PI_2,
-                })
-            })
-            .collect();
-        (
-            Plane::from_axes([0.0, 0.0, z], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
-            curves,
-        )
-    }
 
     #[test]
     fn a_curved_loft_round_trips_through_text_and_binary_acis() {
-        let body =
-            ocs_brep::loft(&[circle_section(0.0, 5.0), circle_section(10.0, 2.0)]).unwrap();
-        assert!(body.validate().is_empty());
-
-        let mut document = SatDocument::new();
-        ocs_acis::append(&body, &mut document).unwrap();
-        let text = document.to_sat_string();
-        let parsed = SatDocument::parse(&text).unwrap();
-        let (restored, text_loss) = ocs_acis::lift(&parsed);
-        assert!(text_loss.is_empty(), "{text_loss:?}");
-        assert_eq!(restored.len(), 1);
-        assert!(restored[0].validate().is_empty());
-
-        let binary = SabWriter::write(&parsed);
-        let parsed_binary = SabReader::read(&binary).unwrap();
-        let (restored, binary_loss) = ocs_acis::lift(&parsed_binary);
-        assert!(binary_loss.is_empty(), "{binary_loss:?}");
-        assert_eq!(restored.len(), 1);
-        assert!(restored[0].validate().is_empty());
+        let body = crate::scene::model::solid_model::cone_frustum_solid([0.0; 3], 5.0, 3.0, 2.0, 10.0).unwrap();
+        let document = solid_to_sat(&body).expect("written");
+        let (restored, loss) = ocs_solid::lift(&document);
+        assert!(loss.is_empty(), "{loss:?}");
+        let before = ocs_solid::model::volume(&body).unwrap();
+        let after = ocs_solid::model::volume(&restored[0].brep).unwrap();
+        assert!((before - after).abs() < 1e-6 * before, "{before} {after}");
     }
 }

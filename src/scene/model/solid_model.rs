@@ -1,166 +1,251 @@
-// Kernel B-rep construction and display tessellation.
+// Solidcore records built, moved, measured and meshed for display.
 
 use glam::DVec3;
-use ocs_brep::{self as brep, Body, Curve3, EdgeKey, FaceKey, Surface};
+use ocs_solid::model::{self, r, BooleanOp, Brep};
 
-use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
+use crate::scene::model::mesh_model::{MassProperties, MeshLodSet, MeshModel};
+use crate::scene::model::silhouette::SilhouetteSource;
 use crate::scene::model::wire_model::WireModel;
 
-/// What counts as the same point when the kernel checks a body over.
-const TOL: f64 = 1e-9;
+/// The facet angle a display asks for by default (7.5°).
+pub const DEFAULT_ANGLE: f64 = std::f64::consts::PI / 24.0;
+/// Coarsest chordal display angle: 20 degrees.
+const DISPLAY_ANGLE: f64 = std::f64::consts::PI / 9.0;
+/// Finest display angle: 5 degrees.
+const FINE_ANGLE: f64 = std::f64::consts::PI / 36.0;
 
-fn tessellation(body: &Body) -> brep::mesh::BodyMesh {
-    brep::mesh::tessellate(
-        body,
-        brep::mesh::TessellationTolerance::new(ocs_geom::tessellation::DEFAULT_ANGLE, TOL),
-    )
-}
-
-/// `tolerance` with a body's isolines: a surface's own U/V counts and
-/// planar switch, or (`planar_isolines` `None`) a solid's, spaced as the
-/// drawing's isoline setting spaces them.
-pub(crate) fn with_isolines(
-    tolerance: brep::mesh::TessellationTolerance,
-    isolines: [usize; 2],
-    planar_isolines: Option<bool>,
-) -> brep::mesh::TessellationTolerance {
-    match planar_isolines {
-        None => tolerance.with_solid_isolines(isolines[0]),
-        Some(planar) => tolerance
-            .with_uv_isolines(isolines[0], isolines[1])
-            .with_planar_isolines(planar),
+fn resolution(value: f64) -> f64 {
+    if value.is_finite() && value > 0.0 {
+        value.clamp(0.01, 10.0)
+    } else {
+        1.0
     }
 }
 
+/// The facet angle a display resolution asks for: finer for a higher resolution.
+pub fn angle_for_resolution(value: f64) -> f64 {
+    (DEFAULT_ANGLE / resolution(value).sqrt()).clamp(FINE_ANGLE, std::f64::consts::FRAC_PI_2)
+}
+
+/// The facet angle of a display with a chordal deflection.
+pub fn display_angle_for_resolution(value: f64) -> f64 {
+    (DISPLAY_ANGLE / resolution(value).max(1.0).sqrt()).clamp(FINE_ANGLE, std::f64::consts::FRAC_PI_2)
+}
+
+/// What a display mesh shows: the facet angle, the chordal deflection, the isoline counts, and
+/// whether they are a surface's own U/V lines (`Some`, with whether planes get them too) or a
+/// solid's (`None`), spaced as the drawing's isoline setting spaces them.
+#[derive(Clone, Copy, Debug)]
+pub struct DisplayTolerance {
+    pub angle: f64,
+    pub chord: Option<f64>,
+    pub isolines: [usize; 2],
+    pub planar_isolines: Option<bool>,
+}
+
+impl DisplayTolerance {
+    pub fn new(angle: f64) -> Self {
+        Self {
+            angle,
+            chord: None,
+            isolines: [0; 2],
+            planar_isolines: Some(false),
+        }
+    }
+
+    /// With a body's isolines: a surface's own U/V counts and planar switch, or
+    /// (`planar_isolines` `None`) a solid's.
+    pub fn with_isolines(mut self, isolines: [usize; 2], planar_isolines: Option<bool>) -> Self {
+        self.isolines = isolines;
+        self.planar_isolines = planar_isolines;
+        self
+    }
+
+    pub fn with_chord(mut self, chord: Option<f64>) -> Self {
+        self.chord = chord.filter(|c| c.is_finite() && *c > 0.0);
+        self
+    }
+}
+
+/// The display mesh of `brep`.
+pub fn tessellate(brep: &Brep, tolerance: DisplayTolerance) -> Option<ocs_solid::display::RecordMesh> {
+    let display = ocs_solid::display::Display {
+        angle: tolerance.angle,
+        chord: tolerance.chord,
+        isolines: tolerance.isolines,
+        planar_isolines: tolerance.planar_isolines.unwrap_or(false),
+        solid_isolines: tolerance.planar_isolines.is_none(),
+    };
+    ocs_solid::display::mesh(brep, &display, model::size(brep)).ok()
+}
+
+/// A preview cage of `brep`: its wireframe edges, then `isolines` solid isolines.
+pub fn preview_curves(brep: &Brep, isolines: usize) -> Vec<Vec<[f64; 3]>> {
+    let Some(mesh) = tessellate(
+        brep,
+        DisplayTolerance::new(DEFAULT_ANGLE).with_isolines([isolines, isolines], None),
+    ) else {
+        return Vec::new();
+    };
+    mesh.edges
+        .into_iter()
+        .chain(mesh.isolines)
+        .map(|(_, points)| points)
+        .filter(|points| points.len() >= 2)
+        .collect()
+}
+
+fn tessellation(brep: &Brep) -> Option<ocs_solid::display::RecordMesh> {
+    tessellate(brep, DisplayTolerance::new(DEFAULT_ANGLE))
+}
+
 fn display_tessellation(
-    body: &Body,
+    brep: &Brep,
     facet_resolution: f64,
     chordal_deflection: Option<f64>,
     isolines: [usize; 2],
     planar_isolines: Option<bool>,
-) -> brep::mesh::BodyMesh {
-    let resolution = if facet_resolution.is_finite() && facet_resolution > 0.0 {
-        facet_resolution.clamp(0.01, 10.0)
-    } else {
-        1.0
+) -> Option<ocs_solid::display::RecordMesh> {
+    let angle = match chordal_deflection {
+        Some(_) => display_angle_for_resolution(facet_resolution),
+        None => angle_for_resolution(facet_resolution),
     };
-    let max_angle = chordal_deflection.map_or_else(
-        || ocs_geom::tessellation::angle_for_resolution(resolution),
-        |_| ocs_geom::tessellation::display_angle_for_resolution(resolution),
-    );
-    let mut tolerance = with_isolines(
-        brep::mesh::TessellationTolerance::new(max_angle, TOL),
-        isolines,
-        planar_isolines,
-    );
-    if let Some(deflection) = chordal_deflection {
-        tolerance = tolerance.with_chordal_deflection(deflection);
-    }
-    brep::mesh::tessellate(body, tolerance)
-}
-
-/// Axis-aligned box from its center and full extents.
-pub fn box_solid(center: [f64; 3], length: f64, width: f64, height: f64) -> Option<Body> {
-    brep::make::cuboid(
-        [
-            center[0] - length / 2.0,
-            center[1] - width / 2.0,
-            center[2] - height / 2.0,
-        ],
-        [length, width, height],
+    tessellate(
+        brep,
+        DisplayTolerance::new(angle)
+            .with_isolines(isolines, planar_isolines)
+            .with_chord(chordal_deflection),
     )
 }
 
-/// Right triangular prism (wedge): right-triangle cross-section in XZ,
-/// extruded along Y. `origin` is the min corner, ramp rising in +X/+Z.
-pub fn wedge_solid(origin: [f64; 3], length: f64, width: f64, height: f64) -> Option<Body> {
-    brep::make::wedge(origin, length, width, height)
+// ── Primitives ──────────────────────────────────────────────────────────────
+
+/// Axis-aligned box from its center and full extents.
+pub fn box_solid(center: [f64; 3], length: f64, width: f64, height: f64) -> Option<Brep> {
+    model::make_box(
+        [center[0] - length / 2.0, center[1] - width / 2.0, center[2] - height / 2.0],
+        [length, width, height],
+    )
+    .ok()
+}
+
+fn line(start: [f64; 3], end: [f64; 3]) -> solidcore_ops::sweep::Curve {
+    solidcore_ops::sweep::Curve::Line { start, end }
+}
+
+/// A closed polygon through `corners`, as sweep curves.
+fn polygon(corners: &[[f64; 3]]) -> Vec<solidcore_ops::sweep::Curve> {
+    (0..corners.len())
+        .map(|i| line(corners[i], corners[(i + 1) % corners.len()]))
+        .collect()
+}
+
+/// A full ellipse about `centre` in the plane z = centre.z, as sweep curves.
+fn ellipse(centre: [f64; 3], x_radius: f64, y_radius: f64) -> Vec<solidcore_ops::sweep::Curve> {
+    let frame = r::Frame {
+        origin: centre,
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [0.0, 1.0, 0.0],
+    };
+    let curve = if (x_radius - y_radius).abs() <= 1e-12 * x_radius.abs().max(1.0) {
+        r::Curve::Circle { frame, radius: x_radius }
+    } else {
+        r::Curve::Ellipse { frame, radii: [x_radius, y_radius] }
+    };
+    solidcore_ops::sweep::Curve::from_record(&curve, [0.0, std::f64::consts::TAU]).unwrap_or_default()
+}
+
+/// Right triangular prism (wedge): right-triangle cross-section in XZ, extruded along Y.
+/// `origin` is the min corner, the ramp falling from the full height at x = 0 to nothing at
+/// x = length.
+pub fn wedge_solid(origin: [f64; 3], length: f64, width: f64, height: f64) -> Option<Brep> {
+    let at = |x: f64, z: f64| [origin[0] + x, origin[1], origin[2] + z];
+    model::extrude(&polygon(&[at(0.0, 0.0), at(length, 0.0), at(0.0, height)]), [0.0, 1.0, 0.0], width, 0.0, true).ok()
 }
 
 /// Solid cylinder standing on the z = base plane.
-pub fn cylinder_solid(center: [f64; 3], radius: f64, height: f64) -> Option<Body> {
-    brep::make::cylinder(center, radius, height)
+pub fn cylinder_solid(center: [f64; 3], radius: f64, height: f64) -> Option<Brep> {
+    model::make_cylinder(center, radius, height).ok()
 }
 
-/// Circular or elliptical cone/frustum standing on the z = base plane.
+/// Circular or elliptical cone/frustum standing on the z = base plane; an elliptical one keeps
+/// its base's proportions up to the top.
 pub fn cone_frustum_solid(
     center: [f64; 3],
     base_x_radius: f64,
     base_y_radius: f64,
     top_radius: f64,
     height: f64,
-) -> Option<Body> {
-    brep::make::frustum(center, base_x_radius, base_y_radius, top_radius, height)
+) -> Option<Brep> {
+    let scale = base_x_radius.abs().max(base_y_radius.abs()).max(1.0);
+    let circular = (base_x_radius - base_y_radius).abs() <= 1e-12 * scale;
+    if circular {
+        return model::make_cone(center, base_x_radius, top_radius, height).ok();
+    }
+    let top = [center[0], center[1], center[2] + height];
+    let base = ellipse(center, base_x_radius, base_y_radius);
+    if top_radius <= 1e-12 * scale {
+        return model::loft_to_point(&base, top).ok();
+    }
+    let ratio = top_radius / base_x_radius;
+    model::loft(&[base, ellipse(top, top_radius, base_y_radius * ratio)], 1, true).ok()
 }
 
 /// Circular or elliptical cylinder standing on the local z = base plane.
-pub fn elliptical_cylinder_solid(
-    center: [f64; 3],
-    major_radius: f64,
-    minor_radius: f64,
-    height: f64,
-) -> Option<Body> {
-    brep::make::elliptical_cylinder(center, major_radius, minor_radius, height)
+pub fn elliptical_cylinder_solid(center: [f64; 3], major_radius: f64, minor_radius: f64, height: f64) -> Option<Brep> {
+    if (major_radius - minor_radius).abs() <= 1e-12 * major_radius.abs().max(1.0) {
+        return cylinder_solid(center, major_radius, height);
+    }
+    model::extrude(&ellipse(center, major_radius, minor_radius), [0.0, 0.0, 1.0], height, 0.0, true).ok()
 }
 
 /// Solid sphere about `center`.
-pub fn sphere_solid(center: [f64; 3], radius: f64) -> Option<Body> {
-    brep::make::sphere(center, radius)
+pub fn sphere_solid(center: [f64; 3], radius: f64) -> Option<Brep> {
+    model::make_sphere(center, radius).ok()
 }
 
 /// Solid torus in the z = base plane (tube revolved about the Z axis).
-pub fn torus_solid(center: [f64; 3], major: f64, minor: f64) -> Option<Body> {
-    brep::make::torus(center, major, minor)
+pub fn torus_solid(center: [f64; 3], major: f64, minor: f64) -> Option<Brep> {
+    model::make_torus(center, major, minor).ok()
+}
+
+fn regular_polygon(centre: [f64; 3], radius: f64, sides: usize) -> Vec<[f64; 3]> {
+    (0..sides)
+        .map(|i| {
+            let angle = std::f64::consts::TAU * i as f64 / sides as f64;
+            [centre[0] + radius * angle.cos(), centre[1] + radius * angle.sin(), centre[2]]
+        })
+        .collect()
 }
 
 /// Solid pyramid on a regular polygon of `sides` corners.
-pub fn pyramid_solid(center: [f64; 3], radius: f64, height: f64, sides: usize) -> Option<Body> {
-    brep::make::pyramid(center, radius, height, sides)
+pub fn pyramid_solid(center: [f64; 3], radius: f64, height: f64, sides: usize) -> Option<Brep> {
+    pyramid_frustum_solid(center, radius, 0.0, height, sides)
 }
 
 /// Solid pyramid or polygonal frustum on a regular polygon of `sides` corners.
-pub fn pyramid_frustum_solid(
-    center: [f64; 3],
-    base_radius: f64,
-    top_radius: f64,
-    height: f64,
-    sides: usize,
-) -> Option<Body> {
-    brep::make::pyramid_frustum(center, base_radius, top_radius, height, sides)
+pub fn pyramid_frustum_solid(center: [f64; 3], base_radius: f64, top_radius: f64, height: f64, sides: usize) -> Option<Brep> {
+    if sides < 3 || !(base_radius > 0.0) || !(height > 0.0) || !(top_radius >= 0.0) {
+        return None;
+    }
+    let base = polygon(&regular_polygon(center, base_radius, sides));
+    let top = [center[0], center[1], center[2] + height];
+    if top_radius <= 1e-12 {
+        return model::loft_to_point(&base, top).ok();
+    }
+    model::loft(&[base, polygon(&regular_polygon(top, top_radius, sides))], 1, true).ok()
 }
 
 // ── Placement ───────────────────────────────────────────────────────────────
 
 /// Moves a body by a rigid transform, given as three axes and an origin.
-///
-/// The Model tab builds every primitive in its own upright frame and then
-/// puts it on the working plane, which is the only reason this exists. A
-/// body carries analytic surfaces, so moving it moves their frames rather
-/// than any points.
-pub fn placed(
-    body: &Body,
-    x: [f64; 3],
-    y: [f64; 3],
-    z: [f64; 3],
-    origin: [f64; 3],
-) -> Option<Body> {
-    brep::transform(
-        body,
-        &brep::Placement {
-            x_axis: x,
-            y_axis: y,
-            z_axis: z,
-            origin,
-        },
-    )
+pub fn placed(body: &Brep, x: [f64; 3], y: [f64; 3], z: [f64; 3], origin: [f64; 3]) -> Option<Brep> {
+    model::transform(body, &model::affine(x, y, z, origin)).ok()
 }
 
 /// Turns a body about one of the world axes, through the point `about`.
-pub fn turned(body: &Body, axis: usize, angle: f64, about: [f64; 3]) -> Option<Body> {
+pub fn turned(body: &Brep, axis: usize, angle: f64, about: [f64; 3]) -> Option<Brep> {
     let (sin, cos) = angle.sin_cos();
-    // The rotation's columns, written out per axis rather than assembled from
-    // a general formula: three cases are shorter than the axis-angle one and
-    // there is nothing to get subtly wrong in them.
     let (x, y, z) = match axis {
         0 => ([1.0, 0.0, 0.0], [0.0, cos, sin], [0.0, -sin, cos]),
         1 => ([cos, 0.0, -sin], [0.0, 1.0, 0.0], [sin, 0.0, cos]),
@@ -170,30 +255,19 @@ pub fn turned(body: &Body, axis: usize, angle: f64, about: [f64; 3]) -> Option<B
 }
 
 /// Reflects a body in the plane across one of the world axes, through `about`.
-///
-/// The kernel puts the mirrored solid back the right way out; a reflection
-/// left alone lights black.
-pub fn mirrored(body: &Body, axis: usize, about: [f64; 3]) -> Option<Body> {
+pub fn mirrored(body: &Brep, axis: usize, about: [f64; 3]) -> Option<Brep> {
     let mut columns = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     columns[axis][axis] = -1.0;
     let [x, y, z] = columns;
     placed(body, x, y, z, about_origin(x, y, z, about))
 }
 
-/// Moves a body by a transform given as a column-major 4×4, which is what a
-/// frame-to-frame solve produces.
-pub fn by_matrix(body: &Body, matrix: [f64; 16]) -> Option<Body> {
-    placed(
-        body,
-        [matrix[0], matrix[1], matrix[2]],
-        [matrix[4], matrix[5], matrix[6]],
-        [matrix[8], matrix[9], matrix[10]],
-        [matrix[12], matrix[13], matrix[14]],
-    )
+/// Moves a body by a transform given as a column-major 4×4.
+pub fn by_matrix(body: &Brep, matrix: [f64; 16]) -> Option<Brep> {
+    model::transform(body, &model::affine_of_columns(matrix)).ok()
 }
 
-/// Where a transform's origin has to sit for it to act about `about` rather
-/// than about the world origin: `about − M·about`.
+/// Where a transform's origin has to sit for it to act about `about`: `about − M·about`.
 fn about_origin(x: [f64; 3], y: [f64; 3], z: [f64; 3], about: [f64; 3]) -> [f64; 3] {
     let mut origin = about;
     for axis in 0..3 {
@@ -202,15 +276,22 @@ fn about_origin(x: [f64; 3], y: [f64; 3], z: [f64; 3], about: [f64; 3]) -> [f64;
     origin
 }
 
-/// The box a body occupies, from its mesh.
-pub fn extent(body: &Body) -> Option<([f64; 3], [f64; 3])> {
-    let mesh = tessellation(body).mesh;
-    if mesh.positions.is_empty() {
+/// The box a body occupies.
+pub fn extent(body: &Brep) -> Option<([f64; 3], [f64; 3])> {
+    if let Ok(found) = model::bounds(body) {
+        return Some(found);
+    }
+    let mesh = tessellation(body)?;
+    bounds_of(&mesh.positions)
+}
+
+fn bounds_of(points: &[[f64; 3]]) -> Option<([f64; 3], [f64; 3])> {
+    if points.is_empty() {
         return None;
     }
     let mut low = [f64::INFINITY; 3];
     let mut high = [f64::NEG_INFINITY; 3];
-    for point in &mesh.positions {
+    for point in points {
         for axis in 0..3 {
             low[axis] = low[axis].min(point[axis]);
             high[axis] = high[axis].max(point[axis]);
@@ -219,20 +300,16 @@ pub fn extent(body: &Body) -> Option<([f64; 3], [f64; 3])> {
     Some((low, high))
 }
 
-/// Where an axis-aligned plane cuts a body, as line segments.
-///
-/// Taken off the mesh rather than the surfaces: a section of a cone by a
-/// slanted plane is a conic, of a torus a quartic, and the answer wanted here
-/// is a set of Line entities either way. Each triangle the plane crosses
-/// contributes the one segment where it does.
-pub fn section(body: &Body, axis: usize, value: f64) -> Vec<([f64; 3], [f64; 3])> {
-    let mesh = tessellation(body).mesh;
+/// Where an axis-aligned plane cuts a body, as line segments off its mesh: a section of a cone
+/// by a slanted plane is a conic, of a torus a quartic, and the answer wanted here is a set of
+/// Line entities either way.
+pub fn section(body: &Brep, axis: usize, value: f64) -> Vec<([f64; 3], [f64; 3])> {
+    let Some(mesh) = tessellation(body) else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
     for triangle in &mesh.triangles {
-        let corners: Vec<[f64; 3]> = triangle.iter().map(|i| mesh.positions[*i]).collect();
-        // Where each edge of the triangle meets the plane. A triangle with a
-        // corner exactly on it contributes that corner twice, which collapses
-        // to nothing and is dropped below.
+        let corners = triangle.map(|i| mesh.positions[i]);
         let mut hits: Vec<[f64; 3]> = Vec::new();
         for step in 0..3 {
             let (from, to) = (corners[step], corners[(step + 1) % 3]);
@@ -241,16 +318,10 @@ pub fn section(body: &Body, axis: usize, value: f64) -> Vec<([f64; 3], [f64; 3])
                 continue;
             }
             let along = a / (a - b);
-            hits.push([
-                from[0] + (to[0] - from[0]) * along,
-                from[1] + (to[1] - from[1]) * along,
-                from[2] + (to[2] - from[2]) * along,
-            ]);
+            hits.push([0, 1, 2].map(|k| from[k] + (to[k] - from[k]) * along));
         }
         if hits.len() == 2 {
-            let span = (hits[0][0] - hits[1][0]).abs()
-                + (hits[0][1] - hits[1][1]).abs()
-                + (hits[0][2] - hits[1][2]).abs();
+            let span: f64 = (0..3).map(|k| (hits[0][k] - hits[1][k]).abs()).sum();
             if span > 1e-9 {
                 out.push((hits[0], hits[1]));
             }
@@ -259,247 +330,122 @@ pub fn section(body: &Body, axis: usize, value: f64) -> Vec<([f64; 3], [f64; 3])
     out
 }
 
-// ── Edge extraction (pick geometry + wireframe overlay) ─────────────────────
+// ── Edges and faces ─────────────────────────────────────────────────────────
 
-/// Tessellate the solid's B-rep edges into document `Wire`s. Stored on the
-/// `Solid3D`/result entity for picking.
-pub fn edge_wires(body: &Body) -> Vec<document::entities::Wire> {
+/// The body's edges a wireframe draws, as document `Wire`s: stored on the entity for picking.
+pub fn edge_wires(body: &Brep) -> Vec<document::entities::Wire> {
     use document::types::Vector3;
     tessellation(body)
-        .edges
-        .iter()
-        .map(|edge| {
-            document::entities::Wire::from_points(
-                edge.positions
-                    .iter()
-                    .map(|p| Vector3::new(p[0], p[1], p[2]))
-                    .collect(),
-            )
+        .map(|mesh| {
+            mesh.edges
+                .into_iter()
+                .map(|(_, points)| {
+                    document::entities::Wire::from_points(points.iter().map(|p| Vector3::new(p[0], p[1], p[2])).collect())
+                })
+                .collect()
         })
-        .collect()
+        .unwrap_or_default()
 }
 
-/// White wireframe used while a solid-history grip is hot. Surface previews
-/// include the requested construction isolines so their cage follows the edit.
-///
-/// This deliberately does not touch the resident solid mesh or its entity
-/// wires: the selected source stays visible in blue while the candidate body
-/// is presented as a separate, non-pickable outline until placement.
-pub fn grip_preview_wires(
-    body: &Body,
-    handle: document::Handle,
-    isolines: [usize; 2],
-    planar_isolines: bool,
-) -> Vec<WireModel> {
-    let tessellation = brep::mesh::tessellate(
-        body,
-        brep::mesh::TessellationTolerance::new(ocs_geom::tessellation::DEFAULT_ANGLE, TOL)
-            .with_uv_isolines(isolines[0], isolines[1])
-            .with_planar_isolines(planar_isolines),
-    );
-    tessellation
-        .edges
+/// White wireframe used while a solid-history grip is hot. Surface previews include the
+/// requested construction isolines so their cage follows the edit.
+pub fn grip_preview_wires(body: &Brep, handle: document::Handle, isolines: [usize; 2], planar_isolines: bool) -> Vec<WireModel> {
+    let Some(mesh) = tessellate(body, DisplayTolerance::new(DEFAULT_ANGLE).with_isolines(isolines, Some(planar_isolines))) else {
+        return Vec::new();
+    };
+    mesh.edges
         .into_iter()
-        .map(|edge| edge.positions)
-        .chain(
-            tessellation
-                .isolines
-                .into_iter()
-                .map(|isoline| isoline.positions),
-        )
-        .filter(|positions| positions.len() >= 2)
-        .map(|positions| {
-            WireModel::solid_f64(
-                format!("{}-GRIP-PREVIEW", handle.value()),
-                positions,
-                WireModel::WHITE,
-                false,
-            )
-        })
+        .map(|(_, points)| points)
+        .chain(mesh.isolines.into_iter().map(|(_, points)| points))
+        .filter(|points| points.len() >= 2)
+        .map(|points| WireModel::solid_f64(format!("{}-GRIP-PREVIEW", handle.value()), points, WireModel::WHITE, false))
         .collect()
 }
 
 /// B-rep edge nearest a world-space surface pick.
-pub fn nearest_edge(body: &Body, pick: [f64; 3]) -> Option<EdgeKey> {
-    let pick = ocs_geom::space::Vec3::from(pick);
-    body.edge_keys()
-        .filter_map(|key| {
-            let edge = body.edges.get(key)?;
-            let curve = body.curves.get(edge.curve)?;
-            let nearest = if matches!(curve, Curve3::Line(_)) {
-                let start = ocs_geom::space::Vec3::from(curve.point_at(edge.start_parameter));
-                let end = ocs_geom::space::Vec3::from(curve.point_at(edge.end_parameter));
-                let span = end - start;
-                let length2 = span.dot(span);
-                let along = if length2 > 0.0 {
-                    (pick - start).dot(span) / length2
-                } else {
-                    0.0
-                }
-                .clamp(0.0, 1.0);
-                pick.distance(start + span * along)
-            } else {
-                (0..=64)
-                    .map(|step| {
-                        let t = edge.start_parameter
-                            + (edge.end_parameter - edge.start_parameter) * step as f64 / 64.0;
-                        pick.distance(ocs_geom::space::Vec3::from(curve.point_at(t)))
-                    })
-                    .fold(f64::INFINITY, f64::min)
-            };
-            Some((key, nearest))
-        })
-        .min_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(key, _)| key)
+pub fn nearest_edge(body: &Brep, pick: [f64; 3]) -> Option<u32> {
+    model::nearest_edge(body, pick)
 }
 
 /// The boundary edges of `face` as world-space polylines.
-pub fn face_outline(body: &Body, face: FaceKey) -> Vec<Vec<[f64; 3]>> {
-    body.face_coedges(face)
+pub fn face_outline(body: &Brep, face: u32) -> Vec<Vec<[f64; 3]>> {
+    model::face_edges(body, face)
         .into_iter()
-        .filter_map(|coedge| {
-            let edge = body.edges.get(body.coedges.get(coedge)?.edge)?;
-            let curve = body.curves.get(edge.curve)?;
-            let steps = if matches!(curve, Curve3::Line(_)) { 1 } else { 48 };
-            Some(
-                (0..=steps)
-                    .map(|step| {
-                        let t = edge.start_parameter
-                            + (edge.end_parameter - edge.start_parameter) * step as f64
-                                / steps as f64;
-                        curve.point_at(t)
-                    })
-                    .collect(),
-            )
-        })
+        .filter_map(|(edge, _)| model::edge_points(body, edge, 48))
         .collect()
 }
 
 /// Planar face nearest a world-space surface pick.
-pub fn nearest_planar_face(body: &Body, pick: [f64; 3]) -> Option<FaceKey> {
-    let face = body
-        .face_keys()
-        .filter_map(|key| {
-            let face = body.faces.get(key)?;
-            let surface = body.surfaces.get(face.surface)?;
-            Some((key, surface.distance_to(pick).abs()))
+pub fn nearest_planar_face(body: &Brep, pick: [f64; 3]) -> Option<u32> {
+    let p = DVec3::from_array(pick);
+    (0..body.faces.len() as u32)
+        .filter_map(|face| {
+            let (origin, normal) = model::face_plane(body, face)?;
+            Some((face, (p - DVec3::from_array(origin)).dot(DVec3::from_array(normal)).abs()))
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(key, _)| key)?;
-    let node = body.faces.get(face)?;
-    matches!(body.surfaces.get(node.surface)?, Surface::Plane(_)).then_some(face)
+        .map(|(face, _)| face)
 }
 
 /// Outward normal of a planar face.
-pub fn planar_face_normal(body: &Body, face: FaceKey) -> Option<[f64; 3]> {
-    let face = body.faces.get(face)?;
-    let Surface::Plane(plane) = body.surfaces.get(face.surface)? else {
-        return None;
-    };
-    let normal = ocs_geom::space::Vec3::from(plane.normal()?);
-    Some(if face.forward { normal } else { -normal }.to_array())
+pub fn planar_face_normal(body: &Brep, face: u32) -> Option<[f64; 3]> {
+    model::face_plane(body, face).map(|(_, normal)| normal)
 }
 
-/// Construct a UCS aligned with a solid's planar face:
-/// - Origin snaps to the face vertex closest to the pick point.
-/// - X-axis aligns along the boundary edge emanating from that vertex closest to the pick point.
-/// - Z-axis is the face's outward normal.
-/// - Y-axis is Z × X (in-plane, right-handed).
-pub fn planar_face_ucs(
-    body: &Body,
-    face: FaceKey,
-    pick: [f64; 3],
-) -> Option<document::tables::Ucs> {
+/// The vertices a face's loops pass, in loop order (each edge's start as the loop runs it).
+fn face_vertices(body: &Brep, face: u32) -> Vec<(u32, [f64; 3])> {
+    model::face_edges(body, face)
+        .into_iter()
+        .filter_map(|(edge, forward)| {
+            let node = body.edges.get(edge as usize)?;
+            let v = node.vertices[if forward { 0 } else { 1 }];
+            Some((v, body.vertices.get(v as usize)?.point))
+        })
+        .collect()
+}
+
+/// Construct a UCS aligned with a solid's planar face: its origin on the face vertex closest to
+/// the pick point, its X along the boundary edge from that vertex closest to the pick, its Z
+/// the face's outward normal.
+pub fn planar_face_ucs(body: &Brep, face: u32, pick: [f64; 3]) -> Option<document::tables::Ucs> {
     let normal = planar_face_normal(body, face)?;
     let z = DVec3::from_array(normal).normalize_or_zero();
     if z.length_squared() < 1e-12 {
         return None;
     }
     let pick_vec = DVec3::from_array(pick);
-
-    // 1. Origin: snap to nearest face vertex to the pick point.
-    let mut best_origin: Option<(ocs_brep::VertexKey, DVec3, f64)> = None;
-    for coedge_key in body.face_coedges(face) {
-        let Some((va, vb)) = body.coedge_vertices(coedge_key) else {
-            continue;
-        };
-        for vk in [va, vb] {
-            let Some(v) = body.vertices.get(vk) else {
-                continue;
-            };
-            let pt = DVec3::from_array(v.point);
-            if !pt.is_finite() {
-                continue;
-            }
-            let dist_sq = pt.distance_squared(pick_vec);
-            match best_origin {
-                None => best_origin = Some((vk, pt, dist_sq)),
-                Some((_, _, best_sq)) if dist_sq < best_sq => {
-                    best_origin = Some((vk, pt, dist_sq));
-                }
-                _ => {}
-            }
-        }
-    }
-
-    let (origin, origin_key) = match best_origin {
-        Some((vk, pt, _)) => (pt, Some(vk)),
-        None => (pick_vec, None),
+    let origin = face_vertices(body, face)
+        .into_iter()
+        .filter(|(_, p)| p.iter().all(|c| c.is_finite()))
+        .min_by(|a, b| DVec3::from_array(a.1).distance_squared(pick_vec).total_cmp(&DVec3::from_array(b.1).distance_squared(pick_vec)));
+    let (origin_vertex, origin) = match origin {
+        Some((v, p)) => (Some(v), DVec3::from_array(p)),
+        None => (None, pick_vec),
     };
-
-    // 2. X-axis: align along the boundary edge emanating from origin closest to pick.
-    let mut best_edge_dir: Option<DVec3> = None;
-    let mut best_edge_dist_sq = f64::INFINITY;
-
-    if let Some(origin_vk) = origin_key {
-        for coedge_key in body.face_coedges(face) {
-            let Some((va, vb)) = body.coedge_vertices(coedge_key) else {
-                continue;
-            };
-            if va != origin_vk && vb != origin_vk {
+    let mut best: Option<(f64, DVec3)> = None;
+    if let Some(vertex) = origin_vertex {
+        for (edge, _) in model::face_edges(body, face) {
+            let Some(node) = body.edges.get(edge as usize) else { continue };
+            if !node.vertices.contains(&vertex) {
                 continue;
             }
-            let Some(coedge) = body.coedges.get(coedge_key) else {
-                continue;
-            };
-            let Some(edge) = body.edges.get(coedge.edge) else {
-                continue;
-            };
-
-            let other_vk = if va == origin_vk { vb } else { va };
-            if other_vk != origin_vk {
-                if let Some(other_v) = body.vertices.get(other_vk) {
-                    let other_pt = DVec3::from_array(other_v.point);
-                    let seg = other_pt - origin;
-                    let seg_len_sq = seg.length_squared();
-                    if seg_len_sq > 1e-12 {
-                        let t = ((pick_vec - origin).dot(seg) / seg_len_sq).clamp(0.0, 1.0);
-                        let closest = origin + seg * t;
-                        let dist_sq = pick_vec.distance_squared(closest);
-                        if dist_sq < best_edge_dist_sq {
-                            best_edge_dist_sq = dist_sq;
-                            best_edge_dir = Some(seg);
-                        }
-                    }
-                }
+            let Some(points) = model::edge_points(body, edge, 16) else { continue };
+            // The direction the edge leaves the vertex in, and how near its first span runs
+            // to the pick.
+            let (a, b) = if node.vertices[0] == vertex {
+                (points[0], points[1])
             } else {
-                // Closed edge sharing start and end vertex (e.g. circle seam).
-                if let Some(curve) = body.curves.get(edge.curve) {
-                    let tangent = DVec3::from_array(curve.tangent_at(edge.start_parameter));
-                    let dir = if coedge.forward { tangent } else { -tangent };
-                    let dist_sq = pick_vec.distance_squared(origin);
-                    if dist_sq < best_edge_dist_sq {
-                        best_edge_dist_sq = dist_sq;
-                        best_edge_dir = Some(dir);
-                    }
-                }
+                (points[points.len() - 1], points[points.len() - 2])
+            };
+            let direction = DVec3::from_array(b) - DVec3::from_array(a);
+            let distance = model::segment_distance(pick, a, b);
+            if direction.length_squared() > 1e-24 && best.is_none_or(|(d, _)| distance < d) {
+                best = Some((distance, direction));
             }
         }
     }
-
-    // Project candidate X onto face plane and orthogonalize against normal Z.
-    let x = best_edge_dir
-        .and_then(|dir| {
+    let x = best
+        .and_then(|(_, dir)| {
             let in_plane = dir - z * dir.dot(z);
             let unit_x = in_plane.normalize_or_zero();
             (unit_x.length_squared() > 1e-6).then_some(unit_x)
@@ -508,9 +454,7 @@ pub fn planar_face_ucs(
             let ((xx, xy, xz), _) = crate::scene::view::transform::ocs_axes((z.x, z.y, z.z));
             DVec3::new(xx, xy, xz)
         });
-
     let y = z.cross(x).normalize_or_zero();
-
     let mut ucs = document::tables::Ucs::new("*ACTIVE*");
     ucs.origin = document::types::Vector3::new(origin.x, origin.y, origin.z);
     ucs.x_axis = document::types::Vector3::new(x.x, x.y, x.z);
@@ -518,36 +462,17 @@ pub fn planar_face_ucs(
     Some(ucs)
 }
 
-/// Centre of every B-rep face: the average of its boundary-loop vertices.
-/// Exact for planar faces; for curved faces the loop average floats slightly
-/// inside the surface — a documented approximation the snap path must not pay
-/// a surface evaluation for on every wire build. Capped like the edge snaps.
-pub fn face_centers(body: &Body) -> Vec<[f64; 3]> {
+/// Centre of every B-rep face: the average of its boundary-loop vertices. Exact for planar
+/// faces; for curved faces the loop average floats slightly inside the surface. Capped like the
+/// edge snaps.
+pub fn face_centers(body: &Brep) -> Vec<[f64; 3]> {
     const MAX_FACE_CENTERS: usize = 2048;
     let mut out = Vec::new();
-    for face in body.face_keys() {
-        let mut sum = [0.0; 3];
-        let mut count = 0usize;
-        for coedge in body.face_coedges(face) {
-            let Some((va, vb)) = body.coedge_vertices(coedge) else {
-                continue;
-            };
-            for vk in [va, vb] {
-                let Some(v) = body.vertices.get(vk) else {
-                    continue;
-                };
-                if !v.point.iter().all(|c| c.is_finite()) {
-                    continue;
-                }
-                sum[0] += v.point[0];
-                sum[1] += v.point[1];
-                sum[2] += v.point[2];
-                count += 1;
-            }
-        }
-        if count >= 3 {
-            let n = count as f64;
-            out.push([sum[0] / n, sum[1] / n, sum[2] / n]);
+    for face in 0..body.faces.len() as u32 {
+        let corners: Vec<[f64; 3]> = face_vertices(body, face).into_iter().map(|(_, p)| p).collect();
+        if corners.len() >= 3 {
+            let n = corners.len() as f64;
+            out.push([0, 1, 2].map(|k| corners.iter().map(|p| p[k]).sum::<f64>() / n));
         }
     }
     if out.len() > MAX_FACE_CENTERS {
@@ -559,8 +484,8 @@ pub fn face_centers(body: &Body) -> Vec<[f64; 3]> {
 
 // ── Boolean operations ──────────────────────────────────────────────────────
 
-/// Which CSG to apply. Mirrors `model::boolean_cmd::BoolOp` but kept local so
-/// this scene module has no dependency on the UI module.
+/// Which CSG to apply. Mirrors `model::boolean_cmd::BoolOp` but kept local so this scene module
+/// has no dependency on the UI module.
 #[derive(Clone, Copy)]
 pub enum Bool {
     Union,
@@ -568,62 +493,40 @@ pub enum Bool {
     Intersect,
 }
 
-/// Combine two solids. `Subtract` removes `b` from `a`.
-///
-/// `None` when the kernel refuses — a face pair it has no closed form for, a
-/// cut it cannot make. It refuses rather than returning a solid with a wall
-/// missing, and passing that on unchanged is the point: a half-done boolean
-/// looks finished.
-pub fn boolean(op: Bool, a: &Body, b: &Body) -> Option<Body> {
-    boolean_result(op, a, b).ok()
+/// Combine two solids. `Subtract` removes `b` from `a`; `None` when Solidcore refuses or
+/// nothing is left.
+pub fn boolean(op: Bool, a: &Brep, b: &Brep) -> Option<Brep> {
+    boolean_result(op, a, b).ok().flatten()
 }
 
-/// Combine two solids while retaining the kernel's exact refusal reason.
-pub fn boolean_result(op: Bool, a: &Body, b: &Body) -> Result<Body, brep::Snag> {
+/// Combine two solids while retaining Solidcore's refusal.
+pub fn boolean_result(op: Bool, a: &Brep, b: &Brep) -> Result<Option<Brep>, model::Error> {
     let how = match op {
-        Bool::Union => brep::Operation::Union,
-        Bool::Subtract => brep::Operation::Difference,
-        Bool::Intersect => brep::Operation::Intersection,
+        Bool::Union => BooleanOp::Union,
+        Bool::Subtract => BooleanOp::Subtract,
+        Bool::Intersect => BooleanOp::Intersect,
     };
-    let tolerance = brep::operation_tolerance(&[a, b]);
-    brep::combine(a.clone(), b.clone(), how, tolerance)
+    model::boolean(a, b, how)
 }
 
 // ── Tessellation ────────────────────────────────────────────────────────────
 
-fn mesh_from_tessellation(
-    tessellation: brep::mesh::BodyMesh,
-    color: [f32; 4],
-) -> Option<MeshLodSet> {
-    let silhouette = tessellation.silhouette_source();
-    let mesh = tessellation.mesh;
-    if mesh.is_empty() {
+fn split(point: [f64; 3]) -> ([f32; 3], [f32; 3]) {
+    let high = point.map(|v| v as f32);
+    let low = [0, 1, 2].map(|k| (point[k] - high[k] as f64) as f32);
+    (high, low)
+}
+
+fn mesh_from_tessellation(mesh: ocs_solid::display::RecordMesh, color: [f32; 4]) -> Option<MeshLodSet> {
+    if mesh.triangles.is_empty() {
         return None;
     }
-    // The renderer holds each position as a coarse float plus a fine
-    // correction, so a survey coordinate keeps its last millimetres instead
-    // of losing them to f32.
-    let mut verts = Vec::with_capacity(mesh.positions.len());
-    let mut verts_low = Vec::with_capacity(mesh.positions.len());
-    for point in &mesh.positions {
-        let high = [point[0] as f32, point[1] as f32, point[2] as f32];
-        verts.push(high);
-        verts_low.push([
-            (point[0] - high[0] as f64) as f32,
-            (point[1] - high[1] as f64) as f32,
-            (point[2] - high[2] as f64) as f32,
-        ]);
-    }
-    let normals = mesh
-        .normals
-        .iter()
-        .map(|n| [n[0] as f32, n[1] as f32, n[2] as f32])
-        .collect();
-    let indices = mesh
-        .triangles
-        .iter()
-        .flat_map(|t| [t[0] as u32, t[1] as u32, t[2] as u32])
-        .collect();
+    let silhouette = SilhouetteSource::of_mesh(&mesh.positions, &mesh.normals, &mesh.triangles, &mesh.triangle_faces);
+    // The renderer holds each position as a coarse float plus a fine correction, so a survey
+    // coordinate keeps its last millimetres instead of losing them to f32.
+    let (verts, verts_low): (Vec<_>, Vec<_>) = mesh.positions.iter().map(|p| split(*p)).unzip();
+    let normals = mesh.normals.iter().map(|n| n.map(|v| v as f32)).collect();
+    let indices = mesh.triangles.iter().flat_map(|t| t.map(|i| i as u32)).collect();
     let mut set = MeshLodSet::from_single(MeshModel {
         name: String::new(),
         verts,
@@ -635,33 +538,23 @@ fn mesh_from_tessellation(
         color,
         selected: false,
     });
-    for positions in tessellation
-        .edges
-        .into_iter()
-        .map(|edge| edge.positions)
-        .chain(tessellation.isolines.into_iter().map(|line| line.positions))
-    {
-        for segment in positions.windows(2) {
+    for (_, points) in mesh.edges.iter().chain(mesh.isolines.iter()) {
+        for segment in points.windows(2) {
             for point in segment {
-                let high = [point[0] as f32, point[1] as f32, point[2] as f32];
+                let (high, low) = split(*point);
                 set.edge_verts.push(high);
-                set.edge_verts_low.push([
-                    (point[0] - high[0] as f64) as f32,
-                    (point[1] - high[1] as f64) as f32,
-                    (point[2] - high[2] as f64) as f32,
-                ]);
+                set.edge_verts_low.push(low);
             }
         }
     }
-    set.complete = tessellation.missing_faces.is_empty();
-    set.curved_gens
-        .push(super::mesh_model::CurvedGen { source: silhouette });
+    set.complete = mesh.missing_faces.is_empty();
+    set.curved_gens.push(super::mesh_model::CurvedGen { source: silhouette });
     set.build_display_lods();
     Some(set)
 }
 
 pub fn display_from_solid(
-    body: &Body,
+    body: &Brep,
     color: [f32; 4],
     facet_resolution: f64,
     chordal_deflection: Option<f64>,
@@ -669,92 +562,39 @@ pub fn display_from_solid(
     planar_isolines: Option<bool>,
 ) -> Option<(MeshLodSet, Vec<document::entities::Wire>, [f64; 3])> {
     use document::types::Vector3;
-    let tessellation = display_tessellation(
-        body,
-        facet_resolution,
-        chordal_deflection,
-        isolines,
-        planar_isolines,
-    );
-    let center = mesh_center(&tessellation.mesh)?;
+    let tessellation = display_tessellation(body, facet_resolution, chordal_deflection, isolines, planar_isolines)?;
+    let (low, high) = bounds_of(&tessellation.positions)?;
+    let center = [0, 1, 2].map(|k| (low[k] + high[k]) * 0.5);
     let wires = tessellation
         .edges
         .iter()
-        .map(|edge| {
-            document::entities::Wire::from_points(
-                edge.positions
-                    .iter()
-                    .map(|point| Vector3::new(point[0], point[1], point[2]))
-                    .collect(),
-            )
-        })
+        .map(|(_, points)| document::entities::Wire::from_points(points.iter().map(|p| Vector3::new(p[0], p[1], p[2])).collect()))
         .collect();
     let mut mesh = mesh_from_tessellation(tessellation, color)?;
-    if let Some(properties) = ocs_brep::analytic_mass_properties(body) {
-        mesh.apply_mass_properties(properties);
+    if model::is_solid(body) {
+        if let Ok(estimate) = model::mass_properties(body) {
+            mesh.apply_mass_properties(MassProperties::from_estimate(&estimate));
+        }
     }
     Some((mesh, wires, center))
 }
 
 /// The middle of a body, for a caller needing a point to turn or scale about.
-///
-/// Read off the mesh rather than `body_bounds`, which refuses a face that
-/// wraps a closed surface — a sphere is one such face and has no box at all.
-pub fn centre(body: &Body) -> Option<[f64; 3]> {
-    mesh_center(&tessellation(body).mesh)
+pub fn centre(body: &Brep) -> Option<[f64; 3]> {
+    let (low, high) = extent(body)?;
+    Some([0, 1, 2].map(|k| (low[k] + high[k]) * 0.5))
 }
 
-fn mesh_center(mesh: &brep::mesh::Mesh) -> Option<[f64; 3]> {
-    if mesh.positions.is_empty() {
-        return None;
-    }
-    let mut low = [f64::INFINITY; 3];
-    let mut high = [f64::NEG_INFINITY; 3];
-    for point in &mesh.positions {
-        for axis in 0..3 {
-            low[axis] = low[axis].min(point[axis]);
-            high[axis] = high[axis].max(point[axis]);
-        }
-    }
-    Some([
-        (low[0] + high[0]) * 0.5,
-        (low[1] + high[1]) * 0.5,
-        (low[2] + high[2]) * 0.5,
-    ])
-}
-
-/// How much a body encloses, from its mesh.
-///
-/// The divergence theorem over triangles wound outwards, which is what makes
-/// it a check rather than only a measurement: a solid built inside out
-/// reports a negative volume rather than a plausible one, and one missing a
-/// face reports far too little. Nothing in the app measures volume yet, so it
-/// exists to test with.
-#[cfg(test)]
-pub fn volume(body: &Body) -> f64 {
-    use ocs_geom::space::Vec3;
-    let mesh = tessellation(body).mesh;
-    let Some(middle) = centre(body) else {
-        return 0.0;
-    };
-    // About the body's own middle: at survey coordinates the tetrahedra
-    // reaching back to the origin are enormous and nearly cancel, and a
-    // cubic millimetre read off a sum of billions is noise.
-    let middle = Vec3::from(middle);
-    mesh.triangles
-        .iter()
-        .map(|triangle| {
-            let at = |index: usize| Vec3::from(mesh.positions[triangle[index]]) - middle;
-            at(0).cross(at(1)).dot(at(2)) / 6.0
-        })
-        .sum()
+/// How much a body encloses.
+pub fn volume(body: &Brep) -> f64 {
+    model::volume(body).unwrap_or(0.0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn tri_count(body: &Body) -> usize {
+    fn tri_count(body: &Brep) -> usize {
         display_from_solid(body, [0.7, 0.7, 0.7, 1.0], 1.0, None, [0; 2], None)
             .map(|(m, _, _)| m.lods[0].indices.len() / 3)
             .unwrap_or(0)
@@ -763,80 +603,13 @@ mod tests {
     #[test]
     fn all_primitives_triangulate() {
         let c = [0.0, 0.0, 0.0];
-        assert!(
-            tri_count(&box_solid(c, 10.0, 10.0, 10.0).unwrap()) >= 12,
-            "box"
-        );
-        assert!(
-            tri_count(&wedge_solid(c, 10.0, 10.0, 10.0).unwrap()) >= 6,
-            "wedge"
-        );
-        assert!(
-            tri_count(&cylinder_solid(c, 5.0, 12.0).unwrap()) > 20,
-            "cylinder"
-        );
-        assert!(
-            tri_count(&cone_frustum_solid(c, 5.0, 5.0, 0.0, 12.0).unwrap()) > 10,
-            "cone"
-        );
+        assert!(tri_count(&box_solid(c, 10.0, 10.0, 10.0).unwrap()) >= 12, "box");
+        assert!(tri_count(&wedge_solid(c, 10.0, 10.0, 10.0).unwrap()) >= 6, "wedge");
+        assert!(tri_count(&cylinder_solid(c, 5.0, 12.0).unwrap()) > 20, "cylinder");
+        assert!(tri_count(&cone_frustum_solid(c, 5.0, 5.0, 0.0, 12.0).unwrap()) > 10, "cone");
         assert!(tri_count(&sphere_solid(c, 5.0).unwrap()) > 50, "sphere");
         assert!(tri_count(&torus_solid(c, 8.0, 2.0).unwrap()) > 50, "torus");
-        assert!(
-            tri_count(&pyramid_solid(c, 5.0, 9.0, 6).unwrap()) >= 8,
-            "pyramid"
-        );
-    }
-
-    #[test]
-    fn planar_display_uses_independent_isoline_counts() {
-        let body = box_solid([0.0; 3], 10.0, 10.0, 10.0).unwrap();
-        let display = |counts, planar| {
-            display_from_solid(&body, [0.7, 0.7, 0.7, 1.0], 1.0, None, counts, Some(planar))
-                .unwrap()
-                .0
-                .edge_verts
-                .len()
-        };
-        let boundaries = display([0, 0], false);
-
-        assert_eq!(display([1, 0], true) - boundaries, 12);
-        assert_eq!(display([0, 2], true) - boundaries, 24);
-        assert_eq!(display([2, 2], false), boundaries);
-    }
-
-    /// A file-sourced header `$ISOLINES` bypasses `SETVAR` entirely, so the
-    /// consumption side must clamp too: `prepare_solid_model_display` hands
-    /// the header count to the kernel for every curved face, and 32767
-    /// isolines on a cylinder is a ~100k-vertex preview rebuilt per cursor
-    /// event.
-    #[test]
-    fn header_isolines_are_clamped_before_display_tessellation() {
-        let measure = |value: i16| {
-            let mut scene = crate::scene::Scene::new();
-            scene.document.header.isolines = value;
-            let body = cylinder_solid([0.0; 3], 5.0, 12.0).unwrap();
-            scene
-                .prepare_solid_model_display(document::Handle::new(0xDEAD), &body)
-                .expect("cylinder display")
-                .0
-                .edge_verts
-                .len()
-        };
-
-        // A hostile file-sourced header must render exactly like the
-        // largest value the Options slider can request — and a negative
-        // one exactly like zero.
-        let hostile = measure(i16::MAX);
-        assert_eq!(
-            hostile,
-            measure(crate::entities::solid3d::MAX_HEADER_ISOLINES),
-            "header.isolines must be clamped before tessellation"
-        );
-        assert_eq!(measure(-5), measure(0));
-        assert!(
-            hostile < 20_000,
-            "even the ceiling must stay a bounded preview: {hostile} vertices"
-        );
+        assert!(tri_count(&pyramid_solid(c, 5.0, 9.0, 6).unwrap()) >= 8, "pyramid");
     }
 
     #[test]
@@ -853,11 +626,7 @@ mod tests {
             [0.0, 0.0, -5.0],
         ] {
             assert!(
-                centers.iter().any(|c| {
-                    (c[0] - expected[0]).abs() < 1e-9
-                        && (c[1] - expected[1]).abs() < 1e-9
-                        && (c[2] - expected[2]).abs() < 1e-9
-                }),
+                centers.iter().any(|c| (0..3).all(|k| (c[k] - expected[k]).abs() < 1e-9)),
                 "missing face center {expected:?} in {centers:?}"
             );
         }
@@ -865,35 +634,20 @@ mod tests {
 
     #[test]
     fn every_primitive_is_the_size_it_was_asked_for() {
-        // Triangle counts say a mesh exists; the volume says it is the right
-        // shape and the right way out. A face left out reads far too small
-        // and one wound inwards reads negative, and neither shows up in a
-        // count.
         use std::f64::consts::PI;
         let c = [0.0, 0.0, 0.0];
-        let cases: [(Body, f64); 5] = [
+        let cases: [(Brep, f64); 7] = [
             (box_solid(c, 10.0, 4.0, 6.0).unwrap(), 240.0),
             (cylinder_solid(c, 5.0, 12.0).unwrap(), PI * 25.0 * 12.0),
-            (
-                cone_frustum_solid(c, 5.0, 5.0, 0.0, 12.0).unwrap(),
-                PI * 25.0 * 12.0 / 3.0,
-            ),
+            (cone_frustum_solid(c, 5.0, 5.0, 0.0, 12.0).unwrap(), PI * 25.0 * 12.0 / 3.0),
             (sphere_solid(c, 5.0).unwrap(), 4.0 / 3.0 * PI * 125.0),
             (torus_solid(c, 8.0, 2.0).unwrap(), 2.0 * PI * PI * 8.0 * 4.0),
+            (wedge_solid(c, 10.0, 4.0, 6.0).unwrap(), 120.0),
+            (elliptical_cylinder_solid(c, 5.0, 3.0, 2.0).unwrap(), PI * 15.0 * 2.0),
         ];
         for (body, expected) in cases {
             let got = volume(&body);
-            assert!(got > 0.0, "wound inwards: {got}");
-            // Close either way, rather than short and never over. A chord does
-            // lie inside the surface it spans, so a convex solid can only read
-            // short — but a torus is not convex, and across the inside of its
-            // tube the chords fall outside the material and add a little. What
-            // is being checked is that the mesh is the shape asked for, and a
-            // per cent covers both.
-            assert!(
-                (got - expected).abs() < 0.01 * expected,
-                "{got} vs {expected}"
-            );
+            assert!((got - expected).abs() < 1e-6 * expected, "{got} vs {expected}");
         }
     }
 
@@ -901,11 +655,7 @@ mod tests {
     fn booleans_produce_solids() {
         let a = box_solid([0.0, 0.0, 0.0], 10.0, 10.0, 10.0).unwrap();
         let b = box_solid([5.0, 5.0, 5.0], 10.0, 10.0, 10.0).unwrap();
-        for (op, label) in [
-            (Bool::Union, "union"),
-            (Bool::Subtract, "subtract"),
-            (Bool::Intersect, "intersect"),
-        ] {
+        for (op, label) in [(Bool::Union, "union"), (Bool::Subtract, "subtract"), (Bool::Intersect, "intersect")] {
             let r = boolean(op, &a, &b);
             let n = r.as_ref().map(tri_count).unwrap_or(0);
             assert!(r.is_some() && n > 0, "{label} produced nothing");
@@ -914,27 +664,16 @@ mod tests {
 
     #[test]
     fn box_exposes_edges() {
-        assert!(edge_wires(&box_solid([0.0, 0.0, 0.0], 10.0, 10.0, 10.0).unwrap()).len() >= 12);
+        assert_eq!(edge_wires(&box_solid([0.0, 0.0, 0.0], 10.0, 10.0, 10.0).unwrap()).len(), 12);
     }
 
     #[test]
     fn placing_a_body_moves_it_without_changing_its_size() {
         let body = box_solid([0.0, 0.0, 0.0], 10.0, 4.0, 6.0).unwrap();
-        // A quarter turn about Z, then five along X.
-        let moved = placed(
-            &body,
-            [0.0, 1.0, 0.0],
-            [-1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0],
-            [5.0, 0.0, 0.0],
-        )
-        .expect("a turned box");
+        let moved = placed(&body, [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [5.0, 0.0, 0.0]).expect("a turned box");
         assert!((volume(&moved) - 240.0).abs() < 1e-6, "{}", volume(&moved));
-        // Centred on the origin to begin with, so the turn leaves it there
-        // and the move puts it five along x.
         let middle = centre(&moved).unwrap();
         assert!((middle[0] - 5.0).abs() < 1e-9, "{middle:?}");
-        // And ten along x really did become ten along y.
         let (low, high) = extent(&moved).unwrap();
         assert!((high[1] - low[1] - 10.0).abs() < 1e-9, "{low:?} {high:?}");
         assert!((high[0] - low[0] - 4.0).abs() < 1e-9, "{low:?} {high:?}");

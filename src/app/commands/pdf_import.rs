@@ -497,6 +497,7 @@ fn apply_geo_placement(
 
 /// Build final underlays without manual placement prompts only when every
 /// selected PDF page has an unambiguous transform in the current host context.
+#[cfg(test)]
 pub(super) fn fully_georeferenced_pdf_pages(
     scene: &crate::scene::Scene,
     kind: document::entities::UnderlayType,
@@ -802,9 +803,10 @@ mod geo_attach_tests {
         assert!(state.geopdf_available);
         assert!(state.geopdf_auto);
 
-        let _ = app.update(crate::app::Message::PdfDialog(
+        let ok = app.update(crate::app::Message::PdfDialog(
             crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachOk,
         ));
+        app.drive_headless_task(ok).expect("OK's GeoPDF read");
 
         assert!(app.tabs[i].active_cmd.is_none());
         assert!(app.pdf_attach.is_none());

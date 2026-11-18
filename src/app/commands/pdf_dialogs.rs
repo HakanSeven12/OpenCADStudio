@@ -982,6 +982,9 @@ impl OpenCADStudio {
             PdfDialogMsg::AttachNameRead(path, read) => {
                 return self.finish_attach_name_read(&path, &read);
             }
+            PdfDialogMsg::AttachOkChecked(path, pages, automatic) => {
+                return self.finish_pdf_attach_ok_check(i, &path, &pages, automatic);
+            }
             PdfDialogMsg::AttachPlaced(tab_id, generation, placed) => {
                 self.finish_attach_pdf_pages(tab_id, generation, *placed);
             }
@@ -1402,26 +1405,82 @@ impl OpenCADStudio {
         Task::none()
     }
 
+    /// OK in the Attach window. With the automatic GeoPDF choice on and a
+    /// coordinate system in the drawing, the placement of the pages is read
+    /// off the UI thread first, and OK goes on when the read ends
+    /// ([`Self::finish_pdf_attach_ok_check`]); the window stays open until
+    /// then.
     fn pdf_attach_ok(&mut self, i: usize) -> Task<Message> {
-        use crate::command::CadCommand;
+        self.pdf_attach_ok_with(i, super::pdf_import::georeferenced_pages_in)
+    }
+
+    /// [`Self::pdf_attach_ok`] with the GeoPDF check given, so a test can
+    /// give one that panics.
+    pub(in crate::app) fn pdf_attach_ok_with(
+        &mut self,
+        i: usize,
+        check: super::pdf_import::GeoPdfCheck,
+    ) -> Task<Message> {
         let Some(state) = self.pdf_attach.as_ref() else {
             return Task::none();
         };
+        if !state.geopdf_auto {
+            return self.finish_pdf_attach_ok(i, None);
+        }
         let plane = if self.tabs[i].editing_model_space() {
             self.tabs[i].ucs_xform().working_plane()
         } else {
             crate::command::WorkingPlane::default()
         };
-        let automatic = if state.geopdf_auto {
-            super::pdf_import::fully_georeferenced_pdf_pages(
-                &self.tabs[i].scene,
-                state.kind,
-                &state.path,
-                &state.page_labels(),
-                plane,
-            )
-        } else {
-            None
+        let kind = state.kind;
+        let context = super::pdf_import::geo_context(&self.tabs[i].scene, kind, true);
+        if context.is_none() {
+            return self.finish_pdf_attach_ok(i, None);
+        }
+        let path = state.path.clone();
+        let pages = state.page_labels();
+        let (worker_path, worker_pages) = (path.clone(), pages.clone());
+        crate::app::update::background_task(
+            "PDFATTACH",
+            move || check(context.as_ref(), kind, &worker_path, &worker_pages, plane),
+            move |automatic| {
+                Message::PdfDialog(PdfDialogMsg::AttachOkChecked(path, pages, automatic))
+            },
+        )
+    }
+
+    /// The end of OK's GeoPDF read: OK goes on if the window is still open
+    /// on that file with those pages and the automatic choice on; else the
+    /// answer is dropped, and the window stays as the user left it.
+    fn finish_pdf_attach_ok_check(
+        &mut self,
+        i: usize,
+        path: &str,
+        pages: &[String],
+        automatic: Option<Vec<(String, document::EntityType)>>,
+    ) -> Task<Message> {
+        if !self.dialog_open(crate::app::ModalKind::PdfAttach) {
+            return Task::none();
+        }
+        let current = self.pdf_attach.as_ref().is_some_and(|state| {
+            state.geopdf_auto && state.path == path && state.page_labels() == pages
+        });
+        if !current {
+            return Task::none();
+        }
+        self.finish_pdf_attach_ok(i, automatic)
+    }
+
+    /// OK's steps after the GeoPDF placement is known: `automatic` has the
+    /// placed underlays when every page has a GeoPDF placement.
+    fn finish_pdf_attach_ok(
+        &mut self,
+        i: usize,
+        automatic: Option<Vec<(String, document::EntityType)>>,
+    ) -> Task<Message> {
+        use crate::command::CadCommand;
+        let Some(state) = self.pdf_attach.as_ref() else {
+            return Task::none();
         };
         let number = |s: &str| s.trim().parse::<f64>().ok();
         let insertion = if automatic.is_some() {

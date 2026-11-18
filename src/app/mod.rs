@@ -5311,6 +5311,10 @@ pub enum Message {
     ShortcutEditorApplyExit,
     /// The check button on a draft row: finish the addition without applying.
     ShortcutEditorDraftAccept,
+    /// Pick an xlsx/csv/txt shortcut file and merge it into the editor rows.
+    ShortcutEditorImport,
+    /// The picked file's bytes, or the read error (none when cancelled).
+    ShortcutEditorImported(Option<Result<Vec<u8>, String>>),
     /// Show the "Reset to default" confirmation.
     ShortcutEditorResetAsk,
     /// Reset bindings and rows to the shipped defaults.

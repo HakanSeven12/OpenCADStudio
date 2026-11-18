@@ -630,6 +630,14 @@ fn workbook_metadata_bytes(bytes: &[u8]) -> Result<(Vec<String>, Vec<String>), S
     Ok((sheets, names))
 }
 
+/// Rows of the first sheet of a workbook held in memory (no path to reopen).
+pub(crate) fn workbook_first_sheet_rows(bytes: &[u8]) -> Result<Vec<Vec<String>>, String> {
+    use calamine::open_workbook_auto_from_rs;
+    let mut workbook =
+        open_workbook_auto_from_rs(Cursor::new(bytes)).map_err(|error| error.to_string())?;
+    workbook_rows(&mut workbook, None, LinkRange::EntireSheet, None).map(|(rows, _)| rows)
+}
+
 fn named_range_target(formula: &str) -> Option<(String, String)> {
     let formula = formula.trim().trim_start_matches('=');
     let (sheet, range) = formula.rsplit_once('!')?;
@@ -1347,7 +1355,7 @@ pub(crate) fn write_extraction_file(path: &Path, rows: &[Vec<String>]) -> Result
 }
 
 /// A one-sheet workbook holding the rows as text cells.
-fn xlsx_bytes(rows: &[Vec<String>]) -> Result<Vec<u8>, String> {
+pub(crate) fn xlsx_bytes(rows: &[Vec<String>]) -> Result<Vec<u8>, String> {
     use std::io::Write;
     fn column_name(mut index: usize) -> String {
         let mut name = String::new();

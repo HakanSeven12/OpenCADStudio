@@ -419,20 +419,9 @@ impl OpenCADStudio {
                 }
                 match std::fs::read_to_string(path) {
                     Ok(text) => {
-                        let mut n = 0usize;
-                        for line in text.lines() {
-                            let line = line.trim();
-                            if line.is_empty() || line.starts_with('#') {
-                                continue;
-                            }
-                            if let Some((k, v)) = line.split_once(char::is_whitespace) {
-                                let key = crate::app::shortcuts::normalize_key(k);
-                                if !key.is_empty() {
-                                    self.shortcut_bindings.insert(key, v.trim().to_uppercase());
-                                    n += 1;
-                                }
-                            }
-                        }
+                        let (rows, _skipped) = crate::app::shortcuts::parse_shortcut_import(&text);
+                        let n = rows.len();
+                        self.shortcut_bindings.extend(rows);
                         crate::app::shortcuts::sync_space_dispatch_flag(&self.shortcut_bindings);
                         self.persist_settings_if_changed();
                         self.command_line.push_output(

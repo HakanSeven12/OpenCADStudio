@@ -108,6 +108,162 @@ pub(super) const PLATFORM_BINDINGS: &[(&str, &str)] = &[("CMD+,", "OPTIONS")];
 #[cfg(not(target_os = "macos"))]
 pub(super) const PLATFORM_BINDINGS: &[(&str, &str)] = &[];
 
+/// Split one leading CSV field off `text`: either a quoted field (with `""`
+/// as an escaped quote) or a bare one running to the next comma. Returns the
+/// field and the text after the separating comma (empty when none).
+fn csv_field(text: &str) -> Option<(String, &str)> {
+    let text = text.trim_start();
+    if let Some(body) = text.strip_prefix('"') {
+        let mut out = String::new();
+        let mut chars = body.char_indices().peekable();
+        while let Some((i, c)) = chars.next() {
+            if c != '"' {
+                out.push(c);
+            } else if matches!(chars.peek(), Some((_, '"'))) {
+                out.push('"');
+                chars.next();
+            } else {
+                let rest = body[i + 1..].trim_start();
+                return match rest.strip_prefix(',') {
+                    Some(rest) => Some((out, rest)),
+                    None if rest.is_empty() => Some((out, rest)),
+                    None => None,
+                };
+            }
+        }
+        None
+    } else {
+        Some(match text.split_once(',') {
+            Some((field, rest)) => (field.trim().to_string(), rest),
+            None => (text.trim().to_string(), ""),
+        })
+    }
+}
+
+/// Split one import line into its raw key and command text. Accepts the
+/// tab-separated text and the comma-separated file written by the editor's
+/// Export, and the "KEY COMMAND" line of CUIEXPORT.
+fn split_import_line(line: &str) -> Option<(String, String)> {
+    if line.starts_with('"') {
+        let (key, rest) = csv_field(line)?;
+        let (command, _) = csv_field(rest)?;
+        return Some((key, command));
+    }
+    if let Some((key, command)) = line.split_once('\t') {
+        return Some((key.trim().to_string(), command.trim().to_string()));
+    }
+    // First separator: whitespace (CUIEXPORT) or comma (csv). A comma that
+    // directly follows `+` (e.g. `CTRL+,`) or starts the line (the bare `,`
+    // key of a CUIEXPORT line) belongs to the key.
+    let mut prev = None;
+    for (i, c) in line.char_indices() {
+        if c.is_whitespace() || (c == ',' && !matches!(prev, None | Some('+'))) {
+            let (key, rest) = (&line[..i], &line[i..]);
+            let rest = if c == ',' {
+                csv_field(&rest[1..])?.0
+            } else {
+                rest.trim().to_string()
+            };
+            return Some((key.trim().to_string(), rest));
+        }
+        prev = Some(c);
+    }
+    None
+}
+
+/// Parse shortcut text: tab-separated or comma-separated rows as written by
+/// the shortcut editor's Export, or "KEY COMMAND" lines as written by
+/// CUIEXPORT. Blank lines, `#` comments and the Key/Command header are
+/// ignored; lines without a usable key and command are skipped and counted.
+/// Keys come back normalized and commands uppercased.
+pub(super) fn parse_shortcut_import(text: &str) -> (Vec<(String, String)>, usize) {
+    let mut rows = Vec::new();
+    let mut skipped = 0usize;
+    for line in text.trim_start_matches('\u{feff}').lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        match split_import_line(line) {
+            Some((key, command)) => push_import_row(&mut rows, &mut skipped, &key, &command),
+            None => skipped += 1,
+        }
+    }
+    (rows, skipped)
+}
+
+/// The one rule every import source shares for a raw key/command pair: the
+/// Key/Command header is dropped, a pair with a control character or without
+/// a usable key and command is counted as skipped.
+fn push_import_row(
+    rows: &mut Vec<(String, String)>,
+    skipped: &mut usize,
+    key: &str,
+    command: &str,
+) {
+    let is = |value: &str, word: &str, translated: &str| {
+        value.trim().eq_ignore_ascii_case(word) || value.trim().eq_ignore_ascii_case(translated)
+    };
+    if is(key, "Key", &crate::t!("Key")) && is(command, "Command", &crate::t!("Command")) {
+        return;
+    }
+    if key.chars().chain(command.chars()).any(char::is_control) {
+        *skipped += 1;
+        return;
+    }
+    let key = normalize_key(key);
+    let command = command.trim().to_uppercase();
+    if key.is_empty() || command.is_empty() {
+        *skipped += 1;
+    } else {
+        rows.push((key, command));
+    }
+}
+
+/// Decide what the bytes of a picked file are and read the shortcut rows from
+/// them: a workbook (zip signature, whatever the file is called; first sheet,
+/// first two columns) or UTF-8 text. Anything else, or text holding control
+/// characters other than tab / CR / LF, is an error and yields no rows.
+pub(super) fn read_shortcut_import(bytes: &[u8]) -> Result<(Vec<(String, String)>, usize), String> {
+    let not_a_list = || crate::t!("Shortcuts: this file is not a shortcut list.").into_owned();
+    if bytes.starts_with(b"PK\x03\x04") {
+        let table = crate::app::annotation_data::workbook_first_sheet_rows(bytes)
+            .map_err(|_| not_a_list())?;
+        let mut rows = Vec::new();
+        let mut skipped = 0usize;
+        for row in table {
+            let cell = |i: usize| row.get(i).map_or("", String::as_str);
+            if cell(0).trim().is_empty() && cell(1).trim().is_empty() {
+                continue;
+            }
+            push_import_row(&mut rows, &mut skipped, cell(0), cell(1));
+        }
+        return Ok((rows, skipped));
+    }
+    let text = std::str::from_utf8(bytes).map_err(|_| not_a_list())?;
+    if text
+        .chars()
+        .any(|c| c.is_control() && !matches!(c, '\t' | '\r' | '\n'))
+    {
+        return Err(not_a_list());
+    }
+    Ok(parse_shortcut_import(text))
+}
+
+/// Merge imported rows into the editor rows: a key that is already present
+/// gets the imported command, a new key is appended.
+pub(super) fn merge_shortcut_rows(
+    rows: &mut Vec<(String, String)>,
+    imported: Vec<(String, String)>,
+) {
+    for (key, command) in imported {
+        match rows.iter_mut().find(|row| normalize_key(&row.0) == key) {
+            Some(row) => row.1 = command,
+            None => rows.push((key, command)),
+        }
+    }
+}
+
 /// Canonical form used by the editor, command interface, config and key event
 /// resolver. Modifier order is stable so equivalent user input shares one row.
 pub(super) fn normalize_key(value: &str) -> String {
@@ -307,6 +463,26 @@ impl OpenCADStudio {
         }
     }
 
+    /// Load imported shortcut text into the editor rows only; Apply persists.
+    pub(super) fn import_shortcut_rows(&mut self, bytes: &[u8]) {
+        let (imported, skipped) = match read_shortcut_import(bytes) {
+            Ok(read) => read,
+            Err(message) => {
+                self.command_line.push_error(&message);
+                return;
+            }
+        };
+        let count = imported.len();
+        merge_shortcut_rows(&mut self.shortcut_editor_rows, imported);
+        self.shortcut_capture_row = None;
+        self.command_line.push_output(
+            crate::tf!(
+                "Shortcuts: imported {count} shortcut(s), skipped {skipped} line(s). Apply to keep them."
+            )
+            .as_ref(),
+        );
+    }
+
     pub(super) fn apply_shortcut_editor_rows(&mut self) {
         let bindings: FxHashMap<String, String> = self
             .shortcut_editor_rows
@@ -503,6 +679,175 @@ impl OpenCADStudio {
 mod tests {
     use super::*;
     use crate::app::OpenCADStudio;
+
+    fn export_text(rows: &[(&str, &str)], ext: &str) -> String {
+        let table: Vec<Vec<String>> =
+            std::iter::once(vec!["Key".to_string(), "Command".to_string()])
+                .chain(rows.iter().map(|(k, c)| vec![k.to_string(), c.to_string()]))
+                .collect();
+        let path = std::env::temp_dir().join(format!(
+            "ocs-shortcut-import-{}-{ext}.{ext}",
+            std::process::id()
+        ));
+        crate::app::annotation_data::write_extraction_file(&path, &table).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        text
+    }
+
+    fn pairs(rows: &[(&str, &str)]) -> Vec<(String, String)> {
+        rows.iter()
+            .map(|(k, c)| (k.to_string(), c.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn import_round_trips_the_editor_csv_and_txt_export() {
+        let rows = [
+            ("CTRL+1", "PROPERTIES"),
+            ("F2", "TEXT"),
+            ("CTRL+,", "OPTIONS"),
+            ("F3", "LINE 0,0"),
+            ("F4", "SAY \"HI\""),
+        ];
+        for ext in ["csv", "txt"] {
+            let (parsed, skipped) = parse_shortcut_import(&export_text(&rows, ext));
+            assert_eq!(skipped, 0, "{ext}");
+            assert_eq!(parsed, pairs(&rows), "{ext}");
+        }
+    }
+
+    fn export_bytes(rows: &[(&str, &str)], ext: &str) -> Vec<u8> {
+        let table: Vec<Vec<String>> =
+            std::iter::once(vec!["Key".to_string(), "Command".to_string()])
+                .chain(rows.iter().map(|(k, c)| vec![k.to_string(), c.to_string()]))
+                .collect();
+        // Tests run side by side: each call writes a file of its own.
+        static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let call = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "ocs-shortcut-import-bytes-{}-{call}.{ext}",
+            std::process::id()
+        ));
+        crate::app::annotation_data::write_extraction_file(&path, &table).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        bytes
+    }
+
+    const ROUND_TRIP_ROWS: [(&str, &str); 4] = [
+        ("CTRL+1", "PROPERTIES"),
+        ("CTRL+,", "OPTIONS"),
+        ("F3", "LINE 0,0"),
+        ("F4", "ZOOM EXTENTS"),
+    ];
+
+    #[test]
+    fn import_reads_the_xlsx_export_by_content() {
+        let bytes = export_bytes(&ROUND_TRIP_ROWS, "xlsx");
+        assert!(bytes.starts_with(b"PK\x03\x04"));
+        let (rows, skipped) = read_shortcut_import(&bytes).unwrap();
+        assert_eq!(skipped, 0);
+        assert_eq!(rows, pairs(&ROUND_TRIP_ROWS));
+    }
+
+    #[test]
+    fn import_reads_csv_and_txt_export_bytes() {
+        for ext in ["csv", "txt"] {
+            let (rows, skipped) = read_shortcut_import(&export_bytes(&ROUND_TRIP_ROWS, ext))
+                .unwrap_or_else(|e| panic!("{ext}: {e}"));
+            assert_eq!(skipped, 0, "{ext}");
+            assert_eq!(rows, pairs(&ROUND_TRIP_ROWS), "{ext}");
+        }
+    }
+
+    #[test]
+    fn import_never_turns_binary_into_rows() {
+        let garbage: Vec<u8> = (0..=255u8).cycle().take(2048).collect();
+        assert!(read_shortcut_import(&garbage).is_err());
+        // A truncated workbook is no list either.
+        let xlsx = export_bytes(&ROUND_TRIP_ROWS, "xlsx");
+        assert!(read_shortcut_import(&xlsx[..40]).is_err());
+        // Text with a control character anywhere is refused whole.
+        assert!(read_shortcut_import(b"F1 HELP\nF2 \x01TEXT\n").is_err());
+        let mut app = OpenCADStudio::new_for_test();
+        app.shortcut_editor_rows = pairs(&[("F1", "HELP")]);
+        app.import_shortcut_rows(&garbage);
+        assert_eq!(app.shortcut_editor_rows, pairs(&[("F1", "HELP")]));
+    }
+
+    #[test]
+    fn import_accepts_a_utf8_bom_and_skips_a_workbook_row_with_a_control_character() {
+        let (rows, _) = read_shortcut_import(b"\xEF\xBB\xBFF1 HELP\n").unwrap();
+        assert_eq!(rows, pairs(&[("F1", "HELP")]));
+        let table: Vec<Vec<String>> = [["Key", "Command"], ["F1", "HELP"], ["F2", "TE\u{1}XT"]]
+            .iter()
+            .map(|r| r.iter().map(|c| c.to_string()).collect())
+            .collect();
+        let bytes = crate::app::annotation_data::xlsx_bytes(&table).unwrap();
+        let (rows, skipped) = read_shortcut_import(&bytes).unwrap();
+        assert_eq!(rows, pairs(&[("F1", "HELP")]));
+        assert_eq!(skipped, 1);
+    }
+
+    #[test]
+    fn import_reads_the_cuiexport_key_command_form() {
+        let text =
+            "# comment\nCTRL+1 PROPERTIES\n\nF2   text\nCTRL+, OPTIONS\nF3 LINE 0,0\n, ZOOM E\n";
+        let (parsed, skipped) = parse_shortcut_import(text);
+        assert_eq!(skipped, 0);
+        assert_eq!(
+            parsed,
+            pairs(&[
+                ("CTRL+1", "PROPERTIES"),
+                ("F2", "TEXT"),
+                ("CTRL+,", "OPTIONS"),
+                ("F3", "LINE 0,0"),
+                (",", "ZOOM E")
+            ])
+        );
+    }
+
+    #[test]
+    fn import_skips_and_counts_bad_lines() {
+        let text = "F1 HELP\nJUSTAKEY\n\"unterminated,CMD\nF2,\n,CMD\nF3\tLINE\n";
+        let (parsed, skipped) = parse_shortcut_import(text);
+        assert_eq!(parsed, pairs(&[("F1", "HELP"), ("F3", "LINE")]));
+        assert_eq!(skipped, 4);
+    }
+
+    #[test]
+    fn import_of_an_empty_file_is_empty() {
+        assert_eq!(parse_shortcut_import(""), (vec![], 0));
+        assert_eq!(
+            parse_shortcut_import("\n  \n# only a comment\n"),
+            (vec![], 0)
+        );
+    }
+
+    #[test]
+    fn import_merge_replaces_an_existing_key_and_appends_a_new_one() {
+        let mut rows = pairs(&[("F1", "HELP"), ("CTRL+1", "PROPERTIES")]);
+        let (imported, _) = parse_shortcut_import("ctrl+1 LINE\nF9 CIRCLE\n");
+        merge_shortcut_rows(&mut rows, imported);
+        assert_eq!(
+            rows,
+            pairs(&[("F1", "HELP"), ("CTRL+1", "LINE"), ("F9", "CIRCLE")])
+        );
+    }
+
+    #[test]
+    fn import_goes_to_the_editor_rows_not_the_saved_bindings() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.shortcut_editor_rows = pairs(&[("F1", "HELP")]);
+        let before = app.shortcut_bindings.clone();
+        app.import_shortcut_rows(b"F1 LINE\nF9 CIRCLE\nbad\n");
+        assert_eq!(
+            app.shortcut_editor_rows,
+            pairs(&[("F1", "LINE"), ("F9", "CIRCLE")])
+        );
+        assert_eq!(app.shortcut_bindings, before);
+    }
 
     /// Bare F12 toggles dynamic input and SHIFT+F12 toggles the quad, also
     /// through the config-upgrade path: a settings file saved before the

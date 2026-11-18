@@ -223,6 +223,10 @@ pub fn view_window<'a>(
                     .on_press(Message::KeyListExport(false))
                     .padding([4, 10])
                     .style(button::secondary),
+                button(text(t!("Import...")).size(12))
+                    .on_press_maybe((!pending_add).then_some(Message::ShortcutEditorImport))
+                    .padding([4, 10])
+                    .style(button::secondary),
             ]
             .spacing(8)
             .align_y(iced::Center),

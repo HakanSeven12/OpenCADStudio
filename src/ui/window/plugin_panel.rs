@@ -9,7 +9,8 @@ use iced::widget::{
 };
 use iced::{Element, Fill, Length, Padding, Theme};
 use ocs_plugin_api::dialog::{
-    DialogControl, DialogValue, HorizontalAlign, PanelDef, PanelSnapshot, VerticalAlign,
+    DialogControl, DialogValue, HorizontalAlign, PanelDef, PanelSnapshot, PanelStyle,
+    VerticalAlign,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -19,7 +20,7 @@ use crate::ui::kit;
 use crate::ui::style::{chrome, kit_metrics as km, text as ui_text};
 use crate::ui::window::plugin_dialog::{
     apply_control_value_updates, collect_svg_handles, find_choice_option_in_controls, styled_text,
-    svg_image, ChoiceOption,
+    svg_image, ChoiceOption, FormControlView,
 };
 
 /// Per-snapshot construction budget (P1-21): a panel snapshot was a complete,
@@ -595,7 +596,7 @@ impl PluginPanelState {
         // through the registry ref handed down by the dock composition —
         // zero entries still means the zero-code legacy path below.
         // SCN-025: the surface registration and the wire attach are LIVE (the
-        // app store feeds the v24 wire crossing's publish/patch legs), so the
+        // app store feeds the v25 wire crossing's publish/patch legs), so the
         // `Some` arm is no longer aspirational; the legacy `None` branch
         // remains the byte-identical fallback for unmounted panels.
         // SCN-026 (upstream merge adaptation): upstream reworked this
@@ -615,6 +616,46 @@ impl PluginPanelState {
                 .map(crate::ui::window::plugin_widget_mount::app_message)
             }
             None => {
+                // SCN-038 (upstream merge adaptation): upstream added the
+                // `PanelStyle::Form` rendering for dialog-like form panels
+                // between the title bar and the legacy palette loop. An
+                // unmounted form panel takes it exactly as upstream wrote it;
+                // the mount seam above still wins for any panel with a
+                // mounted surface (the mounted body replaces the legacy
+                // control loop, form or not).
+                if self.def.style == PanelStyle::Form {
+                    const FORM_SPACING: f32 = 8.0;
+                    const FORM_BODY_PAD: [u16; 2] = [8, 10];
+                    let form_view = FormControlView {
+                        panel_id: Some(&self.def.id),
+                        text_values: &self.text_values,
+                        bool_values: &self.bool_values,
+                        choice_values: &self.choice_values,
+                        color_values: &self.color_values,
+                        file_values: &self.file_values,
+                        table_values: &self.table_values,
+                        collapsed_sections: &self.collapsed_sections,
+                        disabled_controls: &self.disabled_controls,
+                        hidden_controls: &self.hidden_controls,
+                        dynamic_choice_options: &self.dynamic_choice_options,
+                        svg_handles: &self.svg_handles,
+                    };
+                    let mut body_col = column![].spacing(FORM_SPACING).width(Fill);
+                    for control in &self.def.controls {
+                        if control
+                            .id()
+                            .is_some_and(|id| self.hidden_controls.contains(id))
+                        {
+                            continue;
+                        }
+                        body_col = body_col.push(form_view.view_control_inner(control, false));
+                    }
+                    return kit::palette(
+                        tbar,
+                        kit::scroll_area(container(body_col).padding(FORM_BODY_PAD).width(Fill)),
+                        width,
+                    );
+                }
                 let mut body_col = column![].spacing(km::TOOL_GAP).width(Fill);
                 for control in &self.def.controls {
                     if control
@@ -1610,5 +1651,52 @@ mod tests {
                 snapshot.errors
             );
         }
+    }
+
+    #[test]
+    fn form_and_palette_styles_render_controls_and_preserve_snapshots() {
+        const TEST_PANEL_W: f32 = 280.0;
+        let controls = vec![
+            text_control("name", "Beam"),
+            number_control("len", 10.0),
+            choice_control("kind", &["Line", "Circle"]),
+            DialogControl::Checkbox {
+                id: "active".to_string(),
+                label: "Active".to_string(),
+                default: true,
+            },
+            DialogControl::Fields {
+                id: "sec".to_string(),
+                title: Some("Section".to_string()),
+                collapsed: false,
+                controls: vec![text_control("sub", "v")],
+            },
+            table_control("pts"),
+            DialogControl::Button {
+                id: "run".to_string(),
+                label: "Run".to_string(),
+                action: Some("(c:run)".to_string()),
+                align_h: None,
+                width: None,
+            },
+        ];
+
+        let mut form_def = PanelDef::new("form_panel", "Form Panel").with_style(PanelStyle::Form);
+        form_def.controls = controls.clone();
+        let form_state = PluginPanelState::from_def(form_def);
+        // SCN-038 merge adaptation: the mount seam's registry ref (an EMPTY
+        // registry = the zero-entry legacy path these tests exercise).
+        let mount_store = std::cell::RefCell::new(
+            crate::ui::window::plugin_widget_mount::MountRegistry::default(),
+        );
+        let _ = form_state.view(1, TEST_PANEL_W, Chrome::default(), &mount_store);
+
+        let mut palette_def =
+            PanelDef::new("palette_panel", "Palette Panel").with_style(PanelStyle::Palette);
+        palette_def.controls = controls;
+        let palette_state = PluginPanelState::from_def(palette_def);
+        let _ = palette_state.view(2, TEST_PANEL_W, Chrome::default(), &mount_store);
+
+        assert_eq!(form_state.snapshot(1).values, palette_state.snapshot(1).values);
     }
 }

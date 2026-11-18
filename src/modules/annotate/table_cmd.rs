@@ -811,13 +811,16 @@ impl TableCommand {
         }
         WireModel {
             name: "table_preview".into(),
-            points,
             color: WireModel::CYAN,
             line_weight_px: 1.0,
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
             display_visible: true,
             plot_visible: true,
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points,
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         }
     }

@@ -855,7 +855,7 @@ pub fn click_hits_all<W: WireSource + ?Sized>(
             }
         }
     }
-    hits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    hits.sort_by(|a, b| a.0.total_cmp(&b.0));
     hits.into_iter().map(|(_, name)| name).collect()
 }
 

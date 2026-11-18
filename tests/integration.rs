@@ -63,6 +63,9 @@ mod pdf_export_text_check;
 #[path = "presspull_curved_boundary.rs"]
 mod presspull_curved_boundary;
 
+#[path = "scale_list_nan.rs"]
+mod scale_list_nan;
+
 #[path = "section_plane_roundtrip.rs"]
 mod section_plane_roundtrip;
 

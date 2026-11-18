@@ -6,6 +6,10 @@ build = "build.rs"
 default-run = "OpenCADStudio"
 autotests = false
 
+[features]
+# Opt-in release audit helpers; has no effect in the application executable.
+performance-audit = []
+
 [workspace]
 members = [
     "crates/ocs_acis",
@@ -14,6 +18,8 @@ members = [
     "crates/ocs_web_worker",
     "crates/dwg-thumbnailer",
     "crates/dwg-thumbnailer-win",
+    "crates/solidcore-record",
+    "crates/step-export",
 ]
 
 [target.'cfg(windows)'.build-dependencies]
@@ -39,10 +45,14 @@ clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
 svgtypes = "0.15.3"
-document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "ae40a59", features = ["serde"] }
-kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "353ffb2", features = ["brep", "offset"] }
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "88f780e5ca3eb7ab06231bba2b1a4559b53879c6", features = ["serde"] }
+kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "7b5ed9d", features = ["brep", "offset"] }
 ocs_acis = { path = "crates/ocs_acis" }
-kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "353ffb2" }
+# STEP exchange structure and exact B-rep writer, vendored from solidcore
+# (Apache-2.0; see crates/step-export/VENDORED.md).
+solidcore-record = { path = "crates/solidcore-record" }
+step-export = { path = "crates/step-export" }
+kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "7b5ed9d" }
 graph = { package = "opencadgraph", git = "https://github.com/HakanSeven12/opencadgraph.git", rev = "5e4dc20" }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 # Shared SAVE serialization dispatch + web-worker wire format: one
@@ -301,6 +311,10 @@ name = "step_tokenizer"
 harness = false
 
 [[bench]]
+name = "model_import"
+harness = false
+
+[[bench]]
 name = "properties_selection_aggregation"
 harness = false
 
@@ -405,6 +419,10 @@ name = "block_incremental_perf"
 harness = false
 
 [[bench]]
+name = "layer_refresh_idle"
+harness = false
+
+[[bench]]
 name = "wires_build_visible"
 harness = false
 
@@ -434,6 +452,18 @@ harness = false
 
 [[bench]]
 name = "widget_interaction"
+harness = false
+
+[[bench]]
+name = "wire_model_memory"
+harness = false
+
+[[bench]]
+name = "wire_view_culling"
+harness = false
+
+[[bench]]
+name = "save_batch_memory"
 harness = false
 
 [[test]]

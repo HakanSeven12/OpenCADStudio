@@ -49,6 +49,11 @@ fn split_origin_ds(o: [f64; 2]) -> ([f32; 2], [f32; 2]) {
     )
 }
 
+/// Cull box of a fill off Z = 0. The screen cull projects an XY box on
+/// Z = 0, which says nothing about a fill above or below it in a 3D view;
+/// a NaN box is never culled, as for wipeouts off that plane.
+const OFF_GROUND_AABB: [f64; 4] = [f64::NAN; 4];
+
 /// Local-space AABB of an instance moved back to its world anchor, in f64.
 fn world_aabb(inst: &HatchInstance, offset: [f64; 2]) -> [f64; 4] {
     let origin = [
@@ -92,6 +97,7 @@ const _: () = assert!(std::mem::size_of::<LineFamilyGpu>() == 48);
 pub(super) struct HatchVertex {
     pub local_xy: [f32; 2],  // 0  — local-space position
     pub instance_index: u32, // 8  — index into InstanceBuffer
+    pub z: f32,              // 12 — height of the fill plane over this point
 }
 
 impl HatchVertex {
@@ -110,6 +116,11 @@ impl HatchVertex {
                     shader_location: 1,
                     format: wgpu::VertexFormat::Uint32,
                 },
+                wgpu::VertexAttribute {
+                    offset: 12,
+                    shader_location: 6,
+                    format: wgpu::VertexFormat::Float32,
+                },
             ],
         }
     }
@@ -122,6 +133,8 @@ pub(super) struct HatchPlacement {
     pub translation_low: [f32; 2],
     pub draw_depth: f32,
     pub visible: u32,
+    /// Height the copy is moved by, over its source's plane.
+    pub translation_z: f32,
 }
 
 impl HatchPlacement {
@@ -149,6 +162,11 @@ impl HatchPlacement {
                     offset: 20,
                     shader_location: 5,
                     format: wgpu::VertexFormat::Uint32,
+                },
+                wgpu::VertexAttribute {
+                    offset: 24,
+                    shader_location: 7,
+                    format: wgpu::VertexFormat::Float32,
                 },
             ],
         }
@@ -500,11 +518,13 @@ impl StorageHatchBatch {
             dashes.push(0.0);
         }
 
+        let on_ground: Vec<bool> = groups.iter().map(|group| group[0].lies_on_ground()).collect();
         let mut verts = Vec::new();
         let mut indices = Vec::new();
         let mut mesh_ranges = Vec::with_capacity(meshes.len());
         for (instance_index, mesh) in meshes.iter().enumerate() {
             let (points, mesh_indices) = &**mesh;
+            let height = groups[instance_index][0].plane_height();
             let Ok(base) = u32::try_from(verts.len()) else {
                 return None;
             };
@@ -514,6 +534,7 @@ impl StorageHatchBatch {
             verts.extend(points.iter().map(|&local_xy| HatchVertex {
                 local_xy,
                 instance_index: instance_index as u32,
+                z: height(local_xy),
             }));
             for &index in mesh_indices {
                 let Some(index) = base.checked_add(index) else {
@@ -538,6 +559,7 @@ impl StorageHatchBatch {
                 translation_low: [0.0; 2],
                 draw_depth: 0.0,
                 visible: 1,
+                translation_z: 0.0,
             });
             let end = mesh_ranges[unique_source_count - 1].end;
             if end > 0 {
@@ -569,6 +591,7 @@ impl StorageHatchBatch {
                     .render_instance
                     .map_or([0.0; 3], |instance| instance.translation);
                 let delta = [translation[0] - base[0], translation[1] - base[1]];
+                let delta_z = translation[2] - base[2];
                 let high = [delta[0] as f32, delta[1] as f32];
                 placements.push(HatchPlacement {
                     translation: high,
@@ -578,8 +601,13 @@ impl StorageHatchBatch {
                     ],
                     draw_depth: hatch.draw_depth,
                     visible: 1,
+                    translation_z: delta_z as f32,
                 });
-                instance_aabbs.push(world_aabb(&instances[source_index], delta));
+                instance_aabbs.push(if on_ground[source_index] && delta_z == 0.0 {
+                    world_aabb(&instances[source_index], delta)
+                } else {
+                    OFF_GROUND_AABB
+                });
             }
             if !mesh_ranges[source_index].is_empty() {
                 draws.push((
@@ -684,7 +712,14 @@ impl StorageHatchBatch {
         });
         let source_aabbs = instances
             .iter()
-            .map(|inst| world_aabb(inst, [0.0; 2]))
+            .zip(&on_ground)
+            .map(|(inst, &on_ground)| {
+                if on_ground {
+                    world_aabb(inst, [0.0; 2])
+                } else {
+                    OFF_GROUND_AABB
+                }
+            })
             .collect();
 
         if let Some(started) = chunk_started {

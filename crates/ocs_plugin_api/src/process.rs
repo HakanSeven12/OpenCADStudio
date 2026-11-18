@@ -381,11 +381,18 @@ fn base_max_floor(base: Duration, kind: &'static str) -> Duration {
 fn ui_blocking_cap(kind: &'static str) -> Option<Duration> {
     match kind {
         "CursorMove" | "CustomGripMove" => Some(Duration::from_secs(2)),
-        "InteractiveEvent" | "GetPrompt" | "NeedsEntityPick" | "IsSelectionGathering"
-        | "AcceptsDragSelection" | "SelectionRejectsLockedLayers" | "DropInteractive"
-        | "CustomGripBegin" | "CustomGripCancel" | "GetModalDialog" | "DialogAction" => {
-            Some(Duration::from_secs(10))
-        }
+        "InteractiveEvent"
+        | "GetPrompt"
+        | "NeedsEntityPick"
+        | "IsSelectionGathering"
+        | "AcceptsDragSelection"
+        | "SelectionRejectsLockedLayers"
+        | "DropInteractive"
+        | "CustomGripBegin"
+        | "CustomGripCancel"
+        | "GetModalDialog"
+        | "DialogAction"
+        | "UndoStep" => Some(Duration::from_secs(10)),
         _ => None,
     }
 }
@@ -412,6 +419,7 @@ pub(crate) fn request_kind(req: &HostRequest) -> &'static str {
         },
         HostRequest::GetModalDialog { .. } => "GetModalDialog",
         HostRequest::DialogAction { .. } => "DialogAction",
+        HostRequest::UndoStep { .. } => "UndoStep",
         HostRequest::Shutdown => "Shutdown",
     }
 }
@@ -1155,6 +1163,38 @@ impl PluginProcess {
                 "dialog_action",
                 |resp| match resp {
                     HostResponse::DialogAction(answer) => Ok(answer),
+                    other => Err(Box::new(other)),
+                },
+            )
+        }
+    }
+
+    /// Mid-command Ctrl+Z (API v24): ask the interactive command to step
+    /// back one input and return its next step. `Ok(None)` means the command
+    /// leaves Ctrl+Z to the document undo. A runner built against an older
+    /// API cannot decode the request, so a plugin whose manifest declares
+    /// less than v24 is never sent it and answers `None` here.
+    pub fn undo_step(&self, command_id: u64) -> Result<Option<CommandStep>, PluginError> {
+        if self.manifest.api_version < 24 {
+            return Ok(None);
+        }
+        if let Some(v4) = &self.v4 {
+            let resp = v4.call(
+                &mut NullHost::default(),
+                HostRequest::UndoStep { command_id },
+                &mut |_| {},
+            )?;
+            match resp {
+                HostResponse::UndoStep(step) => Ok(step.map(|s| *s)),
+                other => Err(PluginError::UnexpectedResponse(Box::new(other))),
+            }
+        } else {
+            self.call_simple(
+                HostRequest::UndoStep { command_id },
+                "UndoStep",
+                "undo_step",
+                |resp| match resp {
+                    HostResponse::UndoStep(step) => Ok(step.map(|s| *s)),
                     other => Err(Box::new(other)),
                 },
             )
@@ -2227,6 +2267,70 @@ mod timeout_tests {
             Some(v) => std::env::set_var("OCS_PLUGIN_CALL_TIMEOUT_SECS", v),
             None => std::env::remove_var("OCS_PLUGIN_CALL_TIMEOUT_SECS"),
         }
+    }
+
+    fn kill_fake_runner(process: &PluginProcess) {
+        if let Some(mut runner) = process
+            .child
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
+            let _ = runner.child.kill();
+        }
+    }
+
+    #[test]
+    fn undo_step_asks_a_v24_runner_and_returns_its_step() {
+        let (mut process, runner_stream) = fake_process();
+        process.manifest.api_version = 24;
+        let runner = thread::spawn(move || {
+            let mut peer = runner_stream;
+            let req = recv::<HostToPlugin>(&mut peer).expect("read undo step");
+            assert!(matches!(
+                req,
+                HostToPlugin::Request(HostRequest::UndoStep { command_id: 5 })
+            ));
+            send(
+                &mut peer,
+                &PluginToHost::Response(HostResponse::UndoStep(Some(Box::new(
+                    CommandStep::NeedPoint,
+                )))),
+            )
+            .expect("send step");
+        });
+        let step = process.undo_step(5).expect("undo step answered");
+        assert!(matches!(step, Some(CommandStep::NeedPoint)));
+        kill_fake_runner(&process);
+        runner.join().expect("runner thread");
+    }
+
+    /// A runner built against API v23 cannot decode the request, so a plugin
+    /// whose manifest declares v23 is never sent it.
+    #[test]
+    fn undo_step_never_reaches_a_runner_older_than_v24() {
+        let (mut process, runner_stream) = fake_process();
+        process.manifest.api_version = 23;
+        let runner = thread::spawn(move || {
+            let mut peer = runner_stream;
+            let req = recv::<HostToPlugin>(&mut peer).expect("read first request");
+            assert!(
+                matches!(
+                    req,
+                    HostToPlugin::Request(HostRequest::GetPrompt { command_id: 5 })
+                ),
+                "the first frame must be the prompt query, got {req:?}"
+            );
+            send(
+                &mut peer,
+                &PluginToHost::Response(HostResponse::Text("Point 3".into())),
+            )
+            .expect("send prompt");
+        });
+        assert!(matches!(process.undo_step(5), Ok(None)));
+        assert_eq!(process.get_prompt(5).expect("prompt"), "Point 3");
+        kill_fake_runner(&process);
+        runner.join().expect("runner thread");
     }
 
     #[test]

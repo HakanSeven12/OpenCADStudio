@@ -3382,12 +3382,22 @@ bg={bg_ms:.1}ms n={view_count}"
                     };
                     let frame = (|| {
                         let origin = project(ed.pos)?;
-                        let x = project(ed.pos + glam::DVec3::X)? - origin;
-                        let y = project(ed.pos + glam::DVec3::Y)? - origin;
+                        let mut x = project(ed.pos + glam::DVec3::X)? - origin;
+                        let mut y = project(ed.pos + glam::DVec3::Y)? - origin;
                         if (x.x * y.y - x.y * y.x).abs() < 1e-8 {
                             return None;
                         }
-                        let angle = ed.rotation_input_value().unwrap_or(0.0) as f32;
+                        // Not WYSIWYG (MTEXTFIXED 2): a text too small to read
+                        // is shown at a readable size, and level.
+                        if !crate::app::mtext_prefs::prefs().wysiwyg {
+                            let shown = x.x.hypot(x.y) * ed.height_value() as f32;
+                            if shown < overlay::MTEXT_READABLE_BELOW_PX {
+                                let k = overlay::MTEXT_READABLE_PX / shown.max(1e-9);
+                                x = x * k;
+                                y = y * k;
+                            }
+                        }
+                        let angle = overlay::editor_angle(ed);
                         let (sin, cos) = angle.sin_cos();
                         let width = (ed.rect_width as f32).max(0.001);
                         let padding = ed.height_value() as f32 * 0.5;
@@ -3431,7 +3441,14 @@ bg={bg_ms:.1}ms n={view_count}"
                     })();
                     if let Some(frame) = frame {
                         viewport_stack = viewport_stack
-                            .push(overlay::mtext_inplace_overlay(ed, styles, frame, canvas));
+                            .push(overlay::mtext_inplace_overlay(
+                                ed,
+                                styles,
+                                frame,
+                                canvas,
+                                self.mtext_toolbar_shown(),
+                                command_line_inset,
+                            ));
                     } else {
                         viewport_stack = viewport_stack.push(mtext_editor_overlay(
                             ed,
@@ -3500,7 +3517,6 @@ bg={bg_ms:.1}ms n={view_count}"
         }
         let workspace: Element<'_, Message> = row(parts).width(Fill).height(Fill).into();
 
-        let workspace = self.dock_overlay(workspace, tab);
         let command_line = self.command_line.view(
             allow_autocomplete,
             dyn_capturing,
@@ -3542,6 +3558,9 @@ bg={bg_ms:.1}ms n={view_count}"
                 .height(Fill)
                 .into()
         };
+        // Floating pallets draw over the command line, so the bottom rows of
+        // a tall one (Layer Manager with many layers) are not hidden by it.
+        let center_stack = self.dock_overlay(center_stack, tab);
 
         let center_stack: Element<'_, Message> = if self.command_history_resizing {
             mouse_area(center_stack)
@@ -4610,7 +4629,7 @@ fn tab_bar_button_style(theme: &Theme, status: button::Status) -> button::Style 
 /// 1 px apart, a + after the last tab and a ☰ menu at the far right. A tab
 /// shows its whole file name, a dot before it while unsaved, and always
 /// the palette's close button. The Start
-/// page lives in the ☰ menu, which a right-click on the empty bar opens at
+/// page is a home tab at the left and in the ☰ menu, which a right-click on the empty bar opens at
 /// the pointer too; it also sets whether the bar runs above the palettes
 /// or (by default) between them. Resting on a tab lists its drawing's
 /// layouts. Tabs
@@ -4631,6 +4650,36 @@ pub(super) fn doc_tab_bar<'a>(
         .filter_map(|(idx, tab)| (!tab.is_start).then_some(idx))
         .collect::<Vec<_>>()
         .into();
+
+    // Start: a home tab pinned at the left, one click away (#3171).
+    if let Some(start) = tabs.iter().position(|tab| tab.is_start) {
+        let is_active = start == active_tab;
+        let home: fn(&Theme) -> Color = if is_active {
+            chrome::strong
+        } else {
+            chrome::tab_text
+        };
+        let start_btn = button(
+            container(crate::ui::icons::tinted(
+                crate::ui::icons::HOME,
+                km::TITLE_ICON,
+                home,
+            ))
+            .center(Fill),
+        )
+        .on_press(Message::TabSwitch(start))
+        .width(iced::Length::Fixed(km::TAB_BUTTON_W))
+        .height(iced::Length::Fixed(km::TAB_H))
+        .padding(0)
+        .style(move |theme: &Theme, status| {
+            let mut style = tab_bar_button_style(theme, status);
+            if is_active {
+                style.background = Some(Background::Color(chrome::surface(theme)));
+            }
+            style
+        });
+        items.push(start_btn.into());
+    }
 
     for (idx, tab) in tabs.iter().enumerate() {
         if tab.is_start {

@@ -15,11 +15,21 @@ pub enum ModelFormat {
 }
 
 /// The objects a file brings in.
+#[derive(Debug, Clone)]
 pub struct Imported {
     /// Block definitions, each before any block that inserts it.
     pub blocks: Vec<(String, Vec<EntityType>)>,
     /// The objects for the current space.
     pub entities: Vec<EntityType>,
+}
+
+/// Why a file did not become drawing objects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportFailure {
+    /// Nothing readable at the path.
+    Missing,
+    /// The file is not of the format, or holds nothing the importer reads.
+    Unreadable,
 }
 
 /// File units over drawing units; one where the drawing is unitless.
@@ -267,9 +277,45 @@ pub fn read(
     solids.then_some(imported)
 }
 
+/// Reads and parses `path` — the work an import does off the UI thread.
+/// `drawing_mm` is the drawing's unit; blocks are named after the file stem.
+pub fn load(
+    format: ModelFormat,
+    path: &str,
+    drawing_mm: Option<f64>,
+) -> Result<Imported, ImportFailure> {
+    let bytes =
+        crate::scene::model::pdf_raster::source_bytes(path).ok_or(ImportFailure::Missing)?;
+    let stem = std::path::Path::new(&path.replace('\\', "/"))
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    read(format, &bytes, drawing_mm, &stem).ok_or(ImportFailure::Unreadable)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `load` tells a file it cannot open from one it cannot read, so the
+    /// command line can say which.
+    #[test]
+    fn load_reports_a_missing_file_and_an_unreadable_one() {
+        assert!(matches!(
+            load(ModelFormat::Step, "definitely-not-here.step", None),
+            Err(ImportFailure::Missing)
+        ));
+        let path =
+            std::env::temp_dir().join(format!("ocs-model-load-test-{}.step", std::process::id()));
+        std::fs::write(&path, b"not a model").expect("write the scratch file");
+        let result = load(
+            ModelFormat::Step,
+            path.to_str().expect("the scratch path is UTF-8"),
+            None,
+        );
+        let _ = std::fs::remove_file(&path);
+        assert!(matches!(result, Err(ImportFailure::Unreadable)));
+    }
 
     /// Band edges measured on imported STEP colours (8-bit channels).
     #[test]

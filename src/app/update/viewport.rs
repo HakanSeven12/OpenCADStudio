@@ -155,6 +155,41 @@ mod selection_gesture_priority_tests {
     }
 }
 
+/// Whether a grip drag is a table's fill diamond: the fill reaches the cell
+/// under the cursor, so no snap, tracking or polar may move that point.
+fn table_fill_follows_cursor(
+    originals: &[(document::Handle, document::EntityType)],
+    handle: document::Handle,
+    grip_id: usize,
+) -> bool {
+    grip_id == crate::entities::table::CELL_GRIP_FILL
+        && originals.iter().any(|(original, entity)| {
+            *original == handle && matches!(entity, document::EntityType::Table(_))
+        })
+}
+
+#[cfg(test)]
+mod table_fill_cursor_tests {
+    use super::*;
+
+    #[test]
+    fn only_a_table_fill_diamond_follows_the_bare_cursor() {
+        let table = document::Handle::new(0x20);
+        let line = document::Handle::new(0x21);
+        let originals = vec![
+            (table, document::EntityType::Table(Box::default())),
+            (
+                line,
+                document::EntityType::Line(document::entities::Line::default()),
+            ),
+        ];
+        let fill = crate::entities::table::CELL_GRIP_FILL;
+        assert!(table_fill_follows_cursor(&originals, table, fill));
+        assert!(!table_fill_follows_cursor(&originals, table, fill - 1));
+        assert!(!table_fill_follows_cursor(&originals, line, fill));
+    }
+}
+
 /// Snapper coordinates are local to the active pane, while the overlay
 /// consumes canvas coordinates. Apply the same translation to the visible
 /// snap glyph and both Extension guide origins.
@@ -1993,6 +2028,15 @@ impl OpenCADStudio {
             VIEWCUBE_PX,
         );
         self.tabs[i].scene.viewcube_hover.set(hover);
+        self.tabs[i]
+            .scene
+            .viewcube_opacity
+            .set(crate::scene::pipeline::viewcube::viewcube_opacity(
+                self.cursor_pos.x - tile.x,
+                self.cursor_pos.y - tile.y,
+                tile.width,
+                self.navvcube_opacity,
+            ));
         Task::none()
     }
 
@@ -2250,6 +2294,15 @@ impl OpenCADStudio {
             cam_rot,
             VIEWCUBE_PX,
         ));
+        self.tabs[i]
+            .scene
+            .viewcube_opacity
+            .set(crate::scene::pipeline::viewcube::viewcube_opacity(
+                p.x - cube_tile.x,
+                p.y - cube_tile.y,
+                cube_tile.width,
+                self.navvcube_opacity,
+            ));
 
         let grip_hover_started = perf_move.then(Instant::now);
         let navigating = self.tabs[i].scene.selection.borrow().input.middle_down;
@@ -3109,6 +3162,17 @@ impl OpenCADStudio {
                 }
             }
 
+            // A table fill drag reaches the cell under the cursor: object
+            // snaps on the table's own lines, tracking and polar would pull it
+            // to an edge or a far corner.
+            if table_fill_follows_cursor(&self.grip_originals, grip.handle, grip.grip_id) {
+                snapped = raw;
+                self.tabs[i].snap_result = None;
+                self.otrack_active = None;
+                self.otrack_cross = None;
+                self.otrack_kind = None;
+            }
+
             if let Some(axis) = grip.axis {
                 let acquired_point = otrack_hit.is_some()
                     || snap_hit.is_some_and(|hit| hit.snap_type != crate::snap::SnapType::Grid);
@@ -3848,7 +3912,7 @@ impl OpenCADStudio {
                     Instant::now(),
                 );
             }
-            let world = match snap {
+            let world = match crate::snap::pulling_snap(snap, p, self.snapper.osnap_radius_px) {
                 Some(hit) => hit.world,
                 None => {
                     let mut pt = cursor_world;
@@ -4269,14 +4333,18 @@ impl OpenCADStudio {
                 );
             }
 
+            let pull = crate::snap::pulling_snap(
+                self.tabs[i].snap_result,
+                p,
+                self.snapper.osnap_radius_px,
+            );
             let effective = {
                 // Ortho / polar from the last point keep its elevation.
                 let mut drafted_elevation = false;
                 let mut pt: glam::DVec3 = if let (Some(dir), Some(base)) =
                     (axis_lock, self.last_point)
                 {
-                    let point = self.tabs[i]
-                        .snap_result
+                    let point = pull
                         .map(|snap| snap.world)
                         .unwrap_or(cursor_world);
                     axis_lock_apply(point, base, dir)
@@ -4284,7 +4352,7 @@ impl OpenCADStudio {
                     // Exact object snaps win over tracking alignment, but
                     // Extension is a construction guide and must remain
                     // eligible for OTRACK intersections.
-                    !self.tabs[i].snap_result.is_some_and(|s| {
+                    !pull.is_some_and(|s| {
                         !matches!(
                             s.snap_type,
                             crate::snap::SnapType::Grid | crate::snap::SnapType::Extension
@@ -4295,12 +4363,10 @@ impl OpenCADStudio {
                 } else {
                     // Snap runs in model space (viewport camera or the
                     // model/paper view), so the result is already model.
-                    let mut pt = self.tabs[i]
-                        .snap_result
+                    let mut pt = pull
                         .map(|s| s.world)
                         .unwrap_or(cursor_world);
-                    let osnap_locked = self.tabs[i]
-                        .snap_result
+                    let osnap_locked = pull
                         .is_some_and(|s| s.snap_type != crate::snap::SnapType::Grid);
                     let drafted = (!osnap_locked && !free_point && !uses_command_cursor_plane)
                         .then_some(self.last_point)
@@ -4336,7 +4402,7 @@ impl OpenCADStudio {
                     && self.tabs[i].active_ucs.is_none()
                     && !uses_command_cursor_plane
                     && !drafted_elevation
-                    && !snap_keeps_elevation(self.tabs[i].snap_result.map(|s| s.snap_type))
+                    && !snap_keeps_elevation(pull.map(|s| s.snap_type))
                 {
                     pt.z = 0.0;
                 }
@@ -4356,7 +4422,7 @@ impl OpenCADStudio {
                     .and_then(|command| command.cursor_axis())
                     .and_then(|(origin, direction)| {
                         command_axis_point(
-                            self.tabs[i].snap_result,
+                            pull,
                             p,
                             bounds,
                             view_rot,
@@ -4885,8 +4951,6 @@ impl OpenCADStudio {
                         let guide = crate::scene::WireModel {
                             bg_adapt: None,
                             point_marker: None,
-                            taper_widths: Vec::new(),
-                            pattern_stations: Vec::new(),
                             world_width: 0.0,
                             depth_override: None,
                             display_visible: true,
@@ -4896,30 +4960,34 @@ impl OpenCADStudio {
                             fill_is_2d_solid: false,
                             solid_normal: None,
                             render_instance: None,
-                            pick_tris: Vec::new(),
-                            pick_tris_low: Vec::new(),
                             dash_from_start: false,
-                            text_verts: Vec::new(),
                             name: "__polar_guide__".into(),
-                            points: vec![
-                                [far_neg.x, far_neg.y, far_neg.z],
-                                [far_pos.x, far_pos.y, far_pos.z],
-                            ],
-                            points_low: Vec::new(),
                             color: [0.2, 0.7, 0.9, 0.6],
                             selected: false,
                             aci: 0,
                             pattern_length: 0.8,
                             pattern: [0.5, -0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                             line_weight_px: 1.0,
-                            snap_pts: vec![],
-                            tangent_geoms: vec![],
-                            key_vertices: vec![],
                             aabb: crate::scene::WireModel::UNBOUNDED_AABB,
                             plinegen: true,
-                            fill_tris: vec![],
-                            fill_tris_low: Vec::new(),
-
+                            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                                taper_widths: Vec::new(),
+                                pattern_stations: Vec::new(),
+                                pick_tris: Vec::new(),
+                                pick_tris_low: Vec::new(),
+                                text_verts: Vec::new(),
+                                points: vec![
+                                    [far_neg.x, far_neg.y, far_neg.z],
+                                    [far_pos.x, far_pos.y, far_pos.z],
+                                ],
+                                points_low: Vec::new(),
+                                snap_pts: vec![],
+                                tangent_geoms: vec![],
+                                key_vertices: vec![],
+                                fill_tris: vec![],
+                                fill_tris_low: Vec::new(),
+                                ..crate::scene::WireGeom::default()
+                            }),
                             ..Default::default()
                         };
                         previews.push(guide);
@@ -5156,6 +5224,24 @@ impl OpenCADStudio {
         sel.input.middle_pan_from = None;
         drop(sel);
         self.nav_drag_by_button = true;
+    }
+
+    /// Drops every pointer navigation in flight. Its release can go missing
+    /// when the window loses focus or the drawing it began in is switched
+    /// away or closed, leaving the view following the pointer (#3195).
+    pub(in crate::app) fn release_pointer_navigation(&mut self) {
+        for tab in &self.tabs {
+            let mut sel = tab.scene.selection.borrow_mut();
+            sel.input.middle_down = false;
+            sel.input.middle_last_pos = None;
+            sel.orbit.pivot = None;
+        }
+        self.nav_held = Default::default();
+        self.nav_claimed = Default::default();
+        self.nav_pending = None;
+        self.nav_middle_press = None;
+        self.nav_drag_by_button = false;
+        self.nav_zoom_latched = false;
     }
 
     fn nav_end_drag(&mut self, i: usize) {
@@ -8023,10 +8109,14 @@ impl OpenCADStudio {
                         // PICKADD 0 (#226): a plain box REPLACES.
                         let hit_ms = timing.hit;
                         let t_apply = crate::perf::enabled().then(Instant::now);
-                        if self.shift_down || self.select_remove_mode {
+                        // PICKADD 0: Shift+box/lasso adds instead (#3111).
+                        if self.select_remove_mode || (self.shift_down && selection_pick_add) {
                             self.tabs[i].scene.deselect_entities(&handles);
                         } else {
-                            if !selection_pick_add && (!handles.is_empty() || marker_hit) {
+                            if !selection_pick_add
+                                && !self.shift_down
+                                && (!handles.is_empty() || marker_hit)
+                            {
                                 self.tabs[i].scene.deselect_all();
                             }
                             self.tabs[i].scene.select_entities(&handles);
@@ -8090,16 +8180,22 @@ properties={:.1}ms picked={}",
                     // leaves the current selection untouched so a stray
                     // drag never discards hard-won picks.
                     if is_gathering {
-                        self.last_pick =
-                            Some((handles.clone(), self.shift_down || self.select_remove_mode));
+                        self.last_pick = Some((
+                            handles.clone(),
+                            self.select_remove_mode || (self.shift_down && selection_pick_add),
+                        ));
                     }
-                    if self.shift_down || self.select_remove_mode {
+                    // PICKADD 0: Shift+box/lasso adds instead (#3111).
+                    if self.select_remove_mode || (self.shift_down && selection_pick_add) {
                         self.tabs[i].scene.deselect_entities(&handles);
                     } else {
                         // PICKADD 0 (#226): a plain marquee REPLACES
                         // the selection (empty results still leave it
                         // alone, matching the box rule).
-                        if !selection_pick_add && (!handles.is_empty() || marker_hit) {
+                        if !selection_pick_add
+                            && !self.shift_down
+                            && (!handles.is_empty() || marker_hit)
+                        {
                             self.tabs[i].scene.deselect_all();
                         }
                         self.tabs[i].scene.select_entities(&handles);
@@ -8564,13 +8660,19 @@ was_selected={}",
                     // so an accidental empty drag never discards it.
                     // PICKADD 0 (#226): a plain box REPLACES instead.
                     if is_gathering {
-                        self.last_pick =
-                            Some((handles.clone(), self.shift_down || self.select_remove_mode));
+                        self.last_pick = Some((
+                            handles.clone(),
+                            self.select_remove_mode || (self.shift_down && selection_pick_add),
+                        ));
                     }
-                    if self.shift_down || self.select_remove_mode {
+                    // PICKADD 0: Shift+box/lasso adds instead (#3111).
+                    if self.select_remove_mode || (self.shift_down && selection_pick_add) {
                         self.tabs[i].scene.deselect_entities(&handles);
                     } else {
-                        if !selection_pick_add && (!handles.is_empty() || marker_hit) {
+                        if !selection_pick_add
+                            && !self.shift_down
+                            && (!handles.is_empty() || marker_hit)
+                        {
                             self.tabs[i].scene.deselect_all();
                         }
                         self.tabs[i].scene.select_entities(&handles);

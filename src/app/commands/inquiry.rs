@@ -545,8 +545,23 @@ impl OpenCADStudio {
             // editor dialog. If a single block with attributes is already
             // selected it opens on that block; otherwise the pick command runs
             // and the editor opens once a block is chosen (see `command_driver`).
-            "ATTEDIT" | "EATTEDIT" => {
+            "EATTEDIT" => {
                 self.open_attedit_dialog();
+            }
+            // ATTEDIT edits the values in the attribute value form.
+            "ATTEDIT" => {
+                self.start_attedit_pick(
+                    crate::modules::draw::modify::attedit::AtteditKind::Classic,
+                    None,
+                );
+            }
+            "_EATTEDIT_VALUE" => {
+                self.tabs[i].active_cmd = None;
+                self.attr_editor_value_back();
+            }
+            "_ATTEDIT_FORM_VALUE" => {
+                self.tabs[i].active_cmd = None;
+                self.attribute_form_value_back();
             }
 
             "BEDIT" => {
@@ -811,17 +826,20 @@ impl OpenCADStudio {
             "MASSPROP" => {
                 let selected = self.tabs[i].scene.selected_entities();
                 if selected.is_empty() {
-                    self.command_line.push_error(
-                        crate::t!("MASSPROP: no entities selected. Select entities first.")
-                            .as_ref(),
-                    );
+                    // Without a selection, ask for the objects first.
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let cmd = SelectObjectsCommand::new("MASSPROP");
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                    return Some(Task::none());
                 } else {
                     for (handle, _) in &selected {
                         if let Some(entity) = self.tabs[i].scene.document.get_entity(*handle) {
                             use crate::entities::traits::EntityTypeOps;
-                            // A solid's properties come from its B-rep: exact
-                            // where the kernel knows the shape, a fine mesh
-                            // otherwise — not the display mesh.
+                            // A solid's properties come from its B-rep:
+                            // integrated over its faces to about ten digits,
+                            // a fine mesh only where a trim cannot be
+                            // followed — not the display mesh.
                             let acis = match entity {
                                 document::EntityType::Solid3D(solid) => Some(&solid.acis_data),
                                 document::EntityType::Body(body) => Some(&body.acis_data),
@@ -1030,6 +1048,9 @@ impl OpenCADStudio {
             "FIND" => {
                 return Some(Task::done(Message::FindReplaceOpen));
             }
+            "FIND_OBJECTS_GATHERED" => {
+                self.find_objects_gathered(i);
+            }
             "FINDALL" => {
                 use crate::command::ValuePromptCommand;
                 let c = ValuePromptCommand::new(
@@ -1210,8 +1231,8 @@ impl OpenCADStudio {
         self.visibility_popup = None;
         self.table_popup = None;
         // Entering BEDIT changes which block is assembled, not the
-        // cached geometry of that block's entities.
-        self.tabs[i].scene.bump_geometry_no_blocks();
+        // cached geometry of that block's entities or Model space.
+        self.tabs[i].scene.bump_active_space();
         // Frame the camera on the block's own geometry (block-local, near
         // origin) — fit_all() goes through current_layout_block_handle so
         // it already scopes to the edited block. Without this the view
@@ -1644,37 +1665,6 @@ fn entity_list_details(entity: &document::EntityType) -> String {
         )
         .into_owned(),
         _ => String::new(),
-    }
-}
-
-impl OpenCADStudio {
-    /// Open the attribute editor. If a single block with attributes is already
-    /// selected it opens directly on that block; otherwise it starts the
-    /// block-pick command and opens once a block is chosen (see
-    /// `command_driver`). Shared by ATTEDIT and its command aliases
-    /// ATTMAN / BATTMAN.
-    pub(in crate::app) fn open_attedit_dialog(&mut self) {
-        let i = self.active_tab;
-        let selected_attr_insert = {
-            let sel = self.tabs[i].scene.selected_entities();
-            if sel.len() == 1 {
-                let (h, e) = sel[0];
-                match e {
-                    document::EntityType::Insert(ins) if !ins.attributes.is_empty() => Some(h),
-                    _ => None,
-                }
-            } else {
-                None
-            }
-        };
-        if let Some(handle) = selected_attr_insert {
-            self.open_attribute_editor(handle);
-        } else {
-            use crate::modules::draw::modify::attedit::AtteditCommand;
-            let cmd_obj = AtteditCommand::new();
-            self.command_line.push_info(&cmd_obj.prompt());
-            self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
-        }
     }
 }
 

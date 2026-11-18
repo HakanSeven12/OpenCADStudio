@@ -496,6 +496,20 @@ pub(crate) fn entity_json(
             map.insert("leader_count".into(), json!(leaders.len()));
             map.insert("leaders".into(), json!(leaders));
         }
+        E::Dimension(dimension) => {
+            map.insert("measurement".into(), json!(dimension.measurement()));
+            map.insert("style".into(), json!(dimension.base().style_name));
+            // A text override replaces the measured value in the display;
+            // reporting it lets a caller tell an edited dimension from a
+            // plain one without reading the entity record.
+            let text = &dimension.base().text;
+            if !text.is_empty() {
+                map.insert(
+                    "text".into(),
+                    json!(crate::entities::text_support::resolve_dxf_special_chars(text)),
+                );
+            }
+        }
         _ => {}
     }
     if matches!(e, E::Hatch(_)) {
@@ -1009,6 +1023,10 @@ impl OpenCADStudio {
                         let i = self.active_tab;
                         self.tabs[i].scene.clear();
                         self.tabs[i].scene.document = doc;
+                        self.tabs[i].xref_unloaded =
+                            crate::io::xref_model::UnloadSet::from_document(
+                                &self.tabs[i].scene.document,
+                            );
                         self.tabs[i].scene.sync_annotation_scale_from_header();
                         self.tabs[i].scene.bump_layout_epoch();
                         self.tabs[i].scene.bump_scale_epoch();
@@ -1316,6 +1334,7 @@ impl OpenCADStudio {
                 };
                 if let Some(session) = &self.tabs[i].ifccad_session {
                     if let Err(error) = session.check_destination(
+                        &self.tabs[i].scene.document,
                         path.extension()
                             .and_then(|ext| ext.to_str())
                             .unwrap_or_default(),
@@ -1335,7 +1354,7 @@ impl OpenCADStudio {
                         path.file_name().unwrap().to_string_lossy()
                     ));
                     self.tabs[i].scene.update_fields(2, None);
-                    let document = self.tabs[i].scene.document_for_save();
+                    let document = self.tabs[i].document_for_save();
                     if let Err(e) = crate::io::save(&document, &scratch) {
                         return err(format!("save: {e}"));
                     }
@@ -1702,10 +1721,9 @@ impl OpenCADStudio {
             matched.push((nearest.map(|nearest| nearest.distance), entity));
         }
         if near.is_some() {
-            matched.sort_by(|left, right| {
-                left.0
-                    .partial_cmp(&right.0)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+            matched.sort_by(|left, right| match (left.0, right.0) {
+                (Some(left), Some(right)) => left.total_cmp(&right),
+                (left, right) => left.is_some().cmp(&right.is_some()),
             });
         }
         let count = matched.len();
@@ -1925,7 +1943,11 @@ impl OpenCADStudio {
                 json!({"ok":false,"code":"temporary_document","error":"Test Block is temporary and cannot be saved."}),
             );
         }
-        if self.tabs[i].ifccad_session.is_some() {
+        if self.tabs[i]
+            .ifccad_session
+            .as_ref()
+            .is_some_and(ocs_save::IfccadSession::has_native_context)
+        {
             return Err(json!({
                 "ok": false, "status": "failed", "code": "unsupported_format",
                 "error": "This drawing has retained IFCCAD content. Use Save as .ifccad.",
@@ -1984,7 +2006,7 @@ impl OpenCADStudio {
         self.prepare_native_save(i);
         // The same snapshot a normal save writes: display-only overrides and
         // resolved xref content stay out of the file.
-        let snapshot = self.tabs[i].scene.document_for_save();
+        let snapshot = self.tabs[i].document_for_save();
         // Bake simulation: save_as_version mints *D geometry blocks on its
         // private clone, so the reopened manifest always contains baked
         // sub-entities. Compare against the same baked view or every new

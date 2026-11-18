@@ -1118,8 +1118,25 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::FbxExport));
             }
 
-            // STEPOUT — export 3D meshes to STEP AP214 format
-            "STEPOUT" | "EXPORTSTEP" | "STPOUT" => {
+            // STEPOUT [AP203|AP214|AP242] — export the drawing's 3D objects
+            // to STEP, exact B-reps where they have one (AP214 by default).
+            cmd if ["STEPOUT", "EXPORTSTEP", "STPOUT"]
+                .contains(&cmd.split_whitespace().next().unwrap_or("")) =>
+            {
+                let keyword = cmd.split_whitespace().nth(1);
+                match keyword.map(crate::io::step::parse_schema) {
+                    None => self.step_schema = crate::io::step::Schema::Ap214,
+                    Some(Some(schema)) => self.step_schema = schema,
+                    Some(None) => {
+                        let error = format!(
+                            "unknown schema {} (AP203, AP214 or AP242)",
+                            keyword.unwrap_or("")
+                        );
+                        self.command_line
+                            .push_error(crate::tf!("STEPOUT: {error}").as_ref());
+                        return Some(Task::none());
+                    }
+                }
                 return Some(Task::done(Message::StepExport));
             }
 
@@ -1168,6 +1185,24 @@ impl OpenCADStudio {
             }
             "EXPORT" => {
                 return Some(Task::done(Message::PlotExport));
+            }
+            // PNGOUT / JPGOUT / BMPOUT / TIFOUT — the selected objects as an
+            // image file.
+            "PNGOUT" | "JPGOUT" | "BMPOUT" | "TIFOUT" => {
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(h, _)| h)
+                    .collect();
+                if handles.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let select = SelectObjectsCommand::new(cmd);
+                    self.command_line.push_info(&select.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(select));
+                } else {
+                    return Some(self.raster_out(cmd, &handles));
+                }
             }
             // PREVIEW [path] — render the plot page to SVG through the plot
             // pipeline, including the plot style, and report its paper size and
@@ -3133,6 +3168,7 @@ mod tests {
             complete: true,
             edge_verts: Vec::new(),
             edge_verts_low: Vec::new(),
+            edge_vert_colors: Vec::new(),
             curved_gens: Vec::new(),
             metrics: Default::default(),
             world_aabb: [0.0; 4],
@@ -3143,6 +3179,7 @@ mod tests {
             instance_color: None,
             edge_color: None,
             instance_aabb: None,
+            display_lods: Default::default(),
         }
     }
 }

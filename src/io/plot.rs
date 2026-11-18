@@ -164,10 +164,9 @@ pub struct PlotContent {
     /// Legacy handle-based layer fallback. Per-occurrence `effective_layer`
     /// metadata takes precedence for expanded block and xref content.
     pub entity_layers: std::collections::HashMap<document::Handle, String>,
-    /// Named plot style of each plotted entity (ByLayer and ByBlock already
-    /// resolved), keyed like `entity_layers`; a named (STB) table plots each
-    /// entity with this style.
-    pub entity_plot_styles: std::collections::HashMap<document::Handle, String>,
+    /// Effective STB style keyed by the plotted object and optional block member.
+    pub entity_plot_styles:
+        std::collections::HashMap<(document::Handle, Option<document::Handle>), String>,
 }
 
 /// Owned geometry and settings for one plot page.
@@ -181,6 +180,10 @@ pub struct PlotPage {
     pub offset_x: f64,
     pub offset_y: f64,
     pub rotation_deg: i32,
+    /// Counter-clockwise turn (radians) of the offset content before scale
+    /// and page rotation: a model plot of a twisted view comes out as seen on
+    /// screen. `clip` is in the turned space.
+    pub content_rotation: f64,
     pub scale: f32,
     pub clip: Option<(f32, f32, f32, f32)>,
     pub options: PlotOptions,
@@ -188,6 +191,52 @@ pub struct PlotPage {
     /// Explicit model-space GeoPDF registration. Plot-file export may consume
     /// this; preview and ordinary printing always ignore it.
     pub geopdf: Option<crate::io::geopdf_export::GeoPdfFrame>,
+}
+
+/// Bounds of the rectangle `[x0, y0, x1, y1]` turned counter-clockwise by
+/// `angle` radians about the origin.
+pub fn turned_bounds(angle: f64, [x0, y0, x1, y1]: [f64; 4]) -> [f64; 4] {
+    if angle == 0.0 {
+        return [x0, y0, x1, y1];
+    }
+    let (sin, cos) = angle.sin_cos();
+    let mut out = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    for (x, y) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)] {
+        let (tx, ty) = (cos * x - sin * y, sin * x + cos * y);
+        out = [out[0].min(tx), out[1].min(ty), out[2].max(tx), out[3].max(ty)];
+    }
+    out
+}
+
+impl PlotPage {
+    pub(crate) fn validate_plot_styles(
+        &self,
+        fallback: Option<&PlotStyleTable>,
+    ) -> Result<(), String> {
+        let Some(table) = self
+            .plot_style
+            .as_ref()
+            .or(fallback)
+            .filter(|table| table.is_stb)
+        else {
+            return Ok(());
+        };
+        for ((handle, member), style) in &self.content.entity_plot_styles {
+            let matches = table
+                .named_entries
+                .keys()
+                .filter(|entry| entry.eq_ignore_ascii_case(style))
+                .count();
+            if matches != 1 {
+                let object = member.unwrap_or(*handle);
+                return Err(format!(
+                    "Table {:?}, object {object}: style {style:?} has {matches} matches.",
+                    table.name,
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Default for PlotOptions {
@@ -284,7 +333,9 @@ fn circle_beziers(points: &[glam::DVec2]) -> Option<Vec<[glam::DVec2; 4]>> {
     use glam::DVec2;
     let (center, radius, start, sweep) = fit_circle(points)?;
     // A full turn sums to a hair over 2π; that is still four quarters.
-    let pieces = (sweep.abs() / std::f64::consts::FRAC_PI_2 - 1.0e-9).ceil().max(1.0) as usize;
+    let pieces = (sweep.abs() / std::f64::consts::FRAC_PI_2 - 1.0e-9)
+        .ceil()
+        .max(1.0) as usize;
     let step = sweep / pieces as f64;
     let handle = 4.0 / 3.0 * (step / 4.0).tan();
     let at = |t: f64| center + radius * DVec2::from_angle(t);
@@ -292,7 +343,10 @@ fn circle_beziers(points: &[glam::DVec2]) -> Option<Vec<[glam::DVec2; 4]>> {
     Some(
         (0..pieces)
             .map(|piece| {
-                let (t0, t1) = (start + step * piece as f64, start + step * (piece + 1) as f64);
+                let (t0, t1) = (
+                    start + step * piece as f64,
+                    start + step * (piece + 1) as f64,
+                );
                 [
                     at(t0),
                     at(t0) + handle * tangent(t0),
@@ -413,18 +467,21 @@ mod tests {
     fn arc_wire(sweep: f64, segments: usize) -> WireModel {
         let (center, radius) = ([1000.0, 2000.0], 5.0);
         WireModel {
-            points: (0..=segments)
-                .map(|i| {
-                    let t = 0.3 + sweep * i as f64 / segments as f64;
-                    let x = center[0] + radius * t.cos();
-                    let y = center[1] + radius * t.sin();
-                    [x as f32, y as f32, 0.0]
-                })
-                .collect(),
-            tangent_geoms: vec![TangentGeom::Circle {
-                center: [1000.0, 2000.0, 0.0],
-                radius: 5.0,
-            }],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points: (0..=segments)
+                    .map(|i| {
+                        let t = 0.3 + sweep * i as f64 / segments as f64;
+                        let x = center[0] + radius * t.cos();
+                        let y = center[1] + radius * t.sin();
+                        [x as f32, y as f32, 0.0]
+                    })
+                    .collect(),
+                tangent_geoms: vec![TangentGeom::Circle {
+                    center: [1000.0, 2000.0, 0.0],
+                    radius: 5.0,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         }
     }
@@ -433,7 +490,10 @@ mod tests {
     fn circles_and_arcs_plot_as_curves() {
         for sweep in [1.0, -2.5, std::f64::consts::TAU] {
             let spans = super::wire_arc_beziers(&arc_wire(sweep, 48), 1.0).unwrap();
-            assert_eq!(spans.len(), (sweep.abs() / std::f64::consts::FRAC_PI_2).ceil() as usize);
+            assert_eq!(
+                spans.len(),
+                (sweep.abs() / std::f64::consts::FRAC_PI_2).ceil() as usize
+            );
             let center = glam::DVec2::new(1000.0, 2000.0);
             for [p0, c1, c2, p3] in &spans {
                 // The curve's midpoint lies on the circle.

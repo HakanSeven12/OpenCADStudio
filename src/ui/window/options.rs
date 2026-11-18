@@ -47,6 +47,8 @@ pub struct AppPrefs {
     pub savetime_min: i32,
     /// ISAVEBAK: keep a `.bak` when overwriting.
     pub backup_on_save: bool,
+    /// Offer to download missing `.shx` fonts when a drawing opens.
+    pub check_missing_fonts: bool,
     /// ETRANSMIT/ARCHIVE: preserve, structured-by-type, or flat layout.
     pub transmittal_layout: crate::io::transmit::TransmittalLayout,
     /// TEXTFILL: fill TrueType glyphs rather than drawing them hollow.
@@ -577,6 +579,15 @@ pub fn view_window<'a>(
                 "Keep a .bak copy when overwriting a drawing (ISAVEBAK)"
             ))
             .size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(8),
+        row![
+            iced::widget::checkbox(prefs.check_missing_fonts)
+                .on_toggle(Message::CheckMissingFontsChanged)
+                .size(15),
+            text(crate::t!("Missing fonts")).size(12),
         ]
         .spacing(8)
         .align_y(iced::Center),

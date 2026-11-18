@@ -417,11 +417,8 @@ pub(crate) fn sort_by_depth<T: Copy + Send + Sync>(
     depth: impl Fn(&T) -> f32 + Sync,
 ) -> (Vec<T>, Vec<u32>) {
     let mut order: Vec<u32> = (0..items.len() as u32).collect();
-    let compare = |a: &u32, b: &u32| {
-        depth(&items[*a as usize])
-            .partial_cmp(&depth(&items[*b as usize]))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    };
+    let compare =
+        |a: &u32, b: &u32| depth(&items[*a as usize]).total_cmp(&depth(&items[*b as usize]));
     #[cfg(not(target_arch = "wasm32"))]
     {
         use rayon::prelude::*;

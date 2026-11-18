@@ -91,7 +91,13 @@ impl OpenCADStudio {
         else {
             return false;
         };
-        let initial = picture.text.value.clone();
+        // A formula cell opens with its formula, like the reference does;
+        // the value stays on screen everywhere else.
+        let formula =
+            crate::entities::table::cell_formula_text(&scene.document, table, row, column);
+        let initial = formula
+            .clone()
+            .unwrap_or_else(|| picture.text.value.clone());
         let p = picture.text.insertion_point;
         let pos = DVec3::new(p.x, p.y, p.z);
         let template = picture.text.clone();
@@ -102,7 +108,11 @@ impl OpenCADStudio {
         if let Some(ed) = self.mtext_editor.as_mut() {
             ed.editing = Some(handle);
         }
-        self.mtext_table_cell_fields(handle, row, column);
+        // A formula is edited as text and stored again as a formula field
+        // on commit, not through the field host.
+        if formula.is_none() {
+            self.mtext_table_cell_fields(handle, row, column);
+        }
         self.table_cell_editor = Some(TableCellEditor {
             tab_id: self.tabs[i].id,
             handle,
@@ -177,6 +187,7 @@ impl OpenCADStudio {
             Vec::new()
         };
         scene.set_command_preview_hidden(&[cell.handle]);
+        scene.table_cell_editing = Some(cell.handle);
         scene.set_preview_wires(preview);
     }
 
@@ -186,6 +197,7 @@ impl OpenCADStudio {
         };
         if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == cell.tab_id) {
             tab.scene.set_command_preview_hidden(&[]);
+            tab.scene.table_cell_editing = None;
             tab.scene.set_preview_wires(Vec::new());
             tab.snap_result = None;
         }
@@ -273,7 +285,9 @@ impl OpenCADStudio {
             if let Some(target) = document.get_entity_mut(handle) {
                 *target = entity;
             }
-            // A typed formula is stored as a formula field.
+            // The typed text replaced any old formula field: drop its objects,
+            // then a typed formula is stored as a formula field.
+            document.prune_table_fields(handle);
             crate::entities::table::typed_formula_to_field(document, handle, row, column);
             if let Some(EntityType::Table(table)) = document.get_entity_mut(handle) {
                 table.block_record_handle = None;

@@ -1,0 +1,443 @@
+//! The Text Editor ribbon tab and the open editor: what the tab shows of the
+//! editor after every update, and the `_MTED <action>` tools it runs.
+
+use super::*;
+use crate::app::{Message, OpenCADStudio};
+use crate::ui::ribbon::text_editor::TextEditorRibbon;
+use document::entities::mtext_format::MTextParagraphAlignment;
+use iced::Task;
+
+/// The `_MTED` tool of each character format.
+const FORMATS: [(MTextFmt, &str); 5] = [
+    (MTextFmt::Bold, "_MTED BOLD"),
+    (MTextFmt::Italic, "_MTED ITALIC"),
+    (MTextFmt::Underline, "_MTED UNDERLINE"),
+    (MTextFmt::Overline, "_MTED OVERLINE"),
+    (MTextFmt::Strike, "_MTED STRIKE"),
+];
+
+impl OpenCADStudio {
+    /// What the Text Editor tab shows of the open editor, or None while no
+    /// multiline text is edited.
+    pub(in crate::app) fn text_editor_ribbon_state(&self) -> Option<TextEditorRibbon> {
+        let ed = self.mtext_editor.as_ref()?;
+        let i = self.active_tab;
+        let doc = &self.tabs[i].scene.document;
+        let mut lit = Vec::new();
+        let mut off = Vec::new();
+        for (kind, id) in FORMATS {
+            match ed.format_state(kind) {
+                FormatState::On => lit.push(id),
+                FormatState::Unavailable => off.push(id),
+                FormatState::Off | FormatState::Mixed => {}
+            }
+        }
+        if ed.annotative {
+            lit.push("_MTED ANNOTATIVE");
+        }
+        if ed.mask().on {
+            lit.push("_MTED MASK");
+        }
+        lit.push(match ed.caret_alignment() {
+            None | Some(MTextParagraphAlignment::Default) => "_MTED ALIGN DEFAULT",
+            Some(MTextParagraphAlignment::Left) => "_MTED ALIGN LEFT",
+            Some(MTextParagraphAlignment::Center) => "_MTED ALIGN CENTER",
+            Some(MTextParagraphAlignment::Right) => "_MTED ALIGN RIGHT",
+            Some(MTextParagraphAlignment::Justified) => "_MTED ALIGN JUSTIFY",
+            Some(MTextParagraphAlignment::Distributed) => "_MTED ALIGN DISTRIBUTE",
+        });
+        if ed.ruler {
+            lit.push("_MTED RULER");
+        }
+        if ed.auto_caps {
+            lit.push("_MTED AUTOCAPS");
+        }
+        if ed.selected_range().is_empty() {
+            off.extend(["_MTED STACK", "_MTED SUPERSCRIPT", "_MTED SUBSCRIPT"]);
+        }
+        let p = super::prefs::prefs();
+        if ed.matching.is_some() {
+            lit.push("_MTED MATCH");
+        }
+        if p.spell_check {
+            lit.push("_MTED SPELL");
+        }
+        if p.wysiwyg {
+            lit.push("_MTED WYSIWYG");
+        }
+        if crate::app::commands::mtext_toolbar() == 1 {
+            lit.push("_MTED TOOLBAR");
+        }
+        if p.show_background {
+            lit.push("_MTED BACKGROUND");
+        }
+        if p.allow_lists {
+            lit.push("_MTED LIST ALLOW");
+            if p.allow_auto_lists {
+                lit.push("_MTED LIST AUTO");
+            }
+        } else {
+            off.extend([
+                "_MTED LIST OFF",
+                "_MTED LIST NUMBER",
+                "_MTED LIST LOWER",
+                "_MTED LIST UPPER",
+                "_MTED LIST BULLET",
+                "_MTED LIST START",
+                "_MTED LIST CONTINUE",
+                "_MTED LIST AUTO",
+            ]);
+        }
+        match ed.list_kind() {
+            Some(ListKind::Number) => lit.push("_MTED LIST NUMBER"),
+            Some(ListKind::LowerLetter) => lit.push("_MTED LIST LOWER"),
+            Some(ListKind::UpperLetter) => lit.push("_MTED LIST UPPER"),
+            Some(ListKind::Bullet) => lit.push("_MTED LIST BULLET"),
+            None => lit.push("_MTED LIST OFF"),
+        }
+        if ed.column_type == 0 {
+            off.push("_MTED COLUMNBREAK");
+        }
+        if ed.caret_stack().is_none() {
+            off.push("_MTED STACKPROPS");
+        }
+        let font = {
+            let font = ed.font_field();
+            match &ed.object_style.font {
+                Some(style_font) if font.trim().is_empty() => style_font.label().into_owned(),
+                _ => crate::ui::font_picker::FontChoice::of_name(&font)
+                    .label()
+                    .into_owned(),
+            }
+        };
+        let mut styles: Vec<String> = doc.text_styles.iter().map(|s| s.name.clone()).collect();
+        styles.sort_by_key(|name| name.to_lowercase());
+        let style_faces = styles
+            .iter()
+            .map(|name| {
+                let face = super::raw_style::ObjectStyle::of(doc, name).face;
+                (!face.trim().is_empty() && !crate::scene::text::lff::is_shx_name(&face))
+                    .then_some(face)
+            })
+            .collect();
+        let style_annotative = styles
+            .iter()
+            .map(|name| {
+                doc.text_styles
+                    .iter()
+                    .find(|s| s.name.eq_ignore_ascii_case(name))
+                    .is_some_and(|s| s.annotative)
+            })
+            .collect();
+        Some(TextEditorRibbon {
+            styles,
+            style_faces,
+            style_annotative,
+            style: ed.style.clone(),
+            height: ed.span_field("height", &ed.height).to_string(),
+            font,
+            color: ed.whole_text_color(),
+            color_open: ed.color_picker_open,
+            layer: self.text_layer(i).unwrap_or_default(),
+            layers: doc.layers.iter().map(|layer| layer.name.clone()).collect(),
+            oblique: ed.span_field("oblique", &ed.oblique).to_string(),
+            tracking: ed.char_space.clone(),
+            width: ed.span_field("width", &ed.width).to_string(),
+            lit,
+            off,
+        })
+    }
+
+    /// Hand the ribbon what the open editor holds, and show or leave the Text
+    /// Editor tab with it.
+    pub(in crate::app) fn sync_text_editor_ribbon(&mut self) {
+        self.refresh_mtext_spelling();
+        let state = self.text_editor_ribbon_state();
+        let editing = state.is_some();
+        if crate::ui::ribbon::text_editor::set(state) {
+            let doc = &self.tabs[self.active_tab].scene.document;
+            crate::ui::ribbon::text_editor::set_fonts(
+                crate::ui::font_picker::catalogue(doc, true)
+                    .into_iter()
+                    .map(|entry| entry.choice)
+                    .collect(),
+            );
+        }
+        self.ribbon.set_text_editor_context(editing);
+    }
+
+    /// Run a Text Editor tool (`_MTED <action>`) on the open editor. None
+    /// for any other command; with no editor open the tool does nothing.
+    pub(in crate::app) fn dispatch_text_editor_tool(&mut self, cmd: &str) -> Option<Task<Message>> {
+        let rest = cmd.trim().strip_prefix("_MTED")?;
+        // A whole word only: `_MTEDIT` is another command.
+        if !(rest.is_empty() || rest.starts_with(char::is_whitespace)) {
+            return None;
+        }
+        let rest = rest.trim().to_string();
+        if self.mtext_editor.is_none() {
+            return Some(Task::none());
+        }
+        let (action, arg) = rest.split_once(' ').unwrap_or((rest.as_str(), ""));
+        let arg = arg.trim();
+        let message = match action {
+            "ANNOTATIVE" => {
+                let on = self.mtext_editor.as_ref().is_some_and(|ed| ed.annotative);
+                Message::MTextAnnotative(!on)
+            }
+            "BOLD" => Message::MTextFmt(MTextFmt::Bold),
+            "ITALIC" => Message::MTextFmt(MTextFmt::Italic),
+            "UNDERLINE" => Message::MTextFmt(MTextFmt::Underline),
+            "OVERLINE" => Message::MTextFmt(MTextFmt::Overline),
+            "STRIKE" => Message::MTextFmt(MTextFmt::Strike),
+            "CLEAR" => {
+                self.mtext_clear(match arg {
+                    "PARA" => ClearMode::Paragraph,
+                    "ALL" => ClearMode::All,
+                    _ => ClearMode::Character,
+                });
+                return Some(Task::none());
+            }
+            "MATCH" => {
+                self.mtext_match_toggle();
+                return Some(Task::none());
+            }
+            "STACK" => Message::MTextStack,
+            "SUPERSCRIPT" => Message::MTextScript(true),
+            "SUBSCRIPT" => Message::MTextScript(false),
+            "CASE" => Message::MTextFmt(if arg == "LOWER" {
+                MTextFmt::Lowercase
+            } else {
+                MTextFmt::Uppercase
+            }),
+            "JUSTIFY" => Message::MTextJustify(match arg {
+                "TC" => AttachmentPoint::TopCenter,
+                "TR" => AttachmentPoint::TopRight,
+                "ML" => AttachmentPoint::MiddleLeft,
+                "MC" => AttachmentPoint::MiddleCenter,
+                "MR" => AttachmentPoint::MiddleRight,
+                "BL" => AttachmentPoint::BottomLeft,
+                "BC" => AttachmentPoint::BottomCenter,
+                "BR" => AttachmentPoint::BottomRight,
+                _ => AttachmentPoint::TopLeft,
+            }),
+            "ALIGN" => Message::MTextAlign(match arg {
+                "LEFT" => ParaAlign::Left,
+                "CENTER" => ParaAlign::Center,
+                "RIGHT" => ParaAlign::Right,
+                "JUSTIFY" => ParaAlign::Justify,
+                "DISTRIBUTE" => ParaAlign::Distribute,
+                _ => ParaAlign::Default,
+            }),
+            "LIST" => match arg {
+                "OFF" => Message::MTextList(None),
+                "NUMBER" => Message::MTextList(Some(ListKind::Number)),
+                "BULLET" => Message::MTextList(Some(ListKind::Bullet)),
+                "LOWER" => Message::MTextList(Some(ListKind::LowerLetter)),
+                "UPPER" => Message::MTextList(Some(ListKind::UpperLetter)),
+                "START" | "CONTINUE" => {
+                    self.mtext_list_restart(arg == "CONTINUE");
+                    return Some(Task::none());
+                }
+                "AUTO" => {
+                    super::prefs::update_prefs(|p| p.allow_auto_lists = !p.allow_auto_lists);
+                    self.save_config();
+                    return Some(Task::none());
+                }
+                "ALLOW" => {
+                    self.mtext_lists_toggle();
+                    return Some(Task::none());
+                }
+                _ => return Some(self.text_editor_tool_unavailable(cmd)),
+            },
+            "SPACING" if arg == "CLEAR" => {
+                self.raw_paragraph_line_spacing(
+                    document::entities::mtext_format::MTextLineSpacing::Default,
+                );
+                return Some(Task::none());
+            }
+            "SPACING" => match arg.parse::<f64>() {
+                Ok(factor) => Message::MTextLineSpacing(factor),
+                Err(_) => Message::MTextLineSpacing(1.0),
+            },
+            "COLUMNBREAK" => {
+                self.mtext_column_break();
+                return Some(Task::none());
+            }
+            "SPELL" => {
+                super::prefs::update_prefs(|p| p.spell_check = !p.spell_check);
+                self.save_config();
+                return Some(Task::none());
+            }
+            "WYSIWYG" => {
+                super::prefs::update_prefs(|p| p.wysiwyg = !p.wysiwyg);
+                self.save_config();
+                return Some(Task::none());
+            }
+            "BACKGROUND" => {
+                super::prefs::update_prefs(|p| p.show_background = !p.show_background);
+                self.save_config();
+                return Some(Task::none());
+            }
+            "IMPORT" => return Some(self.mtext_import_pick()),
+            "HELP" => return Some(self.dispatch_command("HELP MTEXT")),
+            "DICTIONARIES" | "SPELLSETTINGS" | "HIGHLIGHT" | "STACKPROPS"
+            | "AUTOSTACK" => {
+                self.open_mtext_dialog(action);
+                return Some(Task::none());
+            }
+            "COLUMNS" => {
+                let mut parts = arg.split_whitespace();
+                let mode = match (parts.next(), parts.next()) {
+                    (Some("DYNAMIC"), Some("MANUAL")) => "Dynamic manual",
+                    (Some("DYNAMIC"), _) => "Dynamic auto",
+                    (Some("STATIC"), count) => {
+                        let _ = self.update(Message::MTextColumnMode("Static".to_string()));
+                        return Some(self.update(Message::MTextColumnCount(
+                            count.unwrap_or("2").to_string(),
+                        )));
+                    }
+                    _ => "No columns",
+                };
+                Message::MTextColumnMode(mode.to_string())
+            }
+            "SYMBOL" => Message::MTextInsert(symbol_text(arg)),
+            "FIELD" => Message::MTextInsertField,
+            "AUTOCAPS" => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.auto_caps = !ed.auto_caps;
+                }
+                return Some(Task::none());
+            }
+            "RULER" => {
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.ruler = !ed.ruler;
+                }
+                return Some(Task::none());
+            }
+            "CHARMAP" => {
+                open_character_map();
+                return Some(Task::none());
+            }
+            "TOOLBAR" => {
+                let on = crate::app::commands::mtext_toolbar() != 1;
+                crate::app::commands::set_mtext_toolbar(if on { 1 } else { 2 });
+                self.save_config();
+                return Some(Task::none());
+            }
+            "COMBINE" => {
+                self.mtext_combine_paragraphs();
+                return Some(Task::none());
+            }
+            "UNDO" => Message::MTextUndo,
+            "REDO" => Message::MTextRedo,
+            "CLOSE" => Message::MTextOk,
+            "CANCEL" => Message::MTextCancel,
+            "SELECTALL" => {
+                self.mtext_select_all();
+                return Some(Task::none());
+            }
+            "COPY" | "CUT" => {
+                let Some(text) = self.mtext_selected_text() else {
+                    return Some(Task::none());
+                };
+                if action == "CUT" {
+                    self.raw_delete(false);
+                }
+                return Some(iced::clipboard::write(text).discard());
+            }
+            // Paste, or Paste Special: as plain text, or without the
+            // character or the paragraph formatting it was copied with.
+            "PASTE" if arg.is_empty() => return Some(self.on_paste_shortcut()),
+            "PASTE" => {
+                let mode = arg.to_string();
+                return Some(
+                    iced::clipboard::read_text()
+                        .map(move |text| Message::MTextPasteAs(mode.clone(), text.ok().map(|t| (*t).clone()))),
+                );
+            }
+            // A code page puts it in force; none opens the window.
+            "CHARSET" => {
+                match arg.parse::<u8>() {
+                    Ok(code) => self.mtext_charset(code),
+                    Err(_) => self.open_mtext_dialog(action),
+                }
+                return Some(Task::none());
+            }
+            "STACKTAG" => {
+                self.mtext_stack_tag(arg);
+                return Some(Task::none());
+            }
+            "LISTTAG" => {
+                self.mtext_list_tag(arg);
+                return Some(Task::none());
+            }
+            "SPELLREPLACE" => {
+                self.mtext_spell_replace(arg);
+                return Some(Task::none());
+            }
+            "SPELLADD" | "SPELLIGNORE" => {
+                self.mtext_spell_keep(action == "SPELLADD");
+                return Some(Task::none());
+            }
+            "MASK" | "PARAGRAPH" | "COLUMNSETTINGS" | "FIND" => {
+                self.open_mtext_dialog(action);
+                return Some(Task::none());
+            }
+            _ => return Some(self.text_editor_tool_unavailable(cmd)),
+        };
+        Some(self.update(message))
+    }
+
+    /// Combine Paragraphs: the paragraph breaks inside the selection become
+    /// spaces, as one undo step.
+    fn mtext_combine_paragraphs(&mut self) {
+        let Some(ed) = self.mtext_editor.as_ref() else {
+            return;
+        };
+        let range = ed.selected_range();
+        let breaks: Vec<(usize, usize)> = doc_to_cells(&ed.doc)
+            .iter()
+            .enumerate()
+            .filter(|(at, cell)| {
+                range.contains(at) && *at + 1 < range.end && matches!(cell, Cell::Break(..))
+            })
+            .map(|(at, _)| (at, at + 1))
+            .collect();
+        self.raw_replace_ranges(&breaks, " ");
+    }
+
+    /// A Text Editor tool this build does not carry out yet.
+    fn text_editor_tool_unavailable(&mut self, cmd: &str) -> Task<Message> {
+        self.command_line
+            .push_info(&crate::tf!("{cmd} is not available in the text editor yet."));
+        Task::none()
+    }
+}
+
+inventory::submit!(crate::command::CommandRegistration { names: &["_MTED"] });
+
+/// The text a Symbol menu entry puts in: `%%d`, `%%p` and `%%c` as their
+/// characters, `\U+XXXX` as that character, NBSP as a non-breaking space.
+fn symbol_text(code: &str) -> String {
+    match code {
+        "%%d" => "°".to_string(),
+        "%%p" => "±".to_string(),
+        "%%c" => "∅".to_string(),
+        "NBSP" => "\u{a0}".to_string(),
+        code => code
+            .strip_prefix("\\U+")
+            .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+            .and_then(char::from_u32)
+            .map_or_else(|| code.to_string(), String::from),
+    }
+}
+
+/// Other…: the system's character map, from which a character is copied and
+/// pasted into the text.
+fn open_character_map() {
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("charmap.exe").spawn();
+    }
+}

@@ -88,6 +88,10 @@ pub(super) fn text_inline_overlay(
 /// world XY plane; the program fits + vertically flips them into the box.
 pub(in crate::app) const MTEXT_PREVIEW_PAD: f32 = 12.0;
 pub(in crate::app) const MTEXT_PREVIEW_EM_PX: f32 = 15.0;
+/// MTEXTFIXED 2: a text whose height shows under this many pixels is edited
+/// at [`MTEXT_READABLE_PX`] instead; larger text keeps its drawing size.
+pub(in crate::app) const MTEXT_READABLE_BELOW_PX: f32 = 5.5;
+pub(in crate::app) const MTEXT_READABLE_PX: f32 = 12.0;
 // Used only until the shared modal sensor reports the first real layout width.
 const MTEXT_EDITOR_FALLBACK_WIDTH: f32 = 660.0;
 pub(in crate::app) const MTEXT_EDITOR_WRITING_WIDTH: f32 =
@@ -121,6 +125,12 @@ struct MTextPreview {
     cell: Option<super::super::table_cell_edit::CellCanvas>,
     inplace: bool,
     translucent: bool,
+    /// The misspelled words, underlined (visible ranges).
+    marks: Vec<(usize, usize)>,
+    /// The selection's fill (None: the theme's).
+    highlight: Option<Color>,
+    /// The in-place box is filled (Show Background).
+    background: bool,
 }
 
 /// Height of the box-width ruler band at the top of the preview.
@@ -339,6 +349,13 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                     return Some(Action::publish(Message::MTextSelStart(off)).and_capture());
                 }
             }
+            Event::Mouse(Me::ButtonPressed(Button::Right)) if self.inplace => {
+                let p = cursor.position_in(bounds)?;
+                if self.cell.is_some_and(|cell| cell.contains(p)) {
+                    let off = self.offset_at(p);
+                    return Some(Action::publish(Message::MTextContextOpen(p, off)).and_capture());
+                }
+            }
             Event::Mouse(Me::CursorMoved { .. }) => {
                 if let Some((start, height)) = state.height_drag {
                     let point = cursor.position_from(bounds.position())?;
@@ -378,7 +395,7 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                 }
                 if state.dragging {
                     state.dragging = false;
-                    return Some(Action::capture());
+                    return Some(Action::publish(Message::MTextSelEnd).and_capture());
                 }
             }
             _ => {}
@@ -440,9 +457,13 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
             });
             frame.fill(
                 &outline,
-                if self.translucent {
-                    // 70% transparent: preserve the drawing behind the editor.
-                    theme.palette().background.base.color.scale_alpha(0.30)
+                if self.inplace && self.background {
+                    // Show Background: the box is filled, the drawing behind
+                    // it hidden.
+                    theme.palette().background.weak.color
+                } else if self.translucent {
+                    // Without it the drawing shows through the editor.
+                    Color::TRANSPARENT
                 } else if self.inplace {
                     theme.palette().background.base.color
                 } else {
@@ -527,8 +548,40 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                         p.line_to(map(bx.xmin, high));
                         p.close();
                     });
-                    frame.fill(&quad, theme.palette().primary.base.color.scale_alpha(0.45));
+                    frame.fill(
+                        &quad,
+                        self.highlight
+                            .unwrap_or_else(|| theme.palette().primary.base.color.scale_alpha(0.45)),
+                    );
                 }
+            }
+        }
+        // A misspelled word: a red dashed line under its letters.
+        for &(a, b) in &self.marks {
+            for bx in self.boxes.iter().filter(|bx| bx.vis >= a && bx.vis < b) {
+                let (low, _) = line_band(&self.boxes, bx);
+                let start = map(bx.xmin, low);
+                let end = map(bx.xmax, low);
+                let length = (end.x - start.x).hypot(end.y - start.y);
+                if length < 0.5 {
+                    continue;
+                }
+                let step = (end - start) * (1.0 / length);
+                let mut at = 0.0;
+                let dashes = Path::new(|p| {
+                    while at < length {
+                        let to = (at + 3.0).min(length);
+                        p.move_to(start + step * at);
+                        p.line_to(start + step * to);
+                        at += 5.0;
+                    }
+                });
+                frame.stroke(
+                    &dashes,
+                    Stroke::default()
+                        .with_color(Color::from_rgb8(230, 30, 30))
+                        .with_width(1.2),
+                );
             }
         }
         for (seg, col, width) in &self.segments {
@@ -637,6 +690,18 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
 /// A text colour too close to the editor background (a light grey layer on
 /// the light theme's white) pulled toward the theme's text colour, keeping
 /// some of its own hue.
+/// The misspelled words the editor underlines.
+fn ed_marks(ed: &super::super::mtext_editor::MTextEditorState) -> Vec<(usize, usize)> {
+    ed.spell_marks.clone()
+}
+
+/// The selection fill set with Text Highlight Color.
+fn ed_highlight() -> Option<Color> {
+    crate::app::mtext_prefs::prefs()
+        .highlight
+        .map(|[r, g, b]| Color::from_rgb8(r, g, b))
+}
+
 fn readable_on(col: Color, background: iced::theme::palette::Pair) -> Color {
     let luminance = |c: Color| 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
     if (luminance(col) - luminance(background.color)).abs() >= 0.35 {
@@ -702,11 +767,56 @@ pub(super) fn table_cell_editor_overlay(
         cell: Some(cell),
         inplace: false,
         translucent: false,
+        marks: ed_marks(ed),
+        highlight: ed_highlight(),
+        background: false,
     };
     crate::ui::ime_zone::ime_zone(
         iced::widget::canvas(prog).width(size.0).height(size.1),
         Message::CommandAppendChar,
     )
+}
+
+/// The angle the in-place editor shows the text at: its own, or level when
+/// the editor is not WYSIWYG (MTEXTFIXED 2).
+pub(super) fn editor_angle(ed: &super::super::mtext_editor::MTextEditorState) -> f32 {
+    if crate::app::mtext_prefs::prefs().wysiwyg {
+        ed.rotation_input_value().unwrap_or(0.0) as f32
+    } else {
+        0.0
+    }
+}
+
+/// The editing surface with the tag under text the editor just changed and
+/// the right-click menu; a press outside an open menu closes it.
+fn with_editor_menus<'a>(
+    ed: &super::super::mtext_editor::MTextEditorState,
+    cell: super::super::table_cell_edit::CellCanvas,
+    angle: f32,
+    bottom_inset: f32,
+    surface: Element<'a, Message>,
+) -> Element<'a, Message> {
+    let (sin, cos) = angle.sin_cos();
+    let place = |u: f32, v: f32| cell.project(u * cos - v * sin, u * sin + v * cos);
+    let tag = mtext_menu::context::smart_tag(ed, place);
+    let menu = mtext_menu::context::context_menu(ed);
+    if tag.is_none() && menu.is_none() {
+        return surface;
+    }
+    let mut layers = stack![surface];
+    if let Some((at, tag)) = tag {
+        layers = layers.push(position_canvas_overlay(at, tag));
+    }
+    if let Some((at, panel)) = menu {
+        layers = layers
+            .push(
+                mouse_area(iced::widget::Space::new().width(Fill).height(Fill))
+                    .on_press(Message::MTextContextClose)
+                    .on_right_press(Message::MTextContextClose),
+            )
+            .push(position_canvas_overlay_clamped(at, bottom_inset, Vector::ZERO, panel));
+    }
+    layers.into()
 }
 
 /// A drawing-scale editing surface and a separate formatting toolbar.
@@ -715,8 +825,10 @@ pub(super) fn mtext_inplace_overlay<'a>(
     styles: Vec<String>,
     cell: super::super::table_cell_edit::CellCanvas,
     size: (f32, f32),
+    show_toolbar: bool,
+    bottom_inset: f32,
 ) -> Element<'a, Message> {
-    let angle = ed.rotation_input_value().unwrap_or(0.0) as f32;
+    let angle = editor_angle(ed);
     let prog = MTextPreview {
         segments: mtext_preview_segments(ed),
         boxes: ed.glyph_boxes.clone(),
@@ -727,7 +839,7 @@ pub(super) fn mtext_inplace_overlay<'a>(
         miny: 0.0,
         scale: 1.0,
         content_h: size.1,
-        ruler: Some({
+        ruler: ed.ruler.then(|| {
             let width = ed.rect_width as f32;
             let growth = ed.box_growth();
             let left = if growth == 2.0 {
@@ -748,14 +860,37 @@ pub(super) fn mtext_inplace_overlay<'a>(
         inplace: true,
         // A multileader owns additional graphics and cannot be hidden whole.
         translucent: ed.editing.is_none() || ed.hidden_source_tab.is_some(),
+        marks: ed_marks(ed),
+        highlight: ed_highlight(),
+        background: crate::app::mtext_prefs::prefs().show_background,
     };
     let surface = crate::ui::ime_zone::ime_zone(
         iced::widget::canvas(prog).width(size.0).height(size.1),
         Message::CommandAppendChar,
     );
+    let surface = with_editor_menus(ed, cell, angle, bottom_inset, surface);
     // Keep the commonly edited fields visible together on a normal viewport.
     // The first row still scrolls horizontally when the viewport is narrow.
     let toolbar_width = size.0.min(1000.0).max(1.0);
+    // With the ribbon's Text Editor tab on show (MTEXTTOOLBAR 2), the text
+    // has no toolbar of its own; a panel the tab opens shows by the text.
+    if !show_toolbar {
+        let x = cell.corners.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+        let bottom = cell
+            .corners
+            .iter()
+            .map(|p| p.y)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let mut layers = stack![surface];
+        if let Some(menu) = ed.menu {
+            let anchor = iced::Point::new(
+                x.clamp(0.0, (size.0 - 320.0).max(0.0)),
+                (bottom + 8.0).clamp(0.0, (size.1 - 200.0).max(0.0)),
+            );
+            layers = layers.push(position_canvas_overlay(anchor, mtext_menu::panel(ed, menu)));
+        }
+        return layers.into();
+    }
     let drag_handle = mouse_area(
         container(text("⋮⋮").size(15))
             .height(58)
@@ -1272,6 +1407,9 @@ fn mtext_editor_content<'a>(
             cell: None,
             inplace: false,
             translucent: false,
+            marks: ed_marks(ed),
+            highlight: ed_highlight(),
+            background: false,
         };
         let cv = canvas(prog)
             .width(iced::Length::Fixed(content_w))
@@ -3063,6 +3201,9 @@ mod cell_editor_wheel_tests {
             cell: Some(cell),
             inplace,
             translucent: false,
+            marks: Vec::new(),
+            highlight: None,
+            background: false,
         };
         let drawing =
             mouse_area(Space::new().width(Fill).height(Fill)).on_scroll(Message::ViewportScroll);

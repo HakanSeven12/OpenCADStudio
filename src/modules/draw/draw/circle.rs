@@ -460,6 +460,9 @@ impl CadCommand for CircleCDCommand {
 
 pub struct Circle2PCommand {
     p1: Option<DVec3>,
+    /// The first end was picked with a Tangent snap: the object, in plane
+    /// coordinates, the circle touches at that end of the diameter.
+    tan1: Option<TangentObject>,
     plane: WorkingPlane,
 }
 
@@ -473,8 +476,38 @@ impl Circle2PCommand {
     pub fn new() -> Self {
         Self {
             p1: None,
+            tan1: None,
             plane: WorkingPlane::default(),
         }
+    }
+
+    /// The circle whose diameter runs from `pt` to the point where it
+    /// touches `object`, `hit` choosing between the near and far side of a
+    /// circle. The diameter stands square to the object there.
+    fn tangent_diameter(
+        &self,
+        pt: DVec3,
+        object: TangentObject,
+        hit: DVec3,
+    ) -> Option<(DVec3, f64)> {
+        let p = self.plane.to_local(pt);
+        let hit = self.plane.to_local(hit);
+        let q = match object {
+            TangentObject::Line { .. } => closest_point_on_obj(&object, p, 0.0),
+            TangentObject::Circle { center, radius } => {
+                let dir = DVec3::new(p.x - center.x, p.y - center.y, 0.0).try_normalize()?;
+                let (a, b) = (center + dir * radius, center - dir * radius);
+                if a.distance(hit) <= b.distance(hit) {
+                    a
+                } else {
+                    b
+                }
+            }
+            TangentObject::Ellipse { .. } => return None,
+        };
+        let q = DVec3::new(q.x, q.y, p.z);
+        let radius = p.distance(q) * 0.5;
+        (radius > 1.0e-9).then(|| (self.plane.to_world((p + q) * 0.5), radius))
     }
 
     /// The prompt of the current step as HATCH's Circle asks it.
@@ -525,8 +558,41 @@ impl CadCommand for Circle2PCommand {
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
+    fn on_point_with_tangent(
+        &mut self,
+        pt: DVec3,
+        tangent: Option<TangentObject>,
+    ) -> Option<CmdResult> {
+        let tangent = tangent
+            .filter(|t| !matches!(t, TangentObject::Ellipse { .. }))
+            .map(|t| tangent_object_local(t, self.plane));
+        let circle = match (self.p1, self.tan1, tangent) {
+            (None, _, Some(object)) => {
+                self.p1 = Some(pt);
+                self.tan1 = Some(object);
+                return Some(CmdResult::NeedPoint);
+            }
+            // Both ends cannot touch an object: the second counts as a point.
+            (Some(p1), Some(object), _) => self.tangent_diameter(pt, object, p1),
+            (Some(p1), None, Some(object)) => self.tangent_diameter(p1, object, pt),
+            _ => return None,
+        };
+        let Some((center, radius)) = circle else {
+            return Some(CmdResult::NeedPoint);
+        };
+        defaults::set_circle_radius(radius);
+        Some(CmdResult::CommitAndExit(make_circle(
+            center,
+            radius,
+            self.plane,
+        )))
+    }
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         let p1 = self.p1?;
+        if let Some(object) = self.tan1 {
+            let (center, radius) = self.tangent_diameter(pt, object, p1)?;
+            return Some(circle_wire(center, radius, self.plane));
+        }
         let center = (p1 + pt) * 0.5;
         let radius = plane_distance(p1, pt, self.plane) / 2.0;
         Some(circle_wire(center, radius, self.plane))
@@ -537,6 +603,9 @@ impl CadCommand for Circle2PCommand {
 
 pub struct Circle3PCommand {
     pts: Vec<DVec3>,
+    /// For each pick, the object (in plane coordinates) a Tangent snap
+    /// found there: the circle touches it instead of passing the point.
+    tans: Vec<Option<TangentObject>>,
     plane: WorkingPlane,
 }
 
@@ -550,8 +619,42 @@ impl Circle3PCommand {
     pub fn new() -> Self {
         Self {
             pts: Vec::new(),
+            tans: Vec::new(),
             plane: WorkingPlane::default(),
         }
+    }
+
+    /// The circle through the plain picks and touching the tangent ones,
+    /// the one whose touch points lie nearest the picks. A point is solved
+    /// as a circle of radius zero.
+    fn mixed_circle(&self, picks: [(DVec3, Option<TangentObject>); 3]) -> Option<(DVec3, f64)> {
+        let local = picks.map(|(pt, tan)| (self.plane.to_local(pt), tan));
+        let objs = local.map(|(pt, tan)| {
+            tan.unwrap_or(TangentObject::Circle {
+                center: DVec3::new(pt.x, pt.y, 0.0),
+                radius: 0.0,
+            })
+        });
+        let miss = |&(center, r): &(DVec3, f64)| -> f64 {
+            local
+                .iter()
+                .filter_map(|(hit, tan)| {
+                    let touch = closest_point_on_obj(tan.as_ref()?, center, r);
+                    Some(touch.distance(DVec3::new(hit.x, hit.y, 0.0)))
+                })
+                .sum()
+        };
+        let (center, r) = ttt_candidates(objs[0], objs[1], objs[2])
+            .into_iter()
+            .min_by(|a, b| miss(a).total_cmp(&miss(b)))?;
+        Some((
+            self.plane.to_world(DVec3::new(center.x, center.y, local[0].0.z)),
+            r,
+        ))
+    }
+
+    fn has_tangent(&self) -> bool {
+        self.tans.iter().any(Option::is_some)
     }
 
     /// The prompt of the current step as HATCH's Circle asks it.
@@ -581,6 +684,7 @@ impl CadCommand for Circle3PCommand {
     }
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         self.pts.push(pt);
+        self.tans.push(None);
         if self.pts.len() < 3 {
             return CmdResult::NeedPoint;
         }
@@ -592,8 +696,42 @@ impl CadCommand for Circle3PCommand {
             }
             None => {
                 self.pts.pop();
+                self.tans.pop();
                 CmdResult::NeedPoint
             } // collinear — ask again
+        }
+    }
+    fn on_point_with_tangent(
+        &mut self,
+        pt: DVec3,
+        tangent: Option<TangentObject>,
+    ) -> Option<CmdResult> {
+        let tangent = tangent
+            .filter(|t| !matches!(t, TangentObject::Ellipse { .. }))
+            .map(|t| tangent_object_local(t, self.plane));
+        if tangent.is_none() && !self.has_tangent() {
+            return None;
+        }
+        self.pts.push(pt);
+        self.tans.push(tangent);
+        if self.pts.len() < 3 {
+            return Some(CmdResult::NeedPoint);
+        }
+        let picks = [0, 1, 2].map(|k| (self.pts[k], self.tans[k]));
+        match self.mixed_circle(picks) {
+            Some((center, radius)) => {
+                defaults::set_circle_radius(radius);
+                Some(CmdResult::CommitAndExit(make_circle(
+                    center,
+                    radius,
+                    self.plane,
+                )))
+            }
+            None => {
+                self.pts.pop();
+                self.tans.pop();
+                Some(CmdResult::NeedPoint)
+            }
         }
     }
     fn on_enter(&mut self) -> CmdResult {
@@ -605,6 +743,16 @@ impl CadCommand for Circle3PCommand {
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
         match self.pts.len() {
             0 => None,
+            1 if self.has_tangent() => None,
+            2 if self.has_tangent() => {
+                let picks = [
+                    (self.pts[0], self.tans[0]),
+                    (self.pts[1], self.tans[1]),
+                    (pt, None),
+                ];
+                let (center, radius) = self.mixed_circle(picks)?;
+                Some(circle_wire(center, radius, self.plane))
+            }
             1 => {
                 // Show circle preview with p1→cursor as diameter (same as 2P).
                 let p1 = self.pts[0];

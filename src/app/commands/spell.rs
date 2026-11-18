@@ -56,6 +56,89 @@ fn with_speller<T>(language: &str, f: impl FnOnce(&SystemSpeller) -> T) -> T {
     })
 }
 
+/// The main dictionary's suggestions for `word`, best first.
+pub(crate) fn spelling_suggestions(language: &str, word: &str) -> Vec<String> {
+    with_speller(language, |sp| sp.check_word(word, true).1)
+}
+
+/// The words of a custom dictionary file: one per line, UTF-16 or UTF-8
+/// with a byte order mark, else the system's code page.
+pub(crate) fn read_word_file(path: &str) -> Vec<String> {
+    let Ok(bytes) = std::fs::read(path) else {
+        return Vec::new();
+    };
+    let text = if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
+        encoding_rs::UTF_16BE.decode_without_bom_handling(rest).0.into_owned()
+    } else if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+        encoding_rs::UTF_16LE.decode_without_bom_handling(rest).0.into_owned()
+    } else if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+        String::from_utf8_lossy(rest).into_owned()
+    } else {
+        String::from_utf8(bytes.clone())
+            .unwrap_or_else(|_| encoding_rs::WINDOWS_1252.decode(&bytes).0.into_owned())
+    };
+    text.lines()
+        .map(str::trim)
+        .filter(|w| !w.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Write a custom dictionary file: UTF-16 (big-endian, with its byte order
+/// mark), one word per line.
+pub(crate) fn write_word_file(path: &str, words: &[String]) -> std::io::Result<()> {
+    let mut bytes = vec![0xFE, 0xFF];
+    for unit in words.join("\r\n").encode_utf16() {
+        bytes.extend_from_slice(&unit.to_be_bytes());
+    }
+    std::fs::write(path, bytes)
+}
+
+/// The words the spell checker lets pass besides the main dictionary: the
+/// profile's word list and the custom dictionary in use.
+pub(crate) fn custom_words(prefs: &crate::app::settings::SpellPrefs) -> Vec<String> {
+    let mut words = prefs.custom.clone();
+    if let Some(path) = prefs.current_custom.and_then(|n| prefs.custom_files.get(n)) {
+        words.extend(read_word_file(path));
+    }
+    words
+}
+
+/// The misspelled words of `text` (one char per editor slot) as char
+/// ranges, by the main dictionary, the custom words and the options.
+pub(crate) fn misspelled(
+    text: &str,
+    prefs: &crate::app::settings::SpellPrefs,
+    custom: &[String],
+) -> Vec<(usize, usize)> {
+    let language = prefs.language.clone();
+    words(text, 0)
+        .into_iter()
+        .filter(|&(s, e)| {
+            let word = &text[s..e];
+            !skipped(word, &prefs.options)
+                && !custom.iter().any(|w| w.eq_ignore_ascii_case(word))
+                && !with_speller(&language, |sp| sp.check_word(word, false).0)
+        })
+        .map(|(s, e)| (text[..s].chars().count(), text[..e].chars().count()))
+        .collect()
+}
+
+/// The words of the custom dictionary file in use (none for the profile's
+/// own list, which SPELL keeps itself).
+fn custom_words_extra(prefs: &crate::app::settings::SpellPrefs) -> Vec<String> {
+    prefs
+        .current_custom
+        .and_then(|n| prefs.custom_files.get(n))
+        .map(|path| read_word_file(path))
+        .unwrap_or_default()
+}
+
+/// The main dictionaries offered (tag, name).
+pub(crate) fn dictionary_languages() -> Vec<(String, String)> {
+    available_languages()
+}
+
 fn available_languages() -> Vec<(String, String)> {
     LANGUAGES
         .iter()
@@ -279,6 +362,7 @@ impl OpenCADStudio {
         state.suggestions.clear();
         state.replacement.clear();
         let language = state.language.clone();
+        let extra = custom_words_extra(&self.spell_prefs);
         while state.cursor.0 < state.targets.len() {
             let handle = state.targets[state.cursor.0];
             let text = self.tabs[i]
@@ -292,6 +376,7 @@ impl OpenCADStudio {
                 if skipped(word, &state.options)
                     || state.ignored.iter().any(|w| w == word)
                     || state.custom.iter().any(|w| w.eq_ignore_ascii_case(word))
+                    || extra.iter().any(|w| w.eq_ignore_ascii_case(word))
                 {
                     return false;
                 }

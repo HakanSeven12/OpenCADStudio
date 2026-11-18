@@ -122,7 +122,7 @@ pub(crate) fn resolve_hatch_rings(
         return None;
     }
     // Innermost (smallest-area) outline containing the point is the fill.
-    containing.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    containing.sort_by(|a, b| a.1.total_cmp(&b.1));
     let outer_idx = containing[0].0;
     let outer = &outlines[outer_idx];
 

@@ -475,6 +475,10 @@ impl CadCommand for MLeaderCommand {
         "MLEADER"
     }
 
+    fn has_first_point(&self) -> bool {
+        !self.verts.is_empty()
+    }
+
     /// The leader points refuse with "Invalid Input."; content first's text
     /// corner is a plain keyword point prompt (measured).
     fn point_rejection(&self) -> Option<String> {
@@ -1203,11 +1207,12 @@ fn place_block_content(
         return;
     };
     let dir = root.direction;
+    // The block sits one landing gap past the landing's end.
     let landing = if ml.enable_landing {
         root.landing_distance
     } else {
         0.0
-    };
+    } + ml.context.landing_gap.max(0.0);
     let factor = if ml.context.scale_factor.abs() > 1.0e-12 {
         ml.context.scale_factor
     } else {
@@ -1399,8 +1404,6 @@ fn preview_wire(pts: &[Vec3], arrow_size: f32) -> WireModel {
     WireModel {
         bg_adapt: None,
         point_marker: None,
-        taper_widths: Vec::new(),
-        pattern_stations: Vec::new(),
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
@@ -1410,27 +1413,31 @@ fn preview_wire(pts: &[Vec3], arrow_size: f32) -> WireModel {
         fill_is_2d_solid: false,
         solid_normal: None,
         render_instance: None,
-        pick_tris: Vec::new(),
-        pick_tris_low: Vec::new(),
         dash_from_start: false,
-        text_verts: Vec::new(),
         name: "mleader_preview".into(),
-        points,
-        points_low: Vec::new(),
         color: WireModel::CYAN,
         selected: false,
         pattern_length: 0.0,
         pattern: [0.0; 8],
         line_weight_px: 1.0,
-        snap_pts: vec![],
-        tangent_geoms: vec![],
         aci: 0,
-        key_vertices: vec![],
         aabb: WireModel::UNBOUNDED_AABB,
         plinegen: true,
-        fill_tris: vec![],
-        fill_tris_low: Vec::new(),
-
+        geom: std::sync::Arc::new(crate::scene::WireGeom {
+            taper_widths: Vec::new(),
+            pattern_stations: Vec::new(),
+            pick_tris: Vec::new(),
+            pick_tris_low: Vec::new(),
+            text_verts: Vec::new(),
+            points,
+            points_low: Vec::new(),
+            snap_pts: vec![],
+            tangent_geoms: vec![],
+            key_vertices: vec![],
+            fill_tris: vec![],
+            fill_tris_low: Vec::new(),
+            ..crate::scene::WireGeom::default()
+        }),
         ..Default::default()
     }
 }

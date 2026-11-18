@@ -302,8 +302,8 @@ fn walk_mline_element(
         piece.aci = wire.aci;
     }
     // The element's first wire carries the entity's snaps and vertices.
-    pieces[0].snap_pts = wire.snap_pts;
-    pieces[0].key_vertices = wire.key_vertices;
+    pieces[0].snap_pts = wire.snap_pts.clone();
+    pieces[0].key_vertices = wire.key_vertices.clone();
     pieces
 }
 
@@ -1400,8 +1400,6 @@ fn tessellate_entity_inner(
         return vec![WireModel {
             bg_adapt: None,
             point_marker: None,
-            taper_widths: Vec::new(),
-            pattern_stations: Vec::new(),
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
@@ -1411,27 +1409,31 @@ fn tessellate_entity_inner(
             fill_is_2d_solid: false,
             solid_normal: None,
             render_instance: None,
-            pick_tris,
-            pick_tris_low,
             dash_from_start: false,
-            text_verts: Vec::new(),
             name: h.value().to_string(),
-            points,
-            points_low: Vec::new(),
             color: WireModel::SELECTED,
             selected: sel,
             aci: 0,
             pattern_length: 0.0,
             pattern: [0.0; 8],
             line_weight_px: 1.0,
-            snap_pts: vec![],
-            tangent_geoms: vec![],
-            key_vertices: vec![[x0, y0, 0.0], [x1, y1, 0.0]],
             aabb: [x0 as f32, y0 as f32, x1 as f32, y1 as f32],
             plinegen: true,
-            fill_tris: vec![],
-            fill_tris_low: Vec::new(),
-
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                taper_widths: Vec::new(),
+                pattern_stations: Vec::new(),
+                pick_tris,
+                pick_tris_low,
+                text_verts: Vec::new(),
+                points,
+                points_low: Vec::new(),
+                snap_pts: vec![],
+                tangent_geoms: vec![],
+                key_vertices: vec![[x0, y0, 0.0], [x1, y1, 0.0]],
+                fill_tris: vec![],
+                fill_tris_low: Vec::new(),
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         }];
     }
@@ -1656,8 +1658,6 @@ fn tessellate_entity_inner(
         let marker = WireModel {
             bg_adapt: None,
             point_marker: None,
-            taper_widths: Vec::new(),
-            pattern_stations: Vec::new(),
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
@@ -1667,27 +1667,31 @@ fn tessellate_entity_inner(
             fill_is_2d_solid: false,
             solid_normal: None,
             render_instance: None,
-            pick_tris: Vec::new(),
-            pick_tris_low: Vec::new(),
             dash_from_start: false,
-            text_verts: Vec::new(),
             name: h.value().to_string(),
-            points: vec![],
-            points_low: Vec::new(),
             color: entity_color,
             selected: sel,
             aci: 0,
             pattern_length: 0.0,
             pattern: [0.0; 8],
             line_weight_px: 1.0,
-            snap_pts: vec![(ip, model::wire_model::SnapHint::Insertion)],
-            tangent_geoms: vec![],
-            key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
-            fill_tris: vec![],
-            fill_tris_low: Vec::new(),
-
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                taper_widths: Vec::new(),
+                pattern_stations: Vec::new(),
+                pick_tris: Vec::new(),
+                pick_tris_low: Vec::new(),
+                text_verts: Vec::new(),
+                points: vec![],
+                points_low: Vec::new(),
+                snap_pts: vec![(ip, model::wire_model::SnapHint::Insertion)],
+                tangent_geoms: vec![],
+                key_vertices: vec![],
+                fill_tris: vec![],
+                fill_tris_low: Vec::new(),
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         };
 
@@ -2108,8 +2112,6 @@ fn lod_stub_wire(
     WireModel {
         bg_adapt: None,
         point_marker: None,
-        taper_widths: Vec::new(),
-        pattern_stations: Vec::new(),
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
@@ -2119,32 +2121,36 @@ fn lod_stub_wire(
         fill_is_2d_solid: false,
         solid_normal: None,
         render_instance: None,
-        pick_tris: Vec::new(),
-        pick_tris_low: Vec::new(),
         dash_from_start: false,
-        text_verts: Vec::new(),
         name,
-        // Diagonal of the entity's 3D AABB so depth tests against
-        // shaded / hidden-line geometry are correct — the stub doesn't
-        // flatten to z=0 and pop in front of objects that sit at a
-        // different elevation. 2D entities (text fallbacks) pass
-        // z_min = z_max = 0 to keep the historical behaviour.
-        points: vec![[ax, ay, z_min], [bx, by, z_max]],
-        points_low: Vec::new(),
         color: stored_color,
         selected,
         aci,
         pattern_length: 0.0,
         pattern: [0.0; 8],
         line_weight_px: 1.0,
-        snap_pts: vec![],
-        tangent_geoms: vec![],
-        key_vertices: vec![[cx as f64, cy as f64, cz as f64]],
         aabb,
         plinegen: true,
-        fill_tris: vec![],
-        fill_tris_low: Vec::new(),
-
+        geom: std::sync::Arc::new(crate::scene::WireGeom {
+            taper_widths: Vec::new(),
+            pattern_stations: Vec::new(),
+            pick_tris: Vec::new(),
+            pick_tris_low: Vec::new(),
+            text_verts: Vec::new(),
+            // Diagonal of the entity's 3D AABB so depth tests against
+            // shaded / hidden-line geometry are correct — the stub doesn't
+            // flatten to z=0 and pop in front of objects that sit at a
+            // different elevation. 2D entities (text fallbacks) pass
+            // z_min = z_max = 0 to keep the historical behaviour.
+            points: vec![[ax, ay, z_min], [bx, by, z_max]],
+            points_low: Vec::new(),
+            snap_pts: vec![],
+            tangent_geoms: vec![],
+            key_vertices: vec![[cx as f64, cy as f64, cz as f64]],
+            fill_tris: vec![],
+            fill_tris_low: Vec::new(),
+            ..crate::scene::WireGeom::default()
+        }),
         ..Default::default()
     }
 }
@@ -2207,8 +2213,6 @@ fn lod_stub_wire_3d(
     WireModel {
         bg_adapt: None,
         point_marker: None,
-        taper_widths: Vec::new(),
-        pattern_stations: Vec::new(),
         world_width: 0.0,
         depth_override: None,
         display_visible: true,
@@ -2218,30 +2222,34 @@ fn lod_stub_wire_3d(
         fill_is_2d_solid: false,
         solid_normal: None,
         render_instance: None,
-        pick_tris: Vec::new(),
-        pick_tris_low: Vec::new(),
         dash_from_start: false,
-        text_verts: Vec::new(),
         name,
-        points,
-        points_low: Vec::new(),
         color: stored_color,
         selected,
         aci,
         pattern_length: 0.0,
         pattern: [0.0; 8],
         line_weight_px: 1.0,
-        snap_pts: vec![],
-        tangent_geoms: vec![],
-        // No `key_vertices` — Face3DGpu requires 4 corners to emit a
-        // fill quad, and we don't want this stub painted as a solid
-        // face. The wire pass still draws its 12 edges.
-        key_vertices: vec![],
         aabb,
         plinegen: true,
-        fill_tris: vec![],
-        fill_tris_low: Vec::new(),
-
+        geom: std::sync::Arc::new(crate::scene::WireGeom {
+            taper_widths: Vec::new(),
+            pattern_stations: Vec::new(),
+            pick_tris: Vec::new(),
+            pick_tris_low: Vec::new(),
+            text_verts: Vec::new(),
+            points,
+            points_low: Vec::new(),
+            snap_pts: vec![],
+            tangent_geoms: vec![],
+            // No `key_vertices` — Face3DGpu requires 4 corners to emit a
+            // fill quad, and we don't want this stub painted as a solid
+            // face. The wire pass still draws its 12 edges.
+            key_vertices: vec![],
+            fill_tris: vec![],
+            fill_tris_low: Vec::new(),
+            ..crate::scene::WireGeom::default()
+        }),
         ..Default::default()
     }
 }

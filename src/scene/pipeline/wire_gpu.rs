@@ -367,6 +367,7 @@ pub struct WireGpu {
     pub is_3d_mesh_edge: bool,
     /// Per-wire constants for this chunk (group 1); packed instances carry them inline.
     pub const_bind_group: Option<std::sync::Arc<wgpu::BindGroup>>,
+    pub(super) const_buffer: Option<wgpu::Buffer>,
 }
 
 #[repr(C)]
@@ -1926,7 +1927,7 @@ pub(super) fn build_const_bind_group(
     queue: &wgpu::Queue,
     bgl: &wgpu::BindGroupLayout,
     consts: &[WireConst],
-) -> std::sync::Arc<wgpu::BindGroup> {
+) -> (std::sync::Arc<wgpu::BindGroup>, wgpu::Buffer) {
     // wgpu rejects zero-sized buffers; pad with one zeroed record when empty.
     let one = [<WireConst as bytemuck::Zeroable>::zeroed()];
     let data: &[WireConst] = if consts.is_empty() { &one } else { consts };
@@ -1945,7 +1946,7 @@ pub(super) fn build_const_bind_group(
             resource: buf.as_entire_binding(),
         }],
     });
-    std::sync::Arc::new(bg)
+    (std::sync::Arc::new(bg), buf)
 }
 
 impl WireGpu {
@@ -1977,7 +1978,8 @@ impl WireGpu {
             debug_assert!(items
                 .iter()
                 .all(|item| (item.wire_id as usize) < constants.len()));
-            let bind_group = build_const_bind_group(device, queue, const_bgl, constants);
+            let (bind_group, const_buffer) =
+                build_const_bind_group(device, queue, const_bgl, constants);
             for chunk in items.chunks(max_instances) {
                 out.push(Self {
                     instance_buffer: instance_buffer(device, queue, label, chunk),
@@ -1985,6 +1987,7 @@ impl WireGpu {
                     instance_count: chunk.len() as u32,
                     is_3d_mesh_edge: mesh_edge,
                     const_bind_group: Some(bind_group.clone()),
+                    const_buffer: Some(const_buffer.clone()),
                 });
             }
         }
@@ -2055,6 +2058,7 @@ impl WireGpu {
                 instance_count: chunk.len() as u32,
                 is_3d_mesh_edge: false,
                 const_bind_group: None,
+                const_buffer: None,
             })
             .collect()
     }
@@ -2099,6 +2103,7 @@ impl WireGpu {
                     instance_count: chunk.len() as u32,
                     is_3d_mesh_edge: mesh_edge,
                     const_bind_group: None,
+                    const_buffer: None,
                 })
                 .collect();
         };
@@ -2222,6 +2227,7 @@ impl WireGpu {
                     instance_count: chunk.len() as u32,
                     is_3d_mesh_edge: mesh_edge,
                     const_bind_group: None,
+                    const_buffer: None,
                 }
             })
             .collect()
@@ -2293,6 +2299,7 @@ impl WireGpu {
                     instance_count: chunk.len() as u32,
                     is_3d_mesh_edge: false,
                     const_bind_group: None,
+                    const_buffer: None,
                 }
             })
             .collect()

@@ -1963,10 +1963,10 @@ impl OpenCADStudio {
         if self.tabs[i].history.undo_stack.len() == history_len {
             return;
         }
-        if let Some(crate::app::tab_document::HistorySnapshot::Delta(delta)) =
-            self.tabs[i].history.undo_stack.last_mut()
-        {
-            delta.layiso_state = Some((before, after));
+        if let Some(mut entry) = self.tabs[i].history.last_undo_mut() {
+            if let crate::app::tab_document::HistorySnapshot::Delta(delta) = &mut *entry {
+                delta.layiso_state = Some((before, after));
+            }
         }
     }
 

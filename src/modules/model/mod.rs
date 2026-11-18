@@ -8,6 +8,7 @@ pub mod primitive_cmd;
 pub mod sectionplane_cmd;
 pub mod shell_cmd;
 pub mod slice_cmd;
+pub mod solidedit_cmd;
 
 use crate::modules::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
 
@@ -32,6 +33,24 @@ const INTERSECT_ICON: &[u8] = include_bytes!("../../../assets/icons/model/inters
 const FILLET_ICON: &[u8] = include_bytes!("../../../assets/icons/model/fillet.svg");
 const CHAMFER_ICON: &[u8] = include_bytes!("../../../assets/icons/model/chamfer.svg");
 const SHELL_ICON: &[u8] = include_bytes!("../../../assets/icons/model/shell.svg");
+const SLICE_ICON: &[u8] = include_bytes!("../../../assets/icons/model/slice.svg");
+const INTERFERE_ICON: &[u8] = include_bytes!("../../../assets/icons/model/interfere.svg");
+const THICKEN_ICON: &[u8] = include_bytes!("../../../assets/icons/model/thicken.svg");
+const EXTRACT_EDGES_ICON: &[u8] = include_bytes!("../../../assets/icons/model/extract_edges.svg");
+const IMPRINT_ICON: &[u8] = include_bytes!("../../../assets/icons/model/imprint.svg");
+const COLOR_EDGES_ICON: &[u8] = include_bytes!("../../../assets/icons/model/color_edges.svg");
+const COPY_EDGES_ICON: &[u8] = include_bytes!("../../../assets/icons/model/copy_edges.svg");
+const EXTRUDE_FACES_ICON: &[u8] = include_bytes!("../../../assets/icons/model/extrude_faces.svg");
+const TAPER_FACES_ICON: &[u8] = include_bytes!("../../../assets/icons/model/taper_faces.svg");
+const MOVE_FACES_ICON: &[u8] = include_bytes!("../../../assets/icons/model/move_faces.svg");
+const COPY_FACES_ICON: &[u8] = include_bytes!("../../../assets/icons/model/copy_faces.svg");
+const OFFSET_FACES_ICON: &[u8] = include_bytes!("../../../assets/icons/model/offset_faces.svg");
+const DELETE_FACES_ICON: &[u8] = include_bytes!("../../../assets/icons/model/delete_faces.svg");
+const ROTATE_FACES_ICON: &[u8] = include_bytes!("../../../assets/icons/model/rotate_faces.svg");
+const COLOR_FACES_ICON: &[u8] = include_bytes!("../../../assets/icons/model/color_faces.svg");
+const SEPARATE_ICON: &[u8] = include_bytes!("../../../assets/icons/model/separate.svg");
+const CLEAN_ICON: &[u8] = include_bytes!("../../../assets/icons/model/clean.svg");
+const CHECK_ICON: &[u8] = include_bytes!("../../../assets/icons/model/check.svg");
 
 /// Helper to declare a ribbon tool that fires a named command.
 fn tool(id: &'static str, label: &'static str, icon: &'static [u8]) -> ToolDef {
@@ -82,11 +101,54 @@ impl CadModule for ModelModule {
                     ],
                 },
                 RibbonGroup {
-                    title: "Boolean",
+                    title: "Solid Editing",
                     tools: vec![
                         RibbonItem::LargeTool(tool("UNION", "Union", UNION_ICON)),
                         RibbonItem::LargeTool(tool("SUBTRACT", "Subtract", SUBTRACT_ICON)),
                         RibbonItem::LargeTool(tool("INTERSECT", "Intersect", INTERSECT_ICON)),
+                        RibbonItem::LargeTool(tool("INTERFERE", "Interfere", INTERFERE_ICON)),
+                        RibbonItem::LargeTool(tool("SLICE", "Slice", SLICE_ICON)),
+                        RibbonItem::LargeTool(tool("THICKEN", "Thicken", THICKEN_ICON)),
+                        RibbonItem::LargeDropdown {
+                            id: "SOLIDEDIT_EDGES",
+                            label: "Extract Edges",
+                            icon: IconKind::Svg(EXTRACT_EDGES_ICON),
+                            items: vec![
+                                ("XEDGES", "Extract Edges", IconKind::Svg(EXTRACT_EDGES_ICON)),
+                                ("IMPRINT", "Imprint", IconKind::Svg(IMPRINT_ICON)),
+                                ("SOLIDEDIT EDGE COLOR", "Color Edges", IconKind::Svg(COLOR_EDGES_ICON)),
+                                ("SOLIDEDIT EDGE COPY", "Copy Edges", IconKind::Svg(COPY_EDGES_ICON)),
+                            ],
+                            default: "XEDGES",
+                        },
+                        RibbonItem::LargeDropdown {
+                            id: "SOLIDEDIT_FACES",
+                            label: "Extrude Faces",
+                            icon: IconKind::Svg(EXTRUDE_FACES_ICON),
+                            items: vec![
+                                ("SOLIDEDIT FACE EXTRUDE", "Extrude Faces", IconKind::Svg(EXTRUDE_FACES_ICON)),
+                                ("SOLIDEDIT FACE TAPER", "Taper Faces", IconKind::Svg(TAPER_FACES_ICON)),
+                                ("SOLIDEDIT FACE MOVE", "Move Faces", IconKind::Svg(MOVE_FACES_ICON)),
+                                ("SOLIDEDIT FACE COPY", "Copy Faces", IconKind::Svg(COPY_FACES_ICON)),
+                                ("SOLIDEDIT FACE OFFSET", "Offset Faces", IconKind::Svg(OFFSET_FACES_ICON)),
+                                ("SOLIDEDIT FACE DELETE", "Delete Faces", IconKind::Svg(DELETE_FACES_ICON)),
+                                ("SOLIDEDIT FACE ROTATE", "Rotate Faces", IconKind::Svg(ROTATE_FACES_ICON)),
+                                ("SOLIDEDIT FACE COLOR", "Color Faces", IconKind::Svg(COLOR_FACES_ICON)),
+                            ],
+                            default: "SOLIDEDIT FACE EXTRUDE",
+                        },
+                        RibbonItem::LargeDropdown {
+                            id: "SOLIDEDIT_BODY",
+                            label: "Separate",
+                            icon: IconKind::Svg(SEPARATE_ICON),
+                            items: vec![
+                                ("SOLIDEDIT BODY SEPARATE", "Separate", IconKind::Svg(SEPARATE_ICON)),
+                                ("SOLIDEDIT BODY CLEAN", "Clean", IconKind::Svg(CLEAN_ICON)),
+                                ("SHELL", "Shell", IconKind::Svg(SHELL_ICON)),
+                                ("SOLIDEDIT BODY CHECK", "Check", IconKind::Svg(CHECK_ICON)),
+                            ],
+                            default: "SOLIDEDIT BODY SEPARATE",
+                        },
                     ],
                 },
                 RibbonGroup {
@@ -94,7 +156,6 @@ impl CadModule for ModelModule {
                     tools: vec![
                         RibbonItem::LargeTool(tool("FILLETEDGE", "Fillet Edge", FILLET_ICON)),
                         RibbonItem::LargeTool(tool("CHAMFEREDGE", "Chamfer", CHAMFER_ICON)),
-                        RibbonItem::LargeTool(tool("SHELL", "Shell", SHELL_ICON)),
                     ],
                 },
             ]

@@ -1160,24 +1160,6 @@ impl OpenCADStudio {
             return;
         };
         sync_mleaderstyle_dictionary(&mut self.tabs[i].scene.document);
-        // A changed text style carries its new values over to the texts that
-        // follow it, in the same undo step.
-        let doc = &mut self.tabs[i].scene.document;
-        let changed: Vec<(TextStyle, TextStyle)> = doc
-            .text_styles
-            .iter()
-            .filter_map(|new| {
-                let old = stage
-                    .baseline
-                    .text_styles
-                    .iter()
-                    .find(|old| new.handle.is_valid() && old.handle == new.handle)?;
-                (old != new).then(|| (old.clone(), new.clone()))
-            })
-            .collect();
-        for (old, new) in changed {
-            super::text_style_users::update_texts(doc, &old, &new, &mut stage.entities);
-        }
 
         let linetypes = stage.linetypes;
         let edited = self.capture_style_state(linetypes);

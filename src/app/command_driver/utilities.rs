@@ -252,9 +252,10 @@ impl OpenCADStudio {
             .iter()
             .filter_map(|&handle| {
                 let mut objects = self.tabs[i].scene.solid_history_objects(handle);
-                if let Some(entity @ document::EntityType::Insert(_)) =
-                    self.tabs[i].scene.document.get_entity(handle)
-                {
+                // An annotative object's per-scale context records follow the
+                // grip too (INSERT attributes, a dimension's points), so the
+                // undo has to put them back with the entity (#3102).
+                if let Some(entity) = self.tabs[i].scene.document.get_entity(handle) {
                     objects.extend(
                         crate::scene::annotative::annotation_context_objects_for_entity(
                             &self.tabs[i].scene.document,
@@ -1356,6 +1357,9 @@ impl OpenCADStudio {
             // ATTSYNC <block> names its block on the line; a bare ATTSYNC
             // still asks its [?/Name/Select] question.
             || (tokens[0].eq_ignore_ascii_case("ATTSYNC") && tokens.len() > 1)
+            // COUNT C counts the preselection; probing the verb alone would
+            // install the area-asking command and swallow the answer.
+            || tokens[0].eq_ignore_ascii_case("COUNT")
         {
             return self.dispatch_command(cmd);
         }

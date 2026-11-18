@@ -30,3 +30,10 @@ Two files were derived from `box.step` by a script:
   representations, for the reader's path for files without products. Open
   CASCADE reads shapes only through products, so FreeCAD does not read this
   one.
+
+`solidcore/` holds the STEP fixtures of Solidcore
+(github.com/NVIDIA/solidcore, `crates/solidcore-step/tests/fixtures/` at
+commit `e261b7d`), Apache-2.0, unchanged: `closed-spline-cylinder.step`,
+`discord-2026-10-30-fillet.step` and `rod_doubled_edge.step`. They are inputs
+for `examples/step_eval.rs` and the STEP bake-off it plugs into; see
+`THIRD_PARTY.md`.

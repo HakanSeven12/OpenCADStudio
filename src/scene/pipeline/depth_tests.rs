@@ -533,3 +533,227 @@ fn draw_order_preserves_clip_boundaries_sorting_and_mesh_occlusion() {
         );
     }
 }
+
+/// The page of a layout is its canvas: whatever the sheet holds is drawn on
+/// it, at any Z. Paper space is seen straight down, and a sheet can hold
+/// objects far off its plane (a legend placed at Z = -6040); the page,
+/// drawn at Z = 0 with the lowest draw order, hid everything behind that
+/// plane as soon as the depth range was sized to reach it.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn layout_page_stays_behind_what_the_sheet_holds_at_any_depth() {
+    use crate::scene::model::hatch_model::HatchPattern;
+
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&Default::default())).expect("GPU adapter");
+    for packed in [false, true] {
+        let mut limits = adapter.limits();
+        if packed {
+            limits.max_storage_buffers_per_shader_stage = 0;
+        }
+        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: limits,
+            ..Default::default()
+        }))
+        .expect("GPU device");
+        let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
+        let bounds = Rectangle::with_size(Size::new(SIZE as f32, SIZE as f32));
+        let mut uniforms = Uniforms::new(&Camera::default(), bounds, false);
+        uniforms.view_rot = glam::Mat4::IDENTITY;
+        uniforms.eye_high = [0.; 3];
+        uniforms.eye_low = [0.; 3];
+        // The page as `Scene::paper_sheet_fill` builds it: a white solid
+        // fill on the sheet plane with draw order -2.
+        let page = HatchModel {
+            entity: None,
+            effective_layer: None,
+            pattern_origin: None,
+            render_instance: None,
+            world_origin: [0.0, 0.0],
+            boundary: std::sync::Arc::new(vec![
+                [-0.9, -0.9],
+                [0.9, -0.9],
+                [0.9, 0.9],
+                [-0.9, 0.9],
+                [-0.9, -0.9],
+            ]),
+            boundary_wcs: None,
+            fill_plane: None,
+            fill_plane_boundary: None,
+            boundary_exterior: None,
+            boundary_sources: None,
+            boundary_paths: None,
+            style: document::entities::HatchStyleType::Normal,
+            pattern: HatchPattern::Solid,
+            name: "SOLID".into(),
+            color: [1.0, 1.0, 1.0, 1.0],
+            aci: 0,
+            line_weight_px: 1.0,
+            angle_offset: 0.0,
+            scale: 1.0,
+            draw_depth: -2.0,
+        };
+        pipeline.upload_hatches(&device, &queue, &[page]);
+        pipeline.compute_hatch_lod(&queue, uniforms.view_rot, glam::DVec3::ZERO, SIZE, SIZE);
+        // A red line on the sheet, halfway down the depth range: behind the
+        // page's plane, in front of the far plane.
+        let mut line = WireModel::solid("1".to_string(), Vec::new(), [1.0, 0.0, 0.0, 1.0], false);
+        line.points = vec![[0.0, -0.65, 0.5], [0.0, 0.65, 0.5]];
+        let depths = rustc_hash::FxHashMap::default();
+        let bytes = pixels(&device, &queue, &mut pipeline, &uniforms, &[line], &depths);
+        // The line is one pixel wide and may share it with the page: some
+        // pixel of the middle row near x = 0 must be redder than the white
+        // page.
+        let row = SIZE as usize / 2 * SIZE as usize;
+        let middle = SIZE as usize / 2;
+        let line_drawn = (middle - 2..=middle + 2).any(|column| {
+            let offset = (row + column) * 4;
+            bytes[offset] > 200 && bytes[offset + 1] < 200 && bytes[offset + 2] < 200
+        });
+        assert!(
+            line_drawn,
+            "the line is hidden by the page {:?}, packed={packed}",
+            color_at(&bytes, 0.0)
+        );
+        assert!(
+            block_on(validation.pop()).is_none(),
+            "GPU validation failed"
+        );
+    }
+}
+
+/// A white SOLID fill over `x0..x1` × `-20..20` on the horizontal plane at
+/// height `z`, optionally one copy of an instanced block expansion.
+fn solid_fill_at(
+    x0: f32,
+    x1: f32,
+    z: f64,
+    instance: Option<crate::scene::model::instance_model::RenderInstance>,
+) -> crate::scene::model::hatch_model::HatchModel {
+    use crate::scene::model::hatch_model::{FillPlane, HatchModel, HatchPattern};
+    let ring = vec![[x0, -20.0], [x1, -20.0], [x1, 20.0], [x0, 20.0]];
+    HatchModel {
+        entity: None,
+        effective_layer: None,
+        pattern_origin: None,
+        render_instance: instance,
+        world_origin: [0.0, 0.0],
+        boundary: std::sync::Arc::new(ring.clone()),
+        boundary_wcs: None,
+        fill_plane: Some(FillPlane {
+            origin: [0.0, 0.0, z],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        }),
+        fill_plane_boundary: Some(std::sync::Arc::new(ring)),
+        boundary_exterior: None,
+        boundary_sources: None,
+        boundary_paths: None,
+        style: document::entities::HatchStyleType::Normal,
+        pattern: HatchPattern::Solid,
+        name: "SOLID".into(),
+        color: [1.0, 1.0, 1.0, 1.0],
+        aci: 7,
+        line_weight_px: 1.0,
+        angle_offset: 0.0,
+        scale: 1.0,
+        draw_depth: 0.0,
+    }
+}
+
+/// Sum of the RGB channels over the 5 × 5 pixels around an NDC point.
+fn color_around(bytes: &[u8], ndc_x: f32, ndc_y: f32) -> u32 {
+    let x = ((ndc_x * 0.5 + 0.5) * SIZE as f32) as usize;
+    let y = ((0.5 - ndc_y * 0.5) * SIZE as f32) as usize;
+    let mut sum = 0;
+    for row in y - 2..=y + 2 {
+        for col in x - 2..=x + 2 {
+            let offset = (row * SIZE as usize + col) * 4;
+            for &channel in &bytes[offset..offset + 3] {
+                sum += u32::from(channel);
+            }
+        }
+    }
+    sum
+}
+
+/// A hatch is drawn on its own plane, not on Z = 0: a fill at elevation 500
+/// and a block copy of it moved down by 200 show at those heights, in both
+/// the storage-buffer and the packed hatch paths. The view puts height on
+/// screen (screen y grows with world Y + Z), so a fill at the wrong height
+/// lands somewhere else, and the per-frame cull must keep it.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn hatch_fills_are_drawn_at_their_plane_height() {
+    use crate::scene::model::instance_model::RenderInstance;
+
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&Default::default())).expect("GPU adapter");
+    for packed in [false, true] {
+        let mut limits = adapter.limits();
+        if packed {
+            limits.max_storage_buffers_per_shader_stage = 0;
+        }
+        let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: limits,
+            ..Default::default()
+        }))
+        .expect("GPU device");
+        let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
+        let bounds = Rectangle::with_size(Size::new(SIZE as f32, SIZE as f32));
+        let mut uniforms = Uniforms::new(&Camera::default(), bounds, false);
+        // clip = (x / 100, (y + z - 400) / 400, 0.5, 1).
+        uniforms.view_rot = glam::Mat4::from_cols(
+            glam::Vec4::new(0.01, 0.0, 0.0, 0.0),
+            glam::Vec4::new(0.0, 1.0 / 400.0, 0.0, 0.0),
+            glam::Vec4::new(0.0, 1.0 / 400.0, 0.0, 0.0),
+            glam::Vec4::new(0.0, -1.0, 0.5, 1.0),
+        );
+        uniforms.eye_high = [0.; 3];
+        uniforms.eye_low = [0.; 3];
+        let source = RenderInstance {
+            source_id: crate::scene::model::instance_model::next_source_id(),
+            translation: [0.0; 3],
+        };
+        let copy = RenderInstance {
+            translation: [60.0, 0.0, -200.0],
+            ..source
+        };
+        let fills = [
+            // A lone fill at Z = 500, and a block's fill at Z = 500 with one
+            // copy moved to x + 60, Z = 300.
+            solid_fill_at(-90.0, -70.0, 500.0, None),
+            solid_fill_at(-40.0, -20.0, 500.0, Some(source)),
+            solid_fill_at(20.0, 40.0, 300.0, Some(copy)),
+        ];
+        pipeline.upload_hatches(&device, &queue, &fills);
+        // The per-frame cull must not drop a fill whose Z = 0 shadow is off
+        // screen while the fill itself is on it.
+        pipeline.compute_hatch_lod(&queue, uniforms.view_rot, glam::DVec3::ZERO, SIZE, SIZE);
+        let bytes = pixels(
+            &device,
+            &queue,
+            &mut pipeline,
+            &uniforms,
+            &[],
+            &Default::default(),
+        );
+        // Z = 500 shows around screen y 0.25, Z = 300 around -0.25.
+        for (what, x, y) in [
+            ("the fill at Z = 500", -0.8, 0.25),
+            ("the block fill at Z = 500", -0.3, 0.25),
+            ("its copy at Z = 300", 0.3, -0.25),
+        ] {
+            assert!(
+                color_around(&bytes, x, y) > 0,
+                "{what} is not drawn at its height, packed={packed}"
+            );
+        }
+        assert!(
+            block_on(validation.pop()).is_none(),
+            "GPU validation failed"
+        );
+    }
+}

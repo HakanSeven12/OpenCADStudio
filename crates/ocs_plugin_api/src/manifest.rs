@@ -178,7 +178,19 @@
 /// v23 appends `TableOperation::LayoutSetTabOrder`: a plugin sets the order of
 /// the paper-space layout tabs in one undo step. A v22 host cannot decode it,
 /// so a plugin that sends it declares v23.
-/// v24 crosses the scene/widget wire (ADR-008: the reviewed, approved append
+/// Also additive on `PanelDef`: `PanelDef::style` (`PanelStyle::Palette`
+/// default, `PanelStyle::Form` for dialog-like form rendering); older payloads
+/// decode as `PanelStyle::Palette` via `deserialize_panel_style`.
+/// v24 appends `InteractiveCommand::on_undo_step`, the mid-command Ctrl+Z
+/// hook, with the `HostRequest::UndoStep` / `HostResponse::UndoStep` pair. A
+/// v23 runner cannot decode the request, so the host sends it only to plugins
+/// whose manifest declares v24; older plugins keep the document undo.
+/// (SCN-038, upstream merge: upstream consumed the V24 label for THEIR
+/// UndoStep crossing — `HostRequest::UndoStep` at HostRequest slot 16,
+/// `HostResponse::UndoStep` at HostResponse slot 11. Per ADR-010 OUR
+/// crossing re-versions to v25 and upstream's V24 UndoStep keeps its label
+/// and wire slots.)
+/// v25 crosses the scene/widget wire (ADR-008: the reviewed, approved append
 /// plan): panels expose their BOUNDED semantic state to out-of-process plugins
 /// — the append tail pesticide-pinned at requests 63..=66
 /// (`PluginRequest::PanelScenePublish` — publish-or-patch: the first publish
@@ -192,16 +204,16 @@
 /// summaries plus a leading window, never a full dump). Host→plugin,
 /// `HostNotification::PanelSceneEvents` carries the small semantic widget
 /// events and `PanelStoreDemand` the lazy fetch demands (notifications
-/// 15..=16); both are routed only to plugins reporting v24+ (per-plugin
+/// 15..=16); both are routed only to plugins reporting v25+ (per-plugin
 /// routing, no duplicated variants). The host-UI/mount publisher attach is
 /// LIVE (SCN-025): panels holding a mounted body publish/patch through the
 /// app-owned surface store and the drained event/demand batches forward
 /// through the notify routers; a panel without an attached publisher still
 /// gets the honest structured answers (`PublisherUnattached` /
-/// `PublisherOwnedByOther`). A v23 host cannot decode any of these requests,
-/// so a plugin that sends them declares v24; v23 and older plugins remain
+/// `PublisherOwnedByOther`). A v24 host cannot decode any of these requests,
+/// so a plugin that sends them declares v25; v24 and older plugins remain
 /// supported unchanged (`API_VERSION_MIN_SUPPORTED` untouched).
-pub const API_VERSION: u32 = 24;
+pub const API_VERSION: u32 = 25;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

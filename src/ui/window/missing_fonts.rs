@@ -14,11 +14,13 @@ fn muted_style(theme: &Theme) -> text::Style {
     }
 }
 
-/// The prompt: the missing-font list, a download action, and a skip.
+/// The prompt: the missing-font list, a download action, and a skip that
+/// can turn the prompt off for good.
 pub fn view_window<'a>(
     fonts: &'a [String],
     font_source: &'a str,
     downloading: bool,
+    silence: bool,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
     let content_width = if matches!(sizing.width, Length::Fill) {
@@ -45,6 +47,11 @@ pub fn view_window<'a>(
         button::primary,
     );
     let actions = row![
+        crate::ui::window::block_definition::labeled_checkbox(
+            crate::tr!("gpu", "silence"),
+            silence,
+            Message::MissingFontsSilence,
+        ),
         Space::new().width(content_width),
         dialog_button_styled_opt(
             crate::t!("Skip"),

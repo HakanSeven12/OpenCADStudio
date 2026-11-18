@@ -9673,3 +9673,901 @@ mod copy_draw_order_tests {
         assert!(eff(cp_a) < eff(cp_c), "the copy of A must stay behind the copy of C");
     }
 }
+
+#[cfg(test)]
+mod dimension_query_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+
+    /// The automation query answers for a dimension like it does for the
+    /// other entity families: the measured value and the style it was
+    /// drawn with, so a caller can read a drawing's dimensions without
+    /// opening each entity record.
+    #[test]
+    fn a_dimension_query_reports_its_measurement_and_style() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("DIMLINEAR 0,0 10,0 5,2");
+
+        let r = app.automation_op(
+            r#"{"op":"query","type":"DIMENSION","detail":"full","fields":["measurement","style"]}"#,
+        );
+        assert_eq!(r["ok"], true, "{r}");
+        let entity = &r["entities"][0];
+        let measurement = entity["measurement"]
+            .as_f64()
+            .expect("measurement is numeric");
+        assert!((measurement - 10.0).abs() < 1e-6, "measurement: {measurement}");
+        assert_eq!(entity["style"], "ISO-25", "the drawing's current style");
+    }
+}
+
+#[cfg(test)]
+mod dim_baseline_chain_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+
+    /// DIMBASELINE takes the last dimension as its base and grows the
+    /// series from the first extension line origin: a typed origin
+    /// produces one more dimension of the same style, measured from the
+    /// base's first origin, spaced by DIMDLI.
+    #[test]
+    fn dimbaseline_continues_the_series_from_the_last_dimension() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("DIMLINEAR 0,0 10,0 5,2");
+        let _ = app.run_command_line("DIMBASELINE");
+        let _ = app.feed_script_line("15,3");
+        let _ = app.feed_script_line("");
+
+        let dims: Vec<_> = app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Dimension(dimension) => Some(dimension.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(dims.len(), 2, "one base dimension and one baseline dimension");
+        let measured: Vec<f64> = dims.iter().map(|d| d.measurement()).collect();
+        assert!(
+            measured
+                .iter()
+                .any(|m| (*m - 10.0).abs() < 1e-6),
+            "the base measures 10: {measured:?}"
+        );
+        assert!(
+            measured
+                .iter()
+                .any(|m| (*m - 15.0).abs() < 1e-6),
+            "the baseline dimension measures from the shared first origin to the typed one: {measured:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod dim_continue_chain_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+
+    /// DIMCONTINUE chains from the last dimension: each typed origin
+    /// starts where the previous dimension ended, so a series of
+    /// endpoints measures as a running chain.
+    #[test]
+    fn dimcontinue_chains_from_the_last_dimension_end() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("DIMLINEAR 0,0 10,0 5,2");
+        let _ = app.run_command_line("DIMCONTINUE");
+        let _ = app.feed_script_line("18,0");
+        let _ = app.feed_script_line("");
+
+        let dims: Vec<_> = app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Dimension(dimension) => Some(dimension.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(dims.len(), 2, "one base dimension and one continued dimension");
+        let measured: Vec<f64> = dims.iter().map(|d| d.measurement()).collect();
+        assert!(
+            measured
+                .iter()
+                .any(|m| (*m - 10.0).abs() < 1e-6),
+            "the base measures 10: {measured:?}"
+        );
+        assert!(
+            measured
+                .iter()
+                .any(|m| (*m - 8.0).abs() < 1e-6),
+            "the continued dimension runs from the base's end to the typed origin: {measured:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod dim_inspect_window_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use crate::ui::window::dim_inspect_dialog::DimInspectMsg;
+    use crate::app::Message;
+
+    /// The inspection window stamps the dimensions it opened on: the
+    /// shape, label and rate ride the dimension's extension data, in one
+    /// undo step, and the same read answers the window when it opens
+    /// again on an already inspected dimension.
+    #[test]
+    fn the_inspection_window_stamps_the_selected_dimension() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("DIMLINEAR 0,0 10,0 5,2");
+        let i = app.active_tab;
+        let dim = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Dimension(_) => Some(entity.common().handle),
+                _ => None,
+            })
+            .expect("the dimension was placed");
+        app.tabs[i].scene.select_entities(&[dim]);
+
+        let _ = app.run_command_line("DIMINSPECT");
+
+        assert!(
+            app.dim_inspect_dialog.is_some(),
+            "the window opened on the selected dimension"
+        );
+
+        let _ = app.update(Message::DimInspect(DimInspectMsg::LabelOn(true)));
+        let _ = app.update(Message::DimInspect(DimInspectMsg::Label("QCS".into())));
+        let _ = app.update(Message::DimInspect(DimInspectMsg::RateOn(true)));
+        let _ = app.update(Message::DimInspect(DimInspectMsg::Rate("100%".into())));
+        let _ = app.update(Message::DimInspect(DimInspectMsg::Ok));
+
+        let entity = app.tabs[i]
+            .scene
+            .document
+            .get_entity(dim)
+            .expect("the dimension survived");
+        let inspection = crate::entities::dim_inspect::read(&entity.common().extended_data)
+            .expect("the inspection was written");
+        assert_eq!(inspection.label.as_deref(), Some("QCS"));
+        assert_eq!(inspection.rate.as_deref(), Some("100%"));
+        assert!(app.dim_inspect_dialog.is_none(), "the window closed on Ok");
+
+        // The window reads its current values back from the dimension.
+        app.tabs[i].scene.select_entities(&[dim]);
+        let _ = app.run_command_line("DIMINSPECT");
+        let state = app
+            .dim_inspect_dialog
+            .as_ref()
+            .expect("the window reopened");
+        assert_eq!(state.label, "QCS", "the stored label is shown");
+        assert!(state.any_inspected, "the dimension reports as inspected");
+    }
+}
+
+#[cfg(test)]
+mod join_command_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Line;
+    use document::types::Vector3;
+
+    fn fresh_line(app: &mut OpenCADStudio, x1: f64, x2: f64) -> document::Handle {
+        app.tabs[app.active_tab].scene.add_entity(
+            document::EntityType::Line(Line::from_points(
+                Vector3::new(x1, 0.0, 0.0),
+                Vector3::new(x2, 0.0, 0.0),
+            )),
+        )
+    }
+
+    /// Pickfirst JOIN: two collinear lines selected together merge into
+    /// the one line that spans both, and the consumed piece is erased.
+    #[test]
+    fn join_merges_collinear_lines_selected_together() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let first = fresh_line(&mut app, 0.0, 10.0);
+        let second = fresh_line(&mut app, 10.0, 18.0);
+        app.tabs[i].scene.select_entities(&[first, second]);
+
+        let _ = app.run_command_line("JOIN");
+
+        let lines: Vec<_> = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Line(line) => Some(line.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(lines.len(), 1, "two collinear lines joined into one: {lines:?}");
+        let line = &lines[0];
+        let xs = [line.start.x, line.end.x];
+        assert_eq!(xs.iter().cloned().reduce(f64::min), Some(0.0), "{line:?}");
+        assert_eq!(xs.iter().cloned().reduce(f64::max), Some(18.0), "{line:?}");
+    }
+}
+
+#[cfg(test)]
+mod array_surface_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Line;
+    use document::types::Vector3;
+
+    fn out(app: &OpenCADStudio) -> String {
+        app.command_line.history_plain_text().trim().to_string()
+    }
+
+    /// ARRAYRECT on the pickfirst selection runs to its associative
+    /// array from the command line: typed row and column counts and
+    /// spacings produce the array entity, and the source geometry is
+    /// consumed by it.
+    #[test]
+    fn arrayrect_builds_the_associative_array_from_the_preselection() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let line = app.tabs[i].scene.add_entity(
+            document::EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            )),
+        );
+        app.tabs[i].scene.select_entities(&[line]);
+
+        let _ = app.run_command_line("ARRAYRECT");
+        let _ = app.feed_script_line("3");
+        let _ = app.feed_script_line("2");
+        let _ = app.feed_script_line("10");
+        let _ = app.feed_script_line("5");
+
+        assert!(
+            out(&app).contains("associative array created"),
+            "the command reports the array: {}",
+            out(&app)
+        );
+        assert!(
+            app.tabs[i].scene.document.get_entity(line).is_none(),
+            "the source line is consumed by the array"
+        );
+        let inserts = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter(|entity| matches!(entity, document::EntityType::Insert(_)))
+            .count();
+        assert!(inserts >= 1, "the array item entity exists");
+    }
+}
+
+#[cfg(test)]
+mod scale_rotate_copy_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Line;
+    use document::types::Vector3;
+
+    fn fresh_line(app: &mut OpenCADStudio, x: f64) -> document::Handle {
+        app.tabs[app.active_tab].scene.add_entity(
+            document::EntityType::Line(Line::from_points(
+                Vector3::new(x, 0.0, 0.0),
+                Vector3::new(x + 10.0, 0.0, 0.0),
+            )),
+        )
+    }
+
+    /// SCALE's Copy option scales a duplicate about the base point and
+    /// leaves the source untouched; the factor prompt stays on offer so
+    /// the value follows the keyword.
+    #[test]
+    fn scale_copy_keeps_the_source_and_places_the_scaled_duplicate() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let source = fresh_line(&mut app, 0.0);
+        app.tabs[i].scene.select_entities(&[source]);
+
+        let _ = app.run_command_line("SCALE");
+        let _ = app.feed_script_line("0,0");
+        let _ = app.feed_script_line("C");
+        let _ = app.feed_script_line("2");
+
+        let lengths: Vec<f64> = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Line(line) => {
+                    Some((line.end - line.start).length())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(lengths.len(), 2, "the source and its copy: {lengths:?}");
+        assert!(
+            lengths.iter().any(|l| (*l - 10.0).abs() < 1e-9),
+            "the source keeps its length: {lengths:?}"
+        );
+        assert!(
+            lengths.iter().any(|l| (*l - 20.0).abs() < 1e-9),
+            "the copy is scaled: {lengths:?}"
+        );
+    }
+
+    /// ROTATE's Copy option rotates a duplicate about the base point and
+    /// leaves the source at its original angle.
+    #[test]
+    fn rotate_copy_keeps_the_source_and_places_the_rotated_duplicate() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let source = fresh_line(&mut app, 0.0);
+        app.tabs[i].scene.select_entities(&[source]);
+
+        let _ = app.run_command_line("ROTATE");
+        let _ = app.feed_script_line("0,0");
+        let _ = app.feed_script_line("C");
+        let _ = app.feed_script_line("90");
+
+        let horizontal = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Line(line) => Some(line.clone()),
+                _ => None,
+            })
+            .filter(|line| (line.end.y - line.start.y).abs() < 1e-9)
+            .count();
+        let vertical = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Line(line) => Some(line.clone()),
+                _ => None,
+            })
+            .filter(|line| (line.end.x - line.start.x).abs() < 1e-9)
+            .count();
+        assert_eq!(horizontal, 1, "the source keeps its angle");
+        assert_eq!(vertical, 1, "the duplicate is rotated 90 degrees");
+    }
+}
+
+#[cfg(test)]
+mod attedit_editor_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::{AttributeEntity, Insert};
+    use document::types::Vector3;
+
+    fn attributed_insert() -> (OpenCADStudio, document::Handle) {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut insert = Insert::new("TITLEBLOCK", Vector3::new(0.0, 0.0, 0.0));
+        insert
+            .attributes
+            .push(AttributeEntity::new("TITLE".into(), "old".into()));
+        let handle = app.tabs[i].scene.add_entity(document::EntityType::Insert(insert));
+        (app, handle)
+    }
+
+    /// Bare EATTEDIT opens the interactive attribute editor on the
+    /// selected reference instead of ending silently: the editor's rows
+    /// list the reference's attributes with their current values.
+    #[test]
+    fn eattedit_opens_the_editor_on_the_selected_reference() {
+        let (mut app, handle) = attributed_insert();
+        let i = app.active_tab;
+        app.tabs[i].scene.select_entities(&[handle]);
+
+        let _ = app.run_command_line("EATTEDIT");
+
+        assert_eq!(
+            app.attr_editor_rows.len(),
+            1,
+            "the editor opened on the reference's one attribute"
+        );
+        assert_eq!(
+            app.attr_editor_rows[0].value,
+            "old",
+            "the row shows the attribute's current value"
+        );
+    }
+}
+
+#[cfg(test)]
+mod count_mode_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::Insert;
+    use document::types::Vector3;
+
+    fn out(app: &OpenCADStudio) -> String {
+        app.command_line.history_plain_text().trim().to_string()
+    }
+
+    /// COUNT C (Count Selection) takes the preselection as its target:
+    /// the count is announced, count mode is on with the picked blocks
+    /// as its target, and the number answers COUNTNUMBER afterwards.
+    #[test]
+    fn count_selection_counts_the_preselected_inserts() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "VALVE",
+            Vector3::ZERO,
+            vec![document::EntityType::Circle(document::entities::Circle::new())],
+        );
+        let mut handles = Vec::new();
+        for n in 0..3 {
+            let insert = Insert::new("VALVE", Vector3::new(n as f64 * 30.0, 0.0, 0.0));
+            handles.push(app.tabs[i].scene.add_entity(document::EntityType::Insert(insert)));
+        }
+        app.tabs[i].scene.select_entities(&handles);
+
+        let _ = app.run_command_line("COUNT C");
+
+        assert!(out(&app).contains("3 found"), "the count announced: {}", out(&app));
+        let mode = app.tabs[i].count.as_ref().expect("count mode is on");
+        assert_eq!(mode.count(&app.tabs[i].scene.document), 3, "the mode counts the picked blocks");
+    }
+}
+
+#[cfg(test)]
+mod select_by_handle_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use document::entities::{Insert, Line};
+    use document::types::Vector3;
+
+    /// Selecting by explicit handles (hex, as `query` returns them) takes
+    /// what was named: a line and a block reference named together both end
+    /// up selected, and the selection survives the op, so a following
+    /// command acts on both.
+    #[test]
+    fn select_by_handles_selects_every_named_entity() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let line = app.tabs[i].scene.add_entity(document::EntityType::Line(
+            Line::from_points(Vector3::ZERO, Vector3::new(10.0, 0.0, 0.0)),
+        ));
+        let insert = app.tabs[i].scene.add_entity(document::EntityType::Insert(
+            Insert::new("VALVE", Vector3::new(30.0, 0.0, 0.0)),
+        ));
+
+        let r = app.automation_op(&format!(
+            r#"{{"op":"select","handles":["{:X}","{:X}"]}}"#,
+            line.value(),
+            insert.value()
+        ));
+
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(r["selected"], 2, "both named entities are selected: {r}");
+        let selected: Vec<document::Handle> = app.tabs[i]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .map(|(h, _)| h)
+            .collect();
+        assert!(selected.contains(&line) && selected.contains(&insert), "{selected:?}");
+    }
+}
+
+
+// The Block Definition dialog's whole flow is message-driven: BLOCK opens the
+// band over the current selection, the typed fields update its state, and
+// applying commits through the same CreateBlockWithOptions result as -BLOCK.
+mod block_definition_dialog_tests {
+    use super::super::*;
+    use crate::app::Message;
+    use document::entities::Line;
+    use document::types::Vector3;
+
+    #[test]
+    fn block_def_apply_defines_the_block_and_consumes_the_preselected_objects() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let line = app.tabs[i].scene.add_entity(document::EntityType::Line(
+            Line::from_points(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0)),
+        ));
+        app.tabs[i].scene.select_entity(line, true);
+
+        let _ = app.run_command_line("BLOCK");
+
+        let state = app
+            .block_definition
+            .as_ref()
+            .expect("BLOCK opens the definition dialog");
+        assert_eq!(
+            state.selected_handles,
+            vec![line],
+            "the current selection carries into the dialog"
+        );
+        assert_eq!(
+            app.active_modal,
+            Some(crate::app::ModalKind::BlockDefinition)
+        );
+
+        let _ = app.update(Message::BlockDefName("PANEL".into()));
+        let _ = app.update(Message::BlockDefBaseX("2".into()));
+        let _ = app.update(Message::BlockDefBaseY("3".into()));
+
+        let _ = app.update(Message::BlockDefApply);
+
+        assert!(
+            app.block_definition.is_none(),
+            "applying closes the dialog"
+        );
+        assert_eq!(app.active_modal, None);
+
+        let record = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PANEL")
+            .expect("applying defines the named block");
+        assert!(
+            !record.entity_handles.is_empty(),
+            "the definition holds the converted objects"
+        );
+        assert!(
+            app.tabs[i].scene.document.get_entity(line).is_none(),
+            "convert mode consumes the source objects"
+        );
+
+        let insert = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Insert(ins) if ins.block_name == "PANEL" => Some(ins.clone()),
+                _ => None,
+            })
+            .expect("convert mode leaves a reference where the objects were");
+        assert_eq!(
+            insert.insert_point,
+            Vector3::new(2.0, 3.0, 0.0),
+            "the reference sits at the picked base point"
+        );
+        assert!(
+            app.tabs[i].scene.selected.contains(&insert.common.handle),
+            "the new reference is selected"
+        );
+    }
+}
+
+
+// -BLOCK from the command line: the name and base point steps run through
+// the active command, and a preselection stands in for the select-objects
+// step, so the block is defined in one pass.
+mod dash_block_command_line_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::entities::Line;
+    use document::types::Vector3;
+    use glam::DVec3;
+
+    #[test]
+    fn dash_block_defines_the_block_from_a_preselection_and_a_typed_base() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let line = app.tabs[i].scene.add_entity(document::EntityType::Line(
+            Line::from_points(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0)),
+        ));
+        app.tabs[i].scene.select_entity(line, true);
+
+        let _ = app.run_command_line("-BLOCK");
+        let command = app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("-BLOCK stays active to ask its prompts");
+        assert_eq!(command.name(), "-BLOCK");
+        assert_eq!(command.prompt(), "Enter block name or [?]:");
+
+        let _ = app.feed_command(StepInput::Text("GEAR".into()));
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("the base point step follows the name")
+                .prompt(),
+            "Specify insertion base point or [Annotative/mOde]:"
+        );
+        let _ = app.feed_command(StepInput::Point(DVec3::new(2.0, 3.0, 0.0)));
+
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "the preselection completes the command"
+        );
+        assert!(app.command_line.last_error.is_none());
+
+        let record = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("GEAR")
+            .expect("the command line defines the named block");
+        assert!(
+            !record.entity_handles.is_empty(),
+            "the definition holds the preselected objects"
+        );
+        assert!(
+            app.tabs[i].scene.document.get_entity(line).is_none(),
+            "convert mode consumes the preselected objects"
+        );
+        let insert = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Insert(ins) if ins.block_name == "GEAR" => Some(ins.clone()),
+                _ => None,
+            })
+            .expect("convert mode leaves a reference where the objects were");
+        assert_eq!(
+            insert.insert_point,
+            Vector3::new(2.0, 3.0, 0.0),
+            "the reference sits at the typed base point"
+        );
+    }
+}
+
+
+// -INSERT takes its name and insertion point on one command line and places
+// a reference of the named definition at that point.
+mod dash_insert_placement_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::entities::{EntityType, Line};
+    use document::types::Vector3;
+
+    #[test]
+    fn dash_insert_places_the_named_block_at_the_typed_point() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "GEAR",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+
+        let _ = app.run_command_line("-INSERT GEAR 5,5");
+        // Classic -INSERT keeps asking after the point: the line's trailing
+        // Enter accepted the X scale <1> default, Y scale follows.
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("classic -INSERT asks the scale factors next")
+                .prompt(),
+            "Enter Y scale factor <use X scale factor>:"
+        );
+        let _ = app.feed_command(StepInput::Enter);
+        let _ = app.feed_command(StepInput::Enter);
+
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "name and point complete the placement: prompt={:?} out={:?}",
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|c| (c.name(), c.prompt())),
+            app.command_line.history_plain_text()
+        );
+        assert!(app.command_line.last_error.is_none());
+        let insert = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Insert(ins) if ins.block_name == "GEAR" => Some(ins.clone()),
+                _ => None,
+            })
+            .expect("-INSERT places a reference of the named definition");
+        assert_eq!(
+            insert.insert_point,
+            Vector3::new(5.0, 5.0, 0.0),
+            "the reference lands on the typed point"
+        );
+        assert_eq!(
+            app.tabs[i].insname, "GEAR",
+            "the placed name is remembered for the next INSERT"
+        );
+    }
+}
+
+
+// The Scale option presets the factor before the insertion point, so the
+// placement completes with that scale instead of asking the classic scale
+// prompts.
+mod dash_insert_scale_option_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::entities::{EntityType, Line};
+    use document::types::Vector3;
+    use glam::DVec3;
+
+    #[test]
+    fn dash_insert_scale_option_places_the_block_at_the_preset_scale() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "GEAR",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+
+        let _ = app.run_command_line("-INSERT");
+        let _ = app.feed_command(StepInput::Text("GEAR".into()));
+        let _ = app.feed_command(StepInput::Text("S".into()));
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("the Scale option asks for the factor")
+                .prompt(),
+            "Specify scale factor for XYZ axes <1>:"
+        );
+        let _ = app.feed_command(StepInput::Text("2".into()));
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("the preset scale returns to the insertion point")
+                .prompt(),
+            "Specify insertion point or [Basepoint/Scale/X/Y/Z/Rotate/Explode/REpeat]:"
+        );
+        let _ = app.feed_command(StepInput::Point(DVec3::new(5.0, 5.0, 0.0)));
+        let _ = app.feed_command(StepInput::Enter);
+
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "the preset scale places the block without the scale prompts: prompt={:?} err={:?}",
+            app.tabs[i].active_cmd.as_ref().map(|c| (c.name(), c.prompt())),
+            app.command_line.last_error
+        );
+        assert!(app.command_line.last_error.is_none());
+        let insert = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::Insert(ins) if ins.block_name == "GEAR" => Some(ins.clone()),
+                _ => None,
+            })
+            .expect("the option sequence places a reference");
+        let base = crate::scene::render_graph::block_base_point(
+            &app.tabs[i].scene.document,
+            "GEAR",
+        );
+        let xform =
+            crate::scene::render_graph::insert_transform_with_base(&insert, base);
+        let end = xform.apply(Vector3::new(10.0, 0.0, 0.0));
+        assert_eq!(
+            (end.x, end.y),
+            (25.0, 5.0),
+            "the 10-unit member is drawn twice as long from the typed point: {end:?}"
+        );
+    }
+}
+
+
+// BEDIT entered from the command line with a single reference preselected
+// jumps straight into that block's editor; BSAVE saves and stays, and BCLOSE
+// leaves.
+mod bedit_command_line_entry_tests {
+    use super::super::*;
+    use document::entities::{EntityType, Insert, Line};
+    use document::types::Vector3;
+
+    #[test]
+    fn a_preselected_reference_enters_the_editor_and_bsave_bclose_drive_it() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "VALVE",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+        let reference = app.tabs[i]
+            .scene
+            .document
+            .add_entity(EntityType::Insert(Insert::new(
+                "VALVE",
+                Vector3::new(20.0, 0.0, 0.0),
+            )))
+            .unwrap();
+        app.tabs[i].scene.select_entity(reference, true);
+        app.tabs[i].dirty = false;
+
+        let _ = app.run_command_line("BEDIT");
+
+        let session = app.tabs[i]
+            .active_block_edit_session()
+            .expect("a preselected reference enters the editor without the pick prompt");
+        assert_eq!(
+            session.br_handle,
+            app.tabs[i]
+                .scene
+                .document
+                .block_records
+                .get("VALVE")
+                .unwrap()
+                .handle,
+            "the editor opens on the referenced definition"
+        );
+        assert!(app.tabs[i].active_cmd.is_none(), "no pick step is installed");
+
+        let result = app.automation_op(r#"{"op":"run","cmd":"CIRCLE 3,0 2"}"#);
+        assert_eq!(result["ok"], true, "{result}");
+        app.finish_pending_history(i);
+        assert!(app.block_edit_dirty(i), "the drawn circle marks the editor dirty");
+
+        let _ = app.dispatch_command("BSAVE");
+        assert!(
+            app.tabs[i].active_block_edit_session().is_some(),
+            "BSAVE saves and stays in the editor"
+        );
+        assert!(!app.block_edit_dirty(i), "BSAVE clears the dirty flag");
+        let members: Vec<_> = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("VALVE")
+            .unwrap()
+            .entity_handles
+            .clone();
+        assert_eq!(members.len(), 2, "the saved circle joins the definition");
+
+        let _ = app.dispatch_command("BCLOSE");
+        assert!(
+            app.tabs[i].active_block_edit_session().is_none(),
+            "BCLOSE leaves the editor"
+        );
+        assert_eq!(app.active_modal, None);
+        let members: Vec<_> = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("VALVE")
+            .unwrap()
+            .entity_handles
+            .clone();
+        assert_eq!(
+            members.len(),
+            2,
+            "the saved definition keeps its members after the editor closes"
+        );
+    }
+}
+

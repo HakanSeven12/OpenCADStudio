@@ -19,7 +19,7 @@ use iced::futures::{channel::mpsc, Stream};
 use serde_json::{json, Value};
 use std::io::ErrorKind;
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicU16, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -32,6 +32,11 @@ static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Called from `main` before the GUI boots.
 pub fn set_gui_http_port(port: u16) {
     GUI_HTTP_PORT.store(port, Ordering::SeqCst);
+}
+
+/// Whether this GUI run hosts the `--http` channel, which needs control on.
+pub(in crate::app) fn gui_http_requested() -> bool {
+    GUI_HTTP_PORT.load(Ordering::SeqCst) != 0
 }
 
 pub(in crate::app) fn subscribe() -> iced::Subscription<Envelope> {
@@ -61,10 +66,10 @@ fn listen(
     bound_port.store(listener.local_addr()?.port(), Ordering::SeqCst);
     eprintln!("OpenCADStudio GUI REST listening on http://127.0.0.1:{port}/api/v1");
     rest::announce_token();
-    // One thread per connection: a `getpoint` or `user_select` request stays
+    // Independent workers: a `getpoint` or `user_select` request stays
     // open until the person answers, and must not block the other reads
     // (get_selection…).
-    let clients = Arc::new(AtomicUsize::new(0));
+    let workers = crate::io::connection_workers::ConnectionWorkers::new("ocs-http", 8)?;
     // One document-id cache for the whole listener: a state read primes it,
     // later mutations address the live drawing without the caller repeating
     // the id — the same ergonomics as the headless server.
@@ -73,14 +78,9 @@ fn listen(
         // Same request/response-line shape as the native control transport:
         // disable Nagle so reply tails never wait on the peer's delayed ACK.
         let _ = stream.set_nodelay(true);
-        if clients.fetch_add(1, Ordering::SeqCst) >= 8 {
-            clients.fetch_sub(1, Ordering::SeqCst);
-            continue;
-        }
-        let clients = clients.clone();
         let sender = sender.clone();
         let document_cache = document_cache.clone();
-        std::thread::spawn(move || {
+        workers.try_execute(move || {
             let mut stream = stream;
             let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
             let _ = stream.set_write_timeout(Some(Duration::from_secs(15)));
@@ -92,7 +92,6 @@ fn listen(
                     let _ = rest::write_response(&mut stream, status, &body);
                 }
             }
-            clients.fetch_sub(1, Ordering::SeqCst);
         });
     }
     Ok(())

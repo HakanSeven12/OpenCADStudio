@@ -81,6 +81,7 @@ pub(crate) fn adopt_table_fields(
         }
     };
     let mut created = Vec::with_capacity(order.len());
+    let mut clones = Vec::with_capacity(order.len());
     for handle in &order {
         let mut field = by_handle[handle].clone();
         field.handle = remap[handle];
@@ -94,8 +95,11 @@ pub(crate) fn adopt_table_fields(
             *reference = rewrite(*reference);
         }
         created.push(field.handle);
-        doc.objects.insert(field.handle, ObjectType::Field(field));
+        clones.push(field);
     }
+    // Registered, not just stored: a cell formula is evaluated through the
+    // drawing's field index, and the drawing's field list names every field.
+    doc.register_fields(clones);
     if let Some(EntityType::Table(table)) = doc.get_entity_mut(copy) {
         for content in table
             .rows

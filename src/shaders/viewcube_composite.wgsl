@@ -5,7 +5,9 @@ struct VertexOutput {
 
 struct CompositeUniforms {
     uv_scale: vec2<f32>,
-    _pad: vec2<f32>,
+    // Premultiplied colour, so the whole sample scales.
+    opacity: f32,
+    _pad: f32,
 }
 
 var<private> POSITIONS: array<vec2<f32>, 6> = array<vec2<f32>, 6>(
@@ -40,5 +42,6 @@ fn vs_main(@builtin(vertex_index) index: u32) -> VertexOutput {
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    return textureSample(resolved_texture, resolved_sampler, input.uv * uniforms.uv_scale);
+    return textureSample(resolved_texture, resolved_sampler, input.uv * uniforms.uv_scale)
+        * uniforms.opacity;
 }

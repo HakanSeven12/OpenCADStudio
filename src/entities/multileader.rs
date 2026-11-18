@@ -142,6 +142,48 @@ pub(crate) fn catmull_rom_pts(ctrl: &[[f64; 3]], segs_per_span: u32) -> Vec<[f64
     out
 }
 
+/// A spline leader through its bend points that runs into the landing along
+/// `landing` (unit, toward the text) instead of meeting it at an angle: a
+/// two-point leader then bows the way it is drawn, rather than lying straight.
+fn spline_into_landing(ctrl: &[[f64; 3]], landing: [f64; 2]) -> Vec<[f64; 3]> {
+    const SEGS: u32 = 8;
+    let [prev, end] = [ctrl[ctrl.len() - 2], ctrl[ctrl.len() - 1]];
+    // A Catmull-Rom tangent at `end` is half the step from `prev` to the
+    // point after it: put that point where the step is along the landing.
+    let reach = 2.0 * (end[0] - prev[0]).hypot(end[1] - prev[1]);
+    let mut extended = ctrl.to_vec();
+    extended.push([prev[0] + landing[0] * reach, prev[1] + landing[1] * reach, end[2]]);
+    let mut pts = catmull_rom_pts(&extended, SEGS);
+    pts.truncate(pts.len() - (SEGS as usize + 1));
+    pts
+}
+
+/// Whether a leader root draws a landing (dogleg). Vertically attached
+/// leaders meet the text edge directly.
+fn draws_landing(ml: &MultiLeader, root: &document::entities::multileader::LeaderRoot) -> bool {
+    ml.enable_landing
+        && ml.enable_dogleg
+        && root.landing_distance > 0.0
+        && !matches!(
+            ml.text_attachment_direction,
+            document::entities::multileader::TextAttachmentDirectionType::Vertical
+        )
+}
+
+/// A root whose leaders curve: they run on through the landing themselves.
+fn spline_root(ml: &MultiLeader, root: &document::entities::multileader::LeaderRoot) -> bool {
+    root.lines
+        .iter()
+        .any(|line| line_path_type(ml, line) == MultiLeaderPathType::Spline)
+}
+
+/// A leader root's landing direction, unit length, when it stores one.
+fn landing_direction(root: &document::entities::multileader::LeaderRoot) -> Option<[f64; 2]> {
+    let [x, y] = [root.direction.x, root.direction.y];
+    let length = x.hypot(y);
+    (length > 1e-9).then(|| [x / length, y / length])
+}
+
 fn to_render(ml: &MultiLeader, document: &document::Document) -> Option<RenderEntity> {
     let nan = [f64::NAN; 3];
     let p3 = |v: &document::types::Vector3| -> [f64; 3] { [v.x, v.y, v.z] };
@@ -308,6 +350,7 @@ fn to_render(ml: &MultiLeader, document: &document::Document) -> Option<RenderEn
             if line.points.is_empty() {
                 continue;
             }
+            let mut curve_start: Option<[f64; 3]> = None;
 
             if !invisible {
                 if !first {
@@ -331,14 +374,16 @@ fn to_render(ml: &MultiLeader, document: &document::Document) -> Option<RenderEn
                     snap_pts.push(node(c));
                 }
 
-                if line.path_type == MultiLeaderPathType::Spline && ctrl.len() >= 2 {
-                    // Catmull-Rom spline through the bend points. Use the leader
-                    // line's own path type — a spline-style MultiLeader can carry
-                    // straight lines, and splining a straight run bows it.
-                    let pts = catmull_rom_pts(&ctrl, 8);
-                    for &pt in &pts {
-                        points.push(pt);
-                    }
+                if line_path_type(ml, line) == MultiLeaderPathType::Spline && ctrl.len() >= 2 {
+                    // The curve runs on to the landing's text end; it has no
+                    // separate landing.
+                    let mut through = ctrl.clone();
+                    *through.last_mut().unwrap() = text_edge_pt;
+                    let landing = landing_direction(root)
+                        .unwrap_or([text_sign * tdx, text_sign * tdy]);
+                    let curve = spline_into_landing(&through, landing);
+                    curve_start = curve.get(1).copied();
+                    points.extend(curve);
                 } else {
                     for &c in &ctrl {
                         points.push(c);
@@ -359,10 +404,11 @@ fn to_render(ml: &MultiLeader, document: &document::Document) -> Option<RenderEn
             if draw_arrow && !invisible {
                 let tip = &line.points[0];
                 let tip_f = p3(tip);
-                let next = if line.points.len() >= 2 {
-                    line.points[1]
-                } else {
-                    *cp
+                // A curve leaves the tip along its own first step.
+                let next = match curve_start {
+                    Some(c) => document::types::Vector3::new(c[0], c[1], c[2]),
+                    None if line.points.len() >= 2 => line.points[1],
+                    None => *cp,
                 };
                 let dx = next.x - tip.x;
                 let dy = next.y - tip.y;
@@ -386,7 +432,7 @@ fn to_render(ml: &MultiLeader, document: &document::Document) -> Option<RenderEn
         }
 
         // Horizontal landing from the leader end to the text's near edge.
-        if dogleg > 0.0 && !invisible {
+        if dogleg > 0.0 && !invisible && !spline_root(ml, root) {
             points.push(nan);
             points.push(elbow_pt);
             points.push(text_edge_pt);
@@ -981,6 +1027,21 @@ fn attachment_str(a: &TextAttachmentType) -> &'static str {
         TextAttachmentType::BottomOfTopLineUnderlineAll => ATTACH_LABELS[8],
         TextAttachmentType::CenterOfText => "Center of text",
         TextAttachmentType::CenterOfTextOverline => "Center of text (overline)",
+    }
+}
+
+/// The path a leader line is drawn with. A line's own path type counts only
+/// when its override flags say so; otherwise the MultiLeader's applies, so a
+/// spline leader whose lines store a stale straight type still curves, and a
+/// straight line inside a spline leader keeps its override.
+fn line_path_type(ml: &MultiLeader, line: &document::entities::LeaderLine) -> MultiLeaderPathType {
+    if line
+        .override_flags
+        .contains(document::entities::LeaderLinePropertyOverrideFlags::PATH_TYPE)
+    {
+        line.path_type
+    } else {
+        ml.path_type
     }
 }
 
@@ -2003,15 +2064,33 @@ pub(crate) fn block_content_insert(
     );
     let mut insertion = ml.context.block_content_location;
     if ml.block_connection_type == BlockContentConnectionType::BlockExtents {
-        // Other writers store the block's insertion point in the block content
-        // location, already moved off the landing by the extents; derive it
-        // again from the content base point so it is not moved twice.
+        // The block's edge facing the arrow sits one landing gap past the end
+        // of the first root's landing. Derived from the root, not the content
+        // base point: AutoCAD stores that at the block's left edge even when
+        // the leader comes from the right, while this program stores the
+        // landing end (#2640).
         insertion = ml.context.content_base_point;
-        if let Some(bounds) = block_content_bounds(document, record) {
+        let root = ml
+            .context
+            .leader_roots
+            .first()
+            .filter(|root| root.direction.x.hypot(root.direction.y) > 1.0e-9);
+        let mut from_left = true;
+        if let Some(root) = root {
+            let length = root.direction.x.hypot(root.direction.y);
+            let (ux, uy) = (root.direction.x / length, root.direction.y / length);
+            let landing = if draws_landing(ml, root) {
+                root.landing_distance
+            } else {
+                0.0
+            };
+            let reach = landing + ml.context.landing_gap.max(0.0);
+            insertion.x = root.connection_point.x + ux * reach;
+            insertion.y = root.connection_point.y + uy * reach;
             let to_block = Transform::rotation(-ml.block_rotation);
-            let from_left = ml.context.leader_roots.first().is_none_or(|root| {
-                to_block.apply_vector([root.direction.x, root.direction.y])[0] >= 0.0
-            });
+            from_left = to_block.apply_vector([ux, uy])[0] >= 0.0;
+        }
+        if let Some(bounds) = block_content_bounds(document, record) {
             let anchor_x = if from_left { bounds[0] } else { bounds[2] };
             let anchor_y = (bounds[1] + bounds[3]) * 0.5;
             let local_x = (anchor_x - record.base_point.x) * scale.x;
@@ -2179,8 +2258,9 @@ fn lift_wire_to_world(w: &mut crate::scene::model::wire_model::WireModel, origin
         *tris = hi;
         *low = lo;
     };
-    lift(&mut w.fill_tris, &mut w.fill_tris_low);
-    lift(&mut w.pick_tris, &mut w.pick_tris_low);
+    let geom = w.geom_mut();
+    lift(&mut geom.fill_tris, &mut geom.fill_tris_low);
+    lift(&mut geom.pick_tris, &mut geom.pick_tris_low);
     let offset = DVec3::from_array(origin);
     for (p, _) in &mut w.snap_pts {
         *p += offset;
@@ -2399,6 +2479,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                 if line.points.is_empty() {
                     continue;
                 }
+                let mut curve_start: Option<[f64; 3]> = None;
 
                 if !invisible {
                     if !first {
@@ -2418,16 +2499,22 @@ impl MultiLeaderFrameTess for MultiLeader {
                         snap_pts.push((Vec3::from(c).as_dvec3(), SnapHint::Node));
                     }
 
-                    // Use the leader LINE's own path type (its stored 170 code),
-                    // not the MultiLeader's overall/style default: a spline-style
-                    // leader can carry straight lines, and drawing those through a
-                    // Catmull-Rom bows an otherwise-straight two-point segment.
-                    if line.path_type == MultiLeaderPathType::Spline && ctrl.len() >= 2 {
-                        let ctrl_f64: Vec<[f64; 3]> = ctrl
+                    if line_path_type(ml, line) == MultiLeaderPathType::Spline && ctrl.len() >= 2 {
+                        let mut ctrl_f64: Vec<[f64; 3]> = ctrl
                             .iter()
                             .map(|c| [c[0] as f64, c[1] as f64, c[2] as f64])
                             .collect();
-                        for pt in catmull_rom_pts(&ctrl_f64, 8) {
+                        let landing = landing_direction(root).unwrap_or([text_sign_w, 0.0]);
+                        // The curve runs on to the landing's text end; it has
+                        // no separate landing.
+                        if draws_landing(ml, root) {
+                            let d = root.landing_distance * context_scale_correction as f64;
+                            *ctrl_f64.last_mut().unwrap() =
+                                [cp.x + landing[0] * d, cp.y + landing[1] * d, cp.z];
+                        }
+                        let curve = spline_into_landing(&ctrl_f64, landing);
+                        curve_start = curve.get(1).copied();
+                        for pt in curve {
                             points.push([pt[0] as f32, pt[1] as f32, pt[2] as f32]);
                         }
                     } else {
@@ -2448,10 +2535,11 @@ impl MultiLeaderFrameTess for MultiLeader {
                 if draw_arrow && !invisible {
                     let tip = &line.points[0];
                     let tip_f = p3(tip);
-                    let next = if line.points.len() >= 2 {
-                        line.points[1]
-                    } else {
-                        *cp
+                    // A curve leaves the tip along its own first step.
+                    let next = match curve_start {
+                        Some(c) => document::types::Vector3::new(c[0], c[1], c[2]),
+                        None if line.points.len() >= 2 => line.points[1],
+                        None => *cp,
                     };
                     let dx = (next.x - tip.x) as f32;
                     let dy = (next.y - tip.y) as f32;
@@ -2470,17 +2558,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                 }
             }
 
-            // Vertically attached leaders meet the text edge directly.
-            let vertical_attach = matches!(
-                ml.text_attachment_direction,
-                document::entities::multileader::TextAttachmentDirectionType::Vertical
-            );
-            if !invisible
-                && ml.enable_landing
-                && ml.enable_dogleg
-                && root.landing_distance > 0.0
-                && !vertical_attach
-            {
+            if !invisible && draws_landing(ml, root) {
                 // Horizontal landing (dogleg) from the leader elbow (connection
                 // point) toward the text side. The stored geometry places the
                 // text so its near-bottom edge sits one landing_gap past this
@@ -2504,7 +2582,9 @@ impl MultiLeaderFrameTess for MultiLeader {
                 let landing_end = [(cp.x + ux * d) as f32, (cp.y + uy * d) as f32, cp_f[2]];
                 landing_end_w.get_or_insert([landing_end[0], landing_end[1]]);
                 points.push(nan);
-                points.push(cp_f);
+                if !spline_root(ml, root) {
+                    points.push(cp_f);
+                }
                 points.push(landing_end);
                 // A root landing on the text's other side than the first
                 // root meets the text's far edge: it never runs on.
@@ -2538,8 +2618,6 @@ impl MultiLeaderFrameTess for MultiLeader {
         wires.push(WireModel {
             bg_adapt: None,
             point_marker: None,
-            taper_widths: Vec::new(),
-            pattern_stations: Vec::new(),
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
@@ -2549,32 +2627,36 @@ impl MultiLeaderFrameTess for MultiLeader {
             fill_is_2d_solid: false,
             solid_normal: None,
             render_instance: None,
-            pick_tris: Vec::new(),
-            pick_tris_low: Vec::new(),
             dash_from_start: false,
-            text_verts: Vec::new(),
             name: name.clone(),
-            points,
-            points_low: Vec::new(),
             color: line_color,
             selected,
             aci: 0,
             pattern_length: leader_pat_len,
             pattern: leader_pat,
             line_weight_px: leader_lw_px,
-            snap_pts,
-            tangent_geoms: tangents,
-            key_vertices: key_verts,
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
-            fill_tris: arrow_fill,
-            // fill_tris_low intentionally empty: this fill renders on the
-            // top-level path, where consumers (face3d_gpu, xclip) treat a short
-            // low half as all-zero, so it draws at f32 precision (sub-metre
-            // error at UTM scale) — not a crash. Follow-up: double-single-split
-            // via points_to_ds to match emit_wire's paired fill path.
-            fill_tris_low: Vec::new(),
-
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                taper_widths: Vec::new(),
+                pattern_stations: Vec::new(),
+                pick_tris: Vec::new(),
+                pick_tris_low: Vec::new(),
+                text_verts: Vec::new(),
+                points,
+                points_low: Vec::new(),
+                snap_pts,
+                tangent_geoms: tangents,
+                key_vertices: key_verts,
+                fill_tris: arrow_fill,
+                // fill_tris_low intentionally empty: this fill renders on the
+                // top-level path, where consumers (face3d_gpu, xclip) treat a short
+                // low half as all-zero, so it draws at f32 precision (sub-metre
+                // error at UTM scale) — not a crash. Follow-up: double-single-split
+                // via points_to_ds to match emit_wire's paired fill path.
+                fill_tris_low: Vec::new(),
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         });
 
@@ -2982,8 +3064,6 @@ impl MultiLeaderFrameTess for MultiLeader {
                     wires.push(WireModel {
                         bg_adapt: None,
                         point_marker: None,
-                        taper_widths: Vec::new(),
-                        pattern_stations: Vec::new(),
                         world_width: 0.0,
                         depth_override: None,
                         display_visible: true,
@@ -2996,34 +3076,40 @@ impl MultiLeaderFrameTess for MultiLeader {
                         solid_normal: None,
                         render_instance: None,
                         stub: None,
-                        pick_tris: Vec::new(),
-                        pick_tris_low: Vec::new(),
                         dash_from_start: false,
                         element_linetype: None,
                         element_color: None,
                         dash_closure: Default::default(),
-                        text_verts: sdf_verts,
-                        searchable_text: searchable,
                         name: name.clone(),
                         effective_layer: None,
-                        points: deco_pts,
-                        points_low: Vec::new(),
+                        block_member: None,
                         color: neutral,
                         selected,
                         aci: 0,
                         pattern_length: 0.0,
                         pattern: [0.0; 8],
                         line_weight_px,
-                        snap_pts: vec![(
-                            glam::DVec3::new(local_ins_x as f64, local_ins_y as f64, z as f64),
-                            SnapHint::Node,
-                        )],
-                        tangent_geoms: vec![],
-                        key_vertices: vec![],
                         aabb: [nx as f32, ny as f32, xx as f32, xy as f32],
                         plinegen: true,
-                        fill_tris: deco_fill,
-                        fill_tris_low: Vec::new(),
+                        geom: std::sync::Arc::new(crate::scene::WireGeom {
+                            taper_widths: Vec::new(),
+                            pattern_stations: Vec::new(),
+                            pick_tris: Vec::new(),
+                            pick_tris_low: Vec::new(),
+                            text_verts: sdf_verts,
+                            searchable_text: searchable,
+                            points: deco_pts,
+                            points_low: Vec::new(),
+                            snap_pts: vec![(
+                                glam::DVec3::new(local_ins_x as f64, local_ins_y as f64, z as f64),
+                                SnapHint::Node,
+                            )],
+                            tangent_geoms: vec![],
+                            key_vertices: vec![],
+                            fill_tris: deco_fill,
+                            fill_tris_low: Vec::new(),
+                            ..crate::scene::WireGeom::default()
+                        }),
                     });
                 }
             }
@@ -3096,8 +3182,6 @@ impl MultiLeaderFrameTess for MultiLeader {
                 wires.push(WireModel {
                     bg_adapt: None,
                     point_marker: None,
-                    taper_widths: Vec::new(),
-                    pattern_stations: Vec::new(),
                     world_width: 0.0,
                     depth_override: None,
                     display_visible: true,
@@ -3107,27 +3191,31 @@ impl MultiLeaderFrameTess for MultiLeader {
                     fill_is_2d_solid: false,
                     solid_normal: None,
                     render_instance: None,
-                    pick_tris: Vec::new(),
-                    pick_tris_low: Vec::new(),
                     dash_from_start: false,
-                    text_verts: Vec::new(),
                     name: name.clone(),
-                    points: pts,
-                    points_low: Vec::new(),
                     color: line_color,
                     selected,
                     aci: 0,
                     pattern_length: 0.0,
                     pattern: [0.0; 8],
                     line_weight_px,
-                    snap_pts: vec![],
-                    tangent_geoms: vec![],
-                    key_vertices: vec![],
                     aabb: WireModel::UNBOUNDED_AABB,
                     plinegen: true,
-                    fill_tris: vec![],
-                    fill_tris_low: Vec::new(),
-
+                    geom: std::sync::Arc::new(crate::scene::WireGeom {
+                        taper_widths: Vec::new(),
+                        pattern_stations: Vec::new(),
+                        pick_tris: Vec::new(),
+                        pick_tris_low: Vec::new(),
+                        text_verts: Vec::new(),
+                        points: pts,
+                        points_low: Vec::new(),
+                        snap_pts: vec![],
+                        tangent_geoms: vec![],
+                        key_vertices: vec![],
+                        fill_tris: vec![],
+                        fill_tris_low: Vec::new(),
+                        ..crate::scene::WireGeom::default()
+                    }),
                     ..Default::default()
                 });
             }
@@ -3197,8 +3285,6 @@ impl MultiLeaderFrameTess for MultiLeader {
                             })
                         }),
                         point_marker: None,
-                        taper_widths: Vec::new(),
-                        pattern_stations: Vec::new(),
                         world_width: 0.0,
                         depth_override: None,
                         display_visible: true,
@@ -3208,27 +3294,31 @@ impl MultiLeaderFrameTess for MultiLeader {
                         fill_is_2d_solid: false,
                         solid_normal: None,
                         render_instance: None,
-                        pick_tris: Vec::new(),
-                        pick_tris_low: Vec::new(),
                         dash_from_start: false,
-                        text_verts: Vec::new(),
                         name: name.clone(),
-                        points: vec![],
-                        points_low: Vec::new(),
                         color: fill_color,
                         selected,
                         aci: 0,
                         pattern_length: 0.0,
                         pattern: [0.0; 8],
                         line_weight_px: 1.0,
-                        snap_pts: vec![],
-                        tangent_geoms: vec![],
-                        key_vertices: vec![],
                         aabb: WireModel::UNBOUNDED_AABB,
                         plinegen: true,
-                        fill_tris,
-                        fill_tris_low: Vec::new(),
-
+                        geom: std::sync::Arc::new(crate::scene::WireGeom {
+                            taper_widths: Vec::new(),
+                            pattern_stations: Vec::new(),
+                            pick_tris: Vec::new(),
+                            pick_tris_low: Vec::new(),
+                            text_verts: Vec::new(),
+                            points: vec![],
+                            points_low: Vec::new(),
+                            snap_pts: vec![],
+                            tangent_geoms: vec![],
+                            key_vertices: vec![],
+                            fill_tris,
+                            fill_tris_low: Vec::new(),
+                            ..crate::scene::WireGeom::default()
+                        }),
                         ..Default::default()
                     });
                 }
@@ -3245,8 +3335,6 @@ impl MultiLeaderFrameTess for MultiLeader {
                     wires.push(WireModel {
                         bg_adapt: None,
                         point_marker: None,
-                        taper_widths: Vec::new(),
-                        pattern_stations: Vec::new(),
                         world_width: 0.0,
                         depth_override: None,
                         display_visible: true,
@@ -3256,27 +3344,31 @@ impl MultiLeaderFrameTess for MultiLeader {
                         fill_is_2d_solid: false,
                         solid_normal: None,
                         render_instance: None,
-                        pick_tris: Vec::new(),
-                        pick_tris_low: Vec::new(),
                         dash_from_start: false,
-                        text_verts: Vec::new(),
                         name,
-                        points: frame_points,
-                        points_low: Vec::new(),
                         color: text_color,
                         selected,
                         aci: 0,
                         pattern_length: 0.0,
                         pattern: [0.0; 8],
                         line_weight_px,
-                        snap_pts: vec![],
-                        tangent_geoms: vec![],
-                        key_vertices: vec![],
                         aabb: WireModel::UNBOUNDED_AABB,
                         plinegen: true,
-                        fill_tris: vec![],
-                        fill_tris_low: Vec::new(),
-
+                        geom: std::sync::Arc::new(crate::scene::WireGeom {
+                            taper_widths: Vec::new(),
+                            pattern_stations: Vec::new(),
+                            pick_tris: Vec::new(),
+                            pick_tris_low: Vec::new(),
+                            text_verts: Vec::new(),
+                            points: frame_points,
+                            points_low: Vec::new(),
+                            snap_pts: vec![],
+                            tangent_geoms: vec![],
+                            key_vertices: vec![],
+                            fill_tris: vec![],
+                            fill_tris_low: Vec::new(),
+                            ..crate::scene::WireGeom::default()
+                        }),
                         ..Default::default()
                     });
                 }
@@ -4067,9 +4159,27 @@ mod tests {
         let root = ml.context.add_leader_root();
         root.connection_point = Vector3::new(60.0, 5.0, 0.0);
         root.direction = Vector3::new(1.0, 0.0, 0.0);
+        root.landing_distance = 0.0;
+        ml.context.landing_gap = 0.36;
         let insert = block_content_insert(&doc, &ml).expect("block content");
         assert!(
             (insert.insert_point - Vector3::new(64.36, 5.0, 0.0)).length() < 1e-4,
+            "insertion {:?}",
+            insert.insert_point
+        );
+        // A leader from the right (#2640): AutoCAD keeps the content base
+        // point at the block's left edge; the circle still meets the landing.
+        ml.context.landing_gap = 0.0;
+        ml.context.content_base_point = Vector3::new(52.0, 5.0, 0.0);
+        let root = &mut ml.context.leader_roots[0];
+        root.connection_point = Vector3::new(70.0, 5.0, 0.0);
+        root.direction = Vector3::new(-1.0, 0.0, 0.0);
+        root.landing_distance = 10.0;
+        ml.enable_landing = true;
+        ml.enable_dogleg = true;
+        let insert = block_content_insert(&doc, &ml).expect("block content");
+        assert!(
+            (insert.insert_point - Vector3::new(56.0, 5.0, 0.0)).length() < 1e-4,
             "insertion {:?}",
             insert.insert_point
         );

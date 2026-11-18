@@ -61,7 +61,7 @@ pub enum FractionPart {
 fn storable(part: &str) -> bool {
     !part
         .chars()
-        .any(|c| matches!(c, '/' | '#' | '^' | '%' | ';' | '\\' | '{' | '}') || c.is_control())
+        .any(|c| matches!(c, '/' | '#' | '^' | '~' | '%' | ';' | '\\' | '{' | '}') || c.is_control())
 }
 
 /// The `\S` code of a stack. The `^` carries no space: in a DXF file a bare
@@ -80,6 +80,8 @@ fn stack_code(data: &StackingData) -> Result<String, EditError> {
         StackingType::Horizontal => ("/", true),
         StackingType::Diagonal => ("#", true),
         StackingType::Limit => ("^", false),
+        // The halves line up on the point named after `~`.
+        StackingType::Decimal => ("~.", true),
     };
     let empty = |s: &str| s.trim().is_empty();
     if (both && (empty(&data.numerator) || empty(&data.denominator)))
@@ -350,6 +352,49 @@ impl OpenCADStudio {
             Ok(edit)
         });
         self.select_after_edit(before, range.start)
+    }
+
+    /// The AutoStack tag: the stack it stands under made diagonal or
+    /// horizontal, unstacked back to its typed text, or its properties.
+    pub(in crate::app) fn mtext_stack_tag(&mut self, pick: &str) {
+        let Some(at) = self.mtext_editor.as_ref().and_then(|ed| match ed.smart_tag {
+            Some(super::context_menu::SmartTag::Stack(at)) => Some(at),
+            _ => None,
+        }) else {
+            return;
+        };
+        if let Some(ed) = self.mtext_editor.as_mut() {
+            ed.sel = Some((at, at + 1));
+            ed.sel_anchor = at;
+            ed.caret = at + 1;
+        }
+        let Some(mut data) = self.mtext_editor.as_ref().and_then(|ed| ed.selected_stack()) else {
+            return;
+        };
+        match pick {
+            "DIAGONAL" | "HORIZONTAL" => {
+                data.stacking_type = if pick == "DIAGONAL" {
+                    StackingType::Diagonal
+                } else {
+                    StackingType::Horizontal
+                };
+                self.raw_stack(at..at + 1, data);
+            }
+            "UNSTACK" => {
+                let separator = match data.stacking_type {
+                    StackingType::Diagonal => "#",
+                    StackingType::Limit => "^",
+                    _ => "/",
+                };
+                let text = data.numerator + separator + &data.denominator;
+                self.raw_unstack(at..at + 1, text);
+                if let Some(ed) = self.mtext_editor.as_mut() {
+                    ed.smart_tag = None;
+                }
+            }
+            "PROPERTIES" => self.open_mtext_dialog("STACKPROPS"),
+            _ => {}
+        }
     }
 
     /// Turn the selected one-sided stack back into its plain text.

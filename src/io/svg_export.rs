@@ -207,7 +207,41 @@ pub fn build_svg(
     }
     out.push_str(" stroke-linecap=\"round\" stroke-linejoin=\"round\">\n");
 
+    let turned = page.content_rotation != 0.0;
+    if turned {
+        // Content turn in SVG units: q -> o + L R L^-1 (q - o), with L and o
+        // the linear part and origin of the page map.
+        let o = map.apply(0.0, 0.0);
+        let (ux, uy) = map.apply(1.0, 0.0);
+        let (vx, vy) = map.apply(0.0, 1.0);
+        let l = [ux - o.0, uy - o.1, vx - o.0, vy - o.1];
+        let det = l[0] * l[3] - l[2] * l[1];
+        let inv = [l[3] / det, -l[1] / det, -l[2] / det, l[0] / det];
+        let (sin, cos) = page.content_rotation.sin_cos();
+        let mul = |m: [f64; 4], n: [f64; 4]| {
+            [
+                m[0] * n[0] + m[2] * n[1],
+                m[1] * n[0] + m[3] * n[1],
+                m[0] * n[2] + m[2] * n[3],
+                m[1] * n[2] + m[3] * n[3],
+            ]
+        };
+        let a = mul(mul(l, [cos, sin, -sin, cos]), inv);
+        let e = (o.0 - a[0] * o.0 - a[2] * o.1, o.1 - a[1] * o.0 - a[3] * o.1);
+        out.push_str(&format!(
+            "<g transform=\"matrix({} {} {} {} {} {})\">\n",
+            fmt(a[0]),
+            fmt(a[1]),
+            fmt(a[2]),
+            fmt(a[3]),
+            fmt(e.0),
+            fmt(e.1)
+        ));
+    }
     emit_page_content(&mut out, page, plot_style, &map, glyphs.as_ref())?;
+    if turned {
+        out.push_str("</g>\n");
+    }
 
     out.push_str("</g>\n");
     if let Some(label) = stamp {
@@ -1430,6 +1464,7 @@ mod tests {
             offset_x: 0.0,
             offset_y: 0.0,
             rotation_deg: 0,
+            content_rotation: 0.0,
             scale: 1.0,
             clip: None,
             options: PlotOptions::default(),

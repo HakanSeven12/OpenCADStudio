@@ -153,6 +153,63 @@ impl Scene {
         })
     }
 
+    /// ALIGNSPACE: move a plan-view viewport's view so `model[k]` shows at
+    /// `paper[k]`. One pair pans; two pairs also set the scale and twist.
+    /// Returns `false` for an unsupported or locked viewport, or coincident
+    /// points.
+    pub fn align_viewport_view(
+        &mut self,
+        vp_handle: Handle,
+        model: &[glam::DVec2],
+        paper: &[glam::DVec2],
+    ) -> bool {
+        use crate::scene::viewport_ref::ViewportFrame;
+        let Some(frame) = self.viewport_frame(vp_handle) else {
+            return false;
+        };
+        if frame.locked {
+            return false;
+        }
+        let (scale, twist) = match (model, paper) {
+            ([m1, m2], [p1, p2]) => {
+                let (dm, dp) = (*m2 - *m1, *p2 - *p1);
+                if dm.length() < 1e-12 || dp.length() < 1e-12 {
+                    return false;
+                }
+                (
+                    dp.length() / dm.length(),
+                    dp.y.atan2(dp.x) - dm.y.atan2(dm.x),
+                )
+            }
+            ([_], [_]) => (frame.scale, frame.twist),
+            _ => return false,
+        };
+        // The model point at the viewport centre, from a frame that shows
+        // model[0] at paper[0].
+        let target = ViewportFrame {
+            paper_center: paper[0],
+            model_target: model[0],
+            scale,
+            twist,
+            ..frame
+        }
+        .paper_to_model(frame.paper_center.extend(0.0));
+        let Some(EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) else {
+            return false;
+        };
+        vp.view_target.x = target.x;
+        vp.view_target.y = target.y;
+        vp.view_center = document::types::Vector3::ZERO;
+        vp.view_height = vp.height / scale;
+        vp.custom_scale = scale;
+        // A plan view's stored twist is the frame's twist.
+        vp.twist_angle = twist;
+        self.notify_viewport_changed(vp_handle);
+        self.resident_wire_sets.borrow_mut().clear();
+        self.bump_geometry();
+        true
+    }
+
     /// Visible, supported content viewports at a sheet point, topmost first.
     /// Shared by snapping and explicit dimension object picking.
     pub fn viewport_frames_at_paper_point(

@@ -31,6 +31,28 @@ enum Entry {
 
 use Entry::{Cmd, Sep, Sub};
 
+/// The Toolbars submenu: each entry shows that ribbon panel as a toolbar
+/// over the drawing, or puts it back. `TOOLBAR` alone lists them all.
+const TOOLBARS: &[Entry] = &[
+    Cmd("Draw", "TOOLBAR draw/Draw", ""),
+    Cmd("Modify", "TOOLBAR draw/Modify", ""),
+    Cmd("Layers", "TOOLBAR draw/Layers", ""),
+    Cmd("Properties", "TOOLBAR draw/Properties", ""),
+    Cmd("Annotation", "TOOLBAR draw/Annotation", ""),
+    Cmd("Block", "TOOLBAR draw/Block", ""),
+    Cmd("Groups", "TOOLBAR draw/Groups", ""),
+    Cmd("Clipboard", "TOOLBAR draw/Clipboard", ""),
+    Cmd("Measure", "TOOLBAR draw/Measure", ""),
+    Sep,
+    Cmd("Text", "TOOLBAR annotate/Text", ""),
+    Cmd("Dimensions", "TOOLBAR annotate/Dimensions", ""),
+    Cmd("Leaders", "TOOLBAR annotate/Leaders", ""),
+    Cmd("Tables", "TOOLBAR annotate/Tables", ""),
+    Sep,
+    Cmd("Navigate", "TOOLBAR view/Navigate", ""),
+    Cmd("Visual Style", "TOOLBAR view/Visual Style", ""),
+];
+
 /// The menus in menu-bar order. The Window menu also lists the open
 /// drawings (see `view`).
 const MENUS: &[(&str, &[Entry])] = &[
@@ -196,7 +218,7 @@ const MENUS: &[(&str, &[Entry])] = &[
                     Cmd("Text Window", "TEXTSCR", "F2"),
                 ],
             ),
-            Cmd("Toolbars...", "TOOLBAR", ""),
+            Sub("Toolbars", TOOLBARS),
         ],
     ),
     (
@@ -301,7 +323,7 @@ const MENUS: &[(&str, &[Entry])] = &[
                     Cmd("External References", "EXTERNALREFERENCES", ""),
                 ],
             ),
-            Cmd("Toolbars...", "TOOLBAR", ""),
+            Sub("Toolbars", TOOLBARS),
             Cmd("Command Line", "COMMANDLINE", "Ctrl+9"),
             Cmd("Clean Screen", "CLEANSCREEN", "Ctrl+0"),
             Sep,

@@ -5,6 +5,8 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod edit_lock;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod connection_workers;
 // Same split as web_session/web_autosave: the save-routing decision (and
 // its tests) is pure and compiles everywhere; the showSaveFilePicker half
 // inside is wasm-only.
@@ -27,6 +29,7 @@ pub mod ole_embed;
 pub mod paper_catalog;
 pub mod patterns;
 pub mod pdf_export;
+pub mod picture_import;
 pub mod plot;
 pub mod plot_device;
 pub mod plot_style;
@@ -70,8 +73,10 @@ pub mod windows_media;
 pub mod xref;
 pub mod xref_model;
 
-#[cfg(not(target_arch = "wasm32"))]
-use crate::io::plot_style::PlotStyleTableExt as _;
+#[cfg(all(test, feature = "performance-audit"))]
+#[path = "save_audit.rs"]
+mod performance_audit;
+
 use crate::scene::DerivedCaches;
 use document::entities::EntityType;
 // The path-based readers are native-only; web parsing runs through the
@@ -1038,6 +1043,11 @@ pub fn load_bytes(name: &str, bytes: Vec<u8>) -> Result<Document, String> {
     } else {
         ext.as_str()
     };
+    // Share the converter route used by GUI/worker opening, including IFCCAD.
+    // Headless automation must not reject a format the application supports.
+    if let Some(converter) = ocs_save::external_format(format) {
+        return ocs_save::read_external(converter, &bytes).map(|outcome| outcome.document);
+    }
     match format {
         // Templates (.dwt) and standards (.dws) are drawings in the DWG format.
         "dwg" | "dwt" | "dws" => {
@@ -2398,12 +2408,13 @@ pub async fn pick_linetype_file() -> Option<(Option<std::path::PathBuf>, String)
         .map(|file| (file.dir, file.source))
 }
 
-pub async fn pick_plot_style() -> Result<Option<plot_style::PlotStyleTable>, String> {
+pub async fn pick_plot_style() -> Result<Option<plot_style::PickedPlotStyle>, String> {
     let dialog = crate::sys::file_dialog()
         .set_title(crate::t!("Load Plot Style Table").as_ref())
-        .add_filter(crate::t!("Plot Style Tables").as_ref(), &["ctb", "CTB"])
-        .add_filter(crate::t!("CTB Files").as_ref(), &["ctb", "CTB"])
-        .add_filter(crate::t!("All Files").as_ref(), &["*"]);
+        .add_filter(
+            crate::t!("Plot Style Tables").as_ref(),
+            &["ctb", "CTB", "stb", "STB"],
+        );
     #[cfg(not(target_arch = "wasm32"))]
     let dialog = match plot_style::ensure_plot_styles_dir() {
         Ok(dir) => dialog.set_directory(dir),
@@ -2412,39 +2423,13 @@ pub async fn pick_plot_style() -> Result<Option<plot_style::PlotStyleTable>, Str
     let Some(handle) = dialog.pick_file().await else {
         return Ok(None);
     };
+    let name = handle.file_name();
     #[cfg(not(target_arch = "wasm32"))]
-    {
-        let path = crate::sys::handle_path(&handle);
-        let table = plot_style::PlotStyleTable::load(&path)?;
-        if let (Ok(dir), Some(file_name)) = (plot_style::ensure_plot_styles_dir(), path.file_name())
-        {
-            let destination = dir.join(file_name);
-            let same_place = path.parent().is_some_and(|parent| {
-                parent
-                    .canonicalize()
-                    .ok()
-                    .zip(dir.canonicalize().ok())
-                    .is_some_and(|(a, b)| a == b)
-            });
-            if !same_place && !destination.exists() {
-                let _ = std::fs::copy(&path, &destination);
-            }
-        }
-        Ok(Some(table))
-    }
-    // Web: read the picked file's bytes now — the name-only path has nothing
-    // behind it — parse them, and remember them in the session registry so
-    // `load_named` resolves the name afterwards. There is no plot-styles
-    // folder on the web, so registration lasts for the session.
+    let bytes =
+        std::fs::read(crate::sys::handle_path(&handle)).map_err(|error| error.to_string())?;
     #[cfg(target_arch = "wasm32")]
-    {
-        let name = handle.file_name();
-        let bytes: std::sync::Arc<Vec<u8>> = std::sync::Arc::new(handle.read().await);
-        let table =
-            plot_style::PlotStyleTable::from_bytes(&name, &bytes).map_err(|e| e.to_string())?;
-        plot_style::register_session_table(&name, bytes);
-        Ok(Some(table))
-    }
+    let bytes = handle.read().await;
+    plot_style::PickedPlotStyle::from_bytes(name, bytes).map(Some)
 }
 
 // ── Image file picker ─────────────────────────────────────────────────────
@@ -2685,7 +2670,7 @@ where
         .unwrap_or_default();
     if let Some(session) = ifccad_session {
         session
-            .check_destination(&ext)
+            .check_destination(&doc, &ext)
             .map_err(SaveFailure::other)?;
     }
     let write_started = iced::time::Instant::now();
@@ -2980,6 +2965,7 @@ pub fn prepare_document_for_save(mut doc: Document, version: document::DxfVersio
         }
     }
     let attributes_ms = crate::perf::elapsed_ms(attributes_started);
+    sync_justified_text_insertion(&mut doc);
     if perf {
         crate::perf_record!(
             "[perf] save-prepare styles={:.1} dimensions={:.1} attributes={:.1} entities={} objects={}",
@@ -2991,6 +2977,56 @@ pub fn prepare_document_for_save(mut doc: Document, version: document::DxfVersio
         );
     }
     doc
+}
+
+/// A justified TEXT is drawn from its alignment point, but readers that do not
+/// lay text out (viewers, DWG consumers) draw it from the insertion point,
+/// which must be the left end of the baseline. Text placed here kept the
+/// alignment point in both, so it showed left-aligned elsewhere (#3130).
+/// Only that stale case is filled in; a computed insertion point is kept.
+fn sync_justified_text_insertion(doc: &mut Document) {
+    use document::entities::{TextHorizontalAlignment as HA, TextVerticalAlignment as VA};
+    let stale: Vec<(document::Handle, [f64; 2])> = doc
+        .entities()
+        .filter_map(|entity| {
+            let document::EntityType::Text(t) = entity else {
+                return None;
+            };
+            if matches!(t.horizontal_alignment, HA::Aligned | HA::Fit)
+                || matches!(
+                    (t.horizontal_alignment, t.vertical_alignment),
+                    (HA::Left, VA::Baseline)
+                )
+            {
+                return None;
+            }
+            let a = t.alignment_point?;
+            let same = (a.x - t.insertion_point.x).hypot(a.y - t.insertion_point.y) <= 1e-9;
+            let origin = crate::entities::text::text_run_placement_at_scale(t, doc, 1.0).origin;
+            let moved = (origin[0] - a.x).hypot(origin[1] - a.y) > 1e-9;
+            (same && moved && origin.iter().all(|v| v.is_finite()))
+                .then(|| (t.common.handle, origin))
+        })
+        .collect();
+    for (handle, [x, y]) in stale {
+        if let Some(document::EntityType::Text(t)) = doc.get_entity_mut(handle) {
+            t.insertion_point.x = x;
+            t.insertion_point.y = y;
+        }
+    }
+}
+
+/// Prepare captured save snapshots on demand. Keep the original capture point
+/// (including documents whose tabs are later edited or closed), but only bake
+/// the next document's styles/dimension blocks when its writer is ready.
+/// Callers should finish writing and drop each prepared document before asking
+/// for the next one; collecting this iterator would retain all baked copies.
+pub fn prepare_save_batch<T>(
+    snapshots: impl IntoIterator<Item = (T, Document, document::DxfVersion)>,
+) -> impl Iterator<Item = (T, Document)> {
+    snapshots
+        .into_iter()
+        .map(|(context, document, version)| (context, prepare_document_for_save(document, version)))
 }
 
 /// Web SAVE/AUTOSAVE: offload the DWG/DXF writer pass to the browser worker.
@@ -3007,7 +3043,7 @@ pub async fn serialize_prepared_document(
     ifccad_session: Option<&ocs_save::IfccadSession>,
 ) -> Result<Vec<u8>, String> {
     if let Some(session) = ifccad_session {
-        session.check_destination(ext)?;
+        session.check_destination(prepared, ext)?;
     }
     // A converter writes inline: the worker only carries the DWG/DXF writers,
     // and the user's "Save anyway" lives on this side.
@@ -3895,6 +3931,76 @@ mod prepare_save_tests {
     use document::entities::{Dimension, DimensionLinear};
     use document::tables::TextStyle;
     use document::types::Vector3;
+
+    fn batch_dimension_document(x: f64) -> (Document, document::Handle) {
+        let mut doc = Document::new();
+        crate::io::linetypes::populate_document(&mut doc);
+        let mut dim =
+            DimensionLinear::new(Vector3::new(x, 0.0, 0.0), Vector3::new(x + 10.0, 0.0, 0.0));
+        dim.definition_point = Vector3::new(x + 5.0, 7.0, 0.0);
+        dim.base.common.handle = doc.allocate_handle();
+        let handle = dim.base.common.handle;
+        doc.add_entity(EntityType::Dimension(Box::new(Dimension::Linear(dim))))
+            .unwrap();
+        (doc, handle)
+    }
+
+    #[test]
+    fn save_batch_prepares_only_the_next_snapshot_and_releases_pending_ones_on_drop() {
+        let (first, first_handle) = batch_dimension_document(0.0);
+        let (second, second_handle) = batch_dimension_document(20.0);
+        let first_image = std::sync::Arc::downgrade(&first.get_entity_arc(first_handle).unwrap());
+        let second_image =
+            std::sync::Arc::downgrade(&second.get_entity_arc(second_handle).unwrap());
+        let mut pending = prepare_save_batch(vec![
+            ("first", first, document::DxfVersion::AC1027),
+            ("second", second, document::DxfVersion::AC1032),
+        ]);
+        assert_eq!(first_image.strong_count(), 1);
+        assert_eq!(second_image.strong_count(), 1);
+        let (name, prepared) = pending.next().unwrap();
+        assert_eq!(name, "first");
+        assert_eq!(prepared.version, document::DxfVersion::AC1027);
+        assert!(
+            prepared.entities().count() > 1,
+            "dimension geometry was baked"
+        );
+        assert_eq!(
+            first_image.strong_count(),
+            0,
+            "the first dimension image was replaced"
+        );
+        assert_eq!(
+            second_image.strong_count(),
+            1,
+            "the queued snapshot is still unprepared"
+        );
+        drop(prepared);
+        drop(pending);
+        assert_eq!(second_image.strong_count(), 0);
+    }
+
+    #[test]
+    fn save_batch_preserves_captured_contents_and_matches_eager_writer_output() {
+        let (mut live, handle) = batch_dimension_document(0.0);
+        let captured = live.clone();
+        let expected = prepare_document_for_save(captured.clone(), document::DxfVersion::AC1027);
+        live.remove_entity(handle);
+        drop(live); // Closing or editing the tab cannot alter the captured copy.
+        let (context, actual) =
+            prepare_save_batch(vec![(7, captured, document::DxfVersion::AC1027)])
+                .next()
+                .unwrap();
+        assert_eq!(context, 7);
+        assert!(actual.get_entity(handle).is_some());
+        for ext in ["dxf", "dwg"] {
+            assert_eq!(
+                ocs_save::serialize_document(&actual, ext).unwrap(),
+                ocs_save::serialize_document(&expected, ext).unwrap(),
+                "{ext} output changed"
+            );
+        }
+    }
 
     // The live document must never observe the save preparation: version
     // stamp, style sync and dimension baking all happen on the clone only.

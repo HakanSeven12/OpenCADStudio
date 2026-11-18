@@ -31,7 +31,7 @@ use crate::io::line_read::{is_line_too_long, read_line_capped};
 use serde_json::{json, Value};
 use std::io::{BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicU16, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -226,23 +226,24 @@ fn listen(mut app: OpenCADStudio, port: u16, bound_port: Arc<AtomicU16>) {
     eprintln!("OpenCADStudio REST listening on http://127.0.0.1:{bound}/api/v1");
     announce_token();
     let (jobs, incoming) = std::sync::mpsc::channel::<Job>();
-    // Connections are served one thread each: a slow op (plot, open a large
-    // drawing) or a client that connects and stalls must never keep other
-    // callers — `state`, `get_selection`, `cancel`, `operation` — from being
-    // accepted and answered.
-    let clients = Arc::new(AtomicUsize::new(0));
+    // Slow connections occupy independent workers without creating a fresh
+    // OS thread for every request or status poll.
+    let workers = match crate::io::connection_workers::ConnectionWorkers::new(
+        "ocs-rest",
+        MAX_CONNECTIONS,
+    ) {
+        Ok(workers) => workers,
+        Err(error) => {
+            eprintln!("--http: cannot start connection workers: {error}");
+            return;
+        }
+    };
     let acceptor = jobs.clone();
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
-            if clients.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
-                clients.fetch_sub(1, Ordering::SeqCst);
-                continue;
-            }
             let jobs = acceptor.clone();
-            let clients = clients.clone();
-            std::thread::spawn(move || {
+            workers.try_execute(move || {
                 serve_connection(stream, jobs);
-                clients.fetch_sub(1, Ordering::SeqCst);
             });
         }
     });

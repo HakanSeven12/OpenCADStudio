@@ -33,6 +33,7 @@ Other viewport tools:
 | `VPCLIP` | Gives a viewport a polygonal or object outline, or removes it. |
 | `VPLAYER` | Freezes layers in chosen viewports only. The Layer Manager has VP Freeze and VP override columns for the same purpose; see [Layers and Object Properties](Layers-and-Properties). |
 | `CHSPACE` | Moves objects between paper space and the model space of a viewport, keeping their printed size. |
+| `ALIGNSPACE` | Pans, zooms and rotates a viewport so model points line up with points on the sheet. |
 | `VPSYNC` / `SYNCPVIEWPORTS` | Lines up the views of several viewports with a master viewport. |
 | **Ctrl+R** | Moves to the next viewport. |
 

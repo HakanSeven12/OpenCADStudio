@@ -215,6 +215,33 @@ impl SolidEdgeCommand {
         (!wires.is_empty()).then_some((handle, wires))
     }
 
+    /// The chamfer's base surface, outlined like a hovered face, so the face
+    /// Distance1 is measured on shows while edges and distances are given.
+    fn base_face_wires(&self) -> Vec<WireModel> {
+        if self.operation != EdgeOperation::Chamfer {
+            return Vec::new();
+        }
+        let (Some(face), Some((handle, body))) = (
+            self.base_face.or_else(|| self.current_loop_face()),
+            self.active_body(),
+        ) else {
+            return Vec::new();
+        };
+        crate::scene::model::solid_model::face_outline(body, face)
+            .into_iter()
+            .map(|points| {
+                let mut wire = WireModel::solid_f64(
+                    format!("{}-CHAMFER-BASE", handle.value()),
+                    points,
+                    WireModel::HOVER,
+                    false,
+                );
+                wire.set_fixed_screen_width(2.0);
+                wire
+            })
+            .collect()
+    }
+
     fn rebuild_preview(&mut self) {
         self.preview_wires.clear();
         self.preview_hidden.clear();
@@ -757,7 +784,9 @@ impl CadCommand for SolidEdgeCommand {
                 }
             }
         }
-        self.preview_wires.clone()
+        let mut wires = self.preview_wires.clone();
+        wires.extend(self.base_face_wires());
+        wires
     }
 
     fn preview_hidden_handles(&self) -> &[Handle] {

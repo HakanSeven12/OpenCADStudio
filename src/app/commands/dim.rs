@@ -520,11 +520,7 @@ impl OpenCADStudio {
 
                 // Keep the existing reading order:
                 // higher Y first, then smaller X.
-                texts.sort_by(|a, b| {
-                    b.2.partial_cmp(&a.2)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                        .then(a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-                });
+                texts.sort_by(|a, b| b.2.total_cmp(&a.2).then(a.1.total_cmp(&b.1)));
 
                 self.push_undo_snapshot(i, "TCOUNT");
 
@@ -904,7 +900,8 @@ impl OpenCADStudio {
 
             "PLOTWINDOW" => {
                 use crate::modules::view::plot_window::PlotWindowCommand;
-                let cmd = PlotWindowCommand::new();
+                let mut cmd = PlotWindowCommand::new();
+                cmd.twist = self.model_plot_twist();
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }

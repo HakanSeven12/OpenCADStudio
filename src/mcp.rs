@@ -60,6 +60,9 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// Atomic entity common-property writes and direct DGN import joined execute.
 /// Fresh xref reads joined the read facade; six direct-reference lifecycle
 /// writes joined execute with operation-local unknown-field rejection.
+/// The Text Editor tab's windows are driveable from a script: `mtext_dialog`.
+/// The enhanced attribute editor joined them: `attr_editor`.
+/// Find and Replace is driveable from a script: `find_replace_dialog`.
 /// SWG-005 (the sanctioned digest repin): semantic plugin-panel reads joined
 /// the read facade (`panel_semantics` — bounded summaries, targeted
 /// enablement/visibility, selection, pending prompt; `panel_page` — the same
@@ -70,8 +73,14 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// docs/automation/DEVELOPING.md:
 /// 7e2b74104179b37b1b64b557983aa3a65fc56495916b8a6e6a2346e6aee885e5 →
 /// 23f45d04c2822dbf8564b7bd171169fc2f83e6dced8c627dc973865db14d5cc0.
+/// SCN-038 (upstream merge repin, the ONE sanctioned movement per
+/// SWG-005/ADR-011): upstream's `mtext_dialog` / `attr_editor` /
+/// `find_replace_dialog` tools joined the merged schema alongside our panel
+/// tools; digest repinned deliberately:
+/// 23f45d04c2822dbf8564b7bd171169fc2f83e6dced8c627dc973865db14d5cc0 →
+/// d3748b0592a84ec18be3a52e2c5d5dea3a99ae197d977f49688885a924f6255d.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "23f45d04c2822dbf8564b7bd171169fc2f83e6dced8c627dc973865db14d5cc0";
+const TOOL_SCHEMA_DIGEST: &str = "d3748b0592a84ec18be3a52e2c5d5dea3a99ae197d977f49688885a924f6255d";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

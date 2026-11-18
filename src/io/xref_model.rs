@@ -540,6 +540,27 @@ pub enum UnloadKey {
 pub struct UnloadSet(pub std::collections::HashSet<UnloadKey>);
 
 impl UnloadSet {
+    /// The direct references `doc` stores as unloaded.
+    pub fn from_document(doc: &document::Document) -> Self {
+        let mut set = Self::default();
+        for br in doc.block_records.iter() {
+            if (br.flags.is_xref || br.flags.is_xref_overlay) && br.flags.is_xref_unloaded {
+                set.add(br.handle.value());
+            }
+        }
+        set
+    }
+
+    /// Store this session's load state on `doc`'s xref records, so a save
+    /// keeps which references are unloaded.
+    pub fn write_flags(&self, doc: &mut document::Document) {
+        for br in doc.block_records.iter_mut() {
+            if br.flags.is_xref || br.flags.is_xref_overlay {
+                br.flags.is_xref_unloaded = self.is_unloaded(br.handle.value());
+            }
+        }
+    }
+
     pub fn add(&mut self, key: u64) {
         self.0.insert(UnloadKey::Direct(key));
     }

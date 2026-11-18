@@ -179,7 +179,7 @@ impl OpenCADStudio {
         self.tabs[self.active_tab].active_cmd = Some(Box::new(command));
         Task::none()
     }
-    fn apply_action_document_diff(
+    pub(super) fn apply_action_document_diff(
         &mut self,
         i: usize,
         mut staged: document::Document,
@@ -207,17 +207,24 @@ impl OpenCADStudio {
                     .iter()
                     .filter_map(|&handle| staged.get_entity(handle)),
             )
-            .filter(|e| seen_handles.insert(e.common().handle))
-            .filter(|e| doc.get_entity(e.common().handle) != Some(*e))
-            .map(|e| {
+            .filter_map(|e| {
                 let handle = e.common().handle;
-                let kind = if doc.get_entity(handle).is_some() {
-                    ChangeKind::Modified
-                } else {
-                    ChangeKind::Added
-                };
-                delta_changes.push((handle, kind));
-                e.clone()
+                if !seen_handles.insert(handle) {
+                    return None;
+                }
+                let next_arc = staged.get_entity_arc(handle)?;
+                match doc.get_entity_arc(handle) {
+                    Some(prev_arc) if std::sync::Arc::ptr_eq(&prev_arc, &next_arc) => None,
+                    Some(prev_arc) if *prev_arc == *next_arc => None,
+                    Some(_) => {
+                        delta_changes.push((handle, ChangeKind::Modified));
+                        Some(e.clone())
+                    }
+                    None => {
+                        delta_changes.push((handle, ChangeKind::Added));
+                        Some(e.clone())
+                    }
+                }
             })
             .collect::<Vec<_>>();
         seen_handles.clear();
@@ -256,6 +263,7 @@ impl OpenCADStudio {
         (delta_changes, touched_blocks)
     }
 
+    #[cfg(test)]
     pub(super) fn apply_action_document(&mut self, i: usize, staged: document::Document) {
         let _ = self.apply_action_document_diff(i, staged);
     }
@@ -1284,30 +1292,23 @@ impl BlockBenchHarness {
         let mut app = OpenCADStudio::new();
         app.apply_config(crate::app::config::AppConfig::default());
         app.last_saved_config = Some(app.current_config());
+        let _ = app.update(Message::TabNew);
         app
     }
 
-    pub fn setup_block_edit_undo(
-        bg_lines: usize,
-        other_blocks: usize,
-        entities_per_block: usize,
-    ) -> Self {
+    fn populate_background(scene: &mut crate::scene::Scene, bg_lines: usize, other_blocks: usize, entities_per_block: usize, prefix: &str) {
         use document::entities::{Insert, Line};
         use document::types::Vector3;
 
-        let mut app = Self::new_app();
-        let i = app.active_tab;
         for k in 0..bg_lines {
             let y = (k as f64) * 2.0;
-            app.tabs[i]
-                .scene
-                .add_entity(EntityType::Line(Line::from_points(
-                    Vector3::new(100.0, y, 0.0),
-                    Vector3::new(200.0, y, 0.0),
-                )));
+            scene.add_entity(EntityType::Line(Line::from_points(
+                Vector3::new(100.0, y, 0.0),
+                Vector3::new(200.0, y, 0.0),
+            )));
         }
         for b in 0..other_blocks {
-            let name = format!("OtherBlock_{b}");
+            let name = format!("{prefix}_{b}");
             let ents = (0..entities_per_block)
                 .map(|j| {
                     EntityType::Line(Line::from_points(
@@ -1316,11 +1317,30 @@ impl BlockBenchHarness {
                     ))
                 })
                 .collect();
-            app.tabs[i].scene.define_block_raw(&name, Vector3::ZERO, ents);
+            scene.define_block_raw(&name, Vector3::ZERO, ents);
             let mut ins = Insert::new(&name, Vector3::new((b as f64) * 10.0, -50.0, 0.0));
             ins.common.handle = Handle::NULL;
-            app.tabs[i].scene.add_entity(EntityType::Insert(ins));
+            scene.add_entity(EntityType::Insert(ins));
         }
+    }
+
+    fn setup_edit_block_app(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> (OpenCADStudio, Handle) {
+        use document::entities::{Insert, Line};
+        use document::types::Vector3;
+
+        let mut app = Self::new_app();
+        let i = app.active_tab;
+        Self::populate_background(
+            &mut app.tabs[i].scene,
+            bg_lines,
+            other_blocks,
+            entities_per_block,
+            "OtherBlock",
+        );
         let edit_ents = (0..entities_per_block)
             .map(|j| {
                 EntityType::Line(Line::from_points(
@@ -1343,6 +1363,17 @@ impl BlockBenchHarness {
         ins_edit.common.handle = Handle::NULL;
         app.tabs[i].scene.add_entity(EntityType::Insert(ins_edit));
         let _ = app.tabs[i].scene.entity_wires();
+        (app, edit_line)
+    }
+
+    pub fn setup_block_edit_undo(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> Self {
+        let (mut app, edit_line) =
+            Self::setup_edit_block_app(bg_lines, other_blocks, entities_per_block);
+        let i = app.active_tab;
 
         app.push_undo_snapshot(
             i,
@@ -1452,6 +1483,237 @@ impl BlockBenchHarness {
         let i = self.0.active_tab;
         self.0.tabs[i].scene.entity_wires().len()
     }
+
+    pub fn setup_block_prop_edit(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> (Self, Handle) {
+        let (app, edit_line) =
+            Self::setup_edit_block_app(bg_lines, other_blocks, entities_per_block);
+        (Self(app), edit_line)
+    }
+
+    pub fn prop_edit_in_block(&mut self, member: Handle, step: usize) -> usize {
+        let i = self.0.active_tab;
+        if let Some(EntityType::Line(line)) = self.0.tabs[i].scene.document.get_entity_mut(member) {
+            line.end.x = 12.0 + (step % 5) as f64;
+        }
+        self.0.invalidate_property_targets_or_blocks(i, &[member]);
+        self.0.tabs[i].scene.entity_wires().len()
+    }
+
+    pub fn setup_bedit_save(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> (Self, Handle) {
+        let (mut scene, _insert, _stretch_param, _flip_param) =
+            crate::scene::Scene::bench_setup_dynamic_block_scene(bg_lines, 0, entities_per_block);
+        Self::populate_background(
+            &mut scene,
+            0,
+            other_blocks,
+            entities_per_block,
+            "SaveOtherBlock",
+        );
+        let edit_line = scene
+            .document
+            .block_records
+            .get("DynBenchBlock")
+            .unwrap()
+            .entity_handles[0];
+        let mut app = Self::new_app();
+        let i = app.active_tab;
+        app.tabs[i].scene = scene;
+        let _ = app.tabs[i].scene.entity_wires();
+        (Self(app), edit_line)
+    }
+
+    pub fn bedit_save_step(&mut self, member: Handle, step: usize) -> usize {
+        let _ = self.0.dispatch_command("BEDIT_OPEN:DynBenchBlock");
+        let i = self.0.active_tab;
+        assert!(self.0.tabs[i].active_block_edit.is_some());
+        self.0.push_undo_snapshot(
+            i,
+            super::tab_document::HistoryLabel::Message("Edit block geometry"),
+        );
+        if let Some(EntityType::Line(line)) = self.0.tabs[i].scene.document.get_entity_mut(member) {
+            line.end.x = 12.0 + (step % 5) as f64;
+        }
+        self.0.tabs[i]
+            .scene
+            .bump_entities(&[(member, crate::scene::ChangeKind::Modified)]);
+        self.0.finish_pending_history(i);
+        assert!(self.0.save_block_edit(i));
+        self.0.close_block_edit(i, false);
+        self.0.tabs[i].scene.entity_wires().len()
+    }
+
+    pub fn setup_find_replace(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> Self {
+        use document::entities::{Insert, Text};
+        use document::types::Vector3;
+
+        let mut app = Self::new_app();
+        let i = app.active_tab;
+        Self::populate_background(
+            &mut app.tabs[i].scene,
+            bg_lines,
+            other_blocks,
+            entities_per_block,
+            "FindOtherBlock",
+        );
+
+        let mut top_text = Text::new();
+        top_text.value = "FIND_TOK_0".into();
+        top_text.height = 2.5;
+        app.tabs[i].scene.add_entity(EntityType::Text(top_text));
+
+        let mut blk_text = Text::new();
+        blk_text.value = "FIND_TOK_0".into();
+        blk_text.height = 2.5;
+        app.tabs[i].scene.define_block_raw(
+            "FindBenchBlock",
+            Vector3::ZERO,
+            vec![EntityType::Text(blk_text)],
+        );
+        let mut ins = Insert::new("FindBenchBlock", Vector3::new(15.0, 25.0, 0.0));
+        ins.common.handle = Handle::NULL;
+        app.tabs[i].scene.add_entity(EntityType::Insert(ins));
+        app.find_replace.options.blocks = true;
+        let _ = app.tabs[i].scene.entity_wires();
+        Self(app)
+    }
+
+    pub fn find_replace_cycle(&mut self, step: usize) -> usize {
+        use crate::ui::window::find_replace::{FindAnswer, FindMsg};
+
+        let (search, replace) = if step % 2 == 0 {
+            ("FIND_TOK_0", "FIND_TOK_1")
+        } else {
+            ("FIND_TOK_1", "FIND_TOK_0")
+        };
+        self.0.find_replace.changed.clear();
+        self.0.find_replace.search = search.to_string();
+        self.0.find_replace.replacement = replace.to_string();
+        let _ = self.0.find_replace_all();
+        if self.0.find_replace.run.is_some() {
+            let _ = self
+                .0
+                .on_find_message(FindMsg::Answer(FindAnswer::AllBlocks));
+        }
+        let i = self.0.active_tab;
+        self.0.tabs[i].scene.entity_wires().len()
+    }
+
+    pub fn setup_battman(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> Self {
+        use document::entities::{AttributeDefinition, AttributeEntity, Insert, Line};
+        use document::types::Vector3;
+
+        let mut app = Self::new_app();
+        let i = app.active_tab;
+        Self::populate_background(
+            &mut app.tabs[i].scene,
+            bg_lines,
+            other_blocks,
+            entities_per_block,
+            "AttOtherBlock",
+        );
+
+        let att1 = AttributeDefinition::new("TAG_A".into(), "Prompt A".into(), "VAL_0".into());
+        let att2 = AttributeDefinition::new("TAG_B".into(), "Prompt B".into(), "INIT".into());
+        let mut line = Line::from_points(Vector3::ZERO, Vector3::new(5.0, 0.0, 0.0));
+        line.common.handle = Handle::NULL;
+        app.tabs[i].scene.define_block_raw(
+            "AttBenchBlock",
+            Vector3::ZERO,
+            vec![
+                EntityType::Line(line),
+                EntityType::AttributeDefinition(att1.clone()),
+                EntityType::AttributeDefinition(att2.clone()),
+            ],
+        );
+        for k in 0..5 {
+            let mut ins = Insert::new("AttBenchBlock", Vector3::new((k as f64) * 12.0, 40.0, 0.0));
+            ins.common.handle = Handle::NULL;
+            ins.attributes
+                .push(AttributeEntity::from_definition(&att1, Some("VAL_0".into())));
+            ins.attributes
+                .push(AttributeEntity::from_definition(&att2, Some("INIT".into())));
+            app.tabs[i].scene.add_entity(EntityType::Insert(ins));
+        }
+        let _ = app.tabs[i].scene.entity_wires();
+        let _ = app.open_attman(i, &[]);
+        Self(app)
+    }
+
+    pub fn battman_apply(&mut self, step: usize) -> usize {
+        use crate::ui::window::attman_dialog::AttManMsg;
+
+        let tag = if step % 2 == 0 { "TAG_X" } else { "TAG_A" };
+        let _ = self.0.on_attman(AttManMsg::Tag(tag.to_string()));
+        let _ = self.0.on_attman(AttManMsg::Sync);
+        let i = self.0.active_tab;
+        self.0.tabs[i].scene.entity_wires().len()
+    }
+
+    pub fn setup_bcycleorder(
+        bg_lines: usize,
+        other_blocks: usize,
+        entities_per_block: usize,
+    ) -> Self {
+        use document::entities::{Insert, Line};
+        use document::types::Vector3;
+
+        let (mut scene, _insert, _stretch_param, _flip_param) =
+            crate::scene::Scene::bench_setup_dynamic_block_scene(bg_lines, 0, entities_per_block);
+        for b in 0..other_blocks {
+            let name = format!("CycleOtherBlock_{b}");
+            let ents = (0..entities_per_block)
+                .map(|j| {
+                    EntityType::Line(Line::from_points(
+                        Vector3::new(0.0, (j as f64) * 0.5, 0.0),
+                        Vector3::new(5.0, (j as f64) * 0.5, 0.0),
+                    ))
+                })
+                .collect();
+            scene.define_block_raw(&name, Vector3::ZERO, ents);
+            let mut ins = Insert::new(&name, Vector3::new((b as f64) * 10.0, -50.0, 0.0));
+            ins.common.handle = Handle::NULL;
+            scene.add_entity(EntityType::Insert(ins));
+        }
+        let mut app = Self::new_app();
+        let i = app.active_tab;
+        app.tabs[i].scene = scene;
+        let _ = app.tabs[i].scene.entity_wires();
+        Self(app)
+    }
+
+    pub fn bcycleorder_apply(&mut self) -> usize {
+        let _ = self.0.dispatch_command("BEDIT_OPEN:DynBenchBlock");
+        let i = self.0.active_tab;
+        assert!(self.0.tabs[i].active_block_edit.is_some());
+        let _ = self.0.open_block_cycle_order();
+        assert!(self
+            .0
+            .block_cycle_order
+            .as_ref()
+            .is_some_and(|s| s.rows.len() >= 2));
+        let _ = self.0.update(Message::BlockCycleEnable(0, true));
+        let _ = self.0.update(Message::BlockCycleEnable(1, true));
+        let _ = self.0.update(Message::BlockCycleMove(0, false));
+        let _ = self.0.update(Message::BlockCycleApply);
+        self.0.close_block_edit(i, false);
+        self.0.tabs[i].scene.entity_wires().len()
+    }
 }
 
 /// Grip shape by parameter kind: flip = arrow, rotation = circle,
@@ -1466,5 +1728,218 @@ fn parameter_grip_shape(p: &actions::Parameter) -> crate::scene::model::object::
         GripShape::Triangle
     } else {
         GripShape::Square
+    }
+}
+
+#[cfg(test)]
+mod item1_incremental_tests {
+    use super::*;
+
+    fn first_top_level_line(app: &OpenCADStudio) -> Handle {
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| matches!(e, EntityType::Line(_)).then(|| e.common().handle))
+            .expect("top-level line")
+    }
+
+    #[test]
+    fn invalidate_property_targets_or_blocks_is_incremental_for_block_members() {
+        let (mut harness, member) = BlockBenchHarness::setup_block_prop_edit(5, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        let edit_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("EditBenchBlock")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.prop_edit_in_block(member, 1);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("OtherBlock_0")
+                .unwrap()
+        );
+        assert_ne!(
+            edit_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("EditBenchBlock")
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn bedit_save_preserves_unrelated_blocks_and_top_level_cache() {
+        let (mut harness, member) = BlockBenchHarness::setup_bedit_save(5, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("SaveOtherBlock_0")
+            .unwrap();
+        let insert_block = harness.0.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| match e {
+                EntityType::Insert(ins) if !ins.block_name.starts_with("SaveOtherBlock") => {
+                    Some(ins.block_name.clone())
+                }
+                _ => None,
+            })
+            .expect("dynamic insert");
+        let dyn_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr(&insert_block)
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.bedit_save_step(member, 1);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("SaveOtherBlock_0")
+                .unwrap()
+        );
+        let insert_block_after = harness.0.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| match e {
+                EntityType::Insert(ins) if !ins.block_name.starts_with("SaveOtherBlock") => {
+                    Some(ins.block_name.clone())
+                }
+                _ => None,
+            })
+            .expect("dynamic insert");
+        assert_ne!(
+            Some(dyn_before),
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr(&insert_block_after)
+        );
+    }
+
+    #[test]
+    fn find_replace_preserves_unrelated_blocks_and_top_level_cache() {
+        let mut harness = BlockBenchHarness::setup_find_replace(5, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("FindOtherBlock_0")
+            .unwrap();
+        let edited_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("FindBenchBlock")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.find_replace_cycle(0);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("FindOtherBlock_0")
+                .unwrap()
+        );
+        assert_ne!(
+            edited_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("FindBenchBlock")
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn battman_sync_preserves_unrelated_blocks_and_top_level_cache() {
+        let mut harness = BlockBenchHarness::setup_battman(5, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("AttOtherBlock_0")
+            .unwrap();
+        let att_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("AttBenchBlock")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.battman_apply(0);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("AttOtherBlock_0")
+                .unwrap()
+        );
+        assert_ne!(
+            att_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("AttBenchBlock")
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn bcycleorder_apply_preserves_unrelated_blocks_and_top_level_cache() {
+        let mut harness = BlockBenchHarness::setup_bcycleorder(5, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("CycleOtherBlock_0")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.bcycleorder_apply();
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("CycleOtherBlock_0")
+                .unwrap()
+        );
     }
 }

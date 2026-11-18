@@ -10,16 +10,6 @@
     "description": "GIS and civil design for infrastructure: project location in any coordinate system, 600+ WMS/WFS/tile services worldwide, OpenStreetMap, CityGML/CityJSON, alignments, profiles and corridors, plus Dutch base data (BGT, BRK, KLIC, AHN) to NLCS."
   },
   {
-    "repo": "mf4633/opencad-storm-sewer-plugin",
-    "name": "Storm Sewer",
-    "description": "Gravity storm-drain network design and analysis (Rational + Manning + HGL, LandXML import). Free to draw and analyze; Pro ($29/yr) adds HTML reports, pipe sizing, multi-RP."
-  },
-  {
-    "repo": "mf4633/opencad-hydrocomplete-plugin",
-    "name": "HydroComplete",
-    "description": "Full stormwater hydrology and hydraulics — mirrors HydroComplete for Civil 3D (HC_ANALYZE, HC_REVIEW, KaTeX HTML reports, Atlas 14, BMP/WQV, LandXML)."
-  },
-  {
     "repo": "KevinGriffin-new/opencad-landsurvey-plugin",
     "name": "Land Survey",
     "description": "Survey points, PNEZD & LandXML import, TIN surfaces, earthwork volumes, COGO, and coordinate transforms (RTS / Helmert / resection)."
@@ -45,9 +35,9 @@
     "description": "Survey points and TIN surfaces: point import with format detection (PNEZD, PYXZD, S-JTSK), breaklines, boundaries and holes, manual triangle edits, contours, point and surface styles, 3D viewer, LandXML/DXF export. Czech and English."
   },
   {
-    "repo": "Macchecaspita/opencad-raster-plugin",
+    "repo": "BeeBeeSix/OCS_Plugin_RasterTools",
     "name": "Raster Tools",
-    "description": "Raster images: insert by size, width, DPI or pixel; clip with a rectangle, polygon or closed object, inverted clips and splitting; resize by dragging or to an exact size; pick a colour to make transparent; relink and find moved image files. English and Italian."
+    "description": "Raster images: insert by size, width, DPI, pixel or World File; clip with a rectangle, polygon or closed object, inverted clips and splitting; resize by dragging or to an exact size; pick a colour to make transparent or use alpha channel; relink and find moved image files. Add OpenStreetMap Basemaps to EPSG codes. English and Italian."
   },
   {
     "repo": "Macchecaspita/opencad-rilievo-plugin",

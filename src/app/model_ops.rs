@@ -149,12 +149,16 @@ fn inherited_common(source: &EntityCommon) -> EntityCommon {
 
 fn union_bodies(kind: UnionEntityKind, bodies: Vec<Body>) -> Result<Body, kernel::brep::Snag> {
     if kind == UnionEntityKind::Solid {
+        let references = bodies.iter().collect::<Vec<_>>();
+        let tolerance = kernel::brep::operation_tolerance(&references);
         let mut operands = bodies.into_iter();
-        let mut result = operands.next().ok_or(kernel::brep::Snag::CutRefused)?;
-        for operand in operands {
-            result = solid_model::boolean_result(Bool::Union, &result, &operand)?;
-        }
-        return Ok(result);
+        let first = operands.next().ok_or(kernel::brep::Snag::CutRefused)?;
+        return kernel::brep::combine_all(
+            first,
+            operands.collect(),
+            kernel::brep::Operation::Union,
+            tolerance,
+        );
     }
     let references = bodies.iter().collect::<Vec<_>>();
     let tolerance = kernel::brep::operation_tolerance(&references);
@@ -214,15 +218,15 @@ fn subtract_bodies(
         return kernel::brep::subtract_planar_regions(&bases, &cutters, tolerance);
     }
 
+    // Cutters that keep clear of each other are taken away in one pass: a
+    // plate drilled with a hundred holes is cut once, not a hundred times.
+    let references = bases.iter().chain(&cutters).collect::<Vec<_>>();
+    let tolerance = kernel::brep::operation_tolerance(&references);
     let mut bases = bases.into_iter();
-    let mut result = bases.next().ok_or(kernel::brep::Snag::CutRefused)?;
-    for base in bases {
-        result = solid_model::boolean_result(Bool::Union, &result, &base)?;
-    }
-    for cutter in cutters {
-        result = solid_model::boolean_result(Bool::Subtract, &result, &cutter)?;
-    }
-    Ok(result)
+    let first = bases.next().ok_or(kernel::brep::Snag::CutRefused)?;
+    let united =
+        kernel::brep::combine_all(first, bases.collect(), kernel::brep::Operation::Union, tolerance)?;
+    kernel::brep::combine_all(united, cutters, kernel::brep::Operation::Difference, tolerance)
 }
 
 inventory::submit!(crate::command::CommandRegistration {
@@ -416,7 +420,7 @@ impl super::OpenCADStudio {
         handle
     }
 
-    fn add_surface_model_preserving_style(&mut self, entity: EntityType, surface: Body) -> Handle {
+    pub(super) fn add_surface_model_preserving_style(&mut self, entity: EntityType, surface: Body) -> Handle {
         self.add_surface_model_inner(entity, surface, false)
     }
 
@@ -468,7 +472,7 @@ impl super::OpenCADStudio {
         self.add_region_model_inner(region, body, false)
     }
 
-    fn add_region_model_preserving_style(&mut self, region: Region, body: Body) -> Handle {
+    pub(super) fn add_region_model_preserving_style(&mut self, region: Region, body: Body) -> Handle {
         self.add_region_model_inner(region, body, true)
     }
 
@@ -820,8 +824,12 @@ impl super::OpenCADStudio {
             match kernel::brep::fillet_edges(&body, edges, value) {
                 Ok(result) => Some(result),
                 Err(error) => {
+                    use kernel::brep::FilletError::{InvalidResult, RadiusTooLargeOrInteracting};
+                    let fit = matches!(error, RadiusTooLargeOrInteracting | InvalidResult)
+                        .then(|| kernel::brep::fillet_fit(&body, edges, value))
+                        .flatten();
                     self.command_line
-                        .push_error(&format!("FILLETEDGE: {error}"));
+                        .push_error(&format!("FILLETEDGE: {error}{}", fit_hint("radius", fit)));
                     return Task::none();
                 }
             }
@@ -834,8 +842,14 @@ impl super::OpenCADStudio {
             match kernel::brep::chamfer_edges(&body, edges, base_face, value, other_value) {
                 Ok(result) => Some(result),
                 Err(error) => {
+                    use kernel::brep::ChamferError::{DistanceTooLargeOrInteracting, InvalidResult};
+                    let fit = matches!(error, DistanceTooLargeOrInteracting | InvalidResult)
+                        .then(|| {
+                            kernel::brep::chamfer_fit(&body, edges, base_face, value, other_value)
+                        })
+                        .flatten();
                     self.command_line
-                        .push_error(&format!("CHAMFEREDGE: {error}"));
+                        .push_error(&format!("CHAMFEREDGE: {error}{}", fit_hint("distance", fit)));
                     return Task::none();
                 }
             }
@@ -2451,9 +2465,8 @@ impl super::OpenCADStudio {
     }
 
     /// SPLINEFIT — replace the selected polyline with a cubic spline that passes
-    /// through its vertices. Control points come from the Catmull-Rom → cubic
-    /// Bézier formula (the curve provably interpolates each vertex), with a
-    /// clamped piecewise-Bézier knot vector the spline renderer reads directly.
+    /// through its vertices: the kernel's C² interpolation, so the control
+    /// curve is the one its stored fit points describe.
     pub(super) fn fit_spline(&mut self) -> Task<Message> {
         use document::entities::Spline;
         use document::types::Vector3;
@@ -2493,32 +2506,26 @@ impl super::OpenCADStudio {
             return Task::none();
         }
         let n = fit.len();
-        let m = n - 1; // Bézier segments
-        let p = |k: usize| glam::DVec3::new(fit[k][0], fit[k][1], fit[k][2]);
-        // Catmull-Rom → cubic Bézier control points: [P0, b1,b2,P1, b1,b2,P2, …].
-        let mut ctrl: Vec<Vector3> = Vec::with_capacity(3 * m + 1);
-        ctrl.push(Vector3::new(fit[0][0], fit[0][1], fit[0][2]));
-        for seg in 0..m {
-            let p0 = p(seg);
-            let p1 = p(seg + 1);
-            let prev = if seg > 0 { p(seg - 1) } else { p0 };
-            let next = if seg + 2 <= m { p(seg + 2) } else { p1 };
-            let b1 = p0 + (p1 - prev) / 6.0;
-            let b2 = p1 - (next - p0) / 6.0;
-            ctrl.push(Vector3::new(b1.x, b1.y, b1.z));
-            ctrl.push(Vector3::new(b2.x, b2.y, b2.z));
-            ctrl.push(Vector3::new(p1.x, p1.y, p1.z));
-        }
-        // Clamped piecewise-Bézier knots (degree 3): len == ctrl.len()+degree+1.
-        let mut knots: Vec<f64> = vec![0.0; 4];
-        for s in 1..m {
-            knots.extend_from_slice(&[s as f64, s as f64, s as f64]);
-        }
-        knots.extend_from_slice(&[m as f64; 4]);
+        // The C² cubic through every vertex, chord-length parameterised: the
+        // same interpolation the stored fit points describe.
+        let Some(curve) = kernel::space::NurbsCurve3::interpolate_fit(
+            &fit,
+            None,
+            None,
+            kernel::space::Parameterization::Chord,
+        ) else {
+            self.command_line
+                .push_error(crate::t!("SPLINEFIT: need at least 3 points.").as_ref());
+            return Task::none();
+        };
         let mut spl = Spline::new();
         spl.degree = 3;
-        spl.control_points = ctrl;
-        spl.knots = knots;
+        spl.control_points = curve
+            .control_points()
+            .iter()
+            .map(|q| Vector3::new(q[0], q[1], q[2]))
+            .collect();
+        spl.knots = curve.knots().to_vec();
         spl.fit_points = fit.iter().map(|q| Vector3::new(q[0], q[1], q[2])).collect();
         // flags.rational defaults to false (non-rational) — exactly what we want.
         self.push_undo_snapshot(i, "SPLINEFIT");
@@ -2616,4 +2623,19 @@ impl super::OpenCADStudio {
         );
         Task::none()
     }
+}
+
+/// The size a refused blend would have fitted at, rounded down to three
+/// figures, as the end of its refusal: empty where none was found.
+fn fit_hint(size: &str, fit: Option<f64>) -> String {
+    let Some(fit) = fit.filter(|fit| *fit > 0.0) else {
+        return String::new();
+    };
+    let digits = (2 - fit.log10().floor() as i32).max(0);
+    let scale = 10f64.powi(digits);
+    format!(
+        "; the largest {size} that fits is about {:.*}",
+        digits as usize,
+        (fit * scale).floor() / scale
+    )
 }

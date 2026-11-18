@@ -684,7 +684,7 @@ fn config_from_rects(
     let eps = 1e-3;
     // Try a vertical cut: a boundary x where every rect is wholly left or right.
     let mut cuts: Vec<f32> = items.iter().map(|(_, r)| r.x + r.width).collect();
-    cuts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    cuts.sort_by(|a, b| a.total_cmp(b));
     for &x in &cuts {
         if x <= region.x + eps || x >= region.x + region.width - eps {
             continue;
@@ -720,7 +720,7 @@ fn config_from_rects(
     }
     // Try a horizontal cut: a boundary y where every rect is wholly above/below.
     let mut cuts: Vec<f32> = items.iter().map(|(_, r)| r.y + r.height).collect();
-    cuts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    cuts.sort_by(|a, b| a.total_cmp(b));
     for &y in &cuts {
         if y <= region.y + eps || y >= region.y + region.height - eps {
             continue;

@@ -354,7 +354,7 @@ Generated from the command registry of OpenCADStudio `main` (commit f664c42, 202
 | `REFCLOSE` | — | Closes in-place reference editing. † |
 | `REFEDIT` | — | Edits a block or xref in place. † |
 | `REFSET` | — | Adds or removes objects from the working set of an in-place edit. † |
-| `STEPOUT` | — | Export 3D meshes to STEP AP203 format. |
+| `STEPOUT` | — | Export 3D objects to STEP (AP214; `STEPOUT AP203` / `AP242`), solids as exact B-reps. |
 | `UNDERLAY` | — | Edit properties of selected PDF/DWF/DGN underlay entities. Usage: UNDERLAY FADE <0-80> UNDERLAY CONTRAST <0-100> UNDERLAY ON \| OFF UNDERLAY CLIP ON \| OFF UNDERLAY MONO ON \| OFF. |
 | `WMFIN` | — | Imports a Windows metafile (WMF). † |
 
@@ -924,6 +924,7 @@ Type a name to read it and be prompted for a new value (`OSMODE <4133>`). A dash
 | `MENUBAR` | — | — | — |
 | `MIRRTEXT` | 0 (Off) | Boolean Read/Write | Controls how the MIRROR command reflects text: 0=retains text reading direction (left-to- right), 1=mirrors text backwards like a mirror image. Tip: Always keep MIRRTEXT=0 so mirrored floor plans or symmetrical parts do not produce backwards unreadable notes. |
 | `MSLTSCALE` | 1 (On) | Boolean Read/Write | Scales linetypes displayed on the model tab by the current annotation scale (CANNOSCALE). Tip: Set to 1 so dashed lines preview accurately in Model Space as you change annotation scale. |
+| `NAVVCUBEOPACITY` | 50 | Integer Read/Write | Opacity of the ViewCube in percent (0–100) while the cursor is away from it; it turns fully opaque when the cursor reaches its corner. |
 | `ORTHOMODE` | 0 (Off) | Boolean Read/Write | Constrains cursor movement strictly to horizontal and vertical axes (F8 toggle). Tip: Hold Shift temporarily while drawing to invert Ortho mode on the fly. |
 | `OSMODE` | 4133 | Bitmask Read/Write | Sets running Object Snap (Osnap) modes using bitcode sum (1=Endpoint, 2=Midpoint, 4=Center, 8=Node, 16=Quadrant, 32=Intersection, 64=Insertion, 128=Perpendicular, 256=Tangent, 512=Nearest, 1024=Apparent, 2048=Extension, 4096=Parallel). Tip: Add 16384 to suppress running osnaps without losing your configured bitmask. 0 turns all osnaps off. |
 | `OSNAPZ` | — | — | — |

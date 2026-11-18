@@ -56,7 +56,9 @@ def sha256(path: Path) -> str:
 
 def parse_trace(lines: list[str]) -> dict:
     result = {"entities": None, "wire_models": None, "text_vertices": None,
-              "open_phases_ms": None, "gpu_adapter": None}
+              "open_phases_ms": None, "gpu_adapter": None,
+              "gpu_live_samples": [], "gpu_live_last": None,
+              "gpu_live_peak_bytes": None}
     for line in lines:
         if match := READY.match(line):
             result["entities"] = int(match[2])
@@ -71,6 +73,22 @@ def parse_trace(lines: list[str]) -> dict:
             result["text_vertices"] = int(match[1])
         elif line.startswith("[gpu] adapter:"):
             result["gpu_adapter"] = line
+        elif line.startswith("[perf] gpu-live-json "):
+            try:
+                sample = json.loads(line.removeprefix("[perf] gpu-live-json "))
+                categories = sample["categories"]
+                if (sample["schema"] != 1 or not isinstance(sample["scope"], str)
+                        or not isinstance(categories, dict) or "slots" not in categories
+                        or not all(type(value) is int and value >= 0 for value in categories.values())
+                        or type(sample["total_bytes"]) is not int
+                        or sample["total_bytes"] != sum(value for key, value in categories.items() if key != "slots")):
+                    continue
+            except (ValueError, KeyError, TypeError):
+                continue
+            result["gpu_live_samples"].append(sample)
+            result["gpu_live_last"] = sample
+            result["gpu_live_peak_bytes"] = max(result["gpu_live_peak_bytes"] or 0,
+                                                 sample["total_bytes"])
     return result
 
 

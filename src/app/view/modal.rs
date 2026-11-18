@@ -73,6 +73,24 @@ impl OpenCADStudio {
             Some(K::TableCellFormat) => crate::tr!("table-cells", "format-title"),
             Some(K::TableCellWarning) => crate::tr!("table-cells", "warning-title"),
             Some(K::AnnotationScalePrompt) => crate::tr!("anno-scale-prompt", "title"),
+            Some(K::MTextDialog) => {
+                use crate::ui::window::mtext_dialogs::MTextDialog as D;
+                crate::t!(match self.mtext_dialog {
+                    Some(D::Paragraph(_)) => "Paragraph",
+                    Some(D::Columns(_)) => "Column Settings",
+                    Some(D::Mask(_)) => "Background Mask",
+                    Some(D::Charset(_)) => "Character Set",
+                    Some(D::StyleChange(_)) => "Text Style Change",
+                    Some(D::Dictionaries(_)) => "Dictionaries",
+                    Some(D::SpellSettings(_)) => "Check Spelling Settings",
+                    Some(D::Highlight(_)) => "Text Highlight Color",
+                    Some(D::Stack(_)) => "Stack Properties",
+                    Some(D::AutoStack(_)) => "AutoStack Properties",
+                    Some(D::ListsToggle(_)) => "Bullets and Lists",
+                    _ => "Find and Replace",
+                })
+                .into_owned()
+            }
             Some(K::TableCellEntry) => crate::tr!("table-cells", "entry-title"),
             Some(K::PdfShxSettings) => crate::tr!("pdf-shx", "title"),
             Some(K::UnderlayLayers) => crate::t!("Underlay Layers").into_owned(),
@@ -257,6 +275,7 @@ impl OpenCADStudio {
                         crate::ui::window::options::AppPrefs {
                             savetime_min: self.savetime_min,
                             backup_on_save: self.backup_on_save,
+                            check_missing_fonts: self.check_missing_fonts,
                             transmittal_layout: self.transmittal_layout,
                             page_setup_on_new_layout: self.plot_dialog.page_setup_on_new_layout,
                             textfill: crate::scene::text::sdf_atlas::textfill(),
@@ -410,14 +429,7 @@ impl OpenCADStudio {
                 })
             }
             super::super::ModalKind::FindReplace => automatic_flow(ex, |flow| {
-                crate::ui::window::find_replace::view_window(
-                    &self.find_replace.search,
-                    &self.find_replace.replacement,
-                    &self.find_replace.status,
-                    &self.find_replace.results,
-                    self.find_replace.current_match,
-                    flow,
-                )
+                crate::ui::window::find_replace::view_window(&self.find_replace, flow)
             }),
             super::super::ModalKind::PluginManager => {
                 #[cfg(not(target_arch = "wasm32"))]
@@ -623,6 +635,26 @@ impl OpenCADStudio {
                 sized_flow(ex, 470, 330, |flow| {
                     crate::ui::window::table_cell_dialog::view_block(state, flow)
                 })
+            }
+            super::super::ModalKind::MTextDialog => {
+                use crate::ui::window::mtext_dialogs::{self as w, MTextDialog as D};
+                use crate::ui::window::mtext_tool_dialogs as t;
+                match self.mtext_dialog.as_ref()? {
+                    D::Paragraph(d) => sized_flow(ex, 640, 560, |flow| w::view_paragraph(d, flow)),
+                    D::Columns(d) => sized_flow(ex, 520, 330, |flow| w::view_columns(d, flow)),
+                    D::Mask(d) => sized_flow(ex, 440, 300, |flow| w::view_mask(d, flow)),
+                    D::Find(d) => sized_flow(ex, 560, 440, |flow| w::view_find(d, flow)),
+                    D::Charset(d) => sized_flow(ex, 340, 420, |_| t::view_charset(d)),
+                    D::StyleChange(d) => sized_flow(ex, 470, 220, |_| t::view_style_change(d)),
+                    D::Dictionaries(d) => sized_flow(ex, 450, if d.manage { 660 } else { 480 }, |_| {
+                        t::view_dictionaries(d)
+                    }),
+                    D::SpellSettings(d) => sized_flow(ex, 410, 320, |_| t::view_spell_settings(d)),
+                    D::Highlight(d) => sized_flow(ex, 370, 260, |_| t::view_highlight(d)),
+                    D::Stack(d) => sized_flow(ex, 530, 400, |_| t::view_stack(d)),
+                    D::AutoStack(d) => sized_flow(ex, 450, 330, |_| t::view_autostack(d)),
+                    D::ListsToggle(d) => sized_flow(ex, 470, 220, |_| t::view_lists_toggle(d)),
+                }
             }
             super::super::ModalKind::AnnotationScalePrompt => {
                 let state = self.anno_scale_prompt.as_ref()?;
@@ -1712,12 +1744,17 @@ impl OpenCADStudio {
             super::super::ModalKind::AttributeEditor => {
                 let doc = &self.tabs[self.active_tab].scene.document;
                 let layers: Vec<String> = doc.layers.iter().map(|l| l.name.clone()).collect();
-                let mut linetypes: Vec<String> = vec!["ByLayer".to_string()];
+                // ByBlock and ByLayer, then the loaded linetypes.
+                let mut linetypes: Vec<String> = vec!["ByBlock".to_string(), "ByLayer".to_string()];
                 linetypes.extend(
                     doc.line_types
                         .iter()
                         .map(|lt| lt.name.clone())
-                        .filter(|n| !n.is_empty() && n != "ByLayer"),
+                        .filter(|n| {
+                            !n.is_empty()
+                                && !n.eq_ignore_ascii_case("ByLayer")
+                                && !n.eq_ignore_ascii_case("ByBlock")
+                        }),
                 );
                 let styles: Vec<String> = doc
                     .text_styles
@@ -1725,15 +1762,24 @@ impl OpenCADStudio {
                     .map(|s| s.name.trim().to_string())
                     .filter(|n| !n.is_empty())
                     .collect();
-                sized_flow(ex, 640, 500, |flow| {
+                // Shown, not edited: an attribute plots by its layer.
+                let plot_style = "ByLayer".to_string();
+                let pending = self.attr_editor_pending();
+                sized_flow(ex, 640, 560, |flow| {
                     crate::ui::window::attribute_editor::view_window(
-                        &self.attr_editor_block,
-                        &self.attr_editor_rows,
-                        self.attr_editor_selected,
-                        self.attr_editor_tab,
-                        layers.clone(),
-                        linetypes.clone(),
-                        styles.clone(),
+                        crate::ui::window::attribute_editor::AttrEditorView {
+                            block: &self.attr_editor_block,
+                            rows: &self.attr_editor_rows,
+                            selected: self.attr_editor_selected,
+                            tab: self.attr_editor_tab,
+                            layers: layers.clone(),
+                            linetypes: linetypes.clone(),
+                            styles: styles.clone(),
+                            plot_style: plot_style.clone(),
+                            pending,
+                            error: self.attr_editor_error.as_deref(),
+                            asking: self.attr_editor_asking,
+                        },
                         flow,
                     )
                 })
@@ -1749,6 +1795,7 @@ impl OpenCADStudio {
                         fonts,
                         font_source,
                         self.missing_fonts_downloading,
+                        self.missing_fonts_silence,
                         flow,
                     )
                 })

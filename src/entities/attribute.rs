@@ -158,11 +158,8 @@ fn build_attr_layout(
     } else {
         input.rotation as f32
     };
-    let oblique_angle = if input.oblique_angle.abs() > 1e-9 {
-        input.oblique_angle as f32
-    } else {
-        resolved.oblique_angle
-    };
+    // An oblique angle of 0 is the attribute's own, as on TEXT.
+    let oblique_angle = input.oblique_angle as f32;
 
     // Align / Fit run the text along the baseline between the two points:
     // Fit stretches its width, Align scales its height too.

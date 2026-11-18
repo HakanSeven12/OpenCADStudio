@@ -30,6 +30,9 @@ pub(in crate::app) fn sync_annotation_scale_header(scene: &mut Scene) {
     let hdr = &mut scene.document.header;
     hdr.current_annotation_scale = name.clone();
     hdr.annotation_scale_value = value;
+    // The UI can display a fallback scale list for a drawing without SCALE
+    // objects. Materialize the selected scale before saving its reference.
+    let _ = scene.current_annotation_scale_handle();
     crate::io::set_drawing_variable(&mut scene.document, "CANNOSCALE", &name);
 }
 

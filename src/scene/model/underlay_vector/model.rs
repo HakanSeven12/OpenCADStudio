@@ -260,6 +260,13 @@ fn cubic_extrema(p0: [f64; 2], p1: [f64; 2], p2: [f64; 2], p3: [f64; 2]) -> Vec<
     out
 }
 
+/// How much placing a DGN model's shared cells may cost: each instance
+/// placed costs one, and one more for each item of its definition. A cell
+/// that places itself, or a chain of cells, many times at each level
+/// otherwise multiplies its copies past any time or memory; placing stops
+/// once this is spent.
+pub const DGN_PLACEMENT_BUDGET: usize = 1_000_000;
+
 /// The colour table a DGN file without one is drawn with (index 255, the
 /// background entry, black).
 pub const DGN_DEFAULT_COLORS: [[u8; 3]; 256] = [

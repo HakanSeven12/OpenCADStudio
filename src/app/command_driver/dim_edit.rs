@@ -845,24 +845,8 @@ fn apply_dim_distribute(
     for (handle, target) in targets {
         let target = target + shift;
         if let Some(document::EntityType::Dimension(dim)) = scene.document.get_entity_mut(handle) {
-            let slide = |point: &mut document::types::Vector3| {
-                let moved = kernel::space::move_to_dimension_spacing(
-                    [point.x, point.y, point.z],
-                    frame,
-                    target,
-                );
-                *point = document::types::Vector3::new(moved[0], moved[1], moved[2]);
-            };
-            match &mut **dim {
-                document::entities::Dimension::Linear(d) => {
-                    slide(&mut d.definition_point);
-                    d.base.definition_point = d.definition_point;
-                }
-                document::entities::Dimension::Aligned(d) => {
-                    slide(&mut d.definition_point);
-                    d.base.definition_point = d.definition_point;
-                }
-                _ => continue,
+            if !slide_dimension_line(dim, frame, target) {
+                continue;
             }
             scene.invalidate_dim_block_recorded(handle);
             changes.push((handle, crate::scene::ChangeKind::Modified));
@@ -872,6 +856,31 @@ fn apply_dim_distribute(
         scene.bump_entities(&changes);
     }
     !changes.is_empty()
+}
+
+/// Move a linear/aligned dimension line to `target` across `frame`. The text
+/// rides along by the same offset, so a placed (user-positioned) text stays
+/// with its dimension line instead of being left behind (#3102).
+fn slide_dimension_line(
+    dim: &mut document::entities::Dimension,
+    frame: kernel::space::DimensionSpacingFrame,
+    target: f64,
+) -> bool {
+    use document::entities::Dimension;
+    let (Dimension::Linear(document::entities::DimensionLinear { definition_point, .. })
+    | Dimension::Aligned(document::entities::DimensionAligned { definition_point, .. })) = dim
+    else {
+        return false;
+    };
+    let p = *definition_point;
+    let moved = kernel::space::move_to_dimension_spacing([p.x, p.y, p.z], frame, target);
+    let delta = document::types::Vector3::new(moved[0] - p.x, moved[1] - p.y, moved[2] - p.z);
+    *definition_point = p + delta;
+    let point = *definition_point;
+    let base = dim.base_mut();
+    base.definition_point = point;
+    base.text_middle_point = base.text_middle_point + delta;
+    true
 }
 
 fn apply_dimspace(
@@ -934,27 +943,10 @@ fn apply_dimspace(
     let mut changes = Vec::new();
     for (idx, &h) in others.iter().enumerate() {
         let target = frame.coordinate + effective_spacing * (idx + 1) as f64;
-        let mut changed = false;
-        if let Some(document::EntityType::Dimension(dim)) = scene.document.get_entity_mut(h) {
-            let slide = |p: &mut document::types::Vector3| {
-                let point =
-                    kernel::space::move_to_dimension_spacing([p.x, p.y, p.z], frame, target);
-                *p = document::types::Vector3::new(point[0], point[1], point[2]);
-            };
-            match &mut **dim {
-                Dimension::Linear(d) => {
-                    slide(&mut d.definition_point);
-                    d.base.definition_point = d.definition_point;
-                    changed = true;
-                }
-                Dimension::Aligned(d) => {
-                    slide(&mut d.definition_point);
-                    d.base.definition_point = d.definition_point;
-                    changed = true;
-                }
-                _ => {}
-            }
-        }
+        let changed = match scene.document.get_entity_mut(h) {
+            Some(document::EntityType::Dimension(dim)) => slide_dimension_line(dim, frame, target),
+            _ => false,
+        };
         if changed {
             // The dimension line moved, so its baked *D block is stale — drop it
             // so the next save re-bakes it. (#181)

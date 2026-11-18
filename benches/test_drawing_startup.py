@@ -1,6 +1,7 @@
 """Tests for the cross-platform startup benchmark; no GUI is required."""
 
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -42,6 +43,28 @@ class DrawingStartupTests(unittest.TestCase):
         self.assertFalse(bench.consistent([(1, 2), (1, 3)]))
         self.assertIsNone(bench.consistent([None, None]))
         self.assertIsNone(bench.consistent([]))
+
+    def test_gpu_memory_tracks_last_and_peak_without_summing_category_peaks(self):
+        def sample(meshes, images):
+            return "[perf] gpu-live-json " + json.dumps({
+                "schema": 1, "scope": "logical resources", "total_bytes": meshes + images,
+                "categories": {"slots": 2, "meshes": meshes, "images": images},
+            })
+        parsed = bench.parse_trace([sample(100, 10), sample(20, 80)])
+        self.assertEqual(parsed["gpu_live_peak_bytes"], 110)
+        self.assertEqual(parsed["gpu_live_last"]["total_bytes"], 100)
+        self.assertEqual(len(parsed["gpu_live_samples"]), 2)
+
+    def test_gpu_memory_missing_or_malformed_samples_are_unknown(self):
+        parsed = bench.parse_trace([
+            "[perf] gpu-live total=123.4MiB",
+            "[perf] gpu-live-json {bad json}",
+            '[perf] gpu-live-json {"schema":1,"total_bytes":0,"categories":{"slots":1,"meshes":-1}}',
+            '[perf] gpu-live-json {"schema":1,"scope":"logical","total_bytes":10,"categories":{"slots":1,"meshes":9}}',
+        ])
+        self.assertIsNone(parsed["gpu_live_peak_bytes"])
+        self.assertIsNone(parsed["gpu_live_last"])
+        self.assertEqual(parsed["gpu_live_samples"], [])
 
     def test_graphics_preferences_follow_platform_config_paths(self):
         self.assertEqual(bench.graphics_settings_path({"OCS_GPU_SENTINEL_DIR": "custom"}, "Windows"),

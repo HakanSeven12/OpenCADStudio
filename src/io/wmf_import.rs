@@ -23,6 +23,7 @@ pub struct Face {
 
 /// A picture: its objects, in block coordinates, and the font of each
 /// text (an index into `fonts`).
+#[derive(Debug, Clone)]
 pub struct Picture {
     pub entities: Vec<EntityType>,
     /// Each face the text uses, in the order first used; each becomes a

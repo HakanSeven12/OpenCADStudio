@@ -639,6 +639,18 @@ impl OpenCADStudio {
             "save-block",
             name.to_owned().into(),
         );
+        let save_changes: Vec<(document::Handle, crate::scene::ChangeKind)> = delta
+            .entities
+            .iter()
+            .map(|(handle, before, after)| {
+                let kind = match (before, after) {
+                    (None, Some(_)) => crate::scene::ChangeKind::Added,
+                    (Some(_), None) => crate::scene::ChangeKind::Removed,
+                    _ => crate::scene::ChangeKind::Modified,
+                };
+                (*handle, kind)
+            })
+            .collect();
         let mut history = self.tabs[i].block_edit_history.take().unwrap();
         std::mem::swap(&mut self.tabs[i].history, &mut history.main);
         self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
@@ -658,9 +670,16 @@ impl OpenCADStudio {
         self.grip_popup = None;
         self.visibility_popup = None;
         self.table_popup = None;
+        for &(handle, _) in &save_changes {
+            self.tabs[i].scene.reseed_derived_caches(handle);
+        }
         history.checkpoint = self.block_edit_checkpoint(i);
         self.tabs[i].block_edit_history = Some(history);
-        self.tabs[i].scene.bump_geometry();
+        self.tabs[i].scene.bump_entities_restyled_with_block_deps(
+            &save_changes,
+            &[source_handle, copied.record],
+            &touched,
+        );
         self.tabs[i].refresh_active_ucs();
         self.note_block_changes(fresh, &touched);
         self.refresh_block_palette();
@@ -673,39 +692,59 @@ impl OpenCADStudio {
 
     /// Save-time representation edits belong to the preceding editor command,
     /// so local Undo cannot leave untracked members or reuse their handles.
-    fn coalesce_saved_representations(&mut self, i: usize, before: &Document) {
+    fn coalesce_saved_representations(
+        &mut self,
+        i: usize,
+        mut before: Document,
+        changes: &[(document::Handle, crate::scene::ChangeKind)],
+    ) {
         let tab = &mut self.tabs[i];
-        let doc = &tab.scene.document;
-        if before == doc {
+        let mut doc_snapshot = tab.scene.document.snapshot_structure();
+        let before_snapshot = before.snapshot_structure();
+        let structure_changed = before_snapshot != doc_snapshot;
+        let _ = &mut doc_snapshot;
+        if changes.is_empty() && !structure_changed {
             return;
         }
-        let Some(HistorySnapshot::Delta(delta)) = tab.history.undo_stack.last_mut() else {
-            return;
-        };
-        let handles = before
-            .entities()
-            .chain(doc.entities())
-            .map(|e| e.common().handle)
-            .collect::<FxHashSet<_>>();
-        for handle in handles {
+        let doc = &tab.scene.document;
+        let mut entity_diffs = Vec::new();
+        for &(handle, _) in changes {
             let a = before.get_entity_arc(handle);
             let b = doc.get_entity_arc(handle);
-            if a == b {
-                continue;
+            let same = match (&a, &b) {
+                (Some(a_arc), Some(b_arc)) => {
+                    std::sync::Arc::ptr_eq(a_arc, b_arc) || a_arc == b_arc
+                }
+                (None, None) => true,
+                _ => false,
+            };
+            if !same {
+                entity_diffs.push((handle, a, b));
             }
+        }
+        if entity_diffs.is_empty() && !structure_changed {
+            return;
+        }
+        let Some(mut entry) = tab.history.last_undo_mut() else {
+            return;
+        };
+        let HistorySnapshot::Delta(delta) = &mut *entry else {
+            return;
+        };
+        for (handle, a, b) in entity_diffs {
             if let Some((_, _, after)) = delta.entities.iter_mut().find(|(h, _, _)| *h == handle) {
                 *after = b;
             } else {
                 delta.entities.push((handle, a, b));
             }
         }
-        if !delta
-            .structure
-            .as_ref()
-            .is_some_and(StructureSnapshot::is_full)
+        if structure_changed
+            && !delta
+                .structure
+                .as_ref()
+                .is_some_and(StructureSnapshot::is_full)
         {
-            let mut previous = before.clone();
-            let broad = StructureSnapshot::Full(previous.snapshot_structure());
+            let broad = StructureSnapshot::Full(before_snapshot);
             delta.structure = Some(match delta.structure.take() {
                 Some(specialized) => StructureSnapshot::Combined(vec![broad, specialized]),
                 None => broad,
@@ -757,6 +796,7 @@ impl OpenCADStudio {
         // A dynamic block leaves the editor showing its first visibility
         // state, with erased objects dropped from its states.
         let definition = session.br_handle;
+        let mut save_changes = Vec::new();
         if self.block_edit_delta(i, true).is_some() {
             self.reconcile_block_edit_membership(i);
             self.finish_pending_history(i);
@@ -774,13 +814,12 @@ impl OpenCADStudio {
                 &staged, before, definition,
             ) {
                 Ok(document) => {
-                    self.apply_action_document(i, document);
-                    self.coalesce_saved_representations(i, &before_sync);
+                    let (action_changes, action_blocks) =
+                        self.apply_action_document_diff(i, document);
+                    self.coalesce_saved_representations(i, before_sync, &action_changes);
+                    save_changes.extend(action_changes);
                     // A dynamic block's references are drawn again too.
-                    touched.extend(crate::app::update::blocks_palette::changed_block_names(
-                        &before_sync,
-                        &self.tabs[i].scene.document,
-                    ));
+                    touched.extend(action_blocks);
                 }
                 Err(error) => {
                     self.command_line.push_error(crate::t!(error).as_ref());
@@ -805,9 +844,17 @@ impl OpenCADStudio {
             self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
             std::mem::swap(&mut self.tabs[i].history, &mut history.main);
             self.tabs[i].dirty = true;
+            for &(handle, _) in &save_changes {
+                self.tabs[i].scene.reseed_derived_caches(handle);
+            }
             history.checkpoint = self.block_edit_checkpoint(i);
             self.tabs[i].block_edit_history = Some(history);
-            self.tabs[i].scene.bump_geometry();
+            self.tabs[i].scene.bump_entities_with_block_deps(
+                &save_changes,
+                &[definition],
+                &touched,
+                false,
+            );
             self.note_block_changes(fresh, &touched);
         }
         if let Some(session) = self.tabs[i].active_block_edit_session_mut() {

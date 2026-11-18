@@ -818,6 +818,82 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
 
+            // ── ALIGNSPACE — line a viewport's view up with the sheet: model
+            //    points picked inside the viewport land on paper points
+            //    picked on the sheet (#3132).
+            "ALIGNSPACE" => {
+                let scene = &self.tabs[i].scene;
+                if scene.current_layout == "Model" {
+                    self.command_line.push_error(
+                        crate::t!("ALIGNSPACE: switch to a paper layout first.").as_ref(),
+                    );
+                    return Some(Task::none());
+                }
+                let viewport = scene
+                    .active_viewport
+                    .or_else(|| {
+                        scene.selected.iter().copied().find(|handle| {
+                            matches!(
+                                scene.document.get_entity(*handle),
+                                Some(document::EntityType::Viewport(vp)) if vp.id > 1
+                            )
+                        })
+                    })
+                    .or_else(|| scene.first_user_viewport());
+                let Some(viewport) = viewport.filter(|&vp| {
+                    scene.viewport_frame(vp).is_some_and(|frame| !frame.locked)
+                }) else {
+                    self.command_line.push_error(
+                        crate::t!("ALIGNSPACE: no unlocked plan-view viewport to align.")
+                            .as_ref(),
+                    );
+                    return Some(Task::none());
+                };
+                use crate::modules::layout::alignspace::AlignSpacePointsCommand;
+                let command = AlignSpacePointsCommand::model();
+                self.command_line.push_info(&command.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(command));
+                self.alignspace_pending = Some((viewport, Vec::new()));
+                if self.tabs[i].scene.active_viewport != Some(viewport) {
+                    self.viewport_switch_keeps_command = true;
+                    return Some(Task::done(Message::EnterViewport(viewport)));
+                }
+            }
+            cmd if cmd.starts_with("ALIGNSPACE_MODEL ") || cmd.starts_with("ALIGNSPACE_PAPER ") => {
+                let points: Vec<glam::DVec2> = cmd["ALIGNSPACE_MODEL ".len()..]
+                    .split_whitespace()
+                    .filter_map(|v| v.parse::<f64>().ok())
+                    .collect::<Vec<_>>()
+                    .chunks_exact(3)
+                    .map(|p| glam::DVec2::new(p[0], p[1]))
+                    .collect();
+                let Some((viewport, model)) = self.alignspace_pending.take() else {
+                    return Some(Task::none());
+                };
+                if cmd.starts_with("ALIGNSPACE_MODEL ") {
+                    use crate::modules::layout::alignspace::AlignSpacePointsCommand;
+                    let command = AlignSpacePointsCommand::paper(points.len());
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                    self.alignspace_pending = Some((viewport, points));
+                    self.viewport_switch_keeps_command = true;
+                    return Some(Task::done(Message::ExitViewport));
+                }
+                if self.tabs[i]
+                    .scene
+                    .align_viewport_view(viewport, &model, &points)
+                {
+                    self.push_undo_snapshot(i, "ALIGNSPACE");
+                    self.tabs[i].dirty = true;
+                    let report = describe_viewport_scale(&self.tabs[i].scene, viewport);
+                    self.command_line.push_output(&report);
+                } else {
+                    self.command_line.push_error(
+                        crate::t!("ALIGNSPACE: the points must not coincide.").as_ref(),
+                    );
+                }
+            }
+
             // ── MSPACE / PSPACE ───────────────────────────────────────────
             "MSPACE" => {
                 return Some(Task::done(Message::MspaceCommand));

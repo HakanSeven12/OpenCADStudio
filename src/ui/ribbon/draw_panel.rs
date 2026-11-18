@@ -454,7 +454,9 @@ fn slide_out_place(ribbon: &Ribbon, panel: &PanelExtras) -> Option<(f32, f32, f3
     // One physical pixel wider than the panel: its right border lies on
     // the line between this panel and the next.
     let width = match panel.layout {
-        Layout::TextLayer | Layout::CenterLayer => (body.width + icons::hairline()).max(LIST_MIN_W),
+        Layout::TextLayer | Layout::CenterLayer | Layout::TextEditorFormat => {
+            (body.width + icons::hairline()).max(LIST_MIN_W)
+        }
         Layout::Grid | Layout::Reference => body.width + icons::hairline(),
     };
     Some((body.x, top, width))
@@ -560,6 +562,7 @@ pub(super) fn extra_special<'a>(
         Layout::Grid => None,
         Layout::Reference => Some(fade_row(ribbon.xref_fade, panel.id)),
         Layout::TextLayer => Some(text_layers(ribbon)),
+        Layout::TextEditorFormat => super::text_editor::format_more(),
         Layout::CenterLayer => Some(super::widgets::layer_combo(
             super::widgets::CENTER_LAYER_COMBO,
             &ribbon.center_layer,

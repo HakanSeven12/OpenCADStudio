@@ -451,6 +451,27 @@ impl DialogDef {
     }
 }
 
+/// Visual layout style for a [`PanelDef`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PanelStyle {
+    /// Compact 2-column Properties-palette grid style (`ui::kit`).
+    #[default]
+    Palette,
+    /// Dialog-like form style matching modal plugin dialogs (`ui::style::form`).
+    #[serde(alias = "dialog")]
+    Form,
+}
+
+fn deserialize_panel_style<'de, D>(deserializer: D) -> Result<PanelStyle, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // bincode 1 reports UnexpectedEof when decoding an older PanelDef payload
+    // that ends immediately before this trailing field.
+    PanelStyle::deserialize(deserializer).or(Ok(PanelStyle::Palette))
+}
+
 /// Definition of a persistent dockable side panel / palette.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PanelDef {
@@ -466,6 +487,9 @@ pub struct PanelDef {
     /// Optional command to open / toggle this panel from the CAD command prompt.
     #[serde(default)]
     pub command: Option<String>,
+    /// Visual layout style (`Palette` by default; `Form` for dialog-like layout).
+    #[serde(default, deserialize_with = "deserialize_panel_style")]
+    pub style: PanelStyle,
 }
 
 impl PanelDef {
@@ -476,6 +500,7 @@ impl PanelDef {
             controls: Vec::new(),
             width: None,
             command: None,
+            style: PanelStyle::default(),
         }
     }
 
@@ -491,6 +516,11 @@ impl PanelDef {
 
     pub fn with_command(mut self, command: impl Into<String>) -> Self {
         self.command = Some(command.into());
+        self
+    }
+
+    pub fn with_style(mut self, style: PanelStyle) -> Self {
+        self.style = style;
         self
     }
 }
@@ -1113,6 +1143,46 @@ mod tests {
                 "expected the node-budget rejection, got: {error}"
             ),
         }
+    }
+
+    #[test]
+    fn panel_style_bincode_and_json_roundtrip() {
+        let form_panel = PanelDef::new("form_p", "Form Panel")
+            .with_style(PanelStyle::Form)
+            .with_control(DialogControl::Text {
+                id: "name".to_string(),
+                label: "Name:".to_string(),
+                default: "A".to_string(),
+            });
+        let bytes = bincode::serialize(&form_panel).expect("serialize form panel");
+        let restored: PanelDef = bincode::deserialize(&bytes).expect("deserialize form panel");
+        assert_eq!(restored.style, PanelStyle::Form);
+
+        // Legacy bincode payload without trailing PanelStyle (4 bytes u32 enum tag omitted)
+        let palette_panel = PanelDef::new("old_p", "Old Panel");
+        let full_bytes = bincode::serialize(&palette_panel).expect("serialize palette panel");
+        let legacy_bytes = &full_bytes[..full_bytes.len() - 4];
+        let legacy_restored: PanelDef =
+            bincode::deserialize(legacy_bytes).expect("legacy panel decodes cleanly");
+        assert_eq!(legacy_restored.style, PanelStyle::Palette);
+
+        // JSON supports "form", "dialog" alias, "palette", and omitted field
+        let parsed_dialog: PanelDef = serde_json::from_value(serde_json::json!({
+            "id": "p",
+            "title": "P",
+            "controls": [],
+            "style": "dialog"
+        }))
+        .expect("dialog alias");
+        assert_eq!(parsed_dialog.style, PanelStyle::Form);
+
+        let parsed_default: PanelDef = serde_json::from_value(serde_json::json!({
+            "id": "p",
+            "title": "P",
+            "controls": []
+        }))
+        .expect("default style");
+        assert_eq!(parsed_default.style, PanelStyle::Palette);
     }
 }
 

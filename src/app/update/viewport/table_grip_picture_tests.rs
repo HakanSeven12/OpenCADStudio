@@ -84,9 +84,14 @@ fn assert_picture(doc: &Document, handle: Handle, width: f64) {
 
 fn drag(app: &mut OpenCADStudio, handle: Handle, id: usize, delta: glam::DVec3) {
     let i = app.active_tab;
-    let origin = table(&app.tabs[i].scene.document, handle)
+    let t = table(&app.tabs[i].scene.document, handle);
+    let range_grips = crate::entities::table::prop_cell_range()
+        .map(|range| crate::entities::table::cell_range_grips(t, range))
+        .unwrap_or_default();
+    let origin = t
         .grips()
         .into_iter()
+        .chain(range_grips)
         .find(|g| g.id == id)
         .unwrap()
         .world;
@@ -271,4 +276,39 @@ fn table_grip_picture_width_undo_restores_old_picture() {
     assert_eq!(picture(&app.tabs[i].scene.document, h), before);
     app.redo_steps(1);
     assert_picture(&app.tabs[i].scene.document, h, 120.0);
+}
+
+/// Dragging a picked cell's fill diamond reaches the cell under the cursor
+/// whatever drawing aids are on: snaps on the table's own lines, tracking or
+/// polar must not pull it to the far edge of the table.
+#[test]
+fn table_fill_drag_reaches_the_cell_under_the_cursor_with_drawing_aids_on() {
+    let fill = crate::entities::table::CELL_GRIP_FILL;
+    for aid in ["osnap", "ortho", "polar", "otrack", "grid"] {
+        let (mut app, h) = fixture();
+        let i = app.active_tab;
+        match aid {
+            "osnap" => app.snapper.snap_enabled = true,
+            "ortho" => app.ortho_mode = true,
+            "polar" => app.polar_mode = true,
+            "otrack" => {
+                app.snapper.snap_enabled = true;
+                app.snapper.otrack_enabled = true;
+            }
+            _ => app.snapper.grid_snap_on = true,
+        }
+        crate::entities::table::set_prop_cell_range(Some((0, 0, 0, 0)));
+        // The diamond sits at the picked cell's lower right corner (20, -10);
+        // the cursor goes inside cell (1, 1), next to the row line at y = -20
+        // and the column line at x = 20, both of which run to the table edge.
+        drag(&mut app, h, fill, glam::DVec3::new(3.0, -9.0, 0.0));
+        let cells = app.tabs[i].scene.table_cells;
+        crate::entities::table::set_prop_cell_range(None);
+        let cells = cells.unwrap_or_else(|| panic!("{aid}: no fill span shown"));
+        assert_eq!(
+            (cells.anchor, cells.end),
+            ((0, 0), (1, 0)),
+            "{aid}: the fill must stop at the row under the cursor"
+        );
+    }
 }

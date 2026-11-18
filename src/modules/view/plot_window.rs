@@ -10,6 +10,8 @@ use glam::DVec3;
 
 pub struct PlotWindowCommand {
     p1: Option<DVec3>,
+    /// View twist (radians): the window's sides follow the screen.
+    pub twist: f64,
 }
 
 impl Default for PlotWindowCommand {
@@ -20,7 +22,7 @@ impl Default for PlotWindowCommand {
 
 impl PlotWindowCommand {
     pub fn new() -> Self {
-        Self { p1: None }
+        Self { p1: None, twist: 0.0 }
     }
 }
 
@@ -57,14 +59,18 @@ impl CadCommand for PlotWindowCommand {
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {
+        let p1 = self.p1?;
+        // The other two corners lie along the view's axes from these two.
+        let axis = glam::DVec3::new(self.twist.cos(), self.twist.sin(), 0.0);
+        let along = (pt - p1).dot(axis);
+        let c1 = (p1 + axis * along).as_vec3();
+        let c2 = (pt - axis * along).as_vec3();
         let pt = pt.as_vec3();
-        let p1 = self.p1?.as_vec3();
+        let p1 = p1.as_vec3();
         // Draw the selection rectangle.
         Some(WireModel {
             bg_adapt: None,
             point_marker: None,
-            taper_widths: Vec::new(),
-            pattern_stations: Vec::new(),
             world_width: 0.0,
             depth_override: None,
             display_visible: true,
@@ -74,36 +80,40 @@ impl CadCommand for PlotWindowCommand {
             fill_is_2d_solid: false,
             solid_normal: None,
             render_instance: None,
-            pick_tris: Vec::new(),
-            pick_tris_low: Vec::new(),
             dash_from_start: false,
-            text_verts: Vec::new(),
             name: "plotwindow_preview".into(),
-            points: vec![
-                [p1.x, p1.y, p1.z],
-                [pt.x, p1.y, p1.z],
-                [pt.x, p1.y, p1.z],
-                [pt.x, pt.y, pt.z],
-                [pt.x, pt.y, pt.z],
-                [p1.x, pt.y, pt.z],
-                [p1.x, pt.y, pt.z],
-                [p1.x, p1.y, p1.z],
-            ],
-            points_low: Vec::new(),
             color: WireModel::CYAN,
             selected: false,
             pattern_length: 0.0,
             pattern: [0.0; 8],
             line_weight_px: 1.0,
-            snap_pts: vec![],
-            tangent_geoms: vec![],
             aci: 0,
-            key_vertices: vec![],
             aabb: WireModel::UNBOUNDED_AABB,
             plinegen: true,
-            fill_tris: vec![],
-            fill_tris_low: Vec::new(),
-
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                taper_widths: Vec::new(),
+                pattern_stations: Vec::new(),
+                pick_tris: Vec::new(),
+                pick_tris_low: Vec::new(),
+                text_verts: Vec::new(),
+                points: vec![
+                    [p1.x, p1.y, p1.z],
+                    [c1.x, c1.y, p1.z],
+                    [c1.x, c1.y, p1.z],
+                    [pt.x, pt.y, pt.z],
+                    [pt.x, pt.y, pt.z],
+                    [c2.x, c2.y, pt.z],
+                    [c2.x, c2.y, pt.z],
+                    [p1.x, p1.y, p1.z],
+                ],
+                points_low: Vec::new(),
+                snap_pts: vec![],
+                tangent_geoms: vec![],
+                key_vertices: vec![],
+                fill_tris: vec![],
+                fill_tris_low: Vec::new(),
+                ..crate::scene::WireGeom::default()
+            }),
             ..Default::default()
         })
     }

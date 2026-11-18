@@ -656,6 +656,7 @@ fn mesh_from_tessellation(
     set.complete = tessellation.missing_faces.is_empty();
     set.curved_gens
         .push(super::mesh_model::CurvedGen { source: silhouette });
+    set.build_display_lods();
     Some(set)
 }
 

@@ -35,7 +35,9 @@ pub(super) struct TextureHatchPlacement {
     translation: [f32; 2],
     translation_low: [f32; 2],
     draw_depth: f32,
-    _pad: [f32; 3],
+    /// Height the copy is moved by, over its source's plane.
+    translation_z: f32,
+    _pad: [f32; 2],
 }
 
 impl TextureHatchPlacement {
@@ -57,6 +59,11 @@ impl TextureHatchPlacement {
                 wgpu::VertexAttribute {
                     offset: 16,
                     shader_location: 3,
+                    format: wgpu::VertexFormat::Float32,
+                },
+                wgpu::VertexAttribute {
+                    offset: 20,
+                    shader_location: 4,
                     format: wgpu::VertexFormat::Float32,
                 },
             ],
@@ -107,6 +114,14 @@ pub(super) struct TextureHatch {
 }
 
 impl TextureHatch {
+    pub(super) fn gpu_bytes<'a>(&'a self, counter: &mut super::super::gpu_memory::ResourceCounter<'a>) -> u64 {
+        counter.buffer(&self.vertex_buffer)
+            + counter.buffer(&self.index_buffer)
+            + counter.buffer(&self.placement_buffer)
+            + counter.buffer(&self._uniform_buf)
+            + counter.texture(&self._data_tex)
+    }
+
     pub(super) fn from_models(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -216,10 +231,11 @@ impl TextureHatch {
         if mesh_points.is_empty() || indices.is_empty() {
             return None;
         }
+        let height = model.plane_height();
         let vertices: Vec<HatchVertex> = mesh_points
             .into_iter()
             .map(|[x, y]| HatchVertex {
-                pos: [x, y, 0.0],
+                pos: [x, y, height([x, y])],
                 _pad: 0.0,
             })
             .collect();
@@ -255,7 +271,8 @@ impl TextureHatch {
                         (delta[1] - high[1] as f64) as f32,
                     ],
                     draw_depth: model.draw_depth,
-                    _pad: [0.0; 3],
+                    translation_z: (translation[2] - base[2]) as f32,
+                    _pad: [0.0; 2],
                 }
             })
             .collect();

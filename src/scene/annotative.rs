@@ -129,8 +129,17 @@ pub fn set_entity_annotative(doc: &mut Document, handle: Handle, want: bool) {
 /// The object's own annotative flag, which other programs read before its
 /// annotation contexts: `AnnotativeData { 1, on }`.
 fn set_annotative_marker(doc: &mut Document, handle: Handle, on: bool) {
+    crate::scene::view::dispatch::set_entity_xdata(
+        doc,
+        handle,
+        "AcadAnnotative",
+        annotative_marker(on),
+    );
+}
+
+fn annotative_marker(on: bool) -> Option<Vec<document::xdata::XDataValue>> {
     use document::xdata::XDataValue;
-    let values = on.then(|| {
+    on.then(|| {
         vec![
             XDataValue::String("AnnotativeData".into()),
             XDataValue::ControlString("{".into()),
@@ -138,8 +147,40 @@ fn set_annotative_marker(doc: &mut Document, handle: Handle, on: bool) {
             XDataValue::Integer16(1),
             XDataValue::ControlString("}".into()),
         ]
-    });
-    crate::scene::view::dispatch::set_entity_xdata(doc, handle, "AcadAnnotative", values);
+    })
+}
+
+/// Make an INSERT's attribute annotative or not, as the attribute editor's
+/// Annotative box does: the flag and the object's own marker. The attribute
+/// keeps its height, the paper height at the current scale.
+pub(crate) fn set_attribute_annotative(
+    doc: &mut Document,
+    insert: Handle,
+    index: usize,
+    want: bool,
+) {
+    if !doc.app_ids.contains("AcadAnnotative") {
+        let mut a = document::tables::AppId::new("AcadAnnotative");
+        a.handle = doc.allocate_handle();
+        let _ = doc.app_ids.add(a);
+    }
+    let app_handle = doc.app_ids.get("AcadAnnotative").map(|a| a.handle.value());
+    if let Some(EntityType::Insert(ins)) = doc.get_entity_mut(insert) {
+        if let Some(attribute) = ins.attributes.get_mut(index) {
+            attribute.flags.annotative = want;
+            // Turned off, the marker stays and says so: `{ 1, 0 }`.
+            let mut marker = annotative_marker(true);
+            if let Some(values) = marker.as_mut() {
+                values[3] = document::xdata::XDataValue::Integer16(i16::from(want));
+            }
+            crate::scene::view::dispatch::replace_xdata_record(
+                &mut attribute.common,
+                "AcadAnnotative",
+                app_handle,
+                marker,
+            );
+        }
+    }
 }
 
 /// Derive the per-scale context payload for an entity from its current

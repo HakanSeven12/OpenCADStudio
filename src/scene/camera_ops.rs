@@ -796,7 +796,7 @@ impl Scene {
     /// Bring one rendered entity into view: centre on it, keeping zoom
     /// distance, orientation and viewport scale, or with `zoom` also fit the
     /// view around it with room for its surroundings.
-    pub fn focus_camera_on_entity(&mut self, handle: Handle, zoom: bool) -> bool {
+    pub fn focus_camera_on_entity(&mut self, handle: Handle, zoom: FindZoom) -> bool {
         let fallback_z = self.active_camera_target().z;
         let wires = self.wire_models_for(&[handle]);
         let Some(bounds) = rendered_wire_bounds(&wires, fallback_z) else {
@@ -808,16 +808,26 @@ impl Scene {
     fn focus_active_camera_on(
         &mut self,
         (min, max): (glam::DVec3, glam::DVec3),
-        zoom: bool,
+        zoom: FindZoom,
     ) -> bool {
         let center = (min + max) * 0.5;
-        if !zoom {
-            return self.center_active_camera_on(center);
+        match zoom {
+            FindZoom::Center => self.center_active_camera_on(center),
+            // The view is 24 text heights tall, centred on the text.
+            FindZoom::TextHeight(height) => {
+                let half = glam::DVec3::new(0.0, 12.0 * height.max(1e-6), 0.0);
+                self.fit_active_view(center - half, center + half)
+            }
+            // An object without a text height (a hyperlink): a view 20 times
+            // its size, the object in the upper part where the link's tip
+            // leaves room below it.
+            FindZoom::Object => {
+                let size = (max - min).max_element().max(0.5);
+                let at = center - glam::DVec3::new(0.0, 5.0 * size, 0.0);
+                let half = glam::DVec3::new(0.0, 10.0 * size, 0.0);
+                self.fit_active_view(at - half, at + half)
+            }
         }
-        // Three times the object's size keeps a short text readable while
-        // the drawing around it still shows where it is.
-        let half = ((max - min) * 1.5).max(glam::DVec3::splat(0.5));
-        self.fit_active_view(center - half, center + half)
     }
 
     /// Focus on one concrete attribute value attached to an INSERT rather
@@ -826,7 +836,7 @@ impl Scene {
         &mut self,
         insert: Handle,
         index: usize,
-        zoom: bool,
+        zoom: FindZoom,
     ) -> bool {
         let (attribute, fallback) = {
             let Some(EntityType::Insert(entity)) = self.document.get_entity(insert) else {
@@ -855,7 +865,7 @@ impl Scene {
         &mut self,
         insert: Handle,
         entity: Handle,
-        zoom: bool,
+        zoom: FindZoom,
     ) -> bool {
         let (source, transform) = {
             let Some(EntityType::Insert(insert_entity)) = self.document.get_entity(insert) else {
@@ -1666,7 +1676,11 @@ impl Scene {
     }
 
     /// Size the camera's near/far from the drawing's own recorded extent,
-    /// leaving its pose alone.
+    /// leaving its pose alone. The recorded extent is that of the space the
+    /// camera shows: model space's `$EXTMIN`/`$EXTMAX`, or the current
+    /// layout's own extents. A sheet holds objects far off its plane (a
+    /// legend or a block placed at Z = -6040) that the model's extent knows
+    /// nothing about, and sizing a layout by the model clipped them away.
     ///
     /// `$EXTMIN`/`$EXTMAX` is untrustworthy for *positioning* — stale after an
     /// edit, or the 1e20 sentinel when the writer never computed it (see the
@@ -1679,20 +1693,34 @@ impl Scene {
         // Same bound `model_space_extents`'s header fallback uses; rejects the
         // sentinel and any garbage that would blow the range up.
         const SANE_EXTENT: f64 = 1.0e16;
+        let sane = |lo: document::types::Vector3, hi: document::types::Vector3| {
+            (lo.x <= hi.x
+                && lo.y <= hi.y
+                && lo.z <= hi.z
+                && [lo.x, lo.y, lo.z, hi.x, hi.y, hi.z]
+                    .iter()
+                    .all(|v| v.is_finite() && v.abs() < SANE_EXTENT))
+            .then(|| {
+                (
+                    glam::DVec3::new(lo.x, lo.y, lo.z),
+                    glam::DVec3::new(hi.x, hi.y, hi.z),
+                )
+            })
+        };
         let h = &self.document.header;
-        let (lo, hi) = (h.model_space_extents_min, h.model_space_extents_max);
-        let ok = lo.x <= hi.x
-            && lo.y <= hi.y
-            && lo.z <= hi.z
-            && [lo.x, lo.y, lo.z, hi.x, hi.y, hi.z]
-                .iter()
-                .all(|v| v.is_finite() && v.abs() < SANE_EXTENT);
-        if !ok {
-            return;
+        let model = sane(h.model_space_extents_min, h.model_space_extents_max);
+        // A layout that never recorded its extents (the sentinel, or an
+        // empty box at the origin) keeps the model's as before.
+        let extents = if self.current_layout == "Model" {
+            model
+        } else {
+            sane(h.paper_space_extents_min, h.paper_space_extents_max)
+                .filter(|(min, max)| min.x < max.x || min.y < max.y)
+                .or(model)
+        };
+        if let Some((min, max)) = extents {
+            self.camera.borrow_mut().fit_depth_to_bounds_f64(min, max);
         }
-        let min = glam::DVec3::new(lo.x, lo.y, lo.z);
-        let max = glam::DVec3::new(hi.x, hi.y, hi.z);
-        self.camera.borrow_mut().fit_depth_to_bounds_f64(min, max);
     }
 
     fn fit_paper_space_extents(&mut self) {
@@ -2335,4 +2363,15 @@ mod far_view_center_tests {
             cam.target
         );
     }
+}
+
+/// How Find and Replace brings a match into view.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FindZoom {
+    /// Keep the zoom, centre on the match.
+    Center,
+    /// Zoom to a text of this height.
+    TextHeight(f64),
+    /// Zoom to an object that has no text height.
+    Object,
 }

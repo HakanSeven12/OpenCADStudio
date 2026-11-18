@@ -958,16 +958,19 @@ impl OpenCADStudio {
                         display_visible: true,
                         plot_visible: true,
                         name: "__polar_guide__".into(),
-                        points: vec![
-                            [far_neg.x, far_neg.y, far_neg.z],
-                            [far_pos.x, far_pos.y, far_pos.z],
-                        ],
                         color: [0.2, 0.7, 0.9, 0.6],
                         pattern_length: 0.8,
                         pattern: [0.5, -0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                         line_weight_px: 1.0,
                         aabb: crate::scene::WireModel::UNBOUNDED_AABB,
                         plinegen: true,
+                        geom: std::sync::Arc::new(crate::scene::WireGeom {
+                            points: vec![
+                                [far_neg.x, far_neg.y, far_neg.z],
+                                [far_pos.x, far_pos.y, far_pos.z],
+                            ],
+                            ..crate::scene::WireGeom::default()
+                        }),
                         ..Default::default()
                     });
                 }

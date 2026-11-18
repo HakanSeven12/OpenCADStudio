@@ -1,23 +1,20 @@
-//! The texts that use a text style, and what Apply changes on them: a value
-//! that follows the style takes the new one, a value set on the text itself
-//! stays (#2413).
+//! The texts that use a text style, and what Apply does to them.
 //!
-//! Font, bold/italic and the backward/upside-down flags come from the style
-//! when a text is drawn, so they follow by themselves. TEXT, ATTRIB and
-//! ATTDEF store their own width and oblique angle, and every text stores its
-//! height; those are written here when they equal the style's old value. An
-//! MTEXT draws with the style's width and oblique unless it carries a
-//! whole-text `\W` / `\Q` code, and keeps its height under a whole-text `\H`.
+//! Apply writes the style only; no text is changed. Font, bold/italic and the
+//! backward/upside-down flags come from the style when a text is drawn, so
+//! they follow by themselves. TEXT, ATTRIB and ATTDEF store their own height,
+//! width and oblique angle, and every MTEXT its height: those stay as they
+//! are, a new value reaches only texts placed afterwards. An MTEXT draws with
+//! the style's width and oblique unless it carries a whole-text `\W` / `\Q`
+//! code, so it redraws with the new ones.
 //!
-//! Before Apply the manager lists every changed style this way, from the
-//! same old/new pairs Apply writes.
+//! Before Apply the manager lists every changed style this way.
 
 use document::entities::EntityType;
 use document::tables::TextStyle;
 use document::types::Handle;
 use document::Document;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::sync::Arc;
 
 /// A style value an Apply can carry over to the texts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,8 +39,8 @@ impl StyleValue {
 /// How a text holds one value.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Held {
-    /// Stored on the entity.
-    Stored(f64),
+    /// Stored on the entity, so it stays when the style changes.
+    Stored,
     /// Not stored: drawn with the style's value (MTEXT width and oblique).
     FromStyle,
     /// Not stored: the text carries its own (an MTEXT `\W` / `\Q` code).
@@ -62,10 +59,6 @@ pub enum TextKind {
 /// One text that uses the style.
 #[derive(Debug, Clone)]
 pub(super) struct TextUser {
-    /// The text, or the INSERT that holds the attribute.
-    handle: Handle,
-    /// The attribute's place in the INSERT.
-    attribute: Option<usize>,
     kind: TextKind,
     /// The block definition that holds the text.
     block: Option<Handle>,
@@ -114,21 +107,11 @@ impl TextUser {
         }
     }
 
-    /// Whether the text shows the style's `old` value, so it follows the
-    /// style. A height follows only a fixed (non-zero) style height.
-    fn follows(&self, value: StyleValue, old: f64) -> bool {
-        match self.held(value) {
-            Held::Stored(_) if value == StyleValue::Height && old <= 0.0 => false,
-            Held::Stored(stored) => same(stored, old),
-            Held::FromStyle => true,
-            Held::Own => false,
-        }
+    /// Whether the text draws with the style's value, so a new one shows on
+    /// it. A stored value stays on the text whatever the style says.
+    fn follows(&self, value: StyleValue) -> bool {
+        matches!(self.held(value), Held::FromStyle)
     }
-}
-
-/// Equal up to the last bits a save and load may round.
-fn same(a: f64, b: f64) -> bool {
-    (a - b).abs() <= 1e-9 * a.abs().max(b.abs()).max(1.0)
 }
 
 /// The entity handles in external references, and those in block
@@ -146,15 +129,6 @@ fn xref_and_block_handles(doc: &Document) -> (FxHashSet<Handle>, FxHashMap<Handl
     (xref, block)
 }
 
-/// The texts in the drawing that use `style`: model space, layouts, block
-/// definitions and the attributes of inserts. Texts in external references
-/// are left out; Apply does not change them.
-pub(super) fn text_users(doc: &Document, style: &str) -> Vec<TextUser> {
-    users_by_style(doc)
-        .remove(&style.to_ascii_lowercase())
-        .unwrap_or_default()
-}
-
 /// The texts of every style, keyed by the style name in ASCII lowercase, in one walk
 /// of the drawing.
 pub(super) fn users_by_style(doc: &Document) -> FxHashMap<String, Vec<TextUser>> {
@@ -166,13 +140,11 @@ pub(super) fn users_by_style(doc: &Document) -> FxHashMap<String, Vec<TextUser>>
             continue;
         }
         let block = block.get(&handle).copied();
-        let mut push = |style: &str, kind, attribute, height, width, oblique| {
+        let mut push = |style: &str, kind, height, width, oblique| {
             users
                 .entry(style.to_ascii_lowercase())
                 .or_default()
                 .push(TextUser {
-                    handle,
-                    attribute,
                     kind,
                     block,
                     in_block: block.is_some(),
@@ -181,26 +153,19 @@ pub(super) fn users_by_style(doc: &Document) -> FxHashMap<String, Vec<TextUser>>
                     oblique,
                 })
         };
-        let stored = |height: f64, width: f64, oblique: f64| {
-            (
-                Held::Stored(height),
-                Held::Stored(width),
-                Held::Stored(oblique),
-            )
-        };
+        let stored = Held::Stored;
         match entity {
-            EntityType::Text(t) => {
-                let (h, w, o) = stored(t.height, t.width_factor, t.oblique_angle);
-                push(&t.style, TextKind::Text, None, h, w, o)
-            }
-            EntityType::AttributeDefinition(a) => {
-                let (h, w, o) = stored(a.height, a.width_factor, a.oblique_angle);
-                push(&a.text_style, TextKind::AttributeDefinition, None, h, w, o)
-            }
+            EntityType::Text(t) => push(&t.style, TextKind::Text, stored, stored, stored),
+            EntityType::AttributeDefinition(a) => push(
+                &a.text_style,
+                TextKind::AttributeDefinition,
+                stored,
+                stored,
+                stored,
+            ),
             EntityType::Insert(insert) => {
-                for (index, a) in insert.attributes.iter().enumerate() {
-                    let (h, w, o) = stored(a.height, a.width_factor, a.oblique_angle);
-                    push(&a.text_style, TextKind::Attribute, Some(index), h, w, o)
+                for a in &insert.attributes {
+                    push(&a.text_style, TextKind::Attribute, stored, stored, stored)
                 }
             }
             EntityType::MText(t) => {
@@ -211,20 +176,8 @@ pub(super) fn users_by_style(doc: &Document) -> FxHashMap<String, Vec<TextUser>>
                         Held::FromStyle
                     }
                 };
-                // A whole-text `\H` is the text's own height, whatever the
-                // stored one says.
-                let height = match code('H') {
-                    Held::Own => Held::Own,
-                    _ => Held::Stored(t.height),
-                };
-                push(
-                    &t.style,
-                    TextKind::MText,
-                    None,
-                    height,
-                    code('W'),
-                    code('Q'),
-                )
+                // The height is stored (or a whole-text `\H`): it stays.
+                push(&t.style, TextKind::MText, stored, code('W'), code('Q'))
             }
             _ => {}
         }
@@ -238,7 +191,7 @@ pub(super) struct ValueChange {
     pub value: StyleValue,
     pub from: f64,
     pub to: f64,
-    /// Texts that follow the style and take the new value.
+    /// Texts that draw with the style's value and show the new one.
     pub updated: usize,
     /// How many of those are inside block definitions.
     pub in_blocks: usize,
@@ -261,7 +214,7 @@ pub(super) fn value_changes(
             if from == to || value == StyleValue::Height && (from <= 0.0 || to <= 0.0) {
                 return None;
             }
-            let following: Vec<_> = users.iter().filter(|u| u.follows(value, from)).collect();
+            let following: Vec<_> = users.iter().filter(|u| u.follows(value)).collect();
             Some(ValueChange {
                 value,
                 from,
@@ -273,55 +226,6 @@ pub(super) fn value_changes(
         })
         .filter(|change| change.updated + change.kept > 0)
         .collect()
-}
-
-/// Write the new style values into the texts that follow `old`, each through
-/// `get_entity_mut`. The image of each text before its first change goes into
-/// `before`, so the style manager can undo it with the style.
-pub(super) fn update_texts(
-    doc: &mut Document,
-    old: &TextStyle,
-    new: &TextStyle,
-    before: &mut FxHashMap<Handle, Arc<EntityType>>,
-) {
-    let users = text_users(doc, &new.name);
-    for change in value_changes(&users, old, new) {
-        for user in users
-            .iter()
-            .filter(|u| u.follows(change.value, change.from))
-        {
-            if !matches!(user.held(change.value), Held::Stored(_)) {
-                continue;
-            }
-            if let Some(image) = doc.get_entity_arc(user.handle) {
-                before.entry(user.handle).or_insert(image);
-            }
-            let fields = match (doc.get_entity_mut(user.handle), user.attribute) {
-                (Some(EntityType::Text(t)), None) => {
-                    Some((&mut t.height, &mut t.width_factor, &mut t.oblique_angle))
-                }
-                (Some(EntityType::AttributeDefinition(a)), None) => {
-                    Some((&mut a.height, &mut a.width_factor, &mut a.oblique_angle))
-                }
-                (Some(EntityType::Insert(insert)), Some(index)) => insert
-                    .attributes
-                    .get_mut(index)
-                    .map(|a| (&mut a.height, &mut a.width_factor, &mut a.oblique_angle)),
-                (Some(EntityType::MText(t)), None) if change.value == StyleValue::Height => {
-                    t.height = change.to;
-                    None
-                }
-                _ => None,
-            };
-            if let Some((height, width, oblique)) = fields {
-                *match change.value {
-                    StyleValue::Height => height,
-                    StyleValue::Width => width,
-                    StyleValue::Oblique => oblique,
-                } = change.to;
-            }
-        }
-    }
 }
 
 /// A number without trailing zeros (`0.8`, `1`).
@@ -496,8 +400,7 @@ pub(super) fn property_changes(old: &TextStyle, new: &TextStyle) -> Vec<Property
 }
 
 /// What Apply does to every style changed since the manager opened (or since
-/// the last Apply): the same pairs `style_stage_commit` writes, matched by
-/// handle. `styles` are the styles as Apply will see them, `baseline` gives
+/// the last Apply), matched by handle. `styles` are the styles as Apply will see them, `baseline` gives
 /// each one's stored state, `users` the texts of each style keyed by the name
 /// in ASCII lowercase.
 pub(super) fn pending_changes<'s, 'b>(
@@ -529,10 +432,10 @@ pub(super) fn pending_changes<'s, 'b>(
 /// "Height: 2.5 → 3.5. 4 texts that follow the style are updated. …"
 fn value_line(label: &str, from: &str, to: &str, change: &ValueChange) -> String {
     let (value, count) = (label, change.updated);
-    let mut line = if count == 1 {
-        crate::tf!("{value}: {from} → {to}. 1 text that follows the style is updated.")
-    } else {
-        crate::tf!("{value}: {from} → {to}. {count} texts that follow the style are updated.")
+    let mut line = match count {
+        0 => crate::tf!("{value}: {from} → {to}."),
+        1 => crate::tf!("{value}: {from} → {to}. 1 text that follows the style is updated."),
+        _ => crate::tf!("{value}: {from} → {to}. {count} texts that follow the style are updated."),
     }
     .into_owned();
     if change.in_blocks > 0 {

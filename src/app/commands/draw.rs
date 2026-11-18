@@ -404,7 +404,10 @@ impl OpenCADStudio {
                     // instead of refusing to start.
                     if args.is_empty() {
                         use crate::modules::draw::modify::attedit::AtteditCommand;
-                        let command = AtteditCommand::new();
+                        let command = AtteditCommand::new(
+                            crate::modules::draw::modify::attedit::AtteditKind::Classic,
+                            None,
+                        );
                         self.command_line.push_info(&command.prompt());
                         self.tabs[i].active_cmd = Some(Box::new(command));
                     } else {
@@ -2702,7 +2705,7 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "SHELL" | "SOLIDEDIT" => {
+            "SHELL" => {
                 use crate::modules::model::shell_cmd::ShellCommand;
                 let selected = self.tabs[i]
                     .scene
@@ -2723,11 +2726,40 @@ impl OpenCADStudio {
                     [handle] => Some(*handle),
                     _ => None,
                 };
-                let new_cmd = if cmd == "SHELL" {
-                    ShellCommand::direct(target)
-                } else {
-                    ShellCommand::solid_edit(target)
-                };
+                let new_cmd = ShellCommand::direct(target);
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            // SOLIDEDIT, and the ribbon's `SOLIDEDIT FACE EXTRUDE` style
+            // entries that start it at one of its options.
+            _ if cmd == "SOLIDEDIT" || cmd.starts_with("SOLIDEDIT ") => {
+                use crate::modules::model::solidedit_cmd::SolidEditCommand;
+                let new_cmd = SolidEditCommand::new()
+                    .with_options(cmd.strip_prefix("SOLIDEDIT").unwrap_or_default());
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "IMPRINT" => {
+                use crate::modules::model::solidedit_cmd::SolidEditCommand;
+                let new_cmd = SolidEditCommand::imprint();
+                self.command_line.push_info(&new_cmd.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+            }
+
+            "XEDGES" => {
+                use crate::modules::model::solidedit_cmd::ExtractEdgesCommand;
+                let selected = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .map(|(handle, entity)| (handle, entity.clone()))
+                    .collect();
+                let new_cmd = ExtractEdgesCommand::new(selected);
+                if let Some(result) = new_cmd.ready() {
+                    return Some(self.apply_cmd_result(result));
+                }
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }

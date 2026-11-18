@@ -38,6 +38,8 @@ pub struct AppConfig {
     pub show_command_history: bool,
     /// Whether the Layer Manager pallet is open.
     pub show_layers: bool,
+    /// Whether the Blocks palette is open.
+    pub show_block_palette: bool,
     /// Whether the document file tabs are shown (FILETAB).
     pub show_file_tabs: bool,
     /// The drawing tabs run across the window above the palettes, instead
@@ -61,6 +63,8 @@ pub struct AppConfig {
     pub model_space: ModelSpaceThemeConfig,
     /// The user's changes to the right-click menu.
     pub context_menu: crate::ui::popup::context_menu::MenuCustomization,
+    /// MCP control is on at start (the MCP button's last state).
+    pub mcp_enabled: bool,
 }
 
 impl Default for AppConfig {
@@ -76,6 +80,7 @@ impl Default for AppConfig {
             show_tool_palettes: false,
             show_command_history: false,
             show_layers: false,
+            show_block_palette: false,
             show_file_tabs: true,
             file_tabs_above_docks: false,
             show_layout_tabs: true,
@@ -86,6 +91,7 @@ impl Default for AppConfig {
             shortcuts: ShortcutConfig::default(),
             model_space: ModelSpaceThemeConfig::default(),
             context_menu: Default::default(),
+            mcp_enabled: true,
         }
     }
 }
@@ -94,12 +100,17 @@ impl Default for AppConfig {
 #[serde(default)]
 pub struct ShortcutConfig {
     pub bindings: std::collections::BTreeMap<String, String>,
+    /// The shipped default keys this table has already been offered. A
+    /// default added in a later release is backfilled once; one the user
+    /// removed stays removed.
+    pub known_defaults: std::collections::BTreeSet<String>,
 }
 
 impl Default for ShortcutConfig {
     fn default() -> Self {
         Self {
             bindings: super::shortcuts::default_bindings(),
+            known_defaults: super::shortcuts::default_bindings().into_keys().collect(),
         }
     }
 }

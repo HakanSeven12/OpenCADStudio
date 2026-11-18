@@ -292,6 +292,13 @@ pub struct TextAtlasGpu {
 }
 
 impl TextAtlasGpu {
+    pub(super) fn counted_gpu_bytes<'a>(
+        &'a self,
+        counter: &mut super::gpu_memory::ResourceCounter<'a>,
+    ) -> u64 {
+        counter.texture(&self._texture)
+    }
+
     /// Device bytes this atlas holds. `R8`, so one byte per texel.
     pub fn gpu_bytes(&self) -> u64 {
         u64::from(self._texture.width()) * u64::from(self._texture.height())

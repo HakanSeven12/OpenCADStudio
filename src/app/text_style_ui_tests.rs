@@ -109,9 +109,12 @@ fn the_font_list_opens_right_under_the_font_field() {
 fn the_font_list_is_coloured_in_both_themes() {
     let app = font_list_open();
     let mut ui = window(&app, 1280.0);
-    for text in ["SHX", "TT", "missing · drawn with Standard"] {
+    for text in ["SHX", "TT"] {
         shown(&mut ui, text);
     }
+    // The missing font's row is in the list, but on a machine with many
+    // system fonts (Windows) it sits below the scrolled part.
+    assert!(ui.find("missing · drawn with Standard".to_string()).is_ok());
     drop(ui);
     snapshots(&app, "text-style-font-list", 1280.0);
 }

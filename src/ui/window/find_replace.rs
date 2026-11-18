@@ -270,7 +270,9 @@ pub enum FindMsg {
     ReplaceAll,
     Done,
     Help,
-    Row(usize),
+    /// A click on a list row; `Some((ctrl, shift))` stands for held keys
+    /// (automation), `None` reads the keyboard.
+    Row(usize, Option<(bool, bool)>),
     ZoomToResult,
     SelectHighlighted,
     SelectAll,
@@ -388,7 +390,7 @@ fn results_card<'a>(state: &'a FindReplaceState, busy: bool) -> Element<'a, Mess
     .spacing(8);
     let mut rows = column![].spacing(1);
     for (index, result) in state.results.iter().enumerate() {
-        let selected = state.current_match == Some(result.key);
+        let selected = state.highlighted.contains(&result.key);
         let line = row![
             text(result.location.clone())
                 .size(11)
@@ -406,10 +408,10 @@ fn results_card<'a>(state: &'a FindReplaceState, busy: bool) -> Element<'a, Mess
         rows = rows.push(if busy {
             b
         } else {
-            b.on_press(msg(FindMsg::Row(index)))
+            b.on_press(msg(FindMsg::Row(index, None)))
         });
     }
-    let has_row = state.current_match.is_some() && !busy;
+    let has_row = !state.highlighted.is_empty() && !busy;
     let has_any = !state.results.is_empty() && !busy;
     let side = |label: String, on: bool, m: FindMsg| {
         let b = button(text(label).size(11).width(Fill).align_x(iced::Center))
@@ -436,7 +438,11 @@ fn results_card<'a>(state: &'a FindReplaceState, busy: bool) -> Element<'a, Mess
             .width(Fill)
             .style(well_style),
             column![
-                side(crate::tr!("find", "zoom-result"), has_row, FindMsg::ZoomToResult),
+                side(
+                    crate::tr!("find", "zoom-result"),
+                    has_row && state.highlighted.len() == 1,
+                    FindMsg::ZoomToResult
+                ),
                 side(
                     crate::tr!("find", "select-highlighted"),
                     has_row,

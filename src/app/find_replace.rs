@@ -42,10 +42,15 @@ impl OpenCADStudio {
     }
 
     fn reset_find_search(&mut self) {
+        if self.find_replace.current_match.is_some() {
+            self.clear_find_highlight();
+        }
         let state = &mut self.find_replace;
         state.current_match = None;
         state.matches.clear();
         state.results.clear();
+        state.highlighted.clear();
+        state.anchor = None;
         state.changed.clear();
         state.pending_entities.clear();
         state.pending_blocks.clear();
@@ -88,6 +93,7 @@ impl OpenCADStudio {
             FindMsg::Replace => return self.find_replace_one(),
             FindMsg::ReplaceAll => return self.find_replace_all(),
             FindMsg::Done => {
+                self.clear_find_highlight();
                 self.active_modal = None;
                 self.command_line
                     .push_output(crate::tr!("find", "regenerating").as_str());
@@ -95,14 +101,40 @@ impl OpenCADStudio {
             FindMsg::Help => self
                 .command_line
                 .push_info(crate::tr!("find", "help").as_str()),
-            FindMsg::Row(index) => {
-                if let Some(result) = self.find_replace.results.get(index).cloned() {
-                    self.find_replace.current_match = Some(result.key);
-                    return self.visit_find_result(&result);
+            FindMsg::Row(index, keys) => {
+                let (ctrl, shift) = keys.unwrap_or((self.ctrl_down, self.shift_down));
+                let Some(result) = self.find_replace.results.get(index).cloned() else {
+                    return Task::none();
+                };
+                let state = &mut self.find_replace;
+                if shift {
+                    let from = state.anchor.unwrap_or(index);
+                    let (a, b) = (from.min(index), from.max(index));
+                    state.highlighted = state.results[a..=b].iter().map(|r| r.key).collect();
+                    state.current_match = Some(result.key);
+                    return Task::none();
                 }
+                state.anchor = Some(index);
+                if ctrl {
+                    if let Some(at) = state.highlighted.iter().position(|k| *k == result.key) {
+                        state.highlighted.remove(at);
+                        state.current_match = state.highlighted.last().copied();
+                    } else {
+                        state.highlighted.push(result.key);
+                        state.current_match = Some(result.key);
+                    }
+                    return Task::none();
+                }
+                state.highlighted = vec![result.key];
+                state.current_match = Some(result.key);
+                return self.visit_find_result(&result);
             }
             FindMsg::ZoomToResult => {
-                let current = self.find_replace.current_match;
+                // One highlighted row only, as the button allows.
+                let current = match self.find_replace.highlighted.as_slice() {
+                    [one] => Some(*one),
+                    _ => return Task::none(),
+                };
                 if let Some(result) = self
                     .find_replace
                     .results
@@ -114,12 +146,11 @@ impl OpenCADStudio {
                 }
             }
             FindMsg::SelectHighlighted => {
-                let current = self.find_replace.current_match;
                 let picked: Vec<FindResult> = self
                     .find_replace
                     .results
                     .iter()
-                    .filter(|r| Some(r.key) == current)
+                    .filter(|r| self.find_replace.highlighted.contains(&r.key))
                     .cloned()
                     .collect();
                 return self.find_select_results(picked);
@@ -182,6 +213,8 @@ impl OpenCADStudio {
             });
             let first = self.find_replace.results.first().cloned();
             self.find_replace.current_match = first.as_ref().map(|r| r.key);
+            self.find_replace.highlighted = first.iter().map(|r| r.key).collect();
+            self.find_replace.anchor = first.is_some().then_some(0);
             return first.map_or_else(Task::none, |r| self.visit_find_result(&r));
         }
         let next = match self.find_replace.current_match {
@@ -212,6 +245,7 @@ impl OpenCADStudio {
                     changed: self.find_replace.changed.len(),
                 });
                 self.find_replace.current_match = None;
+                self.clear_find_highlight();
                 Task::none()
             }
         }
@@ -245,8 +279,25 @@ impl OpenCADStudio {
         }
         scene.deselect_all();
         scene.select_entity(key.owner, false);
+        let quads = match_quads(
+            &scene.document,
+            key,
+            &self.find_replace.search,
+            &self.find_replace.options.matching(),
+        );
+        let (frame, shade) = highlight(&quads);
+        scene.set_preview_wires(frame);
+        scene.set_command_preview_hatches(shade);
         self.refresh_properties();
         task
+    }
+
+    /// Drop the drawing's highlight of the match on show.
+    pub(in crate::app) fn clear_find_highlight(&mut self) {
+        let i = self.active_tab;
+        if self.tabs[i].active_cmd.is_none() {
+            self.tabs[i].scene.clear_preview_wire();
+        }
     }
 
     /// Create Selection Set: the listed objects become the selection, which
@@ -271,6 +322,7 @@ impl OpenCADStudio {
         if !first.eq_ignore_ascii_case(&self.tabs[i].scene.current_layout) {
             task = self.on_layout_switch(first);
         }
+        self.clear_find_highlight();
         self.active_modal = None;
         self.command_line
             .push_output(crate::tr!("find", "regenerating").as_str());
@@ -529,7 +581,7 @@ impl OpenCADStudio {
         let doc = &self.tabs[i].scene.document;
         for row in &mut self.find_replace.results {
             if let Some(value) = field_text(doc, row.key) {
-                row.text = one_line(&value);
+                row.text = one_line(&shown_text(doc, row.key.target, row.key.part, &value));
             }
         }
         self.find_replace.current_match = None;
@@ -827,6 +879,8 @@ impl Walk<'_> {
     }
 
     fn push(&mut self, owner: Handle, target: Handle, part: FindPart, kind: FindKind, location: &str, value: &str, height: f64) {
+        // Formatted texts are searched and listed as they read.
+        let value = &shown_text(self.doc, target, part, value);
         if crate::app::text_match::str_ranges(value, self.pattern, &self.matching).is_empty() {
             return;
         }
@@ -1027,6 +1081,209 @@ fn set_field_text(doc: &mut document::Document, key: FindMatchKey, value: String
         _ => return false,
     }
     true
+}
+
+/// Where a match reads in the drawing: the whole text's frame first, then
+/// one quad per line the matched characters span. Texts and multiline texts
+/// are boxed character by character; other matches (an attribute, a
+/// dimension, a table cell, a hyperlink, a text in a block) show only their
+/// object selected.
+fn match_quads(
+    doc: &document::Document,
+    key: FindMatchKey,
+    pattern: &str,
+    opts: &crate::app::text_match::MatchOptions,
+) -> Vec<[[f64; 2]; 4]> {
+    use crate::entities::text_support::{resolve_dxf_special_chars, text_char_cells};
+    // Cells as [left, bottom, right, top] in a frame at `origin`, turned by
+    // `rotation`.
+    let to_quads = |origin: [f64; 2], rotation: f64, boxes: Vec<[f64; 4]>| {
+        let (sin, cos) = rotation.sin_cos();
+        let world = |x: f64, y: f64| [origin[0] + x * cos - y * sin, origin[1] + x * sin + y * cos];
+        boxes
+            .into_iter()
+            .filter(|[l, _, r, _]| r > l)
+            .map(|[l, b, r, t]| [world(l, b), world(r, b), world(r, t), world(l, t)])
+            .collect::<Vec<_>>()
+    };
+    // The frame of every cell, then each match's cells joined line by line
+    // (cells of one line share their bottom).
+    let runs = |cells: &[(usize, [f64; 4])], visible: &str| -> Vec<[f64; 4]> {
+        let chars: Vec<Option<char>> = visible.chars().map(Some).collect();
+        let join = |a: [f64; 4], c: [f64; 4]| [a[0].min(c[0]), a[1].min(c[1]), a[2].max(c[2]), a[3].max(c[3])];
+        let frame = cells.iter().map(|(_, c)| *c).reduce(join);
+        let mut out: Vec<[f64; 4]> = frame.into_iter().collect();
+        for (start, end) in crate::app::text_match::find_ranges(&chars, pattern, opts) {
+            let mut line: Option<[f64; 4]> = None;
+            for (_, c) in cells.iter().filter(|(v, _)| (start..end).contains(v)) {
+                line = Some(match line {
+                    Some(a) if (a[1] - c[1]).abs() <= 1e-3 * (c[3] - c[1]).abs() => join(a, *c),
+                    Some(a) => {
+                        out.push(a);
+                        *c
+                    }
+                    None => *c,
+                });
+            }
+            out.extend(line);
+        }
+        out
+    };
+    let Some(entity) = doc.get_entity(key.target) else {
+        return Vec::new();
+    };
+    match (key.part, entity) {
+        (FindPart::Text, EntityType::Text(t)) if key.owner == key.target => {
+            let p = crate::entities::text::text_run_placement_at_scale(t, doc, 1.0);
+            let visible = resolve_dxf_special_chars(&t.value);
+            let h = p.height as f64;
+            let cells: Vec<(usize, [f64; 4])> =
+                text_char_cells(&p.font, &visible, p.height, p.width_factor)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(v, (l, r))| (v, [l as f64, 0.0, r as f64, h]))
+                    .collect();
+            to_quads(p.origin, p.rotation as f64, runs(&cells, &visible))
+        }
+        (FindPart::Text, EntityType::MText(m)) if key.owner == key.target => {
+            let cells: Vec<(usize, [f64; 4])> = crate::entities::mtext::glyph_boxes(m, doc)
+                .into_iter()
+                .map(|b| (b.vis, b.local.map(f64::from)))
+                .collect();
+            let flip = if crate::entities::text_support::resolve_text_style(&m.style, doc)
+                .is_upside_down
+            {
+                std::f64::consts::PI
+            } else {
+                0.0
+            };
+            to_quads(
+                [m.insertion_point.x, m.insertion_point.y],
+                m.rotation + flip,
+                runs(&cells, &mtext_visible_text(&m.value)),
+            )
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// A multiline text's characters in the order its layout counts them (a
+/// paragraph break, a tab and a stack's divider one each).
+fn mtext_visible_text(raw: &str) -> String {
+    use crate::entities::text_support::{adapt_mtext_paragraphs, MTextRunKind};
+    let mut out = String::new();
+    for (i, para) in adapt_mtext_paragraphs(raw, 1.0, false).iter().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        for run in &para.runs {
+            match &run.kind {
+                MTextRunKind::Glyphs(text) => out.push_str(text),
+                MTextRunKind::Tab => out.push('\t'),
+                MTextRunKind::Stack {
+                    numerator,
+                    denominator,
+                    ..
+                } => {
+                    out.push_str(numerator);
+                    if !denominator.is_empty() {
+                        out.push('/');
+                        out.push_str(denominator);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The highlight over a match, drawn over the drawing and never plotted:
+/// the text's frame outlined and the matched characters shaded.
+fn highlight(
+    quads: &[[[f64; 2]; 4]],
+) -> (Vec<crate::scene::WireModel>, Vec<crate::scene::HatchModel>) {
+    use crate::scene::convert::tessellate::split_ds_xyz;
+    use crate::scene::{WireGeom, WireModel};
+    let Some((frame, matched)) = quads.split_first() else {
+        return (Vec::new(), Vec::new());
+    };
+    let split = |corners: &[[f64; 2]; 4], order: &[usize]| {
+        order
+            .iter()
+            .map(|&k| split_ds_xyz(corners[k][0], corners[k][1], 0.0))
+            .unzip::<_, _, Vec<_>, Vec<_>>()
+    };
+    let (points, points_low) = split(frame, &[0, 1, 2, 3, 0]);
+    let shade = matched
+        .iter()
+        .map(|q| {
+            let origin = q[0];
+            let ring = q.iter().map(|p| [(p[0] - origin[0]) as f32, (p[1] - origin[1]) as f32]);
+            crate::scene::HatchModel {
+                entity: None,
+                effective_layer: None,
+                pattern_origin: None,
+                render_instance: None,
+                world_origin: origin,
+                boundary: std::sync::Arc::new(ring.collect()),
+                boundary_wcs: None,
+                fill_plane: None,
+                fill_plane_boundary: None,
+                boundary_exterior: None,
+                boundary_sources: None,
+                boundary_paths: None,
+                style: document::entities::HatchStyleType::Normal,
+                pattern: crate::scene::model::hatch_model::HatchPattern::Solid,
+                name: "FIND_MATCH".into(),
+                color: FIND_MATCH_FILL,
+                aci: 0,
+                line_weight_px: 1.0,
+                angle_offset: 0.0,
+                scale: 1.0,
+                draw_depth: 0.0,
+            }
+        })
+        .collect();
+    let wire = |name: &str, color: [f32; 4], geom: WireGeom| WireModel {
+        display_visible: true,
+        plot_visible: false,
+        name: name.into(),
+        color,
+        line_weight_px: 1.0,
+        aabb: WireModel::UNBOUNDED_AABB,
+        plinegen: true,
+        geom: std::sync::Arc::new(geom),
+        ..Default::default()
+    };
+    let frame = wire(
+        "__find_frame__",
+        FIND_FRAME,
+        WireGeom {
+            points,
+            points_low,
+            ..WireGeom::default()
+        },
+    );
+    (vec![frame], shade)
+}
+
+/// The shade over the matched characters and the outline of the text.
+const FIND_MATCH_FILL: [f32; 4] = [0.20, 0.47, 0.85, 0.45];
+const FIND_FRAME: [f32; 4] = [0.62, 0.66, 0.72, 1.0];
+
+/// A text as it reads: multiline text, a multileader's text, a dimension's
+/// override and a table cell carry formatting codes, shown without them.
+fn shown_text(doc: &document::Document, target: Handle, part: FindPart, value: &str) -> String {
+    let formatted = matches!(
+        (part, doc.get_entity(target)),
+        (FindPart::Text, Some(EntityType::MText(_) | EntityType::MultiLeader(_) | EntityType::Dimension(_)))
+            | (FindPart::Cell(..), Some(EntityType::Table(_)))
+    );
+    if formatted {
+        document::entities::mtext_format::parse_mtext(value, true).to_plain_text()
+    } else {
+        value.to_string()
+    }
 }
 
 /// A text on one line, shortened, for the result list.

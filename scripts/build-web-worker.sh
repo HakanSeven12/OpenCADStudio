@@ -12,4 +12,4 @@ wasm-bindgen \
   --target web \
   --out-dir "$worker_out" \
   --out-name ocs_web_worker \
-  target/wasm32-unknown-unknown/release/ocs_web_worker.wasm
+  "${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/release/ocs_web_worker.wasm"

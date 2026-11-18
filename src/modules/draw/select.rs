@@ -265,6 +265,12 @@ impl CadCommand for SelectObjectsCommand {
         self.pick.is_none()
     }
 
+    /// Fence and polygon points are the bare cursor: object snap would pull
+    /// them onto the objects being selected.
+    fn wants_raw_point(&self) -> bool {
+        self.pick.is_some()
+    }
+
     fn selection_path(&self) -> Option<crate::command::SelectionPath> {
         self.pick
             .as_ref()

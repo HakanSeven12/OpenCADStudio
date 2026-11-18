@@ -2173,6 +2173,19 @@ enum TrimMode {
     ChooseMode,
 }
 
+impl TrimMode {
+    /// A fence or crossing-box point: the bare cursor, no object snap.
+    fn picks_selection_path(&self) -> bool {
+        matches!(
+            self,
+            TrimMode::Fence(_)
+                | TrimMode::QuickFence(_)
+                | TrimMode::CrossFirst
+                | TrimMode::CrossSecond(_)
+        )
+    }
+}
+
 /// Quick mode: an empty click in Pick starts a two-point fence, so the next
 /// click trims or extends everything the dashed line crosses. Standard mode
 /// keeps the crossing box.
@@ -4726,6 +4739,10 @@ impl CadCommand for TrimCommand {
         )
     }
 
+    fn wants_raw_point(&self) -> bool {
+        self.mode.picks_selection_path()
+    }
+
     fn entity_pick_includes_fills(&self) -> bool {
         matches!(self.mode, TrimMode::Pick)
     }
@@ -5671,6 +5688,10 @@ impl CadCommand for ExtendCommand {
 
     fn needs_entity_pick(&self) -> bool {
         matches!(self.mode, TrimMode::Pick | TrimMode::SelectEdges)
+    }
+
+    fn wants_raw_point(&self) -> bool {
+        self.mode.picks_selection_path()
     }
 
     fn on_entity_pick(&mut self, handle: Handle, pt: DVec3) -> CmdResult {

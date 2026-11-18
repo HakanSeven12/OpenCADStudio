@@ -813,7 +813,7 @@ fn notice_lines<'a>(title: String, detail: Option<String>) -> Element<'a, Messag
         .into()
 }
 
-fn name_notice_lines<'a>(notice: &NameNotice) -> Element<'a, Message> {
+pub(crate) fn name_notice_lines<'a>(notice: &NameNotice) -> Element<'a, Message> {
     let (title, detail) = match notice {
         NameNotice::Empty => (crate::tr!("text-style", "name-empty"), None),
         NameNotice::Exists(name) => (

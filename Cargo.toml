@@ -478,3 +478,8 @@ harness = false
 name = "integration"
 path = "tests/integration.rs"
 
+
+# A DXF file lists its table styles and tables in the recompose record, so a
+# reader keeps every cell style. Drop when the document pin includes it.
+[patch."https://github.com/hakanaktt/acadrust.git"]
+acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "4e6ef812" }

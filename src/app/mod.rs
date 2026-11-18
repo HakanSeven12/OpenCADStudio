@@ -2199,17 +2199,20 @@ pub(super) struct OpenCADStudio {
     /// The cell style being edited ("_DATA", "_HEADER", "_TITLE" or a
     /// user cell style).
     ts_cell: String,
-    /// Text buffers of the edited cell style: name (new / rename), text
-    /// height, text angle, margins and format.
-    ts_cell_name: String,
+    /// Text buffers of the edited cell style: text height, text angle and
+    /// margins.
     ts_cell_height: String,
     ts_cell_angle: String,
     ts_cell_hmargin: String,
     ts_cell_vmargin: String,
-    ts_cell_format: String,
-    /// Double-line spacing buffers of its six edges (top, inside
-    /// horizontal, bottom, left, inside vertical, right).
-    ts_edge_spacing: [String; 6],
+    /// The Borders page's line properties and the cards over the window
+    /// (New / Manage cell styles, Select Linetype, Load).
+    ts_border: crate::ui::style::tablestyle::BorderDraft,
+    ts_cards: crate::ui::style::tablestyle::TsCards,
+    /// The Cell Data Format window / Text Style manager is open from the
+    /// table style window and returns to it.
+    ts_format_return: bool,
+    ts_text_return: bool,
     /// Colour field ("textcolor" / "fillcolor") whose expanded palette is
     /// open.
     ts_color_open: Option<&'static str>,
@@ -5996,24 +5999,13 @@ pub enum Message {
     TableStyleApply,
     /// Edit the named cell style.
     TableStyleCellSelect(String),
-    /// Add a cell style (named by the name buffer) copying the edited one.
-    TableStyleCellNew,
-    /// Rename the edited user cell style to the name buffer.
-    TableStyleCellRename,
-    /// Delete the edited user cell style.
-    TableStyleCellDelete,
-    /// A field of the edited cell style: a text buffer ("name", "height",
-    /// "angle", "hmargin", "vmargin", "format") or a choice ("align",
-    /// "class", "datatype", "textstyle", "textcolor", "fillcolor",
-    /// "merge").
+    /// The cell style cards (New / Manage), the Borders page's line
+    /// properties and buttons, and the Format / Text style "…" windows.
+    TableStyleCells(crate::ui::style::tablestyle::TsCellMsg),
+    /// A field of the edited cell style: a text buffer ("height", "angle",
+    /// "hmargin", "vmargin") or a choice ("align", "class", "textstyle",
+    /// "textcolor", "fillcolor", "merge").
     TableStyleCellEdit {
-        field: &'static str,
-        value: String,
-    },
-    /// A field ("visible", "lw", "linetype", "color", "double",
-    /// "spacing") of one edge of the edited cell style.
-    TableStyleEdgeEdit {
-        edge: u8,
         field: &'static str,
         value: String,
     },
@@ -7052,13 +7044,14 @@ impl OpenCADStudio {
             tablestyle_compare: String::new(),
             ts_description: String::new(),
             ts_cell: document::objects::DATA_CELL_STYLE.to_string(),
-            ts_cell_name: String::new(),
             ts_cell_height: String::new(),
             ts_cell_angle: String::new(),
             ts_cell_hmargin: String::new(),
             ts_cell_vmargin: String::new(),
-            ts_cell_format: String::new(),
-            ts_edge_spacing: Default::default(),
+            ts_border: Default::default(),
+            ts_cards: Default::default(),
+            ts_format_return: false,
+            ts_text_return: false,
             ts_color_open: None,
             // MLineStyle dialog
             linetype_selected: String::new(),

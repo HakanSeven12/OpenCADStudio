@@ -149,6 +149,11 @@ impl OpenCADStudio {
         });
         let description = style.description.clone();
         let margins = (style.horizontal_margin, style.vertical_margin);
+        let data_height = style
+            .cell_style(document::objects::DATA_CELL_STYLE)
+            .map_or(style.data_row_style.text_height, |cell| {
+                cell.cell_style.content_format.text_height
+            });
         let cell = style
             .cell_style(&wanted)
             .or_else(|| style.cell_style(document::objects::DATA_CELL_STYLE))
@@ -159,20 +164,16 @@ impl OpenCADStudio {
         };
         let data = &cell.cell_style;
         let format = &data.content_format;
+        use crate::ui::style::mleaderstyle::trim_number;
         self.ts_cell = cell.name.clone();
-        self.ts_cell_name.clear();
-        self.ts_cell_height = crate::entities::common::format_length(format.text_height);
-        self.ts_cell_angle = crate::entities::common::format_length(format.rotation.to_degrees());
+        self.ts_cell_height = trim_number(format.text_height);
+        self.ts_cell_angle = trim_number(format.rotation.to_degrees());
         let (horizontal, vertical) = data.margins().unwrap_or(margins);
-        self.ts_cell_hmargin = crate::entities::common::format_length(horizontal);
-        self.ts_cell_vmargin = crate::entities::common::format_length(vertical);
-        self.ts_cell_format = format.value_format_string.clone();
-        for (slot, edge) in document::objects::TABLE_GRID_EDGES.iter().enumerate() {
-            let spacing = data.grid(*edge).map_or(0.25 * format.text_height, |grid| {
-                grid.border.double_line_spacing
-            });
-            self.ts_edge_spacing[slot] = crate::entities::common::format_length(spacing);
-        }
+        self.ts_cell_hmargin = trim_number(horizontal);
+        self.ts_cell_vmargin = trim_number(vertical);
+        // The Borders page's line properties start over on every cell style,
+        // their spacing a quarter of the data text height.
+        self.ts_border = crate::ui::style::tablestyle::BorderDraft::new(0.25 * data_height);
     }
 
     /// Edits the cell style the table style editor shows, then refreshes
@@ -188,6 +189,43 @@ impl OpenCADStudio {
                 edit(cell);
             }
             style.sync_rows_from_cell_styles();
+        }
+        self.drop_table_style_pictures(i);
+    }
+
+    /// The tables of the selected table style no longer look as their
+    /// stored pictures: they are drawn from their cells and the pictures
+    /// made again. The window's transaction keeps them as they were.
+    pub(in crate::app) fn drop_table_style_pictures(&mut self, tab: usize) {
+        use document::objects::ObjectType;
+        let doc = &self.tabs[tab].scene.document;
+        let Some(style) = doc.objects.iter().find_map(|(handle, object)| match object {
+            ObjectType::TableStyle(style) if style.name == self.tablestyle_selected => {
+                Some(*handle)
+            }
+            _ => None,
+        }) else {
+            return;
+        };
+        let tables: Vec<document::Handle> = doc
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Table(table)
+                    if table.table_style_handle == Some(style)
+                        && table.block_record_handle.is_some() =>
+                {
+                    Some(table.common.handle)
+                }
+                _ => None,
+            })
+            .collect();
+        for handle in tables {
+            self.style_stage_keep_entity(tab, handle);
+            if let Some(document::EntityType::Table(table)) =
+                self.tabs[tab].scene.document.get_entity_mut(handle)
+            {
+                table.block_record_handle = None;
+            }
         }
     }
 
@@ -632,67 +670,8 @@ impl OpenCADStudio {
         Task::none()
     }
 
-    pub(super) fn on_table_cell_style_new(&mut self) -> Task<Message> {
-        let i = self.active_tab;
-        let source = self.ts_cell.clone();
-        let typed = self.ts_cell_name.trim().to_string();
-        let Some(style) = self.tablestyle_mut(i) else {
-            return Task::none();
-        };
-        let name = if typed.is_empty() {
-            style.unique_cell_style_name(crate::t!("Cell style").as_ref())
-        } else {
-            typed
-        };
-        if style.create_cell_style(&name, Some(&source)).is_none() {
-            self.command_line
-                .push_error(crate::t!("A cell style with this name already exists.").as_ref());
-            return Task::none();
-        }
-        self.ts_cell = name;
-        self.load_tablestyle_bufs(i);
-        Task::none()
-    }
-
-    pub(super) fn on_table_cell_style_rename(&mut self) -> Task<Message> {
-        let i = self.active_tab;
-        let name = self.ts_cell.clone();
-        let new_name = self.ts_cell_name.trim().to_string();
-        let Some(style) = self.tablestyle_mut(i) else {
-            return Task::none();
-        };
-        if style.rename_cell_style(&name, &new_name) {
-            style.sync_rows_from_cell_styles();
-            self.ts_cell = new_name;
-            self.load_tablestyle_bufs(i);
-        } else if !new_name.is_empty() && !document::objects::is_row_cell_style(&name) {
-            self.command_line
-                .push_error(crate::t!("A cell style with this name already exists.").as_ref());
-        }
-        Task::none()
-    }
-
-    pub(super) fn on_table_cell_style_delete(&mut self) -> Task<Message> {
-        let i = self.active_tab;
-        let name = self.ts_cell.clone();
-        // A cell style tables of the style still use stays.
-        if self.table_cell_style_in_use(i, &name) {
-            self.command_line
-                .push_error(crate::t!("The cell style is in use and cannot be deleted.").as_ref());
-            return Task::none();
-        }
-        if let Some(style) = self.tablestyle_mut(i) {
-            if style.delete_cell_style(&name) {
-                style.sync_rows_from_cell_styles();
-                self.ts_cell = document::objects::DATA_CELL_STYLE.to_string();
-                self.load_tablestyle_bufs(i);
-            }
-        }
-        Task::none()
-    }
-
     /// Whether a table of the selected style uses the named cell style.
-    fn table_cell_style_in_use(&self, tab: usize, name: &str) -> bool {
+    pub(super) fn table_cell_style_in_use(&self, tab: usize, name: &str) -> bool {
         use document::objects::ObjectType;
         let document = &self.tabs[tab].scene.document;
         let found = document
@@ -736,7 +715,6 @@ impl OpenCADStudio {
     ) -> Task<Message> {
         let number = || value.trim().parse::<f64>().ok().filter(|v| v.is_finite());
         match field {
-            "name" => self.ts_cell_name = value,
             "height" => {
                 if let Some(height) = number().filter(|h| *h > 0.0) {
                     self.edit_table_cell_style(|cell| {
@@ -746,9 +724,11 @@ impl OpenCADStudio {
                 self.ts_cell_height = value;
             }
             "angle" => {
+                // Kept within a turn: 400 reads as 40.
                 if let Some(angle) = number() {
                     self.edit_table_cell_style(|cell| {
-                        cell.cell_style.content_format.rotation = angle.to_radians();
+                        cell.cell_style.content_format.rotation =
+                            angle.rem_euclid(360.0).to_radians();
                     });
                 }
                 self.ts_cell_angle = value;
@@ -766,13 +746,6 @@ impl OpenCADStudio {
                         self.edit_table_cell_style(|cell| cell.cell_style.set_margins(h, v));
                     }
                 }
-            }
-            "format" => {
-                let format = value.clone();
-                self.edit_table_cell_style(|cell| {
-                    cell.cell_style.content_format.value_format_string = format;
-                });
-                self.ts_cell_format = value;
             }
             "align" => {
                 if let Ok(align) = value.parse::<i32>() {
@@ -805,12 +778,8 @@ impl OpenCADStudio {
                 }
             }
             "textcolor" | "fillcolor" => {
-                let color = match value.trim().parse::<i16>() {
-                    Ok(0) => document::types::Color::ByBlock,
-                    Ok(256) => document::types::Color::ByLayer,
-                    Ok(257) => document::types::Color::None,
-                    Ok(index @ 1..=255) => document::types::Color::Index(index as u8),
-                    _ => return Task::none(),
+                let Some(color) = crate::ui::style::tablestyle::parse_color_code(&value) else {
+                    return Task::none();
                 };
                 self.edit_table_cell_style(|cell| {
                     if field == "textcolor" {
@@ -823,76 +792,6 @@ impl OpenCADStudio {
             "merge" => {
                 let on = value == "1";
                 self.edit_table_cell_style(|cell| cell.cell_style.set_merge_all(on));
-            }
-            _ => {}
-        }
-        Task::none()
-    }
-
-    pub(super) fn on_table_cell_edge_edit(
-        &mut self,
-        edge: u8,
-        field: &'static str,
-        value: String,
-    ) -> Task<Message> {
-        use document::objects::TableBorderType;
-        let Some(mask) = document::objects::TABLE_GRID_EDGES
-            .get(edge as usize)
-            .copied()
-        else {
-            return Task::none();
-        };
-        match field {
-            "visible" => {
-                let hidden = value != "1";
-                self.edit_table_cell_style(|cell| cell.cell_style.set_edge_hidden(mask, hidden));
-            }
-            "lw" => {
-                if let Ok(weight) = value.parse::<i16>() {
-                    self.edit_table_cell_style(|cell| {
-                        cell.cell_style.grid_mut(mask).border.line_weight =
-                            document::types::LineWeight::from_value(weight);
-                    });
-                }
-            }
-            "linetype" => {
-                let handle = u64::from_str_radix(value.trim(), 16)
-                    .map(document::Handle::new)
-                    .unwrap_or(document::Handle::NULL);
-                self.edit_table_cell_style(|cell| {
-                    cell.cell_style.grid_mut(mask).line_type = handle
-                });
-            }
-            "color" => {
-                let color = match value.trim().parse::<i16>() {
-                    Ok(0) => document::types::Color::ByBlock,
-                    Ok(256) => document::types::Color::ByLayer,
-                    Ok(index @ 1..=255) => document::types::Color::Index(index as u8),
-                    _ => return Task::none(),
-                };
-                self.edit_table_cell_style(|cell| {
-                    cell.cell_style.grid_mut(mask).border.color = color
-                });
-            }
-            "double" => {
-                let double = value == "1";
-                self.edit_table_cell_style(|cell| {
-                    cell.cell_style.grid_mut(mask).border.border_type = if double {
-                        TableBorderType::Double
-                    } else {
-                        TableBorderType::Single
-                    };
-                });
-            }
-            "spacing" => {
-                if let Some(spacing) = value.trim().parse::<f64>().ok().filter(|v| *v > 0.0) {
-                    self.edit_table_cell_style(|cell| {
-                        cell.cell_style.grid_mut(mask).border.double_line_spacing = spacing;
-                    });
-                }
-                if let Some(slot) = self.ts_edge_spacing.get_mut(edge as usize) {
-                    *slot = value;
-                }
             }
             _ => {}
         }
@@ -1100,9 +999,13 @@ impl OpenCADStudio {
             Some(crate::app::ColorPickTarget::MLeader(f)) => {
                 Some(Message::MLeaderStyleEdit { field: f, value: s })
             }
-            Some(crate::app::ColorPickTarget::Table(f)) => {
-                Some(Message::TableStyleCellEdit { field: f, value: s })
-            }
+            Some(crate::app::ColorPickTarget::Table("edgecolor")) => Some(
+                Message::TableStyleCells(crate::ui::style::tablestyle::TsCellMsg::BorderColor(color)),
+            ),
+            Some(crate::app::ColorPickTarget::Table(f)) => Some(Message::TableStyleCellEdit {
+                field: f,
+                value: crate::ui::style::tablestyle::color_code(color),
+            }),
             Some(crate::app::ColorPickTarget::Properties) => {
                 return self.set_property_color(color, name);
             }

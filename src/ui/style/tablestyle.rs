@@ -5,10 +5,11 @@
 //! header, data or a user cell style): its properties, text and edges.
 
 use crate::app::Message;
-use crate::t;
 use crate::ui::style::common::muted_style;
+use crate::ui::style::textstyle::NameNotice;
+use crate::{t, tr};
 use document::objects::{NamedTableCellStyle, TableCellStyleData, TableStyle, TABLE_GRID_EDGES};
-use iced::widget::{button, canvas, checkbox, column, pick_list, row, text, text_input, Column};
+use iced::widget::{button, canvas, checkbox, column, pick_list, row, text, text_input, Column, Space};
 use iced::{mouse, Color, Element, Length, Point, Rectangle, Size, Theme};
 use std::borrow::Cow;
 use std::fmt;
@@ -77,15 +78,18 @@ pub struct TableStyleView<'a> {
     pub description: &'a str,
     /// The edited cell style and its text buffers.
     pub cell: &'a str,
-    pub cell_name: &'a str,
     pub cell_height: &'a str,
     pub cell_angle: &'a str,
     pub cell_hmargin: &'a str,
     pub cell_vmargin: &'a str,
-    pub cell_format: &'a str,
-    pub edge_spacing: &'a [String; 6],
     pub text_styles: Vec<(String, document::Handle)>,
     pub linetypes: Vec<(String, document::Handle)>,
+    /// The Borders page's line properties.
+    pub border: &'a BorderDraft,
+    pub cards: &'a TsCards,
+    /// Select Linetype rows and the drawing's linetype names (Load).
+    pub linetype_rows: Vec<crate::ui::style::mleaderstyle::LinetypeRow>,
+    pub linetype_names: Vec<String>,
     /// The style's starting table.
     pub template: Option<&'a document::entities::Table>,
     pub rename_active: Option<&'a str>,
@@ -94,7 +98,7 @@ pub struct TableStyleView<'a> {
 }
 
 /// The name a cell style shows: the three row styles by their role.
-fn cell_style_label(name: &str) -> Cow<'static, str> {
+pub fn cell_style_label(name: &str) -> Cow<'static, str> {
     match name {
         document::objects::TITLE_CELL_STYLE => t!("Title"),
         document::objects::HEADER_CELL_STYLE => t!("Header"),
@@ -102,20 +106,6 @@ fn cell_style_label(name: &str) -> Cow<'static, str> {
         other => Cow::Owned(other.to_string()),
     }
 }
-
-/// Data types a cell style formats its values as: (data type, unit type).
-const DATA_TYPES: [(&str, &str); 10] = [
-    ("512/0", "General"),
-    ("4/0", "Text"),
-    ("1/0", "Whole number"),
-    ("2/0", "Real number"),
-    ("2/1", "Distance"),
-    ("2/2", "Angle"),
-    ("2/4", "Area"),
-    ("2/8", "Volume"),
-    ("8/0", "Date"),
-    ("32/0", "Point"),
-];
 
 const ALIGNMENTS: [(&str, &str); 9] = [
     ("1", "Top left"),
@@ -145,32 +135,34 @@ fn line_weight_choices() -> Vec<EnumChoice> {
     list
 }
 
-fn edge_color_code(color: &document::types::Color) -> String {
-    use document::types::Color as C;
+/// A colour as a cell style field value: an ACI number (0 ByBlock, 256
+/// ByLayer, 257 None) or `r,g,b` for a true colour.
+pub fn color_code(color: document::types::Color) -> String {
     match color {
-        C::ByBlock => "0".into(),
-        C::ByLayer => "256".into(),
-        C::Index(index) => index.to_string(),
-        other => other
-            .index()
-            .map_or_else(|| "0".into(), |index| index.to_string()),
+        document::types::Color::Rgb { r, g, b } => format!("{r},{g},{b}"),
+        other => crate::ui::color_select::color_to_aci_string(other),
     }
 }
 
-fn edge_color_choices() -> Vec<EnumChoice> {
-    let mut list = vec![choice("0", t!("ByBlock")), choice("256", t!("ByLayer"))];
-    for (index, name) in [
-        (1, "Red"),
-        (2, "Yellow"),
-        (3, "Green"),
-        (4, "Cyan"),
-        (5, "Blue"),
-        (6, "Magenta"),
-        (7, "White"),
-    ] {
-        list.push(choice(index.to_string(), crate::i18n::translate(name)));
+/// Reads [`color_code`].
+pub fn parse_color_code(value: &str) -> Option<document::types::Color> {
+    use document::types::Color as C;
+    let value = value.trim();
+    if let Some((r, rest)) = value.split_once(',') {
+        let (g, b) = rest.split_once(',')?;
+        return Some(C::Rgb {
+            r: r.trim().parse().ok()?,
+            g: g.trim().parse().ok()?,
+            b: b.trim().parse().ok()?,
+        });
     }
-    list
+    match value.parse::<i16>().ok()? {
+        0 => Some(C::ByBlock),
+        256 => Some(C::ByLayer),
+        257 => Some(C::None),
+        index @ 1..=255 => Some(C::Index(index as u8)),
+        _ => None,
+    }
 }
 
 // ── Preview ────────────────────────────────────────────────────────────────
@@ -614,7 +606,7 @@ fn cell_color<'a>(
     none: bool,
 ) -> Element<'a, Message> {
     let current = *color;
-    crate::ui::color_select::color_selector(
+    let selector = crate::ui::color_select::color_selector(
         current,
         v.color_open == Some(field),
         crate::ui::color_select::ColorExtras {
@@ -629,53 +621,54 @@ fn cell_color<'a>(
         },
         Message::TableColorMore(field),
         Message::OpenColorWindow(crate::app::ColorPickTarget::Table(field), current),
-    )
+    );
+    iced::widget::container(selector).width(170).into()
 }
 
-/// The cell style picker with its new / rename / delete actions.
+/// List codes of the two actions the cell style list ends with.
+const CREATE_CODE: &str = "\u{1}create";
+const MANAGE_CODE: &str = "\u{1}manage";
+
+fn cells(message: TsCellMsg) -> Message {
+    Message::TableStyleCells(message)
+}
+
+/// The style's cell styles in list order: by their shown name.
+pub fn sorted_cell_styles(style: &TableStyle) -> Vec<&NamedTableCellStyle> {
+    let mut list: Vec<&NamedTableCellStyle> = style.cell_styles().collect();
+    list.sort_by_key(|cell| cell_style_label(&cell.name).to_lowercase());
+    list
+}
+
+/// The cell style list, ending with Create / Manage, and their buttons.
 fn cell_style_bar<'a>(v: &TableStyleView<'a>, style: &TableStyle) -> Element<'a, Message> {
-    let options: Vec<EnumChoice> = style
-        .cell_styles()
+    let mut options: Vec<EnumChoice> = sorted_cell_styles(style)
+        .into_iter()
         .map(|cell| choice(cell.name.clone(), cell_style_label(&cell.name)))
         .collect();
-    let builtin = document::objects::is_row_cell_style(v.cell);
-    let mut rename = button(text(t!("Rename")).size(11)).padding([3, 8]);
-    let mut delete = button(text(t!("Delete")).size(11)).padding([3, 8]);
-    if !builtin {
-        delete = delete.on_press(Message::TableStyleCellDelete);
-        if !v.cell_name.trim().is_empty() {
-            rename = rename.on_press(Message::TableStyleCellRename);
-        }
-    }
-    column![
-        row![
-            text(t!("Cell style"))
-                .size(11)
-                .style(primary_style)
-                .width(140),
-            choice_list(v.cell, options, 170.0, 11, Message::TableStyleCellSelect),
-        ]
-        .spacing(8)
-        .align_y(iced::Center),
-        row![
-            text_input(t!("New name").as_ref(), v.cell_name)
-                .on_input(|value| Message::TableStyleCellEdit {
-                    field: "name",
-                    value
-                })
-                .style(crate::ui::style::form::field_style)
-                .size(11)
-                .width(140),
-            button(text(t!("New from this")).size(11))
-                .on_press(Message::TableStyleCellNew)
-                .padding([3, 8]),
-            rename,
-            delete,
-        ]
-        .spacing(6)
-        .align_y(iced::Center),
+    options.push(choice(CREATE_CODE, Cow::Owned(tr!("table-style-cells", "create-entry"))));
+    options.push(choice(MANAGE_CODE, Cow::Owned(tr!("table-style-cells", "manage-entry"))));
+    row![
+        text(t!("Cell style"))
+            .size(11)
+            .style(primary_style)
+            .width(140),
+        choice_list(v.cell, options, 190.0, 11, |code| match code.as_str() {
+            CREATE_CODE => cells(TsCellMsg::CreateOpen),
+            MANAGE_CODE => cells(TsCellMsg::ManageOpen),
+            _ => Message::TableStyleCellSelect(code),
+        }),
+        button(text(tr!("table-style-cells", "new-button")).size(11))
+            .on_press(cells(TsCellMsg::CreateOpen))
+            .style(button::secondary)
+            .padding([3, 8]),
+        button(text(tr!("table-style-cells", "manage-button")).size(11))
+            .on_press(cells(TsCellMsg::ManageOpen))
+            .style(button::secondary)
+            .padding([3, 8]),
     ]
     .spacing(6)
+    .align_y(iced::Center)
     .into()
 }
 
@@ -685,10 +678,20 @@ fn primary_style(theme: &Theme) -> iced::widget::text::Style {
     }
 }
 
+/// A small "…" button beside a field.
+fn more_button<'a>(on_press: Message) -> Element<'a, Message> {
+    button(text("…").size(11))
+        .on_press(on_press)
+        .style(button::secondary)
+        .padding([3, 8])
+        .into()
+}
+
 fn properties_page<'a>(v: &TableStyleView<'a>, cell: &NamedTableCellStyle) -> Column<'a, Message> {
     let data = &cell.cell_style;
     let format = &data.content_format;
-    let data_type = format!("{}/{}", format.value_data_type, format.value_unit_type);
+    let category =
+        crate::entities::table::cell_data_category(format.value_data_type, format.value_unit_type);
     column![
         field_row(
             t!("Fill color"),
@@ -708,17 +711,14 @@ fn properties_page<'a>(v: &TableStyleView<'a>, cell: &NamedTableCellStyle) -> Co
             )
         ),
         field_row(
-            t!("Data type"),
-            choice_list(&data_type, translated(&DATA_TYPES), 170.0, 11, |value| {
-                Message::TableStyleCellEdit {
-                    field: "datatype",
-                    value,
-                }
-            })
-        ),
-        field_row(
             t!("Format"),
-            cell_input("format", v.cell_format, "%lu2%pr3")
+            row![
+                text(crate::t!(category).to_string()).size(11).width(140),
+                more_button(cells(TsCellMsg::FormatOpen)),
+            ]
+            .spacing(6)
+            .align_y(iced::Center)
+            .into()
         ),
         field_row(
             t!("Type"),
@@ -761,16 +761,22 @@ fn text_page<'a>(v: &TableStyleView<'a>, cell: &NamedTableCellStyle) -> Column<'
     column![
         field_row(
             t!("Text style"),
-            choice_list(
-                &format!("{:X}", format.text_style.value()),
-                styles,
-                170.0,
-                11,
-                |value| Message::TableStyleCellEdit {
-                    field: "textstyle",
-                    value
-                }
-            )
+            row![
+                choice_list(
+                    &format!("{:X}", format.text_style.value()),
+                    styles,
+                    140.0,
+                    11,
+                    |value| Message::TableStyleCellEdit {
+                        field: "textstyle",
+                        value
+                    }
+                ),
+                more_button(cells(TsCellMsg::TextStyles)),
+            ]
+            .spacing(6)
+            .align_y(iced::Center)
+            .into()
         ),
         field_row(
             t!("Text height"),
@@ -785,8 +791,38 @@ fn text_page<'a>(v: &TableStyleView<'a>, cell: &NamedTableCellStyle) -> Column<'
     .spacing(8)
 }
 
-fn borders_page<'a>(v: &TableStyleView<'a>, cell: &NamedTableCellStyle) -> Column<'a, Message> {
-    let data = &cell.cell_style;
+/// The edges each border button applies the line properties to (top 1,
+/// inside horizontal 2, bottom 4, left 8, inside vertical 16, right 32),
+/// in button order; the last one hides every edge.
+pub const BORDER_BUTTONS: [(&str, i32); 8] = [
+    ("all", 63),
+    ("outside", 1 | 4 | 8 | 32),
+    ("inside", 2 | 16),
+    ("bottom", 4 | 2),
+    ("left", 8 | 16),
+    ("top", 1 | 2),
+    ("right", 32 | 16),
+    ("none", 63),
+];
+
+fn border_label(index: usize) -> String {
+    match index {
+        0 => tr!("table-cells", "all"),
+        1 => tr!("table-cells", "outside"),
+        2 => tr!("table-cells", "inside"),
+        3 => tr!("table-cells", "bottom"),
+        4 => tr!("table-cells", "left"),
+        5 => tr!("table-cells", "top"),
+        6 => tr!("table-cells", "right"),
+        _ => tr!("table-cells", "none"),
+    }
+}
+
+/// The linetype list's code that opens Select Linetype.
+pub const OTHER_LINETYPE: &str = "other";
+
+fn borders_page<'a>(v: &TableStyleView<'a>) -> Column<'a, Message> {
+    let border = v.border;
     let mut linetypes = vec![choice("0", t!("ByBlock"))];
     linetypes.extend(
         v.linetypes
@@ -796,86 +832,455 @@ fn borders_page<'a>(v: &TableStyleView<'a>, cell: &NamedTableCellStyle) -> Colum
                 choice(format!("{:X}", handle.value()), Cow::Owned(name.clone()))
             }),
     );
-    let names = [
-        t!("Top"),
-        t!("Inside horizontal"),
-        t!("Bottom"),
-        t!("Left"),
-        t!("Inside vertical"),
-        t!("Right"),
-    ];
-    let mut page = Column::new().spacing(6).push(
-        row![
-            text(t!("Edge")).size(10).style(muted_style).width(118),
-            text(t!("Lineweight")).size(10).style(muted_style).width(82),
-            text(t!("Linetype")).size(10).style(muted_style).width(92),
-            text(t!("Color")).size(10).style(muted_style).width(78),
-            text(t!("Double")).size(10).style(muted_style).width(56),
-            text(t!("Spacing")).size(10).style(muted_style).width(60),
-        ]
-        .spacing(5),
+    linetypes.push(choice(
+        OTHER_LINETYPE,
+        Cow::Owned(tr!("table-style-cells", "other-linetype")),
+    ));
+    let color = border.color;
+    let color_field = crate::ui::color_select::color_selector(
+        color,
+        v.color_open == Some("edgecolor"),
+        crate::ui::color_select::ColorExtras {
+            by_layer: true,
+            by_block: true,
+            standard_only: true,
+            ..Default::default()
+        },
+        |color| cells(TsCellMsg::BorderColor(color)),
+        Message::TableColorMore("edgecolor"),
+        Message::OpenColorWindow(crate::app::ColorPickTarget::Table("edgecolor"), color),
     );
-    for (slot, name) in names.into_iter().enumerate() {
-        let edge = slot as u8;
-        let mask = TABLE_GRID_EDGES[slot];
-        let grid = data.grid(mask);
-        let weight = grid.map_or(-2, |grid| grid.border.line_weight.value());
-        let linetype = grid.map_or(0, |grid| grid.line_type.value());
-        let color = grid.map_or_else(
-            || "0".to_string(),
-            |grid| edge_color_code(&grid.border.color),
-        );
-        let double = grid.is_some_and(|grid| {
-            grid.border.border_type == document::objects::TableBorderType::Double
-        });
-        let edit = move |field: &'static str| {
-            move |value: String| Message::TableStyleEdgeEdit { edge, field, value }
-        };
-        page = page.push(
-            row![
-                checkbox(!data.edge_hidden(mask))
-                    .label(name)
-                    .on_toggle(move |on| Message::TableStyleEdgeEdit {
-                        edge,
-                        field: "visible",
-                        value: if on { "1" } else { "0" }.to_string(),
-                    })
-                    .size(13)
-                    .text_size(10)
-                    .width(118),
-                choice_list(
-                    &weight.to_string(),
-                    line_weight_choices(),
-                    82.0,
-                    10,
-                    edit("lw")
-                ),
-                choice_list(
-                    &format!("{linetype:X}"),
-                    linetypes.clone(),
-                    92.0,
-                    10,
-                    edit("linetype")
-                ),
-                choice_list(&color, edge_color_choices(), 78.0, 10, edit("color")),
-                checkbox(double)
-                    .on_toggle(move |on| Message::TableStyleEdgeEdit {
-                        edge,
-                        field: "double",
-                        value: if on { "1" } else { "0" }.to_string(),
-                    })
-                    .size(13)
-                    .width(56),
-                text_input("", &v.edge_spacing[slot])
-                    .on_input(edit("spacing"))
-                    .size(10)
-                    .width(60),
-            ]
-            .spacing(5)
-            .align_y(iced::Center),
-        );
+    let mut spacing = text_input("", &border.spacing)
+        .style(crate::ui::style::form::field_style)
+        .size(11)
+        .width(170);
+    if border.double {
+        spacing = spacing.on_input(|value| cells(TsCellMsg::BorderSpacing(value)));
     }
-    page
+    let apply = |index: usize| -> Element<'a, Message> {
+        button(
+            text(border_label(index))
+                .size(11)
+                .width(Length::Fill)
+                .align_x(iced::Center),
+        )
+        .on_press(cells(TsCellMsg::BorderApply(index as u8)))
+        .style(crate::ui::style::form::button_style(false))
+        .padding([5, 6])
+        .width(Length::Fill)
+        .into()
+    };
+    column![
+        field_row(
+            tr!("table-cells", "lineweight").into(),
+            choice_list(
+                &border.line_weight.to_string(),
+                line_weight_choices(),
+                170.0,
+                11,
+                |value| cells(TsCellMsg::BorderLineweight(value))
+            )
+        ),
+        field_row(
+            tr!("table-cells", "linetype").into(),
+            choice_list(&border.linetype, linetypes, 170.0, 11, |value| cells(
+                TsCellMsg::BorderLinetype(value)
+            ))
+        ),
+        field_row(
+            tr!("table-cells", "color").into(),
+            iced::widget::container(color_field).width(170).into()
+        ),
+        checkbox(border.double)
+            .label(tr!("table-cells", "double"))
+            .on_toggle(|on| cells(TsCellMsg::BorderDouble(on)))
+            .size(14)
+            .text_size(11),
+        field_row(tr!("table-cells", "spacing").into(), spacing.into()),
+        column![
+            row![apply(0), apply(1), apply(2), apply(3)].spacing(4),
+            row![apply(4), apply(5), apply(6), apply(7)].spacing(4),
+        ]
+        .spacing(4),
+        text(tr!("table-style-cells", "borders-hint"))
+            .size(11)
+            .style(muted_style),
+    ]
+    .spacing(8)
+}
+
+// ── Cell style cards ───────────────────────────────────────────────────────
+
+/// New Cell Style: the name being typed and the cell style it copies.
+#[derive(Debug, Clone)]
+pub struct CreateCell {
+    pub name: String,
+    pub start: String,
+    pub notice: Option<NameNotice>,
+    /// Opened from Manage Cell Styles, which it returns to.
+    pub from_manage: bool,
+}
+
+/// Manage Cell Styles: the cell styles as they were (Cancel restores
+/// them), the selected one, an inline rename and the delete question.
+#[derive(Debug, Clone)]
+pub struct ManageCells {
+    pub before: Vec<(i32, NamedTableCellStyle)>,
+    pub selected: String,
+    pub rename: Option<String>,
+    pub notice: Option<NameNotice>,
+    pub delete_ask: bool,
+    /// Delete refused: a table of the style uses the cell style.
+    pub in_use: bool,
+}
+
+/// The cards over the table style window.
+#[derive(Default)]
+pub struct TsCards {
+    pub create: Option<CreateCell>,
+    pub manage: Option<ManageCells>,
+    /// Select Linetype for the border properties, with the picked name.
+    pub linetype: Option<String>,
+    pub load: Option<crate::ui::style::mleaderstyle::LoadDraft>,
+    pub reload_ask: Option<crate::ui::style::mleaderstyle::ReloadAsk>,
+}
+
+/// The line properties the Borders page applies with its buttons. They
+/// start over whenever another cell style is edited.
+#[derive(Debug, Clone)]
+pub struct BorderDraft {
+    pub line_weight: i16,
+    /// Linetype handle (hex), `0` for ByBlock.
+    pub linetype: String,
+    pub color: document::types::Color,
+    pub double: bool,
+    pub spacing: String,
+}
+
+impl BorderDraft {
+    pub fn new(spacing: f64) -> Self {
+        Self {
+            line_weight: -2,
+            linetype: "0".into(),
+            color: document::types::Color::ByBlock,
+            double: false,
+            spacing: crate::ui::style::mleaderstyle::trim_number(spacing),
+        }
+    }
+}
+
+impl Default for BorderDraft {
+    fn default() -> Self {
+        Self::new(1.125)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum TsCellMsg {
+    CreateOpen,
+    CreateName(String),
+    CreateStart(String),
+    CreateOk,
+    CreateCancel,
+    NoticeClose,
+    ManageOpen,
+    ManageSelect(String),
+    ManageNew,
+    RenameStart,
+    RenameText(String),
+    RenameCommit,
+    DeleteAsk,
+    DeleteAnswer(bool),
+    ManageOk,
+    ManageCancel,
+    /// Format "…": the Cell Data Format window for the cell style.
+    FormatOpen,
+    /// Text style "…": the Text Style manager.
+    TextStyles,
+    BorderLineweight(String),
+    BorderLinetype(String),
+    BorderColor(document::types::Color),
+    BorderDouble(bool),
+    BorderSpacing(String),
+    BorderApply(u8),
+    LinetypePick(String),
+    LinetypeOk,
+    LinetypeCancel,
+    LinetypeLoad,
+    LoadFile,
+    LoadFileChosen(Option<crate::io::PickedLinetypeFile>),
+    LoadToggle(String),
+    LoadOk,
+    LoadCancel,
+    ReloadAnswer(crate::ui::style::mleaderstyle::Reload),
+}
+
+fn card_title<'a>(label: String) -> Element<'a, Message> {
+    text(label)
+        .size(13)
+        .style(crate::ui::window::pdf_dialogs::accent_text)
+        .into()
+}
+
+fn notice_card<'a>(notice: &NameNotice) -> Element<'a, Message> {
+    use crate::ui::style::form::dialog_button;
+    let body = column![
+        crate::ui::style::textstyle::name_notice_lines(notice),
+        row![
+            Space::new().width(Length::Fill),
+            dialog_button(tr!("text-style", "close"), cells(TsCellMsg::NoticeClose), true),
+        ],
+    ]
+    .spacing(14);
+    crate::ui::style::mleaderstyle::panel(body.into(), 420.0)
+}
+
+fn create_card<'a>(draft: &CreateCell, style: &TableStyle) -> Element<'a, Message> {
+    use crate::ui::style::form::dialog_button;
+    let starts: Vec<EnumChoice> = sorted_cell_styles(style)
+        .into_iter()
+        .map(|cell| choice(cell.name.clone(), cell_style_label(&cell.name)))
+        .collect();
+    let body = column![
+        card_title(tr!("table-style-cells", "new-title")),
+        column![
+            text(tr!("table-style-cells", "new-style-name"))
+                .size(11)
+                .style(muted_style),
+            text_input("", &draft.name)
+                .id(iced::widget::Id::new(CREATE_NAME_ID))
+                .on_input(|value| cells(TsCellMsg::CreateName(value)))
+                .on_submit(cells(TsCellMsg::CreateOk))
+                .size(12)
+                .padding([5, 8])
+                .style(crate::ui::style::form::field_style)
+                .width(Length::Fill),
+        ]
+        .spacing(4),
+        column![
+            text(tr!("table-style-cells", "start-with"))
+                .size(11)
+                .style(muted_style),
+            choice_list(&draft.start, starts, 384.0, 12, |value| cells(
+                TsCellMsg::CreateStart(value)
+            )),
+        ]
+        .spacing(4),
+        row![
+            Space::new().width(Length::Fill),
+            dialog_button(tr!("table-style-cells", "cancel"), cells(TsCellMsg::CreateCancel), false),
+            dialog_button(tr!("table-style-cells", "continue"), cells(TsCellMsg::CreateOk), true),
+        ]
+        .spacing(6),
+    ]
+    .spacing(12);
+    crate::ui::style::mleaderstyle::panel(body.into(), 420.0)
+}
+
+pub const CREATE_NAME_ID: &str = "ts-cell-new-name";
+pub const RENAME_ID: &str = "ts-cell-rename";
+
+fn manage_card<'a>(manage: &ManageCells, style: &TableStyle) -> Element<'a, Message> {
+    use crate::ui::style::form::{dialog_button, dialog_button_styled_opt};
+    use iced::widget::{container, mouse_area, scrollable};
+    if manage.delete_ask || manage.in_use {
+        let (question, buttons): (String, Element<'a, Message>) = if manage.in_use {
+            (
+                tr!("table-style-cells", "cell-style-in-use"),
+                row![
+                    Space::new().width(Length::Fill),
+                    dialog_button(tr!("text-style", "close"), cells(TsCellMsg::DeleteAnswer(false)), true),
+                ]
+                .into(),
+            )
+        } else {
+            (
+                tr!("table-style-cells", "delete-ask"),
+                row![
+                    Space::new().width(Length::Fill),
+                    dialog_button(tr!("table-style-cells", "cancel"), cells(TsCellMsg::DeleteAnswer(false)), false),
+                    dialog_button(tr!("table-style-cells", "ok"), cells(TsCellMsg::DeleteAnswer(true)), true),
+                ]
+                .spacing(6)
+                .into(),
+            )
+        };
+        let body = column![text(question).size(13), buttons].spacing(14);
+        return crate::ui::style::mleaderstyle::panel(body.into(), 420.0);
+    }
+    let rows: Vec<Element<'a, Message>> = sorted_cell_styles(style)
+        .into_iter()
+        .map(|cell| {
+            let on = cell.name.eq_ignore_ascii_case(&manage.selected);
+            if on {
+                if let Some(buffer) = &manage.rename {
+                    return text_input("", buffer)
+                        .id(iced::widget::Id::new(RENAME_ID))
+                        .on_input(|value| cells(TsCellMsg::RenameText(value)))
+                        .on_submit(cells(TsCellMsg::RenameCommit))
+                        .size(12)
+                        .padding([3, 6])
+                        .style(crate::ui::style::form::field_style)
+                        .width(Length::Fill)
+                        .into();
+                }
+            }
+            let row = container(text(cell_style_label(&cell.name)).size(12))
+                .padding([4, 8])
+                .width(Length::Fill)
+                .style(move |theme: &Theme| {
+                    let pair = theme.palette().primary.strong;
+                    iced::widget::container::Style {
+                        background: on.then_some(iced::Background::Color(pair.color)),
+                        text_color: on.then_some(pair.text),
+                        ..Default::default()
+                    }
+                });
+            mouse_area(row)
+                .on_press(cells(TsCellMsg::ManageSelect(cell.name.clone())))
+                .on_double_click(cells(TsCellMsg::RenameStart))
+                .into()
+        })
+        .collect();
+    let list = container(scrollable(column(rows).spacing(1)).height(Length::Fixed(176.0)))
+        .padding(2)
+        .width(Length::Fill)
+        .style(crate::ui::window::pdf_dialogs::well_style);
+    let user = !document::objects::is_row_cell_style(&manage.selected);
+    let side = |label: String, on: Option<Message>| -> Element<'a, Message> {
+        dialog_button_styled_opt(label, on, iced::widget::button::secondary)
+            .width(Length::Fill)
+            .into()
+    };
+    let actions = column![
+        side(tr!("table-style-cells", "new-button"), Some(cells(TsCellMsg::ManageNew))),
+        side(
+            tr!("table-style-cells", "rename"),
+            user.then(|| cells(TsCellMsg::RenameStart))
+        ),
+        side(
+            tr!("table-style-cells", "delete"),
+            user.then(|| cells(TsCellMsg::DeleteAsk))
+        ),
+    ]
+    .spacing(6)
+    .width(Length::Fixed(130.0));
+    let preview_cell = style
+        .cell_style(&manage.selected)
+        .map(|cell| (preview_cell(&cell.cell_style), cell_style_label(&cell.name).into_owned()))
+        .unwrap_or_else(|| (preview_cell(&TableCellStyleData::default()), String::new()));
+    let preview = canvas(TablePreviewCanvas {
+        layout: PreviewLayout::Cell {
+            cell: preview_cell.0,
+            label: preview_cell.1,
+        },
+    })
+    .width(Length::Fill)
+    .height(90);
+    let body = column![
+        card_title(tr!("table-style-cells", "manage-title")),
+        text(tr!("table-style-cells", "cell-styles"))
+            .size(11)
+            .style(muted_style),
+        row![list, actions].spacing(10),
+        text(tr!("table-style-cells", "preview"))
+            .size(11)
+            .style(muted_style),
+        container(preview).style(crate::ui::window::pdf_dialogs::well_style),
+        row![
+            Space::new().width(Length::Fill),
+            dialog_button(tr!("table-style-cells", "cancel"), cells(TsCellMsg::ManageCancel), false),
+            dialog_button(tr!("table-style-cells", "ok"), cells(TsCellMsg::ManageOk), true),
+        ]
+        .spacing(6),
+    ]
+    .spacing(10);
+    crate::ui::style::mleaderstyle::panel(body.into(), 460.0)
+}
+
+/// The card on top, if any, and what a click beside it does.
+fn card_view<'a>(v: &TableStyleView<'a>) -> Option<(Element<'a, Message>, Message)> {
+    use crate::ui::style::mleaderstyle::Reload;
+    let cards = v.cards;
+    if let Some(ask) = &cards.reload_ask {
+        return Some((
+            crate::ui::style::mleaderstyle::reload_card(ask, |answer| {
+                cells(TsCellMsg::ReloadAnswer(answer))
+            }),
+            cells(TsCellMsg::ReloadAnswer(Reload::Cancel)),
+        ));
+    }
+    if let Some(load) = &cards.load {
+        return Some((
+            crate::ui::style::mleaderstyle::load_linetypes_card(
+                load,
+                &v.linetype_names,
+                cells(TsCellMsg::LoadFile),
+                |name| cells(TsCellMsg::LoadToggle(name)),
+                cells(TsCellMsg::LoadOk),
+                cells(TsCellMsg::LoadCancel),
+            ),
+            cells(TsCellMsg::LoadCancel),
+        ));
+    }
+    if let Some(selected) = &cards.linetype {
+        return Some((
+            crate::ui::style::mleaderstyle::linetype_card(
+                &v.linetype_rows,
+                selected,
+                |name| cells(TsCellMsg::LinetypePick(name)),
+                cells(TsCellMsg::LinetypeLoad),
+                cells(TsCellMsg::LinetypeCancel),
+                cells(TsCellMsg::LinetypeOk),
+            ),
+            cells(TsCellMsg::LinetypeCancel),
+        ));
+    }
+    let style = v.style?;
+    if let Some(create) = &cards.create {
+        if let Some(notice) = &create.notice {
+            return Some((notice_card(notice), cells(TsCellMsg::NoticeClose)));
+        }
+        return Some((create_card(create, style), cells(TsCellMsg::CreateCancel)));
+    }
+    if let Some(manage) = &cards.manage {
+        if let Some(notice) = &manage.notice {
+            return Some((notice_card(notice), cells(TsCellMsg::NoticeClose)));
+        }
+        return Some((manage_card(manage, style), cells(TsCellMsg::ManageCancel)));
+    }
+    None
+}
+
+/// The window with its card over it, dimmed as the text style window's.
+fn with_card<'a>(window: Element<'a, Message>, v: &TableStyleView<'a>) -> Element<'a, Message> {
+    use iced::widget::{container, mouse_area, stack};
+    let Some((panel, dismiss)) = card_view(v) else {
+        return window;
+    };
+    stack([
+        window,
+        mouse_area(
+            container(Space::new())
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(|theme: &Theme| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(
+                        theme.palette().background.strongest.color.scale_alpha(0.55),
+                    )),
+                    ..Default::default()
+                }),
+        )
+        .on_press(dismiss)
+        .into(),
+        container(panel)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .into(),
+    ])
+    .into()
 }
 
 fn general_page<'a>(v: &TableStyleView<'a>, style: &TableStyle) -> Column<'a, Message> {
@@ -959,7 +1364,7 @@ pub fn view_window<'a>(
             let page = match tab {
                 1 => properties_page(&v, cell),
                 2 => text_page(&v, cell),
-                _ => borders_page(&v, cell),
+                _ => borders_page(&v),
             };
             column![cell_style_bar(&v, style), page].spacing(12).into()
         }
@@ -997,8 +1402,8 @@ pub fn view_window<'a>(
             status,
             preview: preview.into(),
             comparison: Some(crate::ui::style::style_manager::EditorComparison {
-                selected: v.compare_name,
-                options: v.compare_opts,
+                selected: v.compare_name.clone(),
+                options: v.compare_opts.clone(),
                 summary,
                 on_select: Message::TableStyleDialogCompare,
             }),
@@ -1019,7 +1424,7 @@ pub fn view_window<'a>(
             content,
         },
     );
-    crate::ui::style::style_manager::view(crate::ui::style::style_manager::Scaffold {
+    let window = crate::ui::style::style_manager::view(crate::ui::style::style_manager::Scaffold {
         sizing,
         kind: crate::app::StyleKind::Table,
         styles: &v.styles,
@@ -1048,5 +1453,6 @@ pub fn view_window<'a>(
         list: None,
         extra_actions: Vec::new(),
         editor,
-    })
+    });
+    with_card(window, &v)
 }

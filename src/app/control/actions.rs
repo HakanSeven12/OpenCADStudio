@@ -2216,10 +2216,23 @@ impl OpenCADStudio {
             // button), `ok`.
             "table_style_dialog" => {
                 // value: "open", "select=<style>", "tab=<0-3>", "cell=<name>",
-                // "new[=<name>]", "rename=<name>", "delete", "<field>=<value>"
-                // (cell fields), "edge<0-5>.<field>=<value>", "flow=<Down|Up>",
+                // "<field>=<value>" (cell fields), "flow=<Down|Up>",
                 // "description=<text>", "template_pick", "template_remove",
-                // "apply", "close".
+                // "apply", "close"; New Cell Style: "cell_new",
+                // "cell_new_name=<n>", "cell_new_start=<cell>", "cell_new_ok",
+                // "cell_new_cancel", "notice_close"; Manage Cell Styles:
+                // "manage", "manage_select=<cell>", "manage_new",
+                // "manage_rename=<n>", "manage_delete", "manage_delete_yes",
+                // "manage_delete_no", "manage_ok", "manage_cancel"; "format"
+                // and "text_styles" ("…"); Borders: "border_lw=<-2|-1|n>",
+                // "border_linetype=<handle hex|0|other>",
+                // "border_color=<aci|r,g,b>", "border_double=0|1",
+                // "border_spacing=<n>", "border_apply=<0-7>" (All, Outside,
+                // Inside, Bottom, Left, Top, Right, None); Select Linetype:
+                // "linetype_pick=<name>", "linetype_ok", "linetype_cancel",
+                // "linetype_load", "load_toggle=<name>", "load_ok",
+                // "load_cancel", "reload=this|all|skip|skip_rest|cancel".
+                use crate::ui::style::tablestyle::TsCellMsg as C;
                 let value = string(req, "value")?;
                 let (key, v) = value.split_once('=').unwrap_or((value, ""));
                 if key != "open" && !self.focus_dialog(crate::app::ModalKind::TableStyle) {
@@ -2229,20 +2242,12 @@ impl OpenCADStudio {
                     field,
                     value: v.to_string(),
                 };
+                let cells = Message::TableStyleCells;
                 match key {
                     "open" => Message::TableStyleDialogOpen,
                     "select" => Message::TableStyleDialogSelect(v.to_string()),
                     "tab" => Message::TableStyleDialogTab(v.parse().unwrap_or(0)),
                     "cell" => Message::TableStyleCellSelect(v.to_string()),
-                    "new" => {
-                        let _ = self.update(cell("name"));
-                        Message::TableStyleCellNew
-                    }
-                    "rename" => {
-                        let _ = self.update(cell("name"));
-                        Message::TableStyleCellRename
-                    }
-                    "delete" => Message::TableStyleCellDelete,
                     "flow" => Message::TableStyleSetFlow(v.to_string()),
                     "description" => Message::TableStyleEdit {
                         field: "description",
@@ -2256,7 +2261,6 @@ impl OpenCADStudio {
                     "angle" => cell("angle"),
                     "hmargin" => cell("hmargin"),
                     "vmargin" => cell("vmargin"),
-                    "format" => cell("format"),
                     "align" => cell("align"),
                     "class" => cell("class"),
                     "datatype" => cell("datatype"),
@@ -2264,22 +2268,52 @@ impl OpenCADStudio {
                     "textcolor" => cell("textcolor"),
                     "fillcolor" => cell("fillcolor"),
                     "merge" => cell("merge"),
-                    edge if edge.starts_with("edge") => {
-                        let (slot, field) = edge[4..].split_once('.').unwrap_or(("", ""));
-                        let field: &'static str = match field {
-                            "visible" => "visible",
-                            "lw" => "lw",
-                            "linetype" => "linetype",
-                            "color" => "color",
-                            "double" => "double",
-                            "spacing" => "spacing",
-                            _ => return Err(failure("invalid_value", "Unknown edge field")),
-                        };
-                        Message::TableStyleEdgeEdit {
-                            edge: slot.parse().unwrap_or(0),
-                            field,
-                            value: v.to_string(),
-                        }
+                    "cell_new" => cells(C::CreateOpen),
+                    "cell_new_name" => cells(C::CreateName(v.to_string())),
+                    "cell_new_start" => cells(C::CreateStart(v.to_string())),
+                    "cell_new_ok" => cells(C::CreateOk),
+                    "cell_new_cancel" => cells(C::CreateCancel),
+                    "notice_close" => cells(C::NoticeClose),
+                    "manage" => cells(C::ManageOpen),
+                    "manage_select" => cells(C::ManageSelect(v.to_string())),
+                    "manage_new" => cells(C::ManageNew),
+                    "manage_rename" => {
+                        let _ = self.update(cells(C::RenameStart));
+                        let _ = self.update(cells(C::RenameText(v.to_string())));
+                        cells(C::RenameCommit)
+                    }
+                    "manage_delete" => cells(C::DeleteAsk),
+                    "manage_delete_yes" => cells(C::DeleteAnswer(true)),
+                    "manage_delete_no" => cells(C::DeleteAnswer(false)),
+                    "manage_ok" => cells(C::ManageOk),
+                    "manage_cancel" => cells(C::ManageCancel),
+                    "format" => cells(C::FormatOpen),
+                    "text_styles" => cells(C::TextStyles),
+                    "border_lw" => cells(C::BorderLineweight(v.to_string())),
+                    "border_linetype" => cells(C::BorderLinetype(v.to_string())),
+                    "border_color" => match crate::ui::style::tablestyle::parse_color_code(v) {
+                        Some(color) => cells(C::BorderColor(color)),
+                        None => return Err(failure("invalid_value", "Unknown color")),
+                    },
+                    "border_double" => cells(C::BorderDouble(v == "1")),
+                    "border_spacing" => cells(C::BorderSpacing(v.to_string())),
+                    "border_apply" => cells(C::BorderApply(v.parse().unwrap_or(0))),
+                    "linetype_pick" => cells(C::LinetypePick(v.to_string())),
+                    "linetype_ok" => cells(C::LinetypeOk),
+                    "linetype_cancel" => cells(C::LinetypeCancel),
+                    "linetype_load" => cells(C::LinetypeLoad),
+                    "load_toggle" => cells(C::LoadToggle(v.to_string())),
+                    "load_ok" => cells(C::LoadOk),
+                    "load_cancel" => cells(C::LoadCancel),
+                    "reload" => {
+                        use crate::ui::style::mleaderstyle::Reload;
+                        cells(C::ReloadAnswer(match v {
+                            "this" => Reload::This,
+                            "all" => Reload::All,
+                            "skip" => Reload::Skip,
+                            "skip_rest" => Reload::SkipRest,
+                            _ => Reload::Cancel,
+                        }))
                     }
                     _ => return Err(failure("invalid_value", "Unknown Table Style field")),
                 }

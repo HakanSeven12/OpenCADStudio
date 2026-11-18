@@ -1231,6 +1231,12 @@ impl OpenCADStudio {
                     .push_info(crate::tr!("table-cells", "format-help").as_str()),
                 M::Ok => {
                     let state = self.table_cell_format.take().expect("open");
+                    // Opened from the table style window: the cell style
+                    // takes the format.
+                    if self.ts_format_return {
+                        self.table_style_format_back(Some(state));
+                        return Task::none();
+                    }
                     self.close_active_modal();
                     self.apply_cell_format(i, state, false);
                     return Task::none();
@@ -1461,7 +1467,7 @@ fn parse_points(text: &str) -> Vec<glam::DVec3> {
 
 /// The preview of the Cell Data Format settings: a sample of the chosen data
 /// type, formatted as the cells will read.
-fn format_preview(
+pub(crate) fn format_preview(
     document: &document::Document,
     state: &crate::ui::window::table_cell_dialog::CellFormatState,
 ) -> String {

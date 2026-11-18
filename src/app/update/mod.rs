@@ -179,6 +179,7 @@ pub(in crate::app) use plugin_grips::SETTLE_WATCHDOG;
 mod plugin_grips_tests;
 mod qselect;
 mod style;
+mod table_style_cells;
 pub(crate) mod style_import;
 pub(in crate::app) mod util;
 mod viewport;
@@ -248,6 +249,16 @@ impl OpenCADStudio {
                 self.active_modal = Some(parent);
                 return;
             }
+        }
+        // The Cell Data Format window and the Text Style manager opened from
+        // the table style window return to it.
+        if self.active_modal == Some(TableCellFormat) && self.ts_format_return {
+            self.table_style_format_back(None);
+            return;
+        }
+        if self.active_modal == Some(TextStyle) && self.ts_text_return {
+            self.table_style_back_from_text_styles();
+            return;
         }
         // The Text Style manager opened from the multileader style window
         // returns to it.
@@ -15546,6 +15557,7 @@ impl OpenCADStudio {
                     .or(names.first())
                     .map_or_else(|| "Standard".to_string(), |name| (*name).clone());
                 self.tablestyle_parent_table = false;
+                self.ts_cards = Default::default();
                 self.load_tablestyle_bufs(i);
                 self.active_modal = Some(super::ModalKind::TableStyle);
                 self.style_stage_begin();
@@ -15561,6 +15573,7 @@ impl OpenCADStudio {
             }
             Message::TableStyleDialogSelect(name) => {
                 self.stage_tablestyle_bufs();
+                self.ts_cards = Default::default();
                 self.tablestyle_selected = name;
                 let i = self.active_tab;
                 self.load_tablestyle_bufs(i);
@@ -15598,6 +15611,7 @@ impl OpenCADStudio {
                     };
                     s.sync_rows_from_cell_styles();
                 }
+                self.drop_table_style_pictures(i);
                 Task::none()
             }
 
@@ -15616,15 +15630,10 @@ impl OpenCADStudio {
                 self.load_tablestyle_bufs(i);
                 Task::none()
             }
-            Message::TableStyleCellNew => self.on_table_cell_style_new(),
-            Message::TableStyleCellRename => self.on_table_cell_style_rename(),
-            Message::TableStyleCellDelete => self.on_table_cell_style_delete(),
+            Message::TableStyleCells(message) => self.on_table_style_cells(message),
             Message::TableStyleCellEdit { field, value } => {
                 self.ts_color_open = None;
                 self.on_table_cell_style_edit(field, value)
-            }
-            Message::TableStyleEdgeEdit { edge, field, value } => {
-                self.on_table_cell_edge_edit(edge, field, value)
             }
             Message::TableStyleTemplatePick => self.on_table_style_template_pick(),
             Message::TableStyleTemplateRemove => self.on_table_style_template_remove(),

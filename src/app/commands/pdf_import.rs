@@ -1153,6 +1153,50 @@ mod pdfimport_tests {
         assert_eq!(texts, ["Hello PDF", "Tilted"]);
     }
 
+    /// A script line with all the answers waits at the read, as at a PAUSE,
+    /// and takes the rest of the line when the read ends.
+    #[test]
+    fn a_one_line_script_takes_its_answers_after_the_read() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = inkscape();
+        let response = app.automation_op(&format!(
+            r#"{{"op":"run","cmd":"-PDFIMPORT F \"{path}\" 1 5,5 3 0"}}"#
+        ));
+        assert!(app.tabs[i].active_cmd.is_none(), "{response}");
+        assert_eq!(app.tabs[i].history.undo_stack.len(), 1);
+        let (mut texts, _) = content(&app);
+        texts.sort();
+        assert_eq!(texts, ["Hello PDF", "Tilted"]);
+    }
+
+    /// A script line whose file needs a password keeps its answers while
+    /// the password window is open; cancelling the window drops them, so
+    /// they do not go to the next file name.
+    #[test]
+    fn a_cancelled_password_drops_the_rest_of_the_line() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path =
+            std::env::temp_dir().join(format!("pdfimport-locked-{}.pdf", std::process::id()));
+        let file = "%PDF-1.4\ntrailer\n<< /Encrypt << /Filter /Standard /V 1 /R 2 \
+            /O <95fe1f4219662a774442fb072e3d9f19e9d130ec09a4d0061e78fe920f7ab62f> \
+            /U <0102030405060708090a0b0c0d0e0f100102030405060708090a0b0c0d0e0f10> /P -44 >> >>\n%%EOF\n";
+        std::fs::write(&path, file).expect("write the locked file");
+        let _ = app.automation_op(&format!(
+            r#"{{"op":"run","cmd":"-PDFIMPORT F \"{}\" 1 5,5 3 0"}}"#,
+            path.display()
+        ));
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::PdfPassword));
+        assert!(
+            app.tabs[i].pending_pause_tokens.is_some(),
+            "the answers wait"
+        );
+        let _ = app.cancel_pdf_password();
+        assert_eq!(app.tabs[i].pending_pause_tokens, None);
+        let _ = std::fs::remove_file(path);
+    }
+
     /// -PDFIMPORT at its file name prompt, the File option taken.
     fn at_file_name(app: &mut OpenCADStudio) {
         let _ = app.update(Message::Command("-PDFIMPORT".to_string()));

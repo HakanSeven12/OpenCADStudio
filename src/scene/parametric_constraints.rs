@@ -2983,7 +2983,14 @@ impl super::Scene {
             // (native-graph sync, associative refreshes, dependency-index and
             // whole-model draw-depth recompute — ~0.5 s on large drawings,
             // issue #3277).
-            self.bump_entities_restyled(&changes);
+            // `bump_entities_restyled_with_block_deps` derives
+            // `sync_native_graph = !appearance_only`, so the native-graph
+            // block — a full sweep of every block record's associative
+            // networks (7.6K definitions on large drawings) plus the
+            // constraint-model fingerprint — never runs for a scale rewrite.
+            // It also marks owning block definitions dirty, which the plain
+            // restyled bump misses for dimensions that live inside a block.
+            self.bump_entities_restyled_with_block_deps(&changes, &[], &[]);
         }
     }
 
@@ -3046,7 +3053,7 @@ impl super::Scene {
         self.bump_constraints_epoch();
         // Visibility of dynamic pills is display-only; keep it off the full
         // bump chain for the same reason as the scale rewrite above.
-        self.bump_entities_restyled(&changes);
+        self.bump_entities_restyled_with_block_deps(&changes, &[], &[]);
     }
 
     /// Enables or disables one constraint without losing it — the production

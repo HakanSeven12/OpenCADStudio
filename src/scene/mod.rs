@@ -5409,7 +5409,9 @@ impl Scene {
         if sync_native_graph
             && (!self.parametric_constraints.is_empty() || !self.named_parameters.is_empty())
         {
+            bump_mark("before-dynamic-dim-texts");
             self.refresh_dynamic_dimension_texts();
+            bump_mark("dynamic-dim-texts");
             // The stored associative graph rebuilds only when the constraint
             // model actually changed since the last sync — never for a pure
             // geometry edit. Nothing in the session reads the graph between
@@ -5425,6 +5427,7 @@ impl Scene {
             let fingerprint = self.constraint_model_fingerprint();
             bump_mark("fingerprint");
             if self.native_graph_fingerprint != Some(fingerprint) {
+                bump_mark("before-native-graph-sync");
                 self.sync_native_parametric_graph();
                 bump_mark("native-graph-sync");
             }

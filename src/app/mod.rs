@@ -283,7 +283,8 @@ impl SnapDwell {
     }
 }
 
-/// How long the cursor must sit still before the idle rollover pick runs.
+/// How long the cursor must sit still before the idle rollover pick runs
+/// when the moving pick (`hover_pick_due`) has not already answered it.
 pub const HOVER_DWELL_MS: u128 = 500;
 /// How long the cursor must sit still before the active-command object-snap pass runs.
 pub const SNAP_DWELL_MS: u128 = 60;
@@ -298,9 +299,6 @@ pub const SNAP_PREVIEW_INTERVAL_MS: u128 = 16;
 /// frame already answers faster than the display can show, and the queue it
 /// leaves behind is empty.
 pub const MOVE_COALESCE_FROM_MS: u64 = 8;
-/// Dense resident sets also retain the previous rollover while moving; this
-/// threshold gates that extra redraw-avoidance behavior.
-pub const HOVER_DWELL_DENSE_WIRES: usize = 50_000;
 
 /// Keyboard navigation inside the open right-click context menu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1542,6 +1540,10 @@ pub(super) struct OpenCADStudio {
     /// `HOVER_DWELL_MS`. Skipping the pick mid-stroke avoids the per-frame
     /// O(N) wire+hatch+mesh sweep that froze the cursor on large drawings.
     hover_dwell: Option<HoverDwell>,
+    /// When a moving cursor may next run the rollover pick, so the highlight
+    /// follows the pointer instead of waiting for it to stop. Spaced like the
+    /// moving snap pass: `SNAP_MOVING_MS`, or four times the last pick's cost.
+    hover_pick_due: iced::time::Instant,
     /// The pointer position a coalesced move withheld, with its tab.
     ///
     /// Nothing used to drop a pointer move: every position the mouse reported
@@ -6673,6 +6675,7 @@ impl OpenCADStudio {
             grip_ctrl_cycle: None,
             grip_preview_handles: Vec::new(),
             hover_dwell: None,
+            hover_pick_due: iced::time::Instant::now(),
             move_owed: None,
             box_preview_pending: None,
             box_preview_due: None,

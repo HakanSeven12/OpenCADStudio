@@ -3736,12 +3736,8 @@ impl OpenCADStudio {
         if !dragging
             && (self.tabs[i].active_cmd.is_none() || deferred_command_hover || is_gathering_cmd)
         {
-            // On dense drawings, clearing a rollover immediately schedules a
-            // second full scene frame just as motion resumes. Keep the previous
-            // highlight until the next settled pick replaces it.
-            if self.tabs[i].scene.last_tess_wires.get() < crate::app::HOVER_DWELL_DENSE_WIRES {
-                self.tabs[i].scene.set_hover_highlight(None);
-            }
+            // Keep the previous highlight: the throttled moving pick
+            // (`hover_pick_due`) replaces it while the cursor travels.
             // A cursor move is the strongest "the pick's inputs changed"
             // signal for the quad dwell poll: bump the move count first so
             // the recorded (or pending) settled pick is disqualified.
@@ -9677,10 +9673,9 @@ properties={:.1}ms picked={}",
             return Task::none();
         };
         let dwell_ms = crate::app::HOVER_DWELL_MS;
-        if Instant::now()
-            .duration_since(dwell.last_move_at)
-            .as_millis()
-            < dwell_ms
+        let now = Instant::now();
+        if now.duration_since(dwell.last_move_at).as_millis() < dwell_ms
+            && now < self.hover_pick_due
         {
             return Task::none();
         }
@@ -9964,6 +9959,9 @@ properties={:.1}ms picked={}",
         } else {
             self.hover_dwell = None;
         }
+        let gap = std::time::Duration::from_millis(crate::app::SNAP_MOVING_MS)
+            .max(hover_started.elapsed() * 4);
+        self.hover_pick_due = Instant::now() + gap;
         let hover_ms = hover_started.elapsed().as_secs_f64() * 1000.0;
         if perf && hover_ms >= 5.0 {
             crate::perf_record!(

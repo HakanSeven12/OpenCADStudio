@@ -749,7 +749,7 @@ pub(crate) fn view_window<'a>(
     }
     if state.more_options {
         body = body.push(
-            column![
+            row![
                 card(
                     crate::tr!("find", "search-options"),
                     option_chips(

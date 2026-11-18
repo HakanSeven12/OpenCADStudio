@@ -246,49 +246,13 @@ impl ImageGpu {
                     "image.texture:{}:{}:{}",
                     model.file_path, x.content_start, y.content_start
                 );
-                let levels = mip_chain(
-                    &model.pixels,
-                    model.width,
-                    x.data_start,
-                    y.data_start,
-                    width,
-                    height,
+                let texture = tile_texture(
+                    device,
+                    queue,
+                    model,
+                    [x.data_start, y.data_start, width, height],
+                    &tex_label,
                 );
-                let texture = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some(&tex_label),
-                    size: wgpu::Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: levels.len() as u32,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                    view_formats: &[],
-                });
-                for (level, (w, h, data)) in levels.iter().enumerate() {
-                    queue.write_texture(
-                        wgpu::TexelCopyTextureInfo {
-                            texture: &texture,
-                            mip_level: level as u32,
-                            origin: wgpu::Origin3d::ZERO,
-                            aspect: wgpu::TextureAspect::All,
-                        },
-                        data,
-                        wgpu::TexelCopyBufferLayout {
-                            offset: 0,
-                            bytes_per_row: Some(4 * w),
-                            rows_per_image: Some(*h),
-                        },
-                        wgpu::Extent3d {
-                            width: *w,
-                            height: *h,
-                            depth_or_array_layers: 1,
-                        },
-                    );
-                }
                 let tex_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("image.bind_group1"),
@@ -329,6 +293,77 @@ impl ImageGpu {
         }
         output
     }
+}
+
+/// Textures already uploaded per pixel buffer and tile, so every viewport
+/// showing the same raster samples one texture instead of building its own
+/// mip chain and copy (#3225). An entry lives while its buffer does.
+type TileKey = (usize, [u32; 4]);
+type TileEntry = (std::sync::Weak<Vec<u8>>, wgpu::Device, wgpu::Texture);
+type TileMap = std::sync::Mutex<rustc_hash::FxHashMap<TileKey, TileEntry>>;
+
+fn shared_tiles() -> &'static TileMap {
+    static TILES: std::sync::OnceLock<TileMap> = std::sync::OnceLock::new();
+    TILES.get_or_init(Default::default)
+}
+
+/// The texture for one tile (`[x, y, width, height]` in pixels) of `model`.
+fn tile_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    model: &ImageModel,
+    tile: [u32; 4],
+    label: &str,
+) -> wgpu::Texture {
+    let key = (Arc::as_ptr(&model.pixels) as usize, tile);
+    let mut tiles = shared_tiles()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some((pixels, owner, texture)) = tiles.get(&key) {
+        if pixels.strong_count() > 0 && owner == device {
+            return texture.clone();
+        }
+    }
+    tiles.retain(|_, (pixels, owner, _)| pixels.strong_count() > 0 && owner == device);
+    let [x0, y0, width, height] = tile;
+    let levels = mip_chain(&model.pixels, model.width, x0, y0, width, height);
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: levels.len() as u32,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    for (level, (w, h, data)) in levels.iter().enumerate() {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: level as u32,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * w),
+                rows_per_image: Some(*h),
+            },
+            wgpu::Extent3d {
+                width: *w,
+                height: *h,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+    tiles.insert(key, (Arc::downgrade(&model.pixels), device.clone(), texture.clone()));
+    texture
 }
 
 #[derive(Clone, Copy)]

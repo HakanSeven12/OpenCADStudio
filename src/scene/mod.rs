@@ -5438,6 +5438,8 @@ impl Scene {
         // A modified image-bearing entity redraws its raster: an underlay's
         // display adjustments and clip live on the entity, not the image.
         bump_mark("raster-seed-start");
+        let raster_loop_started = std::time::Instant::now();
+        let mut raster_seeds = 0usize;
         for (handle, kind) in &changes {
             if !matches!(kind, ChangeKind::Modified) {
                 continue;
@@ -5447,7 +5449,10 @@ impl Scene {
                     entity @ (EntityType::RasterImage(_)
                     | EntityType::Ole2Frame(_)
                     | EntityType::Underlay(_)),
-                ) => Some(self.image_seed_for(entity)),
+                ) => {
+                    raster_seeds += 1;
+                    Some(self.image_seed_for(entity))
+                }
                 _ => None,
             };
             if let Some(seed) = seed {
@@ -5456,6 +5461,14 @@ impl Scene {
                     self.images.insert(*handle, model);
                 }
             }
+        }
+        if raster_loop_started.elapsed().as_millis() > 1 {
+            crate::perf_record!(
+                "[perf] raster-loop slow changes={} modified_seeds={} {:?}ms",
+                changes.len(),
+                raster_seeds,
+                raster_loop_started.elapsed().as_millis()
+            );
         }
         bump_mark("raster-seed-end");
         bump_mark("before-dependency-index");

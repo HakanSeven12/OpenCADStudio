@@ -1143,6 +1143,9 @@ fn split_highlight_reuses_selection_when_hover_changes() {
             SPLIT_TINT,
             1,
             1,
+            false,
+            true,
+            (hovered, 0),
         )
     };
     upload(&mut p, 2);
@@ -1174,6 +1177,9 @@ fn split_highlight_rebuilds_when_selection_changes() {
             SPLIT_TINT,
             1,
             1,
+            true,
+            true,
+            (0, 0),
         );
     }
     let cache = p.selected_highlight_gpu_cache.as_ref().unwrap();
@@ -1201,6 +1207,9 @@ fn split_highlight_rebuilds_when_depth_changes() {
             SPLIT_TINT,
             1,
             generation,
+            true,
+            false,
+            (0, 0),
         );
     }
     let cache = p.selected_highlight_gpu_cache.as_ref().unwrap();

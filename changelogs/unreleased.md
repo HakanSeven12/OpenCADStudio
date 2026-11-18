@@ -31,6 +31,12 @@
 
 ---
 
+### ⚡ Performance
+
+* **Selection Preview at Scale:** Rollover and marquee (`SELECTIONPREVIEW`) highlight updates no longer rebuild the committed selection's GPU overlay: hover changes ride a separate hover generation, so previewing a selection box over a drawing with thousands of objects already selected stays smooth. Selectable-group expansion reads a cached group snapshot instead of scanning every document object on every pointer move, marquee tick and rendered frame; the per-frame viewport selection data is cached per selection generation; dense-entity highlights reuse a persistent overlay constant buffer with partial updates instead of cloning the whole scene's constants; hovered text highlights are cached per hover identity; a marquee over `SELECTIONPREVIEWLIMIT` now caps the preview (stable subset) instead of dropping it entirely; and committing a huge selection defers the Properties panel rebuild by one frame so the click or box release returns instantly. *([@emrahoksak](https://github.com/emrahoksak))*
+
+---
+
 ### 👥 Contributors
 
 * **ramox81** ([@ramox81](https://github.com/ramox81)) — Text Editor ribbon tab and windows (`#3095`), annotation scale question (`#3090`), Text Style Apply (`#3089`) and oblique `TEXT`/attribute rendering.

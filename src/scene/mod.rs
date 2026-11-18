@@ -100,6 +100,8 @@ mod group_layer;
 pub const GROUP_GRIP_ID: usize = usize::MAX - 2;
 #[cfg(test)]
 mod hatch_boundary;
+#[cfg(test)]
+mod selection_preview_tests;
 mod layout;
 #[cfg(test)]
 mod layout_viewport_tests;

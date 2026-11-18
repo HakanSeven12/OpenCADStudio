@@ -299,3 +299,171 @@ impl OpenCADStudio {
         }
     }
 }
+
+#[cfg(test)]
+mod attach_read_tests {
+    use super::*;
+    use crate::modules::insert::pc_attach::AttachOptions;
+    use crate::scene::model::point_cloud::test_scan_file;
+    use glam::DVec3;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    fn placement(path: &std::path::Path) -> PointCloudPlacement {
+        PointCloudPlacement {
+            path: path.to_path_buf(),
+            insertion: DVec3::ZERO,
+            axes: [DVec3::X, DVec3::Y, DVec3::Z],
+            options: AttachOptions::default(),
+        }
+    }
+
+    fn clouds(app: &OpenCADStudio, i: usize) -> usize {
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter(|entity| {
+                matches!(
+                    entity,
+                    document::EntityType::Extended(extended)
+                        if matches!(
+                            extended.data,
+                            document::entities::ExtendedEntityData::PointCloudEx(_)
+                        )
+                )
+            })
+            .count()
+    }
+
+    fn history(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|entry| entry.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The attach reads on a worker: nothing changes in the drawing until
+    /// the worker ends, then the cloud is one undo step.
+    #[test]
+    fn the_cloud_is_placed_only_when_the_worker_ends() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = test_scan_file("attach-placed", 40);
+        let before = app.tabs[i].history.undo_stack.len();
+        let task = app.attach_point_cloud(i, "POINTCLOUDATTACH".into(), placement(&path));
+        assert_eq!(clouds(&app, i), 0, "nothing is placed during the read");
+        app.drive_headless_task(task).expect("the attach task");
+        assert_eq!(clouds(&app, i), 1);
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before + 1);
+        assert!(
+            history(&app).ends_with("1 point cloud attached"),
+            "{}",
+            history(&app)
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A reader that panics gives an error, the drawing does not change,
+    /// and the next attach works.
+    #[test]
+    fn a_reader_panic_is_an_error_and_the_drawing_does_not_change() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = test_scan_file("attach-panic", 10);
+        let before = app.tabs[i].history.undo_stack.len();
+        let task =
+            app.attach_point_cloud_with(i, "POINTCLOUDATTACH".into(), placement(&path), |_| {
+                panic!("a reader bug")
+            });
+        app.drive_headless_task(task).expect("the attach task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("POINTCLOUDATTACH failed: a reader bug")
+        );
+        assert_eq!(clouds(&app, i), 0);
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before);
+        let task = app.attach_point_cloud(i, "POINTCLOUDATTACH".into(), placement(&path));
+        app.drive_headless_task(task).expect("the attach task");
+        assert_eq!(clouds(&app, i), 1);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A file with no scan that can be read gives the two errors when the
+    /// worker ends, and the drawing does not change.
+    #[test]
+    fn a_file_that_cannot_be_read_gives_the_two_errors() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = std::env::temp_dir().join(format!(
+            "ocs-pointcloud-attach-place-bad-{}.rcs",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"not a scan").expect("write the bad scan");
+        let task = app.attach_point_cloud(i, "POINTCLOUDATTACH".into(), placement(&path));
+        app.drive_headless_task(task).expect("the attach task");
+        let lines: Vec<&str> = app
+            .command_line
+            .history
+            .iter()
+            .rev()
+            .take(2)
+            .map(|entry| entry.text.as_str())
+            .collect();
+        assert!(
+            lines[0].ends_with("Attach point cloud failed")
+                && lines[1].ends_with("All scans are not found or invalid."),
+            "lines: {lines:?}"
+        );
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Attach point cloud failed")
+        );
+        assert_eq!(clouds(&app, i), 0);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A result for a drawing that was replaced during the read is
+    /// dropped; the new drawing gets nothing.
+    #[test]
+    fn a_result_for_a_replaced_drawing_is_dropped() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = test_scan_file("attach-replaced", 10);
+        let task = app.attach_point_cloud(i, "POINTCLOUDATTACH".into(), placement(&path));
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.drive_headless_task(task).expect("the attach task");
+        assert_eq!(clouds(&app, app.active_tab), 0);
+        assert!(history(&app).contains("was replaced"), "{}", history(&app));
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A result for a drawing that is no longer the current one is
+    /// dropped: the commit writes to the current drawing, so neither
+    /// drawing gets the cloud.
+    #[test]
+    fn a_result_for_a_drawing_that_is_not_current_is_dropped() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = test_scan_file("attach-not-current", 10);
+        let task = app.attach_point_cloud(i, "POINTCLOUDATTACH".into(), placement(&path));
+        app.push_test_document();
+        app.active_tab = app.tabs.len() - 1;
+        app.drive_headless_task(task).expect("the attach task");
+        assert_eq!(clouds(&app, i), 0);
+        assert_eq!(clouds(&app, app.active_tab), 0);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some(
+                "Attach point cloud cancelled: a different drawing became current while the file was read."
+            )
+        );
+        let _ = std::fs::remove_file(path);
+    }
+}

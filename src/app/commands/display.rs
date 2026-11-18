@@ -23,7 +23,7 @@ impl OpenCADStudio {
                     _ => (0.0, -step),
                 };
                 self.tabs[i].scene.remember_current_view();
-                self.pan_active_view(i, dx, dy, std::time::Instant::now());
+                self.pan_active_view(i, dx, dy, iced::time::Instant::now());
             }
 
             // ── TABLE structure and cell editing ───────────────────────────────

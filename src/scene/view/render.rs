@@ -1317,6 +1317,17 @@ retained_contributors={}",
                 } else {
                     None
                 };
+                // Identity of the hover half's inputs for the text-upload
+                // cache: generations + wire content + depth generation mix,
+                // plus the hover-annotation source pointer (the Arc content
+                // is immutable, so pointer equality is content equality).
+                let hover_key = (
+                    vp.hover_generation
+                        ^ vp.selection_generation.rotate_left(32)
+                        ^ vp.wire_content_id.rotate_left(16)
+                        ^ vp.draw_depth_generation.rotate_left(48),
+                    std::sync::Arc::as_ptr(&vp.annotation_context_wires) as usize as u64,
+                );
                 inner.upload_split_highlights(
                     device,
                     queue,
@@ -1331,6 +1342,7 @@ retained_contributors={}",
                     vp.draw_depth_generation,
                     refresh_selected,
                     refresh_hover,
+                    hover_key,
                 );
                 inner.cached_annotation_highlight_source =
                     Some(Arc::clone(&vp.annotation_context_wires));

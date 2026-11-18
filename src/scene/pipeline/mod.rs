@@ -160,6 +160,17 @@ struct SelectedHighlightGpuCache {
     block_text: Vec<text_gpu::BlockTextGpu>,
 }
 
+// Cached hover-half text highlight uploads, keyed by the render-side hover
+// identity (generations + wire content + depth generation, annotation source
+// pointer). The hover half of the xray overlay re-emits on every rollover /
+// marquee tick; without this cache every tick re-copied every glyph vertex of
+// the hovered set and re-uploaded it, scaling with hovered text size.
+struct HoverTextGpuCache {
+    key: (u64, u64),
+    text: Vec<text_gpu::TextGpu>,
+    block_text: Vec<text_gpu::BlockTextGpu>,
+}
+
 pub struct Pipeline {
     gpu_error_epoch: usize,
     background_pipeline: wgpu::RenderPipeline,
@@ -485,6 +496,8 @@ pub struct Pipeline {
     /// the hover generation, so the committed selection's cached GPU buffers
     /// (sized by the whole selection) are reused untouched.
     pub cached_hover_generation: Option<u64>,
+    /// Cached hover-half text highlight uploads — see [`HoverTextGpuCache`].
+    hover_text_gpu_cache: Option<HoverTextGpuCache>,
     /// Face upload key; keeps the resident wire Arc uniquely owned by Scene.
     pub cached_face3d_key: (u64, bool, bool, u64),
     /// Cached planar-solid visibility for `(wire_content_id, view direction)`.
@@ -2670,6 +2683,7 @@ impl Pipeline {
             cached_wire_id: u64::MAX,
             cached_selection: (u64::MAX, u64::MAX),
             cached_hover_generation: None,
+            hover_text_gpu_cache: None,
             cached_face3d_key: (u64::MAX, false, false, u64::MAX),
             cached_solid_visibility: (u64::MAX, [u32::MAX; 3], u64::MAX),
             wire_handle_index: std::sync::Arc::new(rustc_hash::FxHashMap::default()),
@@ -3410,6 +3424,7 @@ impl Pipeline {
         depth_generation: u64,
         refresh_selected: bool,
         refresh_hover: bool,
+        hover_key: (u64, u64),
     ) {
         let tint_key = selected_tint.map(|color| color.map(f32::to_bits));
         let selected_cache_ready = self.selected_highlight_gpu_cache.as_ref().is_some_and(|cache| {
@@ -3461,7 +3476,11 @@ impl Pipeline {
             });
         }
         // The hover half re-emits only when it changed. The hover set is
-        // `hovered − selected`, so a selection change also changes it.
+        // `hovered − selected`, so a selection change also changes it. The
+        // text uploads are additionally cached on the render-side hover key:
+        // a marquee over text-heavy content re-emits the wire instances (the
+        // small-chunk cache covers those) but must not re-copy every hovered
+        // glyph vertex per tick.
         if refresh_hover {
             let hover_only = hovered.difference(selected).copied().collect();
             self.upload_selected_wires(
@@ -3474,16 +3493,31 @@ impl Pipeline {
                 depth_map,
                 selected_tint,
             );
-            self.upload_text_highlight(
-                device,
-                queue,
-                wires,
-                &empty,
-                &hover_only,
-                hover_annotation,
-                depth_map,
-                selected_tint,
-            );
+            if self
+                .hover_text_gpu_cache
+                .as_ref()
+                .is_some_and(|cache| cache.key == hover_key)
+            {
+                let cache = self.hover_text_gpu_cache.as_ref().unwrap();
+                self.text_highlight_gpu = cache.text.clone();
+                self.block_text_highlight_gpu = cache.block_text.clone();
+            } else {
+                self.upload_text_highlight(
+                    device,
+                    queue,
+                    wires,
+                    &empty,
+                    &hover_only,
+                    hover_annotation,
+                    depth_map,
+                    selected_tint,
+                );
+                self.hover_text_gpu_cache = Some(HoverTextGpuCache {
+                    key: hover_key,
+                    text: self.text_highlight_gpu.clone(),
+                    block_text: self.block_text_highlight_gpu.clone(),
+                });
+            }
             // Draw committed selection before the current hover, as in the
             // combined overlay.
             let cache = self.selected_highlight_gpu_cache.as_ref();
@@ -6314,6 +6348,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.cached_wire_id = u64::MAX;
         self.cached_selection = (u64::MAX, u64::MAX);
         self.cached_hover_generation = None;
+        self.hover_text_gpu_cache = None;
         self.cached_highlight_key = (u64::MAX, u64::MAX);
         self.cached_mesh_content_id = u64::MAX;
         self.cached_face3d_key = (u64::MAX, false, false, u64::MAX);

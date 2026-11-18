@@ -10997,3 +10997,77 @@ mod unsupported_parameter_set_tests {
     }
 }
 
+
+// Saving or opening another editor while the Test Block window is in front
+// is refused with a specific message; closing the Test Block releases the
+// guard.
+mod test_block_persistence_refusal_tests {
+    use super::super::*;
+    use document::entities::{EntityType, Insert, Line};
+    use document::types::Vector3;
+
+    #[test]
+    fn saving_while_a_test_block_is_open_is_refused_until_it_is_closed() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let source = app.active_tab;
+        app.tabs[source].scene.define_block_raw(
+            "PANEL",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+        let reference = app.tabs[source]
+            .scene
+            .document
+            .add_entity(EntityType::Insert(Insert::new("PANEL", Vector3::ZERO)))
+            .unwrap();
+        app.tabs[source].dirty = false;
+        app.tabs[source].scene.select_entity(reference, true);
+        let _ = app.run_command_line("BEDIT");
+        assert!(app.tabs[source].active_block_edit_session().is_some());
+
+        let result = app.automation_op(r#"{"op":"run","cmd":"CIRCLE 3,0 2"}"#);
+        assert_eq!(result["ok"], true, "{result}");
+        app.finish_pending_history(source);
+        assert!(app.block_edit_dirty(source));
+
+        let _ = app.dispatch_command("BTESTBLOCK");
+        let test = app.active_tab;
+        assert_ne!(test, source, "the Test Block window is a separate tab");
+        assert!(app.tabs[test].block_test.is_some());
+        let before = app.tabs[test].scene.document.clone();
+
+        let _ = app.run_command_line("BSAVE");
+
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Close Test Block before saving or opening another block editor."),
+            "the save is refused while the Test Block window is open"
+        );
+        assert_eq!(
+            app.tabs[test].scene.document, before,
+            "the refused save changes nothing"
+        );
+        assert_eq!(app.active_tab, test, "the Test Block window stays in front");
+
+        let _ = app.run_command_line("BEDIT_OPEN:PANEL");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Close Test Block before saving or opening another block editor."),
+            "opening another editor is refused too"
+        );
+
+        let _ = app.dispatch_command("BCLOSETESTBLOCK");
+        assert!(app.tabs[source].block_test.is_none());
+        assert_eq!(app.active_tab, source, "closing returns to the source drawing");
+        assert!(app.block_edit_dirty(source), "the edit is still unsaved");
+
+        let _ = app.dispatch_command("BSAVE");
+        assert!(!app.block_edit_dirty(source), "saving works again");
+        assert!(app.tabs[source].active_block_edit_session().is_some());
+    }
+}
+

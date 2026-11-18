@@ -99,11 +99,7 @@ impl OpenCADStudio {
             "Reading {}…",
             crate::entities::underlay::display_path(path)
         ));
-        let context = match kind {
-            document::entities::UnderlayType::Dwf => "DWFATTACH",
-            document::entities::UnderlayType::Dgn => "DGNATTACH",
-            _ => "PDFATTACH",
-        };
+        let context = attach_context(kind);
         let path = path.to_string();
         let worker_path = path.clone();
         crate::app::update::background_task(
@@ -205,10 +201,63 @@ impl OpenCADStudio {
         Task::none()
     }
 
-    fn load_pdf_attach_file(&self, state: &mut PdfAttachState, path: &str) {
-        let pages = item_thumbs(state.kind, path);
-        let (sizes, units) = item_sizes(state.kind, path, &pages);
-        self.set_pdf_attach_file(state, path, pages, sizes, units);
+    /// A file chosen in the Attach window's name list: it is read off the
+    /// UI thread, and the window shows it when the read ends
+    /// ([`Self::finish_attach_name_read`]). The window stays open with its
+    /// options.
+    fn read_attach_name_with(
+        &mut self,
+        kind: document::entities::UnderlayType,
+        path: &str,
+        reader: fn(document::entities::UnderlayType, &str, bool) -> UnderlayAttachRead,
+    ) -> Task<Message> {
+        self.command_line.push_info(&format!(
+            "Reading {}…",
+            crate::entities::underlay::display_path(path)
+        ));
+        let path = path.to_string();
+        let worker_path = path.clone();
+        crate::app::update::background_task(
+            attach_context(kind),
+            move || std::sync::Arc::new(reader(kind, &worker_path, false)),
+            move |read| Message::PdfDialog(PdfDialogMsg::AttachNameRead(path, read)),
+        )
+    }
+
+    /// The end of the read of a file chosen in the name list: the window
+    /// shows it, if the window is still open and that file is still the
+    /// one chosen. A file with no page, sheet or model, or one that needs
+    /// a password, shows no pages, as before.
+    fn finish_attach_name_read(&mut self, path: &str, read: &UnderlayAttachRead) {
+        if self.active_modal != Some(crate::app::ModalKind::PdfAttach) {
+            return;
+        }
+        let Some(mut state) = self.pdf_attach.take() else {
+            return;
+        };
+        if state.pending_path.as_deref() != Some(path) {
+            self.pdf_attach = Some(state);
+            return;
+        }
+        state.pending_path = None;
+        let (pages, sizes, units) = match read {
+            UnderlayAttachRead::Items {
+                pages,
+                sizes,
+                units,
+                ..
+            } => (pages.clone(), sizes.clone(), units.clone()),
+            _ => (Vec::new(), Vec::new(), Vec::new()),
+        };
+        self.set_pdf_attach_file(&mut state, path, pages, sizes, units);
+        let i = self.active_tab;
+        let plane = if self.tabs[i].editing_model_space() {
+            self.tabs[i].ucs_xform().working_plane()
+        } else {
+            crate::command::WorkingPlane::default()
+        };
+        Self::refresh_pdf_attach_geopdf(&self.tabs[i].scene, plane, &mut state);
+        self.pdf_attach = Some(state);
     }
 
     /// Put a file that was read into the Attach window.
@@ -805,19 +854,19 @@ impl OpenCADStudio {
                 }
             }
             PdfDialogMsg::AttachName(name) => {
-                let Some(mut state) = self.pdf_attach.take() else {
+                let Some(state) = self.pdf_attach.as_mut() else {
                     return Task::none();
                 };
-                if let Some((_, path)) = state.existing.iter().find(|(n, _)| *n == name).cloned() {
-                    self.load_pdf_attach_file(&mut state, &path);
-                    let plane = if self.tabs[i].editing_model_space() {
-                        self.tabs[i].ucs_xform().working_plane()
-                    } else {
-                        crate::command::WorkingPlane::default()
-                    };
-                    Self::refresh_pdf_attach_geopdf(&self.tabs[i].scene, plane, &mut state);
-                }
-                self.pdf_attach = Some(state);
+                let Some((_, path)) = state.existing.iter().find(|(n, _)| *n == name).cloned()
+                else {
+                    return Task::none();
+                };
+                state.pending_path = Some(path.clone());
+                let kind = state.kind;
+                return self.read_attach_name_with(kind, &path, read_for_attach_window);
+            }
+            PdfDialogMsg::AttachNameRead(path, read) => {
+                self.finish_attach_name_read(&path, &read);
             }
             PdfDialogMsg::AttachPage(page) => {
                 let (ctrl, shift) = (self.ctrl_down, self.shift_down);
@@ -1373,6 +1422,16 @@ fn read_pdf_for_import_window(path: &str) -> PdfImportFileRead {
         pages,
         page_sizes,
         remembered,
+    }
+}
+
+/// The name of the command that a read for the Attach window reports a
+/// panic with.
+fn attach_context(kind: document::entities::UnderlayType) -> &'static str {
+    match kind {
+        document::entities::UnderlayType::Dwf => "DWFATTACH",
+        document::entities::UnderlayType::Dgn => "DGNATTACH",
+        _ => "PDFATTACH",
     }
 }
 
@@ -2105,6 +2164,129 @@ mod underlay_attach_read_tests {
         let state = app.pdf_attach.as_ref().expect("the window's state");
         assert_eq!(state.sub_per_master, 250.0);
         assert_eq!(state.page_size, "2 × 2");
+    }
+
+    /// The window open on `first.pdf`, with `second.pdf` in its name list.
+    fn window_with_two_files(app: &mut OpenCADStudio, first: &str, second: &str) {
+        for path in [first, second] {
+            crate::scene::model::pdf_raster::register_source(path, Arc::new(two_pages()));
+        }
+        let task = app.open_pdf_attach_dialog(first);
+        app.drive_headless_task(task).expect("the read task");
+        let state = app.pdf_attach.as_mut().expect("the window's state");
+        state.existing = vec![
+            (file_stem(first), first.to_string()),
+            (file_stem(second), second.to_string()),
+        ];
+    }
+
+    /// A file chosen in the name list is read on a worker: the window stays
+    /// open with its options, and shows the file when the read ends.
+    #[test]
+    fn a_name_change_reads_on_a_worker_and_keeps_the_options() {
+        let mut app = new_app();
+        let (first, second) = ("underlay-name-first.pdf", "underlay-name-second.pdf");
+        window_with_two_files(&mut app, first, second);
+        app.pdf_attach.as_mut().unwrap().scale = "4".to_string();
+        let task = app.update(Message::PdfDialog(PdfDialogMsg::AttachName(file_stem(
+            second,
+        ))));
+        assert_eq!(
+            app.pdf_attach.as_ref().map(|s| s.path.as_str()),
+            Some(first),
+            "the read runs"
+        );
+        assert_eq!(last_line(&app), format!("ⓘ Reading {second}…"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::PdfAttach));
+        let state = app.pdf_attach.as_ref().expect("the window's state");
+        assert_eq!(state.path, second);
+        assert_eq!(state.pages.len(), 2);
+        assert_eq!(state.page_size, "10.0000 × 5.0000");
+        assert_eq!(state.scale, "4", "the options stay");
+        assert_eq!(state.pending_path, None);
+    }
+
+    /// A reader that panics during a name change gives an error, and the
+    /// window stays with its file.
+    #[test]
+    fn a_reader_panic_during_a_name_change_keeps_the_window() {
+        let mut app = new_app();
+        let (first, second) = (
+            "underlay-name-panic-first.pdf",
+            "underlay-name-panic-second.pdf",
+        );
+        window_with_two_files(&mut app, first, second);
+        let task =
+            app.read_attach_name_with(UnderlayType::Pdf, second, |_, _, _| panic!("a reader bug"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("PDFATTACH failed: a reader bug")
+        );
+        assert_eq!(app.active_modal, Some(ModalKind::PdfAttach));
+        assert_eq!(
+            app.pdf_attach.as_ref().map(|s| s.path.as_str()),
+            Some(first)
+        );
+    }
+
+    /// The read of a file chosen before another changes nothing; the read
+    /// of the last file chosen shows it.
+    #[test]
+    fn an_older_name_read_changes_nothing() {
+        let mut app = new_app();
+        let (first, second) = (
+            "underlay-name-old-first.pdf",
+            "underlay-name-old-second.pdf",
+        );
+        window_with_two_files(&mut app, first, second);
+        let older = app.update(Message::PdfDialog(PdfDialogMsg::AttachName(file_stem(
+            second,
+        ))));
+        let newer = app.update(Message::PdfDialog(PdfDialogMsg::AttachName(file_stem(
+            first,
+        ))));
+        app.drive_headless_task(older).expect("the older read");
+        assert_eq!(
+            app.pdf_attach.as_ref().map(|s| s.path.as_str()),
+            Some(first)
+        );
+        assert_eq!(
+            app.pdf_attach
+                .as_ref()
+                .and_then(|s| s.pending_path.as_deref()),
+            Some(first),
+            "the newer read is still awaited"
+        );
+        app.drive_headless_task(newer).expect("the newer read");
+        assert_eq!(
+            app.pdf_attach
+                .as_ref()
+                .and_then(|s| s.pending_path.as_deref()),
+            None
+        );
+    }
+
+    /// A window closed during the read is not opened again.
+    #[test]
+    fn a_closed_window_ignores_the_name_read() {
+        let mut app = new_app();
+        let (first, second) = (
+            "underlay-name-closed-first.pdf",
+            "underlay-name-closed-second.pdf",
+        );
+        window_with_two_files(&mut app, first, second);
+        let task = app.update(Message::PdfDialog(PdfDialogMsg::AttachName(file_stem(
+            second,
+        ))));
+        app.active_modal = None;
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, None);
+        assert_eq!(
+            app.pdf_attach.as_ref().map(|s| s.path.as_str()),
+            Some(first)
+        );
     }
 
     /// The window of a second read (Browse) takes the place of the first.

@@ -200,20 +200,22 @@ impl OpenCADStudio {
             );
             return;
         }
-        if cloud.is_none() {
+        let Some(cloud) = cloud else {
             self.command_line
                 .push_error("All scans are not found or invalid.");
             self.command_line.push_error("Attach point cloud failed");
             return;
-        }
-        self.open_point_cloud_attach_dialog(path);
+        };
+        self.open_point_cloud_attach_dialog(path, cloud);
     }
 
-    /// The Attach Point Cloud dialog, placed on screen by default.
-    pub(in crate::app) fn open_point_cloud_attach_dialog(&mut self, path: &std::path::Path) {
-        let Some(cloud) = crate::scene::model::point_cloud::load(path) else {
-            return;
-        };
+    /// The Attach Point Cloud dialog for a cloud already read, placed on
+    /// screen by default. It does not read the file.
+    fn open_point_cloud_attach_dialog(
+        &mut self,
+        path: &std::path::Path,
+        cloud: &crate::scene::model::point_cloud::CloudPoints,
+    ) {
         let yes_no = |on: bool| {
             if on {
                 crate::t!("Yes")

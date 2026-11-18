@@ -2412,19 +2412,7 @@ impl OpenCADStudio {
                     ));
                 }
                 #[cfg(not(target_arch = "wasm32"))]
-                match std::fs::read_to_string(path) {
-                    Ok(text) => {
-                        let link_path = std::fs::canonicalize(path)
-                            .map(|value| value.to_string_lossy().into_owned())
-                            .unwrap_or_else(|_| path.to_string());
-                        self.place_data_link_table(&text, &link_path);
-                    }
-                    Err(e) => {
-                        self.command_line.push_error(
-                            crate::tf!("DATALINK: cannot read \"{path}\": {e}").as_ref(),
-                        );
-                    }
-                }
+                return Some(self.read_data_link_csv(i, cmd, path));
             }
 
             "DATALINKUPDATE" => {
@@ -2626,6 +2614,82 @@ impl OpenCADStudio {
             _ => return None,
         }
         Some(self.finish_dispatch(cmd))
+    }
+
+    /// DATALINK with a typed path: reads the file off the UI thread; the
+    /// table's placement starts when the read ends
+    /// ([`Self::finish_data_link_csv_read`]).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn read_data_link_csv(
+        &mut self,
+        i: usize,
+        cmd: &str,
+        path: &str,
+    ) -> Task<Message> {
+        self.read_data_link_csv_with(i, cmd, path, read_data_link_file)
+    }
+
+    /// [`Self::read_data_link_csv`] with the reader given, so a test can
+    /// give one that panics.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn read_data_link_csv_with(
+        &mut self,
+        i: usize,
+        cmd: &str,
+        path: &str,
+        reader: fn(&str) -> Result<DataLinkCsv, String>,
+    ) -> Task<Message> {
+        let read = DataLinkRead {
+            tab_id: self.tabs[i].id,
+            generation: self.tabs[i].document_generation,
+            cmd: cmd.to_string(),
+            path: path.to_string(),
+        };
+        let worker_path = read.path.clone();
+        self.command_line.push_info(&format!("Reading {path}…"));
+        crate::app::update::background_task(
+            "DATALINK",
+            move || reader(&worker_path),
+            move |result| Message::DataLinkCsvRead(Box::new(read), result),
+        )
+    }
+
+    /// Starts the placement of a table read by DATALINK. A result for a
+    /// drawing that was closed, replaced or cleared is dropped; so is one
+    /// for a drawing that is not the current one now, or that started a
+    /// different command during the read (the placement is a command of
+    /// the current drawing).
+    pub(in crate::app) fn finish_data_link_csv_read(
+        &mut self,
+        read: &DataLinkRead,
+        result: Result<DataLinkCsv, String>,
+    ) -> Task<Message> {
+        let Some(i) = self.import_target(read.tab_id, read.generation) else {
+            return Task::none();
+        };
+        let csv = match result {
+            Ok(csv) => csv,
+            Err(e) => {
+                let path = &read.path;
+                self.command_line
+                    .push_error(crate::tf!("DATALINK: cannot read \"{path}\": {e}").as_ref());
+                return Task::none();
+            }
+        };
+        if i != self.active_tab {
+            self.command_line.push_error(
+                "DATALINK cancelled: a different drawing became current while the file was read.",
+            );
+            return Task::none();
+        }
+        if self.tabs[i].active_cmd.is_some() {
+            self.command_line.push_error(
+                "DATALINK cancelled: a different command started while the file was read.",
+            );
+            return Task::none();
+        }
+        self.place_data_link_table(&csv.text, &csv.link_path);
+        self.finish_dispatch(&read.cmd)
     }
 
     /// Build the linked table from CSV text and start the placement command —
@@ -2860,6 +2924,35 @@ fn parse_landxml_cgpoints(xml: &str) -> Vec<[f64; 3]> {
         rest = &body[close + "</CgPoint>".len()..];
     }
     out
+}
+
+/// A DATALINK read in progress: the tab it was started for, that
+/// document's generation, the command line that started it, and the file.
+#[derive(Debug, Clone)]
+pub struct DataLinkRead {
+    pub tab_id: u64,
+    pub generation: u64,
+    pub cmd: String,
+    pub path: String,
+}
+
+/// The text of a CSV file read by DATALINK, and the path the link stores
+/// (the full path when it can be found).
+#[derive(Debug, Clone)]
+pub struct DataLinkCsv {
+    pub text: String,
+    pub link_path: String,
+}
+
+/// The DATALINK reader: the file's text and the path to store, or why the
+/// file cannot be read.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_data_link_file(path: &str) -> Result<DataLinkCsv, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let link_path = std::fs::canonicalize(path)
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.to_string());
+    Ok(DataLinkCsv { text, link_path })
 }
 
 pub(crate) fn parse_csv_table(text: &str) -> Vec<Vec<String>> {

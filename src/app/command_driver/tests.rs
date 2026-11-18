@@ -11685,7 +11685,8 @@ mod datalink_csv_command_tests {
         let path = std::env::temp_dir().join(format!("ocs_datalink_{}.csv", std::process::id()));
         std::fs::write(&path, "NAME,QTY\nBolt,12\nNut,30\n").unwrap();
         let escaped = path.to_string_lossy().replace('\\', "/");
-        let _ = app.run_command_line(&format!("DATALINK {escaped}"));
+        let task = app.run_command_line(&format!("DATALINK {escaped}"));
+        app.drive_headless_task(task).expect("the read task");
         let _ = app.feed_command(StepInput::Point(DVec3::new(10.0, 10.0, 0.0)));
 
         assert!(app.command_line.last_error.is_none());

@@ -4390,6 +4390,13 @@ pub enum Message {
     /// the native typed-path command uses. `None` = cancelled.
     #[cfg(target_arch = "wasm32")]
     DataLinkCsvPicked(Option<(String, Vec<u8>)>),
+    /// Completion of a DATALINK read off the UI thread: the read (tab,
+    /// generation, command line, file), and the file's text or why it
+    /// cannot be read.
+    DataLinkCsvRead(
+        Box<crate::app::commands::display::DataLinkRead>,
+        Result<crate::app::commands::display::DataLinkCsv, String>,
+    ),
     /// Append one typed character to the command-line input from the
     /// global key-press subscription. Used when the text-input widget
     /// itself isn't focused (focus parked on viewport / button / etc.)

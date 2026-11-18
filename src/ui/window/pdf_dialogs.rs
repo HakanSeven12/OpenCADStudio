@@ -44,6 +44,9 @@ pub enum PdfDialogMsg {
         String,
         std::sync::Arc<UnderlayAttachRead>,
     ),
+    /// A file chosen in the Attach window's name list, read off the UI
+    /// thread: the file, and what the read found.
+    AttachNameRead(String, std::sync::Arc<UnderlayAttachRead>),
     // Attach Point Cloud
     CloudBrowse,
     CloudPathType(PathTypeChoice),
@@ -646,6 +649,9 @@ pub struct PdfAttachState {
     /// sheet or model, read with the file: a page change does not read.
     pub item_sizes: Vec<String>,
     pub item_units: Vec<f64>,
+    /// The file chosen in the name list while it is read off the UI
+    /// thread; a read for another file changes nothing.
+    pub pending_path: Option<String>,
     pub details: bool,
 }
 
@@ -682,6 +688,7 @@ impl PdfAttachState {
             page_size: String::new(),
             item_sizes: Vec::new(),
             item_units: Vec::new(),
+            pending_path: None,
             details: memory.details,
         }
     }

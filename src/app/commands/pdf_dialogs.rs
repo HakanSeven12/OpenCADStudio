@@ -99,11 +99,7 @@ impl OpenCADStudio {
             "Reading {}…",
             crate::entities::underlay::display_path(path)
         ));
-        let context = match kind {
-            document::entities::UnderlayType::Dwf => "DWFATTACH",
-            document::entities::UnderlayType::Dgn => "DGNATTACH",
-            _ => "PDFATTACH",
-        };
+        let context = attach_context(kind);
         let path = path.to_string();
         let worker_path = path.clone();
         crate::app::update::background_task(
@@ -205,10 +201,63 @@ impl OpenCADStudio {
         Task::none()
     }
 
-    fn load_pdf_attach_file(&self, state: &mut PdfAttachState, path: &str) {
-        let pages = item_thumbs(state.kind, path);
-        let (sizes, units) = item_sizes(state.kind, path, &pages);
-        self.set_pdf_attach_file(state, path, pages, sizes, units);
+    /// A file chosen in the Attach window's name list: it is read off the
+    /// UI thread, and the window shows it when the read ends
+    /// ([`Self::finish_attach_name_read`]). The window stays open with its
+    /// options.
+    fn read_attach_name_with(
+        &mut self,
+        kind: document::entities::UnderlayType,
+        path: &str,
+        reader: fn(document::entities::UnderlayType, &str, bool) -> UnderlayAttachRead,
+    ) -> Task<Message> {
+        self.command_line.push_info(&format!(
+            "Reading {}…",
+            crate::entities::underlay::display_path(path)
+        ));
+        let path = path.to_string();
+        let worker_path = path.clone();
+        crate::app::update::background_task(
+            attach_context(kind),
+            move || std::sync::Arc::new(reader(kind, &worker_path, false)),
+            move |read| Message::PdfDialog(PdfDialogMsg::AttachNameRead(path, read)),
+        )
+    }
+
+    /// The end of the read of a file chosen in the name list: the window
+    /// shows it, if the window is still open and that file is still the
+    /// one chosen. A file with no page, sheet or model, or one that needs
+    /// a password, shows no pages, as before.
+    fn finish_attach_name_read(&mut self, path: &str, read: &UnderlayAttachRead) {
+        if self.active_modal != Some(crate::app::ModalKind::PdfAttach) {
+            return;
+        }
+        let Some(mut state) = self.pdf_attach.take() else {
+            return;
+        };
+        if state.pending_path.as_deref() != Some(path) {
+            self.pdf_attach = Some(state);
+            return;
+        }
+        state.pending_path = None;
+        let (pages, sizes, units) = match read {
+            UnderlayAttachRead::Items {
+                pages,
+                sizes,
+                units,
+                ..
+            } => (pages.clone(), sizes.clone(), units.clone()),
+            _ => (Vec::new(), Vec::new(), Vec::new()),
+        };
+        self.set_pdf_attach_file(&mut state, path, pages, sizes, units);
+        let i = self.active_tab;
+        let plane = if self.tabs[i].editing_model_space() {
+            self.tabs[i].ucs_xform().working_plane()
+        } else {
+            crate::command::WorkingPlane::default()
+        };
+        Self::refresh_pdf_attach_geopdf(&self.tabs[i].scene, plane, &mut state);
+        self.pdf_attach = Some(state);
     }
 
     /// Put a file that was read into the Attach window.
@@ -805,19 +854,19 @@ impl OpenCADStudio {
                 }
             }
             PdfDialogMsg::AttachName(name) => {
-                let Some(mut state) = self.pdf_attach.take() else {
+                let Some(state) = self.pdf_attach.as_mut() else {
                     return Task::none();
                 };
-                if let Some((_, path)) = state.existing.iter().find(|(n, _)| *n == name).cloned() {
-                    self.load_pdf_attach_file(&mut state, &path);
-                    let plane = if self.tabs[i].editing_model_space() {
-                        self.tabs[i].ucs_xform().working_plane()
-                    } else {
-                        crate::command::WorkingPlane::default()
-                    };
-                    Self::refresh_pdf_attach_geopdf(&self.tabs[i].scene, plane, &mut state);
-                }
-                self.pdf_attach = Some(state);
+                let Some((_, path)) = state.existing.iter().find(|(n, _)| *n == name).cloned()
+                else {
+                    return Task::none();
+                };
+                state.pending_path = Some(path.clone());
+                let kind = state.kind;
+                return self.read_attach_name_with(kind, &path, read_for_attach_window);
+            }
+            PdfDialogMsg::AttachNameRead(path, read) => {
+                self.finish_attach_name_read(&path, &read);
             }
             PdfDialogMsg::AttachPage(page) => {
                 let (ctrl, shift) = (self.ctrl_down, self.shift_down);
@@ -1373,6 +1422,16 @@ fn read_pdf_for_import_window(path: &str) -> PdfImportFileRead {
         pages,
         page_sizes,
         remembered,
+    }
+}
+
+/// The name of the command that a read for the Attach window reports a
+/// panic with.
+fn attach_context(kind: document::entities::UnderlayType) -> &'static str {
+    match kind {
+        document::entities::UnderlayType::Dwf => "DWFATTACH",
+        document::entities::UnderlayType::Dgn => "DGNATTACH",
+        _ => "PDFATTACH",
     }
 }
 

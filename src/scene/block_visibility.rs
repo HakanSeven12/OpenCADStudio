@@ -84,11 +84,40 @@ impl Scene {
         common.invisible && !self.visibility_revealed(common.handle)
     }
 
+    fn visibility_reveal_member_handles(&self) -> Vec<Handle> {
+        let Some(definition) = self.block_edit_block else {
+            return Vec::new();
+        };
+        let Some(param) = parameter(&self.document, definition) else {
+            return Vec::new();
+        };
+        param
+            .all_blocks
+            .iter()
+            .copied()
+            .filter(|&handle| {
+                self.document.get_entity(handle).is_some_and(|entity| {
+                    let common = entity.common();
+                    common.owner_handle == definition
+                        && common.invisible
+                        && !super::block_construction::is_construction(common)
+                })
+            })
+            .collect()
+    }
+
     pub(crate) fn set_block_visibility_reveal(&mut self, reveal: bool) {
         if self.block_visibility_reveal != reveal {
             self.block_visibility_reveal = reveal;
-            self.recolor_meshes();
-            self.bump_geometry();
+            let affected = self.visibility_reveal_member_handles();
+            if !affected.is_empty() {
+                self.recolor_meshes_for_handles(&affected);
+                let changes: Vec<(Handle, super::ChangeKind)> = affected
+                    .into_iter()
+                    .map(|h| (h, super::ChangeKind::Modified))
+                    .collect();
+                self.bump_entities_restyled(&changes);
+            }
         }
     }
 }

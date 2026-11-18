@@ -2567,3 +2567,135 @@ mod tier1_group2_incremental_tests {
         assert_eq!(inc_non_empty, full_non_empty);
     }
 }
+
+#[cfg(test)]
+mod tier2_bedit_authoring_toggle_tests {
+    use super::*;
+
+    fn first_top_level_line(app: &OpenCADStudio) -> Handle {
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| match e {
+                EntityType::Line(l) if l.start.x == 100.0 => Some(l.common.handle),
+                _ => None,
+            })
+            .expect("top-level line exists")
+    }
+
+    #[test]
+    fn toggle_visibility_reveal_preserves_unrelated_blocks_and_top_level_cache() {
+        let mut harness = BlockBenchHarness::setup_visibility_reveal(5, 2, 4);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.toggle_visibility_reveal_step(0);
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("OtherBlock_0")
+                .unwrap()
+        );
+        let revealed_count = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+
+        harness.toggle_visibility_reveal_step(1);
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("OtherBlock_0")
+                .unwrap()
+        );
+        let hidden_inc = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        assert!(revealed_count > hidden_inc);
+
+        harness.0.tabs[i].scene.bump_geometry();
+        let hidden_full = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        assert_eq!(hidden_inc, hidden_full);
+    }
+
+    #[test]
+    fn toggle_construction_shown_preserves_unrelated_blocks_and_top_level_cache() {
+        let (mut harness, def) = BlockBenchHarness::setup_construction_shown(5, 2, 4);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.toggle_construction_shown_step(def, 0);
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("OtherBlock_0")
+                .unwrap()
+        );
+        let hidden_inc = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+
+        harness.toggle_construction_shown_step(def, 1);
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        assert_eq!(
+            keep_before,
+            harness.0.tabs[i]
+                .scene
+                .active_block_cache_arc()
+                .defn_ptr("OtherBlock_0")
+                .unwrap()
+        );
+        let shown_inc = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        assert!(shown_inc > hidden_inc);
+
+        harness.0.tabs[i].scene.bump_geometry();
+        let shown_full = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        assert_eq!(shown_inc, shown_full);
+    }
+}

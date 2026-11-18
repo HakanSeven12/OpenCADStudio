@@ -12002,7 +12002,7 @@ impl Scene {
         let mut redo: HashSet<Handle> = HashSet::default();
         let mut inserts: HashSet<Handle> = HashSet::default();
         for (handle, _) in &changes {
-            if self.meshes.contains_key(handle) {
+            if self.meshes.contains_key(handle) || self.block_meshes.contains_key(handle) {
                 return None;
             }
             match self.document.get_entity(*handle) {

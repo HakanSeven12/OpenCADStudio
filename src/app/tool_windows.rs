@@ -70,6 +70,31 @@ impl ModalKind {
             _ => ToolScope::Document,
         }
     }
+
+    /// A question or a notice: its window is the size of its content and
+    /// cannot be resized (#3241). Stretching it only adds empty space, and
+    /// shrinking it clips the buttons.
+    pub(crate) fn fixed_size(self) -> bool {
+        use ModalKind as K;
+        match self {
+            K::Unsaved
+            | K::BlockEditChanges
+            | K::SaveDialog
+            | K::AssocPrompt
+            | K::RecoveryPrompt
+            | K::ConversionLoss
+            | K::AecDropWarning
+            | K::IfccadAlphaWarning
+            | K::LayerDeleteWarning
+            | K::TableCellWarning
+            | K::TableCellEntry
+            | K::PdfPassword
+            | K::DataExtractionUnsaved => true,
+            #[cfg(not(target_arch = "wasm32"))]
+            K::FileInUse | K::ExternalChange => true,
+            _ => false,
+        }
+    }
 }
 
 /// One open tool dialog.
@@ -1028,7 +1053,7 @@ impl OpenCADStudio {
                 // size belongs to whichever of them was last open: they keep
                 // only its place.
                 .map(|placement| {
-                    let shared = kind == ModalKind::MTextDialog;
+                    let shared = kind == ModalKind::MTextDialog || kind.fixed_size();
                     WindowPlacement {
                         w: if shared { natural_w } else { placement.w.max(natural_w) },
                         h: if shared { natural_h } else { placement.h.max(natural_h) },
@@ -1037,6 +1062,7 @@ impl OpenCADStudio {
                 })
                 .filter(|placement| fits(placement.w, placement.h))
                 .unwrap_or_else(|| {
+                    let resize = if kind.fixed_size() { Vector::ZERO } else { resize };
                     let w = natural_w + resize.x;
                     let h = natural_h + resize.y;
                     let (w, h) = if fits(w, h) {
@@ -1054,7 +1080,12 @@ impl OpenCADStudio {
                 });
             // A dialog opened from another dialog's window comes up in front
             // of it, not behind the window that was clicked (#2750).
-            let (id, open) = open_window(placement, self.modal_title_for(kind), true);
+            let (id, open) = open_window(
+                placement,
+                self.modal_title_for(kind),
+                true,
+                !kind.fixed_size(),
+            );
             if let Some(tool) = self.tool_windows.iter_mut().find(|tool| tool.kind == kind) {
                 tool.window = Some(id);
             }
@@ -1086,7 +1117,7 @@ impl OpenCADStudio {
                     h: h.max(PALLET_WINDOW_MIN_H) + HEADER_H,
                 };
             }
-            let (id, open) = open_window(placement, panel.title().to_string(), false);
+            let (id, open) = open_window(placement, panel.title().to_string(), false, true);
             self.os_windows
                 .push(OsWindow::new(id, Detached::Panel(panel), placement, None));
             tasks.push(open);
@@ -1249,6 +1280,7 @@ fn open_window(
     placement: WindowPlacement,
     _title: String,
     focus: bool,
+    resizable: bool,
 ) -> (iced::window::Id, Task<Message>) {
     // The main window's scale is the best guess before the window exists;
     // `os_window_scale` puts it right once it knows its own.
@@ -1262,6 +1294,7 @@ fn open_window(
         size: Size::new(placement.w.max(240.0), placement.h.max(160.0)),
         position,
         min_size: Some(Size::new(240.0, 160.0)),
+        resizable,
         exit_on_close_request: false,
         // Opened from the app, which has the focus: above the main window.
         level: iced::window::Level::AlwaysOnTop,

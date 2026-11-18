@@ -119,6 +119,22 @@ fn the_font_list_is_coloured_in_both_themes() {
     snapshots(&app, "text-style-font-list", 1280.0);
 }
 
+/// The missing font's note has room in its row, wide and narrow: the list
+/// is at least as wide as its narrowest width also under a field that
+/// fills its column (114 px in a wide window). The note's layout width
+/// does not depend on the row being scrolled into view.
+#[test]
+fn the_missing_font_note_has_room_in_its_row() {
+    let app = font_list_open();
+    for width in [1280.0, 780.0] {
+        let mut ui = window(&app, width);
+        let note = ui
+            .find("missing · drawn with Standard".to_string())
+            .unwrap_or_else(|_| panic!("{width}: the note is not in the list"));
+        assert!(note.bounds().width > 50.0, "{width}: {:?}", note.bounds());
+    }
+}
+
 /// B5: the stand-in is the font that really draws: the bundled stroke
 /// font a name stands for, else Standard.
 #[test]

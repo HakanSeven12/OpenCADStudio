@@ -497,8 +497,18 @@ impl OpenCADStudio {
             super::super::ModalKind::RibbonCustomize => {
                 let state = self.ribbon_customize.as_ref()?;
                 let panels = self.ribbon.custom_panels();
+                let suggestions = crate::ui::window::ribbon_customize::suggestions(
+                    &state.draft,
+                    &self.command_line.dynamic_commands,
+                    &self.command_aliases,
+                );
                 sized_flow(ex, 640, 440, |flow| {
-                    crate::ui::window::ribbon_customize::view_window(state, panels, flow)
+                    crate::ui::window::ribbon_customize::view_window(
+                        state,
+                        &suggestions,
+                        panels,
+                        flow,
+                    )
                 })
             }
             super::super::ModalKind::DrawingUnits => {

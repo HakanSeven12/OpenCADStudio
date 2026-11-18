@@ -1153,6 +1153,133 @@ mod pdfimport_tests {
         assert_eq!(texts, ["Hello PDF", "Tilted"]);
     }
 
+    /// -PDFIMPORT at its file name prompt, the File option taken.
+    fn at_file_name(app: &mut OpenCADStudio) {
+        let _ = app.update(Message::Command("-PDFIMPORT".to_string()));
+        let task = app.feed_command(StepInput::Text("F".to_string()));
+        app.drive_headless_task(task).expect("the command's task");
+    }
+
+    fn prompt(app: &OpenCADStudio) -> String {
+        app.tabs[app.active_tab]
+            .active_cmd
+            .as_ref()
+            .map(|command| command.prompt())
+            .unwrap_or_default()
+    }
+
+    /// The file name prompt reads the file on a worker: the command waits,
+    /// after a `Reading` line, and asks for the page when the read ends.
+    #[test]
+    fn the_file_name_prompt_waits_for_the_read() {
+        let mut app = new_app();
+        let path = inkscape();
+        at_file_name(&mut app);
+        let read = app.feed_command(StepInput::Text(path.clone()));
+        assert_eq!(prompt(&app), "Reading the file…");
+        // Input waits until the read ends.
+        let _ = app.feed_command(StepInput::Text("other.pdf".to_string()));
+        assert_eq!(prompt(&app), "Reading the file…");
+        assert!(
+            history(&app).contains(&format!(
+                "Reading {}…",
+                crate::entities::underlay::display_path(&path)
+            )),
+            "{}",
+            history(&app)
+        );
+        app.drive_headless_task(read).expect("the read task");
+        assert_eq!(prompt(&app), "Enter page number or [?] <1>:");
+    }
+
+    /// A reader that panics gives an error, and the command asks for the
+    /// file name again; it does not wait for ever.
+    #[test]
+    fn a_reader_panic_at_the_prompt_asks_for_the_file_again() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = inkscape();
+        at_file_name(&mut app);
+        let _ = app.feed_command(StepInput::Text(path.clone()));
+        let read = app.read_pdf_for_import_prompt_with(i, path, |_| panic!("a reader bug"));
+        app.drive_headless_task(read).expect("the read task");
+        assert!(
+            history(&app).contains("PDFIMPORT failed: a reader bug"),
+            "{}",
+            history(&app)
+        );
+        assert_eq!(prompt(&app), "Enter filename for PDF import:");
+    }
+
+    /// A read for a command that ended changes nothing.
+    #[test]
+    fn a_prompt_read_after_the_command_ended_changes_nothing() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        at_file_name(&mut app);
+        let read = app.feed_command(StepInput::Text(inkscape()));
+        let _ = app.update(Message::Command("LINE".to_string()));
+        let line = prompt(&app);
+        app.drive_headless_task(read).expect("the read task");
+        assert_eq!(prompt(&app), line);
+        assert!(app.tabs[i].active_cmd.is_some());
+    }
+
+    /// The read of a file named before the command started again changes
+    /// nothing; the read of the file named now goes on.
+    #[test]
+    fn the_read_of_an_older_file_name_changes_nothing() {
+        let mut app = new_app();
+        at_file_name(&mut app);
+        let older = app.feed_command(StepInput::Text("pdfimport-older-name.pdf".to_string()));
+        let _ = app.feed_command(StepInput::Escape);
+        at_file_name(&mut app);
+        let newer = app.feed_command(StepInput::Text(inkscape()));
+        app.drive_headless_task(older).expect("the older read");
+        assert_eq!(prompt(&app), "Reading the file…");
+        assert!(!history(&app).contains("pdfimport-older-name.pdf does not exist."));
+        app.drive_headless_task(newer).expect("the newer read");
+        assert_eq!(prompt(&app), "Enter page number or [?] <1>:");
+    }
+
+    /// The read for a command in a drawing that is not the current one
+    /// moves that command on to the page prompt, without messages here.
+    #[test]
+    fn a_prompt_read_in_another_drawing_moves_its_command_on() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        at_file_name(&mut app);
+        let read = app.feed_command(StepInput::Text(inkscape()));
+        app.push_test_document();
+        app.active_tab = app.tabs.len() - 1;
+        app.drive_headless_task(read).expect("the read task");
+        let waiting = app.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+        assert_eq!(waiting.as_deref(), Some("Enter page number or [?] <1>:"));
+    }
+
+    /// A read in another drawing that ends with an error sends that
+    /// drawing's command back to the file name prompt, and shows nothing
+    /// in the current drawing.
+    #[test]
+    fn a_failed_prompt_read_in_another_drawing_shows_nothing_here() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        at_file_name(&mut app);
+        let read = app.feed_command(StepInput::Text(
+            "pdfimport-elsewhere-missing.pdf".to_string(),
+        ));
+        app.push_test_document();
+        app.active_tab = app.tabs.len() - 1;
+        app.drive_headless_task(read).expect("the read task");
+        assert!(
+            !history(&app).contains("does not exist"),
+            "{}",
+            history(&app)
+        );
+        let waiting = app.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+        assert_eq!(waiting.as_deref(), Some("Enter filename for PDF import:"));
+    }
+
     /// The import reads and converts on a worker: nothing changes in the
     /// drawing until the worker ends, then the result is one undo step.
     #[test]

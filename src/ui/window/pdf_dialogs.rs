@@ -55,6 +55,18 @@ pub enum PdfDialogMsg {
         std::path::PathBuf,
         Option<std::sync::Arc<crate::scene::model::point_cloud::CloudPoints>>,
     ),
+    /// A point cloud read off the UI thread for its attach: the tab it was
+    /// started for, that document's generation, the undo label and the
+    /// placement, and the cloud (None: no scan could be read).
+    CloudAttachRead(
+        u64,
+        u64,
+        Box<(
+            String,
+            crate::modules::insert::pc_attach::PointCloudPlacement,
+        )>,
+        Option<std::sync::Arc<crate::scene::model::point_cloud::CloudPoints>>,
+    ),
     // Point Cloud Color Map
     /// Elevation tab (else intensity).
     MapTab(bool),

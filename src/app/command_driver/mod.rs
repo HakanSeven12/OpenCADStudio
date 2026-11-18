@@ -955,8 +955,8 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.command_line.push_output(&message);
-                self.attach_point_cloud(i, label, placement);
                 self.restore_pre_cmd_tangent();
+                return self.attach_point_cloud(i, label, placement);
             }
             CmdResult::AttachPdfPages {
                 kind,

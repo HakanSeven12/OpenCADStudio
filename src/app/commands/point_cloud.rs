@@ -10,6 +10,9 @@ use document::objects::{
 use document::types::{Handle, Vector3};
 
 use crate::modules::insert::pc_attach::PointCloudPlacement;
+use crate::scene::model::point_cloud;
+use crate::ui::window::pdf_dialogs::PdfDialogMsg;
+use std::sync::Arc;
 
 const DEFINITIONS: &str = "ACAD_POINTCLOUD_EX_DICT";
 
@@ -111,13 +114,67 @@ fn ensure_definition(
 }
 
 impl OpenCADStudio {
+    /// The end of POINTCLOUDATTACH: the file is read off the UI thread,
+    /// and [`Self::finish_point_cloud_attach`] places the cloud when the
+    /// read ends. A panic in the reader becomes an error on the command
+    /// line.
     pub(crate) fn attach_point_cloud(
         &mut self,
         i: usize,
         label: String,
         placement: PointCloudPlacement,
+    ) -> Task<Message> {
+        self.attach_point_cloud_with(i, label, placement, point_cloud::load)
+    }
+
+    /// [`Self::attach_point_cloud`] with the reader given, so a test can
+    /// give one that panics.
+    pub(in crate::app) fn attach_point_cloud_with(
+        &mut self,
+        i: usize,
+        label: String,
+        placement: PointCloudPlacement,
+        reader: fn(&std::path::Path) -> Option<Arc<point_cloud::CloudPoints>>,
+    ) -> Task<Message> {
+        let tab_id = self.tabs[i].id;
+        let generation = self.tabs[i].document_generation;
+        let path = placement.path.clone();
+        crate::app::update::background_task(
+            "POINTCLOUDATTACH",
+            move || reader(&path),
+            move |cloud| {
+                Message::PdfDialog(PdfDialogMsg::CloudAttachRead(
+                    tab_id,
+                    generation,
+                    Box::new((label, placement)),
+                    cloud,
+                ))
+            },
+        )
+    }
+
+    /// Places a cloud read off the UI thread, one undo step. A result for
+    /// a drawing that was closed, replaced or cleared is dropped, and so is
+    /// one for a drawing that is not the current one now (the commit
+    /// writes to the current drawing).
+    pub(in crate::app) fn finish_point_cloud_attach(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        label: String,
+        placement: PointCloudPlacement,
+        cloud: Option<Arc<point_cloud::CloudPoints>>,
     ) {
-        let Some(points) = crate::scene::model::point_cloud::load(&placement.path) else {
+        let Some(i) = self.import_target(tab_id, generation) else {
+            return;
+        };
+        if i != self.active_tab {
+            self.command_line.push_error(
+                "Attach point cloud cancelled: a different drawing became current while the file was read.",
+            );
+            return;
+        }
+        let Some(points) = cloud else {
             self.command_line
                 .push_error("All scans are not found or invalid.");
             self.command_line.push_error("Attach point cloud failed");

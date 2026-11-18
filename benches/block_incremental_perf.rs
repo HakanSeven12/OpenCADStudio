@@ -11,6 +11,13 @@
 //! 7. `find_replace_text`: `find_replace_all` replacing top-level + block text
 //! 8. `battman_apply`: `BATTMAN` tag rename + attribute sync
 //! 9. `bcycleorder_apply`: `BCYCLEORDER` grip cycling apply inside BEDIT
+//! 10. `define_block_owned`: `Scene::define_block_from_owned_entities`
+//! 11. `redefine_block`: `Scene::define_block_raw` replacing an existing block
+//! 12. `rename_block`: `block_service::rename`
+//! 13. `delete_block`: `block_service::delete`
+//! 14. `laydel_in_block`: `LAYDEL` erasing entities inside a block definition
+//! 15. `update_block_member`: `Scene::update_entity` on a block member entity
+//! 16. `paste_new_block`: `finalize_paste` bringing in an unseen block definition
 //!
 //! Run: `cargo bench --bench block_incremental_perf`
 
@@ -129,6 +136,90 @@ fn run() {
         ENTITIES_PER_BLOCK,
     );
     bench_op("bcycleorder_apply", |_| cycle_app.bcycleorder_apply());
+
+    let total_steps = WARMUP + RUNS * ITERATIONS;
+    let mut seq;
+
+    let mut define_app = BlockBenchHarness::setup_background(
+        BACKGROUND_LINES,
+        OTHER_BLOCKS,
+        ENTITIES_PER_BLOCK,
+    );
+    seq = 0;
+    bench_op("define_block_owned", |_| {
+        let s = seq;
+        seq += 1;
+        define_app.define_block_owned_step(s, ENTITIES_PER_BLOCK)
+    });
+
+    let (mut redefine_app, _) = BlockBenchHarness::setup_edit_block(
+        BACKGROUND_LINES,
+        OTHER_BLOCKS,
+        ENTITIES_PER_BLOCK,
+    );
+    bench_op("redefine_block", |step| {
+        redefine_app.redefine_block_step(step, ENTITIES_PER_BLOCK)
+    });
+
+    let (mut rename_app, _) = BlockBenchHarness::setup_edit_block(
+        BACKGROUND_LINES,
+        OTHER_BLOCKS,
+        ENTITIES_PER_BLOCK,
+    );
+    seq = 0;
+    bench_op("rename_block", |_| {
+        let s = seq;
+        seq += 1;
+        rename_app.rename_block_step(s)
+    });
+
+    let mut delete_app = BlockBenchHarness::setup_delete_blocks(
+        BACKGROUND_LINES,
+        OTHER_BLOCKS,
+        ENTITIES_PER_BLOCK,
+        total_steps,
+    );
+    seq = 0;
+    bench_op("delete_block", |_| {
+        let s = seq;
+        seq += 1;
+        delete_app.delete_block_step(s)
+    });
+
+    let mut laydel_app = BlockBenchHarness::setup_laydel_in_block(
+        BACKGROUND_LINES,
+        OTHER_BLOCKS,
+        ENTITIES_PER_BLOCK,
+        total_steps,
+    );
+    seq = 0;
+    bench_op("laydel_in_block", |_| {
+        let s = seq;
+        seq += 1;
+        laydel_app.laydel_in_block_step(s)
+    });
+
+    let (mut member_app, edit_member) = BlockBenchHarness::setup_edit_block(
+        BACKGROUND_LINES,
+        OTHER_BLOCKS,
+        ENTITIES_PER_BLOCK,
+    );
+    bench_op("update_block_member", |step| {
+        member_app.update_block_member_step(edit_member, step)
+    });
+
+    let (mut paste_app, paste_snaps) = BlockBenchHarness::setup_paste_new_block(
+        BACKGROUND_LINES,
+        OTHER_BLOCKS,
+        ENTITIES_PER_BLOCK,
+        total_steps,
+    );
+    seq = 0;
+    bench_op("paste_new_block", |_| {
+        let s = seq;
+        seq += 1;
+        paste_app.paste_new_block_step(&paste_snaps[s], s)
+    });
 }
 
 fn main() {

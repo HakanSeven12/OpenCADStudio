@@ -3879,6 +3879,9 @@ struct GridProjection {
     row_x_norm: f32,
     row_y_norm: f32,
     row_w_norm: f32,
+    /// Line indices of the grid node nearest the eye; `grid_clip_origin` sits
+    /// on that node, so `project_line` values stay small.
+    line_shift: [i32; 2],
     grid_clip_origin: glam::Vec4,
     grid_clip_axis1: glam::Vec4,
     grid_clip_axis2: glam::Vec4,
@@ -3922,7 +3925,23 @@ impl GridProjection {
         // intersect it with the viewport rectangle. This remains valid across the
         // perspective horizon; projecting a finite world-space bounding rectangle
         // is only correct for the perpendicular/top view.
-        let grid_clip_origin = view_rot * (grid_origin - eye).as_vec3().extend(1.0);
+        // In f64, from the grid node nearest the eye: at UTM-scale coordinates
+        // an f32 `i * step` away from the true origin rounds lines off by
+        // pixels, so they no longer meet the (f64) grid snap points (#3240).
+        let rel = eye - grid_origin;
+        let nearest = |axis: Vec3, step: f32| {
+            let k = (rel.dot(axis.as_dvec3()) / f64::from(step)).round();
+            if k.is_finite() {
+                k.clamp(-1e9, 1e9) as i32
+            } else {
+                0
+            }
+        };
+        let line_shift = [nearest(axis1, step_x), nearest(axis2, step_y)];
+        let node = grid_origin
+            + axis1.as_dvec3() * (f64::from(line_shift[0]) * f64::from(step_x))
+            + axis2.as_dvec3() * (f64::from(line_shift[1]) * f64::from(step_y));
+        let grid_clip_origin = view_rot * (node - eye).as_vec3().extend(1.0);
         let grid_clip_axis1 = view_rot * axis1.extend(0.0);
         let grid_clip_axis2 = view_rot * axis2.extend(0.0);
 
@@ -3944,6 +3963,7 @@ impl GridProjection {
             row_x_norm,
             row_y_norm,
             row_w_norm,
+            line_shift,
             grid_clip_origin,
             grid_clip_axis1,
             grid_clip_axis2,
@@ -4561,7 +4581,7 @@ impl GridProjection {
                     let anchor1 = (anchor_world - self.grid_origin).as_vec3().dot(self.axis1);
                     let (start, end) = self.line_range(min1, max1, anchor1, self.step_x);
                     for i in start..=end {
-                        let value = i as f32 * self.step_x;
+                        let value = i.saturating_sub(self.line_shift[0]) as f32 * self.step_x;
                         if let Some((p0, p1)) = self.project_line(0, value) {
                             if self.is_major(i) {
                                 self.trim_line(0, p0, p1, &mut all_major);
@@ -4587,7 +4607,7 @@ impl GridProjection {
                     let anchor2 = (anchor_world - self.grid_origin).as_vec3().dot(self.axis2);
                     let (start, end) = self.line_range(min2, max2, anchor2, self.step_y);
                     for i in start..=end {
-                        let value = i as f32 * self.step_y;
+                        let value = i.saturating_sub(self.line_shift[1]) as f32 * self.step_y;
                         if let Some((p0, p1)) = self.project_line(1, value) {
                             if self.is_major(i) {
                                 self.trim_line(1, p0, p1, &mut all_major);

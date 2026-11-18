@@ -97,6 +97,22 @@ pub enum ImportDialogMsg {
         Option<u16>,
         Option<std::sync::Arc<crate::scene::model::underlay_vector::DgnImport>>,
     ),
+    /// The automation `dgn_import` operation's read off the UI thread: the
+    /// tab it was started for, that document's generation, and the request
+    /// with its prepared import, or why it failed.
+    DgnOpPrepared(
+        u64,
+        u64,
+        Box<
+            Result<
+                (
+                    crate::modules::insert::dgn_import::DgnImportRequest,
+                    crate::modules::insert::dgn_import::PreparedImport,
+                ),
+                crate::modules::insert::dgn_import::DgnImportError,
+            >,
+        >,
+    ),
     /// A DGN import read and converted off the UI thread: the tab it was
     /// started for, that document's generation, the import's choices, and
     /// what was read.

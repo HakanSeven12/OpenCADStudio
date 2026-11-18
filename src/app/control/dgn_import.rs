@@ -1,7 +1,9 @@
 //! Prompt-free DGN model import for the protocol-1 control envelope.
 
 use super::*;
-use crate::modules::insert::dgn_import::{DgnImportError, DgnImportOptions, DgnImportRequest};
+use crate::modules::insert::dgn_import::{
+    DgnImportError, DgnImportOptions, DgnImportRequest, PreparedImport,
+};
 
 fn optional_string<'a>(req: &'a Value, key: &str) -> Result<Option<&'a str>, Value> {
     match req.get(key) {
@@ -47,25 +49,111 @@ impl OpenCADStudio {
                     })?,
             ),
         };
-        let request = DgnImportRequest::from_options(DgnImportOptions {
-            path,
-            model,
-            units,
-            mapping,
+        let options = OwnedDgnOptions {
+            path: path.to_string(),
+            model: model.map(str::to_string),
+            units: units.map(str::to_string),
+            mapping: mapping.map(str::to_string),
             code_page,
-        })
-        .map_err(dgn_failure)?;
+        };
+        Ok(self.control_dgn_import_with(options, read_and_prepare))
+    }
+
+    /// The request is checked (`from_options` reads the file's models) and
+    /// the model read and converted off the UI thread; the import is placed
+    /// when the worker ends ([`Self::finish_control_dgn_import`]), and the
+    /// operation settles then: with its result, or with the failure it
+    /// answered at once before (the same `code` and `error`). The reader is
+    /// given, so a test can give one that panics.
+    pub(in crate::app) fn control_dgn_import_with(
+        &mut self,
+        options: OwnedDgnOptions,
+        reader: fn(&OwnedDgnOptions) -> Result<(DgnImportRequest, PreparedImport), DgnImportError>,
+    ) -> Task<Message> {
+        let i = self.active_tab;
+        let tab_id = self.tabs[i].id;
+        let generation = self.tabs[i].document_generation;
+        crate::app::update::background_task(
+            "DGNIMPORT",
+            move || reader(&options),
+            move |read| {
+                Message::ImportDialog(
+                    crate::ui::window::import_dialogs::ImportDialogMsg::DgnOpPrepared(
+                        tab_id,
+                        generation,
+                        Box::new(read),
+                    ),
+                )
+            },
+        )
+    }
+
+    /// The end of the operation's read: the import is placed, as the
+    /// operation placed it at once before, and the operation's result or
+    /// failure is set. An import into the current drawing needs that
+    /// drawing as it was; one into a new drawing does not.
+    pub(in crate::app) fn finish_control_dgn_import(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        read: Result<(DgnImportRequest, PreparedImport), DgnImportError>,
+    ) -> Task<Message> {
+        let (request, prepared) = match read {
+            Ok(read) => read,
+            Err(error) => {
+                self.set_control_failure(dgn_failure(error));
+                return Task::none();
+            }
+        };
+        let i = if request.current_drawing {
+            let Some(i) = self.import_target(tab_id, generation) else {
+                self.set_control_failure(failure(
+                    "document_closed",
+                    "The drawing to import into was closed or replaced during the read",
+                ));
+                return Task::none();
+            };
+            i
+        } else {
+            self.active_tab
+        };
         let result_path = request.path.clone();
         let canonical_model = request.model.clone();
-        let i = self.active_tab;
-        let (task, entities) = self.try_run_dgn_import(i, request).map_err(dgn_failure)?;
+        let (task, entities) = self.place_dgn_import(i, &request, prepared);
         self.set_control_result(json!({
             "entities": entities,
             "model": canonical_model,
             "path": result_path,
         }));
-        Ok(task)
+        task
     }
+}
+
+/// The fields of a `dgn_import` request, owned so that a worker can take
+/// them.
+#[derive(Clone, Debug, Default)]
+pub(in crate::app) struct OwnedDgnOptions {
+    pub path: String,
+    pub model: Option<String>,
+    pub units: Option<String>,
+    pub mapping: Option<String>,
+    pub code_page: Option<u16>,
+}
+
+/// The operation's read, on a worker: the request checked against the
+/// file's models, then the model read and converted.
+fn read_and_prepare(
+    options: &OwnedDgnOptions,
+) -> Result<(DgnImportRequest, PreparedImport), DgnImportError> {
+    let request = DgnImportRequest::from_options(DgnImportOptions {
+        path: &options.path,
+        model: options.model.as_deref(),
+        units: options.units.as_deref(),
+        mapping: options.mapping.as_deref(),
+        code_page: options.code_page,
+    })?;
+    let prepared = crate::modules::insert::dgn_import::prepare_import(&request)?;
+    Ok((request, prepared))
 }
 
 #[cfg(test)]

@@ -5,6 +5,8 @@ pub fn tool() -> ToolDef {
         id: "UCSICON",
         label: "UCS\nIcon",
         icon: ICON,
-        event: ModuleEvent::Command("UCSICON".to_string()),
+        // One click flips the icon (the button shows the state); typing
+        // UCSICON keeps its On / Off / NoOrigin / Origin prompt.
+        event: ModuleEvent::Command("UCSICON TOGGLE".to_string()),
     }
 }

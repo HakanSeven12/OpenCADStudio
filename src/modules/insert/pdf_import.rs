@@ -259,8 +259,6 @@ enum Step {
     Rotation,
 }
 
-/// What a file name that is no readable PDF (damaged, empty, not a PDF)
-/// prints before the name is asked for again.
 /// The file a name typed at the -PDFIMPORT prompt names: a name without
 /// an extension is a .pdf file.
 fn prompt_file_path(typed: &str) -> String {
@@ -320,6 +318,8 @@ pub fn read_for_prompt(path: &str) -> PdfPromptRead {
     }
 }
 
+/// What a file name that is no readable PDF (damaged, empty, not a PDF)
+/// prints before the name is asked for again.
 const UNREADABLE_FILE: &str = "This file cannot be opened.\n\
 The problem can be caused by several things:\n\
 - The data in the file is corrupted\n\

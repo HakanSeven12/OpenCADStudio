@@ -661,11 +661,6 @@ impl OpenCADStudio {
         self.active_modal = Some(crate::app::ModalKind::MatchPropSettings);
     }
 
-    /// PDFIMPORT's File option after the file is chosen: the file is read
-    /// off the UI thread, and the Import PDF window opens when the read
-    /// ends ([`Self::open_pdf_import_window`]); an encrypted file asks for
-    /// its password first. A panic in the reader becomes an error on the
-    /// command line.
     /// The -PDFIMPORT file name prompt: the file is read off the UI thread,
     /// and the command waits for the read
     /// ([`Self::finish_pdf_import_prompt_read`]). A panic in the reader is
@@ -743,6 +738,11 @@ impl OpenCADStudio {
         self.apply_cmd_result(result)
     }
 
+    /// PDFIMPORT's File option after the file is chosen: the file is read
+    /// off the UI thread, and the Import PDF window opens when the read
+    /// ends ([`Self::open_pdf_import_window`]); an encrypted file asks for
+    /// its password first. A panic in the reader becomes an error on the
+    /// command line.
     pub(in crate::app) fn open_pdf_import_file(&mut self, path: &str) -> Task<Message> {
         self.open_pdf_import_file_with(path, read_pdf_for_import_window)
     }

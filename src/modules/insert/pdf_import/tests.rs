@@ -1000,7 +1000,6 @@ fn fixture(path: &str) -> String {
     format!("{}/tests/fixtures/{path}", env!("CARGO_MANIFEST_DIR"))
 }
 
-/// Types `text` at the command's prompt.
 /// Type `text`; a file name read off the UI thread is read here and given
 /// back, as the host does when the read ends.
 fn typed(command: &mut PdfImportCommand, text: &str) -> CmdResult {

@@ -25,9 +25,17 @@ rustflags = [
     "-Clink-arg=-Wl,--exclude-all-symbols",
 ]
 
+# `crt-static` links the MSVC C runtime into the binaries, so they start on
+# a Windows install without the Visual C++ Redistributable (#3289).
 [target.x86_64-pc-windows-msvc]
 rustflags = [
     "-Clink-arg=/STACK:16777216",
+    "-Ctarget-feature=+crt-static",
+]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = [
+    "-Ctarget-feature=+crt-static",
 ]
 
 # Also sizes rustc's own threads: rustc 1.99 overflows the default 8 MB

@@ -10978,7 +10978,7 @@ impl Scene {
         // This composite is the CPU pick/snap set; the projection follows the
         // paper camera, so the key keeps `camera_generation`.
         let mut wires = (*self.paper_sheet_wires_arc()).clone();
-        wires.extend(self.viewport_content_wires(layout_block, None, None, false));
+        wires.extend(self.viewport_content_wires(layout_block, None, None, false, false));
         let arc = Arc::new(wires);
         let gen = WIRE_CONTENT_GEN.fetch_add(1, Ordering::Relaxed);
         self.last_model_wire_gen.set(gen);
@@ -11025,11 +11025,16 @@ impl Scene {
                 crate::scene::model::instance_model::expand_stubs(&self.entity_wires_arc())
                     .into_owned();
             // Model space plots in plan, so solids show their top view.
-            wires.extend(self.mesh_plot_wires(&self.meshes_arc(), [0.0, 0.0, 1.0], None));
-            apply_mode(
-                &mut wires,
-                render_mode_override.unwrap_or_else(|| self.active_model_tile_render_mode()),
-            );
+            let mode =
+                render_mode_override.unwrap_or_else(|| self.active_model_tile_render_mode());
+            let hidden_line = view::render::render_mode_flags(mode).mesh_fill;
+            wires.extend(self.mesh_plot_wires(
+                &self.meshes_arc(),
+                [0.0, 0.0, 1.0],
+                None,
+                hidden_line,
+            ));
+            apply_mode(&mut wires, mode);
             // On screen the wire shader multiplies dash patterns by this ratio;
             // a plot has no shader, so apply it to the patterns themselves.
             if let Some(ratio) = view::render::model_linetype_ratio(&self.document) {
@@ -11050,8 +11055,17 @@ impl Scene {
             if viewport.common.owner_handle != paper_block || !viewport.is_on() {
                 continue;
             }
-            let mode = render_mode_override.unwrap_or(viewport.render_mode);
-            let mut wires = self.viewport_content_wires(paper_block, Some(handle), None, true);
+            // The viewport's shade plot: 1 wireframe, 2 hidden, 3 rendered;
+            // anything else plots as displayed.
+            let mode = render_mode_override.unwrap_or(match viewport.shade_plot_mode {
+                1 => document::entities::ViewportRenderMode::Wireframe2D,
+                2 => document::entities::ViewportRenderMode::HiddenLine,
+                3 => document::entities::ViewportRenderMode::GouraudShaded,
+                _ => viewport.render_mode,
+            });
+            let hidden_line = view::render::render_mode_flags(mode).mesh_fill;
+            let mut wires =
+                self.viewport_content_wires(paper_block, Some(handle), None, true, hidden_line);
             apply_mode(&mut wires, mode);
             model_wires.extend(wires);
         }

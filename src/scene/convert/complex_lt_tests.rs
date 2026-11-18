@@ -1266,7 +1266,7 @@ fn a_plot_right_after_a_zoom_takes_the_current_viewport_scale() {
     );
 
     let paper = scene.current_layout_block_handle();
-    let _ = scene.viewport_content_wires(paper, Some(viewport), None, true);
+    let _ = scene.viewport_content_wires(paper, Some(viewport), None, true, false);
     assert_eq!(
         scene.viewport_complex_lt_factor(viewport, false),
         Some(factor),

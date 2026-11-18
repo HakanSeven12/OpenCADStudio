@@ -12,6 +12,7 @@ impl Scene {
         only_vp: Option<Handle>,
         exclude_vp: Option<Handle>,
         plot: bool,
+        hidden_line: bool,
     ) -> Vec<WireModel> {
         use document::entities::Viewport;
 
@@ -96,7 +97,7 @@ impl Scene {
                 let frozen: HashSet<Handle> = vp.frozen_layers.iter().copied().collect();
                 let meshes = self.meshes_for_viewport(vp_handle, &frozen);
                 let view = (cam_frame.rotation * glam::Vec3::Z).as_dvec3().to_array();
-                let mesh_wires = self.mesh_plot_wires(&meshes, view, Some(vp_handle));
+                let mesh_wires = self.mesh_plot_wires(&meshes, view, Some(vp_handle), hidden_line);
                 model_wires.to_mut().extend(mesh_wires);
                 for wire in model_wires.to_mut() {
                     wire.resample_plot_curve();
@@ -811,9 +812,11 @@ impl Scene {
         meshes: &[MeshLodSet],
         view: [f64; 3],
         viewport: Option<Handle>,
+        hidden_line: bool,
     ) -> Vec<WireModel> {
         use document::types::Vector3;
         let mut wires = Vec::new();
+        let occluders = hidden_line.then(|| Occluders::new(meshes, view));
         for set in meshes {
             let Some(handle) = set.entity_handle() else {
                 continue;
@@ -876,6 +879,12 @@ impl Scene {
                     points.extend([pair[0], pair[1], [f64::NAN; 3]]);
                 }
             }
+            if let Some(occluders) = &occluders {
+                points = points
+                    .chunks_exact(3)
+                    .flat_map(|seg| occluders.visible_parts(seg[0], seg[1]))
+                    .collect();
+            }
             if points.is_empty() {
                 continue;
             }
@@ -894,6 +903,123 @@ impl Scene {
             wires.push(wire);
         }
         wires
+    }
+}
+
+/// The faces of every plotted mesh, for hiding the edges they cover when a
+/// viewport plots hidden or shaded.
+struct Occluders {
+    /// Triangle corners, then the triangle's extent across the view
+    /// (`[min_u, min_v, max_u, max_v]`) and its nearest depth toward the viewer.
+    tris: Vec<([[f64; 3]; 3], [f64; 4], f64)>,
+    axes: [glam::DVec3; 3],
+    eps: f64,
+}
+
+impl Occluders {
+    fn new(meshes: &[MeshLodSet], view: [f64; 3]) -> Self {
+        use document::types::Vector3;
+        let w = glam::DVec3::from(view).normalize_or(glam::DVec3::Z);
+        let u = w.any_orthonormal_vector();
+        let axes = [u, w.cross(u), w];
+        let mut tris = Vec::new();
+        let (mut lo, mut hi) = (glam::DVec3::splat(f64::MAX), glam::DVec3::splat(f64::MIN));
+        for set in meshes {
+            let Some(mesh) = set.geometry_lods().first() else {
+                continue;
+            };
+            let vertex = |i: u32| {
+                let i = i as usize;
+                let low = mesh.verts_low.get(i).copied().unwrap_or([0.0; 3]);
+                let p: [f64; 3] =
+                    std::array::from_fn(|k| mesh.verts[i][k] as f64 + low[k] as f64);
+                set.instance_transform.map_or(p, |xform| {
+                    let q = xform.apply(Vector3::new(p[0], p[1], p[2]));
+                    [q.x, q.y, q.z]
+                })
+            };
+            for tri in mesh.indices.chunks_exact(3) {
+                let corners = [vertex(tri[0]), vertex(tri[1]), vertex(tri[2])];
+                let mut extent = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
+                let mut near = f64::MIN;
+                for c in corners {
+                    let c = glam::DVec3::from(c);
+                    lo = lo.min(c);
+                    hi = hi.max(c);
+                    let (pu, pv) = (c.dot(axes[0]), c.dot(axes[1]));
+                    extent = [
+                        extent[0].min(pu),
+                        extent[1].min(pv),
+                        extent[2].max(pu),
+                        extent[3].max(pv),
+                    ];
+                    near = near.max(c.dot(w));
+                }
+                tris.push((corners, extent, near));
+            }
+        }
+        let eps = if tris.is_empty() {
+            0.0
+        } else {
+            (hi - lo).length() * 1e-7
+        };
+        Self { tris, axes, eps }
+    }
+
+    /// Whether a face lies between `p` and the viewer.
+    // ponytail: linear scan of every face per sample; bin the extents in a
+    // grid if hidden-line plots of large models get slow.
+    fn hidden(&self, p: glam::DVec3) -> bool {
+        let [u, v, w] = self.axes;
+        let (pu, pv, pw) = (p.dot(u), p.dot(v), p.dot(w));
+        self.tris.iter().any(|(c, e, near)| {
+            if *near <= pw + self.eps || pu < e[0] || pu > e[2] || pv < e[1] || pv > e[3] {
+                return false;
+            }
+            // Ray from `p` toward the viewer against the triangle.
+            let [a, b, c] = c.map(glam::DVec3::from);
+            let (e1, e2) = (b - a, c - a);
+            let h = w.cross(e2);
+            let det = e1.dot(h);
+            if det.abs() < 1e-18 {
+                return false;
+            }
+            let s = p - a;
+            let bu = s.dot(h) / det;
+            if !(0.0..=1.0).contains(&bu) {
+                return false;
+            }
+            let q = s.cross(e1);
+            let bv = w.dot(q) / det;
+            bv >= 0.0 && bu + bv <= 1.0 && e2.dot(q) / det > self.eps
+        })
+    }
+
+    /// The pieces of `a`–`b` no face hides, as `[start, end, NaN]` triples.
+    fn visible_parts(&self, a: [f64; 3], b: [f64; 3]) -> Vec<[f64; 3]> {
+        let (a, b) = (glam::DVec3::from(a), glam::DVec3::from(b));
+        if !a.is_finite() || !b.is_finite() {
+            return Vec::new();
+        }
+        let n = (((b - a).length() / (self.eps * 1e4)).ceil() as usize).clamp(1, 64);
+        let at = |i: usize| a.lerp(b, i as f64 / n as f64);
+        let mut out = Vec::new();
+        let mut start = None;
+        for i in 0..n {
+            let shown = !self.hidden(a.lerp(b, (i as f64 + 0.5) / n as f64));
+            match (shown, start) {
+                (true, None) => start = Some(i),
+                (false, Some(s)) => {
+                    out.extend([at(s).to_array(), at(i).to_array(), [f64::NAN; 3]]);
+                    start = None;
+                }
+                _ => {}
+            }
+        }
+        if let Some(s) = start {
+            out.extend([at(s).to_array(), b.to_array(), [f64::NAN; 3]]);
+        }
+        out
     }
 }
 

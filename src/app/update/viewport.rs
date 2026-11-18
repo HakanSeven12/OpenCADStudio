@@ -5368,6 +5368,7 @@ impl OpenCADStudio {
             && self.nav_style_action(self.nav_held, true).is_none()
         {
             self.nav_end_drag(i);
+            return Some(self.refresh_pointer_after_navigation(i));
         }
         Some(Task::none())
     }
@@ -6895,7 +6896,7 @@ impl OpenCADStudio {
             sel.input.zoom_dir_out = false;
             drop(sel);
             self.arm_hover_after_navigation(i);
-            return Task::none();
+            return self.refresh_pointer_after_navigation(i);
         }
 
         // Commit a UCS icon grip drag: persist the new UCS so it
@@ -9333,6 +9334,7 @@ properties={:.1}ms picked={}",
             // view pans under it (#234).
             self.reproject_box_anchor(i, vw, vh);
         }
+        self.reproject_dyn_guide(i);
         self.tabs[i]
             .scene
             .record_nav_perf(crate::scene::NavPerfOp::Pan, started);
@@ -9396,11 +9398,72 @@ properties={:.1}ms picked={}",
             // as the view zooms under it (#234).
             self.reproject_box_anchor(i, vw, vh);
         }
+        self.reproject_dyn_guide(i);
         self.tabs[i]
             .scene
             .record_nav_perf(crate::scene::NavPerfOp::Zoom, nav_started);
         self.arm_hover_after_navigation(i);
         Task::none()
+    }
+
+    /// A view drag ended while a command or a grip drag waits for a point:
+    /// run the cursor's place through the move path again, so the rubber
+    /// band, the guide and the value boxes come back where the cursor is now
+    /// and not where it was before the view moved.
+    pub(in crate::app) fn refresh_pointer_after_navigation(&mut self, i: usize) -> Task<Message> {
+        if i >= self.tabs.len()
+            || (self.tabs[i].active_cmd.is_none() && self.tabs[i].active_grip.is_none())
+        {
+            return Task::none();
+        }
+        let at = self.tabs[i].scene.selection.borrow().input.last_move_pos;
+        match at {
+            Some(at) => self.on_viewport_move(at),
+            None => Task::none(),
+        }
+    }
+
+    /// Re-project the dynamic-input guide anchors (`last_point_screen`,
+    /// `dyn_ref_screen`) from their world points after the view moves
+    /// (zoom/pan), using the same projection as the cursor-move handler, so
+    /// the guide and value boxes stay on the geometry instead of waiting for
+    /// the next cursor move.
+    pub(in crate::app) fn reproject_dyn_guide(&mut self, i: usize) {
+        if self.tabs[i].active_cmd.is_none() {
+            return;
+        }
+        let vp_size = self.tabs[i].scene.selection.borrow().view.vp_size;
+        let edit_frame = self.tabs[i].scene.viewport_edit_frame(vp_size);
+        let tile_b = match &edit_frame {
+            Some((_, full)) => *full,
+            None => self.tabs[i]
+                .scene
+                .active_model_tile_bounds(vp_size.0, vp_size.1),
+        };
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: tile_b.width,
+            height: tile_b.height,
+        };
+        let (view_rot, eye) = match &edit_frame {
+            Some((cam, _)) => (cam.view_proj_rte(bounds), cam.eye()),
+            None => {
+                let cam = self.tabs[i].scene.camera.borrow();
+                (cam.view_proj_rte(bounds), cam.eye())
+            }
+        };
+        let proj = |bp: glam::DVec3| {
+            let ndc = view_rot.project_point3((bp - eye).as_vec3());
+            iced::Point::new(
+                (ndc.x + 1.0) * 0.5 * bounds.width + tile_b.x,
+                (1.0 - ndc.y) * 0.5 * bounds.height + tile_b.y,
+            )
+        };
+        let anchor = self.tabs[i].dyn_anchor.or(self.last_point);
+        let dyn_ref = self.tabs[i].dyn_ref;
+        self.tabs[i].last_point_screen = anchor.map(&proj);
+        self.tabs[i].dyn_ref_screen = dyn_ref.map(&proj);
     }
 
     /// Re-pin an active box-selection anchor to its stored world point after the
@@ -11739,6 +11802,115 @@ mod rapid_drawing_tests {
         let (dir, pt) = app.snapper.parallel_ref.unwrap();
         assert!((dir.x.abs() - 1.0).abs() < 0.001);
         assert!((pt.y - 30.0).abs() < 0.001);
+    }
+
+    /// While a draw command waits for its next point, wheel-zooming moves the
+    /// dynamic-input guide anchor with the view instead of leaving it at its
+    /// old pixel until the next cursor move.
+    #[test]
+    fn dynamic_input_guide_anchor_follows_a_wheel_zoom() {
+        use crate::command::StepInput;
+        let mut app = drawing_app("CIRCLE");
+        let i = app.active_tab;
+        let centre = glam::DVec3::new(10.0, 10.0, 0.0);
+        let _ = app.feed_command(StepInput::Point(centre));
+        let at = screen(&app, glam::DVec3::new(30.0, 25.0, 0.0));
+        move_to(&mut app, at);
+        let before = app.tabs[i].last_point_screen.expect("guide anchor");
+
+        app.touchpad_pan = false;
+        app.ctrl_down = false;
+        app.zoom_wheel_reversed = false;
+        let _ = app.update(Message::ViewportScroll(iced::mouse::ScrollDelta::Lines {
+            x: 0.0,
+            y: 3.0,
+        }));
+
+        let after = app.tabs[i].last_point_screen.expect("guide anchor");
+        let expected = screen(&app, centre);
+        assert!(
+            (after.x - expected.x).abs() < 0.01 && (after.y - expected.y).abs() < 0.01,
+            "anchor {after:?} must sit on the projected centre {expected:?}"
+        );
+        assert!(
+            (after.x - before.x).abs() > 1.0 || (after.y - before.y).abs() > 1.0,
+            "the zoom must have moved the anchor"
+        );
+    }
+
+    fn rubber_band_drawn(app: &OpenCADStudio) -> bool {
+        let (segment, wires) = app.tabs[app.active_tab].scene.shown_rubber_band();
+        segment.is_some() || !wires.is_empty()
+    }
+
+    /// While the middle button drags the view, a command draws neither its
+    /// rubber band nor its guide; the release brings both back.
+    #[test]
+    fn a_middle_button_pan_hides_the_drawing_feedback_until_release() {
+        use crate::command::StepInput;
+        let mut app = drawing_app("CIRCLE");
+        let i = app.active_tab;
+        let _ = app.feed_command(StepInput::Point(glam::DVec3::new(10.0, 10.0, 0.0)));
+        let from = screen(&app, glam::DVec3::new(30.0, 25.0, 0.0));
+        move_to(&mut app, from);
+        assert!(app.tabs[i].scene.drawing_feedback_shown());
+        assert!(rubber_band_drawn(&app), "the circle follows the cursor");
+
+        let _ = app.update(Message::ViewportMiddlePress);
+        move_to(&mut app, Point::new(from.x + 120.0, from.y - 60.0));
+        assert!(
+            !app.tabs[i].scene.drawing_feedback_shown(),
+            "a view being dragged shows no guide"
+        );
+        assert!(
+            !rubber_band_drawn(&app),
+            "a view being dragged shows no rubber band"
+        );
+
+        let _ = app.update(Message::ViewportMiddleRelease);
+        assert!(app.tabs[i].scene.drawing_feedback_shown());
+        assert!(rubber_band_drawn(&app));
+    }
+
+    /// The release of a pan puts the guide and the rubber band back under
+    /// the cursor, without waiting for the mouse to move again.
+    #[test]
+    fn a_pan_release_puts_the_drawing_feedback_back_under_the_cursor() {
+        use crate::command::StepInput;
+        let mut app = drawing_app("CIRCLE");
+        let i = app.active_tab;
+        let centre = glam::DVec3::new(10.0, 10.0, 0.0);
+        let _ = app.feed_command(StepInput::Point(centre));
+        let from = screen(&app, glam::DVec3::new(30.0, 25.0, 0.0));
+        move_to(&mut app, from);
+        assert_eq!(app.tabs[i].last_cursor_screen, from);
+        let before = app.tabs[i].last_point_screen.expect("guide anchor");
+
+        let _ = app.update(Message::ViewportMiddlePress);
+        let to = Point::new(from.x + 120.0, from.y - 60.0);
+        move_to(&mut app, to);
+        let _ = app.update(Message::ViewportMiddleRelease);
+        let near = |a: Point, b: Point| (a.x - b.x).abs() < 0.01 && (a.y - b.y).abs() < 0.01;
+        let cursor = app.tabs[i].last_cursor_screen;
+        assert!(
+            near(cursor, to),
+            "the guide ends at the cursor {to:?}, not at {cursor:?}"
+        );
+        let anchor = app.tabs[i].last_point_screen.expect("guide anchor");
+        let expected = screen(&app, centre);
+        assert!(
+            near(anchor, expected),
+            "anchor {anchor:?} must sit on the projected centre {expected:?}"
+        );
+        assert!(
+            (anchor.x - before.x).abs() > 1.0 || (anchor.y - before.y).abs() > 1.0,
+            "the pan must have moved the view"
+        );
+        let end = screen(&app, app.tabs[i].last_cursor_world);
+        assert!(
+            near(end, to),
+            "the rubber band ends under the cursor {to:?}, not at {end:?}"
+        );
     }
 }
 

@@ -278,13 +278,17 @@ impl OpenCADStudio {
             }
         }
         scene.deselect_all();
-        scene.select_entity(key.owner, false);
         let quads = match_quads(
             &scene.document,
             key,
             &self.find_replace.search,
             &self.find_replace.options.matching(),
         );
+        // A text shows its match marked; other matches show their object
+        // selected.
+        if quads.is_empty() {
+            scene.select_entity(key.owner, false);
+        }
         let (frame, shade) = highlight(&quads);
         scene.set_preview_wires(frame);
         scene.set_command_preview_hatches(shade);
@@ -1214,9 +1218,9 @@ fn highlight(
             .unzip::<_, _, Vec<_>, Vec<_>>()
     };
     let (points, points_low) = split(frame, &[0, 1, 2, 3, 0]);
-    let shade = matched
-        .iter()
-        .map(|q| {
+    let shade = std::iter::once((frame, FIND_FRAME_FILL))
+        .chain(matched.iter().map(|q| (q, FIND_MATCH_FILL)))
+        .map(|(q, color)| {
             let origin = q[0];
             let ring = q.iter().map(|p| [(p[0] - origin[0]) as f32, (p[1] - origin[1]) as f32]);
             crate::scene::HatchModel {
@@ -1235,7 +1239,7 @@ fn highlight(
                 style: document::entities::HatchStyleType::Normal,
                 pattern: crate::scene::model::hatch_model::HatchPattern::Solid,
                 name: "FIND_MATCH".into(),
-                color: FIND_MATCH_FILL,
+                color,
                 aci: 0,
                 line_weight_px: 1.0,
                 angle_offset: 0.0,
@@ -1270,6 +1274,8 @@ fn highlight(
 /// The shade over the matched characters and the outline of the text.
 const FIND_MATCH_FILL: [f32; 4] = [0.20, 0.47, 0.85, 0.45];
 const FIND_FRAME: [f32; 4] = [0.62, 0.66, 0.72, 1.0];
+/// The text's box is dimmed under the frame.
+const FIND_FRAME_FILL: [f32; 4] = [0.0, 0.0, 0.0, 0.28];
 
 /// A text as it reads: multiline text, a multileader's text, a dimension's
 /// override and a table cell carry formatting codes, shown without them.

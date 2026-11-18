@@ -1909,3 +1909,150 @@ mod dgn_worker_tests {
         assert!(document.block_records.get("site - Default").is_some());
     }
 }
+
+#[cfg(test)]
+mod dgn_prompt_read_tests {
+    use super::*;
+    use crate::command::StepInput;
+    use crate::modules::insert::dgn_import::test_files;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    /// A file registered under a name of its own: a V7 file with one line,
+    /// or bytes that are no design file.
+    fn file(name: &str, dgn: bool) -> String {
+        let path = format!("memory://dgn-prompt-{name}-{}.dgn", std::process::id());
+        let bytes = if dgn {
+            test_files::minimal_v7_line()
+        } else {
+            b"not a design file".to_vec()
+        };
+        crate::scene::model::pdf_raster::register_source(&path, Arc::new(bytes));
+        path
+    }
+
+    fn prompt(app: &OpenCADStudio, i: usize) -> String {
+        app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .map(|command| command.prompt())
+            .unwrap_or_default()
+    }
+
+    fn history(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|entry| entry.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn at_file_name(app: &mut OpenCADStudio) {
+        let _ = app.update(Message::Command("-DGNIMPORT".to_string()));
+        assert_eq!(
+            prompt(app, app.active_tab),
+            "Enter filename for DGN import:"
+        );
+    }
+
+    /// The file name prompt reads the file on a worker: the command waits,
+    /// after a `Reading` line, input waits, and the model prompt follows the
+    /// read.
+    #[test]
+    fn the_file_name_prompt_waits_for_the_read() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = file("waits", true);
+        at_file_name(&mut app);
+        let read = app.feed_command(StepInput::Text(path.clone()));
+        assert_eq!(prompt(&app, i), "Reading the file…");
+        assert!(
+            history(&app).contains(&format!("Reading {path}…")),
+            "{}",
+            history(&app)
+        );
+        let _ = app.feed_command(StepInput::Text("other.dgn".to_string()));
+        assert_eq!(prompt(&app, i), "Reading the file…");
+        app.drive_headless_task(read).expect("the read task");
+        assert_eq!(prompt(&app, i), "Enter name of model or [?] <Default>:");
+    }
+
+    /// A file that is no DGN model gives the reader's error when the read
+    /// ends, and the command asks for the file name again.
+    #[test]
+    fn a_bad_file_gives_its_error_when_the_read_ends() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        at_file_name(&mut app);
+        let read = app.feed_command(StepInput::Text(file("bad", false)));
+        app.drive_headless_task(read).expect("the read task");
+        assert!(app.command_line.last_error.is_some());
+        assert_eq!(prompt(&app, i), "Enter filename for DGN import:");
+    }
+
+    /// A reader that panics gives an error, and the command asks for the
+    /// file name again; it does not wait for ever.
+    #[test]
+    fn a_reader_panic_asks_for_the_file_again() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = file("panics", true);
+        at_file_name(&mut app);
+        let _ = app.feed_command(StepInput::Text(path.clone()));
+        let read = app.read_dgn_for_import_prompt_with(i, path, |_| panic!("a reader bug"));
+        app.drive_headless_task(read).expect("the read task");
+        assert!(
+            history(&app).contains("DGNIMPORT failed: a reader bug"),
+            "{}",
+            history(&app)
+        );
+        assert_eq!(prompt(&app, i), "Enter filename for DGN import:");
+    }
+
+    /// The read of a file named before the command started again changes
+    /// nothing; the read of the file named now goes on.
+    #[test]
+    fn the_read_of_an_older_file_name_changes_nothing() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        at_file_name(&mut app);
+        let older = app.feed_command(StepInput::Text(file("older", false)));
+        let _ = app.feed_command(StepInput::Escape);
+        at_file_name(&mut app);
+        let newer = app.feed_command(StepInput::Text(file("newer", true)));
+        app.drive_headless_task(older).expect("the older read");
+        assert_eq!(prompt(&app, i), "Reading the file…");
+        assert!(app.command_line.last_error.is_none());
+        app.drive_headless_task(newer).expect("the newer read");
+        assert_eq!(prompt(&app, i), "Enter name of model or [?] <Default>:");
+    }
+
+    /// A read in a drawing that is not the current one moves that drawing's
+    /// command on, and a failed read there shows nothing here.
+    #[test]
+    fn a_read_in_another_drawing_moves_its_command_on_quietly() {
+        for (name, dgn, expected) in [
+            (
+                "elsewhere-good",
+                true,
+                "Enter name of model or [?] <Default>:",
+            ),
+            ("elsewhere-bad", false, "Enter filename for DGN import:"),
+        ] {
+            let mut app = new_app();
+            let i = app.active_tab;
+            at_file_name(&mut app);
+            let read = app.feed_command(StepInput::Text(file(name, dgn)));
+            app.push_test_document();
+            app.active_tab = app.tabs.len() - 1;
+            app.drive_headless_task(read).expect("the read task");
+            assert!(app.command_line.last_error.is_none(), "{name}");
+            assert_eq!(prompt(&app, i), expected, "{name}");
+        }
+    }
+}

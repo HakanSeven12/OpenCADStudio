@@ -77,6 +77,32 @@ pub fn wire_schema() -> &'static str {
     })
 }
 
+/// The self-hosted wire-schema gate's LOUD SKIP message (runner side).
+///
+/// The gate in [`crate::runner::run_with_plugin`] only refuses when
+/// [`WIRE_SCHEMA_ENV`] is PRESENT and mismatched — when the plugin was NOT
+/// launched by the host (the variable absent: a standalone `ocs_plugin_run`
+/// dev loop) the gate silently skipped, and a codec mismatch would surface
+/// only later, as a confusing decode error. The runner now emits ONE loud
+/// stderr warning for that case.
+///
+/// Pure and testable: the caller reads the environment and hands the
+/// result in — `None` (absent) → `Some(warning)` naming
+/// [`WIRE_SCHEMA_ENV`]; `Some(_)` (the host launched us and the gate ran)
+/// → `None`, because the gate's own present-and-mismatched refusal path is
+/// the loud signal then.
+#[cfg(feature = "host")]
+pub(crate) fn wire_schema_gate_skip_warning(host_env: Option<&str>) -> Option<String> {
+    if host_env.is_some() {
+        return None;
+    }
+    Some(format!(
+        "[runner] wire-schema gate SKIPPED: {WIRE_SCHEMA_ENV} is unset — the plugin was \
+         not launched by the host, so the wire schema was not compared; a codec mismatch \
+         will instead surface at decode time"
+    ))
+}
+
 /// Extracts a string from the generated compact JSON.
 fn json_string_value(json: &str, key: &str) -> Option<String> {
     let pattern = format!(r#""{key}":""#);
@@ -247,6 +273,33 @@ mod tests {
         assert!(!uses_acadrust_gate(3));
         assert!(uses_acadrust_gate(4));
         assert!(uses_acadrust_gate(5));
+    }
+
+    #[test]
+    #[cfg(feature = "host")]
+    fn absent_wire_schema_env_yields_the_loud_skip_warning() {
+        let warning = wire_schema_gate_skip_warning(None)
+            .expect("an ABSENT env must yield Some(warning) — the gate skipped");
+        // The warning names the env var and explains both halves of the
+        // situation: why the gate skipped, and what happens instead.
+        assert!(warning.contains(WIRE_SCHEMA_ENV), "names the env var: {warning}");
+        assert!(warning.contains("SKIPPED"), "says the gate skipped: {warning}");
+        assert!(
+            warning.contains("not launched by the host"),
+            "says why: {warning}"
+        );
+        assert!(
+            warning.contains("decode time"),
+            "says where a mismatch surfaces instead: {warning}"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "host")]
+    fn present_wire_schema_env_yields_no_warning() {
+        // The gate RAN (its present-and-mismatched refusal is the loud
+        // signal then) — no skip warning on top.
+        assert_eq!(wire_schema_gate_skip_warning(Some("0123456789abcdef")), None);
     }
 
     #[test]

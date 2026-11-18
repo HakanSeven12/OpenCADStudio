@@ -45,6 +45,10 @@ identify control-channel overhead. A read-only request control is essential:
 automation itself can allocate memory even when the drawing is unchanged.
 Reports retain transport call counts, including native operation-status polls.
 Background memory controls do not establish displayed-frame performance.
+The fixed `edits` control activates and fits each pane once after creating its
+layout, then returns to the first pane. Its separate `fit_panes` phase records
+each fitted camera; compare these alongside viewport dimensions before pooling
+edit timings. Pane setup is excluded from the `move_retained` measurements.
 
 | Existing benchmark | What it measures | Remaining gap |
 | --- | --- | --- |
@@ -79,7 +83,16 @@ never commit those artifacts, including sanitized summaries.
 The drawing and nonzero viewport must become queryable before setup begins.
 Readiness is **not first paint**. Setup selects a real, visible model-space line,
 proves a normal `MOVE` changes it, and proves undo restores its geometry. The
-workload replays middle-button pan and wheel zoom through the editor's pointer
+model-space owner comes from the block records; capped screenshot annotations
+can omit it in drawings containing many block definitions. The edit target must
+also be selected by a pointer hit before replay.
+Use `--wait-for-start-seconds 300` to arrange the owned benchmark window before
+timing. The run writes `ready.json` in its artifact directory, waits for
+`start.signal` there, then records the actual viewport dimensions. Creating that
+signal starts measurement; keep the window foreground and unobstructed for
+display comparisons.
+
+The workload replays middle-button pan and wheel zoom through the editor's pointer
 handlers, performs pointer hit selection, then measures normal `MOVE`/undo and
 paired forward/backward moves that retain undo history. Selection clicks are
 spaced beyond Windows' double-click interval to avoid opening an inline editor.

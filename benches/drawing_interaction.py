@@ -20,6 +20,7 @@ import subprocess
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import psutil
@@ -61,6 +62,15 @@ def recovery_updates(directory, seen, observed_qpc):
     return updates
 
 
+def model_space_owner(client):
+    records = client.call("records", collection="block_records", name="*Model_Space", paths=[], limit=10000)
+    owners = {record["handle"] for record in records["records"]
+              if record.get("name", "").lower() == "*model_space"}
+    if len(owners) != 1:
+        raise RuntimeError("Expected one model-space block record")
+    return owners.pop()
+
+
 def isolation_layout(client, args, layout, active_layout, handle, phase):
     """One controlled workload; fixed-layout controls never recreate panes."""
     if args.scenario == "layout_churn" or layout != active_layout:
@@ -69,7 +79,22 @@ def isolation_layout(client, args, layout, active_layout, handle, phase):
         expected = {"SINGLE": 1, "2V": 2, "4": 4}[layout]
         if not output or output[-1] != f"VPORTS: {expected} viewport(s).":
             raise RuntimeError("VPORTS did not confirm the isolated layout")
-        client.call("commands", cmd="ZOOM EXTENTS")
+        if args.scenario == "edits":
+            # VPORTS can inherit stored cameras. Fit every pane explicitly so
+            # repeated binaries render the same extent, including inactive panes.
+            width, height = client.call("state")["viewport_size"]
+            centers = {"SINGLE": [(0.5, 0.5)], "2V": [(0.25, 0.5), (0.75, 0.5)],
+                       "4": [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)]}[layout]
+            events = []
+            for x, y in centers + centers[:1]:
+                events.extend([
+                    ("pointer", {"events": [{"move": [width * x, height * y]},
+                                             {"press": "left"}, {"release": "left"}]}),
+                    ("select", {"clear": True}),
+                    ("commands", {"cmd": "ZOOM EXTENTS"})])
+            phase("fit_panes", layout, events, args.layout_settle_seconds)
+        else:
+            client.call("commands", cmd="ZOOM EXTENTS")
         active_layout = layout
     if args.scenario == "idle":
         phase("idle", layout, [], args.cycle_seconds)
@@ -171,8 +196,12 @@ class Client:
             if not line.endswith(b"\n"):
                 raise RuntimeError("Truncated automation response")
             return json.loads(line)
+        endpoint = op
         body = None if op == "state" else json.dumps(fields).encode()
-        request = urllib.request.Request(self.base + op, body, {
+        if op == "records":
+            endpoint += "?" + urllib.parse.urlencode({k: fields[k] for k in ("collection", "type", "offset", "limit") if k in fields})
+            body = None
+        request = urllib.request.Request(self.base + endpoint, body, {
             "Authorization": "Bearer " + self.token, "Content-Type": "application/json"})
         try:
             with self.opener.open(request, timeout=self.timeout) as response:
@@ -443,16 +472,17 @@ def run_one(args, drawing, artifacts, version):
                       live_version=state["version"], viewport_size=state["viewport_size"],
                       missing_fonts=state["missing_fonts"], xrefs=state["xrefs"], session_id=state["session_id"])
         result["selection_click_min_interval_ms"] = client.click_interval * 1000
+        client.call("commands", cmd="TILEMODE 1")
         client.call("commands", cmd="VPORTS SINGLE")
         client.call("commands", cmd="ZOOM EXTENTS")
         if args.autosave_minutes is not None:
             client.call("commands", cmd=f"SAVETIME {args.autosave_minutes}")
         time.sleep(args.settle_seconds)
         capture = client.call("capture", path=str(artifacts / "setup.png"), scope="viewport", max_dimension=1600)["result"]
-        owners = {e["owner"] for e in capture["visible_entities"] if e.get("space", "").lower() == "*model_space"}
-        if len(owners) != 1:
-            raise RuntimeError("Need visible model-space geometry to identify the editing workload")
-        owner = owners.pop()
+        # Capture annotations are capped and can be dominated by block-definition
+        # geometry. Read the owning block rather than using that visual sample
+        # as a complete owner inventory.
+        owner = model_space_owner(client)
         query = client.call("query", type="Line", detail="geometry", limit=200,
                             where=[{"path": "/owner", "value": owner}])
         result["model_line_count"] = query["count"]
@@ -468,7 +498,7 @@ def run_one(args, drawing, artifacts, version):
                 continue
             client.call("select", clear=True)
             hit = client.call("pointer", events=[{"move_world": midpoint}, {"press": "left"}, {"release": "left"}])
-            if not hit["state"]["selection"]:
+            if candidate["handle"] not in hit["state"]["selection"]:
                 continue
             client.call("select", clear=True)
             client.call("select", handles=[candidate["handle"]])
@@ -483,6 +513,7 @@ def run_one(args, drawing, artifacts, version):
             if restored["start"] != candidate["start"] or restored["end"] != candidate["end"]:
                 raise RuntimeError("Setup edit/undo did not restore the source line")
             line = candidate
+            result["edit_target_pointer_verified"] = True
             break
         if line is None:
             raise RuntimeError("Could not find a visible, selectable model-space line for replay")
@@ -508,6 +539,28 @@ def run_one(args, drawing, artifacts, version):
                 if time.monotonic() >= deadline:
                     raise TimeoutError("OCS did not become foreground")
                 time.sleep(.2)
+        if args.wait_for_start_seconds:
+            signal = artifacts / "start.signal"
+            (artifacts / "ready.json").write_text(json.dumps({"pid": proc.pid, "start_signal": str(signal)}), encoding="utf-8")
+            print(f"  waiting for start.signal for OCS PID {proc.pid}: {signal}", flush=True)
+            deadline = time.monotonic() + args.wait_for_start_seconds
+            while not signal.exists():
+                if proc.poll() is not None:
+                    raise RuntimeError("Owned editor exited before measurement start")
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Measurement start signal did not arrive")
+                time.sleep(.1)
+        # Window arrangement and pointer activity can change the setup camera.
+        # Seed all later panes from a repeatable single-view extents camera.
+        client.call("commands", cmd="VPORTS SINGLE")
+        client.call("commands", cmd="ZOOM EXTENTS")
+        client.call("select", clear=True)
+        time.sleep(args.layout_settle_seconds)
+        # Foregrounding or maximizing can resize the owned editor after setup.
+        # Record the actual timed-workload dimensions rather than the setup size.
+        state = client.call("state")
+        assert_state(state)
+        result["viewport_size"] = state["viewport_size"]
         result["baseline"] = sampler.snapshot()
         result["baseline_transport_calls"] = dict(client.raw_counts)
         midpoint = [(a + b) / 2 for a, b in zip(line["start"], line["end"])]
@@ -529,6 +582,8 @@ def run_one(args, drawing, artifacts, version):
                 elapsed = (time.perf_counter() - at) * 1000
                 record["requests"].append({"op": op, "roundtrip_ms": elapsed,
                                            "start_qpc": start_qpc, "end_qpc": qpc()})
+                if name == "fit_panes" and op == "commands":
+                    record["requests"][-1]["camera"] = response["state"]["camera"]
                 if name == "selection" and op == "pointer" and not response["state"]["selection"]:
                     raise RuntimeError("Selection replay hit no geometry")
                 time.sleep(max(0, args.input_interval_ms / 1000 - elapsed / 1000))
@@ -541,6 +596,7 @@ def run_one(args, drawing, artifacts, version):
             record.update(end_qpc=qpc(), window_after=window_state(proc.pid),
                           viewport_size=after["viewport_size"],
                           camera_revisions=[before["camera_revision"], after["camera_revision"]],
+                          cameras=[before["camera"], after["camera"]],
                           roundtrip_ms=distribution([r["roundtrip_ms"] for r in record["requests"]]))
             record["by_operation_ms"] = {
                 op: distribution([r["roundtrip_ms"] for r in record["requests"] if r["op"] == op])
@@ -698,6 +754,8 @@ def main():
     parser.add_argument("--presentmon", type=Path)
     parser.add_argument("--presentmon-elevated", action="store_true")
     parser.add_argument("--wait-for-foreground-seconds", type=float, default=0)
+    parser.add_argument("--wait-for-start-seconds", type=float, default=0,
+                        help="Wait for the run artifact's start.signal after arranging the owned window")
     parser.add_argument("--expected-revision")
     parser.add_argument("--output", type=Path, default=LOCAL_MEASUREMENTS / "drawing-interaction.json")
     args = parser.parse_args()
@@ -707,7 +765,8 @@ def main():
             and 1 <= args.edit_steps <= 1000 and 0 <= args.input_interval_ms <= 1000
             and .05 <= args.memory_poll_seconds <= 5 and 0 <= args.settle_seconds <= 600
             and 0 <= args.layout_settle_seconds <= 60 and 1 <= args.timeout_seconds <= 3600
-            and 0 <= args.wait_for_foreground_seconds <= 600):
+            and 0 <= args.wait_for_foreground_seconds <= 600
+            and 0 <= args.wait_for_start_seconds <= 600):
         parser.error("Invalid run count or timing/step limit")
     if args.presentmon_elevated and not args.presentmon:
         parser.error("--presentmon-elevated requires --presentmon")

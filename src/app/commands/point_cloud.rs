@@ -534,3 +534,199 @@ mod attach_read_tests {
         let _ = std::fs::remove_file(path);
     }
 }
+
+#[cfg(test)]
+mod prompt_read_tests {
+    use super::*;
+    use crate::command::StepInput;
+    use crate::scene::model::point_cloud::test_scan_file;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    fn history(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|entry| entry.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn command(app: &OpenCADStudio) -> Option<&'static str> {
+        app.tabs[app.active_tab]
+            .active_cmd
+            .as_ref()
+            .map(|command| command.name())
+    }
+
+    fn bad_scan(tag: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "ocs-pointcloud-prompt-{tag}-{}.rcs",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"not a scan").expect("write the bad scan");
+        path
+    }
+
+    /// The prompt asks for the insertion point at once, while the file is
+    /// read; a good file keeps the command.
+    #[test]
+    fn the_prompt_asks_for_the_point_during_the_read() {
+        let mut app = new_app();
+        let path = test_scan_file("prompt-good", 10);
+        let _ = app.dispatch_command("-POINTCLOUDATTACH");
+        let task = app.feed_command(StepInput::Text(path.to_string_lossy().into_owned()));
+        assert_eq!(command(&app), Some("POINTCLOUDATTACH"));
+        let shown = crate::entities::underlay::display_path(&path.to_string_lossy());
+        assert!(
+            history(&app).contains(&format!("Reading {shown}…")),
+            "{}",
+            history(&app)
+        );
+        assert!(
+            history(&app).ends_with("Specify insertion point <0,0>:"),
+            "{}",
+            history(&app)
+        );
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(command(&app), Some("POINTCLOUDATTACH"));
+        assert_eq!(app.command_line.last_error, None);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A file with no scan that can be read ends the command with the two
+    /// lines when the read ends.
+    #[test]
+    fn a_bad_file_ends_the_command_when_the_read_ends() {
+        let mut app = new_app();
+        let path = bad_scan("bad");
+        let _ = app.dispatch_command("-POINTCLOUDATTACH");
+        let task = app.feed_command(StepInput::Text(path.to_string_lossy().into_owned()));
+        assert_eq!(command(&app), Some("POINTCLOUDATTACH"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(command(&app), None);
+        assert!(
+            history(&app)
+                .ends_with("All scans are not found or invalid.\nAttach point cloud failed"),
+            "{}",
+            history(&app)
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A failed read for a command that ended before the read ended
+    /// changes nothing: the command that is current now continues.
+    #[test]
+    fn a_failed_read_after_the_command_ended_changes_nothing() {
+        let mut app = new_app();
+        let path = bad_scan("ended");
+        let _ = app.dispatch_command("-POINTCLOUDATTACH");
+        let task = app.feed_command(StepInput::Text(path.to_string_lossy().into_owned()));
+        let _ = app.feed_command(StepInput::Escape);
+        let _ = app.dispatch_command("LINE");
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(command(&app), Some("LINE"));
+        assert!(
+            !history(&app).contains("All scans are not found or invalid."),
+            "{}",
+            history(&app)
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A failed read for a command in another drawing changes nothing:
+    /// the -POINTCLOUDATTACH command of the current drawing continues.
+    #[test]
+    fn a_failed_read_for_another_drawing_changes_nothing() {
+        let mut app = new_app();
+        let bad = bad_scan("other-tab");
+        let _ = app.dispatch_command("-POINTCLOUDATTACH");
+        let task = app.feed_command(StepInput::Text(bad.to_string_lossy().into_owned()));
+        app.push_test_document();
+        app.active_tab = app.tabs.len() - 1;
+        let _ = app.dispatch_command("-POINTCLOUDATTACH");
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(command(&app), Some("POINTCLOUDATTACH"));
+        assert!(
+            !history(&app).contains("All scans are not found or invalid."),
+            "{}",
+            history(&app)
+        );
+        let _ = std::fs::remove_file(bad);
+    }
+
+    /// A failed read for an older file name changes nothing: the read of
+    /// the newer name is the one that counts.
+    #[test]
+    fn a_failed_read_for_an_older_file_name_changes_nothing() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let bad = bad_scan("older");
+        let good = test_scan_file("prompt-newer", 10);
+        let _ = app.dispatch_command("-POINTCLOUDATTACH");
+        let older = app.feed_command(StepInput::Text(bad.to_string_lossy().into_owned()));
+        let newer = app.read_point_cloud_for_prompt(i, good.clone());
+        app.drive_headless_task(older).expect("the older read");
+        assert_eq!(command(&app), Some("POINTCLOUDATTACH"));
+        assert!(
+            !history(&app).contains("All scans are not found or invalid."),
+            "{}",
+            history(&app)
+        );
+        app.drive_headless_task(newer).expect("the newer read");
+        assert_eq!(command(&app), Some("POINTCLOUDATTACH"));
+        let _ = std::fs::remove_file(bad);
+        let _ = std::fs::remove_file(good);
+    }
+
+    /// A reader that panics gives an error, and the command continues (the
+    /// attach reads the file again at its end).
+    #[test]
+    fn a_reader_panic_is_an_error_and_the_command_continues() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let _ = app.dispatch_command("-POINTCLOUDATTACH");
+        let task = app
+            .read_point_cloud_for_prompt_with(i, "panics.rcs".into(), |_| panic!("a reader bug"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("POINTCLOUDATTACH failed: a reader bug")
+        );
+        assert_eq!(command(&app), Some("POINTCLOUDATTACH"));
+    }
+
+    /// The full prompt sequence attaches the cloud when the attach's read
+    /// ends.
+    #[test]
+    fn the_prompts_attach_the_cloud() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = test_scan_file("prompt-attach", 10);
+        let _ = app.dispatch_command("-POINTCLOUDATTACH");
+        let task = app.feed_command(StepInput::Text(path.to_string_lossy().into_owned()));
+        app.drive_headless_task(task).expect("the read task");
+        let mut last = Task::none();
+        for _ in 0..3 {
+            last = app.feed_command(StepInput::Enter);
+        }
+        app.drive_headless_task(last).expect("the attach task");
+        let clouds = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter(|entity| matches!(entity, document::EntityType::Extended(_)))
+            .count();
+        assert_eq!(clouds, 1, "{}", history(&app));
+        assert!(
+            history(&app).ends_with("1 point cloud attached"),
+            "{}",
+            history(&app)
+        );
+        let _ = std::fs::remove_file(path);
+    }
+}

@@ -259,6 +259,65 @@ enum Step {
 
 /// What a file name that is no readable PDF (damaged, empty, not a PDF)
 /// prints before the name is asked for again.
+/// The file a name typed at the -PDFIMPORT prompt names: a name without
+/// an extension is a .pdf file.
+fn prompt_file_path(typed: &str) -> String {
+    if std::path::Path::new(typed).extension().is_none() {
+        format!("{typed}.pdf")
+    } else {
+        typed.to_string()
+    }
+}
+
+/// What the read of a file named at the -PDFIMPORT file name prompt found.
+#[derive(Debug, Clone)]
+pub enum PdfPromptRead {
+    /// The file cannot be read: the error to report.
+    Error(String),
+    /// The file needs a password first.
+    Password {
+        stage: crate::scene::model::pdf_password::Stage,
+        remembered: bool,
+    },
+    /// The number of pages, and the notice when a password supplied
+    /// earlier opened the file.
+    Pages {
+        pages: usize,
+        notice: Option<String>,
+    },
+}
+
+/// The read of a file named at the -PDFIMPORT prompt: the file, the check
+/// that it can be opened, the password it needs, and its pages.
+pub fn read_for_prompt(path: &str) -> PdfPromptRead {
+    use crate::scene::model::pdf_password::{gate, remembered_notice, Gate};
+    let shown = crate::entities::underlay::display_path(path);
+    let Ok(bytes) = std::fs::read(path) else {
+        return PdfPromptRead::Error(format!("File {shown} does not exist."));
+    };
+    // A damaged file is repaired only when it still has its trailer (the
+    // `trailer` dictionary or a cross-reference stream); a cut-off one
+    // cannot be opened.
+    // ponytail: byte search; a compressed stream holding these bytes
+    // would pass the test.
+    let has = |key: &[u8]| bytes.windows(key.len()).any(|w| w == key);
+    if !has(b"trailer") && !has(b"/XRef") {
+        return PdfPromptRead::Error(UNREADABLE_FILE.to_string());
+    }
+    crate::scene::model::pdf_raster::register_source(path, std::sync::Arc::new(bytes));
+    let notice = match gate(path, true) {
+        Gate::Open => None,
+        Gate::Remembered => Some(remembered_notice(path)),
+        Gate::Ask { stage, remembered } => {
+            return PdfPromptRead::Password { stage, remembered };
+        }
+    };
+    match crate::scene::model::pdf_raster::page_count(path).filter(|&pages| pages > 0) {
+        Some(pages) => PdfPromptRead::Pages { pages, notice },
+        None => PdfPromptRead::Error(UNREADABLE_FILE.to_string()),
+    }
+}
+
 const UNREADABLE_FILE: &str = "This file cannot be opened.\n\
 The problem can be caused by several things:\n\
 - The data in the file is corrupted\n\
@@ -345,39 +404,30 @@ impl PdfImportCommand {
         if typed.is_empty() {
             return CmdResult::ReportError("Filename cannot be blank".to_string());
         }
-        // A name without an extension is a .pdf file.
-        let path = if std::path::Path::new(typed).extension().is_none() {
-            format!("{typed}.pdf")
-        } else {
-            typed.to_string()
-        };
-        let shown = crate::entities::underlay::display_path(&path);
-        let Ok(bytes) = std::fs::read(&path) else {
-            return CmdResult::ReportError(format!("File {shown} does not exist."));
-        };
-        // A damaged file is repaired only when it still has its trailer (the
-        // `trailer` dictionary or a cross-reference stream); a cut-off one
-        // cannot be opened.
-        // ponytail: byte search; a compressed stream holding these bytes
-        // would pass the test.
-        let has = |key: &[u8]| bytes.windows(key.len()).any(|w| w == key);
-        if !has(b"trailer") && !has(b"/XRef") {
-            return CmdResult::ReportError(UNREADABLE_FILE.to_string());
+        let path = prompt_file_path(typed);
+        let read = read_for_prompt(&path);
+        self.take_read(&path, text, read)
+    }
+
+    /// The command goes on with what the read of the file named at the
+    /// prompt found: the page prompt, the password, or the error.
+    fn take_read(&mut self, path: &str, input: &str, read: PdfPromptRead) -> CmdResult {
+        match read {
+            PdfPromptRead::Error(error) => CmdResult::ReportError(error),
+            PdfPromptRead::Password { stage, remembered } => CmdResult::PdfPassword {
+                path: path.to_string(),
+                input: input.to_string(),
+                stage,
+                remembered,
+                attach: false,
+            },
+            PdfPromptRead::Pages { pages, notice } => {
+                self.pages = pages;
+                self.file.path = path.to_string();
+                self.step = Step::Page;
+                notice.map_or(CmdResult::NeedPoint, CmdResult::ReportMeasurement)
+            }
         }
-        crate::scene::model::pdf_raster::register_source(&path, std::sync::Arc::new(bytes));
-        let notice = match crate::scene::model::pdf_password::prompt_gate(&path, text, false) {
-            Ok(notice) => notice,
-            Err(ask) => return ask,
-        };
-        let Some(pages) =
-            crate::scene::model::pdf_raster::page_count(&path).filter(|&pages| pages > 0)
-        else {
-            return CmdResult::ReportError(UNREADABLE_FILE.to_string());
-        };
-        self.pages = pages;
-        self.file.path = path;
-        self.step = Step::Page;
-        notice.map_or(CmdResult::NeedPoint, CmdResult::ReportMeasurement)
     }
 
     fn page(&mut self, text: &str) -> CmdResult {

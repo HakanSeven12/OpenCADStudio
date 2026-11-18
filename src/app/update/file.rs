@@ -4905,10 +4905,15 @@ impl OpenCADStudio {
         // happens in `on_save_dialog_path_picked` once a path returns.
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let seed_dir = self.tabs[i]
-                .current_path
-                .as_ref()
-                .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+            // A template is saved in the templates folder (#3210).
+            let seed_dir = if ext.eq_ignore_ascii_case("dwt") {
+                self.template_dir()
+            } else {
+                self.tabs[i]
+                    .current_path
+                    .as_ref()
+                    .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            };
             let default_name = filename;
             let (filter_label, filter_ext): (&str, &str) =
                 if let Some(converter) = ocs_save::external_format(ext) {

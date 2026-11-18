@@ -20,6 +20,20 @@ impl OpenCADStudio {
         files
     }
 
+    /// Where template files are picked and saved: where the default
+    /// template lives, so its neighbours in a template folder are one click
+    /// away (#1836); else the templates folder Options › Files lists.
+    pub(in crate::app) fn template_dir(&self) -> Option<std::path::PathBuf> {
+        let dir = std::path::Path::new(self.qnew_template.trim())
+            .parent()
+            .filter(|dir| dir.is_dir())
+            .map(std::path::Path::to_path_buf);
+        #[cfg(not(target_arch = "wasm32"))]
+        return dir.or_else(crate::config::templates_dir);
+        #[cfg(target_arch = "wasm32")]
+        dir
+    }
+
     pub(super) fn dispatch_fileops(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
             // QNEW starts from the default template (Options > Files); NEW
@@ -27,15 +41,7 @@ impl OpenCADStudio {
             "QNEW" => return Some(Task::done(Message::TabNew)),
             "NEW" => {
                 self.start_templates = None;
-                // Open where the default template lives, so its neighbours in
-                // a template folder are one click away (#1836); else in the
-                // templates folder Options › Files lists.
-                let template_dir = std::path::Path::new(self.qnew_template.trim())
-                    .parent()
-                    .filter(|dir| dir.is_dir())
-                    .map(std::path::Path::to_path_buf);
-                #[cfg(not(target_arch = "wasm32"))]
-                let template_dir = template_dir.or_else(crate::config::templates_dir);
+                let template_dir = self.template_dir();
                 return Some(Task::perform(
                     async move {
                         let dialog = crate::sys::file_dialog();

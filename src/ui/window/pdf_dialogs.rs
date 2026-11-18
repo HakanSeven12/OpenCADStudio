@@ -47,6 +47,9 @@ pub enum PdfDialogMsg {
     /// A file chosen in the Attach window's name list, read off the UI
     /// thread: the file, and what the read found.
     AttachNameRead(String, std::sync::Arc<UnderlayAttachRead>),
+    /// The GeoPDF check of the Attach window, run off the UI thread: the
+    /// file, the pages checked, and whether every one has a placement.
+    AttachGeoChecked(String, Vec<String>, bool),
     // Attach Point Cloud
     CloudBrowse,
     CloudPathType(PathTypeChoice),

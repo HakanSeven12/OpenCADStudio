@@ -464,6 +464,16 @@ pub(super) fn georeferenced_pages_in(
 /// The drawing's coordinate system and its millimetres per drawing unit.
 pub(super) type GeoContext = (crate::io::crs::CrsDefinition, f64);
 
+/// A GeoPDF check without the drawing: [`georeferenced_pages_in`], or a
+/// test's check.
+pub(super) type GeoPdfCheck = fn(
+    Option<&GeoContext>,
+    document::entities::UnderlayType,
+    &str,
+    &[String],
+    crate::command::WorkingPlane,
+) -> Option<Vec<(String, document::EntityType)>>;
+
 /// The part of a GeoPDF placement that comes from the drawing: `None` when
 /// PDF pages cannot be placed by their geospatial data here.
 pub(super) fn geo_context(
@@ -766,10 +776,11 @@ mod geo_attach_tests {
         let read = app.open_pdf_attach_dialog(path);
         app.drive_headless_task(read).expect("the read task");
         app.ctrl_down = true;
-        let _ = app.update(crate::app::Message::PdfDialog(
+        let check = app.update(crate::app::Message::PdfDialog(
             crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachPage(1),
         ));
         app.ctrl_down = false;
+        app.drive_headless_task(check).expect("the GeoPDF check");
         let state = app.pdf_attach.as_mut().expect("attach dialog");
         assert_eq!(state.selected, vec![0, 1]);
         assert!(!state.geopdf_available);

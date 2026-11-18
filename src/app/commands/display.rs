@@ -398,8 +398,9 @@ impl OpenCADStudio {
                                 .as_ref(),
                         );
                     }
-                    "" => {
-                        // Bare UCSICON toggles visibility.
+                    "" | "TOGGLE" => {
+                        // Bare UCSICON toggles visibility; the ribbon button
+                        // sends TOGGLE instead of opening the prompt.
                         self.push_undo_snapshot(i, "UCSICON");
                         let visible = !self.show_ucs_icon;
                         self.show_ucs_icon = visible;
@@ -3018,6 +3019,36 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app
+    }
+
+    // The UCS Icon ribbon button flips the icon on each click (and its
+    // highlight follows) instead of opening the UCSICON prompt.
+    #[test]
+    fn the_ucs_icon_ribbon_button_toggles_the_icon() {
+        use crate::modules::{CadModule, ModuleEvent, RibbonItem};
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let view = crate::modules::view::ViewModule;
+        let event = view
+            .ribbon_groups()
+            .iter()
+            .flat_map(|g| g.tools.iter())
+            .find_map(|item| match item {
+                RibbonItem::LargeTool(t) if t.id == "UCSICON" => Some(t.event.clone()),
+                _ => None,
+            })
+            .expect("a UCSICON tool in the View ribbon");
+        let ModuleEvent::Command(cmd) = event else {
+            panic!("the UCSICON button runs a command");
+        };
+        let before = app.show_ucs_icon;
+        let _ = app.dispatch_ribbon_command(&cmd);
+        assert_eq!(app.show_ucs_icon, !before);
+        assert_eq!(app.ribbon.show_ucs_icon, !before);
+        assert!(app.tabs[i].active_cmd.is_none(), "no prompt is left open");
+        let _ = app.dispatch_ribbon_command(&cmd);
+        assert_eq!(app.show_ucs_icon, before);
+        assert_eq!(app.ribbon.show_ucs_icon, before);
     }
 
     #[test]

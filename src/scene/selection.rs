@@ -1282,6 +1282,8 @@ impl Scene {
 
         let mut handle_set: HashSet<Handle> = HashSet::default();
         let mut erased: Vec<(Handle, ChangeKind)> = Vec::new();
+        let mut candidate_block_handles: Vec<Handle> = Vec::new();
+        let mut sentinel_handles: Vec<(Handle, ChangeKind)> = Vec::new();
         let mut selection_changed = false;
         let mut hover_changed = false;
 
@@ -1307,6 +1309,15 @@ impl Scene {
                 },
                 _ => None,
             });
+            if let Some(entity) = self.document.get_entity(h) {
+                let owner = entity.common().owner_handle;
+                if !owner.is_null() {
+                    candidate_block_handles.push(owner);
+                }
+                if matches!(entity, EntityType::Block(_) | EntityType::BlockEnd(_)) {
+                    sentinel_handles.push((h, ChangeKind::Removed));
+                }
+            }
             let section_managers: Vec<Handle> =
                 managers_by_section.get(&h).cloned().unwrap_or_default();
             // Delta-undo: capture the removed entity so an undo can re-insert it.
@@ -1366,11 +1377,7 @@ impl Scene {
                 self.constraint_hover_highlights.clear();
                 hover_changed = true;
             }
-            self.hatches.remove(&h);
-            self.images.remove(&h);
-            self.meshes.remove(&h);
-            self.block_meshes.remove(&h);
-            self.solid_models.remove(&h);
+            self.clear_derived_caches_for(h);
             handle_set.insert(h);
             erased.push((h, ChangeKind::Removed));
         }
@@ -1448,8 +1455,14 @@ impl Scene {
         // the resident set removes only their wires (bump_entities drops them
         // from the tessellation memos too).
         if !erased.is_empty() {
+            let touched_blocks =
+                self.touched_block_definition_names(&sentinel_handles, &candidate_block_handles, &[]);
             self.invalidate_dependency_index();
-            self.bump_entities(&erased);
+            if touched_blocks.is_empty() {
+                self.bump_entities(&erased);
+            } else {
+                self.bump_entities_with_block_deps(&erased, &[], &touched_blocks, false);
+            }
         }
     }
 

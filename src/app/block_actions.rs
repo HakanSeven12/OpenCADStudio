@@ -2352,3 +2352,154 @@ mod tier1_group1_incremental_tests {
         assert_eq!(inc_non_empty, full_non_empty);
     }
 }
+
+#[cfg(test)]
+mod tier1_group2_incremental_tests {
+    use super::*;
+
+    fn first_top_level_line(app: &OpenCADStudio) -> Handle {
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| match e {
+                EntityType::Line(l) if l.start.x == 100.0 => Some(l.common.handle),
+                _ => None,
+            })
+            .expect("top-level line exists")
+    }
+
+    #[test]
+    fn laydel_in_block_preserves_unrelated_blocks_and_top_level_cache() {
+        let mut harness = BlockBenchHarness::setup_laydel_in_block(5, 2, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        let target_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("LaydelBenchBlock")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.laydel_in_block_step(0);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        let cache_after = harness.0.tabs[i].scene.active_block_cache_arc();
+        assert_eq!(keep_before, cache_after.defn_ptr("OtherBlock_0").unwrap());
+        assert_ne!(
+            target_before,
+            cache_after.defn_ptr("LaydelBenchBlock").unwrap()
+        );
+        let inc_non_empty = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        harness.0.tabs[i].scene.bump_geometry();
+        let full_non_empty = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        assert_eq!(inc_non_empty, full_non_empty);
+    }
+
+    #[test]
+    fn update_block_member_updates_block_cache_and_preserves_unrelated() {
+        let (mut harness, member) = BlockBenchHarness::setup_edit_block(5, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        let target_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("EditBenchBlock")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.update_block_member_step(member, 1);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        let cache_after = harness.0.tabs[i].scene.active_block_cache_arc();
+        assert_eq!(keep_before, cache_after.defn_ptr("OtherBlock_0").unwrap());
+        assert_ne!(
+            target_before,
+            cache_after.defn_ptr("EditBenchBlock").unwrap()
+        );
+    }
+
+    #[test]
+    fn erase_entities_in_block_updates_block_cache_and_preserves_unrelated() {
+        let (mut harness, member) = BlockBenchHarness::setup_edit_block(5, 2, 2);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        let target_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("EditBenchBlock")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.0.tabs[i].scene.erase_entities(&[member]);
+        let _ = harness.0.tabs[i].scene.entity_wires();
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        let cache_after = harness.0.tabs[i].scene.active_block_cache_arc();
+        assert_eq!(keep_before, cache_after.defn_ptr("OtherBlock_0").unwrap());
+        assert_ne!(
+            target_before,
+            cache_after.defn_ptr("EditBenchBlock").unwrap()
+        );
+    }
+
+    #[test]
+    fn paste_new_block_preserves_unrelated_blocks_and_top_level_cache() {
+        let (mut harness, snaps) = BlockBenchHarness::setup_paste_new_block(5, 2, 2, 1);
+        let i = harness.0.active_tab;
+        let top_line = first_top_level_line(&harness.0);
+        let keep_before = harness.0.tabs[i]
+            .scene
+            .active_block_cache_arc()
+            .defn_ptr("OtherBlock_0")
+            .unwrap();
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+
+        harness.paste_new_block_step(&snaps[0], 0);
+
+        assert!(harness.0.tabs[i].scene.has_resident_tess_memo(top_line));
+        let cache_after = harness.0.tabs[i].scene.active_block_cache_arc();
+        assert_eq!(keep_before, cache_after.defn_ptr("OtherBlock_0").unwrap());
+        assert!(cache_after.defn_ptr("PasteBench_0").is_some());
+        let inc_non_empty = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        harness.0.tabs[i].scene.bump_geometry();
+        let full_non_empty = harness.0.tabs[i]
+            .scene
+            .entity_wires()
+            .iter()
+            .filter(|w| !w.points.is_empty() || !w.fill_tris.is_empty())
+            .count();
+        assert_eq!(inc_non_empty, full_non_empty);
+    }
+}

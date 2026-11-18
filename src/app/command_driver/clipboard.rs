@@ -335,7 +335,21 @@ impl OpenCADStudio {
         let (created, mleaders) = merge_blocks_and_mleader_styles(document, deps, &apps, &images);
         ensure_pasted_image_reactors(&mut self.tabs[i].scene, &[], deps, first_new_handle);
         if created > 0 {
-            self.tabs[i].scene.bump_geometry();
+            let mut new_blocks: Vec<Handle> = Vec::new();
+            let mut changes: Vec<(Handle, crate::scene::ChangeKind)> = Vec::new();
+            for record in self.tabs[i].scene.document.block_records.iter() {
+                if record.handle.value() >= first_new_handle {
+                    new_blocks.push(record.handle);
+                    for &member in &record.entity_handles {
+                        changes.push((member, crate::scene::ChangeKind::Added));
+                    }
+                }
+            }
+            if !new_blocks.is_empty() || !changes.is_empty() {
+                self.tabs[i]
+                    .scene
+                    .bump_entities_restyled_with_block_deps(&changes, &new_blocks, &[]);
+            }
         }
         mleaders
     }
@@ -856,8 +870,19 @@ pub(crate) fn finish_paste_in_scene(
     // the `bump_geometry` tails the Scene helpers used to run. INSERTs of
     // blocks this drawing already defines add no definition, so they take
     // the per-entity bump like any other pasted entity.
-    let mut needs_geometry_bump = scene.document.block_records.len() != block_records_before;
+    let mut extra_block_handles: Vec<Handle> = Vec::new();
     let mut changes = Vec::new();
+    if scene.document.block_records.len() != block_records_before {
+        for record in scene.document.block_records.iter() {
+            if record.handle.value() >= first_new_handle {
+                extra_block_handles.push(record.handle);
+                for &member in &record.entity_handles {
+                    changes.push((member, crate::scene::ChangeKind::Added));
+                }
+            }
+        }
+    }
+    let mut has_block_sentinel = false;
     for &handle in by_index {
         if handle.is_null() {
             continue;
@@ -877,17 +902,26 @@ pub(crate) fn finish_paste_in_scene(
         ) {
             scene.reseed_derived_caches(handle);
         }
-        if matches!(
-            scene.document.get_entity(handle),
-            Some(document::EntityType::Block(_) | document::EntityType::BlockEnd(_))
-        ) {
-            needs_geometry_bump = true;
-        } else {
-            changes.push((handle, crate::scene::ChangeKind::Added));
+        if let Some(entity) = scene.document.get_entity(handle) {
+            if matches!(
+                entity,
+                document::EntityType::Block(_) | document::EntityType::BlockEnd(_)
+            ) {
+                has_block_sentinel = true;
+                let owner = entity.common().owner_handle;
+                if !owner.is_null() {
+                    extra_block_handles.push(owner);
+                }
+            } else if let Some(edited) = scene.block_edit_block {
+                if entity.common().owner_handle == edited {
+                    extra_block_handles.push(edited);
+                }
+            }
         }
+        changes.push((handle, crate::scene::ChangeKind::Added));
     }
-    if needs_geometry_bump {
-        scene.bump_geometry();
+    if has_block_sentinel || !extra_block_handles.is_empty() {
+        scene.bump_entities_restyled_with_block_deps(&changes, &extra_block_handles, &[]);
     } else if !changes.is_empty() {
         scene.bump_entities(&changes);
     }

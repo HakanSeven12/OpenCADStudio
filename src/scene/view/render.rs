@@ -228,6 +228,8 @@ pub struct ViewportData {
     /// occluded by closer geometry are culled by the LessEqual depth
     /// test on the wire passes that follow.
     pub(in crate::scene) hidden_line: bool,
+    /// HiddenLine draws the edges behind faces dashed.
+    pub(in crate::scene) occluded_edges: bool,
     /// Interaction LOD: when true the (per-pixel, GPU-dominating) hatch pass is
     /// skipped this frame because the view is actively being navigated. Folded
     /// into the render signature so the settle frame re-renders hatches once and
@@ -560,6 +562,7 @@ impl shader::Primitive for Primitive {
             // Interaction LOD: skip the hatch draw this frame while navigating.
             inner.skip_hatch_frame = vp.skip_hatch;
             inner.skip_background = vp.skip_background;
+            inner.occluded_edges = vp.occluded_edges;
             if skip {
                 if vp.show_viewcube {
                     inner.viewcube.upload(
@@ -1672,6 +1675,7 @@ fn render_signature(
     vp.show_3d_edges.hash(&mut h);
     vp.display_silhouette.hash(&mut h);
     vp.hidden_line.hash(&mut h);
+    vp.occluded_edges.hash(&mut h);
     // ViewCube visibility is excluded from the *scene* signature elsewhere only
     // for the live-hover pass; here it MUST invalidate the cache so toggling the
     // cube (NAVVCUBE) re-renders and actually clears the last cube frame
@@ -5653,6 +5657,13 @@ impl Scene {
                         style.silhouette_width > 0 && style.edges_visible()
                     })),
             hidden_line: flags.hidden_line,
+            // VSOCCLUDEDEDGES, or the style's obscured edge flag (4).
+            occluded_edges: flags.hidden_line
+                && (self.occluded_edges
+                    || display
+                        .visual_style
+                        .as_ref()
+                        .is_some_and(|style| style.edge_style & 4 != 0)),
             // Interaction LOD: suppress the costly hatch pass while the view is
             // actively moving; the scene-render cache holds the full-quality
             // (hatched) frame once it settles. Only applied to the on-screen

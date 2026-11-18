@@ -225,6 +225,9 @@ pub struct Pipeline {
     mesh_wireframe_pipeline: wgpu::RenderPipeline,
     /// Edge pipeline that forces black, for the edge overlay in filled modes.
     mesh_edge_black_pipeline: wgpu::RenderPipeline,
+    /// HiddenLine's occluded edges: only where something nearer is drawn
+    /// (`Greater`, no depth write), dashed in screen space.
+    mesh_occluded_pipeline: wgpu::RenderPipeline,
     silhouette_pipeline: wgpu::RenderPipeline,
     silhouette_black_pipeline: wgpu::RenderPipeline,
     /// Depth-only variant of the mesh pipeline (TriangleList, no color
@@ -499,6 +502,9 @@ pub struct Pipeline {
     /// Skip the canvas entirely — no clear colour, no background pass — so
     /// whatever was drawn underneath this viewport shows through it.
     pub skip_background: bool,
+    /// HiddenLine with occluded edges on (VSOCCLUDEDEDGES, or the visual
+    /// style's obscured edge flag): solid edges behind faces draw dashed.
+    pub occluded_edges: bool,
     /// Stable identity of the viewport that last used this (index-addressed)
     /// pipeline slot. The renderer's viewport list drops off-canvas viewports,
     /// so a slot can be reused by a *different* viewport across frames; when the
@@ -1779,14 +1785,16 @@ impl Pipeline {
         // twin (below) forces black for the edge overlay in filled modes.
         let make_edge_pipeline =
             |label: &'static str,
+             vs: &'static str,
              fs: &'static str,
-             vertex_layout: wgpu::VertexBufferLayout<'static>| {
+             vertex_layout: wgpu::VertexBufferLayout<'static>,
+             depth_compare: wgpu::CompareFunction| {
                 device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some(label),
                     layout: Some(&mesh_layout),
                     vertex: wgpu::VertexState {
                         module: &mesh_shader,
-                        entry_point: Some("vs_edge"),
+                        entry_point: Some(vs),
                         buffers: &[vertex_layout, mesh_gpu::MeshInstanceGpu::layout()],
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
                     },
@@ -1797,8 +1805,12 @@ impl Pipeline {
                     },
                     depth_stencil: Some(wgpu::DepthStencilState {
                         format: wgpu::TextureFormat::Depth24PlusStencil8,
-                        depth_write_enabled: Some(true),
-                        depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                        // The occluded pass reads the depth the visible
+                        // edges wrote and leaves it as it is.
+                        depth_write_enabled: Some(
+                            depth_compare == wgpu::CompareFunction::LessEqual,
+                        ),
+                        depth_compare: Some(depth_compare),
                         stencil: content_stencil.clone(),
                         bias: wgpu::DepthBiasState::default(),
                     }),
@@ -1823,13 +1835,24 @@ impl Pipeline {
             };
         let mesh_wireframe_pipeline = make_edge_pipeline(
             "mesh.wireframe.pipeline",
+            "vs_edge",
             "fs_edge",
             mesh_gpu::MeshVertex::edge_layout(),
+            wgpu::CompareFunction::LessEqual,
         );
         let mesh_edge_black_pipeline = make_edge_pipeline(
             "mesh.edge_black.pipeline",
+            "vs_edge",
             "fs_edge_black",
             mesh_gpu::MeshVertex::edge_layout(),
+            wgpu::CompareFunction::LessEqual,
+        );
+        let mesh_occluded_pipeline = make_edge_pipeline(
+            "mesh.occluded.pipeline",
+            "vs_edge_occluded",
+            "fs_edge_occluded",
+            mesh_gpu::MeshVertex::edge_layout(),
+            wgpu::CompareFunction::Greater,
         );
         let silhouette_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mesh.silhouette.shader"),
@@ -2520,6 +2543,7 @@ impl Pipeline {
             mesh_plain_hover_pipeline,
             mesh_wireframe_pipeline,
             mesh_edge_black_pipeline,
+            mesh_occluded_pipeline,
             silhouette_pipeline,
             silhouette_black_pipeline,
             mesh_depth_pipeline,
@@ -2636,6 +2660,7 @@ impl Pipeline {
             skip_geometry: false,
             skip_hatch_frame: false,
             skip_background: false,
+            occluded_edges: false,
             slot_id: u64::MAX,
         }
     }
@@ -5291,6 +5316,29 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                         pass.set_vertex_buffer(0, chunk.vertex_buffer.slice(..));
                         pass.set_vertex_buffer(1, chunk.instance_buffer.slice(..));
                         pass.draw(0..chunk.vertex_count, 0..chunk.instance_count);
+                    }
+                    // Occluded edges: the same edges again, dashed, where
+                    // a face or a visible edge is nearer.
+                    if self.occluded_edges {
+                        pass.set_pipeline(&self.mesh_occluded_pipeline);
+                        for (_, c) in self.active_mesh_chunks_indexed() {
+                            pass.set_bind_group(
+                                1,
+                                c.material_bind_group
+                                    .as_ref()
+                                    .unwrap_or(&self.mesh_default_material_bind_group),
+                                &[],
+                            );
+                            pass.set_vertex_buffer(1, c.instance_buffer.slice(..));
+                            if c.wire_vertex_count != 0 {
+                                pass.set_vertex_buffer(0, c.wire_vertex_buffer.slice(..));
+                                pass.draw(0..c.wire_vertex_count, 0..c.instance_count);
+                            }
+                            if c.edge_vertex_count != 0 {
+                                pass.set_vertex_buffer(0, c.edge_vertex_buffer.slice(..));
+                                pass.draw(0..c.edge_vertex_count, 0..c.instance_count);
+                            }
+                        }
                     }
                 } else {
                     if mesh_wireframe {

@@ -1137,6 +1137,7 @@ impl OpenCADStudio {
                     | "SELECTIONEFFECTCOLOR"
                     | "VSEDGECOLOR"
                     | "VSEDGESMOOTH"
+                    | "VSOCCLUDEDEDGES"
                     | "COMPARECOLORADDED"
                     | "COMPARECOLORREMOVED"
                     | "COMPARECOLORMODIFIED"
@@ -2893,6 +2894,23 @@ impl OpenCADStudio {
                                 },
                                 None => Ok((
                                     format!("VSEDGESMOOTH = {}", self.model_space.edge_smooth),
+                                    false,
+                                )),
+                            },
+                            // Edges behind faces in the Hidden style: 0 off,
+                            // 1 dashed.
+                            "VSOCCLUDEDEDGES" => match value.as_deref().map(str::trim) {
+                                Some(v @ ("0" | "1")) => {
+                                    self.model_space.occluded_edges = v == "1";
+                                    self.sync_model_space_theme(false);
+                                    Ok((format!("VSOCCLUDEDEDGES = {v}"), true))
+                                }
+                                Some(_) => Err("SETVAR: 0 or 1 required.".into()),
+                                None => Ok((
+                                    format!(
+                                        "VSOCCLUDEDEDGES = {}",
+                                        u8::from(self.model_space.occluded_edges)
+                                    ),
                                     false,
                                 )),
                             },

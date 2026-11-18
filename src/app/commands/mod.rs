@@ -1418,6 +1418,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "SELECTIONEFFECTCOLOR",
         "VSEDGECOLOR",
         "VSEDGESMOOTH",
+        "VSOCCLUDEDEDGES",
         "COMPARECOLORADDED",
         "COMPARECOLORREMOVED",
         "COMPARECOLORMODIFIED",

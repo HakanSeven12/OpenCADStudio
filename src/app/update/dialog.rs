@@ -797,6 +797,12 @@ impl OpenCADStudio {
             self.tabs[i].scene.images.remove(&handle);
         }
         self.tabs[i].scene.populate_meshes_from_document();
+        // A reload re-links dimensions to the freshly merged xref copies;
+        // touching those copies re-measures the dimensions from them.
+        let xref_targets = xref_dimension_targets(&self.tabs[i].scene.document);
+        if !xref_targets.is_empty() {
+            self.tabs[i].scene.bump_entities(&xref_targets);
+        }
         self.refresh_layer_panel();
         self.tabs[i].dirty = true;
         // The reference report the automation surface reads must follow the
@@ -2497,4 +2503,41 @@ mod tests {
             "List cleared. 0 items in table."
         );
     }
+}
+
+/// Xref copies a dimension association points at, as modified changes.
+fn xref_dimension_targets(
+    doc: &document::Document,
+) -> Vec<(document::types::Handle, crate::scene::ChangeKind)> {
+    use document::objects::{AssociativeData, ObjectType};
+    let xref_blocks: rustc_hash::FxHashSet<document::types::Handle> = doc
+        .block_records
+        .iter()
+        .filter(|br| br.flags.is_xref || br.flags.is_xref_overlay)
+        .map(|br| br.handle)
+        .collect();
+    if xref_blocks.is_empty() {
+        return Vec::new();
+    }
+    let mut targets: Vec<_> = doc
+        .objects
+        .values()
+        .filter_map(|object| match object {
+            ObjectType::Associative(object) => match &object.data {
+                AssociativeData::DimensionAssociation(association) => Some(association),
+                _ => None,
+            },
+            _ => None,
+        })
+        .flat_map(|association| association.references.iter().flatten())
+        .flat_map(|reference| reference.xrefs.iter().chain(&reference.intersection_objects))
+        .filter(|handle| {
+            doc.get_entity(**handle)
+                .is_some_and(|entity| xref_blocks.contains(&entity.common().owner_handle))
+        })
+        .map(|handle| (*handle, crate::scene::ChangeKind::Modified))
+        .collect();
+    targets.sort_by_key(|(handle, _)| handle.value());
+    targets.dedup();
+    targets
 }

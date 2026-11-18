@@ -493,6 +493,9 @@ impl OpenCADStudio {
                         break;
                     }
                 }
+                if removed[pk::GROUPS] > 0 {
+                    self.tabs[i].scene.bump_groups_epoch();
+                }
 
                 // Remove draw-order tables whose owning blocks are gone.
                 let mut n_sortents = 0usize;

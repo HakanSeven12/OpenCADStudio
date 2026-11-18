@@ -1628,8 +1628,31 @@ pub struct PersistentWireArena {
     inner: PersistentWireArenaKind,
 }
 
-impl PersistentWireArena {
-    pub fn build(
+/// Persistent overlay const buffer for one (arena, tint) pair, used by
+/// [`PersistentWireArena::highlight_dense`]. Full-size copy of the arena's
+/// resident constants, allocated once and updated with partial
+/// `queue.write_buffer` calls covering only the highlighted slabs' const
+/// ranges. Instances index the storage buffer by absolute `wire_id`, so the
+/// overlay must be the same length as the arena's constants — but only the
+/// highlighted ranges ever change after creation.
+#[derive(Debug)]
+pub struct DenseHighlightConst {
+    /// Tint every written range carries.
+    pub(super) color: [f32; 4],
+    /// Index of the arena inside the persistent arena list. A rebuilt arena
+    /// with different identity is detected via the two length guards below.
+    pub(super) arena_index: usize,
+    /// `consts_cpu.len()` when the buffer was created.
+    pub(super) consts_len: usize,
+    /// Instance buffer size when the buffer was created.
+    pub(super) inst_buf_size: u64,
+    pub(super) buffer: wgpu::Buffer,
+    pub(super) bind_group: std::sync::Arc<wgpu::BindGroup>,
+    /// Const ranges (`start, end` indices) currently tinted in `buffer`.
+    pub(super) written: Vec<(u32, u32)>,
+}
+
+impl PersistentWireArena {    pub fn build(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         wires: &[&WireModel],
@@ -1728,6 +1751,14 @@ impl PersistentWireArena {
 
     /// Reuse resident geometry for dense, complete entity runs. Only the
     /// small per-wire constants need a new selection colour.
+    ///
+    /// The per-wire constants live in a persistent overlay buffer per
+    /// (arena, tint) — [`DenseHighlightConst`] passed in by the caller — so a
+    /// highlight rebuild only writes the const ranges of the slabs that are
+    /// highlighted (plus restoring the ones that left). The previous
+    /// implementation cloned the ENTIRE `consts_cpu` — every wire in the
+    /// scene, selected or not — and re-uploaded it on every selection change
+    /// whenever any dense entity was highlighted.
     pub fn highlight_dense(
         &self,
         device: &wgpu::Device,
@@ -1735,14 +1766,16 @@ impl PersistentWireArena {
         const_bgl: &wgpu::BindGroupLayout,
         candidates: &FxHashMap<Handle, usize>,
         color: [f32; 4],
+        overlay_consts: &mut Vec<DenseHighlightConst>,
     ) -> (Vec<WireGpu>, rustc_hash::FxHashSet<Handle>) {
         let PersistentWireArenaKind::Indexed(arenas) = &self.inner else {
             return (Vec::new(), rustc_hash::FxHashSet::default());
         };
         let mut output = Vec::new();
         let mut reused = rustc_hash::FxHashSet::default();
-        for arena in arenas {
+        for (arena_index, arena) in arenas.iter().enumerate() {
             let mut ranges = Vec::new();
+            let mut const_ranges = Vec::new();
             for (&handle, &wire_count) in candidates {
                 let Some(slab) = arena.slabs.get(&handle) else {
                     continue;
@@ -1757,6 +1790,7 @@ impl PersistentWireArena {
                     continue;
                 }
                 ranges.push((slab.inst_off, slab.inst_off + slab.inst_len));
+                const_ranges.push((slab.const_off, slab.const_off + slab.const_len));
                 reused.insert(handle);
             }
             if ranges.is_empty() { continue; }
@@ -1771,12 +1805,96 @@ impl PersistentWireArena {
                 }
                 merged.push((start, end));
             }
-            let mut constants = arena.consts_cpu.clone();
-            for constant in &mut constants {
-                constant.color = color;
+            const_ranges.sort_unstable_by_key(|range| range.0);
+            let mut desired: Vec<(u32, u32)> = Vec::new();
+            for (start, end) in const_ranges {
+                if let Some((_, previous_end)) = desired.last_mut() {
+                    if *previous_end == start {
+                        *previous_end = end;
+                        continue;
+                    }
+                }
+                desired.push((start, end));
             }
-            let (binding, const_buffer) =
-                super::wire_gpu::build_const_bind_group(device, queue, const_bgl, &constants);
+            let consts_len = arena.consts_cpu.len();
+            let inst_buf_size = arena.inst_buf.size();
+            let entry_pos = overlay_consts.iter().position(|entry| {
+                entry.color == color
+                    && entry.arena_index == arena_index
+                    && entry.consts_len == consts_len
+                    && entry.inst_buf_size == inst_buf_size
+            });
+            let entry = match entry_pos {
+                // LRU touch: move the used entry to the back.
+                Some(pos) => {
+                    let entry = overlay_consts.remove(pos);
+                    overlay_consts.push(entry);
+                    let last = overlay_consts.len() - 1;
+                    &mut overlay_consts[last]
+                }
+                None => {
+                    // A stale entry for this arena slot (rebuilt arena) is
+                    // replaced; per-tint entries for other arenas stay.
+                    overlay_consts
+                        .retain(|entry| !(entry.color == color && entry.arena_index == arena_index));
+                    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("wire.dense_highlight.const"),
+                        size: (consts_len.max(1) as u64)
+                            * std::mem::size_of::<WireConst>() as u64,
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                    queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&arena.consts_cpu));
+                    let bind_group = std::sync::Arc::new(device.create_bind_group(
+                        &wgpu::BindGroupDescriptor {
+                            label: Some("wire.dense_highlight.bg"),
+                            layout: const_bgl,
+                            entries: &[wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: buffer.as_entire_binding(),
+                            }],
+                        },
+                    ));
+                    overlay_consts.push(DenseHighlightConst {
+                        color,
+                        arena_index,
+                        consts_len,
+                        inst_buf_size,
+                        buffer,
+                        bind_group,
+                        written: Vec::new(),
+                    });
+                    let last = overlay_consts.len() - 1;
+                    &mut overlay_consts[last]
+                }
+            };
+            // Ranges that left the highlight set go back to their resident
+            // colors; ranges in the set are (re)tinted — always rewritten, so
+            // a patched slab's fresh const values are never shown stale.
+            for &(start, end) in entry.written.iter() {
+                if desired.contains(&(start, end)) {
+                    continue;
+                }
+                queue.write_buffer(
+                    &entry.buffer,
+                    start as u64 * std::mem::size_of::<WireConst>() as u64,
+                    bytemuck::cast_slice(&arena.consts_cpu[start as usize..end as usize]),
+                );
+            }
+            for &(start, end) in desired.iter() {
+                let recolored: Vec<WireConst> = arena.consts_cpu[start as usize..end as usize]
+                    .iter()
+                    .map(|constant| WireConst { color, ..*constant })
+                    .collect();
+                queue.write_buffer(
+                    &entry.buffer,
+                    start as u64 * std::mem::size_of::<WireConst>() as u64,
+                    bytemuck::cast_slice(&recolored),
+                );
+            }
+            entry.written = desired;
+            let binding = entry.bind_group.clone();
+            let const_buffer = entry.buffer.clone();
             output.extend(merged.into_iter().map(|(start, end)| WireGpu {
                 instance_buffer: arena.inst_buf.clone(),
                 first_instance: start,
@@ -1785,6 +1903,12 @@ impl PersistentWireArena {
                 const_bind_group: Some(binding.clone()),
                 const_buffer: Some(const_buffer.clone()),
             }));
+        }
+        // A handful of tints exist (selected, hover); evict the oldest entries
+        // beyond that so a cycling custom tint cannot grow the cache.
+        if overlay_consts.len() > 4 {
+            let excess = overlay_consts.len() - 4;
+            overlay_consts.drain(0..excess);
         }
         (output, reused)
     }

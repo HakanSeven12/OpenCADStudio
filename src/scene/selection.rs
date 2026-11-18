@@ -1363,6 +1363,7 @@ impl Scene {
             selection_changed |= self.selected.remove(&h);
             if self.hover_highlight == Some(h) {
                 self.hover_highlight = None;
+                self.hover_expanded.clear();
                 hover_changed = true;
             }
             hover_changed |= self.constraint_hover_highlights.remove(&h);
@@ -1387,7 +1388,7 @@ impl Scene {
                 .retain(|selected| !handle_set.contains(selected));
             self.bump_selection_set();
         } else if hover_changed {
-            self.bump_selection();
+            self.bump_hover();
         }
         // Capture exactly the group objects that this erase will rewrite, plus
         // the group dictionary when an emptied group will be removed. Do this

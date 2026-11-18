@@ -2614,37 +2614,7 @@ impl OpenCADStudio {
                     );
                     return Some(Task::none());
                 }
-                match std::fs::read_to_string(path) {
-                    Ok(xml) => {
-                        let pts = parse_landxml_cgpoints(&xml);
-                        if pts.is_empty() {
-                            self.command_line.push_info(
-                                crate::t!("LANDXMLIMPORT: no <CgPoint> survey points found.")
-                                    .as_ref(),
-                            );
-                            return Some(Task::none());
-                        }
-                        self.push_undo_snapshot(i, "LANDXMLIMPORT");
-                        for [x, y, z] in &pts {
-                            let mut p = document::entities::Point::new();
-                            p.location = document::types::Vector3::new(*x, *y, *z);
-                            self.tabs[i]
-                                .scene
-                                .add_entity_clone(document::EntityType::Point(p));
-                        }
-                        self.tabs[i].dirty = true;
-                        self.command_line.push_output(
-                            crate::tf!(
-                            "LANDXMLIMPORT: imported {} survey point(s). Use ZOOM EXTENTS to view.",
-                            pts.len()
-                        )
-                            .as_ref(),
-                        );
-                    }
-                    Err(e) => self.command_line.push_error(
-                        crate::tf!("LANDXMLIMPORT: cannot read \"{path}\": {e}").as_ref(),
-                    ),
-                }
+                return Some(self.read_landxml(i, path));
             }
 
             "ULAYERS" => self.open_underlay_layers_dialog(i),
@@ -2774,6 +2744,86 @@ impl OpenCADStudio {
                 .push_output(crate::tf!("ANNOUPDATE: updated {updated} object(s).").as_ref());
         }
     }
+}
+
+impl OpenCADStudio {
+    /// LANDXMLIMPORT: reads and parses the file off the UI thread; the
+    /// points are placed when the read ends ([`Self::finish_landxml_import`]).
+    pub(in crate::app) fn read_landxml(&mut self, i: usize, path: &str) -> Task<Message> {
+        self.read_landxml_with(i, path, read_landxml_points)
+    }
+
+    /// [`Self::read_landxml`] with the reader given, so a test can give one
+    /// that panics.
+    pub(in crate::app) fn read_landxml_with(
+        &mut self,
+        i: usize,
+        path: &str,
+        reader: fn(&str) -> Result<Vec<[f64; 3]>, String>,
+    ) -> Task<Message> {
+        let tab_id = self.tabs[i].id;
+        let generation = self.tabs[i].document_generation;
+        let path = path.to_string();
+        let worker_path = path.clone();
+        self.command_line.push_info(&format!("Reading {path}…"));
+        crate::app::update::background_task(
+            "LANDXMLIMPORT",
+            move || reader(&worker_path),
+            move |result| Message::LandXmlImportFinished(tab_id, generation, path, result),
+        )
+    }
+
+    /// Places the points of a finished LANDXMLIMPORT read, as one undo
+    /// step. A result for a drawing that was closed, replaced or cleared is
+    /// dropped.
+    pub(in crate::app) fn finish_landxml_import(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        path: &str,
+        result: Result<Vec<[f64; 3]>, String>,
+    ) {
+        let Some(i) = self.import_target(tab_id, generation) else {
+            return;
+        };
+        let pts = match result {
+            Ok(pts) => pts,
+            Err(e) => {
+                self.command_line
+                    .push_error(crate::tf!("LANDXMLIMPORT: cannot read \"{path}\": {e}").as_ref());
+                return;
+            }
+        };
+        if pts.is_empty() {
+            self.command_line
+                .push_info(crate::t!("LANDXMLIMPORT: no <CgPoint> survey points found.").as_ref());
+            return;
+        }
+        self.push_undo_snapshot(i, "LANDXMLIMPORT");
+        for [x, y, z] in &pts {
+            let mut p = document::entities::Point::new();
+            p.location = document::types::Vector3::new(*x, *y, *z);
+            self.tabs[i]
+                .scene
+                .add_entity_clone(document::EntityType::Point(p));
+        }
+        self.tabs[i].dirty = true;
+        self.command_line.push_output(
+            crate::tf!(
+                "LANDXMLIMPORT: imported {} survey point(s). Use ZOOM EXTENTS to view.",
+                pts.len()
+            )
+            .as_ref(),
+        );
+    }
+}
+
+/// The LANDXMLIMPORT reader: the file's `<CgPoint>` survey points, or why
+/// the file cannot be read.
+fn read_landxml_points(path: &str) -> Result<Vec<[f64; 3]>, String> {
+    std::fs::read_to_string(path)
+        .map(|xml| parse_landxml_cgpoints(&xml))
+        .map_err(|e| e.to_string())
 }
 
 // Scan LandXML text for <CgPoint> survey points. Each element's text content is
@@ -3245,5 +3295,121 @@ mod printers_command_tests {
         // One line for the default printer, at least one for the list (a
         // count and names, "none", or the system's error).
         assert!(lines.len() >= 2, "{lines:?}");
+    }
+}
+
+#[cfg(test)]
+mod landxml_read_tests {
+    use crate::app::OpenCADStudio;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    /// A LandXML file with two survey points, written under `name`.
+    fn survey_file(name: &str) -> String {
+        let path =
+            std::env::temp_dir().join(format!("ocs-landxml-{name}-{}.xml", std::process::id()));
+        std::fs::write(
+            &path,
+            "<LandXML><CgPoints>\
+             <CgPoint name=\"1\">100 200 3</CgPoint>\
+             <CgPoint name=\"2\">110 210 4</CgPoint>\
+             </CgPoints></LandXML>",
+        )
+        .expect("write the survey file");
+        path.to_string_lossy().into_owned()
+    }
+
+    fn points(app: &OpenCADStudio, i: usize) -> Vec<[f64; 3]> {
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Point(p) => Some([p.location.x, p.location.y, p.location.z]),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn last_line(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .last()
+            .map(|entry| entry.text.clone())
+            .unwrap_or_default()
+    }
+
+    /// The command places nothing itself: the points come when the read
+    /// ends, as one undo step.
+    #[test]
+    fn the_points_are_placed_only_when_the_read_ends() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = survey_file("placed");
+        app.finish_all_pending_history();
+        let undo = app.tabs[i].history.undo_stack.len();
+        let task = app.dispatch_command(&format!("LANDXMLIMPORT {path}"));
+        assert!(points(&app, i).is_empty(), "nothing during the read");
+        assert_eq!(last_line(&app), format!("ⓘ Reading {path}…"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            points(&app, i),
+            vec![[200.0, 100.0, 3.0], [210.0, 110.0, 4.0]]
+        );
+        app.finish_all_pending_history();
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo + 1);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A file that cannot be read gives the error when the read ends.
+    #[test]
+    fn a_missing_file_is_an_error() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let task = app.dispatch_command("LANDXMLIMPORT /no/such/survey.xml");
+        app.drive_headless_task(task).expect("the read task");
+        assert!(points(&app, i).is_empty());
+        assert!(app
+            .command_line
+            .last_error
+            .as_deref()
+            .is_some_and(|e| e.starts_with("LANDXMLIMPORT: cannot read \"/no/such/survey.xml\"")));
+    }
+
+    /// A reader that panics gives an error, and nothing is placed.
+    #[test]
+    fn a_reader_panic_is_an_error() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let task = app.read_landxml_with(i, "panics.xml", |_| panic!("a reader bug"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("LANDXMLIMPORT failed: a reader bug")
+        );
+        assert!(points(&app, i).is_empty());
+    }
+
+    /// A result for a drawing that was replaced during the read is
+    /// dropped.
+    #[test]
+    fn a_read_for_a_replaced_drawing_is_dropped() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = survey_file("replaced");
+        let task = app.read_landxml(i, &path);
+        app.tabs[i].document_generation += 1;
+        app.drive_headless_task(task).expect("the read task");
+        assert!(points(&app, i).is_empty());
+        assert!(app
+            .command_line
+            .history
+            .iter()
+            .any(|entry| entry.text.contains("was replaced or cleared")));
+        let _ = std::fs::remove_file(path);
     }
 }

@@ -692,10 +692,15 @@ pub fn view<'a>(picker: FontPicker<'a>) -> Element<'a, Message> {
     .query(state.query.clone());
     let popup = container(list).style(container::bordered_box).padding(2);
     // The list opens centred under the field: as wide as the field, it lines
-    // up with it and stays in the field's column.
+    // up with it and stays in the field's column. A narrower fixed field gets
+    // the narrowest list. A field that fills its column has no width here
+    // (it can be 114 px in a card of a wide window), so it gets the
+    // narrowest list too, at its left edge: as wide as the field, the
+    // missing note had no room.
     let popup_width = match width {
         Length::Fixed(field) if field < POPUP_MIN_W => Some(Length::Fixed(POPUP_MIN_W)),
-        _ => None,
+        Length::Fixed(_) => None,
+        _ => Some(Length::Fixed(POPUP_MIN_W)),
     };
     crate::ui::color_select::editable_drop_down_below(
         head.into(),

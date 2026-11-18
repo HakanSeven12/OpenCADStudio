@@ -4008,7 +4008,10 @@ impl OpenCADStudio {
         // the one full-quality frame that re-renders hatches — this tick does,
         // then the scene-render cache holds it and the subscription auto-stops.
         // Underlay rasters follow the zoom once it settles; tick until then.
-        let nav_settle = if self.tabs[self.active_tab].scene.underlay_resolution_stale() {
+        // A deferred dynamic-dimension scale sync flushes the same way.
+        let nav_settle = if self.tabs[self.active_tab].scene.underlay_resolution_stale()
+            || self.tabs[self.active_tab].scene.dynamic_dimension_scale_pending()
+        {
             // A still view requests no frames; a timer lets the rasters catch up.
             iced::time::every(std::time::Duration::from_millis(50))
                 .map(|_| Message::Tick(iced::time::Instant::now()))

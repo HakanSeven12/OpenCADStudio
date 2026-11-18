@@ -2853,7 +2853,21 @@ impl super::Scene {
         if !force && self.dynamic_dimension_camera_gen == Some(self.camera_generation) {
             return;
         }
+        // Zooming re-writes every dynamic dimension's DIMSCALE xdata, and each
+        // rewrite re-enters the full `bump_geometry` chain (dependency index,
+        // whole-model draw-depth recompute) — that froze the UI for ~1 s per
+        // zoom band change on large drawings. While the camera is still
+        // moving, defer the writes: ticks keep firing until the sync completes
+        // (`dynamic_dimension_scale_pending` drives the nav-settle
+        // subscription), and the text snaps to the new zoom band once the view
+        // settles. `force` callers — constraint creation / editing — still
+        // write immediately.
+        if !force && self.navigating_lod() {
+            self.dynamic_dimension_scale_pending = true;
+            return;
+        }
         self.dynamic_dimension_camera_gen = Some(self.camera_generation);
+        self.dynamic_dimension_scale_pending = false;
         let handles: Vec<Handle> = self
             .parametric_constraints
             .iter()
@@ -2965,6 +2979,13 @@ impl super::Scene {
         if !changes.is_empty() {
             self.bump_entities(&changes);
         }
+    }
+
+    /// Whether a dynamic-dimension scale sync was deferred behind the
+    /// navigation settle window and is still owed. Drives the nav-settle
+    /// subscription so ticks keep arriving until the deferred writes flush.
+    pub fn dynamic_dimension_scale_pending(&self) -> bool {
+        self.dynamic_dimension_scale_pending
     }
 
     /// Re-derives which dynamic dimensions stay off screen (DCHIDE, or
@@ -5001,6 +5022,38 @@ mod two_lines_placement_tests {
         assert!(
             close(placed[0], p(408.82, 282.36)) && close(placed[1], p(498.26, 327.08)),
             "{placed:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod dynamic_dimension_scale_defer_tests {
+    use super::*;
+    use crate::scene::Scene;
+
+    /// A zoom defers the DIMSCALE xdata rewrite while the camera is still
+    /// inside the navigation settle window: each written scale re-entered the
+    /// full `bump_geometry` chain (dependency index, whole-model draw-depth
+    /// recompute) and froze large drawings ~1 s per zoom band change. The
+    /// deferred sync flushes on a later tick, or immediately when forced.
+    #[test]
+    fn zoom_defers_scale_sync_and_force_flushes() {
+        let mut scene = Scene::new();
+        scene.last_world_per_pixel.set(1.0);
+        scene.camera_generation += 1; // a zoom: the camera changed just now
+        scene.refresh_dynamic_dimension_scales(false);
+        assert!(
+            scene.dynamic_dimension_scale_pending,
+            "a mid-navigation sync must defer instead of writing every dimension"
+        );
+        assert_eq!(scene.dynamic_dimension_camera_gen, None);
+
+        // A forced sync — a constraint was created or edited — flushes now.
+        scene.refresh_dynamic_dimension_scales(true);
+        assert!(!scene.dynamic_dimension_scale_pending);
+        assert_eq!(
+            scene.dynamic_dimension_camera_gen,
+            Some(scene.camera_generation)
         );
     }
 }

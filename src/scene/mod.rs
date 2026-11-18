@@ -3222,6 +3222,13 @@ pub struct Scene {
     hidden_dynamic_dimensions: HashSet<Handle>,
     /// The camera generation the dynamic dimensions were last scaled for.
     dynamic_dimension_camera_gen: Option<u64>,
+    /// Set while a dynamic-dimension scale sync was deferred because the
+    /// camera was still moving: each written DIMSCALE re-enters the full
+    /// `bump_geometry` chain, which froze the UI ~1 s per zoom band change
+    /// on large drawings. Ticks keep firing until the deferred sync runs
+    /// (see the `nav_settle` subscription), then the scales flush once and
+    /// this clears.
+    dynamic_dimension_scale_pending: bool,
     /// The view scale the underlay rasters are made for (model space).
     underlay_scale: raster_scale::RasterScale,
     /// The view scale the OLE pictures of the current layout are made for.
@@ -3789,6 +3796,7 @@ impl Scene {
             dynamic_constraint_display: true,
             hidden_dynamic_dimensions: HashSet::default(),
             dynamic_dimension_camera_gen: None,
+            dynamic_dimension_scale_pending: false,
             underlay_scale: raster_scale::RasterScale::default(),
             ole_scale: raster_scale::RasterScale::default(),
             hidden_parametric_constraints: HashSet::default(),

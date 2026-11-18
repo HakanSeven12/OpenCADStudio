@@ -2086,6 +2086,38 @@ mod tests {
         assert_eq!(page.order, (0..5).map(Drawn::Text).collect::<Vec<_>>());
     }
 
+    /// Text in two standard fonts (no font data in the file) is named by the
+    /// font of each run, also when the first font comes back.
+    #[test]
+    fn a_page_with_two_standard_fonts_names_each() {
+        let objects = [
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman >>".to_string(),
+        ];
+        let page = Pdf {
+            content: "BT /F1 12 Tf 72 360 Td (One) Tj ET \
+                      BT /F2 12 Tf 72 216 Td (Two) Tj ET \
+                      BT /F1 12 Tf 72 72 Td (Three) Tj ET",
+            resources: "/Font << /F1 5 0 R /F2 6 0 R >>",
+            objects: &objects,
+            ..Pdf::default()
+        }
+        .read("two-standard-fonts");
+        let fonts: Vec<(&str, &str)> = page
+            .texts
+            .iter()
+            .map(|t| (t.text.as_str(), t.font.as_str()))
+            .collect();
+        assert_eq!(
+            fonts,
+            [
+                ("One", "Helvetica"),
+                ("Two", "Times-Roman"),
+                ("Three", "Helvetica")
+            ]
+        );
+    }
+
     #[test]
     fn an_image_is_read_with_its_pixels_and_placement() {
         // Two grey pixels, black and white, drawn 2 × 1 inches at (1, 1).
@@ -2135,6 +2167,25 @@ mod tests {
         // After the form, the page's own pen again.
         assert_eq!(page.paths[2].stroke, Some(([0, 0, 255], 1.0)));
         assert_eq!(page.paths[2].pen, page.paths[2].stroke);
+    }
+
+    /// A form's own resources hold the colour space of its pen: a pattern,
+    /// so the colour after it does not change the pen.
+    #[test]
+    fn a_form_reads_the_colour_space_of_its_own_resources() {
+        let page = Pdf {
+            content: "/Fm1 Do",
+            resources: "/XObject << /Fm1 5 0 R >>",
+            objects: &[stream(
+                "/Type /XObject /Subtype /Form /BBox [0 0 288 216] \
+                 /Resources << /ColorSpace << /CS0 /Pattern >> >>",
+                "/CS0 CS 0.5 0.5 0.5 SC 0 0 36 18 re f",
+            )],
+            ..Pdf::default()
+        }
+        .read("form-resources");
+        assert_eq!(page.paths.len(), 1);
+        assert_eq!(page.paths[0].pen, Some(([0, 0, 0], 1.0)));
     }
 
     /// Two layers, "Walls" and "Doors", both on; a line outside them, then

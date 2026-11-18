@@ -461,3 +461,197 @@ fn objects_gathered_by_select_copy_via_iced_keyboard() {
         "COPYCLIP must copy what SELECT gathered"
     );
 }
+
+/// Esc and the keyboard: every key goes through the widget tree, the
+/// subscription and the app's own update, as in the window.
+mod esc_keyboard {
+    use super::*;
+    use iced::keyboard::{key::Code, key::Named, Key, Modifiers};
+
+    struct H {
+        app: OpenCADStudio,
+        r: iced::Renderer,
+        c: Cache,
+    }
+
+    fn pump(h: &mut H, msgs: Vec<Message>) {
+        let mut q = std::collections::VecDeque::from(msgs);
+        let mut n = 0;
+        while let Some(m) = q.pop_front() {
+            n += 1;
+            if n > 200 {
+                break;
+            }
+            let t = h.app.update(m);
+            q.extend(apply_focus_task(&h.app, &mut h.r, &mut h.c, t));
+        }
+    }
+
+    fn key(
+        h: &mut H,
+        k: Key,
+        text: Option<&str>,
+        mods: Modifiers,
+        code: Code,
+    ) -> iced::event::Status {
+        let evs = [
+            iced::Event::Keyboard(keyboard::Event::ModifiersChanged(mods)),
+            iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                key: k.clone(),
+                modified_key: k,
+                physical_key: keyboard::key::Physical::Code(code),
+                location: keyboard::Location::Standard,
+                modifiers: mods,
+                text: text.map(|t| t.into()),
+                repeat: false,
+            }),
+            iced::Event::Keyboard(keyboard::Event::ModifiersChanged(Modifiers::empty())),
+        ];
+        let (msgs, st) = key_messages(&h.app, &mut h.r, &mut h.c, &evs);
+        pump(h, msgs);
+        st[1]
+    }
+
+    fn esc(h: &mut H) {
+        key(
+            h,
+            Key::Named(Named::Escape),
+            None,
+            Modifiers::empty(),
+            Code::Escape,
+        );
+    }
+    fn enter(h: &mut H) {
+        key(
+            h,
+            Key::Named(Named::Enter),
+            None,
+            Modifiers::empty(),
+            Code::Enter,
+        );
+    }
+    fn type_text(h: &mut H, s: &str) {
+        for ch in s.chars() {
+            let t = ch.to_string();
+            key(
+                h,
+                Key::Character(t.as_str().into()),
+                Some(&t),
+                Modifiers::empty(),
+                Code::KeyA,
+            );
+        }
+    }
+    fn focus(h: &mut H) {
+        let t = h.app.focus_cmd_input();
+        let ms = apply_focus_task(&h.app, &mut h.r, &mut h.c, t);
+        pump(h, ms);
+    }
+    fn shift_d(h: &mut H) -> (bool, iced::event::Status) {
+        let before = h.app.quad;
+        let st = key(
+            h,
+            Key::Character("D".into()),
+            Some("D"),
+            Modifiers::SHIFT,
+            Code::KeyD,
+        );
+        (h.app.quad != before, st)
+    }
+    fn new() -> H {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.shortcut_bindings
+            .insert("SHIFT+D".into(), "QUADTOGGLE".into());
+        app.shortcut_bindings
+            .insert("SHIFT+L".into(), "LINE".into());
+        let r = block_on(iced::Renderer::new(
+            iced_test::core::renderer::Settings::default(),
+            Some("tiny-skia"),
+        ))
+        .unwrap();
+        H {
+            app,
+            r,
+            c: Cache::default(),
+        }
+    }
+    fn assert_shift_d_runs(h: &mut H, what: &str) {
+        let (ran, status) = shift_d(h);
+        assert!(
+            ran,
+            "{what}: Shift+D did not run its shortcut; widget status {status:?}, command line {:?}",
+            h.app.command_line.input
+        );
+        assert!(
+            h.app.command_line.input.is_empty(),
+            "{what}: the letter was typed"
+        );
+    }
+
+    #[test]
+    fn esc_after_an_unknown_command_returns_the_keyboard() {
+        let _g = crate::headless_ui_lock();
+        let mut h = new();
+        focus(&mut h);
+        type_text(&mut h, "NOSUCHCOMMAND");
+        enter(&mut h);
+        esc(&mut h);
+        assert_shift_d_runs(&mut h, "unknown command");
+    }
+
+    #[test]
+    fn esc_with_typed_text_returns_the_keyboard() {
+        let _g = crate::headless_ui_lock();
+        let mut h = new();
+        focus(&mut h);
+        type_text(&mut h, "LI");
+        esc(&mut h);
+        assert_shift_d_runs(&mut h, "typed text");
+    }
+
+    #[test]
+    fn esc_that_ends_a_typed_command_returns_the_keyboard() {
+        let _g = crate::headless_ui_lock();
+        let mut h = new();
+        focus(&mut h);
+        type_text(&mut h, "LINE");
+        enter(&mut h);
+        assert!(h.app.tabs[0].active_cmd.is_some(), "LINE is running");
+        esc(&mut h);
+        assert!(h.app.tabs[0].active_cmd.is_none(), "Esc ended LINE");
+        assert_shift_d_runs(&mut h, "LINE at its first point");
+    }
+
+    #[test]
+    fn esc_in_the_middle_of_a_command_returns_the_keyboard() {
+        let _g = crate::headless_ui_lock();
+        let mut h = new();
+        focus(&mut h);
+        type_text(&mut h, "LINE");
+        enter(&mut h);
+        type_text(&mut h, "0,0");
+        enter(&mut h);
+        assert!(h.app.tabs[0].active_cmd.is_some(), "LINE is running");
+        esc(&mut h);
+        assert!(h.app.tabs[0].active_cmd.is_none(), "Esc ended LINE");
+        assert_shift_d_runs(&mut h, "LINE after its first point");
+    }
+
+    #[test]
+    fn esc_after_a_shortcut_started_command_returns_the_keyboard() {
+        let _g = crate::headless_ui_lock();
+        let mut h = new();
+        key(
+            &mut h,
+            Key::Character("L".into()),
+            Some("L"),
+            Modifiers::SHIFT,
+            Code::KeyL,
+        );
+        assert!(h.app.tabs[0].active_cmd.is_some(), "Shift+L started LINE");
+        esc(&mut h);
+        assert!(h.app.tabs[0].active_cmd.is_none(), "Esc ended LINE");
+        assert_shift_d_runs(&mut h, "command started by Shift+L");
+    }
+}

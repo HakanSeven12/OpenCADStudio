@@ -1436,13 +1436,20 @@ impl OpenCADStudio {
                             in_use_only: self.tablestyle_in_use_only,
                             description: &self.ts_description,
                             cell: &self.ts_cell,
-                            cell_name: &self.ts_cell_name,
                             cell_height: &self.ts_cell_height,
                             cell_angle: &self.ts_cell_angle,
                             cell_hmargin: &self.ts_cell_hmargin,
                             cell_vmargin: &self.ts_cell_vmargin,
-                            cell_format: &self.ts_cell_format,
-                            edge_spacing: &self.ts_edge_spacing,
+                            border: &self.ts_border,
+                            cards: &self.ts_cards,
+                            linetype_rows: table_style_linetype_rows(&tab.scene.document),
+                            linetype_names: tab
+                                .scene
+                                .document
+                                .line_types
+                                .iter()
+                                .map(|linetype| linetype.name.clone())
+                                .collect(),
                             text_styles: tab
                                 .scene
                                 .document
@@ -2695,4 +2702,33 @@ fn default_assoc_dialog_window(sizing: crate::ui::modal::ModalSizing) -> Element
     .center_y(sizing.height)
     .padding([24, 28])
     .into()
+}
+
+/// Select Linetype rows of the table style window: ByLayer, ByBlock and
+/// the drawing's linetypes.
+fn table_style_linetype_rows(
+    doc: &document::Document,
+) -> Vec<crate::ui::style::mleaderstyle::LinetypeRow> {
+    use crate::ui::style::mleaderstyle::LinetypeRow;
+    let mut rows: Vec<LinetypeRow> = ["ByLayer", "ByBlock"]
+        .into_iter()
+        .map(|name| LinetypeRow {
+            name: name.into(),
+            description: String::new(),
+            pattern: Vec::new(),
+        })
+        .collect();
+    rows.extend(
+        doc.line_types
+            .iter()
+            .filter(|lt| {
+                !lt.name.eq_ignore_ascii_case("ByLayer") && !lt.name.eq_ignore_ascii_case("ByBlock")
+            })
+            .map(|lt| LinetypeRow {
+                name: lt.name.clone(),
+                description: lt.description.clone(),
+                pattern: lt.elements.iter().map(|e| e.length).collect(),
+            }),
+    );
+    rows
 }

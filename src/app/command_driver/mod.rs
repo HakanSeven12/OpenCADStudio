@@ -982,8 +982,9 @@ impl OpenCADStudio {
                 self.tabs[i].scene.clear_preview_wire();
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
-                self.attach_pdf_pages(i, label, kind, &path, pages, auto_place);
+                let placed = self.attach_pdf_pages(i, label, kind, &path, pages, auto_place);
                 self.restore_pre_cmd_tangent();
+                return placed;
             }
             CmdResult::PdfImport(request) => {
                 self.tabs[i].scene.clear_preview_wire();

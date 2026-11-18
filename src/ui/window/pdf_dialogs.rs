@@ -50,6 +50,10 @@ pub enum PdfDialogMsg {
     /// The GeoPDF check of the Attach window, run off the UI thread: the
     /// file, the pages checked, and whether every one has a placement.
     AttachGeoChecked(String, Vec<String>, bool),
+    /// PDF pages placed by their geospatial data off the UI thread: the
+    /// tab the attach was started for, that document's generation, and the
+    /// pages with their placements.
+    AttachPlaced(u64, u64, Box<PlacedPdfPages>),
     // Attach Point Cloud
     CloudBrowse,
     CloudPathType(PathTypeChoice),
@@ -1773,6 +1777,17 @@ pub enum PdfImportFileRead {
         page_sizes: Vec<String>,
         remembered: bool,
     },
+}
+
+/// The pages of a PDFATTACH with the GeoPDF placement that the read found
+/// for each (`None`: the page keeps the placement of the command).
+#[derive(Debug, Clone)]
+pub struct PlacedPdfPages {
+    pub label: String,
+    pub kind: document::entities::UnderlayType,
+    pub path: String,
+    pub pages: Vec<(String, document::EntityType)>,
+    pub placements: Vec<Option<crate::io::geopdf::GeoPlacement>>,
 }
 
 /// What the read of a PDF, DWF or DGN file for the Attach window found.

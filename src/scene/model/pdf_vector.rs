@@ -6,11 +6,11 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use hayro::hayro_interpret::font::Glyph;
+use hayro::hayro_interpret::font::{Glyph, GlyphRun};
 use hayro::hayro_interpret::util::TransformExt;
 use hayro::hayro_interpret::{
-    interpret_page, BlendMode, ClipPath, Context, Device, GlyphDrawMode, Image, InterpreterCache,
-    InterpreterSettings, Paint, PathDrawMode, SoftMask,
+    interpret_page, BlendMode, ClipPath, Context, Device, DrawMode, DrawProps, Image,
+    ImageDrawProps, InterpreterCache, InterpreterSettings, Paint, SoftMask,
 };
 use hayro::hayro_syntax::content::ops::TypedInstruction;
 use hayro::hayro_syntax::object::Name;
@@ -646,7 +646,9 @@ fn walk_steps<'a>(
                 continue;
             }
             let own = match stream.dict().get::<Dict<'_>>(b"Resources") {
-                Some(dict) => Resources::from_parent(dict, resources.clone()),
+                // A form's own resources replace the page's, as the
+                // interpreter reads them.
+                Some(dict) => Resources::new(dict),
                 None => resources.clone(),
             };
             if let Ok(data) = stream.decoded() {
@@ -1156,15 +1158,8 @@ fn subpaths(path: &BezPath, transform: Affine) -> (Vec<SubPath>, Vec<SubClose>) 
 }
 
 impl<'a> Device<'a> for Collector {
-    fn set_soft_mask(&mut self, _: Option<SoftMask<'a>>) {}
-    fn set_blend_mode(&mut self, _: BlendMode) {}
-    fn draw_path(
-        &mut self,
-        path: &BezPath,
-        transform: Affine,
-        paint: &Paint<'a>,
-        mode: &PathDrawMode,
-    ) {
+    fn draw_path(&mut self, path: &BezPath, props: DrawProps<'a>, mode: &DrawMode) {
+        let (transform, paint) = (props.transform, &props.paint);
         // Graphics drawn between glyphs do not end a text run: the next
         // glyph still joins it when it follows on along the baseline.
         self.path_calls.push(None);
@@ -1206,14 +1201,18 @@ impl<'a> Device<'a> for Collector {
                 return;
             }
         }
+        // Width in points: the user-space width through the transform
+        // (which is in inches), back to points.
+        let width =
+            |line_width: f32| line_width as f64 * transform.determinant().abs().sqrt() * 72.0;
+        // The interpreter draws a path that is filled and stroked as a fill,
+        // then a stroke (see `merge_fill_and_stroke`), and sends no paths
+        // in the two other modes.
         let (stroke, fill) = match mode {
-            PathDrawMode::Stroke(props) => {
-                // Width in points: the user-space width through the transform
-                // (which is in inches), back to points.
-                let scale = transform.determinant().abs().sqrt() * 72.0;
-                (Some((rgb(paint), props.line_width as f64 * scale)), None)
+            DrawMode::Stroke(stroke) => (Some((rgb(paint), width(stroke.line_width))), None),
+            DrawMode::Fill(_) | DrawMode::FillAndStroke(..) | DrawMode::Invisible => {
+                (None, Some(rgb(paint)))
             }
-            PathDrawMode::Fill(_) => (None, Some(rgb(paint))),
         };
         if let Some(call) = self.path_calls.last_mut() {
             *call = Some(self.paths.len());
@@ -1243,96 +1242,26 @@ impl<'a> Device<'a> for Collector {
         self.clips.push(polygon);
     }
     fn push_transparency_group(&mut self, _: f32, _: Option<SoftMask<'a>>, _: BlendMode) {}
-    fn draw_glyph(
-        &mut self,
-        glyph: &Glyph<'a>,
-        transform: Affine,
-        glyph_transform: Affine,
-        paint: &Paint<'a>,
-        mode: &GlyphDrawMode,
-    ) {
+    fn draw_glyph_run(&mut self, run: &GlyphRun<'_, 'a>, props: DrawProps<'a>, mode: &DrawMode) {
         // Invisible text (render mode 3, as over a scan) is not drawn.
-        if matches!(mode, GlyphDrawMode::Invisible) {
+        if matches!(mode, DrawMode::Invisible) {
             return;
         }
-        let Glyph::Outline(outline) = glyph else {
-            return;
-        };
-        let full = transform * glyph_transform;
-        let origin = full * Point::ZERO;
-        // Outlines are in 1000 units per em.
-        let em_vec = full * Point::new(0.0, 1000.0) - origin;
-        let em = em_vec.hypot();
-        if em <= 0.0 {
-            return;
-        }
-        let advance = outline.advance_width().unwrap_or(0.0) as f64;
-        let adv_vec = full * Point::new(advance, 0.0) - origin;
-        let run_dir = full * Point::new(1000.0, 0.0) - origin;
-        let rotation = run_dir.y.atan2(run_dir.x);
-        let text = outline
-            .as_unicode()
-            .map(|s| match s {
-                hayro::hayro_interpret::hayro_cmap::BfString::Char(c) => c.to_string(),
-                hayro::hayro_interpret::hayro_cmap::BfString::String(s) => s,
-            })
-            .unwrap_or_default();
-        let key = outline.font_cache_key();
-        if !self.font_order.contains(&key) {
-            self.font_order.push(key);
-        }
-        let origin = pt(origin);
-        // A glyph continues the run on its baseline (within half an em
-        // across it) when the gap along it is under an em, whatever its font
-        // or size; a gap of more than a few hundredths of an em reads as a
-        // space.
-        let gap = self.current.as_ref().and_then(|run| {
-            if (run.text.rotation - rotation).abs() >= 1e-6 {
-                return None;
-            }
-            let (c, s) = (rotation.cos(), rotation.sin());
-            let (dx, dy) = (origin[0] - run.end[0], origin[1] - run.end[1]);
-            let along = dx * c + dy * s;
-            let across = -dx * s + dy * c;
-            (across.abs() < 0.5 * run.em && along > -0.5 * run.em && along < run.em)
-                .then_some(along / run.em)
-        });
-        if gap.is_none() {
-            self.finish_text();
-            self.current = Some(PendingText {
-                text: PdfText {
-                    text: String::new(),
-                    font: String::new(),
-                    origin,
-                    cap_height: 0.0,
-                    width: 0.0,
-                    rotation,
-                    color: rgb(paint),
-                    em,
-                },
-                font_key: key,
-                end: origin,
-                em,
-                oc: self.oc_sections,
-            });
-        }
-        if let Some(run) = self.current.as_mut() {
-            if gap.is_some_and(|g| g >= 0.15) && !run.text.text.ends_with(' ') {
-                run.text.text.push(' ');
-            }
-            run.text.text.push_str(&text);
-            run.end = [origin[0] + adv_vec.x, origin[1] + adv_vec.y];
-            run.text.width = ((run.end[0] - run.text.origin[0]).powi(2)
-                + (run.end[1] - run.text.origin[1]).powi(2))
-            .sqrt();
+        for glyph in run.glyphs() {
+            self.glyph(glyph, props.transform * glyph.transform(), &props.paint);
         }
     }
-    fn begin_marked_content(&mut self, tag: &[u8], _: Option<i32>) {
+    fn begin_marked_content(
+        &mut self,
+        tag: &[u8],
+        _: Option<&hayro::hayro_syntax::object::Dict<'_>>,
+    ) {
         if tag == b"OC" {
             self.oc_sections += 1;
         }
     }
-    fn draw_image(&mut self, image: Image<'a, '_>, transform: Affine) {
+    fn draw_image(&mut self, image: Image<'a, '_>, props: ImageDrawProps<'a>) {
+        let transform = props.transform;
         let Image::Raster(raster) = image else {
             return;
         };
@@ -1384,13 +1313,115 @@ impl<'a> Device<'a> for Collector {
             self.images.push(image);
         }
     }
-    fn pop_clip_path(&mut self) {
+    fn pop_clip(&mut self) {
         if self.visible.len() > 1 {
             self.visible.pop();
         }
         self.clips.pop();
     }
     fn pop_transparency_group(&mut self) {}
+}
+
+impl Collector {
+    /// One glyph of a run, at `full` (its transform onto the page).
+    fn glyph(&mut self, glyph: &Glyph<'_>, full: Affine, paint: &Paint<'_>) {
+        let Glyph::Outline(outline) = glyph else {
+            return;
+        };
+        let origin = full * Point::ZERO;
+        // Outlines are in 1000 units per em.
+        let em_vec = full * Point::new(0.0, 1000.0) - origin;
+        let em = em_vec.hypot();
+        if em <= 0.0 {
+            return;
+        }
+        let advance = outline.advance_width().unwrap_or(0.0) as f64;
+        let adv_vec = full * Point::new(advance, 0.0) - origin;
+        let run_dir = full * Point::new(1000.0, 0.0) - origin;
+        let rotation = run_dir.y.atan2(run_dir.x);
+        let text = outline
+            .as_unicode()
+            .map(|s| match s {
+                hayro::hayro_interpret::hayro_cmap::BfString::Char(c) => c.to_string(),
+                hayro::hayro_interpret::hayro_cmap::BfString::String(s) => s,
+            })
+            .unwrap_or_default();
+        let key = font_key(outline);
+        if !self.font_order.contains(&key) {
+            self.font_order.push(key);
+        }
+        let origin = pt(origin);
+        // A glyph continues the run on its baseline (within half an em
+        // across it) when the gap along it is under an em, whatever its font
+        // or size; a gap of more than a few hundredths of an em reads as a
+        // space.
+        let gap = self.current.as_ref().and_then(|run| {
+            if (run.text.rotation - rotation).abs() >= 1e-6 {
+                return None;
+            }
+            let (c, s) = (rotation.cos(), rotation.sin());
+            let (dx, dy) = (origin[0] - run.end[0], origin[1] - run.end[1]);
+            let along = dx * c + dy * s;
+            let across = -dx * s + dy * c;
+            (across.abs() < 0.5 * run.em && along > -0.5 * run.em && along < run.em)
+                .then_some(along / run.em)
+        });
+        if gap.is_none() {
+            self.finish_text();
+            self.current = Some(PendingText {
+                text: PdfText {
+                    text: String::new(),
+                    font: String::new(),
+                    origin,
+                    cap_height: 0.0,
+                    width: 0.0,
+                    rotation,
+                    color: rgb(paint),
+                    em,
+                },
+                font_key: key,
+                end: origin,
+                em,
+                oc: self.oc_sections,
+            });
+        }
+        if let Some(run) = self.current.as_mut() {
+            if gap.is_some_and(|g| g >= 0.15) && !run.text.text.ends_with(' ') {
+                run.text.text.push(' ');
+            }
+            run.text.text.push_str(&text);
+            run.end = [origin[0] + adv_vec.x, origin[1] + adv_vec.y];
+            run.text.width = ((run.end[0] - run.text.origin[0]).powi(2)
+                + (run.end[1] - run.text.origin[1]).powi(2))
+            .sqrt();
+        }
+    }
+}
+
+/// A key for the font of `glyph`: the content key of its font program.
+///
+/// hayro 0.9 keys a glyph's outline, not its font (0.8 had
+/// `font_cache_key`), and gives a font's data (`font_data`) for embedded
+/// TrueType and CFF fonts only. A glyph's identifier hashes its program's
+/// content key first, as one `u128`, then the glyph, so the first `u128` it
+/// hashes is the font's key. `a_page_with_two_standard_fonts_names_each`
+/// fails if that changes.
+fn font_key(glyph: &hayro::hayro_interpret::font::OutlineGlyph) -> u128 {
+    use std::hash::{Hash, Hasher};
+    #[derive(Default)]
+    struct FirstU128(Option<u128>);
+    impl Hasher for FirstU128 {
+        fn finish(&self) -> u64 {
+            0
+        }
+        fn write(&mut self, _: &[u8]) {}
+        fn write_u128(&mut self, value: u128) {
+            self.0.get_or_insert(value);
+        }
+    }
+    let mut hasher = FirstU128::default();
+    glyph.identifier().hash(&mut hasher);
+    hasher.0.unwrap_or_default()
 }
 
 /// A point of a segment at parameter `t` (0..1).

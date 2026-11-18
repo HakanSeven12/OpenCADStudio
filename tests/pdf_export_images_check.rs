@@ -80,11 +80,11 @@ impl Raster {
             &pdf.pages()[page],
             &hayro::RenderCache::new(),
             &hayro::hayro_interpret::InterpreterSettings::default(),
-            &hayro::RenderSettings {
+            &hayro::RenderSettings::default(),
+            &hayro::PixmapSettings {
                 x_scale: scale,
                 y_scale: scale,
                 bg_color: hayro::vello_cpu::color::palette::css::WHITE,
-                ..Default::default()
             },
         );
         Self {

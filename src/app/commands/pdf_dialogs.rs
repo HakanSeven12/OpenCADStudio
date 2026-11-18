@@ -982,6 +982,9 @@ impl OpenCADStudio {
             PdfDialogMsg::AttachNameRead(path, read) => {
                 return self.finish_attach_name_read(&path, &read);
             }
+            PdfDialogMsg::AttachPlaced(tab_id, generation, placed) => {
+                self.finish_attach_pdf_pages(tab_id, generation, *placed);
+            }
             PdfDialogMsg::AttachGeoChecked(path, pages, available) => {
                 self.finish_pdf_attach_geopdf(&path, &pages, available);
             }

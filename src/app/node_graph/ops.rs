@@ -1030,7 +1030,9 @@ impl AppHost<'_> {
                     .map(|e| e.common().handle)
                     .collect();
                 let i = self.i;
-                self.app
+                // Without automatic placement the pages are placed at once.
+                let _ = self
+                    .app
                     .attach_pdf_pages(i, "PDFATTACH".into(), kind, &path, pages, false);
                 let added: Vec<Handle> = self
                     .scene()

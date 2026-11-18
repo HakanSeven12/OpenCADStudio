@@ -12177,6 +12177,11 @@ impl Scene {
     /// The walk set governing the current interaction space, if any. An
     /// empty set is a valid walk (it hides every layered entity).
     fn interaction_layer_walk(&self) -> Option<&HashSet<Handle>> {
+        // Asked once per entity by every visibility gate: without any walk,
+        // skip the space key, whose layout lookup scans every object.
+        if self.layer_walk.visible.is_empty() {
+            return None;
+        }
         self.layer_walk
             .visible
             .get(&self.interaction_space_base_key())

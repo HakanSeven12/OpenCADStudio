@@ -3198,7 +3198,7 @@ impl OpenCADStudio {
             // "down", "delete", "layout=1|2|4", "content_spacing=<n>"; the
             // Cell Block window: "block=<name>", "align=1..9",
             // "scale=<n>", "autofit=0|1", "rotation=<deg>"; the Cell Data
-            // Format window: "kind=0..8", "unit=<n>", "precision=<text>",
+            // Format window: "kind=0..8", "unit=<n>", "precision=<text>", "use_current=0|1",
             // "symbol=<s>", "append=0|1", "negative=0|1", "separator=0..2",
             // "axis=0..2", "date=<picture>", "conversion=<n>", "prefix=<s>",
             // "suffix=<s>", "decimal=0..2", "thousands=0..3",
@@ -3255,6 +3255,7 @@ impl OpenCADStudio {
                         "kind" => T::FormatKind(value.parse().map_err(|_| bad())?),
                         "unit" => T::FormatUnit(value.parse().map_err(|_| bad())?),
                         "precision" => T::Precision(value.to_string()),
+                        "use_current" => T::UseCurrent(value == "1"),
                         "symbol" => T::Symbol(value.to_string()),
                         "append" => T::Append(value == "1"),
                         "negative" => T::Negative(value == "1"),

@@ -892,6 +892,7 @@ fn editor_window<'a>(v: &View<'a>, sizing: crate::ui::modal::ModalSizing) -> Ele
             ),
             (tr!("dim-style", "compare").into(), Some(msg(DsMsg::Compare))),
         ],
+        list_title: None,
         editor,
     })
 }

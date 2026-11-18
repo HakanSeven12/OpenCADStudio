@@ -7054,6 +7054,7 @@ dimstyle =
     .surveyors-units = Földmérési egységek
 
 style-manager =
+    .only-used = Only styles in use
     .use-big-font = SHX Big Font használata
     .number-field-range = Számjegyeket és tizedespontot használjon. Adjon meg egy értéket __ocs_fmt_0__ és __ocs_fmt_1__ között.
     .number-field-non-negative = Adjon meg 0-t vagy pozitív számot.
@@ -8862,6 +8863,21 @@ block-value-set =
     .y-distance = Y távolság
 
 table-style-cells =
+    .table-styles = Table styles
+    .cell-style-of = cell style
+    .change = Change…
+    .fill-alignment = Fill and alignment
+    .line-card = Line
+    .apply-edges = Edges to apply
+    .edges-hint = Click an edge set to give it the line on the left.
+    .table-card = Table
+    .preview-short = Preview
+    .used-none = No cells use this style
+    .used-some = Used by tables of this style
+    .new-cell-style = New cell style
+    .selected-style = Selected style
+    .usage = Usage
+    .manage-help = Pick a cell style: rename it in place, delete it or add a new one. OK keeps the changes, Cancel restores them.
     .create-entry = Create new cell style…
     .manage-entry = Manage cell styles…
     .new-button = New…
@@ -8928,6 +8944,7 @@ table-style-cells =
     .table-direction = Táblázat iránya
 
 table-cells =
+    .use-current = Use current units and precision
     .borders-title = Cella szegélyei
     .contents-title = Cella tartalma
     .line = Vonal
@@ -9837,6 +9854,8 @@ doc-tabs =
     .above-palettes = Lapok a paletták felett
 
 text-style =
+    .styles-title = Text styles
+    .used-count = Used: { $count }
     .invalid-width =
         Érvénytelen szélességi tényező, adjon meg új értéket.
 

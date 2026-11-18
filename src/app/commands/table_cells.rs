@@ -1201,6 +1201,19 @@ impl OpenCADStudio {
                     state.append = state.kind == 5;
                 }
                 M::FormatUnit(unit) => state.unit = unit,
+                M::UseCurrent(on) => {
+                    // On: current units and precision; off: decimal units,
+                    // keeping a chosen precision.
+                    if on {
+                        state.unit = 1;
+                        state.precision = 0;
+                    } else {
+                        state.unit = 2;
+                        if state.precision == 0 {
+                            state.precision = 5;
+                        }
+                    }
+                }
                 M::Precision(value) => {
                     state.precision = if value.contains('.') {
                         value.len() - 1
@@ -1501,6 +1514,38 @@ pub(crate) fn format_preview(
         8 => "1234".to_string(),
         _ => crate::tr!("table-cells", "sample-text"),
     }
+}
+
+/// Each data type's sample, as the Cell Data Format list shows it beside
+/// the type: the type's default format with the cell's number.
+pub(crate) fn format_badges(
+    document: &document::Document,
+    state: &crate::ui::window::table_cell_dialog::CellFormatState,
+) -> Vec<String> {
+    use crate::ui::window::table_cell_dialog::FORMAT_KINDS;
+    (0..FORMAT_KINDS.len())
+        .map(|kind| {
+            let mut sample = state.clone();
+            sample.kind = kind;
+            sample.unit = if matches!(kind, 0 | 3 | 6) { 1 } else { 0 };
+            sample.precision = if matches!(kind, 1 | 5) { 3 } else { 0 };
+            sample.append = kind == 5;
+            sample.negative_parens = false;
+            sample.date = String::new();
+            sample.prefix = String::new();
+            sample.suffix = String::new();
+            sample.conversion = "1".into();
+            sample.decimal = 0;
+            sample.thousands = 0;
+            sample.zeros = 0;
+            match kind {
+                // General shows the number as it is.
+                4 => document.format_with_picture(state.sample.unwrap_or(845.34786), "%lu6"),
+                7 => "abc".to_string(),
+                _ => format_preview(document, &sample),
+            }
+        })
+        .collect()
 }
 
 impl OpenCADStudio {

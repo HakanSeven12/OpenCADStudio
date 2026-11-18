@@ -179,7 +179,7 @@ pub(in crate::app) use plugin_grips::SETTLE_WATCHDOG;
 mod plugin_grips_tests;
 mod qselect;
 mod style;
-mod table_style_cells;
+pub(in crate::app) mod table_style_cells;
 pub(crate) mod style_import;
 pub(in crate::app) mod util;
 mod viewport;
@@ -15613,6 +15613,9 @@ impl OpenCADStudio {
             Message::TableStyleEdit { field, value } => {
                 if field == "description" {
                     self.ts_description = value;
+                    // Written at once like the other fields: picking another
+                    // cell style reloads the buffers from the style.
+                    self.stage_tablestyle_bufs();
                 }
                 Task::none()
             }

@@ -125,9 +125,11 @@ impl OpenCADStudio {
                 }
             }
             TsCellMsg::RenameText(value) => {
-                if let Some(rename) = self.ts_cards.manage.as_mut().and_then(|m| m.rename.as_mut())
-                {
-                    *rename = value;
+                // Typing in the name field renames in place.
+                if let Some(manage) = self.ts_cards.manage.as_mut() {
+                    if !document::objects::is_row_cell_style(&manage.selected) {
+                        manage.rename = Some(value);
+                    }
                 }
             }
             TsCellMsg::RenameCommit => self.ts_rename_commit(),
@@ -140,6 +142,17 @@ impl OpenCADStudio {
             }
             TsCellMsg::DeleteAnswer(yes) => self.ts_delete_answer(yes),
             TsCellMsg::ManageOk => {
+                // A name being typed is committed first; a refused one
+                // keeps the card open with its notice.
+                self.ts_rename_commit();
+                if self
+                    .ts_cards
+                    .manage
+                    .as_ref()
+                    .is_some_and(|manage| manage.notice.is_some())
+                {
+                    return Task::none();
+                }
                 self.ts_cards.manage = None;
                 let exists = self
                     .ts_style()
@@ -157,6 +170,21 @@ impl OpenCADStudio {
                     }
                     self.load_tablestyle_bufs(i);
                 }
+            }
+            TsCellMsg::ManageHelp => self
+                .command_line
+                .push_info(crate::tr!("table-style-cells", "manage-help").as_str()),
+            TsCellMsg::QuickRename | TsCellMsg::QuickDelete => {
+                if document::objects::is_row_cell_style(&self.ts_cell) {
+                    return Task::none();
+                }
+                let rename = matches!(message, TsCellMsg::QuickRename);
+                let _ = self.on_table_style_cells(TsCellMsg::ManageOpen);
+                return self.on_table_style_cells(if rename {
+                    TsCellMsg::RenameStart
+                } else {
+                    TsCellMsg::DeleteAsk
+                });
             }
             TsCellMsg::FormatOpen => self.ts_format_open(),
             TsCellMsg::TextStyles => return self.ts_open_text_styles(),
@@ -389,6 +417,7 @@ impl OpenCADStudio {
             return;
         };
         let hide = index + 1 == BORDER_BUTTONS.len();
+        self.ts_border.last = Some(index as u8);
         let border = self.ts_border.clone();
         let linetype = u64::from_str_radix(border.linetype.trim(), 16)
             .map(document::Handle::new)
@@ -467,7 +496,6 @@ impl OpenCADStudio {
     /// Format "…": the Cell Data Format window on the cell style's data
     /// type and format; it returns here.
     fn ts_format_open(&mut self) {
-        use crate::ui::window::table_cell_dialog::{CellFormatState, FORMAT_KINDS};
         let Some(cell) = self
             .ts_style()
             .and_then(|style| style.cell_style(&self.ts_cell))
@@ -476,32 +504,7 @@ impl OpenCADStudio {
             return;
         };
         let format = &cell.cell_style.content_format;
-        let category =
-            crate::entities::table::cell_data_category(format.value_data_type, format.value_unit_type);
-        let kind = FORMAT_KINDS
-            .iter()
-            .position(|name| *name == category)
-            .unwrap_or(4);
-        let mut state = CellFormatState {
-            kind,
-            unit: 0,
-            precision: if matches!(kind, 1 | 5) { 3 } else { 0 },
-            symbol: crate::entities::field::os_currency_symbol(),
-            append: kind == 5,
-            negative_parens: false,
-            separator: 0,
-            axes: [true; 3],
-            date: String::new(),
-            sample: None,
-            preview: String::new(),
-            conversion: "1".into(),
-            prefix: String::new(),
-            suffix: String::new(),
-            decimal: 0,
-            thousands: 0,
-            zeros: 0,
-        };
-        state.read_picture(&format.value_format_string);
+        let mut state = cell_format_state(format);
         state.preview = crate::app::commands::table_cells::format_preview(
             &self.tabs[self.active_tab].scene.document,
             &state,
@@ -584,4 +587,39 @@ impl OpenCADStudio {
         self.active_modal = Some(ModalKind::TableStyle);
         self.reset_modal_geometry();
     }
+}
+
+/// The Cell Data Format settings a cell style's data type and format read
+/// as.
+pub(in crate::app) fn cell_format_state(
+    format: &document::objects::TableContentFormat,
+) -> crate::ui::window::table_cell_dialog::CellFormatState {
+    use crate::ui::window::table_cell_dialog::{CellFormatState, FORMAT_KINDS};
+    let category =
+        crate::entities::table::cell_data_category(format.value_data_type, format.value_unit_type);
+    let kind = FORMAT_KINDS
+        .iter()
+        .position(|name| *name == category)
+        .unwrap_or(4);
+    let mut state = CellFormatState {
+        kind,
+        unit: 0,
+        precision: if matches!(kind, 1 | 5) { 3 } else { 0 },
+        symbol: crate::entities::field::os_currency_symbol(),
+        append: kind == 5,
+        negative_parens: false,
+        separator: 0,
+        axes: [true; 3],
+        date: String::new(),
+        sample: None,
+        preview: String::new(),
+        conversion: "1".into(),
+        prefix: String::new(),
+        suffix: String::new(),
+        decimal: 0,
+        thousands: 0,
+        zeros: 0,
+    };
+    state.read_picture(&format.value_format_string);
+    state
 }

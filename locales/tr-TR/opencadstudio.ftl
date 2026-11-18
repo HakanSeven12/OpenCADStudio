@@ -6999,6 +6999,7 @@ dimstyle =
     .surveyors-units = Haritacılık birimleri
 
 style-manager =
+    .only-used = Yalnız kullanılanlar
     .use-big-font = Büyük Yazı Tipi Kullan
     .number-field-range = Rakam ve ondalık nokta kullanın. __ocs_fmt_0__ ile __ocs_fmt_1__ arasında bir değer girin.
     .number-field-non-negative = 0 ya da pozitif bir sayı girin.
@@ -8478,6 +8479,21 @@ table-cmd =
     .styles-in-use = Kullanılan stiller
 
 table-style-cells =
+    .table-styles = Tablo stilleri
+    .cell-style-of = hücre stili
+    .change = Değiştir…
+    .fill-alignment = Dolgu ve hizalama
+    .line-card = Çizgi
+    .apply-edges = Uygulanacak kenarlar
+    .edges-hint = Bir kenara tıklayınca soldaki çizgi o kenara uygulanır.
+    .table-card = Tablo
+    .preview-short = Önizleme
+    .used-none = Bu stili kullanan hücre yok
+    .used-some = Bu stildeki tablolarda kullanılıyor
+    .new-cell-style = Yeni hücre stili
+    .selected-style = Seçili stil
+    .usage = Kullanım
+    .manage-help = Bir hücre stili seçin: adını yerinde değiştirin, silin veya yeni bir stil ekleyin. Tamam değişiklikleri korur, İptal geri alır.
     .create-entry = Yeni hücre stili oluştur…
     .manage-entry = Hücre stillerini yönet…
     .new-button = Yeni…
@@ -8764,6 +8780,7 @@ array-grips = Öğe sayısı
     .prompt-item-angle = Öğeler arası açıyı belirtin:
     .prompt-radius = Yarıçapı belirtin:
 table-cells =
+    .use-current = Geçerli birim ve hassasiyeti kullan
     .borders-title = Hücre Kenarlıkları
     .contents-title = Hücre İçeriği
     .line = Çizgi
@@ -9778,6 +9795,8 @@ doc-tabs =
     .above-palettes = Sekmeler paletlerin üstünde
 
 text-style =
+    .styles-title = Metin stilleri
+    .used-count = Kullanılan: { $count }
     .invalid-width =
         Geçersiz genişlik çarpanı, yeni bir değer girin.
 

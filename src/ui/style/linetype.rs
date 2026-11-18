@@ -544,6 +544,7 @@ pub fn view_window<'a>(
         context_menu: None,
         list: None,
         extra_actions: Vec::new(),
+        list_title: None,
         editor,
     })
 }

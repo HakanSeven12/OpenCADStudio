@@ -7076,6 +7076,7 @@ dimstyle =
     .surveyors-units = Unités d’arpentage
 
 style-manager =
+    .only-used = Only styles in use
     .use-big-font = Use Big Font
     .number-field-range = Use digits and a decimal point. Enter a value from __ocs_fmt_0__ to __ocs_fmt_1__.
     .number-field-non-negative = Enter 0 or a positive number.
@@ -8884,6 +8885,21 @@ block-value-set =
     .y-distance = Distance Y
 
 table-style-cells =
+    .table-styles = Table styles
+    .cell-style-of = cell style
+    .change = Change…
+    .fill-alignment = Fill and alignment
+    .line-card = Line
+    .apply-edges = Edges to apply
+    .edges-hint = Click an edge set to give it the line on the left.
+    .table-card = Table
+    .preview-short = Preview
+    .used-none = No cells use this style
+    .used-some = Used by tables of this style
+    .new-cell-style = New cell style
+    .selected-style = Selected style
+    .usage = Usage
+    .manage-help = Pick a cell style: rename it in place, delete it or add a new one. OK keeps the changes, Cancel restores them.
     .create-entry = Create new cell style…
     .manage-entry = Manage cell styles…
     .new-button = New…
@@ -8950,6 +8966,7 @@ table-style-cells =
     .table-direction = Direction du tableau
 
 table-cells =
+    .use-current = Use current units and precision
     .borders-title = Bordures de cellule
     .contents-title = Contenu de cellule
     .line = Ligne
@@ -9859,6 +9876,8 @@ doc-tabs =
     .above-palettes = Onglets au-dessus des palettes
 
 text-style =
+    .styles-title = Text styles
+    .used-count = Used: { $count }
     .invalid-width =
         Invalid Width Factor, please enter a new value.
 

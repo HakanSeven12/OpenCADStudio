@@ -7071,6 +7071,7 @@ dimstyle =
     .surveyors-units = 測量單位
 
 style-manager =
+    .only-used = Only styles in use
     .use-big-font = 使用大字型
     .number-field-range = 請使用數字和小數點。請輸入介於 __ocs_fmt_0__ 至 __ocs_fmt_1__ 之間的值。
     .number-field-non-negative = 請輸入 0 或正數。
@@ -8871,6 +8872,21 @@ block-value-set =
     .y-distance = Y 距離
 
 table-style-cells =
+    .table-styles = Table styles
+    .cell-style-of = cell style
+    .change = Change…
+    .fill-alignment = Fill and alignment
+    .line-card = Line
+    .apply-edges = Edges to apply
+    .edges-hint = Click an edge set to give it the line on the left.
+    .table-card = Table
+    .preview-short = Preview
+    .used-none = No cells use this style
+    .used-some = Used by tables of this style
+    .new-cell-style = New cell style
+    .selected-style = Selected style
+    .usage = Usage
+    .manage-help = Pick a cell style: rename it in place, delete it or add a new one. OK keeps the changes, Cancel restores them.
     .create-entry = Create new cell style…
     .manage-entry = Manage cell styles…
     .new-button = New…
@@ -8937,6 +8953,7 @@ table-style-cells =
     .table-direction = 表格方向
 
 table-cells =
+    .use-current = Use current units and precision
     .borders-title = 儲存格邊框
     .contents-title = 儲存格內容
     .line = 線
@@ -9846,6 +9863,8 @@ doc-tabs =
     .above-palettes = 索引標籤位於選項板上方
 
 text-style =
+    .styles-title = Text styles
+    .used-count = Used: { $count }
     .invalid-width =
         寬度係數無效，請輸入新數值。
 

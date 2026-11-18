@@ -5383,6 +5383,7 @@ impl Scene {
             Self::absorb_refreshed(&mut changes, &mut refreshed_handles, refreshed);
             bump_mark("path-arrays");
             if solve_parametric && !self.parametric_constraints.is_empty() {
+                bump_mark("solve-refresh-start");
                 let refreshed = self.refresh_parametric_constraints_with_initial_policy(
                     &changes,
                     driven_refs,
@@ -5404,6 +5405,7 @@ impl Scene {
                         .extend(moved.into_iter().filter(|handle| !named.contains(handle)));
                 }
                 Self::absorb_refreshed(&mut changes, &mut refreshed_handles, refreshed);
+                bump_mark("solve-refresh-end");
             }
         }
         if sync_native_graph
@@ -5432,8 +5434,10 @@ impl Scene {
                 bump_mark("native-graph-sync");
             }
         }
+        bump_mark("native-graph-skipped-or-done");
         // A modified image-bearing entity redraws its raster: an underlay's
         // display adjustments and clip live on the entity, not the image.
+        bump_mark("raster-seed-start");
         for (handle, kind) in &changes {
             if !matches!(kind, ChangeKind::Modified) {
                 continue;
@@ -5453,6 +5457,7 @@ impl Scene {
                 }
             }
         }
+        bump_mark("raster-seed-end");
         bump_mark("before-dependency-index");
         if !changes.is_empty() {
             self.refresh_dependency_index_for_changes(&changes);

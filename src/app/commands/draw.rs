@@ -3738,6 +3738,10 @@ impl OpenCADStudio {
                     panel.commands.push(command);
                 }
             }
+            M::PickSuggestion(name) => {
+                state.draft = name;
+                return self.on_ribbon_customize(M::AddCommand);
+            }
             M::RemoveCommand(at) => {
                 if let Some(panel) = selected.and_then(|index| panels.get_mut(index)) {
                     if at < panel.commands.len() {
@@ -3768,5 +3772,137 @@ impl OpenCADStudio {
         let left = self.dock_column_width(crate::app::config::DockSide::Left)
             + crate::ui::dock::DOCK_STRIP_W;
         iced::Point::new(left + 8.0, 74.0)
+    }
+}
+
+#[cfg(test)]
+mod ribbon_customize_suggestion_tests {
+    use crate::app::OpenCADStudio;
+    use crate::ui::window::ribbon_customize::{suggestions, Msg, State};
+
+    fn app_with_panel() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.ribbon
+            .set_custom_panels(vec![crate::ui::ribbon::CustomPanel {
+                title: "Mine".into(),
+                commands: Vec::new(),
+            }]);
+        app.ribbon_customize = Some(State {
+            selected: Some(0),
+            draft: String::new(),
+        });
+        app
+    }
+
+    #[test]
+    fn suggestions_rank_prefix_before_substring_and_are_capped() {
+        let none = rustc_hash::FxHashMap::default();
+        let found = suggestions("lin", &[], &none);
+        assert!(!found.is_empty() && found.len() <= 6);
+        assert!(found.contains(&"LINE".to_owned()));
+        let first_substring = found.iter().position(|n| !n.starts_with("LIN"));
+        let last_prefix = found.iter().rposition(|n| n.starts_with("LIN"));
+        if let (Some(sub), Some(pre)) = (first_substring, last_prefix) {
+            assert!(pre < sub, "prefix matches come first: {found:?}");
+        }
+        // Substring match: typed text found inside a name.
+        assert!(suggestions("ayer", &[], &none)
+            .iter()
+            .any(|n| n.contains("AYER")));
+        assert!(suggestions("", &[], &none).is_empty());
+        assert!(suggestions("QQQQZZ", &[], &none).is_empty());
+    }
+
+    #[test]
+    fn suggestions_include_plugin_commands() {
+        let none = rustc_hash::FxHashMap::default();
+        let found = suggestions("zzplug", &["ZzPlugCmd".to_owned()], &none);
+        assert_eq!(found, vec!["ZZPLUGCMD".to_owned()]);
+    }
+
+    #[test]
+    fn picking_a_suggestion_goes_through_the_add_path() {
+        let mut app = app_with_panel();
+        let _ = app.on_ribbon_customize(Msg::PickSuggestion("LINE".to_owned()));
+        assert_eq!(app.ribbon.custom_panels()[0].commands, vec!["LINE"]);
+        assert!(app.ribbon_customize.as_ref().unwrap().draft.is_empty());
+        // The add path resolves an alias to its command, as typing it would.
+        app.command_aliases
+            .insert("QQ".to_owned(), "CIRCLE".to_owned());
+        let _ = app.on_ribbon_customize(Msg::PickSuggestion("QQ".to_owned()));
+        assert_eq!(
+            app.ribbon.custom_panels()[0].commands,
+            vec!["LINE", "CIRCLE"]
+        );
+    }
+
+    /// The customize window as it is drawn: where the label is, when any of
+    /// it shows.
+    fn shown(app: &OpenCADStudio, label: &str) -> Option<iced::Rectangle> {
+        let mut ui = iced_test::Simulator::with_size(
+            iced::Settings::default(),
+            iced::Size::new(1280.0, 900.0),
+            app.view_main(),
+        );
+        ui.find(label.to_string())
+            .ok()
+            .and_then(|found| found.visible_bounds())
+    }
+
+    fn open_window_with_draft(draft: &str) -> (OpenCADStudio, Vec<String>) {
+        let mut app = app_with_panel();
+        app.active_modal = Some(crate::app::ModalKind::RibbonCustomize);
+        let _ = app.on_ribbon_customize(Msg::Draft(draft.to_owned()));
+        let wanted = suggestions(
+            draft,
+            &app.command_line.dynamic_commands,
+            &app.command_aliases,
+        );
+        (app, wanted)
+    }
+
+    /// The window is sized before anything is typed, so the rows must fit in
+    /// the size it has then: every row shows, above the Close row, and the
+    /// Close row stays where it was with an empty box.
+    #[test]
+    fn suggestion_rows_show_without_growing_the_window() {
+        let (empty, none) = open_window_with_draft("");
+        assert!(none.is_empty());
+        let close_before = shown(&empty, "Close").expect("Close shows with an empty box");
+
+        let (typed, wanted) = open_window_with_draft("lin");
+        assert_eq!(wanted.len(), 6, "a full list: {wanted:?}");
+        let close_after = shown(&typed, "Close").expect("Close still shows with the rows");
+        assert_eq!(
+            close_after, close_before,
+            "the rows must not move the Close row"
+        );
+        for name in &wanted {
+            let row = shown(&typed, name).unwrap_or_else(|| panic!("{name} does not show"));
+            assert!(
+                row.height > 10.0 && row.y + row.height <= close_after.y,
+                "{name} {row:?} is cut off or under the Close row {close_after:?}"
+            );
+        }
+    }
+
+    /// A click on a row in the drawn window adds that command.
+    #[test]
+    fn clicking_a_suggestion_row_adds_the_command() {
+        let (mut app, wanted) = open_window_with_draft("lin");
+        let last = wanted.last().expect("a suggestion").clone();
+        let messages: Vec<_> = {
+            let mut ui = iced_test::Simulator::with_size(
+                iced::Settings::default(),
+                iced::Size::new(1280.0, 900.0),
+                app.view_main(),
+            );
+            ui.click(last.clone()).expect("the last row can be clicked");
+            ui.into_messages().collect()
+        };
+        for message in messages {
+            let _ = app.update(message);
+        }
+        assert_eq!(app.ribbon.custom_panels()[0].commands, vec![last]);
     }
 }

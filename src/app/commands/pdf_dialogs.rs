@@ -666,6 +666,83 @@ impl OpenCADStudio {
     /// ends ([`Self::open_pdf_import_window`]); an encrypted file asks for
     /// its password first. A panic in the reader becomes an error on the
     /// command line.
+    /// The -PDFIMPORT file name prompt: the file is read off the UI thread,
+    /// and the command waits for the read
+    /// ([`Self::finish_pdf_import_prompt_read`]). A panic in the reader is
+    /// the read's error (`PDFIMPORT failed: <message>`), so the command
+    /// goes back to the file name prompt and does not wait for ever.
+    pub(in crate::app) fn read_pdf_for_import_prompt(
+        &mut self,
+        i: usize,
+        path: String,
+    ) -> Task<Message> {
+        self.read_pdf_for_import_prompt_with(i, path, pdf_import::read_for_prompt)
+    }
+
+    /// [`Self::read_pdf_for_import_prompt`] with the reader given, so a test
+    /// can give one that panics.
+    pub(in crate::app) fn read_pdf_for_import_prompt_with(
+        &mut self,
+        i: usize,
+        path: String,
+        reader: fn(&str) -> pdf_import::PdfPromptRead,
+    ) -> Task<Message> {
+        self.command_line.push_info(&format!(
+            "Reading {}…",
+            crate::entities::underlay::display_path(&path)
+        ));
+        let tab_id = self.tabs[i].id;
+        let worker_path = path.clone();
+        crate::app::update::background_task(
+            "PDFIMPORT",
+            move || {
+                // The web build runs the read in place, without unwinding.
+                #[cfg(target_arch = "wasm32")]
+                {
+                    reader(&worker_path)
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| reader(&worker_path)))
+                        .unwrap_or_else(|payload| {
+                            pdf_import::PdfPromptRead::Error(format!(
+                                "PDFIMPORT failed: {}",
+                                crate::app::update::panic_detail(payload)
+                            ))
+                        })
+                }
+            },
+            move |read| Message::PdfDialog(PdfDialogMsg::ImportPromptRead(tab_id, path, read)),
+        )
+    }
+
+    /// The end of the prompt's read: the command of that drawing takes it,
+    /// if it still waits for that file. In the current drawing the command
+    /// goes on (the page prompt, the password, or the error); in another
+    /// drawing it only takes the pages, or goes back to the file name
+    /// prompt, and its messages are not shown.
+    fn finish_pdf_import_prompt_read(
+        &mut self,
+        tab_id: u64,
+        path: &str,
+        read: pdf_import::PdfPromptRead,
+    ) -> Task<Message> {
+        let Some(j) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            return Task::none();
+        };
+        let Some(result) = self.tabs[j]
+            .active_cmd
+            .as_mut()
+            .and_then(|command| command.on_pdf_import_read(path, read))
+        else {
+            return Task::none();
+        };
+        if j != self.active_tab {
+            return Task::none();
+        }
+        self.apply_cmd_result(result)
+    }
+
     pub(in crate::app) fn open_pdf_import_file(&mut self, path: &str) -> Task<Message> {
         self.open_pdf_import_file_with(path, read_pdf_for_import_window)
     }
@@ -1273,6 +1350,9 @@ impl OpenCADStudio {
                     i,
                     crate::app::commands::pdf_import::PdfImportSource::File(import),
                 );
+            }
+            PdfDialogMsg::ImportPromptRead(tab_id, path, read) => {
+                return self.finish_pdf_import_prompt_read(tab_id, &path, read);
             }
             PdfDialogMsg::ImportRead(path, read) => {
                 return self.open_pdf_import_window(&path, &read)

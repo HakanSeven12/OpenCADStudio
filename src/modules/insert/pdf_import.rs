@@ -250,6 +250,8 @@ enum Step {
     Mode,
     // The File option on the command line (-PDFIMPORT, or FILEDIA 0).
     FileName,
+    /// The file named at the prompt is read off the UI thread.
+    Reading,
     Page,
     PageList,
     Insertion,
@@ -349,6 +351,8 @@ pub struct PdfImportCommand {
     dash: bool,
     file: PdfFileImport,
     pages: usize,
+    /// The file read off the UI thread, and the text typed for it.
+    reading: Option<(String, String)>,
 }
 
 impl PdfImportCommand {
@@ -378,6 +382,7 @@ impl PdfImportCommand {
                 insertion: DVec3::ZERO,
             },
             pages: 0,
+            reading: None,
         }
     }
 
@@ -405,8 +410,9 @@ impl PdfImportCommand {
             return CmdResult::ReportError("Filename cannot be blank".to_string());
         }
         let path = prompt_file_path(typed);
-        let read = read_for_prompt(&path);
-        self.take_read(&path, text, read)
+        self.step = Step::Reading;
+        self.reading = Some((path.clone(), text.to_string()));
+        CmdResult::ReadPdfForImport(path)
     }
 
     /// The command goes on with what the read of the file named at the
@@ -548,6 +554,7 @@ impl CadCommand for PdfImportCommand {
                 "Keep, Detach or Unload PDF underlay? [Keep/Detach/Unload] <Unload>:".to_string()
             }
             Step::FileName => "Enter filename for PDF import:".to_string(),
+            Step::Reading => "Reading the file…".to_string(),
             Step::Page => "Enter page number or [?] <1>:".to_string(),
             Step::PageList => "Enter page to list <*>:".to_string(),
             Step::Insertion => "Specify insertion point <0,0>:".to_string(),
@@ -577,7 +584,7 @@ impl CadCommand for PdfImportCommand {
     fn input_kind(&self) -> InputKind {
         match self.step {
             Step::Mode | Step::Page | Step::PageList => InputKind::SingleToken,
-            Step::FileName => InputKind::FreeText,
+            Step::FileName | Step::Reading => InputKind::FreeText,
             _ => InputKind::Point,
         }
     }
@@ -666,6 +673,8 @@ impl CadCommand for PdfImportCommand {
             }
             Step::Mode => self.mode_choice(&token),
             Step::FileName => self.file_name(text),
+            // Input waits until the read ends.
+            Step::Reading => CmdResult::NeedPoint,
             Step::Page => self.page(text),
             Step::PageList => self.page_list(text),
             Step::Scale => match token.parse::<f64>() {
@@ -699,12 +708,23 @@ impl CadCommand for PdfImportCommand {
             Step::Mode => self.mode_choice(""),
             Step::Opposite => CmdResult::NeedPoint,
             Step::FileName => self.file_name(""),
+            Step::Reading => CmdResult::NeedPoint,
             Step::Page => self.page(""),
             Step::PageList => self.page_list(""),
             Step::Insertion => self.on_point(DVec3::ZERO),
             Step::Scale => self.scale(1.0),
             Step::Rotation => self.rotation(0.0),
         }
+    }
+
+    fn on_pdf_import_read(&mut self, path: &str, read: PdfPromptRead) -> Option<CmdResult> {
+        // `reading` is set only with the Reading step, and taken here.
+        if self.reading.as_ref().map(|(p, _)| p.as_str()) != Some(path) {
+            return None;
+        }
+        let (path, input) = self.reading.take()?;
+        self.step = Step::FileName;
+        Some(self.take_read(&path, &input, read))
     }
 
     fn on_mouse_move(&mut self, pt: DVec3) -> Option<WireModel> {

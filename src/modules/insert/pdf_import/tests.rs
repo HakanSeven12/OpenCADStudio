@@ -1001,10 +1001,18 @@ fn fixture(path: &str) -> String {
 }
 
 /// Types `text` at the command's prompt.
+/// Type `text`; a file name read off the UI thread is read here and given
+/// back, as the host does when the read ends.
 fn typed(command: &mut PdfImportCommand, text: &str) -> CmdResult {
-    command
+    let result = command
         .on_text_input(text)
-        .unwrap_or_else(|| panic!("{text:?} not taken at {:?}", command.prompt()))
+        .unwrap_or_else(|| panic!("{text:?} not taken at {:?}", command.prompt()));
+    match result {
+        CmdResult::ReadPdfForImport(path) => command
+            .on_pdf_import_read(&path, read_for_prompt(&path))
+            .expect("the command waits for its read"),
+        other => other,
+    }
 }
 
 fn error(result: CmdResult) -> String {

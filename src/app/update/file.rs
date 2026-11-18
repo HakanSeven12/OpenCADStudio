@@ -149,7 +149,7 @@ where
 /// Render a panic payload the way `std` reports it: `&'static str` messages,
 /// `String` messages, or a fallback for foreign payloads.
 #[cfg(not(target_arch = "wasm32"))]
-fn panic_detail(payload: Box<dyn std::any::Any + Send>) -> String {
+pub(in crate::app) fn panic_detail(payload: Box<dyn std::any::Any + Send>) -> String {
     if let Some(text) = payload.downcast_ref::<&'static str>() {
         (*text).to_string()
     } else if let Some(text) = payload.downcast_ref::<String>() {

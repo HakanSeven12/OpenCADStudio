@@ -949,6 +949,13 @@ impl OpenCADStudio {
                     crate::app::commands::pdf_import::PdfImportSource::File(import),
                 );
             }
+            CmdResult::ReadPdfForImport(path) => {
+                let read = self.read_pdf_for_import_prompt(i, path);
+                return match self.handle_need_point() {
+                    Some(task) => Task::batch([read, task]),
+                    None => read,
+                };
+            }
             CmdResult::ReadPointCloud(path) => {
                 let read = self.read_point_cloud_for_prompt(i, path);
                 return match self.handle_need_point() {

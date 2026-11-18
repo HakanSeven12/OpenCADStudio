@@ -157,6 +157,13 @@ pub enum PdfDialogMsg {
     /// A PDF read off the UI thread for the Import PDF window: the file,
     /// and what the read found.
     ImportRead(String, std::sync::Arc<PdfImportFileRead>),
+    /// The file named at the -PDFIMPORT prompt, read off the UI thread: the
+    /// tab of the command, the file, and what the read found.
+    ImportPromptRead(
+        u64,
+        String,
+        crate::modules::insert::pdf_import::PdfPromptRead,
+    ),
     /// A PDF import converted off the UI thread: the tab it was started
     /// for, that document's generation, the import, and the conversion.
     ImportConverted(

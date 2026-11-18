@@ -124,7 +124,7 @@ fn write_pdf_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn image_clip(ops: &mut Vec<Op>, rings: Vec<Vec<[f32; 2]>>) {
+fn clip_path(ops: &mut Vec<Op>, rings: Vec<Vec<[f32; 2]>>) {
     ops.push(Op::DrawPolygon {
         polygon: Polygon {
             rings: rings
@@ -297,7 +297,7 @@ fn emit_image(
         ops.push(Op::LoadGraphicsState { gs });
     }
     for clip in &plot.clips {
-        image_clip(
+        clip_path(
             ops,
             vec![clip
                 .iter()
@@ -335,7 +335,7 @@ fn emit_image(
     });
     if affine {
         // A single draw preserves intrinsic IMAGE clipping without overlapping image draws.
-        image_clip(
+        clip_path(
             ops,
             image
                 .verts
@@ -357,7 +357,7 @@ fn emit_image(
                 .filter(|matrix| matrix.iter().all(|v| v.is_finite()))
                 .ok_or("Cannot plot bitmap: degenerate texture mapping.")?;
             ops.push(Op::SaveGraphicsState);
-            image_clip(ops, vec![page.to_vec()]);
+            clip_path(ops, vec![page.to_vec()]);
             draw(ops, matrix);
             ops.push(Op::RestoreGraphicsState);
         }
@@ -783,19 +783,16 @@ fn append_pdf_page(
         // Consecutive items on one drawing layer share a marked-content run,
         // so a viewer's layer panel can hide that layer.
         let mut open_layer: Option<&str> = None;
-        // Plot transparency: an object whose colour carries alpha gets its own
-        // graphics state with that alpha (constant fill and stroke alpha), so
-        // what lies beneath stays visible, as on screen and in SVG export.
-        // Opened before the object and closed before the next one, inside the
-        // object's marked-content layer run.
+        // Transparency and viewport clips share an item-local graphics state
+        // inside the marked-content layer run.
         let mut alpha_states: std::collections::HashMap<u8, ExtendedGraphicsStateId> =
             std::collections::HashMap::new();
-        let mut alpha_open = false;
+        let mut item_state_open = false;
 
         for (_, _, _, item) in draw_items {
-            if alpha_open {
+            if item_state_open {
                 ops.push(Op::RestoreGraphicsState);
-                alpha_open = false;
+                item_state_open = false;
                 last_color = None;
                 last_lw = None;
                 // Q restores whatever was set before the q, not the page
@@ -854,7 +851,30 @@ fn append_pdf_page(
                 DrawItem::Hatch(h) if h.name != "WIPEOUT_FILL" => Some(h.color[3]),
                 _ => None,
             };
-            if let Some(alpha) = object_alpha(alpha, options) {
+            let viewport_clip = match &item {
+                DrawItem::WireFill(w) | DrawItem::Wire(w) | DrawItem::Text(w) => {
+                    w.plot_clip.as_deref()
+                }
+                _ => None,
+            };
+            let alpha = object_alpha(alpha, options);
+            if viewport_clip.is_some() || alpha.is_some() {
+                ops.push(Op::SaveGraphicsState);
+                item_state_open = true;
+            }
+            if let Some(ring) = viewport_clip {
+                let ring = ring
+                    .iter()
+                    .map(|&[x, y]| {
+                        [
+                            ((f64::from(x) + ox) * f64::from(MM_TO_PT)) as f32,
+                            ((f64::from(y) + oy) * f64::from(MM_TO_PT)) as f32,
+                        ]
+                    })
+                    .collect();
+                clip_path(&mut ops, vec![ring]);
+            }
+            if let Some(alpha) = alpha {
                 let gs = alpha_states
                     .entry(alpha)
                     .or_insert_with(|| {
@@ -867,9 +887,7 @@ fn append_pdf_page(
                         )
                     })
                     .clone();
-                ops.push(Op::SaveGraphicsState);
                 ops.push(Op::LoadGraphicsState { gs });
-                alpha_open = true;
             }
             let wire = match item {
                 DrawItem::WireFill(wire) => {
@@ -1263,7 +1281,7 @@ fn append_pdf_page(
             }
             flush_line(&mut ops, &segment, dot_radius, line_step);
         }
-        if alpha_open {
+        if item_state_open {
             ops.push(Op::RestoreGraphicsState);
         }
         if open_layer.is_some() {

@@ -713,6 +713,10 @@ pub enum DashClosure {
 /// hot-field change.
 #[derive(Clone, Debug, Default)]
 pub struct WireGeom {
+    /// Paper-space clip ring for a wire projected through a nonrectangular
+    /// viewport for plotting. It clips the rendered ink, including pen caps
+    /// and text, without cutting the path or changing its dash phase.
+    pub(crate) plot_clip: Option<std::sync::Arc<[[f32; 2]]>>,
     /// Ordered world-space positions forming a strip of quads. Each entry is
     /// the "high" half of a double-single f32 pair; [`points_low`] carries the
     /// matching residual so the shader can reconstruct the f64 source.

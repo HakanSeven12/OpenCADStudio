@@ -1615,6 +1615,36 @@ mod dgn_worker_tests {
             .is_some_and(|e| e.starts_with("DGN Import cancelled")));
     }
 
+    /// A window closed while its Change… read runs does not open again
+    /// when the read ends.
+    #[test]
+    fn a_window_closed_during_a_change_read_stays_closed() {
+        let mut app = app_with_new_drawing();
+        let first = app.read_dgn_for_dialog(&v7_file("closed-first"), DgnReadFrom::DgnImport);
+        app.drive_headless_task(first).expect("the first read");
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::DgnImport));
+        let task = app.read_dgn_for_dialog(&v7_file("closed-change"), DgnReadFrom::DgnImport);
+        let _ = app.update(Message::CloseModal);
+        app.drive_headless_task(task).expect("the change read");
+        assert_eq!(app.active_modal, None);
+    }
+
+    /// When two reads overlap, the window shows the newer file, also when
+    /// the older read ends last.
+    #[test]
+    fn only_the_newest_read_fills_the_window() {
+        let mut app = app_with_new_drawing();
+        let older_path = v7_file("older");
+        let newer_path = v7_file("newer");
+        let older = app.read_dgn_for_dialog(&older_path, DgnReadFrom::DgnImport);
+        let newer = app.read_dgn_for_dialog(&newer_path, DgnReadFrom::DgnImport);
+        app.drive_headless_task(newer).expect("the newer read");
+        app.drive_headless_task(older).expect("the older read");
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::DgnImport));
+        let s = app.import_dialogs.dgn.as_ref().expect("window state");
+        assert_eq!(s.path, newer_path);
+    }
+
     /// IMPORT in the Import File window: the window stays open during the
     /// read; a file that is no DGN model shows the error there, a DGN model
     /// opens the DGN Import window in its place.

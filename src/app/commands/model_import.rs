@@ -2128,6 +2128,34 @@ mod tds_worker_tests {
         assert_eq!(app.import_dialogs.tds.as_ref().map(|s| s.layers), Some(2));
     }
 
+    /// A window closed while its Change… read runs does not open again
+    /// when the read ends.
+    #[test]
+    fn a_window_closed_during_a_change_read_stays_closed() {
+        let mut app = app_with_new_drawing();
+        open_window(&mut app, "objects.3ds");
+        let task = app.update(Message::ImportDialog(ImportDialogMsg::TdsPicked(Some(
+            fixture("lights_camera.3ds"),
+        ))));
+        let _ = app.update(Message::CloseModal);
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, None);
+    }
+
+    /// When two reads overlap, the window shows the newer file, also when
+    /// the older read ends last.
+    #[test]
+    fn only_the_newest_read_fills_the_window() {
+        let mut app = app_with_new_drawing();
+        let older = app.read_tds_for_dialog(&fixture("objects.3ds"));
+        let newer = app.read_tds_for_dialog(&fixture("lights_camera.3ds"));
+        app.drive_headless_task(newer).expect("the newer read");
+        app.drive_headless_task(older).expect("the older read");
+        assert_eq!(app.active_modal, Some(ModalKind::TdsImport));
+        assert!(row_names(&app).contains(&"Camera".to_string()));
+        assert!(!row_names(&app).contains(&"Alpha".to_string()));
+    }
+
     /// OK places nothing itself: the conversion runs on a worker, and its
     /// result is placed as one undo step.
     #[test]

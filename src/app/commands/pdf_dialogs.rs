@@ -1843,6 +1843,35 @@ mod import_window_tests {
         }
     }
 
+    /// A window closed while its Browse read runs does not open again when
+    /// the read ends.
+    #[test]
+    fn a_window_closed_during_a_browse_read_stays_closed() {
+        let mut app = new_app();
+        let task = app.open_pdf_import_file(&two_sizes("pdf-window-closed-first.pdf"));
+        app.drive_headless_task(task).expect("the first read");
+        assert_eq!(app.active_modal, Some(ModalKind::PdfImportFile));
+        let task = app.open_pdf_import_file(&two_sizes("pdf-window-closed-browse.pdf"));
+        let _ = app.update(Message::CloseModal);
+        app.drive_headless_task(task).expect("the browse read");
+        assert_eq!(app.active_modal, None);
+    }
+
+    /// When two reads overlap, the window shows the newer file, also when
+    /// the older read ends last.
+    #[test]
+    fn only_the_newest_read_fills_the_window() {
+        let mut app = new_app();
+        let older = app.open_pdf_import_file(&two_sizes("pdf-window-older.pdf"));
+        let newer_path = two_sizes("pdf-window-newer.pdf");
+        let newer = app.open_pdf_import_file(&newer_path);
+        app.drive_headless_task(newer).expect("the newer read");
+        app.drive_headless_task(older).expect("the older read");
+        assert_eq!(app.active_modal, Some(ModalKind::PdfImportFile));
+        let state = app.pdf_import_file.as_ref().expect("the window's state");
+        assert_eq!(state.path, newer_path);
+    }
+
     /// An encrypted file opens the password window when the read ends, not
     /// the Import PDF window.
     #[test]

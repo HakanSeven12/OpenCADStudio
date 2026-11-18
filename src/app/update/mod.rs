@@ -11620,6 +11620,36 @@ impl OpenCADStudio {
                 self.finish_pending_add();
                 Task::none()
             }
+            Message::ShortcutEditorImport => Task::perform(
+                async {
+                    let handle = rfd::AsyncFileDialog::new()
+                        .add_filter(
+                            crate::t!("Shortcut lists (*.xlsx, *.csv, *.txt)").as_ref(),
+                            &["xlsx", "csv", "txt"],
+                        )
+                        .pick_file()
+                        .await?;
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let bytes = std::fs::read(handle.path()).map_err(|e| e.to_string());
+                    #[cfg(target_arch = "wasm32")]
+                    let bytes: Result<Vec<u8>, String> = Ok(handle.read().await);
+                    Some(bytes)
+                },
+                Message::ShortcutEditorImported,
+            ),
+            Message::ShortcutEditorImported(result) => {
+                // A picker can finish after the modal was dismissed.
+                if self.active_modal == Some(super::ModalKind::Shortcuts) {
+                    match result {
+                        Some(Ok(bytes)) => self.import_shortcut_rows(&bytes),
+                        Some(Err(e)) => self.command_line.push_error(
+                            crate::tf!("Shortcuts: cannot read the file: {e}").as_ref(),
+                        ),
+                        None => {}
+                    }
+                }
+                Task::none()
+            }
             Message::ShortcutEditorResetAsk => {
                 self.shortcut_reset_confirm = true;
                 Task::none()

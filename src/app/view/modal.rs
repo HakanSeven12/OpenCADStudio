@@ -1925,11 +1925,26 @@ impl OpenCADStudio {
                 (!command.is_empty() && !valid.contains(command)).then(|| command.to_string())
             })
             .collect();
+        // The row being typed in offers the commands the command line would
+        // complete its text to.
+        let suggest_row = self.shortcut_suggest.as_ref().and_then(|(idx, typed)| {
+            let (_, command) = self.shortcut_editor_rows.get(*idx)?;
+            (command == typed).then_some(*idx)
+        });
+        let suggestions = suggest_row.map_or_else(Vec::new, |idx| {
+            crate::ui::window::shortcuts::suggestions(
+                &self.shortcut_editor_rows[idx].1,
+                &self.command_line.dynamic_commands,
+                &self.command_aliases,
+            )
+        });
         sized_flow(ex, 720, 520, |flow| {
             crate::ui::window::shortcuts::view_window(
                 &self.shortcut_editor_rows,
                 &self.shortcut_filter,
                 self.shortcut_capture_row,
+                suggest_row,
+                &suggestions,
                 self.shortcut_pending_add,
                 self.shortcut_reset_confirm,
                 &duplicate_set,

@@ -11505,6 +11505,7 @@ impl OpenCADStudio {
                 self.shortcut_filter.clear();
                 self.shortcut_capture_row = None;
                 self.shortcut_pending_add = false;
+                self.shortcut_suggest = None;
                 self.shortcut_reset_confirm = false;
                 self.shortcut_close_confirm = false;
                 self.active_modal = Some(super::ModalKind::Shortcuts);
@@ -11537,14 +11538,30 @@ impl OpenCADStudio {
                 if let Some(row) = self.shortcut_editor_rows.get_mut(idx) {
                     match field {
                         ShortcutField::Key => row.0 = value.to_uppercase(),
-                        ShortcutField::Command => row.1 = value.to_uppercase(),
+                        ShortcutField::Command => {
+                            row.1 = value.to_uppercase();
+                            // Typing opens this row's suggestion list.
+                            self.shortcut_suggest = Some((idx, row.1.clone()));
+                        }
                     }
                 }
                 // Typing never finishes the addition — only the draft row's
                 // check button does, so no half-visible "ghost" row appears.
                 Task::none()
             }
+            Message::ShortcutEditorSuggestionPick { idx, command } => {
+                if let Some(row) = self.shortcut_editor_rows.get_mut(idx) {
+                    row.1 = command;
+                }
+                self.shortcut_suggest = None;
+                Task::none()
+            }
+            Message::ShortcutEditorSuggestionDismiss => {
+                self.shortcut_suggest = None;
+                Task::none()
+            }
             Message::ShortcutEditorAdd => {
+                self.shortcut_suggest = None;
                 if self.shortcut_pending_add {
                     // One draft at a time: re-arm its Key cell instead.
                     self.shortcut_capture_row = Some(0);
@@ -11582,6 +11599,7 @@ impl OpenCADStudio {
             Message::ShortcutCaptureCancel => {
                 // Esc backs out of capture and abandons an unfinished draft.
                 self.shortcut_capture_row = None;
+                self.shortcut_suggest = None;
                 if self.shortcut_pending_add {
                     self.shortcut_editor_rows.remove(0);
                     self.shortcut_pending_add = false;
@@ -11589,6 +11607,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ShortcutEditorRemove(idx) => {
+                self.shortcut_suggest = None;
                 if idx < self.shortcut_editor_rows.len() {
                     self.shortcut_editor_rows.remove(idx);
                 }

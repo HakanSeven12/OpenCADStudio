@@ -21,6 +21,18 @@ use crate::ui::window::block_definition::{group, labeled_checkbox};
 pub enum XrefAttachMsg {
     /// Name box: a reference already in the drawing, picked or typed.
     Name(String),
+    /// The reference's file, read off the UI thread for its attach: the tab
+    /// it was started for, that document's generation, and the request, its
+    /// INSERT and the read.
+    Read(
+        u64,
+        u64,
+        Box<(
+            crate::modules::insert::xattach::XrefAttachRequest,
+            document::EntityType,
+            crate::io::xref::XrefRead,
+        )>,
+    ),
     Browse,
     Overlay(bool),
     ScaleOnScreen(bool),

@@ -6,8 +6,8 @@ use super::*;
 use crate::io::xref_model::Pathtype;
 use crate::modules::insert::xattach::IMAGE_EXTENSIONS;
 use crate::modules::insert::xattach::{
-    existing_reference, path_to_block_name, prepare_xref_definition, stored_path, XAttachCommand,
-    XrefAttachRequest, XrefPlacement,
+    existing_reference, path_to_block_name, stored_path, XAttachCommand, XrefAttachRequest,
+    XrefPlacement,
 };
 use crate::modules::insert::xref_cmd::display_path;
 use crate::ui::window::xref_attach::{XrefAttachMsg, XrefAttachState};
@@ -149,8 +149,7 @@ impl OpenCADStudio {
                     // drawing is saved, the full path before that.
                     path_type: Pathtype::Relative,
                 };
-                self.start_xref_attach(i, request, XrefPlacement::on_screen(), "-XREF");
-                Some(Task::none())
+                Some(self.start_xref_attach(i, request, XrefPlacement::on_screen(), "-XREF"))
             }
             _ => None,
         }
@@ -224,7 +223,7 @@ impl OpenCADStudio {
         request: XrefAttachRequest,
         placement: XrefPlacement,
         label: &'static str,
-    ) {
+    ) -> Task<Message> {
         let name = path_to_block_name(&request.path);
         let full = crate::modules::insert::xattach::resolve_xref_store_path(&request.path, None);
         let host = self.tabs[i].current_path.clone();
@@ -233,7 +232,7 @@ impl OpenCADStudio {
                 self.command_line.push_rejection(
                     "Error: Possible circular reference to current drawing. *Invalid*",
                 );
-                return;
+                return Task::none();
             }
         }
         let existing = existing_reference(&self.tabs[i].scene, &name);
@@ -256,15 +255,14 @@ impl OpenCADStudio {
                 self.command_line
                     .push_output(&format!("\"{}\" cannot be found.", file));
                 self.command_line.push_rejection("*Invalid*");
-                return;
+                return Task::none();
             }
             self.command_line
                 .push_output(&format!("\"{}\" loaded.", name));
         }
         let command = XAttachCommand::new(request.clone(), placement, label);
         if let Some(entity) = command.immediate() {
-            self.commit_xref_attach(i, request, entity);
-            return;
+            return self.commit_xref_attach(i, request, entity);
         }
         let (wires, source_units) = self.xref_preview(i, existing.as_deref(), &full);
         let host_units = self.tabs[i].scene.document.header.insertion_units;
@@ -273,6 +271,7 @@ impl OpenCADStudio {
         let command = command.with_preview(wires, unit);
         self.command_line.push_info(&command.prompt());
         self.tabs[i].active_cmd = Some(Box::new(command));
+        Task::none()
     }
 
     /// The reference's geometry for the placement ghost, in its own units:
@@ -322,17 +321,108 @@ impl OpenCADStudio {
         (Vec::new(), 0)
     }
 
-    /// Creates (or reuses) the definition and commits its INSERT — one undo
-    /// step for both, so undo leaves no definition behind.
+    /// The reference's attach: a reference already in the drawing is used at
+    /// once; else its file is read off the UI thread, and the definition and
+    /// its INSERT are committed when the read ends
+    /// ([`Self::finish_xref_attach`]). The command ends now.
     pub(in crate::app) fn commit_xref_attach(
         &mut self,
         i: usize,
         request: XrefAttachRequest,
+        entity: document::EntityType,
+    ) -> Task<Message> {
+        self.commit_xref_attach_with(i, request, entity, read_reference)
+    }
+
+    /// [`Self::commit_xref_attach`] with the reader given, so a test can
+    /// give one that panics.
+    pub(in crate::app) fn commit_xref_attach_with(
+        &mut self,
+        i: usize,
+        request: XrefAttachRequest,
+        entity: document::EntityType,
+        reader: fn(&str, &std::path::Path) -> crate::io::xref::XrefRead,
+    ) -> Task<Message> {
+        let host = self.tabs[i].current_path.clone();
+        let stem = path_to_block_name(&request.path);
+        let (raw_path, base_dir) =
+            crate::modules::insert::xattach::xref_read_inputs(&request, host.as_deref());
+        let base_dir = match base_dir {
+            Some(base_dir) if existing_reference(&self.tabs[i].scene, &stem).is_none() => base_dir,
+            _ => {
+                self.place_xref_attach(i, request, entity, None);
+                return Task::none();
+            }
+        };
+        self.tabs[i].scene.clear_preview_wire();
+        self.tabs[i].active_cmd = None;
+        self.tabs[i].snap_result = None;
+        self.restore_pre_cmd_tangent();
+        self.command_line.push_info(&format!(
+            "Reading {}…",
+            crate::entities::underlay::display_path(&raw_path)
+        ));
+        let tab_id = self.tabs[i].id;
+        let generation = self.tabs[i].document_generation;
+        crate::app::update::background_task(
+            "XATTACH",
+            move || reader(&raw_path, &base_dir),
+            move |read| {
+                Message::XrefAttach(XrefAttachMsg::Read(
+                    tab_id,
+                    generation,
+                    Box::new((request, entity, read)),
+                ))
+            },
+        )
+    }
+
+    /// The end of the reference's read: the attach is committed in the
+    /// drawing it was started for. A result for a drawing that was closed,
+    /// replaced or cleared is dropped, and so is one for a drawing that is
+    /// not the current one now (`commit_entity_handle` writes to the
+    /// current drawing).
+    fn finish_xref_attach(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        request: XrefAttachRequest,
+        entity: document::EntityType,
+        read: crate::io::xref::XrefRead,
+    ) -> Task<Message> {
+        let Some(i) = self.import_target(tab_id, generation) else {
+            return Task::none();
+        };
+        if i != self.active_tab {
+            self.command_line.push_error(
+                "Attach cancelled: a different drawing became current while the reference was read.",
+            );
+            return Task::none();
+        }
+        self.place_xref_attach(i, request, entity, Some(read));
+        Task::none()
+    }
+
+    /// Creates (or reuses) the definition and commits its INSERT — one undo
+    /// step for both, so undo leaves no definition behind. With `read`, the
+    /// reference's content comes from it, and no file is read here.
+    fn place_xref_attach(
+        &mut self,
+        i: usize,
+        request: XrefAttachRequest,
         mut entity: document::EntityType,
+        read: Option<crate::io::xref::XrefRead>,
     ) {
         let pending = self.begin_undo(i, "XATTACH", 1, false);
         let host = self.tabs[i].current_path.clone();
-        let name = prepare_xref_definition(&mut self.tabs[i].scene, &request, host.as_deref());
+        let stem = path_to_block_name(&request.path);
+        let name = crate::modules::insert::xattach::prepare_named_xref_definition_with(
+            &mut self.tabs[i].scene,
+            &request,
+            host.as_deref(),
+            &stem,
+            read,
+        );
         if host.is_none() && request.path_type == Pathtype::Relative {
             self.tabs[i].xref_relative_on_save.insert(name.clone());
         }
@@ -529,11 +619,17 @@ impl OpenCADStudio {
     }
 
     fn edit_xref_attach(&mut self, edit: XrefAttachMsg) -> Task<Message> {
+        if let XrefAttachMsg::Read(tab_id, generation, read) = edit {
+            let (request, entity, read) = *read;
+            return self.finish_xref_attach(tab_id, generation, request, entity, read);
+        }
         let Some(mut state) = self.xref_attach.take() else {
             return Task::none();
         };
         let mut task = Task::none();
         match edit {
+            // Taken before the window's state, above.
+            XrefAttachMsg::Read(..) => {}
             XrefAttachMsg::Name(name) => {
                 if let Some((_, saved)) = state
                     .existing
@@ -628,11 +724,15 @@ impl OpenCADStudio {
                 };
                 self.active_modal = None;
                 let i = self.active_tab;
-                self.start_xref_attach(i, request, placement, "XATTACH");
-                return Task::none();
+                return self.start_xref_attach(i, request, placement, "XATTACH");
             }
         }
         self.xref_attach = Some(state);
         task
     }
+}
+
+/// The read of a reference's file for its attach, on a worker.
+fn read_reference(raw_path: &str, base_dir: &std::path::Path) -> crate::io::xref::XrefRead {
+    crate::io::xref::read_xref_file(raw_path, base_dir, None)
 }

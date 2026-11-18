@@ -1974,7 +1974,7 @@ impl OpenCADStudio {
                     if after.is_empty() {
                         return Some(Task::done(Message::XAttachPick));
                     }
-                    self.start_xref_attach(
+                    return Some(self.start_xref_attach(
                         i,
                         crate::modules::insert::xattach::XrefAttachRequest {
                             path: after.trim_matches('"').to_string(),
@@ -1983,7 +1983,7 @@ impl OpenCADStudio {
                         },
                         crate::modules::insert::xattach::XrefPlacement::on_screen(),
                         "-XREF",
-                    );
+                    ));
                 } else {
                     self.command_line.push_error(crate::tf!(
                         "XREF: unknown option '{}'. Options: ? Reload Unload Detach Path Pathtype Bind Overlay Attach",

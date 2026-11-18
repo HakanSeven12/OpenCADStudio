@@ -10705,3 +10705,108 @@ mod dynamic_block_command_surface_tests {
     }
 }
 
+
+// A real placed reference (not the temporary Test Block reference) takes its
+// visibility state from the Properties row: the `ChoiceWithTooltip` row of
+// `visibility_property` goes through PropGeomChoiceChanged and applies the
+// state to a per-reference evaluated copy.
+mod placed_reference_visibility_property_tests {
+    use super::super::*;
+    use crate::scene::block_visibility;
+    use document::entities::{EntityType, Insert, Line};
+    use document::types::Vector3;
+
+    #[test]
+    fn the_visibility_property_row_switches_a_placed_reference_state() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let frame = Line::from_points(
+            Vector3::new(10.0, 21.0, 0.0),
+            Vector3::new(15.0, 21.0, 0.0),
+        );
+        let other = Line::from_points(
+            Vector3::new(10.0, 22.0, 0.0),
+            Vector3::new(15.0, 22.0, 0.0),
+        );
+        app.tabs[i].scene.define_block_raw(
+            "WINDOW",
+            Vector3::ZERO,
+            vec![EntityType::Line(frame), EntityType::Line(other)],
+        );
+        let owner = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("WINDOW")
+            .unwrap()
+            .handle;
+        let members: Vec<_> = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("WINDOW")
+            .unwrap()
+            .entity_handles
+            .clone();
+        let doc = &mut app.tabs[i].scene.document;
+        let parameter = block_visibility::create(doc, owner, Vector3::ZERO).unwrap();
+        let hidden = block_visibility::add_state(doc, parameter, "WindowHidden", 0).unwrap();
+        block_visibility::set_visible(doc, parameter, hidden, &[members[0]], false);
+        let reference = doc
+            .add_entity(EntityType::Insert(Insert::new(
+                "WINDOW",
+                Vector3::new(20.0, 0.0, 0.0),
+            )))
+            .unwrap();
+        app.tabs[i].dirty = false;
+        app.tabs[i].scene.select_entity(reference, true);
+        app.tabs[i].selected_handle = Some(reference);
+        app.refresh_properties();
+
+        let row = OpenCADStudio::visibility_property(&app.tabs[i].scene.document, reference)
+            .expect("the reference exposes its visibility state in Properties");
+        let crate::scene::model::object::PropValue::ChoiceWithTooltip { ref options, .. } =
+            row.value
+        else {
+            panic!("the visibility row is an editable choice: {:?}", row.value)
+        };
+        assert!(options.iter().any(|name| name == "WindowHidden"));
+
+        let _ = app
+            .set_property_value(row, &serde_json::json!("WindowHidden"))
+            .unwrap();
+        app.finish_pending_history(i);
+
+        let doc = &app.tabs[i].scene.document;
+        let document::EntityType::Insert(insert) = doc.get_entity(reference).unwrap() else {
+            panic!("the reference remains an INSERT")
+        };
+        assert_ne!(
+            insert.block_name, "WINDOW",
+            "the state is applied to a per-reference evaluated copy"
+        );
+        let copy = doc.entities_in_block(&insert.block_name).collect::<Vec<_>>();
+        let frame = copy
+            .iter()
+            .find(|entity| matches!(entity, EntityType::Line(line) if (line.start.y - 21.0).abs() < 1e-6))
+            .expect("the frame member is in the evaluated copy");
+        let other = copy
+            .iter()
+            .find(|entity| matches!(entity, EntityType::Line(line) if (line.start.y - 22.0).abs() < 1e-6))
+            .expect("the other member is in the evaluated copy");
+        assert!(frame.common().invisible, "the chosen state hides the frame");
+        assert!(
+            !other.common().invisible,
+            "the state leaves the ungoverned member visible"
+        );
+        let chosen = OpenCADStudio::visibility_property(doc, reference)
+            .expect("the row is still offered after the change");
+        assert!(
+            matches!(&chosen.value, crate::scene::model::object::PropValue::ChoiceWithTooltip { selected, .. } if selected == "WindowHidden"),
+            "the row reads back the chosen state: {:?}",
+            chosen.value
+        );
+    }
+}
+

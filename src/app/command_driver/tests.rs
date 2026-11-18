@@ -11207,3 +11207,89 @@ mod block_redefinition_dialog_tests {
     }
 }
 
+
+// The Attribute Definition dialog is exposed through the `attdef_dialog`
+// action, but no test drives its fields and Ok end to end.
+mod attdef_dialog_automation_tests {
+    use super::super::*;
+    use document::EntityType;
+
+    fn field(app: &mut OpenCADStudio, value: &str) -> serde_json::Value {
+        let mut req = serde_json::json!({"op":"action","name":"attdef_dialog","value":value});
+        apply_control_request(app, &mut req)
+    }
+
+    fn apply_control_request(app: &mut OpenCADStudio, req: &mut serde_json::Value) -> serde_json::Value {
+        let state = app.control_state();
+        req["protocol"] = serde_json::json!(1);
+        req["document_id"] = state["document_id"].clone();
+        req["revision"] = state["revision"].clone();
+        static SERIAL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let serial = SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        req["request_id"] = serde_json::json!(format!("attdef-dialog-{serial}"));
+        let (reply, task) = app.control_request(req.clone());
+        app.drive_headless_task(task).unwrap();
+        reply
+    }
+
+    #[test]
+    fn the_attdef_dialog_action_creates_a_positioned_definition() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let opened = app.automation_op(r#"{"op":"run","cmd":"ATTDEF"}"#);
+        assert_eq!(opened["ok"], true, "{opened}");
+        assert_eq!(
+            app.active_modal,
+            Some(crate::app::ModalKind::AttDef),
+            "ATTDEF opens the dialog"
+        );
+
+        for value in [
+            "tag=DRAWING_NO",
+            "prompt=Drawing number",
+            "default=A-101",
+            "height=2.5",
+            "rotation=0",
+            "x=5",
+            "y=7",
+            "on_screen=0",
+        ] {
+            let reply = field(&mut app, value);
+            assert_eq!(reply["ok"], true, "{value}: {reply}");
+        }
+        let state = app.attdef_dialog.as_ref().expect("the dialog state is live");
+        assert_eq!(state.tag, "DRAWING_NO");
+        assert_eq!(state.prompt, "Drawing number");
+        assert_eq!(state.default, "A-101");
+        assert_eq!(state.coords[0], "5");
+        assert_eq!(state.coords[1], "7");
+        drop(state);
+
+        let mut ok_req = serde_json::json!({"op":"action","name":"dialog_ok"});
+        let applied = apply_control_request(&mut app, &mut ok_req);
+        assert_ne!(applied["code"], "no_dialog", "{applied}");
+        assert!(app.attdef_dialog.is_none(), "Ok closes the dialog state");
+        assert_ne!(app.active_modal, Some(crate::app::ModalKind::AttDef));
+
+        let definition = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                EntityType::AttributeDefinition(def) => Some(def.clone()),
+                _ => None,
+            })
+            .expect("Ok writes an attribute definition");
+        assert_eq!(definition.tag, "DRAWING_NO");
+        assert_eq!(definition.prompt, "Drawing number");
+        assert_eq!(definition.default_value, "A-101");
+        assert_eq!(definition.height, 2.5);
+        assert_eq!(
+            (definition.insertion_point.x, definition.insertion_point.y),
+            (5.0, 7.0),
+            "the typed coordinates are the placement point"
+        );
+    }
+}
+

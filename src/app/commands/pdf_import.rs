@@ -418,6 +418,24 @@ pub(super) fn fully_georeferenced_pdf_pages(
     page_names: &[String],
     plane: crate::command::WorkingPlane,
 ) -> Option<Vec<(String, document::EntityType)>> {
+    georeferenced_pages_in(
+        geo_context(scene, kind, true).as_ref(),
+        kind,
+        path,
+        page_names,
+        plane,
+    )
+}
+
+/// [`fully_georeferenced_pdf_pages`] with the drawing's part given
+/// ([`geo_context`]): it reads only the PDF, so a worker can run it.
+pub(super) fn georeferenced_pages_in(
+    context: Option<&GeoContext>,
+    kind: document::entities::UnderlayType,
+    path: &str,
+    page_names: &[String],
+    plane: crate::command::WorkingPlane,
+) -> Option<Vec<(String, document::EntityType)>> {
     if kind != document::entities::UnderlayType::Pdf || page_names.is_empty() {
         return None;
     }
@@ -431,7 +449,7 @@ pub(super) fn fully_georeferenced_pdf_pages(
     .into_iter()
     .map(|(page, entity)| (page, plane.place_entity(entity)))
     .collect::<Vec<_>>();
-    let placements = auto_pdf_placements(scene, kind, path, &pages, true);
+    let placements = placements_in(context, path, &pages);
     if placements.iter().any(Option::is_none) {
         return None;
     }
@@ -443,14 +461,17 @@ pub(super) fn fully_georeferenced_pdf_pages(
     Some(pages)
 }
 
-fn auto_pdf_placements(
+/// The drawing's coordinate system and its millimetres per drawing unit.
+pub(super) type GeoContext = (crate::io::crs::CrsDefinition, f64);
+
+/// The part of a GeoPDF placement that comes from the drawing: `None` when
+/// PDF pages cannot be placed by their geospatial data here.
+pub(super) fn geo_context(
     scene: &crate::scene::Scene,
     kind: document::entities::UnderlayType,
-    path: &str,
-    pages: &[(String, document::EntityType)],
     enabled: bool,
-) -> Vec<Option<crate::io::geopdf::GeoPlacement>> {
-    let context = (enabled
+) -> Option<GeoContext> {
+    (enabled
         && kind == document::entities::UnderlayType::Pdf
         && scene.current_layout == "Model"
         && scene.block_edit_block.is_none())
@@ -465,11 +486,30 @@ fn auto_pdf_placements(
         };
         Some((crs, unit_mm))
     })
-    .flatten();
+    .flatten()
+}
+
+fn auto_pdf_placements(
+    scene: &crate::scene::Scene,
+    kind: document::entities::UnderlayType,
+    path: &str,
+    pages: &[(String, document::EntityType)],
+    enabled: bool,
+) -> Vec<Option<crate::io::geopdf::GeoPlacement>> {
+    placements_in(geo_context(scene, kind, enabled).as_ref(), path, pages)
+}
+
+/// The GeoPDF placement of each page for a drawing context; it reads only
+/// the PDF.
+fn placements_in(
+    context: Option<&GeoContext>,
+    path: &str,
+    pages: &[(String, document::EntityType)],
+) -> Vec<Option<crate::io::geopdf::GeoPlacement>> {
     pages
         .iter()
         .map(|(page, entity)| {
-            let (crs, unit_mm) = context.as_ref()?;
+            let (crs, unit_mm) = context?;
             let document::EntityType::Underlay(underlay) = entity else {
                 return None;
             };

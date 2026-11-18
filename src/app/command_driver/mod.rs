@@ -919,7 +919,7 @@ impl OpenCADStudio {
                 self.tabs[i].scene.clear_preview_wire();
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
-                self.run_pdf_import(
+                return self.run_pdf_import(
                     i,
                     crate::app::commands::pdf_import::PdfImportSource::File(import),
                 );
@@ -950,7 +950,7 @@ impl OpenCADStudio {
                 self.tabs[i].scene.clear_preview_wire();
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
-                self.run_pdf_import(
+                return self.run_pdf_import(
                     i,
                     crate::app::commands::pdf_import::PdfImportSource::Underlay(request),
                 );

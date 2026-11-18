@@ -6,7 +6,8 @@ use crate::io::xref_model::Pathtype;
 use crate::modules::insert::pdf_import::{self, PdfFileImport};
 use crate::ui::window::pdf_dialogs::{
     click_page, item_thumbs, page_thumbs, LayerTarget, PdfAttachState, PdfDialogMsg,
-    PdfImportFileState, PointCloudAttachState, RotationChoice, UnderlayLayersState,
+    PdfImportFileRead, PdfImportFileState, PointCloudAttachState, RotationChoice,
+    UnderlayLayersState,
 };
 
 /// "7.8740 × 3.9369" (inches) for a page.
@@ -443,26 +444,79 @@ impl OpenCADStudio {
         self.active_modal = Some(crate::app::ModalKind::MatchPropSettings);
     }
 
-    /// PDFIMPORT's File option after the file is chosen; an encrypted file
-    /// asks for its password first.
+    /// PDFIMPORT's File option after the file is chosen: the file is read
+    /// off the UI thread, and the Import PDF window opens when the read
+    /// ends ([`Self::open_pdf_import_window`]); an encrypted file asks for
+    /// its password first. A panic in the reader becomes an error on the
+    /// command line.
     pub(in crate::app) fn open_pdf_import_file(&mut self, path: &str) -> Task<Message> {
+        self.open_pdf_import_file_with(path, read_pdf_for_import_window)
+    }
+
+    /// [`Self::open_pdf_import_file`] with the reader given, so a test can
+    /// give one that panics.
+    fn open_pdf_import_file_with(
+        &mut self,
+        path: &str,
+        reader: fn(&str) -> PdfImportFileRead,
+    ) -> Task<Message> {
+        self.command_line.push_info(&format!("Reading {path}…"));
+        let path = path.to_string();
+        let worker_path = path.clone();
+        crate::app::update::background_task(
+            "PDFIMPORT",
+            move || std::sync::Arc::new(reader(&worker_path)),
+            move |read| Message::PdfDialog(PdfDialogMsg::ImportRead(path, read)),
+        )
+    }
+
+    /// The Import PDF window for a file read off the UI thread, or the
+    /// password window when the file needs one. It takes the place of the
+    /// Import File window (which IMPORT from a script or the automation
+    /// `run` operation leaves open) and of its own older copy (Browse). If a
+    /// different window opened during the read, neither window opens.
+    fn open_pdf_import_window(&mut self, path: &str, read: &PdfImportFileRead) -> Task<Message> {
         use crate::ui::window::pdf_password_dialog::PdfPasswordThen;
-        if let Some(ask) = self.pdf_locked(path, PdfPasswordThen::ImportFile) {
-            return ask;
+        if self.active_modal.is_some_and(|modal| {
+            !matches!(
+                modal,
+                crate::app::ModalKind::PdfImportFile | crate::app::ModalKind::ImportFile
+            )
+        }) {
+            self.command_line.push_error(
+                "Import PDF cancelled: a different window opened while the file was read.",
+            );
+            return Task::none();
         }
-        self.pdf_import_file = Some(PdfImportFileState {
-            path: path.to_string(),
-            pages: page_thumbs(path),
-            selected: 0,
-            page_text: "1".into(),
-            insert_on_screen: false,
-            scale: "1".into(),
-            rotation: RotationChoice(0),
-            page_size: page_size_mm(path, "1"),
-            settings: pdf_import::import_settings(),
-        });
-        self.active_modal = Some(crate::app::ModalKind::PdfImportFile);
-        Task::none()
+        match read {
+            PdfImportFileRead::Locked { stage, remembered } => {
+                self.open_pdf_password(path, *stage, *remembered, PdfPasswordThen::ImportFile)
+            }
+            PdfImportFileRead::Pages {
+                pages,
+                page_sizes,
+                remembered,
+            } => {
+                if *remembered {
+                    self.command_line
+                        .push_output(&crate::scene::model::pdf_password::remembered_notice(path));
+                }
+                self.pdf_import_file = Some(PdfImportFileState {
+                    path: path.to_string(),
+                    pages: pages.clone(),
+                    page_sizes: page_sizes.clone(),
+                    selected: 0,
+                    page_text: "1".into(),
+                    insert_on_screen: false,
+                    scale: "1".into(),
+                    rotation: RotationChoice(0),
+                    page_size: page_sizes.first().cloned().unwrap_or_default(),
+                    settings: pdf_import::import_settings(),
+                });
+                self.active_modal = Some(crate::app::ModalKind::PdfImportFile);
+                Task::none()
+            }
+        }
     }
 
     /// Writes the layers each underlay turns off, as one undo step.
@@ -921,7 +975,7 @@ impl OpenCADStudio {
                 if let Some(s) = self.pdf_import_file.as_mut() {
                     s.selected = page;
                     s.page_text = (page + 1).to_string();
-                    s.page_size = page_size_mm(&s.path, &s.page_text);
+                    s.page_size = s.page_sizes.get(page).cloned().unwrap_or_default();
                 }
             }
             PdfDialogMsg::ImportPageText(text) => {
@@ -933,7 +987,7 @@ impl OpenCADStudio {
                         .filter(|n| (1..=s.pages.len()).contains(n))
                     {
                         s.selected = n - 1;
-                        s.page_size = page_size_mm(&s.path, &n.to_string());
+                        s.page_size = s.page_sizes.get(n - 1).cloned().unwrap_or_default();
                     }
                     s.page_text = text;
                 }
@@ -980,10 +1034,16 @@ impl OpenCADStudio {
                     self.tabs[i].active_cmd = Some(Box::new(command));
                     return self.focus_cmd_input();
                 }
-                self.run_pdf_import(
+                return self.run_pdf_import(
                     i,
                     crate::app::commands::pdf_import::PdfImportSource::File(import),
                 );
+            }
+            PdfDialogMsg::ImportRead(path, read) => {
+                return self.open_pdf_import_window(&path, &read)
+            }
+            PdfDialogMsg::ImportConverted(tab_id, generation, job, converted) => {
+                self.finish_pdf_import(tab_id, generation, *job, *converted);
             }
         }
         Task::none()
@@ -1107,6 +1167,26 @@ impl OpenCADStudio {
                 self.focus_cmd_input()
             }
         }
+    }
+}
+
+/// The Import PDF window's read of a file, on a worker: the password the
+/// file needs, or its pages and their sizes.
+fn read_pdf_for_import_window(path: &str) -> PdfImportFileRead {
+    use crate::scene::model::pdf_password::{gate, Gate};
+    let remembered = match gate(path, true) {
+        Gate::Open => false,
+        Gate::Remembered => true,
+        Gate::Ask { stage, remembered } => {
+            return PdfImportFileRead::Locked { stage, remembered };
+        }
+    };
+    let pages = page_thumbs(path);
+    let page_sizes = pages.iter().map(|p| page_size_mm(path, &p.label)).collect();
+    PdfImportFileRead::Pages {
+        pages,
+        page_sizes,
+        remembered,
     }
 }
 

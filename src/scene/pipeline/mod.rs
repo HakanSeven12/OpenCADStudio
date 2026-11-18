@@ -354,6 +354,11 @@ pub struct Pipeline {
     /// only the changed entities, so after a full depth rebuild the arenas
     /// have to be rebuilt instead of patched.
     pub(crate) wire_arena_depth_generation: u64,
+    /// Persistent overlay const buffers for dense-entity highlights, one per
+    /// (arena, tint). See [`wire_arena::DenseHighlightConst`] — these replace
+    /// the full `consts_cpu` clone + upload `highlight_dense` used to do on
+    /// every selection change when a dense entity was highlighted.
+    pub(crate) dense_highlight_consts: Vec<wire_arena::DenseHighlightConst>,
     /// Handles that contributed to this slot's retained analytical uploads.
     pub(crate) partition_contributors: wire_arena::ContributorSet,
     /// Where each reference's analytical instances sit in the uploads above, so
@@ -2607,6 +2612,7 @@ impl Pipeline {
             wire_arena_fallback_handles: rustc_hash::FxHashSet::default(),
             wire_arena_id: u64::MAX,
             wire_arena_depth_generation: u64::MAX,
+            dense_highlight_consts: Vec::new(),
             partition_contributors: wire_arena::ContributorSet::default(),
             analytic_slots: None,
             partition_depth_generation: u64::MAX,
@@ -3329,7 +3335,14 @@ impl Pipeline {
                 if self.wire_arena_id == wire_id
                     && self.wire_arena_depth_generation == depth_generation =>
             {
-                arena.highlight_dense(device, queue, bgl, &wire_counts, color)
+                arena.highlight_dense(
+                    device,
+                    queue,
+                    bgl,
+                    &wire_counts,
+                    color,
+                    &mut self.dense_highlight_consts,
+                )
             }
             _ => (Vec::new(), rustc_hash::FxHashSet::default()),
         };
@@ -6293,6 +6306,10 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.highlight_wire_chunks.clear();
         self.highlight_wire_chunk_bytes = 0;
         self.highlight_wire_cache_key = None;
+        // The dense-highlight overlay const buffers mirror the arenas' consts;
+        // an arena rebuild invalidates them (the length guards in
+        // highlight_dense double-check).
+        self.dense_highlight_consts.clear();
         self.cached_epoch = (u64::MAX, u64::MAX, u64::MAX);
         self.cached_wire_id = u64::MAX;
         self.cached_selection = (u64::MAX, u64::MAX);

@@ -9100,12 +9100,30 @@ impl Scene {
     }
 
     pub fn set_box_hover_highlights_limited(&mut self, handles: &[Handle], limit: usize) {
-        let handles = if handles.is_empty() {
+        // Over the limit the preview used to be dropped *entirely* — a huge
+        // marquee gave no feedback at all (and expanding tens of thousands of
+        // candidates per tick was pure waste). Cap to the limit instead,
+        // sorted ascending by handle so the highlighted subset stays stable
+        // across ticks instead of flickering with the hash-set order. Group
+        // expansion can multiply the count, so the cap applies to the
+        // expanded set too.
+        let mut handles: Vec<Handle> = handles.to_vec();
+        if handles.len() > limit {
+            handles.sort_unstable_by_key(|handle| handle.value());
+            handles.dedup();
+            handles.truncate(limit);
+        }
+        let mut handles = if handles.is_empty() {
             HashSet::default()
         } else {
-            self.handles_expanded_for_selectable_groups(handles)
+            self.handles_expanded_for_selectable_groups(&handles)
         };
-        let handles = if handles.len() > limit { HashSet::default() } else { handles };
+        if handles.len() > limit {
+            let mut ordered: Vec<Handle> = handles.iter().copied().collect();
+            ordered.sort_unstable_by_key(|handle| handle.value());
+            handles.clear();
+            handles.extend(ordered[..limit].iter().copied());
+        }
         if handles != self.box_hover_highlights {
             self.box_hover_highlights = handles;
             // Box preview only ever changes the marquee highlight; bumping the

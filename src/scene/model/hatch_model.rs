@@ -666,6 +666,98 @@ impl HatchModel {
     }
 }
 
+impl HatchModel {
+    /// Whether the fill lies level, at one height: its pattern then reads on
+    /// the screen as [`Self::pattern_segments`] lays it out in world XY.
+    pub(crate) fn lies_level(&self) -> bool {
+        self.fill_plane.is_none_or(|plane| {
+            let normal = glam::DVec3::from_array(plane.x_axis)
+                .cross(glam::DVec3::from_array(plane.y_axis))
+                .normalize_or_zero();
+            normal.z.abs() > 1.0 - 1e-9
+        })
+    }
+
+    /// Distance from `point` to the nearest stroke of the pattern, in the
+    /// frame of [`Self::pattern_segments`] (absolute WCS XY) and with its
+    /// line families, taken as if the pattern ran on past the boundary.
+    /// `None` for a fill with no lines to measure: a solid, a gradient, or a
+    /// pattern none of whose families has a spacing.
+    pub(crate) fn pattern_distance(&self, point: [f64; 2]) -> Option<f64> {
+        let HatchPattern::Pattern(families) = &self.pattern else {
+            return None;
+        };
+        let scale = self.scale.max(1e-6) as f64;
+        let angle_offset = self.angle_offset as f64;
+        let (cos_off, sin_off) = (angle_offset.cos(), angle_offset.sin());
+        let mut nearest: Option<f64> = None;
+        for family in families {
+            let angle = (family.angle_deg as f64).to_radians() + angle_offset;
+            let (cos_a, sin_a) = (angle.cos(), angle.sin());
+            let (fdx, fdy) = (family.dx as f64, family.dy as f64);
+            let step = [
+                (fdx * cos_a - fdy * sin_a) * scale,
+                (fdx * sin_a + fdy * cos_a) * scale,
+            ];
+            let step_perp = -step[0] * sin_a + step[1] * cos_a;
+            if step_perp.abs() < 1e-6 {
+                continue; // degenerate spacing
+            }
+            let (fx0, fy0) = (family.x0 as f64, family.y0 as f64);
+            let origin = [
+                self.world_origin[0] + (fx0 * cos_off - fy0 * sin_off) * scale,
+                self.world_origin[1] + (fx0 * sin_off + fy0 * cos_off) * scale,
+            ];
+            let rel = [point[0] - origin[0], point[1] - origin[1]];
+            let across = -rel[0] * sin_a + rel[1] * cos_a;
+            let line = (across / step_perp).round();
+            let period: f64 = family.dashes.iter().map(|d| d.abs() as f64).sum::<f64>() * scale;
+            let distance = if family.dashes.is_empty() || period <= 1e-6 {
+                (across - line * step_perp).abs()
+            } else {
+                // The nearest dash can be on the line to either side when
+                // the cursor sits beside a gap of the nearest line.
+                [line - 1.0, line, line + 1.0]
+                    .into_iter()
+                    .map(|line| {
+                        let along =
+                            (rel[0] - line * step[0]) * cos_a + (rel[1] - line * step[1]) * sin_a;
+                        (across - line * step_perp).hypot(dash_gap(
+                            &family.dashes,
+                            scale,
+                            period,
+                            along,
+                        ))
+                    })
+                    .fold(f64::INFINITY, f64::min)
+            };
+            nearest = Some(nearest.map_or(distance, |nearest| nearest.min(distance)));
+        }
+        nearest
+    }
+}
+
+/// How far the point `along` a dashed pattern line is from the line's nearest
+/// dash or dot; zero on a dash. The dashes repeat every `period` from the
+/// line's base point, as [`HatchModel::pattern_segments`] walks them.
+fn dash_gap(dashes: &[f32], scale: f64, period: f64, along: f64) -> f64 {
+    let phase = along.rem_euclid(period);
+    let mut start = 0.0;
+    let mut gap = f64::INFINITY;
+    for &dash in dashes {
+        let length = dash.abs() as f64 * scale;
+        // A positive entry is a dash, a zero one a dot, a negative one a gap.
+        if dash >= 0.0 {
+            for shift in [-period, 0.0, period] {
+                let (from, to) = (start + shift, start + length + shift);
+                gap = gap.min((from - phase).max(phase - to).max(0.0));
+            }
+        }
+        start += length;
+    }
+    gap
+}
+
 /// Uniform grid over a hatch's boundary edges.
 ///
 /// `pattern_segments` asks two questions of every pattern line — which edges

@@ -4662,6 +4662,8 @@ impl OpenCADStudio {
                         view_rot,
                         eye,
                         bounds,
+                        crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                        &self.tabs[i].scene.draw_depth_map(),
                         candidate_handles.as_ref(),
                     )
                 })
@@ -4673,6 +4675,8 @@ impl OpenCADStudio {
                             view_rot,
                             eye,
                             bounds,
+                            crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                            &self.tabs[i].scene.draw_depth_map(),
                             candidate_handles.as_ref(),
                         )
                     })?
@@ -4784,6 +4788,8 @@ impl OpenCADStudio {
                             view_rot,
                             eye,
                             bounds,
+                            crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                            &self.tabs[i].scene.draw_depth_map(),
                             candidate_handles.as_ref(),
                         )
                     })
@@ -4794,6 +4800,8 @@ impl OpenCADStudio {
                             view_rot,
                             eye,
                             bounds,
+                            crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                            &self.tabs[i].scene.draw_depth_map(),
                             candidate_handles.as_ref(),
                         )
                     })
@@ -7501,6 +7509,8 @@ impl OpenCADStudio {
                         view_rot2,
                         eye2,
                         bounds,
+                        crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                        &self.tabs[i].scene.draw_depth_map(),
                         candidate_handles.as_ref(),
                     )
                 })
@@ -7512,6 +7522,8 @@ impl OpenCADStudio {
                             view_rot2,
                             eye2,
                             bounds,
+                            crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                            &self.tabs[i].scene.draw_depth_map(),
                             candidate_handles.as_ref(),
                         )
                     })?
@@ -8449,6 +8461,8 @@ properties={:.1}ms picked={}",
                                     view_rot,
                                     eye,
                                     bounds,
+                                    crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                                    &self.tabs[i].scene.draw_depth_map(),
                                     candidate_handles.as_ref(),
                                 );
                                 hatch_test_ms = crate::perf::elapsed_ms(hatch_started);
@@ -8463,6 +8477,8 @@ properties={:.1}ms picked={}",
                                     view_rot,
                                     eye,
                                     bounds,
+                                    crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                                    &self.tabs[i].scene.draw_depth_map(),
                                     candidate_handles.as_ref(),
                                 );
                                 insert_ms = crate::perf::elapsed_ms(insert_started);
@@ -8974,6 +8990,8 @@ properties={:.1}ms picked={}",
                 view_rot,
                 eye,
                 bounds,
+                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                &self.tabs[i].scene.draw_depth_map(),
                 candidate_handles.as_ref(),
             )
         })
@@ -8984,6 +9002,8 @@ properties={:.1}ms picked={}",
                 view_rot,
                 eye,
                 bounds,
+                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                &self.tabs[i].scene.draw_depth_map(),
                 candidate_handles.as_ref(),
             )
         })
@@ -9815,6 +9835,8 @@ properties={:.1}ms picked={}",
                 view_rot,
                 eye,
                 bounds,
+                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                &self.tabs[i].scene.draw_depth_map(),
                 candidate_handles.as_ref(),
             );
             hatch_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -9827,6 +9849,8 @@ properties={:.1}ms picked={}",
                 view_rot,
                 eye,
                 bounds,
+                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                &self.tabs[i].scene.draw_depth_map(),
                 candidate_handles.as_ref(),
             );
             insert_ms = started.elapsed().as_secs_f64() * 1000.0;

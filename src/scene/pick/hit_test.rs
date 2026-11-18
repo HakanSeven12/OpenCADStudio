@@ -2735,29 +2735,36 @@ fn segments_intersect(a: Point, b: Point, c: Point, d: Point) -> bool {
 
 // ── Hatch hit-testing ─────────────────────────────────────────────────────
 
-/// Return the Handle of the first hatch whose screen-space boundary polygon
-/// contains `cursor`.
+/// Return the Handle of the fill picked at `cursor`: of the fills hit there,
+/// the one drawn on top by `draw_depth`.
+///
+/// A solid or gradient fill is hit anywhere inside its boundary. A pattern
+/// fill is hit on its lines: inside its boundary and within `aperture_px` of
+/// a stroke of the pattern. Between the lines of a pattern nothing is drawn
+/// to pick, so a click there reaches what lies under it, or starts a
+/// selection box.
 pub fn click_hit_hatch(
     cursor: Point,
     hatches: &HashMap<Handle, HatchModel>,
     view_rot: Mat4,
     eye: glam::DVec3,
     bounds: Rectangle,
+    aperture_px: f32,
+    draw_depth: &HashMap<u64, [f32; 2]>,
     candidate_handles: Option<&HashSet<Handle>>,
 ) -> Option<Handle> {
-    for (&handle, hatch) in hatches {
-        if candidate_handles.is_some_and(|handles| !handles.contains(&handle)) {
-            continue;
-        }
-        if hatch_contains_screen_point(hatch, cursor, view_rot, eye, bounds) {
-            return Some(handle);
-        }
-    }
-    None
+    front_most(
+        hatches
+            .iter()
+            .filter(|(handle, _)| candidate_handles.is_none_or(|handles| handles.contains(handle)))
+            .filter(|(_, hatch)| hatch_picked_at(hatch, cursor, view_rot, eye, bounds, aperture_px))
+            .map(|(&handle, _)| handle),
+        draw_depth,
+    )
 }
 
 /// Same as `click_hit_hatch` but tests block-internal hatches grouped by
-/// their parent Insert handle. The first matching model returns its Insert so
+/// their parent Insert handle. A hit model returns its Insert so
 /// clicking a sub-hatch of a block selects the Insert, matching
 /// AutoCAD's behaviour for block sub-entities.
 pub fn click_hit_insert_hatch(
@@ -2766,31 +2773,143 @@ pub fn click_hit_insert_hatch(
     view_rot: Mat4,
     eye: glam::DVec3,
     bounds: Rectangle,
+    aperture_px: f32,
+    draw_depth: &HashMap<u64, [f32; 2]>,
     candidate_handles: Option<&HashSet<Handle>>,
 ) -> Option<Handle> {
+    let picked = |hatches: &Vec<HatchModel>| {
+        hatches
+            .iter()
+            .any(|hatch| hatch_picked_at(hatch, cursor, view_rot, eye, bounds, aperture_px))
+    };
     if let Some(handles) = candidate_handles {
-        for handle in handles {
-            let Some(hatches) = insert_hatches.get(handle) else {
-                continue;
-            };
-            if hatches
+        return front_most(
+            handles
                 .iter()
-                .any(|hatch| hatch_contains_screen_point(hatch, cursor, view_rot, eye, bounds))
-            {
-                return Some(*handle);
-            }
+                .filter(|handle| insert_hatches.get(handle).is_some_and(picked))
+                .copied(),
+            draw_depth,
+        );
+    }
+    front_most(
+        insert_hatches
+            .iter()
+            .filter(|(_, hatches)| picked(hatches))
+            .map(|(&handle, _)| handle),
+        draw_depth,
+    )
+}
+
+/// Of the fills hit at one point, the one drawn on top: the highest draw
+/// depth, and of equals the newest handle. Which fill a map happens to list
+/// first does not tell.
+fn front_most(
+    hits: impl Iterator<Item = Handle>,
+    draw_depth: &HashMap<u64, [f32; 2]>,
+) -> Option<Handle> {
+    let depth = |handle: Handle| draw_depth.get(&handle.value()).copied().unwrap_or([0.0; 2]);
+    hits.max_by(|&a, &b| {
+        let (da, db) = (depth(a), depth(b));
+        da[0]
+            .total_cmp(&db[0])
+            .then(da[1].total_cmp(&db[1]))
+            .then(a.value().cmp(&b.value()))
+    })
+}
+
+/// Whether a pick at `cursor` takes this fill: inside its boundary and, for
+/// a pattern, within `aperture_px` of one of its strokes.
+fn hatch_picked_at(
+    hatch: &HatchModel,
+    cursor: Point,
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: Rectangle,
+    aperture_px: f32,
+) -> bool {
+    if !hatch_contains_screen_point(hatch, cursor, view_rot, eye, bounds) {
+        return false;
+    }
+    // A sloped fill shows its pattern foreshortened; it keeps the area test.
+    if !hatch.lies_level() {
+        return true;
+    }
+    let Some((point, pixels_per_unit)) = ground_point_under(hatch, cursor, view_rot, eye, bounds)
+    else {
+        return true;
+    };
+    hatch
+        .pattern_distance(point)
+        .is_none_or(|distance| distance * pixels_per_unit <= f64::from(aperture_px))
+}
+
+/// The point of the hatch's boundary plane (world XY, as the boundary is
+/// projected) under `cursor`, and how many pixels a world unit spans there.
+/// The projection is followed from the boundary's own frame, a few steps so
+/// a perspective view lands on the cursor too.
+fn ground_point_under(
+    hatch: &HatchModel,
+    cursor: Point,
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: Rectangle,
+) -> Option<([f64; 2], f64)> {
+    let (mut min, mut max) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    for &[x, y] in hatch
+        .boundary
+        .iter()
+        .filter(|v| v[0].is_finite() && v[1].is_finite())
+    {
+        let point = [
+            x as f64 + hatch.world_origin[0],
+            y as f64 + hatch.world_origin[1],
+        ];
+        for axis in 0..2 {
+            min[axis] = min[axis].min(point[axis]);
+            max[axis] = max[axis].max(point[axis]);
         }
+    }
+    let span = (max[0] - min[0]).max(max[1] - min[1]);
+    if !span.is_finite() || span <= 0.0 {
         return None;
     }
-    for (handle, hatches) in insert_hatches {
-        if hatches
-            .iter()
-            .any(|hatch| hatch_contains_screen_point(hatch, cursor, view_rot, eye, bounds))
-        {
-            return Some(*handle);
+    let screen = |point: [f64; 2]| {
+        projection::project_screen(
+            view_rot,
+            eye,
+            bounds,
+            glam::DVec3::new(point[0], point[1], 0.0),
+        )
+        .map(|p| [f64::from(p.x), f64::from(p.y)])
+    };
+    let mut point = [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5];
+    let mut pixels_per_unit = 0.0;
+    for _ in 0..4 {
+        let at = screen(point)?;
+        let along_x = screen([point[0] + span, point[1]])?;
+        let along_y = screen([point[0], point[1] + span])?;
+        // Screen pixels per world unit along world X and along world Y.
+        let ux = [(along_x[0] - at[0]) / span, (along_x[1] - at[1]) / span];
+        let uy = [(along_y[0] - at[0]) / span, (along_y[1] - at[1]) / span];
+        let det = ux[0] * uy[1] - uy[0] * ux[1];
+        if !det.is_finite() || det.abs() < 1e-18 {
+            return None;
+        }
+        pixels_per_unit = det.abs().sqrt();
+        let off = [f64::from(cursor.x) - at[0], f64::from(cursor.y) - at[1]];
+        let step = [
+            (off[0] * uy[1] - uy[0] * off[1]) / det,
+            (ux[0] * off[1] - off[0] * ux[1]) / det,
+        ];
+        point = [point[0] + step[0], point[1] + step[1]];
+        if step[0].hypot(step[1]) * pixels_per_unit < 1e-3 {
+            break;
         }
     }
-    None
+    point
+        .iter()
+        .all(|v| v.is_finite())
+        .then_some((point, pixels_per_unit))
 }
 
 fn hatch_contains_screen_point(

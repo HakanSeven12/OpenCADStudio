@@ -11609,3 +11609,63 @@ mod annotative_block_end_to_end_tests {
     }
 }
 
+
+// The -TABLE command-line form asks for columns, rows and an insertion point
+// before placing a native table entity; no test drove that flow.
+mod table_command_line_creation_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::EntityType;
+    use glam::DVec3;
+
+    #[test]
+    fn dash_table_places_a_native_table_from_its_prompts() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+
+        let _ = app.run_command_line("-TABLE");
+        let command = app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("-TABLE stays active to ask for columns");
+        assert_eq!(command.name(), "-TABLE");
+        assert!(command.prompt().contains("number of columns"), "{}", command.prompt());
+
+        let _ = app.feed_command(StepInput::Text("3".into()));
+        assert!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("rows follow the columns")
+                .prompt()
+                .contains("number of rows")
+        );
+        let _ = app.feed_command(StepInput::Text("2".into()));
+        let _ = app.feed_command(StepInput::Point(DVec3::new(5.0, 7.0, 0.0)));
+
+        assert!(app.tabs[i].active_cmd.is_none(), "the point places the table");
+        assert!(app.command_line.last_error.is_none());
+        let table = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                EntityType::Table(table) => Some(table.clone()),
+                _ => None,
+            })
+            .expect("a native table entity was created");
+        assert_eq!(table.columns.len(), 3, "the typed column count was used");
+        assert_eq!(
+            table.rows.len(),
+            4,
+            "two typed data rows plus the title and header rows"
+        );
+        assert_eq!(
+            (table.insertion_point.x, table.insertion_point.y),
+            (5.0, 7.0),
+            "the table is placed at the typed point"
+        );
+    }
+}
+

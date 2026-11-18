@@ -566,6 +566,8 @@ pub struct FieldDialogState {
     /// evaluator (`AcObjProp.16.2`); `None` for a new field.
     pub object_versioned: Option<bool>,
     pub formula: String,
+    /// What each `%<…>%` operand of the formula shows as in the formula box.
+    pub operand_labels: Vec<String>,
     /// Indexes into codec FORMULA_FORMATS and FORMULA_PRECISIONS.
     pub formula_format: usize,
     pub formula_precision: usize,
@@ -659,6 +661,7 @@ impl FieldDialogState {
             object_prop: None,
             object_versioned: None,
             formula: String::new(),
+            operand_labels: Vec::new(),
             formula_format: 0,
             formula_precision: 0,
             conversion: String::new(),
@@ -1868,12 +1871,12 @@ pub fn view<'a>(
             card(
                 t!("Formula").into_owned(),
                 column![
-                    text_input("(12+3)*2", &state.formula)
-                        .size(12)
-                        .padding([8, 8])
-                        .font(iced::Font::MONOSPACE)
-                        .style(field_style)
-                        .on_input(|v| msg(FieldDialogMsg::Formula(v))),
+                    crate::ui::formula_input::formula_input(
+                        &state.formula,
+                        &state.operand_labels,
+                        "(12+3)*2",
+                        |v| msg(FieldDialogMsg::Formula(v)),
+                    ),
                     row![
                         table_button(t!("Average").into_owned(), "Average"),
                         table_button(t!("Sum").into_owned(), "Sum"),

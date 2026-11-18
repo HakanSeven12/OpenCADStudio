@@ -4,6 +4,7 @@ pub mod dock;
 pub mod drop_down_fit;
 pub mod dropdown_list;
 pub mod font_picker;
+pub mod formula_input;
 pub mod hover_zone;
 pub mod icons;
 pub mod ime_zone;

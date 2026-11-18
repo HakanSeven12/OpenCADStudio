@@ -1891,6 +1891,7 @@ impl OpenCADStudio {
         sized_flow(ex, 720, 520, |flow| {
             crate::ui::window::shortcuts::view_window(
                 &self.shortcut_editor_rows,
+                &self.shortcut_filter,
                 self.shortcut_capture_row,
                 self.shortcut_pending_add,
                 self.shortcut_reset_confirm,

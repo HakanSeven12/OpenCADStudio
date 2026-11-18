@@ -65,6 +65,12 @@ pub(super) const LARGE_H: f32 = metrics::LARGE_H;
 pub(super) const LARGE_ICON: f32 = metrics::LARGE_ICON;
 /// Icon size inside a small button.
 pub(super) const SMALL_ICON: f32 = metrics::SMALL_ICON;
+
+/// Icons in front of the Properties panel's Color / Linetype / Lineweight
+/// combos.
+const PROP_COLOR_ICON: &[u8] = include_bytes!("../../../assets/icons/color_palette.svg");
+const PROP_LINETYPE_ICON: &[u8] = include_bytes!("../../../assets/icons/attributes/linetype.svg");
+const PROP_LW_ICON: &[u8] = include_bytes!("../../../assets/icons/attributes/lineweight.svg");
 /// Narrowest large button.
 pub(super) const LARGE_W: f32 = 52.0;
 /// Horizontal button padding surrounding a large tool's label.
@@ -1225,8 +1231,7 @@ fn tool_row<'a>(tools: &[ToolDef], active_tool: &Option<String>) -> Element<'a, 
     let btns: Vec<Element<Message>> = tools
         .iter()
         .map(|t| {
-            let is_active =
-                active_tool.as_deref() == Some(t.id) || super::text_editor::lit(t.id);
+            let is_active = active_tool.as_deref() == Some(t.id) || super::text_editor::lit(t.id);
             let tip = t!(t.label);
             let event = t.event.clone();
             let icon_el: Element<Message> = make_icon(t.icon, SMALL_ICON);
@@ -1505,19 +1510,25 @@ fn large_item<'a>(
             );
             let lw_row = prop_row(LwItem(active_lineweight).to_string(), PROP_LW_ID, None);
 
+            // Each combo is led by the icon of the property it sets.
+            let labelled =
+                |icon: &'static [u8], dd_id: &'static str, combo| -> Element<'a, Message> {
+                    row![
+                        icons::tool(icon, SMALL_ICON),
+                        super::qat::list_target(dd_id, PosReport::new(dd_id, combo)),
+                    ]
+                    .spacing(4)
+                    .align_y(iced::Center)
+                    .into()
+                };
+
             // Top-pinned like every combo panel, so the Color dropdown shares
             // the same baseline as the Layers / style selectors.
             let combos = container(
                 column![
-                    super::qat::list_target(
-                        PROP_COLOR_ID,
-                        PosReport::new(PROP_COLOR_ID, color_row)
-                    ),
-                    super::qat::list_target(
-                        PROP_LINETYPE_ID,
-                        PosReport::new(PROP_LINETYPE_ID, lt_row)
-                    ),
-                    super::qat::list_target(PROP_LW_ID, PosReport::new(PROP_LW_ID, lw_row)),
+                    labelled(PROP_COLOR_ICON, PROP_COLOR_ID, color_row),
+                    labelled(PROP_LINETYPE_ICON, PROP_LINETYPE_ID, lt_row),
+                    labelled(PROP_LW_ICON, PROP_LW_ID, lw_row),
                 ]
                 .spacing(2)
                 .align_x(iced::Left),

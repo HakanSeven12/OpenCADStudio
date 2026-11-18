@@ -204,9 +204,15 @@ impl CadModule for DrawModule {
                     title: "Groups",
                     tools: vec![
                         RibbonItem::LargeTool(group::tool()),
-                        RibbonItem::LargeTool(ungroup::tool()),
-                        RibbonItem::LabeledTool(groups::edit_tool()),
-                        RibbonItem::LabeledTool(groups::selection_tool()),
+                        // Ungroup / Group Selection / Edit Group as one
+                        // column of small icon-only buttons.
+                        RibbonItem::ToolGrid {
+                            columns: vec![vec![
+                                ungroup::tool(),
+                                groups::selection_tool(),
+                                groups::edit_tool(),
+                            ]],
+                        },
                     ],
                 },
                 RibbonGroup {

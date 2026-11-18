@@ -3603,6 +3603,7 @@ modify =
     .extend-enter-done = EXTEND [Enter = hotovo]:
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__  Klikněte poblíž konce objektu, který chcete prodloužit (Shift+kliknutí = oříznout):
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__ Křížení: první roh:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__ Křížení: protilehlý roh:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__  Přes čáru: body [umístěno: __ocs_fmt_1__, Enter = prodloužit protnuté]:
     .extrim-click-the-side-to-trim-away = EXTRIM  Klikněte na stranu, která se má oříznout:
@@ -3674,6 +3675,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM  Vyberte řezné hrany [vybráno: __ocs_fmt_0__, Enter = hotovo]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__  Kliknutím odeberete segment (Shift+kliknutí = prodloužit):
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__ Křížení: první roh:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__ Křížení: protilehlý roh:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__  Přes čáru: body [umístěno: __ocs_fmt_1__, Enter = oříznout protnuté]:
     .through = Bodem

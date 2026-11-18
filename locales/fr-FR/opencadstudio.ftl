@@ -3599,6 +3599,7 @@ modify =
     .extend-enter-done = EXTEND [Entrée = Terminer] :
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__ Cliquer près de la fin de l'objet pour l'étendre (shift+click trims):
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__ Traversement: premier coin:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTENSION__ocs_fmt_0__ Traversage: coin opposé:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__ Fence: points de sélection [__ocs_fmt_1__ placé, Entrée = extension croisée]:
     .extrim-click-the-side-to-trim-away = EXTRIM Cliquez sur le côté pour couper :
@@ -3670,6 +3671,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM  Sélectionner les bords de coupe [__ocs_fmt_0__ cueilli, Entrée = fait]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__ Cliquez sur segment pour supprimer (Shift+clic s'étend):
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__ Passage: premier coin:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__ Traversée: coin opposé:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__ Fence: points de sélection [__ocs_fmt_1__ placé, Entrée = coupe croisée]:
     .through = Par

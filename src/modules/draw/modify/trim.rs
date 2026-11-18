@@ -2160,6 +2160,9 @@ enum TrimMode {
     SelectEdges,
     /// Collecting fence points; Enter runs the fence pass.
     Fence(FencePick),
+    /// Quick mode: an empty click placed the fence's first point; the next
+    /// point runs the fence pass.
+    QuickFence(FencePick),
     /// Crossing: waiting for the first rectangle corner.
     CrossFirst,
     /// Crossing: first corner picked, waiting for the second.
@@ -2168,6 +2171,19 @@ enum TrimMode {
     Erase,
     /// mOde: choosing between Quick and Standard (TRIMEXTENDMODE).
     ChooseMode,
+}
+
+/// Quick mode: an empty click in Pick starts a two-point fence, so the next
+/// click trims or extends everything the dashed line crosses. Standard mode
+/// keeps the crossing box.
+fn quick_fence_start(mode: &mut TrimMode, quick: bool, pt: DVec3) -> Option<CmdResult> {
+    if !quick || !matches!(mode, TrimMode::Pick) {
+        return None;
+    }
+    let mut pick = FencePick::fence();
+    pick.push([pt.x, pt.y]);
+    *mode = TrimMode::QuickFence(pick);
+    Some(CmdResult::NeedPoint)
 }
 
 /// TRIMEXTENDMODE: 1 (Quick) starts TRIM and EXTEND ready to pick, every
@@ -4603,6 +4619,9 @@ impl CadCommand for TrimCommand {
                 pick.len()
             )
             .into_owned(),
+            TrimMode::QuickFence(_) => {
+                crate::tf!("TRIM{edge}  Specify next fence point:").into_owned()
+            }
             TrimMode::CrossFirst => crate::tf!("TRIM{edge}  Crossing: first corner:").into_owned(),
             TrimMode::CrossSecond(_) => {
                 crate::tf!("TRIM{edge}  Crossing: opposite corner:").into_owned()
@@ -4863,6 +4882,10 @@ impl CadCommand for TrimCommand {
             return None;
         }
         Some(self.fence_run(fence, window))
+    }
+
+    fn on_empty_pick(&mut self, pt: DVec3) -> Option<CmdResult> {
+        quick_fence_start(&mut self.mode, self.quick, pt)
     }
 
     fn accepts_drag_selection(&self) -> bool {
@@ -5313,6 +5336,12 @@ impl CadCommand for TrimCommand {
                 pick.push([pt.x, pt.y]);
                 CmdResult::NeedPoint
             }
+            TrimMode::QuickFence(pick) => {
+                pick.push([pt.x, pt.y]);
+                let path = pick.path();
+                self.mode = TrimMode::Pick;
+                self.fence_run(&path, None)
+            }
             TrimMode::CrossFirst => {
                 self.mode = TrimMode::CrossSecond([pt.x, pt.y]);
                 CmdResult::NeedPoint
@@ -5337,7 +5366,7 @@ impl CadCommand for TrimCommand {
 
     fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
         match &self.mode {
-            TrimMode::Fence(pick) if !pick.is_empty() => {
+            TrimMode::Fence(pick) | TrimMode::QuickFence(pick) if !pick.is_empty() => {
                 let mut out = vec![pick.preview([pt.x, pt.y], "trim_fence")];
                 let mut fpts = pick.path();
                 fpts.push([pt.x, pt.y]);
@@ -5385,6 +5414,7 @@ impl CadCommand for TrimCommand {
             }
             TrimMode::Fence(pick) if pick.is_usable() => self.fence_run(&pick.path(), None),
             TrimMode::Fence(_)
+            | TrimMode::QuickFence(_)
             | TrimMode::CrossFirst
             | TrimMode::CrossSecond(_)
             | TrimMode::Erase
@@ -5550,6 +5580,9 @@ impl CadCommand for ExtendCommand {
                 pick.len()
             )
             .into_owned(),
+            TrimMode::QuickFence(_) => {
+                crate::tf!("EXTEND{edge}  Specify next fence point:").into_owned()
+            }
             TrimMode::CrossFirst => {
                 crate::tf!("EXTEND{edge}  Crossing: first corner:").into_owned()
             }
@@ -5806,6 +5839,10 @@ impl CadCommand for ExtendCommand {
         }
     }
 
+    fn on_empty_pick(&mut self, pt: DVec3) -> Option<CmdResult> {
+        quick_fence_start(&mut self.mode, self.quick, pt)
+    }
+
     fn accepts_drag_selection(&self) -> bool {
         matches!(self.mode, TrimMode::Pick | TrimMode::SelectEdges)
     }
@@ -5986,6 +6023,12 @@ impl CadCommand for ExtendCommand {
                 pick.push([pt.x, pt.y]);
                 CmdResult::NeedPoint
             }
+            TrimMode::QuickFence(pick) => {
+                pick.push([pt.x, pt.y]);
+                let path = pick.path();
+                self.mode = TrimMode::Pick;
+                self.fence_run(&path, None)
+            }
             TrimMode::CrossFirst => {
                 self.mode = TrimMode::CrossSecond([pt.x, pt.y]);
                 CmdResult::NeedPoint
@@ -6007,7 +6050,7 @@ impl CadCommand for ExtendCommand {
 
     fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
         match &self.mode {
-            TrimMode::Fence(pick) if !pick.is_empty() => {
+            TrimMode::Fence(pick) | TrimMode::QuickFence(pick) if !pick.is_empty() => {
                 let mut out = vec![pick.preview([pt.x, pt.y], "extend_fence")];
                 let mut fpts = pick.path();
                 fpts.push([pt.x, pt.y]);
@@ -6055,6 +6098,7 @@ impl CadCommand for ExtendCommand {
             }
             TrimMode::Fence(pick) if pick.is_usable() => self.fence_run(&pick.path(), None),
             TrimMode::Fence(_)
+            | TrimMode::QuickFence(_)
             | TrimMode::CrossFirst
             | TrimMode::CrossSecond(_)
             | TrimMode::Erase

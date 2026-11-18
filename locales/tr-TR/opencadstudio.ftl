@@ -3581,6 +3581,7 @@ modify =
     .extend-enter-done = EXTEND  [Enter = tamam]:
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__  Uzatmak için nesnenin ucuna yakın tıklayın (Shift+tıklama kırpar):
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__  Kesişen seçim: ilk köşe:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Sonraki çit noktasını belirtin:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__  Kesişen seçim: karşı köşe:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__  Çit: noktaları seçin [__ocs_fmt_1__ yerleştirildi, Enter = kesişenleri uzat]:
     .extrim-click-the-side-to-trim-away = EXTRIM  Kırpılacak tarafa tıklayın:
@@ -3652,6 +3653,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM  Kesme kenarlarını seçin [__ocs_fmt_0__ seçildi, Enter = tamam]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__  Kaldırılacak parçaya tıklayın (Shift+tıklama uzatır):
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__  Kesişen seçim: ilk köşe:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Sonraki çit noktasını belirtin:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__  Kesişen seçim: karşı köşe:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__  Çit: noktaları seçin [__ocs_fmt_1__ yerleştirildi, Enter = kesişenleri kırp]:
     .through = İçinden

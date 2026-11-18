@@ -3587,6 +3587,7 @@ modify =
     .extend-enter-done = EXTEND [Enter=पूर्ण]:
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__ बढ़ाने के लिए ऑब्जेक्ट के सिरे के पास क्लिक करें (Shift+क्लिक से ट्रिम करें):
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__  क्रॉसिंग: पहला कोना:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__  क्रॉसिंग: विपरीत कोना:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__ फ़ेंस: बिंदु चुनें [__ocs_fmt_1__ रखे गए, Enter=आर-पार ऑब्जेक्ट बढ़ाएँ]:
     .extrim-click-the-side-to-trim-away = EXTRIM क्लिक करें, साइड को ट्रिम करने के लिए:
@@ -3658,6 +3659,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM काटने वाले किनारे चुनें [__ocs_fmt_0__ चुने गए, Enter=पूर्ण]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__ क्लिक करें सेगमेंट को हटाने के लिए (Shift + क्लिक विस्तार):
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__  क्रॉसिंग: पहला कोना:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__  क्रॉसिंग: विपरीत कोना:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__ फ़ेंस: बिंदु चुनें [__ocs_fmt_1__ रखे गए, Enter=आर-पार ऑब्जेक्ट ट्रिम करें]:
     .through = माध्यम

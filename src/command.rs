@@ -3464,6 +3464,13 @@ pub trait CadCommand: Send {
         None
     }
 
+    /// An object pick that landed on nothing, at `pt`. `Some` takes the click
+    /// (TRIM and EXTEND start a fence there); `None` leaves it to the drag
+    /// selection box or the missed-pick message.
+    fn on_empty_pick(&mut self, _pt: DVec3) -> Option<CmdResult> {
+        None
+    }
+
     /// Whether an empty click may start a two-corner selection box for this
     /// command instead of being reported as a missed entity pick.
     fn accepts_drag_selection(&self) -> bool {

@@ -3599,6 +3599,7 @@ modify =
     .extend-enter-done = EXTEND  [Enter = terminar]:
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__  Pulse cerca del extremo del objeto que desea alargar (Mayús+clic recorta):
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__  Captura: primera esquina:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__  Captura: esquina opuesta:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__  Borde: designe puntos [__ocs_fmt_1__ colocados, Enter = alargar cruzados]:
     .extrim-click-the-side-to-trim-away = EXTRIM  Pulse el lado que desea recortar:
@@ -3670,6 +3671,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM  Seleccione las aristas de corte [__ocs_fmt_0__ elegidas, Intro = terminar]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__  Pulse el segmento que eliminar (Mayús+clic alarga):
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__  Captura: primera esquina:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__  Captura: esquina opuesta:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__  Borde: designe puntos [__ocs_fmt_1__ colocados, Intro = recortar los cruzados]:
     .through = Punto

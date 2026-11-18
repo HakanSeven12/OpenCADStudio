@@ -3599,6 +3599,7 @@ modify =
     .extend-enter-done = EXTEND  [Enter = concluir]:
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__  Clique perto da extremidade do objeto a estender (Shift+clique apara):
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__  Cruzamento: primeiro canto:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__  Cruzamento: canto oposto:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__  Cerca: escolha pontos [__ocs_fmt_1__ colocados, Enter = estender cruzados]:
     .extrim-click-the-side-to-trim-away = EXTRIM  Clique no lado a aparar:
@@ -3670,6 +3671,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM  Selecione as arestas de corte [__ocs_fmt_0__ escolhidas, Enter = concluir]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__  Clique no segmento a remover (Shift+clique estende):
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__  Cruzamento: primeiro canto:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__  Cruzamento: canto oposto:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__  Cerca: escolha pontos [__ocs_fmt_1__ colocados, Enter = aparar cruzados]:
     .through = Através

@@ -3600,6 +3600,7 @@ modify =
     .extend-enter-done = EXTEND  [ກົດ Enter = ສຳເລັດ]:
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__  ກົດຄລິກໃກ້ປາຍວັດຖຸທີ່ຈະຍືດ (Shift+ຄລິກ ເພື່ອຕັດເສັ້ນ):
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__  Crossing: ມຸມທຳອິດ:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__  Crossing: ມຸມກົງກັນຂ້າມ:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__  Fence: ເລືອກຈຸດ [ວາງແລ້ວ __ocs_fmt_1__ ຈຸດ, ກົດ Enter = ຍືດເສັ້ນທີ່ຖືກຕັດຜ່ານ]:
     .extrim-click-the-side-to-trim-away = EXTRIM  ກົດຄລິກເລືອກດ້ານທີ່ຈະຕັດອອກ:
@@ -3671,6 +3672,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM  ເລືອກຂອບຕັດ [ເລືອກແລ້ວ __ocs_fmt_0__ ອັນ, ກົດ Enter = ສຳເລັດ]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__  ກົດຄລິກສ່ວນທີ່ຈະຕັດອອກ (Shift+ຄລິກ ເພື່ອຍືດເສັ້ນ):
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__  Crossing: ມຸມທຳອິດ:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__  Crossing: ມຸມກົງກັນຂ້າມ:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__  Fence: ເລືອກຈຸດ [ວາງແລ້ວ __ocs_fmt_1__ ຈຸດ, ກົດ Enter = ຕັດເສັ້ນທີ່ຕັດຜ່ານ]:
     .through = ຜ່ານຈຸດ (Through)

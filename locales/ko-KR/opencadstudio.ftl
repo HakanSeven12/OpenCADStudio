@@ -3598,6 +3598,7 @@ modify =
     .extend-enter-done = EXTEND [Enter = 완료]:
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__ 확장할 객체의 끝 근처를 클릭합니다(Shift+자르기 클릭).
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__ 교차로: 첫 번째 코너:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__ 교차점: 반대편 코너:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__ 울타리: 선택 점 [__ocs_fmt_1__ 배치, Enter = 연장 교차]:
     .extrim-click-the-side-to-trim-away = EXTRIM 잘라낼 측면을 클릭합니다.
@@ -3669,6 +3670,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM 절단 모서리 선택 [__ocs_fmt_0__ 선택, Enter = 완료]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__ 제거할 세그먼트를 클릭하세요(Shift+클릭 확장):
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__ 교차로: 첫 번째 코너:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__ 교차점: 반대편 코너:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__ 울타리: 선택 점 [__ocs_fmt_1__ 배치, Enter = 트림 교차]:
     .through = 통해

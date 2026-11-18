@@ -3589,6 +3589,7 @@ modify =
     .extend-enter-done = EXTEND  [Enter=完了]:
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__  延長する端の近くをクリック（Shift+クリックでトリム）:
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__  交差: 最初のコーナー:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__  交差: 反対側のコーナー:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__  フェンス: 点を選択 [__ocs_fmt_1__ 点、Enter=交差を延長]:
     .extrim-click-the-side-to-trim-away = EXTRIM  トリムする側をクリック:
@@ -3660,6 +3661,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM  切断エッジを選択 [__ocs_fmt_0__ 個、Enter=完了]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__  削除する区間をクリック（Shift+クリックで延長）:
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__  交差: 最初のコーナー:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__  交差: 反対側のコーナー:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__  フェンス: 点を選択 [__ocs_fmt_1__ 点、Enter=交差をトリム]:
     .through = 通過点

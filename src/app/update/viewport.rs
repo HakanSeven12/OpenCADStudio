@@ -7773,6 +7773,12 @@ impl OpenCADStudio {
                         .active_cmd
                         .as_mut()
                         .map(|command| command.on_point(pick_wcs))
+                } else if let Some(result) = self.tabs[i]
+                    .active_cmd
+                    .as_mut()
+                    .and_then(|command| command.on_empty_pick(pick_wcs))
+                {
+                    Some(result)
                 } else if self.tabs[i]
                     .active_cmd
                     .as_ref()

@@ -3598,6 +3598,7 @@ modify =
     .extend-enter-done = EXTEND [Enter = zrobione]:
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__ Kliknij w pobliżu końca obiektu, aby go wydłużyć (Shift+kliknij przycięcia):
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__ Skrzyżowanie: pierwszy zakręt:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__ Skrzyżowanie: przeciwny róg:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__ Ogrodzenie: wybierz punkty [__ocs_fmt_1__ umieszczone, Enter = przedłużone skrzyżowane]:
     .extrim-click-the-side-to-trim-away = EXTRIM Kliknij bok, który chcesz przyciąć:
@@ -3669,6 +3670,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM Wybierz krawędzie skrawające [wybrane __ocs_fmt_0__, Enter = zrobione]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__ Kliknij segment, aby go usunąć (Shift+kliknięcie rozszerza):
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__ Skrzyżowanie: pierwszy zakręt:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__ Skrzyżowanie: przeciwny róg:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__ Ogrodzenie: punkty wyboru [__ocs_fmt_1__ umieszczone, Enter = opaski skrzyżowane]:
     .through = Przez

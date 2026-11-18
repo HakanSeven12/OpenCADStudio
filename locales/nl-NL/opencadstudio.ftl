@@ -3599,6 +3599,7 @@ modify =
     .extend-enter-done = EXTEND [Enter = gereed]:
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__ Klik bij het uiteinde van het te verlengen object (Shift+klik om te trimmen):
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__ Oversteken: eerste hoek:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__ Oversteken: tegenoverhoek:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__ Hek: kies punten [__ocs_fmt_1__ geplaatst, Enter om kruisende objecten te verlengen]:
     .extrim-click-the-side-to-trim-away = EXTRIM Klik op de zijkant om weg te knippen:
@@ -3670,6 +3671,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM Selecteer snijkanten [__ocs_fmt_0__ gekozen, Enter = gereed]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__ Klik segment te verwijderen (Shift+klik breidt):
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__ Oversteken: eerste hoek:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__ Oversteken: tegenoverhoek:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__ Kruisvenster: kies punten [__ocs_fmt_1__ geplaatst, Enter = kruisende objecten bijsnijden]:
     .through = Door

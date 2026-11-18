@@ -3598,6 +3598,7 @@ modify =
     .extend-enter-done = EXTEND  [Enter=完成]：
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__ 按一下物件靠近要延伸的端點處（Shift+按一下可修剪）：
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__ 交叉視窗：第一角點：
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__ 交叉視窗：對角點：
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__ 欄選：拾取點 [已放置 __ocs_fmt_1__ 個，Enter=延伸相交物件]：
     .extrim-click-the-side-to-trim-away = EXTRIM 按一下要剪切掉的一側：
@@ -3669,6 +3670,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM 選擇剪切邊 [已選擇 __ocs_fmt_0__ 個，Enter=完成]：
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__ 按一下要移除的線段（Shift+按一下可延伸）：
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__ 交叉視窗：第一角點：
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__ 交叉視窗：對角點：
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__ 欄選：拾取點 [已放置 __ocs_fmt_1__ 個，Enter=修剪相交物件]：
     .through = 通過點

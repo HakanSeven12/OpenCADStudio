@@ -3599,6 +3599,7 @@ modify =
     .extend-enter-done = EXTEND  [Enter = τέλος]:
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__  Κάντε κλικ κοντά στο άκρο του αντικειμένου προς επέκταση (Shift+κλικ για αποκοπή):
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__  Τέμνουσα: πρώτη γωνία:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__  Τέμνουσα: απέναντι γωνία:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__  Διαδρομή: επιλέξτε σημεία [__ocs_fmt_1__ τοποθετημένα, Enter = επέκταση των τεμνόμενων]:
     .extrim-click-the-side-to-trim-away = EXTRIM  Κάντε κλικ στην πλευρά που θα αποκοπεί:
@@ -3670,6 +3671,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM  Επιλέξτε ακμές κοπής [__ocs_fmt_0__ επιλεγμένες, Enter = τέλος]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__  Κάντε κλικ στο τμήμα προς αφαίρεση (Shift+κλικ για επέκταση):
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__  Τέμνουσα: πρώτη γωνία:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__  Τέμνουσα: απέναντι γωνία:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__  Διαδρομή: επιλέξτε σημεία [__ocs_fmt_1__ τοποθετημένα, Enter = αποκοπή των τεμνόμενων]:
     .through = Διέλευση

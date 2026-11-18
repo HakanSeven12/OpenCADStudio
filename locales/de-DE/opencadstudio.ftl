@@ -3599,6 +3599,7 @@ modify =
     .extend-enter-done = EXTEND  [Enter = fertig]:
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__ Nahe dem zu verlängernden Objektende klicken (Umschalt+Klick stutzt):
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__ Kreuzung: erste Ecke:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__ Kreuzung: gegenüberliegende Ecke:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__ Kreuzen: Punkte angeben [__ocs_fmt_1__ gesetzt, Eingabe=kreuzende Objekte verlängern]:
     .extrim-click-the-side-to-trim-away = EXTRIM Klicken Sie auf die Seite, um wegzuschneiden:
@@ -3670,6 +3671,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM  Schneidkanten auswählen [__ocs_fmt_0__ ausgewählt, Enter = fertig]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__ Klicken Sie auf das Segment zum Entfernen (Shift+click extended):
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__ Kreuzung: erste Ecke:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__ Kreuzung: gegenüberliegende Ecke:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__ Kreuzen: Punkte angeben [__ocs_fmt_1__ gesetzt, Eingabe=kreuzende Objekte stutzen]:
     .through = Durch

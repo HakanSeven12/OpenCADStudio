@@ -3598,6 +3598,7 @@ modify =
     .extend-enter-done = EXTEND [Enter = fatto]:
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__ Fare clic vicino all'estremità dell'oggetto per estenderlo (Shift+fare clic sui ritagli):
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__ Incrocio: prima curva:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__ Incrocio: angolo opposto:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__ Recinzione: punti di selezione [__ocs_fmt_1__ posizionato, Enter = estensione incrociata]:
     .extrim-click-the-side-to-trim-away = EXTRIM Fare clic sul lato per ritagliare:
@@ -3669,6 +3670,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM Selezionare i taglienti [__ocs_fmt_0__ selezionato, Enter = fatto]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__ Fare clic sul segmento da rimuovere (Shift+fare clic su estende):
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__ Incrocio: prima curva:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__ Incrocio: angolo opposto:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__ Recinzione: punti di selezione [__ocs_fmt_1__ posizionato, Enter = taglio incrociato]:
     .through = Attraverso

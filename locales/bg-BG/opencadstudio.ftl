@@ -3598,6 +3598,7 @@ modify =
     .extend-enter-done = EXTEND  [Enter = готово]:
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__  Кликни близо до края на обекта за удължаване (Shift+клик изрязва):
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__  Пресичане: първи ъгъл:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__  Пресичане: противоположен ъгъл:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__  Ограда: избери точки [__ocs_fmt_1__ поставени, Enter = удължи пресечените]:
     .extrim-click-the-side-to-trim-away = EXTRIM  Кликни страната за изрязване:
@@ -3669,6 +3670,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM  Избери режещи ръбове [__ocs_fmt_0__ избрани, Enter = готово]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__  Кликни сегмент за премахване (Shift+клик удължава):
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__  Пресичане: първи ъгъл:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__  Пресичане: противоположен ъгъл:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__  Ограда: избери точки [__ocs_fmt_1__ поставени, Enter = изрежи пресечените]:
     .through = Преминаване

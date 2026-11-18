@@ -3598,6 +3598,7 @@ modify =
     .extend-enter-done = EXTEND [Enter = valmis]:
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__ Laajenna napsauttamalla kohteen loppua (Shift + napsautusleikkaukset):
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__ Risteys: ensimmäinen kulma:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__ Risteys: vastakkainen kulma:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__ Aita: poimintapisteet [__ocs_fmt_1__ sijoitettu, Enter = jatketaan ristissä]:
     .extrim-click-the-side-to-trim-away = EXTRIM Napsauta sivua leikataksesi pois:
@@ -3669,6 +3670,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM Valitse leikkuureunat [__ocs_fmt_0__ poimittu, Enter = valmis]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__ Poistettava napsautussegmentti (Shift+napsautus laajenee):
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__ Risteys: ensimmäinen kulma:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__ Risteys: vastakkainen kulma:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__ Aita: poimintapisteet [__ocs_fmt_1__ sijoitettu, Enter = trimmi ristissä]:
     .through = läpi

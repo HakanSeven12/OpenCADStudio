@@ -3606,6 +3606,7 @@ modify =
     .extend-enter-done = EXTEND  [Enter = xong]:
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__  Nhấp gần đầu đối tượng để kéo dài (Shift+nhấp để cắt):
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__  Cắt ngang: góc thứ nhất:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__  Cắt ngang: góc đối diện:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__  Hàng rào: chọn điểm [__ocs_fmt_1__ đã đặt, Enter = kéo dài các đối tượng bị cắt]:
     .extrim-click-the-side-to-trim-away = EXTRIM  Nhấp vào phía cần cắt bỏ:
@@ -3677,6 +3678,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM  Chọn cạnh cắt [__ocs_fmt_0__ đã chọn, Enter = xong]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__  Nhấp vào đoạn cần xóa (Shift+nhấp để kéo dài):
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__  Cắt ngang: góc thứ nhất:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__  Cắt ngang: góc đối diện:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__  Hàng rào: chọn điểm [__ocs_fmt_1__ đã đặt, Enter = cắt các đối tượng bị cắt qua]:
     .through = Qua điểm

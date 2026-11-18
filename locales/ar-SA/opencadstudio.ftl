@@ -3611,6 +3611,7 @@ modify =
     .extend-enter-done = EXTEND  [Enter = انتهاء]:
     .extend-edge-click-near-end-of-object-to-extend = EXTEND__ocs_fmt_0__  انقر قرب نهاية الكائن لتمديده (Shift+نقر للقص):
     .extend-edge-crossing-first-corner = EXTEND__ocs_fmt_0__  تقاطع: الزاوية الأولى:
+    .extend-edge-specify-next-fence-point = EXTEND__ocs_fmt_0__  Specify next fence point:
     .extend-edge-crossing-opposite-corner = EXTEND__ocs_fmt_0__  تقاطع: الزاوية المقابلة:
     .extend-edge-fence-pick-points-placed-enter-ext = EXTEND__ocs_fmt_0__  سياج: اختر النقاط [وُضعت __ocs_fmt_1__، Enter = تمديد المتقاطعة]:
     .extrim-click-the-side-to-trim-away = EXTRIM  انقر الجانب المراد قصه:
@@ -3682,6 +3683,7 @@ modify =
     .trim-select-cutting-edges-picked-enter-done = TRIM  حدد حواف القطع [تم اختيار __ocs_fmt_0__، Enter = انتهاء]:
     .trim-edge-click-segment-to-remove-shift-click = TRIM__ocs_fmt_0__  انقر المقطع لإزالته (Shift+نقر للتمديد):
     .trim-edge-crossing-first-corner = TRIM__ocs_fmt_0__  تقاطع: الزاوية الأولى:
+    .trim-edge-specify-next-fence-point = TRIM__ocs_fmt_0__  Specify next fence point:
     .trim-edge-crossing-opposite-corner = TRIM__ocs_fmt_0__  تقاطع: الزاوية المقابلة:
     .trim-edge-fence-pick-points-placed-enter-trim = TRIM__ocs_fmt_0__  سياج: اختر النقاط [وُضعت __ocs_fmt_1__، Enter = قص المتقاطعة]:
     .through = عبر

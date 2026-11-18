@@ -36,6 +36,7 @@ pub mod dialog;
 pub mod entity_coverage;
 pub mod entity_coverage_types;
 pub mod manifest;
+pub mod revision;
 pub mod ribbon;
 pub mod scene;
 pub mod scene_builder;
@@ -86,16 +87,17 @@ pub use scene::{
     SceneSummary, StableId, Stroke, ThemeColor, Vec2,
 };
 pub use scene_builder::{
-    fixture_graph_scene, fixture_graph_scene_plan, fixture_scene_with_files, try_fixture_graph_scene,
-    PatchBuilder, SceneBuilder,
+    fixture_graph_scene, fixture_graph_scene_plan, fixture_scene_with_files, fixture_widget_surface,
+    try_fixture_graph_scene, PatchBuilder, SceneBuilder,
 };
+pub use revision::RevisionCursor;
 pub use type_registry::{
     get_embedded_type_registry_json, EnumVariantInfo, FieldInfo, MethodInfo, ParameterInfo, TypeId,
     TypeInfo, TypeKind, TypeRegistry,
 };
 pub use version_info::get_embedded_version_info_json;
 pub use widgets::{
-    Axis, BadgeTone, CellKind, ConfirmPolicy, DomainRef, IconActionDef, IconRef, ItemDef,
+    AckBatch, Axis, BadgeTone, CellKind, ConfirmPolicy, DomainRef, IconActionDef, IconRef, ItemDef,
     ItemListDef, MenuDef, MenuItemDef, PanelTableDef, TableCell, TableColumnDef, TableRef,
     TableRowDef, TreeCapabilities, TreeRowDef, WidgetCellValue, WidgetError, WidgetEvent,
     WidgetGroup, WidgetKindCounts, WidgetNode, WidgetOp, WidgetRange, WidgetSummary, WidgetSurface,

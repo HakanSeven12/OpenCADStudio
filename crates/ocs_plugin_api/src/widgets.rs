@@ -1393,6 +1393,87 @@ impl WidgetEvent {
     }
 }
 
+// ---------------------------------------------------------------------------
+// AckBatch (plugin-side event-ack bookkeeping; NOT wire data)
+// ---------------------------------------------------------------------------
+
+/// Plugin-side bookkeeping for the v26 publish event leg: the pending batch
+/// of host-observed widget events the plugin has received but not yet
+/// merged into a publish frame's `events` leg (the merge acknowledgment of
+/// the documented events-vs-patches split; see the [module docs](self)).
+///
+/// The real consumption pattern this wraps (inspected, recorded): the host
+/// forwards widget events it observes; the plugin drains them into a
+/// pending batch and folds the batch into its NEXT publish/patch frame's
+/// `events` leg. The host absorbs that leg as the acknowledgment and never
+/// re-forwards it (the exactly-once law — rebroadcasting would double the
+/// event stream). If the publish is REFUSED, the taken batch is gone from
+/// the frame but NOT acknowledged: it must be restored, or the next
+/// acknowledged frame would silently drop the events it carried.
+///
+/// Dedup semantics (the real ones): a pending batch is a set keyed by
+/// event EQUALITY ([`WidgetEvent`] is `PartialEq`), insertion-ordered. An
+/// event equal to one already pending must not ride twice — the host
+/// absorbs per-event, so a duplicate row would double-acknowledge one
+/// observation. [`AckBatch::merge`] therefore skips `newer` events equal
+/// to an already-pending one and appends the rest in arrival order.
+///
+/// This is deliberate bookkeeping, nothing more: no sending, no retry, no
+/// revision arithmetic (that is [`crate::revision::RevisionCursor`]'s
+/// separate, ADR-013-scoped job), no I/O. Pure value state.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AckBatch {
+    /// Events pending their publish leg. Invariant: pairwise non-equal
+    /// (the dedup contract above), arrival order preserved.
+    pending: Vec<WidgetEvent>,
+}
+
+impl AckBatch {
+    /// An empty batch.
+    pub fn new() -> Self {
+        Self {
+            pending: Vec::new(),
+        }
+    }
+
+    /// How many events are pending.
+    pub fn len(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// `true` when nothing is pending (nothing to piggyback).
+    pub fn is_empty(&self) -> bool {
+        self.pending.is_empty()
+    }
+
+    /// Empties the batch and returns exactly what was pending — the events
+    /// to merge into the publish frame's `events` leg now being assembled.
+    pub fn take(&mut self) -> Vec<WidgetEvent> {
+        std::mem::take(&mut self.pending)
+    }
+
+    /// Puts back EXACTLY what was taken: a refused send's rollback. The
+    /// batch is replaced (not appended), because the taken events left the
+    /// pending set precisely when they were staged into the refused frame —
+    /// restoring returns the pending set to its pre-take self.
+    pub fn restore(&mut self, batch: Vec<WidgetEvent>) {
+        self.pending = batch;
+    }
+
+    /// Folds newer acks into the (possibly restored) pending batch without
+    /// duplication: an event EQUAL to one already pending is skipped, the
+    /// rest append in arrival order. The dedup contract is the struct's own
+    /// invariant (see the type docs) — equality is [`WidgetEvent`]'s
+    /// `PartialEq`.
+    pub fn merge(&mut self, newer: Vec<WidgetEvent>) {
+        for event in newer {
+            if !self.pending.contains(&event) {
+                self.pending.push(event);
+            }
+        }
+    }
+}
+
 /// The requested window of one lazy page fetch ([`WidgetEvent::ChildrenRequested`]).
 /// `start` is the first row offset the host wants; `len` the page width,
 /// bounded by [`MAX_WIDGET_RANGE_LEN`].
@@ -5810,4 +5891,108 @@ mod tests {
             .expect("ref to a registry table applies");
         surface.validate().expect("still valid");
     }
+
+    // -- AckBatch (plugin-side publish-event bookkeeping) --------------------
+
+    fn activation(surface: u64, item: u64) -> WidgetEvent {
+        WidgetEvent::ItemActivated {
+            surface_id: sid(surface),
+            item_id: sid(item),
+        }
+    }
+
+    fn selection(surface: u64, item: u64) -> WidgetEvent {
+        WidgetEvent::SelectionChanged {
+            surface_id: sid(surface),
+            selected_ids: vec![sid(item)],
+        }
+    }
+
+    #[test]
+    fn ack_batch_take_empties_and_returns_the_pending_batch() {
+        let mut batch = AckBatch::new();
+        assert!(batch.is_empty());
+        batch.merge(vec![activation(9, 1), activation(9, 2)]);
+        assert_eq!(batch.len(), 2);
+
+        let taken = batch.take();
+        assert_eq!(
+            taken,
+            vec![activation(9, 1), activation(9, 2)],
+            "take returns exactly the pending events, in arrival order"
+        );
+        assert!(batch.is_empty(), "take empties the batch");
+        assert_eq!(batch.take(), Vec::new(), "a second take has nothing left");
+    }
+
+    #[test]
+    fn ack_batch_restore_round_trips_what_was_taken() {
+        let mut batch = AckBatch::new();
+        batch.merge(vec![activation(9, 1), selection(9, 2)]);
+        let taken = batch.take();
+        assert!(batch.is_empty());
+
+        batch.restore(taken.clone());
+        assert_eq!(batch.len(), 2);
+        assert_eq!(batch.take(), taken, "restore puts back exactly what was taken");
+    }
+
+    #[test]
+    fn ack_batch_merge_folds_newer_acks_without_duplicates() {
+        let mut batch = AckBatch::new();
+        batch.merge(vec![activation(9, 1), selection(9, 2)]);
+
+        // `selection(9,2)` again (an equal event re-observed or re-delivered)
+        // must NOT ride twice; the genuinely new event appends in order.
+        batch.merge(vec![selection(9, 2), activation(9, 3)]);
+        assert_eq!(
+            batch.take(),
+            vec![activation(9, 1), selection(9, 2), activation(9, 3)],
+            "merge dedups by event equality, keeping insertion order"
+        );
+
+        // The same law across a restore: folding into a RESTORED batch
+        // (the refused-send sequence) still dedups against what was there.
+        let mut batch = AckBatch::new();
+        batch.merge(vec![activation(9, 1)]);
+        let taken = batch.take();
+        batch.restore(taken);
+        batch.merge(vec![activation(9, 1), activation(9, 4)]);
+        assert_eq!(
+            batch.take(),
+            vec![activation(9, 1), activation(9, 4)],
+            "merge after restore dedups against the restored batch"
+        );
+    }
+
+    #[test]
+    fn ack_batch_refused_send_sequence_rolls_the_batch_back() {
+        // The documented sequence: take → the publish is REFUSED →
+        // restore → the next send carries the batch again.
+        let mut batch = AckBatch::new();
+        batch.merge(vec![activation(9, 1), selection(9, 2)]);
+
+        let staged = batch.take(); // staged into the publish frame's events leg
+        let refused = PluginResponse::PatchRejected; // stand-in for the refused publish
+        match refused {
+            PluginResponse::PatchRejected => batch.restore(staged),
+            PluginResponse::PatchApplied => {} // the ack leg absorbed the events
+        }
+
+        assert_eq!(
+            batch.take(),
+            vec![activation(9, 1), selection(9, 2)],
+            "after the refused send, the next send carries the batch"
+        );
+    }
+}
+
+/// The two publish outcomes an AckBatch flow can meet (the refusing twin of
+/// the applied ack) — a LOCAL test stand-in mirroring the wire's
+/// `PatchApplied` / `PatchRejected` shape without reaching the host-feature
+/// protocol module (widgets.rs is feature-independent).
+#[cfg(test)]
+enum PluginResponse {
+    PatchApplied,
+    PatchRejected,
 }

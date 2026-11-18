@@ -11,8 +11,9 @@
 //!   [`PanelScene::validate`] — a scene the validator rejects is returned as
 //!   an [`Err`], never swallowed and never panicking.
 //!
-//! - [`fixture_graph_scene`], [`try_fixture_graph_scene`], and
-//!   [`fixture_scene_with_files`] are deterministic fixtures for tests,
+//! - [`fixture_graph_scene`], [`try_fixture_graph_scene`],
+//!   [`fixture_scene_with_files`], and [`fixture_widget_surface`] are
+//!   deterministic fixtures for tests,
 //!   benches, and host-side projection tests. They are NOT runtime data.
 //!   Stability contract: the same arguments produce a byte-identical scene —
 //!   no randomness (only an `Lcg` with published constants and a documented
@@ -60,6 +61,10 @@ use crate::scene::{
     AssetKind, CubicSegment, DragMeta, MarkerKind, MAX_PATCH_OPS, MAX_SCENE_DEPTH,
     MAX_SCENE_NODES, PanelScene, PanelScenePatch, Rect2D, SceneColor, SceneElement, SceneError,
     SceneOp, SceneRevision, StableId, Stroke, ThemeColor, Vec2,
+};
+use crate::widgets::{
+    CellKind, PanelTableDef, TableCell, TableColumnDef, TableRowDef, TableRef, WidgetError,
+    WidgetNode, WidgetSurface, MAX_WIDGET_ROWS_INITIAL,
 };
 use std::collections::HashSet;
 
@@ -1019,6 +1024,117 @@ pub fn fixture_scene_with_files(
 }
 
 // ---------------------------------------------------------------------------
+// Deterministic widget-surface fixture (the table twin)
+// ---------------------------------------------------------------------------
+
+/// Deterministic widget-surface fixture: one typed-table registry entry —
+/// a `rows` × `columns` grid — plus the single [`WidgetNode::Table`] root
+/// that references it: exactly the [`PanelTableDef`]/[`TableRowDef`] /
+/// [`WidgetNode`] structure host-side mount tests currently hand-roll (the
+/// LIVE demo's id scheme: table `200`, columns `201..`, row keys `300..`,
+/// the referencing widget `120`).
+///
+/// Column `c` (0-based) cycles the three scalar kinds the patch skeleton
+/// can write — `text` → `number` → `bool` — with kind-matched cells: the
+/// text cell of row `i` is `format!("cell {c}-{i}")`, the number cell
+/// `i as f64`, the bool cell `i % 2 == 0`. `total_rows: None` (fully
+/// materialized; windowing is the paged contract's business, not a
+/// fixture's). The same determinism contract as [`fixture_graph_scene`]:
+/// the same `(revision, rows, columns)` produce a byte-identical surface —
+/// no randomness, no environment reads, no clock.
+///
+/// Checked form (the [`try_fixture_graph_scene`] discipline): `rows` /
+/// `columns` past the shared payload magnitude
+/// ([`MAX_WIDGET_ROWS_INITIAL`]) refuse [`WidgetError::BudgetExceeded`]
+/// with the exact numbers before any allocation (saturating math keeps
+/// hostile `usize` arguments deterministic), and the built surface runs
+/// [`WidgetSurface::validate`] before returning — a fixture never returns
+/// an invalid surface.
+pub fn fixture_widget_surface(
+    revision: u64,
+    rows: usize,
+    columns: usize,
+) -> Result<WidgetSurface, WidgetError> {
+    if rows > MAX_WIDGET_ROWS_INITIAL {
+        return Err(WidgetError::BudgetExceeded {
+            current: rows,
+            max: MAX_WIDGET_ROWS_INITIAL,
+        });
+    }
+    if columns > MAX_WIDGET_ROWS_INITIAL {
+        return Err(WidgetError::BudgetExceeded {
+            current: columns,
+            max: MAX_WIDGET_ROWS_INITIAL,
+        });
+    }
+
+    // The demo's identity scheme (pinned in the doc comment): the registry
+    // lives in the FOREIGN table-id space; the referencing widget lives in
+    // the surface-wide widget namespace — two id spaces, one fixture.
+    const FIXTURE_TABLE_ID: u64 = 200;
+    const FIXTURE_COLUMN_BASE: u64 = 201;
+    const FIXTURE_ROW_BASE: u64 = 300;
+    const FIXTURE_TABLE_REF_ID: u64 = 120;
+
+    // The three scalar kinds cycle — the kinds a `WidgetOp::TableCell`
+    // patch can write (the display-only kinds are plugin-published, not a
+    // fixture's business).
+    const KINDS: [CellKind; 3] = [CellKind::Text, CellKind::Number, CellKind::Bool];
+
+    let columns_def: Vec<TableColumnDef> = (0..columns)
+        .map(|c| TableColumnDef {
+            id: StableId(FIXTURE_COLUMN_BASE + c as u64),
+            label: format!("col-{c}"),
+            kind: KINDS[c % KINDS.len()],
+            width_hint: None,
+            stretch: false,
+        })
+        .collect();
+
+    let rows_def: Vec<TableRowDef> = (0..rows)
+        .map(|i| {
+            let cells: Vec<TableCell> = (0..columns)
+                .map(|c| match KINDS[c % KINDS.len()] {
+                    CellKind::Text => TableCell::Text(format!("cell {c}-{i}")),
+                    CellKind::Number => TableCell::Number(i as f64),
+                    CellKind::Bool => TableCell::Bool(i % 2 == 0),
+                    // The cycle above only ever produces the scalar kinds;
+                    // this arm is structurally unreachable.
+                    _ => unreachable!("fixture kind cycle is scalar-only"),
+                })
+                .collect();
+            TableRowDef {
+                key: StableId(FIXTURE_ROW_BASE + i as u64),
+                cells,
+                domain_ref: None,
+            }
+        })
+        .collect();
+
+    let table_id = StableId(FIXTURE_TABLE_ID);
+    let def = PanelTableDef {
+        id_table: table_id,
+        columns: columns_def,
+        total_rows: None,
+        rows: rows_def,
+    };
+
+    let surface = WidgetSurface {
+        revision: SceneRevision(revision),
+        roots: vec![WidgetNode::Table(TableRef {
+            id: StableId(FIXTURE_TABLE_REF_ID),
+            name: Some("fixture table".to_owned()),
+            enabled: true,
+            visible: true,
+            table_id,
+        })],
+        tables: std::collections::BTreeMap::from([(table_id, def)]),
+    };
+    surface.validate()?;
+    Ok(surface)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1026,6 +1142,7 @@ pub fn fixture_scene_with_files(
 mod tests {
     use super::*;
     use crate::scene::{MAX_PATCH_OPS, MAX_SCENE_DEPTH, MAX_SCENE_NODES, Rgba8};
+    use crate::widgets::{WidgetCellValue, WidgetOp, WidgetSurfacePatch};
 
     fn v2(x: f64, y: f64) -> Vec2 {
         Vec2([x, y])
@@ -2019,5 +2136,116 @@ mod tests {
             snapshot,
             "refusals must not touch the already-patched scene"
         );
+    }
+
+    // -- the widget-surface fixture twin (item 7) ----------------------------
+
+    #[test]
+    fn fixture_widget_surface_is_deterministic() {
+        let first = fixture_widget_surface(1, 4, 3).expect("fixture builds");
+        let second = fixture_widget_surface(1, 4, 3).expect("fixture builds");
+        // Same arguments → byte-identical surfaces (the graph fixture's own
+        // contract, mirrored here).
+        assert_eq!(
+            bincode::serialize(&first).expect("serialize first"),
+            bincode::serialize(&second).expect("serialize second"),
+            "same (revision, rows, columns) must encode to identical bytes"
+        );
+        assert_eq!(first, second);
+        assert_eq!(first.revision, SceneRevision(1));
+
+        // A different revision steers different (still deterministic) bytes.
+        assert_ne!(
+            bincode::serialize(&fixture_widget_surface(2, 4, 3).expect("fixture builds"))
+                .expect("serialize other"),
+            bincode::serialize(&first).expect("serialize first"),
+        );
+    }
+
+    #[test]
+    fn fixture_widget_surface_is_valid_and_carries_the_demo_id_scheme() {
+        let surface = fixture_widget_surface(7, 4, 3).expect("fixture builds");
+        // The real gate, not a replica.
+        assert_eq!(surface.validate(), Ok(()));
+
+        // One root: the TableRef (widget 120) naming table 200.
+        assert_eq!(surface.roots.len(), 1);
+        let WidgetNode::Table(reference) = &surface.roots[0] else {
+            panic!("expected the TableRef root");
+        };
+        assert_eq!(reference.id, StableId(120));
+        assert_eq!(reference.table_id, StableId(200));
+
+        // The registry: exactly the referenced table, `rows` × `columns`.
+        let def = surface.tables.get(&StableId(200)).expect("registry entry");
+        assert_eq!(def.id_table, StableId(200));
+        assert_eq!(def.columns.len(), 3);
+        assert_eq!(def.rows.len(), 4);
+        assert_eq!(def.total_rows, None);
+        // Kind cycle text → number → bool; row keys `300..`.
+        for (i, row) in def.rows.iter().enumerate() {
+            assert_eq!(row.key, StableId(300 + i as u64));
+            assert_eq!(row.cells[0], TableCell::Text(format!("cell 0-{i}")));
+            assert_eq!(row.cells[1], TableCell::Number(i as f64));
+            assert_eq!(row.cells[2], TableCell::Bool(i % 2 == 0));
+        }
+    }
+
+    #[test]
+    fn fixture_widget_surface_applies_a_real_cell_patch() {
+        let mut surface = fixture_widget_surface(1, 2, 3).expect("fixture builds");
+        // The real validate/apply path: one typed-cell patch against the
+        // fixture's own addresses (table 200, row key 300, column 201).
+        surface
+            .apply_patch(WidgetSurfacePatch {
+                base_revision: SceneRevision(1),
+                revision: SceneRevision(2),
+                ops: vec![WidgetOp::TableCell {
+                    table: StableId(200),
+                    key: StableId(300),
+                    column: StableId(201),
+                    value: WidgetCellValue::Text("edited".to_owned()),
+                }],
+            })
+            .expect("the cell patch applies");
+        assert_eq!(surface.revision, SceneRevision(2));
+        surface.validate().expect("still valid after the patch");
+
+        let def = surface.tables.get(&StableId(200)).expect("registry entry");
+        assert_eq!(
+            def.rows[0].cells[0],
+            TableCell::Text("edited".to_owned()),
+            "the patch landed on the addressed cell"
+        );
+    }
+
+    #[test]
+    fn fixture_widget_surface_refuses_over_budget_before_allocating() {
+        // Checked form: past MAX_WIDGET_ROWS_INITIAL rows the fixture
+        // refuses with the exact numbers (the try_fixture_graph_scene
+        // discipline), never shrinks and never panics.
+        let error = fixture_widget_surface(1, MAX_WIDGET_ROWS_INITIAL + 1, 2)
+            .expect_err("over-budget rows must refuse");
+        assert_eq!(
+            error,
+            crate::widgets::WidgetError::BudgetExceeded {
+                current: MAX_WIDGET_ROWS_INITIAL + 1,
+                max: MAX_WIDGET_ROWS_INITIAL,
+            }
+        );
+
+        let error = fixture_widget_surface(1, 2, MAX_WIDGET_ROWS_INITIAL + 1)
+            .expect_err("over-budget columns must refuse");
+        assert!(matches!(
+            error,
+            crate::widgets::WidgetError::BudgetExceeded { .. }
+        ));
+
+        // The empty grid is valid (a fully materialized, empty registry
+        // entry with its referencing root).
+        fixture_widget_surface(1, 0, 0)
+            .expect("empty grid builds")
+            .validate()
+            .expect("empty grid validates");
     }
 }

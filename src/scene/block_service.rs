@@ -485,6 +485,11 @@ fn erase_definition(scene: &mut Scene, stored: &str, references: &[BlockReferenc
         .filter(|h| scene.document.get_entity(*h).is_some())
         .collect();
     let erased = present.len();
+    let removed_changes: Vec<(Handle, crate::scene::ChangeKind)> = present
+        .iter()
+        .copied()
+        .map(|h| (h, crate::scene::ChangeKind::Removed))
+        .collect();
     scene.erase_entities(&present);
     // `erase_entities` honours layer locks; a member on a locked layer would
     // otherwise dangle against a record that no longer exists.
@@ -494,12 +499,14 @@ fn erase_definition(scene: &mut Scene, stored: &str, references: &[BlockReferenc
         .filter(|h| scene.document.get_entity(*h).is_some())
         .collect();
     for handle in survivors {
+        scene.remove_image_definition_reactor(handle);
         scene.document.remove_entity(handle);
+        scene.clear_derived_caches_for(handle);
     }
     scene.document.block_records.remove(stored);
     drop_orphaned_draw_order_tables(&mut scene.document);
     scene.invalidate_dependency_index();
-    scene.bump_geometry();
+    scene.bump_entities_restyled_with_block_deps(&removed_changes, &[], &[stored.to_string()]);
     erased
 }
 
@@ -571,29 +578,42 @@ pub fn rename(
     if let Some(EntityType::Block(block)) = scene.document.get_entity_mut(marker) {
         block.name = new.clone();
     }
-    repoint_name_references(scene, &stored, &new);
+    let (repointed, changed_dim_styles) = repoint_name_references(scene, &stored, &new);
     scene.invalidate_dependency_index();
-    scene.bump_geometry();
+    if !changed_dim_styles.is_empty() {
+        scene.invalidate_dim_style_dependencies_many(&changed_dim_styles);
+    }
+    scene.bump_entities_restyled_with_block_deps(&repointed, &[handle], &[stored, new]);
     Ok(handle)
 }
 
 /// Every name-based reference follows a rename: INSERTs, a dimension's
 /// picture-block name and the dimension styles' arrow-block names.
-fn repoint_name_references(scene: &mut Scene, stored: &str, new: &str) {
+fn repoint_name_references(
+    scene: &mut Scene,
+    stored: &str,
+    new: &str,
+) -> (Vec<(Handle, crate::scene::ChangeKind)>, Vec<String>) {
+    let mut repointed = Vec::new();
     for entity in scene.document.entities_mut() {
         match entity {
             EntityType::Insert(insert) if insert.block_name.eq_ignore_ascii_case(stored) => {
                 insert.block_name = new.to_owned();
+                repointed.push((insert.common.handle, crate::scene::ChangeKind::Modified));
             }
             EntityType::Dimension(dimension)
                 if dimension.base().block_name.eq_ignore_ascii_case(stored) =>
             {
+                let h = dimension.base().common.handle;
                 dimension.base_mut().block_name = new.to_owned();
+                repointed.push((h, crate::scene::ChangeKind::Modified));
             }
             _ => {}
         }
     }
+    let mut changed_dim_styles = Vec::new();
     for style in scene.document.dim_styles.iter_mut() {
+        let mut touched = false;
         for field in [
             &mut style.dimblk_name,
             &mut style.dimblk1_name,
@@ -601,9 +621,14 @@ fn repoint_name_references(scene: &mut Scene, stored: &str, new: &str) {
         ] {
             if field.eq_ignore_ascii_case(stored) {
                 *field = new.to_owned();
+                touched = true;
             }
         }
+        if touched {
+            changed_dim_styles.push(style.name.clone());
+        }
     }
+    (repointed, changed_dim_styles)
 }
 
 fn record_of<'a>(document: &'a Document, name: &str) -> Result<&'a BlockRecord, BlockServiceError> {

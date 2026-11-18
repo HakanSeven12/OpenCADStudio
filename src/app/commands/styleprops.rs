@@ -4841,7 +4841,7 @@ impl OpenCADStudio {
             false
         };
         if ok {
-            if type_str != "LAYER" {
+            if type_str != "LAYER" && !block {
                 self.tabs[i].scene.bump_geometry_no_blocks();
             }
             if type_str == "BLOCK" {

@@ -684,15 +684,21 @@ impl Scene {
             b.name = new.to_string();
         }
         // Repoint every INSERT reference so all instances keep resolving.
+        let mut repointed = Vec::new();
         for e in self.document.entities_mut() {
             if let EntityType::Insert(ins) = e {
                 if ins.block_name.eq_ignore_ascii_case(old) {
                     ins.block_name = new.to_string();
+                    repointed.push((ins.common.handle, ChangeKind::Modified));
                 }
             }
         }
         self.invalidate_dependency_index();
-        self.bump_geometry();
+        self.bump_entities_restyled_with_block_deps(
+            &repointed,
+            &[record],
+            &[old.to_string(), new.to_string()],
+        );
         true
     }
 
@@ -1237,6 +1243,7 @@ impl Scene {
             .get(name)
             .map(|br| (br.handle, br.block_entity_handle));
 
+        let mut member_changes: Vec<(Handle, ChangeKind)> = Vec::new();
         let (br_handle, block_handle, stale_end) =
             if let Some((existing_br_h, existing_blk_h)) = existing {
                 if !options.redefine {
@@ -1255,6 +1262,8 @@ impl Scene {
                 for h in owned {
                     self.remove_image_definition_reactor(h);
                     self.document.remove_entity(h);
+                    self.clear_derived_caches_for(h);
+                    member_changes.push((h, ChangeKind::Removed));
                 }
                 // Update existing BlockRecord fields
                 if let Some(br) = self.document.block_records.get_mut(name) {
@@ -1340,6 +1349,7 @@ impl Scene {
             };
             // An image draws from its cached model, not the entity (#2149).
             self.reseed_derived_caches(handle);
+            member_changes.push((handle, ChangeKind::Added));
             if options.mode != crate::ui::window::block_definition::BlockObjectMode::Retain {
                 self.erase_entities(&[old_handle]);
             }
@@ -1390,8 +1400,12 @@ impl Scene {
             br.preview_data = thumbnail;
         }
 
-        // Advance the block epoch so all consumers and viewport renderers re-tessellate
-        self.bump_geometry();
+        // Advance the block epoch for the touched definition and any consumers.
+        self.bump_entities_restyled_with_block_deps(
+            &member_changes,
+            &[br_handle],
+            &[name.to_string()],
+        );
         Ok(insert_handle)
     }
 
@@ -1712,12 +1726,44 @@ impl Scene {
         }
     }
 
+    pub(crate) fn clear_derived_caches_for(&mut self, handle: Handle) {
+        self.hatches.remove(&handle);
+        self.images.remove(&handle);
+        self.meshes.remove(&handle);
+        self.block_meshes.remove(&handle);
+        self.solid_models.remove(&handle);
+    }
+
+    /// Create a block definition from already-owned entities (no source
+    /// entities in the document are read or erased). Entities are translated by
+    /// `-base` into block-local coordinates, added into the new block record,
+    /// and sealed with a BlockEnd terminator.
     pub fn define_block_from_owned_entities(
         &mut self,
         entities: Vec<EntityType>,
         name: &str,
         base: glam::DVec3,
     ) -> Result<Vec<Handle>, String> {
+        let (_, handles) = self.define_block_from_owned_entities_with_bump(entities, name, base, true)?;
+        Ok(handles)
+    }
+
+    pub(crate) fn define_block_from_owned_entities_unbumped(
+        &mut self,
+        entities: Vec<EntityType>,
+        name: &str,
+        base: glam::DVec3,
+    ) -> Result<(Handle, Vec<Handle>), String> {
+        self.define_block_from_owned_entities_with_bump(entities, name, base, false)
+    }
+
+    fn define_block_from_owned_entities_with_bump(
+        &mut self,
+        entities: Vec<EntityType>,
+        name: &str,
+        base: glam::DVec3,
+        bump: bool,
+    ) -> Result<(Handle, Vec<Handle>), String> {
         let name = name.trim();
         if name.is_empty() {
             return Err("Block name cannot be empty.".into());
@@ -1782,10 +1828,21 @@ impl Scene {
         // Solids, surfaces and meshes of a definition draw through their
         // instanced block meshes, which only a tessellation pass creates.
         self.refresh_meshes_for_handles(&entity_handles);
-        // Block defns don't render on their own, but the geometry cache must
-        // pick up the new definition so the interactive insert can preview it.
-        self.bump_geometry();
-        Ok(entity_handles)
+        if bump {
+            let changes: Vec<(Handle, ChangeKind)> = entity_handles
+                .iter()
+                .copied()
+                .map(|h| (h, ChangeKind::Added))
+                .collect();
+            // Block defns don't render on their own, but the geometry cache must
+            // pick up the new definition so the interactive insert can preview it.
+            self.bump_entities_restyled_with_block_deps(
+                &changes,
+                &[br_handle],
+                &[name.to_string()],
+            );
+        }
+        Ok((br_handle, entity_handles))
     }
 
     /// Recreate a block definition verbatim — the entities are already in
@@ -1857,7 +1914,16 @@ impl Scene {
         Self::sync_attribute_flag(&mut self.document, name);
         self.refresh_meshes_for_handles(&added);
         if bump {
-            self.bump_geometry();
+            let changes: Vec<(Handle, ChangeKind)> = added
+                .iter()
+                .copied()
+                .map(|h| (h, ChangeKind::Added))
+                .collect();
+            self.bump_entities_restyled_with_block_deps(
+                &changes,
+                &[br_handle],
+                &[name.to_string()],
+            );
         }
     }
 
@@ -1916,23 +1982,32 @@ impl Scene {
         for h in &owned {
             self.remove_image_definition_reactor(*h);
             self.document.remove_entity(*h);
+            self.clear_derived_caches_for(*h);
         }
         if let Some(EntityType::Block(block)) = self.document.get_entity_mut(block_handle) {
             block.base_point = base_point;
         }
         // The old contents' meshes go with them; the new ones are built.
-        let mut changed = owned;
+        let mut added = Vec::with_capacity(entities.len());
+        let mut changes: Vec<(Handle, ChangeKind)> = owned
+            .iter()
+            .copied()
+            .map(|h| (h, ChangeKind::Removed))
+            .collect();
         for mut entity in entities {
             Self::reset_clone_subhandles(&mut self.document, &mut entity);
             entity.common_mut().handle = Handle::NULL;
             entity.common_mut().owner_handle = br_handle;
             self.ensure_image_definition(&mut entity);
-            changed.extend(self.document.add_entity(entity).ok());
+            if let Ok(h) = self.document.add_entity(entity) {
+                added.push(h);
+                changes.push((h, ChangeKind::Added));
+            }
         }
         self.close_block_definition(name, br_handle, stale_end)?;
         Self::sync_attribute_flag(&mut self.document, name);
-        self.refresh_meshes_for_handles(&changed);
-        self.bump_geometry();
+        self.refresh_meshes_for_handles(&added);
+        self.bump_entities_restyled_with_block_deps(&changes, &[br_handle], &[name.to_string()]);
         Ok(())
     }
 

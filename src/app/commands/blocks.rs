@@ -593,9 +593,9 @@ impl OpenCADStudio {
                     }
                     match self.tabs[i]
                         .scene
-                        .define_block_from_owned_entities(entities, &name, base)
+                        .define_block_from_owned_entities_unbumped(entities, &name, base)
                     {
-                        Ok(entity_handles) => {
+                        Ok((br_handle, entity_handles)) => {
                             let remaps: Vec<_> = ext_roots
                                 .iter()
                                 .filter_map(|(&idx, &root)| {
@@ -620,12 +620,21 @@ impl OpenCADStudio {
                                     -base,
                                 );
                             }
-                            scene.bump_geometry();
+                            let changes: Vec<(document::Handle, crate::scene::ChangeKind)> =
+                                entity_handles
+                                    .iter()
+                                    .copied()
+                                    .map(|h| (h, crate::scene::ChangeKind::Added))
+                                    .collect();
+                            scene.bump_entities_restyled_with_block_deps(
+                                &changes,
+                                &[br_handle],
+                                std::slice::from_ref(&name),
+                            );
                             // Block defined; now place it interactively so the
                             // user picks the drop point (insertion uses the
                             // clipboard lower-left corner as the block's base). The
                             // clipboard wires rubber-band under the cursor.
-                            self.tabs[i].scene.populate_meshes_from_document();
                             self.tabs[i].dirty = true;
                             let wires = self.tabs[i].scene.wires_for_entities(&self.clipboard);
                             use crate::modules::insert::insert_block::InsertBlockCommand;

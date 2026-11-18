@@ -143,7 +143,7 @@ impl OpenCADStudio {
         read: &UnderlayAttachRead,
     ) -> Task<Message> {
         use crate::ui::window::pdf_password_dialog::PdfPasswordThen;
-        let (pages, page_size, sub_per_master) = match read {
+        let (pages, sizes, units) = match read {
             UnderlayAttachRead::Failed(e) => {
                 self.command_line
                     .push_error(crate::tf!("PDFATTACH: {e}").as_ref());
@@ -161,15 +161,15 @@ impl OpenCADStudio {
             }
             UnderlayAttachRead::Items {
                 pages,
-                page_size,
-                sub_per_master,
+                sizes,
+                units,
                 remembered,
             } => {
                 if *remembered {
                     self.command_line
                         .push_output(&crate::scene::model::pdf_password::remembered_notice(path));
                 }
-                (pages, page_size, *sub_per_master)
+                (pages, sizes, units)
             }
         };
         let i = self.active_tab;
@@ -191,8 +191,8 @@ impl OpenCADStudio {
             &mut state,
             path,
             pages.clone(),
-            page_size.clone(),
-            sub_per_master,
+            sizes.clone(),
+            units.clone(),
         );
         let plane = if self.tabs[i].editing_model_space() {
             self.tabs[i].ucs_xform().working_plane()
@@ -207,8 +207,8 @@ impl OpenCADStudio {
 
     fn load_pdf_attach_file(&self, state: &mut PdfAttachState, path: &str) {
         let pages = item_thumbs(state.kind, path);
-        let (page_size, sub_per_master) = first_item_size(state.kind, path, &pages);
-        self.set_pdf_attach_file(state, path, pages, page_size, sub_per_master);
+        let (sizes, units) = item_sizes(state.kind, path, &pages);
+        self.set_pdf_attach_file(state, path, pages, sizes, units);
     }
 
     /// Put a file that was read into the Attach window.
@@ -217,8 +217,8 @@ impl OpenCADStudio {
         state: &mut PdfAttachState,
         path: &str,
         pages: Vec<crate::ui::window::pdf_dialogs::PageThumb>,
-        page_size: String,
-        sub_per_master: f64,
+        sizes: Vec<String>,
+        units: Vec<f64>,
     ) {
         state.path = path.to_string();
         state.name = file_stem(path);
@@ -226,8 +226,10 @@ impl OpenCADStudio {
         state.selected = vec![0];
         state.anchor = 0;
         state.found_in = crate::entities::underlay::display_path(path);
-        state.page_size = page_size;
-        state.sub_per_master = sub_per_master;
+        state.page_size = sizes.first().cloned().unwrap_or_default();
+        state.sub_per_master = units.first().copied().unwrap_or(1.0);
+        state.item_sizes = sizes;
+        state.item_units = units;
         state.sub_units = false;
         state.saved_path =
             crate::entities::underlay::display_path(&self.pdf_stored_path(path, state.path_type.0));
@@ -832,9 +834,14 @@ impl OpenCADStudio {
                         state.selected = vec![page];
                         state.anchor = page;
                     }
-                    let first = state.page_labels().into_iter().next().unwrap_or_default();
-                    state.page_size = item_size_text(state.kind, &state.path, &first);
-                    state.sub_per_master = sub_per_master(state.kind, &state.path, &first);
+                    // The sizes and units were read with the file.
+                    let first = state.selected.first().copied();
+                    state.page_size = first
+                        .and_then(|item| state.item_sizes.get(item).cloned())
+                        .unwrap_or_default();
+                    state.sub_per_master = first
+                        .and_then(|item| state.item_units.get(item).copied())
+                        .unwrap_or(1.0);
                     Self::refresh_pdf_attach_geopdf(&self.tabs[i].scene, plane, state);
                 }
             }
@@ -1369,21 +1376,22 @@ fn read_pdf_for_import_window(path: &str) -> PdfImportFileRead {
     }
 }
 
-/// The size text and the sub units per master unit of the first page,
-/// sheet or model.
-fn first_item_size(
+/// The size text and the sub units per master unit of each page, sheet
+/// or model.
+fn item_sizes(
     kind: document::entities::UnderlayType,
     path: &str,
     pages: &[crate::ui::window::pdf_dialogs::PageThumb],
-) -> (String, f64) {
-    let first = pages
-        .first()
-        .map(|page| page.label.clone())
-        .unwrap_or_else(|| "1".to_string());
-    (
-        item_size_text(kind, path, &first),
-        sub_per_master(kind, path, &first),
-    )
+) -> (Vec<String>, Vec<f64>) {
+    pages
+        .iter()
+        .map(|page| {
+            (
+                item_size_text(kind, path, &page.label),
+                sub_per_master(kind, path, &page.label),
+            )
+        })
+        .unzip()
 }
 
 /// The Attach window's read of a PDF, DWF or DGN file: the password the
@@ -1423,11 +1431,11 @@ fn read_for_attach_window(
         return UnderlayAttachRead::NoItems;
     }
     let pages = item_thumbs(kind, path);
-    let (page_size, sub_per_master) = first_item_size(kind, path, &pages);
+    let (sizes, units) = item_sizes(kind, path, &pages);
     UnderlayAttachRead::Items {
         pages,
-        page_size,
-        sub_per_master,
+        sizes,
+        units,
         remembered,
     }
 }
@@ -2043,6 +2051,60 @@ mod underlay_attach_read_tests {
             app.command_line.last_error.as_deref(),
             Some("Attach underlay cancelled: a different window opened while the file was read.")
         );
+    }
+
+    /// A page change shows the size that the read found for that page, and
+    /// does not read the file again: bytes that became bad after the read
+    /// change nothing.
+    #[test]
+    fn a_page_change_does_not_read_the_file() {
+        let mut app = new_app();
+        let path = "underlay-attach-page-change.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_pages()));
+        let task = app.open_pdf_attach_dialog(path);
+        app.drive_headless_task(task).expect("the read task");
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(b"not a PDF".to_vec()));
+        let _ = app.update(Message::PdfDialog(PdfDialogMsg::AttachPage(1)));
+        let state = app.pdf_attach.as_ref().expect("the window's state");
+        assert_eq!(state.selected, vec![1]);
+        assert_eq!(state.page_size, "2.0000 × 1.0000");
+        let _ = app.update(Message::PdfDialog(PdfDialogMsg::AttachPage(0)));
+        let state = app.pdf_attach.as_ref().expect("the window's state");
+        assert_eq!(state.page_size, "10.0000 × 5.0000");
+        assert_eq!(state.sub_per_master, 1.0);
+    }
+
+    /// A page change takes the units of that item from what the read
+    /// found (a DGN file has units for each model).
+    #[test]
+    fn a_page_change_takes_the_units_of_that_item() {
+        let mut app = new_app();
+        let task = app.read_underlay_for_attach_with(
+            UnderlayType::Dgn,
+            "two-models.dgn",
+            false,
+            |_, _, _| {
+                let thumb = |label: &str| crate::ui::window::pdf_dialogs::PageThumb {
+                    label: label.to_string(),
+                    image: None,
+                };
+                UnderlayAttachRead::Items {
+                    pages: vec![thumb("Default"), thumb("Detail")],
+                    sizes: vec!["1 × 1".to_string(), "2 × 2".to_string()],
+                    units: vec![1000.0, 250.0],
+                    remembered: false,
+                }
+            },
+        );
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.pdf_attach.as_ref().map(|s| s.sub_per_master),
+            Some(1000.0)
+        );
+        let _ = app.update(Message::PdfDialog(PdfDialogMsg::AttachPage(1)));
+        let state = app.pdf_attach.as_ref().expect("the window's state");
+        assert_eq!(state.sub_per_master, 250.0);
+        assert_eq!(state.page_size, "2 × 2");
     }
 
     /// The window of a second read (Browse) takes the place of the first.

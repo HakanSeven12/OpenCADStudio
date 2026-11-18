@@ -642,6 +642,10 @@ pub struct PdfAttachState {
     pub found_in: String,
     pub saved_path: String,
     pub page_size: String,
+    /// The size text and the DGN sub units per master unit of each page,
+    /// sheet or model, read with the file: a page change does not read.
+    pub item_sizes: Vec<String>,
+    pub item_units: Vec<f64>,
     pub details: bool,
 }
 
@@ -676,6 +680,8 @@ impl PdfAttachState {
             found_in: String::new(),
             saved_path: String::new(),
             page_size: String::new(),
+            item_sizes: Vec::new(),
+            item_units: Vec::new(),
             details: memory.details,
         }
     }
@@ -1764,13 +1770,13 @@ pub enum UnderlayAttachRead {
         stage: crate::scene::model::pdf_password::Stage,
         remembered: bool,
     },
-    /// The pages (PDF), sheets (DWF) or models (DGN), with the size and the
-    /// sub units per master unit of the first; `remembered` when a password
-    /// supplied earlier opened the file.
+    /// The pages (PDF), sheets (DWF) or models (DGN), with the size text
+    /// and the sub units per master unit of each; `remembered` when a
+    /// password supplied earlier opened the file.
     Items {
         pages: Vec<PageThumb>,
-        page_size: String,
-        sub_per_master: f64,
+        sizes: Vec<String>,
+        units: Vec<f64>,
         remembered: bool,
     },
 }

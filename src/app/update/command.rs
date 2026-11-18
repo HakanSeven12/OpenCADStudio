@@ -1709,7 +1709,15 @@ impl OpenCADStudio {
         if self.tabs[i].active_cmd.is_some() {
             let result = self.tabs[i].active_cmd.as_mut().map(|c| c.on_escape());
             if let Some(r) = result {
-                return self.apply_cmd_result(r);
+                let task = self.apply_cmd_result(r);
+                // Ending a command refocuses the command line; Esc that ended
+                // it gives the keyboard back to the drawing, so a Shift+key
+                // shortcut runs at once. A command that keeps running on Esc
+                // (a multi-stage command's first Esc) keeps the focus.
+                if self.tabs[self.active_tab].active_cmd.is_none() {
+                    return task.chain(self.unfocus_widgets());
+                }
+                return task;
             }
         } else {
             // In a viewport's model space Esc deselects too and the viewport

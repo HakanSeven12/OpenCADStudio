@@ -11071,3 +11071,56 @@ mod test_block_persistence_refusal_tests {
     }
 }
 
+
+// The wblock bridge op can shift the exported selection so its bounds minimum
+// lands on the origin; that opt-in path had no test.
+mod wblock_normalized_export_tests {
+    use super::super::*;
+
+    #[test]
+    fn a_normalized_wblock_export_moves_the_selection_to_the_origin() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.automation_op(r#"{"op":"run","cmd":"LINE 10,10 20,20"}"#);
+        let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+            ["entities"][0]["handle"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let doc = app.automation_op(r#"{"protocol":1,"op":"state"}"#)["document_id"]
+            .as_u64()
+            .unwrap();
+
+        let path = std::env::temp_dir().join(format!("ocs_wblock_norm_{}.dxf", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let escaped = path.to_string_lossy().replace('\\', "\\\\");
+        let result = app.automation_op(&format!(
+            r#"{{"protocol":1,"op":"wblock","request_id":"wb-norm","document_id":{doc},"path":"{escaped}","handles":["{handle}"],"normalize":true}}"#
+        ));
+        assert_eq!(result["ok"], true, "{}", result["error"]);
+
+        let opened = app.automation_op(&format!(r#"{{"op":"open","path":"{escaped}"}}"#));
+        assert_eq!(opened["ok"], true, "{}", opened["error"]);
+        let line = &app.automation_op(r#"{"op":"query","type":"Line"}"#)["entities"][0];
+        let start = line["start"].as_array().unwrap();
+        let end = line["end"].as_array().unwrap();
+        assert_eq!(
+            (
+                start[0].as_f64().unwrap(),
+                start[1].as_f64().unwrap(),
+                end[0].as_f64().unwrap(),
+                end[1].as_f64().unwrap()
+            ),
+            (0.0, 0.0, 10.0, 10.0),
+            "the exported line's bounds minimum is now the origin: {line}"
+        );
+        drop(app);
+        let sidecar = path.with_file_name(format!(
+            ".{}.ocs.lock",
+            path.file_name().unwrap().to_string_lossy()
+        ));
+        let _ = std::fs::remove_file(sidecar);
+        let _ = std::fs::remove_file(&path);
+    }
+}
+

@@ -10209,6 +10209,7 @@ find =
     .selected-count = { $count } objects picked
     .list-results = List results
     .more-options = More options
+    .options = Options
     .search-options = Search options
     .text-types = Text types
     .match-case = Match case

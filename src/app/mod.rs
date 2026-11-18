@@ -663,6 +663,10 @@ pub(crate) struct FindReplaceState {
     pub matches: Vec<FindResult>,
     /// The listed matches (List results).
     pub results: Vec<FindResult>,
+    /// The highlighted rows of the list: a click picks one, Ctrl+click adds
+    /// or removes one, Shift+click a run from `anchor`.
+    pub highlighted: Vec<FindMatchKey>,
+    pub anchor: Option<usize>,
     /// Objects changed since the search started, counted once each.
     pub changed: Vec<(document::Handle, Option<usize>)>,
     /// One undo step for the whole window.

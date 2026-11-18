@@ -10126,6 +10126,7 @@ find =
     .selected-count = { $count } nesne seçildi
     .list-results = Sonuçları listele
     .more-options = Diğer seçenekler
+    .options = Seçenekler
     .search-options = Arama seçenekleri
     .text-types = Metin türleri
     .match-case = Büyük/küçük harf duyarlı

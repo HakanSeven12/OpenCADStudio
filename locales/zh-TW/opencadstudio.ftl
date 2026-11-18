@@ -10194,6 +10194,7 @@ find =
     .selected-count = 已選取 { $count } 個物件
     .list-results = 列出結果
     .more-options = 更多選項
+    .options = Options
     .search-options = 搜尋選項
     .text-types = 文字類型
     .match-case = 區分大小寫

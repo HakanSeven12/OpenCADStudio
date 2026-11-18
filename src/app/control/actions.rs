@@ -3086,7 +3086,7 @@ impl OpenCADStudio {
             // whole_words, wildcards, xrefs, blocks, ignore_hidden,
             // diacritics, half_full, attributes, dimensions, texts, tables,
             // link_texts, links), "find", "replace_one", "replace_all",
-            // "row=<n>", "zoom", "select_row", "select_all", "ok", "help",
+            // "row=<n>[,ctrl|,shift]", "zoom", "select_row", "select_all", "ok", "help",
             // "answer=keep|unlock|skip_locked|all_blocks|this_block|
             // skip_block|this_xref|all_xrefs|skip_xref|cancel", "done", or
             // "ribbon=<text>" (the ribbon's Find text box).
@@ -3126,7 +3126,11 @@ impl OpenCADStudio {
                     "find" => F::Find,
                     "replace_one" => F::Replace,
                     "replace_all" => F::ReplaceAll,
-                    "row" => F::Row(value.parse().map_err(|_| failure("invalid_value", spec))?),
+                    "row" => {
+                        let (n, held) = value.split_once(',').unwrap_or((value, ""));
+                        let n = n.parse().map_err(|_| failure("invalid_value", spec))?;
+                        F::Row(n, Some((held == "ctrl", held == "shift")))
+                    }
                     "zoom" => F::ZoomToResult,
                     "select_row" => F::SelectHighlighted,
                     "select_all" => F::SelectAll,

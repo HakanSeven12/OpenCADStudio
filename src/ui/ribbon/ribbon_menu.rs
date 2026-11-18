@@ -67,6 +67,10 @@ pub enum RibbonMenuMsg {
     TogglePanel(String),
     Reset,
     TogglePanelTitles,
+    /// Center the tabs and panels (`true`), or put them at the left edge.
+    SetCentered(bool),
+    /// Let the mouse wheel over the ribbon step through the tabs, or not.
+    SetWheelTabs(bool),
     /// Show or hide the menu bar (handled by the app).
     ShowMenuBar(bool),
     /// Show the ribbon (`true`) or close it (handled by the app).
@@ -204,6 +208,16 @@ impl Ribbon {
             RibbonMenuMsg::TogglePanelTitles => {
                 self.menu = None;
                 self.layout.show_panel_titles ^= true;
+                true
+            }
+            RibbonMenuMsg::SetCentered(centered) => {
+                self.menu = None;
+                self.layout.centered = centered;
+                true
+            }
+            RibbonMenuMsg::SetWheelTabs(on) => {
+                self.menu = None;
+                self.layout.wheel_switches_tabs = on;
                 true
             }
         }
@@ -351,6 +365,26 @@ impl Ribbon {
                     enabled: true,
                     reason: None,
                     action: RibbonMenuMsg::TogglePanelTitles,
+                },
+                None,
+            )),
+            Some((
+                Row {
+                    label: crate::tr!("ribbon-menu", "center-ribbon"),
+                    checked: self.layout.centered,
+                    enabled: true,
+                    reason: None,
+                    action: RibbonMenuMsg::SetCentered(!self.layout.centered),
+                },
+                None,
+            )),
+            Some((
+                Row {
+                    label: crate::tr!("ribbon-menu", "wheel-switches-tabs"),
+                    checked: self.layout.wheel_switches_tabs,
+                    enabled: true,
+                    reason: None,
+                    action: RibbonMenuMsg::SetWheelTabs(!self.layout.wheel_switches_tabs),
                 },
                 None,
             )),

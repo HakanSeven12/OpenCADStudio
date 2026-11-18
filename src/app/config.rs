@@ -923,6 +923,26 @@ mod tests {
     }
 
     #[test]
+    fn ribbon_centering_and_wheel_default_and_round_trip() {
+        // A config saved before these options keeps the ribbon at its left
+        // edge and lets the wheel step through the tabs.
+        let old: AppConfig =
+            serde_json::from_str(r#"{"ribbon":{"qat_below":true}}"#).expect("old config");
+        assert!(!old.ribbon.layout.centered);
+        assert!(old.ribbon.layout.wheel_switches_tabs);
+
+        let mut original = AppConfig::default();
+        original.ribbon.layout.centered = true;
+        original.ribbon.layout.wheel_switches_tabs = false;
+        let serialized = serde_json::to_string(&original).expect("serialize config");
+        let value: serde_json::Value = serde_json::from_str(&serialized).expect("json");
+        assert_eq!(value["ribbon"]["centered"], true);
+        assert_eq!(value["ribbon"]["wheel_switches_tabs"], false);
+        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
+        assert!(restored.ribbon == original.ribbon);
+    }
+
+    #[test]
     fn floating_panels_default_and_round_trip() {
         use crate::ui::ribbon::FloatingPanel;
 

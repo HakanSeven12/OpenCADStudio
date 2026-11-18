@@ -4043,6 +4043,8 @@ pub enum Message {
     SetProjection(bool),
     /// Select a ribbon module tab by index.
     RibbonSelectTab(usize),
+    /// The mouse wheel turned over the ribbon: step through its tabs.
+    RibbonWheel(iced::mouse::ScrollDelta),
     /// The ribbon's right-click menu.
     RibbonMenu(crate::ui::ribbon::RibbonMenuMsg),
     /// A menu-bar entry: its command line, run like a ribbon button's. A

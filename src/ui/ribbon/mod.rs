@@ -49,6 +49,7 @@ mod ribbon_menu;
 mod search;
 mod stretch_column;
 pub mod text_editor;
+mod wheel;
 use crate::t;
 use crate::ui::style::{chrome, ribbon_metrics as metrics, text as ui_text};
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
@@ -467,6 +468,8 @@ pub struct Ribbon {
     pub mleader_layer: String,
     /// Annotate > Centerlines: CENTERLAYER (empty: the current layer).
     pub center_layer: String,
+    /// The mouse wheel's count toward the next tab.
+    wheel: wheel::WheelState,
     /// Open key tips (Alt).
     keytips: Option<keytips::State>,
     /// What More Commands searches for, and what it found.
@@ -625,6 +628,7 @@ impl Ribbon {
             text_layer: String::new(),
             dim_layer: String::new(),
             center_layer: String::new(),
+            wheel: wheel::WheelState::default(),
             mleader_layer: String::new(),
             keytips: None,
             qat_query: String::new(),
@@ -742,6 +746,12 @@ impl Ribbon {
 
     /// Whether tab `index` is left out of the tab row because the user hid
     /// it. The tab on show and the contextual tabs are never left out.
+    /// Whether module `index` (with id `id`) has a tab on the tab row.
+    /// The Layout module has none: its tools live in the side toolbar.
+    fn tab_shows(&self, index: usize, id: &str) -> bool {
+        id != "layout" && !self.contextual_off(id) && !self.tab_hidden(index)
+    }
+
     fn tab_hidden(&self, index: usize) -> bool {
         index != self.active
             && self.modules.get(index).is_some_and(|module| {
@@ -1356,8 +1366,7 @@ impl Ribbon {
             |mut acc, (i, module)| {
                 // The Layout module no longer has a ribbon tab — its paper-space
                 // tools live in the right-edge side toolbar (see ui::side_toolbar).
-                if module.id() == "layout" || self.contextual_off(module.id()) || self.tab_hidden(i)
-                {
+                if !self.tab_shows(i, module.id()) {
                     return acc;
                 }
 
@@ -1464,7 +1473,8 @@ impl Ribbon {
         let tabs = WrapFlow::new(tab_items)
             .spacing_x(metrics::TAB_GAP)
             .min_spacing_x(-6.0)
-            .row_h(TAB_ROW_H);
+            .row_h(TAB_ROW_H)
+            .center(self.layout.centered);
 
         let mut tab_row = row![].spacing(6.0).align_y(iced::Center);
         if menu_row.is_none() {
@@ -1479,6 +1489,7 @@ impl Ribbon {
             container(
                 WrapBar::new(lead, tabs.into())
                     .spacing(if qat_below { 0.0 } else { 6.0 })
+                    .center_trail(self.layout.centered)
                     .min_row_h(TAB_ROW_H)
                     .report_height(self.tab_bar_h.clone()),
             )
@@ -1538,8 +1549,11 @@ impl Ribbon {
             let line = self.layout.minimize == RibbonMinimize::Tabs;
             ribbon = ribbon.push(self.qat_below_row(is_start, undo_count, redo_count, line));
         }
+        // The wheel steps through the tabs; a closed ribbon has none.
+        let wheel_on = !closed && self.layout.wheel_switches_tabs;
         keytips::ribbon_area(ribbon_menu::RightPress::new(PosReport::new(
-            RIBBON_ID, ribbon,
+            RIBBON_ID,
+            wheel::WheelTabs::new(ribbon, wheel_on),
         )))
     }
 
@@ -1656,7 +1670,8 @@ impl Ribbon {
                 .measure_key(measure_key)
                 .report_height(self.tool_bar_h.clone())
                 .report_tight(self.collapse_tight.clone())
-                .mode(mode);
+                .mode(mode)
+                .centered(self.layout.centered);
             // A floating panel dropped on it docks here.
             PosReport::new(TOOL_AREA_ID, collapse).into()
         } else {

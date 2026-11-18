@@ -83,6 +83,12 @@ pub fn end_frame() {
     FRAME.with(|frame| frame.set(frame.get() + 1));
 }
 
+/// Where something `inner` wide starts to sit in the middle of `outer`, in
+/// whole pixels; 0 when it does not fit.
+fn centered_x(outer: f32, inner: f32) -> f32 {
+    ((outer - inner) / 2.0).floor().max(0.0)
+}
+
 pub struct WrapBar<'a> {
     lead: Element<'a, Message>,
     /// Optional Fill filler occupying the gap between `lead` and `trail`.
@@ -95,6 +101,9 @@ pub struct WrapBar<'a> {
     /// When true, `trail` sits at the right edge (justified); otherwise it is
     /// packed immediately after `lead`.
     justify_end: bool,
+    /// When true and both blocks share a row, `trail` sits in the middle of
+    /// the bar, but never over `lead`.
+    center_trail: bool,
     /// Receives the measured total height (bits of an `f32`).
     height_out: Option<Arc<AtomicU32>>,
 }
@@ -108,6 +117,7 @@ impl<'a> WrapBar<'a> {
             spacing: 0.0,
             min_row_h: 28.0,
             justify_end: false,
+            center_trail: false,
             height_out: None,
         }
     }
@@ -124,6 +134,13 @@ impl<'a> WrapBar<'a> {
 
     pub fn justify_end(mut self, justify: bool) -> Self {
         self.justify_end = justify;
+        self
+    }
+
+    /// Center `trail` in the bar while it shares a row with `lead`. A
+    /// wrapped `trail` is centered by its own flow (`WrapFlow::center`).
+    pub fn center_trail(mut self, center: bool) -> Self {
+        self.center_trail = center;
         self
     }
 
@@ -211,10 +228,13 @@ impl<'a> Widget<Message, Theme, Renderer> for WrapBar<'a> {
         let (lead_pos, trail_pos, middle_x, middle_gap, total_h);
         if fits {
             // One row: lead left, trail packed after it or flush right.
+            let after_lead = lead_sz.width + self.spacing;
             let trail_x = if self.justify_end {
-                (width - trail_sz.width).max(lead_sz.width + self.spacing)
+                (width - trail_sz.width).max(after_lead)
+            } else if self.center_trail {
+                centered_x(width, trail_sz.width).max(after_lead)
             } else {
-                lead_sz.width + self.spacing
+                after_lead
             };
             lead_pos = Point::new(0.0, (row_h - lead_sz.height) / 2.0);
             trail_pos = Point::new(trail_x, (row_h - trail_sz.height) / 2.0);
@@ -509,6 +529,8 @@ pub struct WrapFlow<'a> {
     row_h: f32,
     /// Align every wrapped row to the right edge of the available width.
     justify_end: bool,
+    /// Center every row in the available width once the flow is bounded.
+    center: bool,
     /// Receives the natural single-row width (as `f32` bits). Multiple flows
     /// may share one output; the widest measured value wins.
     natural_width_out: Option<Arc<AtomicU32>>,
@@ -523,6 +545,7 @@ impl<'a> WrapFlow<'a> {
             spacing_y: 0.0,
             row_h: 28.0,
             justify_end: false,
+            center: false,
             natural_width_out: None,
         }
     }
@@ -546,6 +569,13 @@ impl<'a> WrapFlow<'a> {
 
     pub fn justify_end(mut self, justify: bool) -> Self {
         self.justify_end = justify;
+        self
+    }
+
+    /// Center each row in the available width. Unbounded, the flow is as
+    /// wide as its widest row and the caller places it.
+    pub fn center(mut self, center: bool) -> Self {
+        self.center = center;
         self
     }
 
@@ -621,7 +651,7 @@ impl<'a> Widget<Message, Theme, Renderer> for WrapFlow<'a> {
         }
 
         let used_w = row_widths.iter().copied().fold(0.0f32, f32::max);
-        let flow_w = if self.justify_end && max_w.is_finite() {
+        let flow_w = if (self.justify_end || self.center) && max_w.is_finite() {
             max_w.max(0.0)
         } else {
             used_w
@@ -631,6 +661,8 @@ impl<'a> Widget<Message, Theme, Renderer> for WrapFlow<'a> {
             .map(|(node, x, cy, row)| {
                 let offset = if self.justify_end {
                     (flow_w - row_widths[row]).max(0.0)
+                } else if self.center {
+                    centered_x(flow_w, row_widths[row])
                 } else {
                     0.0
                 };
@@ -1405,5 +1437,86 @@ impl<'a> Widget<Message, Theme, Renderer> for ReorderTab<'a> {
 impl<'a> From<ReorderTab<'a>> for Element<'a, Message> {
     fn from(w: ReorderTab<'a>) -> Self {
         Element::new(w)
+    }
+}
+
+#[cfg(test)]
+mod centering_tests {
+    use super::*;
+    use iced::widget::Space;
+
+    fn block(w: f32) -> Element<'static, Message> {
+        Space::new().width(w).height(20.0).into()
+    }
+
+    /// Lays `element` out `width` wide and returns its children's bounds.
+    fn layout_of(mut element: Element<'static, Message>, width: f32) -> Vec<Rectangle> {
+        let _one = crate::headless_ui_lock();
+        let renderer = iced_test::futures::futures::executor::block_on(
+            <Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
+            ),
+        )
+        .expect("headless renderer");
+        let mut tree = widget::Tree::new(element.as_widget());
+        tree.diff(element.as_widget_mut());
+        let limits = layout::Limits::new(Size::ZERO, Size::new(width, 200.0));
+        let node = element
+            .as_widget_mut()
+            .layout(&mut tree, &renderer, &limits);
+        node.children().iter().map(|c| c.bounds()).collect()
+    }
+
+    #[test]
+    fn a_centered_trail_sits_in_the_middle_of_the_bar() {
+        let bar = WrapBar::new(block(100.0), block(200.0))
+            .spacing(6.0)
+            .center_trail(true);
+        let b = layout_of(bar.into(), 1000.0);
+        assert_eq!(b[0].x, 0.0);
+        assert_eq!(b[1].x, 400.0);
+    }
+
+    #[test]
+    fn a_centered_trail_never_covers_the_lead() {
+        // The middle would start at 175, inside the 300 px lead.
+        let bar = WrapBar::new(block(300.0), block(400.0))
+            .spacing(6.0)
+            .center_trail(true);
+        let b = layout_of(bar.into(), 750.0);
+        assert_eq!(b[1].x, 306.0);
+    }
+
+    #[test]
+    fn an_uncentered_trail_follows_the_lead() {
+        let bar = WrapBar::new(block(100.0), block(200.0)).spacing(6.0);
+        let b = layout_of(bar.into(), 1000.0);
+        assert_eq!(b[1].x, 106.0);
+    }
+
+    #[test]
+    fn a_centered_flow_centers_each_wrapped_row() {
+        // Three 100 px items with a 10 px gap in 250 px: two on the first
+        // row (210 px), one on the second.
+        let flow = WrapFlow::new(vec![block(100.0), block(100.0), block(100.0)])
+            .spacing_x(10.0)
+            .row_h(20.0)
+            .center(true);
+        let b = layout_of(flow.into(), 250.0);
+        assert_eq!(b[0].x, 20.0);
+        assert_eq!(b[1].x, 130.0);
+        assert_eq!(b[2].x, 75.0);
+        assert!(b[2].y > b[0].y);
+    }
+
+    #[test]
+    fn an_unbounded_centered_flow_is_as_wide_as_its_row() {
+        let flow = WrapFlow::new(vec![block(100.0), block(100.0)])
+            .spacing_x(10.0)
+            .center(true);
+        let b = layout_of(flow.into(), f32::INFINITY);
+        assert_eq!(b[0].x, 0.0);
+        assert_eq!(b[1].x, 110.0);
     }
 }

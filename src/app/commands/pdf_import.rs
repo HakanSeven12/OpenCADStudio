@@ -12,64 +12,118 @@ pub(crate) enum PdfImportSource {
     File(pdf_import::PdfFileImport),
 }
 
+/// An import that the UI thread started: what its worker reads, and what
+/// the placement needs when the conversion ends.
+#[derive(Clone, Debug)]
+pub struct PdfImportJob {
+    kind: JobKind,
+    path: String,
+    page: String,
+    settings: pdf_import::PdfImportSettings,
+    /// The current layer when the import started.
+    current_layer: String,
+}
+
+#[derive(Clone, Debug)]
+enum JobKind {
+    /// A placed underlay, as it was when the import started.
+    Underlay {
+        request: PdfImportRequest,
+        underlay: Box<document::entities::Underlay>,
+    },
+    /// A file: the worker reads its placement from the page.
+    File(pdf_import::PdfFileImport),
+}
+
+/// What the worker of an import gives back.
+#[derive(Clone, Debug)]
+pub struct PdfConverted {
+    /// Where the page goes.
+    underlay: document::entities::Underlay,
+    /// The notice of a password supplied earlier (a file import only).
+    notice: Option<String>,
+    /// The objects; `None` when the page could not be read.
+    result: Option<pdf_import::ImportResult>,
+}
+
+/// The worker of an import: the page's placement and content read from the
+/// file, and the content converted.
+fn read_and_convert(job: &PdfImportJob, naming: &pdf_import::LayerNaming) -> PdfConverted {
+    let (underlay, area, notice) = match &job.kind {
+        JobKind::Underlay { request, underlay } => {
+            ((**underlay).clone(), request.area.clone(), None)
+        }
+        JobKind::File(import) => (
+            import.placement(),
+            ImportArea::All,
+            crate::scene::model::pdf_password::reopened_notice(&job.path),
+        ),
+    };
+    // The underlay's own layer overrides leave those layers out.
+    let hidden = crate::scene::model::pdf_layers::hidden_layers(&underlay);
+    let result =
+        crate::scene::model::pdf_vector::page_content_by_layer(&job.path, &job.page, &hidden)
+            .map(|content| pdf_import::convert(&content, &underlay, &area, naming));
+    PdfConverted {
+        underlay,
+        notice,
+        result,
+    }
+}
+
 impl OpenCADStudio {
-    pub(crate) fn run_pdf_import(&mut self, i: usize, source: PdfImportSource) {
-        use document::objects::ObjectType;
+    /// PDFIMPORT: the page read and converted off the UI thread;
+    /// [`Self::finish_pdf_import`] places the result when it arrives. A
+    /// panic in the reader or the conversion becomes an error on the
+    /// command line.
+    pub(crate) fn run_pdf_import(&mut self, i: usize, source: PdfImportSource) -> Task<Message> {
+        self.run_pdf_import_with(i, source, read_and_convert)
+    }
+
+    /// [`Self::run_pdf_import`] with the worker given, so a test can give
+    /// one that panics.
+    fn run_pdf_import_with(
+        &mut self,
+        i: usize,
+        source: PdfImportSource,
+        worker: fn(&PdfImportJob, &pdf_import::LayerNaming) -> PdfConverted,
+    ) -> Task<Message> {
+        use crate::ui::window::pdf_dialogs::PdfDialogMsg;
         let document = &self.tabs[i].scene.document;
-        let (underlay, path, page, area, mode, handle) = match &source {
+        let (kind, path, page) = match source {
             PdfImportSource::Underlay(request) => {
                 let Some(document::EntityType::Underlay(underlay)) =
                     document.get_entity(request.underlay)
                 else {
-                    return;
+                    return Task::none();
                 };
                 let Some(def) = crate::entities::underlay::definition(underlay, document) else {
-                    return;
+                    return Task::none();
                 };
                 if def.unloaded {
                     self.command_line
                         .push_error("Cannot bind a PDF underlay that is unloaded.");
-                    return;
+                    return Task::none();
                 }
-                (
-                    underlay.clone(),
-                    def.file_path.clone(),
-                    crate::entities::underlay::page_of(def).to_string(),
-                    request.area.clone(),
-                    Some(request.mode),
-                    Some(request.underlay),
-                )
+                let path = def.file_path.clone();
+                let page = crate::entities::underlay::page_of(def).to_string();
+                let underlay = Box::new(underlay.clone());
+                (JobKind::Underlay { request, underlay }, path, page)
             }
-            PdfImportSource::File(import) => (
-                import.placement(),
-                import.path.clone(),
-                import.page.clone(),
-                ImportArea::All,
-                None,
-                None,
-            ),
+            PdfImportSource::File(import) => {
+                let (path, page) = (import.path.clone(), import.page.clone());
+                (JobKind::File(import), path, page)
+            }
         };
         let shown = crate::entities::underlay::display_path(&path);
-        match &source {
-            PdfImportSource::Underlay(_) => self
+        match &kind {
+            JobKind::Underlay { .. } => self
                 .command_line
                 .push_output(&format!("Binding PDF file {shown}, page {page} ...")),
-            PdfImportSource::File(_) => {
-                self.command_line
-                    .push_output(&format!("Importing page {page} of PDF file: {shown}..."));
-                if let Some(notice) = crate::scene::model::pdf_password::reopened_notice(&path) {
-                    self.command_line.push_output(&notice);
-                }
-            }
+            JobKind::File(_) => self
+                .command_line
+                .push_output(&format!("Importing page {page} of PDF file: {shown}...")),
         }
-        // The underlay's own layer overrides leave those layers out.
-        let hidden = crate::scene::model::pdf_layers::hidden_layers(&underlay);
-        let Some(content) =
-            crate::scene::model::pdf_vector::page_content_by_layer(&path, &page, &hidden)
-        else {
-            self.command_line.push_error(&format!("{shown} not found."));
-            return;
-        };
         let settings = pdf_import::import_settings();
         let current_layer = {
             let header = &self.tabs[i].scene.document.header;
@@ -91,9 +145,75 @@ impl OpenCADStudio {
                 .map(|s| (s.name.clone(), s.font_file.clone()))
                 .collect(),
         };
-        let mut result = pdf_import::convert(&content, &underlay, &area, &naming);
+        let job = PdfImportJob {
+            kind,
+            path,
+            page,
+            settings,
+            current_layer,
+        };
+        let tab_id = self.tabs[i].id;
+        let generation = self.tabs[i].document_generation;
+        let worker_job = job.clone();
+        crate::app::update::background_task(
+            "PDFIMPORT",
+            move || worker(&worker_job, &naming),
+            move |converted| {
+                Message::PdfDialog(PdfDialogMsg::ImportConverted(
+                    tab_id,
+                    generation,
+                    Box::new(job),
+                    Box::new(converted),
+                ))
+            },
+        )
+    }
+
+    /// Places a finished PDF import on the UI thread, one undo step: the
+    /// objects with the layers and text styles they use, then what happens
+    /// to the underlay (Keep / Detach / Unload). A result for a drawing that
+    /// was closed, replaced or cleared is dropped, and so is one for an
+    /// underlay that was erased during the read.
+    pub(in crate::app) fn finish_pdf_import(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        job: PdfImportJob,
+        converted: PdfConverted,
+    ) {
+        use document::objects::ObjectType;
+        let Some(i) = self.import_target(tab_id, generation) else {
+            return;
+        };
+        let PdfConverted {
+            underlay,
+            notice,
+            result,
+        } = converted;
+        if let JobKind::Underlay { request, .. } = &job.kind {
+            let present = matches!(
+                self.tabs[i].scene.document.get_entity(request.underlay),
+                Some(document::EntityType::Underlay(_))
+            );
+            if !present {
+                self.command_line
+                    .push_info("PDFIMPORT: the underlay was erased while the file was read.");
+                return;
+            }
+        }
+        if let Some(notice) = notice {
+            self.command_line.push_output(&notice);
+        }
+        let Some(mut result) = result else {
+            let shown = crate::entities::underlay::display_path(&job.path);
+            self.command_line.push_error(&format!("{shown} not found."));
+            return;
+        };
+        let (path, page) = (&job.path, &job.page);
+        let settings = job.settings;
+        let current_layer = job.current_layer.clone();
         let images = std::mem::take(&mut result.images);
-        let image_dir = pdf_import::image_dir(&path);
+        let image_dir = pdf_import::image_dir(path);
 
         self.push_undo_snapshot(i, "PDFIMPORT");
         let scene = &mut self.tabs[i].scene;
@@ -121,7 +241,7 @@ impl OpenCADStudio {
             if std::fs::create_dir_all(dir).is_err() {
                 break;
             }
-            let file = dir.join(format!("{stem}{:08x}.png", image_file_id(&path, &page, n)));
+            let file = dir.join(format!("{stem}{:08x}.png", image_file_id(path, page, n)));
             if image::save_buffer(
                 &file,
                 &image.rgba,
@@ -199,8 +319,9 @@ impl OpenCADStudio {
                 scene.add_entity(entity);
             }
         }
-        if let (Some(mode), Some(handle)) = (mode, handle) {
-            match mode {
+        if let JobKind::Underlay { request, .. } = &job.kind {
+            let handle = request.underlay;
+            match request.mode {
                 UnderlayMode::Keep => {}
                 UnderlayMode::Unload => {
                     if let Some(ObjectType::UnderlayDefinition(definition)) =
@@ -846,8 +967,8 @@ mod pdfimport_tests {
     fn import(app: &mut OpenCADStudio, source: PdfImportSource) -> usize {
         let i = app.active_tab;
         let before = app.tabs[i].history.undo_stack.len();
-        app.run_pdf_import(i, source);
-        app.finish_all_pending_history();
+        let task = app.run_pdf_import(i, source);
+        app.drive_headless_task(task).expect("the import task");
         app.tabs[i].history.undo_stack.len() - before
     }
 
@@ -1019,13 +1140,110 @@ mod pdfimport_tests {
             StepInput::Text("3".to_string()),
             StepInput::Enter,
         ] {
-            let _ = app.feed_command(input);
+            let task = app.feed_command(input);
+            app.drive_headless_task(task).expect("the command's task");
         }
-        app.finish_all_pending_history();
         assert!(app.tabs[i].active_cmd.is_none());
         assert_eq!(app.tabs[i].history.undo_stack.len(), 1);
         let (mut texts, _) = content(&app);
         texts.sort();
         assert_eq!(texts, ["Hello PDF", "Tilted"]);
+    }
+
+    /// The import reads and converts on a worker: nothing changes in the
+    /// drawing until the worker ends, then the result is one undo step.
+    #[test]
+    fn the_import_is_placed_only_when_the_worker_ends() {
+        let mut app = new_app();
+        let handle = attached(&mut app);
+        let i = app.active_tab;
+        let before = app.tabs[i].history.undo_stack.len();
+        let task = app.run_pdf_import(i, whole(handle, UnderlayMode::Keep));
+        assert_eq!(content(&app), (Vec::new(), Vec::new()));
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before);
+        app.drive_headless_task(task).expect("the import task");
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before + 1);
+        assert!(!content(&app).0.is_empty());
+    }
+
+    /// A worker that panics gives an error, the drawing does not change,
+    /// and the next import works.
+    #[test]
+    fn a_worker_panic_is_an_error_and_the_drawing_does_not_change() {
+        let mut app = new_app();
+        let handle = attached(&mut app);
+        let i = app.active_tab;
+        let before = app.tabs[i].history.undo_stack.len();
+        let task = app.run_pdf_import_with(i, whole(handle, UnderlayMode::Detach), |_, _| {
+            panic!("a reader bug")
+        });
+        app.drive_headless_task(task).expect("the import task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("PDFIMPORT failed: a reader bug")
+        );
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before);
+        assert_eq!(content(&app), (Vec::new(), Vec::new()));
+        assert_eq!(underlays(&app).len(), 1, "Detach did not run");
+        assert_eq!(import(&mut app, whole(handle, UnderlayMode::Keep)), 1);
+    }
+
+    /// A page that cannot be read is an error when the worker ends, and the
+    /// drawing does not change.
+    #[test]
+    fn a_page_that_cannot_be_read_is_an_error() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = "pdfimport-not-a-pdf.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(b"not a PDF".to_vec()));
+        let source = PdfImportSource::File(PdfFileImport {
+            path: path.to_string(),
+            page: "1".to_string(),
+            scale: 1.0,
+            rotation: 0.0,
+            insertion: DVec3::ZERO,
+        });
+        assert_eq!(import(&mut app, source), 0);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some(format!("{path} not found.").as_str())
+        );
+        assert_eq!(app.tabs[i].scene.document.entities().count(), 0);
+    }
+
+    /// A result for a drawing that was replaced during the read is
+    /// dropped; the new drawing gets nothing.
+    #[test]
+    fn a_result_for_a_replaced_drawing_is_dropped() {
+        let mut app = new_app();
+        let handle = attached(&mut app);
+        let i = app.active_tab;
+        let task = app.run_pdf_import(i, whole(handle, UnderlayMode::Keep));
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.drive_headless_task(task).expect("the import task");
+        let now = app.active_tab;
+        assert_eq!(app.tabs[now].scene.document.entities().count(), 0);
+        assert!(app.command_line.last_error.is_none());
+        assert!(history(&app).contains("was replaced"), "{}", history(&app));
+    }
+
+    /// A result for an underlay that was erased during the read is
+    /// dropped: nothing is added, and Detach does not run.
+    #[test]
+    fn a_result_for_an_erased_underlay_is_dropped() {
+        let mut app = new_app();
+        let handle = attached(&mut app);
+        let i = app.active_tab;
+        let task = app.run_pdf_import(i, whole(handle, UnderlayMode::Detach));
+        app.tabs[i].scene.erase_entities(&[handle]);
+        let before = app.tabs[i].history.undo_stack.len();
+        app.drive_headless_task(task).expect("the import task");
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before);
+        assert_eq!(content(&app), (Vec::new(), Vec::new()));
+        assert!(
+            history(&app).contains("PDFIMPORT: the underlay was erased while the file was read."),
+            "{}",
+            history(&app)
+        );
     }
 }

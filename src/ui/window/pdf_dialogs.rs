@@ -123,6 +123,17 @@ pub enum PdfDialogMsg {
     ImportScale(String),
     ImportRotation(RotationChoice),
     ImportOk,
+    /// A PDF read off the UI thread for the Import PDF window: the file,
+    /// and what the read found.
+    ImportRead(String, std::sync::Arc<PdfImportFileRead>),
+    /// A PDF import converted off the UI thread: the tab it was started
+    /// for, that document's generation, the import, and the conversion.
+    ImportConverted(
+        u64,
+        u64,
+        Box<crate::app::commands::pdf_import::PdfImportJob>,
+        Box<crate::app::commands::pdf_import::PdfConverted>,
+    ),
     Options,
     Help(&'static str),
     // View background
@@ -203,7 +214,7 @@ impl fmt::Display for RotationChoice {
 }
 
 /// A page of the chosen file and its thumbnail.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PageThumb {
     pub label: String,
     pub image: Option<image::Handle>,
@@ -1685,6 +1696,8 @@ pub fn view_matchprop_settings<'a>(
 pub struct PdfImportFileState {
     pub path: String,
     pub pages: Vec<PageThumb>,
+    /// "200 × 100 mm" for each page, read with the pages.
+    pub page_sizes: Vec<String>,
     pub selected: usize,
     pub page_text: String,
     pub insert_on_screen: bool,
@@ -1692,6 +1705,23 @@ pub struct PdfImportFileState {
     pub rotation: RotationChoice,
     pub page_size: String,
     pub settings: PdfImportSettings,
+}
+
+/// What the Import PDF window's read of a file found.
+#[derive(Debug)]
+pub enum PdfImportFileRead {
+    /// The file needs a password first.
+    Locked {
+        stage: crate::scene::model::pdf_password::Stage,
+        remembered: bool,
+    },
+    /// The pages with their sizes; `remembered` when a password supplied
+    /// earlier opened the file.
+    Pages {
+        pages: Vec<PageThumb>,
+        page_sizes: Vec<String>,
+        remembered: bool,
+    },
 }
 
 pub fn view_import_file<'a>(

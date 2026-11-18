@@ -522,17 +522,9 @@ impl OpenCADStudio {
                         }
                         Task::none()
                     }
-                    // A point cloud goes on to the Attach Point Cloud dialog.
-                    "rcp" | "rcs" => {
-                        if crate::scene::model::point_cloud::load(&path).is_none() {
-                            self.command_line
-                                .push_error("All scans are not found or invalid.");
-                            self.command_line.push_error("Attach point cloud failed");
-                            return Task::none();
-                        }
-                        self.open_point_cloud_attach_dialog(&path);
-                        Task::none()
-                    }
+                    // A point cloud is read off the UI thread, then goes on
+                    // to the Attach Point Cloud dialog.
+                    "rcp" | "rcs" => self.read_point_cloud_for_attach(path),
                     e if IMAGE_EXTENSIONS.contains(&e) => {
                         let result = image::image_dimensions(&path)
                             .map(|(w, h)| (path.clone(), w, h))

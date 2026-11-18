@@ -148,8 +148,68 @@ impl OpenCADStudio {
         state.geopdf_auto = state.geopdf_available && (state.geopdf_auto || !was_available);
     }
 
-    /// POINTCLOUDATTACH after the file is chosen: the Attach Point Cloud
-    /// dialog, placed on screen by default.
+    /// POINTCLOUDATTACH after the file is chosen: the file is read off the
+    /// UI thread, and the Attach Point Cloud window opens when the read
+    /// ends ([`Self::finish_point_cloud_attach_read`]). A panic in the
+    /// reader becomes an error on the command line.
+    pub(in crate::app) fn read_point_cloud_for_attach(
+        &mut self,
+        path: std::path::PathBuf,
+    ) -> Task<Message> {
+        self.read_point_cloud_for_attach_with(path, crate::scene::model::point_cloud::load)
+    }
+
+    /// [`Self::read_point_cloud_for_attach`] with the reader given, so a
+    /// test can give one that panics.
+    fn read_point_cloud_for_attach_with(
+        &mut self,
+        path: std::path::PathBuf,
+        reader: fn(
+            &std::path::Path,
+        )
+            -> Option<std::sync::Arc<crate::scene::model::point_cloud::CloudPoints>>,
+    ) -> Task<Message> {
+        self.command_line.push_info(&format!(
+            "Reading {}…",
+            crate::entities::underlay::display_path(&path.to_string_lossy())
+        ));
+        let worker_path = path.clone();
+        crate::app::update::background_task(
+            "POINTCLOUDATTACH",
+            move || reader(&worker_path),
+            move |cloud| Message::PdfDialog(PdfDialogMsg::CloudRead(path, cloud)),
+        )
+    }
+
+    /// The end of the read for the Attach Point Cloud window: the window
+    /// for a cloud, the reference's two errors for a file with no scan
+    /// that can be read. The window takes the place of its own older copy
+    /// (Browse); if a different window opened during the read, it does
+    /// not open.
+    pub(in crate::app) fn finish_point_cloud_attach_read(
+        &mut self,
+        path: &std::path::Path,
+        cloud: Option<&crate::scene::model::point_cloud::CloudPoints>,
+    ) {
+        if self
+            .active_modal
+            .is_some_and(|modal| modal != crate::app::ModalKind::PointCloudAttach)
+        {
+            self.command_line.push_error(
+                "Attach point cloud cancelled: a different window opened while the file was read.",
+            );
+            return;
+        }
+        if cloud.is_none() {
+            self.command_line
+                .push_error("All scans are not found or invalid.");
+            self.command_line.push_error("Attach point cloud failed");
+            return;
+        }
+        self.open_point_cloud_attach_dialog(path);
+    }
+
+    /// The Attach Point Cloud dialog, placed on screen by default.
     pub(in crate::app) fn open_point_cloud_attach_dialog(&mut self, path: &std::path::Path) {
         let Some(cloud) = crate::scene::model::point_cloud::load(path) else {
             return;
@@ -729,6 +789,9 @@ impl OpenCADStudio {
             // ── Attach Point Cloud ────────────────────────────────────────
             PdfDialogMsg::CloudBrowse => return Task::done(Message::PointCloudAttachPick),
             PdfDialogMsg::CloudOk => return self.point_cloud_attach_ok(i),
+            PdfDialogMsg::CloudRead(path, cloud) => {
+                self.finish_point_cloud_attach_read(&path, cloud.as_deref());
+            }
             message @ (PdfDialogMsg::MapTab(_)
             | PdfDialogMsg::MapScheme(_)
             | PdfDialogMsg::MapCount(_)

@@ -40,6 +40,16 @@ pub struct CloudPoints {
     pub bounds: Option<[[f64; 3]; 2]>,
 }
 
+/// Short: a message that carries a cloud prints its size, not its points.
+impl std::fmt::Debug for CloudPoints {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CloudPoints")
+            .field("scans", &self.scans)
+            .field("points", &self.positions.len())
+            .finish_non_exhaustive()
+    }
+}
+
 /// Per-cache byte budget for decoded scan clouds. Every distinct scan file a
 /// drawing references decodes to a full point set that would otherwise stay
 /// resident for the whole process lifetime; past the budget the least recently
@@ -71,23 +81,35 @@ fn cloud_cost(path: &Path, cloud: &Option<Arc<CloudPoints>>) -> usize {
     arrays + std::mem::size_of::<CloudPoints>() + path.as_os_str().len()
 }
 
+type CloudCache =
+    super::pdf_raster::BudgetedRasterCache<PathBuf, (SystemTime, Option<Arc<CloudPoints>>)>;
+
+/// The decoded clouds. The lock is held only to look up or to insert, never
+/// during a decode: a read on a worker does not make the UI thread wait, and
+/// a decode that panics does not poison the cache.
+fn cloud_cache() -> std::sync::MutexGuard<'static, CloudCache> {
+    static CACHE: OnceLock<Mutex<CloudCache>> = OnceLock::new();
+    CACHE
+        .get_or_init(|| Mutex::new(CloudCache::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// Scan points by file path and modification time. A file that fails to
 /// decode is remembered too, so it is not re-read on every tessellate.
+/// This reads the file when the cache does not have it: call it off the UI
+/// thread.
 pub fn load(path: &Path) -> Option<Arc<CloudPoints>> {
-    use super::pdf_raster::BudgetedRasterCache;
-    type Cache = Mutex<BudgetedRasterCache<PathBuf, (SystemTime, Option<Arc<CloudPoints>>)>>;
-    static CACHE: OnceLock<Cache> = OnceLock::new();
     let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
     let key = path.to_path_buf();
-    let mut cache = CACHE
-        .get_or_init(|| Mutex::new(BudgetedRasterCache::new()))
-        .lock()
-        .ok()?;
-    if let Some((stamp, cloud)) = cache.get(&key) {
-        if stamp == modified {
-            return cloud;
+    {
+        let mut cache = cloud_cache();
+        if let Some((stamp, cloud)) = cache.get(&key) {
+            if stamp == modified {
+                return cloud;
+            }
+            cache.pop(&key);
         }
-        cache.pop(&key);
     }
     let started = crate::perf::enabled().then(iced::time::Instant::now);
     let cloud = decode(path).map(Arc::new);
@@ -100,7 +122,7 @@ pub fn load(path: &Path) -> Option<Arc<CloudPoints>> {
     let budget = point_cloud_cache_budget_bytes();
     let cost = cloud_cost(path, &cloud);
     if cost <= budget {
-        cache.insert_with_budget(key, (modified, cloud.clone()), cost, budget);
+        cloud_cache().insert_with_budget(key, (modified, cloud.clone()), cost, budget);
     }
     cloud
 }

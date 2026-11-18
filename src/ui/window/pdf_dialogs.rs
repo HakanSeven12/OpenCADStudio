@@ -49,6 +49,12 @@ pub enum PdfDialogMsg {
     CloudLock(bool),
     CloudZoom(bool),
     CloudOk,
+    /// A point cloud read off the UI thread for the Attach Point Cloud
+    /// window: the file, and the cloud (None: no scan could be read).
+    CloudRead(
+        std::path::PathBuf,
+        Option<std::sync::Arc<crate::scene::model::point_cloud::CloudPoints>>,
+    ),
     // Point Cloud Color Map
     /// Elevation tab (else intensity).
     MapTab(bool),

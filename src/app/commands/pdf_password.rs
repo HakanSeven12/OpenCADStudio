@@ -163,3 +163,105 @@ impl OpenCADStudio {
         self.focus_cmd_input()
     }
 }
+
+#[cfg(test)]
+mod password_check_tests {
+    use super::*;
+    use crate::app::ModalKind;
+    use std::sync::Arc;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    /// The password window for an encrypted file (PDFIMPORT's window read),
+    /// with `typed` in its field.
+    fn password_window(app: &mut OpenCADStudio, path: &str, typed: &str) {
+        let file = "%PDF-1.4\ntrailer\n<< /Encrypt << /Filter /Standard /V 1 /R 2 \
+            /O <95fe1f4219662a774442fb072e3d9f19e9d130ec09a4d0061e78fe920f7ab62f> \
+            /U <0102030405060708090a0b0c0d0e0f100102030405060708090a0b0c0d0e0f10> /P -44 >> >>\n%%EOF\n";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(file.as_bytes().to_vec()));
+        let read = app.open_pdf_import_file(path);
+        app.drive_headless_task(read).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::PdfPassword));
+        let _ = app.update(Message::PdfPassword(PdfPasswordMsg::Input(
+            typed.to_string(),
+        )));
+    }
+
+    fn wrong(app: &OpenCADStudio) -> bool {
+        app.pdf_password.as_ref().is_some_and(|state| state.wrong)
+    }
+
+    /// OK checks the password on a worker: the window waits, and says the
+    /// password is wrong when the check ends.
+    #[test]
+    fn ok_checks_the_password_on_a_worker() {
+        let mut app = new_app();
+        password_window(&mut app, "password-on-a-worker.pdf", "not it");
+        let check = app.update(Message::PdfPassword(PdfPasswordMsg::Ok));
+        assert!(!wrong(&app), "no answer during the check");
+        app.drive_headless_task(check).expect("the check");
+        assert!(wrong(&app));
+        assert_eq!(app.active_modal, Some(ModalKind::PdfPassword));
+    }
+
+    /// A check that panics gives an error, and the window stays open.
+    #[test]
+    fn a_check_that_panics_keeps_the_window() {
+        let mut app = new_app();
+        password_window(&mut app, "password-panics.pdf", "x");
+        let check = app.check_pdf_password_with(|_, _, _, _, _| panic!("a reader bug"));
+        app.drive_headless_task(check).expect("the check");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("PDFIMPORT failed: a reader bug")
+        );
+        assert_eq!(app.active_modal, Some(ModalKind::PdfPassword));
+        assert!(!wrong(&app));
+    }
+
+    /// An answer for a password changed during the check, or for a window
+    /// closed during it, is dropped.
+    #[test]
+    fn an_answer_for_a_changed_or_closed_window_is_dropped() {
+        let mut app = new_app();
+        password_window(&mut app, "password-changed.pdf", "first");
+        let check = app.update(Message::PdfPassword(PdfPasswordMsg::Ok));
+        let _ = app.update(Message::PdfPassword(PdfPasswordMsg::Input(
+            "second".to_string(),
+        )));
+        app.drive_headless_task(check).expect("the check");
+        assert!(!wrong(&app), "an answer for another password");
+
+        let check = app.check_pdf_password_with(|_, _, _, _, _| Check::Unlocked);
+        let _ = app.cancel_pdf_password();
+        app.drive_headless_task(check).expect("the check");
+        assert_eq!(app.active_modal, None, "a closed window stays closed");
+    }
+
+    /// An answer that unlocks the file closes the window and goes on to
+    /// what asked for the password: here the Import PDF window's read runs
+    /// again. (The fake answer does not unlock the file, so that read asks
+    /// for the password again, in a new window.)
+    #[test]
+    fn an_unlocking_answer_goes_on() {
+        let mut app = new_app();
+        password_window(&mut app, "password-unlocks.pdf", "x");
+        let check = app.check_pdf_password_with(|_, _, _, _, _| Check::Unlocked);
+        app.drive_headless_task(check).expect("the check");
+        let reads = app
+            .command_line
+            .history
+            .iter()
+            .filter(|entry| entry.text.contains("Reading password-unlocks.pdf"))
+            .count();
+        assert_eq!(reads, 2, "the window's read runs again");
+        assert_eq!(
+            app.pdf_password.as_ref().map(|s| s.input.as_str()),
+            Some("")
+        );
+    }
+}

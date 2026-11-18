@@ -11498,3 +11498,56 @@ mod annotative_properties_row_tests {
     }
 }
 
+
+// The ANNOALLVISIBLE command toggles the scene's per-layout annotation
+// visibility; its observable effect on an offscale annotative object had no
+// command-line test.
+mod annotation_visibility_command_tests {
+    use super::super::*;
+    use document::entities::Text;
+    use document::objects::Scale;
+    use document::EntityType;
+
+    #[test]
+    fn annoallvisible_hides_and_shows_an_offscale_annotative_object() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let at_50 = crate::scene::annotative::ensure_scale_object(
+            &mut app.tabs[i].scene.document,
+            &Scale::new("1:50".into(), 1.0, 50.0),
+        );
+        let current = crate::scene::annotative::ensure_scale_object(
+            &mut app.tabs[i].scene.document,
+            &Scale::new("1:1".into(), 1.0, 1.0),
+        );
+        let handle = app.tabs[i].scene.add_entity(EntityType::Text(Text::new()));
+        assert!(crate::scene::annotative::create_annotation_context(
+            &mut app.tabs[i].scene.document,
+            handle,
+            at_50
+        ));
+
+        let offscale = |app: &OpenCADStudio| {
+            let doc = &app.tabs[i].scene.document;
+            let common = doc.get_entity(handle).unwrap().common();
+            crate::scene::annotative::annotative_offscale_for(
+                doc,
+                common,
+                Some(current),
+                app.tabs[i].scene.annotation_all_visible(),
+            )
+        };
+
+        assert!(!offscale(&app), "all objects show by default in Model");
+        let _ = app.run_command_line("ANNOALLVISIBLE 0");
+        assert!(!app.tabs[i].scene.annotation_all_visible());
+        assert!(offscale(&app), "the toggle hides the offscale object");
+        assert!(app.tabs[i].dirty, "the toggle marks the drawing dirty");
+
+        let _ = app.run_command_line("ANNOALLVISIBLE 1");
+        assert!(app.tabs[i].scene.annotation_all_visible());
+        assert!(!offscale(&app), "the object shows again");
+    }
+}
+

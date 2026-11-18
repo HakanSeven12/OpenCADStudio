@@ -5,7 +5,7 @@ ribbon: Manage tab › Cleanup panel
 ---
 
 ## Usage
-1. Run the command. The Purge dialog lists everything that can be removed, grouped by kind with a count: blocks, layers, linetypes, text, dimension, multileader, table and multiline styles, empty groups, materials, zero-length geometry and empty text objects.
+1. Run the command. The Purge dialog lists everything that can be removed, grouped by kind with a count: blocks, layers, linetypes, text, dimension, multileader, table and multiline styles, empty groups, materials, registered applications, zero-length geometry and empty text objects.
 2. Tick the items you want to remove. Ticking a group ticks all of its items.
 3. Click **Purge Checked Items**, or **Purge All** to remove everything listed.
 4. The dialog stays open and shows what is left. Click **Close** when you are done.
@@ -23,9 +23,9 @@ If nothing can be removed, the dialog says so.
 2. `Enter name(s) to purge <*>:` type names or wildcards, separated by commas, or press Enter for all.
 3. `Verify each name to be purged? [Yes/No] <Y>:` the items are removed without further questions either way.
 
-**DEtailviewstyles**, **Plotstyles**, **SHapes**, **Visualstyles**, **Regapps** and **Orphaned data** are not purged: data the program carries without reading it can refer to them, so removing one could damage the file. They report that, so a script keeps running.
+**DEtailviewstyles**, **Plotstyles**, **SHapes**, **Visualstyles** and **Orphaned data** are not purged: data the program carries without reading it can refer to them, so removing one could damage the file. They report that, so a script keeps running.
 
-You can also type `PURGE` with a type and an optional name list, for example `PURGE LAYERS A*,TMP`. The types are `ALL`, `BLOCKS`, `LAYERS`, `LINETYPES`, `STYLES`, `DIMSTYLES`, `MLEADERSTYLES`, `TABLESTYLES`, `MLINESTYLES`, `GROUPS`, `MATERIALS`, `ZEROLENGTH` and `EMPTYTEXT`.
+You can also type `PURGE` with a type and an optional name list, for example `PURGE LAYERS A*,TMP`. The types are `ALL`, `BLOCKS`, `LAYERS`, `LINETYPES`, `STYLES`, `DIMSTYLES`, `MLEADERSTYLES`, `TABLESTYLES`, `MLINESTYLES`, `GROUPS`, `MATERIALS`, `REGAPPS`, `ZEROLENGTH` and `EMPTYTEXT`.
 
 **All** removes every unused named item but no geometry: zero-length geometry and empty text go only when you choose them, by type or in the dialog.
 
@@ -34,6 +34,7 @@ You can also type `PURGE` with a type and an optional name list, for example `PU
 - A dimension style with overrides (`NAME$0`) goes after its overrides.
 - Zero-length geometry means lines, arcs, circles and lightweight polylines of no length; empty text means text and multiline text with nothing but spaces. Only objects in model space and on sheets are offered, and objects on locked layers stay.
 - Removing a block can free the layers, linetypes, styles and nested blocks it used. One purge repeats until nothing more can be removed.
+- A registered application (Regapps) is offered when no extended data in the drawing names it. ACAD and the applications the program itself writes data under (AcadAnnotative, AcCmTransparency, AcAecLayerStandard) always stay.
 - Draw-order data left behind by removed blocks is cleaned up too.
 - The command line reports how many items of each kind were removed.
 - A purge is one undo step.

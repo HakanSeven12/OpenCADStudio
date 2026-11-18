@@ -7575,6 +7575,7 @@ purge-dialog =
     .mline-styles = Çoklu çizgi stilleri
     .groups = Boş gruplar
     .materials = Malzemeler
+    .regapps = Kayıtlı uygulamalar
     .zero-length = Sıfır uzunluklu geometri
     .empty-text = Boş metin nesneleri
     .unknown-type = PURGE: bilinmeyen tür "{ $kind }". Türler arasından seçmek için -PURGE yazın.

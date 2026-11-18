@@ -7651,6 +7651,7 @@ purge-dialog =
     .mline-styles = Multiline styles
     .groups = Empty groups
     .materials = Materials
+    .regapps = Registered applications
     .zero-length = Zero-length geometry
     .empty-text = Empty text objects
     .unknown-type = PURGE: unknown type "{ $kind }". Type -PURGE to choose from the types.

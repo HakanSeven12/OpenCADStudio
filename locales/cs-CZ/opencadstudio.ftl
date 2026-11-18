@@ -7654,6 +7654,7 @@ purge-dialog =
     .mline-styles = Styly multičar
     .groups = Prázdné skupiny
     .materials = Materiály
+    .regapps = Registrované aplikace
     .zero-length = Geometrie nulové délky
     .empty-text = Prázdné textové objekty
     .unknown-type = PURGE: neznámý typ „{ $kind }“. Typ vyberte příkazem -PURGE.

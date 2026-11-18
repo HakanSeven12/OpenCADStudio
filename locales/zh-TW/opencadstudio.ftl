@@ -7647,6 +7647,7 @@ purge-dialog =
     .mline-styles = 複線型式
     .groups = 空群組
     .materials = 材料
+    .regapps = 已註冊的應用程式
     .zero-length = 零長度幾何
     .empty-text = 空白文字物件
     .unknown-type = PURGE：未知的類型「{ $kind }」。輸入 -PURGE 以選擇類型。

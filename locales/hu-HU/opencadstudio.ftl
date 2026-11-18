@@ -7630,6 +7630,7 @@ purge-dialog =
     .mline-styles = Multivonalstílusok
     .groups = Üres csoportok
     .materials = Anyagok
+    .regapps = Regisztrált alkalmazások
     .zero-length = Nulla hosszúságú geometria
     .empty-text = Üres szövegobjektumok
     .unknown-type = PURGE: ismeretlen típus: „{ $kind }”. A típusok közüli választáshoz írja be: -PURGE.

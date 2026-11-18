@@ -337,7 +337,7 @@ fn purge_flow() -> PromptFlow {
             None,
             &PURGE_TYPES,
         )?;
-        if matches!(kind, "REGAPPS" | "ZEROLENGTH" | "EMPTYTEXT" | "ORPHANED") {
+        if matches!(kind, "ZEROLENGTH" | "EMPTYTEXT" | "ORPHANED") {
             return run("-PURGE", &[kind, "*"]);
         }
         let names = q.text(
@@ -1066,12 +1066,13 @@ impl OpenCADStudio {
                         | "MLINESTYLES"
                         | "GROUPS"
                         | "MATERIALS"
+                        | "REGAPPS"
                         | "ZEROLENGTH"
                         | "EMPTYTEXT"
                 ) {
                     return Some(self.dispatch_command(&format!("PURGE {} {}", arg(0), arg(1))));
                 }
-                // ponytail: regapps, detail view, plot and visual styles,
+                // ponytail: detail view, plot and visual styles,
                 // shapes and orphaned data are not purged: their users are
                 // not all known to the drawing model (raw passthrough data
                 // can name them), so removing one could break the file. They

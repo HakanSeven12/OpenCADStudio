@@ -24,16 +24,19 @@
 //! growing parameter list. [`SceneBuilder`] therefore tracks the
 //! **most-recently-added element** as the *active element*:
 //! [`SceneBuilder::name`], [`SceneBuilder::actions`],
-//! [`SceneBuilder::drag`], and the paint setters [`SceneBuilder::fill`] /
-//! [`SceneBuilder::stroke`] apply to it and to nothing else. A subsequent
+//! [`SceneBuilder::drag`], the paint setters [`SceneBuilder::fill`] /
+//! [`SceneBuilder::stroke`], the group clip [`SceneBuilder::clip`], the
+//! port label [`SceneBuilder::label`], and the color setter
+//! [`SceneBuilder::color`] apply to it and to nothing else. A subsequent
 //! add re-points the active element at the new element; closing a group with
 //! [`SceneBuilder::end_group`] re-points it at the just-closed group. Calling
 //! an accessor before any element has been added is a documented no-op (the
 //! error vocabulary of [`SceneError`] is frozen, so there is nothing to
-//! report it with; the typed adds are the paths that report). The paint
-//! setters follow the same convention on elements that take no such paint
-//! (a `fill` on a Group, a `stroke` on a Text): documented no-ops, never
-//! errors.
+//! report it with; the typed adds are the paths that report). The variant-
+//! specific setters follow the same convention on elements that take no
+//! such field — no such paint (a `fill` on a Group, a `stroke` on a Text),
+//! no clip (a `clip` on a Rect), no port label (a `label` on a Group), or
+//! no color (a `color` on a Group): documented no-ops, never errors.
 //!
 //! # Group nesting
 //!
@@ -246,8 +249,7 @@ impl SceneBuilder {
     }
 
     /// Append a named connection point (its `label` stays unset; label it
-    /// with a [`SceneBuilder::text`] sibling or insert it raw via
-    /// [`SceneBuilder::element`]).
+    /// fluently with [`SceneBuilder::label`]).
     pub fn port(&mut self, id: u64, at: [f64; 2]) -> Result<&mut Self, SceneError> {
         self.register_unique(StableId(id))?;
         self.push_active_child(SceneElement::Port {
@@ -368,6 +370,50 @@ impl SceneBuilder {
     pub fn stroke(&mut self, stroke: Stroke) -> &mut Self {
         if let Some(line) = self.active_element_mut().and_then(stroke_mut) {
             *line = Some(stroke);
+        }
+        self
+    }
+
+    /// Set the active element's clip rectangle (a Group's children render
+    /// only inside it). Follows the accessory convention — a documented
+    /// no-op when no element has been added yet or the active element is
+    /// not a Group (Rect, Path, CubicPath, Text, Asset, Port, Marker,
+    /// Edge). Wire note: this assigns the Group variant's existing
+    /// `clip: Option<Rect2D>` field; no wire bytes move.
+    pub fn clip(&mut self, clip: Rect2D) -> &mut Self {
+        if let Some(slot) = self.active_element_mut().and_then(clip_mut) {
+            *slot = Some(clip);
+        }
+        self
+    }
+
+    /// Set the active Port's variant-specific `label` (`None` clears it) —
+    /// the short string drawn next to the port, which
+    /// [`SceneBuilder::name`] cannot reach. Follows the accessory
+    /// convention — a documented no-op when no element has been added yet
+    /// or the active element is not a Port. NOT the display `name`: the
+    /// two fields coexist on a Port and land independently
+    /// (`name(..)` → the common `name` accessory, `label(..)` →
+    /// `Port.label`). Wire note: this assigns the Port variant's existing
+    /// `label: Option<String>` field; no wire bytes move.
+    pub fn label(&mut self, label: Option<&str>) -> &mut Self {
+        if let Some(slot) = self.active_element_mut().and_then(label_mut) {
+            *slot = label.map(str::to_owned);
+        }
+        self
+    }
+
+    /// Set the active element's color (a Text or a Marker — the variants
+    /// that carry a `color` set mandatorily at add time; this is the
+    /// re-theming path that spares a whole-literal Replace). Follows the
+    /// accessory convention — a documented no-op when no element has been
+    /// added yet or the active element carries no color (Group, Rect,
+    /// Path, CubicPath, Asset, Port, Edge). Wire note: this assigns the
+    /// existing `color: SceneColor` field of the Text/Marker variant; no
+    /// wire bytes move.
+    pub fn color(&mut self, color: SceneColor) -> &mut Self {
+        if let Some(slot) = self.active_element_mut().and_then(color_mut) {
+            *slot = color;
         }
         self
     }
@@ -507,6 +553,36 @@ fn stroke_mut(element: &mut SceneElement) -> Option<&mut Option<Stroke>> {
         | SceneElement::Path { stroke, .. }
         | SceneElement::CubicPath { stroke, .. }
         | SceneElement::Edge { stroke, .. } => Some(stroke),
+        _ => None,
+    }
+}
+
+/// Mutable view of the active element's `clip` field — the Group variant
+/// alone (the only variant that clips its children). `None` on every other
+/// variant (the [`SceneBuilder::clip`] no-op arm).
+fn clip_mut(element: &mut SceneElement) -> Option<&mut Option<Rect2D>> {
+    match element {
+        SceneElement::Group { clip, .. } => Some(clip),
+        _ => None,
+    }
+}
+
+/// Mutable view of the active element's variant-specific `label` — the
+/// Port variant alone. `None` on every other variant (the
+/// [`SceneBuilder::label`] no-op arm).
+fn label_mut(element: &mut SceneElement) -> Option<&mut Option<String>> {
+    match element {
+        SceneElement::Port { label, .. } => Some(label),
+        _ => None,
+    }
+}
+
+/// Mutable view of the active element's `color` field — the variants that
+/// carry a color (Text, Marker). `None` on every other variant (the
+/// [`SceneBuilder::color`] no-op arm).
+fn color_mut(element: &mut SceneElement) -> Option<&mut SceneColor> {
+    match element {
+        SceneElement::Text { color, .. } | SceneElement::Marker { color, .. } => Some(color),
         _ => None,
     }
 }
@@ -1396,6 +1472,289 @@ mod tests {
         let mut builder = SceneBuilder::new(1);
         builder.fill(fill).stroke(stroke);
         assert_eq!(builder.finish().map(|scene| scene.elements.len()), Ok(0));
+    }
+
+    /// The fluent variant-specific accessories (clip/label/color): an
+    /// element built through them equals the documented `element(literal)`
+    /// workaround byte for byte — value AND wire bytes — with no wire
+    /// change anywhere.
+    #[test]
+    fn builder_clip_label_color_match_the_literal() {
+        let clip = Rect2D {
+            pos: v2(1.0, 2.0),
+            size: v2(30.0, 40.0),
+        };
+        let color = SceneColor::Rgba(Rgba8([9, 8, 7, 255]));
+
+        // clip on a group: the chained shape...
+        let chained = SceneBuilder::new(1)
+            .group(1)
+            .expect("group add")
+            .clip(clip)
+            .finish()
+            .expect("valid scene");
+        // ...must equal the literal the escape hatch used to require.
+        let literal = PanelScene {
+            revision: SceneRevision(1),
+            elements: vec![SceneElement::Group {
+                id: StableId(1),
+                name: None,
+                actions: Vec::new(),
+                drag: None,
+                children: Vec::new(),
+                clip: Some(clip),
+            }],
+        };
+        assert_eq!(chained, literal, "chained clip == the literal group");
+        assert_eq!(
+            bincode::serialize(&chained).expect("serialize chained"),
+            bincode::serialize(&literal).expect("serialize literal"),
+            "the parity holds on the wire bytes too"
+        );
+
+        // label on a port: the field `name(..)` cannot reach.
+        let chained = SceneBuilder::new(1)
+            .port(1, [3.0, 4.0])
+            .expect("port add")
+            .label(Some("IN"))
+            .finish()
+            .expect("valid scene");
+        let literal = PanelScene {
+            revision: SceneRevision(1),
+            elements: vec![SceneElement::Port {
+                id: StableId(1),
+                name: None,
+                actions: Vec::new(),
+                drag: None,
+                at: Vec2([3.0, 4.0]),
+                label: Some("IN".to_string()),
+            }],
+        };
+        assert_eq!(chained, literal, "chained label == the literal port");
+        assert_eq!(
+            bincode::serialize(&chained).expect("serialize chained"),
+            bincode::serialize(&literal).expect("serialize literal"),
+            "the parity holds on the wire bytes too"
+        );
+
+        // color on a text: re-themed without a whole-literal Replace.
+        let chained = SceneBuilder::new(1)
+            .text(1, "hello", [0.0, 0.0], 11.0, SceneColor::Theme(ThemeColor::Accent))
+            .expect("text add")
+            .color(color)
+            .finish()
+            .expect("valid scene");
+        let literal = PanelScene {
+            revision: SceneRevision(1),
+            elements: vec![SceneElement::Text {
+                id: StableId(1),
+                name: None,
+                actions: Vec::new(),
+                drag: None,
+                content: "hello".to_string(),
+                pos: Vec2([0.0, 0.0]),
+                size: 11.0,
+                color,
+            }],
+        };
+        assert_eq!(chained, literal, "chained color == the literal text");
+        assert_eq!(
+            bincode::serialize(&chained).expect("serialize chained"),
+            bincode::serialize(&literal).expect("serialize literal"),
+            "the parity holds on the wire bytes too"
+        );
+
+        // color on a marker: the other color-carrying variant.
+        let chained = SceneBuilder::new(1)
+            .marker(
+                1,
+                [5.0, 5.0],
+                MarkerKind::Dot,
+                SceneColor::Theme(ThemeColor::Accent),
+            )
+            .expect("marker add")
+            .color(color)
+            .finish()
+            .expect("valid scene");
+        let literal = PanelScene {
+            revision: SceneRevision(1),
+            elements: vec![SceneElement::Marker {
+                id: StableId(1),
+                name: None,
+                actions: Vec::new(),
+                drag: None,
+                at: Vec2([5.0, 5.0]),
+                kind: MarkerKind::Dot,
+                color,
+            }],
+        };
+        assert_eq!(chained, literal, "chained color == the literal marker");
+        assert_eq!(
+            bincode::serialize(&chained).expect("serialize chained"),
+            bincode::serialize(&literal).expect("serialize literal"),
+            "the parity holds on the wire bytes too"
+        );
+    }
+
+    /// A group built `group(id)..clip(r)..` bincode-equals the SAME group
+    /// added whole through the escape hatch (`element(literal with clip)`):
+    /// the fluent clip is not a different element, it is the same bytes.
+    #[test]
+    fn builder_group_clip_equals_the_element_literal() {
+        let clip = Rect2D {
+            pos: v2(0.0, 0.0),
+            size: v2(100.0, 100.0),
+        };
+        let mut via_builder = SceneBuilder::new(1);
+        via_builder.group(1).expect("group add").clip(clip);
+        let via_builder = via_builder.finish().expect("valid scene");
+        let via_element = SceneBuilder::new(1)
+            .element(SceneElement::Group {
+                id: StableId(1),
+                name: None,
+                actions: Vec::new(),
+                drag: None,
+                children: Vec::new(),
+                clip: Some(clip),
+            })
+            .finish()
+            .expect("valid scene");
+        assert_eq!(
+            bincode::serialize(&via_builder).expect("serialize builder group"),
+            bincode::serialize(&via_element).expect("serialize literal group"),
+            "group(id)..clip(r).. == element(group literal with clip)"
+        );
+    }
+
+    /// Off their target variants the new accessories follow the accessory
+    /// convention: documented no-ops, never errors — a non-matching active
+    /// element and no active element at all each leave the scene
+    /// byte-identical to the baseline built without the calls.
+    #[test]
+    fn builder_clip_label_color_are_noops_off_their_variants() {
+        let clip = Rect2D {
+            pos: v2(1.0, 2.0),
+            size: v2(3.0, 4.0),
+        };
+        let color = SceneColor::Rgba(Rgba8([9, 8, 7, 255]));
+
+        // clip on a Rect, label on a Group, color on a Group: each pinned
+        // against its own accessory-free baseline.
+        let baseline = SceneBuilder::new(1)
+            .rect(1, [0.0, 0.0], [10.0, 10.0])
+            .expect("rect add")
+            .finish()
+            .expect("valid scene");
+        let with_noop = SceneBuilder::new(1)
+            .rect(1, [0.0, 0.0], [10.0, 10.0])
+            .expect("rect add")
+            .clip(clip) // no-op: not a Group
+            .finish()
+            .expect("valid scene");
+        assert_eq!(
+            bincode::serialize(&with_noop).expect("serialize clip noop"),
+            bincode::serialize(&baseline).expect("serialize baseline"),
+            "clip on a rect is a no-op, not a refusal"
+        );
+
+        let baseline = SceneBuilder::new(1)
+            .group(1)
+            .expect("group add")
+            .finish()
+            .expect("valid scene");
+        let with_noop = SceneBuilder::new(1)
+            .group(1)
+            .expect("group add")
+            .label(Some("lost")) // no-op: not a Port
+            .color(color) // no-op: a Group carries no color
+            .finish()
+            .expect("valid scene");
+        assert_eq!(
+            bincode::serialize(&with_noop).expect("serialize noop group"),
+            bincode::serialize(&baseline).expect("serialize baseline"),
+            "label/color on a group are no-ops, not refusals"
+        );
+
+        // With no active element at all: the same documented no-op (the
+        // scene finishes empty, byte-identical to a bare empty finish).
+        let baseline = SceneBuilder::new(1).finish().expect("valid scene");
+        let mut builder = SceneBuilder::new(1);
+        builder.clip(clip).label(Some("lost")).color(color);
+        let with_noops = builder.finish().expect("valid scene");
+        assert_eq!(
+            bincode::serialize(&with_noops).expect("serialize empty noops"),
+            bincode::serialize(&baseline).expect("serialize empty baseline"),
+            "the accessories before any add are no-ops"
+        );
+    }
+
+    /// The accessories bind the CURRENT active element at call time: the
+    /// clip lands on the group, then the rect re-points the active element,
+    /// so the NEXT accessory call targets the rect under its own law (a
+    /// no-op here), and the text after THAT is the one `color` reaches.
+    #[test]
+    fn builder_clip_label_color_re_point_with_the_active_element() {
+        let clip = Rect2D {
+            pos: v2(0.0, 0.0),
+            size: v2(50.0, 50.0),
+        };
+        let color = SceneColor::Rgba(Rgba8([1, 2, 3, 255]));
+        let scene = SceneBuilder::new(1)
+            .group(1)
+            .expect("group add")
+            .clip(clip) // binds the group
+            .rect(2, [0.0, 0.0], [10.0, 10.0])
+            .expect("rect add")
+            .clip(clip) // no-op: the rect is active now, not the group
+            .text(3, "hi", [1.0, 1.0], 10.0, SceneColor::Theme(ThemeColor::Accent))
+            .expect("text add")
+            .color(color) // binds the text, the most-recent add
+            .end_group()
+            .finish()
+            .expect("valid scene");
+        match &scene.elements[0] {
+            SceneElement::Group { clip: c, children, .. } => {
+                assert_eq!(*c, Some(clip), "the clip stuck to the group");
+                assert_eq!(children.len(), 2);
+                match &children[0] {
+                    SceneElement::Rect { fill, stroke, .. } => {
+                        // The second clip() call must not have touched the
+                        // rect (a Rect carries no clip field at all — the
+                        // no-op is provable by the element staying put).
+                        assert!(fill.is_none() && stroke.is_none());
+                    }
+                    other => panic!("expected the rect, got {other:?}"),
+                }
+                match &children[1] {
+                    SceneElement::Text { color: c2, .. } => {
+                        assert_eq!(*c2, color, "the color landed on the text");
+                    }
+                    other => panic!("expected the text, got {other:?}"),
+                }
+            }
+            other => panic!("expected the group, got {other:?}"),
+        }
+    }
+
+    /// `name(..)` and `label(..)` coexist on a Port: each lands on its own
+    /// field — the common `name` accessory and the variant-specific
+    /// `Port.label` — independently and in either order.
+    #[test]
+    fn builder_port_name_and_label_land_on_their_own_fields() {
+        let scene = SceneBuilder::new(1)
+            .port(1, [3.0, 4.0])
+            .expect("port add")
+            .name(Some("input-node"))
+            .label(Some("IN"))
+            .finish()
+            .expect("valid scene");
+        match &scene.elements[0] {
+            SceneElement::Port { name, label, .. } => {
+                assert_eq!(name.as_deref(), Some("input-node"), "name(..) → Port.name");
+                assert_eq!(label.as_deref(), Some("IN"), "label(..) → Port.label");
+            }
+            other => panic!("expected the port, got {other:?}"),
+        }
     }
 
     #[test]

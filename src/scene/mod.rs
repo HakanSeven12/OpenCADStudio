@@ -37,6 +37,7 @@ pub mod model;
 pub mod pick;
 pub mod pipeline;
 pub(crate) mod raster_scale;
+pub(crate) mod reaper;
 pub(crate) mod render_graph;
 pub mod section_cull;
 pub mod sub_select;
@@ -9974,7 +9975,7 @@ impl Scene {
         let cur_epoch = self.geometry_epoch;
         let mut sets = self.resident_wire_sets.borrow_mut();
         self.prune_resident_wire_sets(&mut sets, shown);
-        sets.insert(
+        let evicted = sets.insert(
             key,
             ResidentWireSet {
                 epoch: cur_epoch,
@@ -9983,6 +9984,11 @@ impl Scene {
                 layout,
             },
         );
+        // Tearing down the previous set walks every wire's String, layer Arc
+        // and point Vec (~39 ms for 200k wires); drop it off the rebuild path.
+        if let Some(evicted) = evicted {
+            reaper::reap(evicted);
+        }
         arc
     }
 

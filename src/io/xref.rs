@@ -10,11 +10,6 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-#[cfg(not(target_arch = "wasm32"))]
-type SourceFingerprint = crate::io::edit_lock::FileFingerprint;
-#[cfg(target_arch = "wasm32")]
-type SourceFingerprint = ();
-
 /// Status of an external reference block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum XrefStatus {
@@ -449,25 +444,10 @@ fn resolve_xrefs_with_filter(
             .map(|_| std::sync::atomic::AtomicU16::new(0))
             .collect(),
     );
-    let parsed: Vec<(
-        String,
-        String,
-        Handle,
-        Option<PathBuf>,
-        Option<Result<document::ReadOutcome, String>>,
-        Option<String>,
-        Option<SourceFingerprint>,
-    )> = xref_entries
+    let parsed: Vec<(String, String, Handle, XrefRead)> = xref_entries
         .into_par_iter()
         .enumerate()
         .map(|(xref_index, (block_name, raw_path, br_handle))| {
-            let resolved = resolve_path(&raw_path, base_dir);
-            #[cfg(not(target_arch = "wasm32"))]
-            let initial_fingerprint = resolved
-                .as_ref()
-                .and_then(|path| crate::io::edit_lock::FileFingerprint::capture(path).ok());
-            #[cfg(target_arch = "wasm32")]
-            let initial_fingerprint = None;
             let units = std::sync::Arc::clone(&parse_units);
             let nested_progress = progress.as_ref().map(|progress| {
                 let progress = std::sync::Arc::clone(progress);
@@ -483,38 +463,7 @@ fn resolve_xrefs_with_filter(
                     });
                 callback
             });
-            #[cfg(not(target_arch = "wasm32"))]
-            let xref_outcome = resolved
-                .as_ref()
-                .map(|path| super::load_file_with_progress(path, nested_progress));
-            // Web: read the registry — the cached off-thread parse when the
-            // pick/open pre-pass made one, otherwise the registered bytes.
-            #[cfg(target_arch = "wasm32")]
-            let xref_outcome = resolved
-                .as_ref()
-                .map(|path| read_registered_outcome(&path.to_string_lossy(), nested_progress));
-            let source_sha256 = resolved.as_ref().and_then(|path| {
-                let needs_fingerprint = match &xref_outcome {
-                    Some(Ok(outcome)) => {
-                        outcome.stats.recovered()
-                            || outcome.stats.skipped_source_records > 0
-                            || !outcome.stats.stream_completed
-                    }
-                    Some(Err(_)) => true,
-                    None => false,
-                };
-                if !needs_fingerprint {
-                    return None;
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    super::stable_sha256_file(path, initial_fingerprint.as_ref())
-                }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    crate::io::recovery::sha256_file(path).ok()
-                }
-            });
+            let read = read_xref_file(&raw_path, base_dir, nested_progress);
             parse_units[xref_index].store(1000, std::sync::atomic::Ordering::Relaxed);
             if let Some(progress) = &progress {
                 let completed = parse_units
@@ -523,37 +472,96 @@ fn resolve_xrefs_with_filter(
                     .sum();
                 progress(completed, total_units);
             }
-            (
-                block_name,
-                raw_path,
-                br_handle,
-                resolved,
-                xref_outcome,
-                source_sha256,
-                initial_fingerprint,
-            )
+            (block_name, raw_path, br_handle, read)
         })
         .collect();
 
-    // Phase 2 — merge each parsed xref into the host document, in the original
-    // block order (par_iter preserves it), so handle allocation is deterministic.
+    merge_xref_reads(doc, parsed, &mut result, progress.as_ref());
+    result
+}
+
+/// What the read of one referenced drawing found, before the merge: the
+/// file it resolved to, the reader's outcome (none when no file was found)
+/// and the source hash of a damaged read.
+#[derive(Clone, Debug)]
+pub struct XrefRead {
+    resolved: Option<PathBuf>,
+    outcome: Option<Result<document::ReadOutcome, String>>,
+    source_sha256: Option<String>,
+}
+
+/// Read and parse the drawing that a reference stored as `raw_path` names,
+/// resolved against `base_dir`. It touches no host document, so it can run
+/// on any thread; [`merge_xref_reads`] merges the result.
+pub fn read_xref_file(
+    raw_path: &str,
+    base_dir: &Path,
+    progress: Option<std::sync::Arc<dyn Fn(u16) + Send + Sync>>,
+) -> XrefRead {
+    let resolved = resolve_path(raw_path, base_dir);
+    #[cfg(not(target_arch = "wasm32"))]
+    let initial_fingerprint = resolved
+        .as_ref()
+        .and_then(|path| crate::io::edit_lock::FileFingerprint::capture(path).ok());
+    #[cfg(not(target_arch = "wasm32"))]
+    let outcome = resolved
+        .as_ref()
+        .map(|path| super::load_file_with_progress(path, progress));
+    // Web: read the registry — the cached off-thread parse when the
+    // pick/open pre-pass made one, otherwise the registered bytes.
+    #[cfg(target_arch = "wasm32")]
+    let outcome = resolved
+        .as_ref()
+        .map(|path| read_registered_outcome(&path.to_string_lossy(), progress));
+    let source_sha256 = resolved.as_ref().and_then(|path| {
+        let needs_fingerprint = match &outcome {
+            Some(Ok(outcome)) => {
+                outcome.stats.recovered()
+                    || outcome.stats.skipped_source_records > 0
+                    || !outcome.stats.stream_completed
+            }
+            Some(Err(_)) => true,
+            None => false,
+        };
+        if !needs_fingerprint {
+            return None;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            super::stable_sha256_file(path, initial_fingerprint.as_ref())
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            crate::io::recovery::sha256_file(path).ok()
+        }
+    });
+    XrefRead {
+        resolved,
+        outcome,
+        source_sha256,
+    }
+}
+
+/// Merge each read into its reference's block (`block_name`, the stored
+/// `raw_path`, the block record `br_handle`), in the order given, so handle
+/// allocation is deterministic. It reads no file.
+pub fn merge_xref_reads(
+    doc: &mut Document,
+    parsed: Vec<(String, String, Handle, XrefRead)>,
+    result: &mut Vec<XrefInfo>,
+    progress: Option<&std::sync::Arc<dyn Fn(usize, usize) + Send + Sync>>,
+) {
+    let xref_count = parsed.len();
+    let total_units = xref_count.saturating_mul(2000);
     result.reserve(parsed.len());
-    #[allow(unused_mut, unused_variables)]
-    for (
-        merge_index,
-        (
-            block_name,
-            raw_path,
-            br_handle,
+    for (merge_index, (block_name, raw_path, br_handle, read)) in parsed.into_iter().enumerate() {
+        let XrefRead {
             resolved,
-            xref_outcome,
-            mut source_sha256,
-            initial_fingerprint,
-        ),
-    ) in parsed.into_iter().enumerate()
-    {
+            outcome: xref_outcome,
+            source_sha256,
+        } = read;
         let (status, diagnostics, read_stats) = match xref_outcome {
-            Some(Ok(mut outcome)) => {
+            Some(Ok(outcome)) => {
                 let recovered = outcome.stats.recovered()
                     || outcome.stats.skipped_source_records > 0
                     || !outcome.stats.stream_completed
@@ -637,8 +645,6 @@ fn resolve_xrefs_with_filter(
             );
         }
     }
-
-    result
 }
 
 /// Underlay files named by a relative (or moved) path: read them from where

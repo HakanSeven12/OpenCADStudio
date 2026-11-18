@@ -210,8 +210,7 @@ impl OpenCADStudio {
             .filter(|cmd| cmd.name() == "XATTACH")
             .and_then(|cmd| cmd.xattach_request());
         if let Some(request) = xattach_request {
-            self.commit_xref_attach(i, request, entity);
-            return Some(Task::none());
+            return Some(self.commit_xref_attach(i, request, entity));
         }
         let insert_block_name = match &entity {
             document::EntityType::Insert(ins) => Some(ins.block_name.clone()),

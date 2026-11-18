@@ -666,6 +666,39 @@ pub fn prepare_named_xref_definition(
     host_file: Option<&std::path::Path>,
     stem: &str,
 ) -> String {
+    prepare_named_xref_definition_with(scene, request, host_file, stem, None)
+}
+
+/// What a reference to `request` reads: the path stored in the drawing, and
+/// the folder it resolves against (a stored relative path against the host
+/// folder; a full path or bare file name against the chosen file's). No
+/// folder: nothing is read.
+pub fn xref_read_inputs(
+    request: &XrefAttachRequest,
+    host_file: Option<&std::path::Path>,
+) -> (String, Option<std::path::PathBuf>) {
+    let file_dir = std::path::Path::new(&resolve_xref_store_path(&request.path, None))
+        .parent()
+        .map(|p| p.to_path_buf());
+    let base_dir = match request.path_type {
+        Pathtype::Relative => host_file.and_then(|h| h.parent()).map(|p| p.to_path_buf()),
+        _ => None,
+    }
+    .or(file_dir);
+    (stored_path(request, host_file), base_dir)
+}
+
+/// [`prepare_named_xref_definition`] with the reference's file already read
+/// (off the UI thread, [`crate::io::xref::read_xref_file`] with
+/// [`xref_read_inputs`]): it merges `read` and reads no file. With `None` it
+/// reads the file here.
+pub fn prepare_named_xref_definition_with(
+    scene: &mut Scene,
+    request: &XrefAttachRequest,
+    host_file: Option<&std::path::Path>,
+    stem: &str,
+    read: Option<crate::io::xref::XrefRead>,
+) -> String {
     let stem = stem.to_string();
     if let Some(existing) = existing_reference(scene, &stem) {
         return existing;
@@ -697,19 +730,23 @@ pub fn prepare_named_xref_definition(
     // BLOCK / ENDBLK markers linked through the record.
     crate::io::xref::ensure_block_entities(&mut scene.document, &block_name);
 
-    // Load this reference only. A stored relative path resolves against the
-    // host folder; a full path or bare file name against the chosen file's.
-    let file_dir = std::path::Path::new(&resolve_xref_store_path(&request.path, None))
-        .parent()
-        .map(|p| p.to_path_buf());
-    let base_dir = match request.path_type {
-        Pathtype::Relative => host_file.and_then(|h| h.parent()).map(|p| p.to_path_buf()),
-        _ => None,
-    }
-    .or(file_dir);
-    if let Some(base_dir) = base_dir {
-        let keys: rustc_hash::FxHashSet<document::types::Handle> = [key].into_iter().collect();
-        let _ = crate::io::xref::resolve_xrefs_for_keys(&mut scene.document, &base_dir, &keys);
+    // Load this reference only.
+    let (_, base_dir) = xref_read_inputs(request, host_file);
+    match (read, base_dir) {
+        (Some(read), Some(_)) => {
+            let mut result = Vec::new();
+            crate::io::xref::merge_xref_reads(
+                &mut scene.document,
+                vec![(block_name.clone(), store_path, key, read)],
+                &mut result,
+                None,
+            );
+        }
+        (None, Some(base_dir)) => {
+            let keys: rustc_hash::FxHashSet<document::types::Handle> = [key].into_iter().collect();
+            let _ = crate::io::xref::resolve_xrefs_for_keys(&mut scene.document, &base_dir, &keys);
+        }
+        (_, None) => {}
     }
 
     block_name

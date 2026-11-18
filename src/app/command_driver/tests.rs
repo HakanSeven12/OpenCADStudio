@@ -8192,12 +8192,11 @@ mod batch7_tests {
         app.active_tab = idx;
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let _ = app.run_command_line("-XREF");
-        let _ = app.feed_active_cmd("ATTACH");
-        let _ = app.feed_active_cmd(&source.display().to_string());
-        let _ = app.feed_active_cmd("0,0");
-        let _ = app.feed_active_cmd("1");
-        let _ = app.feed_active_cmd("");
-        let _ = app.feed_active_cmd("");
+        // The attach reads the reference off the UI thread: drive each task.
+        for input in ["ATTACH", &source.display().to_string(), "0,0", "1", "", ""] {
+            let task = app.feed_active_cmd(input);
+            app.drive_headless_task(task).expect("the attach's task");
+        }
         let record = app.tabs[idx]
             .scene
             .document

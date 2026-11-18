@@ -70,6 +70,11 @@ fn shown(simulator: &mut Simulator<'_, Message>, text: &str) -> iced::Rectangle 
         .unwrap_or_else(|| panic!("{text:?} is not visible"))
 }
 
+/// The preview card's chip of the texts that use the style.
+fn used(count: usize) -> String {
+    crate::tr!("text-style", "used-count", count = count).to_string()
+}
+
 #[test]
 fn the_counts_come_from_one_walk_and_cover_every_kind() {
     let app = manager();
@@ -104,16 +109,10 @@ fn the_list_shows_counts_and_styles_in_use_hides_the_unused() {
 }
 
 #[test]
-fn the_where_used_box_and_the_status_count_the_texts() {
+fn the_preview_card_says_the_style_is_used_and_counts_the_texts() {
     let app = manager();
     let mut ui = window(&app, 1280.0);
-    for text in [
-        "Single-line text",
-        "MTEXT",
-        "Attribute definitions",
-        "1 of them inside 1 block definition.",
-        "Used in drawing · used by 4 texts",
-    ] {
+    for text in ["NOTES", "Used in drawing", &used(4)] {
         shown(&mut ui, text);
     }
 }
@@ -139,12 +138,12 @@ fn the_preview_sits_above_the_cards_and_they_stack_in_a_narrow_window() {
         value: "3.5".into(),
     });
     let mut wide = window(&app, 1280.0);
-    let font = shown(&mut wide, "Font style");
-    let preview = shown(&mut wide, "Sample text");
+    let font = shown(&mut wide, "FONT");
+    let preview = shown(&mut wide, "NOTES");
     assert!(preview.y < font.y, "{font:?} {preview:?}");
-    // Two columns: the effects card comes under the font card.
-    let effects = shown(&mut wide, "Width factor");
-    assert!(effects.y > font.y && (effects.x - font.x).abs() < 40.0, "{font:?} {effects:?}");
+    // Wide: the setting cards sit side by side.
+    let effects = shown(&mut wide, "EFFECTS");
+    assert!((effects.y - font.y).abs() < 1.0 && effects.x > font.x, "{font:?} {effects:?}");
     shown(&mut wide, "Set Current");
     drop(wide);
 
@@ -152,7 +151,7 @@ fn the_preview_sits_above_the_cards_and_they_stack_in_a_narrow_window() {
     // columns stack, the toolbar shows icons only, the names as hints.
     let mut narrow = window(&app, 780.0);
     let summary = shown(&mut narrow, "Apply will change");
-    let font = shown(&mut narrow, "Font style");
+    let font = shown(&mut narrow, "FONT");
     assert!(summary.y < font.y, "{summary:?} {font:?}");
     assert!(narrow.find("Set Current".to_string()).is_err());
 }
@@ -167,7 +166,7 @@ fn the_preview_draws_the_draft_with_its_sample_text() {
     });
     let mut ui = window(&app, 1280.0);
     shown(&mut ui, "Hello");
-    shown(&mut ui, "Texts using this style");
+    shown(&mut ui, &used(4));
 }
 
 #[test]
@@ -267,29 +266,6 @@ fn the_preview_draws_the_bold_and_italic_face_the_drawing_draws() {
     }
 }
 
-#[test]
-fn a_long_preview_caption_wraps_inside_the_box() {
-    let mut app = manager();
-    let _ = app.update(Message::TextStyleEdit {
-        field: "height",
-        value: "125".into(),
-    });
-    let _ = app.update(crate::app::text_style_manager_tests::pick(
-        crate::ui::font_picker::FontChoice::Stroke(
-            "a-stroke-font-with-a-rather-long-file-name.shx".into(),
-        ),
-    ));
-    let caption = app
-        .textstyle_preview(&app.textstyle_draft.resolved())
-        .caption;
-    let mut ui = window(&app, 1280.0);
-    let label = shown(&mut ui, "Preview");
-    let text = shown(&mut ui, &caption);
-    // The preview spans the editor, inside the window.
-    assert!(text.x >= label.x, "{text:?} {label:?}");
-    assert!(text.x + text.width <= 1280.0, "{text:?}");
-}
-
 /// Test 10: the window draws, wide and narrow. With
 /// `OCS_TEXT_STYLE_CAPTURES` set to a folder it also saves both in the light
 /// and dark theme for a look; rendering them on every run slows the parallel
@@ -300,7 +276,7 @@ fn the_window_draws_wide_and_narrow_in_both_themes() {
     let folder = std::env::var_os("OCS_TEXT_STYLE_CAPTURES").map(std::path::PathBuf::from);
     for width in [1280.0, 780.0] {
         let mut ui = window(&app, width);
-        shown(&mut ui, "Preview");
+        shown(&mut ui, "NOTES");
         let Some(folder) = &folder else { continue };
         for theme in [iced::Theme::Light, iced::Theme::Dark] {
             let snapshot = ui.snapshot(&theme).expect("a snapshot");

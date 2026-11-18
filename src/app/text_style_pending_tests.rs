@@ -204,7 +204,7 @@ fn a_changed_style_keeps_the_window_usable() {
         );
         if width >= 920.0 {
             // Beside it, the preview keeps its place.
-            shown(&mut ui, "Sample text");
+            shown(&mut ui, "NOTES");
         }
     }
 }
@@ -288,7 +288,7 @@ fn a_long_name_does_not_hide_a_large_count() {
         let mut ui = window(&app, width, 760.0);
         let count = shown(&mut ui, "1234");
         let name = shown(&mut ui, LONG);
-        let editor = shown(&mut ui, "Font style");
+        let editor = shown(&mut ui, "TrueType fonts only");
         // The name stops before the count; the count stays in the list.
         assert!(name.x + name.width <= count.x + 0.5, "{name:?} {count:?}");
         assert!(count.x + count.width < editor.x, "{count:?} {editor:?}");

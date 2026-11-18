@@ -44,6 +44,7 @@ pub mod type_registry;
 pub mod type_registry_types;
 pub mod version_info;
 pub mod widgets;
+pub mod widgets_builder;
 
 /// Runtime host surface — only built with the `host` feature (pulls `document`).
 #[cfg(feature = "host")]
@@ -103,6 +104,7 @@ pub use widgets::{
     WidgetGroup, WidgetKindCounts, WidgetNode, WidgetOp, WidgetRange, WidgetSummary, WidgetSurface,
     WidgetSurfacePatch, WidgetTreeDef,
 };
+pub use widgets_builder::{WidgetSurfaceBuilder, WidgetSurfacePatchBuilder};
 
 #[cfg(test)]
 pub(crate) mod test_lock {

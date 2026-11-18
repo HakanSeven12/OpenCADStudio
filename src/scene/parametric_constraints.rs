@@ -2977,7 +2977,13 @@ impl super::Scene {
             changes.push((handle, super::ChangeKind::Modified));
         }
         if !changes.is_empty() {
-            self.bump_entities(&changes);
+            // A scale rewrite moves no geometry: route it through the
+            // appearance-only bump so the settle tick pays only the two
+            // dimensions' re-tessellation instead of the full bump chain
+            // (native-graph sync, associative refreshes, dependency-index and
+            // whole-model draw-depth recompute — ~0.5 s on large drawings,
+            // issue #3277).
+            self.bump_entities_restyled(&changes);
         }
     }
 
@@ -3038,7 +3044,9 @@ impl super::Scene {
         // callers, including the DYNCONSTRAINTDISPLAY toggle that has no
         // call-site bump of its own.
         self.bump_constraints_epoch();
-        self.bump_entities(&changes);
+        // Visibility of dynamic pills is display-only; keep it off the full
+        // bump chain for the same reason as the scale rewrite above.
+        self.bump_entities_restyled(&changes);
     }
 
     /// Enables or disables one constraint without losing it — the production

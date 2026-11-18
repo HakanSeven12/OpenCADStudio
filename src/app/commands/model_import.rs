@@ -147,7 +147,7 @@ impl OpenCADStudio {
     /// The tab a finished import goes to: the one it was started for, while
     /// that tab still holds the same document. If not, the command line says
     /// why the result is dropped.
-    fn import_target(&mut self, tab_id: u64, generation: u64) -> Option<usize> {
+    pub(in crate::app) fn import_target(&mut self, tab_id: u64, generation: u64) -> Option<usize> {
         let found = self
             .tabs
             .iter()

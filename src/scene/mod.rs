@@ -2879,6 +2879,23 @@ pub struct Scene {
     #[cfg(any(test, not(target_arch = "wasm32")))]
     selection_fingerprint_cache: u64,
     selection_fingerprint_dirty: bool,
+    /// Cached per-frame `ViewportData` interaction sets (bit-encoded
+    /// `(selection_generation, hover_generation)` keys → selected handles,
+    /// hover handles, selected signature). Building them used to clone the
+    /// selected set, expand the hover set and hash the selection on EVERY
+    /// rendered frame per viewport — idle CPU that scaled with the selection
+    /// size even when nothing moved. The two generations cover every input:
+    /// selection mutations, sub-segment picks and table-cell picks all bump
+    /// the selection generation; hover sets bump the hover one.
+    viewport_interaction_sets: RefCell<
+        Option<(
+            u64,
+            u64,
+            std::sync::Arc<rustc_hash::FxHashSet<Handle>>,
+            std::sync::Arc<rustc_hash::FxHashSet<Handle>>,
+            u64,
+        )>,
+    >,
     /// Cached tessellation of all visible entity wires for the current layout.
     /// Keyed by `(geometry_epoch, camera_generation)` so a camera change
     /// invalidates the cull-dependent wire list as well as a geometry change.
@@ -3732,6 +3749,7 @@ impl Scene {
             #[cfg(any(test, not(target_arch = "wasm32")))]
             selection_fingerprint_cache: 0,
             selection_fingerprint_dirty: false,
+            viewport_interaction_sets: RefCell::new(None),
             wire_cache: RefCell::new(None),
             interaction_index_cache: RefCell::new(Vec::new()),
             interaction_index_pending_key: std::cell::Cell::new(None),
@@ -8998,6 +9016,76 @@ impl Scene {
         handles.extend(self.box_hover_highlights.iter().copied());
         handles.extend(self.filter_preview_highlights.iter().copied());
         handles
+    }
+
+    /// Cached interaction sets for [`crate::scene::view`]'s `ViewportData`:
+    /// `(selected handles, hover handles, selected signature)` keyed by the
+    /// bit-encoded `(selection_generation, hover_generation)`. Per rendered
+    /// frame per viewport this used to rebuild a fresh selected-set clone,
+    /// expand the hover set and hash the selection — idle CPU that scaled
+    /// with the selection size even when nothing moved. Cache invalidation
+    /// rides the two generations: selection mutations, sub-segment picks and
+    /// table-cell picks bump the selection generation; hover / marquee /
+    /// constraint / filter sets bump the hover one.
+    fn cached_viewport_interaction_sets(
+        &self,
+        show_interaction: bool,
+    ) -> (
+        std::sync::Arc<rustc_hash::FxHashSet<Handle>>,
+        std::sync::Arc<rustc_hash::FxHashSet<Handle>>,
+        u64,
+    ) {
+        let sel_key = self
+            .selection_generation
+            .wrapping_mul(2)
+            .wrapping_add(u64::from(!show_interaction));
+        let hover_key = self
+            .hover_generation
+            .wrapping_mul(2)
+            .wrapping_add(u64::from(!show_interaction));
+        {
+            let cache = self.viewport_interaction_sets.borrow();
+            if let Some((cached_sel, cached_hover, selected, hover, sig)) = cache.as_ref() {
+                if *cached_sel == sel_key && *cached_hover == hover_key {
+                    return (
+                        std::sync::Arc::clone(selected),
+                        std::sync::Arc::clone(hover),
+                        *sig,
+                    );
+                }
+            }
+        }
+        let selected = if show_interaction {
+            let cells = self.table_cells_handle();
+            self.selected
+                .iter()
+                .copied()
+                .filter(|handle| self.picked_segments(*handle).is_none())
+                .filter(|handle| Some(*handle) != cells)
+                .collect()
+        } else {
+            rustc_hash::FxHashSet::default()
+        };
+        let hover = if show_interaction {
+            self.hover_highlight_handles()
+        } else {
+            rustc_hash::FxHashSet::default()
+        };
+        let sig = if show_interaction {
+            self.selected_set_sig()
+        } else {
+            0
+        };
+        let selected = std::sync::Arc::new(selected);
+        let hover = std::sync::Arc::new(hover);
+        *self.viewport_interaction_sets.borrow_mut() = Some((
+            sel_key,
+            hover_key,
+            std::sync::Arc::clone(&selected),
+            std::sync::Arc::clone(&hover),
+            sig,
+        ));
+        (selected, hover, sig)
     }
 
     #[cfg(test)]

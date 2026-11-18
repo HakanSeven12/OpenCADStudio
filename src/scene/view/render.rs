@@ -5624,6 +5624,11 @@ impl Scene {
                 second.y, second.z, 0.0,
             ]
         };
+        // Cached per (selection, hover) generation: rebuilding the two sets
+        // and the signature every frame per viewport scaled with the selection
+        // size even while idle.
+        let (interaction_selected, interaction_hover, interaction_sig) =
+            self.cached_viewport_interaction_sets(show_interaction);
         Some(ViewportData {
             instance_id,
             force_rasterize,
@@ -5698,25 +5703,8 @@ impl Scene {
             camera_generation: self.camera_generation,
             wire_content_id,
             wire_patch,
-            selected_handles: Arc::new(if show_interaction {
-                // A partly picked polyline lights only its picked segments,
-                // drawn with the highlight wires.
-                // A table whose cells are picked draws plain under its labels.
-                let cells = self.table_cells_handle();
-                self.selected
-                    .iter()
-                    .copied()
-                    .filter(|handle| self.picked_segments(*handle).is_none())
-                    .filter(|handle| Some(*handle) != cells)
-                    .collect()
-            } else {
-                rustc_hash::FxHashSet::default()
-            }),
-            hover_handles: Arc::new(if show_interaction {
-                self.hover_highlight_handles()
-            } else {
-                rustc_hash::FxHashSet::default()
-            }),
+            selected_handles: interaction_selected,
+            hover_handles: interaction_hover,
             selection_generation: self
                 .selection_generation
                 .wrapping_mul(2)
@@ -5725,11 +5713,7 @@ impl Scene {
                 .hover_generation
                 .wrapping_mul(2)
                 .wrapping_add(u64::from(!show_interaction)),
-            selected_sig: if show_interaction {
-                self.selected_set_sig()
-            } else {
-                0
-            },
+            selected_sig: interaction_sig,
             screen_rect,
         })
     }

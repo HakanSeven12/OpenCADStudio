@@ -1231,7 +1231,8 @@ fn tool_row<'a>(tools: &[ToolDef], active_tool: &Option<String>) -> Element<'a, 
     let btns: Vec<Element<Message>> = tools
         .iter()
         .map(|t| {
-            let is_active = active_tool.as_deref() == Some(t.id) || super::text_editor::lit(t.id);
+            let is_active =
+                active_tool.as_deref() == Some(t.id) || super::text_editor::lit(t.id);
             let tip = t!(t.label);
             let event = t.event.clone();
             let icon_el: Element<Message> = make_icon(t.icon, SMALL_ICON);

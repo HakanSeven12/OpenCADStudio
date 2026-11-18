@@ -8,12 +8,12 @@ use document::entities::acis::types::{
     SatLoop, SatLump, SatPCurve, SatPlaneSurface, SatPoint, SatPointer, SatRecord, SatShell,
     SatSphereSurface, SatSplineSurface, SatStraightCurve, SatTorusSurface, SatVertex, Sense,
 };
-use kernel::brep::{
+use ocs_brep::{
     Body, Circle3, Coedge, Cone, Curve3, CurveKey, Cylinder, Edge, EdgeKey, Face, Line3, Loop,
     Lump, Provenance, Shell, SourceRef, Sphere, Surface, SurfaceKey, Torus, Vertex, VertexKey,
 };
-use kernel::geom2d::{Curve as Curve2, NurbsCurve};
-use kernel::space::{NurbsCurve3, NurbsSurface3, Plane, Vec3};
+use ocs_geom::geom2d::{Curve as Curve2, NurbsCurve};
+use ocs_geom::space::{NurbsCurve3, NurbsSurface3, Plane, Vec3};
 use std::collections::HashMap;
 use std::f64::consts::TAU;
 
@@ -146,7 +146,7 @@ fn lift_one(
     let Some(record) = resolve(document, source.transform()) else {
         return Some(body);
     };
-    let placed = body_placement(record).and_then(|place| kernel::brep::transform(&body, &place));
+    let placed = body_placement(record).and_then(|place| ocs_brep::transform(&body, &place));
     if placed.is_none() {
         note_broken(loss, record);
     }
@@ -157,7 +157,7 @@ fn lift_one(
 /// and the scale at the head of a `transform` record. SAB groups the rows
 /// and the translation as positions, and some writers put the whole payload
 /// in one long string; all three forms are read.
-fn body_placement(record: &SatRecord) -> Option<kernel::brep::Placement> {
+fn body_placement(record: &SatRecord) -> Option<ocs_brep::Placement> {
     if record.entity_type != "transform" {
         return None;
     }
@@ -181,7 +181,7 @@ fn body_placement(record: &SatRecord) -> Option<kernel::brep::Placement> {
     }
     let scale = values[12];
     let row = |at: usize| [scale * values[at], scale * values[at + 1], scale * values[at + 2]];
-    Some(kernel::brep::Placement {
+    Some(ocs_brep::Placement {
         x_axis: row(0),
         y_axis: row(3),
         z_axis: row(6),
@@ -196,7 +196,7 @@ fn lift_face(
     loss: &mut Loss,
     source: &SatFace<'_>,
     record: &SatRecord,
-    shell: kernel::brep::ShellKey,
+    shell: ocs_brep::ShellKey,
 ) -> Option<()> {
     let surface_record = resolve(document, source.surface())?;
     let surface = match surface_of(document, body, seen, loss, source.surface()) {
@@ -532,7 +532,7 @@ fn read_curve(document: &SatDocument, record: &SatRecord) -> Option<Curve3> {
         return Some(if (ellipse.ratio() - 1.0).abs() < 1e-12 {
             Curve3::Circle(Circle3 { plane, radius })
         } else {
-            Curve3::Ellipse(kernel::brep::Ellipse3 {
+            Curve3::Ellipse(ocs_brep::Ellipse3 {
                 plane,
                 major_radius: radius,
                 minor_radius: radius * ellipse.ratio(),
@@ -1074,7 +1074,7 @@ fn read_surface(document: &SatDocument, record: &SatRecord) -> Option<Surface> {
         };
         let surface = surface.with_v_reversed(reversed);
         return Some(match offset {
-            Some((base, distance)) => Surface::Offset(kernel::brep::OffsetSurface {
+            Some((base, distance)) => Surface::Offset(ocs_brep::OffsetSurface {
                 base,
                 distance,
                 approximation: surface,
@@ -1160,7 +1160,7 @@ fn interpolate_grid(
     (v0, v1): (f64, f64),
 ) -> Option<NurbsSurface3> {
     let fit = |points: &[[f64; 3]]| {
-        NurbsCurve3::interpolate_fit(points, None, None, kernel::space::Parameterization::Uniform)
+        NurbsCurve3::interpolate_fit(points, None, None, ocs_geom::space::Parameterization::Uniform)
     };
     let rows = grid.iter().map(|row| fit(row)).collect::<Option<Vec<_>>>()?;
     let u_knots = rows.first()?.knots().to_vec();
@@ -1370,7 +1370,7 @@ fn supported_curve(
         &samples,
         None,
         None,
-        kernel::space::Parameterization::Uniform,
+        ocs_geom::space::Parameterization::Uniform,
     )?;
     let (low, high) = fitted.domain();
     let knots = fitted

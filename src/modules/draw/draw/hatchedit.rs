@@ -30,7 +30,7 @@ pub struct HatcheditCommand {
     disassociate: bool,
     store_origin: bool,
     current_origin: [f64; 2],
-    origin_plane: kernel::space::Plane,
+    origin_plane: ocs_geom::space::Plane,
     origin_bounds: Option<([f64; 2], [f64; 2])>,
     origin_bounds_unavailable: bool,
     style: Option<document::entities::HatchStyleType>,
@@ -75,7 +75,7 @@ impl HatcheditCommand {
             origin_bounds: None,
             origin_bounds_unavailable: false,
             current_origin: [0.0, 0.0],
-            origin_plane: kernel::space::Plane::from_axes(
+            origin_plane: ocs_geom::space::Plane::from_axes(
                 [0.0; 3],
                 [1.0, 0.0, 0.0],
                 [0.0, 1.0, 0.0],
@@ -116,7 +116,7 @@ impl HatcheditCommand {
             origin_bounds: None,
             origin_bounds_unavailable: false,
             current_origin: [0.0, 0.0],
-            origin_plane: kernel::space::Plane::from_axes(
+            origin_plane: ocs_geom::space::Plane::from_axes(
                 [0.0; 3],
                 [1.0, 0.0, 0.0],
                 [0.0, 1.0, 0.0],
@@ -174,7 +174,7 @@ impl HatcheditCommand {
         rings: Vec<Vec<[f64; 2]>>,
         sources: &rustc_hash::FxHashMap<Handle, crate::scene::BoundarySource>,
     ) {
-        let exterior = kernel::geom2d::ring_nesting_depths(&rings)
+        let exterior = ocs_geom::geom2d::ring_nesting_depths(&rings)
             .into_iter()
             .map(|depth| depth == 0)
             .collect::<Vec<_>>();
@@ -214,26 +214,26 @@ impl HatcheditCommand {
                     let mut anchors = Vec::new();
                     for curve in curves {
                         match curve {
-                            kernel::geom2d::Curve::Ellipse(arc) => {
+                            ocs_geom::geom2d::Curve::Ellipse(arc) => {
                                 if (arc.end_parameter - arc.start_parameter).abs()
                                     < std::f64::consts::TAU
                                 {
                                     return None;
                                 }
                                 for angle in [0.0, std::f64::consts::FRAC_PI_2] {
-                                    anchors.push(kernel::geom2d::Curve::Line(
-                                        kernel::geom2d::Line {
+                                    anchors.push(ocs_geom::geom2d::Curve::Line(
+                                        ocs_geom::geom2d::Line {
                                             start: arc.ellipse.point_at(angle),
                                             end: arc.ellipse.point_at(angle + std::f64::consts::PI),
                                         },
                                     ));
                                 }
                             }
-                            kernel::geom2d::Curve::Nurbs(_) => return None,
+                            ocs_geom::geom2d::Curve::Nurbs(_) => return None,
                             other => anchors.push(other),
                         }
                     }
-                    kernel::geom2d::analytic_curve_bounds(&anchors)
+                    ocs_geom::geom2d::analytic_curve_bounds(&anchors)
                 });
         }
         self.source_appearance = entity.map(|e| {

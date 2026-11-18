@@ -1138,7 +1138,11 @@ impl OpenCADStudio {
         if let Some(handle) = picked_handle {
             self.record_dimension_entity_points(i, None, handle, Vec::new());
         }
-        self.sync_dimension_snaps(i);
+        // A committed dimension still needs the snaps its command just let
+        // go of (DIM resets its inner command); the commit resyncs (#3203).
+        if !matches!(result, Some(CmdResult::CommitDimension { .. })) {
+            self.sync_dimension_snaps(i);
+        }
         if is_escape {
             self.tabs[i].pending_pause_tokens = None;
         }

@@ -747,7 +747,7 @@ fn clip_boundary_extents(
         .document
         .get_entity(clip)
         .and_then(crate::entities::curve::entity_curve_xy)
-        .and_then(|curve| kernel::geom2d::analytic_curve_bounds(&[curve]));
+        .and_then(|curve| ocs_geom::geom2d::analytic_curve_bounds(&[curve]));
     if exact.is_some() {
         return exact;
     }

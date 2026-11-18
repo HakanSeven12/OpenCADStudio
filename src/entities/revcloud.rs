@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use document::entities::{LwPolyline, LwVertex};
 use document::xdata::{ExtendedDataRecord, XDataValue};
 use glam::DVec3;
-use kernel::geom2d::{closest_point, signed_area, Curve, Polyline, PolylineVertex, Vec2};
+use ocs_geom::geom2d::{closest_point, signed_area, Curve, Polyline, PolylineVertex, Vec2};
 
 use crate::entities::common::square_grip;
 use crate::scene::model::object::{GripApply, GripDef};

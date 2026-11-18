@@ -17,6 +17,7 @@ fn sheet_with_ole() -> (Scene, Handle) {
         pixel_width: 100,
         pixel_height: 100,
         name: "picture.emf".to_string(),
+        source: None,
     };
     let ole = build_embedded_ole(
         &picture,

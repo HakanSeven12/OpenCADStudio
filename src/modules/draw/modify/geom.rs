@@ -11,11 +11,11 @@
 //! resident render path splits the `f64` into a high/low pair instead. Only a
 //! caller knows which of the two it is.
 
-use kernel::geom2d::{self, Ellipse};
+use ocs_geom::geom2d::{self, Ellipse};
 
 /// Re-exported unchanged: these already speak in plain `f64`, so there is no
 /// call-shape difference for this module to absorb.
-pub use kernel::geom2d::{arc_parameter, ellipse_closest_parameter, lerp, normalize_angle};
+pub use ocs_geom::geom2d::{arc_parameter, ellipse_closest_parameter, lerp, normalize_angle};
 
 /// Preview geometry keeps the density the commands have always used.
 const SEGMENTS_PER_RADIAN: f64 = geom2d::DEFAULT_SEGMENTS_PER_RADIAN;

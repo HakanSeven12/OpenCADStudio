@@ -1,6 +1,6 @@
 use document::entities::acis::{SabReader, SatBody, SatDocument};
 use document::entities::{Body, Region, Solid3D, Surface};
-use kernel::brep::Body as KernelBody;
+use ocs_brep::Body as KernelBody;
 
 use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
 

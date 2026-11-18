@@ -371,6 +371,8 @@ impl OpenCADStudio {
                                         .is_some(),
                                     support: crate::io::font_repo::support_folder()
                                         .map(|p| p.display().to_string()),
+                                    templates: crate::config::templates_dir()
+                                        .map(|p| p.display().to_string()),
                                 }
                             }
                             #[cfg(target_arch = "wasm32")]
@@ -454,6 +456,16 @@ impl OpenCADStudio {
                                 selected_repo: self.selected_plugin_repo.as_deref(),
                                 readmes: &self.plugin_readmes,
                                 readme_loading: &self.plugin_readme_loading,
+                                releases_loading: &self.plugin_releases_loading,
+                                installing: &self.plugin_installing,
+                                installed_now: &self.plugin_installed_now,
+                                ai_tools: self
+                                    .plugin_tools
+                                    .iter()
+                                    .map(|(id, tools)| {
+                                        (id.clone(), tools.iter().map(|t| t.name.clone()).collect())
+                                    })
+                                    .collect(),
                                 status: &self.marketplace_status,
                             },
                             &self.active_theme,

@@ -1,7 +1,7 @@
 use document::entities::{MLine, MLineFlags, MLineSegment, MLineVertex};
 use document::types::Vector3;
-use kernel::geom2d::{intersect::line_line, Vec2};
-use kernel::space::Plane;
+use ocs_geom::geom2d::{intersect::line_line, Vec2};
+use ocs_geom::space::Plane;
 
 use crate::entities::common::{edit_prop as edit, ro_prop, square_grip};
 use crate::entities::traits::{Grippable, PropertyEditable, RenderConvertible, Transformable};
@@ -38,20 +38,20 @@ pub(crate) fn rebuild_mline_geometry(mline: &mut MLine) -> bool {
     let axis = points
         .windows(2)
         .find_map(|pair| {
-            (kernel::space::Vec3::from(pair[1]) - kernel::space::Vec3::from(pair[0]))
+            (ocs_geom::space::Vec3::from(pair[1]) - ocs_geom::space::Vec3::from(pair[0]))
                 .normalize()
-                .map(kernel::space::Vec3::to_array)
+                .map(ocs_geom::space::Vec3::to_array)
         })
         .or_else(|| {
             mline
                 .is_closed()
                 .then(|| {
-                    (kernel::space::Vec3::from(points[0])
-                        - kernel::space::Vec3::from(points[count - 1]))
+                    (ocs_geom::space::Vec3::from(points[0])
+                        - ocs_geom::space::Vec3::from(points[count - 1]))
                     .normalize()
                 })
                 .flatten()
-                .map(kernel::space::Vec3::to_array)
+                .map(ocs_geom::space::Vec3::to_array)
         });
     let Some(plane) = axis.and_then(|axis| {
         Plane::orthonormal(
@@ -149,7 +149,7 @@ fn adjusted_mline_endpoint(
     } else {
         style.end_angle
     };
-    let Some(tangent) = kernel::space::Vec3::new(
+    let Some(tangent) = ocs_geom::space::Vec3::new(
         mline.vertices[vertex].direction.x,
         mline.vertices[vertex].direction.y,
         mline.vertices[vertex].direction.z,
@@ -158,23 +158,23 @@ fn adjusted_mline_endpoint(
         return point;
     };
     let Some(normal) =
-        kernel::space::Vec3::new(mline.normal.x, mline.normal.y, mline.normal.z).normalize()
+        ocs_geom::space::Vec3::new(mline.normal.x, mline.normal.y, mline.normal.z).normalize()
     else {
         return point;
     };
     let Some(transverse) = normal.cross(tangent).normalize() else {
         return point;
     };
-    let base = kernel::space::Vec3::new(
+    let base = ocs_geom::space::Vec3::new(
         mline.vertices[vertex].position.x,
         mline.vertices[vertex].position.y,
         mline.vertices[vertex].position.z,
     );
-    let current = kernel::space::Vec3::from(point);
+    let current = ocs_geom::space::Vec3::from(point);
     let tangent = if angle.tan().abs() > 1.0e-9 {
         tangent * ((current - base).dot(transverse) / angle.tan())
     } else {
-        kernel::space::Vec3::ZERO
+        ocs_geom::space::Vec3::ZERO
     };
     (current + tangent).to_array()
 }
@@ -350,7 +350,7 @@ fn mline_element_endpoints(
     mline: &MLine,
     vertex: usize,
     element: usize,
-) -> Option<(kernel::space::Vec3, kernel::space::Vec3)> {
+) -> Option<(ocs_geom::space::Vec3, ocs_geom::space::Vec3)> {
     let next = if vertex + 1 < mline.vertices.len() {
         vertex + 1
     } else if mline.is_closed() {
@@ -362,8 +362,8 @@ fn mline_element_endpoints(
         let vertex = mline.vertices.get(index)?;
         let offset = vertex.segments.get(element)?.parameters.first().copied()?;
         let position =
-            kernel::space::Vec3::new(vertex.position.x, vertex.position.y, vertex.position.z);
-        let miter = kernel::space::Vec3::new(vertex.miter.x, vertex.miter.y, vertex.miter.z);
+            ocs_geom::space::Vec3::new(vertex.position.x, vertex.position.y, vertex.position.z);
+        let miter = ocs_geom::space::Vec3::new(vertex.miter.x, vertex.miter.y, vertex.miter.z);
         Some(position + miter * offset)
     };
     Some((point(vertex)?, point(next)?))
@@ -620,8 +620,8 @@ fn mline_lines_resolved(
     };
     let off_pt = |vi: usize, d: f64| -> [f64; 3] {
         let v = &m.vertices[vi];
-        (kernel::space::Vec3::new(v.position.x, v.position.y, v.position.z)
-            + kernel::space::Vec3::new(v.miter.x, v.miter.y, v.miter.z) * d)
+        (ocs_geom::space::Vec3::new(v.position.x, v.position.y, v.position.z)
+            + ocs_geom::space::Vec3::new(v.miter.x, v.miter.y, v.miter.z) * d)
             .to_array()
     };
     let endpoint_pt = |vi: usize, ei: usize| -> [f64; 3] {
@@ -654,8 +654,8 @@ fn mline_lines_resolved(
             } else {
                 off_pt(wi, elem_off(wi, ei))
             };
-            let a = kernel::space::Vec3::from(a);
-            let b = kernel::space::Vec3::from(b);
+            let a = ocs_geom::space::Vec3::from(a);
+            let b = ocs_geom::space::Vec3::from(b);
             let segment = b - a;
             let len = segment.length();
             let Some(direction) = segment.normalize() else {
@@ -801,28 +801,28 @@ fn semicircle_cap(
     direction: [f64; 3],
     start: bool,
 ) -> Vec<[f64; 3]> {
-    let first = kernel::space::Vec3::from(first);
-    let second = kernel::space::Vec3::from(second);
+    let first = ocs_geom::space::Vec3::from(first);
+    let second = ocs_geom::space::Vec3::from(second);
     let center = (first + second) * 0.5;
     let transverse = (first - second) * 0.5;
     let radius = transverse.length();
     let Some(x_axis) = transverse.normalize() else {
         return Vec::new();
     };
-    let Some(direction) = kernel::space::Vec3::from(direction).normalize() else {
+    let Some(direction) = ocs_geom::space::Vec3::from(direction).normalize() else {
         return Vec::new();
     };
     let y_axis = if start { -direction } else { direction };
-    kernel::space::PlanarCurve::new(
+    ocs_geom::space::PlanarCurve::new(
         Plane::from_axes(center.to_array(), x_axis.to_array(), y_axis.to_array()),
-        kernel::geom2d::Curve::Arc(kernel::geom2d::Arc {
+        ocs_geom::geom2d::Curve::Arc(ocs_geom::geom2d::Arc {
             centre: [0.0, 0.0],
             radius,
             start_angle: 0.0,
             end_angle: std::f64::consts::PI,
         }),
     )
-    .tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
+    .tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE)
 }
 
 pub fn mline_fill_triangles_with_style(
@@ -877,8 +877,8 @@ pub fn mline_fill_triangles_with_style(
                 (style.elements[element].offset + shift) * m.scale_factor
                     / mline_miter_factor(item, m.normal)
             });
-        let point = (kernel::space::Vec3::new(item.position.x, item.position.y, item.position.z)
-            + kernel::space::Vec3::new(item.miter.x, item.miter.y, item.miter.z) * distance)
+        let point = (ocs_geom::space::Vec3::new(item.position.x, item.position.y, item.position.z)
+            + ocs_geom::space::Vec3::new(item.miter.x, item.miter.y, item.miter.z) * distance)
             .to_array();
         if endpoint {
             adjusted_mline_endpoint(m, style, vertex, point)
@@ -897,11 +897,11 @@ pub fn mline_fill_triangles_with_style(
         let next = (vertex + 1) % m.vertices.len();
         let start_endpoint = !closed && vertex == 0;
         let end_endpoint = !closed && next + 1 == m.vertices.len();
-        let low_start = kernel::space::Vec3::from(offset_point(vertex, low_index, start_endpoint));
-        let low_end = kernel::space::Vec3::from(offset_point(next, low_index, end_endpoint));
+        let low_start = ocs_geom::space::Vec3::from(offset_point(vertex, low_index, start_endpoint));
+        let low_end = ocs_geom::space::Vec3::from(offset_point(next, low_index, end_endpoint));
         let high_start =
-            kernel::space::Vec3::from(offset_point(vertex, high_index, start_endpoint));
-        let high_end = kernel::space::Vec3::from(offset_point(next, high_index, end_endpoint));
+            ocs_geom::space::Vec3::from(offset_point(vertex, high_index, start_endpoint));
+        let high_end = ocs_geom::space::Vec3::from(offset_point(next, high_index, end_endpoint));
         let low_length = low_start.distance(low_end);
         let high_length = high_start.distance(high_end);
         if low_length <= 1.0e-12 || high_length <= 1.0e-12 {
@@ -1100,7 +1100,7 @@ impl Grippable for MLine {
                 new_v.position.y = (v0.position.y + v1.position.y) * 0.5;
                 new_v.position.z = (v0.position.z + v1.position.z) * 0.5;
                 let point =
-                    kernel::space::Vec3::new(new_v.position.x, new_v.position.y, new_v.position.z);
+                    ocs_geom::space::Vec3::new(new_v.position.x, new_v.position.y, new_v.position.z);
                 let source: Option<Vec<_>> = (0..self.style_element_count)
                     .map(|element| {
                         let endpoints = mline_element_endpoints(self, grip_id, element)?;
@@ -1364,16 +1364,16 @@ fn set_mline_scale(mline: &mut MLine, scale: f64) {
 
 fn mline_vertex_factor(mline: &MLine, index: usize) -> f64 {
     let vertex = &mline.vertices[index];
-    let normal = kernel::space::Vec3::new(mline.normal.x, mline.normal.y, mline.normal.z)
+    let normal = ocs_geom::space::Vec3::new(mline.normal.x, mline.normal.y, mline.normal.z)
         .normalize()
-        .unwrap_or(kernel::space::Vec3::Z);
+        .unwrap_or(ocs_geom::space::Vec3::Z);
     let direction =
-        kernel::space::Vec3::new(vertex.direction.x, vertex.direction.y, vertex.direction.z)
+        ocs_geom::space::Vec3::new(vertex.direction.x, vertex.direction.y, vertex.direction.z)
             .normalize()
-            .unwrap_or(kernel::space::Vec3::X);
-    let miter = kernel::space::Vec3::new(vertex.miter.x, vertex.miter.y, vertex.miter.z)
+            .unwrap_or(ocs_geom::space::Vec3::X);
+    let miter = ocs_geom::space::Vec3::new(vertex.miter.x, vertex.miter.y, vertex.miter.z)
         .normalize()
-        .unwrap_or(kernel::space::Vec3::Y);
+        .unwrap_or(ocs_geom::space::Vec3::Y);
     miter.dot(normal.cross(direction)).abs().max(1.0e-9)
 }
 

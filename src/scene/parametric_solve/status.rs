@@ -441,7 +441,7 @@ pub(crate) fn analyze(
                 }
             }
         }
-        let diagnosis = kernel_constraints::diagnosis::diagnose(partition, sys.store());
+        let diagnosis = ocs_constraints::diagnosis::diagnose(partition, sys.store());
         for row in diagnosis.redundant {
             if let Some((_, owner)) = owners
                 .iter()

@@ -31,7 +31,7 @@ fn area_picks_follow_exact_curves_and_keep_holes() {
         assert!(loops
             .iter()
             .flatten()
-            .all(|curve| !matches!(curve, kernel::geom2d::Curve::Line(_))));
+            .all(|curve| !matches!(curve, ocs_geom::geom2d::Curve::Line(_))));
         let body = presspull_model::extrusion_body(&entity, [0.0, 0.0, 10.0]).unwrap();
         assert!(body.validate().is_empty());
     }

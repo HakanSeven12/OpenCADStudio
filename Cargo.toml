@@ -18,8 +18,10 @@ members = [
     "crates/ocs_web_worker",
     "crates/dwg-thumbnailer",
     "crates/dwg-thumbnailer-win",
-    "crates/solidcore-record",
     "crates/step-export",
+    "crates/ocs_geom",
+    "crates/ocs_brep",
+    "crates/ocs_constraints",
 ]
 
 [target.'cfg(windows)'.build-dependencies]
@@ -45,14 +47,21 @@ clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
 svgtypes = "0.15.3"
-document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "88f780e5ca3eb7ab06231bba2b1a4559b53879c6", features = ["serde"] }
-kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "7b5ed9d", features = ["brep", "offset"] }
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "6ac42925a5c5b35d705ae9a66b818446a78bc00e", features = ["serde"] }
+# 2D curve algebra, the B-rep model and the constraint solver (from
+# opencadkernel); the operations on solids are Solidcore's.
+ocs_geom = { path = "crates/ocs_geom" }
+ocs_brep = { path = "crates/ocs_brep" }
+ocs_constraints = { path = "crates/ocs_constraints" }
+solidcore = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
+solidcore-ops = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
+solidcore-convert = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
+solidcore-tess = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
 ocs_acis = { path = "crates/ocs_acis" }
-# STEP exchange structure and exact B-rep writer, vendored from solidcore
-# (Apache-2.0; see crates/step-export/VENDORED.md).
-solidcore-record = { path = "crates/solidcore-record" }
+# Solidcore's record model (B-rep, STEP exchange structure); the STEP writer
+# is vendored with OCS changes (Apache-2.0; see crates/step-export/VENDORED.md).
+solidcore-record = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
 step-export = { path = "crates/step-export" }
-kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "7b5ed9d" }
 graph = { package = "opencadgraph", git = "https://github.com/HakanSeven12/opencadgraph.git", rev = "5e4dc20" }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 # Shared SAVE serialization dispatch + web-worker wire format: one
@@ -64,7 +73,7 @@ flate2 = "1"
 # also appear in the IMAGE picker filter (io::pick_image_file) and the web
 # drop filter (io::web_drop::is_image_name).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff", "webp", "gif"] }
-hayro = "0.7.1"
+hayro = "0.9.0"
 kurbo = "0.13"
 # Pure-Rust CRS resolution and projection for document GEODATA. The embedded
 # EPSG data runs on native and wasm; the WKT parser is native-only (below).
@@ -117,7 +126,6 @@ naga = { version = "27", features = ["wgsl-in"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 libloading = "0.8"
-mimalloc = { version = "0.1", default-features = false }
 windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi", "Win32_UI_Input", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_Security", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_Storage_FileSystem", "Win32_Foundation", "Win32_Graphics_Printing", "Win32_Graphics_Gdi", "Win32_Storage_Xps", "Win32_Globalization", "Win32_Security_Authentication_Identity", "Win32_UI_Controls_Dialogs"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -135,10 +143,31 @@ block2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString", "NSObject", "NSNotification", "NSThread", "NSEnumerator"] }
 
 [patch.crates-io]
-iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
-iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
+iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+
+# The pinned iced revision plus upstream 478c363df: a mesh clipped out of its
+# layer did not advance the index offset, so every later mesh in that layer
+# was drawn with the wrong indices (stale glyph outlines left across the top
+# of the window by rotated canvas text, #3063). Drop when iced is bumped past it.
+[patch."https://github.com/iced-rs/iced.git"]
+iced = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced_debug = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced_futures = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced_graphics = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced_program = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced_renderer = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced_runtime = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced_selector = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced_test = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced_tiny_skia = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+mimalloc = { version = "0.1", default-features = false }
 getrandom = "0.3"
 ocs_plugin_api = { path = "crates/ocs_plugin_api", features = ["host"] }
 bincode = "1.3"
@@ -424,6 +453,10 @@ harness = false
 
 [[bench]]
 name = "wires_build_visible"
+harness = false
+
+[[bench]]
+name = "wires_rebuild_stages"
 harness = false
 
 [[bench]]

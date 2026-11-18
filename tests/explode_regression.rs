@@ -499,9 +499,9 @@ fn apply_explode_replacements_matches_legacy_loop() {
 fn explode_region_acis_sat_and_binary_sab_with_hole_and_style() {
     use document::entities::acis::{SabWriter, SatDocument};
     use document::entities::{AcisData, Region};
-    use kernel::brep;
-    use kernel::geom2d::{Arc as KArc, Curve as KCurve, Line as KLine};
-    use kernel::space::Plane;
+    use ocs_brep as brep;
+    use ocs_geom::geom2d::{Arc as KArc, Curve as KCurve, Line as KLine};
+    use ocs_geom::space::Plane;
 
     let plane = Plane::from_axes([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
     let outer = vec![
@@ -614,9 +614,9 @@ fn explode_region_acis_sat_and_binary_sab_with_hole_and_style() {
 fn explode_region_tilted_plane_arc_and_multi_island() {
     use document::entities::acis::SatDocument;
     use document::entities::{AcisData, Region};
-    use kernel::brep;
-    use kernel::geom2d::{Arc as KArc, Curve as KCurve, Line as KLine};
-    use kernel::space::Plane;
+    use ocs_brep as brep;
+    use ocs_geom::geom2d::{Arc as KArc, Curve as KCurve, Line as KLine};
+    use ocs_geom::space::Plane;
 
     // Semicircle + closing chord on tilted plane (XZ plane at y = 4.0).
     let plane = Plane::from_axes([0.0, 4.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
@@ -721,9 +721,9 @@ fn explode_region_tilted_plane_arc_and_multi_island() {
 fn explode_region_acis_with_body_transform() {
     use document::entities::acis::SatDocument;
     use document::entities::{AcisData, Region};
-    use kernel::brep;
-    use kernel::geom2d::{Curve as KCurve, Line as KLine};
-    use kernel::space::Plane;
+    use ocs_brep as brep;
+    use ocs_geom::geom2d::{Curve as KCurve, Line as KLine};
+    use ocs_geom::space::Plane;
 
     let plane = Plane::from_axes([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
     let rect = vec![
@@ -788,12 +788,12 @@ fn explode_region_acis_with_body_transform() {
 fn explode_region_elliptical_and_spline_boundaries() {
     use document::entities::acis::SatDocument;
     use document::entities::{AcisData, Region};
-    use kernel::brep;
-    use kernel::geom2d::{
+    use ocs_brep as brep;
+    use ocs_geom::geom2d::{
         Curve as KCurve, Ellipse as KEllipse, EllipseArc as KEllipseArc, Line as KLine,
         NurbsCurve as KNurbs,
     };
-    use kernel::space::Plane;
+    use ocs_geom::space::Plane;
 
     let plane = Plane::from_axes([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
     let doc = Document::new();

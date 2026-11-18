@@ -12,10 +12,10 @@
 
 use std::collections::HashMap;
 
-use kernel::brep::{
+use ocs_brep::{
     Body, Curve3, EdgeKey, FaceKey, LoopKey, ShellKey, Surface, VertexKey,
 };
-use kernel::space::{NurbsSurface3, Plane, Vec3};
+use ocs_geom::space::{NurbsSurface3, Plane, Vec3};
 use solidcore_record::step::model as m;
 pub use step_export::Schema;
 
@@ -895,7 +895,7 @@ fn outline(
 mod tests {
     use super::{build_step, mesh_body, Schema, StepItem};
     use crate::scene::model::mesh_model::MeshModel;
-    use kernel::brep::{make, Body};
+    use ocs_brep::{make, Body};
 
     fn mesh_step(mesh: MeshModel) -> String {
         let item = StepItem {
@@ -932,7 +932,7 @@ mod tests {
     }
 
     fn volume(body: &Body) -> f64 {
-        kernel::brep::mass_properties(body).expect("mass").volume
+        ocs_brep::mass_properties(body).expect("mass").volume
     }
 
     /// Exports a solid, reads it back through both readers and compares
@@ -1035,7 +1035,7 @@ mod tests {
         let outer = make::cuboid([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap();
         let inner = make::cuboid([3.0, 3.0, 3.0], [4.0, 4.0, 4.0]).unwrap();
         let hollow =
-            kernel::brep::combine(outer, inner, kernel::brep::Operation::Difference, 1e-6)
+            ocs_brep::combine(outer, inner, ocs_brep::Operation::Difference, 1e-6)
                 .expect("difference");
         round_trip(
             hollow,
@@ -1057,7 +1057,7 @@ mod tests {
     fn a_sheet_is_a_shell_based_surface_model() {
         let square = make::cuboid([0.0, 0.0, 0.0], [2.0, 2.0, 2.0]).unwrap();
         let face = square.face_keys().next().unwrap();
-        let sheet = kernel::brep::face_sheet(&square, &[face]).expect("sheet");
+        let sheet = ocs_brep::face_sheet(&square, &[face]).expect("sheet");
         let step = body_step(sheet, false, 1.0);
         assert!(step.contains("SHELL_BASED_SURFACE_MODEL"), "{step}");
         assert!(step.contains("OPEN_SHELL"), "{step}");

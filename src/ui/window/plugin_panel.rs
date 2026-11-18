@@ -596,7 +596,7 @@ impl PluginPanelState {
         // through the registry ref handed down by the dock composition —
         // zero entries still means the zero-code legacy path below.
         // SCN-025: the surface registration and the wire attach are LIVE (the
-        // app store feeds the v25 wire crossing's publish/patch legs), so the
+        // app store feeds the v26 wire crossing's publish/patch legs), so the
         // `Some` arm is no longer aspirational; the legacy `None` branch
         // remains the byte-identical fallback for unmounted panels.
         // SCN-026 (upstream merge adaptation): upstream reworked this

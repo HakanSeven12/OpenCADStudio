@@ -1128,7 +1128,7 @@ impl<'a> HostSession<'a> {
                 if !closed {
                     return Err("the profile must be closed".into());
                 }
-                let body = kernel::brep::planar_region(plane, &loops)
+                let body = ocs_brep::planar_region(plane, &loops)
                     .ok_or("the geometry kernel could not build a region from this profile")?;
                 let sat = crate::scene::convert::acis_export::solid_to_sat(&body)
                     .ok_or("the region could not be exported losslessly")?;
@@ -1161,7 +1161,7 @@ impl<'a> HostSession<'a> {
                 if !closed {
                     return Err("the profile must be closed".into());
                 }
-                let body = kernel::brep::planar_region(plane, &loops)
+                let body = ocs_brep::planar_region(plane, &loops)
                     .ok_or("the geometry kernel could not build a surface from this profile")?;
                 let sat = crate::scene::convert::acis_export::solid_to_sat(&body)
                     .ok_or("the surface could not be exported losslessly")?;
@@ -1301,9 +1301,9 @@ impl<'a> HostSession<'a> {
                 };
                 let combined = model::boolean_result(kind, &body_a, &body_b).map_err(|snag| {
                     let reason = match snag {
-                        kernel::brep::Snag::Coincident => "two faces lie on the same surface, which the kernel cannot resolve",
-                        kernel::brep::Snag::CutRefused => "a face could not be cut along the intersection curve",
-                        kernel::brep::Snag::NoClosedForm => "the surfaces meet along a curve the kernel has no closed form for",
+                        ocs_brep::Snag::Coincident => "two faces lie on the same surface, which the kernel cannot resolve",
+                        ocs_brep::Snag::CutRefused => "a face could not be cut along the intersection curve",
+                        ocs_brep::Snag::NoClosedForm => "the surfaces meet along a curve the kernel has no closed form for",
                     };
                     format!("the geometry kernel refused this {operation:?} ({snag:?}): {reason}; nothing was changed")
                 })?;
@@ -1425,8 +1425,8 @@ impl<'a> HostSession<'a> {
     ) -> Result<
         (
             EntityType,
-            kernel::space::Plane,
-            Vec<Vec<kernel::geom2d::Curve>>,
+            ocs_geom::space::Plane,
+            Vec<Vec<ocs_geom::geom2d::Curve>>,
             bool,
             String,
         ),
@@ -5430,7 +5430,7 @@ impl HostApi for HostSession<'_> {
         self.validate_parametric_chain(chain, tolerance)
     }
 
-    // ── V25 panel-surface attach (SCN-025 — the mount/publisher goes live) ──
+    // ── V26 panel-surface attach (SCN-025 — the mount/publisher goes live) ──
     //
     // The real attach. ACCESS PATH (inspected + recorded): `HostSession`
     // reaches ALL app state through `self.app` (private-field access, this
@@ -9835,6 +9835,7 @@ mod tests {
                 pixel_width: 4,
                 pixel_height: 3,
                 name: "audit.png".into(),
+                source: None,
             };
             crate::io::ole_embed::add_embedded_image(
                 host.document_mut(),
@@ -11312,7 +11313,7 @@ mod tests {
     fn spike_kernel_body_round_trip() {
         use crate::scene::convert::solid3d_tess::{kernel_acis_body, kernel_body};
         use crate::scene::model::solid_model as sm;
-        let make = |body: &kernel::brep::Body| -> document::entities::Solid3D {
+        let make = |body: &ocs_brep::Body| -> document::entities::Solid3D {
             let sat = crate::scene::convert::acis_export::solid_to_sat(body).expect("solid_to_sat");
             let mut solid = document::entities::Solid3D::new();
             solid.wires = sm::edge_wires(body);
@@ -18926,7 +18927,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         assert_eq!(field1(&host).as_deref(), Some("empty_id_update"));
     }
 
-    // ── SCN-025: the v25 wire attach (the mount/publisher goes LIVE) ────────
+    // ── SCN-025: the v26 wire attach (the mount/publisher goes LIVE) ────────
     //
     // The full attach is exercised through THE wire entry the plugin
     // transport uses: `handle_plugin_request` (the ipc arms delegate to the

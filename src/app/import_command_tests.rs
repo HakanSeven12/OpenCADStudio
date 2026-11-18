@@ -344,7 +344,7 @@ fn metafiles_and_svg_drawings_come_in_as_blocks() {
 #[test]
 fn acisin_reads_a_sat_file() {
     // A box, written as SAT by the app's own writer.
-    let body = kernel::brep::make::cuboid([0.0, 0.0, 0.0], [10.0, 20.0, 30.0]).unwrap();
+    let body = ocs_brep::make::cuboid([0.0, 0.0, 0.0], [10.0, 20.0, 30.0]).unwrap();
     let sat = crate::scene::convert::acis_export::solid_to_sat(&body)
         .expect("a box writes")
         .to_sat_string();
@@ -461,7 +461,8 @@ fn a_3d_studio_import_runs_through_its_window() {
         &format!("IMPORT {}", fixture("tds/two_materials.3ds")),
     );
     import_rows(&mut app, &["Crate"]);
-    let _ = app.update(Message::CloseModal);
+    let task = app.update(Message::CloseModal);
+    app.drive_headless_task(task).expect("the import task");
     assert_eq!(app.active_modal, None);
     assert!(!layers(&app).contains(&"CRATE".to_string()));
 }

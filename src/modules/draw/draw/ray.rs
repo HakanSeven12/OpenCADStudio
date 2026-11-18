@@ -201,7 +201,7 @@ impl XLineCommand {
                 let base = self.base?;
                 let first = self.reference?.1;
                 let last = (pt - base).try_normalize()?;
-                let direction = kernel::space::curve::angle_bisector(
+                let direction = ocs_geom::space::curve::angle_bisector(
                     first.to_array(),
                     last.to_array(),
                     self.plane.z.to_array(),
@@ -370,7 +370,7 @@ impl CadCommand for XLineCommand {
             }
             XLineMode::OffsetDistance => {
                 let distance =
-                    kernel::space::Vec3::from(cursor.to_array()).distance(origin.to_array().into());
+                    ocs_geom::space::Vec3::from(cursor.to_array()).distance(origin.to_array().into());
                 (distance.is_finite() && distance > 0.0).then_some(distance)
             }
             _ => None,

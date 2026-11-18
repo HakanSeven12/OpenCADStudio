@@ -17,3 +17,5 @@ ocs_plugin_api = { git = "https://github.com/HakanSeven12/OpenCADStudio", featur
 # Entity types for writes. MUST match the host's codec pin exactly
 # (the host's `codec` dependency in its Cargo.toml) or the host refuses.
 acadrust = { package = "acadrust", git = "https://github.com/hakanaktt/acadrust.git", rev = "185e8cbe" }
+# Parses AI tool arguments (`call_tool`).
+serde_json = "1"

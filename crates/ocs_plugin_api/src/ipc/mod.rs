@@ -292,9 +292,9 @@ mod tests {
     }
 
     #[test]
-    fn v25_scene_wire_tails_are_pinned() {
+    fn v26_scene_wire_tails_are_pinned() {
         // Same discipline as `v4_additions_preserve_legacy_discriminants`
-        // above: the v25 crossing appends at the ENDS of every public enum,
+        // above: the v26 crossing appends at the ENDS of every public enum,
         // and these creation-time pins make a future insertion mid-enum
         // fail loudly. Tag numbers: the contract review pack named the new
         // request tail "61+". The crate had already appended v22's geo tail

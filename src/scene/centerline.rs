@@ -4,7 +4,7 @@ use document::entities::{CenterLineAssociation, CenterLineSource, CenterLineSour
 use document::objects::XRecordValue;
 use document::types::Vector3;
 use glam::DVec3;
-use kernel::geom2d::{centerline_between, closest_point, Curve, Line as KernelLine};
+use ocs_geom::geom2d::{centerline_between, closest_point, Curve, Line as KernelLine};
 
 const SETTINGS_RECORD: &str = "OPEN_CAD_CENTERLINE_SETTINGS";
 

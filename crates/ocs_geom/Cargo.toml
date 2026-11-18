@@ -1,0 +1,21 @@
+[package]
+name = "ocs_geom"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+description = "OpenCADStudio's 2D curve algebra and the 3D space a curve lives in (from opencadkernel)"
+publish = false
+
+[features]
+default = ["geom2d", "offset", "nlib"]
+geom2d = []
+offset = ["geom2d", "dep:cavalier_contours"]
+nlib = []
+
+[dependencies]
+# Offsetting only. Pinned: the offset path reaches into the crate's internals.
+cavalier_contours = { version = "=0.7.0", optional = true }
+rustc-hash = "2"
+spade = { version = "=2.15.1" }
+# Solidcore's NURBS layer (NLib), which space::nurbs_tools calls.
+nlib = { package = "solidcore", git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }

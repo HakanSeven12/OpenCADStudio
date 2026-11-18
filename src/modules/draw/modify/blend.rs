@@ -10,8 +10,8 @@ use document::entities::{EntityCommon, Spline};
 use document::types::Vector3;
 use document::{EntityType, Handle};
 use glam::DVec3;
-use kernel::space::curve as space_curve;
-use kernel::space::NurbsCurve3;
+use ocs_geom::space::curve as space_curve;
+use ocs_geom::space::NurbsCurve3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult};
 use crate::entities::common::BulgeArc;

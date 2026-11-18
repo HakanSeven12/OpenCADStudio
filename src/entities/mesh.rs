@@ -1,7 +1,7 @@
 use document::entities::{mesh::Mesh, polygon_mesh::PolygonMesh, Face3D, PolyfaceMesh};
 use glam::Vec3;
-use kernel::geom2d::{triangulate, Tolerance};
-use kernel::space::{polygon, NurbsSurface3, Plane, Vec3 as KernelVec3};
+use ocs_geom::geom2d::{triangulate, Tolerance};
+use ocs_geom::space::{polygon, NurbsSurface3, Plane, Vec3 as KernelVec3};
 
 use crate::entities::common::{
     edit_prop as edit, edit_scalar_prop as edit_scalar, parse_f64, ro_prop as ro, square_grip,
@@ -1053,14 +1053,14 @@ fn display_mesh(mesh: &Mesh) -> RefinedMesh {
 /// Convert a closed indexed mesh entity to an exact planar-faced B-rep.
 /// Open, non-manifold, non-planar, and degenerate meshes return `None` so a
 /// modelling command can leave the source untouched.
-pub(crate) fn closed_mesh_body(entity: &document::EntityType) -> Option<kernel::brep::Body> {
+pub(crate) fn closed_mesh_body(entity: &document::EntityType) -> Option<ocs_brep::Body> {
     if let document::EntityType::PolygonMesh(mesh) = entity {
         if !mesh.is_closed_m() || !mesh.is_closed_n() {
             return None;
         }
     }
     let (vertices, faces) = mesh_polygons(entity)?;
-    kernel::brep::make::faceted_solid(&vertices, &faces)
+    ocs_brep::make::faceted_solid(&vertices, &faces)
 }
 
 /// The vertices and face loops (vertex indices) of a MESH, polygon mesh or

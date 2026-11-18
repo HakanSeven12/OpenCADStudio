@@ -1966,7 +1966,7 @@ impl Scene {
         target: Handle,
         first: Handle,
         steps: &[(Handle, u8)],
-        bodies: &std::collections::HashMap<Handle, kernel::brep::Body>,
+        bodies: &std::collections::HashMap<Handle, ocs_brep::Body>,
     ) -> bool {
         let solids = std::iter::once(target)
             .chain(std::iter::once(first))
@@ -2087,7 +2087,7 @@ impl Scene {
         &self,
         handle: Handle,
         operation: &document::objects::SolidHistoryOperation,
-    ) -> Option<kernel::brep::Body> {
+    ) -> Option<ocs_brep::Body> {
         use document::objects::SolidHistoryOperation;
 
         match (self.document.get_entity(handle)?, operation) {
@@ -2323,7 +2323,7 @@ impl Scene {
             let made: Option<
                 Result<
                     SolidHistoryOperation,
-                    (kernel::brep::Body, document::entities::SurfaceData),
+                    (ocs_brep::Body, document::entities::SurfaceData),
                 >,
             > = match &sources {
                 SurfaceSources::Extrude {
@@ -3150,9 +3150,9 @@ impl Scene {
         if delta.iter().all(|value| value.abs() <= f64::EPSILON) {
             return;
         }
-        let placement = kernel::brep::Placement::at(delta);
+        let placement = ocs_brep::Placement::at(delta);
         if let Some(body) = self.solid_models.get(&handle).cloned() {
-            if let Some(moved) = kernel::brep::transform(&body, &placement) {
+            if let Some(moved) = ocs_brep::transform(&body, &placement) {
                 self.solid_models.insert(handle, moved);
             }
         }
@@ -3188,7 +3188,7 @@ impl Scene {
         }
         for generator in &mut set.curved_gens {
             if let Some(source) =
-                kernel::brep::mesh::transform_silhouette(&generator.source, &placement)
+                ocs_brep::mesh::transform_silhouette(&generator.source, &placement)
             {
                 generator.source = source;
             }

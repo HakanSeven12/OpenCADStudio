@@ -59,7 +59,7 @@ pub(super) fn default_bindings() -> BTreeMap<String, String> {
         (format!("{ACCEL}+9"), "COMMANDLINETOGGLE"),
         (format!("{ACCEL}+1"), "PROPERTIES"),
         (format!("{ACCEL}+K"), "HYPERLINK"),
-        (format!("{ACCEL}+N"), "QNEW"),
+        (format!("{ACCEL}+N"), "NEW"),
         (format!("{ACCEL}+O"), "OPEN"),
         (format!("{ACCEL}+P"), "PLOT"),
         (format!("{ACCEL}+W"), "TOGGLESELECTIONCYCLING"),

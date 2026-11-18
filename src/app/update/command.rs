@@ -3442,6 +3442,7 @@ impl OpenCADStudio {
                             pixel_width: width,
                             pixel_height: height,
                             name: format!("{}.png", pasted_image_stem()),
+                            source: None,
                         })
                     });
                     Message::PasteSpecial(text.clone(), picture, crate::sys::clipboard_link::read())

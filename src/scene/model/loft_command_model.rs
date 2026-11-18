@@ -5,7 +5,7 @@ use crate::command::{ExtrudeMode, LoftOptions, LoftSectionSelection};
 use document::entities::{EmbeddedEntity, Point, Surface, SurfaceData, SurfaceKind};
 use document::objects::{SolidHistoryLoft, SolidHistoryLoftParameters, SolidHistoryNodeBase};
 use document::{EntityType, Handle};
-use kernel::brep::Body;
+use ocs_brep::Body;
 
 pub(crate) fn embedded_section(entity: &EntityType) -> Option<EmbeddedEntity> {
     match entity {
@@ -64,7 +64,7 @@ pub fn record(
                 })
                 .collect::<Result<Vec<_>, _>>()?,
         };
-        if let kernel::brep::LoftSection::Profile { closed, .. } =
+        if let ocs_brep::LoftSection::Profile { closed, .. } =
             ocs_acis::loft_section_geometry(&members)?
         {
             surface |= !closed;

@@ -5,6 +5,7 @@
 //   pick    — hit-testing, selection, grips, spatial index, xclip
 //   view    — camera, transforms, viewport, render pipeline driver
 //   cache   — block-definition and property caches
+pub mod analysis;
 pub mod annotative;
 pub mod assoc_array;
 pub mod assoc_array_grips;
@@ -36,6 +37,7 @@ pub mod model;
 pub mod pick;
 pub mod pipeline;
 pub(crate) mod raster_scale;
+pub(crate) mod reaper;
 pub(crate) mod render_graph;
 pub mod section_cull;
 pub mod sub_select;
@@ -194,7 +196,7 @@ pub(crate) fn tessellate_entity(
                 // wire converter emits nothing. Decode every exact boundary,
                 // including holes, then sample only for this cached display.
                 let mut boundaries = Vec::new();
-                if let Ok(kernel::brep::LoftSection::Profile { plane, wires, .. }) =
+                if let Ok(ocs_brep::LoftSection::Profile { plane, wires, .. }) =
                     ocs_acis::loft_section_geometry(&[
                         document::entities::EmbeddedEntity::Region(region.clone()),
                     ])
@@ -326,7 +328,7 @@ impl Scene {
     /// profile of the mesh build at the same epoch. No body ⇒ no centres.
     fn solid_face_centers(
         entity: &EntityType,
-        cached: Option<&kernel::brep::Body>,
+        cached: Option<&ocs_brep::Body>,
     ) -> Vec<glam::DVec3> {
         use crate::scene::convert::solid3d_tess::{kernel_body, kernel_region_body};
         use crate::scene::model::solid_model::face_centers;
@@ -2771,8 +2773,10 @@ pub struct Scene {
     constraint_hover_wires: Vec<WireModel>,
     /// Dynamic UCS: the outline of the planar solid face a first point
     /// would align the UCS to, with the solid and face it outlines.
-    ducs_face: Option<(Handle, kernel::brep::FaceKey)>,
+    ducs_face: Option<(Handle, ocs_brep::FaceKey)>,
     ducs_face_wires: Vec<WireModel>,
+    /// Control nets shown by CVSHOW, by surface.
+    cv_net_wires: HashMap<Handle, Vec<WireModel>>,
     /// Color used to draw the selection highlight overlay wires (SELECTIONEFFECTCOLOR).
     pub selection_color: [f32; 4],
     /// Whether selection visual effect (glow/highlight) is enabled (SELECTIONEFFECT).
@@ -3052,7 +3056,7 @@ pub struct Scene {
     /// INSERT scale renders at the right size. (#123)
     pub block_meshes: HashMap<Handle, MeshLodSet>,
     /// Kernel B-reps used by solid operations and exact-geometry saves.
-    pub solid_models: HashMap<Handle, kernel::brep::Body>,
+    pub solid_models: HashMap<Handle, ocs_brep::Body>,
     /// GPU render data for raster images (RasterImage entities), keyed by handle.
     pub images: HashMap<Handle, ImageModel>,
     /// The viewport that is currently "entered" (MSPACE mode).
@@ -3555,9 +3559,9 @@ fn section_plane(
     tangent: glam::DVec3,
     normal: glam::DVec3,
     body_to_world: Option<&document::types::Transform>,
-) -> Option<kernel::space::Plane> {
+) -> Option<ocs_geom::space::Plane> {
     let Some(transform) = body_to_world else {
-        return kernel::space::Plane::orthonormal(
+        return ocs_geom::space::Plane::orthonormal(
             origin.to_array(),
             tangent.to_array(),
             normal.to_array(),
@@ -3579,7 +3583,7 @@ fn section_plane(
     let normal = linear
         .transpose()
         .transform_point(document::types::Vector3::new(normal.x, normal.y, normal.z));
-    kernel::space::Plane::orthonormal(
+    ocs_geom::space::Plane::orthonormal(
         [origin.x, origin.y, origin.z],
         [tangent.x, tangent.y, tangent.z],
         [normal.x, normal.y, normal.z],
@@ -3587,13 +3591,13 @@ fn section_plane(
 }
 
 fn keep_section_positive(
-    body: &kernel::brep::Body,
-    plane: kernel::space::Plane,
-) -> Result<Option<kernel::brep::Body>, ()> {
-    match kernel::brep::slice_by_plane(body, plane) {
+    body: &ocs_brep::Body,
+    plane: ocs_geom::space::Plane,
+) -> Result<Option<ocs_brep::Body>, ()> {
+    match ocs_brep::slice_by_plane(body, plane) {
         Ok(Some(result)) => Ok(Some(result.positive)),
         Ok(None) => {
-            let bounds = kernel::brep::body_bounds(body).ok_or(())?;
+            let bounds = ocs_brep::body_bounds(body).ok_or(())?;
             let centre = [
                 (bounds.min[0] + bounds.max[0]) * 0.5,
                 (bounds.min[1] + bounds.max[1]) * 0.5,
@@ -3661,6 +3665,7 @@ impl Scene {
             constraint_hover_wires: Vec::new(),
             ducs_face: None,
             ducs_face_wires: Vec::new(),
+            cv_net_wires: HashMap::default(),
             selection_color: crate::scene::model::wire_model::WireModel::SELECTED,
             selection_widen: 0.0,
             edge_color: None,
@@ -6059,7 +6064,7 @@ impl Scene {
     pub(crate) fn prepare_solid_model_display(
         &self,
         handle: Handle,
-        solid: &kernel::brep::Body,
+        solid: &ocs_brep::Body,
     ) -> Option<(MeshLodSet, Vec<document::entities::Wire>, [f64; 3])> {
         let color = self
             .document
@@ -6117,7 +6122,7 @@ impl Scene {
     pub(crate) fn register_prepared_solid_model(
         &mut self,
         handle: Handle,
-        solid: kernel::brep::Body,
+        solid: ocs_brep::Body,
         display: (MeshLodSet, Vec<document::entities::Wire>, [f64; 3]),
     ) -> bool {
         let (mut set, wires, center) = display;
@@ -6172,7 +6177,7 @@ impl Scene {
 
     /// Cache and display a Model-tab kernel solid. A failed preparation leaves
     /// the previous entity, body and mesh untouched.
-    pub fn register_solid_model(&mut self, handle: Handle, solid: kernel::brep::Body) -> bool {
+    pub fn register_solid_model(&mut self, handle: Handle, solid: ocs_brep::Body) -> bool {
         let Some(display) = self.prepare_solid_model_display(handle, &solid) else {
             return false;
         };
@@ -6242,7 +6247,45 @@ impl Scene {
                     entity,
                 );
             }
+            crate::scene::analysis::apply(set);
         }
+    }
+
+    /// Re-tessellates the shaded models and recolours them: the surface analysis turned on or
+    /// off, or its options changed.
+    pub fn invalidate_solid_meshes(&mut self) {
+        self.populate_meshes_from_document();
+        self.recolor_meshes();
+        self.bump_geometry();
+    }
+
+    /// Shows the control net of the NURBS surface `handle` (CVSHOW): its rows and columns of
+    /// control vertices drawn over the model until hidden.
+    pub fn show_control_net(&mut self, handle: Handle, net: &solidcore_ops::surface_cvs::Net) {
+        let mut wires = Vec::new();
+        let at = |i: usize, j: usize| net.points[i * net.cols + j];
+        let line = |points: Vec<[f64; 3]>, k: usize| {
+            let mut wire = WireModel::solid_f64(format!("cv-net:{}:{k}", handle.value()), points, WireModel::HOVER, false);
+            wire.set_fixed_screen_width(1.5);
+            wire
+        };
+        for i in 0..net.rows {
+            wires.push(line((0..net.cols).map(|j| at(i, j)).collect(), wires.len()));
+        }
+        for j in 0..net.cols {
+            wires.push(line((0..net.rows).map(|i| at(i, j)).collect(), wires.len()));
+        }
+        self.cv_net_wires.insert(handle, wires);
+    }
+
+    /// Hides every control net shown (CVHIDE).
+    pub fn hide_control_nets(&mut self) {
+        self.cv_net_wires.clear();
+    }
+
+    /// Whether the control net of `handle` is shown.
+    pub fn control_net_shown(&self, handle: Handle) -> bool {
+        self.cv_net_wires.contains_key(&handle)
     }
 
     /// Recolour only the named cached solids after a property edit.
@@ -6296,6 +6339,7 @@ impl Scene {
                         entity,
                     );
                 }
+                crate::scene::analysis::apply(set);
             } else if let Some(set) = self.block_meshes.get_mut(handle) {
                 material.apply_to_with_face_overrides(
                     set,
@@ -7250,6 +7294,9 @@ impl Scene {
         layout.plot_view_handle = ps.plot_view_handle;
         layout.visual_style_handle = ps.visual_style_handle;
         layout.raw_plot_settings_codes = None;
+        if name != "Model" {
+            Self::place_centred_window_sheet(layout);
+        }
         self.display_plot_style_cache
             .borrow_mut()
             .retain(|(layout_name, _), _| layout_name != name);
@@ -7347,6 +7394,102 @@ impl Scene {
         }
     }
 
+    /// The sheet of a paper layout in paper-space units, from its plot
+    /// settings; none when the layout has no paper size.
+    pub fn layout_sheet(l: &document::objects::Layout) -> Option<((f64, f64), (f64, f64))> {
+        // Use the physical paper dimensions from PlotSettings if available
+        // (populated from DWG embedded plot settings or DXF codes 44/45/73).
+        // Rotation 1=90° or 3=270° → swap width and height.
+        if l.paper_width <= 1e-6 || l.paper_height <= 1e-6 {
+            return None;
+        }
+        let (pw, ph) = if l.plot_rotation == 1 || l.plot_rotation == 3 {
+            (l.paper_height, l.paper_width)
+        } else {
+            (l.paper_width, l.paper_height)
+        };
+        // paper_width/height are millimetres; scale them into
+        // the layout's paper-space units so the sheet lands in
+        // the same coordinate system as the viewports drawn on
+        // it. An inch-based paper space would otherwise get a
+        // 25.4× oversized sheet, shrinking the content into the
+        // corner.
+        let (wx0, wy0, wx1, wy1) = (
+            l.plot_window_min_x,
+            l.plot_window_min_y,
+            l.plot_window_max_x,
+            l.plot_window_max_y,
+        );
+        let window_plot = l.plot_type == 4 && wx1 > wx0 && wy1 > wy0;
+        let f = Self::layout_unit_factor(l);
+        let (pw, ph) = (pw * f, ph * f);
+        // A window plot maps that window onto the sheet, so the
+        // sheet sits around it rather than at the origin.
+        let (ox, oy) = if window_plot {
+            if l.plot_flags.plot_centered {
+                ((wx0 + wx1 - pw) / 2.0, (wy0 + wy1 - ph) / 2.0)
+            } else {
+                (wx0 - l.plot_origin_x * f, wy0 - l.plot_origin_y * f)
+            }
+        } else {
+            // The printable area's corner sits at minus the
+            // paper image origin (paper-space units, usually
+            // 0); the sheet starts the stored margins (turned
+            // with the plot) before it. LIMMIN is not used; it
+            // goes stale when the device or medium changes.
+            let (left, bottom, ..) = crate::scene::rotated_margins(
+                (
+                    l.plot_margin_left,
+                    l.plot_margin_bottom,
+                    l.plot_margin_right,
+                    l.plot_margin_top,
+                ),
+                l.plot_rotation,
+            );
+            (
+                -l.paper_image_origin_x - left * f,
+                -l.paper_image_origin_y - bottom * f,
+            )
+        };
+        Some(((ox, oy), (ox + pw, oy + ph)))
+    }
+
+    /// A centred window plot places the sheet around its window. The paper
+    /// image origin and the limits other programs open the sheet with follow
+    /// that window, or they keep the place of the window the layout had
+    /// before (#3209). Other layouts are left as they are. True when a value
+    /// changed.
+    pub fn place_centred_window_sheet(layout: &mut document::objects::Layout) -> bool {
+        let window_plot = layout.plot_type == 4
+            && layout.plot_window_max_x > layout.plot_window_min_x
+            && layout.plot_window_max_y > layout.plot_window_min_y;
+        if !window_plot || !layout.plot_flags.plot_centered {
+            return false;
+        }
+        let before = (
+            layout.paper_image_origin_x,
+            layout.paper_image_origin_y,
+            layout.min_limits,
+            layout.max_limits,
+        );
+        // ponytail: 1:1 layouts; a scaled window plot would need the window
+        // corner in paper units.
+        layout.paper_image_origin_x = -layout.plot_window_min_x;
+        layout.paper_image_origin_y = -layout.plot_window_min_y;
+        if let Some((min, max)) = Self::layout_sheet(layout) {
+            layout.min_limits = min;
+            layout.max_limits = max;
+        }
+        let close = |a: f64, b: f64| (a - b).abs() <= 1e-9;
+        let (x, y, min, max) = before;
+        !(close(x, layout.paper_image_origin_x)
+            && close(y, layout.paper_image_origin_y)
+            && close(min.0, layout.min_limits.0)
+            && close(min.1, layout.min_limits.1)
+            && close(max.0, layout.max_limits.0)
+            && close(max.1, layout.max_limits.1))
+    }
+
     pub fn paper_limits(&self) -> Option<((f64, f64), (f64, f64))> {
         if self.current_layout == "Model" {
             return None;
@@ -7367,59 +7510,8 @@ impl Scene {
                         return None;
                     }
 
-                    // Use the physical paper dimensions from PlotSettings if available
-                    // (populated from DWG embedded plot settings or DXF codes 44/45/73).
-                    // Rotation 1=90° or 3=270° → swap width and height.
-                    if l.paper_width > 1e-6 && l.paper_height > 1e-6 {
-                        let (pw, ph) = if l.plot_rotation == 1 || l.plot_rotation == 3 {
-                            (l.paper_height, l.paper_width)
-                        } else {
-                            (l.paper_width, l.paper_height)
-                        };
-                        // paper_width/height are millimetres; scale them into
-                        // the layout's paper-space units so the sheet lands in
-                        // the same coordinate system as the viewports drawn on
-                        // it. An inch-based paper space would otherwise get a
-                        // 25.4× oversized sheet, shrinking the content into the
-                        // corner.
-                        let (wx0, wy0, wx1, wy1) = (
-                            l.plot_window_min_x,
-                            l.plot_window_min_y,
-                            l.plot_window_max_x,
-                            l.plot_window_max_y,
-                        );
-                        let window_plot = l.plot_type == 4 && wx1 > wx0 && wy1 > wy0;
-                        let f = Self::layout_unit_factor(l);
-                        let (pw, ph) = (pw * f, ph * f);
-                        // A window plot maps that window onto the sheet, so the
-                        // sheet sits around it rather than at the origin.
-                        let (ox, oy) = if window_plot {
-                            if l.plot_flags.plot_centered {
-                                ((wx0 + wx1 - pw) / 2.0, (wy0 + wy1 - ph) / 2.0)
-                            } else {
-                                (wx0 - l.plot_origin_x * f, wy0 - l.plot_origin_y * f)
-                            }
-                        } else {
-                            // The printable area's corner sits at minus the
-                            // paper image origin (paper-space units, usually
-                            // 0); the sheet starts the stored margins (turned
-                            // with the plot) before it. LIMMIN is not used; it
-                            // goes stale when the device or medium changes.
-                            let (left, bottom, ..) = crate::scene::rotated_margins(
-                                (
-                                    l.plot_margin_left,
-                                    l.plot_margin_bottom,
-                                    l.plot_margin_right,
-                                    l.plot_margin_top,
-                                ),
-                                l.plot_rotation,
-                            );
-                            (
-                                -l.paper_image_origin_x - left * f,
-                                -l.paper_image_origin_y - bottom * f,
-                            )
-                        };
-                        return Some(((ox, oy), (ox + pw, oy + ph)));
+                    if let Some(sheet) = Self::layout_sheet(l) {
+                        return Some(sheet);
                     }
 
                     // Fall back to the Layout's drawing limits.
@@ -9663,10 +9755,19 @@ impl Scene {
                 return v;
             }
         }
+        let t_scan = crate::perf::enabled().then(iced::time::Instant::now);
         let v = self
             .document
             .entities()
             .any(|e| crate::scene::annotative::is_annotative(&self.document, e));
+        if let Some(t) = t_scan {
+            crate::perf_record!(
+                "[perf] anno-scan {:.1}ms entities={} result={}",
+                t.elapsed().as_secs_f64() * 1000.0,
+                self.document.entity_count(),
+                v
+            );
+        }
         self.annotation_affects_wires
             .set(Some((self.geometry_epoch, v)));
         v
@@ -9729,7 +9830,8 @@ impl Scene {
         // Rebuild the resident set in that case so an incremental patch cannot
         // retain the source solid's uncut edge cache.
         if self.active_live_section(block).is_none() && !self.constraint_shading_active() {
-            if let Some(arc) = self.try_resident_patch(
+            let t_patch = crate::perf::enabled().then(iced::time::Instant::now);
+            let patched = self.try_resident_patch(
                 key,
                 block,
                 bg,
@@ -9738,7 +9840,15 @@ impl Scene {
                 all_visible,
                 frozen_layers,
                 style_viewport,
-            ) {
+            );
+            if let Some(t) = t_patch {
+                crate::perf_record!(
+                    "[perf] resident-patch-attempt {:.1}ms hit={}",
+                    t.elapsed().as_secs_f64() * 1000.0,
+                    patched.is_some()
+                );
+            }
+            if let Some(arc) = patched {
                 return arc;
             }
         }
@@ -9826,6 +9936,7 @@ impl Scene {
         let arc = Arc::new(wires);
         // The memo keeps one copy of what this set holds; read before the
         // previous set is evicted below, which may hold runs it still needs.
+        let t_memo = perf.then(iced::time::Instant::now);
         if self.uses_resident_memo(block, frozen_layers) {
             match &layout {
                 Some(layout) if self.resident_runs_match_memo(block) => {
@@ -9833,6 +9944,13 @@ impl Scene {
                 }
                 _ => self.detach_memo_backing(),
             }
+        }
+        if let Some(t) = t_memo {
+            crate::perf_record!(
+                "[perf] memo-bind {:.1}ms wires={}",
+                t.elapsed().as_secs_f64() * 1000.0,
+                arc.len()
+            );
         }
         let gen = WIRE_CONTENT_GEN.fetch_add(1, Ordering::Relaxed);
         self.last_model_wire_gen.set(gen);
@@ -9857,7 +9975,7 @@ impl Scene {
         let cur_epoch = self.geometry_epoch;
         let mut sets = self.resident_wire_sets.borrow_mut();
         self.prune_resident_wire_sets(&mut sets, shown);
-        sets.insert(
+        let evicted = sets.insert(
             key,
             ResidentWireSet {
                 epoch: cur_epoch,
@@ -9866,6 +9984,11 @@ impl Scene {
                 layout,
             },
         );
+        // Tearing down the previous set walks every wire's String, layer Arc
+        // and point Vec (~39 ms for 200k wires); drop it off the rebuild path.
+        if let Some(evicted) = evicted {
+            reaper::reap(evicted);
+        }
         arc
     }
 
@@ -12129,6 +12252,11 @@ impl Scene {
     /// The walk set governing the current interaction space, if any. An
     /// empty set is a valid walk (it hides every layered entity).
     fn interaction_layer_walk(&self) -> Option<&HashSet<Handle>> {
+        // Asked once per entity by every visibility gate: without any walk,
+        // skip the space key, whose layout lookup scans every object.
+        if self.layer_walk.visible.is_empty() {
+            return None;
+        }
         self.layer_walk
             .visible
             .get(&self.interaction_space_base_key())
@@ -12524,7 +12652,7 @@ impl Scene {
         &self,
         handle: Handle,
         section: &LiveSection,
-    ) -> Result<Option<kernel::brep::Body>, ()> {
+    ) -> Result<Option<ocs_brep::Body>, ()> {
         let body = self.section_source_body(handle).ok_or(())?;
         Self::section_body(&body, &section.data, section.slice_depth, None)
     }
@@ -12580,7 +12708,7 @@ impl Scene {
     fn section_source_body(
         &self,
         handle: Handle,
-    ) -> Option<std::borrow::Cow<'_, kernel::brep::Body>> {
+    ) -> Option<std::borrow::Cow<'_, ocs_brep::Body>> {
         if let Some(body) = self.solid_models.get(&handle) {
             return Some(std::borrow::Cow::Borrowed(body));
         }
@@ -12609,11 +12737,11 @@ impl Scene {
     }
 
     fn section_body(
-        body: &kernel::brep::Body,
+        body: &ocs_brep::Body,
         data: &document::entities::SectionObjectData,
         slice_depth: Option<f64>,
         body_to_world: Option<&document::types::Transform>,
-    ) -> Result<Option<kernel::brep::Body>, ()> {
+    ) -> Result<Option<ocs_brep::Body>, ()> {
         let planes = Self::section_planes(data, slice_depth, body_to_world).ok_or(())?;
         let mut current = body.clone();
         for plane in planes {
@@ -12632,7 +12760,7 @@ impl Scene {
         data: &document::entities::SectionObjectData,
         slice_depth: Option<f64>,
         body_to_world: Option<&document::types::Transform>,
-    ) -> Option<Vec<kernel::space::Plane>> {
+    ) -> Option<Vec<ocs_geom::space::Plane>> {
         let (origin, tangent, vertical, viewing) = section_frame(data)?;
         let mut planes = vec![section_plane(origin, tangent, viewing, body_to_world)?];
         if data.state == 1 && slice_depth.is_none() {
@@ -18364,10 +18492,10 @@ mod section_tests {
         }
     }
 
-    fn bounds(body: Option<kernel::brep::Body>) -> ([f64; 3], [f64; 3]) {
+    fn bounds(body: Option<ocs_brep::Body>) -> ([f64; 3], [f64; 3]) {
         let body = body.expect("section should retain material");
         assert!(body.validate().is_empty());
-        let bounds = kernel::brep::body_bounds(&body).expect("sectioned body should be bounded");
+        let bounds = ocs_brep::body_bounds(&body).expect("sectioned body should be bounded");
         (bounds.min, bounds.max)
     }
 
@@ -18379,7 +18507,7 @@ mod section_tests {
 
     #[test]
     fn kernel_clipping_obeys_plane_slice_boundary_and_volume_limits() {
-        let body = kernel::brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
+        let body = ocs_brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
 
         let (min, max) = bounds(Scene::section_body(&body, &section(1, 0.0), None, None).unwrap());
         assert_near(min, [0.0, 0.0, 0.0]);
@@ -18401,7 +18529,7 @@ mod section_tests {
 
     #[test]
     fn instance_transform_pulls_the_section_plane_into_body_space() {
-        let body = kernel::brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
+        let body = ocs_brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
         let transform =
             document::types::Transform::from_scaling(document::types::Vector3::new(2.0, 1.0, 1.0))
                 .then(&document::types::Transform::from_translation(
@@ -18467,7 +18595,7 @@ mod section_tests {
 
     #[test]
     fn live_section_rebuilds_an_uncached_persisted_solid() {
-        let body = kernel::brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
+        let body = ocs_brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
         let sat = crate::scene::convert::acis_export::solid_to_sat(&body).unwrap();
         let mut solid = Solid3D::new();
         solid.set_sat_document(&sat);

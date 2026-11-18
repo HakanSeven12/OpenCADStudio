@@ -150,6 +150,16 @@ pub enum HostRequest {
     UndoStep {
         command_id: u64,
     },
+    /// V25 (additive): the plugin's AI tools. The runner answers with
+    /// [`HostResponse::Tools`]; sent only to plugins declaring v25 or newer.
+    ListTools,
+    /// V25 (additive): run one AI tool on the given tab. The runner answers
+    /// with [`HostResponse::ToolResult`].
+    CallTool {
+        tab_index: usize,
+        name: String,
+        arguments: String,
+    },
 }
 
 /// Responses the plugin runner sends back for `HostRequest`.
@@ -172,6 +182,11 @@ pub enum HostResponse {
     /// V24 (additive): answer to [`HostRequest::UndoStep`]; `None` when the
     /// command leaves Ctrl+Z to the document undo.
     UndoStep(Option<Box<CommandStep>>),
+    /// V25 (additive): answer to [`HostRequest::ListTools`].
+    Tools(Vec<crate::host::PluginTool>),
+    /// V25 (additive): answer to [`HostRequest::CallTool`]: the result as
+    /// JSON text, or the plugin's error message.
+    ToolResult(Result<String, String>),
 }
 
 /// Requests the plugin runner sends to the host.
@@ -422,7 +437,7 @@ pub enum PluginRequest {
     },
     /// V22 (additive): remove the model-space GEODATA object.
     RemoveGeoLocation,
-    /// V25 (additive): publish a panel's scene / widget surface — the
+    /// V26 (additive): publish a panel's scene / widget surface — the
     /// publish-or-patch contract. The FIRST publish of a panel carries the
     /// full bounded surface (a snapshot the host mounts); later state moves
     /// travel as [`PluginRequest::PanelScenePatch`] frames that name a
@@ -455,7 +470,7 @@ pub enum PluginRequest {
         #[serde(deserialize_with = "budgeted_publish_events")]
         events: Vec<WidgetEvent>,
     },
-    /// V25 (additive): an incremental panel-surface update — the
+    /// V26 (additive): an incremental panel-surface update — the
     /// patch leg of the publish-or-patch contract. The patch's ops are
     /// applied atomically (all-or-nothing) against the surface the host
     /// holds: a stale `base_revision` (or any op failure) is answered with
@@ -474,7 +489,7 @@ pub enum PluginRequest {
         /// the scene/widget budgets inside the patch types themselves).
         patch: SceneOrWidgetPatch,
     },
-    /// V25 (additive): a BOUNDED store read — one window of rows, one lazy
+    /// V26 (additive): a BOUNDED store read — one window of rows, one lazy
     /// children page, or one scene region ([`PanelStoreKind`]). The range's
     /// width is capped at decode ([`MAX_WIDGET_RANGE_LEN`]); an over-cap
     /// read request is a structured refusal (the frame decodes to an error),
@@ -498,7 +513,7 @@ pub enum PluginRequest {
         #[serde(deserialize_with = "bounded_store_range")]
         range: WidgetRange,
     },
-    /// V25 (additive): request the CURRENT state of a panel's surfaces as a
+    /// V26 (additive): request the CURRENT state of a panel's surfaces as a
     /// bounded recovery read: the bounded summaries (the
     /// [`SceneSummary`]-grade digest of what the host holds) plus the LEADING
     /// window of the scene — never a full dump (full dumps remain
@@ -516,19 +531,19 @@ pub enum PluginRequest {
 }
 
 // ---------------------------------------------------------------------------
-// V25 wire tails: payload vocabulary (envelopes, store kinds, rows, rejections)
+// V26 wire tails: payload vocabulary (envelopes, store kinds, rows, rejections)
 // ---------------------------------------------------------------------------
 
-/// Maximum `panel_id` bytes accepted on any v25 scene/store tail. No
+/// Maximum `panel_id` bytes accepted on any v26 scene/store tail. No
 /// earlier tail capped the id string on the wire (ownership is
-/// transport-authenticated), so this is NEW at v25 for the heavy payloads'
+/// transport-authenticated), so this is NEW at v26 for the heavy payloads'
 /// frames — a hostile or fat-fingered id refuses at decode instead of
 /// flowing into host state. Generous to the documented "align_tools"-grade
 /// ids; the registration side stays the byte-free contract it always was
 /// (only the scene/store frames gate).
 pub const MAX_PANEL_ID_BYTES: usize = 256;
 
-/// Maximum event rows carried by ONE v25 frame's event batch
+/// Maximum event rows carried by ONE v26 frame's event batch
 /// ([`PluginRequest::PanelScenePublish`], [`HostNotification::PanelSceneEvents`]).
 /// Matches the rows-per-payload budget family (`MAX_WIDGET_ROWS_INITIAL`);
 /// named for its role because events are rows of the notify leg, not
@@ -537,7 +552,7 @@ pub const MAX_PANEL_ID_BYTES: usize = 256;
 /// defect, never a transport need).
 pub const MAX_WIDGET_EVENT_ROWS: usize = 4_096;
 
-/// Which surface of a panel a v25 publish frame carries — the minimal
+/// Which surface of a panel a v26 publish frame carries — the minimal
 /// envelope the §4 append plan names ("one `PanelScene` or one
 /// `WidgetSurface`"; a panel owns one of each but a frame carries one).
 ///
@@ -552,7 +567,7 @@ pub enum SceneOrWidgetSurface {
     Widgets(WidgetSurface),
 }
 
-/// Which surface of a panel a v25 patch frame updates — the minimal
+/// Which surface of a panel a v26 patch frame updates — the minimal
 /// envelope for `PanelScenePatch | WidgetSurfacePatch`. Both patch types
 /// already decode under their own budgets (`budgeted_ops` /
 /// `budgeted_widget_ops`) and apply atomically.
@@ -597,7 +612,7 @@ pub struct StoreStateDigest {
 }
 
 /// One row of a [`PluginResponse::StorePage`] — the bounded row envelope of
-/// the v25 store reads (each variant's payload is a bounded read the
+/// the v26 store reads (each variant's payload is a bounded read the
 /// scene/widget modules cap at decode: page ELEMENTS charge the scene node
 /// budget, row payloads carry their own payload caps).
 ///
@@ -638,12 +653,12 @@ pub enum PatchRejectCode {
     /// structural-refusal bucket (`PanelScene::validate` /
     /// `WidgetSurface::validate` / per-op staging failures).
     InvalidOp,
-    /// The v25 wire frame was accepted but no host UI publisher/mount is
+    /// The v26 wire frame was accepted but no host UI publisher/mount is
     /// attached for the panel yet (the scene-UI mount/publisher attach is
     /// the recorded follow-up). Transport-honest answer, never a silent
     /// success.
     PublisherUnattached,
-    /// The panel's v25 surface store is already attached to a DIFFERENT
+    /// The panel's v26 surface store is already attached to a DIFFERENT
     /// transport-authenticated plugin. The FIRST publisher owns the panel's
     /// surface store; publishing never transfers it (the owning plugin keeps
     /// the patch/publish contract; a second plugin's publish refuses
@@ -668,7 +683,7 @@ pub struct PatchRejectReport {
     pub failed_op: Option<usize>,
 }
 
-/// Bounded decode helper for the v25 tails' `panel_id` strings
+/// Bounded decode helper for the v26 tails' `panel_id` strings
 /// ([`MAX_PANEL_ID_BYTES`]). Wire layout unchanged; a past-cap id refuses
 /// at decode.
 fn bounded_panel_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
@@ -682,7 +697,7 @@ fn bounded_panel_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D:
     Ok(panel_id)
 }
 
-/// Bounded decode helper for the v25 event batches: charges the batch
+/// Bounded decode helper for the v26 event batches: charges the batch
 /// against the per-thread widget decode budget (the same machinery the
 /// widget payloads charge — `crate::widgets::budgeted_widget_events`, whose
 /// production caller this wire task is) and then enforces the
@@ -732,11 +747,11 @@ fn budgeted_store_rows<'de, D: serde::Deserializer<'de>>(
 }
 
 // ---------------------------------------------------------------------------
-// Wire bridges for the in-process bounded read types (v25)
+// Wire bridges for the in-process bounded read types (v26)
 //
 // `SceneSummary` / `SceneKindCounts` / `WidgetSummary` / `WidgetKindCounts` /
 // `AppliedPatchReport` are in-process READ types (the bounded recovery reads
-// and patch reports): before v25 nothing consumed them on the wire, and
+// and patch reports): before v26 nothing consumed them on the wire, and
 // scene.rs / widgets.rs are SOURCE-FROZEN for this package, so their serde
 // impls live HERE as same-shape mirror structs with `From` mappings. The
 // wire layout is exactly the derive these types would carry (each field
@@ -1088,12 +1103,12 @@ pub enum PluginResponse {
     GeoLocationSet(Result<crate::host::Handle, String>),
     /// V22 (additive): whether `RemoveGeoLocation` removed an object.
     GeoLocationRemoved(Result<bool, String>),
-    /// V25 (additive): the bounded invalidation plan of an applied
+    /// V26 (additive): the bounded invalidation plan of an applied
     /// publish/patch ([`crate::scene::AppliedPatchReport`]) — the typed ack
     /// of the publish-or-patch contract. Bounded by construction (capped
     /// touched/retired id lists + the bounded post-patch summary).
     PatchApplied(AppliedPatchReport),
-    /// V25 (additive): the structured refusal of a publish/patch — machine
+    /// V26 (additive): the structured refusal of a publish/patch — machine
     /// code ([`PatchRejectCode`]) plus the bounded recovery report
     /// ([`PatchRejectReport`]). Carries NO payload dumps (no full trees /
     /// op lists echoed back): the plugin re-synchronizes from its own
@@ -1104,7 +1119,7 @@ pub enum PluginResponse {
         /// Bounded recovery facts (head revision / op index).
         report: PatchRejectReport,
     },
-    /// V25 (additive): one bounded window of a store read
+    /// V26 (additive): one bounded window of a store read
     /// ([`PluginRequest::PanelStoreRead`]) or the leading window of a
     /// windowed snapshot request ([`PluginRequest::PanelSceneSnapshot2`],
     /// whose page leads with a [`StoreRow::State`] digest row). `rows` is
@@ -1300,7 +1315,7 @@ mod tests {
         }
     }
 
-    // -- v25 scene/widget wire tails (SCN-004) ------------------------------
+    // -- v26 scene/widget wire tails (SCN-004) ------------------------------
 
     fn one_rect_element(id: u64) -> SceneElement {
         SceneElement::Rect {
@@ -1364,7 +1379,7 @@ mod tests {
     }
 
     #[test]
-    fn v25_request_tails_roundtrip_bincode_and_json() {
+    fn v26_request_tails_roundtrip_bincode_and_json() {
         // PanelScenePublish (61): scene leg, widget leg, event batch.
         let publish = PluginRequest::PanelScenePublish {
             panel_id: "align_tools".to_owned(),
@@ -1504,7 +1519,7 @@ mod tests {
     }
 
     #[test]
-    fn v25_response_tails_roundtrip_bincode_and_json() {
+    fn v26_response_tails_roundtrip_bincode_and_json() {
         // PatchApplied (47): a REAL report from the existing apply path.
         let mut scene = one_rect_scene(1);
         let report = scene
@@ -1593,7 +1608,7 @@ mod tests {
     }
 
     #[test]
-    fn v25_envelope_and_reject_enums_are_pinned_from_creation() {
+    fn v26_envelope_and_reject_enums_are_pinned_from_creation() {
         fn discriminant<T: serde::Serialize>(value: &T) -> u32 {
             let bytes = bincode::serialize(value).expect("serialize orientation pin");
             u32::from_le_bytes(bytes[..4].try_into().expect("bincode tag"))
@@ -1796,7 +1811,7 @@ mod tests {
     }
 
     #[test]
-    fn v25_wire_shapes_stay_minimal() {
+    fn v26_wire_shapes_stay_minimal() {
         // The incremental wire shape is NOT proportional to the carried
         // state: a one-op patch request is constant bytes (the 40-72B
         // single-fact family here because the request envelope adds the
@@ -1826,7 +1841,7 @@ mod tests {
              {envelope_overhead} bytes (fixed, panel-id sized)"
         );
         println!(
-            "v25 wire facts: bare one-cell patch = {bare_patch_bytes} bytes; \
+            "v26 wire facts: bare one-cell patch = {bare_patch_bytes} bytes; \
              patch REQUEST = {request_bytes} bytes (envelope overhead = {envelope_overhead} bytes)"
         );
 
@@ -1856,7 +1871,7 @@ mod tests {
             };
             bincode::serialize(&page).expect("serialize worst page").len()
         };
-        println!("v25 wire facts: worst snapshot page = {page_bytes} bytes");
+        println!("v26 wire facts: worst snapshot page = {page_bytes} bytes");
         assert!(
             page_bytes < 1_000_000,
             "worst bounded page = {page_bytes} bytes must stay well under the frame cap"
@@ -1876,7 +1891,7 @@ mod tests {
     }
 
     #[test]
-    fn v25_decode_budgets_refuse_gracefully() {
+    fn v26_decode_budgets_refuse_gracefully() {
         // Every budget is enforced at DECODE: over-budget requests answer
         // a structured Decode error, never a bigger page, never a panic.
         // (The budgets are the Q4-approved numbers.)
@@ -1993,7 +2008,7 @@ mod tests {
     }
 
     #[test]
-    fn v25_malformed_and_truncated_frames_reject_without_panics() {
+    fn v26_malformed_and_truncated_frames_reject_without_panics() {
         // Garbage discriminants and truncated payloads decode to a
         // structured error — never a panic, never a variant.
         crate::scene::scene_decode_frame_begin();

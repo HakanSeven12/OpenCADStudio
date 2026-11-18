@@ -10,7 +10,7 @@ use document::entities::{LeaderLine, MultiLeader};
 use document::types::Vector3;
 use document::{EntityType, Handle};
 use glam::{DVec3, Vec3};
-use kernel::geom2d::{closest_point, Curve, Line};
+use ocs_geom::geom2d::{closest_point, Curve, Line};
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};

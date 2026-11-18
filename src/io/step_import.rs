@@ -4,11 +4,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use kernel::brep::{
+use ocs_brep::{
     Circle3, Cone, Curve3, Cylinder, EdgeKey, Ellipse3, Line3, OffsetSurface, Sphere, Surface,
     Torus, VertexKey,
 };
-use kernel::space::{NurbsCurve3, NurbsSurface3, Plane, Vec3};
+use ocs_geom::space::{NurbsCurve3, NurbsSurface3, Plane, Vec3};
 
 use super::brep_build::{Builder, FaceSpec};
 
@@ -811,7 +811,7 @@ impl Doc {
                 surface.point_at(u * angle_u, v * angle_v)
             })
             .collect::<Vec<_>>();
-        NurbsCurve3::interpolate_fit(&points, None, None, kernel::space::Parameterization::Chord)
+        NurbsCurve3::interpolate_fit(&points, None, None, ocs_geom::space::Parameterization::Chord)
     }
 }
 
@@ -1264,7 +1264,7 @@ const IDENTITY: Placement = [
 
 /// A body with the colours the file shows it in.
 pub struct StepBody {
-    pub body: kernel::brep::Body,
+    pub body: ocs_brep::Body,
     /// The colour of the solid (or shell model) as a whole.
     pub colour: Option<Rgb>,
     /// Each face's own colour, in the body's face order.
@@ -1891,8 +1891,8 @@ mod tests {
     const COLOURED_BOX: &[u8] = include_bytes!("../../tests/fixtures/step/coloured_box.step");
     const NO_PRODUCTS: &[u8] = include_bytes!("../../tests/fixtures/step/no_products.step");
 
-    fn bounds(body: &kernel::brep::Body) -> ([f64; 3], [f64; 3]) {
-        let b = kernel::brep::body_bounds(body).expect("a body with geometry");
+    fn bounds(body: &ocs_brep::Body) -> ([f64; 3], [f64; 3]) {
+        let b = ocs_brep::body_bounds(body).expect("a body with geometry");
         (b.min, b.max)
     }
 
@@ -1905,13 +1905,13 @@ mod tests {
         }
     }
 
-    fn volume(body: &kernel::brep::Body) -> f64 {
-        kernel::brep::mass_properties(body)
+    fn volume(body: &ocs_brep::Body) -> f64 {
+        ocs_brep::mass_properties(body)
             .expect("a closed body")
             .volume
     }
 
-    fn assert_volume(body: &kernel::brep::Body, expected: f64, what: &str) {
+    fn assert_volume(body: &ocs_brep::Body, expected: f64, what: &str) {
         let v = volume(body);
         assert!(
             (v - expected).abs() <= expected * 1e-6,
@@ -2216,7 +2216,7 @@ mod tests {
         for body in [&analytic.bodies[0].body, &only_product(&spline).bodies[0].body] {
             assert_eq!((body.edges.len(), body.vertices.len()), (1, 2));
             assert!(body.validate().is_empty(), "{:?}", body.validate());
-            let mesh = kernel::brep::mesh_body(body, 0.1, 0.01);
+            let mesh = ocs_brep::mesh_body(body, 0.1, 0.01);
             assert!(!mesh.triangles.is_empty(), "the sphere meshes");
         }
     }
@@ -2246,7 +2246,7 @@ mod tests {
         )
     }
 
-    fn only_body(text: &str) -> kernel::brep::Body {
+    fn only_body(text: &str) -> ocs_brep::Body {
         let model = read(text.as_bytes()).expect("a STEP model");
         let mut bodies: Vec<_> = model.direct.into_iter().map(|b| b.body).collect();
         for product in model.products {
@@ -2261,7 +2261,7 @@ mod tests {
     /// instances added.
     fn cylinder_side_as(surface: &str, extra: &str) -> String {
         let item = crate::io::step::StepItem {
-            body: kernel::brep::make::cylinder([0.0, 0.0, 0.0], 5.0, 10.0),
+            body: ocs_brep::make::cylinder([0.0, 0.0, 0.0], 5.0, 10.0),
             solid: true,
             mesh: None,
             name: String::new(),
@@ -2284,7 +2284,7 @@ mod tests {
 
     const CYLINDER: f64 = std::f64::consts::PI * 25.0 * 10.0;
 
-    fn assert_near(body: &kernel::brep::Body, expected: f64, what: &str) {
+    fn assert_near(body: &ocs_brep::Body, expected: f64, what: &str) {
         assert!(body.validate().is_empty(), "{what}: {:?}", body.validate());
         let v = volume(body);
         assert!((v - expected).abs() <= expected * 1e-3, "{what}: volume {v} != {expected}");
@@ -2458,7 +2458,7 @@ mod tests {
         data += &format!("#{solid}=MANIFOLD_SOLID_BREP('',#{shell});");
         let body = only_body(&solid_file(&data, solid));
         assert_eq!((body.vertices.len(), body.edges.len()), (8, 12));
-        assert_eq!(kernel::brep::heal::free_edges(&body), 0);
+        assert_eq!(ocs_brep::heal::free_edges(&body), 0);
         assert_near(&body, 1000.0, "sewn cube");
     }
 

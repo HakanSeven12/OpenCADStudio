@@ -3,7 +3,7 @@
 use document::entities::{LwPolyline, LwVertex};
 use document::EntityType;
 use glam::DVec3;
-use kernel::geom2d::{Circle as KernelCircle, Curve as KernelCurve, Vec2 as KernelVec2};
+use ocs_geom::geom2d::{Circle as KernelCircle, Curve as KernelCurve, Vec2 as KernelVec2};
 
 use crate::t;
 

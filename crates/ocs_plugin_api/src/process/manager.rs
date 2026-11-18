@@ -349,9 +349,10 @@ impl PluginManager {
         }
     }
 
-    /// Router for the v25 scene/widget event tail: the bounded semantic
-    /// event batch goes to endpoints reporting API v25+ only (pre-v25
-    /// cdylibs have no such variant — upstream's v24 plugins included; the
+    /// Router for the v26 scene/widget event tail: the bounded semantic
+    /// event batch goes to endpoints reporting API v26+ only (pre-v26
+    /// cdylibs have no such variant — upstream's v24 UndoStep and v25
+    /// AI-tools plugins included; the
     /// runner's `notification_api_version` rows gate it too — this
     /// per-endpoint choice keeps a legacy plugin's stream byte-exact).
     /// O(panels): the notification is built ONCE (one event-batch copy at
@@ -362,7 +363,9 @@ impl PluginManager {
     /// panels) are LIVE since SCN-025: forwarded batches from the app-owned
     /// surface store fan out HERE (SCN-026 re-versioned the gate row from
     /// 23 to 24; SCN-038 re-versioned it 24 → 25 at the V24 label
-    /// collision — upstream's v24 = the UndoStep append; the routing
+    /// collision — upstream's v24 = the UndoStep append; SCN-039
+    /// re-versioned it 25 → 26 at the V25 label collision — upstream's
+    /// v25 = the ListTools/CallTool append; the routing
     /// predates the attach, so no attach ever fanned out unwrapped events
     /// to an unprepared plugin).
     pub fn broadcast_panel_scene_events(
@@ -376,14 +379,15 @@ impl PluginManager {
             surface_id,
             events: Vec::from(events),
         };
-        self.broadcast_for_api(None, &|api: u32| (api >= 25).then(|| notification.clone()));
+        self.broadcast_for_api(None, &|api: u32| (api >= 26).then(|| notification.clone()));
     }
 
-    /// Router for the v25 store-demand tail: the bounded lazy-fetch demand
+    /// Router for the v26 store-demand tail: the bounded lazy-fetch demand
     /// (`parent_id` + windowed `range`) goes to endpoints reporting API
-    /// v25+ only — the same per-endpoint gate as the event tail (SCN-026
-    /// re-versioned the row to 24; SCN-038 re-versioned it to 25 — 24 stays
-    /// upstream's UndoStep era). O(panels): one notification build at
+    /// v26+ only — the same per-endpoint gate as the event tail (SCN-026
+    /// re-versioned the row to 24; SCN-038 re-versioned it to 25; SCN-039
+    /// re-versioned it to 26 — 24 stays upstream's UndoStep era, 25 their
+    /// AI-tools era). O(panels): one notification build at
     /// entry, per-plugin writer clones only, nothing rebuilt per demand.
     pub fn broadcast_panel_store_demand(
         &self,
@@ -398,7 +402,7 @@ impl PluginManager {
             parent_id,
             range,
         };
-        self.broadcast_for_api(None, &|api: u32| (api >= 25).then(|| notification.clone()));
+        self.broadcast_for_api(None, &|api: u32| (api >= 26).then(|| notification.clone()));
     }
 
     /// Mark a plugin's notification channel verifiably live and flush every
@@ -548,6 +552,15 @@ impl PluginManager {
             .iter()
             .map(|p| p.process.id().to_string())
             .collect()
+    }
+
+    /// The process of the loaded plugin `id`, for host calls that outlive a
+    /// manager borrow (AI tool calls serve nested HostApi requests).
+    pub fn process(&self, id: &str) -> Option<Arc<PluginProcess>> {
+        self.plugins
+            .iter()
+            .find(|p| p.process.id() == id)
+            .map(|p| Arc::clone(&p.process))
     }
 
     /// Ids of loaded plugins whose processes are currently alive (API v11).
@@ -932,10 +945,10 @@ mod tests {
     }
 
     #[test]
-    fn v25_scene_notification_routers_are_benign_without_routable_endpoints() {
-        // The v25 routers fan out O(panels) through `broadcast_for_api`:
+    fn v26_scene_notification_routers_are_benign_without_routable_endpoints() {
+        // The v26 routers fan out O(panels) through `broadcast_for_api`:
         // endpoints that are not alive V4 processes are skipped outright,
-        // and the api gate (`api >= 25`) is the per-endpoint decision the
+        // and the api gate (`api >= 26`) is the per-endpoint decision the
         // runner's `notification_api_version` rows redouble. Without a live
         // v4 endpoint (the unit-test depth every other router here has)
         // both routers must be a bounded no-op: no panic, no send.

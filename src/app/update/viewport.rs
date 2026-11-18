@@ -3572,11 +3572,19 @@ impl OpenCADStudio {
             // construction handle non-linearly. Rebase each active target onto
             // the freshly rebuilt grip so the hot arrow remains attached to the
             // live surface and reverses immediately from a geometric limit.
+            // Only history-driven targets: a plain curve grip need not sit at
+            // the cursor (a circle quadrant is rebuilt at the new radius on its
+            // own axis), and rebasing it would drop the cursor offset (#3187).
+            let document = &self.tabs[i].scene.document;
             let refreshed_targets: Vec<_> = self.tabs[i]
                 .selected_grip_handles
                 .iter()
                 .copied()
                 .zip(self.tabs[i].selected_grips.iter())
+                .filter(|(handle, _)| {
+                    crate::scene::model::solid_history::edit_operand(document, *handle).is_some()
+                        || document.solid_history_operation(*handle).is_some()
+                })
                 .map(|(handle, grip)| ((handle, grip.id), grip.world))
                 .collect();
             if let Some(active) = self.tabs[i].active_grip.as_mut() {
@@ -7513,26 +7521,18 @@ impl OpenCADStudio {
                     })?
                 });
                 // A dimension pick inside a viewport measures the model
-                // geometry shown there, not the viewport entity itself.
+                // geometry shown there, never the viewport entity itself: with
+                // nothing under the cursor the click is a sheet point (#3203).
                 let hit = hit.filter(|&handle| {
                     let measures = self.tabs[i]
                         .active_cmd
                         .as_ref()
                         .is_some_and(|c| c.measures_through_viewports());
-                    if !measures
+                    !measures
                         || !matches!(
                             self.tabs[i].scene.document.get_entity(handle),
                             Some(document::EntityType::Viewport(_))
                         )
-                    {
-                        return true;
-                    }
-                    let per_px = self.tabs[i].scene.camera.borrow().ortho_size() as f64 * 2.0
-                        / (bounds.height as f64).max(1.0);
-                    self.tabs[i]
-                        .scene
-                        .dimension_pick_through_viewport(pick_wcs, pick_aperture as f64 * per_px)
-                        .is_none()
                 });
                 if let Some(handle) = hit {
                     let uses_surface_point = self.tabs[i]
@@ -7773,6 +7773,12 @@ impl OpenCADStudio {
                         .active_cmd
                         .as_mut()
                         .map(|command| command.on_point(pick_wcs))
+                } else if let Some(result) = self.tabs[i]
+                    .active_cmd
+                    .as_mut()
+                    .and_then(|command| command.on_empty_pick(pick_wcs))
+                {
+                    Some(result)
                 } else if self.tabs[i]
                     .active_cmd
                     .as_ref()
@@ -7897,7 +7903,9 @@ impl OpenCADStudio {
                 .unwrap_or_default();
             self.apply_panel_or_dialog_updates(panel_updates);
 
-            self.sync_dimension_snaps(i);
+            if !matches!(result, Some(crate::command::CmdResult::CommitDimension { .. })) {
+                self.sync_dimension_snaps(i);
+            }
             if let Some(r) = result {
                 let task = self.apply_cmd_result(r);
                 let mut sel = self.tabs[i].scene.selection.borrow_mut();
@@ -8985,6 +8993,11 @@ properties={:.1}ms picked={}",
                     .as_ref(),
             );
             return Some(Task::none());
+        }
+        // An embedded document opens in its own program.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(task) = self.edit_ole_package(i, handle) {
+            return Some(task);
         }
         // Table double-click: shared TABLEDIT editor setup. A
         // grid miss returns NoCell and falls through to the

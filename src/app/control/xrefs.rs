@@ -763,6 +763,7 @@ mod tests {
             pixel_width: 1,
             pixel_height: 1,
             name: "embedded.png".into(),
+            source: None,
         };
         crate::io::ole_embed::add_embedded_image(
             &mut app.tabs[app.active_tab].scene.document,

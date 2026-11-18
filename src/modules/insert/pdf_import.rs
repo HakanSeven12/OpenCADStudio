@@ -690,7 +690,7 @@ impl CadCommand for PdfImportCommand {
 
 /// What an import adds: objects, and the layers and text styles they use
 /// (name, colour / font file), created when missing.
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ImportResult {
     pub entities: Vec<EntityType>,
     pub layers: Vec<(String, Color)>,
@@ -834,6 +834,7 @@ impl LayerNaming {
 
 /// An image the import places: its pixels go to a PNG file named by the
 /// caller, then a raster image at `insertion` spanning `u` × `v` per pixel.
+#[derive(Clone, Debug)]
 pub struct ImageImport {
     pub rgba: Vec<u8>,
     pub width: u32,

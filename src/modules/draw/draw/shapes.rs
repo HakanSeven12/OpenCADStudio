@@ -14,7 +14,7 @@ use crate::t;
 use document::entities::LwVertex;
 use document::types::Vector2;
 use document::{EntityType, LwPolyline};
-use kernel::geom2d::{
+use ocs_geom::geom2d::{
     arc_span, fillet_between_rays, Curve as KernelCurve, Frame as KernelFrame,
     Polyline as KernelPolyline, PolylineVertex as KernelVertex, Ray as KernelRay,
     Transform as KernelTransform, Vec2 as KernelVec2,

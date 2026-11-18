@@ -3,7 +3,7 @@ use document::entities::{
     MultiLeader, MultiLeaderPathType, MultiLeaderPropertyOverrideFlags, TextAlignmentType,
     TextAttachmentDirectionType, TextAttachmentType,
 };
-use kernel::geom2d::Transform;
+use ocs_geom::geom2d::Transform;
 
 use crate::entities::text_support::{
     layout_mtext, resolve_text_style, MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,

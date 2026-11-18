@@ -18,20 +18,29 @@ use document::{EntityType as AcadEntityType, Handle};
 use iced::time::Instant;
 use iced::{mouse, Point, Task};
 
-/// Wait for save work without occupying the executor that delivers timers and
-/// control messages. A worker panic drops the sender and follows save failure
-/// handling just like the former join error.
+/// Run blocking work (disk, network) on a thread of its own: the executor
+/// that delivers timers and control messages has one thread, and blocking it
+/// freezes the app until the work ends. `None` when the worker panicked.
 #[cfg(not(target_arch = "wasm32"))]
-async fn native_save_worker<T: Send + 'static>(
+pub(in crate::app) async fn on_worker_thread<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
-) -> Result<T, crate::io::SaveFailure> {
+) -> Option<T> {
     let (sender, receiver) = iced::futures::channel::oneshot::channel();
     std::thread::spawn(move || {
         let _ = sender.send(work());
     });
-    receiver
+    receiver.await.ok()
+}
+
+/// Wait for save work without occupying the executor; a worker panic follows
+/// save failure handling just like the former join error.
+#[cfg(not(target_arch = "wasm32"))]
+async fn native_save_worker<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, crate::io::SaveFailure> {
+    on_worker_thread(work)
         .await
-        .map_err(|_| crate::io::SaveFailure::other("save worker panicked"))
+        .ok_or_else(|| crate::io::SaveFailure::other("save worker panicked"))
 }
 
 /// Write an exported file: to disk on the desktop, as a browser download on
@@ -1635,34 +1644,33 @@ impl OpenCADStudio {
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn fetch_registry_task(&self) -> Task<Message> {
         Task::perform(
-            async { crate::plugin::marketplace::fetch_registry() },
+            async {
+                on_worker_thread(crate::plugin::marketplace::fetch_registry)
+                    .await
+                    .unwrap_or_else(|| Err("registry fetch thread died".into()))
+            },
             Message::PluginRegistryFetched,
         )
     }
 
     /// Background task: fetch `owner/repo`'s installable releases and their
-    /// manifest API versions. The fetch runs on its own OS thread because the
-    /// several sequential HTTP requests inside `fetch_release_info` would
-    /// otherwise block the async executor and serialise all repo fetches.
+    /// manifest API versions.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(in crate::app) fn fetch_releases_task(&self, repo: String) -> Task<Message> {
+    pub(in crate::app) fn fetch_releases_task(&mut self, repo: String) -> Task<Message> {
+        self.plugin_releases_loading.insert(repo.clone());
         let label = repo.clone();
         Task::perform(
             async move {
-                let (tx, rx) = iced::futures::channel::oneshot::channel();
-                std::thread::spawn(move || {
-                    let result = crate::plugin::marketplace::fetch_release_info(&repo);
-                    let _ = tx.send(result);
-                });
-                rx.await
-                    .unwrap_or_else(|_| Err("release fetch thread died".into()))
+                on_worker_thread(move || crate::plugin::marketplace::fetch_release_info(&repo))
+                    .await
+                    .unwrap_or_else(|| Err("release fetch thread died".into()))
             },
             move |res| Message::PluginReleasesFetched(label, res),
         )
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub(in crate::app) fn fetch_releases_task(&self, repo: String) -> Task<Message> {
+    pub(in crate::app) fn fetch_releases_task(&mut self, repo: String) -> Task<Message> {
         Task::done(Message::PluginReleasesFetched(
             repo,
             Err("External plugins are available in the desktop app.".to_string()),
@@ -1674,7 +1682,11 @@ impl OpenCADStudio {
     pub(in crate::app) fn fetch_plugin_readme_task(&self, repo: String) -> Task<Message> {
         let label = repo.clone();
         Task::perform(
-            async move { crate::plugin::marketplace::fetch_readme(&repo) },
+            async move {
+                on_worker_thread(move || crate::plugin::marketplace::fetch_readme(&repo))
+                    .await
+                    .unwrap_or_else(|| Err("README fetch thread died".into()))
+            },
             move |result| Message::PluginReadmeFetched(label, result),
         )
     }
@@ -1690,24 +1702,30 @@ impl OpenCADStudio {
     /// Background task: download and install the `tag` release of `owner/repo`.
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn install_task(&self, repo: String, tag: String) -> Task<Message> {
+        let label = repo.clone();
         Task::perform(
             async move {
-                let releases = crate::plugin::marketplace::fetch_releases(&repo)?;
-                let rel = releases
-                    .into_iter()
-                    .find(|r| r.tag == tag)
-                    .ok_or_else(|| format!("release {tag} not found"))?;
-                crate::plugin::marketplace::install(&rel, &repo)
+                on_worker_thread(move || {
+                    let releases = crate::plugin::marketplace::fetch_releases(&repo)?;
+                    let rel = releases
+                        .into_iter()
+                        .find(|r| r.tag == tag)
+                        .ok_or_else(|| format!("release {tag} not found"))?;
+                    crate::plugin::marketplace::install(&rel, &repo)
+                })
+                .await
+                .unwrap_or_else(|| Err("install thread died".into()))
             },
-            Message::PluginInstalled,
+            move |result| Message::PluginInstalled(label, result),
         )
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub(in crate::app) fn install_task(&self, _repo: String, _tag: String) -> Task<Message> {
-        Task::done(Message::PluginInstalled(Err(
-            "External plugins are available in the desktop app.".to_string(),
-        )))
+    pub(in crate::app) fn install_task(&self, repo: String, _tag: String) -> Task<Message> {
+        Task::done(Message::PluginInstalled(
+            repo,
+            Err("External plugins are available in the desktop app.".to_string()),
+        ))
     }
 
     /// Gather the full persisted config (all sections) from live app state.
@@ -4887,10 +4905,15 @@ impl OpenCADStudio {
         // happens in `on_save_dialog_path_picked` once a path returns.
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let seed_dir = self.tabs[i]
-                .current_path
-                .as_ref()
-                .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+            // A template is saved in the templates folder (#3210).
+            let seed_dir = if ext.eq_ignore_ascii_case("dwt") {
+                self.template_dir()
+            } else {
+                self.tabs[i]
+                    .current_path
+                    .as_ref()
+                    .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            };
             let default_name = filename;
             let (filter_label, filter_ext): (&str, &str) =
                 if let Some(converter) = ocs_save::external_format(ext) {
@@ -6306,10 +6329,17 @@ impl OpenCADStudio {
         for obj in self.tabs[i].scene.document.objects.values_mut() {
             if let document::objects::ObjectType::Layout(layout) = obj {
                 if layout.name == layout_name {
+                    // A centred window plot puts the sheet around the window.
+                    let ((x0, y0), (x1, y1)) = if layout.plot_type == 4 && center {
+                        crate::scene::Scene::layout_sheet(layout)
+                            .unwrap_or(((x0, y0), (x0 + lw, y0 + lh)))
+                    } else {
+                        ((x0, y0), (x0 + lw, y0 + lh))
+                    };
                     layout.min_limits = (x0, y0);
-                    layout.max_limits = (x0 + lw, y0 + lh);
+                    layout.max_limits = (x1, y1);
                     layout.min_extents = (x0, y0, 0.0);
-                    layout.max_extents = (x0 + lw, y0 + lh, 0.0);
+                    layout.max_extents = (x1, y1, 0.0);
                     break;
                 }
             }

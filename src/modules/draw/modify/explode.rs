@@ -1035,7 +1035,7 @@ fn explode_region(region: &document::entities::Region) -> Vec<EntityType> {
             let (bodies, _loss) = ocs_acis::lift(&sat);
             for body in &bodies {
                 for face in body.face_keys() {
-                    if let Some(profile) = kernel::brep::planar_face_profile(body, face) {
+                    if let Some(profile) = ocs_brep::planar_face_profile(body, face) {
                         append_region_loops(&profile.plane, &profile.loops, &common, &mut out);
                     }
                 }
@@ -1079,8 +1079,8 @@ struct CircularPiece {
     sweep: f64,
 }
 
-fn as_circular_piece(curve: &kernel::geom2d::Curve) -> Option<CircularPiece> {
-    use kernel::geom2d::Curve;
+fn as_circular_piece(curve: &ocs_geom::geom2d::Curve) -> Option<CircularPiece> {
+    use ocs_geom::geom2d::Curve;
     match curve {
         Curve::Circle(circle) if circle.radius > 1e-12 => {
             let centre = circle.centre;
@@ -1234,12 +1234,12 @@ fn as_circular_piece(curve: &kernel::geom2d::Curve) -> Option<CircularPiece> {
 }
 
 fn append_region_loops(
-    plane: &kernel::space::Plane,
-    loops: &[Vec<kernel::geom2d::Curve>],
+    plane: &ocs_geom::space::Plane,
+    loops: &[Vec<ocs_geom::geom2d::Curve>],
     common: &EntityCommon,
     out: &mut Vec<EntityType>,
 ) {
-    use kernel::geom2d::Curve;
+    use ocs_geom::geom2d::Curve;
     let Some(normal_arr) = plane.normal() else {
         return;
     };
@@ -1263,7 +1263,7 @@ fn append_region_loops(
         EntityType::Circle(circle)
     };
 
-    let make_ellipse = |ellipse: &kernel::geom2d::Ellipse,
+    let make_ellipse = |ellipse: &ocs_geom::geom2d::Ellipse,
                         start_param: f64,
                         end_param: f64|
      -> Option<EntityType> {

@@ -661,10 +661,10 @@ impl OpenCADStudio {
                                         .enumerate()
                                         .map(|(outer, boundary)| {
                                             inner != outer
-                                                && kernel::geom2d::contains(
+                                                && ocs_geom::geom2d::contains(
                                                     boundary,
                                                     seed,
-                                                    kernel::geom2d::Tolerance::new(1e-6),
+                                                    ocs_geom::geom2d::Tolerance::new(1e-6),
                                                 )
                                         })
                                         .collect::<Vec<_>>()

@@ -260,9 +260,9 @@ impl OpenCADStudio {
                 failed += 1;
                 continue;
             };
-            let solid = match kernel::brep::thicken(&body, kernel_distance) {
+            let solid = match ocs_brep::thicken(&body, kernel_distance) {
                 Ok(solid) => solid,
-                Err(kernel::brep::ThickenError::SelfIntersection) => {
+                Err(ocs_brep::ThickenError::SelfIntersection) => {
                     failed += 1;
                     self_intersections += 1;
                     continue;
@@ -896,7 +896,7 @@ impl OpenCADStudio {
     pub(super) fn handle_slice_entities(
         &mut self,
         targets: Vec<Handle>,
-        plane: kernel::space::Plane,
+        plane: ocs_geom::space::Plane,
         keep_point: Option<glam::DVec3>,
     ) -> Task<Message> {
         let i = self.active_tab;
@@ -911,7 +911,7 @@ impl OpenCADStudio {
     pub(super) fn handle_slice_surface_entities(
         &mut self,
         targets: Vec<Handle>,
-        cutter: Box<kernel::brep::Body>,
+        cutter: Box<ocs_brep::Body>,
         keep_point: Option<glam::DVec3>,
     ) -> Task<Message> {
         let i = self.active_tab;

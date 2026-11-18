@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use hayro::hayro_interpret::InterpreterSettings;
 use hayro::hayro_syntax::Pdf;
 use hayro::vello_cpu::color::palette::css::{TRANSPARENT, WHITE};
-use hayro::{RenderCache, RenderSettings};
+use hayro::{PixmapSettings, RenderCache, RenderSettings};
 use lru::LruCache;
 
 /// One rasterised PDF page. `dpi` ties its pixel size to its physical size.
@@ -376,11 +376,11 @@ fn raster_pdf_page(pdf: &Pdf, index: usize, dpi: f32, transparent: bool) -> Opti
         page,
         &RenderCache::new(),
         &InterpreterSettings::default(),
-        &RenderSettings {
+        &RenderSettings::default(),
+        &PixmapSettings {
             x_scale: scale,
             y_scale: scale,
             bg_color: if transparent { TRANSPARENT } else { WHITE },
-            ..Default::default()
         },
     );
     let width = u32::from(pixmap.width());

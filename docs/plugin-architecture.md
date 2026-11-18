@@ -324,6 +324,25 @@ state, as when PLINE pops its last vertex. Returning `None` (the default)
 leaves Ctrl+Z to the document undo. Plugins whose manifest declares an older
 API are never asked.
 
+### AI tools (API v25)
+
+A plugin can offer typed operations to AI clients that drive OCS over its
+MCP / automation bridge. `tools()` returns `PluginTool { name, description,
+input_schema }`, the schema being a JSON Schema of the arguments object as
+JSON text; `call_tool(host, name, arguments)` runs one and returns its result
+as JSON text, or an `Err` message. See `docs/plugin-template/src/lib.rs`
+(`add_point`).
+
+- Clients find the tools with `ocs_read` op `plugins` (each installed plugin
+  lists its `tools`) and call one with `ocs_execute` op
+  `plugin_call {plugin, tool, arguments}`. A disabled plugin's tools are not
+  callable; the Plugin Manager lists each plugin's tools on its card.
+- The host checks `arguments` against `input_schema` before the call and
+  wraps the whole call in one undo step named `<plugin id> <tool>`; the
+  plugin's own `push_undo` calls join it.
+- Only plugins whose manifest declares v25 or newer are asked; older ones
+  simply offer no tools.
+
 ### XDATA — domain persistence
 
 Store domain data on entities as XDATA (under your `xdata_apps` ids), not in a

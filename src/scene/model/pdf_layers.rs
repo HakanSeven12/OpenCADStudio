@@ -17,7 +17,7 @@ pub struct PdfLayer {
     pub name: String,
     /// Shown by the file's default configuration.
     pub on_by_default: bool,
-    object: (i32, i32),
+    object: (u32, i32),
 }
 
 /// A PDF text string: UTF-16 with a byte-order mark (big-endian per the
@@ -64,7 +64,7 @@ pub fn layers(path: &str) -> Vec<PdfLayer> {
         return Vec::new();
     };
     let config = props.get::<Dict<'_>>(b"D").unwrap_or_default();
-    let ids = |key: &[u8]| -> Vec<(i32, i32)> {
+    let ids = |key: &[u8]| -> Vec<(u32, i32)> {
         config
             .get::<Array<'_>>(key)
             .map(|a| {

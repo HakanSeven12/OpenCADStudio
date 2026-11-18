@@ -1,8 +1,8 @@
 use document::entities::Ellipse;
-use kernel::geom2d::{
+use ocs_geom::geom2d::{
     Curve as KernelCurve, EllipseArc as KernelEllipseArc, Tolerance, Vec2 as KernelVec2,
 };
-use kernel::space::PlanarCurve;
+use ocs_geom::space::PlanarCurve;
 
 use crate::entities::curve::CurveSnap;
 use crate::t;

@@ -428,7 +428,9 @@ fn caption<'a>(title: Cow<'static, str>) -> Element<'a, Message> {
 }
 
 /// The style's name and status, the comparison, and the three groups.
-fn properties<'a>(v: &TextStyleView<'a>) -> Element<'a, Message> {
+/// The style's name and status with the comparison above, and the setting
+/// cards (font, size, effects).
+fn properties<'a>(v: &TextStyleView<'a>) -> (Element<'a, Message>, Vec<Element<'a, Message>>) {
     let ttf = !v.ttf_buf.trim().is_empty();
     let face = FaceStyle::of(v.bold, v.italic);
     let face_style: Element<'a, Message> = if ttf && !v.read_only {
@@ -586,7 +588,7 @@ fn properties<'a>(v: &TextStyleView<'a>) -> Element<'a, Message> {
     } else {
         format!("{}: {}", t!("Different"), v.comparison_sections.join(", "))
     };
-    column![
+    let head = column![
         row![
             text(v.selected.to_string()).size(15).style(primary_style),
             text(status).size(10).style(muted_style),
@@ -599,13 +601,11 @@ fn properties<'a>(v: &TextStyleView<'a>) -> Element<'a, Message> {
             summary,
             on_select: Message::TextStyleDialogCompare,
         })),
-        font,
-        size,
-        effects,
     ]
     .spacing(10)
     .width(Length::Fill)
-    .into()
+    .into();
+    (head, vec![font, size, effects])
 }
 
 /// What Apply does to every changed style and its texts, framed; nothing
@@ -680,7 +680,9 @@ fn note_style(theme: &Theme) -> container::Style {
 }
 
 /// The preview with its sample text field, and where the style is used.
-fn preview_and_usage<'a>(v: &TextStyleView<'a>) -> Element<'a, Message> {
+/// The preview with its sample text, and the card of the texts using the
+/// style.
+fn preview_and_usage<'a>(v: &TextStyleView<'a>) -> (Element<'a, Message>, Element<'a, Message>) {
     // The caption wraps under the drawing: a long font name stays inside.
     let preview = container(column![
         canvas(PreviewCanvas {
@@ -732,11 +734,16 @@ fn preview_and_usage<'a>(v: &TextStyleView<'a>) -> Element<'a, Message> {
             .style(muted_style),
         );
     }
-    column![
+    let top = column![
         caption(t!("Preview")),
         preview,
         caption(t!("Sample text")),
         sample,
+    ]
+    .spacing(6)
+    .width(Length::Fill)
+    .into();
+    let used = column![
         caption(t!("Texts using this style")),
         container(usage)
             .padding([8, 10])
@@ -745,7 +752,8 @@ fn preview_and_usage<'a>(v: &TextStyleView<'a>) -> Element<'a, Message> {
     ]
     .spacing(6)
     .width(Length::Fill)
-    .into()
+    .into();
+    (top, used)
 }
 
 /// Below this width the two columns stack and the toolbar shows its icons
@@ -970,26 +978,37 @@ fn layout<'a>(
             .width(Length::Fill)
             .height(Length::Fill)
     };
-    let editor: Element<'a, Message> = if narrow {
-        let mut stack = column![].spacing(12);
-        if let Some(summary) = apply_summary(v, summary_height) {
-            stack = stack.push(summary);
-        }
-        pane(stack.push(properties(v)).push(preview_and_usage(v)).into()).into()
+    // The name, the preview on top, then the setting cards: in two columns
+    // dealt left, right, left… when the window is wide, one under another
+    // when it is narrow.
+    let (head, mut cards) = properties(v);
+    let (preview, used) = preview_and_usage(v);
+    cards.push(used);
+    let mut stack = column![head].spacing(12);
+    if let Some(summary) = apply_summary(v, summary_height) {
+        stack = stack.push(summary);
+    }
+    stack = stack.push(preview);
+    let stack = if narrow {
+        cards.into_iter().fold(stack, |stack, card| stack.push(card))
     } else {
-        let mut side = column![].spacing(12);
-        if let Some(summary) = apply_summary(v, summary_height) {
-            side = side.push(summary);
+        let (mut first, mut second) = (Vec::new(), Vec::new());
+        for (index, card) in cards.into_iter().enumerate() {
+            if index % 2 == 0 {
+                first.push(card);
+            } else {
+                second.push(card);
+            }
         }
-        let side = side.push(preview_and_usage(v));
-        row![
-            pane(properties(v)),
-            crate::ui::style::style_manager::vsep(Length::Fill),
-            container(pane(side.into())).width(320),
-        ]
-        .height(Length::Fill)
-        .into()
+        stack.push(
+            row![
+                column(first).spacing(12).width(Length::Fill),
+                column(second).spacing(12).width(Length::Fill),
+            ]
+            .spacing(14),
+        )
     };
+    let editor: Element<'a, Message> = pane(stack.into()).into();
     crate::ui::style::style_manager::view(crate::ui::style::style_manager::Scaffold {
         sizing,
         kind: StyleKind::Text,
@@ -1044,6 +1063,8 @@ fn layout<'a>(
                 ],
             )
         }),
+        list: None,
+        extra_actions: Vec::new(),
         editor,
     })
 }

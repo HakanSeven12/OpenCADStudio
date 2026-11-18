@@ -80,6 +80,8 @@ pub enum RibbonMenuMsg {
     QatSeparatorAfter(usize),
     /// Show the Quick Access Toolbar below the ribbon (`true`) or above.
     QatBelow(bool),
+    /// Put this command on the My Tools tab, or take it off.
+    MyToolsToggle(String),
 }
 
 #[derive(Clone, Debug)]
@@ -154,6 +156,11 @@ impl Ribbon {
             RibbonMenuMsg::QatBelow(below) => {
                 self.menu = None;
                 self.layout.qat_below = below;
+                true
+            }
+            RibbonMenuMsg::MyToolsToggle(command) => {
+                self.menu = None;
+                self.my_tools_toggle(&command);
                 true
             }
             RibbonMenuMsg::Close => {
@@ -396,7 +403,21 @@ impl Ribbon {
                 } else {
                     crate::tr!("ribbon-menu", "add-to-qat")
                 };
-                let mut rows = vec![plain(label, RibbonMenuMsg::QatToggle(item.clone())), None];
+                let mut rows = vec![plain(label, RibbonMenuMsg::QatToggle(item.clone()))];
+                // A dropdown goes on My Tools as its default command.
+                if let QatItem::Command(command) = item {
+                    let command = self
+                        .ribbon_dropdown(command)
+                        .map_or(command.as_str(), |(_, _, _, default)| default)
+                        .to_string();
+                    let label = if self.my_tools_has(&command) {
+                        crate::tr!("ribbon-menu", "remove-from-my-tools")
+                    } else {
+                        crate::tr!("ribbon-menu", "add-to-my-tools")
+                    };
+                    rows.push(plain(label, RibbonMenuMsg::MyToolsToggle(command)));
+                }
+                rows.push(None);
                 rows.extend(ribbon_rows);
                 rows
             }

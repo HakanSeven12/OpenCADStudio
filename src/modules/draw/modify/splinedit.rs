@@ -121,7 +121,7 @@ impl SplineditCommand {
             {
                 let normal = planar.plane.normal()?;
                 let elevation =
-                    kernel::space::Vec3::from(points[0]).dot(kernel::space::Vec3::from(normal));
+                    ocs_geom::space::Vec3::from(points[0]).dot(ocs_geom::space::Vec3::from(normal));
                 let normal = Vector3::new(normal[0], normal[1], normal[2]);
                 let plane = crate::entities::curve::ocs_plane(normal, elevation);
                 let mut polyline = document::LwPolyline::new();
@@ -382,13 +382,13 @@ impl SplineditCommand {
             return Some(result);
         }
         let planar = crate::entities::curve::entity_curve(&EntityType::Spline(source.clone()))?;
-        let kernel::geom2d::Curve::Nurbs(mut curve) = planar.curve else {
+        let ocs_geom::geom2d::Curve::Nurbs(mut curve) = planar.curve else {
             return None;
         };
         if let Some(point) = point {
             let projected = planar.plane.project([point.x, point.y, point.z])?;
-            let nearest = kernel::geom2d::closest_point(
-                &kernel::geom2d::Curve::Nurbs(curve.clone()),
+            let nearest = ocs_geom::geom2d::closest_point(
+                &ocs_geom::geom2d::Curve::Nurbs(curve.clone()),
                 projected,
             );
             let (start, end) = curve.domain();
@@ -893,7 +893,7 @@ impl CadCommand for SplineditCommand {
                 } else {
                     source.weights.clone()
                 };
-                let curve = kernel::space::NurbsCurve3::new_strict(
+                let curve = ocs_geom::space::NurbsCurve3::new_strict(
                     source.degree as usize,
                     controls,
                     source.knots.clone(),
@@ -1036,7 +1036,7 @@ fn change_closure(
     source: &document::entities::Spline,
     closed: bool,
 ) -> Option<document::entities::Spline> {
-    use kernel::space::{NurbsCurve3, Parameterization};
+    use ocs_geom::space::{NurbsCurve3, Parameterization};
     if (source.flags.closed || source.flags.periodic) == closed {
         return None;
     }
@@ -1152,7 +1152,7 @@ mod tests {
             .iter()
             .map(|point| Vector3::new(point[0], point[1], point[2]))
             .collect();
-        spline.knots = kernel::space::clamped_uniform_knots(degree, points.len());
+        spline.knots = ocs_geom::space::clamped_uniform_knots(degree, points.len());
         spline
     }
 
@@ -1275,7 +1275,7 @@ mod tests {
 
     #[test]
     fn a_closed_weighted_control_curve_can_be_opened() {
-        let curve = kernel::space::NurbsCurve3::from_weighted_control_polygon(
+        let curve = ocs_geom::space::NurbsCurve3::from_weighted_control_polygon(
             2,
             &[
                 [0.0, 0.0, 0.0],
@@ -1296,7 +1296,7 @@ mod tests {
         let opened = change_closure(&spline, false).expect("closed control curve opens");
         assert!(!opened.flags.closed);
         assert!(!opened.flags.periodic);
-        assert!(kernel::space::NurbsCurve3::new_strict(
+        assert!(ocs_geom::space::NurbsCurve3::new_strict(
             opened.degree as usize,
             opened
                 .control_points
@@ -1371,7 +1371,7 @@ mod tests {
 
     #[test]
     fn closed_conversion_closes_once_and_invalid_precision_retries() {
-        let curve = kernel::space::NurbsCurve3::from_control_polygon(
+        let curve = ocs_geom::space::NurbsCurve3::from_control_polygon(
             2,
             &[
                 [0.0, 0.0, 0.0],
@@ -1455,7 +1455,7 @@ inventory::submit!(crate::command::CommandRegistration {
     names: &["SPLINEDIT"]
 }); // SplineditCommand
 
-fn spatial_spline(source: &document::entities::Spline) -> Option<kernel::space::NurbsCurve3> {
+fn spatial_spline(source: &document::entities::Spline) -> Option<ocs_geom::space::NurbsCurve3> {
     let curve = if crate::entities::spline::uses_fit_method(source) {
         crate::entities::spline::fit_nurbs3(source)?
     } else {
@@ -1465,7 +1465,7 @@ fn spatial_spline(source: &document::entities::Spline) -> Option<kernel::space::
         } else {
             source.weights.clone()
         };
-        kernel::space::NurbsCurve3::new_strict(
+        ocs_geom::space::NurbsCurve3::new_strict(
             current,
             source
                 .control_points

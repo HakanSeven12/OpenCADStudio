@@ -142,9 +142,9 @@ fn paint_record(
 /// [`solid_to_sat`](super::acis_export::solid_to_sat), colours of their own.
 pub fn paint_body(
     document: &mut document::entities::acis::SatDocument,
-    body: &kernel::brep::Body,
-    faces: &std::collections::HashMap<kernel::brep::FaceKey, document::types::Color>,
-    edges: &std::collections::HashMap<kernel::brep::EdgeKey, document::types::Color>,
+    body: &ocs_brep::Body,
+    faces: &std::collections::HashMap<ocs_brep::FaceKey, document::types::Color>,
+    edges: &std::collections::HashMap<ocs_brep::EdgeKey, document::types::Color>,
 ) {
     // The writer puts faces and edges in the body's own order.
     let records = |kind: &str| -> Vec<usize> {
@@ -170,10 +170,10 @@ pub fn paint_body(
 /// through the records each node was lifted from.
 pub fn body_colors(
     document: &document::entities::acis::SatDocument,
-    body: &kernel::brep::Body,
+    body: &ocs_brep::Body,
 ) -> (
-    std::collections::HashMap<kernel::brep::FaceKey, document::types::Color>,
-    std::collections::HashMap<kernel::brep::EdgeKey, document::types::Color>,
+    std::collections::HashMap<ocs_brep::FaceKey, document::types::Color>,
+    std::collections::HashMap<ocs_brep::EdgeKey, document::types::Color>,
 ) {
     let mut owned = std::collections::HashMap::new();
     // A true colour outranks the index beside it, so it is read last.
@@ -197,7 +197,7 @@ pub fn body_colors(
             owned.insert(owner, color);
         }
     }
-    let source = |provenance: &kernel::brep::Provenance| {
+    let source = |provenance: &ocs_brep::Provenance| {
         provenance.source().and_then(|source| owned.get(&(source.index() as i32)).copied())
     };
     let faces = body
@@ -218,14 +218,14 @@ pub fn body_colors(
 /// bounding those faces carrying it too. A `sheet` is a SURFACE however
 /// flat it is.
 pub fn painted_body_entity(
-    body: &kernel::brep::Body,
+    body: &ocs_brep::Body,
     colour: Option<document::types::Color>,
     faces: &[Option<document::types::Color>],
     sheet: bool,
 ) -> Option<EntityType> {
     let mut document = super::acis_export::solid_to_sat(body)?;
     let base = colour.unwrap_or(document::types::Color::ByBlock);
-    let own: std::collections::HashMap<kernel::brep::FaceKey, document::types::Color> = body
+    let own: std::collections::HashMap<ocs_brep::FaceKey, document::types::Color> = body
         .faces
         .keys()
         .zip(faces)

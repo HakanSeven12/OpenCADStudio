@@ -265,10 +265,10 @@ impl Scene {
         let Some(point) = boundary.plane.project([paper.x, paper.y, vp.center.z]) else {
             return false;
         };
-        kernel::geom2d::contains(
+        ocs_geom::geom2d::contains(
             &[boundary.curve],
             point,
-            kernel::geom2d::Tolerance::new(1e-9),
+            ocs_geom::geom2d::Tolerance::new(1e-9),
         )
     }
 }

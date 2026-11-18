@@ -407,12 +407,10 @@ impl OpenCADStudio {
             Some(ImportFile) => self.import_dialogs.file = None,
             Some(DgnImport) => self.import_dialogs.dgn = None,
             Some(TdsImport) => self.import_dialogs.tds = None,
-            // Cancel or ✕ stops the import at this mesh.
-            Some(TdsMaterial) => {
-                if let Some(state) = self.import_dialogs.tds_material.take() {
-                    self.stop_tds_import(state);
-                }
-            }
+            // Cancel and ✕ stop the import at this mesh in
+            // `Message::CloseModal`; closed for another window, the import
+            // is dropped.
+            Some(TdsMaterial) => self.import_dialogs.tds_material = None,
             // OK or ✕ dismisses this map; the next one follows.
             // Cancel or ✕ leaves the cells as they were.
             Some(TableCellWarning) => self.table_cell_warning = None,
@@ -2400,6 +2398,14 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
                 Task::none()
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::OleEditPoll => self.poll_ole_edits(),
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::OleEditRendered(tab, handle, result) => {
+                self.on_ole_edit_rendered(tab, handle, result)
+            }
+            #[cfg(target_arch = "wasm32")]
+            Message::OleEditPoll | Message::OleEditRendered(..) => Task::none(),
             Message::InsertObjectResult(Err(e)) => {
                 if e != "Cancelled" {
                     self.command_line.push_error(&format!("INSERTOBJ: {e}"));
@@ -5778,6 +5784,9 @@ impl OpenCADStudio {
 
             Message::WindowCloseRequested(id) => {
                 if self.main_window == Some(id) {
+                    // A plain quit after a cancelled Restart quits only.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    super::RESTART_AFTER_EXIT.store(false, std::sync::atomic::Ordering::Relaxed);
                     return self.request_quit_with_block_edits();
                 }
                 #[cfg(not(target_arch = "wasm32"))]
@@ -12907,6 +12916,15 @@ impl OpenCADStudio {
                 )
             }
             Message::CloseModal => {
+                // Cancel or ✕ in the multiple-material window of a 3D Studio
+                // import stops the import at the asked mesh; the meshes
+                // before it are converted off the UI thread.
+                if self.active_modal == Some(super::ModalKind::TdsMaterial) {
+                    if let Some(state) = self.import_dialogs.tds_material.take() {
+                        self.close_active_modal();
+                        return self.stop_tds_import(state);
+                    }
+                }
                 // The multileader style window's ✕ closes its topmost face.
                 if self.active_modal == Some(super::ModalKind::MLeaderStyle)
                     && self.mleader_style_close_face()
@@ -13759,6 +13777,7 @@ impl OpenCADStudio {
                     // Refresh the on-disk external-plugin list each time the manager
                     // opens so newly dropped-in packages show up.
                     self.external_plugins = crate::plugin::external::discover();
+                    self.refresh_plugin_tools();
                     self.marketplace_status.clear();
                     self.active_modal = Some(super::ModalKind::PluginManager);
                     // Fetch the curated registry and release lists for linked repos.
@@ -14004,6 +14023,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::PluginReleasesFetched(repo, Ok(releases)) => {
+                self.plugin_releases_loading.remove(&repo);
                 if let Some(first) = releases.first() {
                     self.repo_selected_tag
                         .entry(repo.clone())
@@ -14022,6 +14042,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::PluginReleasesFetched(repo, Err(e)) => {
+                self.plugin_releases_loading.remove(&repo);
                 self.marketplace_status = format!("{repo}: {e}");
                 Task::none()
             }
@@ -14054,14 +14075,23 @@ impl OpenCADStudio {
                 let Some(tag) = self.repo_selected_tag.get(&repo).cloned() else {
                     return Task::none();
                 };
+                if !self.plugin_installing.insert(repo.clone()) {
+                    return Task::none();
+                }
+                self.plugin_installed_now.insert(repo.clone(), true);
                 self.marketplace_status = crate::tf!("Installing {repo} {tag}…").into_owned();
                 self.install_task(repo, tag)
             }
             Message::PluginUpdate(repo, tag) => {
+                if !self.plugin_installing.insert(repo.clone()) {
+                    return Task::none();
+                }
+                self.plugin_installed_now.insert(repo.clone(), false);
                 self.marketplace_status = crate::tf!("Updating {repo} to {tag}…").into_owned();
                 self.install_task(repo, tag)
             }
-            Message::PluginInstalled(Ok(id)) => {
+            Message::PluginInstalled(repo, Ok(id)) => {
+                self.plugin_installing.remove(&repo);
                 self.marketplace_status =
                     crate::tf!("Installed '{id}'. Restart to load it.").into_owned();
                 for id in id.split(", ") {
@@ -14073,9 +14103,16 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
-            Message::PluginInstalled(Err(e)) => {
+            Message::PluginInstalled(repo, Err(e)) => {
+                self.plugin_installing.remove(&repo);
+                self.plugin_installed_now.remove(&repo);
                 self.marketplace_status = crate::tf!("Install failed: {e}").into_owned();
                 Task::none()
+            }
+            Message::PluginRestart => {
+                #[cfg(not(target_arch = "wasm32"))]
+                super::RESTART_AFTER_EXIT.store(true, std::sync::atomic::Ordering::Relaxed);
+                self.request_quit_with_block_edits()
             }
             Message::PluginUninstall(id) => {
                 #[cfg(not(target_arch = "wasm32"))]
@@ -15799,8 +15836,14 @@ impl OpenCADStudio {
             // ── MLeaderStyle Dialog ───────────────────────────────────────────
             Message::MLeaderStyleDialogOpen => self.on_mleader_style_dialog_open(),
             Message::MLeaderStyleDlg(message) => self.on_mleader_style_dlg(message),
-            Message::MLeaderStyleEdit { field, value } => self.on_mleader_style_edit(field, value),
-            Message::MLeaderStyleToggle(field) => self.on_mleader_style_toggle(field),
+            Message::MLeaderStyleEdit { field, value } => {
+                self.mls_mark_dirty();
+                self.on_mleader_style_edit(field, value)
+            }
+            Message::MLeaderStyleToggle(field) => {
+                self.mls_mark_dirty();
+                self.on_mleader_style_toggle(field)
+            }
             Message::MLeaderColorMore(field) => {
                 self.mls_color_open = if self.mls_color_open == Some(field) {
                     None
@@ -15810,9 +15853,11 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::MLeaderStyleSetEnum { field, value } => {
+                self.mls_mark_dirty();
                 self.on_mleader_style_set_enum(field, value)
             }
             Message::MLeaderStyleLineWeightChanged(line_weight) => {
+                self.mls_mark_dirty();
                 self.mls_color_open = None;
                 let i = self.active_tab;
                 if let Some(s) = self.mleaderstyle_mut(i) {
@@ -15821,6 +15866,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::MLeaderStyleSetHandle { field, value } => {
+                self.mls_mark_dirty();
                 self.on_mleader_style_set_handle(field, value)
             }
 

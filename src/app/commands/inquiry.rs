@@ -5,7 +5,7 @@ impl OpenCADStudio {
     fn align_selected_bounds(&mut self, i: usize, command: &str) {
         use crate::command::EntityTransform;
         use glam::DVec3;
-        use kernel::space::BoundsAlignment;
+        use ocs_geom::space::BoundsAlignment;
 
         let (alignment, label) = match command {
             "ALIGNLEFT" => (BoundsAlignment::Left, "Align Left"),
@@ -66,7 +66,7 @@ impl OpenCADStudio {
         }
 
         let extents: Vec<_> = bounds.iter().map(|(_, bounds)| *bounds).collect();
-        let offsets = kernel::space::align_aabbs_2d(&extents, alignment)
+        let offsets = ocs_geom::space::align_aabbs_2d(&extents, alignment)
             .expect("validated at least two finite bounds");
         let pending = self.begin_undo(i, label, handles.len(), true);
         for ((unit, _), [dx, dy]) in bounds.iter().zip(offsets) {
@@ -848,7 +848,7 @@ impl OpenCADStudio {
                             if let Some(acis) = acis {
                                 let properties =
                                     crate::scene::convert::solid3d_tess::kernel_acis_body(acis)
-                                        .and_then(|body| kernel::brep::mass_properties(&body));
+                                        .and_then(|body| ocs_brep::mass_properties(&body));
                                 let Some(p) = properties else {
                                     self.command_line.push_error(
                                         crate::tf!(

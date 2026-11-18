@@ -1,6 +1,6 @@
 use document::{EntityType, Handle};
 use glam::DVec3;
-use kernel::space::Plane;
+use ocs_geom::space::Plane;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, SelectionEntity, WorkingPlane};
 use crate::scene::model::wire_model::WireModel;
@@ -38,7 +38,7 @@ pub struct SliceCommand {
     preview_center: DVec3,
     preview_radius: f64,
     picked: Option<EntityType>,
-    surface_tool: Option<kernel::brep::Body>,
+    surface_tool: Option<ocs_brep::Body>,
     notice: Option<&'static str>,
 }
 
@@ -457,14 +457,14 @@ impl CadCommand for SliceCommand {
     }
 }
 
-fn planar_body_plane(body: &kernel::brep::Body) -> Option<Plane> {
+fn planar_body_plane(body: &ocs_brep::Body) -> Option<Plane> {
     let mut faces = body.face_keys();
-    let first = kernel::brep::planar_face_profile(body, faces.next()?)?.plane;
+    let first = ocs_brep::planar_face_profile(body, faces.next()?)?.plane;
     let normal = DVec3::from_array(first.normal()?);
-    let tolerance = kernel::brep::operation_tolerance(&[body]);
+    let tolerance = ocs_brep::operation_tolerance(&[body]);
     faces
         .all(|face| {
-            let Some(profile) = kernel::brep::planar_face_profile(body, face) else {
+            let Some(profile) = ocs_brep::planar_face_profile(body, face) else {
                 return false;
             };
             profile.plane.normal().is_some_and(|other| {

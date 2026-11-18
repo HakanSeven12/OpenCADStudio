@@ -4,9 +4,9 @@
 // attached so eprintln! / panics stay visible while developing.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-// The Windows system heap is slow for the millions of small allocations a
-// large drawing makes (wire models, index entries), above all when freeing.
-#[cfg(target_os = "windows")]
+// The system heap is slow for the millions of small allocations a large
+// drawing makes (wire models, index entries), above all when freeing.
+#[cfg(not(target_arch = "wasm32"))]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

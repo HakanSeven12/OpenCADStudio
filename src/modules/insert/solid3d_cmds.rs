@@ -188,15 +188,15 @@ impl ExtrudeCommand {
 }
 
 fn preview_body_wires(
-    body: &kernel::brep::Body,
+    body: &ocs_brep::Body,
     color: [f32; 4],
     isolines: usize,
 ) -> Vec<WireModel> {
     // This overlay only consumes curves. Do not triangulate the body's faces
     // on every cursor event just to discard the resulting surface mesh.
-    let wireframe = kernel::brep::mesh::tessellate_wireframe(
+    let wireframe = ocs_brep::mesh::tessellate_wireframe(
         body,
-        kernel::brep::mesh::TessellationTolerance::new(kernel::tessellation::DEFAULT_ANGLE, 1e-9)
+        ocs_brep::mesh::TessellationTolerance::new(ocs_geom::tessellation::DEFAULT_ANGLE, 1e-9)
             .with_solid_isolines(isolines),
     );
     let mut wires = wireframe
@@ -1008,7 +1008,7 @@ impl CadCommand for PresspullCommand {
                     .map(|(plane, loops, _)| (plane, loops))
             }
             PresspullTargetKind::Face { body, face, .. } => {
-                kernel::brep::planar_face_profile(&body, face)
+                ocs_brep::planar_face_profile(&body, face)
                     .map(|profile| (profile.plane, profile.loops))
             }
         };
@@ -1018,7 +1018,7 @@ impl CadCommand for PresspullCommand {
                 .flatten()
                 .filter_map(|curve| {
                     let points = curve
-                        .tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
+                        .tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE)
                         .into_iter()
                         .map(|point| plane.point_at(point))
                         .collect::<Vec<_>>();

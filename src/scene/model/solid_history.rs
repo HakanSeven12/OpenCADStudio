@@ -6,7 +6,7 @@ use document::objects::{
     SolidHistoryRevolve, SolidHistorySphere, SolidHistorySweep, SolidHistoryTorus,
 };
 use document::EntityType;
-use kernel::brep::{Body, Surface};
+use ocs_brep::{Body, Surface};
 
 use crate::entities::traits::EntityTypeOps;
 use crate::entities::transform::EntityTransform;
@@ -152,7 +152,7 @@ pub fn select_operand_at(
     let operands = placed_operands(document, handle);
     let size = operands
         .iter()
-        .filter_map(|(_, body)| kernel::brep::body_bounds(body))
+        .filter_map(|(_, body)| ocs_brep::body_bounds(body))
         .map(|bounds| {
             (0..3)
                 .map(|axis| bounds.max[axis] - bounds.min[axis])
@@ -161,8 +161,8 @@ pub fn select_operand_at(
         .fold(0.0_f64, f64::max);
     for reach in [1e-6, 1e-4, 1e-3, 1e-2] {
         let found = operands.iter().find(|(_, body)| {
-            kernel::brep::contains_point(body, point.to_array(), reach * size)
-                == kernel::brep::Containment::OnBoundary
+            ocs_brep::contains_point(body, point.to_array(), reach * size)
+                == ocs_brep::Containment::OnBoundary
         });
         if let Some((id, _)) = found {
             EDIT_OPERANDS.with(|operands| operands.borrow_mut().insert(handle, *id));
@@ -177,7 +177,7 @@ pub fn select_operand_at(
 fn placed_operands(
     document: &document::Document,
     handle: document::Handle,
-) -> Vec<(i32, kernel::brep::Body)> {
+) -> Vec<(i32, ocs_brep::Body)> {
     let Some(tree) = document
         .solid_history_tree(handle)
         .filter(|tree| tree.has_boolean())
@@ -212,10 +212,10 @@ pub fn composite_history_edges(
     placed_operands(document, handle)
         .iter()
         .flat_map(|(_, body)| {
-            kernel::brep::mesh::tessellate_wireframe(
+            ocs_brep::mesh::tessellate_wireframe(
                 body,
-                kernel::brep::mesh::TessellationTolerance::new(
-                    kernel::tessellation::DEFAULT_ANGLE,
+                ocs_brep::mesh::TessellationTolerance::new(
+                    ocs_geom::tessellation::DEFAULT_ANGLE,
                     1e-9,
                 ),
             )
@@ -1178,7 +1178,7 @@ fn sweep_path_length(value: &SolidHistorySweep) -> Option<f64> {
     {
         return None;
     }
-    let placement = kernel::brep::Placement {
+    let placement = ocs_brep::Placement {
         x_axis: [transform[0], transform[1], transform[2]],
         y_axis: [transform[4], transform[5], transform[6]],
         z_axis: [transform[8], transform[9], transform[10]],
@@ -3170,7 +3170,7 @@ fn apply_extrusion_profile_grip(
 
 fn sweep_placement_matrices(value: &SolidHistorySweep) -> Option<(glam::DMat4, glam::DMat4)> {
     let (profile, path) = ocs_acis::sweep_history_placements(value).ok()?;
-    let matrix = |place: kernel::brep::Placement| {
+    let matrix = |place: ocs_brep::Placement| {
         glam::DMat4::from_cols(
             glam::DVec3::from_array(place.x_axis).extend(0.0),
             glam::DVec3::from_array(place.y_axis).extend(0.0),

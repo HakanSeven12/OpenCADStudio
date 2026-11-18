@@ -1,6 +1,6 @@
 use document::entities::Spline;
-use kernel::geom2d::Curve as KernelCurve;
-use kernel::space::{NurbsCurve3, Parameterization};
+use ocs_geom::geom2d::Curve as KernelCurve;
+use ocs_geom::space::{NurbsCurve3, Parameterization};
 
 use crate::entities::common::{
     dropdown_grip, edit_prop as edit, edit_scalar_prop as edit_scalar, parse_f64, ro_prop as ro,
@@ -298,9 +298,9 @@ pub(crate) fn replace_with_nurbs(spline: &mut Spline, curve: &NurbsCurve3) {
 /// constraints, not control-hull vertices, so their box can exclude the curve.
 /// The shared kernel reconstructs the same spatial interpolation used by the
 /// curve consumers, then its control hull bounds every point of that curve.
-pub(crate) fn fit_geometry_bounds(spline: &Spline) -> Option<kernel::brep::Aabb> {
+pub(crate) fn fit_geometry_bounds(spline: &Spline) -> Option<ocs_brep::Aabb> {
     let curve = fit_nurbs3(spline)?;
-    kernel::brep::Aabb::around(curve.control_points().iter().copied())
+    ocs_brep::Aabb::around(curve.control_points().iter().copied())
 }
 fn to_render(spl: &Spline) -> RenderEntity {
     let n = spl.control_points.len();
@@ -324,7 +324,7 @@ fn to_render(spl: &Spline) -> RenderEntity {
                 // here remains the only description of its shape.
                 None if spl.flags.periodic => periodic_fit_spline_polyline(spl),
                 None if spl.fit_tolerance > 0.0 => fit_nurbs3(spl)
-                    .map(|curve| curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE))
+                    .map(|curve| curve.tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE))
                     .unwrap_or_else(|| fit_spline_polyline(spl)),
                 None if spl.flags.closed => catmull_rom_polyline(&spl.fit_points, true),
                 None => fit_spline_polyline(spl),
@@ -464,7 +464,7 @@ pub(crate) fn measurement_polyline(spl: &Spline) -> Vec<[f64; 3]> {
 
     if let Some((points, knots, weights)) = unwrapped_periodic(spl) {
         if let Some(curve) = NurbsCurve3::new_strict(spl.degree as usize, points, knots, weights) {
-            return curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE);
+            return curve.tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE);
         }
     }
 
@@ -490,7 +490,7 @@ pub(crate) fn measurement_polyline(spl: &Spline) -> Vec<[f64; 3]> {
             .collect()
     });
     match NurbsCurve3::new(degree, controls, spl.knots.clone(), weights) {
-        Some(curve) => curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE),
+        Some(curve) => curve.tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE),
         None => spl.control_points.iter().map(|p| [p.x, p.y, p.z]).collect(),
     }
 }
@@ -558,10 +558,10 @@ fn catmull_rom_polyline(pts: &[document::types::Vector3], closed: bool) -> Vec<[
             }
             q
         };
-        let sampled = kernel::tessellation::sample_curve3_angle(
+        let sampled = ocs_geom::tessellation::sample_curve3_angle(
             point_at,
             tangent_at,
-            kernel::tessellation::DEFAULT_ANGLE,
+            ocs_geom::tessellation::DEFAULT_ANGLE,
         );
         out.extend(sampled.into_iter().skip(usize::from(seg > 0)));
     }
@@ -616,10 +616,10 @@ fn fit_spline_polyline(spl: &Spline) -> Vec<[f64; 3]> {
             }
             q
         };
-        let sampled = kernel::tessellation::sample_curve3_angle(
+        let sampled = ocs_geom::tessellation::sample_curve3_angle(
             point_at,
             tangent_at,
-            kernel::tessellation::DEFAULT_ANGLE,
+            ocs_geom::tessellation::DEFAULT_ANGLE,
         );
         out.extend(sampled.into_iter().skip(usize::from(i > 0)));
     }
@@ -638,7 +638,7 @@ fn periodic_fit_spline_polyline(spl: &Spline) -> Vec<[f64; 3]> {
         _ => Parameterization::Chord,
     };
     NurbsCurve3::interpolate_periodic(&points, parameterization)
-        .map(|curve| curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE))
+        .map(|curve| curve.tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE))
         .unwrap_or_else(|| catmull_rom_polyline(&spl.fit_points, true))
 }
 
@@ -1596,7 +1596,7 @@ mod tests {
             document::types::Vector3::new(4.0, 3.0, 0.0),
             document::types::Vector3::new(5.0, 0.0, 0.0),
         ];
-        spline.knots = kernel::space::clamped_uniform_knots(3, 4);
+        spline.knots = ocs_geom::space::clamped_uniform_knots(3, 4);
         let before = nurbs3(&spline).unwrap().point_at(0.37);
 
         assert!(prepare_fit_point_view(&mut spline));
@@ -1606,7 +1606,7 @@ mod tests {
         assert!(!uses_fit_method(&spline));
         let after = nurbs3(&spline).unwrap().point_at(0.37);
         assert!(
-            kernel::space::Vec3::from(before).distance(kernel::space::Vec3::from(after)) < 1.0e-12
+            ocs_geom::space::Vec3::from(before).distance(ocs_geom::space::Vec3::from(after)) < 1.0e-12
         );
     }
 }

@@ -10,7 +10,7 @@
 
 use document::entities::acis::SatDocument;
 use ocs_acis::lift;
-use kernel::brep;
+use ocs_brep as brep;
 
 use crate::scene::convert::solid3d_tess::{body_transform, finalize_mesh};
 use crate::scene::model::mesh_model::{CurvedGen, MeshLodSet};
@@ -47,8 +47,8 @@ pub fn tessellate_sat(
         1.0
     };
     let max_angle = chordal_deflection.map_or_else(
-        || kernel::tessellation::angle_for_resolution(resolution),
-        |_| kernel::tessellation::display_angle_for_resolution(resolution),
+        || ocs_geom::tessellation::angle_for_resolution(resolution),
+        |_| ocs_geom::tessellation::display_angle_for_resolution(resolution),
     );
 
     // Positions stay f64 until `finalize_mesh` splits them into the coarse

@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 #![recursion_limit = "512"]
 
-// Match the Windows application allocator in opt-in release audit tests.
-#[cfg(all(test, feature = "performance-audit", target_os = "windows"))]
+// Match the application allocator in opt-in release audit tests.
+#[cfg(all(test, feature = "performance-audit", not(target_arch = "wasm32")))]
 #[global_allocator]
 static AUDIT_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

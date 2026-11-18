@@ -278,7 +278,7 @@ fn annotative_dimension_text_follows_the_scale_once() {
 
 #[test]
 fn region_radial_dimensions_exact_radius_and_diameter_preview_matches_commit() {
-    use kernel::geom2d::{Circle as KernelCircle, Curve};
+    use ocs_geom::geom2d::{Circle as KernelCircle, Curve};
     let (mut app, i) = app();
     let region = crate::scene::model::presspull_model::region_from_loops(
         &[
@@ -323,7 +323,7 @@ fn region_radial_dimensions_exact_radius_and_diameter_preview_matches_commit() {
 
 #[test]
 fn region_arc_length_preview_and_commit_for_circular_arc_edges() {
-    use kernel::geom2d::{Arc as KernelArc, Circle as KernelCircle, Curve, Line as KernelLine};
+    use ocs_geom::geom2d::{Arc as KernelArc, Circle as KernelCircle, Curve, Line as KernelLine};
     let (mut app, i) = app();
     let arc_loop = vec![
         Curve::Arc(KernelArc {
@@ -385,7 +385,7 @@ fn region_arc_length_preview_and_commit_for_circular_arc_edges() {
 
 #[test]
 fn region_dimension_association_refreshes_after_same_topology_change() {
-    use kernel::geom2d::{Arc as KernelArc, Circle as KernelCircle, Curve, Line as KernelLine};
+    use ocs_geom::geom2d::{Arc as KernelArc, Circle as KernelCircle, Curve, Line as KernelLine};
     let (mut app, i) = app();
     app.tabs[i].scene.document.header.dimension_associativity = 2;
     let initial_region = crate::scene::model::presspull_model::region_from_loops(
@@ -477,7 +477,7 @@ fn region_dimension_association_refreshes_after_same_topology_change() {
 
 #[test]
 fn region_dimension_rejection_for_straight_and_noncircular_edges() {
-    use kernel::geom2d::{Arc as KernelArc, Curve, Line as KernelLine};
+    use ocs_geom::geom2d::{Arc as KernelArc, Curve, Line as KernelLine};
     let (mut app, i) = app();
     let loop_pieces = vec![
         Curve::Arc(KernelArc {
@@ -535,7 +535,7 @@ fn region_dimension_rejection_for_straight_and_noncircular_edges() {
 
 #[test]
 fn region_inclined_plane_radial_dimension_reports_world_radius() {
-    use kernel::geom2d::{Circle as KernelCircle, Curve};
+    use ocs_geom::geom2d::{Circle as KernelCircle, Curve};
     let (mut app, i) = app();
     let inclined_plane = crate::command::WorkingPlane::new(
         DVec3::new(100.0, 100.0, 0.0),
@@ -597,7 +597,7 @@ fn baseline_circle_and_arc_dimensions_preserved() {
 
 #[test]
 fn region_dimension_rejection_for_noncircular_and_near_circle_nurbs_edges() {
-    use kernel::geom2d::{Curve, Line as KernelLine, NurbsCurve};
+    use ocs_geom::geom2d::{Curve, Line as KernelLine, NurbsCurve};
     let (mut app, i) = app();
     // Near-circular rational quadratic NURBS:
     // P0 = [10.0, 0.0], P1 = [10.0, 9.9995], P2 = [0.0, 9.9995], w = [1.0, 1/sqrt(2), 1.0].
@@ -660,7 +660,7 @@ fn region_dimension_rejection_for_noncircular_and_near_circle_nurbs_edges() {
 
 #[test]
 fn region_radial_dimensions_large_translated_coordinates_certified() {
-    use kernel::geom2d::{Circle as KernelCircle, Curve};
+    use ocs_geom::geom2d::{Circle as KernelCircle, Curve};
     let (mut app, i) = app();
     let large_plane = crate::command::WorkingPlane::new(
         DVec3::new(1_000_000.0, 1_000_000.0, 0.0),

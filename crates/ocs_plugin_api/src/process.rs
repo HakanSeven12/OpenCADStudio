@@ -357,7 +357,7 @@ fn base_max_floor(base: Duration, kind: &'static str) -> Duration {
         "InteractiveEvent" | "GetPrompt" | "NeedsEntityPick" | "CustomGripBegin"
         | "CustomGripCancel" => Duration::from_secs(2),
         "CursorMove" | "CustomGripMove" => Duration::from_millis(500),
-        "ExecuteCode" => execute_code_timeout(),
+        "ExecuteCode" | "CallTool" => execute_code_timeout(),
         _ => Duration::from_secs(1),
     };
     let effective = base.max(floor);
@@ -392,7 +392,8 @@ fn ui_blocking_cap(kind: &'static str) -> Option<Duration> {
         | "CustomGripCancel"
         | "GetModalDialog"
         | "DialogAction"
-        | "UndoStep" => Some(Duration::from_secs(10)),
+        | "UndoStep"
+        | "ListTools" => Some(Duration::from_secs(10)),
         _ => None,
     }
 }
@@ -420,6 +421,8 @@ pub(crate) fn request_kind(req: &HostRequest) -> &'static str {
         HostRequest::GetModalDialog { .. } => "GetModalDialog",
         HostRequest::DialogAction { .. } => "DialogAction",
         HostRequest::UndoStep { .. } => "UndoStep",
+        HostRequest::ListTools => "ListTools",
+        HostRequest::CallTool { .. } => "CallTool",
         HostRequest::Shutdown => "Shutdown",
     }
 }
@@ -1198,6 +1201,41 @@ impl PluginProcess {
                     other => Err(Box::new(other)),
                 },
             )
+        }
+    }
+
+    /// The plugin's AI tools (API v25); empty for a plugin whose manifest
+    /// declares an older API or that speaks only the legacy protocol.
+    pub fn tools(&self) -> Result<Vec<crate::host::PluginTool>, PluginError> {
+        let Some(v4) = self.v4.as_ref().filter(|_| self.manifest.api_version >= 25) else {
+            return Ok(Vec::new());
+        };
+        match v4.call(&mut NullHost::default(), HostRequest::ListTools, &mut |_| {})? {
+            HostResponse::Tools(tools) => Ok(tools),
+            other => Err(PluginError::UnexpectedResponse(Box::new(other))),
+        }
+    }
+
+    /// Run one AI tool (API v25) against `host`'s tab and wait for its
+    /// answer, serving the plugin's HostApi requests meanwhile. The inner
+    /// `Err` is the plugin's own refusal; the outer one a transport failure.
+    pub fn call_tool(
+        &self,
+        host: &mut dyn HostApi,
+        name: &str,
+        arguments: &str,
+    ) -> Result<Result<String, String>, PluginError> {
+        let Some(v4) = self.v4.as_ref().filter(|_| self.manifest.api_version >= 25) else {
+            return Ok(Err("the plugin predates AI tools (API v25)".to_string()));
+        };
+        let req = HostRequest::CallTool {
+            tab_index: host.tab_index(),
+            name: name.to_string(),
+            arguments: arguments.to_string(),
+        };
+        match v4.call(host, req, &mut |_| {})? {
+            HostResponse::ToolResult(result) => Ok(result),
+            other => Err(PluginError::UnexpectedResponse(Box::new(other))),
         }
     }
 

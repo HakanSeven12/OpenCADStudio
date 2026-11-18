@@ -37,6 +37,7 @@ pub(crate) fn kind_label(index: usize) -> String {
         pk::MLINE_STYLES => crate::tr!("purge-dialog", "mline-styles"),
         pk::GROUPS => crate::tr!("purge-dialog", "groups"),
         pk::MATERIALS => crate::tr!("purge-dialog", "materials"),
+        pk::REGAPPS => crate::tr!("purge-dialog", "regapps"),
         pk::ZERO_LENGTH => crate::tr!("purge-dialog", "zero-length"),
         pk::EMPTY_TEXT => crate::tr!("purge-dialog", "empty-text"),
         _ => crate::tr!("purge-dialog", "blocks"),
@@ -55,6 +56,7 @@ pub(crate) const ORDER: [usize; KINDS] = [
     pk::MLINE_STYLES,
     pk::GROUPS,
     pk::MATERIALS,
+    pk::REGAPPS,
     pk::ZERO_LENGTH,
     pk::EMPTY_TEXT,
 ];

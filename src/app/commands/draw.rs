@@ -2901,7 +2901,7 @@ impl OpenCADStudio {
                         else {
                             continue;
                         };
-                        let Some(body) = kernel::brep::planar_region(plane, &loops) else {
+                        let Some(body) = ocs_brep::planar_region(plane, &loops) else {
                             continue;
                         };
                         let mut region = Region::new();
@@ -2920,7 +2920,7 @@ impl OpenCADStudio {
                     .filter(|(handle, _)| !sources.contains(handle))
                     .filter_map(|(_, entity)| crate::entities::curve::entity_curve(entity))
                     .collect();
-                let open_plane = kernel::space::common_curve_plane(&open_curves, 1.0e-6);
+                let open_plane = ocs_geom::space::common_curve_plane(&open_curves, 1.0e-6);
                 let open_plane_rejected = !open_curves.is_empty() && open_plane.is_none();
                 if let Some(plane) = open_plane {
                     let working_plane = crate::command::WorkingPlane::new(
@@ -2958,7 +2958,7 @@ impl OpenCADStudio {
                         else {
                             continue;
                         };
-                        let Some(body) = kernel::brep::planar_region(plane, &[curves]) else {
+                        let Some(body) = ocs_brep::planar_region(plane, &[curves]) else {
                             continue;
                         };
                         let mut region = Region::new();
@@ -3311,7 +3311,7 @@ impl OpenCADStudio {
                             1 => ([0.0, v, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]),
                             _ => ([0.0, 0.0, v], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
                         };
-                        let plane = kernel::space::Plane::orthonormal(origin, x, normal)
+                        let plane = ocs_geom::space::Plane::orthonormal(origin, x, normal)
                             .expect("fixed world axes define a plane");
                         let side = glam::DVec3::from_array(origin)
                             + glam::DVec3::from_array(normal) * if keep_low { -1.0 } else { 1.0 };

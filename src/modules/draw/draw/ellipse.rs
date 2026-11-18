@@ -155,7 +155,7 @@ fn ellipse_polyline(
         points.push([point.x, point.y]);
         tangents.push(Some([tangent.x, tangent.y]));
     }
-    let fitted = kernel::geom2d::fit_arc_chain(&points, closed, &tangents)?;
+    let fitted = ocs_geom::geom2d::fit_arc_chain(&points, closed, &tangents)?;
     let mut polyline = LwPolyline::new();
     polyline.is_closed = closed;
     polyline.elevation = plane.to_local(center).z;

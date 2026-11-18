@@ -33,7 +33,7 @@
 //! after SCN-025 (the wire attach):
 //! - the events the bridge drains: the COLLECTING sink ([`CollectingSink`])
 //!   was the pipeline seam the future publisher hangs off — that publisher
-//!   LANDED with SCN-025 (the drained batches forward through the v25
+//!   LANDED with SCN-025 (the drained batches forward through the v26
 //!   notify router from the arms via `app::update::widget_mount`'s one
 //!   forwarding helper; the sink itself keeps exactly its collecting
 //!   contract);
@@ -294,7 +294,7 @@ use iced::widget::tooltip::Position as TooltipPosition;
 use iced::widget::{Tooltip, button, canvas, column, container, mouse_area, row, text};
 use iced::{Element, Fill, Length, Point, Theme};
 use iced_aw::menu::{Item, Menu, MenuBar};
-// The v25 panel-surface store's vocabulary (SCN-025). Wire-adjacent STRUCT
+// The v26 panel-surface store's vocabulary (SCN-025). Wire-adjacent STRUCT
 // types only (codes, reports, bounded envelopes); no frames built here — the
 // PluginResponse mapping happens in `app::plugin_host`. The `ipc` module is
 // host-feature-only: desktop-only machinery, which the plugin-host attach is.
@@ -2119,7 +2119,7 @@ pub struct MountRegistry {
     /// §16 "closing a tab/plugin cancels pending requests and releases
     /// state" rule, tables edition). Host-local only, never serialized.
     tables: HashMap<StableId, SurfaceTableState>,
-    /// (SCN-025) The app-owned PANEL SURFACE STORE — the v25
+    /// (SCN-025) The app-owned PANEL SURFACE STORE — the v26
     /// publish-or-patch contract's host-side truth (keyed by panel id,
     /// recording the owning plugin's transport id), the store the wire
     /// attach publishes into, patches over, and pages. Extension of THIS
@@ -2424,7 +2424,7 @@ impl MountRegistry {
 
     /// Drain the surface's settle-bound events and forward them the way
     /// every drained-events batch forwards: the §16 forward probe
-    /// ([`Self::record_panel_events_forwarded_owned`]) plus the v25 notify
+    /// ([`Self::record_panel_events_forwarded_owned`]) plus the v26 notify
     /// router (`broadcast_panel_scene_events`, bounded batches — the settle
     /// is exactly one row). This is the RELEASE route's tail: the body
     /// wrapper's `PointerReleased` (and the window-level release-anywhere
@@ -2954,7 +2954,7 @@ impl SceneRegionProgram {
     /// parked in the slot for the release route's forward drain (the body
     /// wrapper's `PointerReleased` lands in
     /// [`MountRegistry::mount_pointer_released_owned`], which forwards it
-    /// through the v25 notify router — the drained-events shape). An ARMED
+    /// through the v26 notify router — the drained-events shape). An ARMED
     /// release is a click, not a drag: `cancel(ThresholdNotMet)`, no event.
     /// A release observed outside the region is the point-out completion
     /// (the move that left already cancelled; this is the lossless
@@ -3102,7 +3102,7 @@ pub(crate) fn app_message(msg: WidgetMountMsg) -> crate::app::Message {
 /// [`WidgetEvent`]s gather in a shared `Vec` and the bridge drains them
 /// (`take`). The wire era HAS landed (the API-24 scene/widget crossing,
 /// live since SCN-025): the drain call IS the forwarding call now —
-/// drained batches forward through the v25 notify router
+/// drained batches forward through the v26 notify router
 /// (`broadcast_panel_scene_events`, the exact seam this buffer's shape
 /// was designed for; no type change was needed) — and the
 /// tests pin the contract "the sink receives exactly the forwarded events,
@@ -3205,13 +3205,13 @@ pub struct MountCounters {
     pub keyboard_nav_steps: u64,
     //
     // -- SCN-025 wire-attach probes ---------------------------------------
-    /// Widget events FORWARDed through the v25 notify router
+    /// Widget events FORWARDed through the v26 notify router
     /// (`broadcast_panel_scene_events`) from the bridge arms' sink drains —
     /// one tick per forwarded EVENT row. Exactly-once discipline: the drain
     /// (`CollectingSink::take`) empties the buffer, so a re-drain can never
     /// re-forward; this probe is the count a double-forward defect breaks.
     pub mount_event_forwards: u64,
-    /// Store DEMANDS forwarded through the v25 demand router
+    /// Store DEMANDS forwarded through the v26 demand router
     /// (`broadcast_panel_store_demand`) from the store reads' page misses —
     /// one tick per demand raised (a read-driven fact; a re-read legitimately
     /// re-demands, but never as a replay of a queued ledger).
@@ -5523,10 +5523,10 @@ impl Drop for RegisteredGuard {
 }
 
 // ---------------------------------------------------------------------------
-// SCN-025 — the app-owned PANEL SURFACE STORE (the v25 wire attach)
+// SCN-025 — the app-owned PANEL SURFACE STORE (the v26 wire attach)
 // ---------------------------------------------------------------------------
 //
-// The living truth the v25 wire attach publishes into, patches over, and
+// The living truth the v26 wire attach publishes into, patches over, and
 // pages: one entry per attached panel, keyed by the panel id the plugin's
 // `RegisterPanel` registration used, recording the transport-authenticated
 // OWNING plugin id and the two surface legs (a publish frame carries exactly

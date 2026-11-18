@@ -215,7 +215,7 @@ pub fn join_to_source(
             let next = match (&result, *candidate) {
                 (EntityType::Line(a), EntityType::Line(b)) => {
                     let point = |p: &Vector3| [p.x, p.y, p.z];
-                    kernel::space::source_join::join_collinear_lines(
+                    ocs_geom::space::source_join::join_collinear_lines(
                         [point(&a.start), point(&a.end)],
                         [point(&b.start), point(&b.end)],
                         JOIN_EPS,
@@ -236,7 +236,7 @@ pub fn join_to_source(
                             [a.start_angle, a.end_angle],
                         )
                     };
-                    kernel::space::source_join::join_cocircular_arcs(data(a), data(b), JOIN_EPS)
+                    ocs_geom::space::source_join::join_cocircular_arcs(data(a), data(b), JOIN_EPS)
                         .map(|span| {
                             if span[1] - span[0] >= std::f64::consts::TAU {
                                 let mut circle = document::entities::Circle::new();
@@ -260,7 +260,7 @@ pub fn join_to_source(
                             return None;
                         }
                         if s.control_points.is_empty() && s.fit_points.len() >= 2 {
-                            use kernel::space::{NurbsCurve3, Parameterization};
+                            use ocs_geom::space::{NurbsCurve3, Parameterization};
                             let points: Vec<_> = s
                                 .fit_points
                                 .iter()
@@ -288,7 +288,7 @@ pub fn join_to_source(
                         } else {
                             s.weights.clone()
                         };
-                        kernel::space::NurbsCurve3::new_strict(
+                        ocs_geom::space::NurbsCurve3::new_strict(
                             s.degree as usize,
                             s.control_points.iter().map(|p| [p.x, p.y, p.z]).collect(),
                             s.knots.clone(),
@@ -298,7 +298,7 @@ pub fn join_to_source(
                     curve(source).and_then(|a| {
                         let b = match candidate {
                             EntityType::Spline(s) => curve(s),
-                            EntityType::Line(line) => kernel::space::source_join::line_as_nurbs(
+                            EntityType::Line(line) => ocs_geom::space::source_join::line_as_nurbs(
                                 [
                                     [line.start.x, line.start.y, line.start.z],
                                     [line.end.x, line.end.y, line.end.z],
@@ -308,7 +308,7 @@ pub fn join_to_source(
                             _ => None,
                         }?;
                         let joined =
-                            kernel::space::source_join::join_nurbs_curves(&a, &b, JOIN_EPS)?;
+                            ocs_geom::space::source_join::join_nurbs_curves(&a, &b, JOIN_EPS)?;
                         let mut spline = source.clone();
                         spline.degree = joined.degree() as i32;
                         spline.control_points = joined
@@ -323,7 +323,7 @@ pub fn join_to_source(
                         spline.dwg_flags1 &= !1;
                         spline.dxf_flags &= !(32 | 1024);
                         spline.flags.planar =
-                            kernel::space::are_coplanar(joined.control_points(), &[]);
+                            ocs_geom::space::are_coplanar(joined.control_points(), &[]);
                         spline.begin_tangent = Vector3::new(0.0, 0.0, 0.0);
                         spline.end_tangent = Vector3::new(0.0, 0.0, 0.0);
                         Some(EntityType::Spline(spline))
@@ -462,7 +462,7 @@ fn segs_of(e: &EntityType) -> Option<Vec<Seg>> {
             if normal.x.abs() > 1e-12 || normal.y.abs() > 1e-12 {
                 return None;
             }
-            let kernel::geom2d::Curve::Polyline(curve) =
+            let ocs_geom::geom2d::Curve::Polyline(curve) =
                 crate::entities::curve::entity_curve_xy(&EntityType::Polyline2D(p.clone()))?
             else {
                 return None;
@@ -729,8 +729,8 @@ fn join_chain(
                         point[1],
                         source.elevation,
                     ));
-                    result.bulge = if kernel::space::Vec3::from(input.normal()?)
-                        .dot(kernel::space::Vec3::from(output.normal()?))
+                    result.bulge = if ocs_geom::space::Vec3::from(input.normal()?)
+                        .dot(ocs_geom::space::Vec3::from(output.normal()?))
                         < 0.0
                     {
                         -vertex.bulge

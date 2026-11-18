@@ -128,7 +128,7 @@ pub(super) fn commands() -> [(&'static [u8], String, &'static str, &'static str)
             icons::DOC_NEW,
             crate::t!("New").into_owned(),
             "Ctrl+N",
-            "QNEW",
+            "NEW",
         ),
         (
             icons::FOLDER_OPEN,
@@ -175,7 +175,7 @@ mod tests {
     fn every_application_menu_command_is_known() {
         let known = crate::command::all_registered_command_names();
         for command in [
-            "QNEW",
+            "NEW",
             "OPEN",
             "QSAVE",
             "SAVEAS",

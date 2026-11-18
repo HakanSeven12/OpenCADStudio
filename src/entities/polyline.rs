@@ -10,7 +10,7 @@ use crate::entities::transform::EntityTransform;
 use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection, PropValue, Property};
 use crate::scene::model::wire_model::TangentGeom;
-use kernel::space::{NurbsCurve3, Vec3};
+use ocs_geom::space::{NurbsCurve3, Vec3};
 
 // ── Polyline (old-style 3D heavy polyline) ────────────────────────────────────
 
@@ -384,7 +384,7 @@ fn tessellate_polyline2d(pl: &Polyline2D, fill_mode: bool) -> RenderEntity {
                     &arc, &to_wcs, normal,
                 ));
                 for s in arc
-                    .tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
+                    .tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE)
                     .into_iter()
                     .skip(1)
                 {
@@ -501,7 +501,7 @@ fn tessellate_polyline2d(pl: &Polyline2D, fill_mode: bool) -> RenderEntity {
                 .filter(|_| v0.bulge.abs() >= 1e-9)
                 {
                     Some(arc) => points.extend(
-                        arc.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
+                        arc.tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE)
                             .into_iter()
                             .skip(1)
                             .map(|sample| {
@@ -1162,7 +1162,7 @@ fn polyline3d_spline_samples(
     } else {
         NurbsCurve3::new(degree, controls.to_vec(), Vec::new(), None)?
     };
-    let mut samples = curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE);
+    let mut samples = curve.tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE);
     if closed
         && samples.len() >= 2
         && Vec3::from(samples[0]).distance(Vec3::from(samples[samples.len() - 1])) <= 1.0e-9

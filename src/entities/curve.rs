@@ -34,11 +34,11 @@ use document::entities::{
 };
 use document::types::Vector3;
 use document::EntityType;
-use kernel::geom2d::{
+use ocs_geom::geom2d::{
     characteristic_points, Arc, Circle, Curve, Ellipse, EllipseArc, Line, Polyline, PolylineVertex,
     Ray, SnapKind, Transform, XLine,
 };
-use kernel::space::{are_coplanar, coplanarity_tolerance, PlanarCurve, Plane, Vec3};
+use ocs_geom::space::{are_coplanar, coplanarity_tolerance, PlanarCurve, Plane, Vec3};
 
 use crate::modules::draw::modify::spline_ops::spline_to_nurbs_on;
 use crate::scene::model::wire_model::SnapHint;
@@ -111,8 +111,8 @@ pub fn entity_curve(entity: &EntityType) -> Option<PlanarCurve> {
 
 /// Exact spatial source geometry for commands that traverse nonplanar curves.
 /// Curve construction and arc-length calculations remain in the kernel.
-pub fn entity_spatial_measurement(entity: &EntityType) -> Option<kernel::space::ArcLengthCurve3> {
-    use kernel::space::{ArcLengthCurve3, NurbsCurve3};
+pub fn entity_spatial_measurement(entity: &EntityType) -> Option<ocs_geom::space::ArcLengthCurve3> {
+    use ocs_geom::space::{ArcLengthCurve3, NurbsCurve3};
     let curve = match entity {
         EntityType::Polyline3D(polyline) => {
             if polyline.flags.spline_fit {
@@ -494,7 +494,7 @@ pub fn entity_with_lwpolyline_world_xy_owned(entity: EntityType) -> EntityType {
 
 /// World-space wire points sampled by the kernel's angular policy.
 pub fn curve_points(curve: &PlanarCurve) -> Vec<[f64; 3]> {
-    curve.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
+    curve.tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE)
 }
 
 /// The snap candidates an entity's curve offers, in the two channels the
@@ -919,7 +919,7 @@ mod tests {
     /// where it happens rather than the next time somebody reaches for it.
     #[test]
     fn the_solid_layer_and_the_acis_bridge_are_reachable() {
-        let solid = kernel::brep::make::cuboid([0.0; 3], [1.0; 3])
+        let solid = ocs_brep::make::cuboid([0.0; 3], [1.0; 3])
             .expect("the kernel builds its own primitives");
         assert!(solid.validate().is_empty());
         assert_eq!(solid.euler_characteristic(), 2);
@@ -959,14 +959,14 @@ mod tests {
         ray.base_point = v3(1.0, 1.0, 0.0);
         ray.direction = v3(2.0, 0.0, 0.0);
         let curve = entity_curve(&EntityType::Ray(ray)).unwrap();
-        assert_eq!(curve.extent(), kernel::geom2d::Extent::Forward);
+        assert_eq!(curve.extent(), ocs_geom::geom2d::Extent::Forward);
         assert_eq!(curve.point_at(1.0), [3.0, 1.0, 0.0]);
 
         let mut line = XLineEnt::default();
         line.base_point = v3(0.0, 0.0, 0.0);
         line.direction = v3(0.0, 3.0, 0.0);
         let curve = entity_curve(&EntityType::XLine(line)).unwrap();
-        assert_eq!(curve.extent(), kernel::geom2d::Extent::Infinite);
+        assert_eq!(curve.extent(), ocs_geom::geom2d::Extent::Infinite);
         assert_eq!(curve.point_at(-1.0), [0.0, -3.0, 0.0]);
     }
 }

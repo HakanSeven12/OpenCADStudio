@@ -1,7 +1,7 @@
 use document::entities::{Dimension, DimensionLinear};
 use document::types::Vector3;
 use document::EntityType;
-use kernel::geom2d::{closest_point, Circle as KernelCircle, Curve, Line as KernelLine};
+use ocs_geom::geom2d::{closest_point, Circle as KernelCircle, Curve, Line as KernelLine};
 
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionPreview, InputKind,

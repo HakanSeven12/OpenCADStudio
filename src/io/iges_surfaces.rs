@@ -2,7 +2,7 @@
 //! of revolution (120), tabulated cylinders (122), ruled surfaces (118) and
 //! parametric spline surfaces (114) — and the circular arcs they use.
 
-use kernel::space::{NurbsCurve3, NurbsSurface3, Vec3};
+use ocs_geom::space::{NurbsCurve3, NurbsSurface3, Vec3};
 
 /// A circular arc from `a0` to `a1` (radians, counter-clockwise round
 /// `x × y`) as a rational quadratic spline in segments of at most a quarter

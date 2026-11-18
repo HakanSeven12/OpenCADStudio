@@ -1,9 +1,9 @@
 //! Thickened bodies written as ACIS records read back whole.
 
 use document::entities::acis::types::SatDocument;
-use kernel::brep::{analytic_mass_properties, revolve_surface, thicken, Body};
-use kernel::geom2d::{Curve, Line};
-use kernel::space::{Plane, Vec3};
+use ocs_brep::{analytic_mass_properties, revolve_surface, thicken, Body};
+use ocs_geom::geom2d::{Curve, Line};
+use ocs_geom::space::{Plane, Vec3};
 use std::f64::consts::PI;
 
 fn cylinder_sheet(angle: f64) -> Body {

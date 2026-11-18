@@ -132,7 +132,7 @@ pub(crate) fn refit_grips(arc: &mut Arc, original: &Arc, edits: &[(usize, glam::
     let Some(c) = plane.project(points[2].to_array()) else {
         return false;
     };
-    let Some(fit) = kernel::geom2d::arc_through_points(a, b, c) else {
+    let Some(fit) = ocs_geom::geom2d::arc_through_points(a, b, c) else {
         return false;
     };
 
@@ -385,7 +385,7 @@ impl crate::entities::traits::Grippable for Arc {
         point: glam::DVec3,
     ) -> Option<f64> {
         use crate::scene::model::object::GripMenuAction as A;
-        use kernel::geom2d::{Circle as KernelCircle, Curve as KernelCurve, Vec2};
+        use ocs_geom::geom2d::{Circle as KernelCircle, Curve as KernelCurve, Vec2};
         if self.radius <= 1.0e-9 {
             return None;
         }

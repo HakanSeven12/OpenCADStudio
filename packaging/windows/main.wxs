@@ -183,7 +183,12 @@
       </Directory>
     </Directory>
 
-    <Feature Id='Complete' Title='Open CAD Studio' Level='1' Display='expand'>
+    <Feature
+      Id='Complete'
+      Title='Open CAD Studio'
+      Level='1'
+      Display='expand'
+      ConfigurableDirectory='APPLICATIONROOTDIRECTORY'>
       <ComponentRef Id='MainExecutable' />
       <ComponentRef Id='DefaultPrograms' />
       <ComponentRef Id='ProgramMenuDirComp' />

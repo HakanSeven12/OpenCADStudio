@@ -1228,8 +1228,8 @@ pub struct ParametricConstraintSet {
     /// Cached redundant/conflicting constraints found by the last resolve.
     /// Also a derived cache, not
     /// persisted; a `ConflictResolverPanel` reads this rather than calling
-    /// `kernel_constraints::diagnosis::classify_redundant` itself.
-    pub conflicts: Vec<(ConstraintId, kernel_constraints::diagnosis::RedundancyKind)>,
+    /// `ocs_constraints::diagnosis::classify_redundant` itself.
+    pub conflicts: Vec<(ConstraintId, ocs_constraints::diagnosis::RedundancyKind)>,
     /// Lazy reverse index for [`Self::constraints_referencing`] and
     /// [`Self::constraints_touching`]: entity handle → positions into
     /// `constraints`, one entry per constraint however many of its refs name
@@ -1607,7 +1607,7 @@ pub(crate) fn resolve_point(entity: &document::EntityType, marker: i32) -> Optio
     if let Some(segment) = reference.segment_center_index() {
         let planar = crate::entities::curve::entity_curve(entity)?;
         let curve = planar.curve.segments().into_iter().nth(segment)?;
-        let kernel::geom2d::Curve::Arc(arc) = curve else {
+        let ocs_geom::geom2d::Curve::Arc(arc) = curve else {
             return None;
         };
         let point = planar.plane.point_at(arc.centre);
@@ -1796,7 +1796,7 @@ pub(crate) fn parametric_curve_ref_for_pick(
         | document::EntityType::Spline(_) => Some(ParametricRef::whole(handle)),
         document::EntityType::LwPolyline(_) | document::EntityType::Polyline2D(_) => {
             let segments = crate::entities::curve::entity_curve_xy(entity)?.segments();
-            kernel::geom2d::nearest_of(segments.iter(), [world_point.x, world_point.y])
+            ocs_geom::geom2d::nearest_of(segments.iter(), [world_point.x, world_point.y])
                 .map(|(index, _)| ParametricRef::segment(handle, index))
         }
         _ => None,
@@ -1984,7 +1984,7 @@ fn glyph_placement_for_reference(
         let planar = crate::entities::curve::entity_curve(entity)?;
         let curve = planar.curve.segments().into_iter().nth(segment)?;
         let on_arc = planar.plane.point_at(curve.point_at(0.5));
-        let kernel::geom2d::Curve::Arc(arc) = curve else {
+        let ocs_geom::geom2d::Curve::Arc(arc) = curve else {
             return None;
         };
         let center = planar.plane.point_at(arc.centre);
@@ -2078,10 +2078,10 @@ fn glyph_placements(
                 constraint_reference_curve_xy(document, *second),
                 fallback,
             ) {
-                if let Some(crossing) = kernel::geom2d::intersect(
+                if let Some(crossing) = ocs_geom::geom2d::intersect(
                     &first_curve,
                     &second_curve,
-                    kernel::geom2d::Tolerance::default(),
+                    ocs_geom::geom2d::Tolerance::default(),
                 )
                 .into_iter()
                 .next()
@@ -2127,11 +2127,11 @@ fn constraint_segment_endpoints(
 fn constraint_reference_curve_xy(
     document: &document::Document,
     reference: ParametricRef,
-) -> Option<kernel::geom2d::Curve> {
+) -> Option<ocs_geom::geom2d::Curve> {
     let entity = document.get_entity(reference.entity)?;
     if reference.directional_axis().is_some() {
         let [start, end] = directional_axis_endpoints(entity, reference)?;
-        return Some(kernel::geom2d::Curve::Line(kernel::geom2d::Line {
+        return Some(ocs_geom::geom2d::Curve::Line(ocs_geom::geom2d::Line {
             start: [start.x, start.y],
             end: [end.x, end.y],
         }));
@@ -2184,10 +2184,10 @@ pub(crate) fn constraint_hover_points(
                 let elevation = glyph_placement(document, constraint)
                     .map(|(anchor, _)| anchor.z)
                     .unwrap_or(0.0);
-                for crossing in kernel::geom2d::intersect(
+                for crossing in ocs_geom::geom2d::intersect(
                     &first_curve,
                     &second_curve,
-                    kernel::geom2d::Tolerance::default(),
+                    ocs_geom::geom2d::Tolerance::default(),
                 ) {
                     push_unique(
                         &mut points,
@@ -3060,7 +3060,7 @@ impl super::Scene {
         handles: &[Handle],
         settings: &crate::app::settings::AutoConstrainSettings,
     ) -> Vec<(ConstraintKind, Vec<ParametricRef>)> {
-        use kernel::geom2d::{
+        use ocs_geom::geom2d::{
             infer_constraints_with_settings, Arc, Circle, ConstraintEndpoint, InferenceKind,
             InferenceSettings, InferredConstraint, Line, ParametricPrimitive,
         };
@@ -4837,7 +4837,7 @@ mod tests {
 
         assert!(matches!(
             constraint_reference_curve_xy(&document, ParametricRef::segment(h(1), 0)),
-            Some(kernel::geom2d::Curve::Arc(_))
+            Some(ocs_geom::geom2d::Curve::Arc(_))
         ));
     }
 

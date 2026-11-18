@@ -26,7 +26,7 @@ use document::{EntityType, Handle};
 // from the kernel; only the entity conversion stays here.
 use crate::t;
 use glam::{DVec3, Vec3};
-use kernel::geom2d::{
+use ocs_geom::geom2d::{
     offset_polyline_with_gap, Polyline as KernelPolyline, PolylineVertex as KernelVertex,
 };
 
@@ -186,9 +186,9 @@ fn offset_lwpolylines(p: &LwPolyline, dist: f64, side_pt: Vec3) -> Vec<EntityTyp
     };
 
     let gap = match gap_type() {
-        1 => kernel::geom2d::OffsetGap::Fillet,
-        2 => kernel::geom2d::OffsetGap::Chamfer,
-        _ => kernel::geom2d::OffsetGap::Extend,
+        1 => ocs_geom::geom2d::OffsetGap::Fillet,
+        2 => ocs_geom::geom2d::OffsetGap::Chamfer,
+        _ => ocs_geom::geom2d::OffsetGap::Extend,
     };
     offset_polyline_with_gap(&source, dist, [side_pt.x as f64, side_pt.y as f64], gap)
         .into_iter()
@@ -264,8 +264,8 @@ fn offset_curved(
     let left = along[0] * toward[1] - along[1] * toward[0] > 0.0;
     let signed = if left { dist.abs() } else { -dist.abs() };
     let tolerance = (curve.length() * 1e-6).max(1e-9);
-    let kernel::geom2d::Curve::Nurbs(parallel) =
-        kernel::geom2d::offset_curve(curve, signed, tolerance)?
+    let ocs_geom::geom2d::Curve::Nurbs(parallel) =
+        ocs_geom::geom2d::offset_curve(curve, signed, tolerance)?
     else {
         return None;
     };
@@ -384,7 +384,7 @@ fn far_side(entity: &EntityType, pt: Vec3, dist: f64) -> Option<Vec3> {
 // ── Wire preview points ─────────────────────────────────────────────────────
 
 /// Preview density, matching the figure the drawn wires use.
-const PREVIEW_SEGMENTS_PER_RADIAN: f64 = kernel::geom2d::DEFAULT_SEGMENTS_PER_RADIAN;
+const PREVIEW_SEGMENTS_PER_RADIAN: f64 = ocs_geom::geom2d::DEFAULT_SEGMENTS_PER_RADIAN;
 
 /// Preview points for an entity, from its own curve.
 ///

@@ -351,16 +351,18 @@ fn notification_api_version(notification: &crate::host::HostNotification) -> u32
     use crate::host::HostNotification as N;
     match notification {
         N::QuadAction { .. } => 15,
-        // V25 scene/widget wire tails (the crossing re-versioned twice at
+        // V26 scene/widget wire tails (the crossing re-versioned thrice at
         // upstream merges: 23→24 at SCN-026 — upstream's v23 = the
-        // `TableOperation::LayoutSetTabOrder` append — and 24→25 at SCN-038,
-        // the V24 label collision: upstream consumed v24 for THEIR
-        // `HostRequest::UndoStep` crossing, so our scene/widget crossing
-        // claims 25 — see `manifest::API_VERSION`): the
+        // `TableOperation::LayoutSetTabOrder` append — 24→25 at SCN-038,
+        // the V24 label collision where upstream consumed v24 for THEIR
+        // `HostRequest::UndoStep` crossing, and 25→26 at SCN-039, the V25
+        // label collision where upstream consumed v25 for THEIR
+        // `ListTools`/`CallTool` AI-tools crossing, so our scene/widget
+        // crossing claims 26 — see `manifest::API_VERSION`): the
         // mount/publisher attach is LIVE (SCN-025), and the runner
         // conversational gate was in place BEFORE the publisher existed (a
-        // pre-25 cdylib has no such variants and must never see the frames).
-        N::PanelSceneEvents { .. } | N::PanelStoreDemand { .. } => 25,
+        // pre-26 cdylib has no such variants and must never see the frames).
+        N::PanelSceneEvents { .. } | N::PanelStoreDemand { .. } => 26,
         N::SelectionChangedDigest { .. } => 22,
         N::DocumentChangedRegions { .. } => 13,
         N::DocumentOpened { .. } => 9,
@@ -618,6 +620,10 @@ fn handle_host_request(
         }
         // The V3 path serves plugins far older than v24.
         HostRequest::UndoStep { .. } => HostResponse::UndoStep(None),
+        HostRequest::ListTools => HostResponse::Tools(Vec::new()),
+        HostRequest::CallTool { .. } => {
+            HostResponse::Error("AI tools require the V4 protocol".to_string())
+        }
         HostRequest::ExecuteCode { .. } => {
             HostResponse::Error("ExecuteCode requires V4 protocol".to_string())
         }
@@ -875,6 +881,36 @@ fn handle_host_request_v4(
             command_id,
             api_version,
         ))),
+        // API v25 gate: an older cdylib's vtable has neither slot.
+        HostRequest::ListTools => {
+            if api_version < 25 {
+                return Some(HostResponse::Tools(Vec::new()));
+            }
+            Some(
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| plugin.tools())) {
+                    Ok(tools) => HostResponse::Tools(tools),
+                    Err(_) => HostResponse::Error("plugin tools() panicked".to_string()),
+                },
+            )
+        }
+        HostRequest::CallTool {
+            tab_index,
+            name,
+            arguments,
+        } => {
+            if api_version < 25 {
+                return Some(HostResponse::ToolResult(Err(
+                    "the plugin predates AI tools (API v25)".to_string(),
+                )));
+            }
+            let mut proxy = client.plugin_host_api(tab_index, interactive.clone());
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                plugin.call_tool(&mut proxy, &name, &arguments)
+            }));
+            Some(HostResponse::ToolResult(result.unwrap_or_else(|_| {
+                Err(format!("plugin tool '{name}' panicked"))
+            })))
+        }
         HostRequest::ExecuteCode {
             command_id,
             source,
@@ -1453,7 +1489,7 @@ mod tests {
     }
 
     #[test]
-    fn notification_gate_rows_hold_the_v25_tails_back_from_pre_v25_plugins() {
+    fn notification_gate_rows_hold_the_v26_tails_back_from_pre_v26_plugins() {
         use crate::host::HostNotification as N;
 
         let events = || N::PanelSceneEvents {
@@ -1467,14 +1503,14 @@ mod tests {
             parent_id: None,
             range: crate::widgets::WidgetRange { start: 0, len: 4 },
         };
-        // The v25 wire tails gate at 25 (SCN-038 re-version: 24 stays
-        // upstream's UndoStep era): a runner serving an
-        // api_version < 25 plugin must DROP both frames (the cdylib has no
-        // such variants — upstream's v24 plugins included).
-        assert_eq!(notification_api_version(&events()), 25);
-        assert_eq!(notification_api_version(&demand()), 25);
-        assert!(notification_api_version(&events()) > 24);
-        assert!(notification_api_version(&demand()) > 24);
+        // The v26 wire tails gate at 26 (SCN-039 re-version: 24 stays
+        // upstream's UndoStep era, 25 their AI-tools era): a runner serving
+        // an api_version < 26 plugin must DROP both frames (the cdylib has
+        // no such variants — upstream's v24 and v25 plugins included).
+        assert_eq!(notification_api_version(&events()), 26);
+        assert_eq!(notification_api_version(&demand()), 26);
+        assert!(notification_api_version(&events()) > 25);
+        assert!(notification_api_version(&demand()) > 25);
 
         // The v22 row is UNTOUCHED by the crossing: the digest still gates
         // at 22 (this is the exact row the v22 selection router relies on).

@@ -99,7 +99,7 @@ impl SplineCommand {
 }
 
 fn control_spline(points: &[[f64; 3]], degree: usize, closed: bool) -> Option<Spline> {
-    let curve = kernel::space::NurbsCurve3::from_control_polygon(degree, points, closed)?;
+    let curve = ocs_geom::space::NurbsCurve3::from_control_polygon(degree, points, closed)?;
     let mut spline = Spline {
         degree: curve.degree() as i32,
         control_points: curve

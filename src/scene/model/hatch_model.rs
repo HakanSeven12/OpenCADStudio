@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use kernel::geom2d::{
+use ocs_geom::geom2d::{
     contains, distance_to, inside_spans, intersect, Curve as KernelCurve, Line as KernelLine,
     Ray as KernelRay, Tolerance, Vec2 as KernelVec2, XLine as KernelXLine,
 };
@@ -332,14 +332,14 @@ impl HatchModel {
         &self,
         angle_deg: f32,
         shift: f32,
-    ) -> Option<kernel::geom2d::GradientFrame> {
+    ) -> Option<ocs_geom::geom2d::GradientFrame> {
         let boundary: Vec<[f64; 2]> = self
             .boundary
             .iter()
             .filter(|point| point[0].is_finite() && point[1].is_finite())
             .map(|point| [point[0] as f64, point[1] as f64])
             .collect();
-        kernel::geom2d::gradient_frame(
+        ocs_geom::geom2d::gradient_frame(
             &boundary,
             (angle_deg as f64).to_radians(),
             shift as f64,
@@ -378,7 +378,7 @@ impl HatchModel {
             rings.push(ring);
         }
 
-        let (points, triangles) = kernel::geom2d::triangulate_rings(&rings);
+        let (points, triangles) = ocs_geom::geom2d::triangulate_rings(&rings);
         let vertices = points
             .into_iter()
             .map(|[x, y]| [x as f32, y as f32])

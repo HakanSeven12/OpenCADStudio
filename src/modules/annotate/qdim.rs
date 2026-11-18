@@ -6,7 +6,7 @@ use document::entities::{
 use document::types::Vector3;
 use document::{EntityType, Handle};
 use glam::DVec3;
-use kernel::geom2d::{characteristic_points, intersect, Curve, SnapKind, Tolerance};
+use ocs_geom::geom2d::{characteristic_points, intersect, Curve, SnapKind, Tolerance};
 
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionAssociationSource,

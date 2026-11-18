@@ -736,6 +736,8 @@ impl OpenCADStudio {
                 // summaries-first — see `mcp_panel_semantics.rs`).
                 | "panel_semantics"
                 | "panel_page"
+                // SCN-039 (upstream merge): the AI-tools bridge reads.
+                | "plugins"
         );
         if !query && !self.control.enabled {
             return (
@@ -867,6 +869,9 @@ impl OpenCADStudio {
                 }),
                 Task::none(),
             );
+        }
+        if op == "plugins" {
+            return self.control_plugins();
         }
         let id = if query {
             String::new()
@@ -1501,6 +1506,8 @@ impl OpenCADStudio {
             "getpoint" => self.control_getpoint(req)?,
             "close" => self.control_close(req)?,
             "sysvar" => self.control_sysvar(req)?,
+            #[cfg(not(target_arch = "wasm32"))]
+            "plugin_call" => self.control_plugin_call(req)?,
             "layout_create" => self.control_layout_create(req)?,
             "layout_rename" => self.control_layout_rename(req)?,
             "layout_activate" => self.control_layout_activate(req)?,
@@ -1976,7 +1983,7 @@ impl OpenCADStudio {
             };
             let solid_bounds = if let document::EntityType::Solid3D(solid) = entity {
                 crate::scene::convert::solid3d_tess::kernel_body(solid)
-                    .and_then(|body| kernel::brep::body_bounds(&body))
+                    .and_then(|body| ocs_brep::body_bounds(&body))
                     .map(|bounds| (bounds.min, bounds.max))
                     .filter(valid_bounds)
                     .or_else(|| {
@@ -2313,6 +2320,7 @@ mod entities;
 pub(crate) mod http_bridge;
 mod interactive;
 mod node_graph;
+mod plugins;
 mod sheets;
 mod xrefs;
 pub(crate) use sheets::new_guid_v4;
@@ -2322,7 +2330,7 @@ pub(crate) mod spellcheck;
 pub(crate) mod text_ops;
 
 // SWG-005: the semantic plugin-panel MCP ops' host half (reads + the ONE
-// machine-path invoke) — desktop-only, like the v25 store it reads.
+// machine-path invoke) — desktop-only, like the v26 store it reads.
 #[cfg(not(target_arch = "wasm32"))]
 mod mcp_panel_semantics;
 

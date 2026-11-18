@@ -122,7 +122,7 @@ impl CadCommand for AlignCommand {
             }
             AlignState::Src2 => {
                 let pair = [self.src1.unwrap().to_array(), pt.to_array()];
-                if kernel::space::align_point_pairs(&pair, &pair, false).is_none() {
+                if ocs_geom::space::align_point_pairs(&pair, &pair, false).is_none() {
                     return CmdResult::NeedPoint;
                 }
                 self.src2 = Some(pt);
@@ -131,7 +131,7 @@ impl CadCommand for AlignCommand {
             }
             AlignState::Dst2 => {
                 let pair = [self.dst1.unwrap().to_array(), pt.to_array()];
-                if kernel::space::align_point_pairs(&pair, &pair, false).is_none() {
+                if ocs_geom::space::align_point_pairs(&pair, &pair, false).is_none() {
                     return CmdResult::NeedPoint;
                 }
                 self.dst2 = Some(pt);
@@ -144,7 +144,7 @@ impl CadCommand for AlignCommand {
                     self.src2.unwrap().to_array(),
                     pt.to_array(),
                 ];
-                if kernel::space::align_point_pairs(&frame, &frame, false).is_none() {
+                if ocs_geom::space::align_point_pairs(&frame, &frame, false).is_none() {
                     return CmdResult::NeedPoint;
                 }
                 self.src3 = Some(pt);
@@ -294,7 +294,7 @@ impl AlignCommand {
             source.push(s3.to_array());
             target.push(d3.to_array());
         }
-        let Some(matrix) = kernel::space::align_point_pairs(&source, &target, with_scale) else {
+        let Some(matrix) = ocs_geom::space::align_point_pairs(&source, &target, with_scale) else {
             return CmdResult::NeedPoint;
         };
         CmdResult::TransformSelected(

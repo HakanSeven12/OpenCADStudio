@@ -11,7 +11,7 @@ use document::objects::{
 use document::types::Vector3;
 use document::{EntityType, Handle};
 use glam::DVec3;
-use kernel::brep::{self, Body, PlanarFaceProfile, PresspullMode};
+use ocs_brep::{self as brep, Body, PlanarFaceProfile, PresspullMode};
 
 struct PreparedPresspull {
     owner: Option<Handle>,

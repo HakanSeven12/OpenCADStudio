@@ -52,6 +52,8 @@ pub struct Dialog {
     pub load: Option<LoadDraft>,
     /// Load Linetypes asks about the ticked linetypes the drawing has.
     pub reload_ask: Option<ReloadAsk>,
+    /// The settings tab last shown, kept when another style is selected.
+    pub last_tab: u8,
 }
 
 /// The ticked linetypes the drawing already has, asked about one by one.
@@ -157,6 +159,8 @@ pub struct Modify {
     pub first_angle_on: bool,
     pub second_angle_on: bool,
     pub scale_to_layout: bool,
+    /// A value was changed since the face opened: Apply has work.
+    pub dirty: bool,
 }
 
 /// Why a new name was refused.
@@ -441,11 +445,7 @@ pub struct View<'a> {
 }
 
 pub fn view_window<'a>(v: View<'a>, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
-    let face: Element<'a, Message> = if v.dialog.modify.is_some() {
-        modify_view(&v)
-    } else {
-        manager_view(&v)
-    };
+    let face = editor_window(&v, sizing);
     let mut layers: Vec<Element<'a, Message>> = vec![
         Space::new()
             .width(Length::Fixed(WIDTH))
@@ -509,10 +509,9 @@ pub fn view_window<'a>(v: View<'a>, sizing: crate::ui::modal::ModalSizing) -> El
 
 /// The window's title for its current face.
 pub fn title(dialog: &Dialog, selected: &str) -> String {
+    let _ = selected;
     if dialog.create.is_some() {
         tr!("mleader-style", "create-title")
-    } else if dialog.modify.is_some() {
-        tr!("mleader-style", "modify-title", name = selected.to_string())
     } else {
         tr!("modal", "multileader-style-manager")
     }
@@ -550,12 +549,6 @@ fn help_button<'a>() -> Element<'a, Message> {
         .into()
 }
 
-fn side_button<'a>(label: String, message: Option<Message>) -> Element<'a, Message> {
-    crate::ui::style::form::dialog_button_styled_opt(label, message, button::secondary)
-        .width(Fill)
-        .into()
-}
-
 fn label<'a>(value: String) -> Element<'a, Message> {
     text(value)
         .size(11)
@@ -566,7 +559,8 @@ fn label<'a>(value: String) -> Element<'a, Message> {
 
 // ── Manager ─────────────────────────────────────────────────────────────────
 
-fn manager_view<'a>(v: &View<'a>) -> Element<'a, Message> {
+/// The style list, annotative styles marked, and the list filter below.
+fn style_list_pane<'a>(v: &View<'a>) -> Element<'a, Message> {
     let listed: Vec<&(String, bool)> = v
         .styles
         .iter()
@@ -633,90 +627,112 @@ fn manager_view<'a>(v: &View<'a>) -> Element<'a, Message> {
             .on_select(|c: Choice| msg(MlsMsg::ListFilter(c.code == "used")))
             .text_size(11)
             .width(Fill);
-    let left = column![
-        text(tr!("mleader-style", "styles"))
-            .size(11)
-            .style(muted_style),
-        list,
-        text(tr!("mleader-style", "list"))
-            .size(11)
-            .style(muted_style),
-        filter,
-    ]
-    .spacing(6)
-    .width(Length::Fixed(230.0))
-    .height(Fill);
+    column![list, filter].spacing(6).height(Fill).into()
+}
 
+/// The window: the shared manager frame with this list, and the selected
+/// style's settings under its preview.
+fn editor_window<'a>(v: &View<'a>, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
+    use crate::ui::style::style_manager::{editor_shell, EditorShell, EditorTab, Scaffold};
     let in_use = v.in_use.iter().any(|u| u.eq_ignore_ascii_case(v.selected));
-    let can_delete = v.style.is_some()
-        && !v.selected.eq_ignore_ascii_case("Standard")
-        && !v.selected.eq_ignore_ascii_case(v.current)
-        && !in_use;
-    let actions = column![
-        side_button(
-            tr!("mleader-style", "set-current"),
-            v.style.is_some().then(|| msg(MlsMsg::SetCurrent))
-        ),
-        side_button(tr!("mleader-style", "new"), Some(msg(MlsMsg::New))),
-        side_button(
-            tr!("mleader-style", "modify"),
-            v.style.is_some().then(|| msg(MlsMsg::Modify))
-        ),
-        side_button(
-            tr!("mleader-style", "delete"),
-            can_delete.then(|| msg(MlsMsg::Delete))
-        ),
+    let status: std::borrow::Cow<'static, str> = if v.selected.eq_ignore_ascii_case(v.current) {
+        crate::t!("Current style")
+    } else if in_use {
+        crate::t!("Used in drawing")
+    } else {
+        crate::t!("Available style")
+    };
+    let m = v.dialog.modify.as_ref();
+    let tab = m.map_or(0, |m| m.tab);
+    let tabs = [
+        tr!("mleader-style", "tab-format"),
+        tr!("mleader-style", "tab-structure"),
+        tr!("mleader-style", "tab-content"),
     ]
-    .spacing(8)
-    .width(Length::Fixed(132.0));
-
-    let preview = column![
-        text(tr!(
-            "mleader-style",
-            "preview-of",
-            name = v.selected.to_string()
-        ))
-        .size(11)
-        .style(muted_style),
-        preview_well(v, Length::Fill),
-    ]
-    .spacing(6)
-    .width(Fill)
-    .height(Fill);
-
-    let body = column![
-        container(
-            text(tr!(
-                "mleader-style",
-                "current",
-                name = v.current.to_string()
-            ))
-            .size(12)
-        )
-        .padding([8, 12])
-        .width(Fill)
-        .style(card_style),
-        row![left, preview, actions].spacing(12).height(Fill),
-    ]
-    .spacing(10)
-    .padding([12, 14])
-    .height(Fill);
-
-    let footer = row![
-        help_button(),
-        Space::new().width(Fill),
-        dialog_button(tr!("mleader-style", "close"), Message::CloseModal, true),
-    ]
-    .spacing(6)
-    .align_y(iced::Center);
-
-    column![
-        container(body).height(Fill),
-        crate::ui::style::form::hdivider(Fill),
-        container(footer).padding([8, 14]),
-    ]
-    .height(Fill)
-    .into()
+    .into_iter()
+    .enumerate()
+    .map(|(index, label)| EditorTab {
+        label: label.into(),
+        active: tab == index as u8,
+        on_press: msg(MlsMsg::Tab(index as u8)),
+    })
+    .collect();
+    let content: Element<'a, Message> = match (v.style, m) {
+        (Some(style), Some(m)) => {
+            let cards = match m.tab {
+                0 => format_tab(v, style),
+                1 => structure_tab(v, style, m),
+                _ => content_tab(v, style),
+            };
+            // Two columns of equal width, the cards dealt left, right, left…
+            let (mut first, mut second) = (Vec::new(), Vec::new());
+            for (index, card) in cards.into_iter().enumerate() {
+                if index % 2 == 0 {
+                    first.push(card);
+                } else {
+                    second.push(card);
+                }
+            }
+            row![
+                column(first).spacing(10).width(Fill),
+                column(second).spacing(10).width(Fill),
+            ]
+            .spacing(14)
+            .into()
+        }
+        _ => Space::new().into(),
+    };
+    let editor = editor_shell(EditorShell {
+        sizing,
+        selected: v.selected.to_string(),
+        status,
+        preview: preview_well(v, Length::Fixed(170.0)),
+        comparison: None,
+        tabs,
+        content,
+    });
+    let names: Vec<String> = v.styles.iter().map(|(name, _)| name.clone()).collect();
+    // A style multileaders use cannot be deleted: its row counts one user.
+    let rows: Vec<crate::ui::style::style_manager::StyleRow> = v
+        .styles
+        .iter()
+        .map(|(name, annotative)| crate::ui::style::style_manager::StyleRow {
+            count: usize::from(v.in_use.iter().any(|u| u.eq_ignore_ascii_case(name))),
+            locked: false,
+            annotative: *annotative,
+        })
+        .collect();
+    let pending = m.is_some_and(|m| m.dirty || m.backup.is_none());
+    crate::ui::style::style_manager::view(Scaffold {
+        sizing,
+        kind: crate::app::StyleKind::MLeader,
+        styles: &names,
+        selected: v.selected,
+        current: Some(v.current),
+        rename_active: None,
+        rename_buf: "",
+        on_new: msg(MlsMsg::New),
+        on_copy: msg(MlsMsg::New),
+        on_delete: msg(MlsMsg::Delete),
+        on_import: None,
+        on_select: |name| msg(MlsMsg::Select(name)),
+        on_set_current: msg(MlsMsg::SetCurrent),
+        on_apply: msg(MlsMsg::Ok),
+        read_only: v.style.is_none(),
+        locked_keeps_actions: false,
+        on_list_scroll: None,
+        in_use_filter: None,
+        apply_blocked: None,
+        rows: Some(&rows),
+        compact: false,
+        apply_pending: pending,
+        delete_in_use: false,
+        on_context: None,
+        context_menu: None,
+        list: Some(style_list_pane(v)),
+        extra_actions: Vec::new(),
+        editor,
+    })
 }
 
 // ── Cards over the manager ──────────────────────────────────────────────────
@@ -1519,7 +1535,7 @@ fn radio_choice<'a>(
     }
 }
 
-fn format_tab<'a>(v: &View<'a>, style: &'a MultiLeaderStyle) -> Element<'a, Message> {
+fn format_tab<'a>(v: &View<'a>, style: &'a MultiLeaderStyle) -> Vec<Element<'a, Message>> {
     let leader = style.path_type != MultiLeaderPathType::Invisible;
     let types = vec![
         choice("StraightLineSegments", tr!("mleader-style", "straight")),
@@ -1599,7 +1615,7 @@ fn format_tab<'a>(v: &View<'a>, style: &'a MultiLeaderStyle) -> Element<'a, Mess
         .collect();
     arrows.push(choice(OTHER, tr!("mleader-style", "user-arrow")));
     let arrow = choice(v.arrowhead_name.clone(), arrow_label(&v.arrowhead_name));
-    column![
+    vec![
         card(
             tr!("mleader-style", "general"),
             column![
@@ -1658,8 +1674,6 @@ fn format_tab<'a>(v: &View<'a>, style: &'a MultiLeaderStyle) -> Element<'a, Mess
             ),
         ),
     ]
-    .spacing(10)
-    .into()
 }
 
 const ANGLES: [&str; 6] = ["0", "15", "30", "45", "60", "90"];
@@ -1672,7 +1686,7 @@ fn structure_tab<'a>(
     v: &View<'a>,
     style: &'a MultiLeaderStyle,
     m: &'a Modify,
-) -> Element<'a, Message> {
+) -> Vec<Element<'a, Message>> {
     let leader = style.path_type != MultiLeaderPathType::Invisible;
     let angle_row = |caption: String,
                      on: bool,
@@ -1835,16 +1849,14 @@ fn structure_tab<'a>(
         .align_y(iced::Center),
     ]
     .spacing(8);
-    column![
+    vec![
         card(tr!("mleader-style", "constraints"), constraints),
         card(tr!("mleader-style", "landing-settings"), landing),
         card(tr!("mleader-style", "scale"), scale),
     ]
-    .spacing(10)
-    .into()
 }
 
-fn content_tab<'a>(v: &View<'a>, style: &'a MultiLeaderStyle) -> Element<'a, Message> {
+fn content_tab<'a>(v: &View<'a>, style: &'a MultiLeaderStyle) -> Vec<Element<'a, Message>> {
     let types = vec![
         choice("MText", tr!("mleader-style", "mtext")),
         choice("Block", tr!("mleader-style", "block")),
@@ -1870,16 +1882,16 @@ fn content_tab<'a>(v: &View<'a>, style: &'a MultiLeaderStyle) -> Element<'a, Mes
             value: code,
         },
     );
-    let mut body = column![type_row].spacing(10);
+    let mut cards = vec![type_row];
     match style.content_type {
-        LeaderContentType::Block => body = body.push(block_options(v, style)),
+        LeaderContentType::Block => cards.push(block_options(v, style)),
         LeaderContentType::None => {}
         _ => {
-            body = body.push(text_options(v, style));
-            body = body.push(leader_connection(v, style));
+            cards.push(text_options(v, style));
+            cards.push(leader_connection(v, style));
         }
     }
-    body.into()
+    cards
 }
 
 fn dots_button<'a>(message: Message) -> Element<'a, Message> {
@@ -2127,79 +2139,6 @@ fn block_options<'a>(v: &View<'a>, style: &'a MultiLeaderStyle) -> Element<'a, M
         ]
         .spacing(8),
     )
-}
-
-fn modify_view<'a>(v: &View<'a>) -> Element<'a, Message> {
-    let (Some(style), Some(m)) = (v.style, v.dialog.modify.as_ref()) else {
-        return Space::new().into();
-    };
-    let tabs = [
-        tr!("mleader-style", "tab-format"),
-        tr!("mleader-style", "tab-structure"),
-        tr!("mleader-style", "tab-content"),
-    ];
-    let tab_bar = container(
-        iced::widget::Row::with_children(
-            tabs.into_iter()
-                .enumerate()
-                .map(|(index, caption)| {
-                    let on = m.tab == index as u8;
-                    button(text(caption).size(11).width(Fill).align_x(iced::Center))
-                        .on_press(msg(MlsMsg::Tab(index as u8)))
-                        .style(button_style(on))
-                        .padding([5, 6])
-                        .width(Fill)
-                        .into()
-                })
-                .collect::<Vec<_>>(),
-        )
-        .spacing(2),
-    )
-    .padding(2)
-    .width(Fill)
-    .style(crate::ui::window::pdf_dialogs::well_style);
-    let page: Element<'a, Message> = match m.tab {
-        0 => format_tab(v, style),
-        1 => structure_tab(v, style, m),
-        _ => content_tab(v, style),
-    };
-    let left = column![
-        tab_bar,
-        scrollable(container(page).padding([2, 2]).width(Fill))
-            .height(Fill)
-            .width(Fill),
-    ]
-    .spacing(10)
-    .width(Length::Fixed(500.0))
-    .height(Fill);
-    let right = column![
-        text(tr!(
-            "mleader-style",
-            "preview-of",
-            name = v.selected.to_string()
-        ))
-        .size(11)
-        .style(muted_style),
-        preview_well(v, Length::Fixed(240.0)),
-    ]
-    .spacing(6)
-    .width(Fill);
-    let body = row![left, right].spacing(14).padding([12, 14]).height(Fill);
-    let footer = row![
-        help_button(),
-        Space::new().width(Fill),
-        dialog_button(tr!("mleader-style", "cancel"), msg(MlsMsg::Cancel), false),
-        dialog_button(tr!("mleader-style", "ok"), msg(MlsMsg::Ok), true),
-    ]
-    .spacing(6)
-    .align_y(iced::Center);
-    column![
-        container(body).height(Fill),
-        crate::ui::style::form::hdivider(Fill),
-        container(footer).padding([8, 14]),
-    ]
-    .height(Fill)
-    .into()
 }
 
 // ── Preview ─────────────────────────────────────────────────────────────────

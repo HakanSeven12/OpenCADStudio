@@ -7,8 +7,8 @@ use std::collections::BTreeSet;
 
 use document::{EntityType, Handle};
 use glam::DVec3;
-use kernel::geom2d::{Curve, Polyline};
-use kernel::space::PlanarCurve;
+use ocs_geom::geom2d::{Curve, Polyline};
+use ocs_geom::space::PlanarCurve;
 
 use super::Scene;
 use crate::entities::transform::EntityTransform;

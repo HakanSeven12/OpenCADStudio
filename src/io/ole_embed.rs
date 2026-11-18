@@ -83,6 +83,16 @@ pub struct EmbeddedImage {
     pub pixel_height: u32,
     /// File name the picture came from — surfaces in prompts and properties.
     pub name: String,
+    /// A document embedded whole (an OLE package); `bytes` is then the
+    /// picture of it the drawing shows.
+    pub source: Option<PackagedFile>,
+}
+
+/// A file carried whole inside an OLE package: its name and its bytes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PackagedFile {
+    pub name: String,
+    pub bytes: Vec<u8>,
 }
 
 impl EmbeddedImage {
@@ -114,7 +124,24 @@ impl EmbeddedImage {
             pixel_width,
             pixel_height,
             name,
+            source: None,
         })
+    }
+
+    /// A document of any kind, embedded whole as an OLE package and shown by
+    /// a picture of its first page. LibreOffice draws that picture, so it
+    /// must be installed.
+    pub fn from_document(path: &Path) -> Result<Self, String> {
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("document")
+            .to_string();
+        let picture = render_first_page(path)?;
+        let mut embedded = Self::from_bytes(name.clone(), picture)?;
+        embedded.source = Some(PackagedFile { name, bytes });
+        Ok(embedded)
     }
 
     /// Width : height aspect ratio; a degenerate height falls back to square.
@@ -148,17 +175,42 @@ pub fn corners_from_placement(origin: Vector3, width: f64, aspect: f64) -> (Vect
 }
 
 /// Pack `image` into an OLE2FRAME spanning `upper_left` → `lower_right` in
-/// world space. The picture rides in an `\x01Ole10Native` stream as OLE 1.0
-/// native data behind the geometry envelope document writes around it.
+/// world space. A picture rides in an `\x01Ole10Native` stream as OLE 1.0
+/// native data behind the geometry envelope document writes around it; a
+/// document is an OLE package with the picture as its presentation.
 pub fn build_embedded_ole(
     image: &EmbeddedImage,
     upper_left: Vector3,
     lower_right: Vector3,
 ) -> Ole2Frame {
-    // OLE 1.0 native: 4-byte little-endian payload length, then the raster.
-    let mut native = Vec::with_capacity(4 + image.bytes.len());
-    let _ = native.write(&(image.bytes.len() as u32).to_le_bytes());
-    native.extend_from_slice(&image.bytes);
+    let stream = |name: &str, data: &[u8]| {
+        CompoundEntry::Stream(CompoundStream {
+            name: name.to_string(),
+            class_id: [0; 16],
+            state_bits: 0,
+            creation_time: 0,
+            modified_time: 0,
+            content: CompoundStreamContent::Binary(BinaryRecord::split(data, 4096)),
+        })
+    };
+    let (class_id, entries) = match &image.source {
+        Some(file) => (
+            CLSID_PACKAGE,
+            vec![
+                stream(OLE_STREAM, &ole_stream()),
+                stream(COMP_OBJ, &comp_obj()),
+                stream(OLE10NATIVE, &package_native(file)),
+                stream(OLE_PRES, &presentation_dib(image)),
+            ],
+        ),
+        None => {
+            // OLE 1.0 native: 4-byte little-endian payload length, then the raster.
+            let mut native = Vec::with_capacity(4 + image.bytes.len());
+            let _ = native.write(&(image.bytes.len() as u32).to_le_bytes());
+            native.extend_from_slice(&image.bytes);
+            ([0; 16], vec![stream(OLE10NATIVE, &native)])
+        }
+    };
 
     let file = CompoundFile {
         minor_version: 0x003E,
@@ -166,18 +218,11 @@ pub fn build_embedded_ole(
         transaction_signature: 0,
         root: CompoundStorage {
             name: "Root Entry".to_string(),
-            class_id: [0; 16],
+            class_id,
             state_bits: 0,
             creation_time: 0,
             modified_time: 0,
-            entries: vec![CompoundEntry::Stream(CompoundStream {
-                name: OLE10NATIVE.to_string(),
-                class_id: [0; 16],
-                state_bits: 0,
-                creation_time: 0,
-                modified_time: 0,
-                content: CompoundStreamContent::Binary(BinaryRecord::split(&native, 4096)),
-            })],
+            entries,
         },
     };
 
@@ -196,6 +241,190 @@ pub fn build_embedded_ole(
         trailing_records: Vec::new(),
     };
     ole
+}
+
+/// CLSID_Package {0003000C-0000-0000-C000-000000000046}, the system's
+/// packager: it opens the packaged file with the program for its type.
+const CLSID_PACKAGE: [u8; 16] = [
+    0x0C, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+];
+const OLE_STREAM: &str = "\u{1}Ole";
+const COMP_OBJ: &str = "\u{1}CompObj";
+const OLE_PRES: &str = "\u{2}OlePres000";
+
+/// The `\x01Ole` stream (MS-OLEDS 2.3.3) of an embedded object.
+fn ole_stream() -> Vec<u8> {
+    let mut out = 0x0200_0001u32.to_le_bytes().to_vec();
+    out.extend_from_slice(&[0; 16]);
+    out
+}
+
+/// The `\x01CompObj` stream (MS-OLEDS 2.3.8) naming the packager.
+fn comp_obj() -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&0xFFFE_0001u32.to_le_bytes());
+    out.extend_from_slice(&0x0000_0A03u32.to_le_bytes());
+    out.extend_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
+    out.extend_from_slice(&CLSID_PACKAGE);
+    let ansi = |out: &mut Vec<u8>, text: &str| {
+        out.extend_from_slice(&(text.len() as u32 + 1).to_le_bytes());
+        out.extend_from_slice(text.as_bytes());
+        out.push(0);
+    };
+    ansi(&mut out, "Package");
+    // No clipboard format.
+    out.extend_from_slice(&0u32.to_le_bytes());
+    ansi(&mut out, "Package");
+    out
+}
+
+/// A file name as the package's ANSI strings take it.
+fn ansi_name(name: &str) -> Vec<u8> {
+    name.chars()
+        .map(|c| if c.is_ascii() && c != '\0' { c as u8 } else { b'_' })
+        .collect()
+}
+
+/// The packager's native data: its size, then the label, the file's path,
+/// the path it is unpacked to, and the file's bytes.
+fn package_native(file: &PackagedFile) -> Vec<u8> {
+    let name = ansi_name(&file.name);
+    let mut body = 2u16.to_le_bytes().to_vec();
+    for _ in 0..2 {
+        body.extend_from_slice(&name);
+        body.push(0);
+    }
+    body.extend_from_slice(&[0, 0, 3, 0]);
+    body.extend_from_slice(&(name.len() as u32 + 1).to_le_bytes());
+    body.extend_from_slice(&name);
+    body.push(0);
+    body.extend_from_slice(&(file.bytes.len() as u32).to_le_bytes());
+    body.extend_from_slice(&file.bytes);
+    let mut out = (body.len() as u32).to_le_bytes().to_vec();
+    out.extend(body);
+    out
+}
+
+/// The file an OLE object packages, read back from its native data.
+pub fn packaged_file(ole: &Ole2Frame) -> Option<PackagedFile> {
+    let file = ole.storage.compound_file.as_ref()?;
+    let native = file.root.entries.iter().find_map(|entry| match entry {
+        CompoundEntry::Stream(stream) if stream.name == OLE10NATIVE => {
+            Some(stream.content.encode())
+        }
+        _ => None,
+    })?;
+    let body = native.get(4..)?;
+    if body.get(..2)? != [2, 0] {
+        return None;
+    }
+    let mut at = 2;
+    let z_string = |at: &mut usize| -> Option<Vec<u8>> {
+        let end = *at + body.get(*at..)?.iter().position(|b| *b == 0)?;
+        let text = body[*at..end].to_vec();
+        *at = end + 1;
+        Some(text)
+    };
+    let label = z_string(&mut at)?;
+    z_string(&mut at)?;
+    at += 4;
+    let u32_at = |at: usize| -> Option<usize> {
+        Some(u32::from_le_bytes(body.get(at..at + 4)?.try_into().ok()?) as usize)
+    };
+    at += 4 + u32_at(at)?;
+    let size = u32_at(at)?;
+    let bytes = body.get(at + 4..at + 4 + size)?.to_vec();
+    let name = String::from_utf8_lossy(&label).into_owned();
+    Some(PackagedFile { name, bytes })
+}
+
+/// The `\x02OlePres000` stream (MS-OLEDS 2.3.4): the picture as a CF_DIB,
+/// sized in HIMETRIC at 96 pixels per inch.
+fn presentation_dib(image: &EmbeddedImage) -> Vec<u8> {
+    let rgb = image::load_from_memory(&image.bytes)
+        .map(|picture| picture.to_rgb8())
+        .unwrap_or_default();
+    let (width, height) = rgb.dimensions();
+    let stride = (width as usize * 3).div_ceil(4) * 4;
+    let mut dib = Vec::with_capacity(40 + stride * height as usize);
+    dib.extend_from_slice(&40u32.to_le_bytes());
+    dib.extend_from_slice(&(width as i32).to_le_bytes());
+    dib.extend_from_slice(&(height as i32).to_le_bytes());
+    dib.extend_from_slice(&1u16.to_le_bytes());
+    dib.extend_from_slice(&24u16.to_le_bytes());
+    dib.extend_from_slice(&0u32.to_le_bytes());
+    dib.extend_from_slice(&((stride * height as usize) as u32).to_le_bytes());
+    dib.extend_from_slice(&3780i32.to_le_bytes());
+    dib.extend_from_slice(&3780i32.to_le_bytes());
+    dib.extend_from_slice(&[0; 8]);
+    // Rows bottom up, each pixel blue, green, red.
+    for row in rgb.rows().rev() {
+        let start = dib.len();
+        for pixel in row {
+            dib.extend_from_slice(&[pixel[2], pixel[1], pixel[0]]);
+        }
+        dib.resize(start + stride, 0);
+    }
+    let himetric = |pixels: u32| pixels * 2540 / 96;
+    let mut out = Vec::with_capacity(40 + dib.len());
+    // CF_DIB, no target device, content aspect, any index.
+    for value in [0xFFFF_FFFF, 8, 4, 1, 0xFFFF_FFFF, 0, 0] {
+        out.extend_from_slice(&u32::to_le_bytes(value));
+    }
+    out.extend_from_slice(&himetric(width).to_le_bytes());
+    out.extend_from_slice(&himetric(height).to_le_bytes());
+    out.extend_from_slice(&(dib.len() as u32).to_le_bytes());
+    out.extend(dib);
+    out
+}
+
+/// LibreOffice's program, on the search path or where its installer puts it.
+fn office_program() -> Option<std::path::PathBuf> {
+    let installed = [
+        r"C:\Program Files\LibreOffice\program\soffice.exe",
+        r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+    ];
+    std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
+        .flat_map(|dir| [dir.join("soffice"), dir.join("soffice.exe")])
+        .chain(installed.into_iter().map(std::path::PathBuf::from))
+        .find(|path| path.is_file())
+}
+
+/// A PNG of the document's first page, drawn by LibreOffice. It runs with a
+/// profile of its own, so a LibreOffice the user has open does not take the
+/// job.
+fn render_first_page(path: &Path) -> Result<Vec<u8>, String> {
+    let program = office_program().ok_or_else(|| crate::tr!("ole-props", "needs-office"))?;
+    static RUN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let run = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let work =
+        std::env::temp_dir().join(format!("ocs-ole-render-{}-{run}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    let profile = work.join("profile");
+    let profile_url = format!(
+        "file:///{}",
+        profile.to_string_lossy().replace('\\', "/").trim_start_matches('/')
+    );
+    let status = std::process::Command::new(program)
+        .arg(format!("-env:UserInstallation={profile_url}"))
+        .args(["--headless", "--convert-to", "png", "--outdir"])
+        .arg(&work)
+        .arg(path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_err(|e| e.to_string())?;
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    let png = std::fs::read(work.join(format!("{stem}.png")));
+    let _ = std::fs::remove_dir_all(&work);
+    match png {
+        Ok(png) if status.success() => Ok(png),
+        _ => Err(crate::tr!("ole-props", "render-failed")),
+    }
 }
 
 /// Non-interactive embed used by the control API: add the entity to `doc` and
@@ -251,6 +480,7 @@ mod tests {
             pixel_width: 4,
             pixel_height: 3,
             name: "t.png".into(),
+            source: None,
         };
         let ole = build_embedded_ole(
             &image,
@@ -272,6 +502,7 @@ mod tests {
             pixel_width: 4,
             pixel_height: 3,
             name: "t.png".into(),
+            source: None,
         };
         let mut doc = document::Document::new();
         let handle =
@@ -299,3 +530,4 @@ mod tests {
         }
     }
 }
+

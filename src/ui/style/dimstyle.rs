@@ -98,6 +98,8 @@ pub struct Dialog {
     pub reload_ask: Option<ReloadAsk>,
     /// The list (colour, linetype, lineweight, fill) that is open.
     pub open_list: Option<&'static str>,
+    /// The settings tab last shown, kept when another style is selected.
+    pub last_tab: Option<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +132,8 @@ pub struct Edit {
     pub texts: Vec<(&'static str, String)>,
     /// DIMTALN, kept in the style's extended data.
     pub dimtaln: i16,
+    /// A value was changed since the face opened: Apply has work.
+    pub dirty: bool,
 }
 
 impl Edit {
@@ -465,12 +469,10 @@ pub struct View<'a> {
 }
 
 pub fn view_window<'a>(v: View<'a>, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
-    let face: Element<'a, Message> = if v.dialog.edit.is_some() {
-        edit_view(&v)
-    } else if v.dialog.compare.is_some() {
+    let face: Element<'a, Message> = if v.dialog.compare.is_some() {
         compare_view(&v)
     } else {
-        manager_view(&v)
+        editor_window(&v, sizing)
     };
     let mut layers: Vec<Element<'a, Message>> = vec![
         Space::new()
@@ -548,14 +550,9 @@ pub fn view_window<'a>(v: View<'a>, sizing: crate::ui::modal::ModalSizing) -> El
 
 /// The window's title for its current face.
 pub fn title(dialog: &Dialog) -> String {
-    match (&dialog.edit, &dialog.compare, &dialog.create) {
-        (_, _, Some(_)) => tr!("dim-style", "create-title"),
-        (Some(edit), _, _) => match edit.mode {
-            Mode::Modify => tr!("dim-style", "modify-title", name = edit.name.clone()),
-            Mode::New(_) => tr!("dim-style", "new-title", name = edit.name.clone()),
-            Mode::Override => tr!("dim-style", "override-title", name = edit.name.clone()),
-        },
-        (_, Some(_), _) => tr!("dim-style", "compare-title"),
+    match (&dialog.compare, &dialog.create) {
+        (_, Some(_)) => tr!("dim-style", "create-title"),
+        (Some(_), _) => tr!("dim-style", "compare-title"),
         _ => tr!("dim-style", "manager-title"),
     }
 }
@@ -565,12 +562,6 @@ fn help_button<'a>() -> Element<'a, Message> {
         .on_press(msg(DsMsg::Help))
         .style(button_style(false))
         .padding([5, 11])
-        .into()
-}
-
-fn side_button<'a>(caption: String, message: Option<Message>) -> Element<'a, Message> {
-    dialog_button_styled_opt(caption, message, button::secondary)
-        .width(Fill)
         .into()
 }
 
@@ -631,7 +622,9 @@ fn context_actions<'a>(actions: Vec<(String, Option<Message>)>) -> Element<'a, M
     container(row(buttons).spacing(4).wrap()).padding([4, 20]).into()
 }
 
-fn manager_view<'a>(v: &View<'a>) -> Element<'a, Message> {
+/// The style list: family members under their parent, the current style's
+/// overrides first among them, and the list filters below.
+fn style_list_pane<'a>(v: &View<'a>) -> Element<'a, Message> {
     let d = v.dialog;
     let listed = |s: &&StyleRow| {
         (d.list_xrefs || !s.xref) && (!d.in_use_only || s.in_use || s.name == v.current)
@@ -762,96 +755,145 @@ fn manager_view<'a>(v: &View<'a>) -> Element<'a, Message> {
             None
         },
     );
-    let left = column![
-        text(tr!("dim-style", "styles")).size(11).style(muted_style),
-        list,
-        text(tr!("dim-style", "list")).size(11).style(muted_style),
-        filter,
-        xrefs,
-    ]
-    .spacing(6)
-    .width(Length::Fixed(250.0))
-    .height(Fill);
+    column![list, filter, xrefs].spacing(6).height(Fill).into()
+}
 
-    let shown_name = if d.overrides_selected {
-        tr!("dim-style", "style-overrides")
-    } else {
-        display_name(v.selected)
-    };
-    let description = container(
-        column![
-            text(tr!("dim-style", "description")).size(10).style(accent_text),
-            scrollable(text(v.description.clone()).size(11)).height(Fill),
-        ]
-        .spacing(4),
-    )
-    .padding([8, 10])
-    .width(Fill)
-    .height(Length::Fixed(96.0))
-    .style(card_style);
-    let middle = column![
-        text(tr!("dim-style", "preview-of", name = shown_name))
-            .size(11)
-            .style(muted_style),
-        preview_well(v.shown.clone(), v.shown_arrows.clone(), &v.preview, Length::Fill),
-        description,
-    ]
-    .spacing(6)
-    .width(Fill)
-    .height(Fill);
-
+/// The window: the shared manager frame with this list, and the selected
+/// style's settings under its preview.
+fn editor_window<'a>(v: &View<'a>, sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
+    use crate::ui::style::style_manager::{editor_shell, EditorShell, EditorTab, Scaffold};
+    let d = v.dialog;
     let has_style = v.shown.is_some();
     // A family member is never current; Override… changes the current
     // style only.
     let member = !d.overrides_selected && family_member(v.selected).is_some();
     let current_selected = d.overrides_selected || v.selected.eq_ignore_ascii_case(v.current);
-    let actions = column![
-        side_button(
-            tr!("dim-style", "set-current"),
-            (has_style && !member).then(|| msg(DsMsg::SetCurrent))
+    let shown_name = match &d.edit {
+        Some(e) => e.name.clone(),
+        None if d.overrides_selected => tr!("dim-style", "style-overrides"),
+        None => display_name(v.selected),
+    };
+    let status: std::borrow::Cow<'static, str> = if d.overrides_selected {
+        tr!("dim-style", "style-overrides").into()
+    } else if v.selected.eq_ignore_ascii_case(v.current) {
+        crate::t!("Current style")
+    } else {
+        crate::t!("Available style")
+    };
+    let (draft, arrows) = match &d.edit {
+        Some(e) => (
+            Some(e.draft.clone()),
+            PreviewArrows {
+                first: v.names.first.clone(),
+                second: v.names.second.clone(),
+                leader: v.names.leader.clone(),
+            },
         ),
-        side_button(tr!("dim-style", "new"), Some(msg(DsMsg::New))),
-        side_button(
-            tr!("dim-style", "modify"),
-            has_style.then(|| msg(DsMsg::Modify))
-        ),
-        side_button(
-            tr!("dim-style", "override"),
-            (has_style && current_selected).then(|| msg(DsMsg::Override))
-        ),
-        side_button(tr!("dim-style", "compare"), Some(msg(DsMsg::Compare))),
+        None => (v.shown.clone(), v.shown_arrows.clone()),
+    };
+    let mut preview = column![preview_well(draft, arrows, &v.preview, Length::Fixed(160.0))];
+    if !v.description.is_empty() {
+        preview = preview.push(
+            container(text(v.description.clone()).size(10).style(muted_style)).padding([4, 8]),
+        );
+    }
+    let tab = d.edit.as_ref().map_or(0, |e| e.tab);
+    let tabs = [
+        tr!("dim-style", "tab-lines"),
+        tr!("dim-style", "tab-symbols"),
+        tr!("dim-style", "tab-text"),
+        tr!("dim-style", "tab-fit"),
+        tr!("dim-style", "tab-primary"),
+        tr!("dim-style", "tab-alternate"),
+        tr!("dim-style", "tab-tolerances"),
     ]
-    .spacing(8)
-    .width(Length::Fixed(132.0));
-
-    let body = column![
-        container(
-            text(tr!("dim-style", "current", name = v.current.to_string())).size(12)
-        )
-        .padding([8, 12])
-        .width(Fill)
-        .style(card_style),
-        row![left, middle, actions].spacing(12).height(Fill),
-    ]
-    .spacing(10)
-    .padding([12, 14])
-    .height(Fill);
-
-    let footer = row![
-        help_button(),
-        Space::new().width(Fill),
-        dialog_button(tr!("dim-style", "close"), Message::CloseModal, true),
-    ]
-    .spacing(6)
-    .align_y(iced::Center);
-
-    column![
-        container(body).height(Fill),
-        crate::ui::style::form::hdivider(Fill),
-        container(footer).padding([8, 14]),
-    ]
-    .height(Fill)
-    .into()
+    .into_iter()
+    .enumerate()
+    .map(|(index, label)| EditorTab {
+        label: label.into(),
+        active: tab == index as u8,
+        on_press: msg(DsMsg::Tab(index as u8)),
+    })
+    .collect();
+    let content: Element<'a, Message> = match d.edit.as_ref() {
+        Some(e) => {
+            let (left, right) = match e.tab {
+                0 => lines_tab(v, e),
+                1 => symbols_tab(v, e, center_mode(e.draft.dimcen)),
+                2 => text_tab(v, e),
+                3 => fit_tab(e),
+                4 => primary_tab(e),
+                5 => alternate_tab(e),
+                _ => tolerances_tab(e),
+            };
+            // Two columns of equal width, the cards dealt left, right, left…
+            let (mut first, mut second) = (Vec::new(), Vec::new());
+            for (index, card) in left.into_iter().chain(right).enumerate() {
+                if index % 2 == 0 {
+                    first.push(card);
+                } else {
+                    second.push(card);
+                }
+            }
+            row![
+                column(first).spacing(10).width(Fill),
+                column(second).spacing(10).width(Fill),
+            ]
+            .spacing(14)
+            .into()
+        }
+        None => Space::new().into(),
+    };
+    let editor = editor_shell(EditorShell {
+        sizing,
+        selected: shown_name,
+        status,
+        preview: preview.into(),
+        comparison: None,
+        tabs,
+        content,
+    });
+    let names: Vec<String> = v.styles.iter().map(|s| s.name.clone()).collect();
+    let selected = if d.overrides_selected { OVERRIDES } else { v.selected };
+    let pending = d.edit.as_ref().is_some_and(|e| e.dirty || matches!(e.mode, Mode::New(_)));
+    crate::ui::style::style_manager::view(Scaffold {
+        sizing,
+        kind: crate::app::StyleKind::Dim,
+        styles: &names,
+        selected,
+        current: Some(v.current),
+        rename_active: None,
+        rename_buf: "",
+        on_new: msg(DsMsg::New),
+        on_copy: msg(DsMsg::New),
+        on_delete: msg(DsMsg::Delete(selected.to_string())),
+        on_import: None,
+        on_select: |name| msg(DsMsg::Select(name)),
+        on_set_current: msg(DsMsg::SetCurrent),
+        on_apply: msg(DsMsg::Ok),
+        // The overrides and family members are never made current.
+        read_only: !has_style || member || d.overrides_selected,
+        locked_keeps_actions: false,
+        on_list_scroll: None,
+        in_use_filter: None,
+        apply_blocked: None,
+        rows: None,
+        compact: false,
+        apply_pending: pending,
+        delete_in_use: true,
+        on_context: None,
+        context_menu: None,
+        list: Some(style_list_pane(v)),
+        extra_actions: vec![
+            (
+                tr!("dim-style", "override").into(),
+                (has_style && current_selected && !d.overrides_selected)
+                    .then(|| msg(DsMsg::Override)),
+            ),
+            (tr!("dim-style", "compare").into(), Some(msg(DsMsg::Compare))),
+        ],
+        editor,
+    })
 }
 
 // ── Cards over the faces ────────────────────────────────────────────────────
@@ -2153,98 +2195,6 @@ fn tolerances_tab<'a>(e: &'a Edit) -> Page<'a> {
     )
 }
 
-fn edit_view<'a>(v: &View<'a>) -> Element<'a, Message> {
-    let Some(e) = v.dialog.edit.as_ref() else {
-        return Space::new().into();
-    };
-    let tabs = [
-        tr!("dim-style", "tab-lines"),
-        tr!("dim-style", "tab-symbols"),
-        tr!("dim-style", "tab-text"),
-        tr!("dim-style", "tab-fit"),
-        tr!("dim-style", "tab-primary"),
-        tr!("dim-style", "tab-alternate"),
-        tr!("dim-style", "tab-tolerances"),
-    ];
-    let tab_bar = container(
-        iced::widget::Row::with_children(
-            tabs.into_iter()
-                .enumerate()
-                .map(|(index, caption)| {
-                    let on = e.tab == index as u8;
-                    button(text(caption).size(10).width(Fill).align_x(iced::Center))
-                        .on_press(msg(DsMsg::Tab(index as u8)))
-                        .style(button_style(on))
-                        .padding([5, 4])
-                        .width(Fill)
-                        .into()
-                })
-                .collect::<Vec<_>>(),
-        )
-        .spacing(2),
-    )
-    .padding(2)
-    .width(Fill)
-    .style(well_style);
-    let (left_cards, right_cards) = match e.tab {
-        0 => lines_tab(v, e),
-        1 => symbols_tab(v, e, center_mode(e.draft.dimcen)),
-        2 => text_tab(v, e),
-        3 => fit_tab(e),
-        4 => primary_tab(e),
-        5 => alternate_tab(e),
-        _ => tolerances_tab(e),
-    };
-    let left = scrollable(
-        container(column(left_cards).spacing(10))
-            .padding(iced::Padding {
-                right: 10.0,
-                ..Default::default()
-            })
-            .width(Fill),
-    )
-    .height(Fill)
-    .width(Length::Fixed(COLUMN));
-    let right = column![
-        text(tr!("dim-style", "preview-of", name = e.name.clone()))
-            .size(11)
-            .style(muted_style),
-        preview_well(
-            Some(e.draft.clone()),
-            PreviewArrows {
-                first: v.names.first.clone(),
-                second: v.names.second.clone(),
-                leader: v.names.leader.clone(),
-            },
-            &v.preview,
-            Length::Fixed(250.0)
-        ),
-        scrollable(column(right_cards).spacing(10)).height(Fill),
-    ]
-    .spacing(8)
-    .width(Fill)
-    .height(Fill);
-    let body = column![tab_bar, row![left, right].spacing(14).height(Fill)]
-        .spacing(10)
-        .padding([12, 14])
-        .height(Fill);
-    let footer = row![
-        help_button(),
-        Space::new().width(Fill),
-        dialog_button(tr!("dim-style", "cancel"), msg(DsMsg::Cancel), false),
-        dialog_button(tr!("dim-style", "ok"), msg(DsMsg::Ok), true),
-    ]
-    .spacing(6)
-    .align_y(iced::Center);
-    column![
-        container(body).height(Fill),
-        crate::ui::style::form::hdivider(Fill),
-        container(footer).padding([8, 14]),
-    ]
-    .height(Fill)
-    .into()
-}
-
 // ── Compare ─────────────────────────────────────────────────────────────────
 
 fn compare_view<'a>(v: &View<'a>) -> Element<'a, Message> {
@@ -2419,41 +2369,38 @@ impl canvas::Program<Message> for DimPreview {
         let dim_color = aci_rgb(s.dimclrd, s.dimclrd_true_color, ink);
         let ext_color = aci_rgb(s.dimclre, s.dimclre_true_color, ink);
         let text_color = aci_rgb(s.dimclrt, s.dimclrt_true_color, ink);
-        // The sample part is drawn to the style's text height, so the text
-        // keeps its size in the well whatever the style's units.
+        // Each sample is drawn to the style's text height, so the text keeps
+        // its size in the well whatever the style's units. The samples a
+        // family member is not for are left out (their texts are empty).
         let k = (s.dimtxt.abs().max(1e-9) / 2.5) as f32;
-        // The sample spans x -6..56, y 0..38 (nominal units).
-        let (min_x, span_x, span_y) = (-6.0_f32, 62.0_f32, 38.0_f32);
-        let px = (bounds.width / span_x).min(bounds.height / span_y) / k;
-        let ox = (bounds.width - span_x * k * px) * 0.5 - min_x * k * px;
+        let t = &self.texts;
+        let samples: Vec<u8> = [
+            (0u8, &t.horizontal),
+            (1, &t.aligned),
+            (2, &t.radius),
+            (3, &t.angle),
+        ]
+        .into_iter()
+        .filter(|(_, content)| !content.is_empty())
+        .map(|(sample, _)| sample)
+        .collect();
+        if samples.is_empty() {
+            return vec![frame.into_geometry()];
+        }
+        // Side by side, each in a cell of 34 × 30 nominal units at one scale.
+        let (span_x, span_y) = (34.0_f32, 30.0_f32);
+        let cell = bounds.width / samples.len() as f32;
+        let px = (cell / span_x).min(bounds.height / span_y) / k;
         let oy = (bounds.height - span_y * k * px) * 0.5;
-        let at = |x: f32, y: f32| Point::new(ox + x * k * px, bounds.height - (oy + y * k * px));
+        let at = |cell_index: usize, x: f32, y: f32| {
+            let ox = cell * cell_index as f32 + (cell - span_x * k * px) * 0.5;
+            Point::new(ox + x * k * px, bounds.height - (oy + y * k * px))
+        };
         let sz = |v: f64| (v.abs() as f32) * px;
         let thin = |c: Color| canvas::Stroke::default().with_color(c).with_width(1.0);
-        // The part.
-        let outline = [
-            (12.0, 10.0),
-            (42.0, 10.0),
-            (32.0, 24.0),
-            (22.0, 24.0),
-            (22.0, 28.0),
-            (12.0, 28.0),
-        ];
-        frame.stroke(
-            &canvas::Path::new(|p| {
-                p.move_to(at(outline[0].0, outline[0].1));
-                for &(x, y) in &outline[1..] {
-                    p.line_to(at(x, y));
-                }
-                p.close();
-            }),
-            thin(object),
-        );
-        let hole = (18.0, 17.0, 3.5);
-        frame.stroke(
-            &canvas::Path::circle(at(hole.0, hole.1), hole.2 * k * px),
-            thin(object),
-        );
+        let line = |frame: &mut canvas::Frame, a: Point, b: Point| {
+            frame.stroke(&canvas::Path::line(a, b), thin(object));
+        };
 
         let text_h = sz(s.dimtxt).max(4.0);
         let gap = sz(s.dimgap);
@@ -2583,9 +2530,7 @@ impl canvas::Program<Message> for DimPreview {
         };
         // A linear dimension between two points of the part, its line
         // `offset` away along the unit normal `n`.
-        let linear = |frame: &mut canvas::Frame, a: (f32, f32), b: (f32, f32), n: (f32, f32), offset: f32, content: &str| {
-            let pa = at(a.0, a.1);
-            let pb = at(b.0, b.1);
+        let linear = |frame: &mut canvas::Frame, pa: Point, pb: Point, n: (f32, f32), offset: f32, content: &str| {
             let nn = (n.0, -n.1);
             let off = offset * k * px;
             let la = Point::new(pa.x + nn.0 * off, pa.y + nn.1 * off);
@@ -2635,68 +2580,80 @@ impl canvas::Program<Message> for DimPreview {
             draw_arrow(frame, lb, (-u.0, -u.1), &second);
             draw_text(frame, content, text_at, text_angle);
         };
-        // A family member's preview leaves out the dimensions it is not
-        // for (their texts are empty).
-        if !self.texts.horizontal.is_empty() {
-            linear(&mut frame, (12.0, 28.0), (22.0, 28.0), (0.0, 1.0), 4.0, &self.texts.horizontal);
-            linear(&mut frame, (12.0, 10.0), (12.0, 28.0), (-1.0, 0.0), 6.0, &self.texts.vertical);
-            // The slanted edge, dimensioned on its outer side.
-            let edge_len = (10.0_f32 * 10.0 + 14.0 * 14.0).sqrt();
-            linear(&mut frame, (42.0, 10.0), (32.0, 24.0), (14.0 / edge_len, 10.0 / edge_len), 5.0, &self.texts.aligned);
-        }
-        // Radius: from the hole's centre out through its edge and past the
-        // part's corner, the text at the leader's end.
-        let c = at(hole.0, hole.1);
-        let r = hole.2 * k * px;
-        if !self.texts.radius.is_empty() {
-            let dir = (-std::f32::consts::FRAC_1_SQRT_2, std::f32::consts::FRAC_1_SQRT_2);
-            let edge = Point::new(c.x + dir.0 * r, c.y + dir.1 * r);
-            let reach = r + 9.0 * k * px;
-            let out = Point::new(c.x + dir.0 * reach, c.y + dir.1 * reach);
-            frame.stroke(&canvas::Path::line(c, out), thin(dim_color));
-            let leader = kind_of(&self.arrows.first);
-            draw_arrow(&mut frame, edge, (-dir.0, -dir.1), &leader);
-            let radius_width = self.texts.radius.chars().count() as f32 * text_h * 0.6;
-            draw_text(
-                &mut frame,
-                &self.texts.radius,
-                Point::new(
-                    (out.x - radius_width * 0.5).max(radius_width * 0.5 + 2.0),
-                    out.y + text_h * 0.9,
-                ),
-                0.0,
-            );
-        }
-        // The angle between the bottom edge and the slanted edge.
-        if !self.texts.angle.is_empty() {
-            let v0 = at(42.0, 10.0);
-            let ar = 9.0 * k * px;
-            let a1 = 14.0_f32.atan2(-10.0);
-            let a2 = std::f32::consts::PI;
-            frame.stroke(
-                &canvas::Path::new(|p| {
-                    p.arc(canvas::path::Arc {
-                        center: v0,
-                        radius: ar,
-                        start_angle: iced::Radians(-a2),
-                        end_angle: iced::Radians(-a1),
-                    });
-                }),
-                thin(dim_color),
-            );
-            let e1 = Point::new(v0.x + ar * a1.cos(), v0.y - ar * a1.sin());
-            let e2 = Point::new(v0.x - ar, v0.y);
-            // Each arrow points along the arc, away from the other end.
-            draw_arrow(&mut frame, e1, (-a1.sin(), -a1.cos()), &first);
-            draw_arrow(&mut frame, e2, (0.0, -1.0), &second);
-            let am = (a1 + a2) * 0.5;
-            let inner = ar - text_h * 1.6;
-            draw_text(
-                &mut frame,
-                &self.texts.angle,
-                Point::new(v0.x + inner * am.cos(), v0.y - inner * am.sin()),
-                0.0,
-            );
+        for (cell_index, sample) in samples.iter().enumerate() {
+            let at = |x: f32, y: f32| at(cell_index, x, y);
+            match sample {
+                // Linear: a block, its top edge dimensioned.
+                0 => {
+                    let (a, b, c, d) = (at(7.0, 6.0), at(27.0, 6.0), at(27.0, 16.0), at(7.0, 16.0));
+                    for (from, to) in [(a, b), (b, c), (c, d), (d, a)] {
+                        line(&mut frame, from, to);
+                    }
+                    linear(&mut frame, d, c, (0.0, 1.0), 5.0, &t.horizontal);
+                }
+                // Aligned: a slanted edge, dimensioned on its upper side.
+                1 => {
+                    let (a, b) = (at(8.0, 6.0), at(26.0, 18.0));
+                    line(&mut frame, a, b);
+                    let len = (18.0_f32 * 18.0 + 12.0 * 12.0).sqrt();
+                    linear(&mut frame, a, b, (-12.0 / len, 18.0 / len), 5.0, &t.aligned);
+                }
+                // Radius: a circle, the leader from its centre through the
+                // edge, the text at the leader's end.
+                2 => {
+                    let c = at(13.0, 12.0);
+                    let r = 7.5 * k * px;
+                    frame.stroke(&canvas::Path::circle(c, r), thin(object));
+                    let dir = (std::f32::consts::FRAC_1_SQRT_2, -std::f32::consts::FRAC_1_SQRT_2);
+                    let edge = Point::new(c.x + dir.0 * r, c.y + dir.1 * r);
+                    let reach = r + 6.0 * k * px;
+                    let out = Point::new(c.x + dir.0 * reach, c.y + dir.1 * reach);
+                    frame.stroke(&canvas::Path::line(c, out), thin(dim_color));
+                    let leader = kind_of(&self.arrows.first);
+                    draw_arrow(&mut frame, edge, (-dir.0, -dir.1), &leader);
+                    let width = t.radius.chars().count() as f32 * text_h * 0.6;
+                    draw_text(
+                        &mut frame,
+                        &t.radius,
+                        Point::new(out.x + width * 0.5 + 2.0, out.y),
+                        0.0,
+                    );
+                }
+                // Angular: two edges from a corner, the arc between them.
+                _ => {
+                    let v0 = at(7.0, 6.0);
+                    let (a1, a2) = (0.0_f32, 60.0_f32.to_radians());
+                    let arm = 21.0 * k * px;
+                    for angle in [a1, a2] {
+                        line(&mut frame, v0, Point::new(v0.x + arm * angle.cos(), v0.y - arm * angle.sin()));
+                    }
+                    let ar = 14.0 * k * px;
+                    frame.stroke(
+                        &canvas::Path::new(|p| {
+                            p.arc(canvas::path::Arc {
+                                center: v0,
+                                radius: ar,
+                                start_angle: iced::Radians(-a2),
+                                end_angle: iced::Radians(-a1),
+                            });
+                        }),
+                        thin(dim_color),
+                    );
+                    let e1 = Point::new(v0.x + ar * a1.cos(), v0.y - ar * a1.sin());
+                    let e2 = Point::new(v0.x + ar * a2.cos(), v0.y - ar * a2.sin());
+                    // Each arrow points along the arc, away from the other end.
+                    draw_arrow(&mut frame, e1, (-a1.sin(), -a1.cos()), &first);
+                    draw_arrow(&mut frame, e2, (a2.sin(), a2.cos()), &second);
+                    let am = (a1 + a2) * 0.5;
+                    let outer = ar + text_h * 1.1;
+                    draw_text(
+                        &mut frame,
+                        &t.angle,
+                        Point::new(v0.x + outer * am.cos(), v0.y - outer * am.sin()),
+                        0.0,
+                    );
+                }
+            }
         }
         vec![frame.into_geometry()]
     }

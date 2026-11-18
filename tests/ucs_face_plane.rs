@@ -11,7 +11,7 @@ use document::{entities::Circle, types::Vector3, EntityType};
 use OpenCADStudio::scene::model::{presspull_model, solid_model};
 
 /// Extrude a disc into a puck 10 units tall, centred on the origin.
-fn puck() -> kernel::brep::Body {
+fn puck() -> ocs_brep::Body {
     let entity = EntityType::Circle(Circle::from_center_radius(
         Vector3::new(0.0, 0.0, 0.0),
         100.0,

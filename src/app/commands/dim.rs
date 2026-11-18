@@ -98,7 +98,7 @@ fn selected_edge_body(app: &OpenCADStudio, tab: usize) -> Option<document::Handl
 fn solid_edge_sources(
     app: &mut OpenCADStudio,
     tab: usize,
-) -> Vec<(document::Handle, kernel::brep::Body)> {
+) -> Vec<(document::Handle, ocs_brep::Body)> {
     let handles = app.tabs[tab]
         .scene
         .document

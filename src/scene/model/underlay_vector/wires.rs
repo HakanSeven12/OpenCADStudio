@@ -75,7 +75,7 @@ pub(crate) fn display_wires(
                 .filter(|r| r.len() >= 3)
                 .collect();
             if !rings.is_empty() {
-                let (points, triangles) = kernel::geom2d::triangulate_rings(&rings);
+                let (points, triangles) = ocs_geom::geom2d::triangulate_rings(&rings);
                 let at = *fill_at.entry(key(color)).or_insert_with(|| {
                     fills.push((color, Vec::new()));
                     fills.len() - 1

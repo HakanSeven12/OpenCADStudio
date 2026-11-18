@@ -627,7 +627,7 @@ impl<'a> GroupBuilder<'a> {
             );
         } else {
             let arc =
-                kernel::geom2d::BulgeArc::from_bulge([start.x, start.y], [end.x, end.y], bulge)?;
+                ocs_geom::geom2d::BulgeArc::from_bulge([start.x, start.y], [end.x, end.y], bulge)?;
             self.push_node(
                 node_id,
                 "AcConstrainedArc",
@@ -1782,14 +1782,14 @@ fn group_requires_preservation(document: &Document, group: &Assoc2dConstraintGro
 
 fn work_plane_vector(work_plane: &[Vector3; 3], local: Vector3) -> Option<Vector3> {
     let [origin, axis_x, axis_y] = *work_plane;
-    let plane = kernel::space::Plane::from_axes(
+    let plane = ocs_geom::space::Plane::from_axes(
         [origin.x, origin.y, origin.z],
         [axis_x.x, axis_x.y, axis_x.z],
         [axis_y.x, axis_y.y, axis_y.z],
     );
-    let mut world = kernel::space::Vec3::from(plane.vector_at([local.x, local.y]));
+    let mut world = ocs_geom::space::Vec3::from(plane.vector_at([local.x, local.y]));
     if local.z != 0.0 {
-        world = world + kernel::space::Vec3::from(plane.normal()?) * local.z;
+        world = world + ocs_geom::space::Vec3::from(plane.normal()?) * local.z;
     }
     let world = world.normalize()?;
     Some(Vector3::new(world.x, world.y, world.z))

@@ -187,10 +187,11 @@ fn format_signed_length(value: f64) -> String {
             }
         }
         4 | 5 => {
-            // Architectural and fractional formats use 1/64-inch resolution.
+            // Architectural and fractional read LUPREC as the power of two
+            // of the smallest fraction: 4 rounds to 1/16, 8 to 1/256.
             let sign = if value < 0.0 { "-" } else { "" };
             let abs = value.abs();
-            let denom = 64.0;
+            let denom = 2f64.powi(ctx.luprec.clamp(0, 8) as i32);
             let ticks = (abs * denom).round();
             let (feet, rest) = if ctx.lunits == 4 {
                 let per_foot = 12.0 * denom;
@@ -847,7 +848,7 @@ fn parse_angle_deg_unbounded(value: &str) -> Option<f64> {
 /// Re-exported rather than imported at each call site so the twelve modules
 /// that already reach for `entities::common::BulgeArc` keep working, and so
 /// there is one obvious place to see that the maths moved out.
-pub use kernel::geom2d::BulgeArc;
+pub use ocs_geom::geom2d::BulgeArc;
 
 /// Convert a 2D BulgeArc into a 3D TangentGeom::Arc with its world center,
 /// plane axes, radius, and counter-clockwise start/end sweep angles.
@@ -1046,7 +1047,7 @@ pub(crate) fn tapered_band_points(
         if bulge.abs() < 1e-9 {
             push(Some((p1[0], p1[1])), ew0 as f32);
         } else if let Some(arc) = BulgeArc::from_bulge(p0, p1, bulge) {
-            let samples = arc.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE);
+            let samples = arc.tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE);
             let segments = samples.len().saturating_sub(1).max(1);
             for (index, s) in samples.into_iter().enumerate().skip(1) {
                 let t = index as f64 / segments as f64;
@@ -1072,10 +1073,10 @@ pub(crate) fn wide_band_outline(
     restart_per_segment: bool,
     to_wcs: &dyn Fn(f64, f64) -> (f64, f64, f64),
 ) -> WideBandOutline {
-    let source = kernel::geom2d::Polyline {
+    let source = ocs_geom::geom2d::Polyline {
         vertices: verts
             .iter()
-            .map(|(position, bulge, _, _)| kernel::geom2d::PolylineVertex {
+            .map(|(position, bulge, _, _)| ocs_geom::geom2d::PolylineVertex {
                 position: *position,
                 bulge: *bulge,
             })
@@ -1092,10 +1093,10 @@ pub(crate) fn wide_band_outline(
         .take(segment_count)
         .map(|(_, _, start, end)| [*start, *end])
         .collect();
-    let boundary = kernel::geom2d::polyline_band_boundary(
+    let boundary = ocs_geom::geom2d::polyline_band_boundary(
         &source,
         &widths,
-        kernel::tessellation::DEFAULT_ANGLE,
+        ocs_geom::tessellation::DEFAULT_ANGLE,
     );
     let mut points = Vec::new();
     let mut stations = Vec::new();
@@ -1379,25 +1380,25 @@ mod length_format_tests {
 
     #[test]
     fn fractional_carries_a_rounded_up_fraction() {
-        assert_eq!(with_units(5, 4, 5.99), "5 63/64");
-        assert_eq!(with_units(5, 4, 5.995), "6");
-        assert_eq!(with_units(5, 4, 0.995), "1");
-        assert_eq!(with_units(5, 4, 11.999), "12");
-        assert_eq!(with_units(5, 4, -5.995), "-6");
-        assert_eq!(with_units(5, 4, 0.5), "0 1/2");
-        assert_eq!(with_units(5, 4, 9.25), "9 1/4");
-        assert_eq!(with_units(5, 4, 3.0e17), "300000000000000000");
+        assert_eq!(with_units(5, 6, 5.99), "5 63/64");
+        assert_eq!(with_units(5, 6, 5.995), "6");
+        assert_eq!(with_units(5, 6, 0.995), "1");
+        assert_eq!(with_units(5, 6, 11.999), "12");
+        assert_eq!(with_units(5, 6, -5.995), "-6");
+        assert_eq!(with_units(5, 6, 0.5), "0 1/2");
+        assert_eq!(with_units(5, 6, 9.25), "9 1/4");
+        assert_eq!(with_units(5, 6, 3.0e17), "300000000000000000");
     }
 
     #[test]
     fn architectural_carries_into_feet() {
-        assert_eq!(with_units(4, 4, 11.99), "11 63/64\"");
-        assert_eq!(with_units(4, 4, 0.5), "0 1/2\"");
-        assert_eq!(with_units(4, 4, -9.25), "-9 1/4\"");
-        assert_eq!(with_units(4, 4, 11.999), "1'-0\"");
-        assert_eq!(with_units(4, 4, 23.999), "2'-0\"");
-        assert_eq!(with_units(4, 4, 66.5), "5'-6 1/2\"");
-        assert_eq!(with_units(4, 4, -11.999), "-1'-0\"");
+        assert_eq!(with_units(4, 6, 11.99), "11 63/64\"");
+        assert_eq!(with_units(4, 6, 0.5), "0 1/2\"");
+        assert_eq!(with_units(4, 6, -9.25), "-9 1/4\"");
+        assert_eq!(with_units(4, 6, 11.999), "1'-0\"");
+        assert_eq!(with_units(4, 6, 23.999), "2'-0\"");
+        assert_eq!(with_units(4, 6, 66.5), "5'-6 1/2\"");
+        assert_eq!(with_units(4, 6, -11.999), "-1'-0\"");
     }
 
     #[test]
@@ -1415,7 +1416,7 @@ mod length_format_tests {
     fn formatted_lengths_read_back() {
         for lunits in [3, 4, 5] {
             for value in [0.995f64, 5.995, 11.999, 23.999, 66.5, 9.25] {
-                let shown = with_units(lunits, if lunits == 3 { 4 } else { 4 }, value);
+                let shown = with_units(lunits, 4, value);
                 let read = parse_length(&shown).unwrap_or_else(|| {
                     panic!("lunits {lunits} wrote {shown:?}, which does not read back")
                 });

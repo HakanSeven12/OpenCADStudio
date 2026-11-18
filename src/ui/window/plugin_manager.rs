@@ -11,7 +11,7 @@ use crate::plugin::external::{ExternalPlugin, RegistryEntry, ReleaseInfo};
 use crate::t;
 use crate::ui::style::common::muted_style;
 use iced::widget::{
-    button, column, container, markdown, row, rule, scrollable, text, text_input, Space,
+    button, canvas, column, container, markdown, row, rule, scrollable, text, text_input, Space,
 };
 use iced::{Background, Border, Element, Fill, Length, Theme};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -35,6 +35,15 @@ pub struct MarketView<'a> {
     pub selected_repo: Option<&'a str>,
     pub readmes: &'a FxHashMap<String, Result<markdown::Content, String>>,
     pub readme_loading: &'a FxHashSet<String>,
+    /// Repositories whose release list is being fetched.
+    pub releases_loading: &'a FxHashSet<String>,
+    /// Repositories whose install or update is downloading.
+    pub installing: &'a FxHashSet<String>,
+    /// Repositories installed this session, waiting for a restart: `true` for
+    /// a fresh install, `false` for an update.
+    pub installed_now: &'a FxHashMap<String, bool>,
+    /// Names of the AI tools each loaded plugin offers.
+    pub ai_tools: FxHashMap<String, Vec<String>>,
     pub status: &'a str,
 }
 
@@ -176,7 +185,7 @@ fn external_matches_search(plugin: &ExternalPlugin, repository: Option<&str>, qu
         .any(|command| matches_search(query, &[command]))
 }
 
-fn repository_is_installed(
+pub(crate) fn repository_is_installed(
     repository: &str,
     registry_name: Option<&str>,
     externals: &[ExternalPlugin],
@@ -195,11 +204,7 @@ fn newest_update(installed: &str, releases: &[ReleaseInfo]) -> Option<String> {
     let installed = semver::Version::parse(trim_version_prefix(installed)).ok()?;
     releases
         .iter()
-        .filter(|release| {
-            ocs_plugin_api::manifest::host_accepts_plugin_version(release.api_version)
-                && release.acadrust_compatible
-                && release.rustc_compatible
-        })
+        .filter(|release| release_compatible(release))
         .filter_map(|release| {
             semver::Version::parse(trim_version_prefix(&release.tag))
                 .ok()
@@ -218,26 +223,12 @@ fn external_card<'a>(
     load_error: Option<&str>,
     disabled: bool,
     selected: bool,
+    progress: Option<Element<'a, Message>>,
+    ai_tools: Option<&[String]>,
 ) -> Element<'a, Message> {
     let failed_old_api = load_error.is_some() && !p.api_compatible();
-    let acadrust_mismatch = p.acadrust_declared && !p.acadrust_compatible();
-    let rustc_mismatch =
-        ocs_plugin_api::version_info::uses_acadrust_gate(p.api_version) && !p.rustc_compatible();
-    let (status, kind) = if loaded && disabled {
-        (t!("Disabled"), StatusKind::Muted)
-    } else if loaded {
-        (t!("Loaded"), StatusKind::Success)
-    } else if !p.api_compatible() || failed_old_api {
-        (t!("API incompatible"), StatusKind::Danger)
-    } else if acadrust_mismatch || rustc_mismatch {
-        (t!("Incompatible"), StatusKind::Danger)
-    } else if load_error.is_some() {
-        (t!("Load failed"), StatusKind::Danger)
-    } else if !p.lib_present {
-        (t!("No library"), StatusKind::Warning)
-    } else {
-        (t!("Restart to load"), StatusKind::Warning)
-    };
+    let installed = InstalledStatus::of(p, loaded, disabled, load_error);
+    let (status, kind) = (installed.label(), installed.kind());
     let header = row![
         text(p.name.clone()).size(15),
         Space::new().width(8),
@@ -262,6 +253,13 @@ fn external_card<'a>(
             ))
             .size(11)
             .style(muted_style),
+        );
+    }
+    if let Some(tools) = ai_tools {
+        info_body = info_body.push(
+            text(t!("AI tools:  %{tools}", tools = tools.join(", ")))
+                .size(11)
+                .style(muted_style),
         );
     }
     if let Some(error) = load_error {
@@ -293,7 +291,10 @@ fn external_card<'a>(
     };
 
     let mut actions = row![Space::new().width(Fill)].align_y(iced::Center);
-    if let (Some(repo), Some(tag)) = (repository, update_tag) {
+    if let Some(progress) = progress {
+        actions = actions.push(progress);
+        actions = actions.push(Space::new().width(6));
+    } else if let (Some(repo), Some(tag)) = (repository, update_tag) {
         actions = actions.push(pill_button(
             t!("Update to  %{tag}", tag = tag),
             Message::PluginUpdate(repo, tag),
@@ -351,13 +352,177 @@ fn pill_icon_button<'a>(
         .into()
 }
 
+/// A turning arc in its colour, drawn afresh each frame from the wall clock;
+/// the view is redrawn while an install or a release check runs.
+struct Spinner(fn(&Theme) -> iced::Color);
+
+impl canvas::Program<Message> for Spinner {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &iced::Renderer,
+        theme: &Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let millis = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_millis() % 1000);
+        let start = millis as f32 / 1000.0 * std::f32::consts::TAU;
+        let arc = canvas::Path::new(|path| {
+            path.arc(canvas::path::Arc {
+                center: frame.center(),
+                radius: bounds.width.min(bounds.height) / 2.0 - 1.5,
+                start_angle: iced::Radians(start),
+                end_angle: iced::Radians(start + 4.5),
+            });
+        });
+        frame.stroke(
+            &arc,
+            canvas::Stroke::default()
+                .with_width(2.0)
+                .with_color((self.0)(theme))
+                .with_line_cap(canvas::LineCap::Round),
+        );
+        vec![frame.into_geometry()]
+    }
+}
+
+/// What an install or update button turns into once clicked: a disabled
+/// button with a spinner while it downloads, then Restart to load the plugin.
+fn progress_action<'a>(m: &MarketView, repo: &str) -> Option<Element<'a, Message>> {
+    if m.installing.contains(repo) {
+        let content = row![
+            canvas(Spinner(|theme| theme.palette().success.base.text))
+                .width(12)
+                .height(12),
+            text(t!("Installing…")).size(12),
+        ]
+        .spacing(6)
+        .align_y(iced::Center);
+        // No press while it runs, but drawn as the live button it replaced.
+        return Some(
+            button(content)
+                .padding([4, 12])
+                .style(|theme: &Theme, _| button::success(theme, button::Status::Active))
+                .into(),
+        );
+    }
+    m.installed_now.contains_key(repo).then(|| {
+        pill_button(t!("Restart"), Message::PluginRestart, button::primary)
+    })
+}
+
+/// Whether this build can install `release`.
+pub(crate) fn release_compatible(release: &ReleaseInfo) -> bool {
+    ocs_plugin_api::manifest::host_accepts_plugin_version(release.api_version)
+        && release.acadrust_compatible
+        && release.rustc_compatible
+}
+
+/// A repository whose releases are fetched and none of them installs here
+/// (none for this platform, or none this build accepts).
+fn market_incompatible(m: &MarketView, repo: &str) -> bool {
+    !m.installed_now.contains_key(repo)
+        && m.release_tags
+            .get(repo)
+            .is_some_and(|releases| !releases.iter().any(release_compatible))
+}
+
+/// Where an installed package stands; the card's pill and the automation
+/// `plugins` read both come from here.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InstalledStatus {
+    Disabled,
+    Loaded,
+    ApiIncompatible,
+    Incompatible,
+    LoadFailed,
+    NoLibrary,
+    RestartToLoad,
+}
+
+impl InstalledStatus {
+    pub(crate) fn of(
+        p: &ExternalPlugin,
+        loaded: bool,
+        disabled: bool,
+        load_error: Option<&str>,
+    ) -> Self {
+        if loaded && disabled {
+            Self::Disabled
+        } else if loaded {
+            Self::Loaded
+        } else if !p.api_compatible() {
+            Self::ApiIncompatible
+        } else if (p.acadrust_declared && !p.acadrust_compatible())
+            || (ocs_plugin_api::version_info::uses_acadrust_gate(p.api_version)
+                && !p.rustc_compatible())
+        {
+            Self::Incompatible
+        } else if load_error.is_some() {
+            Self::LoadFailed
+        } else if !p.lib_present {
+            Self::NoLibrary
+        } else {
+            Self::RestartToLoad
+        }
+    }
+
+    /// This build cannot run the package as installed.
+    pub(crate) fn incompatible(self) -> bool {
+        matches!(self, Self::ApiIncompatible | Self::Incompatible)
+    }
+
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            Self::Disabled => "disabled",
+            Self::Loaded => "loaded",
+            Self::ApiIncompatible => "api_incompatible",
+            Self::Incompatible => "incompatible",
+            Self::LoadFailed => "load_failed",
+            Self::NoLibrary => "no_library",
+            Self::RestartToLoad => "restart_to_load",
+        }
+    }
+
+    fn label(self) -> Cow<'static, str> {
+        match self {
+            Self::Disabled => t!("Disabled"),
+            Self::Loaded => t!("Loaded"),
+            Self::ApiIncompatible => t!("API incompatible"),
+            Self::Incompatible => t!("Incompatible"),
+            Self::LoadFailed => t!("Load failed"),
+            Self::NoLibrary => t!("No library"),
+            Self::RestartToLoad => t!("Restart to load"),
+        }
+    }
+
+    fn kind(self) -> StatusKind {
+        match self {
+            Self::Disabled => StatusKind::Muted,
+            Self::Loaded => StatusKind::Success,
+            Self::ApiIncompatible | Self::Incompatible | Self::LoadFailed => StatusKind::Danger,
+            Self::NoLibrary | Self::RestartToLoad => StatusKind::Warning,
+        }
+    }
+}
+
 /// Release dropdown + Install (+ optional unlink) for one repo.
 fn install_controls<'a>(
+    m: &MarketView,
     repo: &str,
     releases: Vec<ReleaseInfo>,
     selected: Option<String>,
     removable: bool,
+    progress: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
+    if let Some(progress) = progress {
+        return progress;
+    }
     let repo_s = repo.to_string();
     let tags = releases
         .iter()
@@ -366,6 +531,18 @@ fn install_controls<'a>(
     let selected_release = selected
         .as_ref()
         .and_then(|selected| releases.iter().find(|release| release.tag == *selected));
+    // Releases not fetched yet are still being checked, not missing.
+    if tags.is_empty() && m.releases_loading.contains(repo) {
+        return row![
+            canvas(Spinner(|theme| theme.palette().background.strong.text))
+                .width(12)
+                .height(12),
+            text(t!("Checking releases…")).size(11).style(muted_style),
+        ]
+        .spacing(6)
+        .align_y(iced::Center)
+        .into();
+    }
     let picker: Element<'_, Message> = if tags.is_empty() {
         text(t!("no releases")).size(11).style(muted_style).into()
     } else {
@@ -376,11 +553,7 @@ fn install_controls<'a>(
             .into()
     };
     let action = match selected_release {
-        Some(release)
-            if ocs_plugin_api::manifest::host_accepts_plugin_version(release.api_version)
-                && release.acadrust_compatible
-                && release.rustc_compatible =>
-        {
+        Some(release) if release_compatible(release) => {
             pill_button(
                 t!("Install"),
                 Message::PluginInstall(repo_s.clone()),
@@ -573,7 +746,13 @@ fn registry_notice<'a>(m: &MarketView) -> Option<Element<'a, Message>> {
     })
 }
 
-fn marketplace_section<'a>(m: &MarketView, externals: &[ExternalPlugin]) -> Element<'a, Message> {
+/// The store: compatible entries here, entries no release of which fits this
+/// build pushed onto `incompatible` for the list's last section.
+fn marketplace_section<'a>(
+    m: &MarketView,
+    externals: &[ExternalPlugin],
+    incompatible: &mut Vec<Element<'a, Message>>,
+) -> Element<'a, Message> {
     let mut col = column![text(t!("Available plugins")).size(13).style(primary_style)].spacing(6);
     let mut visible = 0usize;
     if let Some(notice) = registry_notice(m) {
@@ -582,12 +761,13 @@ fn marketplace_section<'a>(m: &MarketView, externals: &[ExternalPlugin]) -> Elem
 
     // Curated registry entries (from the OpenCADStudio repo).
     for e in m.registry {
-        if repository_is_installed(&e.repo, Some(&e.name), externals)
+        // A plugin installed just now keeps its card, its button a Restart.
+        if (repository_is_installed(&e.repo, Some(&e.name), externals)
+            && m.installed_now.get(&e.repo) != Some(&true))
             || !matches_search(m.search, &[&e.name, &e.description, &e.repo])
         {
             continue;
         }
-        visible += 1;
         let tags = m.release_tags.get(&e.repo).cloned().unwrap_or_default();
         let selected = m.selected_tag.get(&e.repo).cloned();
         let mut info = column![text(e.name.clone()).size(14)].spacing(4);
@@ -601,20 +781,27 @@ fn marketplace_section<'a>(m: &MarketView, externals: &[ExternalPlugin]) -> Elem
             .on_press(Message::PluginReadmeSelect(e.repo.clone()));
         let actions = row![
             Space::new().width(Fill),
-            install_controls(&e.repo, tags, selected, false),
+            install_controls(m, &e.repo, tags, selected, false, progress_action(m, &e.repo)),
         ]
         .align_y(iced::Center);
-        col = col.push(market_card(
+        let card = market_card(
             column![info, actions].spacing(8),
             m.selected_repo == Some(e.repo.as_str()),
-        ));
+        );
+        if market_incompatible(m, &e.repo) {
+            incompatible.push(card);
+        } else {
+            visible += 1;
+            col = col.push(card);
+        }
     }
 
     // User-linked repositories join the same catalog, but curated and installed
     // repositories are suppressed so every plugin appears only once.
     for repo in m.repos {
         if m.registry.iter().any(|entry| entry.repo == *repo)
-            || repository_is_installed(repo, None, externals)
+            || (repository_is_installed(repo, None, externals)
+                && m.installed_now.get(repo) != Some(&true))
         {
             continue;
         }
@@ -622,7 +809,6 @@ fn marketplace_section<'a>(m: &MarketView, externals: &[ExternalPlugin]) -> Elem
         if !matches_search(m.search, &[&display_name, repo]) {
             continue;
         }
-        visible += 1;
         let tags = m.release_tags.get(repo).cloned().unwrap_or_default();
         let selected = m.selected_tag.get(repo).cloned();
         let info = button(
@@ -639,13 +825,19 @@ fn marketplace_section<'a>(m: &MarketView, externals: &[ExternalPlugin]) -> Elem
         .on_press(Message::PluginReadmeSelect(repo.clone()));
         let actions = row![
             Space::new().width(Fill),
-            install_controls(repo, tags, selected, true),
+            install_controls(m, repo, tags, selected, true, progress_action(m, repo)),
         ]
         .align_y(iced::Center);
-        col = col.push(market_card(
+        let card = market_card(
             column![info, actions].spacing(8),
             m.selected_repo == Some(repo.as_str()),
-        ));
+        );
+        if market_incompatible(m, repo) {
+            incompatible.push(card);
+        } else {
+            visible += 1;
+            col = col.push(card);
+        }
     }
 
     if visible == 0 && m.registry_error.is_none() && !(m.registry_loading && m.registry.is_empty())
@@ -823,6 +1015,8 @@ pub fn view_window<'a>(
     .style(muted_style);
 
     let mut list = column![].spacing(10);
+    // Installed first, then the store, then whatever this build cannot run.
+    let mut incompatible: Vec<Element<'a, Message>> = Vec::new();
     // Installed external packages (from the plugins folder).
     if externals.is_empty() {
         list = list.push(
@@ -837,24 +1031,49 @@ pub fn view_window<'a>(
             if !external_matches_search(p, repository.as_deref(), market.search) {
                 continue;
             }
-            if visible_installed == 0 {
-                list = list.push(text(t!("Installed")).size(13).style(primary_style));
+            // Installed just now: its store card carries the Restart button.
+            if repository
+                .as_ref()
+                .is_some_and(|repo| market.installed_now.get(repo) == Some(&true))
+            {
+                continue;
             }
-            visible_installed += 1;
             let selected = repository.as_deref() == market.selected_repo;
             let update_tag = repository
                 .as_ref()
                 .and_then(|repo| market.release_tags.get(repo))
                 .and_then(|releases| newest_update(&p.version, releases));
-            list = list.push(external_card(
+            let progress = repository
+                .as_deref()
+                .and_then(|repo| progress_action(&market, repo));
+            let load_error = load_errors.get(&p.id).map(String::as_str);
+            let card = external_card(
                 p,
                 repository,
                 update_tag,
                 loaded.contains(&p.id),
-                load_errors.get(&p.id).map(String::as_str),
+                load_error,
                 disabled.contains(&p.id),
                 selected,
-            ));
+                progress,
+                market.ai_tools.get(&p.id).map(Vec::as_slice),
+            );
+            if InstalledStatus::of(
+                p,
+                loaded.contains(&p.id),
+                disabled.contains(&p.id),
+                load_error,
+            )
+            .incompatible()
+            {
+                incompatible.push(card);
+                continue;
+            }
+            if visible_installed == 0 {
+                list = list.push(text(t!("Installed")).size(13).style(primary_style));
+            }
+            visible_installed += 1;
+            list = list.push(card);
         }
         if visible_installed == 0 && !market.search.trim().is_empty() {
             list = list.push(
@@ -866,7 +1085,14 @@ pub fn view_window<'a>(
     }
     // Marketplace: install from a linked repository's releases.
     list = list.push(Space::new().height(14));
-    list = list.push(marketplace_section(&market, externals));
+    list = list.push(marketplace_section(&market, externals, &mut incompatible));
+    if !incompatible.is_empty() {
+        list = list.push(Space::new().height(14));
+        list = list.push(text(t!("Incompatible")).size(13).style(primary_style));
+        for card in incompatible {
+            list = list.push(card);
+        }
+    }
     let gutter = iced::Padding {
         top: 0.0,
         right: SCROLLBAR_GUTTER,

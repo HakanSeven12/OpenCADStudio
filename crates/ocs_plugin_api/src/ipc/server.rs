@@ -397,7 +397,7 @@ pub fn handle_plugin_request(
             PluginResponse::GeoLocationSet(host.set_geo_location(&location))
         }
         RemoveGeoLocation => PluginResponse::GeoLocationRemoved(host.remove_geo_location()),
-        // V25 scene/widget wire tails — the publish-or-patch contract's
+        // V26 scene/widget wire tails — the publish-or-patch contract's
         // HOST side. The wire layer validates what the transport can verify
         // (decode budgets ran at frame deserialize) and routes the tail to
         // the [`HostApi`] panel-surface methods (the trait's DEFAULTS carry
@@ -874,9 +874,9 @@ mod tests {
     }
 
     #[test]
-    fn v25_panel_surface_arms_delegate_to_the_trait_defaults() {
+    fn v26_panel_surface_arms_delegate_to_the_trait_defaults() {
         // A host that OVERRIDES NONE of the four panel-surface methods (the
-        // out-of-crate implementor shape) must answer the v25 tails exactly
+        // out-of-crate implementor shape) must answer the v26 tails exactly
         // as the transport-era stubs did: structurally invalid → InvalidOp,
         // valid but unpublished → PublisherUnattached, reads → empty/bounded
         // pages. The delegation must not change the semantics for any

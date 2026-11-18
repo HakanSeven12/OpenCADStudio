@@ -198,6 +198,7 @@ impl OpenCADStudio {
         self.active_modal = Some(ModalKind::MLeaderStyle);
         // Linetypes loaded from Select Linetype belong to the session too.
         self.style_stage_begin_linetypes();
+        self.mls_sync_modify();
         Task::none()
     }
 
@@ -470,10 +471,6 @@ impl OpenCADStudio {
         {
             return true;
         }
-        if self.mls.modify.is_some() {
-            self.mleader_style_cancel_modify();
-            return true;
-        }
         false
     }
 
@@ -511,18 +508,83 @@ impl OpenCADStudio {
         self.style_names(StyleKind::MLeader)
     }
 
+    /// The settings under the preview always belong to the selected style:
+    /// a face on another style is dropped and the selected one's opened.
+    pub(super) fn mls_sync_modify(&mut self) {
+        if self.mls.create.is_some() {
+            return;
+        }
+        let i = self.active_tab;
+        let selected = self.mleaderstyle_ref(i).map(|s| s.handle);
+        if let Some(m) = self.mls.modify.as_ref() {
+            if Some(m.handle) == selected {
+                return;
+            }
+            self.mls.modify = None;
+        }
+        let tab = self.mls.last_tab;
+        let _ = self.on_mleader_style_dlg_inner(MlsMsg::Modify);
+        if let Some(m) = self.mls.modify.as_mut() {
+            m.tab = tab;
+        }
+    }
+
+    /// Any change to the selected style's settings gives Apply work.
+    pub(super) fn mls_mark_dirty(&mut self) {
+        if let Some(m) = self.mls.modify.as_mut() {
+            m.dirty = true;
+        }
+    }
+
+    /// Leaving the selected style applies what its settings changed; `Some`
+    /// when a value is refused and the selection must stay.
+    fn mls_apply_before_leaving(&mut self) -> Option<Task<Message>> {
+        let pending = self
+            .mls
+            .modify
+            .as_ref()
+            .is_some_and(|m| m.dirty || m.backup.is_none());
+        if !pending {
+            self.mls.modify = None;
+            return None;
+        }
+        let task = self.mleader_style_ok();
+        self.mls.modify.is_some().then_some(task)
+    }
+
     pub(super) fn on_mleader_style_dlg(&mut self, message: MlsMsg) -> Task<Message> {
+        let changes_value = matches!(
+            message,
+            MlsMsg::Constraint(..)
+                | MlsMsg::ScaleToLayout(..)
+                | MlsMsg::PickOk
+                | MlsMsg::DefaultText
+        );
+        let task = self.on_mleader_style_dlg_inner(message);
+        if let Some(m) = self.mls.modify.as_mut() {
+            m.dirty |= changes_value;
+            self.mls.last_tab = m.tab;
+        }
+        self.mls_sync_modify();
+        task
+    }
+
+    fn on_mleader_style_dlg_inner(&mut self, message: MlsMsg) -> Task<Message> {
         let i = self.active_tab;
         match message {
             MlsMsg::Select(name) => {
-                if self.mls.modify.is_none() {
-                    self.mleaderstyle_selected = name;
-                    self.load_mleaderstyle_bufs(i);
+                if let Some(refused) = self.mls_apply_before_leaving() {
+                    return refused;
                 }
+                self.mleaderstyle_selected = name;
+                self.load_mleaderstyle_bufs(i);
             }
             MlsMsg::ListFilter(in_use) => self.mls.in_use_only = in_use,
             MlsMsg::SetCurrent => self.mleader_style_set_current(),
             MlsMsg::New => {
+                if let Some(refused) = self.mls_apply_before_leaving() {
+                    return refused;
+                }
                 let start = self.mleaderstyle_selected.clone();
                 let annotative = self.mleaderstyle_ref(i).is_some_and(|s| s.is_annotative);
                 self.mls.create = Some(CreateDraft {
@@ -586,6 +648,7 @@ impl OpenCADStudio {
                         second_angle_on: style.second_segment_angle != 0.0,
                         scale_to_layout: style.scale_factor == 0.0 && !style.is_annotative,
                         backup: Some(style),
+                        dirty: false,
                     });
                     self.load_mleaderstyle_bufs(i);
                 }
@@ -818,6 +881,7 @@ impl OpenCADStudio {
                 first_angle_on: style.first_segment_angle != 0.0,
                 second_angle_on: style.second_segment_angle != 0.0,
                 scale_to_layout: style.scale_factor == 0.0 && !style.is_annotative,
+                dirty: false,
             });
         }
         self.load_mleaderstyle_bufs(i);

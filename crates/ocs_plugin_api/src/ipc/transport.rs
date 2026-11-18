@@ -72,7 +72,7 @@ pub fn recv<T: DeserializeOwned>(stream: &mut Stream) -> Result<T, TransportErro
     }
     // Recursive dialog payloads are bounded during decode (see
     // `crate::dialog`): reset the per-frame budget, then let the decoders
-    // refuse deep/wide payloads instead of overflowing the stack. The v25
+    // refuse deep/wide payloads instead of overflowing the stack. The v26
     // scene/widget wire tails decode under the same per-frame discipline
     // (their budget helpers were reserved for this transport wiring).
     crate::dialog::dialog_decode_frame_begin();

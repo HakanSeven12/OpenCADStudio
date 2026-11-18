@@ -2,7 +2,7 @@ use document::entities::{Helix, HelixConstraint, Spline};
 use document::types::Vector3;
 use document::EntityType;
 use glam::DVec3;
-use kernel::space::{HelixCurve, HelixDirection, Vec3};
+use ocs_geom::space::{HelixCurve, HelixDirection, Vec3};
 
 use crate::command::{CadCommand, CmdOption, CmdResult, DynField, WorkingPlane};
 use crate::modules::draw::defaults;
@@ -173,7 +173,7 @@ impl HelixCommand {
         let points = self
             .kernel_curve(height, axis)?
             .nurbs()?
-            .tessellate_angle(kernel::tessellation::DEFAULT_ANGLE);
+            .tessellate_angle(ocs_geom::tessellation::DEFAULT_ANGLE);
         Some(WireModel::solid_f64(
             "helix_preview".to_string(),
             points,

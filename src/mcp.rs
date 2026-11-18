@@ -79,8 +79,14 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// tools; digest repinned deliberately:
 /// 23f45d04c2822dbf8564b7bd171169fc2f83e6dced8c627dc973865db14d5cc0 →
 /// d3748b0592a84ec18be3a52e2c5d5dea3a99ae197d977f49688885a924f6255d.
+/// SCN-039 (upstream merge repin, the ONE sanctioned movement per
+/// SWG-005/ADR-011): upstream's `plugins` read op and the `plugin_call`
+/// execute op (the AI-tools bridge, their API v25) joined the merged schema;
+/// digest repinned deliberately:
+/// d3748b0592a84ec18be3a52e2c5d5dea3a99ae197d977f49688885a924f6255d →
+/// 4c6627ce213cb24f0bb1bc1883cc93fc2087bd3846e13dba99037893454f1bc7.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "d3748b0592a84ec18be3a52e2c5d5dea3a99ae197d977f49688885a924f6255d";
+const TOOL_SCHEMA_DIGEST: &str = "4c6627ce213cb24f0bb1bc1883cc93fc2087bd3846e13dba99037893454f1bc7";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
@@ -121,6 +127,7 @@ const READ_OPS: &[&str] = &[
     "text_search",
     "text_audit",
     "keytips",
+    "plugins",
     "capture",
     "panel_semantics",
     "panel_page",
@@ -175,6 +182,7 @@ const EXECUTE_OPS: &[&str] = &[
     "getpoint",
     "close",
     "sysvar",
+    "plugin_call",
     "layout_create",
     "layout_rename",
     "layout_activate",
@@ -5404,9 +5412,15 @@ mod tests {
         assert!(schema["$defs"]["window"].is_object());
         assert!(schema["$defs"]["batch_step"].is_object());
         let json_str = schema.to_string();
-        // Generates cleanly without exponential blowup: compact ~15KB to 45KB
+        // Generates cleanly without exponential blowup: compact ~15KB to
+        // 45KB. SCN-039 (the upstream merge): the merged surface carries
+        // BOTH sides' sanctioned ops — our
+        // panel_semantics/panel_page/panel_widget_invoke (~1.6KB) on top of
+        // upstream's catalog incl. the new `plugin_call` — measured 45,383
+        // bytes, so the ceiling moves 45,000 → 50,000 deliberately; the
+        // exact content stays pinned by TOOL_SCHEMA_DIGEST.
         assert!(
-            json_str.len() < 45_000,
+            json_str.len() < 50_000,
             "schema size is {} bytes",
             json_str.len()
         );

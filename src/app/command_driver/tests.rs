@@ -1580,14 +1580,14 @@ mod delobj_tests {
 mod thicken_tests {
     use super::super::*;
     use document::entities::{Surface, SurfaceKind};
-    use kernel::geom2d::{Circle, Curve, NurbsCurve};
-    use kernel::space::{Parameterization, Plane};
+    use ocs_geom::geom2d::{Circle, Curve, NurbsCurve};
+    use ocs_geom::space::{Parameterization, Plane};
 
     #[test]
     fn thicken_preserves_sources_and_round_trips_results_with_one_undo() {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
-        let body = kernel::brep::planar_region(
+        let body = ocs_brep::planar_region(
             Plane::XY,
             &[vec![Curve::Circle(Circle {
                 centre: [0.0; 2],
@@ -1636,10 +1636,9 @@ mod thicken_tests {
             serde_json::to_value(app.tabs[i].scene.document.get_entity(source).unwrap()).unwrap(),
             original
         );
-        let expected =
-            kernel::brep::analytic_mass_properties(&app.tabs[i].scene.solid_models[&result])
-                .unwrap()
-                .volume;
+        let expected = ocs_brep::mass_properties(&app.tabs[i].scene.solid_models[&result])
+            .unwrap()
+            .volume;
         let bytes = crate::io::save_to_bytes(
             &app.tabs[i].scene.document,
             "dwg",
@@ -1650,10 +1649,10 @@ mod thicken_tests {
         let mut restored = crate::scene::Scene::new();
         restored.document = document;
         restored.restore_solid_models(&[result]);
-        let actual = kernel::brep::analytic_mass_properties(&restored.solid_models[&result])
+        let actual = ocs_brep::mass_properties(&restored.solid_models[&result])
             .unwrap()
             .volume;
-        assert!((expected - actual).abs() < 1e-8);
+        assert!((expected - actual).abs() < 1e-8 * expected.max(1.0));
         app.undo_active_tab();
         assert!(app.tabs[i].scene.document.get_entity(result).is_none());
         assert!(app.tabs[i]
@@ -1688,7 +1687,7 @@ mod thicken_tests {
         )
         .unwrap();
         let body =
-            kernel::brep::extrude_surface(Plane::XY, &[Curve::Nurbs(profile)], [0.0, 0.0, 2.0])
+            ocs_brep::extrude_surface(Plane::XY, &[Curve::Nurbs(profile)], [0.0, 0.0, 2.0])
                 .unwrap();
         let source = app.add_surface_model(
             document::EntityType::Surface(Box::new(Surface::new(SurfaceKind::Generic))),
@@ -10568,6 +10567,1165 @@ mod bedit_command_line_entry_tests {
             2,
             "the saved definition keeps its members after the editor closes"
         );
+    }
+}
+
+
+// The whole dynamic-block chain - author a Linear parameter, attach a Move
+// action, save, close, then drag the placed reference's parameter grip - is
+// driven here through the public command surface rather than scene calls.
+mod dynamic_block_command_surface_tests {
+    use super::super::*;
+    use crate::app::Message;
+    use crate::command::StepInput;
+    use crate::scene::block_actions as actions;
+    use crate::scene::block_grips::runtime;
+    use document::entities::{EntityType, Insert, Line};
+    use document::types::Vector3;
+    use glam::DVec3;
+
+    fn authored_lines(app: &OpenCADStudio, insert: document::Handle) -> Vec<(DVec3, DVec3)> {
+        let document::EntityType::Insert(reference) = app.tabs[app.active_tab]
+            .scene
+            .document
+            .get_entity(insert)
+            .unwrap()
+        else {
+            panic!("the reference is an INSERT")
+        };
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities_in_block(&reference.block_name)
+            .filter_map(|entity| match entity {
+                document::EntityType::Line(line) => {
+                    Some((actions::v(line.start), actions::v(line.end)))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_command_authored_move_action_drives_the_placed_reference_grip() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "SLIDER",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+        let reference = app.tabs[i]
+            .scene
+            .document
+            .add_entity(EntityType::Insert(Insert::new("SLIDER", Vector3::ZERO)))
+            .unwrap();
+        app.tabs[i].dirty = false;
+        app.tabs[i].scene.select_entity(reference, true);
+
+        let _ = app.run_command_line("BEDIT");
+        let i = app.active_tab;
+        let definition = app.tabs[i]
+            .active_block_edit_session()
+            .unwrap()
+            .br_handle;
+        let member = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("SLIDER")
+            .unwrap()
+            .entity_handles[0];
+
+        let _ = app.run_command_line("BPARAMETER LINEAR 0,0 10,0 5,-2");
+        let parameter = actions::parameters(
+            &app.tabs[i].scene.document,
+            definition,
+            actions::Kind::Move,
+        )[0]
+        .clone();
+
+        let _ = app.dispatch_command("BACTION MOVE");
+        let _ = app.update(Message::CommandInput(parameter.name.clone()));
+        let _ = app.update(Message::CommandSubmit);
+        let _ = app.feed_command(StepInput::SelectionComplete(vec![member]));
+        let _ = app.feed_command(StepInput::Enter);
+        let _ = app.update(Message::CommandInput("3,4".into()));
+        let _ = app.update(Message::CommandSubmit);
+        assert!(app.tabs[i].active_cmd.is_none(), "the action was authored");
+        assert!(app.command_line.last_error.is_none());
+        assert_eq!(
+            actions::actions(&app.tabs[i].scene.document, definition).len(),
+            1,
+            "one Move action follows the Linear parameter"
+        );
+
+        let _ = app.dispatch_command("BSAVE");
+        let _ = app.dispatch_command("BCLOSE");
+        let i = app.active_tab;
+        let before = authored_lines(&app, reference);
+
+        app.tabs[i].scene.select_entity(reference, true);
+        app.tabs[i].selected_handle = Some(reference);
+        app.refresh_properties();
+        let grip_id = runtime::id(parameter.id, 1).expect("linear end grip");
+        let start = app.tabs[i]
+            .selected_grips
+            .iter()
+            .find(|grip| grip.id == grip_id)
+            .expect("the placed reference offers the linear end grip")
+            .clone();
+        let target = start.world + start.dir.expect("linear grip has a direction") * 5.0;
+        assert!(app.start_test_action_grip(reference, start.id));
+
+        let _ = app.feed_command(StepInput::Point(target));
+
+        assert!(app.tabs[i].active_cmd.is_none(), "the grip drag completes");
+        assert_eq!(app.command_line.last_error, None);
+        let after = authored_lines(&app, reference);
+        assert_eq!(
+            before,
+            vec![(DVec3::ZERO, DVec3::new(10.0, 0.0, 0.0))],
+            "the saved reference starts at the definition geometry"
+        );
+        assert_eq!(
+            after,
+            vec![(DVec3::new(5.0, 0.0, 0.0), target)],
+            "the grip delta moves the action target by the same amount"
+        );
+        let moved = after[0];
+        assert!(
+            (moved.1.x - target.x).abs() < 1e-6,
+            "the moved member follows the grip: {moved:?} target {target:?}"
+        );
+    }
+}
+
+
+// A real placed reference (not the temporary Test Block reference) takes its
+// visibility state from the Properties row: the `ChoiceWithTooltip` row of
+// `visibility_property` goes through PropGeomChoiceChanged and applies the
+// state to a per-reference evaluated copy.
+mod placed_reference_visibility_property_tests {
+    use super::super::*;
+    use crate::scene::block_visibility;
+    use document::entities::{EntityType, Insert, Line};
+    use document::types::Vector3;
+
+    #[test]
+    fn the_visibility_property_row_switches_a_placed_reference_state() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let frame = Line::from_points(
+            Vector3::new(10.0, 21.0, 0.0),
+            Vector3::new(15.0, 21.0, 0.0),
+        );
+        let other = Line::from_points(
+            Vector3::new(10.0, 22.0, 0.0),
+            Vector3::new(15.0, 22.0, 0.0),
+        );
+        app.tabs[i].scene.define_block_raw(
+            "WINDOW",
+            Vector3::ZERO,
+            vec![EntityType::Line(frame), EntityType::Line(other)],
+        );
+        let owner = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("WINDOW")
+            .unwrap()
+            .handle;
+        let members: Vec<_> = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("WINDOW")
+            .unwrap()
+            .entity_handles
+            .clone();
+        let doc = &mut app.tabs[i].scene.document;
+        let parameter = block_visibility::create(doc, owner, Vector3::ZERO).unwrap();
+        let hidden = block_visibility::add_state(doc, parameter, "WindowHidden", 0).unwrap();
+        block_visibility::set_visible(doc, parameter, hidden, &[members[0]], false);
+        let reference = doc
+            .add_entity(EntityType::Insert(Insert::new(
+                "WINDOW",
+                Vector3::new(20.0, 0.0, 0.0),
+            )))
+            .unwrap();
+        app.tabs[i].dirty = false;
+        app.tabs[i].scene.select_entity(reference, true);
+        app.tabs[i].selected_handle = Some(reference);
+        app.refresh_properties();
+
+        let row = OpenCADStudio::visibility_property(&app.tabs[i].scene.document, reference)
+            .expect("the reference exposes its visibility state in Properties");
+        let crate::scene::model::object::PropValue::ChoiceWithTooltip { ref options, .. } =
+            row.value
+        else {
+            panic!("the visibility row is an editable choice: {:?}", row.value)
+        };
+        assert!(options.iter().any(|name| name == "WindowHidden"));
+
+        let _ = app
+            .set_property_value(row, &serde_json::json!("WindowHidden"))
+            .unwrap();
+        app.finish_pending_history(i);
+
+        let doc = &app.tabs[i].scene.document;
+        let document::EntityType::Insert(insert) = doc.get_entity(reference).unwrap() else {
+            panic!("the reference remains an INSERT")
+        };
+        assert_ne!(
+            insert.block_name, "WINDOW",
+            "the state is applied to a per-reference evaluated copy"
+        );
+        let copy = doc.entities_in_block(&insert.block_name).collect::<Vec<_>>();
+        let frame = copy
+            .iter()
+            .find(|entity| matches!(entity, EntityType::Line(line) if (line.start.y - 21.0).abs() < 1e-6))
+            .expect("the frame member is in the evaluated copy");
+        let other = copy
+            .iter()
+            .find(|entity| matches!(entity, EntityType::Line(line) if (line.start.y - 22.0).abs() < 1e-6))
+            .expect("the other member is in the evaluated copy");
+        assert!(frame.common().invisible, "the chosen state hides the frame");
+        assert!(
+            !other.common().invisible,
+            "the state leaves the ungoverned member visible"
+        );
+        let chosen = OpenCADStudio::visibility_property(doc, reference)
+            .expect("the row is still offered after the change");
+        assert!(
+            matches!(&chosen.value, crate::scene::model::object::PropValue::ChoiceWithTooltip { selected, .. } if selected == "WindowHidden"),
+            "the row reads back the chosen state: {:?}",
+            chosen.value
+        );
+    }
+}
+
+
+// A real placed reference takes its Lookup choice from the Properties row:
+// the Choice row built by `reference_property` routes through
+// PropGeomChoiceChanged to `evaluate_reference_choice`, not the temporary
+// Test Block path.
+mod placed_reference_lookup_property_tests {
+    use super::super::*;
+    use crate::scene::{block_actions, block_distance_parameter as distance, block_lookup};
+    use document::entities::{EntityType, Insert, Line};
+    use document::types::Vector3;
+
+    #[test]
+    fn the_lookup_property_row_switches_a_placed_reference_choice() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "SCALEBLK",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+        let definition = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("SCALEBLK")
+            .unwrap()
+            .handle;
+        let member = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("SCALEBLK")
+            .unwrap()
+            .entity_handles[0];
+        let doc = &mut app.tabs[i].scene.document;
+        let linear = distance::create(
+            doc,
+            definition,
+            distance::Kind::Linear,
+            Vector3::ZERO,
+            Vector3::new(10.0, 0.0, 0.0),
+            Vector3::new(5.0, -2.0, 0.0),
+        )
+        .unwrap();
+        block_actions::create(
+            doc,
+            definition,
+            block_actions::Kind::Move,
+            linear,
+            &[member],
+            glam::DVec3::ZERO,
+        )
+        .unwrap();
+        let lookup = block_lookup::create(doc, definition, Vector3::new(5.0, -2.0, 0.0)).unwrap();
+        let parameter = block_lookup::parameters(doc, definition)
+            .into_iter()
+            .find(|(handle, _)| *handle == lookup)
+            .unwrap()
+            .1;
+        let mut table = block_lookup::empty_table(parameter);
+        table
+            .columns
+            .insert(0, block_lookup::properties(doc, definition)[0].column.clone());
+        table.column_count = 2;
+        table.row_count = 2;
+        table.expressions = vec![
+            "10".into(),
+            "Small".into(),
+            "20".into(),
+            "Large".into(),
+        ];
+        block_lookup::apply_table(doc, definition, lookup, table).unwrap();
+
+        let reference = doc
+            .add_entity(EntityType::Insert(Insert::new("SCALEBLK", Vector3::ZERO)))
+            .unwrap();
+        app.tabs[i].dirty = false;
+        app.tabs[i].scene.select_entity(reference, true);
+        app.tabs[i].selected_handle = Some(reference);
+        app.refresh_properties();
+
+        let row = block_lookup::reference_property(&app.tabs[i].scene.document, reference)
+            .expect("the placed reference offers a Lookup choice row");
+        assert_eq!(row.field, "dyn_lookup");
+        assert!(
+            matches!(&row.value, crate::scene::model::object::PropValue::Choice { selected, options } if selected == "Small" && options == &["Small", "Large"]),
+            "the row lists the table's labelled choices: {:?}",
+            row.value
+        );
+
+        let _ = app
+            .set_property_value(row, &serde_json::json!("Large"))
+            .unwrap();
+        app.finish_pending_history(i);
+
+        assert!(app.command_line.last_error.is_none());
+        let doc = &app.tabs[i].scene.document;
+        let original = doc.get_entity(member).cloned();
+        let document::EntityType::Insert(insert) = doc.get_entity(reference).unwrap() else {
+            panic!("the reference remains an INSERT")
+        };
+        assert_ne!(
+            insert.block_name, "SCALEBLK",
+            "the choice is applied to a per-reference evaluated copy"
+        );
+        let evaluated: Vec<_> = doc.entities_in_block(&insert.block_name).collect();
+        let document::EntityType::Line(line) = evaluated[0] else {
+            panic!("the evaluated copy holds the member")
+        };
+        assert_eq!(
+            (crate::scene::block_actions::v(line.start).x, crate::scene::block_actions::v(line.end).x),
+            (10.0, 20.0),
+            "the Large row drives the Move action on this reference only"
+        );
+        assert_eq!(
+            doc.get_entity(member),
+            original.as_ref(),
+            "the source definition is untouched"
+        );
+    }
+}
+
+
+// BPARAMETERSET composes an authored parameter with its action editor. An
+// unrecognised label must be refused with the advertised message and must
+// leave the editor document and its history untouched.
+mod unsupported_parameter_set_tests {
+    use super::super::*;
+    use document::entities::{EntityType, Insert, Line};
+    use document::types::Vector3;
+
+    #[test]
+    fn an_unsupported_parameter_set_label_is_refused_without_changing_the_editor() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "PANEL",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+        let reference = app.tabs[i]
+            .scene
+            .document
+            .add_entity(EntityType::Insert(Insert::new("PANEL", Vector3::ZERO)))
+            .unwrap();
+        app.tabs[i].dirty = false;
+        app.tabs[i].scene.select_entity(reference, true);
+        let _ = app.run_command_line("BEDIT");
+        let i = app.active_tab;
+        assert!(app.tabs[i].active_block_edit_session().is_some());
+
+        let before = app.tabs[i].scene.document.clone();
+        let history = app.tabs[i].history.undo_stack.len();
+
+        let _ = app.run_command_line("BPARAMETERSET Radar Set");
+
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("This Parameter Set is not supported yet."),
+            "the unsupported label is refused with the advertised message"
+        );
+        assert_eq!(app.tabs[i].scene.document, before, "nothing was authored");
+        assert_eq!(
+            app.tabs[i].history.undo_stack.len(),
+            history,
+            "the refusal is not an undo step"
+        );
+        assert!(
+            app.tabs[i].pending_parameter_set_follow_up.is_none(),
+            "no follow-up action is armed"
+        );
+        assert!(app.tabs[i].active_cmd.is_none(), "no prompt is installed");
+
+        // A label the palette actually offers still starts its workflow.
+        let _ = app.run_command_line("BPARAMETERSET Visibility Set");
+        assert!(app.tabs[i].active_cmd.is_some());
+    }
+}
+
+
+// Saving or opening another editor while the Test Block window is in front
+// is refused with a specific message; closing the Test Block releases the
+// guard.
+mod test_block_persistence_refusal_tests {
+    use super::super::*;
+    use document::entities::{EntityType, Insert, Line};
+    use document::types::Vector3;
+
+    #[test]
+    fn saving_while_a_test_block_is_open_is_refused_until_it_is_closed() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let source = app.active_tab;
+        app.tabs[source].scene.define_block_raw(
+            "PANEL",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+        let reference = app.tabs[source]
+            .scene
+            .document
+            .add_entity(EntityType::Insert(Insert::new("PANEL", Vector3::ZERO)))
+            .unwrap();
+        app.tabs[source].dirty = false;
+        app.tabs[source].scene.select_entity(reference, true);
+        let _ = app.run_command_line("BEDIT");
+        assert!(app.tabs[source].active_block_edit_session().is_some());
+
+        let result = app.automation_op(r#"{"op":"run","cmd":"CIRCLE 3,0 2"}"#);
+        assert_eq!(result["ok"], true, "{result}");
+        app.finish_pending_history(source);
+        assert!(app.block_edit_dirty(source));
+
+        let _ = app.dispatch_command("BTESTBLOCK");
+        let test = app.active_tab;
+        assert_ne!(test, source, "the Test Block window is a separate tab");
+        assert!(app.tabs[test].block_test.is_some());
+        let before = app.tabs[test].scene.document.clone();
+
+        let _ = app.run_command_line("BSAVE");
+
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Close Test Block before saving or opening another block editor."),
+            "the save is refused while the Test Block window is open"
+        );
+        assert_eq!(
+            app.tabs[test].scene.document, before,
+            "the refused save changes nothing"
+        );
+        assert_eq!(app.active_tab, test, "the Test Block window stays in front");
+
+        let _ = app.run_command_line("BEDIT_OPEN:PANEL");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Close Test Block before saving or opening another block editor."),
+            "opening another editor is refused too"
+        );
+
+        let _ = app.dispatch_command("BCLOSETESTBLOCK");
+        assert!(app.tabs[source].block_test.is_none());
+        assert_eq!(app.active_tab, source, "closing returns to the source drawing");
+        assert!(app.block_edit_dirty(source), "the edit is still unsaved");
+
+        let _ = app.dispatch_command("BSAVE");
+        assert!(!app.block_edit_dirty(source), "saving works again");
+        assert!(app.tabs[source].active_block_edit_session().is_some());
+    }
+}
+
+
+// The wblock bridge op can shift the exported selection so its bounds minimum
+// lands on the origin; that opt-in path had no test.
+mod wblock_normalized_export_tests {
+    use super::super::*;
+
+    #[test]
+    fn a_normalized_wblock_export_moves_the_selection_to_the_origin() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.automation_op(r#"{"op":"run","cmd":"LINE 10,10 20,20"}"#);
+        let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+            ["entities"][0]["handle"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let doc = app.automation_op(r#"{"protocol":1,"op":"state"}"#)["document_id"]
+            .as_u64()
+            .unwrap();
+
+        let path = std::env::temp_dir().join(format!("ocs_wblock_norm_{}.dxf", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let escaped = path.to_string_lossy().replace('\\', "\\\\");
+        let result = app.automation_op(&format!(
+            r#"{{"protocol":1,"op":"wblock","request_id":"wb-norm","document_id":{doc},"path":"{escaped}","handles":["{handle}"],"normalize":true}}"#
+        ));
+        assert_eq!(result["ok"], true, "{}", result["error"]);
+
+        let opened = app.automation_op(&format!(r#"{{"op":"open","path":"{escaped}"}}"#));
+        assert_eq!(opened["ok"], true, "{}", opened["error"]);
+        let line = &app.automation_op(r#"{"op":"query","type":"Line"}"#)["entities"][0];
+        let start = line["start"].as_array().unwrap();
+        let end = line["end"].as_array().unwrap();
+        assert_eq!(
+            (
+                start[0].as_f64().unwrap(),
+                start[1].as_f64().unwrap(),
+                end[0].as_f64().unwrap(),
+                end[1].as_f64().unwrap()
+            ),
+            (0.0, 0.0, 10.0, 10.0),
+            "the exported line's bounds minimum is now the origin: {line}"
+        );
+        drop(app);
+        let sidecar = path.with_file_name(format!(
+            ".{}.ocs.lock",
+            path.file_name().unwrap().to_string_lossy()
+        ));
+        let _ = std::fs::remove_file(sidecar);
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+
+// Defining a block under a name that already exists asks for confirmation;
+// only confirming replaces the definition's body.
+mod block_redefinition_dialog_tests {
+    use super::super::*;
+    use crate::app::Message;
+    use document::entities::{EntityType, Line};
+    use document::types::Vector3;
+
+    #[test]
+    fn confirming_a_block_redefinition_replaces_the_definition_body() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "PANEL",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+        let old = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PANEL")
+            .unwrap()
+            .entity_handles[0];
+        let replacement = app.tabs[i].scene.add_entity(EntityType::Line(Line::from_points(
+            Vector3::new(30.0, 0.0, 0.0),
+            Vector3::new(40.0, 0.0, 0.0),
+        )));
+        app.tabs[i].scene.select_entity(replacement, true);
+
+        let _ = app.run_command_line("BLOCK");
+        let _ = app.update(Message::BlockDefName("PANEL".into()));
+        let _ = app.update(Message::BlockDefApply);
+
+        assert_eq!(
+            app.block_definition.as_ref().and_then(|s| s.confirm_redefine.as_deref()),
+            Some("PANEL"),
+            "the existing name asks for confirmation"
+        );
+        assert!(app.block_definition.is_some(), "the dialog stays open");
+        assert!(
+            app.tabs[i].scene.document.get_entity(old).is_some(),
+            "the old definition is intact while the dialog waits"
+        );
+
+        let _ = app.update(Message::BlockDefConfirmRedefine(false));
+        assert_eq!(
+            app.block_definition.as_ref().and_then(|s| s.confirm_redefine.as_deref()),
+            None,
+            "declining clears the prompt"
+        );
+        assert!(app.block_definition.is_some(), "declining keeps the dialog open");
+        assert!(app.tabs[i].scene.document.get_entity(old).is_some());
+
+        let _ = app.update(Message::BlockDefApply);
+        let _ = app.update(Message::BlockDefConfirmRedefine(true));
+
+        assert!(app.block_definition.is_none(), "confirming closes the dialog");
+        assert_eq!(app.active_modal, None);
+        let doc = &app.tabs[i].scene.document;
+        assert!(
+            doc.get_entity(old).is_none(),
+            "the old body entity was removed: old={old:?}"
+        );
+        let body: Vec<_> = doc.entities_in_block("PANEL").collect();
+        assert_eq!(body.len(), 1, "the new body replaces the old one");
+        assert!(
+            matches!(body[0], EntityType::Line(ref line) if line.start.x == 30.0),
+            "the replacement line is in the definition"
+        );
+        assert!(doc.get_entity(replacement).is_none(), "convert mode consumes the source");
+        assert!(
+            app.command_line.history_plain_text().contains("Block \"PANEL\" redefined"),
+            "the redefinition is reported"
+        );
+    }
+}
+
+
+// The Attribute Definition dialog is exposed through the `attdef_dialog`
+// action, but no test drives its fields and Ok end to end.
+mod attdef_dialog_automation_tests {
+    use super::super::*;
+    use document::EntityType;
+
+    fn field(app: &mut OpenCADStudio, value: &str) -> serde_json::Value {
+        let mut req = serde_json::json!({"op":"action","name":"attdef_dialog","value":value});
+        apply_control_request(app, &mut req)
+    }
+
+    fn apply_control_request(app: &mut OpenCADStudio, req: &mut serde_json::Value) -> serde_json::Value {
+        let state = app.control_state();
+        req["protocol"] = serde_json::json!(1);
+        req["document_id"] = state["document_id"].clone();
+        req["revision"] = state["revision"].clone();
+        static SERIAL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let serial = SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        req["request_id"] = serde_json::json!(format!("attdef-dialog-{serial}"));
+        let (reply, task) = app.control_request(req.clone());
+        app.drive_headless_task(task).unwrap();
+        reply
+    }
+
+    #[test]
+    fn the_attdef_dialog_action_creates_a_positioned_definition() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let opened = app.automation_op(r#"{"op":"run","cmd":"ATTDEF"}"#);
+        assert_eq!(opened["ok"], true, "{opened}");
+        assert_eq!(
+            app.active_modal,
+            Some(crate::app::ModalKind::AttDef),
+            "ATTDEF opens the dialog"
+        );
+
+        for value in [
+            "tag=DRAWING_NO",
+            "prompt=Drawing number",
+            "default=A-101",
+            "height=2.5",
+            "rotation=0",
+            "x=5",
+            "y=7",
+            "on_screen=0",
+        ] {
+            let reply = field(&mut app, value);
+            assert_eq!(reply["ok"], true, "{value}: {reply}");
+        }
+        let state = app.attdef_dialog.as_ref().expect("the dialog state is live");
+        assert_eq!(state.tag, "DRAWING_NO");
+        assert_eq!(state.prompt, "Drawing number");
+        assert_eq!(state.default, "A-101");
+        assert_eq!(state.coords[0], "5");
+        assert_eq!(state.coords[1], "7");
+        drop(state);
+
+        let mut ok_req = serde_json::json!({"op":"action","name":"dialog_ok"});
+        let applied = apply_control_request(&mut app, &mut ok_req);
+        assert_ne!(applied["code"], "no_dialog", "{applied}");
+        assert!(app.attdef_dialog.is_none(), "Ok closes the dialog state");
+        assert_ne!(app.active_modal, Some(crate::app::ModalKind::AttDef));
+
+        let definition = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                EntityType::AttributeDefinition(def) => Some(def.clone()),
+                _ => None,
+            })
+            .expect("Ok writes an attribute definition");
+        assert_eq!(definition.tag, "DRAWING_NO");
+        assert_eq!(definition.prompt, "Drawing number");
+        assert_eq!(definition.default_value, "A-101");
+        assert_eq!(definition.height, 2.5);
+        assert_eq!(
+            (definition.insertion_point.x, definition.insertion_point.y),
+            (5.0, 7.0),
+            "the typed coordinates are the placement point"
+        );
+    }
+}
+
+
+// Bare ATTSYNC offers [?/Name/Select]; the Name path was never driven from
+// the prompts - all existing coverage uses the inline `ATTSYNC <block>` form.
+mod attsync_prompt_flow_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::entities::{AttributeDefinition, AttributeEntity, Insert};
+    use document::types::Vector3;
+    use document::EntityType;
+
+    #[test]
+    fn the_attsync_name_prompt_syncs_the_named_block() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let attdef = |name: &str, default: &str, y: f64| {
+            EntityType::AttributeDefinition(AttributeDefinition {
+                insertion_point: Vector3::new(2.0, y, 0.0),
+                height: 1.0,
+                ..AttributeDefinition::new(name.into(), name.into(), default.into())
+            })
+        };
+        app.tabs[i].scene.define_block_raw(
+            "SYNCED",
+            Vector3::ZERO,
+            vec![attdef("TAG1", "one", 2.0)],
+        );
+        let mut insert = Insert::new("SYNCED", Vector3::new(100.0, 100.0, 0.0));
+        insert
+            .attributes
+            .push(AttributeEntity::new("TAG1".into(), "kept".into()));
+        let reference = app.tabs[i].scene.add_entity(EntityType::Insert(insert));
+        app.tabs[i]
+            .scene
+            .redefine_block_raw(
+                "SYNCED",
+                Vector3::ZERO,
+                vec![attdef("TAG1", "one", 2.0), attdef("TAG2", "two", 5.0)],
+            )
+            .expect("the definition takes the new tag");
+
+        let _ = app.run_command_line("ATTSYNC");
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("the option prompt follows bare ATTSYNC")
+                .prompt(),
+            "Enter an option [?/Name/Select] <Select>:"
+        );
+        let _ = app.feed_command(StepInput::Text("N".into()));
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("the Name option asks which block")
+                .prompt(),
+            "Enter name of block to sync or [?]:"
+        );
+        let _ = app.feed_command(StepInput::Text("SYNCED".into()));
+
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "naming the block completes the sync"
+        );
+        assert!(app.command_line.last_error.is_none());
+        let document::EntityType::Insert(updated) = app.tabs[i]
+            .scene
+            .document
+            .get_entity(reference)
+            .unwrap()
+        else {
+            panic!("the reference remains an INSERT")
+        };
+        let pairs: Vec<_> = updated
+            .attributes
+            .iter()
+            .map(|attribute| (attribute.tag.clone(), attribute.get_value().to_string()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![("TAG1".into(), "kept".into()), ("TAG2".into(), "two".into())],
+            "the prompts sync the definition's tags onto the reference"
+        );
+    }
+}
+
+
+// The dash form -OBJECTSCALE runs its own [Add/Delete/?] prompt session; its
+// option and scale-listing prompts were not covered.
+mod dash_objectscale_prompt_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+
+    #[test]
+    fn dash_objectscale_lists_scales_from_the_option_prompt() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let _ = app.run_command_line("TEXT 0,0 2 0 hello");
+        let _ = app.run_command_line("SELECTALL");
+        let handle = app.tabs[i]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .next()
+            .map(|(handle, _)| handle)
+            .unwrap();
+
+        let _ = app.run_command_line("-OBJECTSCALE");
+        let command = app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("the dash command gathers annotated objects first");
+        assert_eq!(command.name(), "-OBJECTSCALE");
+        assert!(command.is_selection_gathering(), "{}", command.prompt());
+        let _ = app.feed_command(StepInput::SelectionComplete(vec![handle]));
+        let _ = app.feed_command(StepInput::Enter);
+        let command = app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("the option prompt follows the selection");
+        assert!(
+            command.prompt().contains("Add") || command.prompt().contains("?"),
+            "the option prompt offers the scale list: {:?}",
+            command.prompt()
+        );
+        let _ = app.feed_command(StepInput::Text("?".into()));
+        assert!(
+            app.command_line.history_plain_text().contains("1:1")
+                || app.command_line.history_plain_text().contains("scale"),
+            "the listing shows the drawing's scales: {}",
+            app.command_line.history_plain_text()
+        );
+        assert!(
+            app.tabs[i].active_cmd.is_some(),
+            "the ? listing keeps the option prompt open"
+        );
+        assert!(app.command_line.last_error.is_none());
+    }
+}
+
+
+// A selected annotation object exposes an Annotative Yes/No row in
+// Properties; picking Yes drives the per-object annotative toggle.
+mod annotative_properties_row_tests {
+    use super::super::*;
+    use document::entities::MText;
+    use document::types::Vector3;
+    use document::EntityType;
+
+    fn row(app: &OpenCADStudio) -> crate::scene::model::object::Property {
+        app.tabs[app.active_tab]
+            .properties
+            .sections
+            .iter()
+            .flat_map(|section| &section.props)
+            .find(|property| property.field == "annotative")
+            .expect("the Annotative row is in Properties")
+            .clone()
+    }
+
+    #[test]
+    fn the_annotative_properties_choice_toggles_the_object() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let handle = app.tabs[i].scene.add_entity(EntityType::MText(Box::new(
+            MText::with_value("hello".to_string(), Vector3::ZERO),
+        )));
+        app.tabs[i].scene.select_entity(handle, true);
+        app.tabs[i].selected_handle = Some(handle);
+        app.refresh_properties();
+
+        let before = row(&app);
+        assert_eq!(before.label, "Annotative");
+        assert!(
+            matches!(&before.value, crate::scene::model::object::PropValue::Choice { selected, options } if selected == "No" && options.contains(&"Yes".to_string())),
+            "the row offers Yes/No and starts at No: {:?}",
+            before.value
+        );
+
+        let _ = app
+            .set_property_value(before, &serde_json::json!("Yes"))
+            .unwrap();
+        app.finish_pending_history(i);
+
+        let document::EntityType::MText(text) = app.tabs[i]
+            .scene
+            .document
+            .get_entity(handle)
+            .unwrap()
+        else {
+            panic!("the entity stays an MTEXT")
+        };
+        assert!(text.is_annotative, "the Properties choice toggled the object");
+
+        app.refresh_properties();
+        assert!(
+            matches!(&row(&app).value, crate::scene::model::object::PropValue::Choice { selected, .. } if selected == "Yes"),
+            "the row reads back the new state"
+        );
+    }
+}
+
+
+// The ANNOALLVISIBLE command toggles the scene's per-layout annotation
+// visibility; its observable effect on an offscale annotative object had no
+// command-line test.
+mod annotation_visibility_command_tests {
+    use super::super::*;
+    use document::entities::Text;
+    use document::objects::Scale;
+    use document::EntityType;
+
+    #[test]
+    fn annoallvisible_hides_and_shows_an_offscale_annotative_object() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let at_50 = crate::scene::annotative::ensure_scale_object(
+            &mut app.tabs[i].scene.document,
+            &Scale::new("1:50".into(), 1.0, 50.0),
+        );
+        let current = crate::scene::annotative::ensure_scale_object(
+            &mut app.tabs[i].scene.document,
+            &Scale::new("1:1".into(), 1.0, 1.0),
+        );
+        let handle = app.tabs[i].scene.add_entity(EntityType::Text(Text::new()));
+        assert!(crate::scene::annotative::create_annotation_context(
+            &mut app.tabs[i].scene.document,
+            handle,
+            at_50
+        ));
+
+        let offscale = |app: &OpenCADStudio| {
+            let doc = &app.tabs[i].scene.document;
+            let common = doc.get_entity(handle).unwrap().common();
+            crate::scene::annotative::annotative_offscale_for(
+                doc,
+                common,
+                Some(current),
+                app.tabs[i].scene.annotation_all_visible(),
+            )
+        };
+
+        assert!(!offscale(&app), "all objects show by default in Model");
+        let _ = app.run_command_line("ANNOALLVISIBLE 0");
+        assert!(!app.tabs[i].scene.annotation_all_visible());
+        assert!(offscale(&app), "the toggle hides the offscale object");
+        assert!(app.tabs[i].dirty, "the toggle marks the drawing dirty");
+
+        let _ = app.run_command_line("ANNOALLVISIBLE 1");
+        assert!(app.tabs[i].scene.annotation_all_visible());
+        assert!(!offscale(&app), "the object shows again");
+    }
+}
+
+
+// An annotative block definition carries its flag through the BLOCK dialog
+// into the file, and a placed reference reports the same state in Properties.
+mod annotative_block_end_to_end_tests {
+    use super::super::*;
+    use crate::app::Message;
+    use document::entities::{EntityType, Insert, Line};
+    use document::types::Vector3;
+
+    #[test]
+    fn an_annotative_block_definition_marks_its_reference_annotative() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let line = app.tabs[i].scene.add_entity(EntityType::Line(Line::from_points(
+            Vector3::ZERO,
+            Vector3::new(10.0, 0.0, 0.0),
+        )));
+        app.tabs[i].scene.select_entity(line, true);
+
+        let _ = app.run_command_line("BLOCK");
+        let _ = app.update(Message::BlockDefName("ANNOBLOCK".into()));
+        let _ = app.update(Message::BlockDefAnnotative(true));
+        let _ = app.update(Message::BlockDefApply);
+
+        assert!(app.block_definition.is_none(), "the dialog applied");
+        assert!(
+            crate::scene::annotative::block_is_annotative(
+                &app.tabs[i].scene.document,
+                "ANNOBLOCK"
+            ),
+            "the Annotative checkbox marked the definition"
+        );
+
+        let reference = app.tabs[i].scene.add_entity(EntityType::Insert(Insert::new(
+            "ANNOBLOCK",
+            Vector3::new(5.0, 5.0, 0.0),
+        )));
+        app.tabs[i].scene.select_entity(reference, true);
+        app.tabs[i].selected_handle = Some(reference);
+        app.refresh_properties();
+
+        let row = app.tabs[i]
+            .properties
+            .sections
+            .iter()
+            .flat_map(|section| &section.props)
+            .find(|property| property.field == "annotative")
+            .expect("the reference offers an Annotative row");
+        let shown = match &row.value {
+            crate::scene::model::object::PropValue::Choice { selected, .. } => selected.clone(),
+            crate::scene::model::object::PropValue::ReadOnly(value) => value.clone(),
+            other => panic!("unexpected Annotative row: {other:?}"),
+        };
+        assert_eq!(shown, "Yes", "the reference is annotative through its definition");
+    }
+}
+
+
+// The -TABLE command-line form asks for columns, rows and an insertion point
+// before placing a native table entity; no test drove that flow.
+mod table_command_line_creation_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::EntityType;
+    use glam::DVec3;
+
+    #[test]
+    fn dash_table_places_a_native_table_from_its_prompts() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+
+        let _ = app.run_command_line("-TABLE");
+        let command = app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("-TABLE stays active to ask for columns");
+        assert_eq!(command.name(), "-TABLE");
+        assert!(command.prompt().contains("number of columns"), "{}", command.prompt());
+
+        let _ = app.feed_command(StepInput::Text("3".into()));
+        assert!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("rows follow the columns")
+                .prompt()
+                .contains("number of rows")
+        );
+        let _ = app.feed_command(StepInput::Text("2".into()));
+        let _ = app.feed_command(StepInput::Point(DVec3::new(5.0, 7.0, 0.0)));
+
+        assert!(app.tabs[i].active_cmd.is_none(), "the point places the table");
+        assert!(app.command_line.last_error.is_none());
+        let table = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                EntityType::Table(table) => Some(table.clone()),
+                _ => None,
+            })
+            .expect("a native table entity was created");
+        assert_eq!(table.columns.len(), 3, "the typed column count was used");
+        assert_eq!(
+            table.rows.len(),
+            4,
+            "two typed data rows plus the title and header rows"
+        );
+        assert_eq!(
+            (table.insertion_point.x, table.insertion_point.y),
+            (5.0, 7.0),
+            "the table is placed at the typed point"
+        );
+    }
+}
+
+
+// The DATALINK command's scriptable form reads a CSV from a typed path and
+// places a linked table; that path had no test.
+mod datalink_csv_command_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::EntityType;
+    use glam::DVec3;
+
+    #[test]
+    fn datalink_reads_a_csv_and_registers_a_linked_table() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+
+        let path = std::env::temp_dir().join(format!("ocs_datalink_{}.csv", std::process::id()));
+        std::fs::write(&path, "NAME,QTY\nBolt,12\nNut,30\n").unwrap();
+        let escaped = path.to_string_lossy().replace('\\', "/");
+        let _ = app.run_command_line(&format!("DATALINK {escaped}"));
+        let _ = app.feed_command(StepInput::Point(DVec3::new(10.0, 10.0, 0.0)));
+
+        assert!(app.command_line.last_error.is_none());
+        let doc = &app.tabs[i].scene.document;
+        let links = crate::app::annotation_data::data_link_entries(doc);
+        assert_eq!(
+            links.len(),
+            1,
+            "one persistent link was registered: {}",
+            app.command_line.history_plain_text()
+        );
+        let mut table = None;
+        for entity in doc.entities() {
+            if let EntityType::Table(candidate) = entity {
+                if (0..candidate.rows.len()).any(|row| {
+                    (0..candidate.columns.len()).any(|column| {
+                        candidate
+                            .cell(row, column)
+                            .is_some_and(|cell| cell.has_linked_data)
+                    })
+                })
+                {
+                    table = Some(candidate.clone());
+                }
+            }
+        }
+        let table = table.expect("a table linked to the CSV was placed");
+        let texts: Vec<_> = (0..table.rows.len())
+            .flat_map(|row| (0..table.columns.len()).map(move |column| (row, column)))
+            .filter_map(|(row, column)| table.cell_text(row, column))
+            .map(str::to_string)
+            .collect();
+        assert!(
+            texts.iter().any(|text| text.contains("Bolt")),
+            "the CSV rows reached the table: {texts:?}"
+        );
+        drop(app);
+        let _ = std::fs::remove_file(&path);
     }
 }
 

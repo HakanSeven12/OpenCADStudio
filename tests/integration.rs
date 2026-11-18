@@ -60,6 +60,9 @@ mod pdf_export_images_check;
 #[path = "pdf_export_text_check.rs"]
 mod pdf_export_text_check;
 
+#[path = "pdf_page_tree_cycle.rs"]
+mod pdf_page_tree_cycle;
+
 #[path = "presspull_curved_boundary.rs"]
 mod presspull_curved_boundary;
 

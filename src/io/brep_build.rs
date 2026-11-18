@@ -10,11 +10,11 @@
 
 use std::f64::consts::TAU;
 
-use kernel::brep::{
+use ocs_brep::{
     Body, Coedge, Curve3, Edge, EdgeKey, Face, Loop, Lump, Provenance, Shell, Surface, Vertex,
     VertexKey,
 };
-use kernel::space::{Plane, Vec3};
+use ocs_geom::space::{Plane, Vec3};
 
 /// A face as the file gives it: its surface, whether its outward normal
 /// agrees with the surface's, and its loops — the outer one first — as
@@ -110,7 +110,7 @@ impl Builder {
     pub fn edge(&mut self, curve: Curve3, start: VertexKey, end: VertexKey) -> Option<EdgeKey> {
         let (a, b) = (self.point(start)?, self.point(end)?);
         let mut curve = match curve {
-            Curve3::Nurbs(nurbs) => match kernel::brep::analytic_curve(&nurbs) {
+            Curve3::Nurbs(nurbs) => match ocs_brep::analytic_curve(&nurbs) {
                 Some(line @ Curve3::Line(_)) => line,
                 Some(analytic) if !self.closed_only || nurbs.is_closed() => analytic,
                 _ => Curve3::Nurbs(nurbs),
@@ -165,7 +165,7 @@ impl Builder {
 
     /// The seam of a whole sphere: the meridian through the frame's x
     /// direction, from the south pole to the north, once each way.
-    fn sphere_seam(&mut self, sphere: &kernel::brep::Sphere) -> Option<Vec<(EdgeKey, bool)>> {
+    fn sphere_seam(&mut self, sphere: &ocs_brep::Sphere) -> Option<Vec<(EdgeKey, bool)>> {
         let frame = &sphere.frame;
         let c = Vec3::from(frame.origin);
         let x = Vec3::from(frame.x_axis).normalize()?;
@@ -176,7 +176,7 @@ impl Builder {
         let south = self.vertex((c - z * r).to_array());
         let north = self.vertex((c + z * r).to_array());
         let seam = self.edge(
-            Curve3::Circle(kernel::brep::Circle3 {
+            Curve3::Circle(ocs_brep::Circle3 {
                 plane: meridian,
                 radius: r,
             }),
@@ -201,7 +201,7 @@ impl Builder {
             });
             for spec in faces {
                 let (surface, forward) = match spec.surface {
-                    Surface::Nurbs(nurbs) => match kernel::brep::analytic_surface(&nurbs) {
+                    Surface::Nurbs(nurbs) => match ocs_brep::analytic_surface(&nurbs) {
                         Some((analytic, agrees))
                             if !self.closed_only
                                 || matches!(analytic, Surface::Plane(_))
@@ -271,19 +271,19 @@ impl Builder {
         let tolerance = tolerance
             .filter(|t| t.is_finite() && *t > 0.0)
             .or_else(|| {
-                let bounds = kernel::brep::body_bounds(&self.body)?;
+                let bounds = ocs_brep::body_bounds(&self.body)?;
                 Some(1e-7 * (Vec3::from(bounds.max) - Vec3::from(bounds.min)).length())
             });
         let Some(tolerance) = tolerance.filter(|t| *t > 0.0) else {
             return;
         };
         if solid {
-            kernel::brep::heal::sew_into_solid(&mut self.body, tolerance);
+            ocs_brep::heal::sew_into_solid(&mut self.body, tolerance);
         } else {
-            kernel::brep::heal::sew(&mut self.body, tolerance);
+            ocs_brep::heal::sew(&mut self.body, tolerance);
         }
         if !self.body.validate().is_empty() {
-            kernel::brep::heal::fix_loops(&mut self.body);
+            ocs_brep::heal::fix_loops(&mut self.body);
         }
     }
 }

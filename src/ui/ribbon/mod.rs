@@ -671,6 +671,39 @@ impl Ribbon {
         self.refresh_user_tab();
     }
 
+    /// Whether a panel of the user's has `command`.
+    pub fn my_tools_has(&self, command: &str) -> bool {
+        let command = command.trim();
+        self.layout
+            .custom_panels
+            .iter()
+            .any(|panel| panel.commands.iter().any(|c| c.trim().eq_ignore_ascii_case(command)))
+    }
+
+    /// Take `command` off the user's panels, or add it to the last one (a
+    /// first panel is made for it).
+    pub fn my_tools_toggle(&mut self, command: &str) {
+        if self.my_tools_has(command) {
+            let command = command.trim();
+            for panel in &mut self.layout.custom_panels {
+                panel
+                    .commands
+                    .retain(|c| !c.trim().eq_ignore_ascii_case(command));
+            }
+        } else {
+            if self.layout.custom_panels.is_empty() {
+                self.layout.custom_panels.push(CustomPanel {
+                    title: crate::tr!("ribbon-customize", "default-title", n = 1),
+                    commands: Vec::new(),
+                });
+            }
+            if let Some(panel) = self.layout.custom_panels.last_mut() {
+                panel.commands.push(command.trim().to_string());
+            }
+        }
+        self.refresh_user_tab();
+    }
+
     /// The My Tools tab, rebuilt from the user's panels; gone without any.
     fn refresh_user_tab(&mut self) {
         let active_id = self.modules.get(self.active).map(|module| module.id());

@@ -31,6 +31,7 @@ pub mod insert;
 pub mod layout;
 pub mod manage;
 pub mod model;
+pub mod surface;
 pub mod parametric;
 pub mod table_cell;
 pub mod text_editor;

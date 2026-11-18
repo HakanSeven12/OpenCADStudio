@@ -599,7 +599,7 @@ fn copying_two_constrained_entities_carries_their_constraint_along() {
 fn a_duplicated_horizontal_constraint_is_reported_as_redundant() {
     // `solve_scope` resolves the redundant row back to the
     // `ConstraintId` a `ConflictResolverPanel` would name.
-    use kernel_constraints::diagnosis::RedundancyKind;
+    use ocs_constraints::diagnosis::RedundancyKind;
     use OpenCADStudio::scene::parametric_constraints::ConstraintKind;
 
     let mut scene = Scene::new();
@@ -636,7 +636,7 @@ fn a_duplicated_horizontal_constraint_is_reported_as_redundant() {
 
 #[test]
 fn two_conflicting_distance_targets_are_reported_as_conflicting() {
-    use kernel_constraints::diagnosis::RedundancyKind;
+    use ocs_constraints::diagnosis::RedundancyKind;
     use OpenCADStudio::scene::parametric_constraints::ConstraintKind;
 
     let mut scene = Scene::new();
@@ -1283,7 +1283,7 @@ fn point_on_curve_constraint_keeps_a_point_within_an_arcs_sweep() {
         "point should land exactly on the arc: dist={dist} radius={radius}"
     );
     assert!(
-        kernel::geom2d::angle_within_arc(
+        ocs_geom::geom2d::angle_within_arc(
             (p.y - center.y).atan2(p.x - center.x),
             start_angle,
             end_angle,
@@ -1317,7 +1317,7 @@ fn point_on_curve_constraint_keeps_a_point_within_a_polyline_arc_segment() {
     let EntityType::LwPolyline(polyline) = scene.document.get_entity(polyline).unwrap() else {
         panic!("expected a lightweight polyline");
     };
-    let arc = kernel::geom2d::BulgeArc::from_bulge(
+    let arc = ocs_geom::geom2d::BulgeArc::from_bulge(
         [
             polyline.vertices[0].location.x,
             polyline.vertices[0].location.y,
@@ -1332,7 +1332,7 @@ fn point_on_curve_constraint_keeps_a_point_within_a_polyline_arc_segment() {
     let distance = (point.x - arc.center[0]).hypot(point.y - arc.center[1]);
     assert!((distance - arc.radius).abs() < 1e-6);
     assert!(
-        kernel::geom2d::angle_within_arc(
+        ocs_geom::geom2d::angle_within_arc(
             (point.y - arc.center[1]).atan2(point.x - arc.center[0]),
             arc.start_angle,
             arc.start_angle + arc.sweep,
@@ -1579,7 +1579,7 @@ fn concentric_constraint_does_not_reshape_the_ellipse_when_its_center_actually_m
     // ALREADY concentric with the ellipse, so Concentric's equations start
     // out satisfied and the ellipse's center never actually has to move —
     // it doesn't exercise the bug at all. Here the circle starts elsewhere,
-    // forcing a real center move, which is exactly when `kernel_constraints::geo::
+    // forcing a real center move, which is exactly when `ocs_constraints::geo::
     // Ellipse`'s absolute `focus1` point used to get left behind: `center`
     // moved to meet the circle, `focus1` didn't (nothing else referenced
     // it), so the derived major-axis direction/length and minor/major

@@ -11,7 +11,7 @@ use document::{
     Document, EntityType, Handle,
 };
 use glam::DVec3;
-use kernel::geom2d::{self, Curve, Extent, Line, Tolerance};
+use ocs_geom::geom2d::{self, Curve, Extent, Line, Tolerance};
 
 #[derive(Clone)]
 pub struct Alignment {

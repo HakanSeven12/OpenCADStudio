@@ -152,6 +152,8 @@ pub struct Folders {
     pub plot_styles_moved: bool,
     /// The user's support files folder, when one is chosen.
     pub support: Option<String>,
+    /// Where NEW looks for drawing templates.
+    pub templates: Option<String>,
 }
 
 /// Values read from the current drawing's header rather than from preferences.
@@ -2159,6 +2161,12 @@ pub fn view_window<'a>(
         folder_row(
             crate::t!("Color book locations"),
             folders.color_books.clone(),
+            None,
+        ),
+        Space::new().height(12),
+        folder_row(
+            crate::t!("Drawing templates"),
+            folders.templates.clone(),
             None,
         ),
         Space::new().height(16),

@@ -112,6 +112,90 @@ fn source_cache() -> &'static Mutex<(HashMap<String, Arc<Vec<u8>>>, VecDeque<Str
     SOURCES.get_or_init(|| Mutex::new((HashMap::default(), VecDeque::new())))
 }
 
+/// Source handle → host copy of every entity merged from a DWG xref, per
+/// xref block. The copies get fresh handles on every merge, so a reload
+/// re-links the dimension references that point at the old copies through
+/// the source handle, which the source file keeps.
+// ponytail: process-global and session-only. Hosts whose xref blocks share a
+// handle share a slot (a map that does not match the block is ignored, see
+// `matches_block`), closed tabs keep theirs, and a reopened host starts empty:
+// that needs the source handle written into the reference in the file.
+fn merged_copies() -> &'static Mutex<HashMap<Handle, HashMap<Handle, Handle>>> {
+    static MERGED: OnceLock<Mutex<HashMap<Handle, HashMap<Handle, Handle>>>> =
+        OnceLock::new();
+    MERGED.get_or_init(|| Mutex::new(HashMap::default()))
+}
+
+/// Point every dimension reference at an old xref copy to the copy of the
+/// same source entity the reload just merged.
+fn relink_reloaded_references(
+    doc: &mut Document,
+    br_handle: Handle,
+    previous: HashMap<Handle, Handle>,
+) {
+    let current = match merged_copies().lock() {
+        Ok(map) => map.get(&br_handle).cloned().unwrap_or_default(),
+        Err(_) => return,
+    };
+    let moved: HashMap<Handle, Handle> = previous
+        .iter()
+        .filter_map(|(source, old)| Some((*old, *current.get(source)?)))
+        .filter(|(old, new)| old != new)
+        .collect();
+    if moved.is_empty() {
+        return;
+    }
+    use document::objects::{AssociativeData, ObjectType};
+    let mut reactors: Vec<(Handle, Handle)> = Vec::new();
+    for (handle, object) in doc.objects.iter_mut() {
+        let ObjectType::Associative(object) = object else {
+            continue;
+        };
+        let AssociativeData::DimensionAssociation(association) = &mut object.data else {
+            continue;
+        };
+        for reference in association.references.iter_mut().flatten() {
+            for slot in reference
+                .xrefs
+                .iter_mut()
+                .chain(reference.intersection_objects.iter_mut())
+            {
+                if let Some(&new) = moved.get(slot) {
+                    *slot = new;
+                    reactors.push((new, *handle));
+                }
+            }
+        }
+    }
+    for (entity, association) in reactors {
+        if let Some(entity) = doc.get_entity_mut(entity) {
+            if !entity.common().reactors.contains(&association) {
+                entity.common_mut().reactors.push(association);
+            }
+        }
+    }
+}
+
+/// Whether `copies` is the map of the copies `doc` holds in `br_handle` now:
+/// every copy is still there, and it names exactly the block's own entities.
+fn matches_block(doc: &Document, br_handle: Handle, copies: &HashMap<Handle, Handle>) -> bool {
+    let owned: HashSet<Handle> = doc
+        .entities()
+        .filter(|e| e.common().owner_handle == br_handle)
+        .map(|e| e.common().handle)
+        .collect();
+    let mut direct = 0usize;
+    for copy in copies.values() {
+        let Some(entity) = doc.get_entity(*copy) else {
+            return false;
+        };
+        if entity.common().owner_handle == br_handle {
+            direct += 1;
+        }
+    }
+    direct == owned.len()
+}
+
 fn parsed_cache() -> &'static Mutex<HashMap<String, document::ReadOutcome>> {
     static PARSED: OnceLock<Mutex<HashMap<String, document::ReadOutcome>>> = OnceLock::new();
     PARSED.get_or_init(|| Mutex::new(HashMap::default()))
@@ -508,10 +592,18 @@ fn resolve_xrefs_with_filter(
                     } else {
                         HashMap::default()
                     };
+                    let previous = merged_copies()
+                        .lock()
+                        .ok()
+                        .and_then(|mut map| map.remove(&br_handle))
+                        .filter(|copies| matches_block(doc, br_handle, copies));
                     let _ = unload_reference(doc, br_handle.value());
                     remove_pipe_symbols(doc, &block_name);
                     ensure_block_entities(doc, &block_name);
                     merge_xref_into_block(doc, &block_name, br_handle, outcome.document);
+                    if let Some(previous) = previous {
+                        relink_reloaded_references(doc, br_handle, previous);
+                    }
                     // The merged body landed above the pre-merge ENDBLK; any
                     // definition whose terminator now trails its body is
                     // re-terminated.
@@ -1291,6 +1383,9 @@ fn merge_xref_into_block(
     // The unremapped-handle count is ignored on the load path (BIND reports
     // it per bind).
     let (_, entity_handle_map) = merge_source_entities(doc, &xref_doc, br_handle, &maps);
+    if let Ok(mut merged) = merged_copies().lock() {
+        merged.insert(br_handle, entity_handle_map.clone());
+    }
 
     // ── Draw-order overrides (shared helper) ──────────────────────────────
     copy_xref_sortents(
@@ -3662,6 +3757,82 @@ mod tests {
             .filter(|e| e.common().owner_handle == br_h)
             .collect();
         assert!(owned.is_empty());
+    }
+
+    #[test]
+    fn a_reload_relinks_dimension_references_to_the_new_copies() {
+        use document::objects::{
+            AssocDimensionAssociation, AssocDimensionReference, AssociativeData,
+            AssociativeObject, ObjectType,
+        };
+        let dir = xref_tmpdir("relink");
+        let mut source = document::Document::new();
+        let mut line = document::entities::Line::new();
+        line.end = document::types::Vector3::new(5.0, 0.0, 0.0);
+        line.common.owner_handle = source.header.model_space_block_handle;
+        let source_line = source.add_entity(document::EntityType::Line(line)).unwrap();
+        let path = dir.join("walls.dwg");
+        let write = |doc: &document::Document| {
+            std::fs::write(&path, crate::io::save_to_bytes(doc, "dwg", doc.version).unwrap())
+                .unwrap();
+        };
+        write(&source);
+
+        // Handles of its own, so the session map is not shared with other tests.
+        let mut doc = document::Document::new();
+        for _ in 0..4096 {
+            doc.allocate_handle();
+        }
+        let mut br = document::tables::BlockRecord::new("WALLS");
+        br.flags.is_xref = true;
+        br.xref_path = path.to_string_lossy().into_owned();
+        br.handle = doc.allocate_handle();
+        let br_handle = br.handle;
+        doc.block_records.add(br).unwrap();
+        let keys: HashSet<_> = [br_handle].into_iter().collect();
+        let copy = |doc: &document::Document| {
+            doc.entities()
+                .find(|e| {
+                    e.common().owner_handle == br_handle
+                        && matches!(e, document::EntityType::Line(_))
+                })
+                .map(|e| e.common().handle)
+                .unwrap()
+        };
+        resolve_xrefs_for_keys(&mut doc, &dir, &keys);
+        let first = copy(&doc);
+        let association_handle = doc.allocate_handle();
+        let mut association = AssociativeObject::new("ACDBDIMASSOC", "AcDbDimAssoc");
+        association.handle = association_handle;
+        let mut references: [Vec<AssocDimensionReference>; 4] = Default::default();
+        references[0].push(AssocDimensionReference {
+            xrefs: vec![first],
+            ..Default::default()
+        });
+        association.data = AssociativeData::DimensionAssociation(AssocDimensionAssociation {
+            references,
+            ..Default::default()
+        });
+        doc.objects
+            .insert(association_handle, ObjectType::Associative(association));
+
+        if let Some(document::EntityType::Line(line)) = source.get_entity_mut(source_line) {
+            line.end.x = 6.0;
+        }
+        write(&source);
+        resolve_xrefs_for_keys(&mut doc, &dir, &keys);
+        let second = copy(&doc);
+        assert_ne!(first, second, "the reload merged a fresh copy");
+        let Some(ObjectType::Associative(object)) = doc.objects.get(&association_handle) else {
+            panic!("association kept");
+        };
+        let AssociativeData::DimensionAssociation(association) = &object.data else {
+            panic!("dimension association");
+        };
+        assert_eq!(association.references[0][0].xrefs, vec![second]);
+        let relinked = doc.get_entity(second).unwrap();
+        assert!(relinked.common().reactors.contains(&association_handle));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

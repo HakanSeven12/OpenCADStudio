@@ -6,7 +6,7 @@ use document::objects::ObjectType;
 use document::{Document, EntityType, Handle};
 
 /// The kinds PURGE removes, in the order `purge_pass` reports them.
-pub(crate) const KINDS: usize = 12;
+pub(crate) const KINDS: usize = 13;
 pub(crate) const LAYERS: usize = 0;
 pub(crate) const TEXT_STYLES: usize = 1;
 pub(crate) const LINETYPES: usize = 2;
@@ -17,9 +17,11 @@ pub(crate) const TABLE_STYLES: usize = 6;
 pub(crate) const MLINE_STYLES: usize = 7;
 pub(crate) const GROUPS: usize = 8;
 pub(crate) const MATERIALS: usize = 9;
+/// Registered applications (APPID records) no extended data names.
+pub(crate) const REGAPPS: usize = 10;
 /// Entities, not definitions: named `TYPE HANDLE` (`LINE 2A`).
-pub(crate) const ZERO_LENGTH: usize = 10;
-pub(crate) const EMPTY_TEXT: usize = 11;
+pub(crate) const ZERO_LENGTH: usize = 11;
+pub(crate) const EMPTY_TEXT: usize = 12;
 
 /// The style kind a style purge kind removes through the style managers'
 /// shared storage.
@@ -292,6 +294,18 @@ pub(crate) fn purge_pass(
                 }
                 _ => None,
             })
+            .collect();
+    }
+
+    // Registered applications no extended data names; an xref's come back
+    // with its reload.
+    if wanted[REGAPPS] {
+        let unused = doc.unused_app_ids();
+        lists[REGAPPS] = doc
+            .app_ids
+            .iter()
+            .filter(|app| unused.contains(&app.handle) && !xref_dependent(&app.name, false))
+            .map(|app| app.name.clone())
             .collect();
     }
 

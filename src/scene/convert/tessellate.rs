@@ -350,7 +350,10 @@ fn geometric_center(entity: &EntityType) -> Option<glam::DVec3> {
     Some(glam::DVec3::from_array(planar.plane.point_at(center)))
 }
 
-pub(crate) fn points_to_ds(
+/// doc(hidden) public only so `benches/wires_rebuild_stages.rs` can time the
+/// production double-single split stage in isolation.
+#[doc(hidden)]
+pub fn points_to_ds(
     src: impl IntoIterator<Item = [f64; 3]>,
 ) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
     let it = src.into_iter();

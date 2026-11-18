@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use acadrust::entities::Point;
 use acadrust::xdata::{ExtendedDataRecord, XDataValue};
-use ocs_plugin_api::host::{BuiltinPlugin, HostApi, HostNotification};
+use ocs_plugin_api::host::{BuiltinPlugin, HostApi, HostNotification, PluginTool};
 use ocs_plugin_api::manifest::{ApiVersion, PluginManifest};
 use ocs_plugin_api::ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
 
@@ -105,6 +105,39 @@ impl BuiltinPlugin for MyPlugin {
     fn on_notification(&mut self, _command_id: Option<u64>, notification: HostNotification) {
         if let HostNotification::DocumentChanged { version } = notification {
             LAST_DOC_VERSION.store(version, Ordering::SeqCst);
+        }
+    }
+
+    // AI tools (API v25): typed operations an AI client calls over the
+    // automation bridge.
+    fn tools(&self) -> Vec<PluginTool> {
+        vec![PluginTool {
+            name: "add_point".to_string(),
+            description: "Add a point entity at x, y (z = 0) and return its handle.".to_string(),
+            input_schema: r#"{"type":"object","properties":{"x":{"type":"number"},"y":{"type":"number"}},"required":["x","y"],"additionalProperties":false}"#.to_string(),
+        }]
+    }
+
+    fn call_tool(
+        &mut self,
+        host: &mut dyn HostApi,
+        name: &str,
+        arguments: &str,
+    ) -> Result<String, String> {
+        match name {
+            // The host checked `arguments` against the schema above and
+            // wraps the call in one undo step.
+            "add_point" => {
+                let args: serde_json::Value =
+                    serde_json::from_str(arguments).map_err(|e| e.to_string())?;
+                let (x, y) = (args["x"].as_f64().unwrap_or(0.0), args["y"].as_f64().unwrap_or(0.0));
+                let handle = host.add_entity(acadrust::EntityType::Point(Point::from_coords(x, y, 0.0)));
+                if handle.is_null() {
+                    return Err("the point could not be added".to_string());
+                }
+                Ok(serde_json::json!({ "handle": format!("{:X}", handle.value()) }).to_string())
+            }
+            _ => Err(format!("unknown tool '{name}'")),
         }
     }
 }

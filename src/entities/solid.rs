@@ -77,7 +77,7 @@ fn boundary_edges(points: &[[f64; 3]]) -> Vec<Edge> {
 }
 
 fn kernel_tolerance(points: &[[f64; 3]]) -> f64 {
-    let tolerance = kernel::space::coplanarity_tolerance(points);
+    let tolerance = ocs_geom::space::coplanarity_tolerance(points);
     // Corners whose extent overflows f64 give an infinite tolerance, which
     // `Tolerance::new` rejects by panicking.
     if tolerance.is_finite() {
@@ -92,7 +92,7 @@ fn extrusion_body(
     base: &[[f64; 3]],
     tolerance: f64,
     profile_valid: bool,
-) -> Option<kernel::brep::Body> {
+) -> Option<ocs_brep::Body> {
     if solid.thickness.abs() <= 1.0e-10 || !profile_valid {
         return None;
     }
@@ -104,7 +104,7 @@ fn extrusion_body(
         .skip(1)
         .map(|point| glam::DVec3::from_array(*point) - origin)
         .find(|axis| axis.length() > tolerance)?;
-    let plane = kernel::space::Plane::orthonormal(base[0], axis.to_array(), normal.to_array())?;
+    let plane = ocs_geom::space::Plane::orthonormal(base[0], axis.to_array(), normal.to_array())?;
     if base.iter().any(|point| !plane.contains(*point, tolerance)) {
         return None;
     }
@@ -114,20 +114,20 @@ fn extrusion_body(
         .collect::<Option<Vec<_>>>()?;
     let profile = (0..projected.len())
         .map(|index| {
-            kernel::geom2d::Curve::Line(kernel::geom2d::Line {
+            ocs_geom::geom2d::Curve::Line(ocs_geom::geom2d::Line {
                 start: projected[index],
                 end: projected[(index + 1) % projected.len()],
             })
         })
         .collect::<Vec<_>>();
-    kernel::brep::extrude(plane, &profile, (normal * solid.thickness).to_array())
+    ocs_brep::extrude(plane, &profile, (normal * solid.thickness).to_array())
 }
 
 fn solid_geometry(solid: &Solid) -> Option<SolidGeometry> {
     let base = boundary(solid);
     let tolerance = kernel_tolerance(&base);
     let fill_tris =
-        kernel::space::polygon::triangulate(&base, kernel::geom2d::Tolerance::new(tolerance));
+        ocs_geom::space::polygon::triangulate(&base, ocs_geom::geom2d::Tolerance::new(tolerance));
     if solid.thickness.abs() <= 1.0e-10 {
         return Some(SolidGeometry {
             edges: boundary_edges(&base),
@@ -142,10 +142,10 @@ fn solid_geometry(solid: &Solid) -> Option<SolidGeometry> {
             extruded: false,
         });
     };
-    let mesh = kernel::brep::mesh::tessellate(
+    let mesh = ocs_brep::mesh::tessellate(
         &body,
-        kernel::brep::mesh::TessellationTolerance::new(
-            kernel::tessellation::DEFAULT_ANGLE,
+        ocs_brep::mesh::TessellationTolerance::new(
+            ocs_geom::tessellation::DEFAULT_ANGLE,
             tolerance,
         ),
     );
@@ -172,15 +172,15 @@ fn solid_geometry(solid: &Solid) -> Option<SolidGeometry> {
     })
 }
 
-pub(crate) fn wcs_bounds(solid: &Solid) -> Option<kernel::brep::Aabb> {
+pub(crate) fn wcs_bounds(solid: &Solid) -> Option<ocs_brep::Aabb> {
     let base = boundary(solid);
     let tolerance = kernel_tolerance(&base);
     let profile_valid =
-        !kernel::space::polygon::triangulate(&base, kernel::geom2d::Tolerance::new(tolerance))
+        !ocs_geom::space::polygon::triangulate(&base, ocs_geom::geom2d::Tolerance::new(tolerance))
             .is_empty();
     extrusion_body(solid, &base, tolerance, profile_valid)
-        .and_then(|body| kernel::brep::body_bounds(&body))
-        .or_else(|| kernel::brep::Aabb::around(base))
+        .and_then(|body| ocs_brep::body_bounds(&body))
+        .or_else(|| ocs_brep::Aabb::around(base))
 }
 
 impl RenderConvertible for Solid {

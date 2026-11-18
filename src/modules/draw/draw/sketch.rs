@@ -4,7 +4,7 @@ use document::entities::{Line, LwPolyline, LwVertex, Spline};
 use document::types::{Vector2, Vector3};
 use document::EntityType;
 use glam::DVec3;
-use kernel::geom2d::NurbsCurve;
+use ocs_geom::geom2d::NurbsCurve;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};

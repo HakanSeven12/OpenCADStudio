@@ -382,6 +382,7 @@ impl OpenCADStudio {
                     "MLINESTYLES" | "M" => kinds[pk::MLINE_STYLES] = true,
                     "GROUPS" | "G" => kinds[pk::GROUPS] = true,
                     "MATERIALS" | "MA" => kinds[pk::MATERIALS] = true,
+                    "REGAPPS" | "R" => kinds[pk::REGAPPS] = true,
                     "ZEROLENGTH" | "Z" => kinds[pk::ZERO_LENGTH] = true,
                     "EMPTYTEXT" | "E" => kinds[pk::EMPTY_TEXT] = true,
                     _ => {
@@ -456,6 +457,7 @@ impl OpenCADStudio {
                                         pk::LAYERS => doc.layers.remove(n).is_some(),
                                         pk::TEXT_STYLES => doc.text_styles.remove(n).is_some(),
                                         pk::LINETYPES => doc.line_types.remove(n).is_some(),
+                                        pk::REGAPPS => doc.app_ids.remove(n).is_some(),
                                         pk::GROUPS | pk::MATERIALS => {
                                             let handle =
                                                 doc.objects.values().find_map(|o| match o {

@@ -2763,6 +2763,13 @@ pub struct Scene {
     /// Entity drawn with the selection-highlight colour without being part
     /// of the real selection — used to preview a row in the cycling list box.
     pub hover_highlight: Option<Handle>,
+    /// The raw selectable-group expansion of `hover_highlight`, kept in sync
+    /// by [`Scene::set_hover_highlight`]. Storing it lets
+    /// [`Scene::hover_highlight_handles`] — called every rendered frame —
+    /// reuse the expansion instead of re-running the group scan, and lets
+    /// `set_hover_highlight` compare old vs new contribution without a second
+    /// expansion pass.
+    hover_expanded: HashSet<Handle>,
     /// All entities related to the constraint indicator currently under the cursor.
     constraint_hover_highlights: HashSet<Handle>,
     /// Entities a selection box still being drawn would catch on release
@@ -2847,6 +2854,27 @@ pub struct Scene {
     /// pick only refreshes the GPU xray overlay (cheap) instead of bumping
     /// `geometry_epoch` and re-tessellating the whole model.
     pub selection_generation: u64,
+    /// Incremented when only the *hover / box-preview / constraint / filter*
+    /// highlight set changes, with no change to the committed selection.
+    /// The xray overlay splits its caches on the two generations: a rollover
+    /// or marquee tick rebuilds only the hover half, never the committed
+    /// selection's GPU buffers (which are sized by the whole selection).
+    pub hover_generation: u64,
+    /// Bumped whenever a group object is created, edited, or removed, and by
+    /// undo / redo (which can restore any of them). Invalidates
+    /// [`Scene::groups_snapshot`] so the next rollover sees the new groups.
+    pub groups_epoch: u64,
+    /// Lazily rebuilt snapshot of every selectable group's member list, keyed
+    /// by `(groups_epoch, PICKSTYLE group bit)`. Group-selection expansion used
+    /// to scan ALL document objects on every pointer move, box-preview tick and
+    /// rendered frame; with the snapshot those walk only the groups.
+    groups_snapshot: RefCell<
+        Option<(
+            u64,
+            bool,
+            std::sync::Arc<Vec<(Handle, std::sync::Arc<Vec<Handle>>)>>,
+        )>,
+    >,
     /// Cached fingerprint of `selected`, recomputed lazily after mutations.
     #[cfg(any(test, not(target_arch = "wasm32")))]
     selection_fingerprint_cache: u64,
@@ -3667,6 +3695,7 @@ impl Scene {
             refedit_lock: false,
             count_display: None,
             hover_highlight: None,
+            hover_expanded: HashSet::default(),
             constraint_hover_highlights: HashSet::default(),
             box_hover_highlights: HashSet::default(),
             filter_preview_highlights: HashSet::default(),
@@ -3697,6 +3726,9 @@ impl Scene {
             render_id: GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed),
             block_visibility_edits: None,
             selection_generation: 0,
+            hover_generation: 0,
+            groups_epoch: 0,
+            groups_snapshot: RefCell::new(None),
             #[cfg(any(test, not(target_arch = "wasm32")))]
             selection_fingerprint_cache: 0,
             selection_fingerprint_dirty: false,
@@ -5984,6 +6016,22 @@ impl Scene {
     /// hover changes; use [`bump_geometry`] when the geometry itself changed.
     pub fn bump_selection(&mut self) {
         self.selection_generation = self.selection_generation.wrapping_add(1);
+    }
+
+    /// Mark the hover / box-preview / constraint / filter highlight set dirty
+    /// without touching the committed-selection generation. The xray overlay
+    /// keys its *selected* GPU buffers on `selection_generation`, so a
+    /// rollover or marquee tick never re-uploads the (potentially huge)
+    /// committed selection — only the small hover half.
+    pub fn bump_hover(&mut self) {
+        self.hover_generation = self.hover_generation.wrapping_add(1);
+    }
+
+    /// Invalidate the selectable-group snapshot. Call after any change that
+    /// creates, edits or removes a group object (and from undo / redo, which
+    /// can restore them wholesale).
+    pub fn bump_groups_epoch(&mut self) {
+        self.groups_epoch = self.groups_epoch.wrapping_add(1);
     }
 
     pub(crate) fn bump_selection_set(&mut self) {
@@ -8916,29 +8964,36 @@ impl Scene {
         // Selectable groups roll over as one unit, matching click selection.
         // Exclude already-selected members because they already contribute to
         // the overlay and remain in the selected colour.
-        let contribution = |scene: &Scene, hovered: Option<Handle>| {
-            hovered
-                .map(|handle| scene.handles_expanded_for_selectable_groups(&[handle]))
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|handle| !scene.selected.contains(handle))
+        //
+        // The raw expansion of the new hover is computed once and stored
+        // (`hover_expanded`); the old → new comparison reuses the stored old
+        // expansion instead of re-running the group scan a second time, and
+        // `hover_highlight_handles` (every rendered frame) reads the stored
+        // set too.
+        let expanded = handle
+            .map(|handle| self.handles_expanded_for_selectable_groups(&[handle]))
+            .unwrap_or_default();
+        let contribution = |expanded: &HashSet<Handle>, selected: &HashSet<Handle>| {
+            expanded
+                .iter()
+                .filter(|handle| !selected.contains(*handle))
+                .copied()
                 .collect::<HashSet<_>>()
         };
-        let changed = contribution(self, self.hover_highlight) != contribution(self, handle);
+        let changed =
+            contribution(&self.hover_expanded, &self.selected) != contribution(&expanded, &self.selected);
         self.hover_highlight = handle;
+        self.hover_expanded = expanded;
         if changed {
-            self.bump_selection();
+            self.bump_hover();
         }
     }
 
     /// Handles that currently contribute the rollover colour. The stored hover
-    /// remains the picked member for hit-test/UI bookkeeping; rendering expands
-    /// it to the same selectable group that a click would select.
+    /// remains the picked member for hit-test/UI bookkeeping; rendering uses
+    /// the stored group expansion (`hover_expanded`) — no per-frame scan.
     pub fn hover_highlight_handles(&self) -> HashSet<Handle> {
-        let mut handles = self
-            .hover_highlight
-            .map(|handle| self.handles_expanded_for_selectable_groups(&[handle]))
-            .unwrap_or_default();
+        let mut handles = self.hover_expanded.clone();
         handles.extend(self.constraint_hover_highlights.iter().copied());
         handles.extend(self.box_hover_highlights.iter().copied());
         handles.extend(self.filter_preview_highlights.iter().copied());
@@ -8965,7 +9020,10 @@ impl Scene {
         let handles = if handles.len() > limit { HashSet::default() } else { handles };
         if handles != self.box_hover_highlights {
             self.box_hover_highlights = handles;
-            self.bump_selection();
+            // Box preview only ever changes the marquee highlight; bumping the
+            // selection generation would rebuild the committed selection's GPU
+            // overlay on every ~16 ms tick.
+            self.bump_hover();
         }
     }
 
@@ -8975,7 +9033,7 @@ impl Scene {
         let handles: HashSet<Handle> = handles.iter().copied().collect();
         if handles != self.filter_preview_highlights {
             self.filter_preview_highlights = handles;
-            self.bump_selection();
+            self.bump_hover();
         }
     }
 
@@ -9020,7 +9078,7 @@ impl Scene {
         self.constraint_hover_refs = references;
         self.constraint_hover_highlights = handles;
         self.constraint_hover_wires = wires;
-        self.bump_selection();
+        self.bump_hover();
     }
 
     /// Keep the current selection visible and temporarily filter every other
@@ -15889,7 +15947,7 @@ impl Scene {
                 )
             })
             .unwrap_or_default();
-        self.bump_selection();
+        self.bump_hover();
     }
 
     /// The nearest drawn surface under `local` (relative to `bounds`): a solid

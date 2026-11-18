@@ -1714,6 +1714,9 @@ impl OpenCADStudio {
             &touched_visibility_blocks,
         );
         self.restore_history_view(i, step_view);
+        // Undo can restore group objects wholesale; the rollover snapshot and
+        // every other group-derived cache must drop their stale epoch.
+        self.tabs[i].scene.bump_groups_epoch();
         if report {
             self.command_line
                 .push_output(crate::tf!("Undo: {last_label}").as_ref());
@@ -1819,6 +1822,7 @@ impl OpenCADStudio {
             &touched_visibility_blocks,
         );
         self.restore_history_view(i, step_view);
+        self.tabs[i].scene.bump_groups_epoch();
         self.command_line
             .push_output(crate::tf!("Redo: {last_label}").as_ref());
     }

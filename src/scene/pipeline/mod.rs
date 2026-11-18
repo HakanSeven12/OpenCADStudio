@@ -433,6 +433,10 @@ pub struct Pipeline {
     mesh_highlight_draws: Vec<MeshHighlightDraw>,
     /// `(geometry_epoch, selection_generation)` the highlight overlay was built for.
     pub cached_highlight_key: (u64, u64),
+    /// `hover_generation` the mesh highlight ranges were last built for. A
+    /// rollover / marquee tick rebuilds the (cheap) index ranges without
+    /// invalidating the committed-selection draw ranges.
+    pub cached_mesh_hover_generation: Option<u64>,
     /// Batched 3DFACE fill (all faces in one buffer) and edges (merged wire).
     gpu_face3d_fill: Option<Face3DGpu>,
     gpu_face3d_edges: Vec<WireGpu>,
@@ -471,6 +475,11 @@ pub struct Pipeline {
     /// a pick bumps only `selection_generation`, refreshing the overlay without
     /// touching the main wire buffers.
     pub cached_selection: (u64, u64),
+    /// `hover_generation` the hover half of the xray overlay was last built
+    /// for. `None` until the first build. Rollover / marquee ticks bump only
+    /// the hover generation, so the committed selection's cached GPU buffers
+    /// (sized by the whole selection) are reused untouched.
+    pub cached_hover_generation: Option<u64>,
     /// Face upload key; keeps the resident wire Arc uniquely owned by Scene.
     pub cached_face3d_key: (u64, bool, bool, u64),
     /// Cached planar-solid visibility for `(wire_content_id, view direction)`.
@@ -2635,6 +2644,7 @@ impl Pipeline {
             mesh_lod_draws: rustc_hash::FxHashMap::default(),
             mesh_highlight_draws: vec![],
             cached_highlight_key: (u64::MAX, u64::MAX),
+            cached_mesh_hover_generation: None,
             gpu_face3d_fill: None,
             gpu_face3d_edges: vec![],
             viewcube,
@@ -2653,6 +2663,7 @@ impl Pipeline {
             cached_epoch: (u64::MAX, u64::MAX, u64::MAX),
             cached_wire_id: u64::MAX,
             cached_selection: (u64::MAX, u64::MAX),
+            cached_hover_generation: None,
             cached_face3d_key: (u64::MAX, false, false, u64::MAX),
             cached_solid_visibility: (u64::MAX, [u32::MAX; 3], u64::MAX),
             wire_handle_index: std::sync::Arc::new(rustc_hash::FxHashMap::default()),
@@ -3384,9 +3395,11 @@ impl Pipeline {
         selected_tint: Option<[f32; 4]>,
         wire_id: u64,
         depth_generation: u64,
+        refresh_selected: bool,
+        refresh_hover: bool,
     ) {
         let tint_key = selected_tint.map(|color| color.map(f32::to_bits));
-        let reusable = self.selected_highlight_gpu_cache.as_ref().is_some_and(|cache| {
+        let selected_cache_ready = self.selected_highlight_gpu_cache.as_ref().is_some_and(|cache| {
             cache.wire_id == wire_id
                 && cache.depth_generation == depth_generation
                 && cache.tint == tint_key
@@ -3395,7 +3408,11 @@ impl Pipeline {
                     || (cache.annotation.is_empty() && selected_annotation.is_empty()))
         });
         let empty = rustc_hash::FxHashSet::default();
-        if !reusable {
+        // The committed-selection half only re-emits when the caller says the
+        // selection (or the wires under it) changed. Hover-only bumps — every
+        // rollover and marquee tick — skip the O(selected) gather, re-emit and
+        // re-upload entirely, reusing the cached GPU buffers untouched.
+        if refresh_selected || !selected_cache_ready {
             self.upload_selected_wires(
                 device,
                 queue,
@@ -3430,42 +3447,45 @@ impl Pipeline {
                 block_text: self.block_text_highlight_gpu.clone(),
             });
         }
-        let hover_only = hovered.difference(selected).copied().collect();
-        self.upload_selected_wires(
-            device,
-            queue,
-            wires,
-            &empty,
-            &hover_only,
-            hover_annotation,
-            depth_map,
-            selected_tint,
-        );
-        self.upload_text_highlight(
-            device,
-            queue,
-            wires,
-            &empty,
-            &hover_only,
-            hover_annotation,
-            depth_map,
-            selected_tint,
-        );
-        let cache = self
-            .selected_highlight_gpu_cache
-            .as_ref()
-            .expect("selection cache built above");
-        // Draw committed selection before the current hover, as in the
-        // combined overlay.
-        fn prepend<T: Clone>(cached: &[T], live: &mut Vec<T>) {
-            live.splice(0..0, cached.iter().cloned());
+        // The hover half re-emits only when it changed. The hover set is
+        // `hovered − selected`, so a selection change also changes it.
+        if refresh_hover {
+            let hover_only = hovered.difference(selected).copied().collect();
+            self.upload_selected_wires(
+                device,
+                queue,
+                wires,
+                &empty,
+                &hover_only,
+                hover_annotation,
+                depth_map,
+                selected_tint,
+            );
+            self.upload_text_highlight(
+                device,
+                queue,
+                wires,
+                &empty,
+                &hover_only,
+                hover_annotation,
+                depth_map,
+                selected_tint,
+            );
+            // Draw committed selection before the current hover, as in the
+            // combined overlay.
+            let cache = self.selected_highlight_gpu_cache.as_ref();
+            fn prepend<T: Clone>(cached: &[T], live: &mut Vec<T>) {
+                live.splice(0..0, cached.iter().cloned());
+            }
+            if let Some(cache) = cache {
+                prepend(&cache.wires, &mut self.gpu_selected_wires);
+                prepend(&cache.blocks, &mut self.gpu_selected_block_wires);
+                prepend(&cache.circles, &mut self.gpu_selected_circles);
+                prepend(&cache.ellipses, &mut self.gpu_selected_ellipses);
+                prepend(&cache.text, &mut self.text_highlight_gpu);
+                prepend(&cache.block_text, &mut self.block_text_highlight_gpu);
+            }
         }
-        prepend(&cache.wires, &mut self.gpu_selected_wires);
-        prepend(&cache.blocks, &mut self.gpu_selected_block_wires);
-        prepend(&cache.circles, &mut self.gpu_selected_circles);
-        prepend(&cache.ellipses, &mut self.gpu_selected_ellipses);
-        prepend(&cache.text, &mut self.text_highlight_gpu);
-        prepend(&cache.block_text, &mut self.block_text_highlight_gpu);
     }
 
     pub fn upload_selected_wires(
@@ -6276,6 +6296,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.cached_epoch = (u64::MAX, u64::MAX, u64::MAX);
         self.cached_wire_id = u64::MAX;
         self.cached_selection = (u64::MAX, u64::MAX);
+        self.cached_hover_generation = None;
         self.cached_highlight_key = (u64::MAX, u64::MAX);
         self.cached_mesh_content_id = u64::MAX;
         self.cached_face3d_key = (u64::MAX, false, false, u64::MAX);

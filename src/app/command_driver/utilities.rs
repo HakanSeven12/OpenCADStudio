@@ -1176,6 +1176,15 @@ impl OpenCADStudio {
             if self.tabs[tab_idx].active_cmd.is_none() {
                 break;
             }
+            // A command that waits for a read takes the rest when it ends.
+            if self.tabs[tab_idx]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.waits_for_read())
+            {
+                self.tabs[tab_idx].pending_pause_tokens = Some(tokens);
+                break;
+            }
             let token = tokens.remove(0);
             let trimmed = token.trim();
             if trimmed.eq_ignore_ascii_case("PAUSE") || trimmed == "\\" {
@@ -1473,6 +1482,22 @@ impl OpenCADStudio {
             }
             tasks.push(self.feed_active_cmd(unquote(tok)));
             consumed += 1;
+            // A command that waits for a read takes the rest of the line
+            // when the read ends, as after a PAUSE.
+            if self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.waits_for_read())
+            {
+                let mut remainder: Vec<String> = tokens[1 + idx + 1..].to_vec();
+                if finish {
+                    remainder.push("ENTER".to_string());
+                }
+                self.tabs[i].pending_pause_tokens = Some(remainder);
+                consumed = tokens.len();
+                paused = true;
+                break;
+            }
         }
         if !editor_was_open && self.text_inline.is_some() && consumed < tokens.len() {
             // Fill the editor the same way `Message::TextInlineInput` does, then

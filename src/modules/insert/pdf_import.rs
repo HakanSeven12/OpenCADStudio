@@ -717,6 +717,10 @@ impl CadCommand for PdfImportCommand {
         }
     }
 
+    fn waits_for_read(&self) -> bool {
+        self.reading.is_some()
+    }
+
     fn on_pdf_import_read(&mut self, path: &str, read: PdfPromptRead) -> Option<CmdResult> {
         // `reading` is set only with the Reading step, and taken here.
         if self.reading.as_ref().map(|(p, _)| p.as_str()) != Some(path) {

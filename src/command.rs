@@ -3353,6 +3353,13 @@ pub trait CadCommand: Send {
         None
     }
 
+    /// The command waits for a read that it asked for (it reads no input
+    /// until then): a script line or a typed line keeps its remaining
+    /// answers, as at a PAUSE, and the host feeds them when the read ends.
+    fn waits_for_read(&self) -> bool {
+        false
+    }
+
     /// The end of a read asked for with `CmdResult::ReadPdfForImport`:
     /// `None` when the command does not wait for that file.
     fn on_pdf_import_read(

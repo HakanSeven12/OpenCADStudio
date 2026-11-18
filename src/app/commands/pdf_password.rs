@@ -104,6 +104,9 @@ impl OpenCADStudio {
         }
         if matches!(state.then, PdfPasswordThen::Command { .. }) {
             let i = self.active_tab;
+            // The rest of a script line was for this file: it goes with
+            // the refusal, as at an Escape after a PAUSE.
+            self.tabs[i].pending_pause_tokens = None;
             if let Some(prompt) = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt()) {
                 self.command_line.push_info(&prompt);
             }

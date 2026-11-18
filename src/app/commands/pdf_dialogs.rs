@@ -735,7 +735,18 @@ impl OpenCADStudio {
         if j != self.active_tab {
             return Task::none();
         }
-        self.apply_cmd_result(result)
+        // The password window answers first: the rest of a script line is
+        // kept from the drain that follows a command's result, and goes on
+        // after the read that the password window starts again.
+        if matches!(result, crate::command::CmdResult::PdfPassword { .. }) {
+            let kept = self.tabs[j].pending_pause_tokens.take();
+            let applied = self.apply_cmd_result(result);
+            self.tabs[j].pending_pause_tokens = kept;
+            return applied;
+        }
+        let applied = self.apply_cmd_result(result);
+        let rest = self.drain_pending_pause_tokens(j);
+        Task::batch([applied, rest])
     }
 
     /// PDFIMPORT's File option after the file is chosen: the file is read

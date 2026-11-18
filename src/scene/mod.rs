@@ -128,6 +128,8 @@ mod viewport_depth_tests;
 #[cfg(test)]
 mod viewport_freeze_block_member_tests;
 #[cfg(test)]
+mod layout_frame_wires_tests;
+#[cfg(test)]
 mod paper_sheet_depth_tests;
 pub mod viewport_ref;
 pub(crate) use selection::pe_url_of;
@@ -9778,6 +9780,16 @@ impl Scene {
         self.annotation_affects_wires
             .set(Some((self.geometry_epoch, v)));
         v
+    }
+
+    /// Whether `wires` is one of the resident sets themselves, which only the
+    /// scene may hold (see [`Self::try_resident_patch`]), and not a copy made
+    /// from one.
+    pub(in crate::scene) fn is_resident_wire_set(&self, wires: &Arc<Vec<WireModel>>) -> bool {
+        self.resident_wire_sets
+            .borrow()
+            .values()
+            .any(|set| Arc::ptr_eq(&set.wires, wires))
     }
 
     fn resident_wires_for(

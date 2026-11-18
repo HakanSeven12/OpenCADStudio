@@ -11669,3 +11669,63 @@ mod table_command_line_creation_tests {
     }
 }
 
+
+// The DATALINK command's scriptable form reads a CSV from a typed path and
+// places a linked table; that path had no test.
+mod datalink_csv_command_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::EntityType;
+    use glam::DVec3;
+
+    #[test]
+    fn datalink_reads_a_csv_and_registers_a_linked_table() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+
+        let path = std::env::temp_dir().join(format!("ocs_datalink_{}.csv", std::process::id()));
+        std::fs::write(&path, "NAME,QTY\nBolt,12\nNut,30\n").unwrap();
+        let escaped = path.to_string_lossy().replace('\\', "/");
+        let _ = app.run_command_line(&format!("DATALINK {escaped}"));
+        let _ = app.feed_command(StepInput::Point(DVec3::new(10.0, 10.0, 0.0)));
+
+        assert!(app.command_line.last_error.is_none());
+        let doc = &app.tabs[i].scene.document;
+        let links = crate::app::annotation_data::data_link_entries(doc);
+        assert_eq!(
+            links.len(),
+            1,
+            "one persistent link was registered: {}",
+            app.command_line.history_plain_text()
+        );
+        let mut table = None;
+        for entity in doc.entities() {
+            if let EntityType::Table(candidate) = entity {
+                if (0..candidate.rows.len()).any(|row| {
+                    (0..candidate.columns.len()).any(|column| {
+                        candidate
+                            .cell(row, column)
+                            .is_some_and(|cell| cell.has_linked_data)
+                    })
+                })
+                {
+                    table = Some(candidate.clone());
+                }
+            }
+        }
+        let table = table.expect("a table linked to the CSV was placed");
+        let texts: Vec<_> = (0..table.rows.len())
+            .flat_map(|row| (0..table.columns.len()).map(move |column| (row, column)))
+            .filter_map(|(row, column)| table.cell_text(row, column))
+            .map(str::to_string)
+            .collect();
+        assert!(
+            texts.iter().any(|text| text.contains("Bolt")),
+            "the CSV rows reached the table: {texts:?}"
+        );
+        drop(app);
+        let _ = std::fs::remove_file(&path);
+    }
+}
+

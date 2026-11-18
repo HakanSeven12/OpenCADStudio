@@ -5520,7 +5520,7 @@ impl OpenCADStudio {
                 .remove(&crate::ui::properties::FieldKey::Geom(field))
             {
                 let val = if evaluates_expression {
-                    crate::app::expr_eval::eval_to_string(&raw_val)
+                    self.property_expression_value(&raw_val)
                 } else {
                     raw_val
                 };

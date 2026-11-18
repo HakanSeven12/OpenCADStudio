@@ -1419,3 +1419,175 @@ mod import_window_tests {
         assert!(app.pdf_import_file.is_none());
     }
 }
+
+#[cfg(test)]
+mod point_cloud_attach_read_tests {
+    use super::*;
+    use crate::app::ModalKind;
+    use crate::scene::model::point_cloud::test_scan_file;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    fn last_line(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .last()
+            .map(|entry| entry.text.clone())
+            .unwrap_or_default()
+    }
+
+    /// The window opens only when the read ends, after a `Reading` line,
+    /// with what the read found.
+    #[test]
+    fn the_window_opens_only_when_the_read_ends() {
+        let mut app = new_app();
+        let path = test_scan_file("attach-window", 100);
+        let task = app.read_point_cloud_for_attach(path.clone());
+        assert_eq!(app.active_modal, None, "nothing opens during the read");
+        assert_eq!(
+            last_line(&app),
+            format!(
+                "ⓘ Reading {}…",
+                crate::entities::underlay::display_path(&path.to_string_lossy())
+            )
+        );
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::PointCloudAttach));
+        let state = app.point_cloud_attach.as_ref().expect("the window's state");
+        assert_eq!(state.path, path.to_string_lossy());
+        assert!(
+            state.summary.contains("100 points"),
+            "summary: {}",
+            state.summary
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A reader that panics gives an error, no window opens, and the next
+    /// read works.
+    #[test]
+    fn a_reader_panic_is_an_error_and_no_window_opens() {
+        let mut app = new_app();
+        let task =
+            app.read_point_cloud_for_attach_with("panics.rcs".into(), |_| panic!("a reader bug"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("POINTCLOUDATTACH failed: a reader bug")
+        );
+        assert_eq!(app.active_modal, None);
+        assert!(app.point_cloud_attach.is_none());
+        let path = test_scan_file("attach-after-panic", 10);
+        let task = app.read_point_cloud_for_attach(path.clone());
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::PointCloudAttach));
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// The file picker's result for a scan or a project starts the read,
+    /// and the window opens when it ends.
+    #[test]
+    fn the_picker_result_reads_scans_and_projects_on_a_worker() {
+        let scan = test_scan_file("attach-picker", 12);
+        let project = scan.with_extension("rcp");
+        let xml = format!(
+            "<Project><VoxelTreeRunTime Id=\"s1\"><Path Value=\"{}\"/>\
+             <Translation x=\"0\" y=\"0\" z=\"0\"/></VoxelTreeRunTime></Project>",
+            scan.display()
+        );
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        zip.start_file("project.xml", zip::write::SimpleFileOptions::default())
+            .expect("start the project");
+        std::io::Write::write_all(&mut zip, xml.as_bytes()).expect("write the project");
+        std::fs::write(&project, zip.finish().expect("the project").into_inner())
+            .expect("write the project file");
+        for path in [&scan, &project] {
+            let mut app = new_app();
+            let task = app.update(Message::AttachPickResult(Ok(path.clone())));
+            assert_eq!(app.active_modal, None, "nothing opens during the read");
+            assert!(
+                last_line(&app).starts_with("ⓘ Reading "),
+                "{}",
+                last_line(&app)
+            );
+            app.drive_headless_task(task).expect("the read task");
+            assert_eq!(app.active_modal, Some(ModalKind::PointCloudAttach));
+            let state = app.point_cloud_attach.as_ref().expect("the window's state");
+            assert!(state.summary.contains("12 points"), "{}", state.summary);
+        }
+        let _ = std::fs::remove_file(scan);
+        let _ = std::fs::remove_file(project);
+    }
+
+    /// A file with no scan that can be read gives the reference's two
+    /// errors when the read ends, and no window.
+    #[test]
+    fn a_file_that_cannot_be_read_gives_the_two_errors() {
+        let mut app = new_app();
+        let path = std::env::temp_dir().join(format!(
+            "ocs-pointcloud-attach-bad-{}.rcs",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"not a scan").expect("write the bad scan");
+        let task = app.read_point_cloud_for_attach(path.clone());
+        app.drive_headless_task(task).expect("the read task");
+        let errors: Vec<String> = app
+            .command_line
+            .history
+            .iter()
+            .rev()
+            .take(2)
+            .map(|entry| entry.text.clone())
+            .collect();
+        assert!(
+            errors[0].ends_with("Attach point cloud failed")
+                && errors[1].ends_with("All scans are not found or invalid."),
+            "lines: {errors:?}"
+        );
+        assert_eq!(app.active_modal, None);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A window that opened during the read stays, and the Attach Point
+    /// Cloud window does not open.
+    #[test]
+    fn a_window_opened_during_the_read_stays() {
+        let mut app = new_app();
+        let path = test_scan_file("attach-other-window", 10);
+        let task = app.read_point_cloud_for_attach(path.clone());
+        app.active_modal = Some(ModalKind::PdfImportSettings);
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.active_modal, Some(ModalKind::PdfImportSettings));
+        assert!(app.point_cloud_attach.is_none());
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some(
+                "Attach point cloud cancelled: a different window opened while the file was read."
+            )
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// Browse in the window: the new file's window takes the place of the
+    /// old one.
+    #[test]
+    fn the_window_takes_the_place_of_its_older_copy() {
+        let mut app = new_app();
+        let first = test_scan_file("attach-first", 10);
+        let second = test_scan_file("attach-second", 20);
+        let task = app.read_point_cloud_for_attach(first.clone());
+        app.drive_headless_task(task).expect("the first read");
+        let task = app.read_point_cloud_for_attach(second.clone());
+        app.drive_headless_task(task).expect("the second read");
+        assert_eq!(app.active_modal, Some(ModalKind::PointCloudAttach));
+        let state = app.point_cloud_attach.as_ref().expect("the window's state");
+        assert_eq!(state.path, second.to_string_lossy());
+        assert!(state.summary.contains("20 points"), "{}", state.summary);
+        let _ = std::fs::remove_file(first);
+        let _ = std::fs::remove_file(second);
+    }
+}

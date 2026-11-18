@@ -1022,6 +1022,13 @@ pub(crate) fn setting_value(document: &Document, setting: Setting) -> i64 {
         .unwrap_or(setting.default)
 }
 
+/// A scan file of `points` points in the temp folder, for the tests of
+/// other modules.
+#[cfg(test)]
+pub(crate) fn test_scan_file(tag: &str, points: u32) -> PathBuf {
+    tests::budget_scan(tag, points)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1109,7 +1116,7 @@ mod tests {
     /// A 7000-point scan decodes to ~280 KiB of point arrays, so three distinct
     /// clouds fit a 1 MiB budget and four do not — the window the recency test
     /// needs to tell a promoting hit from a non-promoting peek.
-    fn budget_scan(tag: &str, points: u32) -> PathBuf {
+    pub(super) fn budget_scan(tag: &str, points: u32) -> PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let path = std::env::temp_dir().join(format!(
@@ -1273,6 +1280,21 @@ mod tests {
         set_modified(&path, stamp);
         let loaded = load(&path).expect("the evicted failure must retry");
         assert_eq!(loaded.positions.len(), 7000);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A lock that a panic poisoned does not stop later reads: the cache
+    /// takes the data back from the poisoned lock.
+    #[test]
+    fn a_poisoned_cache_lock_does_not_stop_later_reads() {
+        let path = budget_scan("poisoned", 100);
+        let _ = std::thread::spawn(|| {
+            let _cache = cloud_cache();
+            panic!("a decode bug while the cache is locked");
+        })
+        .join();
+        let cloud = load(&path).expect("the scan reads after the poison");
+        assert_eq!(cloud.positions.len(), 100);
         let _ = std::fs::remove_file(path);
     }
 }

@@ -11293,3 +11293,90 @@ mod attdef_dialog_automation_tests {
     }
 }
 
+
+// Bare ATTSYNC offers [?/Name/Select]; the Name path was never driven from
+// the prompts - all existing coverage uses the inline `ATTSYNC <block>` form.
+mod attsync_prompt_flow_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::entities::{AttributeDefinition, AttributeEntity, Insert};
+    use document::types::Vector3;
+    use document::EntityType;
+
+    #[test]
+    fn the_attsync_name_prompt_syncs_the_named_block() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let attdef = |name: &str, default: &str, y: f64| {
+            EntityType::AttributeDefinition(AttributeDefinition {
+                insertion_point: Vector3::new(2.0, y, 0.0),
+                height: 1.0,
+                ..AttributeDefinition::new(name.into(), name.into(), default.into())
+            })
+        };
+        app.tabs[i].scene.define_block_raw(
+            "SYNCED",
+            Vector3::ZERO,
+            vec![attdef("TAG1", "one", 2.0)],
+        );
+        let mut insert = Insert::new("SYNCED", Vector3::new(100.0, 100.0, 0.0));
+        insert
+            .attributes
+            .push(AttributeEntity::new("TAG1".into(), "kept".into()));
+        let reference = app.tabs[i].scene.add_entity(EntityType::Insert(insert));
+        app.tabs[i]
+            .scene
+            .redefine_block_raw(
+                "SYNCED",
+                Vector3::ZERO,
+                vec![attdef("TAG1", "one", 2.0), attdef("TAG2", "two", 5.0)],
+            )
+            .expect("the definition takes the new tag");
+
+        let _ = app.run_command_line("ATTSYNC");
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("the option prompt follows bare ATTSYNC")
+                .prompt(),
+            "Enter an option [?/Name/Select] <Select>:"
+        );
+        let _ = app.feed_command(StepInput::Text("N".into()));
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("the Name option asks which block")
+                .prompt(),
+            "Enter name of block to sync or [?]:"
+        );
+        let _ = app.feed_command(StepInput::Text("SYNCED".into()));
+
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "naming the block completes the sync"
+        );
+        assert!(app.command_line.last_error.is_none());
+        let document::EntityType::Insert(updated) = app.tabs[i]
+            .scene
+            .document
+            .get_entity(reference)
+            .unwrap()
+        else {
+            panic!("the reference remains an INSERT")
+        };
+        let pairs: Vec<_> = updated
+            .attributes
+            .iter()
+            .map(|attribute| (attribute.tag.clone(), attribute.get_value().to_string()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![("TAG1".into(), "kept".into()), ("TAG2".into(), "two".into())],
+            "the prompts sync the definition's tags onto the reference"
+        );
+    }
+}
+

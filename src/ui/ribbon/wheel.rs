@@ -546,8 +546,8 @@ mod view_tests {
     fn first_tab(ribbon: &Ribbon, ui: &mut Simulator<'_, Message>) -> Rectangle {
         let first = ribbon.shown_tabs()[0];
         let module = &ribbon.modules[first];
-        let title = crate::i18n::ribbon_module_title(module.id(), module.title());
-        ui.find(title.as_ref())
+        let title = crate::i18n::ribbon_module_title(module.id(), module.title()).to_string();
+        ui.find(title.as_str())
             .expect("first tab shows")
             .visible_bounds()
             .expect("first tab visible")

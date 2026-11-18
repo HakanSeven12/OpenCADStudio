@@ -64,7 +64,7 @@ flate2 = "1"
 # also appear in the IMAGE picker filter (io::pick_image_file) and the web
 # drop filter (io::web_drop::is_image_name).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff", "webp", "gif"] }
-hayro = "0.7.1"
+hayro = "0.9.0"
 kurbo = "0.13"
 # Pure-Rust CRS resolution and projection for document GEODATA. The embedded
 # EPSG data runs on native and wasm; the WKT parser is native-only (below).

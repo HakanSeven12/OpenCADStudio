@@ -378,4 +378,128 @@ mod tests {
             }
         }
     }
+
+    /// The settled answer of request `id`.
+    fn settled(app: &OpenCADStudio, id: &str) -> Value {
+        app.control
+            .completed
+            .iter()
+            .find(|(request, _, _)| request == id)
+            .map(|(_, _, response)| response.clone())
+            .unwrap_or(Value::Null)
+    }
+
+    /// Import settings with DGNIMPORTMODE `mode` (0: a new drawing, 1: the
+    /// current drawing). Set them after the app starts: a starting app
+    /// applies its own.
+    fn import_settings(mode: u8) -> (OwnSettings, RestoreSettings) {
+        let own = OwnSettings::take();
+        let restore = RestoreSettings(crate::modules::insert::dgn_import::settings());
+        crate::modules::insert::dgn_import::set_settings(DgnImportSettings {
+            mode,
+            explode_text_nodes: false,
+            references: ReferenceMode::Ignore,
+            existing_reference: ExistingReference::Keep,
+            code_page: None,
+        });
+        (own, restore)
+    }
+
+    /// The operation reads on a worker: it is accepted, nothing is imported
+    /// until the worker ends, then it settles with its result, in a new
+    /// drawing that is current and that the request follows.
+    #[test]
+    fn the_operation_settles_when_its_worker_ends() {
+        let mut app = fresh_drawing();
+        let _settings = import_settings(0);
+        let path = format!("memory://dgn-op-worker-{}.dgn", std::process::id());
+        crate::scene::model::pdf_raster::register_source(
+            &path,
+            std::sync::Arc::new(minimal_v7_line()),
+        );
+        let tabs = app.tabs.len();
+        let document_id = app.tabs[app.active_tab].id;
+        let (response, task) = app.control_request(json!({
+            "protocol":1,"op":"dgn_import","request_id":"dgn-op-worker",
+            "document_id":document_id,"path":path,
+        }));
+        assert_eq!(response["status"], "accepted", "{response}");
+        assert_eq!(app.tabs.len(), tabs, "nothing is imported during the read");
+        app.drive_headless_task(task).expect("the operation's task");
+        let settled = settled(&app, "dgn-op-worker");
+        assert_eq!(settled["ok"], true, "{settled}");
+        assert_eq!(settled["result"]["entities"], 1, "{settled}");
+        assert_eq!(app.tabs.len(), tabs + 1);
+        assert_ne!(
+            app.tabs[app.active_tab].id, document_id,
+            "the new drawing is current"
+        );
+        assert_eq!(
+            settled["state"]["document_id"].as_u64(),
+            Some(app.tabs[app.active_tab].id),
+            "the request follows the new drawing"
+        );
+    }
+
+    /// An import into the current drawing fails with `document_closed`
+    /// when that drawing was replaced during the read, and places nothing.
+    #[test]
+    fn a_replaced_drawing_fails_the_operation() {
+        let mut app = fresh_drawing();
+        let _settings = import_settings(1);
+        let path = format!("memory://dgn-op-replaced-{}.dgn", std::process::id());
+        crate::scene::model::pdf_raster::register_source(
+            &path,
+            std::sync::Arc::new(minimal_v7_line()),
+        );
+        let i = app.active_tab;
+        let document_id = app.tabs[i].id;
+        let (_, task) = app.control_request(json!({
+            "protocol":1,"op":"dgn_import","request_id":"dgn-op-replaced",
+            "document_id":document_id,"path":path,
+        }));
+        app.tabs[i].document_generation += 1;
+        let undo = app.tabs[i].history.undo_stack.len();
+        app.drive_headless_task(task).expect("the operation's task");
+        let settled = settled(&app, "dgn-op-replaced");
+        assert_eq!(settled["ok"], false, "{settled}");
+        assert_eq!(settled["code"], "document_closed", "{settled}");
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo);
+    }
+
+    /// A reader that panics settles the operation as failed, and the app
+    /// goes on.
+    #[test]
+    fn a_reader_panic_fails_the_operation() {
+        let mut app = fresh_drawing();
+        let errors = app.command_line.error_revision;
+        app.control.pending = Some(super::super::Operation {
+            id: "dgn-op-panics".to_string(),
+            request: json!({"op":"dgn_import"}),
+            pending: 1,
+            error_revision: errors,
+            document_id: None,
+            origin_document: app.tabs[app.active_tab].id,
+            geometry_revision: 0,
+            result: json!({}),
+            cancelled: false,
+            failure: None,
+        });
+        let task = app.control_dgn_import_with(
+            OwnedDgnOptions {
+                path: "panics.dgn".to_string(),
+                ..OwnedDgnOptions::default()
+            },
+            |_| panic!("a reader bug"),
+        );
+        app.drive_headless_task(task).expect("the operation's task");
+        app.control.pending.as_mut().unwrap().pending = 0;
+        app.control_settle();
+        let settled = settled(&app, "dgn-op-panics");
+        assert_eq!(settled["ok"], false, "{settled}");
+        assert_eq!(
+            settled["error"], "DGNIMPORT failed: a reader bug",
+            "{settled}"
+        );
+    }
 }

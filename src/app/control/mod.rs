@@ -4762,6 +4762,33 @@ mod tests {
         ));
     }
 
+    /// A request that fails after it returned settles with that failure
+    /// (its `code` and `error`) and its `request_id`, as if it had failed
+    /// at once.
+    #[test]
+    fn a_later_failure_settles_with_its_code_and_request_id() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.control.pending = Some(Operation {
+            id: "later-failure".to_string(),
+            request: json!({"op":"dgn_import"}),
+            pending: 0,
+            error_revision: app.command_line.error_revision,
+            document_id: None,
+            origin_document: app.tabs[app.active_tab].id,
+            geometry_revision: 0,
+            result: json!({}),
+            cancelled: false,
+            failure: None,
+        });
+        app.set_control_failure(failure("invalid_dgn", "Not a DGN file"));
+        app.control_settle();
+        let (_, _, response) = app.control.completed.back().expect("settled").clone();
+        assert_eq!(
+            response,
+            json!({"ok":false,"status":"failed","code":"invalid_dgn","error":"Not a DGN file","request_id":"later-failure"})
+        );
+    }
+
     #[test]
     fn controlled_open_recovers_instead_of_waiting_on_the_recovery_prompt() {
         let mut app = OpenCADStudio::new_for_test();

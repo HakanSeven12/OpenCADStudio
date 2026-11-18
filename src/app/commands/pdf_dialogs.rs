@@ -229,7 +229,7 @@ impl OpenCADStudio {
     /// one chosen. A file with no page, sheet or model, or one that needs
     /// a password, shows no pages, as before.
     fn finish_attach_name_read(&mut self, path: &str, read: &UnderlayAttachRead) {
-        if self.active_modal != Some(crate::app::ModalKind::PdfAttach) {
+        if !self.dialog_open(crate::app::ModalKind::PdfAttach) {
             return;
         }
         let Some(mut state) = self.pdf_attach.take() else {

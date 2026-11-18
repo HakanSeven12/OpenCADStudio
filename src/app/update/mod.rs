@@ -11639,7 +11639,7 @@ impl OpenCADStudio {
             ),
             Message::ShortcutEditorImported(result) => {
                 // A picker can finish after the modal was dismissed.
-                if self.active_modal == Some(super::ModalKind::Shortcuts) {
+                if self.dialog_open(super::ModalKind::Shortcuts) {
                     match result {
                         Some(Ok(bytes)) => self.import_shortcut_rows(&bytes),
                         Some(Err(e)) => self.command_line.push_error(

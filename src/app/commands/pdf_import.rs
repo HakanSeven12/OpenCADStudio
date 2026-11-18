@@ -981,6 +981,173 @@ mod geo_attach_tests {
         assert!(!state.geopdf_auto);
     }
 
+    /// The underlays in drawing `i`.
+    fn underlays_in(app: &OpenCADStudio, i: usize) -> usize {
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter(|entity| matches!(entity, document::EntityType::Underlay(_)))
+            .count()
+    }
+
+    /// A PDFATTACH with automatic placement reads the placements on a
+    /// worker: nothing is placed until the read ends.
+    #[test]
+    fn geopdf_pages_are_placed_only_when_the_read_ends() {
+        let mut app = app();
+        let i = app.active_tab;
+        set_crs(&mut app);
+        let path = "placed-on-a-worker.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let placed = app.attach_pdf_pages(
+            i,
+            "PDFATTACH".to_string(),
+            UnderlayType::Pdf,
+            path,
+            pages(DVec3::ZERO),
+            true,
+        );
+        assert_eq!(
+            underlays_in(&app, i),
+            0,
+            "nothing is placed during the read"
+        );
+        app.drive_headless_task(placed).expect("the placement read");
+        assert_eq!(underlays_in(&app, i), 2);
+    }
+
+    /// The command's end (`CmdResult::AttachPdfPages` with automatic
+    /// placement) returns the placement read, and the pages are placed
+    /// when it ends.
+    #[test]
+    fn the_command_result_returns_the_placement_read() {
+        let mut app = app();
+        let i = app.active_tab;
+        set_crs(&mut app);
+        let path = "placed-by-the-command.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let placed = app.apply_cmd_result(crate::command::CmdResult::AttachPdfPages {
+            kind: UnderlayType::Pdf,
+            path: path.to_string(),
+            pages: pages(DVec3::ZERO),
+            auto_place: true,
+        });
+        assert_eq!(
+            underlays_in(&app, i),
+            0,
+            "nothing is placed during the read"
+        );
+        app.drive_headless_task(placed).expect("the placement read");
+        assert_eq!(underlays_in(&app, i), 2);
+    }
+
+    /// Without automatic placement nothing is read: the pages are placed at
+    /// once.
+    #[test]
+    fn pages_without_automatic_placement_are_placed_at_once() {
+        let mut app = app();
+        let i = app.active_tab;
+        set_crs(&mut app);
+        let path = "placed-at-once.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let _ = app.attach_pdf_pages_with(
+            i,
+            "PDFATTACH".to_string(),
+            UnderlayType::Pdf,
+            path,
+            pages(DVec3::ZERO),
+            false,
+            |_, _, _| panic!("no read"),
+        );
+        assert_eq!(underlays_in(&app, i), 2);
+    }
+
+    /// A placement read that panics gives an error, and nothing is placed.
+    #[test]
+    fn a_placement_read_that_panics_is_an_error() {
+        let mut app = app();
+        let i = app.active_tab;
+        set_crs(&mut app);
+        let before = app.tabs[i].history.undo_stack.len();
+        let placed = app.attach_pdf_pages_with(
+            i,
+            "PDFATTACH".to_string(),
+            UnderlayType::Pdf,
+            "placement-panics.pdf",
+            pages(DVec3::ZERO),
+            true,
+            |_, _, _| panic!("a reader bug"),
+        );
+        app.drive_headless_task(placed).expect("the placement read");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("PDFATTACH failed: a reader bug")
+        );
+        assert_eq!(underlays_in(&app, i), 0);
+        app.finish_all_pending_history();
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before);
+    }
+
+    /// A result for a drawing that was replaced is dropped.
+    #[test]
+    fn a_placement_for_a_replaced_drawing_is_dropped() {
+        let mut app = app();
+        let i = app.active_tab;
+        set_crs(&mut app);
+        let path = "placement-replaced.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let placed = app.attach_pdf_pages(
+            i,
+            "PDFATTACH".to_string(),
+            UnderlayType::Pdf,
+            path,
+            pages(DVec3::ZERO),
+            true,
+        );
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.drive_headless_task(placed).expect("the placement read");
+        assert_eq!(underlays_in(&app, app.active_tab), 0);
+        let history = app
+            .command_line
+            .history
+            .iter()
+            .map(|entry| entry.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(history.contains("was replaced"), "{history}");
+    }
+
+    /// A result for a drawing that is no longer the current one is dropped
+    /// with a message: the commit writes to the current drawing.
+    #[test]
+    fn a_placement_for_a_drawing_that_is_not_current_is_dropped() {
+        let mut app = app();
+        let i = app.active_tab;
+        set_crs(&mut app);
+        let path = "placement-not-current.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let placed = app.attach_pdf_pages(
+            i,
+            "PDFATTACH".to_string(),
+            UnderlayType::Pdf,
+            path,
+            pages(DVec3::ZERO),
+            true,
+        );
+        app.push_test_document();
+        app.active_tab = app.tabs.len() - 1;
+        app.drive_headless_task(placed).expect("the placement read");
+        assert_eq!(underlays_in(&app, i), 0);
+        assert_eq!(underlays_in(&app, app.active_tab), 0);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some(
+                "Attach PDF cancelled: a different drawing became current while the file was read."
+            )
+        );
+    }
+
     fn unit_geographic_pdf() -> Vec<u8> {
         let objects = [
             "<< /Type /Catalog /Pages 2 0 R >>".to_string(),

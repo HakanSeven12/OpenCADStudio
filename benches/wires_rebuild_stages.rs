@@ -15,9 +15,9 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-// Match the Windows app's allocator (src/main.rs) so the bench measures the
-// same alloc/dealloc cost the app pays; other targets keep the system heap.
-#[cfg(target_os = "windows")]
+// Match the app's allocator (src/main.rs) so the bench measures the same
+// alloc/dealloc cost the app pays; wasm keeps the system heap.
+#[cfg(not(target_arch = "wasm32"))]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

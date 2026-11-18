@@ -250,12 +250,13 @@ impl OpenCADStudio {
         } else {
             "IMPORT"
         };
+        let ticket = self.start_window_read(crate::app::ModalKind::DgnImport);
         let path = path.to_string();
         let worker_path = path.clone();
         crate::app::update::background_task(
             context,
             move || reader(&worker_path, code_page).map(Arc::new),
-            move |read| Message::ImportDialog(ImportDialogMsg::DgnRead(path, read, from)),
+            move |read| Message::ImportDialog(ImportDialogMsg::DgnRead(ticket, path, read, from)),
         )
     }
 
@@ -372,10 +373,14 @@ impl OpenCADStudio {
     /// not open.
     pub(in crate::app) fn open_dgn_import_dialog(
         &mut self,
+        ticket: crate::ui::window::import_dialogs::ReadTicket,
         path: &str,
         read: Option<Arc<DgnWindowRead>>,
         from: DgnReadFrom,
     ) {
+        if !self.window_read_current(ticket, crate::app::ModalKind::DgnImport) {
+            return;
+        }
         let import_file_open = self.active_modal == Some(crate::app::ModalKind::ImportFile);
         let Some(read) = read else {
             match from {
@@ -694,7 +699,9 @@ impl OpenCADStudio {
                 });
             }
             ImportDialogMsg::TdsPicked(Some(path)) => return self.read_tds_for_dialog(&path),
-            ImportDialogMsg::TdsRead(path, scene) => self.open_tds_import_dialog(&path, scene),
+            ImportDialogMsg::TdsRead(ticket, path, scene) => {
+                self.open_tds_import_dialog(ticket, &path, scene)
+            }
             ImportDialogMsg::TdsConverted(tab_id, generation, request, scene, import) => {
                 self.finish_tds_import(tab_id, generation, *request, scene, *import)
             }
@@ -777,8 +784,8 @@ impl OpenCADStudio {
             ImportDialogMsg::DgnPicked(Some(path)) => {
                 return self.read_dgn_for_dialog(&path, DgnReadFrom::DgnImport)
             }
-            ImportDialogMsg::DgnRead(path, read, from) => {
-                self.open_dgn_import_dialog(&path, read, from)
+            ImportDialogMsg::DgnRead(ticket, path, read, from) => {
+                self.open_dgn_import_dialog(ticket, &path, read, from)
             }
             ImportDialogMsg::DgnPromptRead(tab_id, path, read) => {
                 return self.finish_dgn_import_prompt_read(tab_id, &path, read);

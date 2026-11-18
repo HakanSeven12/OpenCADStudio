@@ -523,13 +523,39 @@ impl OpenCADStudio {
     ) -> Task<Message> {
         use crate::ui::window::import_dialogs::ImportDialogMsg;
         self.command_line.push_info(&format!("Reading {path}…"));
+        let ticket = self.start_window_read(crate::app::ModalKind::TdsImport);
         let path = path.to_string();
         let worker_path = path.clone();
         crate::app::update::background_task(
             "IMPORT",
             move || reader(&worker_path).map(std::sync::Arc::new),
-            move |scene| Message::ImportDialog(ImportDialogMsg::TdsRead(path, scene)),
+            move |scene| Message::ImportDialog(ImportDialogMsg::TdsRead(ticket, path, scene)),
         )
+    }
+
+    /// A ticket for a new read of the import window `kind`: the next
+    /// number, and whether that window is open now.
+    pub(in crate::app) fn start_window_read(
+        &mut self,
+        kind: crate::app::ModalKind,
+    ) -> crate::ui::window::import_dialogs::ReadTicket {
+        self.import_window_read += 1;
+        crate::ui::window::import_dialogs::ReadTicket {
+            id: self.import_window_read,
+            from_window: self.dialog_open(kind),
+        }
+    }
+
+    /// Whether the window `kind` takes the result of the read `ticket`: it
+    /// is the newest read, and a read started from the window finds the
+    /// window still open (a window closed during the read, or closed by OK,
+    /// does not open again).
+    pub(in crate::app) fn window_read_current(
+        &self,
+        ticket: crate::ui::window::import_dialogs::ReadTicket,
+        kind: crate::app::ModalKind,
+    ) -> bool {
+        ticket.id == self.import_window_read && (!ticket.from_window || self.dialog_open(kind))
     }
 
     /// The 3D Studio Import window for a file read off the UI thread; an
@@ -540,9 +566,13 @@ impl OpenCADStudio {
     /// Studio Import window does not open.
     pub(in crate::app) fn open_tds_import_dialog(
         &mut self,
+        ticket: crate::ui::window::import_dialogs::ReadTicket,
         path: &str,
         scene: Option<std::sync::Arc<crate::io::tds_import::TdsScene>>,
     ) {
+        if !self.window_read_current(ticket, crate::app::ModalKind::TdsImport) {
+            return;
+        }
         let Some(scene) = scene else {
             self.command_line
                 .push_error(&format!("{path} is not a valid 3D Studio file."));

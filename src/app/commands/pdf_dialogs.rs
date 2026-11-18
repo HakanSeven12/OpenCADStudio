@@ -792,12 +792,13 @@ impl OpenCADStudio {
         reader: fn(&str) -> PdfImportFileRead,
     ) -> Task<Message> {
         self.command_line.push_info(&format!("Reading {path}…"));
+        let ticket = self.start_window_read(crate::app::ModalKind::PdfImportFile);
         let path = path.to_string();
         let worker_path = path.clone();
         crate::app::update::background_task(
             "PDFIMPORT",
             move || std::sync::Arc::new(reader(&worker_path)),
-            move |read| Message::PdfDialog(PdfDialogMsg::ImportRead(path, read)),
+            move |read| Message::PdfDialog(PdfDialogMsg::ImportRead(ticket, path, read)),
         )
     }
 
@@ -806,7 +807,15 @@ impl OpenCADStudio {
     /// Import File window (which IMPORT from a script or the automation
     /// `run` operation leaves open) and of its own older copy (Browse). If a
     /// different window opened during the read, neither window opens.
-    fn open_pdf_import_window(&mut self, path: &str, read: &PdfImportFileRead) -> Task<Message> {
+    fn open_pdf_import_window(
+        &mut self,
+        ticket: crate::ui::window::import_dialogs::ReadTicket,
+        path: &str,
+        read: &PdfImportFileRead,
+    ) -> Task<Message> {
+        if !self.window_read_current(ticket, crate::app::ModalKind::PdfImportFile) {
+            return Task::none();
+        }
         use crate::ui::window::pdf_password_dialog::PdfPasswordThen;
         if self.active_modal.is_some_and(|modal| {
             !matches!(
@@ -1395,8 +1404,8 @@ impl OpenCADStudio {
             PdfDialogMsg::ImportPromptRead(tab_id, path, read) => {
                 return self.finish_pdf_import_prompt_read(tab_id, &path, read);
             }
-            PdfDialogMsg::ImportRead(path, read) => {
-                return self.open_pdf_import_window(&path, &read)
+            PdfDialogMsg::ImportRead(ticket, path, read) => {
+                return self.open_pdf_import_window(ticket, &path, &read)
             }
             PdfDialogMsg::ImportConverted(tab_id, generation, job, converted) => {
                 self.finish_pdf_import(tab_id, generation, *job, *converted);

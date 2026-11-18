@@ -15,6 +15,17 @@ use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{button_style, dialog_button, dialog_button_styled_opt, field_style};
 use crate::ui::window::pdf_dialogs::{card, well_style, PageThumb};
 
+/// Which read of an import window (3D Studio Import, DGN Import, Import
+/// PDF) a result belongs to: its number, and whether its window was open
+/// when it started (Change… or Browse). The window takes only the result of
+/// its newest read, and a read started from the window only while the
+/// window is still open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadTicket {
+    pub id: u64,
+    pub from_window: bool,
+}
+
 /// One edit in the Import File or DGN Import window.
 #[derive(Debug, Clone)]
 pub enum ImportDialogMsg {
@@ -62,9 +73,10 @@ pub enum ImportDialogMsg {
     TdsMatRemember(bool),
     TdsMatApply,
     /// A 3D Studio file read off the UI thread for the 3D Studio Import
-    /// window: the file, and its model (none when it is no 3D Studio
-    /// file).
+    /// window: the read's ticket, the file, and its model (none when it is
+    /// no 3D Studio file).
     TdsRead(
+        ReadTicket,
         String,
         Option<std::sync::Arc<crate::io::tds_import::TdsScene>>,
     ),
@@ -78,10 +90,15 @@ pub enum ImportDialogMsg {
         std::sync::Arc<crate::io::tds_import::TdsScene>,
         Box<crate::io::tds_import::TdsImport>,
     ),
-    /// A file read off the UI thread for the DGN Import window: the file,
-    /// what was read (none when it is no DGN model), and where the read
-    /// started (which says where an error goes).
-    DgnRead(String, Option<std::sync::Arc<DgnWindowRead>>, DgnReadFrom),
+    /// A file read off the UI thread for the DGN Import window: the read's
+    /// ticket, the file, what was read (none when it is no DGN model), and
+    /// where the read started (which says where an error goes).
+    DgnRead(
+        ReadTicket,
+        String,
+        Option<std::sync::Arc<DgnWindowRead>>,
+        DgnReadFrom,
+    ),
     /// IMPORT with FILEDIA off: whether the file is a DGN model, checked off
     /// the UI thread; the error to show when it is not.
     DgnChecked(String, bool, String),

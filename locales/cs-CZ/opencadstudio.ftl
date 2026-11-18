@@ -3428,6 +3428,7 @@ draw =
     .pick-points-placed-enter-to-apply = __ocs_arg_mode__: vyberte body (umístěno: __ocs_arg_count__, Enter = použít):
     .wpolygon = OPolygon
     .cpolygon = KPolygon
+    .select-box-corner-or-path = Specify opposite corner or [Fence/WPolygon/CPolygon]:
     .remove = Odebrat
     .pline-specify-starting-width = PLINE  Určete počáteční šířku <__ocs_arg_w__>:
     .pline-specify-ending-width = PLINE  Určete koncovou šířku <__ocs_arg_w__>:

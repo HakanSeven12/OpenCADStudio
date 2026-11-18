@@ -3423,6 +3423,7 @@ draw =
     .pick-points-placed-enter-to-apply = __ocs_arg_mode__: 점 선택(__ocs_arg_count__개 배치됨, Enter로 적용):
     .wpolygon = WPolygon
     .cpolygon = CPolygon
+    .select-box-corner-or-path = Specify opposite corner or [Fence/WPolygon/CPolygon]:
     .remove = 제거
     .pline-specify-starting-width = PLINE  시작 폭 지정 <__ocs_arg_w__>:
     .pline-specify-ending-width = PLINE  끝 폭 지정 <__ocs_arg_w__>:

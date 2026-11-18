@@ -3412,6 +3412,7 @@ draw =
     .pick-points-placed-enter-to-apply = __ocs_arg_mode__: बिंदु चुनें (__ocs_arg_count__ रखे गए, लागू करने के लिए Enter):
     .wpolygon = WPolygon
     .cpolygon = CPolygon
+    .select-box-corner-or-path = Specify opposite corner or [Fence/WPolygon/CPolygon]:
     .remove = हटाएँ
     .pline-specify-starting-width = PLINE  प्रारंभिक चौड़ाई निर्दिष्ट करें <__ocs_arg_w__>:
     .pline-specify-ending-width = PLINE  अंतिम चौड़ाई निर्दिष्ट करें <__ocs_arg_w__>:

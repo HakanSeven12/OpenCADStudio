@@ -3423,6 +3423,7 @@ draw =
     .pick-points-placed-enter-to-apply = __ocs_arg_mode__: изберете точки (поставени: __ocs_arg_count__, Enter за прилагане):
     .wpolygon = WPolygon
     .cpolygon = CPolygon
+    .select-box-corner-or-path = Specify opposite corner or [Fence/WPolygon/CPolygon]:
     .remove = Премахване
     .pline-specify-starting-width = PLINE  Задайте начална ширина <__ocs_arg_w__>:
     .pline-specify-ending-width = PLINE  Задайте крайна ширина <__ocs_arg_w__>:

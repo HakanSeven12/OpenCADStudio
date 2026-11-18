@@ -5773,6 +5773,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "%{mode}: pick points (%{count} placed, Enter to apply):" => Some(("draw", "pick-points-placed-enter-to-apply")),
         "WPolygon" => Some(("draw", "wpolygon")),
         "CPolygon" => Some(("draw", "cpolygon")),
+        "Specify opposite corner or [Fence/WPolygon/CPolygon]:" => Some(("draw", "select-box-corner-or-path")),
         "Remove" => Some(("draw", "remove")),
         "INSERT  Enter block name:" => Some(("insert", "insert-enter-block-name")),
         "INSERT  No matching blocks for \"%{needle}\"" => Some(("insert", "insert-no-matching-blocks-for")),

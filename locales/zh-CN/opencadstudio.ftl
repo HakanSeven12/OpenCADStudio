@@ -3411,6 +3411,7 @@ draw =
     .pick-points-placed-enter-to-apply = __ocs_arg_mode__：选择点（已放置 __ocs_arg_count__ 个，按 Enter 应用）：
     .wpolygon = WPolygon
     .cpolygon = CPolygon
+    .select-box-corner-or-path = Specify opposite corner or [Fence/WPolygon/CPolygon]:
     .remove = 移除
     .pline-specify-starting-width = PLINE  指定起点宽度 <__ocs_arg_w__>:
     .pline-specify-ending-width = PLINE  指定端点宽度 <__ocs_arg_w__>:

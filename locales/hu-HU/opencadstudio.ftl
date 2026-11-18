@@ -3420,6 +3420,7 @@ draw =
     .pick-points-placed-enter-to-apply = __ocs_arg_mode__: jelöljön ki pontokat (__ocs_arg_count__ elhelyezve, Enter az alkalmazáshoz):
     .wpolygon = WPolygon
     .cpolygon = CPolygon
+    .select-box-corner-or-path = Specify opposite corner or [Fence/WPolygon/CPolygon]:
     .remove = Eltávolítás
     .pline-specify-starting-width = PLINE  Adja meg a kezdő szélességet <__ocs_arg_w__>:
     .pline-specify-ending-width = PLINE  Adja meg a záró szélességet <__ocs_arg_w__>:

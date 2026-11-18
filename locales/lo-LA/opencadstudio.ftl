@@ -3425,6 +3425,7 @@ draw =
     .pick-points-placed-enter-to-apply = __ocs_arg_mode__: ເລືອກຈຸດ (ວາງແລ້ວ __ocs_arg_count__ ຈຸດ, ກົດ Enter ເພື່ອນຳໃຊ້):
     .wpolygon = WPolygon
     .cpolygon = CPolygon
+    .select-box-corner-or-path = Specify opposite corner or [Fence/WPolygon/CPolygon]:
     .remove = ລຶບອອກ
     .pline-specify-starting-width = PLINE  ກຳນົດຄວາມກວ້າງເລີ່ມຕົ້ນ <__ocs_arg_w__>:
     .pline-specify-ending-width = PLINE  ກຳນົດຄວາມກວ້າງສິ້ນສຸດ <__ocs_arg_w__>:

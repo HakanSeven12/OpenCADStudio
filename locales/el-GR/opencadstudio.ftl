@@ -3424,6 +3424,7 @@ draw =
     .pick-points-placed-enter-to-apply = __ocs_arg_mode__: επιλέξτε σημεία (__ocs_arg_count__ τοποθετημένα, Enter για εφαρμογή):
     .wpolygon = WPolygon
     .cpolygon = CPolygon
+    .select-box-corner-or-path = Specify opposite corner or [Fence/WPolygon/CPolygon]:
     .remove = Αφαίρεση
     .pline-specify-starting-width = PLINE  Ορίστε αρχικό πλάτος <__ocs_arg_w__>:
     .pline-specify-ending-width = PLINE  Ορίστε τελικό πλάτος <__ocs_arg_w__>:

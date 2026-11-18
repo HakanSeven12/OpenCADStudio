@@ -3424,6 +3424,7 @@ draw =
     .pick-points-placed-enter-to-apply = __ocs_arg_mode__: kies punten (__ocs_arg_count__ geplaatst, Enter om toe te passen):
     .wpolygon = WPolygon
     .cpolygon = CPolygon
+    .select-box-corner-or-path = Specify opposite corner or [Fence/WPolygon/CPolygon]:
     .remove = Verwijderen
     .pline-specify-starting-width = PLINE  Geef beginbreedte op <__ocs_arg_w__>:
     .pline-specify-ending-width = PLINE  Geef eindbreedte op <__ocs_arg_w__>:

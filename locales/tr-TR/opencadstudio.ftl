@@ -3406,6 +3406,7 @@ draw =
     .pick-points-placed-enter-to-apply = __ocs_arg_mode__: noktaları seçin (__ocs_arg_count__ yerleştirildi, Enter ile uygula):
     .wpolygon = WPolygon
     .cpolygon = CPolygon
+    .select-box-corner-or-path = Karşı köşeyi belirtin veya [Fence/WPolygon/CPolygon]:
     .remove = Kaldır
     .pline-specify-starting-width = PLINE  Başlangıç genişliğini belirtin <__ocs_arg_w__>:
     .pline-specify-ending-width = PLINE  Bitiş genişliğini belirtin <__ocs_arg_w__>:

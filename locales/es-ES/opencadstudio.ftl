@@ -3424,6 +3424,7 @@ draw =
     .pick-points-placed-enter-to-apply = __ocs_arg_mode__: elija puntos (__ocs_arg_count__ colocados, Intro para aplicar):
     .wpolygon = WPolygon
     .cpolygon = CPolygon
+    .select-box-corner-or-path = Specify opposite corner or [Fence/WPolygon/CPolygon]:
     .remove = Quitar
     .pline-specify-starting-width = PLINE  Precise grosor inicial <__ocs_arg_w__>:
     .pline-specify-ending-width = PLINE  Precise grosor final <__ocs_arg_w__>:

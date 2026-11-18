@@ -2614,37 +2614,7 @@ impl OpenCADStudio {
                     );
                     return Some(Task::none());
                 }
-                match std::fs::read_to_string(path) {
-                    Ok(xml) => {
-                        let pts = parse_landxml_cgpoints(&xml);
-                        if pts.is_empty() {
-                            self.command_line.push_info(
-                                crate::t!("LANDXMLIMPORT: no <CgPoint> survey points found.")
-                                    .as_ref(),
-                            );
-                            return Some(Task::none());
-                        }
-                        self.push_undo_snapshot(i, "LANDXMLIMPORT");
-                        for [x, y, z] in &pts {
-                            let mut p = document::entities::Point::new();
-                            p.location = document::types::Vector3::new(*x, *y, *z);
-                            self.tabs[i]
-                                .scene
-                                .add_entity_clone(document::EntityType::Point(p));
-                        }
-                        self.tabs[i].dirty = true;
-                        self.command_line.push_output(
-                            crate::tf!(
-                            "LANDXMLIMPORT: imported {} survey point(s). Use ZOOM EXTENTS to view.",
-                            pts.len()
-                        )
-                            .as_ref(),
-                        );
-                    }
-                    Err(e) => self.command_line.push_error(
-                        crate::tf!("LANDXMLIMPORT: cannot read \"{path}\": {e}").as_ref(),
-                    ),
-                }
+                return Some(self.read_landxml(i, path));
             }
 
             "ULAYERS" => self.open_underlay_layers_dialog(i),
@@ -2774,6 +2744,86 @@ impl OpenCADStudio {
                 .push_output(crate::tf!("ANNOUPDATE: updated {updated} object(s).").as_ref());
         }
     }
+}
+
+impl OpenCADStudio {
+    /// LANDXMLIMPORT: reads and parses the file off the UI thread; the
+    /// points are placed when the read ends ([`Self::finish_landxml_import`]).
+    pub(in crate::app) fn read_landxml(&mut self, i: usize, path: &str) -> Task<Message> {
+        self.read_landxml_with(i, path, read_landxml_points)
+    }
+
+    /// [`Self::read_landxml`] with the reader given, so a test can give one
+    /// that panics.
+    pub(in crate::app) fn read_landxml_with(
+        &mut self,
+        i: usize,
+        path: &str,
+        reader: fn(&str) -> Result<Vec<[f64; 3]>, String>,
+    ) -> Task<Message> {
+        let tab_id = self.tabs[i].id;
+        let generation = self.tabs[i].document_generation;
+        let path = path.to_string();
+        let worker_path = path.clone();
+        self.command_line.push_info(&format!("Reading {path}…"));
+        crate::app::update::background_task(
+            "LANDXMLIMPORT",
+            move || reader(&worker_path),
+            move |result| Message::LandXmlImportFinished(tab_id, generation, path, result),
+        )
+    }
+
+    /// Places the points of a finished LANDXMLIMPORT read, as one undo
+    /// step. A result for a drawing that was closed, replaced or cleared is
+    /// dropped.
+    pub(in crate::app) fn finish_landxml_import(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        path: &str,
+        result: Result<Vec<[f64; 3]>, String>,
+    ) {
+        let Some(i) = self.import_target(tab_id, generation) else {
+            return;
+        };
+        let pts = match result {
+            Ok(pts) => pts,
+            Err(e) => {
+                self.command_line
+                    .push_error(crate::tf!("LANDXMLIMPORT: cannot read \"{path}\": {e}").as_ref());
+                return;
+            }
+        };
+        if pts.is_empty() {
+            self.command_line
+                .push_info(crate::t!("LANDXMLIMPORT: no <CgPoint> survey points found.").as_ref());
+            return;
+        }
+        self.push_undo_snapshot(i, "LANDXMLIMPORT");
+        for [x, y, z] in &pts {
+            let mut p = document::entities::Point::new();
+            p.location = document::types::Vector3::new(*x, *y, *z);
+            self.tabs[i]
+                .scene
+                .add_entity_clone(document::EntityType::Point(p));
+        }
+        self.tabs[i].dirty = true;
+        self.command_line.push_output(
+            crate::tf!(
+                "LANDXMLIMPORT: imported {} survey point(s). Use ZOOM EXTENTS to view.",
+                pts.len()
+            )
+            .as_ref(),
+        );
+    }
+}
+
+/// The LANDXMLIMPORT reader: the file's `<CgPoint>` survey points, or why
+/// the file cannot be read.
+fn read_landxml_points(path: &str) -> Result<Vec<[f64; 3]>, String> {
+    std::fs::read_to_string(path)
+        .map(|xml| parse_landxml_cgpoints(&xml))
+        .map_err(|e| e.to_string())
 }
 
 // Scan LandXML text for <CgPoint> survey points. Each element's text content is

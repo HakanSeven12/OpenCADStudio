@@ -6326,6 +6326,10 @@ pub enum Message {
         crate::io::model_import::ModelFormat,
         Result<crate::io::model_import::Imported, crate::io::model_import::ImportFailure>,
     ),
+    /// Completion of a LANDXMLIMPORT read off the UI thread: the tab it
+    /// was started for, that document's generation, the file, and its
+    /// survey points or why it cannot be read.
+    LandXmlImportFinished(u64, u64, String, Result<Vec<[f64; 3]>, String>),
     // ── Picture import (WMF/SVG) ──────────────────────────────────────────
     /// Completion of a WMF or SVG import read off the UI thread: the tab it
     /// was started for, that document's generation, the file (none for SVG

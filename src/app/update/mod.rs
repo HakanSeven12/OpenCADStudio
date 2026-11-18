@@ -3115,6 +3115,11 @@ impl OpenCADStudio {
                 self.finish_model_import(tab_id, generation, &path, format, result)
             }
 
+            Message::LandXmlImportFinished(tab_id, generation, path, result) => {
+                self.finish_landxml_import(tab_id, generation, &path, result);
+                Task::none()
+            }
+
             Message::PictureImportFinished(tab_id, generation, path, format, prompt, read) => self
                 .finish_picture_import(tab_id, generation, path.as_deref(), format, prompt, read),
 

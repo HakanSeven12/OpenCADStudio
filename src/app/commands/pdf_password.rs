@@ -47,26 +47,78 @@ impl OpenCADStudio {
                 if state.input.is_empty() {
                     return Task::none();
                 }
-                let owner = !state.then.attach();
-                let (path, stage, remember) = (&state.path, state.stage, state.remember);
-                match pdf_password::check(path, stage, &state.input, remember, owner) {
-                    Check::Wrong => state.wrong = true,
-                    Check::NeedPermission => {
-                        state.stage = Stage::Permission;
-                        state.input.clear();
-                        state.wrong = false;
-                        return self.focus_pdf_password();
-                    }
-                    Check::Unlocked => {
-                        let Some(state) = self.pdf_password.take() else {
-                            return Task::none();
-                        };
-                        self.close_active_modal();
-                        let focus = self.focus_cmd_input();
-                        let next = self.after_pdf_unlocked(state.path, state.then);
-                        return Task::batch([focus, next]);
-                    }
-                }
+                return self.check_pdf_password_with(pdf_password::check);
+            }
+            PdfPasswordMsg::Checked(path, stage, input, check) => {
+                return self.finish_pdf_password_check(&path, stage, &input, check);
+            }
+        }
+        Task::none()
+    }
+
+    /// OK in the password window: the password is checked off the UI
+    /// thread (the check reads the file's encryption dictionary and derives
+    /// its keys), and the window takes the answer when the check ends
+    /// ([`Self::finish_pdf_password_check`]). A panic in the check becomes
+    /// an error on the command line, and the window stays open.
+    pub(in crate::app) fn check_pdf_password_with(
+        &mut self,
+        check: fn(&str, Stage, &str, bool, bool) -> Check,
+    ) -> Task<Message> {
+        let Some(state) = self.pdf_password.as_ref() else {
+            return Task::none();
+        };
+        let owner = !state.then.attach();
+        let context = if state.then.attach() {
+            "PDFATTACH"
+        } else {
+            "PDFIMPORT"
+        };
+        let (path, stage, input, remember) = (
+            state.path.clone(),
+            state.stage,
+            state.input.clone(),
+            state.remember,
+        );
+        let (worker_path, worker_input) = (path.clone(), input.clone());
+        crate::app::update::background_task(
+            context,
+            move || check(&worker_path, stage, &worker_input, remember, owner),
+            move |answer| Message::PdfPassword(PdfPasswordMsg::Checked(path, stage, input, answer)),
+        )
+    }
+
+    /// The end of a password check: the window takes the answer if it is
+    /// still open on that file and stage with that password typed.
+    fn finish_pdf_password_check(
+        &mut self,
+        path: &str,
+        stage: Stage,
+        input: &str,
+        check: Check,
+    ) -> Task<Message> {
+        let Some(state) = self.pdf_password.as_mut() else {
+            return Task::none();
+        };
+        if state.path != path || state.stage != stage || state.input != input {
+            return Task::none();
+        }
+        match check {
+            Check::Wrong => state.wrong = true,
+            Check::NeedPermission => {
+                state.stage = Stage::Permission;
+                state.input.clear();
+                state.wrong = false;
+                return self.focus_pdf_password();
+            }
+            Check::Unlocked => {
+                let Some(state) = self.pdf_password.take() else {
+                    return Task::none();
+                };
+                self.close_active_modal();
+                let focus = self.focus_cmd_input();
+                let next = self.after_pdf_unlocked(state.path, state.then);
+                return Task::batch([focus, next]);
             }
         }
         Task::none()

@@ -19,6 +19,14 @@ pub enum PdfPasswordMsg {
     Remember(bool),
     Help,
     Ok,
+    /// The password checked off the UI thread: the file, the stage and the
+    /// password checked, and the answer.
+    Checked(
+        String,
+        crate::scene::model::pdf_password::Stage,
+        String,
+        crate::scene::model::pdf_password::Check,
+    ),
 }
 
 fn msg(m: PdfPasswordMsg) -> Message {

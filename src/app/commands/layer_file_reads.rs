@@ -227,3 +227,191 @@ impl OpenCADStudio {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::ModalKind;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    fn temp(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("ocs-layer-reads-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a temp folder");
+        dir
+    }
+
+    /// A standards drawing with the layers `names`.
+    fn standards(dir: &std::path::Path, names: &[&str]) -> PathBuf {
+        let mut document = document::Document::new();
+        for name in names {
+            document
+                .layers
+                .add(document::tables::Layer::new(*name))
+                .expect("a layer");
+        }
+        let bytes = crate::io::save_to_bytes(&document, "dwg", document.version).expect("a DWG");
+        let path = dir.join("standards.dwg");
+        std::fs::write(&path, bytes).expect("write the standards");
+        path
+    }
+
+    /// A `.las` file with the state `name`, exported from a new drawing.
+    fn las_file(dir: &std::path::Path, name: &str) -> PathBuf {
+        let mut app = new_app();
+        let path = dir.join(format!("{name}.las"));
+        let _ = app.run_command_line(&format!("-LAYERSTATE SAVE {name}"));
+        let _ = app.run_command_line(&format!("-LAYERSTATE EXPORT {name} {}", path.display()));
+        assert!(path.exists(), "the .las file");
+        path
+    }
+
+    fn has_state(app: &OpenCADStudio, name: &str) -> bool {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .layer_state(name)
+            .is_some()
+    }
+
+    fn output(app: &OpenCADStudio) -> String {
+        app.command_line.history_plain_text()
+    }
+
+    /// LAYERSTATE IMPORT stores the state only when the read ends.
+    #[test]
+    fn a_layer_state_is_imported_when_the_read_ends() {
+        let dir = temp("import");
+        let path = las_file(&dir, "PLAN");
+        let mut app = new_app();
+        let task = app.run_command_line(&format!("-LAYERSTATE IMPORT {}", path.display()));
+        assert!(!has_state(&app, "PLAN"), "nothing during the read");
+        assert!(output(&app).contains(&format!("Reading {}…", path.display())));
+        app.drive_headless_task(task).expect("the read task");
+        assert!(has_state(&app, "PLAN"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A result for a drawing that was replaced during the read is dropped.
+    #[test]
+    fn a_layer_state_for_a_replaced_drawing_is_dropped() {
+        let dir = temp("replaced");
+        let path = las_file(&dir, "PLAN");
+        let mut app = new_app();
+        let i = app.active_tab;
+        let task = app.run_command_line(&format!("-LAYERSTATE IMPORT {}", path.display()));
+        app.tabs[i].document_generation += 1;
+        app.drive_headless_task(task).expect("the read task");
+        assert!(!has_state(&app, "PLAN"));
+        assert!(output(&app).contains("was replaced or cleared"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A reader that panics gives an error, for each command name.
+    #[test]
+    fn a_reader_panic_is_an_error() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        for (job, files, error) in [
+            (
+                LayerFileJob::LayerStateImport,
+                LayerFiles {
+                    layer_state: Some("panics.las".into()),
+                    ..LayerFiles::default()
+                },
+                "LAYERSTATE failed: a reader bug",
+            ),
+            (
+                LayerFileJob::ListTargets,
+                LayerFiles {
+                    standards: Some("panics.dwg".into()),
+                    ..LayerFiles::default()
+                },
+                "LAYTRANS failed: a reader bug",
+            ),
+        ] {
+            let task = app.read_layer_files_with(i, job, files, |_| panic!("a reader bug"));
+            app.drive_headless_task(task).expect("the read task");
+            assert_eq!(app.command_line.last_error.as_deref(), Some(error));
+        }
+    }
+
+    /// -LAYTRANS reads the standards file on a worker; a bad pair is an
+    /// error at once, before any read.
+    #[test]
+    fn laytrans_reads_its_standards_on_a_worker() {
+        let dir = temp("laytrans");
+        let path = standards(&dir, &["WALLS", "DOORS"]);
+        let mut app = new_app();
+        let task = app.run_command_line(&format!("-LAYTRANS LIST {}", path.display()));
+        assert!(
+            !output(&app).contains("target layer(s)"),
+            "nothing during the read"
+        );
+        app.drive_headless_task(task).expect("the read task");
+        assert!(
+            output(&app).contains("LAYTRANS: 3 target layer(s)"),
+            "{}",
+            output(&app)
+        );
+        let before = output(&app);
+        let _ = app.run_command_line(&format!("-LAYTRANS {} NOT-A-PAIR", path.display()));
+        let after = output(&app);
+        assert!(
+            after.contains("'NOT-A-PAIR' is not a FROM=TO mapping"),
+            "{after}"
+        );
+        assert!(
+            !after[before.len()..].contains("Reading"),
+            "no read for a bad pair"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The Layer Translator window takes a file read for it only while it
+    /// is open.
+    #[test]
+    fn the_window_takes_its_files_only_while_open() {
+        let dir = temp("window");
+        let path = standards(&dir, &["WALLS"]);
+        let mappings = dir.join("map.txt");
+        std::fs::write(&mappings, "A-WALL -> WALLS\n").expect("write the mappings");
+        let mut app = new_app();
+        let _ = app.open_layer_translator(None);
+        assert!(app.dialog_open(ModalKind::LayerTranslator));
+        let task = app.update(Message::LayerTranslatorLoaded(path.clone()));
+        assert!(
+            app.layer_translator.as_ref().unwrap().targets.is_empty(),
+            "nothing during the read"
+        );
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.layer_translator.as_ref().unwrap().targets.len(),
+            2,
+            "0 and WALLS"
+        );
+        let task = app.update(Message::LayerTranslatorMappingsPath(
+            mappings.clone(),
+            false,
+        ));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.layer_translator.as_ref().unwrap().mappings.len(), 1);
+
+        app.layer_translator = Some(Default::default());
+        let task = app.update(Message::LayerTranslatorLoaded(path));
+        let mappings_task = app.update(Message::LayerTranslatorMappingsPath(mappings, false));
+        app.close_active_modal();
+        assert!(!app.dialog_open(ModalKind::LayerTranslator));
+        app.drive_headless_task(task).expect("the read task");
+        app.drive_headless_task(mappings_task)
+            .expect("the read task");
+        let state = app.layer_translator.as_ref();
+        assert!(state.is_none_or(|state| state.targets.is_empty() && state.mappings.is_empty()));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

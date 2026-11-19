@@ -3,6 +3,12 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "Select TIN surfaces to sample or press Enter for none:" => Some(("civil-cmd", "select-sample-surfaces")),
+        "Select a sample line group:" => Some(("civil-cmd", "select-sample-line-group")),
+        "Specify the center line point of the first section view:" => Some(("civil-cmd", "specify-section-view-point")),
+        "Create Section Views" => Some(("civil-cmd", "create-section-views")),
+        "The group has no sample lines." => Some(("civil-cmd", "group-no-sample-lines")),
+        "{} section view(s) created." => Some(("civil-cmd", "section-views-created")),
         "Select a baseline alignment that has a profile:" => Some(("civil-cmd", "select-corridor-alignment")),
         "Select an assembly:" => Some(("civil-cmd", "select-assembly")),
         "Select an alignment for the sample lines:" => Some(("civil-cmd", "select-sample-line-alignment")),

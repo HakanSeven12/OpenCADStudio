@@ -277,12 +277,7 @@ impl OpenCADStudio {
                     .sum();
                 let mut stations: Vec<f64> = (0..).map(|k| start + k as f64 * increment).take_while(|s| *s < start + length).collect();
                 stations.push(start + length);
-                // TIN surfaces of the drawing, sampled by the group.
-                let surfaces: Vec<Handle> = doc
-                    .entities()
-                    .filter(|e| civil_class(e) == Some("AECC_TIN_SURFACE"))
-                    .map(|e| e.common().handle)
-                    .collect();
+                let surfaces = req.objects[1].clone();
                 let group = next_name(doc, "AECC_SAMPLE_LINE_GROUP", "SL Collection");
                 self.push_undo_snapshot(i, name);
                 let doc = &mut self.tabs[i].scene.document;
@@ -299,6 +294,55 @@ impl OpenCADStudio {
                     }
                 }
                 crate::tf!("Sample line group {} created with {} line(s).", group, stations.len()).into_owned()
+            }
+            "CREATESECTIONVIEWS" => {
+                let doc = &self.tabs[i].scene.document;
+                let group = *req.objects[0].first().ok_or("no sample line group")?;
+                let at = *req.points.first().ok_or("no point")?;
+                let group_name = arch(doc, group).and_then(|g| g.decode().strings.get(2).cloned()).unwrap_or_default();
+                let lines: Vec<Handle> = arch(doc, group)
+                    .ok_or("no sample line group")?
+                    .typed_handles()
+                    .iter()
+                    .map(|r| Handle::new(r.0))
+                    .filter(|h| arch(doc, *h).is_some_and(|a| a.dxf_name == "AECC_SAMPLE_LINE"))
+                    .collect();
+                if lines.is_empty() {
+                    return Err(crate::t!("The group has no sample lines.").into_owned());
+                }
+                self.push_undo_snapshot(i, name);
+                let doc = &mut self.tabs[i].scene.document;
+                // Five views a row, spaced by the first view's frame.
+                const COLUMNS: usize = 5;
+                const GAP: f64 = 20.0;
+                let mut step = None;
+                let mut failed = None;
+                for (k, line) in lines.iter().enumerate() {
+                    let (dx, dy) = step.unwrap_or((0.0, 0.0));
+                    let origin = Vector2::new(at.x + (k % COLUMNS) as f64 * dx, at.y - (k / COLUMNS) as f64 * dy);
+                    let view = format!("{group_name} - {}", k + 1);
+                    match c3d::add_section_view(doc, *line, &view, origin, layer) {
+                        Ok(h) => {
+                            changes.push((*line, ChangeKind::Modified));
+                            changes.push((h, ChangeKind::Added));
+                            if step.is_none() {
+                                let f = arch(doc, h).and_then(|a| a.section_view_frame()).ok_or("no section view frame")?;
+                                let height = (f.elevation_max - f.elevation_min) * f.vertical_scale;
+                                step = Some((f.offset_max - f.offset_min + GAP, height + GAP));
+                            }
+                        }
+                        Err(e) => {
+                            failed = Some(refused(e));
+                            break;
+                        }
+                    }
+                }
+                let count = changes.len() / 2;
+                match failed {
+                    Some(error) if count == 0 => return Err(error),
+                    Some(error) => format!("{} {error}", crate::tf!("{} section view(s) created.", count)),
+                    None => crate::tf!("{} section view(s) created.", count).into_owned(),
+                }
             }
             _ => return Err(crate::t!("Unknown civil command.").into_owned()),
         };

@@ -27,6 +27,10 @@ pub enum Filter {
     Alignments,
     /// Civil 3D assemblies.
     Assemblies,
+    /// Civil 3D sample line groups.
+    SampleLineGroups,
+    /// Civil 3D TIN surfaces; a step of them may be passed with none selected.
+    TinSurfaces,
     /// Lines, 2D and 3D polylines.
     Paths,
 }
@@ -67,6 +71,8 @@ impl Filter {
             Filter::SurfacePoints => |e| matches!(e, EntityType::Point(_)) || civil_class(e) == Some("AECC_COGO_POINT"),
             Filter::Alignments => |e| civil_class(e) == Some("AECC_ALIGNMENT"),
             Filter::Assemblies => |e| civil_class(e) == Some("AECC_ASSEMBLY"),
+            Filter::SampleLineGroups => |e| civil_class(e) == Some("AECC_SAMPLE_LINE_GROUP"),
+            Filter::TinSurfaces => |e| civil_class(e) == Some("AECC_TIN_SURFACE"),
             Filter::Paths => |e| {
                 matches!(e, EntityType::Line(_) | EntityType::LwPolyline(_) | EntityType::Polyline2D(_) | EntityType::Polyline3D(_))
             },
@@ -330,7 +336,11 @@ impl CadCommand for SurfaceCommand {
         }
         match self.step() {
             // Enter with nothing selected ends the command.
-            Some(Step::Objects { slot, .. }) if self.request.objects[slot].is_empty() => CmdResult::Done,
+            Some(Step::Objects { slot, filter, .. })
+                if self.request.objects[slot].is_empty() && filter != Filter::TinSurfaces =>
+            {
+                CmdResult::Done
+            }
             Some(Step::Points { .. }) if self.request.points.is_empty() => CmdResult::Done,
             Some(Step::Picks { slot, .. }) if self.request.picks[slot].is_empty() => {
                 CmdResult::Measurement(crate::t!("Nothing picked.").into_owned())

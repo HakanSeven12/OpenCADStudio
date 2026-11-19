@@ -590,9 +590,23 @@ pub(crate) fn decoded(data: &ArchEntityData, handle: u64, document: &document::D
         CivilKind::Other if data.dxf_name == "AECC_PIPE" => pipe(data, document, &mut out)?,
         CivilKind::Other if data.dxf_name == "AECC_FEATURE_LINE" => feature_line(data, handle, document, &mut out)?,
         CivilKind::Other if data.dxf_name == "AECC_COGO_POINT" => cogo_point(data, document, &mut out)?,
+        CivilKind::Other if data.dxf_name == "AECC_GRAPH_SECTION_VIEW" => section_view(data, &mut out)?,
         _ => return None,
     }
     Some(out)
+}
+
+/// A section view without a drawn cache: its frame.
+// ponytail: frame only; draw the grid, axes and sections from its style once views are sampled.
+fn section_view(data: &ArchEntityData, out: &mut Decoded) -> Option<()> {
+    let f = data.section_view_frame()?;
+    let at = |offset: f64, elevation: f64| {
+        let p = f.to_drawing(offset, elevation);
+        [p.x, p.y, 0.0]
+    };
+    let (o0, o1, e0, e1) = (f.offset_min, f.offset_max, f.elevation_min, f.elevation_max);
+    styled(out, Some(ProxyStyle::default()), vec![at(o0, e0), at(o1, e0), at(o1, e1), at(o0, e1), at(o0, e0)]);
+    Some(())
 }
 
 /// Stations as Civil 3D shows them along `alignment`: past a station

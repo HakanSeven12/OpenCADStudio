@@ -12658,3 +12658,94 @@ mod transparent_qselect_tests {
     }
 }
 
+
+// A converted dimensional constraint exposes Constraint Form and Reference
+// rows in Properties; driving them had no test.
+mod dimensional_constraint_properties_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use crate::scene::parametric_constraints::DYNAMIC_DIMENSION_LAYER;
+    use document::EntityType;
+
+    #[test]
+    fn a_dimensional_constraints_properties_drive_its_form_and_reference() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 40,0"}"#);
+        let i = app.active_tab;
+        let line = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| matches!(entity, EntityType::Line(_)).then(|| entity.common().handle))
+            .unwrap();
+        let dimension = app.tabs[i].scene.add_entity(
+            crate::modules::annotate::linear_dim::linear_dimension_entity(
+                glam::DVec3::ZERO,
+                glam::DVec3::new(40.0, 0.0, 0.0),
+                glam::DVec3::new(20.0, 10.0, 0.0),
+                glam::DVec3::X,
+                None,
+            ),
+        );
+        app.tabs[i]
+            .scene
+            .attach_dimension_association(dimension, vec![Some(line), Some(line)]);
+
+        let _ = app.run_command_line("DCCONVERT");
+        let _ = app.feed_command(StepInput::SelectionComplete(vec![dimension]));
+        let _ = app.feed_command(StepInput::Enter);
+
+        app.tabs[i].scene.select_entity(dimension, true);
+        app.tabs[i].selected_handle = Some(dimension);
+        app.refresh_properties();
+        let rows: Vec<_> = app.tabs[i]
+            .properties
+            .sections
+            .iter()
+            .flat_map(|section| &section.props)
+            .cloned()
+            .collect();
+        let form = rows
+            .iter()
+            .find(|property| property.field == "dyn_constraint_form")
+            .expect("the Constraint Form row is shown")
+            .clone();
+        assert!(
+            matches!(&form.value, crate::scene::model::object::PropValue::Choice { selected, .. } if selected == "Dynamic"),
+            "a converted dimension starts dynamic: {:?}",
+            form.value
+        );
+        assert!(
+            rows.iter().any(|property| property.field == "dyn_constraint_reference"),
+            "the Reference row is shown too"
+        );
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(dimension)
+                .unwrap()
+                .common()
+                .layer,
+            DYNAMIC_DIMENSION_LAYER
+        );
+
+        let _ = app
+            .set_property_value(form, &serde_json::json!("Annotational"))
+            .unwrap();
+        app.finish_pending_history(i);
+        assert_ne!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(dimension)
+                .unwrap()
+                .common()
+                .layer,
+            DYNAMIC_DIMENSION_LAYER,
+            "the Annotational form moves it off the constraints layer"
+        );
+    }
+}
+

@@ -1,5 +1,5 @@
 ---
-summary: Creates a Civil 3D TIN surface from COGO points or points.
+summary: Creates a TIN surface from COGO points or points.
 related: CREATEPOINTS, CREATEPOINTGROUP
 ---
 
@@ -8,4 +8,4 @@ related: CREATEPOINTS, CREATEPOINTGROUP
 
 ## Notes
 - Needs three or more points apart in plan; of points at the same plan position the first is used.
-- The surface is a native Civil 3D TIN surface triangulated from the points.
+- The surface is a native TIN surface triangulated from the points.

@@ -18,7 +18,7 @@ The package contains:
 
 - The drawing and its recursively resolved external references.
 - Raster images, PDF/DWF/DGN underlays, and point-cloud source files.
-- Referenced TrueType/OpenType fonts, SHX fonts, big fonts, and SHX shape files, including inline MTEXT font overrides. Structured packages place all of these flat in the shared root `Fonts/` folder, as AutoCAD does.
+- Referenced TrueType/OpenType fonts, SHX fonts, big fonts, and SHX shape files, including inline MTEXT font overrides. Structured packages place all of these flat in the shared root `Fonts/` folder.
 - Custom CTB/STB plot style tables named by layouts or active for plotting.
 - A custom external `.lin`/`.dnl` file retained by `CENTERLTYPEFILE`, when present. Embedded linetype definitions are already stored in the drawing and are not exported as invented `.lin` files.
 - `ETRANSMIT.txt`, listing packaged files, missing dependencies, and warnings.
@@ -29,7 +29,7 @@ Missing or conflicting dependencies produce warnings; they do not prevent the av
 - Packaged drawings are rewritten copies; the original drawings are never modified. Xrefs remain separate files—they are not bound.
 - Xref and other resource paths are relative to their owning drawing. In Structured packages a root drawing uses paths such as `xref/name.dwg` and `Images/name.png`, while one xref references a sibling xref as `name.dwg` and another resource type as `../Images/name.png`.
 - Preserve keeps existing relative paths when their targets remain inside the root drawing's source hierarchy. Resources outside that hierarchy fall back to safe root filenames, with references rewritten accordingly.
-- Flat and the default Structured font layout use bare font filenames, matching AutoCAD's actual DWG output. Preserve retains relative font paths where possible. OpenCADStudio finds fonts beside a drawing and in its own or ancestor `Fonts/` folders.
+- Flat and the default Structured font layout use bare font filenames, as DWG files usually store them. Preserve retains relative font paths where possible. OpenCADStudio finds fonts beside a drawing and in its own or ancestor `Fonts/` folders.
 - Default Structured plot-table references likewise remain bare names; desktop opening discovers tables beside the owning drawing and in ancestor `PlotStyles/` folders, and resolves preserved relative table references against that drawing.
 - Repeated references to one source reuse its package entry. Identical non-drawing bytes can also be deduplicated.
 - Different files with the same package name receive a unique suffix such as `_1`; every affected reference is rewritten to the allocated name. Files are never silently overwritten.

@@ -1,5 +1,5 @@
 ---
-summary: Creates Civil 3D feature lines from lines and polylines.
+summary: Creates feature lines from lines and polylines.
 related: CREATEALIGNMENT, CREATESURFACE
 ---
 

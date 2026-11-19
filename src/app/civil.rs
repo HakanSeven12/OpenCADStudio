@@ -278,7 +278,7 @@ impl OpenCADStudio {
                 let h = c3d::add_corridor(doc, &corridor, "Baseline (1)", "Region (1)", alignment, profile, assembly, layer)
                     .map_err(refused)?;
                 changes.push((h, ChangeKind::Added));
-                crate::tf!("Corridor {} created; Civil 3D builds it when it rebuilds the corridor.", corridor).into_owned()
+                crate::tf!("Corridor {} created; it is built when the corridor is rebuilt.", corridor).into_owned()
             }
             "CREATESAMPLELINES" => {
                 let doc = &self.tabs[i].scene.document;

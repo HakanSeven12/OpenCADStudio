@@ -1,5 +1,5 @@
 ---
-summary: Creates a Civil 3D intersection of two crossing alignments.
+summary: Creates an intersection of two crossing alignments.
 related: CREATEALIGNMENT, CREATEPROFILE, CREATECORRIDOR
 ---
 

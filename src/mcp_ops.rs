@@ -1047,7 +1047,7 @@ pub static SAVE: OpDef = OpDef {
         opt(
             "target_version",
             Ty::Enum(TARGET_VERSIONS),
-            "Target AutoCAD version.",
+            "Target DWG version.",
         ),
         opt(
             "allow_lossy",

@@ -29,7 +29,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Create Corridor" => Some(("civil-cmd", "create-corridor")),
         "Create Sample Lines" => Some(("civil-cmd", "create-sample-lines")),
         "The alignment has no profile." => Some(("civil-cmd", "alignment-no-profile")),
-        "Corridor {} created; Civil 3D builds it when it rebuilds the corridor." => Some(("civil-cmd", "corridor-created")),
+        "Corridor {} created; it is built when the corridor is rebuilt." => Some(("civil-cmd", "corridor-created")),
         "The increment and the swath width must be positive." => Some(("civil-cmd", "sample-values-positive")),
         "Sample line group {} created with {} line(s)." => Some(("civil-cmd", "sample-lines-created")),
         "Select an alignment for the profile view:" => Some(("civil-cmd", "select-view-alignment")),

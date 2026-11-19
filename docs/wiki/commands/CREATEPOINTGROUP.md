@@ -1,5 +1,5 @@
 ---
-summary: Creates a Civil 3D point group holding the COGO points you select.
+summary: Creates a point group holding the COGO points you select.
 related: CREATEPOINTS, CREATESURFACE
 ---
 

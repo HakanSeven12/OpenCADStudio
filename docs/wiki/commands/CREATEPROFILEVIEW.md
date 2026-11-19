@@ -1,5 +1,5 @@
 ---
-summary: Creates a Civil 3D profile view of an alignment and its profiles.
+summary: Creates a profile view of an alignment and its profiles.
 related: CREATEPROFILE, CREATEALIGNMENT
 ---
 
@@ -13,4 +13,4 @@ related: CREATEPROFILE, CREATEALIGNMENT
 ## Notes
 - The view shows every profile of the alignment at a vertical scale of 10. Without options its stations run from 200 before the alignment's start to 200 past its end and its elevations around the profiles.
 - A range needs both of its ends.
-- A drawing without Civil 3D data gets the profile view style it needs.
+- A drawing that lacks the profile view style gets it.

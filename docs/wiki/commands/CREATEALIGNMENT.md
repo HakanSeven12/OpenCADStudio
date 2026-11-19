@@ -1,5 +1,5 @@
 ---
-summary: Creates a Civil 3D alignment from a line or polyline.
+summary: Creates an alignment from a line or polyline.
 related: CREATEPROFILE
 ---
 
@@ -10,5 +10,5 @@ related: CREATEPROFILE
    - **Spiral length**: spirals of this length on each side of each curve (0 for none).
 
 ## Notes
-- The alignment is a native Civil 3D alignment of fixed lines with free curves; the polyline stays in the drawing.
+- The alignment is a native alignment of fixed lines with free curves; the polyline stays in the drawing.
 - Polylines with arc segments are not supported yet.

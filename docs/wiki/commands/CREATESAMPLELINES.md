@@ -1,5 +1,5 @@
 ---
-summary: Creates a Civil 3D sample line group with sample lines along an alignment.
+summary: Creates a sample line group with sample lines along an alignment.
 related: CREATEALIGNMENT, CREATESURFACE, CREATECORRIDOR
 ---
 
@@ -11,4 +11,4 @@ related: CREATEALIGNMENT, CREATESURFACE, CREATECORRIDOR
 
 ## Notes
 - Sample lines are placed at the alignment's start, every increment, and at its end.
-- The TIN surfaces you select are sampled (press Enter to sample none); their sections hold no points until Civil 3D updates them.
+- The TIN surfaces you select are sampled (press Enter to sample none); their sections hold no points until they are updated.

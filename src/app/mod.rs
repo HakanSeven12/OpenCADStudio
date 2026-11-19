@@ -81,6 +81,7 @@ mod layers;
 mod linetype_manager_tests;
 mod measurement;
 mod model_ops;
+mod civil;
 mod surfacing;
 mod solid_edit_ops;
 mod mtext_editor;

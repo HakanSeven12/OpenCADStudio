@@ -19,6 +19,25 @@ pub enum Filter {
     Surfaces,
     /// Surfaces, solids and regions.
     Bodies,
+    /// Civil 3D COGO points.
+    CogoPoints,
+    /// COGO points and points.
+    SurfacePoints,
+    /// Civil 3D alignments.
+    Alignments,
+    /// Lines and 2D polylines.
+    Polylines,
+}
+
+/// The Civil 3D class of `entity`, if it is one.
+pub fn civil_class(entity: &EntityType) -> Option<&str> {
+    match entity {
+        EntityType::Extended(x) => match &x.data {
+            document::entities::ExtendedEntityData::Arch(a) => Some(a.dxf_name.as_str()),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 impl Filter {
@@ -42,6 +61,10 @@ impl Filter {
             Filter::Bodies => |e| {
                 matches!(e, EntityType::Surface(_) | EntityType::Solid3D(_) | EntityType::Region(_))
             },
+            Filter::CogoPoints => |e| civil_class(e) == Some("AECC_COGO_POINT"),
+            Filter::SurfacePoints => |e| matches!(e, EntityType::Point(_)) || civil_class(e) == Some("AECC_COGO_POINT"),
+            Filter::Alignments => |e| civil_class(e) == Some("AECC_ALIGNMENT"),
+            Filter::Polylines => |e| matches!(e, EntityType::Line(_) | EntityType::LwPolyline(_) | EntityType::Polyline2D(_)),
         }
     }
 }
@@ -67,6 +90,8 @@ pub enum Step {
     Picks { prompt: &'static str, slot: usize, once: bool },
     /// A point, into `points`.
     Point { prompt: &'static str },
+    /// Points, into `points`, until Enter.
+    Points { prompt: &'static str },
     /// A number, kept under `key`, offered at its last value.
     Value { prompt: &'static str, key: &'static str, default: f64 },
     /// The closing prompt: Enter carries the command out; an option sets its value first.
@@ -209,7 +234,13 @@ impl CadCommand for SurfaceCommand {
             );
         }
         match self.step() {
-            Some(Step::Objects { prompt, .. } | Step::Picks { prompt, .. } | Step::Point { prompt } | Step::Accept { prompt, .. }) => {
+            Some(
+                Step::Objects { prompt, .. }
+                | Step::Picks { prompt, .. }
+                | Step::Point { prompt }
+                | Step::Points { prompt }
+                | Step::Accept { prompt, .. },
+            ) => {
                 crate::t!(prompt).into_owned()
             }
             Some(Step::Value { prompt, key, default }) => format!(
@@ -273,6 +304,10 @@ impl CadCommand for SurfaceCommand {
                 self.request.points.push(point);
                 self.advance()
             }
+            Some(Step::Points { .. }) => {
+                self.request.points.push(point);
+                CmdResult::NeedPoint
+            }
             _ => CmdResult::NeedPoint,
         }
     }
@@ -291,6 +326,7 @@ impl CadCommand for SurfaceCommand {
         match self.step() {
             // Enter with nothing selected ends the command.
             Some(Step::Objects { slot, .. }) if self.request.objects[slot].is_empty() => CmdResult::Done,
+            Some(Step::Points { .. }) if self.request.points.is_empty() => CmdResult::Done,
             Some(Step::Picks { slot, .. }) if self.request.picks[slot].is_empty() => {
                 CmdResult::Measurement(crate::t!("Nothing picked.").into_owned())
             }
@@ -366,6 +402,11 @@ impl CadCommand for SurfaceCommand {
         }
         if let Some(Step::Picks { slot, .. }) = self.step() {
             if self.request.picks[slot].pop().is_some() {
+                return Some(CmdResult::NeedPoint);
+            }
+        }
+        if let Some(Step::Points { .. }) = self.step() {
+            if self.request.points.pop().is_some() {
                 return Some(CmdResult::NeedPoint);
             }
         }

@@ -174,6 +174,7 @@ action =
 
 ribbon-tab =
     .surface = Yüzey
+    .civil = Civil
     .user = Araçlarım
     .block-editor = Blok Düzenleyici
     .draw = Çizim
@@ -10356,3 +10357,34 @@ ribbon-label =
     .hover-outline =
         Hover
         Outline
+
+civil-cmd =
+    .specify-point-location = Nokta konumunu belirtin (x,y,z) veya bitirmek için Enter'a basın:
+    .select-points-for-group = Nokta grubu için COGO noktalarını seçin:
+    .select-alignment-path = Güzergah yapılacak çizgiyi veya polyline'ı seçin:
+    .accept-alignment = Güzergahı oluşturmak için Enter'a basın veya [Yarıçap/Spiral uzunluğu]:
+    .select-surface-points = Yüzeyin yapılacağı COGO noktalarını veya noktaları seçin:
+    .select-profile-alignment = Profil için bir güzergah seçin:
+    .specify-pvi = PVI belirtin (kilometre,kot) veya bitirmek için Enter'a basın:
+    .specify-curve-length = İç PVI'larda düşey kurp uzunluğunu belirtin (yoksa 0)
+    .corner-radius = Köşelerdeki kurp yarıçapı (yoksa 0)
+    .spiral-length-prompt = Kurbun her iki yanındaki spiral uzunluğu (yoksa 0)
+    .spiral-length = Spiral uzunluğu
+    .create-points = Nokta Oluştur
+    .create-point-group = Nokta Grubu Oluştur
+    .create-alignment = Güzergah Oluştur
+    .create-surface = Yüzey Oluştur
+    .create-profile = Profil Oluştur
+    .points-created = __ocs_fmt_0__ nokta oluşturuldu.
+    .no-cogo-points = COGO noktası seçilmedi.
+    .group-created = __ocs_fmt_0__ nokta grubu __ocs_fmt_1__ noktayla oluşturuldu.
+    .polyline-arcs = Yay içeren polyline'lardan henüz güzergah yapılamıyor.
+    .polyline-not-xy = Polyline XY düzleminde değil.
+    .select-line-or-polyline = Bir çizgi veya polyline seçin.
+    .polyline-no-length = Polyline'ın uzunluğu yok.
+    .alignment-created = __ocs_fmt_0__ güzergahı oluşturuldu.
+    .surface-needs-points = Yüzey için planda ayrı en az üç nokta gerekir.
+    .surface-created = __ocs_fmt_0__ yüzeyi __ocs_fmt_1__ noktadan oluşturuldu.
+    .profile-needs-pvis = Profil için en az iki PVI gerekir.
+    .profile-created = __ocs_fmt_0__ profili oluşturuldu.
+    .unknown-civil-command = Bilinmeyen Civil komutu.

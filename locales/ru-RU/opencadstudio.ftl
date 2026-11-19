@@ -174,6 +174,7 @@ action =
 
 ribbon-tab =
     .surface = Surface
+    .civil = Civil
     .user = Мои инструменты
     .block-editor = Редактор блоков
     .draw = Начертить
@@ -10441,3 +10442,34 @@ ribbon-label =
     .hover-outline =
         Hover
         Outline
+
+civil-cmd =
+    .specify-point-location = Specify location of point (x,y,z) or press Enter to end:
+    .select-points-for-group = Select COGO points for the point group:
+    .select-alignment-path = Select a line or polyline to make an alignment of:
+    .accept-alignment = Press Enter to create the alignment or [Radius/Spiral length]:
+    .select-surface-points = Select COGO points or points to make the surface of:
+    .select-profile-alignment = Select an alignment for the profile:
+    .specify-pvi = Specify PVI (station,elevation) or press Enter to end:
+    .specify-curve-length = Specify vertical curve length at the inner PVIs (0 for none)
+    .corner-radius = Curve radius at the corners (0 for none)
+    .spiral-length-prompt = Spiral length on each side of a curve (0 for none)
+    .spiral-length = Spiral length
+    .create-points = Create Points
+    .create-point-group = Create Point Group
+    .create-alignment = Create Alignment
+    .create-surface = Create Surface
+    .create-profile = Create Profile
+    .points-created = __ocs_fmt_0__ point(s) created.
+    .no-cogo-points = No COGO points selected.
+    .group-created = Point group __ocs_fmt_0__ created with __ocs_fmt_1__ point(s).
+    .polyline-arcs = Polylines with arcs cannot be made into alignments yet.
+    .polyline-not-xy = The polyline is not in the XY plane.
+    .select-line-or-polyline = Select a line or polyline.
+    .polyline-no-length = The polyline has no length.
+    .alignment-created = Alignment __ocs_fmt_0__ created.
+    .surface-needs-points = A surface needs three or more points apart in plan.
+    .surface-created = Surface __ocs_fmt_0__ created from __ocs_fmt_1__ point(s).
+    .profile-needs-pvis = A profile needs two or more PVIs.
+    .profile-created = Profile __ocs_fmt_0__ created.
+    .unknown-civil-command = Unknown civil command.

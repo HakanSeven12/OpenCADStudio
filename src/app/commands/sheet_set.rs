@@ -3395,3 +3395,203 @@ fn refresh_sheet_fields(scene: &mut crate::scene::Scene) -> bool {
     }
     !changes.is_empty()
 }
+
+#[cfg(test)]
+mod place_view_read_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A sheet set action through the automation protocol, its tasks driven.
+    fn sheet(app: &mut OpenCADStudio, value: &str) -> serde_json::Value {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let state = app.control_state();
+        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let req = json!({
+            "protocol": 1,
+            "document_id": state["document_id"].clone(),
+            "revision": state["revision"].clone(),
+            "client_id": "test",
+            "request_id": format!("place-{id}"),
+            "op": "action",
+            "name": "sheet_set",
+            "value": value,
+        });
+        app.automation_op(&req.to_string())
+    }
+
+    /// An app with a saved model drawing (one line, 10 by 5) and an open
+    /// sheet of a new set at its layout; the model drawing's path.
+    fn sheet_and_model(stem: &str) -> (OpenCADStudio, String) {
+        let dir = std::env::temp_dir().join(format!("ocs-ss-place-{stem}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        let folder = dir.display().to_string().replace('\\', "/");
+        let model = format!("{folder}/model.dwg");
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,5"}"#);
+        let _ = app.automation_op(&format!(r#"{{"op":"save","path":"{model}"}}"#));
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = sheet(&mut app, "new");
+        let _ = sheet(&mut app, "existing=0");
+        let _ = sheet(&mut app, "name=PLACESET");
+        let _ = sheet(&mut app, &format!("folder={folder}"));
+        let _ = sheet(&mut app, "ok");
+        let _ = sheet(&mut app, "menu=new_sheet:set");
+        let _ = sheet(&mut app, "number=A-1");
+        let _ = sheet(&mut app, "title=Plan");
+        let _ = sheet(&mut app, &format!("folder={folder}"));
+        let _ = sheet(&mut app, "open_after=1");
+        let _ = sheet(&mut app, "ok");
+        assert!(
+            app.current_sheet().is_some(),
+            "the new sheet is open at its layout"
+        );
+        // The model drawing is read for its size before the reference.
+        let task = app
+            .drawing_or_read(&model, SheetSetMsg::Refresh)
+            .expect_err("not read yet");
+        app.drive_headless_task(task).unwrap();
+        (app, model)
+    }
+
+    /// The entities that the sheet's reference to `model.dwg` holds (`None`:
+    /// no such reference).
+    fn reference_content(app: &OpenCADStudio) -> Option<usize> {
+        let scene = &app.tabs[app.active_tab].scene;
+        let record = scene
+            .document
+            .block_records
+            .iter()
+            .find(|r| r.flags.is_xref && r.name.eq_ignore_ascii_case("model"))?;
+        let block = record.handle;
+        Some(
+            scene
+                .document
+                .entities()
+                .filter(|e| e.common().owner_handle == block)
+                .filter(|e| {
+                    !matches!(
+                        e,
+                        document::EntityType::Block(_) | document::EntityType::BlockEnd(_)
+                    )
+                })
+                .count(),
+        )
+    }
+
+    /// Pick the view's insertion point at the origin.
+    fn pick(app: &mut OpenCADStudio) {
+        let task = app.feed_active_cmd("0,0");
+        app.drive_headless_task(task).unwrap();
+    }
+
+    /// The reference is read on a worker before the insertion point is
+    /// asked for; the pick then reads no file.
+    #[test]
+    fn the_view_reference_is_read_on_a_worker() {
+        let _sets = crate::entities::field::sheet_sets_one_at_a_time();
+        let (mut app, model) = sheet_and_model("worker");
+        let task = app.on_sheet_set(SheetSetMsg::PlaceOnSheet(model.clone(), None));
+        assert!(
+            app.sheet_set.placing.is_none(),
+            "no point prompt during the read"
+        );
+        let message = OpenCADStudio::first_task_message(task);
+        assert!(
+            matches!(
+                &message,
+                Message::SheetSet(SheetSetMsg::ViewReferenceRead(path, None, _, _)) if *path == model
+            ),
+            "{message:?}"
+        );
+        // The file is no drawing before the result arrives (at its old time,
+        // so the cached model drawing stays): the pick uses the read.
+        let time = std::fs::metadata(&model).unwrap().modified().unwrap();
+        std::fs::write(&model, b"not a drawing").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&model)
+            .unwrap()
+            .set_modified(time)
+            .unwrap();
+        let _ = app.update(message);
+        assert!(
+            app.sheet_set.placing.is_some(),
+            "the point prompt after the read"
+        );
+        pick(&mut app);
+        assert_eq!(
+            reference_content(&app),
+            Some(1),
+            "the reference holds the line"
+        );
+    }
+
+    /// A reader panic is caught on the worker: no point prompt, no reference.
+    #[test]
+    fn a_view_reference_reader_panic_keeps_the_app() {
+        let _sets = crate::entities::field::sheet_sets_one_at_a_time();
+        let (mut app, model) = sheet_and_model("panic");
+        let task = app.start_place_view_with(model, None, None, |_, _| {
+            panic!("reader panic in the view reference read")
+        });
+        let message = OpenCADStudio::first_task_message(task);
+        assert!(
+            matches!(message, Message::BackgroundTaskFailed { .. }),
+            "{message:?}"
+        );
+        let _ = app.update(message);
+        assert!(app.sheet_set.placing.is_none(), "no point prompt");
+        assert_eq!(reference_content(&app), None, "no reference");
+    }
+
+    /// A read for another sheet drawing is not used: the reference is read
+    /// again, for the sheet that is open.
+    #[test]
+    fn a_view_reference_read_for_another_sheet_is_read_again() {
+        let _sets = crate::entities::field::sheet_sets_one_at_a_time();
+        let (mut app, model) = sheet_and_model("other");
+        let other = Some(PathBuf::from("/elsewhere/other-sheet.dwg"));
+        let stale = crate::io::xref::read_xref_file("model.dwg", Path::new("/elsewhere"), None);
+        let task = app.on_sheet_set(SheetSetMsg::ViewReferenceRead(
+            model.clone(),
+            None,
+            other.clone(),
+            Box::new(stale),
+        ));
+        assert!(
+            app.sheet_set.placing.is_none(),
+            "no point prompt with that read"
+        );
+        let message = OpenCADStudio::first_task_message(task);
+        let Message::SheetSet(SheetSetMsg::ViewReferenceRead(_, _, host, _)) = &message else {
+            panic!("{message:?}");
+        };
+        assert_eq!(
+            *host, app.tabs[app.active_tab].current_path,
+            "read for the open sheet"
+        );
+        let _ = app.update(message);
+        pick(&mut app);
+        assert_eq!(
+            reference_content(&app),
+            Some(1),
+            "the reference holds the line"
+        );
+    }
+
+    /// A second view of a drawing the sheet references already reads
+    /// nothing: its point prompt comes at once.
+    #[test]
+    fn a_second_view_of_a_referenced_drawing_reads_nothing() {
+        let _sets = crate::entities::field::sheet_sets_one_at_a_time();
+        let (mut app, model) = sheet_and_model("second");
+        let task = app.on_sheet_set(SheetSetMsg::PlaceOnSheet(model.clone(), None));
+        app.drive_headless_task(task).unwrap();
+        pick(&mut app);
+        assert_eq!(reference_content(&app), Some(1));
+        let _ = app.on_sheet_set(SheetSetMsg::PlaceOnSheet(model, None));
+        assert!(app.sheet_set.placing.is_some(), "the point prompt at once");
+    }
+}

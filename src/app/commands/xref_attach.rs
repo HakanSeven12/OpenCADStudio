@@ -863,6 +863,98 @@ mod xref_attach_read_tests {
             .count()
     }
 
+    /// The window's unit for a file in `units`, as the window shows it.
+    fn unit_label(units: i16) -> String {
+        crate::t!(crate::app::properties::insunits_name(units)).into_owned()
+    }
+
+    /// A file chosen in the window is read off the UI thread: its name is
+    /// shown at once, its unit when the read ends.
+    #[test]
+    fn the_window_reads_a_chosen_file_on_a_worker() {
+        let (mut app, path) = source_and_host("window");
+        let units = crate::io::load_file(std::path::Path::new(&path))
+            .expect("the source")
+            .header
+            .insertion_units;
+        let _ = app.open_xref_attach_dialog(std::path::PathBuf::from(&path));
+        let task = app.update(Message::XrefAttachBrowseResult(Ok(
+            std::path::PathBuf::from(&path),
+        )));
+        let state = app.xref_attach.as_ref().expect("the window");
+        assert_eq!(state.name, "window");
+        assert_eq!(state.unit_label, "", "no unit during the read");
+        app.drive_headless_task(task).expect("the read's task");
+        let state = app.xref_attach.as_ref().expect("the window");
+        assert_eq!(state.unit_label, unit_label(units));
+    }
+
+    /// A read for a file that the window no longer shows is dropped.
+    #[test]
+    fn the_window_drops_the_read_of_an_earlier_file() {
+        let (mut app, first) = source_and_host("window-first");
+        let second = first.replace("window-first.dwg", "window-second.dwg");
+        std::fs::copy(&first, &second).expect("a second file");
+        let first_task = app.open_xref_attach_dialog(std::path::PathBuf::from(&first));
+        let second_task = app.update(Message::XrefAttachBrowseResult(Ok(
+            std::path::PathBuf::from(&second),
+        )));
+        app.drive_headless_task(first_task)
+            .expect("the first read's task");
+        let state = app.xref_attach.as_ref().expect("the window");
+        assert_eq!(state.name, "window-second");
+        assert_eq!(state.unit_label, "", "the first file's read is dropped");
+        app.drive_headless_task(second_task)
+            .expect("the second read's task");
+        assert_ne!(app.xref_attach.as_ref().expect("the window").unit_label, "");
+    }
+
+    /// A reader that panics leaves the window open, without a unit.
+    #[test]
+    fn a_window_reader_panic_keeps_the_window() {
+        let (mut app, path) = source_and_host("window-panics");
+        let _ = app.open_xref_attach_dialog(std::path::PathBuf::from(&path));
+        let mut state = app.xref_attach.take().expect("the window");
+        let task = app.load_xref_attach_file_with(&mut state, &path, |_| panic!("a reader bug"));
+        app.xref_attach = Some(state);
+        app.drive_headless_task(task).expect("the read's task");
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::XrefAttach));
+        assert_eq!(app.xref_attach.as_ref().expect("the window").unit_label, "");
+    }
+
+    /// XATTACH with a file, and a drawing picked for ATTACH, open the window
+    /// on the file and read it there.
+    #[test]
+    fn xattach_and_attach_open_the_window_and_read_the_file() {
+        let (mut app, path) = source_and_host("typed");
+        let units = crate::io::load_file(std::path::Path::new(&path))
+            .expect("the source")
+            .header
+            .insertion_units;
+        let i = app.active_tab;
+        let typed = app
+            .dispatch_xref_attach(&format!("XATTACH \"{path}\""), i)
+            .expect("XATTACH is handled");
+        app.drive_headless_task(typed).expect("the read's task");
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::XrefAttach));
+        assert_eq!(
+            app.xref_attach.as_ref().expect("the window").unit_label,
+            unit_label(units)
+        );
+
+        app.xref_attach = None;
+        app.active_modal = None;
+        let picked = app.update(Message::AttachPickResult(Ok(std::path::PathBuf::from(
+            &path,
+        ))));
+        app.drive_headless_task(picked).expect("the read's task");
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::XrefAttach));
+        assert_eq!(
+            app.xref_attach.as_ref().expect("the window").unit_label,
+            unit_label(units)
+        );
+    }
+
     /// The attach waits for the read: nothing is attached until the worker
     /// ends, then the reference and its INSERT come in one undo step.
     #[test]

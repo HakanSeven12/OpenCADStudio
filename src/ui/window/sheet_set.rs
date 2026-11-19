@@ -288,6 +288,12 @@ pub enum SheetSetMsg {
     /// Rename & Renumber: apply and go to the previous / next sheet.
     Previous,
     Next,
+    /// Rename & Renumber: the closed sheet drawing's layout renamed in its
+    /// file on a worker (or why not); then OK (`None`) or Previous / Next.
+    RenameWritten(Box<Form>, Option<bool>, Result<(), String>),
+    /// New Sheet: its drawing written on a worker (its layout handle, or
+    /// why not).
+    SheetWritten(Box<Form>, Box<NewSheetWrite>, Result<String, String>),
     /// Sheet Views: by category or by sheet.
     ViewsByCategory(bool),
     NewCategory,
@@ -483,6 +489,20 @@ pub struct ImportRow {
     /// The drawing's sheet link names another sheet set (importable, warned).
     pub warn: bool,
     pub on: bool,
+}
+
+/// What New Sheet writes: its drawing at `path` (the set's `file` for it),
+/// from layout `template` of a drawing (none: a new drawing's first
+/// layout), with one layout `layout_name`, linked to the set `dst` at
+/// revision `version`.
+#[derive(Debug, Clone)]
+pub struct NewSheetWrite {
+    pub path: std::path::PathBuf,
+    pub file: String,
+    pub template: Option<(String, String)>,
+    pub layout_name: String,
+    pub dst: String,
+    pub version: i32,
 }
 
 #[derive(Debug, Clone, Default)]

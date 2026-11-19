@@ -858,15 +858,17 @@ impl OpenCADStudio {
     /// belongs to other geometry, so it leaves the UCS alone.
     /// Dynamic UCS: outline the solid face under the cursor while a command
     /// that would align to it waits for its first point.
+    /// `UCS FACE`'s pick outlines the face it would take the same way.
     pub(in crate::app) fn refresh_ducs_face_highlight(&mut self, i: usize, cursor: iced::Point) {
-        let wanted = self.dynamic_ucs
+        let command = self.tabs[i].active_cmd.as_ref();
+        let ucs_face_pick = command.is_some_and(|command| {
+            command.name() == "UCS" && command.entity_pick_uses_surface_point()
+        });
+        let dynamic = self.dynamic_ucs
             && self.dynamic_ucs_restore.is_none()
             && self.last_point.is_none()
-            && self.tabs[i].editing_model_space()
-            && self.tabs[i]
-                .active_cmd
-                .as_ref()
-                .is_some_and(|command| dynamic_ucs_applies(command.name()));
+            && command.is_some_and(|command| dynamic_ucs_applies(command.name()));
+        let wanted = self.tabs[i].editing_model_space() && (ucs_face_pick || dynamic);
         let at = wanted.then(|| {
             let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
             let bounds = self.tabs[i].scene.active_model_tile_bounds(vw, vh);

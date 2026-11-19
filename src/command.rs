@@ -293,8 +293,10 @@ impl CadCommand for UcsPickCommand {
         self.face
     }
 
+    /// A face pick outlines the face under the cursor instead of the whole
+    /// solid (`refresh_ducs_face_highlight`).
     fn entity_pick_highlights_hover(&self) -> bool {
-        true
+        !self.face
     }
 
     fn on_entity_pick(&mut self, handle: Handle, pt: DVec3) -> CmdResult {

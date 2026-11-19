@@ -525,6 +525,25 @@ impl DocumentTab {
         super::helpers::UcsXform::from_active(self.active_ucs.as_ref())
     }
 
+    /// Rectangle width/height frame `(corner, width_axis, height_axis)` the
+    /// dynamic W/H boxes measure in: a rectangle grip's frame, or a command's
+    /// `RectSides` step whose `ref_point` gives a rotated width direction.
+    pub(super) fn dyn_rect_frame(&self) -> Option<(glam::DVec3, glam::DVec3, glam::DVec3)> {
+        if let Some(grip) = self.active_grip.as_ref() {
+            return grip.rectangle_frame;
+        }
+        if self.dyn_guide != crate::command::DynGuide::RectSides {
+            return None;
+        }
+        let (anchor, reference) = (self.dyn_anchor?, self.dyn_ref?);
+        let width_axis = (reference - anchor).normalize_or_zero();
+        if width_axis == glam::DVec3::ZERO {
+            return None;
+        }
+        let normal = self.ucs_xform().vec_to_wcs(glam::DVec3::Z);
+        Some((anchor, width_axis, normal.cross(width_axis).normalize_or_zero()))
+    }
+
     /// World-space UCS origin in full f64 precision (stored f64 in the header /
     /// viewport). Used to anchor the UCS icon and as the cursor-pick plane point
     /// — `UcsXform`'s origin is f32 and would quantize the anchor at UTM scale.

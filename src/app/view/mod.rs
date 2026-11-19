@@ -2248,17 +2248,13 @@ bg={bg_ms:.1}ms n={view_count}"
                     )
                 });
             let rectangle_values = tab
-                .active_grip
-                .as_ref()
-                .and_then(|grip| grip.rectangle_frame)
+                .dyn_rect_frame()
                 .map(|(opposite, width_axis, height_axis)| {
                     let delta = w - opposite;
                     (delta.dot(width_axis).abs(), delta.dot(height_axis).abs())
                 });
             let rectangle_label_screens = tab
-                .active_grip
-                .as_ref()
-                .and_then(|grip| grip.rectangle_frame)
+                .dyn_rect_frame()
                 .and_then(|(opposite, width_axis, height_axis)| {
                     let delta = w - opposite;
                     let width = delta.dot(width_axis);

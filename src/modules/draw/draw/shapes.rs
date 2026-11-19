@@ -394,6 +394,9 @@ pub struct RectCommand {
     thickness: f64,
     width: f64,
     rotation_deg: f64,
+    /// Signed width/height of the last opposite-corner preview, kept so the
+    /// Rotation steps can show the rectangle turning.
+    last_size: Option<(f64, f64)>,
     /// HATCH's Rectangle: its prompts, and no Thickness or Width.
     hatch: bool,
 }
@@ -550,8 +553,19 @@ impl RectCommand {
             thickness: defaults::get_rect_thickness(),
             width: defaults::get_rect_width().max(0.0),
             rotation_deg: defaults::get_rect_rotation(),
+            last_size: None,
             hatch: false,
         }
+    }
+
+    /// The last previewed rectangle turned to `rotation_deg`.
+    fn rotated_preview(&self, rotation_deg: f64) -> Option<WireModel> {
+        let (first, (width, height)) = (self.first?, self.last_size?);
+        let rotation = KernelTransform::rotation(rotation_deg.to_radians());
+        let [dx, dy] = rotation.apply_vector([width, height]);
+        let cursor = first + self.plane.vector_to_world(DVec3::new(dx, dy, 0.0));
+        let corners = rectangle_corners(first, cursor, self.plane, rotation_deg, None)?;
+        rectangle_wire(corners, self.plane, self.style())
     }
 
     fn style(&self) -> RectStyle {
@@ -971,13 +985,44 @@ impl CadCommand for RectCommand {
         };
         let corners =
             rectangle_corners(first, pt, self.plane, self.rotation_deg, fixed_dimensions)?;
+        if fixed_dimensions.is_none() {
+            let rotation = KernelTransform::rotation(-self.rotation_deg.to_radians());
+            let delta = self.plane.vector_to_local(pt - first);
+            let [width, height] = rotation.apply_vector([delta.x, delta.y]);
+            self.last_size = Some((width, height));
+        }
         rectangle_wire(corners, self.plane, self.style())
+    }
+    fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
+        let from = match self.step {
+            RectStep::Rotation => self.first,
+            RectStep::RotationPick(from) => from,
+            _ => return self.on_mouse_move(pt).into_iter().collect(),
+        };
+        let Some(from) = from else {
+            return self.rotated_preview(self.rotation_deg).into_iter().collect();
+        };
+        let delta = self.plane.vector_to_local(pt - from);
+        let angle = if delta.x.hypot(delta.y) > 1.0e-9 {
+            delta.y.atan2(delta.x).to_degrees()
+        } else {
+            self.rotation_deg
+        };
+        self.rotated_preview(angle)
+            .into_iter()
+            .chain(std::iter::once(wire_seg(from, pt)))
+            .collect()
     }
     fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
         use crate::command::{DynAnchor, DynFieldSpec, DynGuide, DynRole, DynSpec};
-        if !matches!(self.step, RectStep::Opposite) || self.rotation_deg.abs() > 1.0e-9 {
+        if !matches!(self.step, RectStep::Opposite) {
             return None;
         }
+        // A rotated rectangle hands its width direction as the reference, so
+        // W/H measure along its own sides.
+        let rotated = self.rotation_deg.abs() > 1.0e-9;
+        let rotation = self.rotation_deg.to_radians();
+        let width_dir = DVec3::new(rotation.cos(), rotation.sin(), 0.0);
         self.first.map(|first| DynSpec {
             anchor: DynAnchor::Point(first),
             fields: vec![
@@ -985,7 +1030,7 @@ impl CadCommand for RectCommand {
                 DynFieldSpec::new(DynRole::Height),
             ],
             guide: DynGuide::RectSides,
-            ref_point: None,
+            ref_point: rotated.then(|| first + self.plane.vector_to_world(width_dir)),
         })
     }
 }

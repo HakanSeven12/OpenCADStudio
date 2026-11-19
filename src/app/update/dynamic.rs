@@ -445,6 +445,18 @@ impl OpenCADStudio {
             }
         };
         let comps: Vec<DynComponent> = fields.iter().map(|f| f.component).collect();
+        // A rotated rectangle step: W/H measure along the rectangle's own axes.
+        if self.tabs[i].active_grip.is_none()
+            && !comma_cartesian
+            && comps == [DynComponent::X, DynComponent::Y]
+        {
+            if let Some((corner, width_axis, height_axis)) = self.tabs[i].dyn_rect_frame() {
+                let delta = w - corner;
+                let width = val(0, delta.dot(width_axis));
+                let height = val(1, delta.dot(height_axis));
+                return Some(corner + width_axis * width + height_axis * height);
+            }
+        }
         // Perpendicular offset: a single distance measured square to the
         // reference line (anchor → dyn_ref). The committed point lies on the
         // perpendicular through the anchor at that offset; the command projects

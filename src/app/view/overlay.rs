@@ -1023,6 +1023,7 @@ fn mtext_editor_content<'a>(
      -> Element<'static, Message> {
         text_input(placeholder, val)
             .on_input(on)
+            .on_submit(Message::MTextFieldSubmit)
             .width(iced::Length::Fixed(w))
             .padding(3)
             .size(12)

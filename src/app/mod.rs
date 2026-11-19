@@ -5749,6 +5749,8 @@ pub enum Message {
     /// Switch the editor body between raw code input (`false`) and the
     /// rendered preview (`true`).
     MTextShowPreview(bool),
+    /// Enter in a toolbar field: typing goes back to the text.
+    MTextFieldSubmit,
     /// Begin a preview text selection at the given visible-character offset.
     MTextSelStart(usize),
     /// Extend the preview selection to the given visible-character offset.

@@ -34,8 +34,10 @@ pub(super) fn patch_span(
         Ok(want)
     };
     let out = index.format(range.clone(), |n| match cells.get(n) {
-        Some(Cell::Char(_, p)) if expected(p)? == *p => Ok(String::new()),
-        Some(Cell::Char(_, p)) => code_for(p),
+        Some(Cell::Char(_, p) | Cell::Stack { props: p, .. }) if expected(p)? == *p => {
+            Ok(String::new())
+        }
+        Some(Cell::Char(_, p) | Cell::Stack { props: p, .. }) => code_for(p),
         _ => Err(EditError::ProjectionMismatch),
     })?;
     let after = doc_to_cells(&editor_document(&out));
@@ -45,6 +47,18 @@ pub(super) fn patch_span(
             (Cell::Char(a, p), Cell::Char(b, q)) if range.contains(&n) => {
                 a == b && expected(p)? == *q
             }
+            (
+                Cell::Stack {
+                    data: a,
+                    props: p,
+                    head: h,
+                },
+                Cell::Stack {
+                    data: b,
+                    props: q,
+                    head: k,
+                },
+            ) if range.contains(&n) => a == b && h == k && expected(p)? == *q,
             (old, new) => old == new,
         };
     }

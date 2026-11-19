@@ -193,7 +193,10 @@ impl SourceIndex<'_> {
             if unit.visible.start >= range.end || unit.visible.end <= range.start {
                 continue;
             }
-            if matches!(unit.kind, Kind::Stack | Kind::Column) {
+            // A selected stack is whole (`validate_range` refuses a split
+            // one) and takes its code like a character; a caller that cannot
+            // format it refuses through `prefix`.
+            if unit.kind == Kind::Column {
                 return Err(EditError::AtomicStructure);
             }
             if unit.kind == Kind::Break {

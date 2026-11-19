@@ -9625,6 +9625,9 @@ impl OpenCADStudio {
                 }
             }
             Message::MTextSelStart(off) => {
+                // A hit past the last glyph (an empty text's phantom line)
+                // is the end of the text.
+                let off = off.min(self.mtext_vis_count());
                 // Count quick same-spot clicks: 1 = place caret, 2 = select the
                 // word, 3 = select all.
                 let now = Instant::now();
@@ -9656,6 +9659,7 @@ impl OpenCADStudio {
                 self.unfocus_widgets()
             }
             Message::MTextSelTo(off) => {
+                let off = off.min(self.mtext_vis_count());
                 if let Some(ed) = self.mtext_editor.as_mut() {
                     ed.typing_format = Default::default();
                     let a = ed.sel_anchor;
@@ -9665,6 +9669,7 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::MTextFieldSubmit => self.unfocus_widgets(),
             Message::MTextSelEnd => {
                 self.mtext_match_apply();
                 Task::none()

@@ -589,6 +589,21 @@ mod tests {
     }
 
     #[test]
+    fn a_new_text_takes_typing_after_its_height_is_changed() {
+        let mut app = app();
+        app.open_mtext_editor(DVec3::ZERO, None, "", 2.5, None);
+        let _ = app.update(Message::MTextHeight("5".into()));
+        let _ = app.update(Message::MTextHeight("50".into()));
+        // A click right of an empty text's phantom glyph.
+        let _ = app.update(Message::MTextSelStart(1));
+        app.mtext_type("a");
+        app.mtext_type("b");
+        let ed = app.mtext_editor.as_ref().unwrap();
+        assert_eq!(ed.content.text(), "ab");
+        assert_eq!(ed.height, "50");
+    }
+
+    #[test]
     fn repeated_apply_on_a_new_text_updates_the_one_it_created() {
         let mut app = app();
         app.open_mtext_editor(DVec3::ZERO, None, "a", 2.5, None);

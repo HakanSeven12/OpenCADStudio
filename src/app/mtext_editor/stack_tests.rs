@@ -288,3 +288,17 @@ fn stack_splits_the_selection_at_its_first_separator_as_before() {
         assert!(ed(&app).undo.is_empty());
     }
 }
+
+#[test]
+fn a_selected_superscript_takes_a_height() {
+    let mut app = app("m\\S2^;");
+    let len = raw_len(&app);
+    select(&mut app, 0, len);
+    let _ = app.update(Message::MTextHeight("5".into()));
+    assert_eq!(raw(&app), "{\\H5;m\\S2^;}");
+    assert_eq!(stacks(&app).len(), 1);
+}
+
+fn raw_len(app: &OpenCADStudio) -> usize {
+    doc_to_cells(&ed(app).doc).len()
+}

@@ -15057,6 +15057,10 @@ impl OpenCADStudio {
                     .push_error(crate::tf!("{context} failed: {detail}").as_ref());
                 Task::none()
             }
+            Message::UnderlayRastersDrawn(tab_id, generation, done) => {
+                self.finish_underlay_reseed(tab_id, generation, *done);
+                Task::none()
+            }
             Message::PointCloudRead(done) => {
                 self.finish_point_cloud_display_read(&done);
                 Task::none()

@@ -5914,6 +5914,10 @@ pub enum Message {
     /// process down with it.
     /// A point cloud read that the drawing started ended: its clouds draw
     /// again with the points.
+    /// The end of the worker that drew a zoom step's underlay and OLE
+    /// rasters: the drawing it was started for, that document's generation,
+    /// and the rasters.
+    UnderlayRastersDrawn(u64, u64, Box<crate::scene::ReseedDone>),
     PointCloudRead(crate::scene::model::point_cloud::ReadDone),
     BackgroundTaskFailed {
         /// Which operation the worker was running (e.g. "STL export").

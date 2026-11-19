@@ -36,6 +36,7 @@ pub(crate) mod hyperlink;
 pub mod model;
 pub mod pick;
 pub mod pipeline;
+pub(crate) mod raster_reseed;
 pub(crate) mod raster_scale;
 pub(crate) mod reaper;
 pub(crate) mod render_graph;
@@ -78,6 +79,7 @@ mod solid_box_select_tests;
 #[cfg(test)]
 mod solid_highlight_outline_tests;
 pub use camera_ops::{add_background, copy_background, erase_background};
+pub use raster_reseed::{ReseedDone, ReseedJob};
 pub(crate) mod center_native;
 pub(crate) mod centerline;
 pub(crate) mod centermark;
@@ -3273,6 +3275,11 @@ pub struct Scene {
     underlay_scale: raster_scale::RasterScale,
     /// The view scale the OLE pictures of the current layout are made for.
     ole_scale: raster_scale::RasterScale,
+    /// The rasters a zoom step asks a worker to draw (`raster_reseed`).
+    pending_reseed: Option<raster_reseed::ReseedJob>,
+    /// Rasters `apply_reseed` just took: the bump it makes does not draw them
+    /// again.
+    fresh_images: HashSet<Handle>,
     /// Session-only visibility overrides for constraint glyphs.
     hidden_parametric_constraints: HashSet<(
         parametric_constraints::ParametricScope,
@@ -3843,6 +3850,8 @@ impl Scene {
             dynamic_dimension_camera_gen: None,
             underlay_scale: raster_scale::RasterScale::default(),
             ole_scale: raster_scale::RasterScale::default(),
+            pending_reseed: None,
+            fresh_images: HashSet::default(),
             hidden_parametric_constraints: HashSet::default(),
             shown_parametric_constraints: HashSet::default(),
             constraints_epoch: 0,
@@ -3930,6 +3939,9 @@ impl Scene {
                     .entities()
                     .any(|e| matches!(e, EntityType::Underlay(_)))
             {
+                #[cfg(not(target_arch = "wasm32"))]
+                self.queue_reseed(|e| matches!(e, EntityType::Underlay(_)));
+                #[cfg(target_arch = "wasm32")]
                 self.reseed_underlays();
             }
         }
@@ -3937,6 +3949,9 @@ impl Scene {
             let view = self.layout_plan_view_rect();
             let layout = self.current_layout.clone();
             if self.ole_scale.settle(wpp, view, &layout, generation, now) && self.has_ole_frames() {
+                #[cfg(not(target_arch = "wasm32"))]
+                self.queue_reseed(|e| matches!(e, EntityType::Ole2Frame(_)));
+                #[cfg(target_arch = "wasm32")]
                 self.reseed_ole_frames();
             }
         }
@@ -5476,7 +5491,8 @@ impl Scene {
         // A modified image-bearing entity redraws its raster: an underlay's
         // display adjustments and clip live on the entity, not the image.
         for (handle, kind) in &changes {
-            if !matches!(kind, ChangeKind::Modified) {
+            // A raster a worker just drew (`apply_reseed`) is not drawn again.
+            if !matches!(kind, ChangeKind::Modified) || self.fresh_images.contains(handle) {
                 continue;
             }
             let seed = match self.document.get_entity(*handle) {

@@ -3,6 +3,14 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "Start station" => Some(("civil-cmd", "view-start-station")),
+        "End station" => Some(("civil-cmd", "view-end-station")),
+        "Start station of the view" => Some(("civil-cmd", "view-start-station-prompt")),
+        "End station of the view" => Some(("civil-cmd", "view-end-station-prompt")),
+        "Minimum elevation of the view" => Some(("civil-cmd", "view-minimum-elevation-prompt")),
+        "Maximum elevation of the view" => Some(("civil-cmd", "view-maximum-elevation-prompt")),
+        "Press Enter to create the view or [Start station/End station/Minimum elevation/Maximum elevation]:" => Some(("civil-cmd", "accept-profile-view")),
+        "Give both ends of a station or elevation range." => Some(("civil-cmd", "range-both-ends")),
         "Select the main road alignment:" => Some(("civil-cmd", "select-main-road")),
         "Select the crossing road alignment:" => Some(("civil-cmd", "select-crossing-road")),
         "Create Intersection" => Some(("civil-cmd", "create-intersection")),

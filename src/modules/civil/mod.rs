@@ -37,6 +37,13 @@ pub const COMMANDS: &[&str] = &[
     "CREATEINTERSECTION",
 ];
 
+const VIEW_OPTIONS: &[Opt] = &[
+    Opt { label: "Start station", keyword: "S", key: "station_start", prompt: "Start station of the view" },
+    Opt { label: "End station", keyword: "E", key: "station_end", prompt: "End station of the view" },
+    Opt { label: "Minimum elevation", keyword: "MI", key: "elevation_min", prompt: "Minimum elevation of the view" },
+    Opt { label: "Maximum elevation", keyword: "MA", key: "elevation_max", prompt: "Maximum elevation of the view" },
+];
+
 const ALIGNMENT_OPTIONS: &[Opt] = &[
     Opt { label: "Radius", keyword: "R", key: "radius", prompt: "Curve radius at the corners (0 for none)" },
     Opt { label: "Spiral length", keyword: "S", key: "spiral", prompt: "Spiral length on each side of a curve (0 for none)" },
@@ -61,6 +68,10 @@ pub fn steps(name: &str) -> Option<Vec<Step>> {
         "CREATEPROFILEVIEW" => vec![
             Step::Objects { prompt: "Select an alignment for the profile view:", filter: Alignments, slot: 0 },
             Step::Point { prompt: "Specify lower left corner of the profile view:" },
+            Step::Accept {
+                prompt: "Press Enter to create the view or [Start station/End station/Minimum elevation/Maximum elevation]:",
+                options: VIEW_OPTIONS,
+            },
         ],
         "CREATECORRIDOR" => vec![
             Step::Objects { prompt: "Select a baseline alignment that has a profile:", filter: Alignments, slot: 0 },

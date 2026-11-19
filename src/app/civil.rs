@@ -203,7 +203,18 @@ impl OpenCADStudio {
                 let view = next_name(&self.tabs[i].scene.document, "AECC_PROFILE_VIEW", "Profile View");
                 self.push_undo_snapshot(i, name);
                 let doc = &mut self.tabs[i].scene.document;
-                c3d::add_profile_view(doc, alignment, &view, Vector2::new(corner.x, corner.y), layer).map_err(refused)?;
+                // A range given at the closing prompt, both of its ends; none: the automatic one.
+                let range = |lo: &str, hi: &str| -> Result<Option<(f64, f64)>, String> {
+                    match (req.values.get(lo), req.values.get(hi)) {
+                        (None, None) => Ok(None),
+                        (Some(a), Some(b)) => Ok(Some((*a, *b))),
+                        _ => Err(crate::t!("Give both ends of a station or elevation range.").into_owned()),
+                    }
+                };
+                let stations = range("station_start", "station_end")?;
+                let elevations = range("elevation_min", "elevation_max")?;
+                c3d::add_profile_view_with_range(doc, alignment, &view, Vector2::new(corner.x, corner.y), stations, elevations, layer)
+                    .map_err(refused)?;
                 // The view brings its label groups: redraw everything.
                 crate::tf!("Profile view {} created.", view).into_owned()
             }

@@ -10511,3 +10511,17 @@ civil-cmd =
     .create-feature-line = Create Feature Line
     .profile-view-created = Profile view __ocs_fmt_0__ created.
     .feature-lines-created = __ocs_fmt_0__ feature line(s) created.
+
+ifc2plan =
+    .title = IFC 平面図
+    .choose-file = 別の IFC ファイルを選択…
+    .choose-storey = 階を選択してください
+    .storey = 階
+    .height = 階レベルからの切断高さ (m)
+    .depth = 切断面から下の表示深さ (m)
+    .reading = IFC ジオメトリを読み込み中…
+    .generating = 平面図を作成中…
+    .create = 平面図を作成
+    .origin = モデルの原点
+    .source = IFC ソース
+    .source-file = ソースファイル

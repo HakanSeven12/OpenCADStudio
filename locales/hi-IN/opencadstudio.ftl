@@ -10521,3 +10521,17 @@ civil-cmd =
     .create-feature-line = Create Feature Line
     .profile-view-created = Profile view __ocs_fmt_0__ created.
     .feature-lines-created = __ocs_fmt_0__ feature line(s) created.
+
+ifc2plan =
+    .title = IFC तल योजना
+    .choose-file = दूसरी IFC फ़ाइल चुनें…
+    .choose-storey = मंज़िल चुनें
+    .storey = मंज़िल
+    .height = मंज़िल के स्तर से ऊपर कटाव की ऊँचाई (मी)
+    .depth = कटाव तल के नीचे दृश्य की गहराई (मी)
+    .reading = IFC ज्यामिति पढ़ी जा रही है…
+    .generating = तल योजना बनाई जा रही है…
+    .create = तल योजना बनाएँ
+    .origin = मॉडल का मूल बिंदु
+    .source = IFC स्रोत
+    .source-file = स्रोत फ़ाइल

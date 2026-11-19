@@ -10452,3 +10452,17 @@ civil-cmd =
     .create-feature-line = Feature Line Oluştur
     .profile-view-created = __ocs_fmt_0__ profil görünümü oluşturuldu.
     .feature-lines-created = __ocs_fmt_0__ feature line oluşturuldu.
+
+ifc2plan =
+    .title = IFC Kat Planı
+    .choose-file = Başka bir IFC dosyası seç…
+    .choose-storey = Bir kat seçin
+    .storey = Kat
+    .height = Kat seviyesinden kesit yüksekliği (m)
+    .depth = Kesit düzlemi altındaki görünüm derinliği (m)
+    .reading = IFC geometrisi okunuyor…
+    .generating = Kat planı oluşturuluyor…
+    .create = Kat Planı Oluştur
+    .origin = Modelin orijin noktası
+    .source = IFC Kaynağı
+    .source-file = Kaynak dosya

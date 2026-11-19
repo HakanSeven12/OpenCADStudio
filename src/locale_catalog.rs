@@ -4559,6 +4559,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "The preview shows the selected setup's effect on this file." => Some(("dgn-import", "mapping-note")),
         "Import File" => Some(("dgn-import", "import-file")),
         "DGN Import" => Some(("dgn-import", "dgn-import")),
+        "IFC Floor Plan" => Some(("ifc2plan", "title")),
         "Import DGN File" => Some(("dgn-import", "import-dgn-file")),
         "Import WMF" => Some(("dgn-import", "import-wmf")),
         "Import SVG" => Some(("dgn-import", "import-svg")),

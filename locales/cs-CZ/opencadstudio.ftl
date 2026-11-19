@@ -10539,3 +10539,17 @@ civil-cmd =
     .create-feature-line = Create Feature Line
     .profile-view-created = Profile view __ocs_fmt_0__ created.
     .feature-lines-created = __ocs_fmt_0__ feature line(s) created.
+
+ifc2plan =
+    .title = Půdorys z IFC
+    .choose-file = Vybrat jiný soubor IFC…
+    .choose-storey = Vyberte podlaží
+    .storey = Podlaží
+    .height = Výška řezu nad podlažím (m)
+    .depth = Hloubka pohledu pod rovinou řezu (m)
+    .reading = Načítání geometrie IFC…
+    .generating = Vytváření půdorysu…
+    .create = Vytvořit půdorys
+    .origin = Počátek souřadnic modelu
+    .source = Zdroj IFC
+    .source-file = Zdrojový soubor

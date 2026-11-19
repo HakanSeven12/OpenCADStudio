@@ -10536,3 +10536,17 @@ civil-cmd =
     .create-feature-line = Create Feature Line
     .profile-view-created = Profile view __ocs_fmt_0__ created.
     .feature-lines-created = __ocs_fmt_0__ feature line(s) created.
+
+ifc2plan =
+    .title = مخطط طابق IFC
+    .choose-file = اختيار ملف IFC آخر…
+    .choose-storey = اختر طابقًا
+    .storey = الطابق
+    .height = ارتفاع القطع فوق الطابق (م)
+    .depth = عمق العرض أسفل مستوى القطع (م)
+    .reading = جارٍ قراءة هندسة IFC…
+    .generating = جارٍ إنشاء مخطط الطابق…
+    .create = إنشاء مخطط الطابق
+    .origin = نقطة أصل النموذج
+    .source = مصدر IFC
+    .source-file = ملف المصدر

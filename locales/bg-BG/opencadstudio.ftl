@@ -10533,3 +10533,17 @@ civil-cmd =
     .create-feature-line = Create Feature Line
     .profile-view-created = Profile view __ocs_fmt_0__ created.
     .feature-lines-created = __ocs_fmt_0__ feature line(s) created.
+
+ifc2plan =
+    .title = Етажен план от IFC
+    .choose-file = Изберете друг IFC файл…
+    .choose-storey = Изберете етаж
+    .storey = Етаж
+    .height = Височина на разреза над етажа (m)
+    .depth = Дълбочина на изгледа под разреза (m)
+    .reading = Четене на IFC геометрията…
+    .generating = Създаване на етажен план…
+    .create = Създаване на етажен план
+    .origin = Начало на координатите на модела
+    .source = Източник от IFC
+    .source-file = Изходен файл

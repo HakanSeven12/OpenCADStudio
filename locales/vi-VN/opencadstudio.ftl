@@ -10530,3 +10530,17 @@ civil-cmd =
     .create-feature-line = Create Feature Line
     .profile-view-created = Profile view __ocs_fmt_0__ created.
     .feature-lines-created = __ocs_fmt_0__ feature line(s) created.
+
+ifc2plan =
+    .title = Mặt bằng IFC
+    .choose-file = Chọn tệp IFC khác…
+    .choose-storey = Chọn một tầng
+    .storey = Tầng
+    .height = Độ cao mặt cắt so với cao độ tầng (m)
+    .depth = Độ sâu hiển thị dưới mặt phẳng cắt (m)
+    .reading = Đang đọc hình học IFC…
+    .generating = Đang tạo mặt bằng…
+    .create = Tạo mặt bằng
+    .origin = Gốc tọa độ mô hình
+    .source = Nguồn IFC
+    .source-file = Tệp nguồn

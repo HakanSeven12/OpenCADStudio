@@ -10518,3 +10518,17 @@ civil-cmd =
     .create-feature-line = Create Feature Line
     .profile-view-created = Profile view __ocs_fmt_0__ created.
     .feature-lines-created = __ocs_fmt_0__ feature line(s) created.
+
+ifc2plan =
+    .title = IFC 樓層平面圖
+    .choose-file = 選擇其他 IFC 檔案…
+    .choose-storey = 請選擇樓層
+    .storey = 樓層
+    .height = 樓層標高以上的剖切高度（公尺）
+    .depth = 剖切面以下的視圖深度（公尺）
+    .reading = 正在讀取 IFC 幾何圖形…
+    .generating = 正在產生樓層平面圖…
+    .create = 產生樓層平面圖
+    .origin = 模型原點
+    .source = IFC 來源
+    .source-file = 來源檔案

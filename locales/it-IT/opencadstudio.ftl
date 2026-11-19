@@ -10532,3 +10532,17 @@ civil-cmd =
     .create-feature-line = Create Feature Line
     .profile-view-created = Profile view __ocs_fmt_0__ created.
     .feature-lines-created = __ocs_fmt_0__ feature line(s) created.
+
+ifc2plan =
+    .title = Pianta IFC
+    .choose-file = Scegli un altro file IFC…
+    .choose-storey = Seleziona un piano
+    .storey = Piano
+    .height = Altezza di taglio sopra il livello del piano (m)
+    .depth = Profondità di vista sotto il piano di taglio (m)
+    .reading = Lettura della geometria IFC…
+    .generating = Creazione della pianta…
+    .create = Crea pianta
+    .origin = Origine del modello
+    .source = Origine IFC
+    .source-file = File di origine

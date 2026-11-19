@@ -10522,3 +10522,17 @@ civil-cmd =
     .create-feature-line = Create Feature Line
     .profile-view-created = Profile view __ocs_fmt_0__ created.
     .feature-lines-created = __ocs_fmt_0__ feature line(s) created.
+
+ifc2plan =
+    .title = IFC 평면도
+    .choose-file = 다른 IFC 파일 선택…
+    .choose-storey = 층을 선택하세요
+    .storey = 층
+    .height = 층 기준면 위 절단 높이 (m)
+    .depth = 절단면 아래 보기 깊이 (m)
+    .reading = IFC 형상을 읽는 중…
+    .generating = 평면도를 생성하는 중…
+    .create = 평면도 생성
+    .origin = 모델 원점
+    .source = IFC 원본
+    .source-file = 원본 파일

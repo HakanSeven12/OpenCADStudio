@@ -10533,3 +10533,17 @@ civil-cmd =
     .create-feature-line = Create Feature Line
     .profile-view-created = Profile view __ocs_fmt_0__ created.
     .feature-lines-created = __ocs_fmt_0__ feature line(s) created.
+
+ifc2plan =
+    .title = Κάτοψη IFC
+    .choose-file = Επιλογή άλλου αρχείου IFC…
+    .choose-storey = Επιλέξτε όροφο
+    .storey = Όροφος
+    .height = Ύψος τομής πάνω από τη στάθμη του ορόφου (m)
+    .depth = Βάθος προβολής κάτω από το επίπεδο τομής (m)
+    .reading = Ανάγνωση γεωμετρίας IFC…
+    .generating = Δημιουργία κάτοψης…
+    .create = Δημιουργία κάτοψης
+    .origin = Αρχή συντεταγμένων του μοντέλου
+    .source = Προέλευση IFC
+    .source-file = Αρχείο προέλευσης

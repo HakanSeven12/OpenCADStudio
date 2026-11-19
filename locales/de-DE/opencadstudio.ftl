@@ -10531,3 +10531,17 @@ civil-cmd =
     .create-feature-line = Create Feature Line
     .profile-view-created = Profile view __ocs_fmt_0__ created.
     .feature-lines-created = __ocs_fmt_0__ feature line(s) created.
+
+ifc2plan =
+    .title = IFC-Grundriss
+    .choose-file = Andere IFC-Datei auswählen…
+    .choose-storey = Geschoss auswählen
+    .storey = Geschoss
+    .height = Schnitthöhe über dem Geschoss (m)
+    .depth = Sichttiefe unter der Schnittebene (m)
+    .reading = IFC-Geometrie wird gelesen…
+    .generating = Grundriss wird erstellt…
+    .create = Grundriss erstellen
+    .origin = Modellursprung
+    .source = IFC-Quelle
+    .source-file = Quelldatei

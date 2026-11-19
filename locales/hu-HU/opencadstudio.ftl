@@ -10511,3 +10511,17 @@ civil-cmd =
     .create-feature-line = Create Feature Line
     .profile-view-created = Profile view __ocs_fmt_0__ created.
     .feature-lines-created = __ocs_fmt_0__ feature line(s) created.
+
+ifc2plan =
+    .title = IFC-alaprajz
+    .choose-file = Másik IFC-fájl kiválasztása…
+    .choose-storey = Válasszon szintet
+    .storey = Szint
+    .height = Metszési magasság a szint felett (m)
+    .depth = Nézetmélység a metszősík alatt (m)
+    .reading = IFC-geometria beolvasása…
+    .generating = Alaprajz létrehozása…
+    .create = Alaprajz létrehozása
+    .origin = A modell origója
+    .source = IFC-forrás
+    .source-file = Forrásfájl

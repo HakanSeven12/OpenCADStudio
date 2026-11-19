@@ -10530,3 +10530,17 @@ civil-cmd =
     .create-feature-line = Create Feature Line
     .profile-view-created = Profile view __ocs_fmt_0__ created.
     .feature-lines-created = __ocs_fmt_0__ feature line(s) created.
+
+ifc2plan =
+    .title = IFC-pohjapiirros
+    .choose-file = Valitse toinen IFC-tiedosto…
+    .choose-storey = Valitse kerros
+    .storey = Kerros
+    .height = Leikkauskorkeus kerrostasosta (m)
+    .depth = Näkymän syvyys leikkaustason alapuolella (m)
+    .reading = Luetaan IFC-geometriaa…
+    .generating = Luodaan pohjapiirrosta…
+    .create = Luo pohjapiirros
+    .origin = Mallin origo
+    .source = IFC-lähde
+    .source-file = Lähdetiedosto

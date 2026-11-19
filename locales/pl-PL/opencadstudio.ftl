@@ -10535,3 +10535,17 @@ civil-cmd =
     .create-feature-line = Create Feature Line
     .profile-view-created = Profile view __ocs_fmt_0__ created.
     .feature-lines-created = __ocs_fmt_0__ feature line(s) created.
+
+ifc2plan =
+    .title = Rzut kondygnacji z IFC
+    .choose-file = Wybierz inny plik IFC…
+    .choose-storey = Wybierz kondygnację
+    .storey = Kondygnacja
+    .height = Wysokość cięcia nad poziomem kondygnacji (m)
+    .depth = Głębokość widoku poniżej płaszczyzny cięcia (m)
+    .reading = Wczytywanie geometrii IFC…
+    .generating = Tworzenie rzutu kondygnacji…
+    .create = Utwórz rzut kondygnacji
+    .origin = Początek układu współrzędnych modelu
+    .source = Źródło IFC
+    .source-file = Plik źródłowy

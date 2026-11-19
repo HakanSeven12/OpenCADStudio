@@ -10524,3 +10524,17 @@ civil-cmd =
     .create-feature-line = Create Feature Line
     .profile-view-created = Profile view __ocs_fmt_0__ created.
     .feature-lines-created = __ocs_fmt_0__ feature line(s) created.
+
+ifc2plan =
+    .title = ແຜນຜັງຊັ້ນ IFC
+    .choose-file = ເລືອກໄຟລ໌ IFC ອື່ນ…
+    .choose-storey = ເລືອກຊັ້ນ
+    .storey = ຊັ້ນ
+    .height = ຄວາມສູງຂອງແນວຕັດເໜືອລະດັບຊັ້ນ (m)
+    .depth = ຄວາມເລິກຂອງມຸມມອງໃຕ້ລະນາບຕັດ (m)
+    .reading = ກຳລັງອ່ານຮູບຊົງ IFC…
+    .generating = ກຳລັງສ້າງແຜນຜັງຊັ້ນ…
+    .create = ສ້າງແຜນຜັງຊັ້ນ
+    .origin = ຈຸດກຳເນີດຂອງແບບຈຳລອງ
+    .source = ແຫຼ່ງຂໍ້ມູນ IFC
+    .source-file = ໄຟລ໌ຕົ້ນທາງ

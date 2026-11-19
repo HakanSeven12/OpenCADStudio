@@ -94,6 +94,8 @@ mod import_command_tests;
 #[cfg(test)]
 mod mtext_follows_style_tests;
 #[cfg(test)]
+mod mtext_import_tests;
+#[cfg(test)]
 mod mtext_style_from_selection_tests;
 mod navigation;
 pub(crate) mod node_graph;

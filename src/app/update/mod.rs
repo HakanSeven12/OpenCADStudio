@@ -5344,6 +5344,10 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::ShortcutsFileRead(path, rows) => {
+                self.finish_shortcuts_import(&path, rows);
+                Task::none()
+            }
             Message::LayerTranslatorLoaded(path) => {
                 use crate::app::commands::layer_file_reads::{LayerFileJob, LayerFiles};
                 let files = LayerFiles {

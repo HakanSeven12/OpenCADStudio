@@ -4027,6 +4027,9 @@ pub enum Message {
     LayerTranslatorLoaded(std::path::PathBuf),
     /// The end of a read of LAYERSTATE IMPORT's or LAYTRANS's files.
     LayerFileRead(Box<crate::app::commands::layer_file_reads::LayerFileRead>),
+    /// The end of a CUIIMPORT read: the file, and its shortcuts or why it
+    /// cannot be read.
+    ShortcutsFileRead(String, Result<Vec<(String, String)>, String>),
     /// Web: a standards drawing picked and parsed in the browser, with the
     /// target layers already extracted — a name-only path has nothing behind
     /// it for `load_targets` to read. `Ok(None)` = cancelled.

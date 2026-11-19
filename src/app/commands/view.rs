@@ -34,6 +34,125 @@ fn help_url(topic: Option<&str>) -> String {
     }
 }
 
+impl OpenCADStudio {
+    /// CUIIMPORT <path>: the shortcuts file is read and parsed off the UI
+    /// thread; the shortcuts are loaded when the read ends
+    /// ([`Self::finish_shortcuts_import`]).
+    pub(in crate::app) fn import_shortcuts_file(&mut self, path: &str) -> Task<Message> {
+        self.import_shortcuts_file_with(path, read_shortcuts_file)
+    }
+
+    /// [`Self::import_shortcuts_file`] with the reader given, so a test can
+    /// give one that panics.
+    pub(in crate::app) fn import_shortcuts_file_with(
+        &mut self,
+        path: &str,
+        reader: ShortcutsReader,
+    ) -> Task<Message> {
+        let path = path.to_string();
+        let worker_path = path.clone();
+        self.command_line.push_info(&format!("Reading {path}…"));
+        crate::app::update::background_task(
+            "CUIIMPORT",
+            move || reader(&worker_path),
+            move |rows| Message::ShortcutsFileRead(path, rows),
+        )
+    }
+
+    /// Loads the shortcuts of a finished CUIIMPORT read, as the command did
+    /// before. Shortcuts belong to the app, not to a drawing.
+    pub(in crate::app) fn finish_shortcuts_import(
+        &mut self,
+        path: &str,
+        rows: Result<Vec<(String, String)>, String>,
+    ) {
+        match rows {
+            Ok(rows) => {
+                let n = rows.len();
+                self.shortcut_bindings.extend(rows);
+                crate::app::shortcuts::sync_space_dispatch_flag(&self.shortcut_bindings);
+                self.persist_settings_if_changed();
+                self.command_line.push_output(
+                    crate::tf!("CUIIMPORT: loaded {n} shortcut(s) from \"{path}\".").as_ref(),
+                );
+            }
+            Err(e) => self
+                .command_line
+                .push_error(crate::tf!("CUIIMPORT: cannot read \"{path}\": {e}").as_ref()),
+        }
+    }
+}
+
+/// A CUIIMPORT reader: the file's shortcuts (key, command), or why it
+/// cannot be read.
+type ShortcutsReader = fn(&str) -> Result<Vec<(String, String)>, String>;
+
+/// The CUIIMPORT reader: the file's shortcuts, or why it cannot be read.
+fn read_shortcuts_file(path: &str) -> Result<Vec<(String, String)>, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    Ok(crate::app::shortcuts::parse_shortcut_import(&text).0)
+}
+
+#[cfg(test)]
+mod cuiimport_read_tests {
+    use crate::app::OpenCADStudio;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    /// CUIIMPORT loads the shortcuts only when the read ends.
+    #[test]
+    fn the_shortcuts_load_when_the_read_ends() {
+        let mut app = new_app();
+        let path = std::env::temp_dir().join(format!("ocs-cuiimport-{}.txt", std::process::id()));
+        std::fs::write(&path, "# shortcuts\nCTRL+ALT+K LINE\n").expect("write the shortcuts");
+        let shown = path.display().to_string();
+        let before = app.shortcut_bindings.len();
+        let task = app.dispatch_command(&format!("CUIIMPORT {shown}"));
+        assert_eq!(
+            app.shortcut_bindings.len(),
+            before,
+            "nothing during the read"
+        );
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.shortcut_bindings.len(), before + 1);
+        assert!(app.command_line.history_plain_text().contains(&format!(
+            "CUIIMPORT: loaded 1 shortcut(s) from \"{shown}\"."
+        )));
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A missing file gives the same error as before.
+    #[test]
+    fn a_missing_file_is_an_error() {
+        let mut app = new_app();
+        let task = app.dispatch_command("CUIIMPORT /no/such/shortcuts.txt");
+        app.drive_headless_task(task).expect("the read task");
+        assert!(app
+            .command_line
+            .last_error
+            .as_deref()
+            .is_some_and(|e| e.starts_with("CUIIMPORT: cannot read \"/no/such/shortcuts.txt\"")));
+    }
+
+    /// A reader that panics gives an error, and no shortcut changes.
+    #[test]
+    fn a_reader_panic_is_an_error() {
+        let mut app = new_app();
+        let before = app.shortcut_bindings.clone();
+        let task = app.import_shortcuts_file_with("panics.txt", |_| panic!("a reader bug"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("CUIIMPORT failed: a reader bug")
+        );
+        assert_eq!(app.shortcut_bindings, before);
+    }
+}
+
 #[cfg(test)]
 mod help_url_tests {
     use super::help_url;
@@ -417,22 +536,7 @@ impl OpenCADStudio {
                     );
                     return Some(Task::none());
                 }
-                match std::fs::read_to_string(path) {
-                    Ok(text) => {
-                        let (rows, _skipped) = crate::app::shortcuts::parse_shortcut_import(&text);
-                        let n = rows.len();
-                        self.shortcut_bindings.extend(rows);
-                        crate::app::shortcuts::sync_space_dispatch_flag(&self.shortcut_bindings);
-                        self.persist_settings_if_changed();
-                        self.command_line.push_output(
-                            crate::tf!("CUIIMPORT: loaded {n} shortcut(s) from \"{path}\".")
-                                .as_ref(),
-                        );
-                    }
-                    Err(e) => self
-                        .command_line
-                        .push_error(crate::tf!("CUIIMPORT: cannot read \"{path}\": {e}").as_ref()),
-                }
+                return Some(self.import_shortcuts_file(path));
             }
 
             // ── Keyboard Shortcuts panel ──────────────────────────────────

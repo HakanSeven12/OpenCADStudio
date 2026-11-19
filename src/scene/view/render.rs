@@ -5510,6 +5510,7 @@ impl Scene {
         } else {
             self.images_for_viewport(inst.handle, &vp_frozen)
         };
+        vp_mark("images");
         // The paper sheet shows the layout's own 2-D content (fills, borders,
         // annotation) — never the model's 3-D solids. Those are drawn inside
         // the floating content viewports, whose model camera + per-viewport
@@ -5527,6 +5528,7 @@ impl Scene {
             &vp_frozen,
             inst.paper_sheet || wireframe_2d,
         );
+        vp_mark("meshes-clouds");
 
         // SDF text quads (behind OCS_TEXT_SDF). The glyph quads ride on each
         // entity's own wire (produced by the tessellator, transformed for

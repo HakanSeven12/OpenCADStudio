@@ -2320,6 +2320,8 @@ impl OpenCADStudio {
     }
 }
 mod actions;
+#[cfg(not(target_arch = "wasm32"))]
+pub(in crate::app) use actions::EmbedImageRead;
 pub(crate) mod vision;
 pub(crate) use actions::{property_json, row_id};
 mod dgn_import;

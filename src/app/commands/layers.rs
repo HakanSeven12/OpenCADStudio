@@ -570,26 +570,15 @@ impl OpenCADStudio {
                                 crate::t!("Usage: LAYERSTATE IMPORT <file.las>").as_ref(),
                             );
                         } else {
-                            match std::fs::read_to_string(path_text)
-                                .map_err(|error| error.to_string())
-                                .and_then(|text| layer_state_from_las(&text))
-                            {
-                                Ok(state) => {
-                                    let name = state.name.clone();
-                                    self.push_undo_snapshot(i, "LAYERSTATE IMPORT");
-                                    self.tabs[i].scene.document.store_layer_state(state);
-                                    self.tabs[i].dirty = true;
-                                    self.command_line.push_output(
-                                        crate::tf!(
-                                            "LAYERSTATE: imported \"{name}\" from {path_text}."
-                                        )
-                                        .as_ref(),
-                                    );
-                                }
-                                Err(error) => self
-                                    .command_line
-                                    .push_error(crate::tf!("LAYERSTATE: {error}").as_ref()),
-                            }
+                            use super::layer_file_reads::{LayerFileJob, LayerFiles};
+                            return Some(self.read_layer_files(
+                                i,
+                                LayerFileJob::LayerStateImport,
+                                LayerFiles {
+                                    layer_state: Some(path_text.into()),
+                                    ..LayerFiles::default()
+                                },
+                            ));
                         }
                     }
                     _ => {
@@ -1403,9 +1392,26 @@ impl OpenCADStudio {
     /// line up and only the properties are wrong, so there is nothing to sit in
     /// a dialog and decide.
     pub(in crate::app) fn layer_translate_same(&mut self, path: &std::path::Path) -> Task<Message> {
-        use crate::modules::draw::layers::laytrans;
+        use super::layer_file_reads::{LayerFileJob, LayerFiles};
         let i = self.active_tab;
-        let targets = match laytrans::load_targets(path) {
+        self.read_layer_files(
+            i,
+            LayerFileJob::TranslateSame,
+            LayerFiles {
+                standards: Some(path.to_path_buf()),
+                ..LayerFiles::default()
+            },
+        )
+    }
+
+    /// [`Self::layer_translate_same`] when its standards file is read.
+    pub(in crate::app) fn layer_translate_same_to(
+        &mut self,
+        i: usize,
+        targets: Result<Vec<crate::modules::draw::layers::laytrans::TargetLayer>, String>,
+    ) -> Task<Message> {
+        use crate::modules::draw::layers::laytrans;
+        let targets = match targets {
             Ok(targets) => targets,
             Err(why) => {
                 self.command_line
@@ -1528,6 +1534,7 @@ impl OpenCADStudio {
     /// The `-LAYTRANS` line parser: translate, save a mapping list, load one,
     /// or list the standards layers.
     pub(in crate::app) fn layer_translate_scripted(&mut self, rest: &str) -> Task<Message> {
+        use super::layer_file_reads::{LayerFileJob, LayerFiles};
         use crate::modules::draw::layers::laytrans;
         let i = self.active_tab;
         let mut words = rest.split_whitespace();
@@ -1584,33 +1591,12 @@ impl OpenCADStudio {
                     );
                     return Task::none();
                 };
-                let mappings = match laytrans::load_mappings(std::path::Path::new(path)) {
-                    Ok(mappings) => mappings,
-                    Err(why) => {
-                        self.command_line
-                            .push_error(crate::tf!("LAYTRANS: could not read — {why}.").as_ref());
-                        return Task::none();
-                    }
+                let files = LayerFiles {
+                    mappings: Some(path.into()),
+                    standards: words.next().map(Into::into),
+                    ..LayerFiles::default()
                 };
-                if mappings.is_empty() {
-                    self.command_line
-                        .push_error(crate::tf!("LAYTRANS: no mappings in {path}.").as_ref());
-                    return Task::none();
-                }
-                let targets = match words.next() {
-                    Some(standards) => {
-                        match laytrans::load_targets(std::path::Path::new(standards)) {
-                            Ok(targets) => targets,
-                            Err(why) => {
-                                self.command_line
-                                    .push_error(crate::tf!("LAYTRANS: {why}.").as_ref());
-                                return Task::none();
-                            }
-                        }
-                    }
-                    None => Vec::new(),
-                };
-                self.apply_layer_translation(i, targets, &mappings)
+                self.read_layer_files(i, LayerFileJob::TranslateList, files)
             }
             "LIST" => {
                 let Some(path) = words.next() else {
@@ -1618,35 +1604,13 @@ impl OpenCADStudio {
                         .push_info(crate::t!("Usage: -LAYTRANS LIST <standards>").as_ref());
                     return Task::none();
                 };
-                match laytrans::load_targets(std::path::Path::new(path)) {
-                    Ok(targets) => {
-                        self.command_line.push_output(
-                            crate::tf!(
-                                "LAYTRANS: {n} target layer(s) in {path}:",
-                                n = targets.len()
-                            )
-                            .as_ref(),
-                        );
-                        for target in targets {
-                            self.command_line
-                                .push_output(crate::tf!("  {}", target.name).as_ref());
-                        }
-                    }
-                    Err(why) => self
-                        .command_line
-                        .push_error(crate::tf!("LAYTRANS: {why}.").as_ref()),
-                }
-                Task::none()
+                let files = LayerFiles {
+                    standards: Some(path.into()),
+                    ..LayerFiles::default()
+                };
+                self.read_layer_files(i, LayerFileJob::ListTargets, files)
             }
             _ => {
-                let targets = match laytrans::load_targets(std::path::Path::new(first)) {
-                    Ok(targets) => targets,
-                    Err(why) => {
-                        self.command_line
-                            .push_error(crate::tf!("LAYTRANS: {why}.").as_ref());
-                        return Task::none();
-                    }
-                };
                 let mut mappings = Vec::new();
                 for token in words {
                     match laytrans::Mapping::parse(token) {
@@ -1660,22 +1624,126 @@ impl OpenCADStudio {
                         }
                     }
                 }
-                if mappings.is_empty() {
-                    let current = self.tabs[i].active_layer.clone();
-                    let sources = laytrans::source_layers(&self.tabs[i].scene, &current);
-                    mappings = laytrans::map_same(&sources, &targets);
-                    if mappings.is_empty() {
-                        self.command_line.push_info(
-                            crate::t!(
-                                "LAYTRANS: no layer names in common — name the pairs as FROM=TO."
-                            )
-                            .as_ref(),
-                        );
-                        return Task::none();
-                    }
-                }
-                self.apply_layer_translation(i, targets, &mappings)
+                let files = LayerFiles {
+                    standards: Some(first.into()),
+                    ..LayerFiles::default()
+                };
+                self.read_layer_files(i, LayerFileJob::TranslatePairs(mappings), files)
             }
+        }
+    }
+
+    /// -LAYTRANS <standards> [FROM=TO …] when its standards file is read:
+    /// the pairs, or the layers named alike when there are none.
+    pub(in crate::app) fn layer_translate_pairs(
+        &mut self,
+        i: usize,
+        targets: Result<Vec<crate::modules::draw::layers::laytrans::TargetLayer>, String>,
+        mut mappings: Vec<crate::modules::draw::layers::laytrans::Mapping>,
+    ) -> Task<Message> {
+        use crate::modules::draw::layers::laytrans;
+        let targets = match targets {
+            Ok(targets) => targets,
+            Err(why) => {
+                self.command_line
+                    .push_error(crate::tf!("LAYTRANS: {why}.").as_ref());
+                return Task::none();
+            }
+        };
+        if mappings.is_empty() {
+            let current = self.tabs[i].active_layer.clone();
+            let sources = laytrans::source_layers(&self.tabs[i].scene, &current);
+            mappings = laytrans::map_same(&sources, &targets);
+            if mappings.is_empty() {
+                self.command_line.push_info(
+                    crate::t!("LAYTRANS: no layer names in common — name the pairs as FROM=TO.")
+                        .as_ref(),
+                );
+                return Task::none();
+            }
+        }
+        self.apply_layer_translation(i, targets, &mappings)
+    }
+
+    /// -LAYTRANS LOAD <file> [<standards>] when its files are read.
+    pub(in crate::app) fn layer_translate_list(
+        &mut self,
+        i: usize,
+        path: &str,
+        mappings: Result<Vec<crate::modules::draw::layers::laytrans::Mapping>, String>,
+        targets: Option<Result<Vec<crate::modules::draw::layers::laytrans::TargetLayer>, String>>,
+    ) -> Task<Message> {
+        let mappings = match mappings {
+            Ok(mappings) => mappings,
+            Err(why) => {
+                self.command_line
+                    .push_error(crate::tf!("LAYTRANS: could not read — {why}.").as_ref());
+                return Task::none();
+            }
+        };
+        if mappings.is_empty() {
+            self.command_line
+                .push_error(crate::tf!("LAYTRANS: no mappings in {path}.").as_ref());
+            return Task::none();
+        }
+        let targets = match targets {
+            Some(Ok(targets)) => targets,
+            Some(Err(why)) => {
+                self.command_line
+                    .push_error(crate::tf!("LAYTRANS: {why}.").as_ref());
+                return Task::none();
+            }
+            None => Vec::new(),
+        };
+        self.apply_layer_translation(i, targets, &mappings)
+    }
+
+    /// -LAYTRANS LIST <standards> when its standards file is read.
+    pub(in crate::app) fn list_layer_translation_targets(
+        &mut self,
+        path: &str,
+        targets: Result<Vec<crate::modules::draw::layers::laytrans::TargetLayer>, String>,
+    ) {
+        match targets {
+            Ok(targets) => {
+                self.command_line.push_output(
+                    crate::tf!(
+                        "LAYTRANS: {n} target layer(s) in {path}:",
+                        n = targets.len()
+                    )
+                    .as_ref(),
+                );
+                for target in targets {
+                    self.command_line
+                        .push_output(crate::tf!("  {}", target.name).as_ref());
+                }
+            }
+            Err(why) => self
+                .command_line
+                .push_error(crate::tf!("LAYTRANS: {why}.").as_ref()),
+        }
+    }
+
+    /// LAYERSTATE IMPORT when its file is read.
+    pub(in crate::app) fn import_layer_state(
+        &mut self,
+        i: usize,
+        path_text: &str,
+        state: Result<document::layer_state::LayerState, String>,
+    ) {
+        match state {
+            Ok(state) => {
+                let name = state.name.clone();
+                self.push_undo_snapshot(i, "LAYERSTATE IMPORT");
+                self.tabs[i].scene.document.store_layer_state(state);
+                self.tabs[i].dirty = true;
+                self.command_line.push_output(
+                    crate::tf!("LAYERSTATE: imported \"{name}\" from {path_text}.").as_ref(),
+                );
+            }
+            Err(error) => self
+                .command_line
+                .push_error(crate::tf!("LAYERSTATE: {error}").as_ref()),
         }
     }
 
@@ -1865,11 +1933,11 @@ impl OpenCADStudio {
         &mut self,
         path: &std::path::Path,
         save: bool,
-    ) {
-        use crate::modules::draw::layers::laytrans::Mapping;
+    ) -> Task<Message> {
+        use super::layer_file_reads::{LayerFileJob, LayerFiles};
         if save {
             let Some(state) = self.layer_translator.as_ref() else {
-                return;
+                return Task::none();
             };
             match crate::modules::draw::layers::laytrans::save_mappings(path, &state.mappings) {
                 Ok(()) => self.command_line.push_output(
@@ -1880,10 +1948,21 @@ impl OpenCADStudio {
                     .command_line
                     .push_error(crate::tf!("LAYTRANS: could not save — {why}.").as_ref()),
             }
-            return;
+            return Task::none();
         }
-        let parsed: Vec<Mapping> = match crate::modules::draw::layers::laytrans::load_mappings(path)
-        {
+        let files = LayerFiles {
+            mappings: Some(path.to_path_buf()),
+            ..LayerFiles::default()
+        };
+        self.read_layer_files(self.active_tab, LayerFileJob::WindowMappings, files)
+    }
+
+    /// The Layer Translator window's mapping list when it is read.
+    pub(in crate::app) fn take_layer_translator_mappings(
+        &mut self,
+        parsed: Result<Vec<crate::modules::draw::layers::laytrans::Mapping>, String>,
+    ) {
+        let parsed = match parsed {
             Ok(parsed) => parsed,
             Err(why) => {
                 self.command_line
@@ -2455,7 +2534,9 @@ fn layer_state_to_las(state: &document::layer_state::LayerState) -> String {
     out
 }
 
-fn layer_state_from_las(text: &str) -> Result<document::layer_state::LayerState, String> {
+pub(super) fn layer_state_from_las(
+    text: &str,
+) -> Result<document::layer_state::LayerState, String> {
     use document::layer_state::{LayerState, LayerStateLayer, LayerStateMask};
     let mut state = LayerState {
         name: String::new(),

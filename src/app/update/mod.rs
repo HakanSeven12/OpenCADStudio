@@ -5341,29 +5341,12 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::LayerTranslatorLoaded(path) => {
-                use crate::modules::draw::layers::laytrans;
-                match laytrans::load_targets(&path) {
-                    Ok(targets) => {
-                        let state = self.layer_translator.get_or_insert_with(Default::default);
-                        state.source_file = path
-                            .file_name()
-                            .map(|name| name.to_string_lossy().into_owned())
-                            .unwrap_or_default();
-                        state.targets = targets;
-                        // A target set that no longer contains a mapped name
-                        // would translate onto nothing.
-                        let names: Vec<String> =
-                            state.targets.iter().map(|t| t.name.clone()).collect();
-                        state
-                            .mappings
-                            .retain(|m| names.iter().any(|n| n.eq_ignore_ascii_case(&m.to)));
-                        state.selected_to = None;
-                    }
-                    Err(why) => self
-                        .command_line
-                        .push_error(crate::tf!("LAYTRANS: {why}.").as_ref()),
-                }
-                Task::none()
+                use crate::app::commands::layer_file_reads::{LayerFileJob, LayerFiles};
+                let files = LayerFiles {
+                    standards: Some(path),
+                    ..LayerFiles::default()
+                };
+                self.read_layer_files(self.active_tab, LayerFileJob::WindowStandards, files)
             }
             Message::LayerTranslatorSelectFrom(name) => {
                 if let Some(state) = self.layer_translator.as_mut() {
@@ -5442,9 +5425,9 @@ impl OpenCADStudio {
                 },
             ),
             Message::LayerTranslatorMappingsPath(path, save) => {
-                self.layer_translator_mappings_file(&path, save);
-                Task::none()
+                self.layer_translator_mappings_file(&path, save)
             }
+            Message::LayerFileRead(done) => self.finish_layer_file_read(*done),
             Message::LayerTranslatorTranslate => {
                 use crate::modules::draw::layers::laytrans;
                 let Some(state) = self.layer_translator.take() else {

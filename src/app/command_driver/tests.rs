@@ -5737,7 +5737,8 @@ mod mission_m076_tests {
             .document
             .layer_state("NEW-NAME")
             .is_none());
-        let _ = app.run_command_line(&format!("-LAYERSTATE IMPORT {}", path.display()));
+        let task = app.run_command_line(&format!("-LAYERSTATE IMPORT {}", path.display()));
+        app.drive_headless_task(task).expect("the read task");
         let imported = app.tabs[app.active_tab]
             .scene
             .document
@@ -5834,7 +5835,8 @@ mod mission_m078_tests {
         add_line(&mut app, "A-WALL");
         add_line(&mut app, "0");
 
-        let _ = app.run_command_line(&format!("-LAYTRANS {} A-WALL=WALLS", standards.display()));
+        let task = app.run_command_line(&format!("-LAYTRANS {} A-WALL=WALLS", standards.display()));
+        app.drive_headless_task(task).expect("the read task");
 
         let output = all_output(&app);
         assert!(
@@ -5877,7 +5879,8 @@ mod mission_m078_tests {
         let text = std::fs::read_to_string(&map_file).unwrap();
         assert!(text.contains("A-WALL -> WALLS"), "{text}");
 
-        let _ = app.run_command_line(&format!("-LAYTRANS LIST {}", standards.display()));
+        let task = app.run_command_line(&format!("-LAYTRANS LIST {}", standards.display()));
+        app.drive_headless_task(task).expect("the read task");
         let output = all_output(&app);
         assert!(output.contains("target layer(s)"), "{output}");
         assert!(output.contains("  WALLS"), "{output}");
@@ -5890,11 +5893,12 @@ mod mission_m078_tests {
         add_line(&mut app, "A-WALL");
         add_line(&mut app, "A-DOOR");
 
-        let _ = app.run_command_line(&format!(
+        let task = app.run_command_line(&format!(
             "-LAYTRANS LOAD {} {}",
             map_file.display(),
             standards.display()
         ));
+        app.drive_headless_task(task).expect("the read task");
         let output = all_output(&app);
         assert!(
             output.contains("translated 2 layer(s), 2 object(s)"),
@@ -5915,7 +5919,8 @@ mod mission_m078_tests {
         add_layer(&mut app, "A-WALL");
         add_line(&mut app, "A-WALL");
 
-        let _ = app.run_command_line(&format!("-LAYTRANS {} A-WALL=GHOST", standards.display()));
+        let task = app.run_command_line(&format!("-LAYTRANS {} A-WALL=GHOST", standards.display()));
+        app.drive_headless_task(task).expect("the read task");
 
         let output = all_output(&app);
         assert!(

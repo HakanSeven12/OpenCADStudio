@@ -4016,6 +4016,8 @@ pub enum Message {
     LayerTranslatorLoad,
     /// A target set was read from `path`.
     LayerTranslatorLoaded(std::path::PathBuf),
+    /// The end of a read of LAYERSTATE IMPORT's or LAYTRANS's files.
+    LayerFileRead(Box<crate::app::commands::layer_file_reads::LayerFileRead>),
     /// Web: a standards drawing picked and parsed in the browser, with the
     /// target layers already extracted — a name-only path has nothing behind
     /// it for `load_targets` to read. `Ok(None)` = cancelled.

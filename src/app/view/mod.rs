@@ -32,6 +32,7 @@ struct ViewportPickSurface;
 #[derive(Default)]
 struct ViewportPointerState {
     middle_drag: bool,
+    left_drag: bool,
     position: Option<iced::Point>,
 }
 
@@ -186,6 +187,7 @@ impl iced::widget::canvas::Program<Message> for ViewportPickSurface {
         let cursor = state.event_cursor(event, cursor);
         match event {
             Mouse::ButtonPressed(Button::Left) => cursor.position_in(bounds).map(|position| {
+                state.left_drag = true;
                 Action::publish(Message::ViewportLeftPressAt(position)).and_capture()
             }),
             Mouse::ButtonPressed(Button::Middle) => {
@@ -196,7 +198,9 @@ impl iced::widget::canvas::Program<Message> for ViewportPickSurface {
             // MouseArea around this canvas reports no moves of its own. Left
             // uncaptured so it still tracks hover for `on_exit`. A middle
             // drag keeps following the pointer past the viewport edge.
-            Mouse::CursorMoved { position } if cursor.is_over(bounds) || state.middle_drag => {
+            Mouse::CursorMoved { position }
+                if cursor.is_over(bounds) || state.middle_drag || state.left_drag =>
+            {
                 Some(Action::publish(Message::ViewportMove(iced::Point::new(
                     position.x - bounds.x,
                     position.y - bounds.y,
@@ -205,6 +209,10 @@ impl iced::widget::canvas::Program<Message> for ViewportPickSurface {
             Mouse::ButtonReleased(Button::Middle) if state.middle_drag => {
                 state.middle_drag = false;
                 (!cursor.is_over(bounds)).then(|| Action::publish(Message::ViewportMiddleRelease))
+            }
+            Mouse::ButtonReleased(Button::Left) if state.left_drag => {
+                state.left_drag = false;
+                (!cursor.is_over(bounds)).then(|| Action::publish(Message::ViewportLeftRelease))
             }
             _ => None,
         }
@@ -247,13 +255,16 @@ impl iced::widget::canvas::Program<Message> for PaneDragSurface {
         let cursor = state.event_cursor(event, cursor);
         match event {
             Mouse::ButtonPressed(Button::Left) => cursor.position_in(bounds).map(|position| {
+                state.left_drag = true;
                 Action::publish(Message::PanePressAt(self.0, position)).and_capture()
             }),
             Mouse::ButtonPressed(Button::Middle) => {
                 state.middle_drag = cursor.is_over(bounds);
                 None
             }
-            Mouse::CursorMoved { position } if cursor.is_over(bounds) || state.middle_drag => {
+            Mouse::CursorMoved { position }
+                if cursor.is_over(bounds) || state.middle_drag || state.left_drag =>
+            {
                 let local = iced::Point::new(position.x - bounds.x, position.y - bounds.y);
                 Some(Action::publish(Message::PaneMove(self.0, local)))
             }
@@ -261,6 +272,10 @@ impl iced::widget::canvas::Program<Message> for PaneDragSurface {
                 state.middle_drag = false;
                 (!cursor.is_over(bounds))
                     .then(|| Action::publish(Message::PaneMiddleRelease(self.0)))
+            }
+            Mouse::ButtonReleased(Button::Left) if state.left_drag => {
+                state.left_drag = false;
+                (!cursor.is_over(bounds)).then(|| Action::publish(Message::PaneRelease(self.0)))
             }
             _ => None,
         }

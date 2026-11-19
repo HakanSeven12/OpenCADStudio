@@ -5456,10 +5456,15 @@ impl OpenCADStudio {
         }
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
         sel.input.pointer_away = true;
-        sel.input.left_down = false;
-        sel.input.left_press_pos = None;
-        sel.input.left_press_time = None;
-        sel.input.left_dragging = false;
+        // A selection box or fence dragged over the command line, a panel or
+        // past the window edge keeps going: the input layer reports its moves
+        // and its release out there.
+        let left_drag = sel.input.left_down;
+        if !left_drag {
+            sel.input.left_press_pos = None;
+            sel.input.left_press_time = None;
+            sel.input.left_dragging = false;
+        }
         sel.input.right_down = false;
         sel.input.right_press_pos = None;
         sel.input.right_press_time = None;
@@ -5473,19 +5478,23 @@ impl OpenCADStudio {
             sel.input.middle_last_pos = None;
             sel.orbit.pivot = None;
         }
-        sel.gesture.box_anchor = None;
-        sel.gesture.box_anchor_world = None;
-        sel.gesture.box_current = None;
-        sel.gesture.box_crossing = false;
-        sel.gesture.box_crossing_locked = false;
-        sel.gesture.poly_active = false;
-        sel.gesture.poly_points.clear();
-        sel.gesture.poly_crossing = false;
+        if !left_drag {
+            sel.gesture.box_anchor = None;
+            sel.gesture.box_anchor_world = None;
+            sel.gesture.box_current = None;
+            sel.gesture.box_crossing = false;
+            sel.gesture.box_crossing_locked = false;
+            sel.gesture.poly_active = false;
+            sel.gesture.poly_points.clear();
+            sel.gesture.poly_crossing = false;
+        }
         drop(sel);
-        self.box_preview_pending = None;
-        self.box_preview_due = None;
-        self.box_preview_cache = None;
-        self.tabs[i].scene.set_box_hover_highlights(&[]);
+        if !left_drag {
+            self.box_preview_pending = None;
+            self.box_preview_due = None;
+            self.box_preview_cache = None;
+            self.tabs[i].scene.set_box_hover_highlights(&[]);
+        }
         // Clear the rollover highlight when the cursor leaves the
         // viewport so it doesn't stick while the mouse is over the
         // ribbon / panels.

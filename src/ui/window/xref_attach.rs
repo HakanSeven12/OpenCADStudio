@@ -26,6 +26,9 @@ pub type XrefPreviewRead = Option<(Vec<document::EntityType>, i16)>;
 pub enum XrefAttachMsg {
     /// Name box: a reference already in the drawing, picked or typed.
     Name(String),
+    /// The read of the chosen file, made off the UI thread: the file, its
+    /// thumbnail and its units.
+    FileRead(Box<(String, (Option<image::Handle>, i16))>),
     /// The reference's file, read off the UI thread for its attach: the tab
     /// it was started for, that document's generation, and the request, its
     /// INSERT and the read.

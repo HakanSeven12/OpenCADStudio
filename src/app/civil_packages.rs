@@ -44,7 +44,7 @@ pub(super) fn road() -> PktPackage {
 }
 
 /// Writes `pkg` to the user's package folder (when the file there differs) and returns the
-/// texts a subassembly names it by: the host expands `%USERPROFILE%` to the same folder.
+/// texts a subassembly names it by.
 pub(super) fn install(pkg: &PktPackage) -> Result<PktSource, String> {
     let bytes = pkt::write_pkt(pkg).map_err(|e| e.to_string())?;
     let file = format!("{}.pkt", pkg.name);
@@ -55,6 +55,32 @@ pub(super) fn install(pkg: &PktPackage) -> Result<PktSource, String> {
     if std::fs::read(&path).ok().as_deref() != Some(bytes.as_slice()) {
         std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
     }
-    let host = format!("%USERPROFILE%\\Documents\\{}\\{}\\{file}", FOLDER[0], FOLDER[1]);
+    let profile = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(std::path::PathBuf::from);
+    let host = host_path(&path, profile.as_deref());
     Ok(PktSource { library: format!("[ \"{}\" ]", host.replace('\\', "\\\\")), path: host })
+}
+
+/// How the drawing names the package at `path`: the place it was written to, with
+/// `%USERPROFILE%` for the user's folder when the path lies under it (the documents folder
+/// may be redirected, so it is not assumed to be `%USERPROFILE%\Documents`), in the host's
+/// backslash form.
+fn host_path(path: &std::path::Path, profile: Option<&std::path::Path>) -> String {
+    let parts = |p: &std::path::Path| p.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>();
+    match profile.and_then(|home| path.strip_prefix(home).ok()) {
+        Some(rest) => std::iter::once("%USERPROFILE%".to_string()).chain(parts(rest)).collect::<Vec<_>>().join("\\"),
+        None => path.to_string_lossy().replace('/', "\\"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::host_path;
+    use std::path::Path;
+
+    #[test]
+    fn names_the_written_folder_under_the_profile() {
+        let home = Path::new("/home/u");
+        assert_eq!(host_path(&home.join("OneDrive/Documents/OpenCAD Studio/Subassemblies/OCSRoad.pkt"), Some(home)), "%USERPROFILE%\\OneDrive\\Documents\\OpenCAD Studio\\Subassemblies\\OCSRoad.pkt");
+        assert_eq!(host_path(Path::new("/data/docs/OCSRoad.pkt"), Some(home)), "\\data\\docs\\OCSRoad.pkt");
+    }
 }

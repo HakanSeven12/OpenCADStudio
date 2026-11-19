@@ -3,6 +3,13 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "Select an alignment for the profile view:" => Some(("civil-cmd", "select-view-alignment")),
+        "Specify lower left corner of the profile view:" => Some(("civil-cmd", "specify-view-corner")),
+        "Select lines or polylines to make feature lines of:" => Some(("civil-cmd", "select-feature-line-paths")),
+        "Create Profile View" => Some(("civil-cmd", "create-profile-view")),
+        "Create Feature Line" => Some(("civil-cmd", "create-feature-line")),
+        "Profile view {} created." => Some(("civil-cmd", "profile-view-created")),
+        "{} feature line(s) created." => Some(("civil-cmd", "feature-lines-created")),
         "Specify location of point (x,y,z) or press Enter to end:" => Some(("civil-cmd", "specify-point-location")),
         "Select COGO points for the point group:" => Some(("civil-cmd", "select-points-for-group")),
         "Select a line or polyline to make an alignment of:" => Some(("civil-cmd", "select-alignment-path")),

@@ -20,11 +20,12 @@ fn next_name(document: &document::Document, dxf: &str, base: &str) -> String {
     format!("{base} {}", n + 1)
 }
 
-/// The plan vertices of a line or 2D polyline, the first again at the end of a closed one.
-fn vertices(entity: &EntityType) -> Result<Vec<Vector2>, String> {
+/// The vertices (x, y, elevation) of a line or polyline, the first again at the end of a
+/// closed one.
+fn vertices(entity: &EntityType) -> Result<Vec<Vector3>, String> {
     let arcs = || crate::t!("Polylines with arcs cannot be made into alignments yet.").into_owned();
     let (mut points, closed) = match entity {
-        EntityType::Line(l) => (vec![Vector2::new(l.start.x, l.start.y), Vector2::new(l.end.x, l.end.y)], false),
+        EntityType::Line(l) => (vec![l.start, l.end], false),
         EntityType::LwPolyline(p) => {
             if p.vertices.iter().any(|v| v.bulge != 0.0) {
                 return Err(arcs());
@@ -32,14 +33,16 @@ fn vertices(entity: &EntityType) -> Result<Vec<Vector2>, String> {
             if p.normal.z < 0.0 {
                 return Err(crate::t!("The polyline is not in the XY plane.").into_owned());
             }
-            (p.vertices.iter().map(|v| v.location).collect(), p.is_closed)
+            (p.vertices.iter().map(|v| Vector3::new(v.location.x, v.location.y, p.elevation)).collect(), p.is_closed)
         }
         EntityType::Polyline2D(p) => {
             if p.vertices.iter().any(|v| v.bulge != 0.0) {
                 return Err(arcs());
             }
-            (p.vertices.iter().map(|v| Vector2::new(v.location.x, v.location.y)).collect(), p.is_closed())
+            let z = p.elevation;
+            (p.vertices.iter().map(|v| Vector3::new(v.location.x, v.location.y, z)).collect(), p.is_closed())
         }
+        EntityType::Polyline3D(p) => (p.vertices.iter().map(|v| v.position).collect(), p.is_closed()),
         _ => return Err(crate::t!("Select a line or polyline.").into_owned()),
     };
     points.dedup_by(|a, b| a.x == b.x && a.y == b.y);
@@ -109,7 +112,7 @@ impl OpenCADStudio {
             "CREATEALIGNMENT" => {
                 let doc = &self.tabs[i].scene.document;
                 let entity = req.objects[0].first().and_then(|h| doc.get_entity(*h)).ok_or("no object")?;
-                let points = vertices(entity)?;
+                let points: Vec<Vector2> = vertices(entity)?.iter().map(|p| Vector2::new(p.x, p.y)).collect();
                 let radius = req.value("radius", 0.0);
                 let spiral = req.value("spiral", 0.0);
                 let corner = if radius <= 0.0 {
@@ -171,6 +174,59 @@ impl OpenCADStudio {
                 changes.push((alignment, ChangeKind::Modified));
                 changes.push((h, ChangeKind::Added));
                 crate::tf!("Profile {} created.", profile).into_owned()
+            }
+            "CREATEPROFILEVIEW" => {
+                let alignment = *req.objects[0].first().ok_or("no alignment")?;
+                let corner = req.points.first().ok_or("no corner")?;
+                let view = next_name(&self.tabs[i].scene.document, "AECC_PROFILE_VIEW", "Profile View");
+                self.push_undo_snapshot(i, name);
+                let doc = &mut self.tabs[i].scene.document;
+                c3d::add_profile_view(doc, alignment, &view, Vector2::new(corner.x, corner.y), layer).map_err(refused)?;
+                // The view brings its label groups: redraw everything.
+                crate::tf!("Profile view {} created.", view).into_owned()
+            }
+            "CREATEFEATURELINE" => {
+                let doc = &self.tabs[i].scene.document;
+                let paths = req.objects[0]
+                    .iter()
+                    .filter_map(|h| doc.get_entity(*h))
+                    .map(vertices)
+                    .collect::<Result<Vec<_>, String>>()?;
+                // The last site this drawing has; a new one when it has none or when a feature
+                // line cannot join it (a site the codec does not write).
+                let site = doc
+                    .entities()
+                    .filter(|e| match e {
+                        EntityType::Extended(x) => matches!(&x.data,
+                            document::entities::ExtendedEntityData::Arch(a)
+                                if a.dxf_name == "AECC_PARCEL" && a.face_name().is_some() && a.parcel_site().is_none()),
+                        _ => false,
+                    })
+                    .last()
+                    .map(|e| e.common().handle);
+                let first = next_name(doc, "AECC_FEATURE_LINE", "Feature Line");
+                let site_name = next_name(doc, "AECC_PARCEL", "Site");
+                self.push_undo_snapshot(i, name);
+                let doc = &mut self.tabs[i].scene.document;
+                let mut site = site;
+                let base = first.rsplit_once(' ').and_then(|(_, n)| n.parse::<usize>().ok()).unwrap_or(1);
+                for (k, points) in paths.iter().enumerate() {
+                    let line = format!("Feature Line {}", base + k);
+                    let added = match site {
+                        Some(s) => c3d::add_feature_line(doc, s, &line, points, layer),
+                        None => Err(document::error::DxfError::Parse(String::new())),
+                    };
+                    let h = match added {
+                        Ok(h) => h,
+                        Err(_) => {
+                            let s = c3d::add_site(doc, &site_name, "").map_err(refused)?;
+                            site = Some(s);
+                            c3d::add_feature_line(doc, s, &line, points, layer).map_err(refused)?
+                        }
+                    };
+                    changes.push((h, ChangeKind::Added));
+                }
+                crate::tf!("{} feature line(s) created.", changes.len()).into_owned()
             }
             _ => return Err(crate::t!("Unknown civil command.").into_owned()),
         };

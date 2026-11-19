@@ -23,7 +23,15 @@ fn tool(id: &'static str, label: &'static str, icon: IconKind) -> RibbonItem {
 }
 
 /// The civil commands this module runs.
-pub const COMMANDS: &[&str] = &["CREATEPOINTS", "CREATEPOINTGROUP", "CREATEALIGNMENT", "CREATESURFACE", "CREATEPROFILE"];
+pub const COMMANDS: &[&str] = &[
+    "CREATEPOINTS",
+    "CREATEPOINTGROUP",
+    "CREATEALIGNMENT",
+    "CREATESURFACE",
+    "CREATEPROFILE",
+    "CREATEPROFILEVIEW",
+    "CREATEFEATURELINE",
+];
 
 const ALIGNMENT_OPTIONS: &[Opt] = &[
     Opt { label: "Radius", keyword: "R", key: "radius", prompt: "Curve radius at the corners (0 for none)" },
@@ -37,7 +45,7 @@ pub fn steps(name: &str) -> Option<Vec<Step>> {
         "CREATEPOINTS" => vec![Step::Points { prompt: "Specify location of point (x,y,z) or press Enter to end:" }],
         "CREATEPOINTGROUP" => vec![Step::Objects { prompt: "Select COGO points for the point group:", filter: CogoPoints, slot: 0 }],
         "CREATEALIGNMENT" => vec![
-            Step::Objects { prompt: "Select a line or polyline to make an alignment of:", filter: Polylines, slot: 0 },
+            Step::Objects { prompt: "Select a line or polyline to make an alignment of:", filter: Paths, slot: 0 },
             Step::Accept { prompt: "Press Enter to create the alignment or [Radius/Spiral length]:", options: ALIGNMENT_OPTIONS },
         ],
         "CREATESURFACE" => vec![Step::Objects { prompt: "Select COGO points or points to make the surface of:", filter: SurfacePoints, slot: 0 }],
@@ -46,6 +54,11 @@ pub fn steps(name: &str) -> Option<Vec<Step>> {
             Step::Points { prompt: "Specify PVI (station,elevation) or press Enter to end:" },
             Step::Value { prompt: "Specify vertical curve length at the inner PVIs (0 for none)", key: "curve", default: 0.0 },
         ],
+        "CREATEPROFILEVIEW" => vec![
+            Step::Objects { prompt: "Select an alignment for the profile view:", filter: Alignments, slot: 0 },
+            Step::Point { prompt: "Specify lower left corner of the profile view:" },
+        ],
+        "CREATEFEATURELINE" => vec![Step::Objects { prompt: "Select lines or polylines to make feature lines of:", filter: Paths, slot: 0 }],
         _ => return None,
     })
 }
@@ -76,6 +89,8 @@ impl CadModule for CivilModule {
                         tool("CREATEALIGNMENT", "Create Alignment", icon!("alignment")),
                         tool("CREATESURFACE", "Create Surface", icon!("surface")),
                         tool("CREATEPROFILE", "Create Profile", icon!("profile")),
+                        tool("CREATEPROFILEVIEW", "Create Profile View", icon!("profileview")),
+                        tool("CREATEFEATURELINE", "Create Feature Line", icon!("featureline")),
                     ],
                 },
             ]

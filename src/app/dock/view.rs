@@ -719,7 +719,9 @@ impl OpenCADStudio {
                 width,
                 chrome,
             ),
-            crate::ui::dock::PanelId::NodeGraph => tab.graph.panel(width, chrome),
+            crate::ui::dock::PanelId::NodeGraph => {
+                tab.graph.panel(width, chrome, self.node_graph_links)
+            }
             crate::ui::dock::PanelId::Count => crate::ui::window::count_palette::view(
                 &self.count_palette,
                 tab.count.as_ref(),

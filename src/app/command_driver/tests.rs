@@ -12380,3 +12380,84 @@ mod clip_boundary_workflow_tests {
     }
 }
 
+
+// Bare REFCLOSE (with its Save/Discard option prompt) had no test; the
+// internal REFCLOSE_SAVE/REFCLOSE_DISCARD forms were covered.
+mod refclose_command_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::entities::{Insert, Line};
+    use document::types::Vector3;
+    use document::EntityType;
+
+    #[test]
+    fn refclose_prompt_saves_an_in_place_reference_edit() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "PANEL",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+        let reference = app.tabs[i]
+            .scene
+            .document
+            .add_entity(EntityType::Insert(Insert::new("PANEL", Vector3::ZERO)))
+            .unwrap();
+        app.tabs[i].dirty = false;
+        app.tabs[i].scene.select_entity(reference, true);
+
+        let _ = app.run_command_line("-REFEDIT");
+        let command = app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("-REFEDIT asks about the nesting level");
+        assert!(command.prompt().contains("Select nesting level"), "{}", command.prompt());
+        let _ = app.feed_command(StepInput::Text("O".into()));
+        let _ = app.feed_command(StepInput::Enter);
+        let _ = app.feed_command(StepInput::Enter);
+        assert!(
+            app.tabs[i].refedit_session.is_some(),
+            "REFEDIT checked out the preselected reference"
+        );
+        let before = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PANEL")
+            .unwrap()
+            .entity_handles
+            .len();
+
+        let result = app.automation_op(r#"{"op":"run","cmd":"CIRCLE 3,0 2"}"#);
+        assert_eq!(result["ok"], true, "{result}");
+        app.finish_pending_history(i);
+
+        let _ = app.run_command_line("REFCLOSE");
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("REFCLOSE asks what to do with the changes")
+                .prompt(),
+            "Enter option [Save/Discard reference changes] <Save>:"
+        );
+        let _ = app.feed_command(StepInput::Enter);
+
+        assert!(app.tabs[i].refedit_session.is_none(), "the session closed");
+        let after = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PANEL")
+            .unwrap()
+            .entity_handles
+            .len();
+        assert_eq!(after, before + 1, "the drawn circle was saved to the definition");
+    }
+}
+

@@ -3876,6 +3876,336 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    use super::{ensure_block_entities, merged_copies, strip_resolved_xref_content};
+    use document::types::{Handle, Vector3};
+    use document::EntityType;
+
+    /// A host with a dimension association on the line of a DWG xref, as a
+    /// session leaves it: the INSERT that places the xref, then the host's
+    /// copy of the line.
+    struct DimensionedXref {
+        dir: std::path::PathBuf,
+        path: std::path::PathBuf,
+        source: document::Document,
+        source_line: Handle,
+        host: document::Document,
+        br_handle: Handle,
+        insert: Handle,
+        association: Handle,
+    }
+
+    impl DimensionedXref {
+        /// `spare` handles are allocated first, so the session map of the
+        /// copies is this fixture's own.
+        fn new(tag: &str, spare: usize) -> Self {
+            use document::objects::{
+                AssocDimensionAssociation, AssocDimensionReference, AssociativeData,
+                AssociativeObject, ObjectType,
+            };
+            let dir = xref_tmpdir(tag);
+            let mut source = document::Document::new();
+            let mut line = document::entities::Line::new();
+            line.end = Vector3::new(5.0, 0.0, 0.0);
+            line.common.owner_handle = source.header.model_space_block_handle;
+            let source_line = source.add_entity(EntityType::Line(line)).unwrap();
+            let path = dir.join("walls.dwg");
+            let mut host = document::Document::new();
+            for _ in 0..spare {
+                host.allocate_handle();
+            }
+            let mut br = document::tables::BlockRecord::new("WALLS");
+            br.flags.is_xref = true;
+            br.xref_path = path.to_string_lossy().into_owned();
+            br.handle = host.allocate_handle();
+            let br_handle = br.handle;
+            host.block_records.add(br).unwrap();
+            ensure_block_entities(&mut host, "WALLS");
+            let mut insert = document::entities::Insert::new("WALLS", Vector3::ZERO);
+            insert.common.owner_handle = host.header.model_space_block_handle;
+            let insert = host.add_entity(EntityType::Insert(insert)).unwrap();
+            let mut fixture = Self {
+                dir,
+                path,
+                source,
+                source_line,
+                host,
+                br_handle,
+                insert,
+                association: Handle::NULL,
+            };
+            fixture.write_source();
+            let keys: HashSet<_> = [br_handle].into_iter().collect();
+            resolve_xrefs_for_keys(&mut fixture.host, &fixture.dir, &keys);
+            let copy = Self::copy_of_the_line(&fixture.host);
+
+            let association = fixture.host.allocate_handle();
+            let mut object = AssociativeObject::new("DIMASSOC", "AcDbDimAssoc");
+            object.handle = association;
+            let mut references: [Vec<AssocDimensionReference>; 4] = Default::default();
+            references[0].push(AssocDimensionReference {
+                class_name: "AcDbOsnapPointRef".to_owned(),
+                osnap_type: 1,
+                xrefs: vec![insert, copy],
+                ..Default::default()
+            });
+            object.data = AssociativeData::DimensionAssociation(AssocDimensionAssociation {
+                associativity: 1,
+                references,
+                ..Default::default()
+            });
+            fixture
+                .host
+                .objects
+                .insert(association, ObjectType::Associative(object));
+            fixture.association = association;
+            fixture
+        }
+
+        fn write_source(&self) {
+            let bytes = crate::io::save_to_bytes(&self.source, "dwg", self.source.version).unwrap();
+            std::fs::write(&self.path, bytes).unwrap();
+        }
+
+        /// The host's copy of the xref's line.
+        fn copy_of_the_line(host: &document::Document) -> Handle {
+            let br = host.block_records.get("WALLS").unwrap().handle;
+            host.entities()
+                .find(|e| e.common().owner_handle == br && matches!(e, EntityType::Line(_)))
+                .map(|e| e.common().handle)
+                .expect("the xref is loaded")
+        }
+
+        /// The first reference of the only dimension association of `doc`.
+        fn reference(doc: &document::Document) -> document::objects::AssocDimensionReference {
+            Self::reference_at(doc, 0)
+        }
+
+        /// The reference in `slot` of the only dimension association of `doc`.
+        fn reference_at(
+            doc: &document::Document,
+            slot: usize,
+        ) -> document::objects::AssocDimensionReference {
+            use document::objects::{AssociativeData, ObjectType};
+            doc.objects
+                .values()
+                .find_map(|object| match object {
+                    ObjectType::Associative(object) => match &object.data {
+                        AssociativeData::DimensionAssociation(association) => {
+                            association.references[slot].first().cloned()
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .expect("the dimension association")
+        }
+
+        /// The host as a save writes it and another session reads it.
+        fn reopened(&self, format: &str) -> document::Document {
+            let mut saved = self.host.clone();
+            strip_resolved_xref_content(&mut saved);
+            let bytes = crate::io::save_to_bytes(&saved, format, saved.version).unwrap();
+            // Nothing is left of the copies of the session that saved it.
+            merged_copies().lock().unwrap().remove(&self.br_handle);
+            let host_path = self.dir.join(format!("host.{format}"));
+            let mut reopened = crate::io::load_bytes_finalized(&host_path, bytes).unwrap();
+            let br = reopened.block_records.get("WALLS").unwrap().handle;
+            let keys: HashSet<_> = [br].into_iter().collect();
+            resolve_xrefs_for_keys(&mut reopened, &self.dir, &keys);
+            reopened
+        }
+    }
+
+    /// A file does not hold the objects of an xref, and the copies a session
+    /// works with have handles of that session. What the file keeps of a
+    /// reference to one is the INSERT of the xref and the handle the object
+    /// has in the xref's own drawing.
+    #[test]
+    fn a_saved_host_keeps_a_dimension_reference_by_the_handle_in_the_xref_drawing() {
+        let fixture = DimensionedXref::new("stored", 8192);
+        let mut saved = fixture.host.clone();
+        strip_resolved_xref_content(&mut saved);
+        let stored = DimensionedXref::reference(&saved);
+        assert_eq!(stored.xrefs, vec![fixture.insert]);
+        assert_eq!(
+            stored.xref_paths,
+            vec![format!("{:X}", fixture.source_line.value())]
+        );
+        // The open drawing is not touched: it still follows its copy.
+        let open = DimensionedXref::reference(&fixture.host);
+        assert_eq!(
+            open.xrefs,
+            vec![
+                fixture.insert,
+                DimensionedXref::copy_of_the_line(&fixture.host)
+            ]
+        );
+        assert!(open.xref_paths.is_empty());
+        std::fs::remove_dir_all(&fixture.dir).ok();
+    }
+
+    #[test]
+    fn a_reopened_host_points_the_dimension_reference_at_the_xref_copy() {
+        for (format, spare) in [("dwg", 12288), ("dxf", 16384)] {
+            let fixture = DimensionedXref::new(&format!("reopen_{format}"), spare);
+            let reopened = fixture.reopened(format);
+            let copy = DimensionedXref::copy_of_the_line(&reopened);
+            let reference = DimensionedXref::reference(&reopened);
+            assert_eq!(reference.xrefs, vec![fixture.insert, copy], "{format}");
+            assert!(reference.xref_paths.is_empty(), "{format}");
+            let reactors = &reopened.get_entity(copy).unwrap().common().reactors;
+            assert!(reactors.contains(&fixture.association), "{format}");
+            std::fs::remove_dir_all(&fixture.dir).ok();
+        }
+    }
+
+    /// The case of the report: the host is saved and reopened, the source
+    /// changes, and the xref is reloaded.
+    #[test]
+    fn a_reload_after_the_host_was_reopened_keeps_the_dimension_on_the_xref_line() {
+        let mut fixture = DimensionedXref::new("reopen_reload", 20480);
+        let mut reopened = fixture.reopened("dwg");
+        let first = DimensionedXref::copy_of_the_line(&reopened);
+        if let Some(EntityType::Line(line)) = fixture.source.get_entity_mut(fixture.source_line) {
+            line.end.x = 6.0;
+        }
+        fixture.write_source();
+        let br = reopened.block_records.get("WALLS").unwrap().handle;
+        let keys: HashSet<_> = [br].into_iter().collect();
+        resolve_xrefs_for_keys(&mut reopened, &fixture.dir, &keys);
+        let second = DimensionedXref::copy_of_the_line(&reopened);
+        assert_ne!(first, second, "the reload merged a fresh copy");
+        let Some(EntityType::Line(line)) = reopened.get_entity(second) else {
+            panic!("the copy is a line");
+        };
+        assert_eq!(line.end.x, 6.0);
+        let reference = DimensionedXref::reference(&reopened);
+        assert_eq!(reference.xrefs, vec![fixture.insert, second]);
+        let reactors = &reopened.get_entity(second).unwrap().common().reactors;
+        assert!(reactors.contains(&fixture.association));
+        std::fs::remove_dir_all(&fixture.dir).ok();
+    }
+
+    /// An object the xref no longer has leaves the reference as it was read.
+    #[test]
+    fn a_reference_to_an_object_the_xref_lost_stays_as_it_was_saved() {
+        let mut fixture = DimensionedXref::new("lost", 24576);
+        let mut saved = fixture.host.clone();
+        strip_resolved_xref_content(&mut saved);
+        let bytes = crate::io::save_to_bytes(&saved, "dwg", saved.version).unwrap();
+        merged_copies().lock().unwrap().remove(&fixture.br_handle);
+        // The source is drawn again: its line has another handle.
+        let stored = format!("{:X}", fixture.source_line.value());
+        fixture.source = document::Document::new();
+        for _ in 0..64 {
+            fixture.source.allocate_handle();
+        }
+        let mut line = document::entities::Line::new();
+        line.end = Vector3::new(5.0, 0.0, 0.0);
+        line.common.owner_handle = fixture.source.header.model_space_block_handle;
+        let redrawn = fixture.source.add_entity(EntityType::Line(line)).unwrap();
+        assert_ne!(redrawn, fixture.source_line);
+        fixture.write_source();
+        let host_path = fixture.dir.join("host.dwg");
+        let mut reopened = crate::io::load_bytes_finalized(&host_path, bytes).unwrap();
+        let br = reopened.block_records.get("WALLS").unwrap().handle;
+        let keys: HashSet<_> = [br].into_iter().collect();
+        resolve_xrefs_for_keys(&mut reopened, &fixture.dir, &keys);
+        let reference = DimensionedXref::reference(&reopened);
+        assert_eq!(reference.xrefs, vec![fixture.insert]);
+        assert_eq!(reference.xref_paths, vec![stored]);
+        std::fs::remove_dir_all(&fixture.dir).ok();
+    }
+
+    /// A reference to an object in a block of the xref goes through the
+    /// INSERT of that block inside the xref. The file keeps a handle for each
+    /// step after the INSERT of the xref itself.
+    #[test]
+    fn a_reference_through_a_block_of_the_xref_keeps_a_handle_for_each_step() {
+        use document::objects::{AssocDimensionReference, AssociativeData, ObjectType};
+        let mut fixture = DimensionedXref::new("nested", 28672);
+        // The source gets a block that holds a line, and a reference of it.
+        let mut post = document::tables::BlockRecord::new("POST");
+        post.handle = fixture.source.allocate_handle();
+        let post_handle = post.handle;
+        fixture.source.block_records.add(post).unwrap();
+        ensure_block_entities(&mut fixture.source, "POST");
+        let mut inner = document::entities::Line::new();
+        inner.end = Vector3::new(0.0, 3.0, 0.0);
+        inner.common.owner_handle = post_handle;
+        let inner = fixture.source.add_entity(EntityType::Line(inner)).unwrap();
+        let mut placed = document::entities::Insert::new("POST", Vector3::new(2.0, 0.0, 0.0));
+        placed.common.owner_handle = fixture.source.header.model_space_block_handle;
+        let placed = fixture
+            .source
+            .add_entity(EntityType::Insert(placed))
+            .unwrap();
+        fixture.write_source();
+        let keys: HashSet<_> = [fixture.br_handle].into_iter().collect();
+        resolve_xrefs_for_keys(&mut fixture.host, &fixture.dir, &keys);
+
+        // The host's copies of those two: the INSERT in the xref's block and
+        // the line in the block it places.
+        let steps = |host: &document::Document| -> Vec<Handle> {
+            let walls = host.block_records.get("WALLS").unwrap().handle;
+            let (insert, block) = host
+                .entities()
+                .find_map(|e| match e {
+                    EntityType::Insert(insert) if insert.common.owner_handle == walls => Some((
+                        insert.common.handle,
+                        host.block_records.get(&insert.block_name)?.handle,
+                    )),
+                    _ => None,
+                })
+                .expect("the copy of the INSERT");
+            let line = host
+                .entities()
+                .find(|e| e.common().owner_handle == block && matches!(e, EntityType::Line(_)))
+                .map(|e| e.common().handle)
+                .expect("the copy of the line");
+            vec![insert, line]
+        };
+        let chain: Vec<Handle> = std::iter::once(fixture.insert)
+            .chain(steps(&fixture.host))
+            .collect();
+        let Some(ObjectType::Associative(object)) =
+            fixture.host.objects.get_mut(&fixture.association)
+        else {
+            panic!("the association");
+        };
+        let AssociativeData::DimensionAssociation(association) = &mut object.data else {
+            panic!("a dimension association");
+        };
+        association.associativity |= 2;
+        association.references[1].push(AssocDimensionReference {
+            class_name: "AcDbOsnapPointRef".to_owned(),
+            osnap_type: 1,
+            xrefs: chain,
+            ..Default::default()
+        });
+
+        let mut saved = fixture.host.clone();
+        strip_resolved_xref_content(&mut saved);
+        let stored = DimensionedXref::reference_at(&saved, 1);
+        assert_eq!(stored.xrefs, vec![fixture.insert]);
+        assert_eq!(
+            stored.xref_paths,
+            vec![
+                format!("{:X}", placed.value()),
+                format!("{:X}", inner.value())
+            ]
+        );
+
+        let reopened = fixture.reopened("dwg");
+        let linked = DimensionedXref::reference_at(&reopened, 1);
+        let expected: Vec<Handle> = std::iter::once(fixture.insert)
+            .chain(steps(&reopened))
+            .collect();
+        assert_eq!(linked.xrefs, expected);
+        assert!(linked.xref_paths.is_empty());
+        std::fs::remove_dir_all(&fixture.dir).ok();
+    }
+
     #[test]
     fn a_reloaded_reference_ends_its_definition_after_the_merged_body() {
         // A reload replaces the definition body. The terminator written before

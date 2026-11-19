@@ -2790,6 +2790,38 @@ mod tests {
             .any(|(handle, before)| *handle == association && before.is_some()));
     }
 
+    /// A reference a file kept by the handle of an xref's object ends on the
+    /// INSERT that places the xref. While the xref is not loaded it has
+    /// nothing to measure from: the insertion point is not it.
+    #[test]
+    fn a_reference_to_an_object_of_an_xref_that_is_not_loaded_is_unresolved() {
+        let mut scene = Scene::new();
+        let mut walls = document::tables::BlockRecord::new("WALLS");
+        walls.flags.is_xref = true;
+        walls.handle = scene.document.allocate_handle();
+        scene.document.block_records.add(walls).unwrap();
+        let insert = scene.add_entity(EntityType::Insert(document::entities::Insert::new(
+            "WALLS",
+            Vector3::new(40.0, 10.0, 0.0),
+        )));
+        let on_the_insert = AssocDimensionReference {
+            osnap_type: chain::osnap::INS,
+            xrefs: vec![insert],
+            ..Default::default()
+        };
+        let resolved = resolve_reference_chain(&scene, &on_the_insert, None)
+            .expect("the insertion point of a block reference");
+        assert!((resolved.model.x - 40.0).abs() < 1e-9 && (resolved.model.y - 10.0).abs() < 1e-9);
+        let in_the_xref = AssocDimensionReference {
+            xref_paths: vec!["2F".to_owned()],
+            ..on_the_insert
+        };
+        assert_eq!(
+            resolve_reference_chain(&scene, &in_the_xref, None).err(),
+            Some(ReferenceStatus::Unresolved)
+        );
+    }
+
     #[test]
     fn dimension_association_gate_tracks_creation_and_reset() {
         let mut scene = Scene::new();

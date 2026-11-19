@@ -75,7 +75,12 @@ impl OpenCADStudio {
         let generation = self.tabs[i].document_generation;
         crate::app::update::background_task(
             "DGNIMPORT",
-            move || reader(&options),
+            move || {
+                reader(&options).map(|(request, mut prepared)| {
+                    crate::app::commands::read_reference_drawings(&request, &mut prepared);
+                    (request, prepared)
+                })
+            },
             move |read| {
                 Message::ImportDialog(
                     crate::ui::window::import_dialogs::ImportDialogMsg::DgnOpPrepared(

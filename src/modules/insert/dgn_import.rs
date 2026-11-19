@@ -172,13 +172,16 @@ impl std::fmt::Debug for PreparedImport {
 /// A reference attachment that is placed: the attachment, the file it
 /// names as found beside the host file, and the model it shows. For a
 /// translation, `converted` is the model to write as "<file>-<model>.dwg";
-/// none when the drawing is already there and is kept.
+/// none when the drawing is already there and is kept. `drawing` is that
+/// drawing written and read on the import's worker, or why it could not
+/// be written; none when nothing read it there yet.
 #[derive(Clone)]
 pub struct PreparedReference {
     pub reference: crate::scene::model::underlay_vector::DgnReference,
     pub file: std::path::PathBuf,
     pub model: String,
     pub converted: Option<Converted>,
+    pub drawing: Option<Result<crate::io::xref::XrefRead, String>>,
 }
 
 /// The drawing a translated reference is written to, beside its file.
@@ -277,6 +280,7 @@ fn prepare_reference(
         file,
         model,
         converted,
+        drawing: None,
     })
 }
 

@@ -1801,12 +1801,28 @@ impl OpenCADStudio {
         // grips participate, let the common cursor delta drive all of them.
         let axis = (targets.len() == 1).then_some(axis).flatten();
 
+        // A circle's quadrant grip edits its radius, as the grip menu's
+        // Radius does: Dynamic Input shows and takes the radius.
+        let radius = matches!(
+            targets.as_slice(),
+            [target] if !target.is_translate
+                && (1..=4).contains(&target.grip_id)
+                && matches!(
+                    self.tabs[i].scene.document.get_entity(target.handle),
+                    Some(document::EntityType::Circle(_))
+                )
+        );
+
         GripEdit {
             handle,
             grip_id,
             origin_world: world,
             last_world: world,
-            mode: GripEditMode::Stretch,
+            mode: if radius {
+                GripEditMode::Radius
+            } else {
+                GripEditMode::Stretch
+            },
             axis,
             targets,
             rectangle_frame: None,
@@ -3375,6 +3391,18 @@ impl OpenCADStudio {
             // to `last_cursor_world`. Keep it synchronized with the actual point used
             // by the grip, otherwise the guide and the edited geometry diverge.
             self.tabs[i].last_cursor_world = snapped;
+            // A typed (Tab-locked) Distance or Angle pins the stretch, as it
+            // pins a command's preview (#356): the preview shows what Enter
+            // commits.
+            if grip.mode == GripEditMode::Stretch
+                && grip.rectangle_frame.is_none()
+                && self.tabs[i].dyn_fields.iter().any(|f| f.buffer.is_some())
+            {
+                if let Some(point) = self.dyn_resolve_point() {
+                    snapped = point;
+                    self.tabs[i].last_cursor_world = snapped;
+                }
+            }
             self.tabs[i].last_cursor_screen = p_full;
 
             // Project the grip's original position into full-canvas coordinates.
@@ -6753,6 +6781,16 @@ impl OpenCADStudio {
                             _ => None,
                         };
                         edit.grab = grabbed.map(|point| point - world);
+                    }
+                    if edit.mode == GripEditMode::Radius {
+                        self.grip_pending = Some(crate::app::GripPendingValue {
+                            handle,
+                            grip_id,
+                            action: crate::scene::model::object::GripMenuAction::Radius,
+                            label: "New radius",
+                        });
+                        self.command_line
+                            .push_info(crate::t!("Specify point or enter radius:").as_ref());
                     }
                     self.tabs[i].active_grip = Some(edit);
                     self.grip_ctrl_cycle = None;

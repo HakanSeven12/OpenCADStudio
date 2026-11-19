@@ -1531,6 +1531,10 @@ impl OpenCADStudio {
             }
             Message::ControlCaptureFrame { redrew } => self.on_control_capture_frame(redrew),
             Message::Graph(message) => self.on_graph(message),
+            Message::GraphFileRead(read) => self.finish_graph_file_read(*read),
+            Message::GraphLoadRead(tab_id, generation, read) => {
+                self.finish_control_graph_load(tab_id, generation, read)
+            }
 
             Message::ControlToggle => {
                 self.control.enabled = !self.control.enabled;

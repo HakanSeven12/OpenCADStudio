@@ -10,6 +10,15 @@ use graph::{Kind, NodeId, Port};
 
 type Parsed<T> = Result<T, Value>;
 
+/// The `load` action's reader: the file's bytes, checked as a graph.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_graph_file(path: &str) -> Result<Vec<u8>, Value> {
+    let bytes = std::fs::read(path).map_err(|error| failure("read_failed", error))?;
+    crate::ui::node_graph::Graph::from_file(&bytes)
+        .map_err(|error| failure("invalid_graph", error))?;
+    Ok(bytes)
+}
+
 fn node_id(req: &Value, key: &str) -> Parsed<NodeId> {
     req[key]
         .as_u64()
@@ -194,10 +203,7 @@ impl OpenCADStudio {
                 let path = req["path"]
                     .as_str()
                     .ok_or_else(|| failure("path_required", "Supply path: the .ocg file to read"))?;
-                let bytes = std::fs::read(path).map_err(|error| failure("read_failed", error))?;
-                crate::ui::node_graph::Graph::from_file(&bytes)
-                    .map_err(|error| failure("invalid_graph", error))?;
-                self.on_graph(GraphMsg::Loaded(Some(bytes)))
+                return Ok(self.control_graph_load_with(i, path, read_graph_file));
             }
             other => {
                 return Err(failure(
@@ -214,6 +220,56 @@ impl OpenCADStudio {
         }
         self.set_control_result(state);
         Ok(task)
+    }
+
+    /// The `load` action: the `.ocg` file is read and checked off the UI
+    /// thread, and the graph is loaded when the read ends
+    /// ([`Self::finish_control_graph_load`]). The reader is given, so a
+    /// test can give one that panics.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn control_graph_load_with(
+        &mut self,
+        i: usize,
+        path: &str,
+        reader: fn(&str) -> Result<Vec<u8>, Value>,
+    ) -> Task<Message> {
+        let (tab_id, generation) = (self.tabs[i].id, self.tabs[i].document_generation);
+        let path = path.to_string();
+        crate::app::update::background_task(
+            "Node graph load",
+            move || reader(&path),
+            move |read| Message::GraphLoadRead(tab_id, generation, read),
+        )
+    }
+
+    /// The end of the `load` action's read: the graph is loaded into the
+    /// drawing it was read for, while that drawing is still the current
+    /// one, and the action settles with the graph's state or the failure
+    /// it answered at once before.
+    pub(in crate::app) fn finish_control_graph_load(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        read: Result<Vec<u8>, Value>,
+    ) -> Task<Message> {
+        let bytes = match read {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                self.set_control_failure(error);
+                return Task::none();
+            }
+        };
+        let i = self.active_tab;
+        if self.tabs[i].id != tab_id || self.tabs[i].document_generation != generation {
+            self.set_control_failure(failure(
+                "document_closed",
+                "The drawing to load the graph into was closed, replaced or is no longer current",
+            ));
+            return Task::none();
+        }
+        let task = self.on_graph(GraphMsg::Loaded(Some(bytes)));
+        self.set_control_result(self.node_graph_state(i));
+        task
     }
 
     fn existing_node(&self, i: usize, req: &Value, key: &str) -> Parsed<NodeId> {
@@ -971,7 +1027,8 @@ mod data_node_tests {
         let id = app.tabs[i].graph.add_node(super::PaletteItem::Op(spec), Vec::new(), iced::Point::ORIGIN);
         for (field, value) in inputs.as_object().unwrap() {
             let port = super::Port { node: id, field: field.clone() };
-            let _ = app.on_graph(super::GraphMsg::Set(port, value.clone()));
+            let task = app.on_graph(super::GraphMsg::Set(port, value.clone()));
+            app.drive_headless_task(task).expect("the graph's task");
         }
         id
     }

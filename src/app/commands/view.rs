@@ -94,6 +94,66 @@ fn read_shortcuts_file(path: &str) -> Result<Vec<(String, String)>, String> {
 }
 
 #[cfg(test)]
+mod cuiimport_read_tests {
+    use crate::app::OpenCADStudio;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    /// CUIIMPORT loads the shortcuts only when the read ends.
+    #[test]
+    fn the_shortcuts_load_when_the_read_ends() {
+        let mut app = new_app();
+        let path = std::env::temp_dir().join(format!("ocs-cuiimport-{}.txt", std::process::id()));
+        std::fs::write(&path, "# shortcuts\nCTRL+ALT+K LINE\n").expect("write the shortcuts");
+        let shown = path.display().to_string();
+        let before = app.shortcut_bindings.len();
+        let task = app.dispatch_command(&format!("CUIIMPORT {shown}"));
+        assert_eq!(
+            app.shortcut_bindings.len(),
+            before,
+            "nothing during the read"
+        );
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(app.shortcut_bindings.len(), before + 1);
+        assert!(app.command_line.history_plain_text().contains(&format!(
+            "CUIIMPORT: loaded 1 shortcut(s) from \"{shown}\"."
+        )));
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A missing file gives the same error as before.
+    #[test]
+    fn a_missing_file_is_an_error() {
+        let mut app = new_app();
+        let task = app.dispatch_command("CUIIMPORT /no/such/shortcuts.txt");
+        app.drive_headless_task(task).expect("the read task");
+        assert!(app
+            .command_line
+            .last_error
+            .as_deref()
+            .is_some_and(|e| e.starts_with("CUIIMPORT: cannot read \"/no/such/shortcuts.txt\"")));
+    }
+
+    /// A reader that panics gives an error, and no shortcut changes.
+    #[test]
+    fn a_reader_panic_is_an_error() {
+        let mut app = new_app();
+        let before = app.shortcut_bindings.clone();
+        let task = app.import_shortcuts_file_with("panics.txt", |_| panic!("a reader bug"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("CUIIMPORT failed: a reader bug")
+        );
+        assert_eq!(app.shortcut_bindings, before);
+    }
+}
+
+#[cfg(test)]
 mod help_url_tests {
     use super::help_url;
 

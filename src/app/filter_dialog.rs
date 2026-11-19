@@ -1976,6 +1976,56 @@ mod tests {
         let _ = std::fs::remove_file(path);
     }
 
+    /// Import reads the file on a worker: nothing is stored during the
+    /// read; a result for a replaced drawing is dropped; a reader that
+    /// panics gives an error.
+    #[test]
+    fn saved_filters_import_reads_on_a_worker() {
+        let (mut app, _) = app_with_objects();
+        let i = app.active_tab;
+        filter(&mut app, FilterMsg::Open(None));
+        filter(
+            &mut app,
+            FilterMsg::Edit(
+                FilterRow::Root(0),
+                FilterRowEdit::Type(Some("Circle".into())),
+            ),
+        );
+        filter(&mut app, FilterMsg::SaveAs(Some("Circles".into())));
+        filter(&mut app, FilterMsg::SaveAsCommit);
+        let path = std::env::temp_dir().join(format!(
+            "ocs-filters-worker-{}.ocsfilter",
+            std::process::id()
+        ));
+        filter(&mut app, FilterMsg::ExportTo(path.clone()));
+        filter(&mut app, FilterMsg::DeleteSaved);
+
+        let task = app.update(Message::FilterDialog(FilterMsg::ImportFrom(path.clone())));
+        assert!(
+            app.saved_filter_names(i).is_empty(),
+            "nothing during the read"
+        );
+        app.tabs[i].document_generation += 1;
+        app.drive_headless_task(task).expect("the read task");
+        assert!(
+            app.saved_filter_names(i).is_empty(),
+            "dropped for a replaced drawing"
+        );
+        assert!(app
+            .command_line
+            .history_plain_text()
+            .contains("was replaced or cleared"));
+
+        let task = app.import_saved_filters_with(&path, |_| panic!("a reader bug"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("FILTER failed: a reader bug")
+        );
+        assert!(app.saved_filter_names(i).is_empty());
+        let _ = std::fs::remove_file(path);
+    }
+
     /// Quick Select's "Advanced…" carries its conditions over: two types
     /// become two groups under "any", and the count is the same.
     #[test]

@@ -12076,3 +12076,57 @@ mod vpclip_polygonal_tests {
     }
 }
 
+
+// PLOTSTYLE's STATUS/CLEAR forms expose the loaded plot style table; no
+// command-surface test covered them.
+mod plotstyle_command_tests {
+    use super::super::*;
+    use crate::app::Message;
+    use crate::io::plot_style::PickedPlotStyle;
+    use document::plot_style::{PlotStyleEntry, PlotStyleTable};
+
+    #[test]
+    fn plotstyle_status_reports_the_loaded_table_and_clear_removes_it() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let layout = app.tabs[i].scene.current_layout.clone();
+        let mut table = PlotStyleTable::identity("review.ctb".to_string());
+        table.named_entries.insert(
+            "Normal".into(),
+            PlotStyleEntry {
+                name: "Normal".into(),
+                color: Some([255, 0, 0]),
+                ..Default::default()
+            },
+        );
+        let picked = PickedPlotStyle::from_bytes(
+            "review.ctb".into(),
+            table.to_bytes().unwrap(),
+        )
+        .unwrap();
+        let _ = app.update(Message::PlotStyleLoaded(
+            app.tabs[i].id,
+            layout.clone(),
+            Ok(Some(picked)),
+        ));
+
+        let _ = app.run_command_line("PLOTSTYLE STATUS");
+        let text = app.command_line.history_plain_text();
+        assert!(
+            text.contains("Plot style: review.ctb"),
+            "STATUS reports the active table: {text}"
+        );
+        assert!(app.active_plot_style.is_some());
+
+        let clear = app.run_command_line("PLOTSTYLE CLEAR");
+        app.drive_headless_task(clear).unwrap();
+        assert!(app.active_plot_style.is_none(), "CLEAR removes the table");
+        let _ = app.run_command_line("PLOTSTYLE STATUS");
+        assert!(
+            app.command_line.history_plain_text().contains("No plot style table loaded."),
+            "STATUS now reports no table"
+        );
+    }
+}
+

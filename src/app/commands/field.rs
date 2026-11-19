@@ -282,10 +282,23 @@ impl OpenCADStudio {
         else {
             return false;
         };
-        self.open_field_dialog(FieldTarget::EditText(host));
+        self.open_field_dialog_on(FieldTarget::EditText(host), &code, &objects);
+        true
+    }
+
+    /// Open the Field dialog for `target` on the field `code` with its
+    /// `objects`: its name, settings and the object property it reads.
+    pub(in crate::app) fn open_field_dialog_on(
+        &mut self,
+        target: FieldTarget,
+        code: &str,
+        objects: &[document::Handle],
+    ) {
+        let i = self.active_tab;
+        self.open_field_dialog(target);
         let document = &self.tabs[i].scene.document;
         if let Some(state) = self.field_dialog.as_mut() {
-            let property = state.seed_from_code(&code, &objects);
+            let property = state.seed_from_code(code, objects);
             let object = objects
                 .first()
                 .and_then(|handle| document.get_entity(*handle));
@@ -305,7 +318,6 @@ impl OpenCADStudio {
         }
         self.fill_named_objects();
         self.refresh_field_preview();
-        true
     }
 
     fn field_value(&self, code: &str, objects: &[document::Handle]) -> String {
@@ -876,7 +888,7 @@ mod tests {
             "4.0",
         );
 
-        let _ = app.begin_text_edit(text);
+        assert!(app.open_field_edit(text));
         let state = app.field_dialog.as_ref().expect("the Field dialog opens");
         assert_eq!(state.target, FieldTarget::EditText(text));
         assert_eq!((state.name, state.object_prop), ("Object", Some("Area")));
@@ -919,7 +931,7 @@ mod tests {
             "+3.50",
         );
 
-        let _ = app.begin_text_edit(text);
+        assert!(app.open_field_edit(text));
         assert!(app.field_dialog.is_some(), "the Field dialog opens");
         let _ = app.on_field_dialog(FieldDialogMsg::Ok);
         let (written, objects) =
@@ -951,7 +963,7 @@ mod tests {
             Some((code.to_string(), vec![object])),
             "",
         );
-        let _ = app.begin_text_edit(text);
+        assert!(app.open_field_edit(text));
         assert!(app.field_dialog.is_some(), "the Field dialog opens");
         (app, text, object)
     }
@@ -1127,7 +1139,7 @@ mod tests {
             "7",
         );
 
-        let _ = app.begin_text_edit(text);
+        assert!(app.open_field_edit(text));
         let state = app.field_dialog.as_ref().expect("the Field dialog opens");
         assert_eq!(state.name, "Formula");
         assert_eq!(

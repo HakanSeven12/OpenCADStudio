@@ -184,12 +184,18 @@ impl super::OpenCADStudio {
             self.open_attdef_edit(target);
             return iced::Task::none();
         }
-        // A text that is one field, as FIELD makes it, edits that field.
-        if matches!(
-            self.tabs[i].scene.document.get_entity(target),
-            Some(EntityType::MText(_) | EntityType::Text(_))
-        ) && self.open_field_edit(target)
-        {
+        // A TEXT that is one field, as FIELD makes it, edits that field. An
+        // MTEXT opens in the editor, where a double-click on the field opens
+        // it; only one whose field the editor cannot place goes to the field.
+        let document = &self.tabs[i].scene.document;
+        let field_only = match document.get_entity(target) {
+            Some(EntityType::Text(_)) => true,
+            Some(EntityType::MText(m)) => {
+                !super::mtext_editor::locates_fields(document, target, &m.value)
+            }
+            _ => false,
+        };
+        if field_only && self.open_field_edit(target) {
             return iced::Task::none();
         }
         // Snapshot what we need before borrowing `self` mutably to open.

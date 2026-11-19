@@ -12317,3 +12317,66 @@ mod xref_overlay_option_tests {
     }
 }
 
+
+// The CLIP command's boundary workflow on a drawing-space reference had no
+// test (XCLIP was only covered inside the block editor).
+mod clip_boundary_workflow_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::entities::{Insert, Line};
+    use document::types::Vector3;
+    use document::EntityType;
+    use glam::DVec3;
+
+    #[test]
+    fn clip_adds_a_rectangular_boundary_to_a_placed_reference() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "VALVE",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+        let insert = app.tabs[i]
+            .scene
+            .add_entity(EntityType::Insert(Insert::new("VALVE", Vector3::ZERO)));
+
+        let _ = app.run_command_line("CLIP");
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("CLIP asks which object to clip")
+                .prompt(),
+            "Select Object to clip:"
+        );
+        let _ = app.feed_command(StepInput::EntityPick(insert, DVec3::ZERO));
+        let _ = app.feed_command(StepInput::Text("N".into()));
+        let _ = app.feed_command(StepInput::Text("R".into()));
+        let _ = app.feed_command(StepInput::Point(DVec3::new(1.0, 1.0, 0.0)));
+        let _ = app.feed_command(StepInput::Point(DVec3::new(8.0, 7.0, 0.0)));
+
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "the boundary completes CLIP"
+        );
+        assert!(app.command_line.last_error.is_none());
+        assert!(
+            crate::scene::pick::xclip::filter_handle(
+                &app.tabs[i].scene.document,
+                insert
+            )
+            .is_some(),
+            "the reference now carries a clip filter"
+        );
+        assert!(
+            app.tabs[i].scene.document.get_entity(insert).is_some(),
+            "the reference itself stays in the drawing"
+        );
+    }
+}
+

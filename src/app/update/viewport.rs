@@ -10827,6 +10827,21 @@ properties={:.1}ms picked={}",
                 for (handle, object) in edited_objects {
                     self.tabs[i].scene.document.objects.insert(handle, object);
                 }
+                // A fill copies formulas and fields as fields, inside the
+                // same history entry.
+                if let Some((table, pairs)) = self.tabs[i].scene.table_fill_fields.take() {
+                    let filled = grip.targets.iter().any(|target| {
+                        target.handle == table
+                            && target.grip_id == crate::entities::table::CELL_GRIP_FILL
+                    });
+                    if filled {
+                        crate::entities::table::commit_fill_fields(
+                            &mut self.tabs[i].scene.document,
+                            table,
+                            &pairs,
+                        );
+                    }
+                }
             }
             // Dimensions that follow the edited shapes update here; record
             // them so the one undo also brings back their saved pictures.

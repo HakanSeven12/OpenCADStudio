@@ -2765,6 +2765,9 @@ pub struct Scene {
     /// The table whose fill grip is being dragged: its picked range stays
     /// drawn over the grip preview that hides it.
     pub table_fill_drag: Option<Handle>,
+    /// The cells the table fill being dragged copied from field cells, made
+    /// fields again when the drag is committed.
+    pub table_fill_fields: Option<(Handle, Vec<crate::entities::table::FillPair>)>,
     /// The table whose cell is open in the in-place editor: the editor's
     /// picture hides it, but its row and column labels stay drawn.
     pub table_cell_editing: Option<Handle>,
@@ -3735,6 +3738,7 @@ impl Scene {
             reference_only: Default::default(),
             preview_hidden: HashSet::default(),
             table_fill_drag: None,
+            table_fill_fields: None,
             table_cell_editing: None,
             command_preview_hidden: HashSet::default(),
             mtext_editor_hidden: None,

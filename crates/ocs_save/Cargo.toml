@@ -10,7 +10,7 @@ publish = false
 # exactly one implementation. No UI/app dependencies — only the codec + serde.
 
 [dependencies]
-document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "d2ae9f8d6cfbb5054d626f0d9f55ab44c8f9adc7", features = ["serde", "mline-pilot"] }
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "c241d77a2ddfa5b1c5769e7fc80f051b257ef136", features = ["serde", "mline-pilot"] }
 bincode = "1.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

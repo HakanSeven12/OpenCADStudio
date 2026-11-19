@@ -157,6 +157,7 @@ impl OpenCADStudio {
             Some(K::BlockEditChanges) => crate::t!("Block - Save Parameter Changes?").into_owned(),
             Some(K::BlockEditPicker) => crate::t!("Edit Block Definition").into_owned(),
             Some(K::Rename) => crate::tr!("rename-dialog", "title"),
+            Some(K::DesignCenter) => crate::tr!("design-center", "title"),
             Some(K::Purge) => crate::tr!("purge-dialog", "title"),
             Some(K::DrawingProperties) => crate::tr!("dwgprops-dialog", "title"),
             Some(K::GeographicLocation) => {
@@ -543,6 +544,12 @@ impl OpenCADStudio {
                 let state = self.geographic_location.as_ref()?;
                 sized_flow(ex, 600, 250, |flow| {
                     crate::ui::window::geographic_location::view(state, flow)
+                })
+            }
+            super::super::ModalKind::DesignCenter => {
+                let state = self.design_center.as_ref()?;
+                sized_flow(ex, 760, 480, |flow| {
+                    crate::ui::window::design_center::view(state, flow)
                 })
             }
             super::super::ModalKind::Purge => {

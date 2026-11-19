@@ -419,7 +419,12 @@ fn subassembly(data: &ArchEntityData, handle: u64, document: &document::Document
     };
     for (index, link) in shape.links.iter().enumerate() {
         let codes = shape.link_codes.get(index).map(Vec::as_slice).unwrap_or(&[]);
-        for style in pick(codes, "AECC_ROADWAYLINK_STYLE", 1, 4) {
+        let styles = pick(codes, "AECC_ROADWAYLINK_STYLE", 1, 4);
+        // A code set that names no link style (one without items) still shows the links.
+        if styles.is_empty() {
+            styled(out, Some(ProxyStyle::default()), link.iter().map(|&i| point(i)).collect());
+        }
+        for style in styles {
             styled(out, first_component(style, 0), link.iter().map(|&i| point(i)).collect());
         }
     }

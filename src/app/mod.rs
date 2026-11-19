@@ -84,6 +84,7 @@ mod linetype_manager_tests;
 mod measurement;
 mod model_ops;
 mod civil;
+mod civil_packages;
 mod surfacing;
 mod solid_edit_ops;
 mod mtext_editor;
@@ -112,6 +113,7 @@ mod quick_calc;
 mod recent;
 mod record_api;
 mod rename_dialog;
+mod design_center;
 mod saved_filters;
 pub(crate) mod settings;
 mod shortcuts;
@@ -994,6 +996,8 @@ pub(super) struct OpenCADStudio {
     block_definition_open_editor: Option<String>,
     block_edit_picker: Option<crate::ui::window::block_edit_picker::State>,
     rename_dialog: Option<crate::ui::window::rename::State>,
+    /// DESIGN CENTER; kept after closing so browsed drawings stay listed.
+    design_center: Option<crate::ui::window::design_center::State>,
     drawing_properties: Option<crate::ui::window::drawing_properties::State>,
     geographic_location: Option<crate::ui::window::geographic_location::State>,
     purge_dialog: Option<crate::ui::window::purge::State>,
@@ -3513,6 +3517,7 @@ pub enum ModalKind {
     BlockEditChanges,
     BlockEditPicker,
     Rename,
+    DesignCenter,
     Purge,
     DrawingProperties,
     GeographicLocation,
@@ -4260,6 +4265,7 @@ pub enum Message {
     BlockEditPickerSelect(String),
     BlockEditPickerApply,
     Rename(crate::ui::window::rename::RenameMsg),
+    DesignCenter(crate::ui::window::design_center::DesignCenterMsg),
     Purge(crate::ui::window::purge::PurgeMsg),
     DwgProps(crate::ui::window::drawing_properties::DwgPropsMsg),
     GeographicLocation(crate::ui::window::geographic_location::GeographicLocationMsg),
@@ -6518,6 +6524,7 @@ impl OpenCADStudio {
             block_definition_open_editor: None,
             block_edit_picker: None,
             rename_dialog: None,
+            design_center: None,
             drawing_properties: None,
             geographic_location: None,
             purge_dialog: None,

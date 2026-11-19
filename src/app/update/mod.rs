@@ -2656,10 +2656,7 @@ impl OpenCADStudio {
                 }
             }
 
-            Message::XAttachPickResult(Ok(path)) => {
-                self.open_xref_attach_dialog(path);
-                Task::none()
-            }
+            Message::XAttachPickResult(Ok(path)) => self.open_xref_attach_dialog(path),
             message @ (Message::AttachPick
             | Message::UnderlayAttachPick(_)
             | Message::PointCloudAttachPick
@@ -14623,6 +14620,7 @@ impl OpenCADStudio {
             }
             Message::BlockEditPickerApply => self.apply_bedit_dialog(),
             Message::Rename(msg) => self.on_rename_dialog(msg),
+            Message::DesignCenter(msg) => self.on_design_center(msg),
             Message::Purge(msg) => self.on_purge_dialog(msg),
             Message::DwgProps(msg) => self.on_drawing_properties(msg),
             Message::GeographicLocation(msg) => self.on_geographic_location(msg),

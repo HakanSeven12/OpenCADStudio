@@ -1222,6 +1222,29 @@ pub(crate) enum PasteSpace<'a> {
     Block(Handle),
 }
 
+/// Recreate the records, image definitions, block definitions and
+/// multileader styles `deps` names that `doc` lacks, with fresh handles;
+/// existing names are kept. Shared by the paste and DESIGN CENTER.
+/// Returns the APPID, image definition and record maps the pasted
+/// entities are remapped with.
+pub(crate) fn merge_named_content(
+    doc: &mut document::Document,
+    deps: &crate::app::ClipboardDeps,
+) -> (
+    rustc_hash::FxHashMap<u64, u64>,
+    rustc_hash::FxHashMap<Handle, Handle>,
+    std::collections::HashMap<Handle, Handle>,
+) {
+    // Table records first; the dimension styles they add are re-pointed at
+    // their arrow blocks once the block merge has recreated those.
+    let added_dim_styles = merge_table_records(doc, deps);
+    let apps = eed_app_map(doc, deps);
+    let image_definitions = merge_image_definitions(doc, deps);
+    let (_, records) = merge_blocks_and_mleader_styles(doc, deps, &apps, &image_definitions);
+    repoint_added_dim_style_blocks(doc, deps, &added_dim_styles);
+    (apps, image_definitions, records)
+}
+
 pub(crate) fn paste_entities_kernel(
     doc: &mut document::Document,
     entities: &[document::EntityType],
@@ -1229,14 +1252,7 @@ pub(crate) fn paste_entities_kernel(
     translate: Option<&crate::command::EntityTransform>,
     space: PasteSpace,
 ) -> (Vec<Handle>, rustc_hash::FxHashMap<Handle, Handle>) {
-    // Shared table-record merge (also used by `merge_dependencies`): recreate
-    // missing records with fresh handles from the target document.
-    let added_dim_styles = merge_table_records(doc, deps);
-    // Shared block-definition merge (also used by `merge_clipboard_blocks`).
-    let apps = eed_app_map(doc, deps);
-    let image_definitions = merge_image_definitions(doc, deps);
-    let (_, records) = merge_blocks_and_mleader_styles(doc, deps, &apps, &image_definitions);
-    repoint_added_dim_style_blocks(doc, deps, &added_dim_styles);
+    let (apps, image_definitions, records) = merge_named_content(doc, deps);
 
     let by_index: Vec<Handle> = entities
         .iter()

@@ -191,13 +191,17 @@ impl XAttachCommand {
 
     /// Show `wires` (the reference's model space) while placing it.
     pub fn with_preview(mut self, wires: Vec<WireModel>, unit: f64) -> Self {
+        self.set_preview(wires, unit);
+        self
+    }
+
+    fn set_preview(&mut self, wires: Vec<WireModel>, unit: f64) {
         self.preview = wires;
         self.unit = if unit.is_finite() && unit != 0.0 {
             unit
         } else {
             1.0
         };
-        self
     }
 
     /// Placement shown for the cursor at `cursor` (local): insertion point,
@@ -536,6 +540,10 @@ impl CadCommand for XAttachCommand {
 
     fn xattach_request(&self) -> Option<XrefAttachRequest> {
         Some(self.request.clone())
+    }
+
+    fn on_xref_preview(&mut self, wires: Vec<WireModel>, unit: f64) {
+        self.set_preview(wires, unit);
     }
 }
 

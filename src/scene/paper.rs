@@ -736,6 +736,23 @@ impl Scene {
         if let Some((min, max)) = self.model_space_extents() {
             camera.fit_depth_to_bounds_f64(min.as_dvec3(), max.as_dvec3());
         }
+        // DVIEW Clip: the planes sit at their distance from the target,
+        // positive toward the eye. A front plane "at eye" clips at the eye.
+        if let Some(EntityType::Viewport(vp)) = self.document.get_entity(vp_handle) {
+            let distance = camera.distance;
+            let front = vp.status.front_clipping.then(|| {
+                if vp.status.front_clip_not_at_eye {
+                    distance - vp.front_clip_z as f32
+                } else {
+                    0.0
+                }
+            });
+            let back = vp
+                .status
+                .back_clipping
+                .then(|| distance - vp.back_clip_z as f32);
+            camera.clip_depth = (front, back);
+        }
         Some(camera)
     }
 

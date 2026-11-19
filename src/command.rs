@@ -3957,6 +3957,10 @@ pub trait CadCommand: Send {
         None
     }
 
+    /// The placement ghost of an XATTACH whose reference was read off the
+    /// UI thread: the reference's wires and its unit scale. Default: ignored.
+    fn on_xref_preview(&mut self, _wires: Vec<WireModel>, _unit: f64) {}
+
     /// The block reference an ATTEDIT pick has resolved to, awaiting the
     /// attribute editor dialog; else None.
     fn attedit_pending_handle(&self) -> Option<document::Handle> {

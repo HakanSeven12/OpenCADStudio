@@ -1495,10 +1495,15 @@ fn dim_geom_entities(
             value[2] as f64 + origin.z,
         )
     };
+    // A dimension linetype applies to its line and leader. Open arrowheads
+    // and ticks use continuous strokes, as in the live picture.
+    let mut arrow_common = dim_common.clone();
+    arrow_common.linetype = "Continuous".into();
+    arrow_common.linetype_handle = None;
     for (points, common) in [
         (geometry.ext_lines.as_slice(), ext_common),
         (geometry.dim_lines.as_slice(), dim_common),
-        (geometry.arrow_lines.as_slice(), dim_common),
+        (geometry.arrow_lines.as_slice(), &arrow_common),
     ] {
         for run in points.split(|point| point[0].is_nan()) {
             for pair in run.windows(2) {
@@ -1692,59 +1697,6 @@ fn terminator_circle(
     }
 }
 
-/// Center-mark cross at `center`, arm length |DIMCEN|. Empty when DIMCEN == 0.
-fn dim_center_mark(
-    center: Vector3,
-    dimcen: f64,
-    radius: f64,
-    common: &document::entities::EntityCommon,
-) -> Vec<EntityType> {
-    let mag = dimcen.abs();
-    if mag < 1e-9 {
-        return Vec::new();
-    }
-    let v = |x: f64, y: f64| Vector3::new(x, y, center.z);
-    // Central "+" mark.
-    let mut out = vec![
-        dim_seg(
-            v(center.x - mag, center.y),
-            v(center.x + mag, center.y),
-            common,
-        ),
-        dim_seg(
-            v(center.x, center.y - mag),
-            v(center.x, center.y + mag),
-            common,
-        ),
-    ];
-    // Negative DIMCEN adds centre LINES: four radial strokes spanning the edge.
-    if dimcen < 0.0 && radius > mag + 1e-6 {
-        let inner = (radius - mag).max(0.0);
-        let outer = radius + mag;
-        out.push(dim_seg(
-            v(center.x + inner, center.y),
-            v(center.x + outer, center.y),
-            common,
-        ));
-        out.push(dim_seg(
-            v(center.x - inner, center.y),
-            v(center.x - outer, center.y),
-            common,
-        ));
-        out.push(dim_seg(
-            v(center.x, center.y + inner),
-            v(center.x, center.y + outer),
-            common,
-        ));
-        out.push(dim_seg(
-            v(center.x, center.y - inner),
-            v(center.x, center.y - outer),
-            common,
-        ));
-    }
-    out
-}
-
 /// Arc from angle `a1` to `a2` (radians, swept the short way) at `radius` about
 /// `center`, approximated by straight chords (world f64).
 fn dim_arc_segs(
@@ -1796,7 +1748,6 @@ fn dim_arc_segs_with_sweep(
 /// Resolved, DIMSCALE-applied dimension metrics for baking.
 struct DimMetrics {
     dimasz: f64,
-    dimcen: f64,
     dimexo: f64,
     dimexe: f64,
     dimtsz: f64,
@@ -1850,14 +1801,7 @@ pub(crate) fn annotative_picture_scale(dim: &Dimension, doc: &Document) -> f64 {
 }
 
 fn dim_metrics(dim: &Dimension, doc: &Document) -> DimMetrics {
-    let name = dim.base().style_name.as_str();
-    let effective_style = doc
-        .dim_styles
-        .iter()
-        .find(|style| {
-            style.name.eq_ignore_ascii_case(name)
-                || (name.trim().is_empty() && style.name.eq_ignore_ascii_case("Standard"))
-        })
+    let effective_style = crate::entities::dimension::dimension_source_style(doc, dim)
         .map(|style| crate::entities::dimension::resolved_dimension_style(style, dim, doc));
     let style = effective_style.as_ref();
     let scale = style
@@ -1922,7 +1866,6 @@ fn dim_metrics(dim: &Dimension, doc: &Document) -> DimMetrics {
     };
     DimMetrics {
         dimasz,
-        dimcen: style.map(|s| s.dimcen * scale).unwrap_or(0.09 * scale),
         dimexo: style.map(|s| s.dimexo * scale).unwrap_or(0.0),
         dimexe: style.map(|s| s.dimexe * scale).unwrap_or(0.0),
         dimtsz,
@@ -2398,96 +2341,6 @@ fn explode_dimension(dim: &Dimension, doc: &Document) -> Vec<EntityType> {
             result.push(make_seg(&point, &leader, &dim_c));
             // The dimension line reaches the centre, so no centre mark.
         }
-        Dimension::Diameter(d) => {
-            let (edge, far) = (d.angle_vertex, d.definition_point);
-            let center = v3(
-                (edge.x + far.x) * 0.5,
-                (edge.y + far.y) * 0.5,
-                (edge.z + far.z) * 0.5,
-            );
-            let len = ((edge.x - far.x).powi(2) + (edge.y - far.y).powi(2))
-                .sqrt()
-                .max(1e-12);
-            let (ux, uy) = ((edge.x - far.x) / len, (edge.y - far.y) / len);
-            let ticks = met.dimtsz > 1e-9;
-            let extension = if ticks { met.dimdle } else { 0.0 };
-            let edge_outer = v3(edge.x + ux * extension, edge.y + uy * extension, edge.z);
-            let far_outer = v3(far.x - ux * extension, far.y - uy * extension, far.z);
-            if !met.dimsd1 {
-                result.push(make_seg(&edge_outer, &center, &dim_c));
-            }
-            if !met.dimsd2 {
-                result.push(make_seg(&center, &far_outer, &dim_c));
-            }
-            let outside = !ticks && met.dimasz > 1e-6 && len < 2.0 * met.dimasz;
-            let (out1, out2) = (outside != base.flip_arrow1, outside != base.flip_arrow2);
-            let (s1, s2) = (if out1 { 1.0 } else { -1.0 }, if out2 { 1.0 } else { -1.0 });
-            result.extend(dim_terminator(edge, ux * s1, uy * s1, &met.arrow1, &dim_c));
-            result.extend(dim_terminator(far, -ux * s2, -uy * s2, &met.arrow2, &dim_c));
-            if !met.dimsoxd {
-                let stub = 2.0 * met.dimasz;
-                if out1 && !met.dimsd1 {
-                    result.push(make_seg(
-                        &edge,
-                        &v3(edge.x + ux * stub, edge.y + uy * stub, edge.z),
-                        &dim_c,
-                    ));
-                }
-                if out2 && !met.dimsd2 {
-                    result.push(make_seg(
-                        &far,
-                        &v3(far.x - ux * stub, far.y - uy * stub, far.z),
-                        &dim_c,
-                    ));
-                }
-            }
-            let anchor = dim_text_anchor(base, center, edge);
-            let distance_squared = |first: Vector3, second: Vector3| {
-                (first.x - second.x).powi(2)
-                    + (first.y - second.y).powi(2)
-                    + (first.z - second.z).powi(2)
-            };
-            let (leader_tip, suppressed, fallback) =
-                if distance_squared(anchor, edge) <= distance_squared(anchor, far) {
-                    (edge, met.dimsd1, (ux, uy))
-                } else {
-                    (far, met.dimsd2, (-ux, -uy))
-                };
-            if !suppressed && d.leader_length.abs() > 1e-9 {
-                let ld = norm2(
-                    anchor.x - leader_tip.x,
-                    anchor.y - leader_tip.y,
-                    fallback.0,
-                    fallback.1,
-                );
-                result.push(make_seg(
-                    &leader_tip,
-                    &v3(
-                        leader_tip.x + ld.0 * d.leader_length.abs(),
-                        leader_tip.y + ld.1 * d.leader_length.abs(),
-                        leader_tip.z,
-                    ),
-                    &dim_c,
-                ));
-            }
-            if !met.dimse1 {
-                if let Some(points) = crate::scene::dimension_assoc::radial_extension_points(
-                    doc,
-                    base.common.handle,
-                    met.dimexo,
-                    met.dimexe,
-                ) {
-                    for pair in points.windows(2) {
-                        result.push(make_seg(&pair[0], &pair[1], &ext_c));
-                    }
-                }
-            }
-            // A centre mark only when no part of the dimension line crosses
-            // the circle.
-            if met.dimsd1 && met.dimsd2 {
-                result.extend(dim_center_mark(center, met.dimcen, len * 0.5, &dim_c));
-            }
-        }
         Dimension::Angular2Ln(d) => {
             // Two lines, `first_point`→`second_point` and `angle_vertex`→
             // `definition_point`, measured at their crossing, as drawn live.
@@ -2587,14 +2440,17 @@ fn explode_dimension(dim: &Dimension, doc: &Document) -> Vec<EntityType> {
                 ));
             }
         }
-        Dimension::LargeRadial(_) => {
-            if let Some(geometry) =
-                crate::entities::dimension::baked_large_radial_geometry(dim, doc)
-            {
-                let radial_ext_c = with_dim_linetype(ext_c.clone(), doc, met.dimltex1);
-                let radial_dim_c = with_dim_linetype(dim_c.clone(), doc, met.dimltype);
-                result.extend(dim_geom_entities(&geometry, &radial_ext_c, &radial_dim_c));
-            }
+        Dimension::Diameter(_) | Dimension::LargeRadial(_) => {
+            let geometry = crate::entities::dimension::baked_radial_geometry(
+                dim,
+                doc,
+                annotative_picture_scale(dim, doc),
+                &met.arrow1,
+                &met.arrow2,
+            );
+            let radial_ext_c = with_dim_linetype(ext_c.clone(), doc, met.dimltex1);
+            let radial_dim_c = with_dim_linetype(dim_c.clone(), doc, met.dimltype);
+            result.extend(dim_geom_entities(&geometry, &radial_ext_c, &radial_dim_c));
         }
     }
 
@@ -3581,6 +3437,60 @@ mod tests {
             lines > 5,
             "angular bake must include arc chords, got {lines} lines"
         );
+    }
+
+    #[test]
+    fn moved_diameter_leader_survives_dxf_save_and_reopen() {
+        let mut doc = Document::new();
+        let style = doc.dim_styles.get_mut("Standard").unwrap();
+        style.dimtmove = 1;
+        style.dimtofl = false;
+        style.dimtoh = true;
+        style.dimtad = 0;
+        style.dimasz = 0.15;
+        style.dimtxt = 0.1;
+        let tip = Vector3::new(1.0, 0.0, 0.0);
+        let elbow = Vector3::new(3.0, 2.0, 0.0);
+        let mut d = document::entities::DimensionDiameter::new(tip, Vector3::new(-1.0, 0.0, 0.0));
+        d.base.text_user_positioned = true;
+        d.base.text_middle_point = elbow;
+        d.leader_length = 0.0;
+        let handle = doc
+            .add_entity(EntityType::Dimension(Box::new(Dimension::Diameter(d))))
+            .unwrap();
+
+        let path =
+            std::env::temp_dir().join(format!("ocs_diameter_leader_{}.dxf", std::process::id()));
+        crate::io::save_as_version(&doc, &path, document::DxfVersion::AC1024).expect("save DXF");
+        let loaded = crate::io::load_file(&path).expect("reopen DXF");
+        let _ = std::fs::remove_file(path);
+        let Some(EntityType::Dimension(d)) = loaded.get_entity(handle) else {
+            panic!("diameter dimension missing after reopen");
+        };
+        let block = &d.base().block_name;
+        // The filled arrow also has outline strokes, all within one arrow length of the tip.
+        let lines: Vec<_> = baked_segments(&loaded, block).into_iter()
+            .filter(|(a, b)| a.distance(&tip) > 0.2 || b.distance(&tip) > 0.2)
+            .collect();
+        let has_segment = |start: Vector3, end: Vector3| {
+            lines
+                .iter()
+                .any(|(a, b)| a.distance(&start) < 1e-5 && b.distance(&end) < 1e-5)
+        };
+        assert!(
+            has_segment(tip, elbow),
+            "missing rim-to-elbow leader: {lines:?}"
+        );
+        assert!(
+            has_segment(elbow, Vector3::new(3.15, 2.0, 0.0)),
+            "missing horizontal landing"
+        );
+        assert_eq!(lines.len(), 2, "unexpected chord, stub or duplicate leader");
+        let owner = loaded.block_records.get(block).unwrap().handle;
+        let arrows = loaded
+            .entities()
+            .filter(|e| matches!(e, EntityType::Solid(s) if s.common.owner_handle == owner));
+        assert_eq!(arrows.count(), 1, "only the near side gets an arrow");
     }
 
     // Diameter endpoints stay equidistant from the circle center.

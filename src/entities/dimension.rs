@@ -3381,8 +3381,8 @@ use document::{Document, EntityType, Handle};
 
 use crate::scene::convert::tess_util::aci_to_rgba;
 use crate::scene::convert::tessellate::{
-    add_polyline, add_segment, append_arrow, arrow_from_block,
-    arrow_from_block_with_deferred_hatch, normalized_or, ArrowKind, DimGeom,
+    add_polyline, add_segment, append_arrow, arrow_from_block_with_deferred_hatch, normalized_or,
+    ArrowKind, DimGeom,
 };
 use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
 
@@ -4929,7 +4929,7 @@ fn dimtmove_one_text(
     })
 }
 
-/// Endpoints for the DIMTMOVE=1 leader of a diameter or jogged radius
+/// Endpoints for the DIMTMOVE=1 leader of a jogged radius
 /// (linear, aligned and angular text: [`dimtmove_one_text`]).
 fn dimtmove_leader_endpoints(
     dim: &Dimension,
@@ -4938,16 +4938,6 @@ fn dimtmove_leader_endpoints(
     let lv = |v| vec3_local(v);
     let txt = text.position;
     let anchor = match dim {
-        Dimension::Radius(_) => return None,
-        Dimension::Diameter(d) => {
-            let chord = lv(d.angle_vertex);
-            let far_chord = lv(d.definition_point);
-            if chord.distance_squared(txt) <= far_chord.distance_squared(txt) {
-                chord
-            } else {
-                far_chord
-            }
-        }
         Dimension::LargeRadial(d) => {
             let chord = lv(d.chord_point);
             let jog = lv(d.jog_point);
@@ -5898,6 +5888,13 @@ fn append_diameter_dimension(
         return;
     }
     let center = (chord + far_chord) * 0.5;
+    let (tip, direction, suppressed) = if params.text_position.distance_squared(chord)
+        <= params.text_position.distance_squared(far_chord)
+    {
+        (chord, -axis, suppress.dim1)
+    } else {
+        (far_chord, axis, suppress.dim2)
+    };
     let text_is_outside = params.text_position.distance(center) > diameter * 0.5 + 1e-5;
     if text_is_outside && (params.constraint || !params.dimtofl) {
         // A dimensional constraint carries its text on a leader from the
@@ -5906,13 +5903,6 @@ fn append_diameter_dimension(
         // the circle at all: just that leader, with one arrowhead on the
         // circle and its body toward the text. DIMTMOVE 2 keeps the arrowhead
         // and drops the leader.
-        let (tip, suppressed) = if params.text_position.distance_squared(chord)
-            <= params.text_position.distance_squared(far_chord)
-        {
-            (chord, suppress.dim1)
-        } else {
-            (far_chord, suppress.dim2)
-        };
         if !suppressed && params.text_movement != 2 {
             append_radial_leader(g, tip, tip - center, params.text_position, &params);
         }
@@ -5987,14 +5977,18 @@ fn append_diameter_dimension(
     append_dim_arrow(g, chord, if out1 { -axis } else { axis }, arrow1);
     append_dim_arrow(g, far_chord, if out2 { axis } else { -axis }, arrow2);
 
-    if params.text_movement == 0 {
-        let (tip, direction, suppressed) = if params.text_position.distance_squared(chord)
-            <= params.text_position.distance_squared(far_chord)
-        {
-            (chord, -axis, suppress.dim1)
-        } else {
-            (far_chord, axis, suppress.dim2)
-        };
+    if params.text_movement == 1 && !suppressed && !(text_is_outside && params.constraint) {
+        // The outside radial leader above already reaches the text. A diameter
+        // that keeps its chord can also carry moved text on a straight leader.
+        if tip.distance(params.text_position) > params.text_height {
+            add_segment_with_text_break(
+                &mut g.dim_lines,
+                tip,
+                params.text_position,
+                params.text_break,
+            );
+        }
+    } else if params.text_movement == 0 {
         if text_outside && !suppressed {
             let leader_length = (text_anchor - tip).dot(direction);
 
@@ -9052,13 +9046,13 @@ fn perp_sign_default() -> f64 {
     1.0
 }
 
-pub(crate) fn baked_large_radial_geometry(
+pub(crate) fn baked_radial_geometry(
     dimension: &Dimension,
     document: &Document,
-) -> Option<DimGeom> {
-    if !matches!(dimension, Dimension::LargeRadial(_)) {
-        return None;
-    }
+    annotation_scale: f64,
+    arrow1: &ArrowKind,
+    arrow2: &ArrowKind,
+) -> DimGeom {
     // Same local frame as the render path: the geometry is f32, so build it
     // around a nearby origin and let `DimGeom::origin` carry it back.
     let origin = dimension_precision_origin(dimension);
@@ -9068,7 +9062,7 @@ pub(crate) fn baked_large_radial_geometry(
         .map(|style| resolved_dimension_style(style, dimension, document));
     let style = effective_style.as_ref();
     let scale = style
-        .map(|style| dimension_style_scale(style, 1.0))
+        .map(|style| dimension_style_scale(style, annotation_scale))
         .unwrap_or(1.0);
     let text_height = style
         .map(|style| style.dimtxt * scale)
@@ -9078,25 +9072,11 @@ pub(crate) fn baked_large_radial_geometry(
         .unwrap_or(0.18 * scale);
     let tick_size = style.map(|style| style.dimtsz * scale).unwrap_or(0.0);
     let arrow_size = (arrow_size_raw as f32).max(0.001);
-    let arrow = if tick_size > 1.0e-9 {
-        ArrowKind::Tick {
-            size: (tick_size as f32).max(0.001),
-            width: 0.0,
-        }
-    } else if let Some(style) = style {
-        arrow_from_block(document, style.dimldrblk, arrow_size)
-    } else {
-        ArrowKind::Triangle {
-            size: arrow_size,
-            filled: true,
-            size_mul: 1.0,
-        }
-    };
     let text = dimension_text_layout(dimension, style, text_height, scale, Some(document));
     let mut geometry = dimension_geometry(
         dimension,
-        &arrow,
-        &arrow,
+        arrow1,
+        arrow2,
         DimLineParams {
             dimexo: style
                 .map(|style| (style.dimexo * scale) as f32)
@@ -9115,23 +9095,27 @@ pub(crate) fn baked_large_radial_geometry(
             dimcen: style
                 .map(|style| (style.dimcen * scale) as f32)
                 .unwrap_or(0.09),
-            ticks: tick_size > 1.0e-9,
+            ticks: tick_size > 1.0e-9
+                || (matches!(arrow1, ArrowKind::Tick { .. })
+                    && matches!(arrow2, ArrowKind::Tick { .. })),
             arrow_len: arrow_size,
             text_width: text.width,
             text_height: text_height as f32,
-            // A LargeRadial is never a dimensional constraint's dimension.
-            constraint: false,
+            constraint: dynamic_constraint_dimension(dimension),
             dimatfit: style.map(|style| style.dimatfit).unwrap_or(3),
             dimtix: style.is_some_and(|style| style.dimtix),
             dimtofl: style.is_some_and(|style| style.dimtofl),
-            flip1: false,
-            flip2: false,
+            flip1: dimension.base().flip_arrow1,
+            flip2: dimension.base().flip_arrow2,
             text_position: text.position,
             horizontal_text: text.horizontal,
-            text_lifted: style.map(|style| style.dimtad).unwrap_or(1) != 0,
+            text_lifted: style.map(|style| style.dimtad).unwrap_or(1) != 0
+                || text_splits_at_line(dimension),
             text_movement: style.map(|style| style.dimtmove).unwrap_or(0),
             text_break: text.break_box,
-            leader_anchor: None,
+            leader_anchor: stored_text_point(dimension)
+                .filter(|_| style.is_some_and(|style| style.dimtmove == 1))
+                .map(vec3_local),
         },
         SuppressFlags {
             ext1: style.is_some_and(|style| style.dimse1),
@@ -9179,7 +9163,7 @@ pub(crate) fn baked_large_radial_geometry(
         &mut geometry.ext_lines,
         origin,
     );
-    Some(geometry)
+    geometry
 }
 
 /// Build measurement text for a saved dimension block.
@@ -10540,6 +10524,25 @@ mod layout_parity_tests {
             points.iter().any(|p| p.x > 1.05 && p.x < 1.3 && p.y > 0.0),
             "arrowhead body lies outside the arc along the leader"
         );
+        assert_eq!(fills, 1);
+    }
+
+    #[test]
+    fn moved_diameter_leader_leaves_the_rim_once() {
+        let mut doc = document();
+        let style = doc.dim_styles.get_mut("Standard").unwrap();
+        style.dimtmove = 1;
+        style.dimtofl = false;
+        let tip = Vector3::new(1.0, 0.0, 0.0);
+        let mut d = DimensionDiameter::new(tip, Vector3::new(-1.0, 0.0, 0.0));
+        d.base.text_user_positioned = true;
+        d.base.text_middle_point = Vector3::new(3.0, 2.0, 0.0);
+        let (points, fills) = drawn(&doc, &Dimension::Diameter(d));
+        // Count full leader runs, excluding the short strokes outlining the arrow.
+        let starts = points.windows(2).filter(|pair| {
+            pair[0].distance(DVec3::X) < 1e-6 && pair[1].distance(DVec3::X) > 0.2
+        }).count();
+        assert_eq!(starts, 1, "only the hooked leader leaves the arrow tip");
         assert_eq!(fills, 1);
     }
 

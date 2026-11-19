@@ -3249,6 +3249,15 @@ impl Scene {
         if self.is_layer_locked(handle) {
             return;
         }
+        // A table fill needs the drawing: a formula cell is a field.
+        if grip_id == crate::entities::table::CELL_GRIP_FILL
+            && matches!(self.document.get_entity(handle), Some(EntityType::Table(_)))
+        {
+            self.table_fill_fields =
+                crate::entities::table::apply_fill_grip(&mut self.document, handle, apply)
+                    .map(|pairs| (handle, pairs));
+            return;
+        }
         if grip_id == GROUP_GRIP_ID {
             if let GripApply::Translate(delta) = apply {
                 self.transform_entities(

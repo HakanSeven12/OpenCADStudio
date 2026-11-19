@@ -3005,17 +3005,8 @@ impl Grippable for Table {
             let Some(range) = prop_cell_range() else {
                 return;
             };
-            let point = match apply {
-                GripApply::Absolute(point) => point,
-                GripApply::Translate(delta) => {
-                    let Some(grip) = cell_range_grips(self, range)
-                        .into_iter()
-                        .find(|grip| grip.id == grip_id)
-                    else {
-                        return;
-                    };
-                    grip.world + delta
-                }
+            let Some(point) = cell_grip_point(self, range, grip_id, apply) else {
+                return;
             };
             apply_cell_grip(self, range, grip_id, point);
             // The saved picture is drawn again from the cells.
@@ -5632,6 +5623,29 @@ mod tests {
     /// have been None) and stay instant; the elapsed guard keeps a
     /// future un-clamped loop from creeping back in.
     #[test]
+    fn a_filled_formula_moves_its_cell_references_with_the_cell() {
+        assert_eq!(
+            shift_formula_references("=SUM(A5:C5)", 1, 0).as_deref(),
+            Some("=SUM(A6:C6)")
+        );
+        assert_eq!(
+            shift_formula_references("=a1*Z2+3.5e2-AVERAGE(B1:B3)", 2, 1).as_deref(),
+            Some("=B3*AA4+3.5e2-AVERAGE(C3:C5)")
+        );
+        assert_eq!(
+            shift_formula_references("=SUM(B2:B4)", -1, -1).as_deref(),
+            Some("=SUM(A1:A3)")
+        );
+        assert_eq!(shift_formula_references("=A1+1", -1, 0), None);
+        assert_eq!(shift_formula_references("=B1+1", 0, -2), None);
+        assert_eq!(column_letters(0), "A");
+        assert_eq!(column_letters(25), "Z");
+        assert_eq!(column_letters(26), "AA");
+        assert_eq!(column_letters(701), "ZZ");
+        assert_eq!(column_letters(702), "AAA");
+    }
+
+    #[test]
     fn formula_range_evaluation_is_bounded_by_the_table() {
         let table = sample_table();
         let start = std::time::Instant::now();
@@ -5887,9 +5901,205 @@ pub fn apply_cell_grip(
     grip_id: usize,
     point: glam::DVec3,
 ) {
+    apply_cell_grip_with(table, range, grip_id, point, &FillFormulas::new());
+}
+
+/// The point a cell-range grip is dragged to: an absolute point as given, a
+/// move from where the grip sits.
+fn cell_grip_point(
+    table: &Table,
+    range: (usize, usize, usize, usize),
+    grip_id: usize,
+    apply: GripApply,
+) -> Option<glam::DVec3> {
+    match apply {
+        GripApply::Absolute(point) => Some(point),
+        GripApply::Translate(delta) => cell_range_grips(table, range)
+            .into_iter()
+            .find(|grip| grip.id == grip_id)
+            .map(|grip| grip.world + delta),
+    }
+}
+
+/// The formulas of a table's formula-field cells ("=SUM(A5:C5)"), by cell,
+/// as a fill reads them from the cells it copies.
+pub(crate) type FillFormulas = std::collections::HashMap<(usize, usize), String>;
+
+/// A cell a fill copied from a field cell: (source, target).
+pub(crate) type FillPair = ((usize, usize), (usize, usize));
+
+/// The fill diamond dragged on a table in a drawing. Unlike the table on
+/// its own, the drawing knows which cells hold a formula: a formula is
+/// filled with its references moved along with the cell. Returns the cells
+/// filled from a field cell, for `commit_fill_fields`.
+pub(crate) fn apply_fill_grip(
+    document: &mut document::Document,
+    handle: document::Handle,
+    apply: GripApply,
+) -> Option<Vec<FillPair>> {
+    let range = prop_cell_range()?;
+    let document::EntityType::Table(table) = document.get_entity(handle)? else {
+        return None;
+    };
+    let (r0, c0, r1, c1) = widen_to_merged(table, range);
+    let mut formulas = FillFormulas::new();
+    for row in r0..=r1 {
+        for column in c0..=c1 {
+            if let Some(formula) = cell_formula_text(document, table, row, column) {
+                formulas.insert((row, column), formula);
+            }
+        }
+    }
+    let document::EntityType::Table(table) = document.get_entity_mut(handle)? else {
+        return None;
+    };
+    let point = cell_grip_point(table, range, CELL_GRIP_FILL, apply)?;
+    let pairs = apply_cell_grip_with(table, range, CELL_GRIP_FILL, point, &formulas);
+    // The saved picture is drawn again from the cells.
+    table.block_record_handle = None;
+    Some(pairs)
+}
+
+/// Makes the cells a committed fill copied from field cells fields again:
+/// a formula ("=SUM(A6:C6)", already moved) becomes a formula field, as a
+/// typed one does; any other field is copied as it is. Returns whether a
+/// cell changed.
+pub(crate) fn commit_fill_fields(
+    document: &mut document::Document,
+    handle: document::Handle,
+    pairs: &[FillPair],
+) -> bool {
+    use document::objects::ObjectType;
+    let mut changed = false;
+    for &((source_row, source_column), (row, column)) in pairs {
+        let Some(document::EntityType::Table(table)) = document.get_entity(handle) else {
+            return changed;
+        };
+        let typed_formula = table
+            .cell(row, column)
+            .is_some_and(|cell| cell.text_value().trim_start().starts_with('='));
+        if typed_formula {
+            changed |= typed_formula_to_field(document, handle, row, column);
+            continue;
+        }
+        let Some(container) = table
+            .cell(source_row, source_column)
+            .and_then(|cell| cell.contents.first())
+            .and_then(|content| content.field_handle)
+        else {
+            continue;
+        };
+        let field = |handle| match document.objects.get(&handle) {
+            Some(ObjectType::Field(field)) => Some(field),
+            _ => None,
+        };
+        let Some(container) = field(container) else {
+            continue;
+        };
+        if container.evaluator_id != "_text" {
+            continue;
+        }
+        // One level of fields below the container is what a cell field is
+        // made of; a deeper tree stays the text it shows.
+        let children: Option<Vec<document::fields::NewField>> = container
+            .child_fields
+            .iter()
+            .map(|&child| {
+                let child = field(child)?;
+                child.child_fields.is_empty().then(|| {
+                    let mut copy = document::fields::NewField::new(
+                        child.code.clone(),
+                        child.value_string.clone(),
+                    );
+                    copy.evaluator = child.evaluator_id.clone();
+                    copy.objects = child.referenced_objects.clone();
+                    copy.value = child.value.clone();
+                    copy.evaluation_option = child.evaluation_option;
+                    copy
+                })
+            })
+            .collect();
+        let Some(children) = children else {
+            continue;
+        };
+        let template = container.code.clone();
+        changed |= document
+            .set_table_cell_field(handle, row, column, &template, children)
+            .is_some();
+    }
+    changed
+}
+
+/// A formula filled `rows` down and `columns` right: each cell reference
+/// ("A5", not a function name such as "SUM") moves with the cell, as a
+/// spreadsheet's fill does. `None` when a reference would move above the
+/// first row or left of the first column.
+pub(crate) fn shift_formula_references(
+    formula: &str,
+    rows: isize,
+    columns: isize,
+) -> Option<String> {
+    let chars: Vec<char> = formula.chars().collect();
+    let mut out = String::with_capacity(formula.len());
+    let mut index = 0;
+    while index < chars.len() {
+        let ch = chars[index];
+        let word_start = index == 0 || {
+            let before = chars[index - 1];
+            !(before.is_ascii_alphanumeric() || before == '_' || before == '.')
+        };
+        if !(word_start && ch.is_ascii_alphabetic()) {
+            out.push(ch);
+            index += 1;
+            continue;
+        }
+        let mut end = index;
+        while end < chars.len() && chars[end].is_ascii_alphanumeric() {
+            end += 1;
+        }
+        let word: String = chars[index..end].iter().collect();
+        let letters = word.chars().take_while(char::is_ascii_alphabetic).count();
+        let is_reference = letters <= 3
+            && letters < word.len()
+            && word[letters..].chars().all(|ch| ch.is_ascii_digit());
+        match is_reference.then(|| table_cell_reference(&word)).flatten() {
+            Some((row, column)) => {
+                let row = row.checked_add_signed(rows)?;
+                let column = column.checked_add_signed(columns)?;
+                out.push_str(&column_letters(column));
+                out.push_str(&(row + 1).to_string());
+            }
+            None => out.push_str(&word),
+        }
+        index = end;
+    }
+    Some(out)
+}
+
+/// A column's letters: 0 is "A", 25 "Z", 26 "AA".
+fn column_letters(mut column: usize) -> String {
+    let mut letters = Vec::new();
+    loop {
+        letters.push((b'A' + (column % 26) as u8) as char);
+        if column < 26 {
+            break;
+        }
+        column = column / 26 - 1;
+    }
+    letters.iter().rev().collect()
+}
+
+fn apply_cell_grip_with(
+    table: &mut Table,
+    range: (usize, usize, usize, usize),
+    grip_id: usize,
+    point: glam::DVec3,
+    formulas: &FillFormulas,
+) -> Vec<FillPair> {
     const MIN: f64 = 1.0e-6;
+    let mut pairs = Vec::new();
     if table.rows.is_empty() || table.columns.is_empty() {
-        return;
+        return pairs;
     }
     let range = widen_to_merged(table, range);
     let (r0, c0, r1, c1) = range;
@@ -5940,7 +6150,7 @@ pub fn apply_cell_grip(
             let left_columns = c0.saturating_sub(to_column);
             let reach = down_rows.max(up_rows).max(right_columns).max(left_columns);
             if reach == 0 {
-                return;
+                return pairs;
             }
             if down_rows == reach || up_rows == reach {
                 for column in c0..=c1 {
@@ -5954,7 +6164,7 @@ pub fn apply_cell_grip(
                             .map(|row| (row, column))
                             .collect::<Vec<_>>()
                     };
-                    fill_series(table, &at(sources), &at(targets));
+                    fill_series(table, &at(sources), &at(targets), formulas, &mut pairs);
                 }
             } else {
                 for row in r0..=r1 {
@@ -5969,12 +6179,13 @@ pub fn apply_cell_grip(
                             .map(|column| (row, column))
                             .collect::<Vec<_>>()
                     };
-                    fill_series(table, &at(sources), &at(targets));
+                    fill_series(table, &at(sources), &at(targets), formulas, &mut pairs);
                 }
             }
         }
         _ => {}
     }
+    pairs
 }
 
 /// The cell under a point `below` / `along` the table's first cell corner.
@@ -6040,18 +6251,40 @@ pub fn fill_span(
 /// (a single number counts up by one), anything else — text that reads as a
 /// number too — repeats; the source cell formatting goes along. Locked
 /// targets keep their content.
-fn fill_series(table: &mut Table, sources: &[(usize, usize)], targets: &[(usize, usize)]) {
+/// Fills `targets` from `sources`: numbers continue their series, a formula
+/// is copied with its references moved by the distance between the source
+/// and the target cell, anything else is copied as it shows. Each target
+/// filled from a field cell goes into `pairs`.
+fn fill_series(
+    table: &mut Table,
+    sources: &[(usize, usize)],
+    targets: &[(usize, usize)],
+    formulas: &FillFormulas,
+    pairs: &mut Vec<FillPair>,
+) {
     use document::entities::table::CellStateFlags;
-    let cells: Vec<document::entities::table::TableCell> = sources
+    let (origins, cells): (
+        Vec<(usize, usize)>,
+        Vec<document::entities::table::TableCell>,
+    ) = sources
         .iter()
-        .filter_map(|&(row, column)| table.cell(row, column).cloned())
-        .collect();
+        .filter_map(|&(row, column)| Some(((row, column), table.cell(row, column).cloned()?)))
+        .unzip();
     if cells.is_empty() {
         return;
     }
+    let has_field = |cell: &document::entities::table::TableCell| {
+        cell.contents
+            .iter()
+            .any(|content| content.field_handle.is_some())
+    };
+    let any_formula = origins.iter().any(|origin| formulas.contains_key(origin));
     let numbers: Option<Vec<f64>> = cells
         .iter()
         .map(|cell| {
+            if any_formula || has_field(cell) {
+                return None;
+            }
             let value = &cell.contents.first()?.value;
             matches!(
                 value.value_type,
@@ -6079,8 +6312,17 @@ fn fill_series(table: &mut Table, sources: &[(usize, usize)], targets: &[(usize,
         .unwrap_or(0);
     for (index, &(row, column)) in targets.iter().enumerate() {
         let source = &cells[index % cells.len()];
-        let text = match (&numbers, step) {
-            (Some(values), Some(step)) => {
+        let origin = origins[index % cells.len()];
+        let text = match (&numbers, step, formulas.get(&origin)) {
+            (_, _, Some(formula)) => {
+                let rows = row as isize - origin.0 as isize;
+                let columns = column as isize - origin.1 as isize;
+                let Some(moved) = shift_formula_references(formula, rows, columns) else {
+                    continue;
+                };
+                moved
+            }
+            (Some(values), Some(step), None) => {
                 let value = values[values.len() - 1] + step * (index as f64 + 1.0);
                 format!("{value:.decimals$}")
             }
@@ -6102,6 +6344,9 @@ fn fill_series(table: &mut Table, sources: &[(usize, usize)], targets: &[(usize,
             target.style = source.style.clone();
         }
         target.set_text(&text);
+        if has_field(source) {
+            pairs.push((origin, (row, column)));
+        }
     }
 }
 

@@ -12265,3 +12265,55 @@ mod xref_pathtype_control_tests {
     }
 }
 
+
+// XREF's Overlay option changes an existing reference's semantics; that
+// success path had no test (only the image-refusal path was covered).
+mod xref_overlay_option_tests {
+    use super::super::*;
+    use document::tables::BlockRecord;
+
+    #[test]
+    fn xref_overlay_option_flips_an_attached_reference_to_overlay() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut block = BlockRecord::new("PLAN");
+        block.flags.is_xref = true;
+        block.xref_path = "plan.dwg".to_string();
+        block.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i].scene.document.block_records.add(block).unwrap();
+
+        let _ = app.run_command_line("XREF Overlay PLAN");
+
+        let record = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PLAN")
+            .unwrap();
+        assert!(
+            record.flags.is_xref_overlay && !record.flags.is_xref,
+            "the reference is now an overlay: {:?}",
+            record.flags
+        );
+        assert!(
+            app.command_line.history_plain_text().contains("set to Overlay"),
+            "the conversion is reported: {}",
+            app.command_line.history_plain_text()
+        );
+
+        // An overlay stays an overlay when the command is repeated.
+        let _ = app.run_command_line("XREF Attach PLAN");
+        let record = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PLAN")
+            .unwrap();
+        assert!(
+            !record.flags.is_xref && record.flags.is_xref_overlay,
+            "the simple Attach-on-name path does not silently re-attach an overlay"
+        );
+    }
+}
+

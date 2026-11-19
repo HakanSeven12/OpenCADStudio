@@ -4562,6 +4562,10 @@ pub enum Message {
     XrefSplitRelease,
     /// Flip the palette's details/preview lower pane.
     XrefManagerTogglePreview,
+    /// The end of the worker that decoded an Xref Manager preview: the
+    /// panel's refresh count when it was asked for, the cache key, and the
+    /// preview (`None`: the file has none).
+    XrefPreviewRead(u64, (u64, String), Option<iced::widget::image::Handle>),
     /// Toggle the Attach dropdown menu.
     XrefManagerAttachMenu,
     /// Toggle the Refresh dropdown menu.

@@ -186,6 +186,8 @@ pub(crate) mod style_import;
 pub(in crate::app) mod util;
 mod viewport;
 pub(in crate::app) mod viewport_snap;
+#[cfg(test)]
+mod xref_manager_preview_tests;
 
 impl OpenCADStudio {
     pub(in crate::app) fn reset_modal_geometry(&mut self) {
@@ -671,6 +673,15 @@ impl OpenCADStudio {
             )
         });
         let mut task = self.update_message(msg);
+        // A selection or a refresh in the Xref Manager asked for a preview:
+        // it decodes on a worker.
+        if let Some(request) = self.xref_manager.take_preview_request() {
+            let read = self.read_xref_manager_preview_with(
+                request,
+                crate::ui::window::xref_manager::read_preview,
+            );
+            task = Task::batch([task, read]);
+        }
         if let Some((resized, key)) = outline_switch_before {
             if resized || self.outline_switch_key() != key {
                 self.outline_switch_hover = false;
@@ -5071,6 +5082,10 @@ impl OpenCADStudio {
             }
             Message::XrefManagerTogglePreview => {
                 self.xref_manager.show_preview ^= true;
+                Task::none()
+            }
+            Message::XrefPreviewRead(generation, key, preview) => {
+                self.xref_manager.preview_read(generation, key, preview);
                 Task::none()
             }
             Message::XrefManagerAttachMenu => {

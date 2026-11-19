@@ -655,6 +655,26 @@ impl OpenCADStudio {
         Ok(name)
     }
 
+    /// Decode the Xref Manager preview that `request` asks for on a worker
+    /// (`reader`; a test can give one that panics); the panel takes it when
+    /// the decode ends.
+    pub(crate) fn read_xref_manager_preview_with(
+        &self,
+        request: crate::ui::window::xref_manager::PreviewRequest,
+        reader: crate::ui::window::xref_manager::PreviewReader,
+    ) -> Task<Message> {
+        let crate::ui::window::xref_manager::PreviewRequest {
+            generation,
+            key,
+            entry,
+        } = request;
+        crate::app::update::background_task(
+            crate::t!("External References"),
+            move || reader(&entry),
+            move |preview| Message::XrefPreviewRead(generation, key, preview),
+        )
+    }
+
     /// Rebuild the Reference Manager's entry list from the active drawing.
     /// Uses the tab's session sets (unloaded + stat baseline) so CLI and
     /// palette agree; writes fresh load-time mtimes back into the tab's stat

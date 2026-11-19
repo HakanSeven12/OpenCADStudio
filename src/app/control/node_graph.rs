@@ -10,13 +10,11 @@ use graph::{Kind, NodeId, Port};
 
 type Parsed<T> = Result<T, Value>;
 
-/// The `load` action's reader: the file's bytes, checked as a graph.
+/// The `load` action's reader: the file, parsed as a graph.
 #[cfg(not(target_arch = "wasm32"))]
-fn read_graph_file(path: &str) -> Result<Vec<u8>, Value> {
+fn read_graph_file(path: &str) -> Result<crate::ui::node_graph::LoadedGraph, Value> {
     let bytes = std::fs::read(path).map_err(|error| failure("read_failed", error))?;
-    crate::ui::node_graph::Graph::from_file(&bytes)
-        .map_err(|error| failure("invalid_graph", error))?;
-    Ok(bytes)
+    crate::app::node_graph::parse_graph(&bytes).map_err(|error| failure("invalid_graph", error))
 }
 
 fn node_id(req: &Value, key: &str) -> Parsed<NodeId> {
@@ -231,7 +229,7 @@ impl OpenCADStudio {
         &mut self,
         i: usize,
         path: &str,
-        reader: fn(&str) -> Result<Vec<u8>, Value>,
+        reader: fn(&str) -> Result<crate::ui::node_graph::LoadedGraph, Value>,
     ) -> Task<Message> {
         let (tab_id, generation) = (self.tabs[i].id, self.tabs[i].document_generation);
         let path = path.to_string();
@@ -250,10 +248,10 @@ impl OpenCADStudio {
         &mut self,
         tab_id: u64,
         generation: u64,
-        read: Result<Vec<u8>, Value>,
+        read: Result<crate::ui::node_graph::LoadedGraph, Value>,
     ) -> Task<Message> {
-        let bytes = match read {
-            Ok(bytes) => bytes,
+        let graph = match read {
+            Ok(graph) => graph,
             Err(error) => {
                 self.set_control_failure(error);
                 return Task::none();
@@ -267,7 +265,10 @@ impl OpenCADStudio {
             ));
             return Task::none();
         }
-        let task = self.on_graph(GraphMsg::Loaded(Some(bytes)));
+        let Some((graph, drawing)) = graph.take() else {
+            return Task::none();
+        };
+        let task = self.graph_loaded(i, graph, drawing);
         self.set_control_result(self.node_graph_state(i));
         task
     }

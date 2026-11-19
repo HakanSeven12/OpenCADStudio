@@ -16,6 +16,12 @@ pub enum ShortcutField {
 /// Narrowest suggestion list; a longer command name widens it.
 const SUGGESTION_LIST_MIN_WIDTH: f32 = 220.0;
 
+/// Widget id of row `idx`'s Command box, so picking a suggestion can put the
+/// caret after the picked name instead of where the typed prefix ended.
+pub fn command_input_id(idx: usize) -> iced::widget::Id {
+    iced::widget::Id::from(format!("shortcut-command-{idx}"))
+}
+
 /// Commands to offer for the text typed in a Command box: the command
 /// line's own autocomplete list (names that start with the text first, then
 /// names that contain it; an alias offers the command it stands for). Empty
@@ -127,6 +133,7 @@ pub fn view_window<'a>(
         };
         let unknown_command = !command.is_empty() && unknown_commands.contains(command.trim());
         let command_box = text_input(t!("command").as_ref(), command)
+            .id(command_input_id(idx))
             .on_input(move |value| Message::ShortcutEditorInput {
                 idx,
                 field: ShortcutField::Command,

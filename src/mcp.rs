@@ -63,8 +63,9 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// The Text Editor tab's windows are driveable from a script: `mtext_dialog`.
 /// The enhanced attribute editor joined them: `attr_editor`.
 /// Find and Replace is driveable from a script: `find_replace_dialog`.
+/// `save` describes its `target_version` as the DWG version.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "191f3b50f1b2cc1cd826c31d41f4c087a3db9f4d0fa7199ebc3141478f8bceb0";
+const TOOL_SCHEMA_DIGEST: &str = "f3d8f6b3e67c70f28172dee418959de6985dd7a0ea628a4c1e09463ea6e74149";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

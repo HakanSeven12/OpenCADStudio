@@ -4220,6 +4220,14 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 annotation_scale_handle,
             );
         }
+        if let document::EntityType::MText(mtext) = contextual.as_ref() {
+            if let Some(grips) = crate::entities::mtext::grips_on_drawn_box(
+                mtext,
+                &self.tabs[i].scene.document,
+            ) {
+                entity_grips = grips;
+            }
+        }
         if crate::scene::model::solid_history::has_specialized_primitive_properties(
             &self.tabs[i].scene.document,
             handle,

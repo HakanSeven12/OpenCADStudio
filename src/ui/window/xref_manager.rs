@@ -2176,6 +2176,37 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// A selection asks for its preview once and decodes nothing itself; a
+    /// decode that ends after a refresh is dropped.
+    #[test]
+    fn a_selection_asks_for_its_preview_and_a_stale_one_is_dropped() {
+        let dir = std::env::temp_dir().join(format!("ocs_xref_preview_ask_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let doc = preview_doc(&dir, "img.png");
+        let mut panel = XrefManagerPanel::default();
+        let empty = std::collections::HashSet::new();
+        let no_prev = std::collections::HashMap::new();
+        panel.refresh(&doc, &dir, &empty, &no_prev, "host", "");
+        panel.toggle_select(0);
+        assert!(panel.previews.is_empty(), "no decode during the selection");
+        let request = panel.take_preview_request().expect("a request");
+        let id = XrefRowId::of(panel.entries[0].key, &panel.entries[0].saved_path);
+        panel.click_select(&id, SelectExtend::Single);
+        assert!(
+            panel.take_preview_request().is_none(),
+            "asked once while it decodes"
+        );
+        let preview = read_preview(&request.entry);
+        assert!(preview.is_some());
+        panel.refresh(&doc, &dir, &empty, &no_prev, "host", "");
+        panel.preview_read(request.generation, request.key, preview);
+        assert!(
+            panel.previews.is_empty(),
+            "a decode from before the refresh"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn preview_skipped_for_multi_selection() {
         // Spec: the preview pane shows an image for a single selected

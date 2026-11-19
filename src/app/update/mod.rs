@@ -186,6 +186,8 @@ pub(crate) mod style_import;
 pub(in crate::app) mod util;
 mod viewport;
 pub(in crate::app) mod viewport_snap;
+#[cfg(test)]
+mod xref_manager_preview_tests;
 
 impl OpenCADStudio {
     pub(in crate::app) fn reset_modal_geometry(&mut self) {

@@ -11776,3 +11776,91 @@ mod datalink_csv_command_tests {
     }
 }
 
+
+// A table cell can hold a block; the Table Cell Block window's automation
+// fields drive that path, but no test covered the action + Ok round.
+mod table_cell_block_dialog_tests {
+    use super::super::*;
+    use crate::scene::TableCellSelection;
+    use document::entities::{Line, Table};
+    use document::types::Vector3;
+    use document::EntityType;
+
+    fn action(app: &mut OpenCADStudio, value: &str) -> serde_json::Value {
+        static SERIAL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let mut req = serde_json::json!({"op":"action","name":"table_cell_dialog","value":value});
+        let state = app.control_state();
+        req["protocol"] = serde_json::json!(1);
+        req["document_id"] = state["document_id"].clone();
+        req["revision"] = state["revision"].clone();
+        req["request_id"] = serde_json::json!(format!(
+            "tcell-{}",
+            SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let (reply, task) = app.control_request(req);
+        app.drive_headless_task(task).unwrap();
+        reply
+    }
+
+    #[test]
+    fn the_table_cell_block_dialog_installs_a_block_in_the_cell() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "CELLBLK",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(2.0, 0.0, 0.0),
+            ))],
+        );
+        let block = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("CELLBLK")
+            .unwrap()
+            .handle;
+        let table = app.tabs[i].scene.add_entity(EntityType::Table(Box::new(
+            Table::new(Vector3::ZERO, 2, 2),
+        )));
+        app.tabs[i]
+            .scene
+            .select_table_cells(TableCellSelection {
+                table,
+                anchor: (0, 0),
+                end: (0, 0),
+            });
+
+        let _ = app.run_command_line("_TCELLBLOCK");
+        assert_eq!(
+            app.active_modal,
+            Some(crate::app::ModalKind::TableCellBlock),
+            "the Block tab of the cell dialog opened"
+        );
+        assert_eq!(action(&mut app, "block=CELLBLK")["ok"], true);
+        assert_eq!(action(&mut app, "ok")["ok"], true);
+        assert_ne!(app.active_modal, Some(crate::app::ModalKind::TableCellBlock));
+
+        let document::EntityType::Table(table) = app.tabs[i]
+            .scene
+            .document
+            .get_entity(table)
+            .unwrap()
+        else {
+            panic!("the table remains a Table entity")
+        };
+        assert_eq!(
+            crate::app::command_driver::clipboard::table_cell_blocks(table).collect::<Vec<_>>(),
+            vec![block],
+            "the cell now points at the chosen block definition"
+        );
+        assert_eq!(
+            table.rows[0].cells[0].cell_type,
+            document::entities::table::CellType::Block,
+            "the cell's type follows its content"
+        );
+    }
+}
+

@@ -84,6 +84,10 @@ recorded, so a failure changes nothing and leaves the history alone.
   switch (through OCS's own layout switch), page setup (paper size, rotation,
   custom scale) and the order of the layout tabs (API v23, one undo step).
   `Model` is protected.
+- **Custom properties:** set the drawing's custom properties (the Custom tab of
+  `DWGPROPS`, API v26): a listed name replaces the value of the property with the
+  same name or is appended, the rest are kept; one undo step, and fields showing a
+  custom property update.
 
 Style and layout operations act on the active document, because they use the
 application's shared style and view machinery.

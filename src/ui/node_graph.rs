@@ -630,6 +630,29 @@ pub struct GraphUndo {
     created: Vec<Handle>,
 }
 
+/// A graph read from a file on a worker ([`Graph::from_file`]), with the
+/// drawing fingerprint it was saved against, for a message: it is taken
+/// once.
+#[derive(Clone)]
+pub struct LoadedGraph(std::sync::Arc<std::sync::Mutex<Option<(Graph, String)>>>);
+
+impl LoadedGraph {
+    pub fn new(read: (Graph, String)) -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(Some(read))))
+    }
+
+    /// The graph and its fingerprint; `None` once taken.
+    pub fn take(&self) -> Option<(Graph, String)> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).take()
+    }
+}
+
+impl std::fmt::Debug for LoadedGraph {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("LoadedGraph")
+    }
+}
+
 #[derive(Default)]
 pub struct Graph {
     pub engine: graph::Graph,
@@ -719,6 +742,9 @@ pub enum GraphMsg {
     Saved(Option<Result<String, String>>),
     Open,
     Loaded(Option<Vec<u8>>),
+    /// The file of an Open parsed on a worker, for the drawing (tab id,
+    /// document generation) it was opened in, or why it is no graph.
+    Parsed(u64, u64, Result<LoadedGraph, String>),
     /// The button was released over the panel entry it was pressed on.
     PaletteRelease,
     Search(String),

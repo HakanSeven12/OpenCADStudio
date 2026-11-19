@@ -3676,7 +3676,11 @@ pub enum Message {
     /// The end of the automation `node_graph` `load` read: the drawing it
     /// was read for, that document's generation, and the file's bytes or
     /// the failure.
-    GraphLoadRead(u64, u64, Result<Vec<u8>, serde_json::Value>),
+    GraphLoadRead(
+        u64,
+        u64,
+        Result<crate::ui::node_graph::LoadedGraph, serde_json::Value>,
+    ),
     Tick(Instant),
     /// Periodic drain of plugin-to-host requests that arrived outside a host
     /// call (e.g. mutations from the Python REPL).

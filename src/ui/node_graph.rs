@@ -2131,7 +2131,7 @@ fn link_label<'a>(port: Port, name: String) -> Element<'a, Message> {
             .style(|theme: &Theme| iced::widget::text::Style {
                 color: Some(chrome::accent(theme)),
             }),
-        text("▾").size(10),
+        crate::ui::icons::dropdown_arrow(),
     ]
     .spacing(2)
     .align_y(iced::Center);

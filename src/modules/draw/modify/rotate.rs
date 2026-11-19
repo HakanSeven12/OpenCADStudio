@@ -304,6 +304,25 @@ impl CadCommand for RotateCommand {
         }
     }
 
+    /// Picks go through here so the host can take [`Self::resolved_anchor`].
+    fn on_point_with_tangent(
+        &mut self,
+        pt: DVec3,
+        _tangent: Option<crate::command::TangentObject>,
+    ) -> Option<CmdResult> {
+        Some(self.on_point(pt))
+    }
+
+    /// The new angle is measured from the base point, so Ortho and Polar
+    /// must run from there, not from the second reference point just
+    /// picked (#3331).
+    fn resolved_anchor(&self) -> Option<DVec3> {
+        match self.step {
+            Step::Angle { center } | Step::RefNew { center, .. } => Some(center),
+            _ => None,
+        }
+    }
+
     fn on_enter(&mut self) -> CmdResult {
         // The axis defaults to the UCS Z.
         if let Step::Axis { center } = &self.step {

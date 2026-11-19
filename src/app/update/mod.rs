@@ -2653,10 +2653,7 @@ impl OpenCADStudio {
                 }
             }
 
-            Message::XAttachPickResult(Ok(path)) => {
-                self.open_xref_attach_dialog(path);
-                Task::none()
-            }
+            Message::XAttachPickResult(Ok(path)) => self.open_xref_attach_dialog(path),
             message @ (Message::AttachPick
             | Message::UnderlayAttachPick(_)
             | Message::PointCloudAttachPick

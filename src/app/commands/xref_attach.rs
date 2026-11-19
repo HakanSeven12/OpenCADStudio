@@ -25,6 +25,27 @@ const ATTACH_FILTERS: [(&str, &[&str]); 8] = [
 ];
 const ALL_DGN_FILTER: u32 = 4;
 
+/// What the window's read of a chosen file finds: its thumbnail and units
+/// (0 when the file cannot be read).
+type AttachFileRead = (Option<iced::widget::image::Handle>, i16);
+
+/// The window's read of a chosen file, on a worker: the thumbnail, and the
+/// units of the whole drawing.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_attach_file(path: &str) -> AttachFileRead {
+    let file = std::path::Path::new(path);
+    let preview = crate::io::thumbnail::read_handle(file);
+    let units = crate::io::load_file(file)
+        .map(|doc| doc.header.insertion_units)
+        .unwrap_or(0);
+    (preview, units)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn read_attach_file(_path: &str) -> AttachFileRead {
+    (None, 0)
+}
+
 impl OpenCADStudio {
     /// DWFATTACH / DGNATTACH on the command line: with a file, from its
     /// sheet / model prompt; without one, from the path prompt.
@@ -118,8 +139,7 @@ impl OpenCADStudio {
                 std::path::PathBuf::from(rest.trim_matches('"')),
             )))),
             ("XATTACH", false) => {
-                self.open_xref_attach_dialog(std::path::PathBuf::from(rest.trim_matches('"')));
-                Some(Task::none())
+                Some(self.open_xref_attach_dialog(std::path::PathBuf::from(rest.trim_matches('"'))))
             }
             // XREF opens the External References palette; -XREF asks on the
             // command line. Both keep their argument forms for scripts.
@@ -448,8 +468,12 @@ impl OpenCADStudio {
         self.refresh_xref_report(i);
     }
 
-    /// Opens the Attach External Reference dialog for `path`.
-    pub(in crate::app) fn open_xref_attach_dialog(&mut self, path: std::path::PathBuf) {
+    /// Opens the Attach External Reference dialog for `path`; the file's
+    /// units and thumbnail are read off the UI thread.
+    pub(in crate::app) fn open_xref_attach_dialog(
+        &mut self,
+        path: std::path::PathBuf,
+    ) -> Task<Message> {
         let i = self.active_tab;
         let existing: Vec<(String, String)> = self.tabs[i]
             .scene
@@ -460,33 +484,72 @@ impl OpenCADStudio {
             .map(|br| (br.name.clone(), br.xref_path.clone()))
             .collect();
         let mut state = XrefAttachState::new(existing);
-        self.load_xref_attach_file(&mut state, &path.to_string_lossy());
+        let task = self.load_xref_attach_file(&mut state, &path.to_string_lossy());
         self.xref_attach = Some(state);
         self.active_modal = Some(crate::app::ModalKind::XrefAttach);
+        task
     }
 
-    /// Fills the dialog from the chosen file: name, preview, block unit and
-    /// the paths shown under Details.
-    fn load_xref_attach_file(&self, state: &mut XrefAttachState, path: &str) {
-        #[cfg(not(target_arch = "wasm32"))]
-        let i = self.active_tab;
+    /// Fills the dialog from the chosen file: name and the paths shown under
+    /// Details at once; the preview and the block unit when the file's read
+    /// ends ([`Self::finish_xref_attach_file`]).
+    fn load_xref_attach_file(&self, state: &mut XrefAttachState, path: &str) -> Task<Message> {
+        self.load_xref_attach_file_with(state, path, read_attach_file)
+    }
+
+    /// [`Self::load_xref_attach_file`] with the reader given, so a test can
+    /// give one that panics.
+    fn load_xref_attach_file_with(
+        &self,
+        state: &mut XrefAttachState,
+        path: &str,
+        reader: fn(&str) -> AttachFileRead,
+    ) -> Task<Message> {
         state.path = path.to_string();
         state.name = path_to_block_name(path);
         state.found_in = display_path(path);
+        state.preview = None;
+        state.unit_label = String::new();
+        state.unit_factor = String::new();
+        self.refresh_xref_attach_saved_path(state);
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = reader;
+            Task::none()
+        }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            state.preview = crate::io::thumbnail::read_handle(std::path::Path::new(path));
-            let host_units = self.tabs[i].scene.document.header.insertion_units;
-            let source_units = crate::io::load_file(std::path::Path::new(path))
-                .map(|doc| doc.header.insertion_units)
-                .unwrap_or(0);
-            state.unit_label =
-                crate::t!(crate::app::properties::insunits_name(source_units)).into_owned();
-            let factor =
-                crate::app::properties::insert_unit_scale(host_units, source_units).unwrap_or(1.0);
-            state.unit_factor = crate::app::properties::format_unit_factor(factor);
+            let worker_path = path.to_string();
+            let path = path.to_string();
+            crate::app::update::background_task(
+                "XATTACH",
+                move || reader(&worker_path),
+                move |read| Message::XrefAttach(XrefAttachMsg::FileRead(Box::new((path, read)))),
+            )
         }
-        self.refresh_xref_attach_saved_path(state);
+    }
+
+    /// The end of the chosen file's read: the window takes the preview and
+    /// the block unit, if it is still open on that file.
+    fn finish_xref_attach_file(&mut self, path: String, read: AttachFileRead) {
+        let host_units = self.tabs[self.active_tab]
+            .scene
+            .document
+            .header
+            .insertion_units;
+        let Some(state) = self.xref_attach.as_mut() else {
+            return;
+        };
+        if state.path != path {
+            return;
+        }
+        let (preview, source_units) = read;
+        state.preview = preview;
+        state.unit_label =
+            crate::t!(crate::app::properties::insunits_name(source_units)).into_owned();
+        let factor =
+            crate::app::properties::insert_unit_scale(host_units, source_units).unwrap_or(1.0);
+        state.unit_factor = crate::app::properties::format_unit_factor(factor);
     }
 
     fn refresh_xref_attach_saved_path(&self, state: &mut XrefAttachState) {
@@ -592,10 +655,7 @@ impl OpenCADStudio {
                             .map_err(|e| e.to_string());
                         self.update(Message::ImagePickResult(result))
                     }
-                    _ => {
-                        self.open_xref_attach_dialog(path);
-                        Task::none()
-                    }
+                    _ => self.open_xref_attach_dialog(path),
                 }
             }
             Message::AttachPickResult(Err(e)) => {
@@ -606,13 +666,19 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::XrefAttachBrowseResult(Ok(path)) => {
-                if let Some(mut state) = self.xref_attach.take() {
-                    self.load_xref_attach_file(&mut state, &path.to_string_lossy());
-                    self.xref_attach = Some(state);
-                }
-                Task::none()
+                let Some(mut state) = self.xref_attach.take() else {
+                    return Task::none();
+                };
+                let task = self.load_xref_attach_file(&mut state, &path.to_string_lossy());
+                self.xref_attach = Some(state);
+                task
             }
             Message::XrefAttachBrowseResult(Err(_)) => Task::none(),
+            Message::XrefAttach(XrefAttachMsg::FileRead(read)) => {
+                let (path, read) = *read;
+                self.finish_xref_attach_file(path, read);
+                Task::none()
+            }
             Message::XrefAttach(edit) => self.edit_xref_attach(edit),
             _ => Task::none(),
         }
@@ -641,7 +707,7 @@ impl OpenCADStudio {
                     let base = host.as_deref().and_then(|h| h.parent());
                     let full =
                         crate::modules::insert::xattach::resolve_xref_store_path(&saved, base);
-                    self.load_xref_attach_file(&mut state, &full);
+                    task = self.load_xref_attach_file(&mut state, &full);
                 }
             }
             XrefAttachMsg::Browse => {
@@ -726,6 +792,8 @@ impl OpenCADStudio {
                 let i = self.active_tab;
                 return self.start_xref_attach(i, request, placement, "XATTACH");
             }
+            // Taken in `update_xref_attach`, before this.
+            XrefAttachMsg::FileRead(..) => {}
         }
         self.xref_attach = Some(state);
         task

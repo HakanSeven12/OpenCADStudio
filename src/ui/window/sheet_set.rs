@@ -198,6 +198,9 @@ pub enum Placing {
         sheet: String,
         drawing: String,
         view: Option<String>,
+        /// The model drawing, read on a worker for its reference (`None`:
+        /// the sheet has that reference already).
+        read: Option<Box<crate::io::xref::XrefRead>>,
     },
     /// A callout or view label block (file, block name) for sheet view `view`.
     Block {
@@ -272,6 +275,14 @@ pub enum SheetSetMsg {
     ImportRead(bool, Vec<(std::path::PathBuf, ImportRead)>),
     /// A drawing read for the cache, then the message that needed it.
     DrawingRead(String, ReadDrawing, Box<SheetSetMsg>),
+    /// Place on Sheet: the model drawing (and view) read on a worker for its
+    /// reference, for the sheet drawing at that path.
+    ViewReferenceRead(
+        String,
+        Option<String>,
+        Option<std::path::PathBuf>,
+        Box<crate::io::xref::XrefRead>,
+    ),
     /// The wizard's folder of existing drawings, scanned for layouts.
     FolderScanned(std::path::PathBuf, Vec<FoundLayout>),
     /// Rename & Renumber: apply and go to the previous / next sheet.

@@ -162,6 +162,13 @@ pub struct XrefManagerPanel {
     /// on every refresh for the anchor entry only, so the per-frame `view`
     /// stays pure and file I/O never happens during rendering.
     pub previews: HashMap<(u64, String), iced::widget::image::Handle>,
+    /// The anchor entry's preview to decode on a worker; the app takes it
+    /// ([`Self::take_preview_request`]).
+    preview_request: Option<PreviewRequest>,
+    /// Previews being decoded, so a selection asks for each one once.
+    preview_pending: std::collections::HashSet<(u64, String)>,
+    /// Counts the refreshes: a decode started before the last one is dropped.
+    preview_generation: u64,
     /// Details (`false`) vs Preview (`true`) lower pane.
     pub show_preview: bool,
 }
@@ -195,6 +202,9 @@ impl Default for XrefManagerPanel {
             path_open: false,
             row_change_path_open: false,
             previews: HashMap::new(),
+            preview_request: None,
+            preview_pending: std::collections::HashSet::new(),
+            preview_generation: 0,
             show_preview: false,
         }
     }
@@ -345,9 +355,13 @@ impl XrefManagerPanel {
                 .iter()
                 .position(|e| e.key == k && e.saved_path == p)
         });
-        // Previews decode here and on selection change (view stays pure):
-        // the anchor entry only, and only under single selection.
+        // Previews decode on a worker, asked for here and on selection change
+        // (view stays pure): the anchor entry only, and only under single
+        // selection. A decode started before this refresh is dropped.
         self.previews.clear();
+        self.preview_request = None;
+        self.preview_pending.clear();
+        self.preview_generation += 1;
         self.ensure_preview_for_anchor();
         self.expanded.retain(|k| live_keys.contains(k));
         self.entries
@@ -471,15 +485,47 @@ impl XrefManagerPanel {
             return;
         };
         let key = (a.key, found.clone());
-        if self.previews.contains_key(&key) {
+        if self.previews.contains_key(&key) || self.preview_pending.contains(&key) {
             return;
         }
-        if let Some(img) = reference_preview(a) {
-            let (w, h) = (img.width(), img.height());
-            self.previews.insert(
-                key,
-                iced::widget::image::Handle::from_rgba(w, h, img.into_raw()),
-            );
+        self.preview_pending.insert(key.clone());
+        self.preview_request = Some(PreviewRequest {
+            generation: self.preview_generation,
+            key,
+            entry: a.clone(),
+        });
+    }
+
+    /// The preview to decode on a worker ([`read_preview`]), if a selection
+    /// or a refresh asked for one.
+    pub fn take_preview_request(&mut self) -> Option<PreviewRequest> {
+        self.preview_request.take()
+    }
+
+    /// A decode ended: its preview goes into the cache, unless the panel
+    /// was refreshed after the decode started. `None`: the file has no
+    /// preview, and the placeholder shows.
+    pub fn preview_read(
+        &mut self,
+        generation: u64,
+        key: (u64, String),
+        preview: Option<iced::widget::image::Handle>,
+    ) {
+        if generation != self.preview_generation {
+            return;
+        }
+        self.preview_pending.remove(&key);
+        if let Some(preview) = preview {
+            self.previews.insert(key, preview);
+        }
+    }
+
+    /// Decode the asked-for preview here, as the app's worker does.
+    #[cfg(test)]
+    fn read_preview_now(&mut self) {
+        if let Some(request) = self.take_preview_request() {
+            let preview = read_preview(&request.entry);
+            self.preview_read(request.generation, request.key, preview);
         }
     }
 
@@ -1760,6 +1806,26 @@ fn reference_preview(entry: &ReferenceEntry) -> Option<image::RgbaImage> {
     }
 }
 
+/// A preview for the app to decode on a worker: the panel's refresh count
+/// when it was asked for, the cache key, and the entry.
+#[derive(Debug, Clone)]
+pub struct PreviewRequest {
+    pub generation: u64,
+    pub key: (u64, String),
+    pub entry: ReferenceEntry,
+}
+
+/// Decodes an entry's preview ([`read_preview`]).
+pub type PreviewReader = fn(&ReferenceEntry) -> Option<iced::widget::image::Handle>;
+
+/// Decode `entry`'s preview into an image for the panel (run on a worker
+/// thread).
+pub fn read_preview(entry: &ReferenceEntry) -> Option<iced::widget::image::Handle> {
+    let img = reference_preview(entry)?;
+    let (w, h) = (img.width(), img.height());
+    Some(iced::widget::image::Handle::from_rgba(w, h, img.into_raw()))
+}
+
 /// Image definition backing a [`RefKind::Image`] entry, looked up by the
 /// entry key (definition-object handle) for the Details pane extras.
 fn find_image_def(doc: &Document, key: u64) -> Option<&document::objects::ImageDefinition> {
@@ -2099,9 +2165,11 @@ mod tests {
         let empty = std::collections::HashSet::new();
         let no_prev = std::collections::HashMap::new();
         panel.refresh(&doc, &dir, &empty, &no_prev, "host", "");
+        panel.read_preview_now();
         assert!(panel.previews.is_empty(), "nothing selected → no decode");
         panel.toggle_select(0);
         panel.refresh(&doc, &dir, &empty, &no_prev, "host", "");
+        panel.read_preview_now();
         assert_eq!(panel.previews.len(), 1, "single anchor decodes once");
         let (handle, _) = panel.previews.iter().next().unwrap();
         assert!(panel.entries.iter().any(|e| e.key == handle.0));
@@ -2132,6 +2200,7 @@ mod tests {
         panel.toggle_select(1);
         assert_eq!(panel.selected.len(), 2);
         panel.refresh(&doc, &dir, &empty, &no_prev, "host", "");
+        panel.read_preview_now();
         assert!(
             panel.previews.is_empty(),
             "multi-select → grey field, no decode"
@@ -2165,6 +2234,7 @@ mod tests {
         panel.refresh(&doc, &dir, &empty, &no_prev, "host", "");
         panel.toggle_select(0);
         panel.refresh(&doc, &dir, &empty, &no_prev, "host", "");
+        panel.read_preview_now();
         assert!(
             panel.previews.is_empty(),
             "undecodable file → placeholder, no cache entry"
@@ -2202,6 +2272,7 @@ mod tests {
         panel.refresh(&doc, &dir, &unloaded, &no_prev, "host", "");
         panel.toggle_select(0);
         panel.refresh(&doc, &dir, &unloaded, &no_prev, "host", "");
+        panel.read_preview_now();
         assert_eq!(panel.previews.len(), 1);
         std::fs::remove_dir_all(&dir).ok();
     }

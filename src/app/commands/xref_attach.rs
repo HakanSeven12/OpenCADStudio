@@ -224,6 +224,19 @@ impl OpenCADStudio {
         placement: XrefPlacement,
         label: &'static str,
     ) -> Task<Message> {
+        self.start_xref_attach_with(i, request, placement, label, read_preview)
+    }
+
+    /// [`Self::start_xref_attach`] with the ghost's reader given, so a test
+    /// can give one that panics.
+    pub(in crate::app) fn start_xref_attach_with(
+        &mut self,
+        i: usize,
+        request: XrefAttachRequest,
+        placement: XrefPlacement,
+        label: &'static str,
+        reader: PreviewReader,
+    ) -> Task<Message> {
         let name = path_to_block_name(&request.path);
         let full = crate::modules::insert::xattach::resolve_xref_store_path(&request.path, None);
         let host = self.tabs[i].current_path.clone();
@@ -264,61 +277,93 @@ impl OpenCADStudio {
         if let Some(entity) = command.immediate() {
             return self.commit_xref_attach(i, request, entity);
         }
-        let (wires, source_units) = self.xref_preview(i, existing.as_deref(), &full);
-        let host_units = self.tabs[i].scene.document.header.insertion_units;
-        let unit =
-            crate::app::properties::insert_unit_scale(host_units, source_units).unwrap_or(1.0);
-        let command = command.with_preview(wires, unit);
+        // A reference already in the drawing gives its ghost at once; a
+        // file's ghost is read off the UI thread and comes when the read
+        // ends ([`Self::finish_xref_preview`]).
+        let (command, task) = match existing.as_deref() {
+            Some(name) => {
+                let scene = &self.tabs[i].scene;
+                let units = scene
+                    .document
+                    .block_records
+                    .get(name)
+                    .map(|br| br.units)
+                    .unwrap_or(0);
+                let wires = scene.block_preview_wires(name);
+                (
+                    command.with_preview(wires, self.xref_unit(i, units)),
+                    Task::none(),
+                )
+            }
+            None => (command, self.read_xref_preview_with(i, full, reader)),
+        };
         self.command_line.push_info(&command.prompt());
         self.tabs[i].active_cmd = Some(Box::new(command));
-        Task::none()
+        task
     }
 
-    /// The reference's geometry for the placement ghost, in its own units:
-    /// an existing definition's content, or the file's model space.
-    fn xref_preview(
-        &self,
+    /// Drawing units per reference unit, for a reference in `units`.
+    fn xref_unit(&self, i: usize, units: i16) -> f64 {
+        let host_units = self.tabs[i].scene.document.header.insertion_units;
+        crate::app::properties::insert_unit_scale(host_units, units).unwrap_or(1.0)
+    }
+
+    /// Reads the placement ghost of the file at `path` off the UI thread.
+    fn read_xref_preview_with(
+        &mut self,
         i: usize,
-        existing: Option<&str>,
-        path: &str,
-    ) -> (Vec<crate::scene::model::wire_model::WireModel>, i16) {
-        // ponytail: a huge reference skips the ghost; cap by entity count.
-        #[cfg(not(target_arch = "wasm32"))]
-        const MAX_PREVIEW_ENTITIES: usize = 20_000;
-        let scene = &self.tabs[i].scene;
-        if let Some(name) = existing {
-            let units = scene
-                .document
-                .block_records
-                .get(name)
-                .map(|br| br.units)
-                .unwrap_or(0);
-            return (scene.block_preview_wires(name), units);
+        path: String,
+        reader: PreviewReader,
+    ) -> Task<Message> {
+        let tab_id = self.tabs[i].id;
+        let generation = self.tabs[i].document_generation;
+        let worker_path = path.clone();
+        crate::app::update::background_task(
+            "XATTACH",
+            move || reader(&worker_path),
+            move |read| {
+                Message::XrefAttach(XrefAttachMsg::PreviewRead(
+                    tab_id,
+                    generation,
+                    Box::new((path, read)),
+                ))
+            },
+        )
+    }
+
+    /// The end of the ghost's read: the attach that asked for it gets its
+    /// ghost, if it still waits in that drawing for the same file. A result
+    /// for a drawing that was closed, replaced or cleared is dropped.
+    fn finish_xref_preview(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        path: String,
+        read: crate::ui::window::xref_attach::XrefPreviewRead,
+    ) -> Task<Message> {
+        let Some((entities, units)) = read else {
+            return Task::none();
+        };
+        let Some(i) = self.import_target(tab_id, generation) else {
+            return Task::none();
+        };
+        let waits = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .and_then(|command| command.xattach_request())
+            .is_some_and(|request| {
+                crate::modules::insert::xattach::resolve_xref_store_path(&request.path, None)
+                    == path
+            });
+        if !waits {
+            return Task::none();
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Ok(source) = crate::io::load_file(std::path::Path::new(path)) {
-            let owner = source.header.model_space_block_handle;
-            let entities: Vec<document::EntityType> = source
-                .entities()
-                .filter(|e| e.common().owner_handle == owner)
-                .filter(|e| {
-                    !matches!(
-                        e,
-                        document::EntityType::Block(_) | document::EntityType::BlockEnd(_)
-                    )
-                })
-                .take(MAX_PREVIEW_ENTITIES + 1)
-                .cloned()
-                .collect();
-            if entities.len() <= MAX_PREVIEW_ENTITIES {
-                return (
-                    scene.wires_for_entities(&entities),
-                    source.header.insertion_units,
-                );
-            }
+        let wires = self.tabs[i].scene.wires_for_entities(&entities);
+        let unit = self.xref_unit(i, units);
+        if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+            command.on_xref_preview(wires, unit);
         }
-        let _ = path;
-        (Vec::new(), 0)
+        Task::none()
     }
 
     /// The reference's attach: a reference already in the drawing is used at
@@ -623,13 +668,17 @@ impl OpenCADStudio {
             let (request, entity, read) = *read;
             return self.finish_xref_attach(tab_id, generation, request, entity, read);
         }
+        if let XrefAttachMsg::PreviewRead(tab_id, generation, read) = edit {
+            let (path, read) = *read;
+            return self.finish_xref_preview(tab_id, generation, path, read);
+        }
         let Some(mut state) = self.xref_attach.take() else {
             return Task::none();
         };
         let mut task = Task::none();
         match edit {
             // Taken before the window's state, above.
-            XrefAttachMsg::Read(..) => {}
+            XrefAttachMsg::Read(..) | XrefAttachMsg::PreviewRead(..) => {}
             XrefAttachMsg::Name(name) => {
                 if let Some((_, saved)) = state
                     .existing
@@ -729,6 +778,42 @@ impl OpenCADStudio {
         }
         self.xref_attach = Some(state);
         task
+    }
+}
+
+/// What the placement ghost's read gives: a file's model-space objects
+/// and units.
+type PreviewReader = fn(&str) -> crate::ui::window::xref_attach::XrefPreviewRead;
+
+/// The model-space objects and units of the drawing at `path`, for the
+/// placement ghost: none when it cannot be read or holds too many objects
+/// for a ghost. It reads the file, so it runs on a worker.
+fn read_preview(path: &str) -> crate::ui::window::xref_attach::XrefPreviewRead {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // ponytail: a huge reference skips the ghost; cap by entity count.
+        const MAX_PREVIEW_ENTITIES: usize = 20_000;
+        let source = crate::io::load_file(std::path::Path::new(path)).ok()?;
+        let owner = source.header.model_space_block_handle;
+        let entities: Vec<document::EntityType> = source
+            .entities()
+            .filter(|e| e.common().owner_handle == owner)
+            .filter(|e| {
+                !matches!(
+                    e,
+                    document::EntityType::Block(_) | document::EntityType::BlockEnd(_)
+                )
+            })
+            .take(MAX_PREVIEW_ENTITIES + 1)
+            .cloned()
+            .collect();
+        (entities.len() <= MAX_PREVIEW_ENTITIES)
+            .then_some((entities, source.header.insertion_units))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = path;
+        None
     }
 }
 

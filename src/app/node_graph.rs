@@ -16,6 +16,8 @@ pub(crate) mod ops;
 
 #[cfg(test)]
 mod field_tests;
+#[cfg(test)]
+mod open_tests;
 
 use super::{Message, OpenCADStudio};
 use crate::scene::model::object::PropSection;

@@ -4822,15 +4822,14 @@ fn apply_dim_style_json(
     Ok(style)
 }
 
-/// The stored spelling of `name` in the drawing's linetype table, loading the
-/// standard linetypes first when it is not there yet. `None` when the drawing
-/// cannot supply it: a layer must not reference a linetype that does not exist.
+/// The stored spelling of `name` in the drawing's linetype table, loading it
+/// from the catalog first when the drawing lacks it, as a pick in a linetype
+/// list does: that one linetype, whichever the catalog has, and no other.
+/// `None` when neither has it: a layer must not reference a linetype that
+/// does not exist.
 fn resolve_linetype(doc: &mut document::Document, name: &str) -> Option<String> {
-    let stored = |doc: &document::Document| doc.line_types.get(name).map(|lt| lt.name.clone());
-    stored(doc).or_else(|| {
-        crate::io::linetypes::populate_document(doc);
-        stored(doc)
-    })
+    crate::io::linetypes::ensure_catalog_linetype(doc, name);
+    doc.line_types.get(name).map(|lt| lt.name.clone())
 }
 
 /// The registered panel `panel_id` names: its id, or loosely its title or

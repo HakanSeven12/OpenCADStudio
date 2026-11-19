@@ -8,12 +8,12 @@
 //!   • one row  → `lead` at the left; `trail` packed after it (`justify_end`
 //!                false), flush to the right edge (`justify_end` true) or,
 //!                with `center_trail`, in the middle of the bar or of the
-//!                wider span `center_insets` names, never over `lead`; an
+//!                wider span a `CenterSpan` names, never over `lead`; an
 //!                optional Fill `middle` stretches through the gap.
 //!   • wrapped  → `trail` first uses free space on `lead`'s final row; only
 //!                when it does not fit is another row added. Alignment follows
 //!                `justify_end`; a `WrapFlow::center` trail centers each of
-//!                its rows in the bar itself (`center_insets` does not apply).
+//!                its rows in the bar itself (the `CenterSpan` does not apply).
 //!
 //! The measured total height is written to `height_out` (if set) so callers can
 //! anchor overlays below the possibly-taller bar.
@@ -100,6 +100,43 @@ fn centered_in_span(width: f32, inner: f32, (left, right): (f32, f32)) -> f32 {
     x.min(width - inner).max(0.0)
 }
 
+/// The room a bar's neighbours take before and after it, for centering in
+/// the whole span rather than the bar. Neighbours of a fixed width report it
+/// while they are laid out (`PosReport::report_width`); iced lays them out
+/// before a `Fill` bar beside them, so the bar reads it in the same pass.
+#[derive(Clone, Default)]
+pub struct CenterSpan {
+    before: Arc<AtomicU32>,
+    after: Arc<AtomicU32>,
+}
+
+impl CenterSpan {
+    /// A span reaching `before` px before the bar and `after` px past it,
+    /// until a neighbour reports otherwise.
+    pub fn new(before: f32, after: f32) -> Self {
+        Self {
+            before: Arc::new(AtomicU32::new(before.to_bits())),
+            after: Arc::new(AtomicU32::new(after.to_bits())),
+        }
+    }
+
+    /// Where a neighbour before the bar reports its width.
+    pub fn before(&self) -> Arc<AtomicU32> {
+        self.before.clone()
+    }
+
+    /// Where a neighbour after the bar reports its width.
+    pub fn after(&self) -> Arc<AtomicU32> {
+        self.after.clone()
+    }
+
+    /// (before, after) in px, never negative.
+    fn insets(&self) -> (f32, f32) {
+        let read = |side: &AtomicU32| f32::from_bits(side.load(Ordering::Relaxed)).max(0.0);
+        (read(&self.before), read(&self.after))
+    }
+}
+
 pub struct WrapBar<'a> {
     lead: Element<'a, Message>,
     /// Optional Fill filler occupying the gap between `lead` and `trail`.
@@ -115,9 +152,8 @@ pub struct WrapBar<'a> {
     /// When true and both blocks share a row, `trail` sits in the middle of
     /// the bar, but never over `lead`.
     center_trail: bool,
-    /// How far the span `trail` centers in reaches before and past the bar
-    /// (left, right); zero centers it in the bar itself.
-    center_insets: (f32, f32),
+    /// The wider span `trail` centers in; none centers it in the bar.
+    center_span: Option<CenterSpan>,
     /// Receives the measured total height (bits of an `f32`).
     height_out: Option<Arc<AtomicU32>>,
 }
@@ -132,7 +168,7 @@ impl<'a> WrapBar<'a> {
             min_row_h: 28.0,
             justify_end: false,
             center_trail: false,
-            center_insets: (0.0, 0.0),
+            center_span: None,
             height_out: None,
         }
     }
@@ -159,11 +195,11 @@ impl<'a> WrapBar<'a> {
         self
     }
 
-    /// Center `trail` in a wider span than the bar: one reaching `left` px
-    /// before it and `right` px past it (the window, say, when the bar sits
-    /// between other blocks).
-    pub fn center_insets(mut self, left: f32, right: f32) -> Self {
-        self.center_insets = (left.max(0.0), right.max(0.0));
+    /// Center `trail` in `span`, wider than the bar: the bar's whole row,
+    /// say, when the bar sits between other blocks. The span is read while
+    /// the bar is laid out.
+    pub fn center_span(mut self, span: CenterSpan) -> Self {
+        self.center_span = Some(span);
         self
     }
 
@@ -255,7 +291,11 @@ impl<'a> Widget<Message, Theme, Renderer> for WrapBar<'a> {
             let trail_x = if self.justify_end {
                 (width - trail_sz.width).max(after_lead)
             } else if self.center_trail {
-                centered_in_span(width, trail_sz.width, self.center_insets).max(after_lead)
+                let insets = self
+                    .center_span
+                    .as_ref()
+                    .map_or((0.0, 0.0), CenterSpan::insets);
+                centered_in_span(width, trail_sz.width, insets).max(after_lead)
             } else {
                 after_lead
             };
@@ -1032,6 +1072,8 @@ impl<'a> From<DensitySwap<'a>> for Element<'a, Message> {
 pub struct PosReport<'a> {
     id: std::borrow::Cow<'static, str>,
     child: Element<'a, Message>,
+    /// Receives the laid-out width plus the extra px (`report_width`).
+    width_out: Option<(Arc<AtomicU32>, f32)>,
 }
 
 impl<'a> PosReport<'a> {
@@ -1039,6 +1081,7 @@ impl<'a> PosReport<'a> {
         Self {
             id: std::borrow::Cow::Borrowed(id),
             child: child.into(),
+            width_out: None,
         }
     }
 
@@ -1047,7 +1090,15 @@ impl<'a> PosReport<'a> {
         Self {
             id: std::borrow::Cow::Owned(id),
             child: child.into(),
+            width_out: None,
         }
+    }
+
+    /// Also write the child's width, plus `extra` px (a gap beside it, say),
+    /// into `out` each time it is laid out: a `CenterSpan` side.
+    pub fn report_width(mut self, out: Arc<AtomicU32>, extra: f32) -> Self {
+        self.width_out = Some((out, extra));
+        self
     }
 }
 
@@ -1066,9 +1117,14 @@ impl<'a> Widget<Message, Theme, Renderer> for PosReport<'a> {
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        self.child
+        let node = self
+            .child
             .as_widget_mut()
-            .layout(&mut tree.children[0], renderer, limits)
+            .layout(&mut tree.children[0], renderer, limits);
+        if let Some((out, extra)) = &self.width_out {
+            out.store((node.size().width + extra).to_bits(), Ordering::Relaxed);
+        }
+        node
     }
 
     fn update(
@@ -1519,9 +1575,48 @@ mod centering_tests {
         let bar = WrapBar::new(block(100.0), block(200.0))
             .spacing(6.0)
             .center_trail(true)
-            .center_insets(200.0, 0.0);
+            .center_span(CenterSpan::new(200.0, 0.0));
         let b = layout_of(bar.into(), 1000.0);
         assert_eq!(b[1].x, 300.0);
+    }
+
+    #[test]
+    fn neighbours_report_their_room_in_the_same_layout() {
+        // A 300 px block, the bar and a 100 px block, 6 px apart in a row
+        // 1000 wide: the bar's 200 px trail centers in the whole row.
+        let span = CenterSpan::new(0.0, 0.0);
+        let row = iced::widget::row![
+            PosReport::new("test_before", block(300.0)).report_width(span.before(), 6.0),
+            iced::widget::container(
+                WrapBar::new(block(50.0), block(200.0))
+                    .spacing(6.0)
+                    .center_trail(true)
+                    .center_span(span.clone()),
+            )
+            .width(Length::Fill),
+            PosReport::new("test_after", block(100.0)).report_width(span.after(), 6.0),
+        ]
+        .spacing(6.0);
+        let mut element: Element<'static, Message> = row.into();
+        let _one = crate::headless_ui_lock();
+        let renderer = iced_test::futures::futures::executor::block_on(
+            <Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
+            ),
+        )
+        .expect("headless renderer");
+        let mut tree = widget::Tree::new(element.as_widget());
+        tree.diff(element.as_widget_mut());
+        let limits = layout::Limits::new(Size::ZERO, Size::new(1000.0, 200.0));
+        let node = element
+            .as_widget_mut()
+            .layout(&mut tree, &renderer, &limits);
+        let bar = &node.children()[1];
+        let trail = &bar.children()[0].children()[1];
+        let trail_x = bar.bounds().x + trail.bounds().x;
+        assert_eq!(span.insets(), (306.0, 106.0));
+        assert_eq!(trail_x, 400.0, "the trail's middle is the row's");
     }
 
     #[test]

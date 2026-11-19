@@ -622,31 +622,68 @@ mod view_tests {
             .expect("last tab visible")
     }
 
+    /// Where the middle of the tabs falls in the ribbon laid out by its
+    /// first view: nothing drawn before, so nothing from a past frame.
+    fn tabs_middle(ribbon: &Ribbon, menu_row: bool, name: &str) -> f32 {
+        let menu_row = menu_row.then(|| iced::widget::text("File  Edit  View").into());
+        let mut ui = Simulator::with_size(
+            iced::Settings::default(),
+            (WIDTH, 260.0),
+            ribbon.view(menu_row, false, false, false, 0, 0, false, None),
+        );
+        let first = first_tab(ribbon, &mut ui);
+        let last = last_tab(ribbon, &mut ui);
+        capture(&mut ui, name);
+        (first.x + last.x + last.width) / 2.0
+    }
+
+    /// The minimize button after the tabs pulls their labels a little left
+    /// of the exact middle.
+    const MIDDLE_SLACK: f32 = 40.0;
+
     #[test]
-    fn once_drawn_the_centered_tabs_sit_in_the_middle_of_the_whole_ribbon() {
+    fn the_centered_tabs_sit_in_the_middle_of_the_whole_ribbon_at_once() {
         with_ui_test(|| {
-            let ribbon = ribbon(true);
-            // The first draw reports where the logo and the search box
-            // leave the tabs; the next view centers them in the ribbon.
-            let mut ui = Simulator::with_size(
-                iced::Settings::default(),
-                (WIDTH, 260.0),
-                ribbon.view(None, false, false, false, 0, 0, false, None),
-            );
-            ui.snapshot(&iced::Theme::Dark).expect("draw the ribbon");
-            let mut ui = Simulator::with_size(
-                iced::Settings::default(),
-                (WIDTH, 260.0),
-                ribbon.view(None, false, false, false, 0, 0, false, None),
-            );
-            let first = first_tab(&ribbon, &mut ui);
-            let last = last_tab(&ribbon, &mut ui);
-            capture(&mut ui, "ribbon-centered-redrawn");
-            let middle = (first.x + last.x + last.width) / 2.0;
-            // The minimize button after the tabs pulls their labels a
-            // little left of the exact middle.
+            let middle = tabs_middle(&ribbon(true), false, "ribbon-centered-first-view");
             assert!(
-                (middle - WIDTH / 2.0).abs() < 40.0,
+                (middle - WIDTH / 2.0).abs() < MIDDLE_SLACK,
+                "the tabs' middle {middle} is near the ribbon's {}",
+                WIDTH / 2.0
+            );
+        });
+    }
+
+    #[test]
+    fn the_centered_tabs_hold_still_as_the_search_box_collapses_or_opens() {
+        with_ui_test(|| {
+            let mut open = ribbon(true);
+            let mut layout = open.layout().clone();
+            layout.search_expanded = true;
+            open.set_layout(layout.clone());
+            let mut collapsed = ribbon(true);
+            layout.search_expanded = false;
+            collapsed.set_layout(layout);
+            let (open, collapsed) = (
+                tabs_middle(&open, false, "ribbon-centered-search-open"),
+                tabs_middle(&collapsed, false, "ribbon-centered-search-collapsed"),
+            );
+            // Both views center at once, so a collapse or an opening moves
+            // nothing (the box's width is taken into account in the same
+            // layout, not a frame later).
+            assert!(
+                (open - collapsed).abs() <= 1.0,
+                "the tabs stay put: {open} with the box open, {collapsed} collapsed"
+            );
+            assert!((open - WIDTH / 2.0).abs() < MIDDLE_SLACK);
+        });
+    }
+
+    #[test]
+    fn with_the_menu_row_the_centered_tabs_sit_in_the_middle_too() {
+        with_ui_test(|| {
+            let middle = tabs_middle(&ribbon(true), true, "ribbon-centered-menu-row");
+            assert!(
+                (middle - WIDTH / 2.0).abs() < MIDDLE_SLACK,
                 "the tabs' middle {middle} is near the ribbon's {}",
                 WIDTH / 2.0
             );
@@ -702,41 +739,5 @@ mod view_tests {
                 .into_messages()
                 .any(|message| matches!(message, Message::RibbonWheel(_))));
         });
-    }
-}
-
-#[cfg(test)]
-mod inset_tests {
-    use super::super::{RIBBON_ID, TAB_FLOW_ID};
-    use super::*;
-    use crate::ui::wrap_bar::set_drawn_bounds;
-    use iced::{Point, Size};
-
-    #[test]
-    fn the_tabs_center_in_the_whole_ribbon_once_it_is_drawn() {
-        let ribbon = Ribbon::default();
-        // The ribbon spans 0..2400; the logo takes 50 px before the tab
-        // row's block and the search box 250 px after it.
-        set_drawn_bounds(
-            RIBBON_ID,
-            Rectangle::new(Point::ORIGIN, Size::new(2400.0, 140.0)),
-        );
-        set_drawn_bounds(
-            TAB_FLOW_ID,
-            Rectangle::new(Point::new(50.0, 0.0), Size::new(2100.0, 28.0)),
-        );
-        assert_eq!(ribbon.tab_flow_insets(), (50.0, 250.0));
-
-        // Once those bounds are stale (two frames on, nothing drawn), the
-        // last known insets hold instead of dropping to zero.
-        crate::ui::wrap_bar::end_frame();
-        crate::ui::wrap_bar::end_frame();
-        assert!(crate::ui::wrap_bar::recent_bounds(TAB_FLOW_ID).is_none());
-        assert_eq!(ribbon.tab_flow_insets(), (50.0, 250.0));
-    }
-
-    #[test]
-    fn the_tabs_center_in_their_own_block_before_the_first_draw() {
-        assert_eq!(Ribbon::default().tab_flow_insets(), (0.0, 0.0));
     }
 }

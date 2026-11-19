@@ -8,7 +8,7 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
 use rustc_hash::FxHashMap as HashMap;
@@ -52,7 +52,7 @@ pub mod text_editor;
 mod wheel;
 use crate::t;
 use crate::ui::style::{chrome, ribbon_metrics as metrics, text as ui_text};
-use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
+use crate::ui::wrap_bar::{CenterSpan, PosReport, WrapBar, WrapFlow};
 pub use app_menu::{works_without_drawing, APP_MENU_ID};
 pub use collapse::CollapseMode;
 use collapse::{CollapsePanels, Panel};
@@ -236,9 +236,13 @@ fn panel_measure_key_at(
 /// The id the whole ribbon (with the Quick Access row below it) reports its
 /// bounds under: floating panels snap to its bottom.
 const RIBBON_ID: &str = "ribbon_whole";
-/// The tab row's quick-access and tabs block, between the logo and the
-/// search box.
-const TAB_FLOW_ID: &str = "ribbon_tab_flow";
+/// The logo and the search box beside the tab row's quick-access and tabs
+/// block, which report their widths so the tabs center in the whole row.
+const TAB_ROW_LOGO_ID: &str = "ribbon_tab_row_logo";
+const TAB_ROW_SEARCH_ID: &str = "ribbon_tab_row_search";
+/// The gap between the tab row's blocks, and the tab row's right padding.
+const TAB_ROW_GAP: f32 = 6.0;
+const TAB_BAR_PAD_RIGHT: f32 = 6.0;
 
 /// The id the tool area of the tab on show reports its bounds under.
 const TOOL_AREA_ID: &str = "ribbon_tool_area";
@@ -473,9 +477,6 @@ pub struct Ribbon {
     pub center_layer: String,
     /// The mouse wheel's count toward the next tab.
     wheel: wheel::WheelState,
-    /// The tab row's insets as last drawn (left and right `f32` bits), for
-    /// the frames whose bounds are not at hand. See `tab_flow_insets`.
-    tab_flow_insets: AtomicU64,
     /// Open key tips (Alt).
     keytips: Option<keytips::State>,
     /// What More Commands searches for, and what it found.
@@ -635,7 +636,6 @@ impl Ribbon {
             dim_layer: String::new(),
             center_layer: String::new(),
             wheel: wheel::WheelState::default(),
-            tab_flow_insets: AtomicU64::new(0),
             mleader_layer: String::new(),
             keytips: None,
             qat_query: String::new(),
@@ -749,27 +749,6 @@ impl Ribbon {
     /// and panels, and panel titles.
     pub fn is_default_layout(&self) -> bool {
         self.layout.is_default(&self.modules)
-    }
-
-    /// How far the ribbon reaches before and past the tab row's
-    /// quick-access and tabs block, as last drawn. Between draws (or when
-    /// the drawn bounds went stale) the last known insets hold, so the
-    /// centered tabs do not jump; zero before the first draw.
-    fn tab_flow_insets(&self) -> (f32, f32) {
-        let drawn = crate::ui::wrap_bar::recent_bounds(TAB_FLOW_ID)
-            .zip(crate::ui::wrap_bar::recent_bounds(RIBBON_ID));
-        if let Some((flow, ribbon)) = drawn {
-            let left = (flow.x - ribbon.x).max(0.0);
-            let right = (ribbon.x + ribbon.width - flow.x - flow.width).max(0.0);
-            let packed = (u64::from(left.to_bits()) << 32) | u64::from(right.to_bits());
-            self.tab_flow_insets.store(packed, Ordering::Relaxed);
-            return (left, right);
-        }
-        let packed = self.tab_flow_insets.load(Ordering::Relaxed);
-        (
-            f32::from_bits((packed >> 32) as u32),
-            f32::from_bits(packed as u32),
-        )
     }
 
     /// Center the tabs and panels, or keep them at the left edge.
@@ -1516,32 +1495,48 @@ impl Ribbon {
             .center(self.layout.centered);
 
         // Centered, the tabs sit in the middle of the whole ribbon, not of
-        // the room the logo and the search box leave them.
-        let (tab_flow_left, tab_flow_right) = self.tab_flow_insets();
-        let mut tab_row = row![].spacing(6.0).align_y(iced::Center);
+        // the room the logo and the search box leave them. Both have a fixed
+        // width, so they are laid out before the tabs block, and report how
+        // much room they take in the same pass: a search box that collapses
+        // or opens moves the tabs at once. With the menu row the large logo
+        // starts the ribbon and the tab row ends at its right padding.
+        let span = CenterSpan::new(
+            0.0,
+            if menu_row.is_some() {
+                TAB_BAR_PAD_RIGHT
+            } else {
+                0.0
+            },
+        );
+        let mut tab_row = row![].spacing(TAB_ROW_GAP).align_y(iced::Center);
         if menu_row.is_none() {
             // As far from the window's edge as the large logo's artwork; the
             // button's 1 px border sits inside that.
-            tab_row = tab_row.push(container(self.logo_button(false)).padding(Padding {
+            let logo = container(self.logo_button(false)).padding(Padding {
                 left: app_menu::LOGO_PAD - 1.0,
                 ..Padding::ZERO
-            }));
+            });
+            tab_row = tab_row.push(
+                PosReport::new(TAB_ROW_LOGO_ID, logo).report_width(span.before(), TAB_ROW_GAP),
+            );
         }
         tab_row = tab_row.push(
-            container(PosReport::new(
-                TAB_FLOW_ID,
+            container(
                 WrapBar::new(lead, tabs.into())
                     .spacing(if qat_below { 0.0 } else { 6.0 })
                     .center_trail(self.layout.centered)
-                    .center_insets(tab_flow_left, tab_flow_right)
+                    .center_span(span.clone())
                     .min_row_h(TAB_ROW_H)
                     .report_height(self.tab_bar_h.clone()),
-            ))
+            )
             .width(Length::Fill),
         );
         // Without the menu row the search box ends the tab row.
         if menu_row.is_none() {
-            tab_row = tab_row.push(self.search_box());
+            tab_row = tab_row.push(
+                PosReport::new(TAB_ROW_SEARCH_ID, self.search_box())
+                    .report_width(span.after(), TAB_ROW_GAP + TAB_BAR_PAD_RIGHT),
+            );
         }
 
         let tab_bar = container(tab_row)
@@ -1550,7 +1545,7 @@ impl Ribbon {
                 ..Default::default()
             })
             .padding(Padding {
-                right: 6.0,
+                right: TAB_BAR_PAD_RIGHT,
                 ..Padding::ZERO
             })
             .width(Length::Fill);
@@ -1560,10 +1555,14 @@ impl Ribbon {
         let tab_bar = PosReport::new(minimize::TAB_BAR_ID, tab_bar);
         let top: Element<'a, Message> = match menu_row {
             Some(menu_row) => row![
-                container(self.logo_button(true)).style(|theme: &Theme| container::Style {
-                    background: Some(Background::Color(crate::ui::style::chrome::bar(theme))),
-                    ..Default::default()
-                }),
+                PosReport::new(
+                    TAB_ROW_LOGO_ID,
+                    container(self.logo_button(true)).style(|theme: &Theme| container::Style {
+                        background: Some(Background::Color(crate::ui::style::chrome::bar(theme))),
+                        ..Default::default()
+                    }),
+                )
+                .report_width(span.before(), 0.0),
                 column![self.with_search_box(menu_row), tab_bar].width(Fill),
             ]
             .into(),

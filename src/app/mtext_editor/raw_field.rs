@@ -523,7 +523,14 @@ impl super::MTextEditorState {
     /// The editor cells of each field, shaded gray as FIELDDISPLAY shades
     /// them on the canvas.
     pub(in crate::app) fn field_shading(&self) -> Vec<(usize, usize)> {
-        Vec::new()
+        let Some(host) = &self.field_host else {
+            return Vec::new();
+        };
+        let raw = self.content.text();
+        let index = super::raw_adapter::SourceIndex::new(&raw);
+        host.field_cells(&index)
+            .map(|(_, r)| (r.start, r.end))
+            .collect()
     }
 }
 

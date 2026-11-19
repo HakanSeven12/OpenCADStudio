@@ -12595,3 +12595,66 @@ mod entity_specific_properties_tests {
     }
 }
 
+
+// A quoted 'QSELECT can run transparently inside a command that is asking for
+// objects; that hand-back path had no test.
+mod transparent_qselect_tests {
+    use super::super::*;
+    use crate::app::Message;
+    use document::EntityType;
+
+    #[test]
+    fn transparent_qselect_hands_its_matches_back_to_the_running_command() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let _ = app.run_command_line("LINE 0,0 10,0");
+        let _ = app.run_command_line("CIRCLE 20,20 5");
+        let line = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| matches!(entity, EntityType::Line(_)).then(|| entity.common().handle))
+            .unwrap();
+        let circle = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| matches!(entity, EntityType::Circle(_)).then(|| entity.common().handle))
+            .unwrap();
+
+        let _ = app.run_command_line("MOVE");
+        assert!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.is_selection_gathering()),
+            "MOVE is asking for objects"
+        );
+        let _ = app.run_command_line("'QSELECT");
+        assert!(app.qselect.is_some(), "Quick Select opened transparently");
+        assert!(app.transparent_select.is_some(), "MOVE was parked");
+
+        let _ = app.update(Message::QSelectSetType(Some("Circle".into())));
+        let task = app.update(Message::QSelectApply);
+        app.drive_headless_task(task).unwrap();
+
+        assert!(app.qselect.is_none(), "Quick Select closed");
+        assert!(app.transparent_select.is_none(), "the parked command resumed");
+        assert!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.is_selection_gathering()
+                    && command.prompt().starts_with("MOVE")),
+            "the parent MOVE command is back at its object prompt: {:?}",
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|command| (command.name(), command.prompt()))
+        );
+        let selected: Vec<_> = app.tabs[i].scene.selected.iter().copied().collect();
+        assert!(selected.contains(&circle) && !selected.contains(&line), "only the circle was handed back: {selected:?}");
+    }
+}
+

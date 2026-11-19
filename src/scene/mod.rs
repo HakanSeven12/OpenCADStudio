@@ -11162,7 +11162,7 @@ impl Scene {
         // This composite is the CPU pick/snap set; the projection follows the
         // paper camera, so the key keeps `camera_generation`.
         let mut wires = (*self.paper_sheet_wires_arc()).clone();
-        wires.extend(self.viewport_content_wires(layout_block, None, None, false, false));
+        wires.extend(self.viewport_content_wires(layout_block, None, None, false, None));
         let arc = Arc::new(wires);
         let gen = WIRE_CONTENT_GEN.fetch_add(1, Ordering::Relaxed);
         self.last_model_wire_gen.set(gen);
@@ -11211,12 +11211,11 @@ impl Scene {
             // Model space plots in plan, so solids show their top view.
             let mode =
                 render_mode_override.unwrap_or_else(|| self.active_model_tile_render_mode());
-            let hidden_line = view::render::render_mode_flags(mode).mesh_fill;
             wires.extend(self.mesh_plot_wires(
                 &self.meshes_arc(),
                 [0.0, 0.0, 1.0],
                 None,
-                hidden_line,
+                Some(mode),
             ));
             apply_mode(&mut wires, mode);
             // On screen the wire shader multiplies dash patterns by this ratio;
@@ -11247,9 +11246,8 @@ impl Scene {
                 3 => document::entities::ViewportRenderMode::GouraudShaded,
                 _ => viewport.render_mode,
             });
-            let hidden_line = view::render::render_mode_flags(mode).mesh_fill;
             let mut wires =
-                self.viewport_content_wires(paper_block, Some(handle), None, true, hidden_line);
+                self.viewport_content_wires(paper_block, Some(handle), None, true, Some(mode));
             apply_mode(&mut wires, mode);
             model_wires.extend(wires);
         }

@@ -5,14 +5,15 @@ impl Scene {
     /// Collect model-space wires projected into paper space for all (or one specific)
     /// user viewports.  `only_vp = Some(h)` restricts output to that viewport.
     /// `plot` adds the edges of 3-D meshes, which the screen draws on the GPU
-    /// and the plot must draw as wires; such a set is not cached.
+    /// and the plot must draw as wires; such a set is not cached. `shade` is
+    /// the plotted render mode of those meshes (see [`Self::mesh_plot_wires`]).
     pub(super) fn viewport_content_wires(
         &self,
         paper_block: Handle,
         only_vp: Option<Handle>,
         exclude_vp: Option<Handle>,
         plot: bool,
-        hidden_line: bool,
+        shade: Option<document::entities::ViewportRenderMode>,
     ) -> Vec<WireModel> {
         use document::entities::Viewport;
 
@@ -97,7 +98,7 @@ impl Scene {
                 let frozen: HashSet<Handle> = vp.frozen_layers.iter().copied().collect();
                 let meshes = self.meshes_for_viewport(vp_handle, &frozen);
                 let view = (cam_frame.rotation * glam::Vec3::Z).as_dvec3().to_array();
-                let mesh_wires = self.mesh_plot_wires(&meshes, view, Some(vp_handle), hidden_line);
+                let mesh_wires = self.mesh_plot_wires(&meshes, view, Some(vp_handle), shade);
                 model_wires.to_mut().extend(mesh_wires);
                 for wire in model_wires.to_mut() {
                     wire.resample_plot_curve();
@@ -812,11 +813,25 @@ impl Scene {
         meshes: &[MeshLodSet],
         view: [f64; 3],
         viewport: Option<Handle>,
-        hidden_line: bool,
+        shade: Option<document::entities::ViewportRenderMode>,
     ) -> Vec<WireModel> {
         use document::types::Vector3;
-        let mut wires = Vec::new();
-        let occluders = hidden_line.then(|| Occluders::new(meshes, view));
+        let flags = shade.map(view::render::render_mode_flags);
+        // Hidden and shaded modes hide the edges that faces cover; shaded
+        // modes also fill the faces, and drop the edges unless the mode
+        // shows them.
+        let hidden = flags.is_some_and(|f| f.mesh_fill);
+        let shaded = flags.is_some_and(|f| f.mesh_fill && !f.hidden_line);
+        let edges = !shaded || flags.is_some_and(|f| f.show_3d_edges);
+        let mut wires = if shaded {
+            self.mesh_plot_faces(meshes, view)
+        } else {
+            Vec::new()
+        };
+        if !edges {
+            return wires;
+        }
+        let occluders = hidden.then(|| Occluders::new(meshes, view));
         for set in meshes {
             let Some(handle) = set.entity_handle() else {
                 continue;
@@ -903,6 +918,95 @@ impl Scene {
             wires.push(wire);
         }
         wires
+    }
+
+    /// The faces of every plotted mesh as filled triangles, shaded by how
+    /// squarely they face the viewer and ordered far to near, so nearer
+    /// faces paint over farther ones. Each triangle is its own wire (one
+    /// colour per wire); all carry the depth of the lowest mesh in draw
+    /// order, so they sort together under the edges.
+    fn mesh_plot_faces(&self, meshes: &[MeshLodSet], view: [f64; 3]) -> Vec<WireModel> {
+        use document::types::Vector3;
+        let w = glam::DVec3::from(view).normalize_or(glam::DVec3::Z);
+        let depths = self.draw_depth_map();
+        let mut owner: Option<(f32, Handle)> = None;
+        let mut faces: Vec<(f64, [glam::DVec3; 3], usize)> = Vec::new();
+        let mut styles: Vec<([f32; 4], Option<std::sync::Arc<str>>)> = Vec::new();
+        for set in meshes {
+            let Some(handle) = set.entity_handle() else {
+                continue;
+            };
+            let Some(mesh) = set.geometry_lods().first() else {
+                continue;
+            };
+            if let Some(entity) = self.document.get_entity(handle) {
+                let plotted = self
+                    .document
+                    .layers
+                    .get(&entity.common().layer)
+                    .is_none_or(|layer| layer.is_plottable);
+                if !plotted {
+                    continue;
+                }
+            }
+            let depth = depths.get(&handle.value()).map_or(0.0, |d| d[0]);
+            if owner.is_none_or(|(d, _)| depth < d) {
+                owner = Some((depth, handle));
+            }
+            let style = styles.len();
+            styles.push((
+                set.display_color().unwrap_or([0.7, 0.7, 0.7, 1.0]),
+                set.effective_layer.clone(),
+            ));
+            let vertex = |i: u32| {
+                let i = i as usize;
+                let low = mesh.verts_low.get(i).copied().unwrap_or([0.0; 3]);
+                let p: [f64; 3] = std::array::from_fn(|k| mesh.verts[i][k] as f64 + low[k] as f64);
+                let p = set.instance_transform.map_or(p, |xform| {
+                    let q = xform.apply(Vector3::new(p[0], p[1], p[2]));
+                    [q.x, q.y, q.z]
+                });
+                glam::DVec3::from(p)
+            };
+            for tri in mesh.indices.chunks_exact(3) {
+                let corners = [vertex(tri[0]), vertex(tri[1]), vertex(tri[2])];
+                if !corners.iter().all(|c| c.is_finite()) {
+                    continue;
+                }
+                let center = (corners[0] + corners[1] + corners[2]) / 3.0;
+                faces.push((center.dot(w), corners, style));
+            }
+        }
+        let Some((_, owner)) = owner else {
+            return Vec::new();
+        };
+        faces.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let name = owner.value().to_string();
+        faces
+            .into_iter()
+            .filter_map(|(_, corners, style)| {
+                let normal = (corners[1] - corners[0]).cross(corners[2] - corners[0]);
+                let normal = normal.try_normalize()?;
+                // A headlight from the viewer: square faces full tone, edge-on
+                // faces darkest.
+                let light = 0.35 + 0.65 * normal.dot(w).abs() as f32;
+                let (color, layer) = &styles[style];
+                let shaded = [color[0] * light, color[1] * light, color[2] * light, color[3]];
+                let mut wire = WireModel::solid(name.clone(), Vec::new(), shaded, false);
+                let mut high = Vec::with_capacity(3);
+                let mut low = Vec::with_capacity(3);
+                for c in corners {
+                    let split = c.to_array().map(WireModel::split_ds);
+                    high.push(split.map(|(h, _)| h));
+                    low.push(split.map(|(_, l)| l));
+                }
+                wire.fill_tris = high;
+                wire.fill_tris_low = low;
+                wire.fill_is_3d = true;
+                wire.effective_layer = layer.clone();
+                Some(wire)
+            })
+            .collect()
     }
 }
 

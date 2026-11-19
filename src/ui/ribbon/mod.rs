@@ -432,6 +432,9 @@ pub struct Ribbon {
     tab_flow_natural: Arc<AtomicU32>,
     /// The search box ends the tab row (no menu row), as last viewed.
     search_in_tab_row: AtomicBool,
+    /// Whether the last view showed the search box as its magnifier
+    /// (`narrow`), to see when the layout since has changed that.
+    narrow_shown: AtomicBool,
     /// Measured tool-area height (TOOL_BAR_H at full density, shorter once every
     /// panel is collapsed). Written by `CollapsePanels`, read when anchoring
     /// dropdowns below the ribbon.
@@ -621,8 +624,9 @@ impl Ribbon {
             active_table_style: String::new(),
             tab_bar_h: Arc::new(AtomicU32::new(TAB_ROW_H.to_bits())),
             tab_span: CenterSpan::default(),
-            tab_flow_natural: Arc::new(AtomicU32::new(0)),
+            tab_flow_natural: Arc::new(AtomicU32::new(f32::NAN.to_bits())),
             search_in_tab_row: AtomicBool::new(true),
+            narrow_shown: AtomicBool::new(false),
             tool_bar_h: Arc::new(AtomicU32::new(TOOL_BAR_H.to_bits())),
             collapse_mode: CollapseMode::default(),
             layout: RibbonLayout::default(),
@@ -663,7 +667,7 @@ impl Ribbon {
         if w > self.win_w && self.layout.minimize == RibbonMinimize::Off {
             self.close_popup();
         }
-        let was_narrow = self.win_w < search::NARROW;
+        let was_narrow = self.narrow();
         self.win_w = w;
         self.win_h = h;
         self.layout.clamp_floating((w, h), Self::floating_size);
@@ -1519,6 +1523,7 @@ impl Ribbon {
         }
         self.search_in_tab_row
             .store(menu_row.is_none(), Ordering::Relaxed);
+        self.narrow_shown.store(self.narrow(), Ordering::Relaxed);
         let mut tab_row = row![].spacing(TAB_ROW_GAP).align_y(iced::Center);
         if menu_row.is_none() {
             // As far from the window's edge as the large logo's artwork; the
@@ -1604,16 +1609,22 @@ impl Ribbon {
             let line = self.layout.minimize == RibbonMinimize::Tabs;
             ribbon = ribbon.push(self.qat_below_row(is_start, undo_count, redo_count, line));
         }
-        // The wheel steps through the tabs; a closed ribbon has none.
+        // The wheel steps through the tabs; a closed ribbon has none. A
+        // toolbar or tabs that changed width without a resize may have
+        // changed the room for the search box: the redraw asks for a view
+        // that knows.
         let wheel_on = !closed && self.layout.wheel_switches_tabs;
         keytips::ribbon_area(ribbon_menu::RightPress::new(PosReport::new(
             RIBBON_ID,
-            wheel::WheelTabs::new(ribbon, wheel_on),
+            wheel::WheelTabs::new(ribbon, wheel_on).refit_when(|| self.search_fit_stale()),
         )))
     }
 
     /// The menu row with the search box at its right end.
     pub fn with_search_box<'a>(&'a self, menu_row: Element<'a, Message>) -> Element<'a, Message> {
+        // The box sits in the menu row now, also when the app shows that row
+        // without the ribbon's own view.
+        self.search_in_tab_row.store(false, Ordering::Relaxed);
         container(
             row![
                 container(menu_row).width(Fill),

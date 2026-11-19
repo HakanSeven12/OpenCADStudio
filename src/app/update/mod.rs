@@ -3265,6 +3265,10 @@ impl OpenCADStudio {
                 self.ribbon.on_wheel(delta, iced::time::Instant::now());
                 Task::none()
             }
+            Message::RibbonRefit => {
+                self.ribbon.refit();
+                Task::none()
+            }
             Message::RibbonMinimize(msg) => {
                 if self.ribbon.on_minimize(msg, iced::time::Instant::now()) {
                     self.save_config();

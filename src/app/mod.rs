@@ -4049,6 +4049,9 @@ pub enum Message {
     RibbonSelectTab(usize),
     /// The mouse wheel turned over the ribbon: step through its tabs.
     RibbonWheel(iced::mouse::ScrollDelta),
+    /// The ribbon's layout changed what its last view was built on (the
+    /// room for the search box): view it anew.
+    RibbonRefit,
     /// The ribbon's right-click menu.
     RibbonMenu(crate::ui::ribbon::RibbonMenuMsg),
     /// A menu-bar entry: its command line, run like a ribbon button's. A

@@ -130,10 +130,14 @@ impl Ribbon {
 }
 
 /// The ribbon, sending `Message::RibbonWheel` for a wheel turn over it that
-/// nothing inside took and that no modifier key changes.
+/// nothing inside took and that no modifier key changes. On each redraw it
+/// also asks `stale` whether the view was built on measurements the layout
+/// has since replaced, and if so sends `Message::RibbonRefit` for a fresh
+/// view.
 pub(super) struct WheelTabs<'a> {
     content: Element<'a, Message>,
     enabled: bool,
+    stale: Option<Box<dyn Fn() -> bool + 'a>>,
 }
 
 impl<'a> WheelTabs<'a> {
@@ -141,7 +145,15 @@ impl<'a> WheelTabs<'a> {
         Self {
             content: content.into(),
             enabled,
+            stale: None,
         }
+    }
+
+    /// Ask for a fresh view (`Message::RibbonRefit`) on a redraw while
+    /// `stale` holds.
+    pub(super) fn refit_when(mut self, stale: impl Fn() -> bool + 'a) -> Self {
+        self.stale = Some(Box::new(stale));
+        self
     }
 }
 
@@ -188,6 +200,13 @@ impl<'a> Widget<Message, Theme, Renderer> for WheelTabs<'a> {
     ) {
         if let Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) = event {
             tree.state.downcast_mut::<Modifiers>().0 = *modifiers;
+        }
+        // Laid out since the view was built: a decision the view took on
+        // the last layout's measurements may no longer hold.
+        if let Event::Window(iced::window::Event::RedrawRequested(_)) = event {
+            if self.stale.as_ref().is_some_and(|stale| stale()) {
+                shell.publish(Message::RibbonRefit);
+            }
         }
         self.content.as_widget_mut().update(
             &mut tree.children[0],
@@ -567,16 +586,6 @@ mod view_tests {
 
     const WIDTH: f32 = 2400.0;
 
-    fn with_ui_test(test: impl FnOnce() + Send + 'static) {
-        let _guard = crate::headless_ui_lock();
-        std::thread::Builder::new()
-            .stack_size(32 * 1024 * 1024)
-            .spawn(test)
-            .expect("spawn UI test")
-            .join()
-            .unwrap_or_else(|error| std::panic::resume_unwind(error));
-    }
-
     /// The ribbon laid out `WIDTH` wide, centered or not.
     fn ribbon(centered: bool) -> Ribbon {
         let mut ribbon = Ribbon::default();
@@ -643,7 +652,7 @@ mod view_tests {
 
     #[test]
     fn the_centered_tabs_sit_in_the_middle_of_the_whole_ribbon_at_once() {
-        with_ui_test(|| {
+        crate::with_headless_ui(|| {
             let middle = tabs_middle(&ribbon(true), false, "ribbon-centered-first-view");
             assert!(
                 (middle - WIDTH / 2.0).abs() < MIDDLE_SLACK,
@@ -655,7 +664,7 @@ mod view_tests {
 
     #[test]
     fn the_centered_tabs_hold_still_as_the_search_box_collapses_or_opens() {
-        with_ui_test(|| {
+        crate::with_headless_ui(|| {
             let mut open = ribbon(true);
             let mut layout = open.layout().clone();
             layout.search_expanded = true;
@@ -680,7 +689,7 @@ mod view_tests {
 
     #[test]
     fn with_the_menu_row_the_centered_tabs_sit_in_the_middle_too() {
-        with_ui_test(|| {
+        crate::with_headless_ui(|| {
             let middle = tabs_middle(&ribbon(true), true, "ribbon-centered-menu-row");
             assert!(
                 (middle - WIDTH / 2.0).abs() < MIDDLE_SLACK,
@@ -692,7 +701,7 @@ mod view_tests {
 
     #[test]
     fn centering_moves_the_tabs_toward_the_middle_of_a_wide_ribbon() {
-        with_ui_test(|| {
+        crate::with_headless_ui(|| {
             let left_ribbon = ribbon(false);
             let mut ui = Simulator::with_size(
                 iced::Settings::default(),
@@ -723,7 +732,7 @@ mod view_tests {
 
     #[test]
     fn a_wheel_turn_over_the_rendered_ribbon_is_sent_on() {
-        with_ui_test(|| {
+        crate::with_headless_ui(|| {
             let ribbon = ribbon(false);
             let mut ui = Simulator::with_size(
                 iced::Settings::default(),

@@ -65,8 +65,10 @@ const CLEAR: &str = "M5.5 5.5l13 13 M18.5 5.5l-13 13";
 const RESULTS_W: f32 = 440.0;
 const ROW_H: f32 = 26.0;
 const HEADER_H: f32 = 20.0;
-/// Below this window width the box shrinks to its magnifier button.
-pub(super) const NARROW: f32 = 1080.0;
+/// Below this window width the box shrinks to its magnifier button while
+/// the tab row has not been measured yet, or when the box sits in the menu
+/// row. Once measured, the tab row's own room decides (`narrow`).
+const NARROW: f32 = 1080.0;
 const BEST: usize = 5;
 const PER_GROUP: usize = 8;
 /// A picked ribbon button blinks: on and off `FLASHES` times this long.
@@ -807,29 +809,51 @@ impl Ribbon {
         }
     }
 
-    /// A window too narrow for the box, or a tab row that cannot hold it
-    /// beside the quick-access toolbar and the tabs: only its magnifier
-    /// button shows. The box goes before the toolbar and the tabs wrap
-    /// onto two rows.
-    fn narrow(&self) -> bool {
-        self.win_w < NARROW || !self.tab_row_holds_box()
+    /// No room for the box: only its magnifier button shows. In the tab row
+    /// the box goes once the row cannot hold it beside the quick-access
+    /// toolbar and the tabs, before those wrap onto two rows; with the
+    /// toolbar below the ribbon there is room for longer. Before the tab
+    /// row is first laid out, and with the box in the menu row, a window
+    /// narrower than `NARROW` has no room.
+    pub(super) fn narrow(&self) -> bool {
+        match self.tab_row_holds_box() {
+            Some(holds) => !holds,
+            None => self.win_w < NARROW,
+        }
     }
 
     /// Whether the tab row holds the logo, the quick-access toolbar and the
     /// tabs (at the width they last needed) and the full box, in the window
-    /// as wide as it is now. The widths do not depend on the box, so the
-    /// answer does not flip as the box comes and goes. Before the first
-    /// layout, and with the box in the menu row, it does.
-    fn tab_row_holds_box(&self) -> bool {
+    /// as wide as it is now; `None` before the first layout or with the box
+    /// in the menu row. The widths do not depend on the box, so the answer
+    /// does not flip as the box comes and goes.
+    fn tab_row_holds_box(&self) -> Option<bool> {
         if !self.search_in_tab_row.load(Ordering::Relaxed) {
-            return true;
+            return None;
         }
+        // NaN until the tab row is first laid out; 0 is a measured empty row.
         let flow = f32::from_bits(self.tab_flow_natural.load(Ordering::Relaxed));
-        if flow <= 0.0 {
-            return true;
+        if flow.is_nan() {
+            return None;
         }
         let (logo, _) = self.tab_span.insets();
-        logo + flow + super::TAB_ROW_GAP + BOX_W + super::TAB_BAR_PAD_RIGHT <= self.win_w
+        Some(logo + flow + super::TAB_ROW_GAP + BOX_W + super::TAB_BAR_PAD_RIGHT <= self.win_w)
+    }
+
+    /// Whether the last view's choice between the box and its magnifier no
+    /// longer holds: a toolbar or tabs that changed width without a resize.
+    pub(super) fn search_fit_stale(&self) -> bool {
+        self.narrow() != self.narrow_shown.load(Ordering::Relaxed)
+    }
+
+    /// The room for the box changed without a resize: as on a resize that
+    /// turns the window narrow or wide, the search empties, since its
+    /// results would hang from a box that went. The next view shows the
+    /// box or the magnifier anew.
+    pub fn refit(&mut self) {
+        if self.search_fit_stale() {
+            self.clear_search();
+        }
     }
 
     /// Whether the full box shows in the tab row: kept open, or open for now.
@@ -1553,60 +1577,198 @@ mod tests {
         f32::from_bits(ribbon.tab_bar_h.load(Ordering::Relaxed))
     }
 
+    /// A long quick-access toolbar: too long to share the tab row with the
+    /// full box in a window that is not narrow.
+    fn long_toolbar(ribbon: &mut Ribbon) {
+        let mut layout = ribbon.layout.clone();
+        for command in [
+            "LINE", "CIRCLE", "ARC", "PLINE", "RECTANG", "POLYGON", "ELLIPSE", "SPLINE", "HATCH",
+            "MOVE", "COPY", "ROTATE", "SCALE", "MIRROR", "OFFSET", "TRIM", "EXTEND", "FILLET",
+            "CHAMFER", "ARRAY", "ERASE", "EXPLODE", "STRETCH", "BREAK", "JOIN", "LENGTHEN",
+            "ALIGN", "DIST",
+        ] {
+            layout.qat.push(QatItem::Command(command.into()));
+        }
+        ribbon.set_layout(layout);
+    }
+
+    #[test]
+    fn a_toolbar_that_grows_without_a_resize_asks_for_a_fresh_view() {
+        crate::with_headless_ui(|| {
+            let mut ribbon = Ribbon::new();
+            ribbon.set_window_size((1400.0, 900.0));
+            lay_out(&ribbon, 1400.0);
+            assert!(ribbon.shows_box());
+            let _ = ribbon.on_search(SearchMsg::Input("line".into()), Instant::now());
+            assert!(ribbon.search_results_open());
+
+            // The toolbar grows: the view still shows the box, built on the
+            // old widths; once laid out, its redraw asks for a fresh view.
+            long_toolbar(&mut ribbon);
+            let messages: Vec<Message> = {
+                let mut ui = iced_test::simulator::Simulator::with_size(
+                    iced::Settings::default(),
+                    (1400.0, 260.0),
+                    ribbon.view(None, false, false, false, 0, 0, false, None),
+                );
+                ui.simulate([iced::Event::Window(iced::window::Event::RedrawRequested(
+                    Instant::now(),
+                ))]);
+                ui.into_messages().collect()
+            };
+            assert!(
+                messages.iter().any(|m| matches!(m, Message::RibbonRefit)),
+                "the redraw asks for a fresh view"
+            );
+
+            // The fresh view shows the magnifier; the search, whose results
+            // hung from the box, empties as on a resize.
+            ribbon.refit();
+            assert!(!ribbon.search_results_open());
+            assert!(ribbon.search.query.is_empty());
+            assert!(!ribbon.shows_box());
+            lay_out(&ribbon, 1400.0);
+            assert!(!ribbon.search_fit_stale(), "nothing more to ask for");
+        });
+    }
+
+    #[test]
+    fn in_the_menu_row_the_box_stays_whatever_the_tab_row_needs() {
+        crate::with_headless_ui(|| {
+            let mut ribbon = Ribbon::new();
+            long_toolbar(&mut ribbon);
+            ribbon.set_window_size((1200.0, 900.0));
+            // Measured once without the menu row: the box would not fit.
+            lay_out(&ribbon, 1200.0);
+            assert!(!ribbon.shows_box());
+            // With the menu row the box sits beside the menus.
+            let _ui = iced_test::simulator::Simulator::with_size(
+                iced::Settings::default(),
+                (1200.0, 260.0),
+                ribbon.view(
+                    Some(iced::widget::text("File").into()),
+                    false,
+                    false,
+                    false,
+                    0,
+                    0,
+                    false,
+                    None,
+                ),
+            );
+            assert!(ribbon.shows_box(), "wider than NARROW, the box shows");
+        });
+    }
+
+    #[test]
+    fn a_closed_ribbon_with_the_toolbar_below_keeps_the_box_where_it_fits() {
+        crate::with_headless_ui(|| {
+            let mut ribbon = Ribbon::new();
+            let mut layout = ribbon.layout.clone();
+            layout.qat_below = true;
+            ribbon.set_layout(layout);
+            ribbon.set_window_size((900.0, 900.0));
+            // Closed, the tab row holds only the logo and the box: measured
+            // empty, not unmeasured, so `NARROW` does not decide.
+            let _ui = iced_test::simulator::Simulator::with_size(
+                iced::Settings::default(),
+                (900.0, 260.0),
+                ribbon.view(None, true, false, false, 0, 0, false, None),
+            );
+            assert!(ribbon.shows_box());
+        });
+    }
+
     #[test]
     fn the_box_collapses_before_the_tab_row_wraps() {
-        let _guard = crate::headless_ui_lock();
-        std::thread::Builder::new()
-            .stack_size(32 * 1024 * 1024)
-            .spawn(|| {
-                // A long quick-access toolbar: with the box the tab row no
-                // longer fits in a window that is not narrow.
-                let mut ribbon = Ribbon::new();
-                let mut layout = ribbon.layout.clone();
-                for command in [
-                    "LINE", "CIRCLE", "ARC", "PLINE", "RECTANG", "POLYGON", "ELLIPSE", "SPLINE",
-                    "HATCH", "MOVE", "COPY", "ROTATE", "SCALE", "MIRROR", "OFFSET", "TRIM",
-                    "EXTEND", "FILLET", "CHAMFER", "ARRAY", "ERASE", "EXPLODE", "STRETCH", "BREAK",
-                    "JOIN", "LENGTHEN", "ALIGN", "DIST",
-                ] {
-                    layout.qat.push(QatItem::Command(command.into()));
-                }
-                ribbon.set_layout(layout);
-                ribbon.set_window_size((4000.0, 900.0));
-                assert_eq!(
-                    lay_out(&ribbon, 4000.0),
-                    super::super::TAB_ROW_H,
-                    "wide: one row"
-                );
-                assert!(ribbon.shows_box(), "wide: the box shows");
+        crate::with_headless_ui(|| {
+            // A long quick-access toolbar: with the box the tab row no
+            // longer fits in a window that is not narrow.
+            let mut ribbon = Ribbon::new();
+            long_toolbar(&mut ribbon);
+            ribbon.set_window_size((4000.0, 900.0));
+            assert_eq!(
+                lay_out(&ribbon, 4000.0),
+                super::super::TAB_ROW_H,
+                "wide: one row"
+            );
+            assert!(ribbon.shows_box(), "wide: the box shows");
 
-                // Room for everything but the full box.
-                let flow = f32::from_bits(ribbon.tab_flow_natural.load(Ordering::Relaxed));
-                let (logo, _) = ribbon.tab_span.insets();
-                let width = logo
-                    + flow
-                    + super::super::TAB_ROW_GAP
-                    + MAGNIFIER_W
-                    + super::super::TAB_BAR_PAD_RIGHT
-                    + 40.0;
-                assert!(width > NARROW, "the window is not narrow: {width}");
-                assert!(width < logo + flow + BOX_W, "the box does not fit: {width}");
-                ribbon.set_window_size((width, 900.0));
-                assert!(!ribbon.shows_box(), "the box collapses to its magnifier");
-                assert_eq!(
-                    lay_out(&ribbon, width),
-                    super::super::TAB_ROW_H,
-                    "the tabs keep one row"
-                );
+            // Room for everything but the full box.
+            let flow = f32::from_bits(ribbon.tab_flow_natural.load(Ordering::Relaxed));
+            let (logo, _) = ribbon.tab_span.insets();
+            let width = logo
+                + flow
+                + super::super::TAB_ROW_GAP
+                + MAGNIFIER_W
+                + super::super::TAB_BAR_PAD_RIGHT
+                + 40.0;
+            assert!(width > NARROW, "the window is not narrow: {width}");
+            assert!(width < logo + flow + BOX_W, "the box does not fit: {width}");
+            ribbon.set_window_size((width, 900.0));
+            assert!(!ribbon.shows_box(), "the box collapses to its magnifier");
+            assert_eq!(
+                lay_out(&ribbon, width),
+                super::super::TAB_ROW_H,
+                "the tabs keep one row"
+            );
 
-                // The decision holds once the magnifier is laid out.
-                assert!(!ribbon.shows_box());
-                ribbon.set_window_size((4000.0, 900.0));
-                assert!(ribbon.shows_box(), "wide again, the box is back");
-            })
-            .expect("spawn UI test")
-            .join()
-            .unwrap_or_else(|error| std::panic::resume_unwind(error));
+            // The decision holds once the magnifier is laid out.
+            assert!(!ribbon.shows_box());
+            ribbon.set_window_size((4000.0, 900.0));
+            assert!(ribbon.shows_box(), "wide again, the box is back");
+        });
+    }
+
+    #[test]
+    fn with_the_toolbar_below_the_box_stays_while_the_tab_row_has_room() {
+        crate::with_headless_ui(|| {
+            let mut ribbon = Ribbon::new();
+            let mut layout = ribbon.layout.clone();
+            layout.qat_below = true;
+            ribbon.set_layout(layout);
+            ribbon.set_window_size((4000.0, 900.0));
+            lay_out(&ribbon, 4000.0);
+
+            // Below `NARROW`, yet the tab row holds the tabs and the box.
+            let flow = f32::from_bits(ribbon.tab_flow_natural.load(Ordering::Relaxed));
+            let (logo, _) = ribbon.tab_span.insets();
+            let room =
+                logo + flow + super::super::TAB_ROW_GAP + BOX_W + super::super::TAB_BAR_PAD_RIGHT;
+            let width = room + 10.0;
+            assert!(
+                width < NARROW,
+                "the window is narrower than NARROW: {width}"
+            );
+            ribbon.set_window_size((width, 900.0));
+            assert!(ribbon.shows_box(), "the box stays while it fits");
+            assert_eq!(lay_out(&ribbon, width), super::super::TAB_ROW_H);
+
+            // Just too narrow for the box: it collapses.
+            ribbon.set_window_size((room - 10.0, 900.0));
+            assert!(!ribbon.shows_box());
+        });
+    }
+
+    #[test]
+    fn a_resize_keeps_the_search_while_the_box_keeps_its_room() {
+        crate::with_headless_ui(|| {
+            // With the toolbar below, the box fits in a window narrower
+            // than `NARROW`; resizing it must not empty the search.
+            let mut ribbon = Ribbon::new();
+            let mut layout = ribbon.layout.clone();
+            layout.qat_below = true;
+            ribbon.set_layout(layout);
+            ribbon.set_window_size((1000.0, 900.0));
+            lay_out(&ribbon, 1000.0);
+            assert!(ribbon.shows_box(), "the box fits");
+            let now = Instant::now();
+            let _ = ribbon.on_search(SearchMsg::Input("line".into()), now);
+            assert!(ribbon.search_results_open());
+            ribbon.set_window_size((1010.0, 900.0));
+            assert_eq!(ribbon.search.query, "line", "the search stays");
+            assert!(ribbon.search_results_open());
+        });
     }
 
     #[test]

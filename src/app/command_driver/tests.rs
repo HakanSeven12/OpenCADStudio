@@ -12461,3 +12461,53 @@ mod refclose_command_tests {
     }
 }
 
+
+// The UNDERLAY command edits selected PDF/DGN underlays; no test drove
+// its property options from the command line.
+mod underlay_command_tests {
+    use super::super::*;
+    use document::entities::{Underlay, UnderlayDisplayFlags, UnderlayType};
+    use document::EntityType;
+
+    #[test]
+    fn underlay_command_edits_the_selected_underlay() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let handle = app.tabs[i]
+            .scene
+            .document
+            .add_entity(EntityType::Underlay(Underlay::new(UnderlayType::Pdf)))
+            .unwrap();
+        app.tabs[i].scene.select_entity(handle, true);
+
+        for command in [
+            "UNDERLAY FADE 50",
+            "UNDERLAY CONTRAST 70",
+            "UNDERLAY MONO ON",
+            "UNDERLAY CLIP ON",
+            "UNDERLAY OFF",
+        ] {
+            let _ = app.run_command_line(command);
+            assert!(app.command_line.last_error.is_none(), "{command}");
+        }
+
+        let document::EntityType::Underlay(underlay) =
+            app.tabs[i].scene.document.get_entity(handle).unwrap()
+        else {
+            panic!("the underlay remains an Underlay")
+        };
+        assert_eq!(underlay.fade, 50, "the fade was set");
+        assert_eq!(underlay.contrast, 70, "the contrast was set");
+        assert!(
+            underlay.flags.contains(UnderlayDisplayFlags::MONOCHROME),
+            "monochrome was switched on"
+        );
+        assert!(
+            underlay.flags.contains(UnderlayDisplayFlags::CLIPPING),
+            "clipping was switched on"
+        );
+        assert!(!underlay.is_on(), "the underlay was switched off");
+    }
+}
+

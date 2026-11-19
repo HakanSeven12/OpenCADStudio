@@ -1839,6 +1839,9 @@ impl<'a> HostSession<'a> {
             | TableOperation::LayoutSetCurrent { .. }
             | TableOperation::LayoutSetPage { .. }
             | TableOperation::LayoutSetTabOrder { .. }) => self.layout_operation(other),
+            TableOperation::CustomPropertiesSet { properties } => {
+                self.custom_properties_set(properties)
+            }
             other => self.style_operation(other),
         }
     }
@@ -2451,6 +2454,38 @@ impl<'a> HostSession<'a> {
             }
             _ => Err("unsupported table operation".to_owned()),
         }
+    }
+
+    /// `TableOperation::CustomPropertiesSet`: what DWGPROPS OK does for the
+    /// Custom tab. Listed names replace a property of the same name (trimmed,
+    /// ignoring case) or are appended; the rest are kept.
+    fn custom_properties_set(
+        &mut self,
+        properties: Vec<(String, String)>,
+    ) -> Result<Handle, String> {
+        crate::app::drawing_properties::check_custom_names(&properties)?;
+        let mut list = self.document().summary_info.custom_properties.clone();
+        for (name, value) in properties {
+            let key = name.trim().to_lowercase();
+            match list
+                .iter_mut()
+                .find(|(n, _)| n.trim().to_lowercase() == key)
+            {
+                Some(entry) => entry.1 = value,
+                None => list.push((name.trim().to_owned(), value)),
+            }
+        }
+        if list == self.document().summary_info.custom_properties {
+            return Ok(Handle::NULL);
+        }
+        self.push_undo("Drawing properties");
+        let tab = &mut self.app.tabs[self.tab];
+        tab.scene.document.summary_info.custom_properties = list;
+        tab.dirty = true;
+        // Fields showing a custom property read it again, as after DWGPROPS OK.
+        tab.scene.update_summary_field_hosts();
+        self.publish_document_view();
+        Ok(Handle::NULL)
     }
 
     fn finish_layout_change(&mut self) {
@@ -6154,6 +6189,94 @@ mod tests {
         .unwrap();
         drop(host);
         assert_eq!(tabs(&app), before);
+    }
+
+    /// A plugin sets the drawing's custom properties like DWGPROPS OK: a
+    /// listed name replaces the value (trimmed, any case) or is appended, the
+    /// rest stay, a text showing the property updates, and it is one undo step.
+    #[test]
+    fn plugin_sets_custom_properties_in_one_undo_step() {
+        use document::entities::{EntityType, MText};
+        use ocs_plugin_api::host::TableOperation as Op;
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let props = |app: &OpenCADStudio| {
+            app.tabs[0]
+                .scene
+                .document
+                .summary_info
+                .custom_properties
+                .clone()
+        };
+        let pairs = |p: &[(&str, &str)]| -> Vec<(String, String)> {
+            p.iter()
+                .map(|(n, v)| ((*n).to_owned(), (*v).to_owned()))
+                .collect()
+        };
+        let set = |p: &[(&str, &str)]| Op::CustomPropertiesSet {
+            properties: pairs(p),
+        };
+        let document = &mut app.tabs[0].scene.document;
+        document.summary_info.custom_properties = pairs(&[("Cost", "12,5"), ("Keep", "k")]);
+        let text = document
+            .add_entity(EntityType::MText(Box::new(MText::new())))
+            .unwrap();
+        crate::entities::field::set_text_field(
+            document,
+            text,
+            Some((r"\AcVar CustomDP.cost".to_string(), vec![])),
+            "12,5",
+        );
+        let before = props(&app);
+
+        let mut host = HostSession::new(&mut app, 0);
+        assert!(
+            host.table_operation(set(&[(" ", "x")])).is_err(),
+            "empty name"
+        );
+        assert!(
+            host.table_operation(set(&[("New", "1"), ("new ", "2")]))
+                .is_err(),
+            "the same name twice"
+        );
+        drop(host);
+        assert_eq!(props(&app), before, "a refused list changes nothing");
+
+        app.finish_pending_history(0);
+        let undo_before = app.tabs[0].history.undo_stack.len();
+        app.tabs[0].dirty = false;
+        let mut host = HostSession::new(&mut app, 0);
+        host.table_operation(set(&[("cost ", "99"), ("Added", "a")]))
+            .unwrap();
+        drop(host);
+        app.finish_pending_history(0);
+        assert_eq!(
+            props(&app),
+            pairs(&[("Cost", "99"), ("Keep", "k"), ("Added", "a")])
+        );
+        assert!(app.tabs[0].dirty);
+        let Some(EntityType::MText(shown)) = app.tabs[0].scene.document.get_entity(text) else {
+            panic!("the text stays");
+        };
+        assert_eq!(shown.value, "99", "the field shows the new value");
+        assert_eq!(
+            app.tabs[0].history.undo_stack.len(),
+            undo_before + 1,
+            "one undo step"
+        );
+
+        let mut host = HostSession::new(&mut app, 0);
+        host.table_operation(set(&[("COST", "99")])).unwrap();
+        drop(host);
+        app.finish_pending_history(0);
+        assert_eq!(
+            app.tabs[0].history.undo_stack.len(),
+            undo_before + 1,
+            "no change, no undo step"
+        );
+
+        app.undo_steps(1);
+        assert_eq!(props(&app), before, "undo puts the old properties back");
     }
 
     /// A plugin puts the paper-space layout tabs in a new order in one undo

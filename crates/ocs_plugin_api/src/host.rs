@@ -320,6 +320,12 @@ pub enum TableOperation {
     /// every paper-space layout once, in the new order; `Model` stays first
     /// and is not listed. One undo step.
     LayoutSetTabOrder { names: Vec<String> },
+    /// Set the drawing's custom properties (the Custom tab of DWGPROPS) (API
+    /// v26). Each `(name, value)` pair replaces the value of the property with
+    /// that name (matched trimmed, ignoring case) or is appended; properties
+    /// not listed are kept. Names must be non-empty and distinct. One undo
+    /// step; nothing is recorded when every value is already there.
+    CustomPropertiesSet { properties: Vec<(String, String)> },
 }
 
 /// The style tables `TableOperation` can rename, delete or make current.

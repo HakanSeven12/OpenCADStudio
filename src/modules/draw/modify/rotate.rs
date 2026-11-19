@@ -352,13 +352,14 @@ impl CadCommand for RotateCommand {
             }
             Step::RefFirst { center } => {
                 let center = *center;
-                let ref_angle = crate::entities::common::parse_typed_angle(t)?;
+                // Reference and new angles are directions: ANGBASE/ANGDIR apply.
+                let ref_angle = crate::entities::common::parse_typed_direction(t)?;
                 self.step = Step::RefNew { center, ref_angle };
                 Some(CmdResult::NeedPoint)
             }
             Step::RefNew { center, ref_angle } => {
                 let (center, ref_angle) = (*center, *ref_angle);
-                let new_angle = crate::entities::common::parse_typed_angle(t)?;
+                let new_angle = crate::entities::common::parse_typed_direction(t)?;
                 Some(self.commit(center, new_angle - ref_angle))
             }
             Step::Center | Step::RefSecond { .. } => None,
@@ -437,15 +438,28 @@ impl CadCommand for RotateCommand {
     }
 
     fn dyn_commit_as_text(&self) -> bool {
-        matches!(self.step, Step::Angle { .. } | Step::RefFirst { .. })
+        matches!(
+            self.step,
+            Step::Angle { .. } | Step::RefFirst { .. } | Step::RefNew { .. }
+        )
+    }
+
+    /// Reference's new angle is absolute: a typed 90 means 90°, whichever
+    /// side of the center the cursor sits on (#3331).
+    fn dyn_auto_sign_angle(&self) -> bool {
+        !matches!(self.step, Step::RefNew { .. })
     }
 
     fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
         match self.step {
-            Step::Angle { center } | Step::RefNew { center, .. } => self
+            Step::Angle { center } => self
                 .plane
                 .angle(center, cursor)
                 .map(|angle| crate::command::dyn_display_angle_deg(angle as f32) as f64),
+            Step::RefNew { center, .. } => self
+                .plane
+                .angle(center, cursor)
+                .map(|angle| angle.rem_euclid(std::f64::consts::TAU).to_degrees()),
             _ => None,
         }
     }

@@ -4672,8 +4672,15 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             // test), so each level's touching ranges merge into one draw.
             let mut per_level: [Vec<(u32, u32)>; 3] = Default::default();
             for (at, entry) in chunk.lod_entries.iter().enumerate() {
-                let pixels =
-                    mesh_gpu::projected_diagonal(entry.aabb, &view_rot, eye, viewport);
+                let pixels = match chunk.instance_lod_bounds {
+                    // Every instance draws one level: the one the largest
+                    // of them needs where the chunk comes closest.
+                    Some(bounds) => mesh_gpu::instance_lod_boxes(entry.aabb, bounds, eye)
+                        .into_iter()
+                        .map(|aabb| mesh_gpu::projected_diagonal(aabb, &view_rot, eye, viewport))
+                        .fold(0.0, f32::max),
+                    None => mesh_gpu::projected_diagonal(entry.aabb, &view_rot, eye, viewport),
+                };
                 let level = mesh_gpu::lod_level(pixels, current.get(at).copied());
                 if at < current.len() {
                     current[at] = level;
@@ -4705,6 +4712,35 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             );
         }
         levels.retain(|index, _| draws.contains_key(index));
+        if crate::perf::enabled() {
+            // What the opaque fills draw this frame: the parts at each level
+            // and the triangles they come to, of those of every part in full.
+            let mut parts = [0usize; 3];
+            let (mut drawn, mut full) = (0u64, 0u64);
+            for (index, chunk) in self.active_mesh_chunks_indexed() {
+                let instances = u64::from(chunk.instance_count.max(1));
+                full += u64::from(chunk.index_count / 3) * instances;
+                match draws.get(&index) {
+                    Some(ranges) => {
+                        for &(_, _, count) in ranges {
+                            drawn += u64::from(count / 3) * instances;
+                        }
+                        for level in levels.get(&index).into_iter().flatten() {
+                            parts[usize::from(*level).min(2)] += 1;
+                        }
+                    }
+                    None => drawn += u64::from(chunk.index_count / 3) * instances,
+                }
+            }
+            crate::perf_record!(
+                "[perf] mesh-lod parts={}/{}/{} triangles={} of {}",
+                parts[0],
+                parts[1],
+                parts[2],
+                drawn,
+                full,
+            );
+        }
         self.mesh_lod_levels = levels;
         self.mesh_lod_draws = draws;
     }

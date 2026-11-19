@@ -2488,6 +2488,7 @@ fn transform_block_mesh_lod_set(
             edge_verts: set.edge_verts.clone(),
             edge_verts_low: set.edge_verts_low.clone(),
             curved_gens: set.curved_gens.clone(),
+            display_lods: set.display_lods.clone(),
         })
     });
     let mut bounds = [

@@ -350,6 +350,126 @@ fn bounded_gpu_uploads_preserve_geometry_and_instancing() {
     );
 }
 
+/// Placements of one solid are drawn as instances of its geometry. They take
+/// its display LODs too: all at the level the largest of them needs.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn instances_of_a_solid_draw_its_coarser_levels_when_they_are_small() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        .expect("GPU adapter");
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .expect("GPU device");
+    let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Bgra8UnormSrgb);
+
+    // A sphere of radius 10, placed 400 times on a 20 x 20 grid 30 apart.
+    let body = ocs_solid::model::make_sphere([0.0; 3], 10.0).unwrap();
+    let mesh = crate::scene::model::solid_model::tessellate(
+        &body,
+        crate::scene::model::solid_model::DisplayTolerance::new(0.05),
+    )
+    .unwrap();
+    let mut solid = MeshLodSet::from_single(MeshModel {
+        name: "7".to_owned(),
+        verts: mesh
+            .positions
+            .iter()
+            .map(|p| [p[0] as f32, p[1] as f32, p[2] as f32])
+            .collect(),
+        verts_low: Vec::new(),
+        normals: mesh
+            .normals
+            .iter()
+            .map(|n| [n[0] as f32, n[1] as f32, n[2] as f32])
+            .collect(),
+        indices: mesh
+            .triangles
+            .iter()
+            .flat_map(|t| t.map(|i| i as u32))
+            .collect(),
+        triangle_material_handles: Vec::new(),
+        triangle_colors: Vec::new(),
+        color: [1.0; 4],
+        selected: false,
+    });
+    solid.build_display_lods();
+    let levels = [1, 2].map(|level| solid.display_lod(level).expect("a level").indices.len());
+    let full = solid.lods[0].indices.len();
+    assert!(
+        levels[1] < levels[0] && levels[0] < full,
+        "{levels:?} of {full}"
+    );
+    solid.prepare_instance_source(Handle::new(7));
+    let placements: Vec<MeshLodSet> = (0..400u32)
+        .map(|index| {
+            let (x, y) = (30.0 * (index % 20) as f32, 30.0 * (index / 20) as f32);
+            let mut placed = solid.clone();
+            placed.lods.clear();
+            placed.display_lods = Default::default();
+            placed.instance_transform = Some(Transform::from_translation(
+                document::types::Vector3::new(x as f64, y as f64, 0.0),
+            ));
+            placed.instance_handle = Some(Handle::new(1000 + index as u64));
+            placed.world_aabb = [x - 10.0, y - 10.0, x + 10.0, y + 10.0];
+            placed.z_aabb = [-10.0, 10.0];
+            placed
+        })
+        .collect();
+
+    let (chunks, total) = mesh_gpu::build_mesh_batch(&device, &queue, &placements);
+    assert_eq!(total, (full / 3 * 400) as u64);
+    assert_eq!(chunks.len(), 1, "one chunk of 400 instances");
+    let chunk = &chunks[0];
+    assert_eq!(chunk.instance_count, 400);
+    assert_eq!(chunk.index_count as usize, full);
+    assert_eq!(chunk.lod_index_buffers.len(), 2, "both coarser levels");
+    assert_eq!(
+        chunk.lod_entries.len(),
+        1,
+        "one entry for all the triangles"
+    );
+    assert_eq!(
+        chunk.lod_entries[0].ranges,
+        [
+            (0, full as u32),
+            (0, levels[0] as u32),
+            (0, levels[1] as u32)
+        ]
+    );
+
+    // An orthographic view straight down, at `scale` pixels to the unit: a
+    // sphere measures about 28 units across its box, whichever one it is.
+    pipeline.gpu_mesh_batch = std::sync::Arc::new(chunks);
+    let mut drawn_at = |scale: f32| {
+        let half = 500.0 / scale;
+        pipeline.mesh_lod_view = Some((
+            glam::Mat4::orthographic_rh(-half, half, -half, half, -10_000.0, 10_000.0),
+            glam::DVec3::new(285.0, 285.0, 0.0),
+            [1000.0, 1000.0],
+        ));
+        pipeline.select_mesh_lods();
+        pipeline.mesh_lod_draws.get(&0).cloned()
+    };
+    assert_eq!(drawn_at(0.5), Some(vec![(2, 0, levels[1] as u32)]), "14 px");
+    assert_eq!(
+        drawn_at(4.0),
+        Some(vec![(1, 0, levels[0] as u32)]),
+        "113 px"
+    );
+    assert_eq!(drawn_at(20.0), Some(vec![(0, 0, full as u32)]), "566 px");
+
+    queue.submit([]);
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    assert!(
+        block_on(validation.pop()).is_none(),
+        "GPU validation failed"
+    );
+}
+
 /// The shadow map is 16 MiB and every slot used to hold one whether or not its
 /// visual style enabled shadows. Now it is allocated on the transition, which
 /// means the frame bind group is rebuilt while the device is watching — the one

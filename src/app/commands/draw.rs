@@ -976,6 +976,23 @@ impl OpenCADStudio {
                 }
             }
 
+            // GAPCHECK steps through small openings between the loose ends
+            // of the selected curves; it changes nothing.
+            "GAPCHECK" => {
+                use crate::modules::manage::gapcheck::{curve_ends, GapCheckCommand};
+                if self.tabs[i].scene.selected.is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let selection = SelectObjectsCommand::new("GAPCHECK");
+                    self.command_line.push_info(&selection.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(selection));
+                } else {
+                    let ends = curve_ends(self.tabs[i].scene.selected_entities());
+                    let command = GapCheckCommand::new(ends);
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                }
+            }
+
             "MEASUREGEOM" | "MEASURERADIUS" | "MEASUREANGLE" => {
                 use crate::modules::draw::inquiry::measuregeom::MeasureGeomCommand;
                 let new_cmd = match cmd {

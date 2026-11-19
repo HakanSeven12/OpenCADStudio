@@ -852,7 +852,7 @@ mod tests {
         let found = fonts()
             .db
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .faces()
             .find_map(|face| match &face.source {
                 fontdb::Source::File(path) => {
@@ -1025,7 +1025,13 @@ mod tests {
         for folder in ["first", "second"] {
             let base = dir.join(folder);
             let path = std::fs::canonicalize(base.join("assets/shared.ttf")).unwrap();
-            let expected = fonts().by_path.lock().unwrap().get(&path).cloned().unwrap();
+            let expected = fonts()
+                .by_path
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&path)
+                .cloned()
+                .unwrap();
             assert_eq!(
                 family_for_reference_at("assets/shared.ttf", Some(&base)),
                 Some(expected.family)

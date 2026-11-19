@@ -9284,8 +9284,9 @@ impl OpenCADStudio {
                 self.mtext_pick_style(s);
                 Task::none()
             }
-            Message::MTextImport(path) => {
-                self.mtext_import(&path);
+            Message::MTextImport(path) => self.mtext_import(&path),
+            Message::MTextImportRead(opened, read) => {
+                self.finish_mtext_import(opened, read);
                 Task::none()
             }
             Message::MTextFontPicker(event) => {

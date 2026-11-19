@@ -94,6 +94,8 @@ mod import_command_tests;
 #[cfg(test)]
 mod mtext_follows_style_tests;
 #[cfg(test)]
+mod mtext_import_tests;
+#[cfg(test)]
 mod mtext_style_from_selection_tests;
 mod navigation;
 pub(crate) mod node_graph;
@@ -5790,6 +5792,9 @@ pub enum Message {
     MTextSelEnd,
     /// Import Text: the file picked.
     MTextImport(String),
+    /// The end of the worker that read an Import Text file: the editor it
+    /// was read for, and the file's MTEXT source or why it cannot be read.
+    MTextImportRead(u64, Result<String, String>),
     /// Timer tick toggling the preview caret's blink phase.
     MTextCaretBlink,
     TableEditorClick(iced::Point),

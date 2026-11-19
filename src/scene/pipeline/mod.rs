@@ -4672,8 +4672,15 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             // test), so each level's touching ranges merge into one draw.
             let mut per_level: [Vec<(u32, u32)>; 3] = Default::default();
             for (at, entry) in chunk.lod_entries.iter().enumerate() {
-                let pixels =
-                    mesh_gpu::projected_diagonal(entry.aabb, &view_rot, eye, viewport);
+                let pixels = match chunk.instance_lod_bounds {
+                    // Every instance draws one level: the one the largest
+                    // of them needs where the chunk comes closest.
+                    Some(bounds) => mesh_gpu::instance_lod_boxes(entry.aabb, bounds, eye)
+                        .into_iter()
+                        .map(|aabb| mesh_gpu::projected_diagonal(aabb, &view_rot, eye, viewport))
+                        .fold(0.0, f32::max),
+                    None => mesh_gpu::projected_diagonal(entry.aabb, &view_rot, eye, viewport),
+                };
                 let level = mesh_gpu::lod_level(pixels, current.get(at).copied());
                 if at < current.len() {
                     current[at] = level;

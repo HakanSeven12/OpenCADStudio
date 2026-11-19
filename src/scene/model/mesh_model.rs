@@ -185,6 +185,9 @@ pub struct MeshInstanceSource {
     pub edge_verts: Vec<[f32; 3]>,
     pub edge_verts_low: Vec<[f32; 3]>,
     pub curved_gens: Vec<CurvedGen>,
+    /// The display LODs of `lods[0]`, shared by every placement of this
+    /// geometry (see [`MeshLodSet::display_lods`]).
+    pub display_lods: std::sync::Arc<[DisplayLod]>,
 }
 
 /// 3D bounds of every LOD's vertices: `([min_x, min_y, max_x, max_y], [min_z, max_z])`.
@@ -284,9 +287,16 @@ impl MeshLodSet {
 
     /// Display LOD `level` (1 or 2) when it still matches the mesh it was
     /// built from.
+    ///
+    /// A placement of shared geometry holds no mesh of its own: its levels
+    /// are the ones of the geometry it places.
     pub fn display_lod(&self, level: usize) -> Option<&DisplayLod> {
-        let lod = self.display_lods.get(level.checked_sub(1)?)?;
-        let mesh = self.lods.first()?;
+        let (lods, mesh) = match (&self.instance_source, self.lods.first()) {
+            (_, Some(mesh)) => (&self.display_lods, mesh),
+            (Some(source), None) => (&source.display_lods, source.lods.first()?),
+            (None, None) => return None,
+        };
+        let lod = lods.get(level.checked_sub(1)?)?;
         (lod.source == (mesh.verts.len(), mesh.indices.len() / 3)).then_some(lod)
     }
 
@@ -313,6 +323,7 @@ impl MeshLodSet {
             edge_verts: self.edge_verts.clone(),
             edge_verts_low: self.edge_verts_low.clone(),
             curved_gens: self.curved_gens.clone(),
+            display_lods: self.display_lods.clone(),
         }));
         self.instance_transform = None;
         self.instance_handle = None;

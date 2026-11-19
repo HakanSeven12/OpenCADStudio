@@ -1099,8 +1099,12 @@ mod tests {
         let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/web/fonts/greek.ttf"))
             .expect("bundled web font");
         let (family, _) = register_font_file("Poison-Test.ttf", &bytes).expect("a face");
-        let alpha = crate::scene::text::ttf_glyph::glyph(&family, '\u{3b1}');
-        assert!(alpha.is_some(), "the bundled font draws alpha");
+        // The bundled subsets all call their family "Noto Sans", and the
+        // database is shared with every test in this binary: once another
+        // test has registered the Latin subset, the family resolves to that
+        // face, which has no Greek. Ask for signs every subset carries.
+        let section = crate::scene::text::ttf_glyph::glyph(&family, '\u{a7}');
+        assert!(section.is_some(), "the bundled font draws the section sign");
 
         let caught = std::panic::catch_unwind(|| {
             with_face_data::<()>(&family, |_, _| panic!("a damaged font"))
@@ -1114,7 +1118,7 @@ mod tests {
         // What a text draw does next: find the face, read it, build a glyph.
         assert!(has_family(&family));
         assert!(with_face_data(&family, |data, _| data.len()).is_some_and(|len| len > 0));
-        assert!(crate::scene::text::ttf_glyph::glyph(&family, '\u{3b2}').is_some());
+        assert!(crate::scene::text::ttf_glyph::glyph(&family, '\u{b1}').is_some());
 
         // The lock is shared with every other test in this binary.
         fonts().db.clear_poison();

@@ -6453,6 +6453,48 @@ mod batch4_tests {
         assert!(text.contains("1:50"), "{text}");
     }
 
+    /// A ratio is a sheet scale whether or not the scale list names it: in a
+    /// metre drawing 1:40 and 1:750 sit beside 1:50, not a thousand times
+    /// away. A bare number stays the paper / model factor `ZOOM nXP` takes.
+    #[test]
+    fn vpscale_takes_a_ratio_the_list_does_not_name_as_a_sheet_scale_too() {
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        enter_layout(&mut app);
+        let _ = app.run_command_line("VPORTS SINGLE");
+        let _ = app.feed_active_cmd("F");
+        let handles = layout_viewport_handles(&app);
+        assert_eq!(handles.len(), 1, "{}", out(&app));
+        let i = app.active_tab;
+        app.tabs[i].scene.document.header.insertion_units = 6; // metres
+        let unit = app.tabs[i].scene.default_scale_unit_factor();
+        assert_eq!(unit, 1000.0, "millimetres of paper to a metre");
+
+        for (text, ratio) in [
+            ("1:50", 1.0 / 50.0),
+            ("1:40", 1.0 / 40.0),
+            ("1:750", 1.0 / 750.0),
+            ("2:3", 2.0 / 3.0),
+        ] {
+            let _ = app.run_command_line(&format!("VPSCALE {text}"));
+            assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+            let eff = effective_scale(&app, handles[0]);
+            let expected = ratio * unit;
+            assert!(
+                (eff - expected).abs() < 1e-9 * expected,
+                "VPSCALE {text}: the viewport is at {eff}, a sheet scale of {text} is {expected}"
+            );
+        }
+
+        let _ = app.run_command_line("VPSCALE 0.02");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let eff = effective_scale(&app, handles[0]);
+        assert!(
+            (eff - 0.02).abs() < 1e-12,
+            "a bare factor is paper units to a model unit, got {eff}"
+        );
+    }
+
     #[test]
     fn vp_lock_toggles_the_viewport_display_lock() {
         let mut app = new_app();

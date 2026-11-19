@@ -775,9 +775,9 @@ impl OpenCADStudio {
                         return Some(Task::none());
                     }
                     // A named scale in the drawing's own list wins; otherwise
-                    // accept a ratio (1:50) or a bare paper/model factor. The
-                    // explicit factor goes through the same path ZOOM nXP uses,
-                    // so a named ratio and a bare factor land identically.
+                    // accept a ratio (1:40), a sheet scale like the standard
+                    // ones, or a bare paper/model factor. Either goes through
+                    // the same path ZOOM nXP uses.
                     // The picker exposes effective viewport factors, whereas
                     // scale_ratio intentionally exposes the drawing's raw
                     // paper/drawing units for page setups.
@@ -786,7 +786,9 @@ impl OpenCADStudio {
                         .into_iter()
                         .find(|(name, _, _)| name.eq_ignore_ascii_case(&value))
                         .map(|(_, _, factor)| factor)
-                        .or_else(|| parse_viewport_scale(&value));
+                        .or_else(|| {
+                            parse_viewport_scale(&value, scene.default_scale_unit_factor())
+                        });
                     let applied = factor
                         .map(|factor| {
                             self.tabs[i]
@@ -2082,15 +2084,21 @@ fn parse_vport_rects(value: &str) -> Vec<(f64, f64, f64, f64)> {
 }
 
 /// Parse a `VPSCALE` value into a paper-to-model factor (paper units per
-/// model unit). Accepts named ratios (`1:50`, `2:1`) and bare factors (`0.02`).
-fn parse_viewport_scale(value: &str) -> Option<f64> {
+/// model unit). Accepts ratios (`1:50`, `2:1`) and bare factors (`0.02`).
+///
+/// A ratio is a sheet scale, like the standard scales of the list: it is
+/// converted with `sheet_unit`, the paper units in one drawing unit
+/// ([`crate::scene::Scene::default_scale_unit_factor`]). Left raw, a metre
+/// drawing's 1:40 came out a thousand times away from its 1:50. A bare number
+/// is the factor itself, as `ZOOM nXP` takes it.
+fn parse_viewport_scale(value: &str, sheet_unit: f64) -> Option<f64> {
     let text = value.trim();
     if text.is_empty() || text.eq_ignore_ascii_case("?") {
         return None;
     }
     if let Some((paper, drawing)) = crate::scene::Scene::parse_scale_name_ratio(text) {
         if paper > 0.0 && drawing > 0.0 {
-            let factor = paper / drawing;
+            let factor = paper / drawing * sheet_unit;
             if factor.is_finite() && factor > 0.0 {
                 return Some(factor);
             }

@@ -4658,11 +4658,39 @@ impl Scene {
             self.paper_bg_color
         };
         let all_visible = self.annotation_all_visible();
+        // The outline of a solid is built for the size its edges show at, so
+        // in a drawing that has solids the wires follow the steps of this
+        // view's scale. A perspective view shows an edge at more than one
+        // size and outlines the solids in full.
+        let interaction_meshes = self.interaction_meshes_arc();
+        let outline_step = (!interaction_meshes.is_empty()
+            && inst.camera.projection == crate::scene::view::camera::Projection::Orthographic)
+            .then(|| {
+                crate::scene::outline_detail::step(
+                    (inst.screen_rect.height * 0.5 / inst.camera.ortho_size() * device_scale())
+                        as f64,
+                )
+            })
+            .flatten();
+        // While the view is being zoomed the outlines stay the ones it had:
+        // they are built again once it rests, not at every step it crosses.
+        let outline_step = {
+            let mut steps = self.outline_steps.borrow_mut();
+            let view = (inst.handle, inst.tile_idx);
+            match (outline_step, steps.get(&view)) {
+                (Some(_), Some(kept)) if self.navigating_lod() => *kept,
+                _ => {
+                    steps.insert(view, outline_step);
+                    outline_step
+                }
+            }
+        };
 
         let mut key = 0xcbf2_9ce4_8422_2325_u64;
         let mut mix =
             |value: u64| key = key.rotate_left(17) ^ value.wrapping_mul(0x9E37_79B9_7F4A_7C15);
         mix(self.geometry_epoch);
+        mix(outline_step.map_or(u64::MAX, |step| step as u32 as u64));
         if !selected_part {
             // The hover part is `hovered − selected`: it changes on a rollover
             // or marquee tick (hover_generation) and on a selection change.
@@ -4710,7 +4738,6 @@ impl Scene {
         highlighted.sort_unstable_by_key(|(handle, _)| handle.value());
 
         let empty_selection = rustc_hash::FxHashSet::default();
-        let interaction_meshes = self.interaction_meshes_arc();
         // Avoid rescanning every mesh for every highlighted entity. A large
         // cumulative selection contains mostly non-mesh entities, so index
         // the comparatively small mesh set once for this rebuild.
@@ -4722,6 +4749,7 @@ impl Scene {
         }
         let mut wires = Vec::new();
         let mut edge_prototypes = rustc_hash::FxHashMap::default();
+        let mut outline_detail = OutlineDetail::new(outline_step);
         for (handle, selected) in highlighted {
             let Some(entity) = self.document.get_entity(handle) else {
                 continue;
@@ -4755,17 +4783,27 @@ impl Scene {
             }
             for set in meshes_by_handle.get(&handle).into_iter().flatten() {
                 let name = format!("mesh-edge:{}", handle.value());
-                if let Some(stub) =
-                    moved_edge_outline(set, &mut edge_prototypes, &name, tint, selected)
-                {
+                let level = outline_detail.step_of(set);
+                if let Some(stub) = moved_edge_outline(
+                    set,
+                    &mut edge_prototypes,
+                    &mut outline_detail,
+                    level,
+                    &name,
+                    tint,
+                    selected,
+                ) {
                     wires.push(stub);
                     continue;
                 }
-                let (edges, edges_low) = set.geometry_edges();
+                let (edges, _) = set.geometry_edges();
                 if edges.len() < 2 {
                     continue;
                 }
-                let points = edge_outline_points(edges, edges_low, set.instance_transform.as_ref());
+                let points = placed_edge_points(
+                    &outline_detail.edges(set, level),
+                    set.instance_transform.as_ref(),
+                );
                 wires.push(edge_outline(name, points, tint, selected));
             }
 
@@ -6297,29 +6335,96 @@ pub fn device_scale() -> f32 {
     f32::from_bits(DEVICE_SCALE.load(std::sync::atomic::Ordering::Relaxed))
 }
 
-/// The edge outline of a highlighted solid: its edge pairs as one line broken
-/// between pairs, placed by `transform` when the solid is a block's.
-fn edge_outline_points(
-    edges: &[[f32; 3]],
-    edges_low: &[[f32; 3]],
-    transform: Option<&document::types::Transform>,
-) -> Vec<[f64; 3]> {
-    let mut points = Vec::with_capacity(edges.len() / 2 * 3);
+/// The edges of a solid in its own coordinates: the two ends of each pair,
+/// one after the other.
+fn local_edge_points(edges: &[[f32; 3]], edges_low: &[[f32; 3]]) -> Vec<[f64; 3]> {
+    let mut points = Vec::with_capacity(edges.len());
     for pair_start in (0..edges.len().saturating_sub(1)).step_by(2) {
         for index in [pair_start, pair_start + 1] {
             let high = edges[index];
             let low = edges_low.get(index).copied().unwrap_or([0.0; 3]);
-            let local = document::types::Vector3::new(
+            points.push([
                 high[0] as f64 + low[0] as f64,
                 high[1] as f64 + low[1] as f64,
                 high[2] as f64 + low[2] as f64,
-            );
+            ]);
+        }
+    }
+    points
+}
+
+/// The edge outline of a highlighted solid: its edge pairs as one line broken
+/// between pairs, placed by `transform` when the solid is a block's.
+fn placed_edge_points(
+    pairs: &[[f64; 3]],
+    transform: Option<&document::types::Transform>,
+) -> Vec<[f64; 3]> {
+    let mut points = Vec::with_capacity(pairs.len() / 2 * 3);
+    for pair in pairs.chunks_exact(2) {
+        for local in pair {
+            let local = document::types::Vector3::new(local[0], local[1], local[2]);
             let world = transform.map_or(local, |transform| transform.apply(local));
             points.push([world.x, world.y, world.z]);
         }
         points.push([f64::NAN; 3]);
     }
     points
+}
+
+/// What the outlines of one build share: the step of the view's scale they
+/// are built for, and the edges of each solid geometry as thinned for a step
+/// (see [`crate::scene::outline_detail`]).
+struct OutlineDetail {
+    step: Option<i32>,
+    edges: rustc_hash::FxHashMap<(usize, Option<i32>), Arc<Vec<[f64; 3]>>>,
+}
+
+impl OutlineDetail {
+    fn new(step: Option<i32>) -> Self {
+        Self {
+            step,
+            edges: rustc_hash::FxHashMap::default(),
+        }
+    }
+
+    /// The step of the scale `set` shows at: the view's, and what its
+    /// reference stretches it by. `None` outlines it in full.
+    fn step_of(&self, set: &crate::scene::model::mesh_model::MeshLodSet) -> Option<i32> {
+        let step = self.step?;
+        // The longest a unit of the solid gets where the reference places it.
+        let stretch = set.instance_transform.as_ref().map_or(1.0, |transform| {
+            let m = &transform.matrix.m;
+            (0..3)
+                .map(|column| (0..3).map(|row| m[row][column].powi(2)).sum::<f64>())
+                .fold(0.0, f64::max)
+                .sqrt()
+        });
+        Some(step + crate::scene::outline_detail::step(stretch)?)
+    }
+
+    /// The edges of `set` for the scale of `step`, in its own coordinates.
+    /// References of one block share their edges, and so the answer.
+    fn edges(
+        &mut self,
+        set: &crate::scene::model::mesh_model::MeshLodSet,
+        step: Option<i32>,
+    ) -> Arc<Vec<[f64; 3]>> {
+        let (edges, edges_low) = set.geometry_edges();
+        let key = (edges.as_ptr() as usize, step);
+        if let Some(found) = self.edges.get(&key) {
+            return Arc::clone(found);
+        }
+        let whole = local_edge_points(edges, edges_low);
+        let shown = Arc::new(match step {
+            Some(step) => crate::scene::outline_detail::simplified(
+                &whole,
+                crate::scene::outline_detail::small_line(step),
+            ),
+            None => whole,
+        });
+        self.edges.insert(key, Arc::clone(&shown));
+        shown
+    }
 }
 
 fn edge_outline(name: String, points: Vec<[f64; 3]>, tint: [f32; 4], selected: bool) -> WireModel {
@@ -6336,7 +6441,9 @@ fn edge_outline(name: String, points: Vec<[f64; 3]>, tint: [f32; 4], selected: b
 /// a block's, or the reference turns, scales or mirrors it.
 fn moved_edge_outline(
     set: &crate::scene::model::mesh_model::MeshLodSet,
-    prototypes: &mut rustc_hash::FxHashMap<(usize, bool), Arc<Vec<WireModel>>>,
+    prototypes: &mut rustc_hash::FxHashMap<(usize, bool, Option<i32>), Arc<Vec<WireModel>>>,
+    detail: &mut OutlineDetail,
+    level: Option<i32>,
     name: &str,
     tint: [f32; 4],
     selected: bool,
@@ -6348,10 +6455,11 @@ fn moved_edge_outline(
     }
     let prototype = prototypes
         // The tint follows `selected`, so a hovered and a selected
-        // reference of one block each get their own shape.
-        .entry((Arc::as_ptr(source) as usize, selected))
+        // reference of one block each get their own shape; so does each
+        // step of scale.
+        .entry((Arc::as_ptr(source) as usize, selected, level))
         .or_insert_with(|| {
-            let points = edge_outline_points(&source.edge_verts, &source.edge_verts_low, None);
+            let points = placed_edge_points(&detail.edges(set, level), None);
             let mut outline = edge_outline(name.to_string(), points, tint, selected);
             outline.render_instance = Some(crate::scene::model::instance_model::RenderInstance {
                 source_id: crate::scene::model::instance_model::next_source_id(),

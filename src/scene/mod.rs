@@ -118,6 +118,7 @@ pub(crate) use modify::remap_copied_reactors;
 pub(crate) use modify::remap_copied_viewport_clips;
 mod mspace;
 pub mod named_parameters;
+mod outline_detail;
 mod page_setup;
 mod paper;
 mod preview;
@@ -2674,6 +2675,11 @@ pub struct Scene {
     annotation_highlight_cache: RefCell<HashMap<u64, Arc<Vec<WireModel>>>>,
     // The selected part is independent of box/rollover hover changes.
     annotation_selected_cache: RefCell<HashMap<u64, AnnotationSelectedEntry>>,
+    /// The step of scale the outlines of highlighted solids were last built
+    /// for in each view (its viewport handle and model tile; see
+    /// `outline_detail`). A view that is being zoomed keeps its step until
+    /// it rests.
+    outline_steps: RefCell<HashMap<(Handle, Option<usize>), Option<i32>>>,
     /// Per wire-source `(geometry_epoch, gathered text)` of the most recent
     /// SDF-text build. When a new content id misses the cache but the journal
     /// shows no text-bearing entity changed since that epoch, the same glyphs
@@ -3706,6 +3712,7 @@ impl Scene {
             active_model_tile: std::cell::Cell::new(0),
             sdf_text_cache: RefCell::new(HashMap::default()),
             annotation_highlight_cache: RefCell::new(HashMap::default()),
+            outline_steps: RefCell::new(HashMap::default()),
             annotation_selected_cache: RefCell::new(HashMap::default()),
             last_sdf_text: RefCell::new(HashMap::default()),
             // One pane mapped to tile 0 — matches the single default tile above.

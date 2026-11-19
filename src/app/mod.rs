@@ -220,6 +220,11 @@ pub struct HoverDwell {
     pub point: iced::Point,
     pub tile_size: (f32, f32),
     pub tab: usize,
+    /// The camera generation when the cursor came to rest. A wheel zoom
+    /// keeps the cursor still, so a dwell armed before the zoom would fire
+    /// mid-navigation and stall it; a tick that finds this changed restarts
+    /// the rest clock on the new view instead of picking (#3339).
+    pub camera_generation: u64,
 }
 
 /// Raw (unfiltered) box hits from the last preview. This is only used for
@@ -293,6 +298,13 @@ impl SnapDwell {
 /// How long the cursor must sit still before the idle rollover pick runs
 /// when the moving pick (`hover_pick_due`) has not already answered it.
 pub const HOVER_DWELL_MS: u128 = 500;
+
+/// The settled hover pick skips its wire sweep when the pick aperture holds
+/// more than this many candidate segments: past it, every wire in the box is
+/// a plausible hit and the sweep costs more than the rollover highlight is
+/// worth. Click picks keep their full sweep — a deliberate user action earns
+/// the cost.
+pub const HOVER_CANDIDATE_CAP: usize = 16384;
 /// How long the cursor must sit still before the active-command object-snap pass runs.
 pub const SNAP_DWELL_MS: u128 = 60;
 /// Shortest gap between full snap passes while the pointer keeps moving. A

@@ -12049,6 +12049,98 @@ impl Scene {
         arc
     }
 
+    /// Splice a re-delivered raster's fresh model into every cached gathered
+    /// image list. The reseed takes no geometry bump — the entity, its draw
+    /// order and every wire are untouched — so the lists stay valid and only
+    /// their pixels are refreshed; without this the gather would re-walk the
+    /// whole drawing on the UI thread right after the view settled (#3339).
+    /// A raster replacement changes only pixels and size — the gathered
+    /// placement, clip and draw depth stay valid — so lists that are current
+    /// are patched in place; lists already stale for other reasons keep their
+    /// rebuild, as do lists holding an instanced clone (an image inside a
+    /// block reference), whose transform the gather owns.
+    pub(crate) fn patch_image_caches(&self, prev_epoch: u64, handles: &[Handle]) {
+        if handles.is_empty() {
+            return;
+        }
+        let perf = crate::perf::enabled();
+        let started = perf.then(iced::time::Instant::now);
+        let a = self.patch_image_cache_entries(&self.image_cache, prev_epoch, handles);
+        let b = self.patch_image_cache_entries(&self.frozen_image_cache, prev_epoch, handles);
+        let counts = (a.0 + b.0, a.1 + b.1, a.2 + b.2);
+        if perf {
+            crate::perf_record!(
+                "[perf] image-patch   {:>7.2}ms entries={} lists_patched={} stale_kept={}",
+                started.map_or(0.0, |s| s.elapsed().as_secs_f64() * 1000.0),
+                counts.0,
+                counts.1,
+                counts.2,
+            );
+        }
+    }
+
+    /// Returns (entries seen, lists patched, stale lists left to their rebuild).
+    fn patch_image_cache_entries<K>(
+        &self,
+        cache: &RefCell<HashMap<K, (u64, Arc<Vec<ImageModel>>)>>,
+        prev_epoch: u64,
+        handles: &[Handle],
+    ) -> (usize, usize, usize) {
+        let epoch = self.geometry_epoch;
+        let mut seen = 0usize;
+        let mut patched = 0usize;
+        let mut stale = 0usize;
+        for (entry_epoch, arc) in cache.borrow_mut().values_mut() {
+            seen += 1;
+            if *entry_epoch != prev_epoch {
+                // The list predates other changes a patch cannot reason about;
+                // its own rebuild stays responsible for it.
+                stale += 1;
+                continue;
+            }
+            if arc.iter().any(|model| {
+                model.render_instance.is_some()
+                    && model.entity.is_some_and(|entity| handles.contains(&entity))
+            }) {
+                stale += 1;
+                continue;
+            }
+            let list = Arc::make_mut(arc);
+            let mut touched = false;
+            list.retain_mut(|model| {
+                let Some(entity) = model.entity else {
+                    return true;
+                };
+                if !handles.contains(&entity) {
+                    return true;
+                }
+                match self.images.get(&entity) {
+                    Some(fresh) => {
+                        if !Arc::ptr_eq(&model.pixels, &fresh.pixels) {
+                            model.file_path = fresh.file_path.clone();
+                            model.pixels = Arc::clone(&fresh.pixels);
+                            model.width = fresh.width;
+                            model.height = fresh.height;
+                        }
+                        touched = true;
+                        true
+                    }
+                    None => {
+                        // The raster did not come back; the cached list drops
+                        // the entry the rebuild would not gather either.
+                        touched = true;
+                        false
+                    }
+                }
+            });
+            if touched {
+                *entry_epoch = epoch;
+                patched += 1;
+            }
+        }
+        (seen, patched, stale)
+    }
+
     /// Image / OLE-frame models owned by `target_block`, optionally dropping
     /// those whose layer is frozen in a content viewport (`frozen`).
     fn image_models(
@@ -12179,6 +12271,9 @@ impl Scene {
                     .then(|| self.print_underlay_image(entity))
                     .flatten()
                     .unwrap_or_else(|| model.clone());
+                // Stamp the real handle: a seed can build the model before
+                // the entity's handle is assigned, so the builder cannot.
+                placed.entity = Some(handle);
                 if context.is_instanced() {
                     for (corner, low) in placed.corners.iter_mut().zip(&mut placed.corners_low) {
                         let point = document::types::Vector3::new(

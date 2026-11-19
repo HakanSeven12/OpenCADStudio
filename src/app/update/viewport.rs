@@ -3923,6 +3923,7 @@ impl OpenCADStudio {
                 point: p,
                 tile_size: vp_size,
                 tab: i,
+                camera_generation: self.tabs[i].scene.camera_generation,
             });
         } else {
             // Suppress the rollover during a command or a drag.
@@ -9394,6 +9395,7 @@ properties={:.1}ms picked={}",
             point: Point::new(cursor.x - tile.x, cursor.y - tile.y),
             tile_size: (tile.width, tile.height),
             tab: i,
+            camera_generation: self.tabs[i].scene.camera_generation,
         });
     }
 
@@ -9903,6 +9905,21 @@ properties={:.1}ms picked={}",
             self.hover_dwell = None;
             return Task::none();
         }
+        // A wheel zoom keeps the cursor still, so a dwell armed before the
+        // zoom would otherwise fire mid-navigation and stall it with the
+        // O(N) settled pick. The camera generation moved since the cursor
+        // came to rest: restart the rest clock on the new view and pick
+        // only once that has settled too (#3339).
+        if self.tabs[i].scene.camera_generation != dwell.camera_generation {
+            self.hover_dwell = Some(crate::app::HoverDwell {
+                last_move_at: Instant::now(),
+                point: dwell.point,
+                tile_size: dwell.tile_size,
+                tab: dwell.tab,
+                camera_generation: self.tabs[i].scene.camera_generation,
+            });
+            return Task::none();
+        }
         // While the quad's own hover dwell is counting with no quad open
         // (its configured delay is beyond the rollover's), re-running the
         // whole settled pick below would repeat identically: none of its
@@ -9933,6 +9950,7 @@ properties={:.1}ms picked={}",
                         point: dwell.point,
                         tile_size: dwell.tile_size,
                         tab: dwell.tab,
+                        camera_generation: self.tabs[dwell.tab].scene.camera_generation,
                     });
                 } else {
                     self.hover_dwell = None;
@@ -10005,18 +10023,33 @@ properties={:.1}ms picked={}",
         // highlights every selectable object: wire → hatch →
         // block-internal hatch → shaded 3D solid body.
         let wire_started = Instant::now();
-        let mut hovered = scene::pick::hit_test::click_hit(
-            p,
-            &hover_candidates,
-            view_rot,
-            eye,
-            bounds,
-            self.tabs[i].scene.document.header.lineweight_display,
-            crate::ui::overlay::pick_box_aperture_px(self.pick_box),
-            &self.tabs[i].scene.draw_depth_map(),
-        )
-        .and_then(Scene::handle_from_wire_name);
+        // A pathological draw (tens of thousands of segments inside the pick
+        // aperture) would still cost more than a hover highlight is worth;
+        // skip the wire test rather than stall the UI thread (#3339). Click
+        // picks keep their full sweep — a deliberate user action earns it.
+        let over_candidate_cap = candidate_count > crate::app::HOVER_CANDIDATE_CAP;
+        let mut hovered = if over_candidate_cap {
+            None
+        } else {
+            scene::pick::hit_test::click_hit(
+                p,
+                &hover_candidates,
+                view_rot,
+                eye,
+                bounds,
+                self.tabs[i].scene.document.header.lineweight_display,
+                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                &self.tabs[i].scene.draw_depth_map(),
+            )
+            .and_then(Scene::handle_from_wire_name)
+        };
         let wire_ms = wire_started.elapsed().as_secs_f64() * 1000.0;
+        if over_candidate_cap && perf {
+            crate::perf_record!(
+                "[perf] hover-capped   candidates={} wire sweep skipped",
+                candidate_count
+            );
+        }
         let mut hatch_ms = 0.0;
         let mut insert_ms = 0.0;
         let mut solid_ms = 0.0;
@@ -10174,6 +10207,7 @@ properties={:.1}ms picked={}",
                 point: dwell.point,
                 tile_size: dwell.tile_size,
                 tab: dwell.tab,
+                camera_generation: self.tabs[i].scene.camera_generation,
             });
         } else {
             self.hover_dwell = None;
@@ -13229,6 +13263,7 @@ mod selection_preview_tests {
             point: iced::Point::new(400.0, 300.0),
             tile_size: (800.0, 600.0),
             tab: i,
+            camera_generation: app.tabs[i].scene.camera_generation,
         });
         let _ = app.on_hover_dwell_tick();
         app.tabs[i].scene.hover_highlight.is_some()
@@ -13273,6 +13308,7 @@ mod selection_preview_tests {
             point: iced::Point::new(400.0, 300.0),
             tile_size: (800.0, 600.0),
             tab: i,
+            camera_generation: app.tabs[i].scene.camera_generation,
         });
         // The first tick picks (the line under the cursor is highlighted)
         // and arms the quad dwell — rest 501 < 700, so the quad is waiting.
@@ -13316,6 +13352,7 @@ mod selection_preview_tests {
             point: iced::Point::new(400.0, 300.0),
             tile_size: (800.0, 600.0),
             tab: i,
+            camera_generation: app.tabs[i].scene.camera_generation,
         });
         let _ = app.on_hover_dwell_tick();
         assert!(

@@ -41,34 +41,31 @@ fn newest_profile(document: &document::Document, alignment: Handle) -> Option<Ha
         .find(|h| arch(document, *h).is_some_and(|a| a.dxf_name == "AECC_PROFILE"))
 }
 
-/// The vertices (x, y, elevation) of a line or polyline, the first again at the end of a
-/// closed one.
-fn vertices(entity: &EntityType) -> Result<Vec<Vector3>, String> {
-    let arcs = || crate::t!("Polylines with arcs cannot be made into alignments yet.").into_owned();
-    let (mut points, closed) = match entity {
-        EntityType::Line(l) => (vec![l.start, l.end], false),
+/// The vertices (x, y, elevation) of a line or polyline with the bulge of the segment that
+/// starts at each, the first again at the end of a closed one.
+fn vertices(entity: &EntityType) -> Result<Vec<(Vector3, f64)>, String> {
+    let (mut points, closed): (Vec<(Vector3, f64)>, bool) = match entity {
+        EntityType::Line(l) => (vec![(l.start, 0.0), (l.end, 0.0)], false),
         EntityType::LwPolyline(p) => {
-            if p.vertices.iter().any(|v| v.bulge != 0.0) {
-                return Err(arcs());
-            }
             if p.normal.z < 0.0 {
                 return Err(crate::t!("The polyline is not in the XY plane.").into_owned());
             }
-            (p.vertices.iter().map(|v| Vector3::new(v.location.x, v.location.y, p.elevation)).collect(), p.is_closed)
+            let at = |v: &document::entities::LwVertex| Vector3::new(v.location.x, v.location.y, p.elevation);
+            (p.vertices.iter().map(|v| (at(v), v.bulge)).collect(), p.is_closed)
         }
         EntityType::Polyline2D(p) => {
-            if p.vertices.iter().any(|v| v.bulge != 0.0) {
-                return Err(arcs());
-            }
             let z = p.elevation;
-            (p.vertices.iter().map(|v| Vector3::new(v.location.x, v.location.y, z)).collect(), p.is_closed())
+            (p.vertices.iter().map(|v| (Vector3::new(v.location.x, v.location.y, z), v.bulge)).collect(), p.is_closed())
         }
-        EntityType::Polyline3D(p) => (p.vertices.iter().map(|v| v.position).collect(), p.is_closed()),
+        EntityType::Polyline3D(p) => (p.vertices.iter().map(|v| (v.position, 0.0)).collect(), p.is_closed()),
         _ => return Err(crate::t!("Select a line or polyline.").into_owned()),
     };
-    points.dedup_by(|a, b| a.x == b.x && a.y == b.y);
+    points.dedup_by(|a, b| a.0.x == b.0.x && a.0.y == b.0.y);
     if closed && points.len() > 2 {
-        points.push(points[0]);
+        points.push((points[0].0, 0.0));
+    } else if let Some(last) = points.last_mut() {
+        // An open polyline's last bulge belongs to no segment.
+        last.1 = 0.0;
     }
     if points.len() < 2 {
         return Err(crate::t!("The polyline has no length.").into_owned());
@@ -133,7 +130,11 @@ impl OpenCADStudio {
             "CREATEALIGNMENT" => {
                 let doc = &self.tabs[i].scene.document;
                 let entity = req.objects[0].first().and_then(|h| doc.get_entity(*h)).ok_or("no object")?;
-                let points: Vec<Vector2> = vertices(entity)?.iter().map(|p| Vector2::new(p.x, p.y)).collect();
+                let points = vertices(entity)?;
+                if points.iter().any(|p| p.1 != 0.0) {
+                    return Err(crate::t!("Polylines with arcs cannot be made into alignments yet.").into_owned());
+                }
+                let points: Vec<Vector2> = points.iter().map(|p| Vector2::new(p.0.x, p.0.y)).collect();
                 let radius = req.value("radius", 0.0);
                 let spiral = req.value("spiral", 0.0);
                 let corner = if radius <= 0.0 {
@@ -211,7 +212,13 @@ impl OpenCADStudio {
                 let paths = req.objects[0]
                     .iter()
                     .filter_map(|h| doc.get_entity(*h))
-                    .map(vertices)
+                    .map(|e| {
+                        let points = vertices(e)?;
+                        Ok(points
+                            .into_iter()
+                            .map(|(point, bulge)| c3d::FeatureLineVertex { point, bulge, elevation_point: false })
+                            .collect::<Vec<_>>())
+                    })
                     .collect::<Result<Vec<_>, String>>()?;
                 // The last site this drawing has; a new one when it has none or when a feature
                 // line cannot join it (a site the codec does not write).
@@ -234,7 +241,7 @@ impl OpenCADStudio {
                 for (k, points) in paths.iter().enumerate() {
                     let line = format!("Feature Line {}", base + k);
                     let added = match site {
-                        Some(s) => c3d::add_feature_line(doc, s, &line, points, layer),
+                        Some(s) => c3d::add_feature_line_vertices(doc, s, &line, points, layer),
                         None => Err(document::error::DxfError::Parse(String::new())),
                     };
                     let h = match added {
@@ -242,7 +249,7 @@ impl OpenCADStudio {
                         Err(_) => {
                             let s = c3d::add_site(doc, &site_name, "").map_err(refused)?;
                             site = Some(s);
-                            c3d::add_feature_line(doc, s, &line, points, layer).map_err(refused)?
+                            c3d::add_feature_line_vertices(doc, s, &line, points, layer).map_err(refused)?
                         }
                     };
                     changes.push((h, ChangeKind::Added));

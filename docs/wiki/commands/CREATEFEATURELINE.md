@@ -4,7 +4,7 @@ related: CREATEALIGNMENT, CREATESURFACE
 ---
 
 ## Usage
-1. Select lines, 2D polylines or 3D polylines, then press Enter.
+1. Select lines, 2D polylines or 3D polylines, then press Enter; polyline arcs stay arcs.
 
 ## Notes
 - Each object makes one feature line through its vertices, with their elevations.

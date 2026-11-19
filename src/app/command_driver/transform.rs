@@ -198,7 +198,7 @@ impl OpenCADStudio {
         tab.scene
             .selection
             .borrow_mut()
-            .clear_left_selection_gesture("src/app/command_driver/transform.rs:201");
+            .clear_left_selection_gesture();
         self.grip_hover = None;
     }
 

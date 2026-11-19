@@ -27,7 +27,9 @@ mod table_inplace_widget_tests;
 /// positionless press message; capturing the cursor in the actual button
 /// event avoids using the previous hover location when clicking quickly.
 #[derive(Debug, Clone, Copy)]
-struct ViewportPickSurface;
+/// The flag keeps a click-move-click selection box waiting for its second
+/// corner following the pointer past the canvas edge (#3365).
+struct ViewportPickSurface(bool);
 
 #[derive(Default)]
 struct ViewportPointerState {
@@ -199,7 +201,7 @@ impl iced::widget::canvas::Program<Message> for ViewportPickSurface {
             // uncaptured so it still tracks hover for `on_exit`. A middle
             // drag keeps following the pointer past the viewport edge.
             Mouse::CursorMoved { position }
-                if cursor.is_over(bounds) || state.middle_drag || state.left_drag =>
+                if cursor.is_over(bounds) || state.middle_drag || state.left_drag || self.0 =>
             {
                 Some(Action::publish(Message::ViewportMove(iced::Point::new(
                     position.x - bounds.x,
@@ -2118,9 +2120,12 @@ bg={bg_ms:.1}ms n={view_count}"
 
         mark("viewport_mouse");
         let viewport_mouse = mouse_area(container(
-            iced::widget::canvas(ViewportPickSurface)
-                .width(Fill)
-                .height(Fill),
+            iced::widget::canvas(ViewportPickSurface({
+                let sel = tab.scene.selection.borrow();
+                sel.gesture.box_anchor.is_some() || sel.gesture.poly_active
+            }))
+            .width(Fill)
+            .height(Fill),
         ))
         // Moves come from the canvas (mouse and touch) in event order.
         // Left mouse presses are captured by the canvas with their exact
@@ -4202,34 +4207,6 @@ impl OpenCADStudio {
         } else {
             event::listen_with(window_event)
         };
-        // While a selection box drag is in flight — pressed or a click-move-
-        // click box waiting for its second corner — watch the mouse at the
-        // WINDOW level: AutoCAD keeps the rubber band following the pointer
-        // over the command line, panels and past the window edge, and commits
-        // on the release wherever it lands. The canvas only sees events inside
-        // its bounds, so these fall through to the delta tracker.
-        let box_drag_active = {
-            let sel = self.tabs[self.active_tab].scene.selection.borrow();
-            sel.input.left_down || sel.gesture.box_anchor.is_some()
-        };
-        let box_drag_track = if box_drag_active {
-            event::listen_with(|event, _, id| {
-                if !crate::app::tool_windows::is_main_window(id) {
-                    return None;
-                }
-                match event {
-                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: at }) => {
-                        Some(Message::SelectionDragCursor(at))
-                    }
-                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
-                        iced::mouse::Button::Left,
-                    )) => Some(Message::SelectionDragRelease),
-                    _ => None,
-                }
-            })
-        } else {
-            Subscription::none()
-        };
         #[cfg(not(target_arch = "wasm32"))]
         let control = iced::Subscription::batch([
             super::control::subscribe().map(Message::ControlRequest),
@@ -4294,7 +4271,6 @@ impl OpenCADStudio {
             single_instance,
             hatch_pattern_keys,
             keyboard_events,
-            box_drag_track,
             ui_font_changes(),
             terminate_requests(),
         ])
@@ -6203,7 +6179,7 @@ mod tests {
         ] {
             let event = iced::Event::Mouse(Mouse::CursorMoved { position });
             let expected = iced::Point::new(position.x - bounds.x, position.y - bounds.y);
-            let (motion, _, _) = ViewportPickSurface
+            let (motion, _, _) = ViewportPickSurface(false)
                 .update(&mut viewport, &event, bounds, final_cursor)
                 .unwrap()
                 .into_inner();
@@ -6214,7 +6190,7 @@ mod tests {
                 .into_inner();
             assert!(matches!(motion, Some(Message::PaneMove(2, p)) if p == expected));
             let press = iced::Event::Mouse(Mouse::ButtonPressed(Button::Left));
-            let (pick, _, status) = ViewportPickSurface
+            let (pick, _, status) = ViewportPickSurface(false)
                 .update(&mut viewport, &press, bounds, final_cursor)
                 .unwrap()
                 .into_inner();
@@ -6233,7 +6209,7 @@ mod tests {
             Cursor::Unavailable,
             Cursor::Levitating(iced::Point::new(250.0, 200.0)),
         ] {
-            assert!(ViewportPickSurface
+            assert!(ViewportPickSurface(false)
                 .update(&mut viewport, &press, bounds, hidden)
                 .is_none());
             assert!(PaneDragSurface(2)

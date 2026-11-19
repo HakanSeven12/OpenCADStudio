@@ -1588,17 +1588,6 @@ pub(super) struct OpenCADStudio {
     move_owed: Option<(iced::Point, usize)>,
     /// Latest box-preview position awaiting a frame, and its tab.
     box_preview_pending: Option<(iced::Point, usize, u64)>,
-    /// Last cursor position seen at the WINDOW level while a selection box
-    /// drag is in flight. Window-local deltas map into the canvas drag so
-    /// the rubber band keeps following the pointer over the command line,
-    /// panels and past the window edge the way AutoCAD does (#3339).
-    box_drag_window_pos: Option<iced::Point>,
-    /// Whether the canvas answered a pointer move since the last window-level
-    /// one: while the pointer is inside the canvas the canvas drives the box
-    /// corner itself, so a window delta for the same motion would apply it
-    /// twice. Deltas apply only over the command line, panels and past the
-    /// window edge, where the canvas sees no moves of its own.
-    box_drag_canvas_seen: bool,
     /// Tab whose Properties panel rebuild was deferred off the commit event
     /// (a huge selection's build can take ~100 ms). Drives the
     /// `PropertiesRefreshTick` frame subscription; cleared when it runs.
@@ -4760,14 +4749,6 @@ pub enum Message {
     /// never fall through and rotate a different camera.
     ViewportClick(Option<document::Handle>),
     ViewportMove(Point),
-    /// Cursor position seen at the WINDOW level while a selection box drag
-    /// is in flight: window-local deltas keep the rubber band following the
-    /// pointer over the command line, panels and past the window edge.
-    SelectionDragCursor(Point),
-    /// Left button released outside the canvas while a selection box drag
-    /// is in flight; routes through the normal canvas release so the box
-    /// commits wherever the pointer let go.
-    SelectionDragRelease,
     /// Position recorded by the pointer event itself, not the last hover.
     ViewportLeftPressAt(Point),
     ViewportLeftPress,
@@ -6836,8 +6817,6 @@ impl OpenCADStudio {
             hover_pick_due: iced::time::Instant::now(),
             move_owed: None,
             box_preview_pending: None,
-            box_drag_window_pos: None,
-            box_drag_canvas_seen: false,
             properties_refresh_pending: None,
             box_preview_due: None,
             box_preview_cache: None,

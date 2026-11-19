@@ -2229,9 +2229,6 @@ impl OpenCADStudio {
         if self.defer_pointer_move(p) {
             return Task::none();
         }
-        // The canvas answered this move itself: the window-level drag
-        // tracker must not apply the same motion as a delta on top (#3339).
-        self.box_drag_canvas_seen = true;
         self.on_viewport_move(p)
     }
 
@@ -5423,7 +5420,7 @@ impl OpenCADStudio {
         self.clear_navigation_hover(i);
         self.tabs[i].scene.remember_current_view();
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
-        sel.clear_left_selection_gesture("src/app/update/viewport.rs:5416");
+        sel.clear_left_selection_gesture();
         sel.input.left_down = false;
         sel.input.right_down = false;
         sel.input.middle_down = true;
@@ -5616,74 +5613,6 @@ impl OpenCADStudio {
             }
         }
         self.tabs[i].scene.camera_generation += 1;
-    }
-
-    /// Cursor movement seen at the WINDOW level while a selection box drag
-    /// is in flight: window-local deltas map into the canvas drag so the
-    /// rubber band keeps following the pointer over the command line,
-    /// panels and past the window edge the way AutoCAD does (#3339). The
-    /// canvas stops seeing moves outside its bounds; this keeps the corner
-    /// moving, and the drag resumes seamlessly when the pointer returns.
-    pub(super) fn on_selection_drag_cursor(&mut self, at: Point) -> Task<Message> {
-        let prev = self.box_drag_window_pos.replace(at);
-        let Some((dx, dy)) = prev.map(|p| (at.x - p.x, at.y - p.y)) else {
-            return Task::none();
-        };
-        if dx == 0.0 && dy == 0.0 {
-            return Task::none();
-        }
-        // The canvas answered this motion already; a delta would apply the
-        // same move twice while the pointer is over the canvas.
-        if std::mem::take(&mut self.box_drag_canvas_seen) {
-            return Task::none();
-        }
-        let i = self.active_tab;
-        let mut sel = self.tabs[i].scene.selection.borrow_mut();
-        // A pressed drag and a click-move-click box waiting for its second
-        // corner both track the pointer outside the canvas (#3339).
-        if !sel.input.left_down && sel.gesture.box_anchor.is_none() {
-            return Task::none();
-        }
-        let Some(current) = sel.gesture.box_current else {
-            return Task::none();
-        };
-        let moved = Point::new(current.x + dx, current.y + dy);
-        sel.gesture.box_current = Some(moved);
-        sel.input.last_move_pos = Some(moved);
-        let anchor = sel.gesture.box_anchor;
-        if !sel.gesture.box_crossing_locked {
-            if let Some(a) = anchor {
-                sel.gesture.box_crossing = crate::scene::selection_box_crossing(a, moved);
-            }
-        }
-        drop(sel);
-        if crate::perf::enabled() {
-            crate::perf_record_diagnostic!("[perf] drag-delta      dx={dx:.1} dy={dy:.1} corner={moved:?}");
-        }
-        Task::none()
-    }
-
-    /// Left button released outside the canvas while a selection box drag
-    /// is in flight: route it through the normal canvas release so the box
-    /// commits wherever the pointer let go (AutoCAD completes the window on
-    /// the release). A release past the window edge never arrives — the drag
-    /// then simply resumes when the pointer re-enters, and the user finishes
-    /// or cancels (Esc) it there.
-    pub(super) fn on_selection_drag_release(&mut self) -> Task<Message> {
-        self.box_drag_window_pos = None;
-        self.box_drag_canvas_seen = false;
-        let i = self.active_tab;
-        let active = {
-            let sel = self.tabs[i].scene.selection.borrow();
-            sel.input.left_down && sel.gesture.box_anchor.is_some()
-        };
-        if crate::perf::enabled() {
-            crate::perf_record_diagnostic!("[perf] drag-release  outside canvas active={active}");
-        }
-        if !active {
-            return Task::none();
-        }
-        self.on_viewport_left_release()
     }
 
     pub(crate) fn on_viewport_exit(&mut self) -> Task<Message> {
@@ -6504,7 +6433,7 @@ impl OpenCADStudio {
                     .scene
                     .selection
                     .borrow_mut()
-                    .clear_left_selection_gesture("src/app/update/viewport.rs:6474");
+                    .clear_left_selection_gesture();
                 return Task::none();
             }
         }
@@ -6536,7 +6465,7 @@ impl OpenCADStudio {
                 .scene
                 .selection
                 .borrow_mut()
-                .clear_left_selection_gesture("src/app/update/viewport.rs:6506");
+                .clear_left_selection_gesture();
             return task;
         }
 
@@ -6694,7 +6623,7 @@ impl OpenCADStudio {
                             .scene
                             .selection
                             .borrow_mut()
-                            .clear_left_selection_gesture("src/app/update/viewport.rs:6664");
+                            .clear_left_selection_gesture();
                         return Task::none();
                     }
                 }
@@ -6892,7 +6821,7 @@ impl OpenCADStudio {
                         .scene
                         .selection
                         .borrow_mut()
-                        .clear_left_selection_gesture("src/app/update/viewport.rs:6862");
+                        .clear_left_selection_gesture();
 
                     // A grip edit is not a CAD command, so explicitly seed the shared
                     // dynamic-input fields for the newly engaged grip.
@@ -6917,7 +6846,7 @@ impl OpenCADStudio {
                     .scene
                     .selection
                     .borrow_mut()
-                    .clear_left_selection_gesture("src/app/update/viewport.rs:6887");
+                    .clear_left_selection_gesture();
                 let task = self.begin_plugin_grip_drag(i, &candidate);
                 self.grip_engage_press = Some(p_full);
                 self.sync_dyn_fields();
@@ -6954,7 +6883,7 @@ impl OpenCADStudio {
                     .scene
                     .selection
                     .borrow_mut()
-                    .clear_left_selection_gesture("src/app/update/viewport.rs:6924");
+                    .clear_left_selection_gesture();
                 self.command_line
                     .push_info(&format!("{}: {url}", crate::t!("Hyperlink")));
                 return crate::sys::open_url(&url, self.main_window);
@@ -6992,7 +6921,7 @@ impl OpenCADStudio {
                     .scene
                     .selection
                     .borrow_mut()
-                    .clear_left_selection_gesture("src/app/update/viewport.rs:6962");
+                    .clear_left_selection_gesture();
                 if subobject {
                     return self.feed_subobject_pick(Some(handle));
                 }
@@ -7018,7 +6947,7 @@ impl OpenCADStudio {
                     .scene
                     .selection
                     .borrow_mut()
-                    .clear_left_selection_gesture("src/app/update/viewport.rs:6988");
+                    .clear_left_selection_gesture();
                 return self.feed_subobject_pick(None);
             }
         }
@@ -7096,7 +7025,7 @@ impl OpenCADStudio {
                     .scene
                     .selection
                     .borrow_mut()
-                    .clear_left_selection_gesture("src/app/update/viewport.rs:7066");
+                    .clear_left_selection_gesture();
                 self.tabs[i].scene.deselect_all();
                 self.tabs[i].scene.select_entity(handle, false);
                 self.refresh_properties();
@@ -7118,10 +7047,6 @@ impl OpenCADStudio {
         .then_some((self.tabs[i].last_cursor_world, false));
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
         sel.input.left_down = true;
-        // A new drag starts: window-level deltas rebase from the next
-        // window cursor event, never from the previous drag's tail.
-        self.box_drag_window_pos = None;
-        self.box_drag_canvas_seen = false;
         if crate::perf::enabled() {
             crate::perf_record_diagnostic!(
                 "[perf] viewport-press  press_pos={:?} cmd_active={}",
@@ -7203,7 +7128,7 @@ impl OpenCADStudio {
                     .scene
                     .selection
                     .borrow_mut()
-                    .clear_left_selection_gesture("src/app/update/viewport.rs:7156");
+                    .clear_left_selection_gesture();
                 return Task::none();
             }
         }
@@ -7263,7 +7188,7 @@ impl OpenCADStudio {
         if self.tabs[i].active_plugin_grip.is_some() {
             {
                 let mut sel = self.tabs[i].scene.selection.borrow_mut();
-                sel.clear_left_selection_gesture("src/app/update/viewport.rs:7216");
+                sel.clear_left_selection_gesture();
             }
             let engaging_click = self.grip_engage_press.take().is_some_and(|press| {
                 let (dx, dy) = (p.x - press.x, p.y - press.y);
@@ -7296,7 +7221,7 @@ impl OpenCADStudio {
             // click doesn't read as an in-progress drag on later moves.
             {
                 let mut sel = self.tabs[i].scene.selection.borrow_mut();
-                sel.clear_left_selection_gesture("src/app/update/viewport.rs:7249");
+                sel.clear_left_selection_gesture();
             }
             // Grip-menu Base Point: this click re-bases the gesture at the
             // cursor instead of placing anything.
@@ -8581,7 +8506,7 @@ properties={:.1}ms picked={}",
                             tab.scene
                                 .selection
                                 .borrow_mut()
-                                .clear_left_selection_gesture("src/app/update/viewport.rs:8534");
+                                .clear_left_selection_gesture();
                             if !remove && !selection_pick_add {
                                 tab.scene.deselect_all();
                             }
@@ -9586,7 +9511,7 @@ properties={:.1}ms picked={}",
                         .scene
                         .selection
                         .borrow_mut()
-                        .clear_left_selection_gesture("src/app/update/viewport.rs:9539");
+                        .clear_left_selection_gesture();
                     self.drag_move = None;
                     self.tabs[i].scene.remember_current_view();
                     self.clear_navigation_hover(i);
@@ -14430,124 +14355,23 @@ mod pointer_move_coalescing_tests {
 mod selection_drag_tracking_tests {
     use super::*;
 
-    /// Window-level deltas keep a selection box drag following the pointer
-    /// outside the canvas, and a release out there commits the box the same
-    /// way an in-canvas release would (#3339).
-    #[test]
-    fn window_deltas_move_the_dragging_box_and_a_release_commits() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.automation_op(r#"{"op":"new"}"#);
-        let i = app.active_tab;
-        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
-        {
-            let mut sel = app.tabs[i].scene.selection.borrow_mut();
-            sel.input.left_down = true;
-            sel.input.left_press_pos = Some(Point::new(100.0, 100.0));
-            sel.input.last_move_pos = Some(Point::new(150.0, 150.0));
-            sel.gesture.box_anchor = Some(Point::new(100.0, 100.0));
-            sel.gesture.box_current = Some(Point::new(150.0, 150.0));
-        }
-        // The first window position only rebases the delta; the next ones
-        // move the corner, and the crossing mode follows the anchor side.
-        let _ = app.on_selection_drag_cursor(Point::new(500.0, 500.0));
-        let _ = app.on_selection_drag_cursor(Point::new(520.0, 490.0));
-        let sel = app.tabs[i].scene.selection.borrow();
-        assert_eq!(sel.gesture.box_current, Some(Point::new(170.0, 140.0)));
-        assert_eq!(sel.input.last_move_pos, Some(Point::new(170.0, 140.0)));
-        assert!(!sel.gesture.box_crossing, "the corner is right of the anchor");
-        drop(sel);
-        let _ = app.on_selection_drag_cursor(Point::new(300.0, 500.0));
-        assert!(
-            app.tabs[i]
-                .scene
-                .selection
-                .borrow()
-                .gesture
-                .box_crossing,
-            "the corner crossed left of the anchor"
-        );
-        // A release out there commits through the normal canvas release.
-        let _ = app.on_selection_drag_release();
-        assert!(
-            app.tabs[i]
-                .scene
-                .selection
-                .borrow()
-                .gesture
-                .box_anchor
-                .is_none(),
-            "the release completed the box"
-        );
-    }
-
     /// A click-move-click box waiting for its second corner survives the
-    /// pointer leaving the canvas, keeps tracking window deltas with the
-    /// button up, and stays pending for the completing click or Esc (#3339).
+    /// pointer leaving the canvas (#3365).
     #[test]
-    fn exit_keeps_a_pending_click_move_click_box_tracking() {
+    fn exit_keeps_a_pending_click_move_click_box() {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         {
             let mut sel = app.tabs[i].scene.selection.borrow_mut();
             sel.input.left_down = false;
             sel.gesture.box_anchor = Some(Point::new(100.0, 100.0));
             sel.gesture.box_current = Some(Point::new(150.0, 150.0));
         }
-        // The pointer leaves the canvas: the pending box survives.
         let _ = app.on_viewport_exit();
-        {
-            let sel = app.tabs[i].scene.selection.borrow();
-            assert_eq!(
-                sel.gesture.box_anchor,
-                Some(Point::new(100.0, 100.0)),
-                "the pending box survives the exit"
-            );
-            assert!(sel.input.pointer_away, "the glyphs know the pointer left");
-        }
-        // Window deltas keep moving the corner with the button up.
-        let _ = app.on_selection_drag_cursor(Point::new(500.0, 500.0));
-        let _ = app.on_selection_drag_cursor(Point::new(530.0, 480.0));
         let sel = app.tabs[i].scene.selection.borrow();
-        assert_eq!(sel.gesture.box_current, Some(Point::new(180.0, 130.0)));
-        drop(sel);
-        // The user cancels (Esc path): the gesture goes.
-        app.tabs[i]
-            .scene
-            .selection
-            .borrow_mut()
-            .clear_left_selection_gesture("test:esc-cancel");
-        assert!(
-            app.tabs[i]
-                .scene
-                .selection
-                .borrow()
-                .gesture
-                .box_anchor
-                .is_none()
-        );
-    }
-
-    /// Without a dragging box the window-level events are inert: no corner
-    /// moves, no release runs the canvas commit.
-    #[test]
-    fn window_events_do_nothing_without_a_box_drag() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.automation_op(r#"{"op":"new"}"#);
-        let _ = app.on_selection_drag_cursor(Point::new(500.0, 500.0));
-        let _ = app.on_selection_drag_cursor(Point::new(520.0, 490.0));
-        assert!(app.box_drag_window_pos.is_some(), "the rebase keeps tracking");
-        let _ = app.on_selection_drag_release();
-        assert!(
-            app.tabs[app.active_tab]
-                .scene
-                .selection
-                .borrow()
-                .gesture
-                .box_anchor
-                .is_none()
-        );
+        assert_eq!(sel.gesture.box_anchor, Some(Point::new(100.0, 100.0)));
+        assert!(sel.input.pointer_away);
     }
 }
 

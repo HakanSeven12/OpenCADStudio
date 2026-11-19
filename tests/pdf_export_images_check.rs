@@ -131,6 +131,7 @@ fn image() -> PlotImage {
     PlotImage {
         image: ImageModel {
             render_instance: None,
+            entity: None,
             file_path: "synthetic".into(),
             pixels: Arc::new(pixels),
             width: 32,

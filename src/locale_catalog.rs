@@ -3,6 +3,20 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "Specify assembly baseline location:" => Some(("civil-cmd", "specify-assembly-location")),
+        "Press Enter to create the assembly or [Lane width/Lane slope/Shoulder width/Shoulder slope/Pavement depth/Side slope width/Side slope]:" => Some(("civil-cmd", "accept-assembly")),
+        "Lane width" => Some(("civil-cmd", "lane-width")),
+        "Lane slope" => Some(("civil-cmd", "lane-slope")),
+        "Lane cross slope (rise over run, -0.02 falls 2%)" => Some(("civil-cmd", "lane-slope-prompt")),
+        "Shoulder width" => Some(("civil-cmd", "shoulder-width")),
+        "Shoulder slope" => Some(("civil-cmd", "shoulder-slope")),
+        "Shoulder cross slope (rise over run)" => Some(("civil-cmd", "shoulder-slope-prompt")),
+        "Pavement depth" => Some(("civil-cmd", "pavement-depth")),
+        "Side slope width" => Some(("civil-cmd", "side-slope-width")),
+        "Side slope" => Some(("civil-cmd", "side-slope")),
+        "Side slope (rise over run, -0.5 is 2:1 down)" => Some(("civil-cmd", "side-slope-prompt")),
+        "Create Assembly" => Some(("civil-cmd", "create-assembly")),
+        "Assembly {} created." => Some(("civil-cmd", "assembly-created")),
         "Select lines or polylines to make lot lines of:" => Some(("civil-cmd", "select-parcel-boundaries")),
         "Create Parcel" => Some(("civil-cmd", "create-parcel")),
         "{} parcel(s) created." => Some(("civil-cmd", "parcels-created")),

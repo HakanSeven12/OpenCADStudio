@@ -318,6 +318,24 @@ impl OpenCADStudio {
                 // A crossing line changes earlier parcels too: redraw everything.
                 crate::tf!("{} parcel(s) created.", parcels).into_owned()
             }
+            "CREATEASSEMBLY" => {
+                let at = *req.points.first().ok_or("no location")?;
+                let pkg = super::civil_packages::road();
+                let source = super::civil_packages::install(&pkg)?;
+                // The values set at the closing prompt; the package's defaults for the rest.
+                let values: Vec<(String, c3d::pkt::PktValue)> = crate::modules::civil::ASSEMBLY_KEYS
+                    .iter()
+                    .filter_map(|k| req.values.get(k).map(|v| (k.to_string(), c3d::pkt::PktValue::Double(*v))))
+                    .collect();
+                let assembly = next_name(&self.tabs[i].scene.document, "AECC_ASSEMBLY", "Assembly");
+                self.push_undo_snapshot(i, name);
+                let doc = &mut self.tabs[i].scene.document;
+                let h = c3d::add_assembly(doc, &assembly, Vector3::new(at.x, at.y, at.z), layer).map_err(refused)?;
+                for (side, label) in [(c3d::pkt::PktSide::Right, "Road Right"), (c3d::pkt::PktSide::Left, "Road Left")] {
+                    c3d::add_pkt_subassembly(doc, h, label, &source, &pkg, side, &values, layer).map_err(refused)?;
+                }
+                crate::tf!("Assembly {} created.", assembly).into_owned()
+            }
             "CREATECORRIDOR" => {
                 let doc = &self.tabs[i].scene.document;
                 let alignment = *req.objects[0].first().ok_or("no alignment")?;

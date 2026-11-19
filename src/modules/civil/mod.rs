@@ -36,6 +36,7 @@ pub const COMMANDS: &[&str] = &[
     "CREATESAMPLELINES",
     "CREATESECTIONVIEWS",
     "CREATEINTERSECTION",
+    "CREATEASSEMBLY",
 ];
 
 const VIEW_OPTIONS: &[Opt] = &[
@@ -45,10 +46,23 @@ const VIEW_OPTIONS: &[Opt] = &[
     Opt { label: "Maximum elevation", keyword: "MA", key: "elevation_max", prompt: "Maximum elevation of the view" },
 ];
 
+const ASSEMBLY_OPTIONS: &[Opt] = &[
+    Opt { label: "Lane width", keyword: "LW", key: "LaneWidth", prompt: "Lane width" },
+    Opt { label: "Lane slope", keyword: "LS", key: "LaneSlope", prompt: "Lane cross slope (rise over run, -0.02 falls 2%)" },
+    Opt { label: "Shoulder width", keyword: "SW", key: "ShoulderWidth", prompt: "Shoulder width" },
+    Opt { label: "Shoulder slope", keyword: "SS", key: "ShoulderSlope", prompt: "Shoulder cross slope (rise over run)" },
+    Opt { label: "Pavement depth", keyword: "D", key: "PaveDepth", prompt: "Pavement depth" },
+    Opt { label: "Side slope width", keyword: "W", key: "SideSlopeWidth", prompt: "Side slope width" },
+    Opt { label: "Side slope", keyword: "G", key: "SideSlope", prompt: "Side slope (rise over run, -0.5 is 2:1 down)" },
+];
+
 const ALIGNMENT_OPTIONS: &[Opt] = &[
     Opt { label: "Radius", keyword: "R", key: "radius", prompt: "Curve radius at the corners (0 for none)" },
     Opt { label: "Spiral length", keyword: "S", key: "spiral", prompt: "Spiral length on each side of a curve (0 for none)" },
 ];
+
+/// The package parameters CREATEASSEMBLY's options set.
+pub const ASSEMBLY_KEYS: [&str; 7] = ["LaneWidth", "LaneSlope", "ShoulderWidth", "ShoulderSlope", "PaveDepth", "SideSlopeWidth", "SideSlope"];
 
 /// The steps of civil command `name`; `None` for a command this module does not run.
 pub fn steps(name: &str) -> Option<Vec<Step>> {
@@ -93,6 +107,13 @@ pub fn steps(name: &str) -> Option<Vec<Step>> {
             Step::Objects { prompt: "Select the crossing road alignment:", filter: Alignments, slot: 1 },
         ],
         "CREATEPARCEL" => vec![Step::Objects { prompt: "Select lines or polylines to make lot lines of:", filter: Paths, slot: 0 }],
+        "CREATEASSEMBLY" => vec![
+            Step::Point { prompt: "Specify assembly baseline location:" },
+            Step::Accept {
+                prompt: "Press Enter to create the assembly or [Lane width/Lane slope/Shoulder width/Shoulder slope/Pavement depth/Side slope width/Side slope]:",
+                options: ASSEMBLY_OPTIONS,
+            },
+        ],
         "CREATEFEATURELINE" => vec![Step::Objects { prompt: "Select lines or polylines to make feature lines of:", filter: Paths, slot: 0 }],
         _ => return None,
     })
@@ -127,6 +148,7 @@ impl CadModule for CivilModule {
                         tool("CREATEPROFILEVIEW", "Create Profile View", icon!("profileview")),
                         tool("CREATEFEATURELINE", "Create Feature Line", icon!("featureline")),
                         tool("CREATEPARCEL", "Create Parcel", icon!("parcel")),
+                        tool("CREATEASSEMBLY", "Create Assembly", icon!("assembly")),
                         tool("CREATECORRIDOR", "Create Corridor", icon!("corridor")),
                         tool("CREATESAMPLELINES", "Create Sample Lines", icon!("samplelines")),
                         tool("CREATESECTIONVIEWS", "Create Section Views", icon!("sectionviews")),

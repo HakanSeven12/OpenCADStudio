@@ -377,6 +377,20 @@ fn viewcube_has_room(bar_w: f32, tile_w: f32) -> bool {
     bar_w + VIEWCUBE_GAP + VIEWCUBE_REGION_PX + VIEWCUBE_PAD <= tile_w
 }
 
+/// `main_window_event`, after watching the keys for Windows Alt codes
+/// (#3317); kept out of `main_window_event` so tests never type keys.
+fn window_event(
+    ev: iced::Event,
+    status: iced::event::Status,
+    win_id: window::Id,
+) -> Option<Message> {
+    #[cfg(windows)]
+    if let iced::Event::Keyboard(key) = &ev {
+        crate::app::alt_code::observe(key);
+    }
+    main_window_event(ev, status, win_id)
+}
+
 /// The app-wide input events: keys for the command line and shortcuts,
 /// pointer presses, window changes. Split out of `subscription` so tests
 /// can feed it real events.
@@ -4186,7 +4200,7 @@ impl OpenCADStudio {
         let keyboard_events = if self.shortcut_capture_row.is_some() {
             event::listen_with(shortcut_capture_key_event)
         } else {
-            event::listen_with(main_window_event)
+            event::listen_with(window_event)
         };
         #[cfg(not(target_arch = "wasm32"))]
         let control = iced::Subscription::batch([

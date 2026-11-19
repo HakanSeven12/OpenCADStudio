@@ -4,7 +4,7 @@
 //! so the code is read here from the key events and the character is typed
 //! back as a Unicode key press, which reaches whichever field has focus.
 
-use iced::keyboard::{self, key::Code, key::Named, key::Physical, Key};
+use iced::keyboard::{self, Key, key::Code, key::Named, key::Physical};
 
 /// The numpad digits typed since Alt went down; `None` when no code is
 /// being typed.
@@ -16,15 +16,142 @@ pub(crate) struct AltCode {
 impl AltCode {
     /// Feed one key event; returns the digits of a finished code when Alt
     /// is released after them.
-    pub(crate) fn feed(&mut self, _event: &keyboard::Event) -> Option<String> {
-        None
+    pub(crate) fn feed(&mut self, event: &keyboard::Event) -> Option<String> {
+        match event {
+            keyboard::Event::KeyPressed {
+                key: Key::Named(Named::Alt),
+                modifiers,
+                repeat,
+                ..
+            } => {
+                if !*repeat {
+                    // Ctrl+Alt is AltGr, which has no Alt codes.
+                    self.digits = (!modifiers.control()).then(String::new);
+                }
+                None
+            }
+            keyboard::Event::KeyPressed {
+                physical_key,
+                modifiers,
+                ..
+            } => {
+                let digit =
+                    numpad_digit(physical_key).filter(|_| modifiers.alt() && !modifiers.control());
+                match (digit, self.digits.as_mut()) {
+                    (Some(d), Some(digits)) => digits.push(d),
+                    _ => self.digits = None,
+                }
+                None
+            }
+            keyboard::Event::KeyReleased {
+                key: Key::Named(Named::Alt),
+                ..
+            } => self.digits.take().filter(|d| !d.is_empty()),
+            _ => None,
+        }
     }
+}
+
+/// The digit of a numpad key, read from the physical key so it counts
+/// with NumLock off too.
+fn numpad_digit(key: &Physical) -> Option<char> {
+    let Physical::Code(code) = key else {
+        return None;
+    };
+    let n = match code {
+        Code::Numpad0 => 0,
+        Code::Numpad1 => 1,
+        Code::Numpad2 => 2,
+        Code::Numpad3 => 3,
+        Code::Numpad4 => 4,
+        Code::Numpad5 => 5,
+        Code::Numpad6 => 6,
+        Code::Numpad7 => 7,
+        Code::Numpad8 => 8,
+        Code::Numpad9 => 9,
+        _ => return None,
+    };
+    char::from_digit(n, 10)
 }
 
 /// The character of Alt code `digits`: a leading 0 reads it in the ANSI
 /// code page `ansi`, otherwise in the OEM code page `oem`.
-pub(crate) fn decode(_digits: &str, _ansi: u32, _oem: u32) -> Option<char> {
-    None
+pub(crate) fn decode(digits: &str, ansi: u32, oem: u32) -> Option<char> {
+    use windows_sys::Win32::Globalization::{MB_USEGLYPHCHARS, MultiByteToWideChar};
+
+    // Windows keeps the code modulo 256.
+    let byte = (digits.parse::<u32>().ok()? % 256) as u8;
+    if byte == 0 {
+        return None;
+    }
+    // MB_USEGLYPHCHARS: OEM 1-31 are glyphs (☺, ♥), as Windows types them.
+    let (page, flags) = if digits.starts_with('0') {
+        (ansi, 0)
+    } else {
+        (oem, MB_USEGLYPHCHARS)
+    };
+    let mut wide = [0u16; 2];
+    // SAFETY: one input byte, output buffer of 2 units, lengths passed.
+    let n = unsafe { MultiByteToWideChar(page, flags, &byte, 1, wide.as_mut_ptr(), 2) };
+    char::decode_utf16(wide[..n.max(0) as usize].iter().copied())
+        .next()?
+        .ok()
+        // U+FFFD: the byte has no character, as with ANSI page 65001 (UTF-8).
+        .filter(|c| !c.is_control() && *c != char::REPLACEMENT_CHARACTER)
+}
+
+/// Type `ch` into the focused window as a Unicode key press.
+fn type_char(ch: char) {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, SendInput,
+    };
+
+    let mut buf = [0u16; 2];
+    let inputs: Vec<INPUT> = ch
+        .encode_utf16(&mut buf)
+        .iter()
+        .flat_map(|&unit| {
+            [KEYEVENTF_UNICODE, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP].map(|flags| INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: 0,
+                        wScan: unit,
+                        dwFlags: flags,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            })
+        })
+        .collect();
+    // SAFETY: a valid slice of keyboard inputs and its element size.
+    unsafe {
+        SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            std::mem::size_of::<INPUT>() as i32,
+        );
+    }
+}
+
+/// Watch the window's key events and type the character of each finished
+/// Alt code.
+pub(crate) fn observe(event: &keyboard::Event) {
+    use std::sync::Mutex;
+    use windows_sys::Win32::Globalization::{GetACP, GetOEMCP};
+
+    static STATE: Mutex<AltCode> = Mutex::new(AltCode { digits: None });
+    let Some(digits) = STATE.lock().ok().and_then(|mut s| s.feed(event)) else {
+        return;
+    };
+    // shortcut: Windows reads Alt+0nnn in the keyboard layout's ANSI page, not
+    // the system one; differs only when they disagree, read the layout if reported.
+    // SAFETY: plain getters with no arguments.
+    let (ansi, oem) = unsafe { (GetACP(), GetOEMCP()) };
+    if let Some(ch) = decode(&digits, ansi, oem) {
+        type_char(ch);
+    }
 }
 
 #[cfg(test)]
@@ -97,7 +224,10 @@ mod tests {
             Some("0178")
         );
         // The next code starts afresh.
-        assert_eq!(type_code(&mut alt, "253", Modifiers::ALT).as_deref(), Some("253"));
+        assert_eq!(
+            type_code(&mut alt, "253", Modifiers::ALT).as_deref(),
+            Some("253")
+        );
     }
 
     #[test]
@@ -122,8 +252,16 @@ mod tests {
     fn another_key_while_alt_is_held_cancels_the_code() {
         let mut alt = AltCode::default();
         alt.feed(&alt_down());
-        alt.feed(&press(Key::Character("1".into()), Code::Numpad1, Modifiers::ALT));
-        alt.feed(&press(Key::Character("f".into()), Code::KeyF, Modifiers::ALT));
+        alt.feed(&press(
+            Key::Character("1".into()),
+            Code::Numpad1,
+            Modifiers::ALT,
+        ));
+        alt.feed(&press(
+            Key::Character("f".into()),
+            Code::KeyF,
+            Modifiers::ALT,
+        ));
         assert_eq!(alt.feed(&alt_up()), None);
     }
 

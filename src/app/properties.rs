@@ -2029,17 +2029,36 @@ impl OpenCADStudio {
                     .iter_mut()
                     .find(|row| row.field == height_field)
                 {
+                    let fixed_tooltip = match &row.value {
+                        crate::scene::model::object::PropValue::ReadOnlyWithTooltip {
+                            tooltip,
+                            ..
+                        } => Some(tooltip.clone()),
+                        _ => None,
+                    };
                     let editable = !aligned
                         && !matches!(
                             row.value,
                             crate::scene::model::object::PropValue::ReadOnly(_)
+                                | crate::scene::model::object::PropValue::ReadOnlyWithTooltip { .. }
                         );
-                    *row = crate::entities::common::num_prop(
-                        t!("Paper text height").as_ref(),
-                        height_field,
-                        paper_height,
-                        editable,
-                    );
+                    *row = if let Some(tooltip) = fixed_tooltip {
+                        crate::scene::model::object::Property {
+                            label: t!("Paper text height").into_owned(),
+                            field: height_field,
+                            value: crate::scene::model::object::PropValue::ReadOnlyWithTooltip {
+                                value: crate::entities::common::format_length(paper_height),
+                                tooltip,
+                            },
+                        }
+                    } else {
+                        crate::entities::common::num_prop(
+                            t!("Paper text height").as_ref(),
+                            height_field,
+                            paper_height,
+                            editable,
+                        )
+                    };
                 }
             }
             insert_row_after(

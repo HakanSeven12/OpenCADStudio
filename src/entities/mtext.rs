@@ -485,11 +485,12 @@ fn properties(t: &MText, text_style_names: &[String]) -> Vec<PropSection> {
                     },
                 },
                 // Fixed by the style when the style says so — see Text.
-                crate::entities::common::num_prop(
+                crate::entities::common::text_height_prop(
                     t!("Text height").as_ref(),
                     "height",
                     t.height,
-                    crate::entities::common::style_fixed_height(&t.style).is_none(),
+                    &t.style,
+                    true,
                 ),
                 edit_angle(t!("Rotation").as_ref(), "rotation", t.rotation.to_degrees()),
                 edit(

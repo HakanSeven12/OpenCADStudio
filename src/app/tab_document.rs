@@ -336,6 +336,8 @@ pub(super) struct DocumentTab {
     pub(super) ole_frames: std::collections::HashMap<u64, crate::entities::ole2frame::FrameState>,
     /// Node graph shown by the command line's graph button.
     pub(super) graph: crate::ui::node_graph::Graph,
+    /// The files that the graph's nodes read, read off the UI thread.
+    pub(super) graph_files: crate::app::node_graph::files::GraphFiles,
     /// Currently active UCS. `None` means WCS (identity transform).
     pub(super) active_ucs: Option<Ucs>,
     /// Open sketch, if CREATESKETCH is in effect. `None` is the normal
@@ -898,6 +900,7 @@ impl DocumentTab {
             props_asym_scale: std::collections::HashSet::new(),
             ole_frames: std::collections::HashMap::new(),
             graph: Default::default(),
+            graph_files: Default::default(),
             active_ucs: None,
             sketch_session: None,
             sketch_count: 0,

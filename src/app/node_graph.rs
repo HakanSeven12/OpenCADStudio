@@ -11,6 +11,7 @@
 
 mod data;
 mod expr;
+pub(crate) mod files;
 pub(crate) mod ops;
 
 #[cfg(test)]
@@ -454,14 +455,27 @@ impl OpenCADStudio {
         edit: impl FnOnce(&mut Self) -> Vec<Task<Message>>,
     ) -> Task<Message> {
         self.push_undo_snapshot(i, "GRAPH");
+        self.tabs[i].graph_files.edited();
         let before = self.tabs[i].graph.undo_state();
         if let Some(pending) = self.tabs[i].history.pending.as_mut() {
             pending.graph_before = Some(before);
         }
+        self.graph_evaluate(i, edit)
+    }
+
+    /// Runs the graph of drawing `i` in the open undo step. While a file
+    /// that a node reads is still read, the step stays open (`held`), so
+    /// that the run after the read joins it.
+    fn graph_evaluate(
+        &mut self,
+        i: usize,
+        edit: impl FnOnce(&mut Self) -> Vec<Task<Message>>,
+    ) -> Task<Message> {
         self.graph_undo_open = true;
         self.graph_unwind(i);
         let mut tasks = edit(self);
         self.graph_drop_driven_params(i);
+        self.tabs[i].graph_files.begin_run();
         let mut engine = std::mem::take(&mut self.tabs[i].graph.engine);
         let mut host = AppHost {
             app: self,
@@ -471,8 +485,31 @@ impl OpenCADStudio {
         engine.evaluate(&mut host);
         tasks.append(&mut host.tasks);
         self.tabs[i].graph.engine = engine;
+        self.tabs[i].graph_files.end_run();
+        let reading = self.tabs[i].graph_files.reading();
+        if let Some(pending) = self.tabs[i].history.pending.as_mut() {
+            pending.held = reading;
+        }
         self.graph_undo_open = false;
         Task::batch(tasks)
+    }
+
+    /// The run after a node's file was read: in the graph's undo step when
+    /// it is still open, otherwise in a new one.
+    pub(super) fn graph_rerun_after_read(&mut self, i: usize) -> Task<Message> {
+        let joins = self.tabs[i]
+            .history
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.held && pending.graph_before.is_some());
+        if !joins {
+            self.push_undo_snapshot(i, "GRAPH");
+            let before = self.tabs[i].graph.undo_state();
+            if let Some(pending) = self.tabs[i].history.pending.as_mut() {
+                pending.graph_before = Some(before);
+            }
+        }
+        self.graph_evaluate(i, |_| Vec::new())
     }
 
     /// Takes back the last evaluation's edits: objects edited in place get

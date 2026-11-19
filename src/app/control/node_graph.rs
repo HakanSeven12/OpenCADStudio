@@ -10,6 +10,15 @@ use graph::{Kind, NodeId, Port};
 
 type Parsed<T> = Result<T, Value>;
 
+/// The `load` action's reader: the file's bytes, checked as a graph.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_graph_file(path: &str) -> Result<Vec<u8>, Value> {
+    let bytes = std::fs::read(path).map_err(|error| failure("read_failed", error))?;
+    crate::ui::node_graph::Graph::from_file(&bytes)
+        .map_err(|error| failure("invalid_graph", error))?;
+    Ok(bytes)
+}
+
 fn node_id(req: &Value, key: &str) -> Parsed<NodeId> {
     req[key]
         .as_u64()
@@ -194,10 +203,7 @@ impl OpenCADStudio {
                 let path = req["path"]
                     .as_str()
                     .ok_or_else(|| failure("path_required", "Supply path: the .ocg file to read"))?;
-                let bytes = std::fs::read(path).map_err(|error| failure("read_failed", error))?;
-                crate::ui::node_graph::Graph::from_file(&bytes)
-                    .map_err(|error| failure("invalid_graph", error))?;
-                self.on_graph(GraphMsg::Loaded(Some(bytes)))
+                return Ok(self.control_graph_load_with(i, path, read_graph_file));
             }
             other => {
                 return Err(failure(
@@ -214,6 +220,56 @@ impl OpenCADStudio {
         }
         self.set_control_result(state);
         Ok(task)
+    }
+
+    /// The `load` action: the `.ocg` file is read and checked off the UI
+    /// thread, and the graph is loaded when the read ends
+    /// ([`Self::finish_control_graph_load`]). The reader is given, so a
+    /// test can give one that panics.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn control_graph_load_with(
+        &mut self,
+        i: usize,
+        path: &str,
+        reader: fn(&str) -> Result<Vec<u8>, Value>,
+    ) -> Task<Message> {
+        let (tab_id, generation) = (self.tabs[i].id, self.tabs[i].document_generation);
+        let path = path.to_string();
+        crate::app::update::background_task(
+            "Node graph load",
+            move || reader(&path),
+            move |read| Message::GraphLoadRead(tab_id, generation, read),
+        )
+    }
+
+    /// The end of the `load` action's read: the graph is loaded into the
+    /// drawing it was read for, while that drawing is still the current
+    /// one, and the action settles with the graph's state or the failure
+    /// it answered at once before.
+    pub(in crate::app) fn finish_control_graph_load(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        read: Result<Vec<u8>, Value>,
+    ) -> Task<Message> {
+        let bytes = match read {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                self.set_control_failure(error);
+                return Task::none();
+            }
+        };
+        let i = self.active_tab;
+        if self.tabs[i].id != tab_id || self.tabs[i].document_generation != generation {
+            self.set_control_failure(failure(
+                "document_closed",
+                "The drawing to load the graph into was closed, replaced or is no longer current",
+            ));
+            return Task::none();
+        }
+        let task = self.on_graph(GraphMsg::Loaded(Some(bytes)));
+        self.set_control_result(self.node_graph_state(i));
+        task
     }
 
     fn existing_node(&self, i: usize, req: &Value, key: &str) -> Parsed<NodeId> {
@@ -971,7 +1027,8 @@ mod data_node_tests {
         let id = app.tabs[i].graph.add_node(super::PaletteItem::Op(spec), Vec::new(), iced::Point::ORIGIN);
         for (field, value) in inputs.as_object().unwrap() {
             let port = super::Port { node: id, field: field.clone() };
-            let _ = app.on_graph(super::GraphMsg::Set(port, value.clone()));
+            let task = app.on_graph(super::GraphMsg::Set(port, value.clone()));
+            app.drive_headless_task(task).expect("the graph's task");
         }
         id
     }
@@ -1015,5 +1072,160 @@ mod data_node_tests {
         assert_eq!(output(&app, label, "result"), json!(["P-01", "P-02", "P-10"]));
         let bigger = add(&mut app, "Expression", json!({"expression": "a > 1", "a": [0, 2]}));
         assert_eq!(output(&app, bigger, "result"), json!([false, true]));
+    }
+}
+
+#[cfg(test)]
+mod load_read_tests {
+    use crate::app::OpenCADStudio;
+    use crate::ui::node_graph::GraphMsg;
+    use serde_json::{json, Value};
+
+    fn fresh_drawing() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        let response = app.automation_op(r#"{"op":"new"}"#);
+        assert_eq!(response["ok"], true, "{response}");
+        app
+    }
+
+    fn settled(app: &OpenCADStudio, id: &str) -> Value {
+        app.control
+            .completed
+            .iter()
+            .find(|(request, _, _)| request == id)
+            .map(|(_, _, response)| response.clone())
+            .unwrap_or(Value::Null)
+    }
+
+    fn load(
+        app: &mut OpenCADStudio,
+        id: &str,
+        path: &str,
+    ) -> (Value, iced::Task<crate::app::Message>) {
+        let document_id = app.tabs[app.active_tab].id;
+        app.control_request(json!({
+            "protocol":1,"op":"node_graph","action":"load","request_id":id,
+            "document_id":document_id,"path":path,
+        }))
+    }
+
+    fn nodes(app: &OpenCADStudio) -> usize {
+        app.tabs[app.active_tab].graph.engine.nodes.len()
+    }
+
+    /// A graph file with one node, written under `name`; the graph is
+    /// cleared after.
+    fn graph_file(app: &mut OpenCADStudio, name: &str) -> String {
+        let i = app.active_tab;
+        let spec = super::ops::resolve("Read CSV").expect("node type");
+        app.tabs[i].graph.add_node(
+            super::PaletteItem::Op(spec),
+            Vec::new(),
+            iced::Point::ORIGIN,
+        );
+        let bytes = app.graph_file_bytes(i);
+        let _ = app.on_graph(GraphMsg::New);
+        assert_eq!(nodes(app), 0);
+        let path =
+            std::env::temp_dir().join(format!("ocs-graph-load-{name}-{}.ocg", std::process::id()));
+        std::fs::write(&path, bytes).expect("write the graph file");
+        path.to_string_lossy().into_owned()
+    }
+
+    /// The action is accepted, nothing is loaded during the read, and it
+    /// settles with the loaded graph's state when the read ends.
+    #[test]
+    fn the_load_settles_when_its_read_ends() {
+        let mut app = fresh_drawing();
+        let path = graph_file(&mut app, "loaded");
+        let (response, task) = load(&mut app, "graph-load", &path);
+        assert_eq!(response["status"], "accepted", "{response}");
+        assert_eq!(nodes(&app), 0, "nothing is loaded during the read");
+        app.drive_headless_task(task).expect("the action's task");
+        let settled = settled(&app, "graph-load");
+        assert_eq!(settled["ok"], true, "{settled}");
+        assert_eq!(nodes(&app), 1);
+        assert_eq!(
+            settled["result"]["nodes"].as_array().map(Vec::len),
+            Some(1),
+            "{settled}"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A file that cannot be read, or that is no graph, fails with the
+    /// codes it failed with at once before.
+    #[test]
+    fn bad_files_fail_with_their_codes() {
+        let mut app = fresh_drawing();
+        let junk = std::env::temp_dir().join(format!("ocs-graph-junk-{}.ocg", std::process::id()));
+        std::fs::write(&junk, b"no graph").expect("write the junk file");
+        for (id, path, code) in [
+            (
+                "graph-missing",
+                "/no/such/graph.ocg".to_string(),
+                "read_failed",
+            ),
+            (
+                "graph-junk",
+                junk.to_string_lossy().into_owned(),
+                "invalid_graph",
+            ),
+        ] {
+            let (_, task) = load(&mut app, id, &path);
+            app.drive_headless_task(task).expect("the action's task");
+            let settled = settled(&app, id);
+            assert_eq!(settled["ok"], false, "{settled}");
+            assert_eq!(settled["code"], code, "{settled}");
+        }
+        assert_eq!(nodes(&app), 0);
+        let _ = std::fs::remove_file(junk);
+    }
+
+    /// A drawing replaced during the read gets no graph, and the action
+    /// fails with `document_closed`.
+    #[test]
+    fn a_replaced_drawing_fails_the_load() {
+        let mut app = fresh_drawing();
+        let i = app.active_tab;
+        let path = graph_file(&mut app, "replaced");
+        let (_, task) = load(&mut app, "graph-replaced", &path);
+        app.tabs[i].document_generation += 1;
+        app.drive_headless_task(task).expect("the action's task");
+        let settled = settled(&app, "graph-replaced");
+        assert_eq!(settled["code"], "document_closed", "{settled}");
+        assert_eq!(nodes(&app), 0);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A reader that panics fails the action, and the app goes on.
+    #[test]
+    fn a_reader_panic_fails_the_load() {
+        let mut app = fresh_drawing();
+        let errors = app.command_line.error_revision;
+        app.control.pending = Some(super::super::Operation {
+            id: "graph-panics".to_string(),
+            request: json!({"op":"node_graph","action":"load"}),
+            pending: 1,
+            error_revision: errors,
+            document_id: None,
+            origin_document: app.tabs[app.active_tab].id,
+            geometry_revision: 0,
+            result: json!({}),
+            cancelled: false,
+            failure: None,
+        });
+        let i = app.active_tab;
+        let task = app.control_graph_load_with(i, "panics.ocg", |_| panic!("a reader bug"));
+        app.drive_headless_task(task).expect("the action's task");
+        app.control.pending.as_mut().unwrap().pending = 0;
+        app.control_settle();
+        let settled = settled(&app, "graph-panics");
+        assert_eq!(settled["ok"], false, "{settled}");
+        assert_eq!(
+            settled["error"], "Node graph load failed: a reader bug",
+            "{settled}"
+        );
+        assert_eq!(nodes(&app), 0);
     }
 }

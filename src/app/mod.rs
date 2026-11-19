@@ -1013,6 +1013,9 @@ pub(super) struct OpenCADStudio {
     /// The read that the -POINTCLOUDATTACH file name prompt started: the
     /// tab and the file. A failed read ends that command when it ends.
     point_cloud_prompt_read: Option<(u64, std::path::PathBuf)>,
+    /// The reader of the files that node graph nodes read; a test gives
+    /// one that panics.
+    graph_file_reader: crate::app::node_graph::files::Reader,
     /// The number of the newest read of an import window (3D Studio
     /// Import, DGN Import, Import PDF); see `ReadTicket`.
     import_window_read: u64,
@@ -3641,6 +3644,12 @@ pub enum Message {
     ControlCopySetup,
     /// Node graph overlay interaction.
     Graph(crate::ui::node_graph::GraphMsg),
+    /// The end of a read of a file that a node graph node reads.
+    GraphFileRead(Box<crate::app::node_graph::files::FileRead>),
+    /// The end of the automation `node_graph` `load` read: the drawing it
+    /// was read for, that document's generation, and the file's bytes or
+    /// the failure.
+    GraphLoadRead(u64, u64, Result<Vec<u8>, serde_json::Value>),
     Tick(Instant),
     /// Periodic drain of plugin-to-host requests that arrived outside a host
     /// call (e.g. mutations from the Python REPL).
@@ -6496,6 +6505,7 @@ impl OpenCADStudio {
             pdf_attach: None,
             point_cloud_attach: None,
             point_cloud_prompt_read: None,
+            graph_file_reader: crate::app::node_graph::files::read_file,
             import_window_read: 0,
             attdef_dialog: None,
             insert_attr_dialog: None,

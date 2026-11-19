@@ -7,6 +7,7 @@
 //! did (in-place edits restored from their snapshots, created objects
 //! erased), so evaluating twice never moves an object twice.
 
+use super::files::{FileContent, FileKind};
 use super::{data, AppHost};
 use crate::command::EntityTransform;
 use crate::scene::model::solid_history;
@@ -636,7 +637,16 @@ impl AppHost<'_> {
         match spec.name {
             "Read CSV" => {
                 let header = graph::value::boolean(&a[1]).unwrap_or(true);
-                match self.file_path(&text(&a[0])).and_then(|path| std::fs::read_to_string(path).ok()) {
+                let source = self.file_path(&text(&a[0])).and_then(|path| {
+                    match self
+                        .app
+                        .graph_file(self.i, FileKind::Text, path, &mut self.tasks)
+                    {
+                        Some(FileContent::Text(source)) => source,
+                        _ => None,
+                    }
+                });
+                match source {
                     Some(source) => data::csv_outputs(&source, header),
                     None => vec![Value::Null; data::CSV_COLUMNS + 2],
                 }
@@ -990,23 +1000,23 @@ impl AppHost<'_> {
                 let Some(point) = vec3(&a[1]).filter(|_| width > 0.0 && !path.is_empty()) else {
                     return one(Value::Null);
                 };
-                let command = if spec.name == "Raster Image" {
-                    match crate::io::image_file_size(std::path::PathBuf::from(&path)) {
-                        Ok((_, w, h)) => ImageCommand::new(path, w, h),
-                        Err(_) => return one(Value::Null),
-                    }
+                let kind = if spec.name == "Raster Image" {
+                    FileKind::ImageSize
                 } else {
-                    let name = std::path::Path::new(&path)
-                        .file_name()
-                        .map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
-                    match std::fs::read(&path)
-                        .map_err(|e| e.to_string())
-                        .and_then(|bytes| {
-                            crate::io::ole_embed::EmbeddedImage::from_bytes(name, bytes)
-                        }) {
-                        Ok(image) => ImageCommand::new_embedded(image),
-                        Err(_) => return one(Value::Null),
+                    FileKind::Image
+                };
+                let read = self.app.graph_file(
+                    self.i,
+                    kind,
+                    std::path::PathBuf::from(&path),
+                    &mut self.tasks,
+                );
+                let command = match read {
+                    Some(FileContent::ImageSize(Some((w, h)))) => ImageCommand::new(path, w, h),
+                    Some(FileContent::Image(Some(image))) => {
+                        ImageCommand::new_embedded((*image).clone())
                     }
+                    _ => return one(Value::Null),
                 };
                 one(self.drive(Box::new(command), None, &[point, point + DVec3::X * width]))
             }

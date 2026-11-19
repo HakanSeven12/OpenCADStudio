@@ -4712,6 +4712,35 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             );
         }
         levels.retain(|index, _| draws.contains_key(index));
+        if crate::perf::enabled() {
+            // What the opaque fills draw this frame: the parts at each level
+            // and the triangles they come to, of those of every part in full.
+            let mut parts = [0usize; 3];
+            let (mut drawn, mut full) = (0u64, 0u64);
+            for (index, chunk) in self.active_mesh_chunks_indexed() {
+                let instances = u64::from(chunk.instance_count.max(1));
+                full += u64::from(chunk.index_count / 3) * instances;
+                match draws.get(&index) {
+                    Some(ranges) => {
+                        for &(_, _, count) in ranges {
+                            drawn += u64::from(count / 3) * instances;
+                        }
+                        for level in levels.get(&index).into_iter().flatten() {
+                            parts[usize::from(*level).min(2)] += 1;
+                        }
+                    }
+                    None => drawn += u64::from(chunk.index_count / 3) * instances,
+                }
+            }
+            crate::perf_record!(
+                "[perf] mesh-lod parts={}/{}/{} triangles={} of {}",
+                parts[0],
+                parts[1],
+                parts[2],
+                drawn,
+                full,
+            );
+        }
         self.mesh_lod_levels = levels;
         self.mesh_lod_draws = draws;
     }

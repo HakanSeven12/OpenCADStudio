@@ -859,34 +859,9 @@ impl OpenCADStudio {
                 }
             }
 
-            // ADCENTER / CONTENTBROWSER — report the drawing's named content
-            // (blocks and layers) from the command line in place of the browser
-            // panel.
-            "ADCENTER" | "CONTENTBROWSER" => {
-                let blocks = self.tabs[i].scene.custom_block_names();
-                let layers: Vec<String> = self.tabs[i]
-                    .scene
-                    .document
-                    .layers
-                    .names()
-                    .map(|s| s.to_string())
-                    .collect();
-                self.command_line.push_output(
-                    crate::tf!(
-                        "Blocks ({}): {}",
-                        blocks.len(),
-                        if blocks.is_empty() {
-                            "(none)".to_string()
-                        } else {
-                            blocks.join(", ")
-                        }
-                    )
-                    .as_ref(),
-                );
-                self.command_line.push_output(
-                    crate::tf!("Layers ({}): {}", layers.len(), layers.join(", ")).as_ref(),
-                );
-            }
+            // ADCENTER / CONTENTBROWSER — browse another drawing's named
+            // content and add it to this one.
+            "ADCENTER" | "CONTENTBROWSER" => self.open_design_center(),
 
             // BLOCKSPALETTE opens the Blocks palette; BLOCKSPALETTECLOSE
             // closes it. `_BLOCKSPALETTE <tab>` opens it on a tab.

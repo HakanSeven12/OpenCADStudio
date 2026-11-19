@@ -170,7 +170,27 @@ impl OpenCADStudio {
             }
             // Browsers expose no folder picker.
             #[cfg(target_arch = "wasm32")]
-            BlockPaletteMsg::LibraryBrowse => {}
+            BlockPaletteMsg::LibraryBrowse | BlockPaletteMsg::LibraryBrowseDrawing => {}
+            #[cfg(not(target_arch = "wasm32"))]
+            BlockPaletteMsg::LibraryBrowseDrawing => {
+                return Task::perform(
+                    async {
+                        match rfd::AsyncFileDialog::new()
+                            .set_title(crate::t!("Select a Drawing to List Its Blocks").as_ref())
+                            .add_filter(
+                                crate::t!("DWG/DXF Files").as_ref(),
+                                &["dwg", "dxf", "DWG", "DXF"],
+                            )
+                            .pick_file()
+                            .await
+                        {
+                            Some(h) => Ok(crate::sys::handle_path(&h)),
+                            None => Err("Cancelled".to_string()),
+                        }
+                    },
+                    |r| Message::BlockPalette(BlockPaletteMsg::LibraryPicked(r)),
+                );
+            }
             #[cfg(not(target_arch = "wasm32"))]
             BlockPaletteMsg::LibraryBrowse => {
                 return Task::perform(
@@ -261,8 +281,39 @@ impl OpenCADStudio {
         self.persist_settings_if_changed();
     }
 
-    /// Show `dir`: its sub-folders, then its drawings, each by name.
+    /// Show `dir`: its sub-folders, then its drawings, each by name. A
+    /// drawing shows its blocks.
     fn list_block_library(&mut self, dir: PathBuf) {
+        if is_drawing(&dir) && dir.is_file() {
+            // ponytail: read on the UI thread, as inserting a block from
+            // another drawing is; move to a worker if big libraries stall.
+            let doc = match crate::io::load_file(&dir) {
+                Ok(doc) => doc,
+                Err(e) => {
+                    self.command_line.push_error(&e.to_string());
+                    return;
+                }
+            };
+            use document::TableEntry;
+            let mut names: Vec<String> = doc
+                .block_records
+                .iter()
+                .filter(|br| !br.is_standard() && !br.is_layout() && !br.is_anonymous())
+                .map(|br| br.name.clone())
+                .collect();
+            names.sort_by_key(|name| name.to_lowercase());
+            self.block_palette.library_entries = names
+                .into_iter()
+                .map(|name| LibraryEntry {
+                    path: dir.clone(),
+                    folder: false,
+                    thumb: None,
+                    block: Some(name),
+                })
+                .collect();
+            self.block_palette.library_dir = Some(dir);
+            return;
+        }
         let mut entries: Vec<LibraryEntry> = std::fs::read_dir(&dir)
             .into_iter()
             .flatten()
@@ -278,6 +329,7 @@ impl OpenCADStudio {
                         path,
                         folder: true,
                         thumb: None,
+                        block: None,
                     })
                 } else if is_drawing(&path) {
                     // The thumbnail is read in the background.
@@ -285,6 +337,7 @@ impl OpenCADStudio {
                         path,
                         folder: false,
                         thumb: None,
+                        block: None,
                     })
                 } else {
                     None
@@ -558,6 +611,11 @@ impl OpenCADStudio {
         };
         match action {
             MenuAction::Insert => return self.palette_insert(item, None),
+            MenuAction::ShowBlocks => {
+                if let Item::File(path) = item {
+                    self.list_block_library(path);
+                }
+            }
             MenuAction::Redefine => {
                 let result = match &item {
                     Item::Ref(r) if r.drawing => {

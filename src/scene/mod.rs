@@ -12056,9 +12056,9 @@ impl Scene {
     /// whole drawing on the UI thread right after the view settled (#3339).
     /// A raster replacement changes only pixels and size — the gathered
     /// placement, clip and draw depth stay valid — so lists that are current
-    /// are patched in place; lists already stale for other reasons keep their
-    /// rebuild, as do lists holding an instanced clone (an image inside a
-    /// block reference), whose transform the gather owns.
+    /// are patched in place; lists already stale for other reasons, and lists
+    /// holding an instanced clone (an image inside a block reference), are
+    /// evicted so the next gather rebuilds them.
     pub(crate) fn patch_image_caches(&self, prev_epoch: u64, handles: &[Handle]) {
         if handles.is_empty() {
             return;
@@ -12070,7 +12070,7 @@ impl Scene {
         let counts = (a.0 + b.0, a.1 + b.1, a.2 + b.2);
         if perf {
             crate::perf_record!(
-                "[perf] image-patch   {:>7.2}ms entries={} lists_patched={} stale_kept={}",
+                "[perf] image-patch   {:>7.2}ms entries={} lists_patched={} evicted={}",
                 started.map_or(0.0, |s| s.elapsed().as_secs_f64() * 1000.0),
                 counts.0,
                 counts.1,
@@ -12079,7 +12079,7 @@ impl Scene {
         }
     }
 
-    /// Returns (entries seen, lists patched, stale lists left to their rebuild).
+    /// Returns (entries seen, lists patched, lists evicted for a rebuild).
     fn patch_image_cache_entries<K>(
         &self,
         cache: &RefCell<HashMap<K, (u64, Arc<Vec<ImageModel>>)>>,
@@ -12090,20 +12090,20 @@ impl Scene {
         let mut seen = 0usize;
         let mut patched = 0usize;
         let mut stale = 0usize;
-        for (entry_epoch, arc) in cache.borrow_mut().values_mut() {
+        cache.borrow_mut().retain(|_, (entry_epoch, arc)| {
             seen += 1;
-            if *entry_epoch != prev_epoch {
-                // The list predates other changes a patch cannot reason about;
-                // its own rebuild stays responsible for it.
+            // A list the patch cannot reason about — one that predates other
+            // changes, or holds an instanced clone whose transform the gather
+            // owns — is evicted: the reseed records no geometry change, so the
+            // journal replay would otherwise revalidate it with the old pixels.
+            if *entry_epoch != prev_epoch
+                || arc.iter().any(|model| {
+                    model.render_instance.is_some()
+                        && model.entity.is_some_and(|entity| handles.contains(&entity))
+                })
+            {
                 stale += 1;
-                continue;
-            }
-            if arc.iter().any(|model| {
-                model.render_instance.is_some()
-                    && model.entity.is_some_and(|entity| handles.contains(&entity))
-            }) {
-                stale += 1;
-                continue;
+                return false;
             }
             let list = Arc::make_mut(arc);
             let mut touched = false;
@@ -12137,7 +12137,8 @@ impl Scene {
                 *entry_epoch = epoch;
                 patched += 1;
             }
-        }
+            true
+        });
         (seen, patched, stale)
     }
 

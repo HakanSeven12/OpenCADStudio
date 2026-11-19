@@ -7,8 +7,8 @@ use crate::command::{CadCommand, CmdOption, CmdResult};
 use crate::scene::model::wire_model::WireModel;
 use crate::ui::window::sheet_set::{
     BlockList, Category, FieldId, Form, FormKind, FoundLayout, ImportRead, ImportRow, MenuAction,
-    Placing, PropRow, Properties, RowKey, SelectBlock, SheetSetMsg, SheetStatus, SsDialog,
-    TemplatePick, ViewAction, Wizard, WizardMsg,
+    NewSheetWrite, Placing, PropRow, Properties, RowKey, SelectBlock, SheetSetMsg, SheetStatus,
+    SsDialog, TemplatePick, ViewAction, Wizard, WizardMsg,
 };
 use document::entities::Entity as _;
 use document::sheet_set::{
@@ -436,6 +436,96 @@ fn scan_folder(path: &Path) -> Vec<FoundLayout> {
         }
     }
     found
+}
+
+/// `work` on a worker, with a panic in it as its error ("`context` failed:
+/// ..."), so that a form whose drawing is written comes back with it.
+fn caught<T>(context: &str, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).unwrap_or_else(|payload| {
+            let detail = crate::app::update::panic_detail(payload);
+            Err(crate::tf!("{context} failed: {detail}").into_owned())
+        })
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = context;
+        work()
+    }
+}
+
+/// Writes a New Sheet drawing; its layout handle, or why not.
+type SheetWriter = fn(&NewSheetWrite) -> Result<String, String>;
+
+/// Write a New Sheet drawing: layout `template` of its drawing (a new
+/// drawing's first layout when there is none, or it cannot be read), alone
+/// and renamed, with the sheet link; its layout handle (run on a worker
+/// thread).
+fn write_new_sheet(w: &NewSheetWrite) -> Result<String, String> {
+    let mut scene = crate::scene::Scene::new();
+    let source_layout = match w.template.as_ref().and_then(|(file, name)| {
+        crate::io::load_file(Path::new(file))
+            .ok()
+            .map(|d| (d, name.clone()))
+    }) {
+        Some((doc, name)) => {
+            scene.document = doc;
+            name
+        }
+        None => {
+            scene.populate_new_drawing_defaults();
+            paper_layouts(&scene.document)
+                .into_iter()
+                .next()
+                .map(|(n, _)| n)
+                .unwrap_or_else(|| "Layout1".into())
+        }
+    };
+    for (name, _) in paper_layouts(&scene.document) {
+        if !name.eq_ignore_ascii_case(&source_layout) {
+            scene.delete_layout(&name);
+        }
+    }
+    scene.rename_layout(&source_layout, &w.layout_name);
+    let handle = paper_layouts(&scene.document)
+        .into_iter()
+        .find(|(n, _)| *n == w.layout_name)
+        .map(|(_, h)| h)
+        .unwrap_or_default();
+    scene.document.set_sheet_set_data(&SheetSetData {
+        layout_handle: handle.to_lowercase(),
+        layout_name: w.layout_name.clone(),
+        sheet_dwg_name: w.file.clone(),
+        sheet_set_file_name: ss::native_path(&w.dst),
+        sheet_set_version: w.version,
+        update_count: 1,
+        update_time: utc_stamp(),
+    });
+    crate::entities::field::stamp_save_dates(&mut scene.document);
+    crate::io::save(&scene.document, &w.path).map_err(|e| format!("{}: {e}", w.file))?;
+    Ok(handle)
+}
+
+/// Renames a layout in a closed drawing and saves it (path, layout, new
+/// name, `.bak` first).
+type RenameWriter = fn(&Path, &str, &str, bool) -> Result<(), String>;
+
+/// Rename layout `from` to `to` in the closed drawing at `path`, and its
+/// sheet link, and save it back whole; its previous file is kept as `.bak`
+/// when `backup`, as a save over it does (run on a worker thread).
+fn write_renamed_layout(path: &Path, from: &str, to: &str, backup: bool) -> Result<(), String> {
+    let mut scene = crate::scene::Scene::new();
+    scene.document = crate::io::load_file(path).map_err(|e| e.to_string())?;
+    scene.rename_layout(from, to);
+    if let Some(mut link) = scene.document.sheet_set_data() {
+        link.layout_name = to.to_string();
+        scene.document.set_sheet_set_data(&link);
+    }
+    if backup {
+        crate::io::write_backup(path);
+    }
+    crate::io::save(&scene.document, path).map_err(|e| e.to_string())
 }
 
 /// Rename & Renumber: layout and file names follow the options.
@@ -914,8 +1004,15 @@ impl OpenCADStudio {
                 }
                 Err(e) => self.command_line.push_error(&format!("{path}: {e}")),
             },
-            SheetSetMsg::Previous => self.rename_step(false),
-            SheetSetMsg::Next => self.rename_step(true),
+            SheetSetMsg::Previous => return self.rename_step(false),
+            SheetSetMsg::Next => return self.rename_step(true),
+            SheetSetMsg::SheetWritten(f, write, written) => {
+                return self.finish_new_sheet(*f, *write, written)
+            }
+            SheetSetMsg::RenameWritten(f, step, written) => match written {
+                Ok(()) => return self.apply_rename(*f, step, true, write_renamed_layout),
+                Err(e) => return self.form_error(*f, e),
+            },
             SheetSetMsg::ViewsByCategory(v) => self.sheet_set.by_category = v,
             SheetSetMsg::NewCategory => self.open_category(None),
             SheetSetMsg::CategoryProperties(id) => self.open_category(Some(id)),
@@ -1693,11 +1790,34 @@ impl OpenCADStudio {
         self.active_modal = Some(crate::app::ModalKind::SheetSet);
     }
 
+    /// A form back in its dialog with error `e`; on the command line when
+    /// another dialog opened while a worker wrote its drawing.
+    fn form_error(&mut self, f: Form, e: String) -> Task<Message> {
+        if self.sheet_set.dialog.is_none() {
+            self.sheet_set.dialog = Some(SsDialog::Form(Form {
+                error: Some(e),
+                ..f
+            }));
+        } else {
+            self.command_line.push_error(&e);
+        }
+        Task::none()
+    }
+
     /// Rename & Renumber: number and title into the set, and the layout and
-    /// drawing file renamed when they changed.
-    fn apply_rename(&mut self, f: &Form) -> Result<(), String> {
+    /// drawing file renamed when they changed; then `step`: OK (`None`)
+    /// closes the dialog, Previous / Next (`Some(forward)`) go to that
+    /// sheet. A closed drawing's layout is renamed in its file on a worker
+    /// first (`writer`; `written` once it is).
+    fn apply_rename(
+        &mut self,
+        f: Form,
+        step: Option<bool>,
+        written: bool,
+        writer: RenameWriter,
+    ) -> Task<Message> {
         let Some(db) = self.sheet_set.sets.get(f.set) else {
-            return Ok(());
+            return self.rename_done(f, step);
         };
         let old = db
             .layout_reference(&f.component, "Layout")
@@ -1718,12 +1838,14 @@ impl OpenCADStudio {
         let open_tab = self.tab_showing(Path::new(&old.file_name));
         if file_changed {
             if open_tab.is_some() {
-                return Err(
+                return self.form_error(
+                    f,
                     crate::t!("The drawing is open; close it to rename its file.").into_owned(),
                 );
             }
             if Path::new(&new_file).exists() {
-                return Err(crate::tf!("{} already exists.", new_file).into_owned());
+                let e = crate::tf!("{} already exists.", new_file).into_owned();
+                return self.form_error(f, e);
             }
         }
         if layout_changed {
@@ -1741,29 +1863,34 @@ impl OpenCADStudio {
                     }
                     self.tabs[k].dirty = true;
                 }
-                None => {
-                    // The closed drawing is read and written back whole: its
-                    // previous file is kept as `.bak`, as a save over it does.
-                    let path = Path::new(&old.file_name);
-                    let mut scene = crate::scene::Scene::new();
-                    scene.document = crate::io::load_file(path).map_err(|e| e.to_string())?;
-                    scene.rename_layout(&old.name, &new_layout);
-                    if let Some(mut link) = scene.document.sheet_set_data() {
-                        link.layout_name = new_layout.clone();
-                        scene.document.set_sheet_set_data(&link);
-                    }
-                    if self.backup_on_save {
-                        crate::io::write_backup(path);
-                    }
-                    crate::io::save(&scene.document, path).map_err(|e| e.to_string())?;
+                // The closed drawing is read and written back on a worker;
+                // this runs again when it is written.
+                None if !written => {
+                    let path = PathBuf::from(&old.file_name);
+                    let (from, to, backup) = (old.name.clone(), new_layout, self.backup_on_save);
+                    let context = crate::t!("Rename & Renumber Sheet").into_owned();
+                    return crate::app::update::background_task(
+                        context.clone(),
+                        move || caught(&context, || writer(&path, &from, &to, backup)),
+                        move |written| {
+                            Message::SheetSet(SheetSetMsg::RenameWritten(
+                                Box::new(f),
+                                step,
+                                written,
+                            ))
+                        },
+                    );
                 }
+                None => {}
             }
         }
         if file_changed {
-            std::fs::rename(&old.file_name, &new_file).map_err(|e| e.to_string())?;
+            if let Err(e) = std::fs::rename(&old.file_name, &new_file) {
+                return self.form_error(f, e.to_string());
+            }
         }
         let Some(db) = self.sheet_set.sets.get_mut(f.set) else {
-            return Ok(());
+            return self.rename_done(f, step);
         };
         if let Some(el) = db.find_mut(&f.component) {
             el.set_prop("Number", f.number.trim());
@@ -1780,17 +1907,17 @@ impl OpenCADStudio {
                 },
             );
         }
-        Ok(())
+        self.rename_done(f, step)
     }
 
     /// Rename & Renumber < Previous / Next >: apply, then the neighbouring sheet.
-    fn rename_step(&mut self, forward: bool) {
+    fn rename_step(&mut self, forward: bool) -> Task<Message> {
         let Some(SsDialog::Form(f)) = self.sheet_set.dialog.take() else {
-            return;
+            return Task::none();
         };
         if f.kind == FormKind::RenameView {
             let Some(db) = self.sheet_set.sets.get_mut(f.set) else {
-                return;
+                return Task::none();
             };
             if let Some(el) = db.find_mut(&f.component) {
                 if f.number.trim().is_empty() {
@@ -1819,19 +1946,22 @@ impl OpenCADStudio {
                 Some(form) => self.sheet_set.dialog = Some(SsDialog::Form(form)),
                 None => self.close_active_modal(),
             }
-            return;
+            return Task::none();
         }
-        if let Err(e) = self.apply_rename(&f) {
-            self.sheet_set.dialog = Some(SsDialog::Form(Form {
-                error: Some(e),
-                ..f
-            }));
-            return;
-        }
+        self.apply_rename(f, Some(forward), false, write_renamed_layout)
+    }
+
+    /// Rename & Renumber applied: OK (`step` `None`) closes the dialog;
+    /// Previous / Next go to that sheet.
+    fn rename_done(&mut self, f: Form, step: Option<bool>) -> Task<Message> {
         self.sheet_set.current = Some(f.set);
         self.save_current_sheet_set();
+        let Some(forward) = step else {
+            self.close_active_modal();
+            return Task::none();
+        };
         let Some(db) = self.sheet_set.sets.get(f.set) else {
-            return;
+            return Task::none();
         };
         let ids: Vec<String> = db.sheets().iter().map(|s| s.id().to_string()).collect();
         let k = ids.iter().position(|i| *i == f.component).unwrap_or(0);
@@ -1842,13 +1972,14 @@ impl OpenCADStudio {
         };
         let Some(id) = ids.get(next) else {
             self.close_active_modal();
-            return;
+            return Task::none();
         };
         let mut form = rename_form(db, f.set, id);
         form.rename = f.rename;
         follow_rename(&mut form);
         self.sheet_set.selected = Some(id.clone());
         self.sheet_set.dialog = Some(SsDialog::Form(form));
+        Task::none()
     }
 
     /// The View Category dialog for a new (`None`) or existing category.
@@ -2772,13 +2903,7 @@ impl OpenCADStudio {
             return Task::none();
         };
         match f.kind {
-            FormKind::Rename => {
-                if let Err(e) = self.apply_rename(&f) {
-                    f.error = Some(e);
-                    self.sheet_set.dialog = Some(SsDialog::Form(f));
-                    return Task::none();
-                }
-            }
+            FormKind::Rename => return self.apply_rename(f, None, false, write_renamed_layout),
             FormKind::NewSubset => {
                 let name = f.title.trim().to_string();
                 if name.is_empty() {
@@ -2858,12 +2983,13 @@ impl OpenCADStudio {
     /// "Number Title", from the sheet creation template (a new drawing's
     /// Layout1 when the set names none); then the sheet and its layout
     /// reference, and the drawing opens at it.
-    fn create_sheet(&mut self, mut f: Form) -> Task<Message> {
-        let fail = |app: &mut Self, mut f: Form, e: String| {
-            f.error = Some(e);
-            app.sheet_set.dialog = Some(SsDialog::Form(f));
-            Task::none()
-        };
+    fn create_sheet(&mut self, f: Form) -> Task<Message> {
+        self.create_sheet_with(f, write_new_sheet)
+    }
+
+    /// [`Self::create_sheet`] with the writer of the sheet drawing.
+    fn create_sheet_with(&mut self, mut f: Form, writer: SheetWriter) -> Task<Message> {
+        let fail = |app: &mut Self, f: Form, e: String| app.form_error(f, e);
         let title = f.title.trim().to_string();
         if title.is_empty() {
             return fail(
@@ -2906,57 +3032,52 @@ impl OpenCADStudio {
                 .get(f.set)
                 .and_then(|db| template_of(db, &f.component)),
         };
-        let mut scene = crate::scene::Scene::new();
-        let source_layout = match template.as_ref().and_then(|t| {
-            crate::io::load_file(Path::new(&t.file_name))
-                .ok()
-                .map(|d| (d, t.name.clone()))
-        }) {
-            Some((doc, name)) => {
-                scene.document = doc;
-                name
-            }
-            None => {
-                scene.populate_new_drawing_defaults();
-                paper_layouts(&scene.document)
-                    .into_iter()
-                    .next()
-                    .map(|(n, _)| n)
-                    .unwrap_or_else(|| "Layout1".into())
-            }
-        };
-        for (name, _) in paper_layouts(&scene.document) {
-            if !name.eq_ignore_ascii_case(&source_layout) {
-                scene.delete_layout(&name);
-            }
-        }
-        scene.rename_layout(&source_layout, &layout_name);
-        let handle = paper_layouts(&scene.document)
-            .into_iter()
-            .find(|(n, _)| *n == layout_name)
-            .map(|(_, h)| h)
-            .unwrap_or_default();
         f.number = f.number.trim().to_string();
         let Some(db) = self.sheet_set.sets.get(f.set) else {
             return Task::none();
         };
-        // The drawing is saved first: a failed save leaves no sheet in the set.
-        // It records the revision the set's next write counts up to.
-        let dst = db.path.clone().unwrap_or_default();
-        let file = ss::native_path(&path.to_string_lossy());
-        scene.document.set_sheet_set_data(&SheetSetData {
-            layout_handle: handle.to_lowercase(),
-            layout_name: layout_name.clone(),
-            sheet_dwg_name: file.clone(),
-            sheet_set_file_name: ss::native_path(&dst),
-            sheet_set_version: db.file_revision() + 1,
-            update_count: 1,
-            update_time: utc_stamp(),
-        });
-        crate::entities::field::stamp_save_dates(&mut scene.document);
-        if let Err(e) = crate::io::save(&scene.document, &path) {
-            return fail(self, f, format!("{file}: {e}"));
-        }
+        // The drawing is written first, on a worker: a failed save leaves no
+        // sheet in the set. It records the revision the set's next write
+        // counts up to.
+        let write = NewSheetWrite {
+            file: ss::native_path(&path.to_string_lossy()),
+            path,
+            template: template.map(|t| (t.file_name, t.name)),
+            layout_name,
+            dst: db.path.clone().unwrap_or_default(),
+            version: db.file_revision() + 1,
+        };
+        let context = crate::t!("New Sheet").into_owned();
+        crate::app::update::background_task(
+            context.clone(),
+            {
+                let write = write.clone();
+                move || caught(&context, || writer(&write))
+            },
+            move |written| {
+                Message::SheetSet(SheetSetMsg::SheetWritten(
+                    Box::new(f),
+                    Box::new(write),
+                    written,
+                ))
+            },
+        )
+    }
+
+    /// New Sheet: the drawing is written (its layout handle, or why not);
+    /// the sheet and its layout reference join the set, and the drawing
+    /// opens at it.
+    fn finish_new_sheet(
+        &mut self,
+        f: Form,
+        write: NewSheetWrite,
+        written: Result<String, String>,
+    ) -> Task<Message> {
+        let handle = match written {
+            Ok(handle) => handle,
+            Err(e) => return self.form_error(f, e),
+        };
+        let title = f.title.trim().to_string();
         let Some(db) = self.sheet_set.sets.get_mut(f.set) else {
             return Task::none();
         };
@@ -2967,13 +3088,13 @@ impl OpenCADStudio {
             &sheet,
             "Layout",
             &LayoutReference {
-                file_name: file,
-                name: layout_name,
+                file_name: write.file,
+                name: write.layout_name,
                 handle,
             },
         );
-        if let Err(e) = write_set(db, &dst) {
-            self.command_line.push_error(&format!("{dst}: {e}"));
+        if let Err(e) = write_set(db, &write.dst) {
+            self.command_line.push_error(&format!("{}: {e}", write.dst));
         }
         // "Open in drawing editor" (off by default) opens the new sheet.
         self.close_active_modal();

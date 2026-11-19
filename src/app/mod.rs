@@ -5946,6 +5946,11 @@ pub enum Message {
     /// and the rasters.
     UnderlayRastersDrawn(u64, u64, Box<crate::scene::ReseedDone>),
     PointCloudRead(crate::scene::model::point_cloud::ReadDone),
+    /// The end of the worker that read an automation `embed_image` picture:
+    /// the drawing it was started for, that document's generation, and the
+    /// read.
+    #[cfg(not(target_arch = "wasm32"))]
+    EmbedImageRead(u64, u64, Box<control::EmbedImageRead>),
     BackgroundTaskFailed {
         /// Which operation the worker was running (e.g. "STL export").
         context: String,

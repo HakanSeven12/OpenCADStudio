@@ -15075,6 +15075,11 @@ impl OpenCADStudio {
                 self.finish_point_cloud_display_read(&done);
                 Task::none()
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::EmbedImageRead(tab_id, generation, read) => {
+                self.finish_control_embed_image(tab_id, generation, *read);
+                Task::none()
+            }
 
             // ── Print to system printer ───────────────────────────────────────
             Message::PrintToPrinter => self.on_print_to_printer(),

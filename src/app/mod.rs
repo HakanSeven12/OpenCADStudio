@@ -3274,6 +3274,9 @@ impl ClipboardDeps {
                             .filter_map(|entry| entry.value.as_handle()),
                     );
                 }
+                // A field's nested fields (a formula's operands) hang off it,
+                // not off a dictionary entry.
+                ObjectType::Field(f) => queue.extend(f.child_fields.iter().copied()),
                 _ => {}
             }
             out.push((h, obj.clone()));

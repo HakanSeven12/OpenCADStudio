@@ -1786,6 +1786,18 @@ pub(crate) fn remap_object(
             object.handle = new_handle;
             object.visit_handles_mut(&mut |h| *h = map(*h));
         }
+        // A FIELD under ACAD_FIELD: the paste evaluates and edits its own
+        // field tree, so its handle, owner and nested fields move with it.
+        ObjectType::Field(f) => {
+            f.handle = new_handle;
+            f.owner = map(f.owner);
+            for child in &mut f.child_fields {
+                *child = map(*child);
+            }
+            for r in &mut f.referenced_objects {
+                *r = map(*r);
+            }
+        }
         // Other leaf object kinds don't appear in an entity xdictionary; if one
         // does, it's inserted with the fresh handle below via the caller's key,
         // but its internal owner is left as-is (best effort).

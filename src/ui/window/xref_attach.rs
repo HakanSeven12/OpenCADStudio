@@ -16,12 +16,12 @@ use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{button_style, dialog_button, field_style, form_radio, LABEL_WIDTH};
 use crate::ui::window::block_definition::{group, labeled_checkbox};
 
-/// One edit in the dialog.
 /// What the read for an attach's placement ghost found in a file: its
 /// model-space objects and units; none when the file was not read or holds
 /// too many objects for a ghost.
 pub type XrefPreviewRead = Option<(Vec<document::EntityType>, i16)>;
 
+/// One edit in the dialog.
 #[derive(Debug, Clone)]
 pub enum XrefAttachMsg {
     /// Name box: a reference already in the drawing, picked or typed.

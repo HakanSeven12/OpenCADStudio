@@ -486,6 +486,10 @@ harness = false
 name = "save_batch_memory"
 harness = false
 
+[[bench]]
+name = "polygon_overlay_and_clip"
+harness = false
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

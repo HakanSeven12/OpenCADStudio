@@ -12511,3 +12511,87 @@ mod underlay_command_tests {
     }
 }
 
+
+// The Properties panel switches its rows to the selected entity's type: a
+// Table gets table-only rows that a Line does not.
+mod entity_specific_properties_tests {
+    use super::super::*;
+    use document::entities::Table;
+    use document::types::Vector3;
+    use document::EntityType;
+
+    fn has_field(app: &OpenCADStudio, field: &str) -> bool {
+        app.tabs[app.active_tab]
+            .properties
+            .sections
+            .iter()
+            .flat_map(|section| &section.props)
+            .any(|property| property.field == field)
+    }
+
+    #[test]
+    fn a_table_shows_table_rows_that_a_line_does_not() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let table = app.tabs[i]
+            .scene
+            .document
+            .add_entity(EntityType::Table(Box::new(Table::new(
+                Vector3::ZERO,
+                2,
+                2,
+            ))))
+            .unwrap();
+        let line = app.tabs[i].scene.add_entity(EntityType::Line(
+            document::entities::Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0)),
+        ));
+
+        app.tabs[i].scene.select_entity(table, true);
+        app.tabs[i].selected_handle = Some(table);
+        app.refresh_properties();
+        assert!(has_field(&app, "tbl_style_handle"), "a table style row is shown");
+        assert!(has_field(&app, "tbl_rows"), "the row count is shown");
+        assert!(has_field(&app, "tbl_cols"), "the column count is shown");
+        assert!(has_field(&app, "tbl_flow_direction"), "the direction row is shown");
+
+        let direction = app.tabs[i]
+            .properties
+            .sections
+            .iter()
+            .flat_map(|section| &section.props)
+            .find(|property| property.field == "tbl_flow_direction")
+            .unwrap()
+            .clone();
+        let crate::scene::model::object::PropValue::Choice { ref selected, .. } = direction.value
+        else {
+            panic!("the direction row is a choice")
+        };
+        let wanted = if selected == "Up" { "Down" } else { "Up" };
+        let _ = app
+            .set_property_value(direction, &serde_json::json!(wanted))
+            .unwrap();
+        app.finish_pending_history(i);
+        app.refresh_properties();
+        let after = app.tabs[i]
+            .properties
+            .sections
+            .iter()
+            .flat_map(|section| &section.props)
+            .find(|property| property.field == "tbl_flow_direction")
+            .unwrap();
+        assert!(
+            matches!(&after.value, crate::scene::model::object::PropValue::Choice { selected, .. } if selected == wanted),
+            "the table direction changed the row"
+        );
+
+        app.tabs[i].scene.select_entity(line, true);
+        app.tabs[i].selected_handle = Some(line);
+        app.refresh_properties();
+        assert!(
+            !has_field(&app, "tbl_style_handle"),
+            "a line does not get table rows"
+        );
+    }
+}
+

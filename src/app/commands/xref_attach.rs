@@ -998,4 +998,124 @@ mod xref_attach_read_tests {
         assert_eq!(references(&app, i), 1);
         assert_eq!(inserts(&app, i), 2, "the second INSERT is placed at once");
     }
+
+    /// The request of an attach of `path` that asks for its insertion point.
+    fn on_screen(path: &str) -> XrefAttachRequest {
+        XrefAttachRequest {
+            path: path.to_string(),
+            overlay: false,
+            path_type: Pathtype::Full,
+        }
+    }
+
+    /// The ghost that the active command shows with the cursor at (5, 5).
+    fn ghost(app: &mut OpenCADStudio, i: usize) -> usize {
+        app.tabs[i].active_cmd.as_mut().map_or(0, |command| {
+            command.on_preview_wires(DVec3::new(5.0, 5.0, 0.0)).len()
+        })
+    }
+
+    /// The placement ghost of a file is read off the UI thread: the attach
+    /// asks for its point at once, without a ghost, and shows the ghost when
+    /// the read ends.
+    #[test]
+    fn the_ghost_comes_when_its_read_ends() {
+        let (mut app, path) = source_and_host("ghost");
+        let i = app.active_tab;
+        let task =
+            app.start_xref_attach(i, on_screen(&path), XrefPlacement::on_screen(), "XATTACH");
+        assert!(
+            app.tabs[i].active_cmd.is_some(),
+            "the attach asks for its point"
+        );
+        assert_eq!(ghost(&mut app, i), 0, "no ghost during the read");
+        app.drive_headless_task(task).expect("the ghost's task");
+        assert!(ghost(&mut app, i) > 0, "the ghost after the read");
+    }
+
+    /// The ghost is drawn in the drawing's units: a 10-unit line of a
+    /// reference in metres is 10,000 long in a drawing in millimetres.
+    #[test]
+    fn the_ghost_is_scaled_to_the_drawing_units() {
+        let dir =
+            std::env::temp_dir().join(format!("ocs-xattach-read-units-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir
+            .join("metres.dwg")
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.automation_op(r#"{"op":"run","cmd":"INSUNITS 6"}"#);
+        let _ = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+        let _ = app.automation_op(&format!(r#"{{"op":"save","path":"{path}"}}"#));
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.automation_op(r#"{"op":"run","cmd":"INSUNITS 4"}"#);
+        let i = app.active_tab;
+        assert_eq!(app.tabs[i].scene.document.header.insertion_units, 4);
+        let task =
+            app.start_xref_attach(i, on_screen(&path), XrefPlacement::on_screen(), "XATTACH");
+        app.drive_headless_task(task).expect("the ghost's task");
+        let wires = app.tabs[i]
+            .active_cmd
+            .as_mut()
+            .expect("the attach")
+            .on_preview_wires(DVec3::new(5.0, 5.0, 0.0));
+        let xs: Vec<f32> = wires
+            .iter()
+            .flat_map(|wire| wire.geom.points.iter().map(|p| p[0]))
+            .filter(|x| x.is_finite())
+            .collect();
+        let length = xs.iter().cloned().fold(f32::MIN, f32::max)
+            - xs.iter().cloned().fold(f32::MAX, f32::min);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            (length - 10_000.0).abs() < 1.0,
+            "the ghost is {length} long"
+        );
+    }
+
+    /// A ghost reader that panics leaves the attach at its point prompt,
+    /// without a ghost.
+    #[test]
+    fn a_ghost_reader_panic_keeps_the_attach() {
+        let (mut app, path) = source_and_host("ghost-panics");
+        let i = app.active_tab;
+        let task = app.start_xref_attach_with(
+            i,
+            on_screen(&path),
+            XrefPlacement::on_screen(),
+            "XATTACH",
+            |_| panic!("a reader bug"),
+        );
+        app.drive_headless_task(task).expect("the ghost's task");
+        assert!(app.tabs[i].active_cmd.is_some(), "the attach goes on");
+        assert_eq!(ghost(&mut app, i), 0);
+    }
+
+    /// A ghost read for a file that the active attach does not wait for is
+    /// dropped: the attach that was cancelled does not give its ghost to
+    /// the next one.
+    #[test]
+    fn a_ghost_for_another_attach_is_dropped() {
+        let (mut app, first) = source_and_host("ghost-first");
+        // An empty second drawing, saved from a tab of its own; then a new
+        // host.
+        let second = first.replace("ghost-first.dwg", "ghost-second.dwg");
+        let _ = app.automation_op(&format!(r#"{{"op":"save","path":"{second}"}}"#));
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let first_task =
+            app.start_xref_attach(i, on_screen(&first), XrefPlacement::on_screen(), "XATTACH");
+        app.tabs[i].active_cmd = None;
+        let second_task =
+            app.start_xref_attach(i, on_screen(&second), XrefPlacement::on_screen(), "XATTACH");
+        app.drive_headless_task(first_task)
+            .expect("the first ghost's task");
+        assert_eq!(ghost(&mut app, i), 0, "the first file's ghost is dropped");
+        app.drive_headless_task(second_task)
+            .expect("the second ghost's task");
+        assert_eq!(ghost(&mut app, i), 0, "the second file is empty");
+    }
 }

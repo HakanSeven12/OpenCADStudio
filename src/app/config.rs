@@ -943,6 +943,19 @@ mod tests {
     }
 
     #[test]
+    fn the_ribbon_options_reach_the_ribbon_and_the_saved_config() {
+        use crate::app::{Message, OpenCADStudio};
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.update(Message::RibbonCenteredChanged(true));
+        let _ = app.update(Message::RibbonWheelTabsChanged(false));
+        assert!(app.ribbon.layout().centered);
+        assert!(!app.ribbon.layout().wheel_switches_tabs);
+        let saved = app.current_config();
+        assert!(saved.ribbon.layout.centered);
+        assert!(!saved.ribbon.layout.wheel_switches_tabs);
+    }
+
+    #[test]
     fn floating_panels_default_and_round_trip() {
         use crate::ui::ribbon::FloatingPanel;
 

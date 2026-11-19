@@ -367,7 +367,8 @@ impl<'a> CollapsePanels<'a> {
     /// Let a press on the bottom `strip` px of a full or compact panel drag
     /// it to another place; a drop sends `on_reorder` with the panel ids in
     /// their new order. The title strip continues after the last panel to
-    /// the right edge.
+    /// the right edge and, while the panels are centered, from the left
+    /// edge to the first panel.
     pub fn draggable(
         mut self,
         strip: f32,
@@ -621,8 +622,11 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
             placed[i].1 = x;
             x += placed[i].0.size().width;
         }
-        // Centered, the spare room is split over both ends of the row.
-        let shift = centered_shift(self.centered, x, max_w);
+        // Centered, the spare room is split over both ends of the row. A
+        // panel dragged off the row still counts, so the others close up
+        // toward the left instead of jumping to a new middle.
+        let dragged_out = left.map_or(0.0, |i| placed[i].0.size().width);
+        let shift = centered_shift(self.centered, x + dragged_out, max_w);
         if shift > 0.0 {
             for (_, node_x, _) in &mut placed {
                 *node_x += shift;

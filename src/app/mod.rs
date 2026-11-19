@@ -3921,6 +3921,10 @@ pub enum Message {
     MenuBarChanged(bool),
     /// Options: show the ribbon (RIBBON / RIBBONCLOSE).
     RibbonVisibleChanged(bool),
+    /// Options: center the ribbon's tabs and panels.
+    RibbonCenteredChanged(bool),
+    /// Options: the mouse wheel over the ribbon steps through its tabs.
+    RibbonWheelTabsChanged(bool),
     /// Options: new hatches are associative (HPASSOC).
     HatchAssociativeChanged(bool),
     /// Interface scale in percent (Options > Display).

@@ -6,11 +6,14 @@
 //!
 //! Layout, per row:
 //!   • one row  → `lead` at the left; `trail` packed after it (`justify_end`
-//!                false) or flush to the right edge (`justify_end` true);
-//!                an optional Fill `middle` stretches through the gap.
+//!                false), flush to the right edge (`justify_end` true) or,
+//!                with `center_trail`, in the middle of the bar or of the
+//!                wider span `center_insets` names, never over `lead`; an
+//!                optional Fill `middle` stretches through the gap.
 //!   • wrapped  → `trail` first uses free space on `lead`'s final row; only
 //!                when it does not fit is another row added. Alignment follows
-//!                `justify_end`.
+//!                `justify_end`; a `WrapFlow::center` trail centers each of
+//!                its rows in the bar itself (`center_insets` does not apply).
 //!
 //! The measured total height is written to `height_out` (if set) so callers can
 //! anchor overlays below the possibly-taller bar.
@@ -89,6 +92,14 @@ fn centered_x(outer: f32, inner: f32) -> f32 {
     ((outer - inner) / 2.0).floor().max(0.0)
 }
 
+/// Where something `inner` wide starts, within a bar `width` wide, to sit
+/// in the middle of a span reaching `left` px before the bar and `right` px
+/// past it; kept inside the bar.
+fn centered_in_span(width: f32, inner: f32, (left, right): (f32, f32)) -> f32 {
+    let x = ((width + right - left - inner) / 2.0).floor();
+    x.min(width - inner).max(0.0)
+}
+
 pub struct WrapBar<'a> {
     lead: Element<'a, Message>,
     /// Optional Fill filler occupying the gap between `lead` and `trail`.
@@ -104,6 +115,9 @@ pub struct WrapBar<'a> {
     /// When true and both blocks share a row, `trail` sits in the middle of
     /// the bar, but never over `lead`.
     center_trail: bool,
+    /// How far the span `trail` centers in reaches before and past the bar
+    /// (left, right); zero centers it in the bar itself.
+    center_insets: (f32, f32),
     /// Receives the measured total height (bits of an `f32`).
     height_out: Option<Arc<AtomicU32>>,
 }
@@ -118,6 +132,7 @@ impl<'a> WrapBar<'a> {
             min_row_h: 28.0,
             justify_end: false,
             center_trail: false,
+            center_insets: (0.0, 0.0),
             height_out: None,
         }
     }
@@ -141,6 +156,14 @@ impl<'a> WrapBar<'a> {
     /// wrapped `trail` is centered by its own flow (`WrapFlow::center`).
     pub fn center_trail(mut self, center: bool) -> Self {
         self.center_trail = center;
+        self
+    }
+
+    /// Center `trail` in a wider span than the bar: one reaching `left` px
+    /// before it and `right` px past it (the window, say, when the bar sits
+    /// between other blocks).
+    pub fn center_insets(mut self, left: f32, right: f32) -> Self {
+        self.center_insets = (left.max(0.0), right.max(0.0));
         self
     }
 
@@ -232,7 +255,7 @@ impl<'a> Widget<Message, Theme, Renderer> for WrapBar<'a> {
             let trail_x = if self.justify_end {
                 (width - trail_sz.width).max(after_lead)
             } else if self.center_trail {
-                centered_x(width, trail_sz.width).max(after_lead)
+                centered_in_span(width, trail_sz.width, self.center_insets).max(after_lead)
             } else {
                 after_lead
             };
@@ -1486,6 +1509,26 @@ mod centering_tests {
             .center_trail(true);
         let b = layout_of(bar.into(), 750.0);
         assert_eq!(b[1].x, 306.0);
+    }
+
+    #[test]
+    fn a_centered_trail_centers_in_the_wider_span_around_the_bar() {
+        // A bar 1000 px wide with 200 px before it and none past it: the
+        // span's middle is at 400 in the bar, so the 200 px trail starts
+        // at 300.
+        let bar = WrapBar::new(block(100.0), block(200.0))
+            .spacing(6.0)
+            .center_trail(true)
+            .center_insets(200.0, 0.0);
+        let b = layout_of(bar.into(), 1000.0);
+        assert_eq!(b[1].x, 300.0);
+    }
+
+    #[test]
+    fn a_span_centered_trail_stays_inside_the_bar() {
+        assert_eq!(centered_in_span(1000.0, 200.0, (0.0, 0.0)), 400.0);
+        assert_eq!(centered_in_span(1000.0, 200.0, (0.0, 2000.0)), 800.0);
+        assert_eq!(centered_in_span(1000.0, 200.0, (2000.0, 0.0)), 0.0);
     }
 
     #[test]

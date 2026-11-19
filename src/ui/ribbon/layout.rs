@@ -284,7 +284,8 @@ impl RibbonLayout {
 
     /// Back to the default panel order, every tab and panel shown in the
     /// ribbon (floating ones too) and panel titles on. The minimize state,
-    /// pinned slide-outs and the Quick Access Toolbar stay.
+    /// pinned slide-outs, the Quick Access Toolbar, the centering and the
+    /// wheel option stay: they are preferences, not the layout.
     pub(super) fn reset(&mut self) {
         self.hidden_tabs.clear();
         self.hidden_panels.clear();

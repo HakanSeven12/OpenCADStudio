@@ -28,6 +28,9 @@ pub(super) struct WheelState {
     pending: f32,
     /// When the last wheel turn came.
     last: Option<Instant>,
+    /// A touchpad gesture took its step: its further scrolling (momentum
+    /// included) is ignored until the gesture pauses.
+    latched: bool,
 }
 
 /// How far a wheel turn moves through the tabs, forward positive: a line is
@@ -77,10 +80,19 @@ impl Ribbon {
             .wheel
             .last
             .is_none_or(|last| now.saturating_duration_since(last) > SCROLL_PAUSE);
-        if paused || turn.signum() != self.wheel.pending.signum() {
+        if paused {
+            self.wheel.latched = false;
+        }
+        if paused || turn * self.wheel.pending < 0.0 {
             self.wheel.pending = 0.0;
         }
         self.wheel.last = Some(now);
+        // A touchpad steps once per gesture: momentum scrolling that runs
+        // on after the fingers lift does not skip further tabs.
+        let pixels = matches!(delta, mouse::ScrollDelta::Pixels { .. });
+        if pixels && self.wheel.latched {
+            return false;
+        }
         self.wheel.pending += turn;
         if self.wheel.pending.abs() < 1.0 {
             return false;
@@ -88,6 +100,7 @@ impl Ribbon {
         // One tab per turn: a fast spin does not skip tabs unseen.
         let forward = self.wheel.pending > 0.0;
         self.wheel.pending = 0.0;
+        self.wheel.latched = pixels;
         let shown = self.shown_tabs();
         let next = if forward {
             shown.iter().copied().find(|&i| i > self.active)
@@ -346,6 +359,39 @@ mod tests {
     }
 
     #[test]
+    fn a_touchpad_gesture_steps_once_however_long_its_momentum_runs() {
+        let mut ribbon = ribbon();
+        let shown = ribbon.shown_tabs();
+        let t0 = Instant::now();
+        let px = |y: f32| mouse::ScrollDelta::Pixels { x: 0.0, y };
+        let mut at = t0;
+        // A swipe and its momentum: a long run of events 16 ms apart.
+        for _ in 0..60 {
+            ribbon.on_wheel(px(-40.0), at);
+            at += Duration::from_millis(16);
+        }
+        assert_eq!(ribbon.active, shown[1], "one tab for the whole gesture");
+
+        // The next gesture, after a pause, steps again.
+        at += SCROLL_PAUSE * 2;
+        ribbon.on_wheel(px(-40.0), at);
+        assert!(ribbon.on_wheel(px(-40.0), at + Duration::from_millis(16)));
+        assert_eq!(ribbon.active, shown[2]);
+    }
+
+    #[test]
+    fn a_mouse_wheel_is_not_held_back_by_a_touchpad_gesture() {
+        let mut ribbon = ribbon();
+        let shown = ribbon.shown_tabs();
+        let t0 = Instant::now();
+        let px = mouse::ScrollDelta::Pixels { x: 0.0, y: -60.0 };
+        assert!(ribbon.on_wheel(px, t0));
+        assert!(ribbon.on_wheel(DOWN, t0 + Duration::from_millis(16)));
+        assert!(ribbon.on_wheel(DOWN, t0 + Duration::from_millis(32)));
+        assert_eq!(ribbon.active, shown[3]);
+    }
+
+    #[test]
     fn touchpad_pixels_add_up_to_a_step() {
         let mut ribbon = ribbon();
         let shown = ribbon.shown_tabs();
@@ -565,6 +611,48 @@ mod view_tests {
         }
     }
 
+    /// The bounds of the last shown tab's label.
+    fn last_tab(ribbon: &Ribbon, ui: &mut Simulator<'_, Message>) -> Rectangle {
+        let last = *ribbon.shown_tabs().last().unwrap();
+        let module = &ribbon.modules[last];
+        let title = crate::i18n::ribbon_module_title(module.id(), module.title()).to_string();
+        ui.find(title.as_str())
+            .expect("last tab shows")
+            .visible_bounds()
+            .expect("last tab visible")
+    }
+
+    #[test]
+    fn once_drawn_the_centered_tabs_sit_in_the_middle_of_the_whole_ribbon() {
+        with_ui_test(|| {
+            let ribbon = ribbon(true);
+            // The first draw reports where the logo and the search box
+            // leave the tabs; the next view centers them in the ribbon.
+            let mut ui = Simulator::with_size(
+                iced::Settings::default(),
+                (WIDTH, 260.0),
+                ribbon.view(None, false, false, false, 0, 0, false, None),
+            );
+            ui.snapshot(&iced::Theme::Dark).expect("draw the ribbon");
+            let mut ui = Simulator::with_size(
+                iced::Settings::default(),
+                (WIDTH, 260.0),
+                ribbon.view(None, false, false, false, 0, 0, false, None),
+            );
+            let first = first_tab(&ribbon, &mut ui);
+            let last = last_tab(&ribbon, &mut ui);
+            capture(&mut ui, "ribbon-centered-redrawn");
+            let middle = (first.x + last.x + last.width) / 2.0;
+            // The minimize button after the tabs pulls their labels a
+            // little left of the exact middle.
+            assert!(
+                (middle - WIDTH / 2.0).abs() < 40.0,
+                "the tabs' middle {middle} is near the ribbon's {}",
+                WIDTH / 2.0
+            );
+        });
+    }
+
     #[test]
     fn centering_moves_the_tabs_toward_the_middle_of_a_wide_ribbon() {
         with_ui_test(|| {
@@ -614,5 +702,41 @@ mod view_tests {
                 .into_messages()
                 .any(|message| matches!(message, Message::RibbonWheel(_))));
         });
+    }
+}
+
+#[cfg(test)]
+mod inset_tests {
+    use super::super::{RIBBON_ID, TAB_FLOW_ID};
+    use super::*;
+    use crate::ui::wrap_bar::set_drawn_bounds;
+    use iced::{Point, Size};
+
+    #[test]
+    fn the_tabs_center_in_the_whole_ribbon_once_it_is_drawn() {
+        let ribbon = Ribbon::default();
+        // The ribbon spans 0..2400; the logo takes 50 px before the tab
+        // row's block and the search box 250 px after it.
+        set_drawn_bounds(
+            RIBBON_ID,
+            Rectangle::new(Point::ORIGIN, Size::new(2400.0, 140.0)),
+        );
+        set_drawn_bounds(
+            TAB_FLOW_ID,
+            Rectangle::new(Point::new(50.0, 0.0), Size::new(2100.0, 28.0)),
+        );
+        assert_eq!(ribbon.tab_flow_insets(), (50.0, 250.0));
+
+        // Once those bounds are stale (two frames on, nothing drawn), the
+        // last known insets hold instead of dropping to zero.
+        crate::ui::wrap_bar::end_frame();
+        crate::ui::wrap_bar::end_frame();
+        assert!(crate::ui::wrap_bar::recent_bounds(TAB_FLOW_ID).is_none());
+        assert_eq!(ribbon.tab_flow_insets(), (50.0, 250.0));
+    }
+
+    #[test]
+    fn the_tabs_center_in_their_own_block_before_the_first_draw() {
+        assert_eq!(Ribbon::default().tab_flow_insets(), (0.0, 0.0));
     }
 }

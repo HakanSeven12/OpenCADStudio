@@ -12587,6 +12587,18 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::RibbonCenteredChanged(centered) => {
+                self.ribbon.set_centered(centered);
+                self.save_config();
+                Task::none()
+            }
+
+            Message::RibbonWheelTabsChanged(on) => {
+                self.ribbon.set_wheel_switches_tabs(on);
+                self.save_config();
+                Task::none()
+            }
+
             Message::HatchAssociativeChanged(associative) => {
                 self.hatch_associative = associative;
                 self.persist_settings_if_changed();

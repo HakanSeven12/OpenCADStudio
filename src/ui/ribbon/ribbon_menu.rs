@@ -212,12 +212,12 @@ impl Ribbon {
             }
             RibbonMenuMsg::SetCentered(centered) => {
                 self.menu = None;
-                self.layout.centered = centered;
+                self.set_centered(centered);
                 true
             }
             RibbonMenuMsg::SetWheelTabs(on) => {
                 self.menu = None;
-                self.layout.wheel_switches_tabs = on;
+                self.set_wheel_switches_tabs(on);
                 true
             }
         }
@@ -1099,6 +1099,18 @@ mod tests {
         assert!(ribbon.on_menu(modify.action));
         assert!(ribbon.layout.floating.is_empty());
         assert!(ribbon.layout.panel_hidden("draw", "Modify"));
+    }
+
+    #[test]
+    fn reset_keeps_the_centering_and_the_wheel_option() {
+        let mut ribbon = Ribbon::default();
+        ribbon.on_menu(RibbonMenuMsg::SetCentered(true));
+        ribbon.on_menu(RibbonMenuMsg::SetWheelTabs(false));
+        ribbon.on_menu(RibbonMenuMsg::TogglePanelTitles);
+        assert!(ribbon.on_menu(RibbonMenuMsg::Reset));
+        assert!(ribbon.layout.show_panel_titles, "the layout is reset");
+        assert!(ribbon.layout.centered, "the preferences stay");
+        assert!(!ribbon.layout.wheel_switches_tabs);
     }
 
     #[test]

@@ -8,7 +8,7 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use rustc_hash::FxHashMap as HashMap;
@@ -236,6 +236,9 @@ fn panel_measure_key_at(
 /// The id the whole ribbon (with the Quick Access row below it) reports its
 /// bounds under: floating panels snap to its bottom.
 const RIBBON_ID: &str = "ribbon_whole";
+/// The tab row's quick-access and tabs block, between the logo and the
+/// search box.
+const TAB_FLOW_ID: &str = "ribbon_tab_flow";
 
 /// The id the tool area of the tab on show reports its bounds under.
 const TOOL_AREA_ID: &str = "ribbon_tool_area";
@@ -470,6 +473,9 @@ pub struct Ribbon {
     pub center_layer: String,
     /// The mouse wheel's count toward the next tab.
     wheel: wheel::WheelState,
+    /// The tab row's insets as last drawn (left and right `f32` bits), for
+    /// the frames whose bounds are not at hand. See `tab_flow_insets`.
+    tab_flow_insets: AtomicU64,
     /// Open key tips (Alt).
     keytips: Option<keytips::State>,
     /// What More Commands searches for, and what it found.
@@ -629,6 +635,7 @@ impl Ribbon {
             dim_layer: String::new(),
             center_layer: String::new(),
             wheel: wheel::WheelState::default(),
+            tab_flow_insets: AtomicU64::new(0),
             mleader_layer: String::new(),
             keytips: None,
             qat_query: String::new(),
@@ -744,14 +751,46 @@ impl Ribbon {
         self.layout.is_default(&self.modules)
     }
 
-    /// Whether tab `index` is left out of the tab row because the user hid
-    /// it. The tab on show and the contextual tabs are never left out.
+    /// How far the ribbon reaches before and past the tab row's
+    /// quick-access and tabs block, as last drawn. Between draws (or when
+    /// the drawn bounds went stale) the last known insets hold, so the
+    /// centered tabs do not jump; zero before the first draw.
+    fn tab_flow_insets(&self) -> (f32, f32) {
+        let drawn = crate::ui::wrap_bar::recent_bounds(TAB_FLOW_ID)
+            .zip(crate::ui::wrap_bar::recent_bounds(RIBBON_ID));
+        if let Some((flow, ribbon)) = drawn {
+            let left = (flow.x - ribbon.x).max(0.0);
+            let right = (ribbon.x + ribbon.width - flow.x - flow.width).max(0.0);
+            let packed = (u64::from(left.to_bits()) << 32) | u64::from(right.to_bits());
+            self.tab_flow_insets.store(packed, Ordering::Relaxed);
+            return (left, right);
+        }
+        let packed = self.tab_flow_insets.load(Ordering::Relaxed);
+        (
+            f32::from_bits((packed >> 32) as u32),
+            f32::from_bits(packed as u32),
+        )
+    }
+
+    /// Center the tabs and panels, or keep them at the left edge.
+    pub fn set_centered(&mut self, centered: bool) {
+        self.layout.centered = centered;
+    }
+
+    /// Let the mouse wheel over the ribbon step through the tabs, or not.
+    pub fn set_wheel_switches_tabs(&mut self, on: bool) {
+        self.layout.wheel_switches_tabs = on;
+        self.wheel = wheel::WheelState::default();
+    }
+
     /// Whether module `index` (with id `id`) has a tab on the tab row.
     /// The Layout module has none: its tools live in the side toolbar.
     fn tab_shows(&self, index: usize, id: &str) -> bool {
         id != "layout" && !self.contextual_off(id) && !self.tab_hidden(index)
     }
 
+    /// Whether tab `index` is left out of the tab row because the user hid
+    /// it. The tab on show and the contextual tabs are never left out.
     fn tab_hidden(&self, index: usize) -> bool {
         index != self.active
             && self.modules.get(index).is_some_and(|module| {
@@ -1476,6 +1515,9 @@ impl Ribbon {
             .row_h(TAB_ROW_H)
             .center(self.layout.centered);
 
+        // Centered, the tabs sit in the middle of the whole ribbon, not of
+        // the room the logo and the search box leave them.
+        let (tab_flow_left, tab_flow_right) = self.tab_flow_insets();
         let mut tab_row = row![].spacing(6.0).align_y(iced::Center);
         if menu_row.is_none() {
             // As far from the window's edge as the large logo's artwork; the
@@ -1486,13 +1528,15 @@ impl Ribbon {
             }));
         }
         tab_row = tab_row.push(
-            container(
+            container(PosReport::new(
+                TAB_FLOW_ID,
                 WrapBar::new(lead, tabs.into())
                     .spacing(if qat_below { 0.0 } else { 6.0 })
                     .center_trail(self.layout.centered)
+                    .center_insets(tab_flow_left, tab_flow_right)
                     .min_row_h(TAB_ROW_H)
                     .report_height(self.tab_bar_h.clone()),
-            )
+            ))
             .width(Length::Fill),
         );
         // Without the menu row the search box ends the tab row.

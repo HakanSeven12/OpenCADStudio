@@ -1001,9 +1001,7 @@ pub fn view_window<'a>(
         .push(
             row![
                 iced::widget::checkbox(prefs.ribbon_centered)
-                    .on_toggle(|on| Message::RibbonMenu(
-                        crate::ui::ribbon::RibbonMenuMsg::SetCentered(on)
-                    ))
+                    .on_toggle(Message::RibbonCenteredChanged)
                     .size(15),
                 text(crate::tr!("ribbon-menu", "center-ribbon")).size(12),
             ]
@@ -1014,9 +1012,7 @@ pub fn view_window<'a>(
         .push(
             row![
                 iced::widget::checkbox(prefs.ribbon_wheel_tabs)
-                    .on_toggle(|on| Message::RibbonMenu(
-                        crate::ui::ribbon::RibbonMenuMsg::SetWheelTabs(on)
-                    ))
+                    .on_toggle(Message::RibbonWheelTabsChanged)
                     .size(15),
                 text(crate::tr!("ribbon-menu", "wheel-switches-tabs")).size(12),
             ]

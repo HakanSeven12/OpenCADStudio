@@ -4948,6 +4948,7 @@ impl OpenCADStudio {
             // path the native typed-path command feeds.
             #[cfg(target_arch = "wasm32")]
             Message::DataLinkCsvPicked(picked) => self.on_datalink_csv_picked(picked),
+            Message::DataLinkCsvRead(read, result) => self.finish_data_link_csv_read(&read, result),
 
             // Web CENTERLTYPEFILE: the picked .lin/.dnl file's text arrived —
             // load its linetypes, then record the setting under the file's

@@ -30,6 +30,9 @@ mod dim_leader_render_check;
 #[path = "dim_line_color_roundtrip.rs"]
 mod dim_line_color_roundtrip;
 
+#[path = "direct_file_reads.rs"]
+mod direct_file_reads;
+
 #[path = "entity_transform_regression.rs"]
 mod entity_transform_regression;
 

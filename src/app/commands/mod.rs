@@ -58,6 +58,7 @@ pub(crate) use group_display::{group_display_mode, set_group_display_mode};
 pub(crate) use anno_scale_prompt::{annotation_scale_prompt, set_annotation_scale_prompt};
 pub(crate) use hyperlink::{hyperlink_options, set_hyperlink_options};
 mod inquiry;
+pub(crate) mod layer_file_reads;
 mod layerprops;
 mod layers;
 mod model_import;

@@ -11987,3 +11987,92 @@ mod viewport_properties_tests {
     }
 }
 
+
+// VPCLIP's polygonal boundary flow had no test: pick the viewport, choose
+// Polygonal, draw a closed shape and check the viewport is clipped to it.
+mod vpclip_polygonal_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::entities::Viewport;
+    use document::types::Vector3;
+    use document::EntityType;
+    use glam::DVec3;
+
+    #[test]
+    fn vpclip_clips_a_viewport_to_a_drawn_polygon() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let handle = {
+            let scene = &mut app.tabs[i].scene;
+            scene.document.add_layout("Sheet").unwrap();
+            scene.set_current_layout("Sheet".into());
+            let mut viewport = Viewport::new();
+            viewport.id = 2;
+            viewport.center = Vector3::new(50.0, 50.0, 0.0);
+            viewport.width = 100.0;
+            viewport.height = 100.0;
+            viewport.view_height = 1000.0;
+            viewport.turn_on();
+            scene.add_entity(EntityType::Viewport(Box::new(viewport)))
+        };
+
+        let _ = app.run_command_line("VPCLIP");
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("VPCLIP asks for a viewport")
+                .prompt(),
+            "Select viewport to clip:"
+        );
+        let _ = app.feed_command(StepInput::EntityPick(handle, DVec3::ZERO));
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("then asks for the clipping object")
+                .prompt(),
+            "Select clipping object or [Polygonal] <Polygonal>:"
+        );
+        let _ = app.feed_command(StepInput::Enter);
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("Polygonal asks for the start point")
+                .prompt(),
+            "Specify start point:"
+        );
+        for point in [(10.0, 10.0), (30.0, 10.0), (30.0, 25.0), (10.0, 25.0)] {
+            let _ = app.feed_command(StepInput::Point(DVec3::new(point.0, point.1, 0.0)));
+        }
+        let _ = app.feed_command(StepInput::Text("C".into()));
+
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "closing the polygon completes VPCLIP"
+        );
+        assert!(app.command_line.last_error.is_none());
+        let document::EntityType::Viewport(clipped) =
+            app.tabs[i].scene.document.get_entity(handle).unwrap()
+        else {
+            panic!("the viewport remains a Viewport")
+        };
+        assert!(
+            !clipped.clip_boundary_handle.is_null(),
+            "a clip boundary entity was created"
+        );
+        assert!(
+            clipped.status.non_rectangular_clipping,
+            "the viewport is marked as non-rectangularly clipped"
+        );
+        assert!(
+            (clipped.width - 20.0).abs() < 1e-6 && (clipped.height - 15.0).abs() < 1e-6,
+            "the viewport shrank to the drawn 20x15 boundary: {}x{}",
+            clipped.width,
+            clipped.height
+        );
+    }
+}
+

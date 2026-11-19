@@ -7937,6 +7937,7 @@ mod batch7_tests {
 
     #[test]
     fn sheet_set_with_a_custom_property_and_a_field() {
+        let _sets = crate::entities::field::sheet_sets_one_at_a_time();
         use document::objects::{Dictionary, ObjectType};
         use serde_json::json;
 

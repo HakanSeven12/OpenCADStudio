@@ -106,6 +106,15 @@ pub fn set_sheet_sets(sets: Vec<document::sheet_set::SheetSetDatabase>) {
     }
 }
 
+/// Tests that open sheet sets take this first: the open sets are one list
+/// for the whole process, so two such tests at the same time would see each
+/// other's sets.
+#[cfg(test)]
+pub fn sheet_sets_one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Re-evaluate the field hosted by entity `host` (usually an MTEXT), or `None`
 /// to keep the cached text. Thin wrapper over the library engine.
 pub fn resolve(document: &Document, host: Handle) -> Option<String> {

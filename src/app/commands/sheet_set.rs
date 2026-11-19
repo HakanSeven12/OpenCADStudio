@@ -3108,6 +3108,10 @@ impl OpenCADStudio {
     }
 }
 
+#[cfg(test)]
+#[path = "sheet_set_write_tests.rs"]
+mod sheet_set_write_tests;
+
 /// The default folder for new sheet set data: the user's Documents folder,
 /// else the home folder.
 fn dirs_next_documents() -> String {

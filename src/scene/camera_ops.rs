@@ -1122,6 +1122,7 @@ impl Scene {
             // the eye direction once the view is orbited.
             model_bounds: None,
             stale_bounds: None,
+            clip_depth: (None, None),
         })
     }
 

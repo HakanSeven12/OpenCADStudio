@@ -193,6 +193,25 @@ impl Scene {
                 }
             };
             let in_vp = |x: f32, y: f32| x >= vp_x0 && x <= vp_x1 && y >= vp_y0 && y <= vp_y1;
+            // DVIEW Clip: depth toward the eye from the target, kept between
+            // the back and front planes the viewport switches on — the cut the
+            // screen makes with its near/far planes.
+            let depth_of = |p: glam::DVec3| {
+                (p.x - display_center_x) * view_fwd_d.0
+                    + (p.y - display_center_y) * view_fwd_d.1
+                    + (p.z - display_center_z) * view_fwd_d.2
+            };
+            let front = vp.status.front_clipping && vp.status.front_clip_not_at_eye;
+            let depth_range = (front || vp.status.back_clipping).then(|| {
+                (
+                    if vp.status.back_clipping {
+                        vp.back_clip_z
+                    } else {
+                        f64::NEG_INFINITY
+                    },
+                    if front { vp.front_clip_z } else { f64::INFINITY },
+                )
+            });
 
             for wire in model_wires.iter() {
                 let marker_view_height = wire.point_marker.map_or(view_height_eff, |marker| {
@@ -206,18 +225,29 @@ impl Scene {
                         + relative.z * view_fwd_d.2;
                     view_height_eff * (camera_dist_d - depth).max(0.001) / camera_dist_d.max(0.001)
                 });
-                let projected_pts: Vec<[f32; 3]> = wire
+                let depth_pts: Vec<([f32; 3], f64)> = wire
                     .points
                     .iter()
                     .enumerate()
                     .map(|(pi, &[mx, my, mz])| {
                         if mx.is_nan() || my.is_nan() || mz.is_nan() {
-                            return [f32::NAN; 3];
+                            return ([f32::NAN; 3], 0.0);
                         }
                         let point = wire.point_world(pi, marker_view_height);
-                        proj_abs(point.x, point.y, point.z)
+                        (proj_abs(point.x, point.y, point.z), depth_of(point))
                     })
                     .collect();
+                let depth_clipped = depth_range.is_some_and(|(back, front)| {
+                    depth_pts
+                        .iter()
+                        .any(|(p, d)| p[0].is_finite() && (*d < back || *d > front))
+                });
+                let projected_pts: Vec<[f32; 3]> = match depth_range {
+                    Some((back, front)) if depth_clipped => {
+                        clip_polyline_to_depth(&depth_pts, back, front)
+                    }
+                    _ => depth_pts.iter().map(|(p, _)| *p).collect(),
+                };
 
                 // SDF glyph quads ride `text_verts` in absolute WCS, so they need
                 // the same projection the points get — a bare clone leaves the
@@ -261,6 +291,22 @@ impl Scene {
                         );
                         [p[0], p[1]]
                     };
+                    if let Some((back, front)) = depth_range {
+                        let outside = (0..3).any(|k| {
+                            let low = wire.fill_tris_low.get(ti * 3 + k).copied();
+                            let low = low.unwrap_or([0.0; 3]);
+                            let d = depth_of(glam::DVec3::new(
+                                tri[k][0] as f64 + low[0] as f64,
+                                tri[k][1] as f64 + low[1] as f64,
+                                tri[k][2] as f64 + low[2] as f64,
+                            ));
+                            d < back || d > front
+                        });
+                        // ponytail: a fill crossing a clip plane drops whole; split it if plots need the sliver.
+                        if outside {
+                            continue;
+                        }
+                    }
                     let corners = [corner(0), corner(1), corner(2)];
                     if corners
                         .iter()
@@ -307,7 +353,7 @@ impl Scene {
                     continue;
                 }
 
-                let stationed = wire.pattern_stations.len() > wire.points.len();
+                let stationed = !depth_clipped && wire.pattern_stations.len() > wire.points.len();
                 let source_length = stationed.then(|| wire.pattern_stations[wire.points.len()]);
                 let (clipped, mut clipped_stations) = clip_polyline_to_rect(
                     &projected_pts,
@@ -1459,6 +1505,75 @@ fn cs_clip(
 
 /// Clip a projected polyline (NaN-separated segments) to the viewport rectangle.
 /// Returns a new points vec with proper NaN separators at clip boundaries.
+/// Cut a projected polyline (each point with its depth toward the eye) to
+/// the depths `back..=front`, breaking it with NaN where it leaves them.
+/// Crossings interpolate linearly, which is exact for a parallel projection.
+fn clip_polyline_to_depth(pts: &[([f32; 3], f64)], back: f64, front: f64) -> Vec<[f32; 3]> {
+    const NAN3: [f32; 3] = [f32::NAN, f32::NAN, f32::NAN];
+    let lerp = |a: [f32; 3], b: [f32; 3], t: f64| {
+        let t = t as f32;
+        [
+            a[0] + (b[0] - a[0]) * t,
+            a[1] + (b[1] - a[1]) * t,
+            a[2] + (b[2] - a[2]) * t,
+        ]
+    };
+    let mut out: Vec<[f32; 3]> = Vec::new();
+    let mut open = false;
+    for pair in pts.windows(2) {
+        let ((a, da), (b, db)) = (pair[0], pair[1]);
+        if !a[0].is_finite() || !b[0].is_finite() {
+            if open {
+                out.push(NAN3);
+                open = false;
+            }
+            continue;
+        }
+        // Parametric extent of the segment inside the slab.
+        let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
+        for (limit, below) in [(back, true), (front, false)] {
+            if !limit.is_finite() {
+                continue;
+            }
+            let (sa, sb) = if below {
+                (da - limit, db - limit)
+            } else {
+                (limit - da, limit - db)
+            };
+            if sa < 0.0 && sb < 0.0 {
+                t0 = 1.0;
+                t1 = 0.0;
+            } else if sa < 0.0 {
+                t0 = t0.max(sa / (sa - sb));
+            } else if sb < 0.0 {
+                t1 = t1.min(sa / (sa - sb));
+            }
+        }
+        if t0 > t1 {
+            if open {
+                out.push(NAN3);
+                open = false;
+            }
+            continue;
+        }
+        if !open || t0 > 0.0 {
+            if open {
+                out.push(NAN3);
+            }
+            out.push(lerp(a, b, t0));
+        }
+        out.push(lerp(a, b, t1));
+        open = t1 >= 1.0;
+        if !open {
+            out.push(NAN3);
+        }
+    }
+    while out.last().is_some_and(|p| !p[0].is_finite()) {
+        out.pop();
+    }
+    out
+}
+
 fn clip_polyline_to_rect(
     pts: &[[f32; 3]],
     stations: Option<&[f32]>,

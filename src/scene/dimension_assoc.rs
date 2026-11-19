@@ -808,6 +808,13 @@ pub fn resolve_reference_chain(
     reference: &AssocDimensionReference,
     from_space: Option<Vector3>,
 ) -> Result<ResolvedReference, ReferenceStatus> {
+    // A reference still held by the handle its object has in an xref's own
+    // drawing: the xref is not loaded, or no longer has the object. Its
+    // chain ends on the INSERT that places the xref, which is not what the
+    // dimension measures.
+    if !reference.xref_paths.is_empty() || !reference.intersection_xref_paths.is_empty() {
+        return Err(ReferenceStatus::Unresolved);
+    }
     let walked = match chain::walk_chain(&scene.document, &reference.xrefs) {
         Ok(walked) => walked,
         Err(ChainError::Missing(handle)) => return Err(ReferenceStatus::Broken(handle)),

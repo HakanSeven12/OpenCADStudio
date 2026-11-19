@@ -114,11 +114,12 @@ fn source_cache() -> &'static Mutex<(HashMap<String, Arc<Vec<u8>>>, VecDeque<Str
 /// Source handle → host copy of every entity merged from a DWG xref, per
 /// xref block. The copies get fresh handles on every merge, so a reload
 /// re-links the dimension references that point at the old copies through
-/// the source handle, which the source file keeps.
+/// the source handle, which the source file keeps. A save writes those
+/// references by that handle ([`store_references_by_source`]).
 // ponytail: process-global and session-only. Hosts whose xref blocks share a
 // handle share a slot (a map that does not match the block is ignored, see
-// `matches_block`), closed tabs keep theirs, and a reopened host starts empty:
-// that needs the source handle written into the reference in the file.
+// `matches_block`) and closed tabs keep theirs. A reopened host starts empty
+// and fills it as its xrefs are merged.
 fn merged_copies() -> &'static Mutex<HashMap<Handle, HashMap<Handle, Handle>>> {
     static MERGED: OnceLock<Mutex<HashMap<Handle, HashMap<Handle, Handle>>>> =
         OnceLock::new();
@@ -216,6 +217,148 @@ fn matches_block(doc: &Document, br_handle: Handle, copies: &HashMap<Handle, Han
         }
     }
     direct == owned.len()
+}
+
+/// The INSERTs that place the xref block `br_handle`.
+fn xref_inserts(doc: &Document, br_handle: Handle) -> HashSet<Handle> {
+    doc.entities()
+        .filter_map(|entity| match entity {
+            EntityType::Insert(insert)
+                if doc
+                    .block_records
+                    .get(&insert.block_name)
+                    .is_some_and(|br| br.handle == br_handle) =>
+            {
+                Some(insert.common.handle)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Write the dimension references that end on a copy of an object of the
+/// xref `br_handle` the way a file keeps them: the chain as far as the INSERT
+/// that places the xref, and the handles the rest of it has in the xref's
+/// own drawing (`xref_paths`). A file does not hold the copies, and their
+/// handles last one session; [`link_stored_references`] is the way back.
+fn store_references_by_source(doc: &mut Document, br_handle: Handle) {
+    let sources: HashMap<Handle, Handle> = match merged_copies().lock() {
+        Ok(map) => match map.get(&br_handle) {
+            Some(copies) if matches_block(doc, br_handle, copies) => copies
+                .iter()
+                .map(|(source, copy)| (*copy, *source))
+                .collect(),
+            _ => return,
+        },
+        Err(_) => return,
+    };
+    let inserts = xref_inserts(doc, br_handle);
+    if inserts.is_empty() {
+        return;
+    }
+    let store = |chain: &mut Vec<Handle>, paths: &mut Vec<String>| {
+        let Some(at) = chain.iter().position(|handle| inserts.contains(handle)) else {
+            return;
+        };
+        if at + 1 == chain.len() || !paths.is_empty() {
+            return;
+        }
+        let stored: Option<Vec<String>> = chain[at + 1..]
+            .iter()
+            .map(|copy| {
+                sources
+                    .get(copy)
+                    .map(|source| format!("{:X}", source.value()))
+            })
+            .collect();
+        if let Some(stored) = stored {
+            *paths = stored;
+            chain.truncate(at + 1);
+        }
+    };
+    use document::objects::{AssociativeData, ObjectType};
+    for object in doc.objects.values_mut() {
+        let ObjectType::Associative(object) = object else {
+            continue;
+        };
+        let AssociativeData::DimensionAssociation(association) = &mut object.data else {
+            continue;
+        };
+        for reference in association.references.iter_mut().flatten() {
+            store(&mut reference.xrefs, &mut reference.xref_paths);
+            store(
+                &mut reference.intersection_objects,
+                &mut reference.intersection_xref_paths,
+            );
+        }
+    }
+}
+
+/// Point the dimension references a file kept by source handle (see
+/// [`store_references_by_source`]) at the copies the merge of the xref
+/// `br_handle` just made, and make the dimension's association a reactor of
+/// them. A reference whose object the xref no longer has stays as it was read.
+fn link_stored_references(doc: &mut Document, br_handle: Handle, copies: &HashMap<Handle, Handle>) {
+    use document::objects::{AssociativeData, ObjectType};
+    let stored = doc.objects.values().any(|object| match object {
+        ObjectType::Associative(object) => match &object.data {
+            AssociativeData::DimensionAssociation(association) => {
+                association.references.iter().flatten().any(|reference| {
+                    !reference.xref_paths.is_empty()
+                        || !reference.intersection_xref_paths.is_empty()
+                })
+            }
+            _ => false,
+        },
+        _ => false,
+    });
+    if !stored {
+        return;
+    }
+    let inserts = xref_inserts(doc, br_handle);
+    let link = |chain: &mut Vec<Handle>, paths: &mut Vec<String>| -> Vec<Handle> {
+        if paths.is_empty() || !chain.last().is_some_and(|last| inserts.contains(last)) {
+            return Vec::new();
+        }
+        let found: Option<Vec<Handle>> = paths
+            .iter()
+            .map(|path| {
+                let source = u64::from_str_radix(path.trim(), 16).ok()?;
+                copies.get(&Handle::new(source)).copied()
+            })
+            .collect();
+        let Some(found) = found else {
+            return Vec::new();
+        };
+        chain.extend(found.iter().copied());
+        paths.clear();
+        found
+    };
+    let mut reactors: Vec<(Handle, Handle)> = Vec::new();
+    for (handle, object) in doc.objects.iter_mut() {
+        let ObjectType::Associative(object) = object else {
+            continue;
+        };
+        let AssociativeData::DimensionAssociation(association) = &mut object.data else {
+            continue;
+        };
+        for reference in association.references.iter_mut().flatten() {
+            let linked = link(&mut reference.xrefs, &mut reference.xref_paths)
+                .into_iter()
+                .chain(link(
+                    &mut reference.intersection_objects,
+                    &mut reference.intersection_xref_paths,
+                ));
+            reactors.extend(linked.map(|copy| (copy, *handle)));
+        }
+    }
+    for (entity, association) in reactors {
+        if let Some(entity) = doc.get_entity_mut(entity) {
+            if !entity.common().reactors.contains(&association) {
+                entity.common_mut().reactors.push(association);
+            }
+        }
+    }
 }
 
 fn parsed_cache() -> &'static Mutex<HashMap<String, document::ReadOutcome>> {
@@ -1427,6 +1570,7 @@ fn merge_xref_into_block(
     if let Ok(mut merged) = merged_copies().lock() {
         merged.insert(br_handle, entity_handle_map.clone());
     }
+    link_stored_references(doc, br_handle, &entity_handle_map);
 
     // ── Draw-order overrides (shared helper) ──────────────────────────────
     copy_xref_sortents(
@@ -3031,6 +3175,9 @@ pub fn strip_resolved_xref_content(doc: &mut Document) {
         .map(|br| (br.name.clone(), br.handle))
         .collect();
     for (name, handle) in xrefs {
+        // Before the copies go: what refers to them is written by the
+        // handles their objects have in the xref's drawing.
+        store_references_by_source(doc, handle);
         let (begin, end) = doc
             .block_records
             .get(&name)

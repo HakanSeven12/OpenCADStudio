@@ -46,7 +46,7 @@ clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
 svgtypes = "0.15.3"
-document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "f84de6e05d26ce6a93eef68cec95af962063c695", features = ["serde"] }
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "a258058c02548d9ffc2e903b9337c99858c1c3df", features = ["serde"] }
 # 2D curve algebra, the B-rep model and the constraint solver (from
 # opencadkernel); the operations on solids are Solidcore's.
 ocs_geom = { path = "crates/ocs_geom" }

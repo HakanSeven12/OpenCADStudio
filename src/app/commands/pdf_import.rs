@@ -1633,7 +1633,7 @@ mod pdfimport_tests {
     fn a_one_line_script_takes_its_answers_after_the_read() {
         let mut app = new_app();
         let i = app.active_tab;
-        let path = inkscape();
+        let path = inkscape().replace('\\', "\\\\");
         let response = app.automation_op(&format!(
             r#"{{"op":"run","cmd":"-PDFIMPORT F \"{path}\" 1 5,5 3 0"}}"#
         ));
@@ -1659,7 +1659,7 @@ mod pdfimport_tests {
         std::fs::write(&path, file).expect("write the locked file");
         let _ = app.automation_op(&format!(
             r#"{{"op":"run","cmd":"-PDFIMPORT F \"{}\" 1 5,5 3 0"}}"#,
-            path.display()
+            path.to_string_lossy().replace('\\', "\\\\")
         ));
         assert_eq!(app.active_modal, Some(crate::app::ModalKind::PdfPassword));
         assert!(

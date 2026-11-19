@@ -1,4 +1,6 @@
 pub(crate) mod alias;
+#[cfg(windows)]
+pub(crate) mod alt_code;
 mod automation;
 pub(crate) mod control;
 pub(crate) fn automation_action_names() -> &'static [&'static str] {

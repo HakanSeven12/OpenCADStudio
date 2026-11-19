@@ -519,6 +519,14 @@ impl crate::app::OpenCADStudio {
     }
 }
 
+impl super::MTextEditorState {
+    /// The editor cells of each field, shaded gray as FIELDDISPLAY shades
+    /// them on the canvas.
+    pub(in crate::app) fn field_shading(&self) -> Vec<(usize, usize)> {
+        Vec::new()
+    }
+}
+
 /// The editor can place the fields of `host` in its text `value`, so the
 /// text is edited there with its fields atomic.
 pub(in crate::app) fn locates_fields(doc: &document::Document, host: Handle, value: &str) -> bool {

@@ -472,6 +472,83 @@ mod tests {
         assert_eq!(app.tabs[i].history.undo_stack.len(), undo);
     }
 
+    /// The folder of the reference file that [`with_a_reference`] gives.
+    fn reference_folder() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("ocs-dgn-op-reference-{}", std::process::id()))
+    }
+
+    /// The operation's reader for the reference test: the model of
+    /// `options.path`, for a new drawing, with one translated reference
+    /// attachment ("site.dgn" in [`reference_folder`]).
+    fn with_a_reference(
+        options: &OwnedDgnOptions,
+    ) -> Result<(DgnImportRequest, PreparedImport), DgnImportError> {
+        use crate::modules::insert::dgn_import::{prepare_import, PreparedReference};
+        let request = DgnImportRequest {
+            path: options.path.clone(),
+            model: "Default".to_string(),
+            sub_units: false,
+            explode_text_nodes: false,
+            current_drawing: false,
+            prefix_duplicates: false,
+            references: ReferenceMode::Translate,
+            existing_reference: ExistingReference::Prompt,
+            code_page: None,
+        };
+        let prepared = prepare_import(&request)?;
+        let reference = PreparedReference {
+            reference: Default::default(),
+            file: reference_folder().join("site.dgn"),
+            model: "Default".to_string(),
+            converted: Some(prepared.converted.clone()),
+            drawing: None,
+        };
+        let prepared = PreparedImport {
+            references: vec![reference],
+            ..prepared
+        };
+        Ok((request, prepared))
+    }
+
+    /// The operation writes and reads its reference drawings on its worker,
+    /// as the command does: the drawing is attached from that read, so the
+    /// UI thread reads no file. Here the file is gone before the result
+    /// reaches it.
+    #[test]
+    fn the_operation_reads_its_reference_drawings_on_the_worker() {
+        let folder = reference_folder();
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = format!("memory://dgn-op-reference-{}.dgn", std::process::id());
+        crate::scene::model::pdf_raster::register_source(
+            &path,
+            std::sync::Arc::new(minimal_v7_line()),
+        );
+        let mut app = fresh_drawing();
+        let task = app.control_dgn_import_with(
+            OwnedDgnOptions {
+                path,
+                ..OwnedDgnOptions::default()
+            },
+            with_a_reference,
+        );
+        let message = OpenCADStudio::first_task_message(task);
+        let on_worker = folder.join("site-Default.dwg").is_file();
+        let _ = std::fs::remove_dir_all(&folder);
+        let task = app.update(message);
+        app.drive_headless_task(task).expect("the operation's task");
+        assert!(on_worker, "the worker writes the drawing");
+        let document = &app.tabs[app.active_tab].scene.document;
+        assert!(document.block_records.get("site - Default").is_some());
+        assert!(
+            document
+                .layers
+                .iter()
+                .any(|layer| layer.name.starts_with("site - Default|")),
+            "the worker's read is merged"
+        );
+    }
+
     /// A reader that panics settles the operation as failed, and the app
     /// goes on.
     #[test]

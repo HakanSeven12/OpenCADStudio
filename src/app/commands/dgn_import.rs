@@ -1993,6 +1993,102 @@ mod dgn_worker_tests {
         assert_eq!(inserts, ["site - Default"], "the reference is attached");
         assert!(document.block_records.get("site - Default").is_some());
     }
+
+    /// The folder that [`with_a_reference`] puts its reference file in.
+    fn reference_folder(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("ocs-dgn-worker-{name}-{}", std::process::id()))
+    }
+
+    /// A reader for the worker tests: the request's model, with one
+    /// translated reference attachment, "site.dgn" in the folder named by
+    /// the request's model file.
+    fn with_a_reference(
+        request: &DgnImportRequest,
+    ) -> Result<PreparedImport, dgn_import::DgnImportError> {
+        let prepared = dgn_import::prepare_import(request)?;
+        let folder = request.path.rsplit('-').nth(1).unwrap_or_default();
+        let reference = dgn_import::PreparedReference {
+            reference: Default::default(),
+            file: reference_folder(folder).join("site.dgn"),
+            model: "Default".to_string(),
+            converted: Some(prepared.converted.clone()),
+            drawing: None,
+        };
+        Ok(PreparedImport {
+            references: vec![reference],
+            ..prepared
+        })
+    }
+
+    /// The layers that a reference brought into the drawing.
+    fn reference_layers(app: &OpenCADStudio, i: usize) -> usize {
+        app.tabs[i]
+            .scene
+            .document
+            .layers
+            .iter()
+            .filter(|layer| layer.name.starts_with("site - Default|"))
+            .count()
+    }
+
+    /// A translated reference is written and read on the import's worker:
+    /// the drawing is attached from that read, so the UI thread reads no
+    /// file. Here the file is gone before the result reaches it.
+    #[test]
+    fn a_translated_reference_is_written_and_read_on_the_worker() {
+        let folder = reference_folder("written");
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let mut translate = request(&v7_file("written"), true);
+        translate.references = ReferenceMode::Translate;
+        let task = app.run_dgn_import_with(i, translate, with_a_reference);
+        let message = OpenCADStudio::first_task_message(task);
+        let written = folder.join("site-Default.dwg");
+        let on_worker = written.is_file();
+        let _ = std::fs::remove_dir_all(&folder);
+        let task = app.update(message);
+        app.drive_headless_task(task).expect("the import's task");
+        assert!(on_worker, "the worker writes the drawing");
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("site - Default")
+            .is_some());
+        assert!(reference_layers(&app, i) > 0, "the worker's read is merged");
+    }
+
+    /// A reference drawing that cannot be written is reported, and is not
+    /// attached; the model is still placed.
+    #[test]
+    fn a_reference_drawing_that_cannot_be_written_is_reported() {
+        let folder = reference_folder("unwritable");
+        let _ = std::fs::remove_dir_all(&folder);
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let errors = app.command_line.error_revision;
+        let mut translate = request(&v7_file("unwritable"), true);
+        translate.references = ReferenceMode::Translate;
+        let task = app.run_dgn_import_with(i, translate, with_a_reference);
+        app.drive_headless_task(task).expect("the import's task");
+        assert_ne!(
+            app.command_line.error_revision, errors,
+            "the error is shown"
+        );
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("site - Default")
+            .is_none());
+        assert_eq!(
+            app.tabs[i].history.undo_stack.len(),
+            1,
+            "the model is placed"
+        );
+    }
 }
 
 #[cfg(test)]

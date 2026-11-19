@@ -1451,6 +1451,21 @@ impl OpenCADStudio {
         Ok(())
     }
 
+    /// The first message that `task` gives, not yet given to `update`: a
+    /// test can change what a worker's result meets before it arrives.
+    #[cfg(test)]
+    pub(in crate::app) fn first_task_message(task: iced::Task<super::Message>) -> super::Message {
+        use iced::futures::StreamExt;
+        let mut stream = iced_runtime::task::into_stream(task).expect("a task");
+        loop {
+            match iced::futures::executor::block_on(stream.next()) {
+                Some(iced_runtime::Action::Output(message)) => return message,
+                Some(_) => {}
+                None => panic!("the task ended without a message"),
+            }
+        }
+    }
+
     /// Query entities by identity, metadata and exact plane-curve relationships.
     pub(super) fn entity_query(&self, i: usize, req: &Value) -> Value {
         let tab = &self.tabs[i];

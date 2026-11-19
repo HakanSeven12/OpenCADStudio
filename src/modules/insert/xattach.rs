@@ -654,6 +654,7 @@ pub fn stored_path(request: &XrefAttachRequest, host_file: Option<&std::path::Pa
 /// A reference of the same name already in the drawing is reused ("Using
 /// existing definition."). The self-attach guard runs before this, where the
 /// host path is known.
+#[cfg(test)]
 pub fn prepare_xref_definition(
     scene: &mut Scene,
     request: &XrefAttachRequest,
@@ -668,6 +669,7 @@ pub fn prepare_xref_definition(
 }
 
 /// [`prepare_xref_definition`] under a chosen name instead of the file's.
+#[cfg(test)]
 pub fn prepare_named_xref_definition(
     scene: &mut Scene,
     request: &XrefAttachRequest,
@@ -696,7 +698,7 @@ pub fn xref_read_inputs(
     (stored_path(request, host_file), base_dir)
 }
 
-/// [`prepare_named_xref_definition`] with the reference's file already read
+/// `prepare_named_xref_definition` with the reference's file already read
 /// (off the UI thread, [`crate::io::xref::read_xref_file`] with
 /// [`xref_read_inputs`]): it merges `read` and reads no file. With `None` it
 /// reads the file here.

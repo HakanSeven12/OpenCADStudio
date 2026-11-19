@@ -345,6 +345,23 @@ fn prompts_for_template(db: &SheetSetDatabase, component: &str) -> bool {
     false
 }
 
+/// Place on Sheet's reference to model drawing `drawing`, by a relative path.
+fn view_reference(drawing: &str) -> crate::modules::insert::xattach::XrefAttachRequest {
+    crate::modules::insert::xattach::XrefAttachRequest {
+        path: drawing.to_string(),
+        overlay: false,
+        path_type: crate::io::xref_model::Pathtype::Relative,
+    }
+}
+
+/// Reads a reference's drawing (stored path, folder it resolves against).
+type ReferenceReader = fn(&str, &Path) -> crate::io::xref::XrefRead;
+
+/// Read a reference's drawing (run on a worker thread).
+fn read_reference(raw: &str, base: &Path) -> crate::io::xref::XrefRead {
+    crate::io::xref::read_xref_file(raw, base, None)
+}
+
 /// A drawing's paper-space layouts and sheet link, for Import (run on a
 /// worker thread).
 fn read_import(path: &Path) -> ImportRead {
@@ -1023,6 +1040,9 @@ impl OpenCADStudio {
                 self.sheet_set.open_drawings.insert(ss::path_key(&path));
             }
             SheetSetMsg::PlaceOnSheet(path, view) => return self.start_place_view(path, view),
+            SheetSetMsg::ViewReferenceRead(path, view, host, read) => {
+                return self.start_place_view_with(path, view, Some((host, read)), read_reference)
+            }
             SheetSetMsg::ViewMenu(id, action) => {
                 self.sheet_set.submenu = None;
                 return self.view_menu(id, action);
@@ -2073,8 +2093,20 @@ impl OpenCADStudio {
 
     /// Place on Sheet: only on a sheet of this set open at its layout.
     /// The model drawing and the set's view label block drawing are read
-    /// first.
+    /// first, then the model drawing for its reference.
     fn start_place_view(&mut self, drawing: String, view: Option<String>) -> Task<Message> {
+        self.start_place_view_with(drawing, view, None, read_reference)
+    }
+
+    /// [`Self::start_place_view`] with the reference read so far (for the
+    /// sheet drawing at its path), and the reader of the reference.
+    fn start_place_view_with(
+        &mut self,
+        drawing: String,
+        view: Option<String>,
+        read: Option<(Option<PathBuf>, Box<crate::io::xref::XrefRead>)>,
+        reader: ReferenceReader,
+    ) -> Task<Message> {
         if self.tabs[self.active_tab]
             .scene
             .current_layout
@@ -2113,12 +2145,51 @@ impl OpenCADStudio {
                 .push_error(crate::tf!("{}: no view to place.", drawing).as_ref());
             return Task::none();
         };
+        // The reference is read on a worker, for this sheet drawing; a
+        // reference already in the sheet reads nothing.
+        let i = self.active_tab;
+        let host = self.tabs[i].current_path.clone();
+        let read = match read {
+            Some((read_host, read)) if read_host == host => Some(read),
+            _ if crate::modules::insert::xattach::existing_reference(
+                &self.tabs[i].scene,
+                &crate::modules::insert::xattach::path_to_block_name(&drawing),
+            )
+            .is_some() =>
+            {
+                None
+            }
+            _ => {
+                let request = view_reference(&drawing);
+                let (raw, base) =
+                    crate::modules::insert::xattach::xref_read_inputs(&request, host.as_deref());
+                // No folder to resolve against: nothing to read, as before.
+                match base {
+                    None => None,
+                    Some(base) => {
+                        return crate::app::update::background_task(
+                            crate::t!("Place on Sheet"),
+                            move || reader(&raw, &base),
+                            move |read| {
+                                Message::SheetSet(SheetSetMsg::ViewReferenceRead(
+                                    drawing,
+                                    view,
+                                    host,
+                                    Box::new(read),
+                                ))
+                            },
+                        )
+                    }
+                }
+            }
+        };
         self.start_placing(
             Placing::View {
                 set,
                 sheet,
                 drawing,
                 view,
+                read,
             },
             size,
         );
@@ -2333,6 +2404,7 @@ impl OpenCADStudio {
                 sheet,
                 drawing,
                 view,
+                read,
             } => {
                 let Some(mv) = self
                     .sheet_set
@@ -2348,18 +2420,17 @@ impl OpenCADStudio {
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_default()
                 });
-                // The model drawing is attached to the sheet's model space.
+                // The model drawing is attached to the sheet's model space,
+                // from the worker's read.
                 let host = self.tabs[i].current_path.clone();
-                let request = crate::modules::insert::xattach::XrefAttachRequest {
-                    path: drawing.clone(),
-                    overlay: false,
-                    path_type: crate::io::xref_model::Pathtype::Relative,
-                };
+                let request = view_reference(&drawing);
                 let scene = &mut self.tabs[i].scene;
-                let xref = crate::modules::insert::xattach::prepare_xref_definition(
+                let xref = crate::modules::insert::xattach::prepare_named_xref_definition_with(
                     scene,
                     &request,
                     host.as_deref(),
+                    &crate::modules::insert::xattach::path_to_block_name(&request.path),
+                    read.map(|read| *read),
                 );
                 let model = scene.document.header.model_space_block_handle;
                 let inserted = scene.document.entities().any(|e| {

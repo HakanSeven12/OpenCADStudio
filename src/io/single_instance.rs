@@ -53,6 +53,11 @@ const IO_TIMEOUT: Duration = Duration::from_secs(2);
 /// `fn() -> S`, so the stream builder cannot capture anything.
 static LISTENER: Mutex<Option<TcpListener>> = Mutex::new(None);
 
+/// The subscription's output, where drawings opened from Finder while the
+/// editor runs are handed in (macOS sends those to this process directly).
+#[cfg(target_os = "macos")]
+static OPEN_SINK: Mutex<Option<PathSender>> = Mutex::new(None);
+
 /// This editor's secret, created when it wins the port.
 static SECRET: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
 
@@ -288,6 +293,8 @@ pub fn handoff(stream: TcpStream, paths: &[PathBuf]) -> bool {
 /// Inert unless [`claim`] returned [`Claim::Primary`] in this process, so a
 /// window that lost the election simply never produces items.
 pub fn subscribe() -> iced::Subscription<PathBuf> {
+    #[cfg(target_os = "macos")]
+    finder_open::install();
     // `worker` must stay a plain `fn` — `Subscription::run` keys the
     // subscription's identity off the function pointer, so turning this into a
     // closure would silently stop the listener with no error.
@@ -301,6 +308,10 @@ fn worker() -> impl iced::futures::Stream<Item = PathBuf> {
 }
 
 async fn serve_claimed_port(out: PathSender) {
+    #[cfg(target_os = "macos")]
+    {
+        *OPEN_SINK.lock().unwrap_or_else(|e| e.into_inner()) = Some(out.clone());
+    }
     let listener = LISTENER.lock().unwrap_or_else(|e| e.into_inner()).take();
     let Some(listener) = listener else {
         // Not the primary: park forever rather than end the stream, so iced
@@ -317,6 +328,65 @@ async fn serve_claimed_port(out: PathSender) {
         }
     });
     std::future::pending::<()>().await;
+}
+
+/// Finder hands a drawing opened while the editor runs to this process
+/// (`application:openURLs:`), not to the launcher. The windowing library's
+/// application delegate does not answer that message, so AppKit refused the
+/// file ("cannot open files in the AutoCAD Drawing format"); the method is
+/// added to the delegate's class and feeds the same channel as a handoff.
+#[cfg(target_os = "macos")]
+mod finder_open {
+    use objc2::runtime::{AnyObject, Sel};
+    use objc2_foundation::{MainThreadMarker, NSArray, NSURL};
+
+    unsafe extern "C" fn open_urls(
+        _this: *mut AnyObject,
+        _cmd: Sel,
+        _app: *mut AnyObject,
+        urls: *mut NSArray<NSURL>,
+    ) {
+        let Some(urls) = (unsafe { urls.as_ref() }) else {
+            return;
+        };
+        let mut sink = super::OPEN_SINK.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(out) = sink.as_mut() else {
+            return;
+        };
+        for url in urls.iter() {
+            if let Some(path) = unsafe { url.path() } {
+                let _ = out.try_send(std::path::PathBuf::from(path.to_string()));
+            }
+        }
+    }
+
+    /// Adds `application:openURLs:` to the application delegate's class
+    /// (main thread, once the delegate is set).
+    pub(super) fn install() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static DONE: AtomicBool = AtomicBool::new(false);
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+        let delegate: *mut AnyObject = unsafe { objc2::msg_send![&app, delegate] };
+        if delegate.is_null() || DONE.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        type OpenUrls =
+            unsafe extern "C" fn(*mut AnyObject, Sel, *mut AnyObject, *mut NSArray<NSURL>);
+        // SAFETY: the implementation matches the selector's `v@:@@` types.
+        unsafe {
+            let class = objc2::ffi::object_getClass(delegate.cast()).cast_mut();
+            let imp = std::mem::transmute::<OpenUrls, unsafe extern "C" fn()>(open_urls);
+            objc2::ffi::class_addMethod(
+                class,
+                objc2::sel!(application:openURLs:).as_ptr(),
+                Some(imp),
+                c"v@:@@".as_ptr(),
+            );
+        }
+    }
 }
 
 /// One connection: a ping that proves the client half of the secret, then at

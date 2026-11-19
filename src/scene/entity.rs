@@ -994,9 +994,9 @@ impl Scene {
             .filter(|entity| matches!(entity, EntityType::Underlay(_)))
             .map(|entity| entity.common().handle)
             .collect();
-        for handle in &handles {
-            self.reseed_derived_caches(*handle);
-        }
+        // The bump draws each picture again (its loop over the modified
+        // image-bearing objects): drawing it here first too made every
+        // zoom step cost two renders of each picture.
         let changes: Vec<_> = handles
             .iter()
             .map(|handle| (*handle, crate::scene::ChangeKind::Modified))
@@ -1013,9 +1013,9 @@ impl Scene {
             .filter(|entity| matches!(entity, EntityType::Ole2Frame(_)))
             .map(|entity| entity.common().handle)
             .collect();
-        for handle in &handles {
-            self.reseed_derived_caches(*handle);
-        }
+        // The bump draws each picture again (its loop over the modified
+        // image-bearing objects): drawing it here first too made every
+        // zoom step cost two renders of each picture.
         let changes: Vec<_> = handles
             .iter()
             .map(|handle| (*handle, crate::scene::ChangeKind::Modified))
@@ -3671,6 +3671,8 @@ impl Scene {
         &self,
         entity: &document::entities::EntityType,
     ) -> Option<ImageModel> {
+        #[cfg(test)]
+        IMAGE_SEEDS.with(|seeds| seeds.set(seeds.get() + 1));
         match entity {
             EntityType::RasterImage(img) => ImageModel::from_raster_image(img),
             EntityType::Ole2Frame(ole) => {
@@ -5096,4 +5098,10 @@ pub(crate) fn wire_thumbnail_bgra(wires: &[WireModel], size: usize) -> Option<Ve
         }
     }
     Some(pixels)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The image rasters drawn on this thread, for the tests that count them.
+    pub(super) static IMAGE_SEEDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }

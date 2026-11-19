@@ -31,6 +31,8 @@ pub const COMMANDS: &[&str] = &[
     "CREATEPROFILE",
     "CREATEPROFILEVIEW",
     "CREATEFEATURELINE",
+    "CREATECORRIDOR",
+    "CREATESAMPLELINES",
 ];
 
 const ALIGNMENT_OPTIONS: &[Opt] = &[
@@ -57,6 +59,15 @@ pub fn steps(name: &str) -> Option<Vec<Step>> {
         "CREATEPROFILEVIEW" => vec![
             Step::Objects { prompt: "Select an alignment for the profile view:", filter: Alignments, slot: 0 },
             Step::Point { prompt: "Specify lower left corner of the profile view:" },
+        ],
+        "CREATECORRIDOR" => vec![
+            Step::Objects { prompt: "Select a baseline alignment that has a profile:", filter: Alignments, slot: 0 },
+            Step::Objects { prompt: "Select an assembly:", filter: Assemblies, slot: 1 },
+        ],
+        "CREATESAMPLELINES" => vec![
+            Step::Objects { prompt: "Select an alignment for the sample lines:", filter: Alignments, slot: 0 },
+            Step::Value { prompt: "Specify sample line increment", key: "increment", default: 20.0 },
+            Step::Value { prompt: "Specify swath width on each side", key: "swath", default: 20.0 },
         ],
         "CREATEFEATURELINE" => vec![Step::Objects { prompt: "Select lines or polylines to make feature lines of:", filter: Paths, slot: 0 }],
         _ => return None,
@@ -91,6 +102,8 @@ impl CadModule for CivilModule {
                         tool("CREATEPROFILE", "Create Profile", icon!("profile")),
                         tool("CREATEPROFILEVIEW", "Create Profile View", icon!("profileview")),
                         tool("CREATEFEATURELINE", "Create Feature Line", icon!("featureline")),
+                        tool("CREATECORRIDOR", "Create Corridor", icon!("corridor")),
+                        tool("CREATESAMPLELINES", "Create Sample Lines", icon!("samplelines")),
                     ],
                 },
             ]

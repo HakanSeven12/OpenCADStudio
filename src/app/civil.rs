@@ -20,6 +20,17 @@ fn next_name(document: &document::Document, dxf: &str, base: &str) -> String {
     format!("{base} {}", n + 1)
 }
 
+/// The Civil 3D record of `handle`.
+fn arch(document: &document::Document, handle: Handle) -> Option<&document::classes::arch::ArchEntityData> {
+    match document.get_entity(handle)? {
+        EntityType::Extended(x) => match &x.data {
+            document::entities::ExtendedEntityData::Arch(a) => Some(a),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// The vertices (x, y, elevation) of a line or polyline, the first again at the end of a
 /// closed one.
 fn vertices(entity: &EntityType) -> Result<Vec<Vector3>, String> {
@@ -227,6 +238,67 @@ impl OpenCADStudio {
                     changes.push((h, ChangeKind::Added));
                 }
                 crate::tf!("{} feature line(s) created.", changes.len()).into_owned()
+            }
+            "CREATECORRIDOR" => {
+                let doc = &self.tabs[i].scene.document;
+                let alignment = *req.objects[0].first().ok_or("no alignment")?;
+                let assembly = *req.objects[1].first().ok_or("no assembly")?;
+                // The alignment's newest profile.
+                let profile = arch(doc, alignment)
+                    .ok_or("no alignment")?
+                    .typed_handles()
+                    .iter()
+                    .rev()
+                    .map(|r| Handle::new(r.0))
+                    .find(|h| arch(doc, *h).is_some_and(|a| a.dxf_name == "AECC_PROFILE"))
+                    .ok_or_else(|| crate::t!("The alignment has no profile.").into_owned())?;
+                let corridor = next_name(doc, "AECC_CORRIDOR", "Corridor");
+                self.push_undo_snapshot(i, name);
+                let doc = &mut self.tabs[i].scene.document;
+                let h = c3d::add_corridor(doc, &corridor, "Baseline (1)", "Region (1)", alignment, profile, assembly, layer)
+                    .map_err(refused)?;
+                changes.push((h, ChangeKind::Added));
+                crate::tf!("Corridor {} created; Civil 3D builds it when it rebuilds the corridor.", corridor).into_owned()
+            }
+            "CREATESAMPLELINES" => {
+                let doc = &self.tabs[i].scene.document;
+                let alignment = *req.objects[0].first().ok_or("no alignment")?;
+                let a = arch(doc, alignment).ok_or("no alignment")?;
+                let increment = req.value("increment", 20.0);
+                let swath = req.value("swath", 20.0);
+                if increment <= 0.0 || swath <= 0.0 {
+                    return Err(crate::t!("The increment and the swath width must be positive.").into_owned());
+                }
+                let start = a.alignment_start_station().unwrap_or(0.0);
+                let length: f64 = a
+                    .alignment_pieces()
+                    .iter()
+                    .map(|(_, p)| p.windows(2).map(|w| w[0].distance(&w[1])).sum::<f64>())
+                    .sum();
+                let mut stations: Vec<f64> = (0..).map(|k| start + k as f64 * increment).take_while(|s| *s < start + length).collect();
+                stations.push(start + length);
+                // TIN surfaces of the drawing, sampled by the group.
+                let surfaces: Vec<Handle> = doc
+                    .entities()
+                    .filter(|e| civil_class(e) == Some("AECC_TIN_SURFACE"))
+                    .map(|e| e.common().handle)
+                    .collect();
+                let group = next_name(doc, "AECC_SAMPLE_LINE_GROUP", "SL Collection");
+                self.push_undo_snapshot(i, name);
+                let doc = &mut self.tabs[i].scene.document;
+                let g = c3d::add_sample_line_group(doc, alignment, &group, layer).map_err(refused)?;
+                changes.push((alignment, ChangeKind::Modified));
+                changes.push((g, ChangeKind::Added));
+                for (k, station) in stations.iter().enumerate() {
+                    let h = c3d::add_sample_line(doc, g, &format!("SL-{}", k + 1), *station, swath, swath, layer).map_err(refused)?;
+                    changes.push((h, ChangeKind::Added));
+                }
+                for s in &surfaces {
+                    for h in c3d::add_sections(doc, g, *s).map_err(refused)? {
+                        changes.push((h, ChangeKind::Added));
+                    }
+                }
+                crate::tf!("Sample line group {} created with {} line(s).", group, stations.len()).into_owned()
             }
             _ => return Err(crate::t!("Unknown civil command.").into_owned()),
         };

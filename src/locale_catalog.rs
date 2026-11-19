@@ -3,6 +3,17 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "Select a baseline alignment that has a profile:" => Some(("civil-cmd", "select-corridor-alignment")),
+        "Select an assembly:" => Some(("civil-cmd", "select-assembly")),
+        "Select an alignment for the sample lines:" => Some(("civil-cmd", "select-sample-line-alignment")),
+        "Specify sample line increment" => Some(("civil-cmd", "specify-sample-increment")),
+        "Specify swath width on each side" => Some(("civil-cmd", "specify-swath")),
+        "Create Corridor" => Some(("civil-cmd", "create-corridor")),
+        "Create Sample Lines" => Some(("civil-cmd", "create-sample-lines")),
+        "The alignment has no profile." => Some(("civil-cmd", "alignment-no-profile")),
+        "Corridor {} created; Civil 3D builds it when it rebuilds the corridor." => Some(("civil-cmd", "corridor-created")),
+        "The increment and the swath width must be positive." => Some(("civil-cmd", "sample-values-positive")),
+        "Sample line group {} created with {} line(s)." => Some(("civil-cmd", "sample-lines-created")),
         "Select an alignment for the profile view:" => Some(("civil-cmd", "select-view-alignment")),
         "Specify lower left corner of the profile view:" => Some(("civil-cmd", "specify-view-corner")),
         "Select lines or polylines to make feature lines of:" => Some(("civil-cmd", "select-feature-line-paths")),

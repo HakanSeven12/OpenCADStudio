@@ -25,6 +25,8 @@ pub enum Filter {
     SurfacePoints,
     /// Civil 3D alignments.
     Alignments,
+    /// Civil 3D assemblies.
+    Assemblies,
     /// Lines, 2D and 3D polylines.
     Paths,
 }
@@ -64,6 +66,7 @@ impl Filter {
             Filter::CogoPoints => |e| civil_class(e) == Some("AECC_COGO_POINT"),
             Filter::SurfacePoints => |e| matches!(e, EntityType::Point(_)) || civil_class(e) == Some("AECC_COGO_POINT"),
             Filter::Alignments => |e| civil_class(e) == Some("AECC_ALIGNMENT"),
+            Filter::Assemblies => |e| civil_class(e) == Some("AECC_ASSEMBLY"),
             Filter::Paths => |e| {
                 matches!(e, EntityType::Line(_) | EntityType::LwPolyline(_) | EntityType::Polyline2D(_) | EntityType::Polyline3D(_))
             },

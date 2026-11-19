@@ -78,6 +78,8 @@ mod resident_patch_shorter_runs_tests;
 mod solid_box_select_tests;
 #[cfg(test)]
 mod solid_highlight_outline_tests;
+#[cfg(test)]
+mod solid_outline_detail_tests;
 pub use camera_ops::{add_background, copy_background, erase_background};
 pub use raster_reseed::{ReseedDone, ReseedJob};
 pub(crate) mod center_native;

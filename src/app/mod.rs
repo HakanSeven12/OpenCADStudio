@@ -1050,6 +1050,9 @@ pub(super) struct OpenCADStudio {
     field_dialog: Option<crate::ui::window::field_dialog::FieldDialogState>,
     /// The Formula dialog kept while Insert Field has another one open.
     field_formula_parent: Option<crate::ui::window::field_dialog::FieldDialogState>,
+    /// The number format the last formula / object field was placed with;
+    /// a new field starts from it (#3288).
+    field_number_format: crate::ui::window::field_dialog::NumberFormat,
     point_cloud_color_map: Option<crate::ui::window::pdf_dialogs::PointCloudColorMapState>,
     pc_section: Option<crate::ui::window::pdf_dialogs::PcSectionState>,
     /// -VIEW sEttings Background dialog.
@@ -6591,6 +6594,7 @@ impl OpenCADStudio {
             attdef_edit: None,
             field_dialog: None,
             field_formula_parent: None,
+            field_number_format: Default::default(),
             point_cloud_color_map: None,
             pc_section: None,
             view_background: None,

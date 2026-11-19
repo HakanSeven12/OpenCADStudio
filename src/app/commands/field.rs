@@ -235,6 +235,7 @@ impl OpenCADStudio {
     /// Open the Field dialog for `target`.
     pub(in crate::app) fn open_field_dialog(&mut self, target: FieldTarget) {
         let mut state = FieldDialogState::new(target);
+        state.set_number_format(&self.field_number_format);
         if matches!(target, FieldTarget::AttdefDefault | FieldTarget::AttdefEdit) {
             state.placeholder_block = self.tabs[self.active_tab]
                 .active_block_edit_session()
@@ -298,6 +299,8 @@ impl OpenCADStudio {
         self.open_field_dialog(target);
         let document = &self.tabs[i].scene.document;
         if let Some(state) = self.field_dialog.as_mut() {
+            // An existing field shows its own format, not the remembered one.
+            state.set_number_format(&Default::default());
             let property = state.seed_from_code(code, objects);
             let object = objects
                 .first()
@@ -591,6 +594,9 @@ impl OpenCADStudio {
         let (code, objects) = state.code();
         let value = state.preview.clone();
         let field = Some((code, objects));
+        if let Some(format) = state.number_format() {
+            self.field_number_format = format;
+        }
         match state.target {
             FieldTarget::NewText => {
                 self.close_active_modal();

@@ -1123,8 +1123,17 @@ const CACHE_CATEGORY_INSERT_HATCH: u16 = 1 << 7;
 struct ResidentWireSet {
     epoch: u64,
     gen: u64,
+    /// [`resident_touch`] stamp of the last build or reuse: pruning gives up
+    /// the least recently used set first.
+    used: std::cell::Cell<u64>,
     wires: Arc<Vec<WireModel>>,
     layout: Option<ResidentWireLayout>,
+}
+
+/// Monotonic stamp for [`ResidentWireSet::used`].
+fn resident_touch() -> u64 {
+    static TOUCH: AtomicU64 = AtomicU64::new(0);
+    TOUCH.fetch_add(1, Ordering::Relaxed)
 }
 
 #[derive(Clone)]
@@ -4135,9 +4144,9 @@ impl Scene {
                     );
                 }
                 let arc = Arc::new(built);
-                self.block_defn_cache
-                    .borrow_mut()
-                    .insert(key, (self.block_epoch, Arc::clone(&arc)));
+                let mut cache = self.block_defn_cache.borrow_mut();
+                self.bound_block_defn_cache(&mut cache);
+                cache.insert(key, (self.block_epoch, Arc::clone(&arc)));
                 return arc;
             }
         }
@@ -4167,8 +4176,22 @@ impl Scene {
         let arc = Arc::new(built);
         let mut cache = self.block_defn_cache.borrow_mut();
         cache.retain(|_, (epoch, _)| *epoch == self.block_epoch);
+        self.bound_block_defn_cache(&mut cache);
         cache.insert(key, (self.block_epoch, Arc::clone(&arc)));
         arc
+    }
+
+    /// Each entry holds every block definition built for one viewport, and
+    /// layout switches leave the block epoch alone: one entry per viewport
+    /// ever shown piled up until memory ran out (#3260). Keep what one frame
+    /// draws (model tiles count as 4) plus a little slack.
+    fn bound_block_defn_cache(
+        &self,
+        cache: &mut HashMap<u64, (u64, Arc<cache::block_cache::BlockCache>)>,
+    ) {
+        if cache.len() > self.frame_wire_set_count().max(4) + 2 {
+            cache.clear();
+        }
     }
 
     /// Install loader-thread geometry into this scene's Model resident cache.
@@ -4204,6 +4227,7 @@ impl Scene {
             ResidentWireSet {
                 epoch: self.geometry_epoch,
                 gen,
+                used: std::cell::Cell::new(resident_touch()),
                 wires: Arc::clone(&prepared.wires),
                 layout: prepared.resident_layout,
             },
@@ -10049,6 +10073,7 @@ impl Scene {
             let sets = self.resident_wire_sets.borrow();
             if let Some(set) = sets.get(&key) {
                 if set.epoch == self.geometry_epoch {
+                    set.used.set(resident_touch());
                     self.last_model_wire_gen.set(set.gen);
                     return Arc::clone(&set.wires);
                 }
@@ -10213,6 +10238,7 @@ impl Scene {
             ResidentWireSet {
                 epoch: cur_epoch,
                 gen,
+                used: std::cell::Cell::new(resident_touch()),
                 wires: Arc::clone(&arc),
                 layout,
             },
@@ -10243,21 +10269,22 @@ impl Scene {
         let cur_epoch = self.geometry_epoch;
         let floor = self.geometry_journal_floor.get();
         sets.retain(|_, set| set.epoch == cur_epoch || set.epoch >= floor);
-        let cap = 16.max(shown + 2);
+        // Each set is a whole model's wires. Switching layouts leaves the
+        // epoch unchanged, so the other layouts' sets never went stale and a
+        // floor of 16 kept up to 16 of them: memory grew with every layout
+        // visited until the app froze (#3260). Keep the shown viewports' sets
+        // (they were used last) and a little slack; model tiles count as 4.
+        let cap = shown.max(4) + 2;
         while sets.len() > cap {
-            let stalest = sets
+            let Some(key) = sets
                 .iter()
-                .filter(|(_, set)| set.epoch != cur_epoch)
-                .min_by_key(|(_, set)| set.epoch)
-                .map(|(key, _)| *key);
-            match stalest {
-                Some(key) => {
-                    sets.remove(&key);
-                }
-                None => {
-                    sets.clear();
-                    break;
-                }
+                .min_by_key(|(_, set)| set.used.get())
+                .map(|(key, _)| *key)
+            else {
+                break;
+            };
+            if let Some(evicted) = sets.remove(&key) {
+                reaper::reap(evicted);
             }
         }
     }
@@ -11105,6 +11132,7 @@ impl Scene {
             ResidentWireSet {
                 epoch: cur_epoch,
                 gen,
+                used: std::cell::Cell::new(resident_touch()),
                 wires: Arc::clone(&arc),
                 layout: Some(layout),
             },

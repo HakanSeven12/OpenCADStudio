@@ -21,7 +21,10 @@ use crate::scene::{
     SceneLight, Uniforms, ViewportInstance, WireModel,
 };
 
-const DISPLAY_STYLE_CACHE_LIMIT: usize = if cfg!(target_arch = "wasm32") { 4 } else { 24 };
+/// Floor for the display plot style caches. Each entry is a styled copy of a
+/// whole wire set, so the cap follows what one frame draws: a floor of 24 kept
+/// a copy per layout visited until memory ran out (#3260).
+const DISPLAY_STYLE_CACHE_LIMIT: usize = 4;
 const MM_TO_PX: f32 = 96.0 / 25.4;
 
 // ── Camera hover state (shader::Program::State) ───────────────────────────
@@ -5221,7 +5224,10 @@ impl Scene {
                 // Ids change on rebuild, so old keys die naturally; the cap
                 // just bounds pathological churn. It stays above what one
                 // frame draws: below it, the cache emptied on every frame.
-                let cap = 8.max(self.frame_wire_set_count() + 1);
+                // Each entry splits a whole set, so no fixed floor beyond
+                // that: other layouts' splits held memory until it ran out
+                // (#3260).
+                let cap = self.frame_wire_set_count() + 1;
                 let mut c = self.split_cache.borrow_mut();
                 if c.len() > cap {
                     c.clear();

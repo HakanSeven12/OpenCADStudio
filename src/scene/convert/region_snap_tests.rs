@@ -307,7 +307,7 @@ fn assert_region_boundary_clicks(entity: &EntityType) {
     }
 }
 
-fn click_at<W: WireSource + ?Sized>(wires: &W, point: DVec3) -> Option<&str> {
+fn click_at<W: WireSource + Sync + ?Sized>(wires: &W, point: DVec3) -> Option<&str> {
     crate::scene::pick::hit_test::click_hit(
         Point::new(500.0 + point.x as f32 * 10.0, 500.0 - point.y as f32 * 10.0),
         wires,

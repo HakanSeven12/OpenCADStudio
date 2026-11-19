@@ -15,6 +15,12 @@ use crate::scene::model::mesh_model::MeshModel;
 use crate::scene::model::wire_model::WireModel;
 use crate::scene::pick::interaction_index::{SegmentRef, WireSource};
 use crate::scene::view::projection;
+use crate::par::prelude::*;
+
+/// Coincident edges (a rectangle side on an xline) sit at the same pixel
+/// distance give or take float noise; within this band the front-most
+/// entity in draw order wins instead of whichever was measured first. (#1439)
+const TIE_PX: f32 = 0.5;
 
 /// Pick radius for one wire, in screen pixels.
 ///
@@ -210,7 +216,78 @@ fn text_quad_hit_area(
 /// within that wire's [`pick_tolerance_px`] of `cursor`.
 ///
 /// Returns `None` when no wire is close enough.
-pub fn click_hit<'a, W: WireSource + ?Sized>(
+/// One chunk of the indexed segment scan: the chunk's best hit under the
+/// same closest-distance / front-most-depth rule the sequential scan uses.
+/// Dense linework hands the pick thousands of candidate segments; scanning
+/// them in parallel chunks keeps the hover sweep off the UI thread's critical
+/// path while preserving the winner the sequential scan would settle on.
+fn scan_segment_chunk<'a, W: WireSource + ?Sized>(
+    wires: &'a W,
+    chunk: &[SegmentRef],
+    cursor: Point,
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: Rectangle,
+    lw_display: bool,
+    base_radius_px: f32,
+    draw_depth: &HashMap<u64, [f32; 2]>,
+) -> Option<(f32, &'a str)> {
+    let front = |name: &str| {
+        crate::scene::Scene::handle_from_wire_name(name)
+            .and_then(|handle| draw_depth.get(&handle.value()))
+            .map_or(f32::MIN, |depth| depth[0])
+    };
+    let beats = |d: f32, name: &str, best_dist: f32, best: Option<&str>| {
+        if (d - best_dist).abs() > TIE_PX {
+            return d < best_dist;
+        }
+        let (mine, theirs) = (front(name), best.map_or(f32::MIN, front));
+        mine > theirs || (mine == theirs && d < best_dist)
+    };
+    let mut best_dist = f32::MAX;
+    let mut best: Option<&str> = None;
+    for segment in chunk {
+        let Some(wire) = wires.source_wire(segment.wire) else {
+            continue;
+        };
+        if (wire.snap_only && !wire.region_boundary_click) || wire.reference_only {
+            continue;
+        }
+        if wire.point_marker.is_some() {
+            continue;
+        }
+        let start = segment.start as usize;
+        if start + 1 >= wire.points.len() {
+            continue;
+        }
+        let (Some(p0), Some(p1)) = (
+            projection::project_screen(
+                view_rot,
+                eye,
+                bounds,
+                wire_point_world(wire, start, view_rot, eye),
+            ),
+            projection::project_screen(
+                view_rot,
+                eye,
+                bounds,
+                wire_point_world(wire, start + 1, view_rot, eye),
+            ),
+        ) else {
+            continue;
+        };
+        let d = dist_point_to_segment(cursor, p0, p1);
+        if d < pick_tolerance_px(wire, lw_display, base_radius_px)
+            && beats(d, &wire.name, best_dist, best)
+        {
+            best_dist = d;
+            best = Some(&wire.name);
+        }
+    }
+    best.map(|name| (best_dist, name))
+}
+
+pub fn click_hit<'a, W: WireSource + Sync + ?Sized>(
     cursor: Point,
     wires: &'a W,
     view_rot: Mat4,
@@ -220,10 +297,6 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
     base_radius_px: f32,
     draw_depth: &HashMap<u64, [f32; 2]>,
 ) -> Option<&'a str> {
-    // Coincident edges (a rectangle side on an xline) sit at the same pixel
-    // distance give or take float noise; within this band the front-most
-    // entity in draw order wins instead of whichever was measured first. (#1439)
-    const TIE_PX: f32 = 0.5;
     let front = |name: &str| {
         crate::scene::Scene::handle_from_wire_name(name)
             .and_then(|handle| draw_depth.get(&handle.value()))
@@ -292,43 +365,47 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
     if let Some(segments) = wires.segments() {
         // The interaction index already narrowed long/batched wires to segments
         // touching the cursor aperture. Hover and click therefore project only
-        // those local edges, not every point of every candidate wire.
-        for segment in segments {
-            let Some(wire) = wires.source_wire(segment.wire) else {
-                continue;
-            };
-            if (wire.snap_only && !wire.region_boundary_click) || wire.reference_only {
-                continue;
-            }
-            if wire.point_marker.is_some() {
-                continue;
-            }
-            let start = segment.start as usize;
-            if start + 1 >= wire.points.len() {
-                continue;
-            }
-            let (Some(p0), Some(p1)) = (
-                projection::project_screen(
-                    view_rot,
-                    eye,
-                    bounds,
-                    wire_point_world(wire, start, view_rot, eye),
-                ),
-                projection::project_screen(
-                    view_rot,
-                    eye,
-                    bounds,
-                    wire_point_world(wire, start + 1, view_rot, eye),
-                ),
-            ) else {
-                continue;
-            };
-            let d = dist_point_to_segment(cursor, p0, p1);
-            if d < pick_tolerance_px(wire, lw_display, base_radius_px)
-                && beats(d, &wire.name, best_dist, best)
-            {
+        // those local edges, not every point of every candidate wire. Dense
+        // linework still hands over thousands of segments; scan them in
+        // parallel chunks and fold each chunk's best with the same
+        // closest-distance / front-most-depth rule, so the sweep costs a
+        // fraction of the sequential one on every core.
+        const PAR_SEGMENTS_MIN: usize = 512;
+        const PAR_SEGMENTS_CHUNK: usize = 256;
+        let chunk_bests: Vec<Option<(f32, &str)>> = if segments.len() >= PAR_SEGMENTS_MIN {
+            segments
+                .par_chunks(PAR_SEGMENTS_CHUNK)
+                .map(|chunk| {
+                    scan_segment_chunk(
+                        wires,
+                        chunk,
+                        cursor,
+                        view_rot,
+                        eye,
+                        bounds,
+                        lw_display,
+                        base_radius_px,
+                        draw_depth,
+                    )
+                })
+                .collect::<Vec<_>>()
+        } else {
+            vec![scan_segment_chunk(
+                wires,
+                segments,
+                cursor,
+                view_rot,
+                eye,
+                bounds,
+                lw_display,
+                base_radius_px,
+                draw_depth,
+            )]
+        };
+        for (d, name) in chunk_bests.into_iter().flatten() {
+            if beats(d, name, best_dist, best) {
                 best_dist = d;
-                best = Some(&wire.name);
+                best = Some(name);
             }
         }
     } else {

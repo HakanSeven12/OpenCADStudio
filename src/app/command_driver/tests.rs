@@ -12177,3 +12177,91 @@ mod xref_palette_op_tests {
     }
 }
 
+
+// The xref path-type conversion is exposed through the control protocol's
+// xref_set_path op; that surface had no test.
+mod xref_pathtype_control_tests {
+    use super::super::*;
+    use document::tables::BlockRecord;
+
+    fn set_path(app: &mut OpenCADStudio, id: &str, path_type: &str) -> serde_json::Value {
+        static SERIAL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let mut req = serde_json::json!({
+            "op": "xref_set_path",
+            "id": id,
+            "path_type": path_type
+        });
+        let state = app.control_state();
+        req["protocol"] = serde_json::json!(1);
+        req["document_id"] = state["document_id"].clone();
+        req["revision"] = state["revision"].clone();
+        req["request_id"] = serde_json::json!(format!(
+            "xref-path-{}",
+            SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let (reply, task) = app.control_request(req);
+        app.drive_headless_task(task).unwrap();
+        reply
+    }
+
+    #[test]
+    fn xref_set_path_converts_between_none_and_full_paths() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let host = std::env::temp_dir().join(format!("ocs_xref_host_{}.dwg", std::process::id()));
+        let _ = std::fs::remove_file(&host);
+        assert_eq!(
+            app.automation_op(&format!(
+                r#"{{"op":"save","path":"{}"}}"#,
+                host.to_string_lossy().replace('\\', "\\\\")
+            ))["ok"],
+            true
+        );
+        let mut block = BlockRecord::new("PLAN");
+        block.flags.is_xref = true;
+        block.xref_path = "plans/plan.dwg".to_string();
+        block.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i].scene.document.block_records.add(block).unwrap();
+
+        let refs = app.automation_op(r#"{"op":"xrefs"}"#);
+        let id = refs["xrefs"][0]["id"].as_str().unwrap().to_string();
+
+        let none = set_path(&mut app, &id, "none");
+        assert_eq!(none["ok"], true, "{none}");
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .block_records
+                .get("PLAN")
+                .unwrap()
+                .xref_path,
+            "plan.dwg",
+            "no-path mode strips the directory"
+        );
+
+        let full = set_path(&mut app, &id, "full");
+        assert_eq!(full["ok"], true, "{full}");
+        let stored = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PLAN")
+            .unwrap()
+            .xref_path
+            .clone();
+        assert!(
+            stored.ends_with("plan.dwg")
+                && (stored.starts_with("C:") || stored.starts_with('/')),
+            "full mode stores an absolute path: {stored}"
+        );
+        let sidecar = host.with_file_name(format!(
+            ".{}.ocs.lock",
+            host.file_name().unwrap().to_string_lossy()
+        ));
+        let _ = std::fs::remove_file(sidecar);
+        let _ = std::fs::remove_file(&host);
+    }
+}
+

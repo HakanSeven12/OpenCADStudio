@@ -4476,6 +4476,7 @@ insert =
     .xref-external-references = XREF बाहरी संदर्भ:
     .xref-no-external-references-in-this-drawing = XREF इस ड्रॉइंग में कोई बाहरी संदर्भ नहीं है।
     .xref-reloaded = XREF  “__ocs_fmt_0__” पुनः लोड किया गया
+    .xref-other-drawing = XREF  “__ocs_fmt_0__” अब एक अलग ड्रॉइंग लोड करता है (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF: "__ocs_fmt_0__" को ओवरले पर सेट किया गया।
     .xref-set-to-attach = XREF: "__ocs_fmt_0__" को अटैच पर सेट किया गया।
     .xref-cannot-unload-nested-reference = XREF: नेस्टेड संदर्भ '__ocs_fmt_0__' अनलोड नहीं कर सकता। इसे अपने होस्ट ड्राइंग में अनलोड करें।

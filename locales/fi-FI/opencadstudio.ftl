@@ -4487,6 +4487,7 @@ insert =
     .xref-external-references = XREF Ulkoiset viitteet:
     .xref-no-external-references-in-this-drawing = XREF Tässä piirustuksessa ei ole ulkoisia viittauksia.
     .xref-reloaded = XREF Ladattu uudelleen "__ocs_fmt_0__"
+    .xref-other-drawing = XREF "__ocs_fmt_0__" lataa nyt eri piirustuksen (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF: "__ocs_fmt_0__" asetettu Peitä-tilaan.
     .xref-set-to-attach = XREF: "__ocs_fmt_0__" asetettu Liitä-tilaan.
     .xref-cannot-unload-nested-reference = XREF: ei voi purkaa sisäkkäistä viittausta '__ocs_fmt_0__'. Pura se isäntäpiirroksessa.

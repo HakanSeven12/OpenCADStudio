@@ -4455,6 +4455,7 @@ insert =
     .xref-external-references = XREF  Dış referanslar:
     .xref-no-external-references-in-this-drawing = XREF  Bu çizimde dış referans yok.
     .xref-reloaded = XREF  "__ocs_fmt_0__" yeniden yüklendi
+    .xref-other-drawing = XREF  "__ocs_fmt_0__" artık farklı bir çizim yüklüyor (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF: "__ocs_fmt_0__" Üzerine Ekle olarak ayarlandı.
     .xref-set-to-attach = XREF: "__ocs_fmt_0__" Ekle olarak ayarlandı.
     .xref-cannot-unload-nested-reference = XREF: iç içe referans '__ocs_fmt_0__' kaldırılamaz. Ana çiziminde kaldırın.

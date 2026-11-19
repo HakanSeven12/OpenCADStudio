@@ -4487,6 +4487,7 @@ insert =
     .xref-external-references = XREF 외부 참조:
     .xref-no-external-references-in-this-drawing = XREF 이 도면에는 외부 참조가 없습니다.
     .xref-reloaded = XREF가 "__ocs_fmt_0__"를 다시 로드했습니다.
+    .xref-other-drawing = XREF "__ocs_fmt_0__"가 이제 다른 도면을 로드합니다 (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF: "__ocs_fmt_0__"을(를) 오버레이로 설정함.
     .xref-set-to-attach = XREF: "__ocs_fmt_0__"을(를) 첨부로 설정함.
     .xref-cannot-unload-nested-reference = XREF: 중첩 참조 '__ocs_fmt_0__'을(를) 언로드할 수 없습니다. 호스트 도면에서 언로드하세요.

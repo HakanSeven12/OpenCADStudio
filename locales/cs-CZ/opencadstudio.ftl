@@ -4490,6 +4490,7 @@ insert =
     .xref-external-references = XREF  Externí reference:
     .xref-no-external-references-in-this-drawing = XREF  V tomto výkresu nejsou žádné externí reference.
     .xref-reloaded = XREF: znovu načteno „__ocs_fmt_0__“
+    .xref-other-drawing = XREF: „__ocs_fmt_0__“ nyní načítá jiný výkres (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF: „__ocs_fmt_0__“ nastavena na Překrytí.
     .xref-set-to-attach = XREF: „__ocs_fmt_0__“ nastavena na Připojení.
     .xref-cannot-unload-nested-reference = XREF: vnořenou referenci „__ocs_fmt_0__“ nelze uvolnit. Uvolněte ji v jejím hostitelském výkresu.

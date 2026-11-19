@@ -4486,6 +4486,7 @@ insert =
     .xref-external-references = XREF Externe Referenzen:
     .xref-no-external-references-in-this-drawing = XREF Keine externen Referenzen in dieser Zeichnung.
     .xref-reloaded = XREF Reloaded "__ocs_fmt_0__"
+    .xref-other-drawing = XREF "__ocs_fmt_0__" lädt jetzt eine andere Zeichnung (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF: "__ocs_fmt_0__" auf Überlagern festgelegt.
     .xref-set-to-attach = XREF: "__ocs_fmt_0__" auf Anhängen festgelegt.
     .xref-cannot-unload-nested-reference = XREF: kann die geschachtelte Referenz '__ocs_fmt_0__' nicht entladen. Entladen Sie sie in der Host-Zeichnung.

@@ -4495,6 +4495,7 @@ insert =
     .xref-external-references = XREF  Εξωτερικές αναφορές:
     .xref-no-external-references-in-this-drawing = XREF  Δεν υπάρχουν εξωτερικές αναφορές σε αυτό το σχέδιο.
     .xref-reloaded = XREF  Επαναφορτώθηκε το "__ocs_fmt_0__"
+    .xref-other-drawing = XREF  Το "__ocs_fmt_0__" φορτώνει πλέον διαφορετικό σχέδιο (__ocs_fmt_1__)
     .xref-save-the-drawing-first-to-resolve-relativ = XREF  Αποθηκεύστε πρώτα το σχέδιο για να επιλυθούν οι σχετικές διαδρομές XREF.
     .xref-set-to-overlay = XREF: "__ocs_fmt_0__" set to Overlay.
     .xref-bound = XREF: bound "__ocs_fmt_0__".

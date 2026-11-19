@@ -2544,6 +2544,16 @@ impl OpenCADStudio {
                 crate::io::xref::XrefStatus::Loaded => {
                     self.command_line
                         .push_output(crate::tf!("XREF  Loaded \"{}\"", info.name).as_ref());
+                    if info.other_drawing {
+                        self.command_line.push_warning(
+                            crate::tf!(
+                                "XREF  \"{}\" now loads a different drawing ({})",
+                                info.name,
+                                info.path
+                            )
+                            .as_ref(),
+                        );
+                    }
                 }
                 crate::io::xref::XrefStatus::Recovered => {
                     self.command_line.push_warning(

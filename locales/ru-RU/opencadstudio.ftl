@@ -4489,6 +4489,7 @@ insert =
     .xref-external-references = XREF Внешние ссылки:
     .xref-no-external-references-in-this-drawing = XREF В этом чертеже нет внешних ссылок.
     .xref-reloaded = XREF Перезагрузка "__ocs_fmt_0__"
+    .xref-other-drawing = XREF "__ocs_fmt_0__" теперь загружает другой чертеж (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF: "__ocs_fmt_0__" установлен на Наложение.
     .xref-set-to-attach = XREF: "__ocs_fmt_0__" установлен на Присоединение.
     .xref-cannot-unload-nested-reference = XREF: невозможно выгрузить вложенную ссылку '__ocs_fmt_0__'. Выгрузите ее в основном чертеже.

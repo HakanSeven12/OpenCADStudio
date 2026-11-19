@@ -4502,6 +4502,7 @@ insert =
     .xref-external-references = XREF  Tham chiếu ngoài:
     .xref-no-external-references-in-this-drawing = XREF  Bản vẽ này không có tham chiếu ngoài.
     .xref-reloaded = XREF Đã tải lại "__ocs_fmt_0__"
+    .xref-other-drawing = XREF "__ocs_fmt_0__" giờ tải một bản vẽ khác (__ocs_fmt_1__)
     .xref-save-the-drawing-first-to-resolve-relativ = XREF  Hãy lưu bản vẽ trước để phân giải các đường dẫn XREF tương đối.
     .xref-set-to-overlay = XREF: "__ocs_fmt_0__" được đặt thành Lớp phủ.
     .xref-set-to-attach = XREF: "__ocs_fmt_0__" được đặt thành Đính kèm.

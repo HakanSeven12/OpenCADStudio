@@ -4488,6 +4488,7 @@ insert =
     .xref-external-references = XREF  Referências externas:
     .xref-no-external-references-in-this-drawing = XREF  Nenhuma referência externa neste desenho.
     .xref-reloaded = XREF  “__ocs_fmt_0__” recarregada
+    .xref-other-drawing = XREF  “__ocs_fmt_0__” agora carrega um desenho diferente (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF: "__ocs_fmt_0__" definido como Sobrepor.
     .xref-set-to-attach = XREF: "__ocs_fmt_0__" definido como Anexar.
     .xref-cannot-unload-nested-reference = XREF: não é possível descarregar referência aninhada '__ocs_fmt_0__'. Descarregue-a no desenho host.

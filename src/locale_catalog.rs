@@ -4935,6 +4935,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "XREF  No external references in this drawing." => Some(("insert", "xref-no-external-references-in-this-drawing")),
         "XREF  Not found: \"{}\" ({})" => Some(("common", "xref-not-found")),
         "XREF  Reloaded \"{}\"" => Some(("insert", "xref-reloaded")),
+        "XREF  \"{}\" now loads a different drawing ({})" => Some(("insert", "xref-other-drawing")),
         "XREF  Save the drawing first to resolve relative XREF paths." => Some(("insert", "xref-save-the-drawing-first-to-resolve-relativ")),
         "XREF  Unloaded (skipped): \"{}\"" => Some(("common", "xref-unloaded-skipped")),
         "XREF: \"{}\" set to Overlay." => Some(("insert", "xref-set-to-overlay")),

@@ -4487,6 +4487,7 @@ insert =
     .xref-external-references = XREF  Външни референции:
     .xref-no-external-references-in-this-drawing = XREF  Няма външни референции в този чертеж.
     .xref-reloaded = XREF  Презареден "__ocs_fmt_0__"
+    .xref-other-drawing = XREF  "__ocs_fmt_0__" вече зарежда друг чертеж (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF: "__ocs_fmt_0__" зададен на Наслагване.
     .xref-set-to-attach = XREF: "__ocs_fmt_0__" зададен на Прикачване.
     .xref-cannot-unload-nested-reference = XREF: не може да се изключи вложена референция '__ocs_fmt_0__'. Изключете я в нейния чертеж-домакин.

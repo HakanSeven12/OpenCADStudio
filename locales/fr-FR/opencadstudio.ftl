@@ -4488,6 +4488,7 @@ insert =
     .xref-external-references = XREF Références externes:
     .xref-no-external-references-in-this-drawing = XREF Aucune référence externe dans ce dessin.
     .xref-reloaded = XREF Rechargé "__ocs_fmt_0__"
+    .xref-other-drawing = XREF "__ocs_fmt_0__" charge désormais un autre dessin (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF : "__ocs_fmt_0__" défini sur Superposer.
     .xref-set-to-attach = XREF : "__ocs_fmt_0__" défini sur Attacher.
     .xref-cannot-unload-nested-reference = XREF : impossible de décharger la référence imbriquée '__ocs_fmt_0__'. Déchargez-la dans son dessin hôte.

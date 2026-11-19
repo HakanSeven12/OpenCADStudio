@@ -4486,6 +4486,7 @@ insert =
     .xref-external-references = XREF Externe verwijzingen:
     .xref-no-external-references-in-this-drawing = XREF Geen externe referenties in deze tekening.
     .xref-reloaded = XREF Herladen "__ocs_fmt_0__"
+    .xref-other-drawing = XREF "__ocs_fmt_0__" laadt nu een andere tekening (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF: "__ocs_fmt_0__" ingesteld op Overleggen.
     .xref-set-to-attach = XREF: "__ocs_fmt_0__" ingesteld op Koppelen.
     .xref-cannot-unload-nested-reference = XREF: kan geneste verwijzing '__ocs_fmt_0__' niet ontladen. Ontlaad deze in de hosttekening.

@@ -4500,6 +4500,7 @@ insert =
     .xref-external-references = XREF  المراجع الخارجية:
     .xref-no-external-references-in-this-drawing = XREF  لا توجد مراجع خارجية في هذا الرسم.
     .xref-reloaded = XREF  أُعيد تحميل "__ocs_fmt_0__"
+    .xref-other-drawing = XREF  "__ocs_fmt_0__" يحمّل الآن رسمًا مختلفًا (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF: تم تعيين "__ocs_fmt_0__" إلى تراكب.
     .xref-set-to-attach = XREF: تم تعيين "__ocs_fmt_0__" إلى إرفاق.
     .xref-cannot-unload-nested-reference = XREF: لا يمكن إلغاء تحميل المرجع المتداخل '__ocs_fmt_0__'. ألغ تحميله في رسمته المضيفة.

@@ -4496,6 +4496,7 @@ insert =
     .xref-external-references = XREF  External references:
     .xref-no-external-references-in-this-drawing = XREF  No external references in this drawing.
     .xref-reloaded = XREF  Reloaded "__ocs_fmt_0__"
+    .xref-other-drawing = XREF  "__ocs_fmt_0__" now loads a different drawing (__ocs_fmt_1__)
     .xref-save-the-drawing-first-to-resolve-relativ = XREF  Save the drawing first to resolve relative XREF paths.
     .xref-set-to-overlay = XREF: "__ocs_fmt_0__" set to Overlay.
     .xref-set-to-attach = XREF: "__ocs_fmt_0__" set to Attach.

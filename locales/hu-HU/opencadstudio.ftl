@@ -4478,6 +4478,7 @@ insert =
     .xref-external-references = XREF Külső hivatkozások:
     .xref-no-external-references-in-this-drawing = XREF  Ebben a rajzban nincsenek külső hivatkozások.
     .xref-reloaded = XREF  „__ocs_fmt_0__” újratöltve
+    .xref-other-drawing = XREF  „__ocs_fmt_0__” most egy másik rajzot tölt be (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF: „__ocs_fmt_0__” átfedésre állítva.
     .xref-set-to-attach = XREF: „__ocs_fmt_0__” csatolásra állítva.
     .xref-cannot-unload-nested-reference = XREF: a(z) „__ocs_fmt_0__” beágyazott hivatkozás itt nem távolítható el a memóriából. Végezze el a befogadó rajzban.

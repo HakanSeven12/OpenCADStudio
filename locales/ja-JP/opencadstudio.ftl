@@ -4476,6 +4476,7 @@ insert =
     .xref-external-references = XREF  外部参照:
     .xref-no-external-references-in-this-drawing = XREF  この図面には外部参照がありません。
     .xref-reloaded = XREF  「__ocs_fmt_0__」を再ロードしました
+    .xref-other-drawing = XREF  「__ocs_fmt_0__」は別の図面を読み込んでいます (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF: "__ocs_fmt_0__" をオーバーレイに設定しました。
     .xref-set-to-attach = XREF: "__ocs_fmt_0__" をアタッチに設定しました。
     .xref-cannot-unload-nested-reference = XREF: ネストされた参照 '__ocs_fmt_0__' をアンロードできません。ホスト図面でアンロードしてください。

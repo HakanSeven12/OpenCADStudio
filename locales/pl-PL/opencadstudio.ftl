@@ -4487,6 +4487,7 @@ insert =
     .xref-external-references = XREF Referencje zewnętrzne:
     .xref-no-external-references-in-this-drawing = XREF Brak zewnętrznych odniesień na tym rysunku.
     .xref-reloaded = XREF Załadowano ponownie „__ocs_fmt_0__”
+    .xref-other-drawing = XREF „__ocs_fmt_0__” wczytuje teraz inny rysunek (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF: "__ocs_fmt_0__" ustawiono na Nałóż.
     .xref-set-to-attach = XREF: "__ocs_fmt_0__" ustawiono na Dołącz.
     .xref-cannot-unload-nested-reference = XREF: nie można odłączyć zagnieżdżonego odwołania '__ocs_fmt_0__'. Odłącz je w rysunku nadrzędnym.

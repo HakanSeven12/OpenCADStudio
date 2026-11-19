@@ -38,6 +38,10 @@ pub struct XrefInfo {
     pub diagnostics: Vec<String>,
     pub read_stats: Option<document::ReadStats>,
     pub source_sha256: Option<String>,
+    /// The reference loaded a drawing whose FingerprintGUID differs from
+    /// the one it held before in this session: another drawing took the
+    /// file's place, not a revision of it.
+    pub other_drawing: bool,
 }
 
 /// Names of the xrefs that resolved to nothing (`NotFound`) — the list the
@@ -119,6 +123,29 @@ fn merged_copies() -> &'static Mutex<HashMap<Handle, HashMap<Handle, Handle>>> {
     static MERGED: OnceLock<Mutex<HashMap<Handle, HashMap<Handle, Handle>>>> =
         OnceLock::new();
     MERGED.get_or_init(|| Mutex::new(HashMap::default()))
+}
+
+/// FingerprintGUID of the drawing each xref block last loaded, keyed by the
+/// host's own GUID and the block, so a reload can tell a revision (same
+/// GUID) from another drawing that took the file's place.
+// ponytail: session-only; a reopened host has no expected GUID until the
+// file's dependency list (AcDb:FileDepList) records it.
+fn loaded_identities() -> &'static Mutex<HashMap<(String, Handle), String>> {
+    static IDS: OnceLock<Mutex<HashMap<(String, Handle), String>>> = OnceLock::new();
+    IDS.get_or_init(|| Mutex::new(HashMap::default()))
+}
+
+/// Record `loaded` as the drawing behind `br_handle`; true when the block
+/// held a different known drawing before.
+fn replaced_by_other_drawing(host_guid: &str, br_handle: Handle, loaded: &str) -> bool {
+    if host_guid.is_empty() || loaded.is_empty() {
+        return false;
+    }
+    let Ok(mut ids) = loaded_identities().lock() else {
+        return false;
+    };
+    ids.insert((host_guid.to_string(), br_handle), loaded.to_string())
+        .is_some_and(|previous| !previous.eq_ignore_ascii_case(loaded))
 }
 
 /// Point every dimension reference at an old xref copy to the copy of the
@@ -422,6 +449,7 @@ fn resolve_xrefs_with_filter(
                 diagnostics: Vec::new(),
                 read_stats: None,
                 source_sha256: None,
+                other_drawing: false,
             });
             continue;
         }
@@ -560,6 +588,7 @@ pub fn merge_xref_reads(
             outcome: xref_outcome,
             source_sha256,
         } = read;
+        let mut other_drawing = false;
         let (status, diagnostics, read_stats) = match xref_outcome {
             Some(Ok(outcome)) => {
                 let recovered = outcome.stats.recovered()
@@ -594,6 +623,11 @@ pub fn merge_xref_reads(
                     // re-apply onto the freshly merged layers below. Without this
                     // every reload silently reset frozen/off/color tweaks the
                     // user made on `name|*` layers back to file defaults.
+                    other_drawing = replaced_by_other_drawing(
+                        &doc.header.fingerprint_guid,
+                        br_handle,
+                        &outcome.document.header.fingerprint_guid,
+                    );
                     let visretain = doc.header.retain_xref_visibility;
                     let kept_layers = if visretain {
                         snapshot_dependent_layers(doc, &block_name)
@@ -635,6 +669,7 @@ pub fn merge_xref_reads(
             diagnostics,
             read_stats,
             source_sha256,
+            other_drawing,
         });
         if let Some(progress) = &progress {
             progress(
@@ -4709,6 +4744,7 @@ mod web_registry_tests {
                 diagnostics: Vec::new(),
                 read_stats: None,
                 source_sha256: None,
+                other_drawing: false,
             },
             XrefInfo {
                 name: "Missing A.dwg".into(),
@@ -4717,6 +4753,7 @@ mod web_registry_tests {
                 diagnostics: Vec::new(),
                 read_stats: None,
                 source_sha256: None,
+                other_drawing: false,
             },
             XrefInfo {
                 name: "Broken.dwg".into(),
@@ -4725,6 +4762,7 @@ mod web_registry_tests {
                 diagnostics: Vec::new(),
                 read_stats: None,
                 source_sha256: None,
+                other_drawing: false,
             },
             XrefInfo {
                 name: "Missing B.dxf".into(),
@@ -4733,6 +4771,7 @@ mod web_registry_tests {
                 diagnostics: Vec::new(),
                 read_stats: None,
                 source_sha256: None,
+                other_drawing: false,
             },
         ];
         assert_eq!(

@@ -4497,6 +4497,7 @@ insert =
     .xref-external-references = XREF  ການອ້າງອີງພາຍນອກ:
     .xref-no-external-references-in-this-drawing = XREF  ບໍ່ມີການອ້າງອີງພາຍນອກໃນຮູບແຕ້ມນີ້.
     .xref-reloaded = XREF  ໂຫຼດຄືນໃໝ່ "__ocs_fmt_0__"
+    .xref-other-drawing = XREF  "__ocs_fmt_0__" ຕອນນີ້ໂຫຼດແບບແຕ້ມອື່ນ (__ocs_fmt_1__)
     .xref-save-the-drawing-first-to-resolve-relativ = XREF  ບັນທຶກຮູບແຕ້ມກ່ອນ ເພື່ອແກ້ໄຂເສັ້ນທາງ XREF ແບບສໍາພັດ.
     .xref-set-to-overlay = XREF: ຕັ້ງຄ່າ "__ocs_fmt_0__" ເປັນແບບຊ້ອນທັບ (Overlay).
     .xref-set-to-attach = XREF: ຕັ້ງຄ່າ "__ocs_fmt_0__" ເປັນແບບແນບ (Attach).

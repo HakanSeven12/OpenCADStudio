@@ -4471,6 +4471,7 @@ insert =
     .xref-external-references = XREF 外部参考文献 :
     .xref-no-external-references-in-this-drawing = XREF 此绘图中没有外部引用 。
     .xref-reloaded = XREF 重新装入了 “ __ocs_fmt_0__ ”
+    .xref-other-drawing = XREF “__ocs_fmt_0__” 现在载入的是另一个图形 (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF: 已将 "__ocs_fmt_0__" 设置为覆盖。
     .xref-set-to-attach = XREF: 已将 "__ocs_fmt_0__" 设置为附着。
     .xref-cannot-unload-nested-reference = XREF: 无法卸载嵌套参照 '__ocs_fmt_0__'。请在宿主图形中卸载它。

@@ -4487,6 +4487,7 @@ insert =
     .xref-external-references = XREF Riferimenti esterni:
     .xref-no-external-references-in-this-drawing = XREF Nessun riferimento esterno in questo disegno.
     .xref-reloaded = XREF Ricaricato "__ocs_fmt_0__"
+    .xref-other-drawing = XREF "__ocs_fmt_0__" ora carica un disegno diverso (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF: "__ocs_fmt_0__" impostato su Sovrapposto.
     .xref-set-to-attach = XREF: "__ocs_fmt_0__" impostato su Allegato.
     .xref-cannot-unload-nested-reference = XREF: impossibile scaricare il riferimento nidificato '__ocs_fmt_0__'. Scaricarlo nel suo disegno host.

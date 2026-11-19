@@ -4483,6 +4483,7 @@ insert =
     .xref-external-references = XREF 外部參考：
     .xref-no-external-references-in-this-drawing = XREF 此圖面中沒有外部參考。
     .xref-reloaded = XREF 已重新載入 “__ocs_fmt_0__”
+    .xref-other-drawing = XREF “__ocs_fmt_0__” 現在載入的是另一個圖面 (__ocs_fmt_1__)
     .xref-set-to-overlay = XREF: 已將 "__ocs_fmt_0__" 設定為覆疊。
     .xref-set-to-attach = XREF: 已將 "__ocs_fmt_0__" 設定為附加。
     .xref-cannot-unload-nested-reference = XREF: 無法卸載巢狀參考 '__ocs_fmt_0__'。請在主控圖面中卸載它。

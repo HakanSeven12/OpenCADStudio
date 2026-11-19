@@ -592,6 +592,7 @@ pub(crate) fn decoded(data: &ArchEntityData, handle: u64, document: &document::D
         CivilKind::Other if data.dxf_name == "AECC_COGO_POINT" => cogo_point(data, document, &mut out)?,
         CivilKind::Other if data.dxf_name == "AECC_GRAPH_SECTION_VIEW" => section_view(data, &mut out)?,
         CivilKind::Parcel => parcel(data, document, &mut out)?,
+        CivilKind::Other if data.dxf_name == "AECC_PARCEL_SEGMENT" => lot_line(handle, document, &mut out)?,
         _ => return None,
     }
     Some(out)
@@ -611,6 +612,22 @@ fn parcel(data: &ArchEntityData, document: &document::Document, out: &mut Decode
     for run in topology.face_polylines(face) {
         styled(out, style, run.into_iter().map(|p| [p.x, p.y, 0.0]).collect());
     }
+    Some(())
+}
+
+/// A lot line without a drawn cache: its edge in its site's topology.
+fn lot_line(handle: u64, document: &document::Document, out: &mut Decoded) -> Option<()> {
+    let (topology, index) = document.objects.values().find_map(|o| match o {
+        ObjectType::Arch(a) => {
+            let members = a.site_members();
+            let index = members.iter().position(|h| *h == handle)?;
+            // Members name the edges in order only when they match one to one.
+            Some((a.topology().filter(|t| t.edges.len() == members.len())?, index))
+        }
+        _ => None,
+    })?;
+    let points = topology.edge_points(index).into_iter().map(|p| [p.x, p.y, p.z]).collect();
+    styled(out, Some(ProxyStyle::default()), points);
     Some(())
 }
 

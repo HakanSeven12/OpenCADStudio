@@ -92,7 +92,7 @@ pub fn steps(name: &str) -> Option<Vec<Step>> {
             Step::Objects { prompt: "Select the main road alignment:", filter: Alignments, slot: 0 },
             Step::Objects { prompt: "Select the crossing road alignment:", filter: Alignments, slot: 1 },
         ],
-        "CREATEPARCEL" => vec![Step::Objects { prompt: "Select closed polylines to make parcels of:", filter: Paths, slot: 0 }],
+        "CREATEPARCEL" => vec![Step::Objects { prompt: "Select lines or polylines to make lot lines of:", filter: Paths, slot: 0 }],
         "CREATEFEATURELINE" => vec![Step::Objects { prompt: "Select lines or polylines to make feature lines of:", filter: Paths, slot: 0 }],
         _ => return None,
     })

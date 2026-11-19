@@ -3,10 +3,8 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
-        "Select closed polylines to make parcels of:" => Some(("civil-cmd", "select-parcel-boundaries")),
+        "Select lines or polylines to make lot lines of:" => Some(("civil-cmd", "select-parcel-boundaries")),
         "Create Parcel" => Some(("civil-cmd", "create-parcel")),
-        "A parcel needs a closed polyline." => Some(("civil-cmd", "parcel-needs-closed")),
-        "Polylines with arcs cannot be made into parcels yet." => Some(("civil-cmd", "parcel-arcs")),
         "{} parcel(s) created." => Some(("civil-cmd", "parcels-created")),
         "Start station" => Some(("civil-cmd", "view-start-station")),
         "End station" => Some(("civil-cmd", "view-end-station")),

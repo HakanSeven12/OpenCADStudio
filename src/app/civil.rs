@@ -65,7 +65,7 @@ fn add_on_site(
     doc: &mut document::Document,
     site: &mut Option<Handle>,
     site_name: &str,
-    add: impl Fn(&mut document::Document, Handle) -> Result<Handle, document::error::DxfError>,
+    mut add: impl FnMut(&mut document::Document, Handle) -> Result<Handle, document::error::DxfError>,
 ) -> Result<Handle, document::error::DxfError> {
     if let Some(s) = *site {
         if let Ok(h) = add(doc, s) {
@@ -285,34 +285,38 @@ impl OpenCADStudio {
             }
             "CREATEPARCEL" => {
                 let doc = &self.tabs[i].scene.document;
-                let boundaries = req.objects[0]
+                // Each line or polyline: its vertices with their bulges, and whether it closes.
+                let lines = req.objects[0]
                     .iter()
                     .filter_map(|h| doc.get_entity(*h))
                     .map(|e| {
                         let mut points = vertices(e)?;
                         let closed = points.len() > 3 && points.first().map(|p| (p.0.x, p.0.y)) == points.last().map(|p| (p.0.x, p.0.y));
-                        if !closed {
-                            return Err(crate::t!("A parcel needs a closed polyline.").into_owned());
+                        if closed {
+                            // A closed lot line closes back to its first vertex itself, with the
+                            // last vertex's bulge.
+                            points.pop();
                         }
-                        if points.iter().any(|p| p.1 != 0.0) {
-                            return Err(crate::t!("Polylines with arcs cannot be made into parcels yet.").into_owned());
-                        }
-                        // The lot line closes back to its first vertex itself.
-                        points.pop();
-                        Ok(points.iter().map(|p| Vector2::new(p.0.x, p.0.y)).collect::<Vec<_>>())
+                        Ok((points.iter().map(|p| (Vector2::new(p.0.x, p.0.y), p.1)).collect::<Vec<_>>(), closed))
                     })
                     .collect::<Result<Vec<_>, String>>()?;
                 let mut site = last_site(doc);
                 let site_name = next_name(doc, "AECC_PARCEL", "Site");
                 self.push_undo_snapshot(i, name);
                 let doc = &mut self.tabs[i].scene.document;
-                for boundary in &boundaries {
-                    let h = add_on_site(doc, &mut site, &site_name, |doc, s| c3d::add_parcel(doc, s, boundary, layer)).map_err(refused)?;
-                    changes.push((h, ChangeKind::Added));
+                let mut parcels = 0;
+                for (points, closed) in &lines {
+                    let mut made = Vec::new();
+                    add_on_site(doc, &mut site, &site_name, |doc, s| {
+                        let (line, new) = c3d::add_lot_line(doc, s, points, *closed, layer)?;
+                        made = new;
+                        Ok(line)
+                    })
+                    .map_err(refused)?;
+                    parcels += made.len();
                 }
-                // The lot lines are new entities too: redraw everything.
-                changes.clear();
-                crate::tf!("{} parcel(s) created.", boundaries.len()).into_owned()
+                // A crossing line changes earlier parcels too: redraw everything.
+                crate::tf!("{} parcel(s) created.", parcels).into_owned()
             }
             "CREATECORRIDOR" => {
                 let doc = &self.tabs[i].scene.document;

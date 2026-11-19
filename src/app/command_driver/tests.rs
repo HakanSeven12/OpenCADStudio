@@ -12130,3 +12130,50 @@ mod plotstyle_command_tests {
     }
 }
 
+
+// The External References palette's selection + operation path has no test:
+// opening the panel, selecting a row and detaching it must change the drawing.
+mod xref_palette_op_tests {
+    use super::super::*;
+    use crate::app::Message;
+    use crate::ui::window::xref_manager::{XrefPaletteOp, XrefRowId};
+    use document::tables::BlockRecord;
+
+    #[test]
+    fn the_xref_palette_detaches_the_selected_reference() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut block = BlockRecord::new("PLAN");
+        block.flags.is_xref = true;
+        block.xref_path = "plans/plan.dwg".to_string();
+        block.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i].scene.document.block_records.add(block).unwrap();
+
+        let _ = app.run_command_line("EXTERNALREFERENCES");
+        assert!(app.show_external_references, "the panel opened");
+        let row = app
+            .xref_manager
+            .entries
+            .iter()
+            .find(|entry| entry.name == "PLAN")
+            .expect("the palette lists the xref")
+            .clone();
+        let id = XrefRowId::of(row.key, &row.saved_path);
+        let _ = app.update(Message::XrefManagerSelect(id));
+
+        let _ = app.update(Message::XrefManagerOp(XrefPaletteOp::Detach));
+
+        assert!(
+            app.tabs[i].scene.document.block_records.get("PLAN").is_none(),
+            "the palette op detached the reference"
+        );
+        assert!(
+            app.command_line.history_plain_text().contains("DETACH")
+                || app.command_line.history_plain_text().contains("detach"),
+            "the palette op reported what it did: {}",
+            app.command_line.history_plain_text()
+        );
+    }
+}
+

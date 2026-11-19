@@ -10508,3 +10508,17 @@ civil-cmd =
     .create-feature-line = Create Feature Line
     .profile-view-created = Profile view __ocs_fmt_0__ created.
     .feature-lines-created = __ocs_fmt_0__ feature line(s) created.
+
+ifc2plan =
+    .title = IFC Floor Plan
+    .choose-file = Choose Another IFC…
+    .choose-storey = Choose a storey
+    .storey = Storey
+    .height = Cut height above storey (m)
+    .depth = Viewing depth below cut (m)
+    .reading = Reading IFC geometry…
+    .generating = Creating floor plan…
+    .create = Create Floor Plan
+    .origin = Model origin
+    .source = IFC Source
+    .source-file = Source file

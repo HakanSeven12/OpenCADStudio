@@ -10507,3 +10507,17 @@ civil-cmd =
     .create-feature-line = Create Feature Line
     .profile-view-created = Profile view __ocs_fmt_0__ created.
     .feature-lines-created = __ocs_fmt_0__ feature line(s) created.
+
+ifc2plan =
+    .title = IFC-plattegrond
+    .choose-file = Ander IFC-bestand…
+    .choose-storey = Kies een verdieping
+    .storey = Verdieping
+    .height = Snijhoogte boven verdieping (m)
+    .depth = Kijkdiepte onder snijvlak (m)
+    .reading = IFC-geometrie lezen…
+    .generating = Plattegrond maken…
+    .create = Plattegrond maken
+    .origin = Modeloorsprong
+    .source = IFC-bron
+    .source-file = Bronbestand

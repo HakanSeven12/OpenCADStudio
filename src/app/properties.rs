@@ -419,7 +419,36 @@ impl OpenCADStudio {
 
         {
             use crate::entities::common::ro_prop;
-            let xd = &source_entity.common().extended_data;
+            let common = source_entity.common();
+            let xd = &common.extended_data;
+            let ifc_source = crate::ifc_plan::source::read(common);
+            if let Some(source) = &ifc_source {
+                let mut props = Vec::new();
+                if let Some(file) = source.file {
+                    props.push(ro_prop(
+                        &crate::tr!("ifc2plan", "source-file"),
+                        "ifc_file",
+                        file,
+                    ));
+                }
+                for (index, element) in source.elements.iter().enumerate() {
+                    let (field, label) = if element.global_id.is_empty() {
+                        ("ifc_step_id", format!("#{}", element.step_id))
+                    } else {
+                        ("ifc_global_id", element.global_id.to_owned())
+                    };
+                    let title = if source.elements.len() == 1 {
+                        element.ifc_type.to_owned()
+                    } else {
+                        format!("{} {}", index + 1, element.ifc_type)
+                    };
+                    props.push(ro_prop(&title, field, label));
+                }
+                sections.push(crate::scene::model::object::PropSection {
+                    title: crate::tr!("ifc2plan", "source"),
+                    props,
+                });
+            }
             if !xd.is_empty() && !matches!(source_entity, document::EntityType::Ole2Frame(_)) {
                 let mut xd_props = Vec::new();
                 // A hyperlink shows on its own row; inspection data is the
@@ -434,6 +463,7 @@ impl OpenCADStudio {
                             != document::entities::CENTERLINE_XDATA_APPLICATION
                         // A cloud's arc length is its Arc Length row.
                         && rec.application_name != crate::entities::revcloud::APP
+                        && !(ifc_source.is_some() && rec.application_name == crate::ifc_plan::source::APPLICATION)
                 }) {
                     let value_text = rec
                         .values

@@ -3570,6 +3570,7 @@ pub enum ModalKind {
     ImportFile,
     /// DGNIMPORT's DGN Import window.
     DgnImport,
+    IfcPlan,
     /// IMPORT's 3D Studio Import window.
     TdsImport,
     /// A 3D Studio import set to ask: one mesh with several materials.

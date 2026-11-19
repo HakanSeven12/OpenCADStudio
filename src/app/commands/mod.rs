@@ -33,6 +33,7 @@ mod bvisibility;
 mod count;
 mod dash;
 mod dgn_import;
+mod ifc_plan;
 pub(in crate::app) use dgn_import::read_reference_drawings;
 mod dim;
 mod dim_cmd;
@@ -1546,6 +1547,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "NEW",
         "QNEW",
         "OBJIMPORT",
+        "IFC2PLAN",
         "IMPORT",
         "ACISIN",
         "WMFIN",

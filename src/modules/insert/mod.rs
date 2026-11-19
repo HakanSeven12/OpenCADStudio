@@ -182,6 +182,7 @@ impl CadModule for InsertModule {
                             items: vec![
                                 ("PDFIMPORT;FILE", "PDF Import", underlay_layers::ICON),
                                 ("DGNIMPORT", "DGN Import", underlay_layers::ICON),
+                                ("IFC2PLAN", "IFC Floor Plan", IMPORT_ICON),
                                 ("IMPORT", "Import…", IMPORT_ICON),
                             ],
                             default: "PDFIMPORT;FILE",

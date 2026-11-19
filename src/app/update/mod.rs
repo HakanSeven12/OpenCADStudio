@@ -234,6 +234,9 @@ impl OpenCADStudio {
             self.pending_close = None;
             self.save_dialog_for_unsaved = false;
         }
+        if self.active_modal == Some(IfcPlan) {
+            self.import_dialogs.ifc_plan = None;
+        }
         if self.active_modal == Some(BlockEditorSettings) {
             self.block_editor_settings = None;
         }

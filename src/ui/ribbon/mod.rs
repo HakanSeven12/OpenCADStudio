@@ -49,9 +49,10 @@ mod ribbon_menu;
 mod search;
 mod stretch_column;
 pub mod text_editor;
+mod wheel;
 use crate::t;
 use crate::ui::style::{chrome, ribbon_metrics as metrics, text as ui_text};
-use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
+use crate::ui::wrap_bar::{CenterSpan, PosReport, WrapBar, WrapFlow};
 pub use app_menu::{works_without_drawing, APP_MENU_ID};
 pub use collapse::CollapseMode;
 use collapse::{CollapsePanels, Panel};
@@ -235,6 +236,13 @@ fn panel_measure_key_at(
 /// The id the whole ribbon (with the Quick Access row below it) reports its
 /// bounds under: floating panels snap to its bottom.
 const RIBBON_ID: &str = "ribbon_whole";
+/// The logo and the search box beside the tab row's quick-access and tabs
+/// block, which report their widths so the tabs center in the whole row.
+const TAB_ROW_LOGO_ID: &str = "ribbon_tab_row_logo";
+const TAB_ROW_SEARCH_ID: &str = "ribbon_tab_row_search";
+/// The gap between the tab row's blocks, and the tab row's right padding.
+const TAB_ROW_GAP: f32 = 6.0;
+const TAB_BAR_PAD_RIGHT: f32 = 6.0;
 
 /// The id the tool area of the tab on show reports its bounds under.
 const TOOL_AREA_ID: &str = "ribbon_tool_area";
@@ -415,6 +423,18 @@ pub struct Ribbon {
     /// Measured tab-bar height (28 on one row, 56 when tabs wrap). Written by
     /// the `WrapBar` widget during layout, read when anchoring dropdowns.
     tab_bar_h: Arc<AtomicU32>,
+    /// The room the logo and the search box take beside the tab row's
+    /// quick-access and tabs block, written while the row is laid out.
+    tab_span: CenterSpan,
+    /// The width the quick-access and tabs block needs on one row (`f32`
+    /// bits), as last laid out; 0 before the first layout. The search box
+    /// collapses when the row cannot also hold it.
+    tab_flow_natural: Arc<AtomicU32>,
+    /// The search box ends the tab row (no menu row), as last viewed.
+    search_in_tab_row: AtomicBool,
+    /// Whether the last view showed the search box as its magnifier
+    /// (`narrow`), to see when the layout since has changed that.
+    narrow_shown: AtomicBool,
     /// Measured tool-area height (TOOL_BAR_H at full density, shorter once every
     /// panel is collapsed). Written by `CollapsePanels`, read when anchoring
     /// dropdowns below the ribbon.
@@ -467,6 +487,8 @@ pub struct Ribbon {
     pub mleader_layer: String,
     /// Annotate > Centerlines: CENTERLAYER (empty: the current layer).
     pub center_layer: String,
+    /// The mouse wheel's count toward the next tab.
+    wheel: wheel::WheelState,
     /// Open key tips (Alt).
     keytips: Option<keytips::State>,
     /// What More Commands searches for, and what it found.
@@ -601,6 +623,10 @@ impl Ribbon {
             table_style_names: vec![],
             active_table_style: String::new(),
             tab_bar_h: Arc::new(AtomicU32::new(TAB_ROW_H.to_bits())),
+            tab_span: CenterSpan::default(),
+            tab_flow_natural: Arc::new(AtomicU32::new(f32::NAN.to_bits())),
+            search_in_tab_row: AtomicBool::new(true),
+            narrow_shown: AtomicBool::new(false),
             tool_bar_h: Arc::new(AtomicU32::new(TOOL_BAR_H.to_bits())),
             collapse_mode: CollapseMode::default(),
             layout: RibbonLayout::default(),
@@ -625,6 +651,7 @@ impl Ribbon {
             text_layer: String::new(),
             dim_layer: String::new(),
             center_layer: String::new(),
+            wheel: wheel::WheelState::default(),
             mleader_layer: String::new(),
             keytips: None,
             qat_query: String::new(),
@@ -640,7 +667,7 @@ impl Ribbon {
         if w > self.win_w && self.layout.minimize == RibbonMinimize::Off {
             self.close_popup();
         }
-        let was_narrow = self.win_w < search::NARROW;
+        let was_narrow = self.narrow();
         self.win_w = w;
         self.win_h = h;
         self.layout.clamp_floating((w, h), Self::floating_size);
@@ -738,6 +765,23 @@ impl Ribbon {
     /// and panels, and panel titles.
     pub fn is_default_layout(&self) -> bool {
         self.layout.is_default(&self.modules)
+    }
+
+    /// Center the tabs and panels, or keep them at the left edge.
+    pub fn set_centered(&mut self, centered: bool) {
+        self.layout.centered = centered;
+    }
+
+    /// Let the mouse wheel over the ribbon step through the tabs, or not.
+    pub fn set_wheel_switches_tabs(&mut self, on: bool) {
+        self.layout.wheel_switches_tabs = on;
+        self.wheel = wheel::WheelState::default();
+    }
+
+    /// Whether module `index` (with id `id`) has a tab on the tab row.
+    /// The Layout module has none: its tools live in the side toolbar.
+    fn tab_shows(&self, index: usize, id: &str) -> bool {
+        id != "layout" && !self.contextual_off(id) && !self.tab_hidden(index)
     }
 
     /// Whether tab `index` is left out of the tab row because the user hid
@@ -1356,8 +1400,7 @@ impl Ribbon {
             |mut acc, (i, module)| {
                 // The Layout module no longer has a ribbon tab — its paper-space
                 // tools live in the right-edge side toolbar (see ui::side_toolbar).
-                if module.id() == "layout" || self.contextual_off(module.id()) || self.tab_hidden(i)
-                {
+                if !self.tab_shows(i, module.id()) {
                     return acc;
                 }
 
@@ -1464,21 +1507,42 @@ impl Ribbon {
         let tabs = WrapFlow::new(tab_items)
             .spacing_x(metrics::TAB_GAP)
             .min_spacing_x(-6.0)
-            .row_h(TAB_ROW_H);
+            .row_h(TAB_ROW_H)
+            .center(self.layout.centered);
 
-        let mut tab_row = row![].spacing(6.0).align_y(iced::Center);
+        // Centered, the tabs sit in the middle of the whole ribbon, not of
+        // the room the logo and the search box leave them. Both have a fixed
+        // width, so they are laid out before the tabs block, and report how
+        // much room they take in the same pass: a search box that collapses
+        // or opens moves the tabs at once. With the menu row the large logo
+        // starts the ribbon and the tab row ends at its right padding.
+        let span = self.tab_span.clone();
+        if menu_row.is_some() {
+            span.after()
+                .store(TAB_BAR_PAD_RIGHT.to_bits(), Ordering::Relaxed);
+        }
+        self.search_in_tab_row
+            .store(menu_row.is_none(), Ordering::Relaxed);
+        self.narrow_shown.store(self.narrow(), Ordering::Relaxed);
+        let mut tab_row = row![].spacing(TAB_ROW_GAP).align_y(iced::Center);
         if menu_row.is_none() {
             // As far from the window's edge as the large logo's artwork; the
             // button's 1 px border sits inside that.
-            tab_row = tab_row.push(container(self.logo_button(false)).padding(Padding {
+            let logo = container(self.logo_button(false)).padding(Padding {
                 left: app_menu::LOGO_PAD - 1.0,
                 ..Padding::ZERO
-            }));
+            });
+            tab_row = tab_row.push(
+                PosReport::new(TAB_ROW_LOGO_ID, logo).report_width(span.before(), TAB_ROW_GAP),
+            );
         }
         tab_row = tab_row.push(
             container(
                 WrapBar::new(lead, tabs.into())
                     .spacing(if qat_below { 0.0 } else { 6.0 })
+                    .center_trail(self.layout.centered)
+                    .center_span(span.clone())
+                    .report_natural_width(self.tab_flow_natural.clone())
                     .min_row_h(TAB_ROW_H)
                     .report_height(self.tab_bar_h.clone()),
             )
@@ -1486,7 +1550,10 @@ impl Ribbon {
         );
         // Without the menu row the search box ends the tab row.
         if menu_row.is_none() {
-            tab_row = tab_row.push(self.search_box());
+            tab_row = tab_row.push(
+                PosReport::new(TAB_ROW_SEARCH_ID, self.search_box())
+                    .report_width(span.after(), TAB_ROW_GAP + TAB_BAR_PAD_RIGHT),
+            );
         }
 
         let tab_bar = container(tab_row)
@@ -1495,7 +1562,7 @@ impl Ribbon {
                 ..Default::default()
             })
             .padding(Padding {
-                right: 6.0,
+                right: TAB_BAR_PAD_RIGHT,
                 ..Padding::ZERO
             })
             .width(Length::Fill);
@@ -1505,10 +1572,14 @@ impl Ribbon {
         let tab_bar = PosReport::new(minimize::TAB_BAR_ID, tab_bar);
         let top: Element<'a, Message> = match menu_row {
             Some(menu_row) => row![
-                container(self.logo_button(true)).style(|theme: &Theme| container::Style {
-                    background: Some(Background::Color(crate::ui::style::chrome::bar(theme))),
-                    ..Default::default()
-                }),
+                PosReport::new(
+                    TAB_ROW_LOGO_ID,
+                    container(self.logo_button(true)).style(|theme: &Theme| container::Style {
+                        background: Some(Background::Color(crate::ui::style::chrome::bar(theme))),
+                        ..Default::default()
+                    }),
+                )
+                .report_width(span.before(), 0.0),
                 column![self.with_search_box(menu_row), tab_bar].width(Fill),
             ]
             .into(),
@@ -1538,13 +1609,22 @@ impl Ribbon {
             let line = self.layout.minimize == RibbonMinimize::Tabs;
             ribbon = ribbon.push(self.qat_below_row(is_start, undo_count, redo_count, line));
         }
+        // The wheel steps through the tabs; a closed ribbon has none. A
+        // toolbar or tabs that changed width without a resize may have
+        // changed the room for the search box: the redraw asks for a view
+        // that knows.
+        let wheel_on = !closed && self.layout.wheel_switches_tabs;
         keytips::ribbon_area(ribbon_menu::RightPress::new(PosReport::new(
-            RIBBON_ID, ribbon,
+            RIBBON_ID,
+            wheel::WheelTabs::new(ribbon, wheel_on).refit_when(|| self.search_fit_stale()),
         )))
     }
 
     /// The menu row with the search box at its right end.
     pub fn with_search_box<'a>(&'a self, menu_row: Element<'a, Message>) -> Element<'a, Message> {
+        // The box sits in the menu row now, also when the app shows that row
+        // without the ribbon's own view.
+        self.search_in_tab_row.store(false, Ordering::Relaxed);
         container(
             row![
                 container(menu_row).width(Fill),
@@ -1656,7 +1736,8 @@ impl Ribbon {
                 .measure_key(measure_key)
                 .report_height(self.tool_bar_h.clone())
                 .report_tight(self.collapse_tight.clone())
-                .mode(mode);
+                .mode(mode)
+                .centered(self.layout.centered);
             // A floating panel dropped on it docks here.
             PosReport::new(TOOL_AREA_ID, collapse).into()
         } else {

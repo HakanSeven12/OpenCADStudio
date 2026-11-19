@@ -210,6 +210,11 @@ pub struct RibbonLayout {
     pub floating: Vec<FloatingPanel>,
     /// The user's own panels, shown on the My Tools tab.
     pub custom_panels: Vec<CustomPanel>,
+    /// The tabs and the panels sit in the middle of the ribbon instead of
+    /// at its left edge, closer to the pointer on a wide screen.
+    pub centered: bool,
+    /// Turning the mouse wheel over the ribbon steps through its tabs.
+    pub wheel_switches_tabs: bool,
 }
 
 /// A panel of the user's: a title and the commands its buttons run.
@@ -236,6 +241,8 @@ impl Default for RibbonLayout {
             qat_faces: BTreeMap::new(),
             floating: Vec::new(),
             custom_panels: Vec::new(),
+            centered: false,
+            wheel_switches_tabs: true,
         }
     }
 }
@@ -277,7 +284,8 @@ impl RibbonLayout {
 
     /// Back to the default panel order, every tab and panel shown in the
     /// ribbon (floating ones too) and panel titles on. The minimize state,
-    /// pinned slide-outs and the Quick Access Toolbar stay.
+    /// pinned slide-outs, the Quick Access Toolbar, the centering and the
+    /// wheel option stay: they are preferences, not the layout.
     pub(super) fn reset(&mut self) {
         self.hidden_tabs.clear();
         self.hidden_panels.clear();

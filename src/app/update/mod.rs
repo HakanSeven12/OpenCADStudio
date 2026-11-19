@@ -3280,6 +3280,14 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::RibbonWheel(delta) => {
+                self.ribbon.on_wheel(delta, iced::time::Instant::now());
+                Task::none()
+            }
+            Message::RibbonRefit => {
+                self.ribbon.refit();
+                Task::none()
+            }
             Message::RibbonMinimize(msg) => {
                 if self.ribbon.on_minimize(msg, iced::time::Instant::now()) {
                     self.save_config();
@@ -12654,6 +12662,18 @@ impl OpenCADStudio {
             Message::RibbonVisibleChanged(shown) => {
                 self.ribbon_closed = !shown;
                 self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::RibbonCenteredChanged(centered) => {
+                self.ribbon.set_centered(centered);
+                self.save_config();
+                Task::none()
+            }
+
+            Message::RibbonWheelTabsChanged(on) => {
+                self.ribbon.set_wheel_switches_tabs(on);
+                self.save_config();
                 Task::none()
             }
 

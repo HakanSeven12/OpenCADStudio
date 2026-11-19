@@ -281,6 +281,8 @@ impl OpenCADStudio {
                             command_line_font_size: self.command_line.font_size(),
                             show_menu_bar: self.show_menu_bar,
                             show_ribbon: !self.ribbon_closed,
+                            ribbon_centered: self.ribbon.layout().centered,
+                            ribbon_wheel_tabs: self.ribbon.layout().wheel_switches_tabs,
                             hatch_associative: self.hatch_associative,
                             zoom_wheel_reversed: self.zoom_wheel_reversed,
                             navigation_style: self.navigation_style,

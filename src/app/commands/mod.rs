@@ -608,7 +608,7 @@ impl OpenCADStudio {
         {
             let mut selection = self.tabs[i].scene.selection.borrow_mut();
             // Cancel the active selection gesture before the new command starts.
-            selection.clear_left_selection_gesture();
+            selection.clear_left_selection_gesture("src/app/commands/mod.rs:611");
         }
         // Cancel any running command before starting a new one.
         if self.tabs[i].active_cmd.is_some() {

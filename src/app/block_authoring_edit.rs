@@ -1088,7 +1088,7 @@ impl OpenCADStudio {
                 .scene
                 .selection
                 .borrow_mut()
-                .clear_left_selection_gesture();
+                .clear_left_selection_gesture("src/app/block_authoring_edit.rs:1091");
             self.refresh_properties();
             self.command_line.push_info(&format!(
                 "{} — {}",

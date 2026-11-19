@@ -994,9 +994,9 @@ impl Scene {
             .filter(|entity| matches!(entity, EntityType::Underlay(_)))
             .map(|entity| entity.common().handle)
             .collect();
-        for handle in &handles {
-            self.reseed_derived_caches(*handle);
-        }
+        // The bump draws each picture again (its loop over the modified
+        // image-bearing objects): drawing it here first too made every
+        // zoom step cost two renders of each picture.
         let changes: Vec<_> = handles
             .iter()
             .map(|handle| (*handle, crate::scene::ChangeKind::Modified))
@@ -1013,9 +1013,9 @@ impl Scene {
             .filter(|entity| matches!(entity, EntityType::Ole2Frame(_)))
             .map(|entity| entity.common().handle)
             .collect();
-        for handle in &handles {
-            self.reseed_derived_caches(*handle);
-        }
+        // The bump draws each picture again (its loop over the modified
+        // image-bearing objects): drawing it here first too made every
+        // zoom step cost two renders of each picture.
         let changes: Vec<_> = handles
             .iter()
             .map(|handle| (*handle, crate::scene::ChangeKind::Modified))

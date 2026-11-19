@@ -1096,7 +1096,14 @@ fn append_pdf_page(
 
             // Linetype dash pattern. Without this every wire exported as a solid
             // line regardless of its linetype (dashed / centre / dash-dot). (#155)
-            let dash_arr = dash_array_from_pattern(wire.pattern_length, &wire.pattern, MM_TO_PT);
+            // A pattern shorter on paper than a pen can resolve plots as a
+            // solid line: cutting it into dashes wrote millions of invisible
+            // pieces, a 70 MB page for a layout of inch-scale sheets (#3334).
+            let dash_arr = if wire.pattern_length * scale < MIN_PLOT_PATTERN_MM {
+                Vec::new()
+            } else {
+                dash_array_from_pattern(wire.pattern_length, &wire.pattern, MM_TO_PT)
+            };
             let page_h = paper_h as f64 / scale.max(1e-6) as f64;
             // A dashed wire is cut into its dashes here, as the screen lays them
             // out: a dash array can neither align a run's ends nor fit a closed
@@ -1307,6 +1314,10 @@ fn append_pdf_page(
 /// Slack around the export window, in sheet mm, so a stroke whose centreline
 /// sits just outside still contributes its width.
 const CULL_MARGIN_MM: f64 = 10.0;
+
+/// Shortest linetype pattern, in paper mm, that plots as dashes; a shorter
+/// one is below what a pen resolves and plots solid.
+const MIN_PLOT_PATTERN_MM: f32 = 0.25;
 
 fn sheet_overlaps(b: [f64; 4], window: [f64; 4]) -> bool {
     b[0] <= window[2] + CULL_MARGIN_MM

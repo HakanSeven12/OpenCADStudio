@@ -40,6 +40,7 @@ mod raw_stack;
 mod raw_style;
 mod style_from;
 pub(in crate::app) use raw_edit::FormatState;
+pub(in crate::app) use raw_field::locates_fields;
 pub(in crate::app) use raw_list::ListKind;
 pub(in crate::app) use raw_stack::{FractionPart, Script};
 pub(in crate::app) use raw_style::{sets_whole_text, ValueOrigin};
@@ -1315,8 +1316,12 @@ impl super::OpenCADStudio {
         self.rebuild_mtext_preview();
     }
 
-    /// Select the word at visible offset `off` (double-click).
+    /// Select the word at visible offset `off` (double-click); on a field,
+    /// open the Field dialog on it.
     pub(super) fn mtext_select_word(&mut self, off: usize) {
+        if self.mtext_edit_field_at(off) {
+            return;
+        }
         if let Some(ed) = self.mtext_editor.as_mut() {
             ed.typing_format = Default::default();
             let cells = doc_to_cells(&ed.doc);

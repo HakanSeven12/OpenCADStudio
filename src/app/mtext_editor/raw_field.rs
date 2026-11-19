@@ -289,11 +289,8 @@ impl FieldHost {
         }
     }
 
-    fn field_parts(
-        &self,
-        doc: &document::Document,
-        value: &str,
-    ) -> Option<(String, Vec<NewField>)> {
+    /// The container's fields, in `%<\_FldIdx n>%` order.
+    fn old_fields(&self, doc: &document::Document) -> Vec<Handle> {
         let mut old: Vec<Handle> = self
             .container
             .map(|c| {
@@ -305,6 +302,36 @@ impl FieldHost {
             })
             .unwrap_or_default();
         old.sort_by_key(|h| h.value());
+        old
+    }
+
+    /// The code and objects of an existing field from its placeholder.
+    fn placeholder_code(
+        doc: &document::Document,
+        old: &[Handle],
+        placeholder: &str,
+    ) -> Option<(String, Vec<Handle>)> {
+        let n = placeholder
+            .strip_prefix("%<\\_FldIdx ")?
+            .strip_suffix(">%")?
+            .trim();
+        document::fields::inline_code(doc, *old.get(n.parse::<usize>().ok()?)?)
+    }
+
+    /// The code and objects of the field at span `k`.
+    fn span_code(&self, doc: &document::Document, k: usize) -> Option<(String, Vec<Handle>)> {
+        match self.inserted.get(k)? {
+            Some(field) => Some((field.code.clone(), field.objects.clone())),
+            None => Self::placeholder_code(doc, &self.old_fields(doc), &self.placeholders[k]),
+        }
+    }
+
+    fn field_parts(
+        &self,
+        doc: &document::Document,
+        value: &str,
+    ) -> Option<(String, Vec<NewField>)> {
+        let old = self.old_fields(doc);
         let (mut template, mut at, mut children) = (String::new(), 0, Vec::new());
         for ((span, placeholder), inserted) in self
             .spans
@@ -313,12 +340,7 @@ impl FieldHost {
             .zip(&self.inserted)
         {
             let field = inserted.clone().or_else(|| {
-                let n = placeholder
-                    .strip_prefix("%<\\_FldIdx ")?
-                    .strip_suffix(">%")?
-                    .trim();
-                let (code, objects) =
-                    document::fields::inline_code(doc, *old.get(n.parse::<usize>().ok()?)?)?;
+                let (code, objects) = Self::placeholder_code(doc, &old, placeholder)?;
                 let mut field = NewField::new(code, &value[span.clone()]);
                 field.objects = objects;
                 Some(field)
@@ -425,6 +447,19 @@ impl crate::app::OpenCADStudio {
         }
         let mut field = NewField::new(code, display);
         field.objects = objects;
+        // A selection goes first, as a deletion: one that takes a field whole
+        // is allowed, a replacement over it is not.
+        let selected = |app: &Self| {
+            app.mtext_editor
+                .as_ref()
+                .is_some_and(|e| !e.selected_range().is_empty())
+        };
+        if selected(self) {
+            self.raw_delete(false);
+            if selected(self) {
+                return;
+            }
+        }
         let before = self.mtext_editor.as_ref().map(|e| e.content.text());
         let at = std::cell::Cell::new(None);
         self.edit_raw(|ed, index| {
@@ -450,6 +485,44 @@ impl crate::app::OpenCADStudio {
         });
         ed.field_host = Some(base.with_inserted(at, display, field));
     }
+
+    /// Double-click on a field's text in the editor: select the field whole
+    /// and open the Field dialog on it; OK puts the chosen field in its place.
+    /// False when `cell` is not in a field.
+    pub(super) fn mtext_edit_field_at(&mut self, cell: usize) -> bool {
+        let doc = &self.tabs[self.active_tab].scene.document;
+        let Some(ed) = self.mtext_editor.as_mut() else {
+            return false;
+        };
+        let Some(host) = ed.field_host.as_ref() else {
+            return false;
+        };
+        let raw = ed.content.text();
+        let index = super::raw_adapter::SourceIndex::new(&raw);
+        let Some((k, cells)) = host.field_at_cell(&index, cell) else {
+            return false;
+        };
+        let Some((code, objects)) = host.span_code(doc, k) else {
+            return false;
+        };
+        ed.typing_format = Default::default();
+        ed.sel_anchor = cells.start;
+        ed.sel = Some((cells.start, cells.end));
+        ed.caret = cells.end;
+        ed.caret_blink_on = true;
+        self.open_field_dialog_on(
+            crate::ui::window::field_dialog::FieldTarget::EditorInsert,
+            &code,
+            &objects,
+        );
+        true
+    }
+}
+
+/// The editor can place the fields of `host` in its text `value`, so the
+/// text is edited there with its fields atomic.
+pub(in crate::app) fn locates_fields(doc: &document::Document, host: Handle, value: &str) -> bool {
+    FieldHost::locate(doc, host, value).is_some()
 }
 
 impl FieldHost {
@@ -460,11 +533,31 @@ impl FieldHost {
         index: &super::raw_adapter::SourceIndex,
         cell: std::ops::Range<usize>,
     ) -> Option<std::ops::Range<usize>> {
-        let count = index.visible_len?;
-        let at = |byte: usize| (0..=count).find(|c| index.insertion_byte(*c).ok() == Some(byte));
-        self.spans.iter().find_map(|r| {
-            let (start, end) = (at(r.start)?, at(r.end)?);
-            (start <= cell.start && cell.end <= end && start < end).then_some(start..end)
-        })
+        self.field_cells(index)
+            .find(|(_, r)| r.start <= cell.start && cell.end <= r.end && r.start < r.end)
+            .map(|(_, r)| r)
+    }
+
+    /// The index and editor cells of the field whose text holds `cell`.
+    fn field_at_cell(
+        &self,
+        index: &super::raw_adapter::SourceIndex,
+        cell: usize,
+    ) -> Option<(usize, std::ops::Range<usize>)> {
+        self.field_cells(index).find(|(_, r)| r.contains(&cell))
+    }
+
+    /// Each field's editor cells, with its index.
+    fn field_cells<'a>(
+        &'a self,
+        index: &'a super::raw_adapter::SourceIndex,
+    ) -> impl Iterator<Item = (usize, std::ops::Range<usize>)> + 'a {
+        let count = index.visible_len;
+        let at =
+            move |byte: usize| (0..=count?).find(|c| index.insertion_byte(*c).ok() == Some(byte));
+        self.spans
+            .iter()
+            .enumerate()
+            .filter_map(move |(k, r)| Some((k, at(r.start)?..at(r.end)?)))
     }
 }

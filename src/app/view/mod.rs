@@ -3337,7 +3337,7 @@ bg={bg_ms:.1}ms n={view_count}"
 
         if self.show_node_graph && !tab.is_start {
             let sections = self.graph_all_sections(self.active_tab);
-            viewport_stack = viewport_stack.push(tab.graph.view(sections));
+            viewport_stack = viewport_stack.push(tab.graph.view(sections, self.node_graph_links));
         }
 
         // Docked pallets: each edge's icon strip and shown group (see

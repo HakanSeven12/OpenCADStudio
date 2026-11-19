@@ -636,6 +636,52 @@ impl OpenCADStudio {
                 return self.graph_commit(i, ports);
             }
             GraphMsg::Set(port, value) => return self.graph_set(i, port, value),
+            GraphMsg::Links(links) => {
+                self.node_graph_links = links;
+                let graph = &mut self.tabs[i].graph;
+                graph.hovered_label = None;
+                graph.picker = None;
+                self.persist_settings_if_changed();
+            }
+            // With labels, pressing an unlinked input's port picks its
+            // source; a linked one is still dragged off to re-route it.
+            GraphMsg::InPress(port)
+                if self.node_graph_links.labels()
+                    && !matches!(self.tabs[i].graph.drag, Some(Drag::Link(_))) =>
+            {
+                return self.on_graph(GraphMsg::Pick(port));
+            }
+            GraphMsg::Pick(_) => {
+                if self.tabs[i].graph.picker.is_some() {
+                    return iced::widget::operation::focus(
+                        crate::ui::node_graph::picker_search_id(),
+                    );
+                }
+            }
+            GraphMsg::PickSource(from, to) => {
+                // Choosing the current source changes nothing; a source the
+                // input's node reaches would close a loop.
+                let engine = &self.tabs[i].graph.engine;
+                let current = engine
+                    .links
+                    .iter()
+                    .any(|link| link.to == to && link.from == from);
+                if current || engine.reaches(to.node, from.node) {
+                    return Task::none();
+                }
+                return self.graph_step(i, |app| {
+                    app.graph_connect(i, from, to);
+                    Vec::new()
+                });
+            }
+            GraphMsg::PickClear(to) => {
+                if self.tabs[i].graph.engine.is_linked(&to) {
+                    return self.graph_step(i, |app| {
+                        app.tabs[i].graph.engine.disconnect(&to);
+                        Vec::new()
+                    });
+                }
+            }
             // The last evaluation's edits stay in the drawing as they are.
             GraphMsg::New => self.tabs[i].graph = Default::default(),
             GraphMsg::Save => {

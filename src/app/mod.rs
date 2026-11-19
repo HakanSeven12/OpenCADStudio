@@ -1672,6 +1672,9 @@ pub(super) struct OpenCADStudio {
     authoring_palette_tab: crate::ui::window::authoring_palettes::Tab,
     /// Node graph overlay over the viewport.
     pub(crate) show_node_graph: bool,
+    /// How the node graph shows links; a view setting, saved with the
+    /// preferences and not in the graph's file.
+    pub(crate) node_graph_links: crate::ui::node_graph::LinkDisplay,
     /// Entity the Properties handlers act on instead of the selection, set
     /// only for the duration of a node-graph property write.
     pub(crate) property_target_override: Option<document::Handle>,
@@ -6754,6 +6757,7 @@ impl OpenCADStudio {
             show_parameters_manager: false,
             authoring_palette_tab: Default::default(),
             show_node_graph: false,
+            node_graph_links: Default::default(),
             property_target_override: None,
             graph_undo_open: false,
             show_external_references: false,

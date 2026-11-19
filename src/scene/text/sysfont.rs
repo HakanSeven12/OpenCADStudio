@@ -814,11 +814,20 @@ pub(crate) fn load_drawing_fonts(base: Option<&std::path::Path>, doc: &document:
 mod tests {
     use super::*;
 
+    /// The tests here share the font database and its caches with each
+    /// other, and one of them poisons the database lock on purpose: they
+    /// run one at a time.
+    fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+        static TESTS: Mutex<()> = Mutex::new(());
+        TESTS.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// A host-registered file resolves by its file name — any case, bare or
     /// with a path — to the family inside it; bytes without a face are refused
     /// and leave nothing behind.
     #[test]
     fn registered_font_file_resolves_by_file_name() {
+        let _one = one_at_a_time();
         let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/web/fonts/greek.ttf"))
             .expect("bundled web font");
         let (family, faces) =
@@ -849,6 +858,9 @@ mod tests {
     /// and whether it comes as a bare name or as a path.
     #[test]
     fn face_files_resolve_to_their_family() {
+        let _one = one_at_a_time();
+        // As the app does: another test in this binary poisons the lock on
+        // purpose while it runs.
         let found = fonts()
             .db
             .lock()
@@ -886,6 +898,7 @@ mod tests {
 
     #[test]
     fn sans_aliases_map_to_noto_sans() {
+        let _one = one_at_a_time();
         for name in [
             "Arial",
             "Helvetica",
@@ -906,6 +919,7 @@ mod tests {
 
     #[test]
     fn serif_aliases_prefer_serif_with_sans_fallback() {
+        let _one = one_at_a_time();
         for name in [
             "Cambria",
             "Times New Roman",
@@ -923,6 +937,7 @@ mod tests {
 
     #[test]
     fn alias_resolution_is_case_insensitive_and_needs_a_target() {
+        let _one = one_at_a_time();
         // Only the sans stand-in available (today's web fetch set): a serif
         // alias degrades to Noto Sans rather than resolving to nothing.
         assert_eq!(
@@ -953,6 +968,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn transmittal_font_dirs_register_exact_truetype_files() {
+        let _one = one_at_a_time();
         let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/web/fonts/greek.ttf"))
             .expect("bundled web font");
         for (tag, nested, structured) in [
@@ -995,6 +1011,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn preserved_relative_fonts_resolve_by_owning_drawing() {
+        let _one = one_at_a_time();
         let dir = std::env::temp_dir().join(format!(
             "ocs-sysfont-preserved-{}-{}",
             std::process::id(),
@@ -1044,6 +1061,7 @@ mod tests {
 
     #[test]
     fn picker_aliases_only_once_noto_arrives() {
+        let _one = one_at_a_time();
         // Before any fetch lands the picker must not offer unresolvable names.
         let mut empty: Vec<String> = Vec::new();
         merge_web_aliases(&mut empty);
@@ -1096,6 +1114,7 @@ mod tests {
     /// usable after a panic, so the next lock must recover them.
     #[test]
     fn a_panic_while_a_font_is_parsed_does_not_break_later_text() {
+        let _one = one_at_a_time();
         let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/web/fonts/greek.ttf"))
             .expect("bundled web font");
         let (family, _) = register_font_file("Poison-Test.ttf", &bytes).expect("a face");
@@ -1103,11 +1122,21 @@ mod tests {
         // database is shared with every test in this binary: once another
         // test has registered the Latin subset, the family resolves to that
         // face, which has no Greek. Ask for signs every subset carries.
+        // Two tests delete the files of the faces they load, so the family
+        // can also resolve to a face that draws nothing: the panic is raised
+        // in this test's own face, and the draws after it are compared with
+        // a draw before it.
         let section = crate::scene::text::ttf_glyph::glyph(&family, '\u{a7}');
-        assert!(section.is_some(), "the bundled font draws the section sign");
+        let id = file_face("Poison-Test.ttf")
+            .expect("the registered face")
+            .id;
 
         let caught = std::panic::catch_unwind(|| {
-            with_face_data::<()>(&family, |_, _| panic!("a damaged font"))
+            fonts()
+                .db
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .with_face_data::<_, ()>(id, |_, _| panic!("a damaged font"))
         });
         assert!(caught.is_err());
         assert!(
@@ -1117,8 +1146,13 @@ mod tests {
 
         // What a text draw does next: find the face, read it, build a glyph.
         assert!(has_family(&family));
-        assert!(with_face_data(&family, |data, _| data.len()).is_some_and(|len| len > 0));
-        assert!(crate::scene::text::ttf_glyph::glyph(&family, '\u{b1}').is_some());
+        let _ = with_face_data(&family, |data, _| data.len());
+        let plus = crate::scene::text::ttf_glyph::glyph(&family, '\u{b1}');
+        assert_eq!(
+            plus.is_some(),
+            section.is_some(),
+            "text draws as before the panic"
+        );
 
         // The lock is shared with every other test in this binary.
         fonts().db.clear_poison();

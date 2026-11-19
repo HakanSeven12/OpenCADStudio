@@ -258,3 +258,186 @@ impl OpenCADStudio {
         self.graph_rerun_after_read(i)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::node_graph::{GraphMsg, PaletteItem};
+    use graph::{NodeId, Port};
+    use serde_json::{json, Value};
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    /// A CSV file with one column of two numbers, written under `name`.
+    fn csv_file(name: &str, numbers: &str) -> PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("ocs-graph-{name}-{}.csv", std::process::id()));
+        std::fs::write(&path, numbers).expect("write the CSV file");
+        path
+    }
+
+    /// Adds a "Read CSV" node for `path` to the current drawing's graph;
+    /// returns its id and the task of the run, not run.
+    fn read_csv(app: &mut OpenCADStudio, path: &std::path::Path) -> (NodeId, Task<Message>) {
+        let i = app.active_tab;
+        let spec = crate::app::node_graph::ops::resolve("Read CSV").expect("node type");
+        let id = app.tabs[i]
+            .graph
+            .add_node(PaletteItem::Op(spec), Vec::new(), iced::Point::ORIGIN);
+        let port = Port {
+            node: id,
+            field: "path".to_string(),
+        };
+        let task = app.on_graph(GraphMsg::Set(port, json!(path.to_string_lossy())));
+        (id, task)
+    }
+
+    fn column(app: &OpenCADStudio, id: NodeId) -> Value {
+        let graph = &app.tabs[app.active_tab].graph.engine;
+        graph
+            .node(id)
+            .and_then(|node| node.outputs.get("column 1").cloned())
+            .unwrap_or(Value::Null)
+    }
+
+    fn undo_steps(app: &mut OpenCADStudio) -> usize {
+        app.finish_all_pending_history();
+        app.tabs[app.active_tab].history.undo_stack.len()
+    }
+
+    /// The node gives nothing during the read, and its columns when the
+    /// read ends; the run after the read joins the undo step of the edit.
+    #[test]
+    fn a_csv_node_gives_its_columns_when_the_read_ends() {
+        let mut app = new_app();
+        let path = csv_file("columns", "x\n1\n2\n");
+        let before = undo_steps(&mut app);
+        let (id, task) = read_csv(&mut app, &path);
+        assert_eq!(column(&app, id), Value::Null, "nothing during the read");
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(column(&app, id), json!([1.0, 2.0]));
+        assert_eq!(undo_steps(&mut app), before + 1, "one undo step");
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A file that did not change is not read again: the next run gives
+    /// its columns at once. A changed file is read again.
+    #[test]
+    fn only_a_changed_file_is_read_again() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = csv_file("changed", "x\n1\n2\n");
+        let (id, task) = read_csv(&mut app, &path);
+        app.drive_headless_task(task).expect("the read task");
+        let task = app.graph_run(i);
+        assert_eq!(column(&app, id), json!([1.0, 2.0]), "no new read");
+        assert!(!app.tabs[i].graph_files.reading());
+        app.drive_headless_task(task).expect("the run's task");
+        std::fs::write(&path, "x\n1\n2\n3\n").expect("change the file");
+        let task = app.graph_run(i);
+        assert_eq!(column(&app, id), Value::Null, "the changed file is read");
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(column(&app, id), json!([1.0, 2.0, 3.0]));
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A reader that panics gives an error and no output; the undo step
+    /// closes, and the next change of the file is read.
+    #[test]
+    fn a_reader_panic_gives_an_error_and_no_output() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        app.graph_file_reader = |_, _| panic!("a reader bug");
+        let path = csv_file("panics", "x\n1\n");
+        let (id, task) = read_csv(&mut app, &path);
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Node graph failed: a reader bug")
+        );
+        assert_eq!(column(&app, id), Value::Null);
+        assert!(!app.tabs[i].graph_files.reading());
+        assert!(app.tabs[i]
+            .history
+            .pending
+            .as_ref()
+            .is_none_or(|pending| !pending.held));
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A file that changes at each read does not make the graph run
+    /// without end: after the limit, an error, and the undo step closes.
+    #[test]
+    fn a_file_that_changes_at_each_read_stops_the_reruns() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        app.graph_file_reader = |kind, path| {
+            let content = read_file(kind, path);
+            let mut text = std::fs::read_to_string(path).unwrap_or_default();
+            text.push_str("1\n");
+            let _ = std::fs::write(path, text);
+            content
+        };
+        let path = csv_file("changing", "x\n1\n");
+        let (_, task) = read_csv(&mut app, &path);
+        app.drive_headless_task(task).expect("the read tasks");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("Node graph: a file that the graph reads changed at each run; the graph stopped running again.")
+        );
+        assert!(app.tabs[i]
+            .history
+            .pending
+            .as_ref()
+            .is_none_or(|pending| !pending.held));
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A read for a drawing that was replaced during the read is dropped.
+    #[test]
+    fn a_read_for_a_replaced_drawing_is_dropped() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = csv_file("replaced", "x\n1\n");
+        let (id, task) = read_csv(&mut app, &path);
+        app.tabs[i].document_generation += 1;
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(column(&app, id), Value::Null);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// The image readers give a picture's size and the picture for
+    /// embedding, and nothing for a file that is no picture.
+    #[test]
+    fn the_image_readers_give_the_size_and_the_picture() {
+        let dir = std::env::temp_dir();
+        let picture = dir.join(format!("ocs-graph-image-{}.png", std::process::id()));
+        image::RgbaImage::new(3, 2)
+            .save(&picture)
+            .expect("write the picture");
+        let junk = dir.join(format!("ocs-graph-junk-{}.png", std::process::id()));
+        std::fs::write(&junk, b"no picture").expect("write the junk file");
+        assert!(matches!(
+            read_file(FileKind::ImageSize, &picture),
+            FileContent::ImageSize(Some((3, 2)))
+        ));
+        assert!(matches!(
+            read_file(FileKind::Image, &picture),
+            FileContent::Image(Some(_))
+        ));
+        assert!(matches!(
+            read_file(FileKind::ImageSize, &junk),
+            FileContent::ImageSize(None)
+        ));
+        assert!(matches!(
+            read_file(FileKind::Image, &junk),
+            FileContent::Image(None)
+        ));
+        let _ = std::fs::remove_file(picture);
+        let _ = std::fs::remove_file(junk);
+    }
+}

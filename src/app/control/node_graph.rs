@@ -1074,3 +1074,158 @@ mod data_node_tests {
         assert_eq!(output(&app, bigger, "result"), json!([false, true]));
     }
 }
+
+#[cfg(test)]
+mod load_read_tests {
+    use crate::app::OpenCADStudio;
+    use crate::ui::node_graph::GraphMsg;
+    use serde_json::{json, Value};
+
+    fn fresh_drawing() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        let response = app.automation_op(r#"{"op":"new"}"#);
+        assert_eq!(response["ok"], true, "{response}");
+        app
+    }
+
+    fn settled(app: &OpenCADStudio, id: &str) -> Value {
+        app.control
+            .completed
+            .iter()
+            .find(|(request, _, _)| request == id)
+            .map(|(_, _, response)| response.clone())
+            .unwrap_or(Value::Null)
+    }
+
+    fn load(
+        app: &mut OpenCADStudio,
+        id: &str,
+        path: &str,
+    ) -> (Value, iced::Task<crate::app::Message>) {
+        let document_id = app.tabs[app.active_tab].id;
+        app.control_request(json!({
+            "protocol":1,"op":"node_graph","action":"load","request_id":id,
+            "document_id":document_id,"path":path,
+        }))
+    }
+
+    fn nodes(app: &OpenCADStudio) -> usize {
+        app.tabs[app.active_tab].graph.engine.nodes.len()
+    }
+
+    /// A graph file with one node, written under `name`; the graph is
+    /// cleared after.
+    fn graph_file(app: &mut OpenCADStudio, name: &str) -> String {
+        let i = app.active_tab;
+        let spec = super::ops::resolve("Read CSV").expect("node type");
+        app.tabs[i].graph.add_node(
+            super::PaletteItem::Op(spec),
+            Vec::new(),
+            iced::Point::ORIGIN,
+        );
+        let bytes = app.graph_file_bytes(i);
+        let _ = app.on_graph(GraphMsg::New);
+        assert_eq!(nodes(app), 0);
+        let path =
+            std::env::temp_dir().join(format!("ocs-graph-load-{name}-{}.ocg", std::process::id()));
+        std::fs::write(&path, bytes).expect("write the graph file");
+        path.to_string_lossy().into_owned()
+    }
+
+    /// The action is accepted, nothing is loaded during the read, and it
+    /// settles with the loaded graph's state when the read ends.
+    #[test]
+    fn the_load_settles_when_its_read_ends() {
+        let mut app = fresh_drawing();
+        let path = graph_file(&mut app, "loaded");
+        let (response, task) = load(&mut app, "graph-load", &path);
+        assert_eq!(response["status"], "accepted", "{response}");
+        assert_eq!(nodes(&app), 0, "nothing is loaded during the read");
+        app.drive_headless_task(task).expect("the action's task");
+        let settled = settled(&app, "graph-load");
+        assert_eq!(settled["ok"], true, "{settled}");
+        assert_eq!(nodes(&app), 1);
+        assert_eq!(
+            settled["result"]["nodes"].as_array().map(Vec::len),
+            Some(1),
+            "{settled}"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A file that cannot be read, or that is no graph, fails with the
+    /// codes it failed with at once before.
+    #[test]
+    fn bad_files_fail_with_their_codes() {
+        let mut app = fresh_drawing();
+        let junk = std::env::temp_dir().join(format!("ocs-graph-junk-{}.ocg", std::process::id()));
+        std::fs::write(&junk, b"no graph").expect("write the junk file");
+        for (id, path, code) in [
+            (
+                "graph-missing",
+                "/no/such/graph.ocg".to_string(),
+                "read_failed",
+            ),
+            (
+                "graph-junk",
+                junk.to_string_lossy().into_owned(),
+                "invalid_graph",
+            ),
+        ] {
+            let (_, task) = load(&mut app, id, &path);
+            app.drive_headless_task(task).expect("the action's task");
+            let settled = settled(&app, id);
+            assert_eq!(settled["ok"], false, "{settled}");
+            assert_eq!(settled["code"], code, "{settled}");
+        }
+        assert_eq!(nodes(&app), 0);
+        let _ = std::fs::remove_file(junk);
+    }
+
+    /// A drawing replaced during the read gets no graph, and the action
+    /// fails with `document_closed`.
+    #[test]
+    fn a_replaced_drawing_fails_the_load() {
+        let mut app = fresh_drawing();
+        let i = app.active_tab;
+        let path = graph_file(&mut app, "replaced");
+        let (_, task) = load(&mut app, "graph-replaced", &path);
+        app.tabs[i].document_generation += 1;
+        app.drive_headless_task(task).expect("the action's task");
+        let settled = settled(&app, "graph-replaced");
+        assert_eq!(settled["code"], "document_closed", "{settled}");
+        assert_eq!(nodes(&app), 0);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A reader that panics fails the action, and the app goes on.
+    #[test]
+    fn a_reader_panic_fails_the_load() {
+        let mut app = fresh_drawing();
+        let errors = app.command_line.error_revision;
+        app.control.pending = Some(super::super::Operation {
+            id: "graph-panics".to_string(),
+            request: json!({"op":"node_graph","action":"load"}),
+            pending: 1,
+            error_revision: errors,
+            document_id: None,
+            origin_document: app.tabs[app.active_tab].id,
+            geometry_revision: 0,
+            result: json!({}),
+            cancelled: false,
+            failure: None,
+        });
+        let i = app.active_tab;
+        let task = app.control_graph_load_with(i, "panics.ocg", |_| panic!("a reader bug"));
+        app.drive_headless_task(task).expect("the action's task");
+        app.control.pending.as_mut().unwrap().pending = 0;
+        app.control_settle();
+        let settled = settled(&app, "graph-panics");
+        assert_eq!(settled["ok"], false, "{settled}");
+        assert_eq!(
+            settled["error"], "Node graph load failed: a reader bug",
+            "{settled}"
+        );
+        assert_eq!(nodes(&app), 0);
+    }
+}

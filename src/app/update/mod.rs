@@ -6266,6 +6266,8 @@ impl OpenCADStudio {
 
             // ── Cursor / viewport messages ─────────────────────────────────
             Message::CursorMoved(p, viewport) => self.on_cursor_moved(p, viewport),
+            Message::SelectionDragCursor(at) => self.on_selection_drag_cursor(at),
+            Message::SelectionDragRelease => self.on_selection_drag_release(),
 
             // A multi-finger gesture owns the pointer while it runs.
             Message::ViewportMove(_)

@@ -4188,6 +4188,34 @@ impl OpenCADStudio {
         } else {
             event::listen_with(main_window_event)
         };
+        // While a selection box drag is in flight — pressed or a click-move-
+        // click box waiting for its second corner — watch the mouse at the
+        // WINDOW level: AutoCAD keeps the rubber band following the pointer
+        // over the command line, panels and past the window edge, and commits
+        // on the release wherever it lands. The canvas only sees events inside
+        // its bounds, so these fall through to the delta tracker.
+        let box_drag_active = {
+            let sel = self.tabs[self.active_tab].scene.selection.borrow();
+            sel.input.left_down || sel.gesture.box_anchor.is_some()
+        };
+        let box_drag_track = if box_drag_active {
+            event::listen_with(|event, _, id| {
+                if !crate::app::tool_windows::is_main_window(id) {
+                    return None;
+                }
+                match event {
+                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position: at }) => {
+                        Some(Message::SelectionDragCursor(at))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                        iced::mouse::Button::Left,
+                    )) => Some(Message::SelectionDragRelease),
+                    _ => None,
+                }
+            })
+        } else {
+            Subscription::none()
+        };
         #[cfg(not(target_arch = "wasm32"))]
         let control = iced::Subscription::batch([
             super::control::subscribe().map(Message::ControlRequest),
@@ -4252,6 +4280,7 @@ impl OpenCADStudio {
             single_instance,
             hatch_pattern_keys,
             keyboard_events,
+            box_drag_track,
             ui_font_changes(),
             terminate_requests(),
         ])

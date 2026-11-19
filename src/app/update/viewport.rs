@@ -3442,11 +3442,18 @@ impl OpenCADStudio {
             let delta = snapped - grip.last_world;
             // A table grip edits the table as it was when the drag started,
             // at the cursor: a fill, a break or a column line need not follow
-            // the cursor, so the drag is not rebased onto them.
+            // the cursor, so the drag is not rebased onto them. A viewport
+            // corner too: dragged past the opposite edge, the rebased frame
+            // would take the cursor as its fixed corner and fold flat (#3327).
             let table_targets: rustc_hash::FxHashSet<Handle> = self
                 .grip_originals
                 .iter()
-                .filter(|(_, entity)| matches!(entity, document::EntityType::Table(_)))
+                .filter(|(_, entity)| {
+                    matches!(
+                        entity,
+                        document::EntityType::Table(_) | document::EntityType::Viewport(_)
+                    )
+                })
                 .map(|(handle, _)| *handle)
                 .collect();
             let menu_action = match grip.mode {

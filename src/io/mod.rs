@@ -2947,6 +2947,36 @@ pub fn prepare_document_for_save(mut doc: Document, version: document::DxfVersio
             }
         }
     }
+    // A drawing file numbers a layout's viewports in their order, and the
+    // first is the sheet's own. A layout can hold viewports onto the model
+    // and no sheet yet (a script, a plugin or an automation request added
+    // them before the layout was first opened); written like that, the first
+    // of them came back as the sheet and was sized to the page. Such a layout
+    // gets its sheet in the copy that is saved.
+    let without_sheet: Vec<String> = doc
+        .objects
+        .values()
+        .filter_map(|object| match object {
+            document::objects::ObjectType::Layout(layout)
+                if !layout.name.eq_ignore_ascii_case("Model")
+                    && crate::scene::Scene::layout_sheet_viewport_handle(&doc, layout)
+                        .is_null()
+                    && doc.entities().any(|entity| {
+                        matches!(
+                            entity,
+                            document::EntityType::Viewport(viewport)
+                                if viewport.common.owner_handle == layout.block_record
+                        )
+                    }) =>
+            {
+                Some(layout.name.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    for layout in without_sheet {
+        crate::scene::Scene::ensure_layout_sheet_viewport(&mut doc, &layout);
+    }
     let styles_started = perf.then(iced::time::Instant::now);
     sync_current_styles_on_save(&mut doc);
     let styles_ms = crate::perf::elapsed_ms(styles_started);

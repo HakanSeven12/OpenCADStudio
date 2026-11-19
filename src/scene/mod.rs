@@ -134,6 +134,8 @@ mod viewport_freeze_block_member_tests;
 #[cfg(test)]
 mod layout_frame_wires_tests;
 #[cfg(test)]
+mod layout_saved_without_sheet_tests;
+#[cfg(test)]
 mod paper_sheet_depth_tests;
 pub mod viewport_ref;
 pub(crate) use selection::pe_url_of;
@@ -6887,17 +6889,26 @@ impl Scene {
     /// Ensure a paper layout has its overall (`id == 1`) viewport; true when
     /// it had none (the layout opens for the first time).
     pub fn ensure_sheet_viewport(&mut self, layout_name: &str) -> bool {
+        Self::ensure_layout_sheet_viewport(&mut self.document, layout_name)
+    }
+
+    /// [`Self::ensure_sheet_viewport`] on a document, for the copy a save
+    /// writes.
+    pub(crate) fn ensure_layout_sheet_viewport(
+        document: &mut document::Document,
+        layout_name: &str,
+    ) -> bool {
         if layout_name == "Model" {
             return false;
         }
         // Locate the layout and its paper limits.
-        let info = self.document.objects.iter().find_map(|(h, obj)| {
+        let info = document.objects.iter().find_map(|(h, obj)| {
             if let ObjectType::Layout(l) = obj {
                 if l.name == layout_name {
                     return Some((
                         *h,
                         l.block_record,
-                        Self::layout_sheet_viewport_handle(&self.document, l),
+                        Self::layout_sheet_viewport_handle(document, l),
                         l.min_limits,
                         l.max_limits,
                     ));
@@ -6914,7 +6925,7 @@ impl Scene {
 
         if sheet.is_valid()
             && matches!(
-                self.document.get_entity(sheet),
+                document.get_entity(sheet),
                 Some(EntityType::Viewport(vp)) if vp.common.owner_handle == block_record
             )
         {
@@ -6926,13 +6937,27 @@ impl Scene {
         vp.id = 1;
         vp.status = document::entities::ViewportStatusFlags::default_on();
         fit_sheet_viewport(&mut vp, min_lim, max_lim);
-        if let Ok(handle) = self
-            .document
-            .add_entity_to_layout(EntityType::Viewport(Box::new(vp)), layout_name)
+        if let Ok(handle) =
+            document.add_entity_to_layout(EntityType::Viewport(Box::new(vp)), layout_name)
         {
-            if let Some(ObjectType::Layout(l)) = self.document.objects.get_mut(&layout_handle) {
+            if let Some(ObjectType::Layout(l)) = document.objects.get_mut(&layout_handle) {
                 l.viewports.retain(|candidate| *candidate != handle);
                 l.viewports.insert(0, handle);
+            }
+            // First in the block too: where a file keeps no viewport list
+            // (DXF), the block's first viewport is read as the sheet, and a
+            // layout can already hold viewports onto the model.
+            if let Some(block) = document
+                .block_records
+                .iter_mut()
+                .find(|block| block.handle == block_record)
+            {
+                if block.entity_handles.contains(&handle) {
+                    block
+                        .entity_handles
+                        .retain(|candidate| *candidate != handle);
+                    block.entity_handles.insert(0, handle);
+                }
             }
         }
         true

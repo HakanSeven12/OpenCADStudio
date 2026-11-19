@@ -1006,6 +1006,7 @@ impl Scene {
 
     /// Rebuild every OLE picture's raster, after the view scale it follows
     /// moved.
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn reseed_ole_frames(&mut self) {
         let handles: Vec<Handle> = self
             .document
@@ -3671,53 +3672,12 @@ impl Scene {
         &self,
         entity: &document::entities::EntityType,
     ) -> Option<ImageModel> {
-        #[cfg(test)]
-        IMAGE_SEEDS.with(|seeds| seeds.set(seeds.get() + 1));
         match entity {
             EntityType::RasterImage(img) => ImageModel::from_raster_image(img),
-            EntityType::Ole2Frame(ole) => {
-                // Pictures of the layout in view follow its scale; others
-                // keep the size used when the view is unknown.
-                let in_view = ole.common.owner_handle == self.current_layout_block_handle();
-                let scale = &self.ole_scale;
-                let (wpp, view) = if in_view {
-                    (scale.world_per_pixel, scale.view)
-                } else {
-                    (None, None)
-                };
-                ImageModel::from_ole2frame_in_view(ole, wpp, view).map(|(model, sharp)| {
-                    if sharp {
-                        scale.region_used.set(true);
-                    }
-                    model
-                })
+            EntityType::Ole2Frame(_) | EntityType::Underlay(_) => {
+                let input = self.raster_input_for(entity)?;
+                self.render_raster_input(&input)
             }
-            EntityType::Underlay(u) => match self.document.objects.get(&u.definition_handle) {
-                Some(document::objects::ObjectType::UnderlayDefinition(def)) => {
-                    // A paper-space underlay adjusts to the sheet, not the canvas.
-                    let owner = u.common.owner_handle;
-                    let background = if owner.is_null() || owner == self.model_space_block_handle()
-                    {
-                        self.bg_color
-                    } else {
-                        self.paper_bg_color
-                    };
-                    ImageModel::from_underlay_in_view(
-                        u,
-                        def,
-                        background,
-                        self.underlay_scale.world_per_pixel,
-                        self.underlay_scale.view,
-                    )
-                    .map(|(model, sharp)| {
-                        if sharp {
-                            self.underlay_scale.region_used.set(true);
-                        }
-                        model
-                    })
-                }
-                _ => None,
-            },
             _ => None,
         }
     }

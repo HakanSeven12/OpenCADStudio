@@ -1872,8 +1872,10 @@ impl OpenCADStudio {
         if !self.tabs[i].scene.navigating_lod() {
             self.tabs[i].scene.refresh_dynamic_dimension_scales(false);
         }
-        // Underlays are rasterised again for the zoom once it settles.
+        // Underlays are rasterised again for the zoom once it settles, on a
+        // worker; the old rasters stay on screen until it ends.
         self.tabs[i].scene.refresh_underlay_resolution(t);
+        let reseed = self.start_underlay_reseed(i);
 
         // If the camera moved since we last synced, write it back to
         // the document and mark the file dirty.
@@ -1904,7 +1906,38 @@ impl OpenCADStudio {
             self.command_line.push_error(&msg);
         }
 
-        Task::none()
+        reseed
+    }
+
+    /// Starts the worker for the rasters a zoom step asked for in drawing
+    /// `i` ([`crate::scene::Scene::take_reseed_job`]).
+    pub(super) fn start_underlay_reseed(&mut self, i: usize) -> Task<Message> {
+        let Some(job) = self.tabs[i].scene.take_reseed_job() else {
+            return Task::none();
+        };
+        let (tab_id, generation) = (self.tabs[i].id, self.tabs[i].document_generation);
+        crate::app::update::background_task(
+            "Underlay raster",
+            move || job.render(),
+            move |done| Message::UnderlayRastersDrawn(tab_id, generation, Box::new(done)),
+        )
+    }
+
+    /// Takes the rasters a worker drew for a zoom step, into the drawing it
+    /// was started for while that drawing is still the same.
+    pub(super) fn finish_underlay_reseed(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        done: crate::scene::ReseedDone,
+    ) {
+        if let Some(tab) = self
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.id == tab_id && tab.document_generation == generation)
+        {
+            tab.scene.apply_reseed(done);
+        }
     }
 
     pub(super) fn on_set_render_mode(

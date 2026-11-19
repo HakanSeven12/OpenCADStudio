@@ -41,6 +41,10 @@ fn look_at(scene: &mut Scene, x0: f32, y0: f32, x1: f32, y1: f32) {
     );
     scene.refresh_underlay_resolution(start);
     scene.refresh_underlay_resolution(start + Duration::from_millis(200));
+    // The rasters are drawn by a worker; the app takes them when it ends.
+    if let Some(job) = scene.take_reseed_job() {
+        scene.apply_reseed(job.render());
+    }
     assert!(
         !scene.underlay_resolution_stale(),
         "the rasters followed the view"

@@ -31,6 +31,16 @@ fn arch(document: &document::Document, handle: Handle) -> Option<&document::clas
     }
 }
 
+/// The newest profile of `alignment`.
+fn newest_profile(document: &document::Document, alignment: Handle) -> Option<Handle> {
+    arch(document, alignment)?
+        .typed_handles()
+        .iter()
+        .rev()
+        .map(|r| Handle::new(r.0))
+        .find(|h| arch(document, *h).is_some_and(|a| a.dxf_name == "AECC_PROFILE"))
+}
+
 /// The vertices (x, y, elevation) of a line or polyline, the first again at the end of a
 /// closed one.
 fn vertices(entity: &EntityType) -> Result<Vec<Vector3>, String> {
@@ -243,15 +253,7 @@ impl OpenCADStudio {
                 let doc = &self.tabs[i].scene.document;
                 let alignment = *req.objects[0].first().ok_or("no alignment")?;
                 let assembly = *req.objects[1].first().ok_or("no assembly")?;
-                // The alignment's newest profile.
-                let profile = arch(doc, alignment)
-                    .ok_or("no alignment")?
-                    .typed_handles()
-                    .iter()
-                    .rev()
-                    .map(|r| Handle::new(r.0))
-                    .find(|h| arch(doc, *h).is_some_and(|a| a.dxf_name == "AECC_PROFILE"))
-                    .ok_or_else(|| crate::t!("The alignment has no profile.").into_owned())?;
+                let profile = newest_profile(doc, alignment).ok_or_else(|| crate::t!("The alignment has no profile.").into_owned())?;
                 let corridor = next_name(doc, "AECC_CORRIDOR", "Corridor");
                 self.push_undo_snapshot(i, name);
                 let doc = &mut self.tabs[i].scene.document;
@@ -343,6 +345,21 @@ impl OpenCADStudio {
                     Some(error) => format!("{} {error}", crate::tf!("{} section view(s) created.", count)),
                     None => crate::tf!("{} section view(s) created.", count).into_owned(),
                 }
+            }
+            "CREATEINTERSECTION" => {
+                let doc = &self.tabs[i].scene.document;
+                let main = *req.objects[0].first().ok_or("no alignment")?;
+                let other = *req.objects[1].first().ok_or("no alignment")?;
+                let no_profile = || crate::t!("The alignment has no profile.").into_owned();
+                let main_profile = newest_profile(doc, main).ok_or_else(no_profile)?;
+                let other_profile = newest_profile(doc, other).ok_or_else(no_profile)?;
+                let intersection = next_name(doc, "AECC_INTERSECTION", "Intersection");
+                self.push_undo_snapshot(i, name);
+                let doc = &mut self.tabs[i].scene.document;
+                let h = c3d::add_intersection(doc, &intersection, main, main_profile, other, other_profile, ["", ""], layer)
+                    .map_err(refused)?;
+                changes.push((h, ChangeKind::Added));
+                crate::tf!("Intersection {} created.", intersection).into_owned()
             }
             _ => return Err(crate::t!("Unknown civil command.").into_owned()),
         };

@@ -3,6 +3,10 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "Select the main road alignment:" => Some(("civil-cmd", "select-main-road")),
+        "Select the crossing road alignment:" => Some(("civil-cmd", "select-crossing-road")),
+        "Create Intersection" => Some(("civil-cmd", "create-intersection")),
+        "Intersection {} created." => Some(("civil-cmd", "intersection-created")),
         "Select TIN surfaces to sample or press Enter for none:" => Some(("civil-cmd", "select-sample-surfaces")),
         "Select a sample line group:" => Some(("civil-cmd", "select-sample-line-group")),
         "Specify the center line point of the first section view:" => Some(("civil-cmd", "specify-section-view-point")),

@@ -10,4 +10,4 @@ related: CREATESAMPLELINES, CREATESURFACE
 ## Notes
 - One view per sample line, five a row, spaced by the first view's size.
 - A line must sample at most one surface, and its section must not be sampled by Civil 3D yet.
-- The drawing needs a section view style, as drawings made in Civil 3D have.
+- A drawing without Civil 3D data gets the section view style it needs.

@@ -34,6 +34,7 @@ pub const COMMANDS: &[&str] = &[
     "CREATECORRIDOR",
     "CREATESAMPLELINES",
     "CREATESECTIONVIEWS",
+    "CREATEINTERSECTION",
 ];
 
 const ALIGNMENT_OPTIONS: &[Opt] = &[
@@ -75,6 +76,10 @@ pub fn steps(name: &str) -> Option<Vec<Step>> {
             Step::Objects { prompt: "Select a sample line group:", filter: SampleLineGroups, slot: 0 },
             Step::Point { prompt: "Specify the center line point of the first section view:" },
         ],
+        "CREATEINTERSECTION" => vec![
+            Step::Objects { prompt: "Select the main road alignment:", filter: Alignments, slot: 0 },
+            Step::Objects { prompt: "Select the crossing road alignment:", filter: Alignments, slot: 1 },
+        ],
         "CREATEFEATURELINE" => vec![Step::Objects { prompt: "Select lines or polylines to make feature lines of:", filter: Paths, slot: 0 }],
         _ => return None,
     })
@@ -111,6 +116,7 @@ impl CadModule for CivilModule {
                         tool("CREATECORRIDOR", "Create Corridor", icon!("corridor")),
                         tool("CREATESAMPLELINES", "Create Sample Lines", icon!("samplelines")),
                         tool("CREATESECTIONVIEWS", "Create Section Views", icon!("sectionviews")),
+                        tool("CREATEINTERSECTION", "Create Intersection", icon!("intersection")),
                     ],
                 },
             ]

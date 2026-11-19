@@ -2869,6 +2869,8 @@ impl PartialEq for BlockDef {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ClipExtObjects {
     pub entity_index: usize,
+    #[serde(default)]
+    pub attribute_index: Option<usize>,
     pub src_entity_handle: document::Handle,
     pub root: document::Handle,
     pub objects: Vec<(document::Handle, document::objects::ObjectType)>,
@@ -3006,41 +3008,56 @@ impl ClipboardDeps {
                 }
             }
         }
-        // Extension-dictionary subtree per entity (XCLIP filters etc.).
+        // Extension-dictionary subtree per entity (XCLIP filters, annotation
+        // contexts, …) and per inline INSERT attribute.
         let mut ext_objects = Vec::new();
+        let mut push_ext = |entity_index: usize,
+                            attribute_index: Option<usize>,
+                            src_entity_handle: document::Handle,
+                            root: document::Handle| {
+            if root.is_null() {
+                return;
+            }
+            let objects = Self::collect_ext_subtree(doc, root);
+            if objects.is_empty() {
+                return;
+            }
+            let mut annotation_scales = Vec::new();
+            for (_, object) in &objects {
+                let document::objects::ObjectType::ObjectContextData(context) = object else {
+                    continue;
+                };
+                if annotation_scales
+                    .iter()
+                    .any(|(handle, _)| *handle == context.scale)
+                {
+                    continue;
+                }
+                if let Some(document::objects::ObjectType::Scale(scale)) =
+                    doc.objects.get(&context.scale)
+                {
+                    annotation_scales.push((context.scale, scale.clone()));
+                }
+            }
+            ext_objects.push(ClipExtObjects {
+                entity_index,
+                attribute_index,
+                src_entity_handle,
+                root,
+                objects,
+                annotation_scales,
+            });
+        };
         for (entity_index, e) in entities.iter().enumerate() {
             let c = e.common();
             if let Some(root) = c.xdictionary_handle {
-                if root.is_null() {
-                    continue;
-                }
-                let objects = Self::collect_ext_subtree(doc, root);
-                if !objects.is_empty() {
-                    let mut annotation_scales = Vec::new();
-                    for (_, object) in &objects {
-                        let document::objects::ObjectType::ObjectContextData(context) = object
-                        else {
-                            continue;
-                        };
-                        if annotation_scales
-                            .iter()
-                            .any(|(handle, _)| *handle == context.scale)
-                        {
-                            continue;
-                        }
-                        if let Some(document::objects::ObjectType::Scale(scale)) =
-                            doc.objects.get(&context.scale)
-                        {
-                            annotation_scales.push((context.scale, scale.clone()));
-                        }
+                push_ext(entity_index, None, c.handle, root);
+            }
+            if let EntityType::Insert(ins) = e {
+                for (attr_index, att) in ins.attributes.iter().enumerate() {
+                    if let Some(root) = att.common.xdictionary_handle {
+                        push_ext(entity_index, Some(attr_index), att.common.handle, root);
                     }
-                    ext_objects.push(ClipExtObjects {
-                        entity_index,
-                        src_entity_handle: c.handle,
-                        root,
-                        objects,
-                        annotation_scales,
-                    });
                 }
             }
         }

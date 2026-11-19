@@ -1203,6 +1203,211 @@ mod tests {
         assert_eq!(grips.len(), 2);
         assert_eq!(grips[1].world, glam::DVec3::new(12.0, 10.0, 0.0));
     }
+
+    fn multiscale_annotative_insert() -> (crate::scene::Scene, Handle, Handle, Handle) {
+        use document::objects::{Dictionary, ObjectContextData, ObjectContextKind, ObjectType};
+
+        let (mut document, mut insert, at_50, at_100, _) = annotative_attribute();
+        insert.insert_point = Vector3::new(100.0, 50.0, 0.0);
+        insert.set_x_scale(50.0);
+        insert.set_y_scale(50.0);
+        insert.set_z_scale(50.0);
+        document.header.current_annotation_scale = "1:100".into();
+
+        let mut scene = crate::scene::Scene::new();
+        scene.document = document;
+        scene.current_layout = "Model".into();
+        let handle = scene
+            .document
+            .add_entity(EntityType::Insert(insert))
+            .unwrap();
+
+        let xdict_h = scene.document.allocate_handle();
+        let mgr_h = scene.document.allocate_handle();
+        let coll_h = scene.document.allocate_handle();
+        let leaf_50_h = scene.document.allocate_handle();
+        let leaf_100_h = scene.document.allocate_handle();
+
+        let mut xdict = Dictionary::new();
+        xdict.handle = xdict_h;
+        xdict.owner = handle;
+        xdict.hard_owner = true;
+        xdict.add_entry("AcDbContextDataManager", mgr_h);
+
+        let mut mgr = Dictionary::new();
+        mgr.handle = mgr_h;
+        mgr.owner = xdict_h;
+        mgr.add_entry("ACDB_ANNOTATIONSCALES", coll_h);
+
+        let mut coll = Dictionary::new();
+        coll.handle = coll_h;
+        coll.owner = mgr_h;
+        coll.add_entry("*A1", leaf_50_h);
+        coll.add_entry("*A2", leaf_100_h);
+
+        let mk_blkref = |h: Handle, scale: Handle, is_default: bool, pos: Vector3, s: f64| {
+            ObjectType::ObjectContextData(ObjectContextData {
+                handle: h,
+                owner_handle: coll_h,
+                reactors: vec![coll_h],
+                xdictionary_handle: None,
+                class_version: 4,
+                has_file_to_extension_dictionary: true,
+                uses_legacy_mleader_context_base: false,
+                is_default,
+                scale,
+                kind: ObjectContextKind::BlkRef {
+                    rotation: 0.0,
+                    insertion: pos,
+                    scale_factor: Vector3::new(s, s, s),
+                },
+            })
+        };
+
+        scene
+            .document
+            .objects
+            .insert(xdict_h, ObjectType::Dictionary(xdict));
+        scene
+            .document
+            .objects
+            .insert(mgr_h, ObjectType::Dictionary(mgr));
+        scene
+            .document
+            .objects
+            .insert(coll_h, ObjectType::Dictionary(coll));
+        scene.document.objects.insert(
+            leaf_50_h,
+            mk_blkref(leaf_50_h, at_50, true, Vector3::new(100.0, 50.0, 0.0), 50.0),
+        );
+        scene.document.objects.insert(
+            leaf_100_h,
+            mk_blkref(leaf_100_h, at_100, false, Vector3::new(80.0, 60.0, 0.0), 100.0),
+        );
+        if let Some(entity) = scene.document.get_entity_mut(handle) {
+            entity.common_mut().xdictionary_handle = Some(xdict_h);
+        }
+
+        (scene, handle, at_50, at_100)
+    }
+
+    fn blkref_context(
+        document: &Document,
+        handle: Handle,
+        scale: Handle,
+    ) -> (Vector3, Vector3) {
+        let entity = document.get_entity(handle).expect("insert exists");
+        let placed = crate::scene::annotative::entity_for_annotation_context(
+            document,
+            entity,
+            Some(scale),
+        );
+        let EntityType::Insert(ins) = placed.as_ref() else {
+            panic!("expected INSERT")
+        };
+        (
+            ins.insert_point,
+            Vector3::new(ins.x_scale(), ins.y_scale(), ins.z_scale()),
+        )
+    }
+
+    #[test]
+    fn annotative_insert_move_preserves_displayed_scale_placement_and_factor() {
+        let (mut scene, handle, at_50, at_100) = multiscale_annotative_insert();
+        scene.transform_entities(
+            &[handle],
+            &EntityTransform::Translate(glam::DVec3::new(10.0, 20.0, 0.0)),
+        );
+
+        let (pos_100, scale_100) = blkref_context(&scene.document, handle, at_100);
+        let (pos_50, scale_50) = blkref_context(&scene.document, handle, at_50);
+        assert!((pos_100.x - 90.0).abs() < 1e-9 && (pos_100.y - 80.0).abs() < 1e-9);
+        assert!((scale_100.x - 100.0).abs() < 1e-9 && (scale_100.y - 100.0).abs() < 1e-9);
+        assert!((pos_50.x - 110.0).abs() < 1e-9 && (pos_50.y - 70.0).abs() < 1e-9);
+        assert!((scale_50.x - 50.0).abs() < 1e-9 && (scale_50.y - 50.0).abs() < 1e-9);
+
+        let EntityType::Insert(insert) = scene.document.get_entity(handle).unwrap() else {
+            panic!("expected INSERT")
+        };
+        assert!((painted_attribute(&scene.document, insert, at_100).0 - 22.4).abs() < 1e-9);
+        assert!((painted_attribute(&scene.document, insert, at_50).0 - 20.2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn annotative_insert_copy_preserves_per_scale_contexts_and_disjoint_handles() {
+        let (mut scene, handle, at_50, at_100) = multiscale_annotative_insert();
+        let src_xdict = scene
+            .document
+            .get_entity(handle)
+            .unwrap()
+            .common()
+            .xdictionary_handle;
+        let copies = scene.copy_entities(
+            &[handle],
+            &EntityTransform::Translate(glam::DVec3::new(30.0, -10.0, 0.0)),
+        );
+        assert_eq!(copies.len(), 1);
+        let copy = copies[0];
+        let copy_xdict = scene
+            .document
+            .get_entity(copy)
+            .unwrap()
+            .common()
+            .xdictionary_handle;
+        assert!(copy_xdict.is_some());
+        assert_ne!(copy_xdict, src_xdict);
+
+        // Copy keeps distinct 1:100 and 1:50 placements & scale factors.
+        let (pos_100, scale_100) = blkref_context(&scene.document, copy, at_100);
+        let (pos_50, scale_50) = blkref_context(&scene.document, copy, at_50);
+        assert!((pos_100.x - 110.0).abs() < 1e-9 && (pos_100.y - 50.0).abs() < 1e-9);
+        assert!((scale_100.x - 100.0).abs() < 1e-9 && (scale_100.y - 100.0).abs() < 1e-9);
+        assert!((pos_50.x - 130.0).abs() < 1e-9 && (pos_50.y - 40.0).abs() < 1e-9);
+        assert!((scale_50.x - 50.0).abs() < 1e-9 && (scale_50.y - 50.0).abs() < 1e-9);
+
+        // Source is untouched.
+        let (src_100, src_scale_100) = blkref_context(&scene.document, handle, at_100);
+        assert!((src_100.x - 80.0).abs() < 1e-9 && (src_100.y - 60.0).abs() < 1e-9);
+        assert!((src_scale_100.x - 100.0).abs() < 1e-9);
+
+        // Copy's attribute contexts are disjoint and translated.
+        let EntityType::Insert(src_ins) = scene.document.get_entity(handle).unwrap() else {
+            panic!("expected INSERT")
+        };
+        let EntityType::Insert(copy_ins) = scene.document.get_entity(copy).unwrap() else {
+            panic!("expected INSERT")
+        };
+        assert_ne!(
+            copy_ins.attributes[0].common.xdictionary_handle,
+            src_ins.attributes[0].common.xdictionary_handle
+        );
+        assert!((painted_attribute(&scene.document, copy_ins, at_100).0 - 42.4).abs() < 1e-9);
+        assert!((painted_attribute(&scene.document, src_ins, at_100).0 - 12.4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn annotative_insert_grip_drag_preserves_displayed_scale_and_moves_all_scales() {
+        let (mut scene, handle, at_50, at_100) = multiscale_annotative_insert();
+        // Displayed 1:100 grip is at (80, 60); drag it to (90, 80) -> delta = (10, 20).
+        scene.apply_grip(
+            handle,
+            0,
+            GripApply::Absolute(glam::DVec3::new(90.0, 80.0, 0.0)),
+        );
+
+        let (pos_100, scale_100) = blkref_context(&scene.document, handle, at_100);
+        let (pos_50, scale_50) = blkref_context(&scene.document, handle, at_50);
+        assert!((pos_100.x - 90.0).abs() < 1e-9 && (pos_100.y - 80.0).abs() < 1e-9);
+        assert!((scale_100.x - 100.0).abs() < 1e-9 && (scale_100.y - 100.0).abs() < 1e-9);
+        assert!((pos_50.x - 110.0).abs() < 1e-9 && (pos_50.y - 70.0).abs() < 1e-9);
+        assert!((scale_50.x - 50.0).abs() < 1e-9 && (scale_50.y - 50.0).abs() < 1e-9);
+
+        let EntityType::Insert(insert) = scene.document.get_entity(handle).unwrap() else {
+            panic!("expected INSERT")
+        };
+        assert!((painted_attribute(&scene.document, insert, at_100).0 - 22.4).abs() < 1e-9);
+        assert!((painted_attribute(&scene.document, insert, at_50).0 - 20.2).abs() < 1e-9);
+    }
 }
 
 #[cfg(test)]

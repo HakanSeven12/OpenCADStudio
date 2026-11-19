@@ -731,7 +731,6 @@ impl Scene {
         }
         for &h in handles {
             crate::scene::annotative::transform_annotation_contexts(&mut self.document, h, t);
-            self.sync_displayed_annotation_context(h);
         }
         // Move the baked dimension-block sub-entities too (collected above).
         // These are entities not named in the reported change set, so a delta
@@ -1028,6 +1027,7 @@ impl Scene {
             EntityType::Insert(ins) => {
                 for att in ins.attributes.iter_mut() {
                     att.common.handle = doc.allocate_handle();
+                    att.common.xdictionary_handle = None;
                     // The text of a multiline attribute is an object of its
                     // own inside the reference, so the copy needs a fresh
                     // handle for it and its new attribute as owner.
@@ -1214,6 +1214,18 @@ impl Scene {
                     document::objects::ObjectType::Field(f) => {
                         stack.extend(f.child_fields.iter().copied());
                     }
+                    document::objects::ObjectType::ObjectContextData(c) => {
+                        if let Some(xd) = c.xdictionary_handle {
+                            stack.push(xd);
+                        }
+                        if let document::objects::ObjectContextKind::MTextAttribute(attr) = &c.kind {
+                            if let Some(embedded) = &attr.context {
+                                if let Some(xd) = embedded.xdictionary_handle {
+                                    stack.push(xd);
+                                }
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1289,6 +1301,18 @@ impl Scene {
                 // A text field's nested fields belong to the same tree.
                 document::objects::ObjectType::Field(f) => {
                     stack.extend(f.child_fields.iter().copied());
+                }
+                document::objects::ObjectType::ObjectContextData(c) => {
+                    if let Some(xd) = c.xdictionary_handle {
+                        stack.push(xd);
+                    }
+                    if let document::objects::ObjectContextKind::MTextAttribute(attr) = &c.kind {
+                        if let Some(embedded) = &attr.context {
+                            if let Some(xd) = embedded.xdictionary_handle {
+                                stack.push(xd);
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -1376,6 +1400,27 @@ impl Scene {
                     }
                     for r in &mut f.referenced_objects {
                         *r = rewrite(*r);
+                    }
+                }
+                // Per-scale annotation context leaf under ACDB_ANNOTATIONSCALES:
+                // remap its handle, owner, reactors and nested xdictionary links
+                // while keeping its document-level `scale` handle intact.
+                document::objects::ObjectType::ObjectContextData(c) => {
+                    c.handle = new_h;
+                    c.owner_handle = rewrite(c.owner_handle);
+                    c.xdictionary_handle = c.xdictionary_handle.map(rewrite);
+                    for r in &mut c.reactors {
+                        *r = rewrite(*r);
+                    }
+                    if let document::objects::ObjectContextKind::MTextAttribute(attr) = &mut c.kind {
+                        if let Some(embedded) = &mut attr.context {
+                            embedded.owner_handle = rewrite(embedded.owner_handle);
+                            embedded.xdictionary_handle =
+                                embedded.xdictionary_handle.map(rewrite);
+                            for r in &mut embedded.reactors {
+                                *r = rewrite(*r);
+                            }
+                        }
                     }
                 }
                 _ => {}
@@ -1519,7 +1564,7 @@ impl Scene {
             .iter()
             .filter(|&&h| !self.is_layer_locked(h))
             .filter_map(|&h| {
-                let mut entity = self.document.get_entity(h)?.clone();
+                let entity = self.document.get_entity(h)?.clone();
 
                 // Any annotative entity (not only a LEADER/MTEXT pair) needs
                 // its own context tree; a shared one ties the copy to the
@@ -1530,16 +1575,11 @@ impl Scene {
                         h,
                     );
 
-                // An annotative entity's extension dictionary is a context tree
-                // recreated fresh on the copy; any other copy's tree is
-                // deep-cloned after insertion, so the source root is captured
-                // here and cleared before add_entity.
-                let src_xdict = if annotation_scales.is_empty() {
-                    entity.common().xdictionary_handle
-                } else {
-                    entity.common_mut().xdictionary_handle = None;
-                    None
-                };
+                // Capture the source entity's extension-dictionary root so the
+                // copy deep-clones the entire tree (including annotation-scale
+                // contexts and XCLIP filters) instead of sharing or recreating
+                // per-scale representations from the base entity. (#700)
+                let src_xdict = entity.common().xdictionary_handle;
 
                 Some((h, entity, annotation_scales, src_xdict))
             })
@@ -1680,6 +1720,7 @@ impl Scene {
                 // Deep-clone the extension-dictionary tree so edits on the
                 // copy never touch the source. A dangling or missing root
                 // leaves the copy without one — never shared.
+                let mut cloned_xdict = false;
                 if let Some(src_root) = src_xdict {
                     if let Some(new_root) = Self::clone_xdict_tree(
                         &mut self.document,
@@ -1693,6 +1734,14 @@ impl Scene {
                         if let Some(clone) = self.document.get_entity_mut(h) {
                             clone.common_mut().xdictionary_handle = Some(new_root);
                         }
+                        cloned_xdict = true;
+                        // Carry every cloned annotation-scale leaf through `t`
+                        // while preserving each scale's own placement/scale.
+                        crate::scene::annotative::transform_annotation_contexts(
+                            &mut self.document,
+                            h,
+                            t,
+                        );
                         // The cloned tree lives in document.objects — outside
                         // a pure-entity delta; keep undo on the full snapshot.
                         self.poison_undo_recording();
@@ -1736,7 +1785,7 @@ impl Scene {
                         t,
                     );
                 }
-                if !annotation_scales.is_empty() {
+                if !cloned_xdict && !annotation_scales.is_empty() {
                     for scale_handle in annotation_scales {
                         crate::scene::annotative::create_annotation_context(
                             &mut self.document,
@@ -3209,14 +3258,40 @@ impl Scene {
             }
             return;
         }
+        let displayed_scale = self.displayed_annotation_scale_handle();
         let whole_insert_before = (grip_id == 0)
             .then(|| self.document.get_entity(handle))
             .flatten()
             .and_then(|entity| match entity {
-                EntityType::Insert(insert) => Some((
-                    document::types::Matrix3::arbitrary_axis(insert.normal) * insert.insert_point,
-                    insert.attributes.clone(),
-                )),
+                EntityType::Insert(insert) => {
+                    let contextual = crate::scene::annotative::entity_for_annotation_context(
+                        &self.document,
+                        entity,
+                        displayed_scale,
+                    );
+                    let displayed_world = match contextual.as_ref() {
+                        EntityType::Insert(displayed) => {
+                            document::types::Matrix3::arbitrary_axis(displayed.normal)
+                                * displayed.insert_point
+                        }
+                        _ => {
+                            document::types::Matrix3::arbitrary_axis(insert.normal)
+                                * insert.insert_point
+                        }
+                    };
+                    let delta = match &apply {
+                        GripApply::Absolute(target) => {
+                            *target
+                                - glam::DVec3::new(
+                                    displayed_world.x,
+                                    displayed_world.y,
+                                    displayed_world.z,
+                                )
+                        }
+                        GripApply::Translate(delta) => *delta,
+                    };
+                    Some((delta, insert.attributes.clone()))
+                }
                 _ => None,
             });
         // An INSERT-owned attribute may be painted from an annotation context
@@ -3237,7 +3312,7 @@ impl Scene {
             crate::scene::annotative::place_attribute_for_annotation_scale(
                 &self.document,
                 &mut displayed,
-                self.displayed_annotation_scale_handle(),
+                displayed_scale,
             )
             .then(|| {
                 let delta = match &apply {
@@ -3254,9 +3329,14 @@ impl Scene {
                 (attribute, delta)
             })
         });
-        let apply = match (self.document.get_entity(handle), &context_move) {
-            (_, Some((_, delta))) => GripApply::Translate(*delta),
-            (Some(EntityType::Insert(insert)), None) => {
+        let apply = match (
+            self.document.get_entity(handle),
+            &whole_insert_before,
+            &context_move,
+        ) {
+            (_, Some((delta, _)), _) => GripApply::Translate(*delta),
+            (_, None, Some((_, delta))) => GripApply::Translate(*delta),
+            (Some(EntityType::Insert(insert)), None, None) => {
                 crate::entities::insert::unscale_attribute_grip(
                     insert,
                     self.annotation_scale,
@@ -3308,13 +3388,14 @@ impl Scene {
                 delta,
             );
         }
-        if let (Some((old_world, attributes)), Some(EntityType::Insert(insert))) =
-            (whole_insert_before, self.document.get_entity(handle))
-        {
-            let new_world =
-                document::types::Matrix3::arbitrary_axis(insert.normal) * insert.insert_point;
-            let delta = new_world - old_world;
-            let delta = glam::DVec3::new(delta.x, delta.y, delta.z);
+        if let Some((delta, attributes)) = whole_insert_before {
+            if crate::scene::annotative::translate_annotation_contexts(
+                &mut self.document,
+                handle,
+                delta,
+            ) {
+                self.poison_undo_recording();
+            }
             for attribute in &attributes {
                 crate::scene::annotative::translate_insert_attribute_contexts(
                     &mut self.document,
@@ -3358,7 +3439,14 @@ impl Scene {
                 }
             }
         }
-        if self.sync_displayed_annotation_context(handle) {
+        // INSERT grips handle their own per-scale contexts above (grip 0
+        // translates every BlkRef context; attribute grips leave the insert's
+        // BlkRef contexts untouched). Syncing from the base insert here would
+        // overwrite the displayed scale's placement and scale with the default
+        // representation.
+        if !matches!(self.document.get_entity(handle), Some(EntityType::Insert(_)))
+            && self.sync_displayed_annotation_context(handle)
+        {
             self.poison_undo_recording();
         }
         // A dimension loaded from a file renders through its baked *D block;

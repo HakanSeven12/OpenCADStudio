@@ -33,6 +33,7 @@ mod bvisibility;
 mod count;
 mod dash;
 mod dgn_import;
+pub(in crate::app) use dgn_import::read_reference_drawings;
 mod dim;
 mod dim_cmd;
 mod dim_inspect;

@@ -941,7 +941,12 @@ impl OpenCADStudio {
         let worker_request = request.clone();
         crate::app::update::background_task(
             "DGNIMPORT",
-            move || reader(&worker_request),
+            move || {
+                reader(&worker_request).map(|mut prepared| {
+                    read_reference_drawings(&worker_request, &mut prepared);
+                    prepared
+                })
+            },
             move |prepared| {
                 Message::ImportDialog(ImportDialogMsg::DgnPrepared(
                     tab_id,
@@ -1075,6 +1080,7 @@ impl OpenCADStudio {
             file,
             model,
             converted,
+            drawing,
         } = prepared;
         let path = file.to_string_lossy().into_owned();
         // Sub units scale the placement and the size alike.
@@ -1109,15 +1115,24 @@ impl OpenCADStudio {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
         let target = dgn_import::reference_drawing(&file, &model);
-        // A converted model is written; none keeps the drawing on disk.
-        if let Some(converted) = converted {
-            let mut scene = crate::scene::Scene::new();
-            place_converted(&mut scene, converted, &Naming::Number);
-            if let Err(error) = crate::io::save(&scene.document, &target) {
+        let read = match drawing {
+            Some(Ok(read)) => Some(read),
+            Some(Err(error)) => {
                 self.command_line.push_error(&error);
                 return;
             }
-        }
+            // Not written and read on a worker (`read_reference_drawings`):
+            // a converted model is written here, and the attach reads it.
+            None => {
+                if let Some(converted) = converted {
+                    if let Err(error) = write_reference_drawing(converted, &target) {
+                        self.command_line.push_error(&error);
+                        return;
+                    }
+                }
+                None
+            }
+        };
         let xref = crate::modules::insert::xattach::XrefAttachRequest {
             path: target.to_string_lossy().into_owned(),
             overlay: false,
@@ -1128,11 +1143,12 @@ impl OpenCADStudio {
         self.command_line
             .push_output(&format!("Attach Xref \"{name}\": {full}"));
         let host = self.tabs[i].current_path.clone();
-        let block = crate::modules::insert::xattach::prepare_named_xref_definition(
+        let block = crate::modules::insert::xattach::prepare_named_xref_definition_with(
             &mut self.tabs[i].scene,
             &xref,
             host.as_deref(),
             &name,
+            read,
         );
         if host.is_none() {
             self.tabs[i].xref_relative_on_save.insert(block.clone());
@@ -1191,6 +1207,47 @@ impl Naming {
             }
         }
     }
+}
+
+/// The reference drawings of a translation, for the import's worker: each
+/// converted model is written beside its file as "<file>-<model>.dwg", and
+/// each drawing is then read, so the placing of the import on the UI thread
+/// writes and reads no file. An underlay reads nothing here.
+pub(in crate::app) fn read_reference_drawings(
+    request: &DgnImportRequest,
+    prepared: &mut dgn_import::PreparedImport,
+) {
+    if matches!(
+        request.references,
+        ReferenceMode::Ignore | ReferenceMode::Underlay
+    ) {
+        return;
+    }
+    for reference in &mut prepared.references {
+        let target = dgn_import::reference_drawing(&reference.file, &reference.model);
+        if let Some(converted) = reference.converted.take() {
+            if let Err(error) = write_reference_drawing(converted, &target) {
+                reference.drawing = Some(Err(error));
+                continue;
+            }
+        }
+        let base = target.parent().unwrap_or(std::path::Path::new(""));
+        reference.drawing = Some(Ok(crate::io::xref::read_xref_file(
+            &target.to_string_lossy(),
+            base,
+            None,
+        )));
+    }
+}
+
+/// Writes a translated reference's model as the drawing `target`.
+fn write_reference_drawing(
+    converted: dgn_import::Converted,
+    target: &std::path::Path,
+) -> Result<(), String> {
+    let mut scene = crate::scene::Scene::new();
+    place_converted(&mut scene, converted, &Naming::Number);
+    crate::io::save(&scene.document, target)
 }
 
 /// Adds converted objects to a drawing under the naming rule; returns the
@@ -1911,6 +1968,7 @@ mod dgn_worker_tests {
             file: folder.join("site.dgn"),
             model: "Default".to_string(),
             converted: Some(prepared.converted.clone()),
+            drawing: None,
         };
         let prepared = PreparedImport {
             references: vec![reference],
@@ -1934,6 +1992,102 @@ mod dgn_worker_tests {
         assert!(written, "the drawing is written");
         assert_eq!(inserts, ["site - Default"], "the reference is attached");
         assert!(document.block_records.get("site - Default").is_some());
+    }
+
+    /// The folder that [`with_a_reference`] puts its reference file in.
+    fn reference_folder(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("ocs-dgn-worker-{name}-{}", std::process::id()))
+    }
+
+    /// A reader for the worker tests: the request's model, with one
+    /// translated reference attachment, "site.dgn" in the folder named by
+    /// the request's model file.
+    fn with_a_reference(
+        request: &DgnImportRequest,
+    ) -> Result<PreparedImport, dgn_import::DgnImportError> {
+        let prepared = dgn_import::prepare_import(request)?;
+        let folder = request.path.rsplit('-').nth(1).unwrap_or_default();
+        let reference = dgn_import::PreparedReference {
+            reference: Default::default(),
+            file: reference_folder(folder).join("site.dgn"),
+            model: "Default".to_string(),
+            converted: Some(prepared.converted.clone()),
+            drawing: None,
+        };
+        Ok(PreparedImport {
+            references: vec![reference],
+            ..prepared
+        })
+    }
+
+    /// The layers that a reference brought into the drawing.
+    fn reference_layers(app: &OpenCADStudio, i: usize) -> usize {
+        app.tabs[i]
+            .scene
+            .document
+            .layers
+            .iter()
+            .filter(|layer| layer.name.starts_with("site - Default|"))
+            .count()
+    }
+
+    /// A translated reference is written and read on the import's worker:
+    /// the drawing is attached from that read, so the UI thread reads no
+    /// file. Here the file is gone before the result reaches it.
+    #[test]
+    fn a_translated_reference_is_written_and_read_on_the_worker() {
+        let folder = reference_folder("written");
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let mut translate = request(&v7_file("written"), true);
+        translate.references = ReferenceMode::Translate;
+        let task = app.run_dgn_import_with(i, translate, with_a_reference);
+        let message = OpenCADStudio::first_task_message(task);
+        let written = folder.join("site-Default.dwg");
+        let on_worker = written.is_file();
+        let _ = std::fs::remove_dir_all(&folder);
+        let task = app.update(message);
+        app.drive_headless_task(task).expect("the import's task");
+        assert!(on_worker, "the worker writes the drawing");
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("site - Default")
+            .is_some());
+        assert!(reference_layers(&app, i) > 0, "the worker's read is merged");
+    }
+
+    /// A reference drawing that cannot be written is reported, and is not
+    /// attached; the model is still placed.
+    #[test]
+    fn a_reference_drawing_that_cannot_be_written_is_reported() {
+        let folder = reference_folder("unwritable");
+        let _ = std::fs::remove_dir_all(&folder);
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let errors = app.command_line.error_revision;
+        let mut translate = request(&v7_file("unwritable"), true);
+        translate.references = ReferenceMode::Translate;
+        let task = app.run_dgn_import_with(i, translate, with_a_reference);
+        app.drive_headless_task(task).expect("the import's task");
+        assert_ne!(
+            app.command_line.error_revision, errors,
+            "the error is shown"
+        );
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("site - Default")
+            .is_none());
+        assert_eq!(
+            app.tabs[i].history.undo_stack.len(),
+            1,
+            "the model is placed"
+        );
     }
 }
 

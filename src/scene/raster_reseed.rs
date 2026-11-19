@@ -210,3 +210,168 @@ impl Scene {
         taken
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use document::types::Vector3;
+    use std::time::Duration;
+
+    fn seeds() -> usize {
+        entity::IMAGE_SEEDS.with(std::cell::Cell::get)
+    }
+
+    /// Four PDF underlays of a one-inch page, side by side in model space.
+    fn model_with_underlays(name: &str) -> (Scene, Vec<Handle>) {
+        use printpdf::{Mm, PdfDocument, PdfPage, PdfSaveOptions};
+        let mut pdf = PdfDocument::new("reseed worker");
+        pdf.pages.push(PdfPage::new(Mm(25.4), Mm(25.4), Vec::new()));
+        let bytes = pdf.save(&PdfSaveOptions::default(), &mut Vec::new());
+        let path = format!("memory://reseed-worker-{name}.pdf");
+        crate::scene::model::pdf_raster::register_source(&path, std::sync::Arc::new(bytes));
+        let mut scene = Scene::new();
+        let definition = scene.document.allocate_handle();
+        scene.document.objects.insert(
+            definition,
+            document::objects::ObjectType::UnderlayDefinition(
+                document::objects::UnderlayDefinition::pdf(&path, "1"),
+            ),
+        );
+        let handles = (0..4)
+            .map(|k| {
+                let mut underlay = document::entities::Underlay::pdf();
+                underlay.definition_handle = definition;
+                underlay.insertion_point = Vector3::new(f64::from(k) * 2.0, 0.0, 0.0);
+                scene.add_entity(EntityType::Underlay(underlay))
+            })
+            .collect();
+        (scene, handles)
+    }
+
+    /// Zooms to `[x0, y0]`–`[x1, y1]` in a 1000-pixel square view and lets
+    /// the view rest; the job is left for the caller.
+    fn rest_at(scene: &mut Scene, x0: f32, y0: f32, x1: f32, y1: f32) {
+        scene.zoom_to_window(glam::Vec3::new(x0, y0, 0.0), glam::Vec3::new(x1, y1, 0.0));
+        scene.set_render_pixel_scale(1000.0, 1000.0);
+        let start = iced::time::Instant::now();
+        scene.refresh_underlay_resolution(start);
+        scene.refresh_underlay_resolution(start + Duration::from_millis(200));
+    }
+
+    fn pixels(scene: &Scene, handles: &[Handle]) -> Vec<std::sync::Arc<Vec<u8>>> {
+        handles
+            .iter()
+            .map(|handle| std::sync::Arc::clone(&scene.images[handle].pixels))
+            .collect()
+    }
+
+    /// A zoom step draws nothing on the UI thread: the old rasters stay
+    /// until the worker's result is taken, and taking it draws nothing.
+    #[test]
+    fn a_zoom_step_draws_nothing_on_the_ui_thread() {
+        let (mut scene, handles) = model_with_underlays("ui-thread");
+        let old = pixels(&scene, &handles);
+        let before = seeds();
+        rest_at(&mut scene, 0.0, 0.0, 8.0, 8.0);
+        assert_eq!(seeds(), before, "no render at the zoom step");
+        assert!(
+            !scene.underlay_resolution_stale(),
+            "no more frames are asked for"
+        );
+        let shown = pixels(&scene, &handles);
+        assert!(
+            old.iter()
+                .zip(&shown)
+                .all(|(a, b)| std::sync::Arc::ptr_eq(a, b)),
+            "the old rasters stay on screen"
+        );
+        let job = scene.take_reseed_job().expect("a job for the worker");
+        assert!(scene.take_reseed_job().is_none(), "the job is taken once");
+        let done = job.render();
+        let drawn = seeds();
+        assert_eq!(
+            drawn - before,
+            handles.len(),
+            "the worker draws each one once"
+        );
+        assert_eq!(scene.apply_reseed(done), handles.len());
+        assert_eq!(seeds(), drawn, "taking the result draws nothing again");
+        let new = pixels(&scene, &handles);
+        assert!(
+            old.iter()
+                .zip(&new)
+                .all(|(a, b)| !std::sync::Arc::ptr_eq(a, b)),
+            "the new rasters replace the old"
+        );
+    }
+
+    /// A result for an older zoom step is dropped; the newer one is taken.
+    #[test]
+    fn a_result_for_an_older_step_is_dropped() {
+        let (mut scene, handles) = model_with_underlays("older-step");
+        rest_at(&mut scene, 0.0, 0.0, 8.0, 8.0);
+        let older = scene.take_reseed_job().expect("a job").render();
+        rest_at(&mut scene, 0.0, 0.0, 2.0, 2.0);
+        let newer = scene.take_reseed_job().expect("a job").render();
+        assert_eq!(
+            scene.apply_reseed(older),
+            0,
+            "the older step's rasters are dropped"
+        );
+        assert_eq!(scene.apply_reseed(newer), handles.len());
+    }
+
+    /// An object changed while the worker draws keeps the raster its edit
+    /// drew; the others take theirs.
+    #[test]
+    fn a_changed_object_keeps_its_own_raster() {
+        let (mut scene, handles) = model_with_underlays("changed");
+        rest_at(&mut scene, 0.0, 0.0, 8.0, 8.0);
+        let done = scene.take_reseed_job().expect("a job").render();
+        if let Some(EntityType::Underlay(u)) = scene.document.get_entity_mut(handles[0]) {
+            u.fade = 50;
+        }
+        scene.bump_entities(&[(handles[0], ChangeKind::Modified)]);
+        let edited = std::sync::Arc::clone(&scene.images[&handles[0]].pixels);
+        assert_eq!(scene.apply_reseed(done), handles.len() - 1);
+        assert!(
+            std::sync::Arc::ptr_eq(&edited, &scene.images[&handles[0]].pixels),
+            "the edited underlay keeps the raster of its edit"
+        );
+    }
+
+    /// A raster of a zoomed-in region marks its scale, when the result is
+    /// taken, so that leaving the region asks for frames again.
+    #[test]
+    fn a_zoomed_in_region_is_marked_when_taken() {
+        let (mut scene, _) = model_with_underlays("region");
+        rest_at(&mut scene, 0.4, 0.4, 0.6, 0.6);
+        assert!(!scene.underlay_scale.region_used.get(), "nothing drawn yet");
+        let done = scene.take_reseed_job().expect("a job").render();
+        scene.apply_reseed(done);
+        assert!(
+            scene.underlay_scale.region_used.get(),
+            "the region is marked"
+        );
+        scene.zoom_to_window(
+            glam::Vec3::new(4.0, 4.0, 0.0),
+            glam::Vec3::new(4.2, 4.2, 0.0),
+        );
+        assert!(
+            scene.underlay_resolution_stale(),
+            "leaving the region asks for frames"
+        );
+    }
+
+    /// Two zoom steps before the worker starts make one job, with the
+    /// newer input of each object.
+    #[test]
+    fn a_job_keeps_one_input_for_each_object() {
+        let (mut scene, handles) = model_with_underlays("one-input");
+        rest_at(&mut scene, 0.0, 0.0, 8.0, 8.0);
+        rest_at(&mut scene, 0.0, 0.0, 2.0, 2.0);
+        let job = scene.take_reseed_job().expect("a job");
+        assert_eq!(job.len(), handles.len());
+        assert_eq!(scene.apply_reseed(job.render()), handles.len());
+    }
+}

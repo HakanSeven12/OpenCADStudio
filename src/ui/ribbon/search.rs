@@ -2,6 +2,7 @@
 //! the application menu, the menu bar and the ribbon, and runs it the way its
 //! button or menu item would.
 
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use iced::advanced::layout::{self, Layout};
@@ -806,9 +807,29 @@ impl Ribbon {
         }
     }
 
-    /// A window too narrow for the box: only its magnifier button shows.
+    /// A window too narrow for the box, or a tab row that cannot hold it
+    /// beside the quick-access toolbar and the tabs: only its magnifier
+    /// button shows. The box goes before the toolbar and the tabs wrap
+    /// onto two rows.
     fn narrow(&self) -> bool {
-        self.win_w < NARROW
+        self.win_w < NARROW || !self.tab_row_holds_box()
+    }
+
+    /// Whether the tab row holds the logo, the quick-access toolbar and the
+    /// tabs (at the width they last needed) and the full box, in the window
+    /// as wide as it is now. The widths do not depend on the box, so the
+    /// answer does not flip as the box comes and goes. Before the first
+    /// layout, and with the box in the menu row, it does.
+    fn tab_row_holds_box(&self) -> bool {
+        if !self.search_in_tab_row.load(Ordering::Relaxed) {
+            return true;
+        }
+        let flow = f32::from_bits(self.tab_flow_natural.load(Ordering::Relaxed));
+        if flow <= 0.0 {
+            return true;
+        }
+        let (logo, _) = self.tab_span.insets();
+        logo + flow + super::TAB_ROW_GAP + BOX_W + super::TAB_BAR_PAD_RIGHT <= self.win_w
     }
 
     /// Whether the full box shows in the tab row: kept open, or open for now.
@@ -1519,6 +1540,73 @@ mod tests {
         let _ = ribbon.on_search(SearchMsg::Press(false), now);
         ribbon.search_tick(now + BLUR_DELAY);
         assert!(ribbon.shows_box());
+    }
+
+    /// Lays the ribbon out in a window `width` wide, as the app does after
+    /// each view, and returns the tab row's height.
+    fn lay_out(ribbon: &Ribbon, width: f32) -> f32 {
+        let _ui = iced_test::simulator::Simulator::with_size(
+            iced::Settings::default(),
+            (width, 260.0),
+            ribbon.view(None, false, false, false, 0, 0, false, None),
+        );
+        f32::from_bits(ribbon.tab_bar_h.load(Ordering::Relaxed))
+    }
+
+    #[test]
+    fn the_box_collapses_before_the_tab_row_wraps() {
+        let _guard = crate::headless_ui_lock();
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(|| {
+                // A long quick-access toolbar: with the box the tab row no
+                // longer fits in a window that is not narrow.
+                let mut ribbon = Ribbon::new();
+                let mut layout = ribbon.layout.clone();
+                for command in [
+                    "LINE", "CIRCLE", "ARC", "PLINE", "RECTANG", "POLYGON", "ELLIPSE", "SPLINE",
+                    "HATCH", "MOVE", "COPY", "ROTATE", "SCALE", "MIRROR", "OFFSET", "TRIM",
+                    "EXTEND", "FILLET", "CHAMFER", "ARRAY", "ERASE", "EXPLODE", "STRETCH", "BREAK",
+                    "JOIN", "LENGTHEN", "ALIGN", "DIST",
+                ] {
+                    layout.qat.push(QatItem::Command(command.into()));
+                }
+                ribbon.set_layout(layout);
+                ribbon.set_window_size((4000.0, 900.0));
+                assert_eq!(
+                    lay_out(&ribbon, 4000.0),
+                    super::super::TAB_ROW_H,
+                    "wide: one row"
+                );
+                assert!(ribbon.shows_box(), "wide: the box shows");
+
+                // Room for everything but the full box.
+                let flow = f32::from_bits(ribbon.tab_flow_natural.load(Ordering::Relaxed));
+                let (logo, _) = ribbon.tab_span.insets();
+                let width = logo
+                    + flow
+                    + super::super::TAB_ROW_GAP
+                    + MAGNIFIER_W
+                    + super::super::TAB_BAR_PAD_RIGHT
+                    + 40.0;
+                assert!(width > NARROW, "the window is not narrow: {width}");
+                assert!(width < logo + flow + BOX_W, "the box does not fit: {width}");
+                ribbon.set_window_size((width, 900.0));
+                assert!(!ribbon.shows_box(), "the box collapses to its magnifier");
+                assert_eq!(
+                    lay_out(&ribbon, width),
+                    super::super::TAB_ROW_H,
+                    "the tabs keep one row"
+                );
+
+                // The decision holds once the magnifier is laid out.
+                assert!(!ribbon.shows_box());
+                ribbon.set_window_size((4000.0, 900.0));
+                assert!(ribbon.shows_box(), "wide again, the box is back");
+            })
+            .expect("spawn UI test")
+            .join()
+            .unwrap_or_else(|error| std::panic::resume_unwind(error));
     }
 
     #[test]

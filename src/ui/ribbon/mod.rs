@@ -423,6 +423,15 @@ pub struct Ribbon {
     /// Measured tab-bar height (28 on one row, 56 when tabs wrap). Written by
     /// the `WrapBar` widget during layout, read when anchoring dropdowns.
     tab_bar_h: Arc<AtomicU32>,
+    /// The room the logo and the search box take beside the tab row's
+    /// quick-access and tabs block, written while the row is laid out.
+    tab_span: CenterSpan,
+    /// The width the quick-access and tabs block needs on one row (`f32`
+    /// bits), as last laid out; 0 before the first layout. The search box
+    /// collapses when the row cannot also hold it.
+    tab_flow_natural: Arc<AtomicU32>,
+    /// The search box ends the tab row (no menu row), as last viewed.
+    search_in_tab_row: AtomicBool,
     /// Measured tool-area height (TOOL_BAR_H at full density, shorter once every
     /// panel is collapsed). Written by `CollapsePanels`, read when anchoring
     /// dropdowns below the ribbon.
@@ -611,6 +620,9 @@ impl Ribbon {
             table_style_names: vec![],
             active_table_style: String::new(),
             tab_bar_h: Arc::new(AtomicU32::new(TAB_ROW_H.to_bits())),
+            tab_span: CenterSpan::default(),
+            tab_flow_natural: Arc::new(AtomicU32::new(0)),
+            search_in_tab_row: AtomicBool::new(true),
             tool_bar_h: Arc::new(AtomicU32::new(TOOL_BAR_H.to_bits())),
             collapse_mode: CollapseMode::default(),
             layout: RibbonLayout::default(),
@@ -1500,14 +1512,13 @@ impl Ribbon {
         // much room they take in the same pass: a search box that collapses
         // or opens moves the tabs at once. With the menu row the large logo
         // starts the ribbon and the tab row ends at its right padding.
-        let span = CenterSpan::new(
-            0.0,
-            if menu_row.is_some() {
-                TAB_BAR_PAD_RIGHT
-            } else {
-                0.0
-            },
-        );
+        let span = self.tab_span.clone();
+        if menu_row.is_some() {
+            span.after()
+                .store(TAB_BAR_PAD_RIGHT.to_bits(), Ordering::Relaxed);
+        }
+        self.search_in_tab_row
+            .store(menu_row.is_none(), Ordering::Relaxed);
         let mut tab_row = row![].spacing(TAB_ROW_GAP).align_y(iced::Center);
         if menu_row.is_none() {
             // As far from the window's edge as the large logo's artwork; the
@@ -1526,6 +1537,7 @@ impl Ribbon {
                     .spacing(if qat_below { 0.0 } else { 6.0 })
                     .center_trail(self.layout.centered)
                     .center_span(span.clone())
+                    .report_natural_width(self.tab_flow_natural.clone())
                     .min_row_h(TAB_ROW_H)
                     .report_height(self.tab_bar_h.clone()),
             )

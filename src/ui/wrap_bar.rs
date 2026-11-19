@@ -131,7 +131,7 @@ impl CenterSpan {
     }
 
     /// (before, after) in px, never negative.
-    fn insets(&self) -> (f32, f32) {
+    pub(crate) fn insets(&self) -> (f32, f32) {
         let read = |side: &AtomicU32| f32::from_bits(side.load(Ordering::Relaxed)).max(0.0);
         (read(&self.before), read(&self.after))
     }
@@ -156,6 +156,9 @@ pub struct WrapBar<'a> {
     center_span: Option<CenterSpan>,
     /// Receives the measured total height (bits of an `f32`).
     height_out: Option<Arc<AtomicU32>>,
+    /// Receives the width both blocks need side by side on one row (bits of
+    /// an `f32`), whether or not they get it.
+    natural_width_out: Option<Arc<AtomicU32>>,
 }
 
 impl<'a> WrapBar<'a> {
@@ -170,6 +173,7 @@ impl<'a> WrapBar<'a> {
             center_trail: false,
             center_span: None,
             height_out: None,
+            natural_width_out: None,
         }
     }
 
@@ -210,6 +214,13 @@ impl<'a> WrapBar<'a> {
 
     pub fn report_height(mut self, out: Arc<AtomicU32>) -> Self {
         self.height_out = Some(out);
+        self
+    }
+
+    /// Report the width `lead` and `trail` need on one row into `out` on
+    /// every layout, so a neighbour can make room before the bar wraps.
+    pub fn report_natural_width(mut self, out: Arc<AtomicU32>) -> Self {
+        self.natural_width_out = Some(out);
         self
     }
 
@@ -271,6 +282,10 @@ impl<'a> Widget<Message, Theme, Renderer> for WrapBar<'a> {
 
         let mut lead_sz = lead_node.size();
         let mut trail_sz = trail_node.size();
+        if let Some(out) = &self.natural_width_out {
+            let natural = lead_sz.width + self.spacing + trail_sz.width;
+            out.store(natural.to_bits(), Ordering::Relaxed);
+        }
 
         let width = if max.width.is_finite() {
             max.width

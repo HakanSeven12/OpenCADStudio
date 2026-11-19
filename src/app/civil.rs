@@ -41,6 +41,42 @@ fn newest_profile(document: &document::Document, alignment: Handle) -> Option<Ha
         .find(|h| arch(document, *h).is_some_and(|a| a.dxf_name == "AECC_PROFILE"))
 }
 
+/// The drawing's last site.
+fn last_site(document: &document::Document) -> Option<Handle> {
+    document
+        .entities()
+        .filter_map(|e| match e {
+            EntityType::Extended(x) => match &x.data {
+                document::entities::ExtendedEntityData::Arch(a)
+                    if a.dxf_name == "AECC_PARCEL" && a.face_name().is_some() && a.parcel_site().is_none() =>
+                {
+                    Some(x.common.handle)
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .last()
+}
+
+/// `add` on `site`; on a new site named `site_name` when there is none or when the member
+/// cannot join it (a site the codec does not write, or a member that would cross another).
+fn add_on_site(
+    doc: &mut document::Document,
+    site: &mut Option<Handle>,
+    site_name: &str,
+    add: impl Fn(&mut document::Document, Handle) -> Result<Handle, document::error::DxfError>,
+) -> Result<Handle, document::error::DxfError> {
+    if let Some(s) = *site {
+        if let Ok(h) = add(doc, s) {
+            return Ok(h);
+        }
+    }
+    let s = c3d::add_site(doc, site_name, "")?;
+    *site = Some(s);
+    add(doc, s)
+}
+
 /// The vertices (x, y, elevation) of a line or polyline with the bulge of the segment that
 /// starts at each, the first again at the end of a closed one.
 fn vertices(entity: &EntityType) -> Result<Vec<(Vector3, f64)>, String> {
@@ -231,41 +267,52 @@ impl OpenCADStudio {
                             .collect::<Vec<_>>())
                     })
                     .collect::<Result<Vec<_>, String>>()?;
-                // The last site this drawing has; a new one when it has none or when a feature
-                // line cannot join it (a site the codec does not write).
-                let site = doc
-                    .entities()
-                    .filter(|e| match e {
-                        EntityType::Extended(x) => matches!(&x.data,
-                            document::entities::ExtendedEntityData::Arch(a)
-                                if a.dxf_name == "AECC_PARCEL" && a.face_name().is_some() && a.parcel_site().is_none()),
-                        _ => false,
-                    })
-                    .last()
-                    .map(|e| e.common().handle);
+                let mut site = last_site(doc);
                 let first = next_name(doc, "AECC_FEATURE_LINE", "Feature Line");
                 let site_name = next_name(doc, "AECC_PARCEL", "Site");
                 self.push_undo_snapshot(i, name);
                 let doc = &mut self.tabs[i].scene.document;
-                let mut site = site;
                 let base = first.rsplit_once(' ').and_then(|(_, n)| n.parse::<usize>().ok()).unwrap_or(1);
                 for (k, points) in paths.iter().enumerate() {
                     let line = format!("Feature Line {}", base + k);
-                    let added = match site {
-                        Some(s) => c3d::add_feature_line_vertices(doc, s, &line, points, layer),
-                        None => Err(document::error::DxfError::Parse(String::new())),
-                    };
-                    let h = match added {
-                        Ok(h) => h,
-                        Err(_) => {
-                            let s = c3d::add_site(doc, &site_name, "").map_err(refused)?;
-                            site = Some(s);
-                            c3d::add_feature_line_vertices(doc, s, &line, points, layer).map_err(refused)?
-                        }
-                    };
+                    let h = add_on_site(doc, &mut site, &site_name, |doc, s| {
+                        c3d::add_feature_line_vertices(doc, s, &line, points, layer)
+                    })
+                    .map_err(refused)?;
                     changes.push((h, ChangeKind::Added));
                 }
                 crate::tf!("{} feature line(s) created.", changes.len()).into_owned()
+            }
+            "CREATEPARCEL" => {
+                let doc = &self.tabs[i].scene.document;
+                let boundaries = req.objects[0]
+                    .iter()
+                    .filter_map(|h| doc.get_entity(*h))
+                    .map(|e| {
+                        let mut points = vertices(e)?;
+                        let closed = points.len() > 3 && points.first().map(|p| (p.0.x, p.0.y)) == points.last().map(|p| (p.0.x, p.0.y));
+                        if !closed {
+                            return Err(crate::t!("A parcel needs a closed polyline.").into_owned());
+                        }
+                        if points.iter().any(|p| p.1 != 0.0) {
+                            return Err(crate::t!("Polylines with arcs cannot be made into parcels yet.").into_owned());
+                        }
+                        // The lot line closes back to its first vertex itself.
+                        points.pop();
+                        Ok(points.iter().map(|p| Vector2::new(p.0.x, p.0.y)).collect::<Vec<_>>())
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
+                let mut site = last_site(doc);
+                let site_name = next_name(doc, "AECC_PARCEL", "Site");
+                self.push_undo_snapshot(i, name);
+                let doc = &mut self.tabs[i].scene.document;
+                for boundary in &boundaries {
+                    let h = add_on_site(doc, &mut site, &site_name, |doc, s| c3d::add_parcel(doc, s, boundary, layer)).map_err(refused)?;
+                    changes.push((h, ChangeKind::Added));
+                }
+                // The lot lines are new entities too: redraw everything.
+                changes.clear();
+                crate::tf!("{} parcel(s) created.", boundaries.len()).into_owned()
             }
             "CREATECORRIDOR" => {
                 let doc = &self.tabs[i].scene.document;

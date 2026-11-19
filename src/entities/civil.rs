@@ -591,9 +591,27 @@ pub(crate) fn decoded(data: &ArchEntityData, handle: u64, document: &document::D
         CivilKind::Other if data.dxf_name == "AECC_FEATURE_LINE" => feature_line(data, handle, document, &mut out)?,
         CivilKind::Other if data.dxf_name == "AECC_COGO_POINT" => cogo_point(data, document, &mut out)?,
         CivilKind::Other if data.dxf_name == "AECC_GRAPH_SECTION_VIEW" => section_view(data, &mut out)?,
+        CivilKind::Parcel => parcel(data, document, &mut out)?,
         _ => return None,
     }
     Some(out)
+}
+
+/// A parcel without a drawn cache: the boundary of its face in its site's topology.
+fn parcel(data: &ArchEntityData, document: &document::Document, out: &mut Decoded) -> Option<()> {
+    let (_, face) = data.parcel_face()?;
+    let site = data.parcel_site()?;
+    // The site's container: the topology record that refers to the site.
+    let topology = document.objects.values().find_map(|o| match o {
+        ObjectType::Arch(a) if a.decode().handles.contains(&site) => a.topology(),
+        _ => None,
+    })?;
+    let components = style_components(document, &data.decode().handles, "AECC_PARCEL_STYLE");
+    let style = component(document, components.as_deref(), 0).or(Some(ProxyStyle::default()));
+    for run in topology.face_polylines(face) {
+        styled(out, style, run.into_iter().map(|p| [p.x, p.y, 0.0]).collect());
+    }
+    Some(())
 }
 
 /// A section view without a drawn cache: its frame.

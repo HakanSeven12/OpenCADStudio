@@ -31,6 +31,7 @@ pub const COMMANDS: &[&str] = &[
     "CREATEPROFILE",
     "CREATEPROFILEVIEW",
     "CREATEFEATURELINE",
+    "CREATEPARCEL",
     "CREATECORRIDOR",
     "CREATESAMPLELINES",
     "CREATESECTIONVIEWS",
@@ -91,6 +92,7 @@ pub fn steps(name: &str) -> Option<Vec<Step>> {
             Step::Objects { prompt: "Select the main road alignment:", filter: Alignments, slot: 0 },
             Step::Objects { prompt: "Select the crossing road alignment:", filter: Alignments, slot: 1 },
         ],
+        "CREATEPARCEL" => vec![Step::Objects { prompt: "Select closed polylines to make parcels of:", filter: Paths, slot: 0 }],
         "CREATEFEATURELINE" => vec![Step::Objects { prompt: "Select lines or polylines to make feature lines of:", filter: Paths, slot: 0 }],
         _ => return None,
     })
@@ -124,6 +126,7 @@ impl CadModule for CivilModule {
                         tool("CREATEPROFILE", "Create Profile", icon!("profile")),
                         tool("CREATEPROFILEVIEW", "Create Profile View", icon!("profileview")),
                         tool("CREATEFEATURELINE", "Create Feature Line", icon!("featureline")),
+                        tool("CREATEPARCEL", "Create Parcel", icon!("parcel")),
                         tool("CREATECORRIDOR", "Create Corridor", icon!("corridor")),
                         tool("CREATESAMPLELINES", "Create Sample Lines", icon!("samplelines")),
                         tool("CREATESECTIONVIEWS", "Create Section Views", icon!("sectionviews")),

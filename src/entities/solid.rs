@@ -325,9 +325,11 @@ impl PropertyEditable for Solid {
 
 impl Transformable for Solid {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(
+        let normal = self.normal;
+        crate::scene::view::transform::apply_ocs_entity_transform(
             self,
             t,
+            normal,
             |entity, p1, p2| {
                 for corner in [
                     &mut entity.first_corner,

@@ -994,7 +994,8 @@ impl PropertyEditable for AttributeDefinition {
 
 impl Transformable for AttributeDefinition {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
+        let normal = self.normal;
+        transform::apply_ocs_entity_transform(self, t, normal, |entity, p1, p2| {
             transform::reflect_xy_point(
                 &mut entity.insertion_point.x,
                 &mut entity.insertion_point.y,
@@ -1309,7 +1310,8 @@ impl PropertyEditable for AttributeEntity {
 
 impl Transformable for AttributeEntity {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
+        let normal = self.normal;
+        transform::apply_ocs_entity_transform(self, t, normal, |entity, p1, p2| {
             transform::reflect_xy_point(
                 &mut entity.insertion_point.x,
                 &mut entity.insertion_point.y,

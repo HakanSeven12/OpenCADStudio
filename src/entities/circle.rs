@@ -257,7 +257,8 @@ fn apply_grip(circle: &mut Circle, grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(circle: &mut Circle, t: &EntityTransform) {
-    crate::scene::view::transform::apply_standard_entity_transform(circle, t, |entity, p1, p2| {
+    let normal = circle.normal;
+    crate::scene::view::transform::apply_ocs_entity_transform(circle, t, normal, |entity, p1, p2| {
         crate::scene::view::transform::reflect_xy_point(
             &mut entity.center.x,
             &mut entity.center.y,

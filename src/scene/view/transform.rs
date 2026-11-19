@@ -61,6 +61,36 @@ where
     }
 }
 
+/// [`apply_standard_entity_transform`] for an entity stored in its OCS
+/// (`normal`). The `mirror` closure reflects stored coordinates as world XY,
+/// which they are only under a +Z normal: an arc with a -Z normal keeps its
+/// centre with X negated, and reflecting that as world X across a vertical
+/// line threw the copy far away (#3325). Any other normal goes through the
+/// document's OCS-aware reflection instead.
+pub fn apply_ocs_entity_transform<T, F>(
+    entity: &mut T,
+    t: &EntityTransform,
+    normal: Vector3,
+    mirror: F,
+) where
+    T: document::Entity,
+    F: FnOnce(&mut T, DVec3, DVec3),
+{
+    let plus_z = DVec3::new(normal.x, normal.y, normal.z)
+        .normalize_or(DVec3::Z)
+        .abs_diff_eq(DVec3::Z, 1e-10);
+    match t {
+        EntityTransform::Mirror {
+            p1,
+            p2,
+            working_normal,
+        } if !plus_z => {
+            entity.apply_transform(&reflection_about_working_line(*p1, *p2, *working_normal))
+        }
+        _ => apply_standard_entity_transform(entity, t, mirror),
+    }
+}
+
 /// `t` as one document `Transform`, for data that has no entity-specific
 /// rules (XDATA world points, distances and scale factors).
 pub fn codec_transform(t: &EntityTransform) -> Transform {

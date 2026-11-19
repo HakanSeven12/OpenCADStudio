@@ -618,7 +618,8 @@ fn apply_grip(t: &mut Text, grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(t: &mut Text, tr: &EntityTransform) {
-    crate::scene::view::transform::apply_standard_entity_transform(t, tr, |entity, p1, p2| {
+    let normal = t.normal;
+    crate::scene::view::transform::apply_ocs_entity_transform(t, tr, normal, |entity, p1, p2| {
         crate::scene::view::transform::reflect_xy_point(
             &mut entity.insertion_point.x,
             &mut entity.insertion_point.y,

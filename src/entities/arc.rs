@@ -293,7 +293,8 @@ fn apply_grip(arc: &mut Arc, grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(arc: &mut Arc, t: &EntityTransform) {
-    crate::scene::view::transform::apply_standard_entity_transform(arc, t, |entity, p1, p2| {
+    let normal = arc.normal;
+    crate::scene::view::transform::apply_ocs_entity_transform(arc, t, normal, |entity, p1, p2| {
         crate::scene::view::transform::reflect_xy_point(
             &mut entity.center.x,
             &mut entity.center.y,

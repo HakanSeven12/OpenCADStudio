@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "acadrust"
 version = "0.6.8"
-source = "git+https://github.com/hakanaktt/acadrust.git?rev=64a8fd346e7eba068f779938105082995b60187c#64a8fd346e7eba068f779938105082995b60187c"
+source = "git+https://github.com/hakanaktt/acadrust.git?rev=e862f9916d118cc2d7a4b16c9892cf3cbed8d342#e862f9916d118cc2d7a4b16c9892cf3cbed8d342"
 dependencies = [
  "anyhow",
  "bitflags",
@@ -1300,7 +1300,7 @@ dependencies = [
 [[package]]
 name = "opencaddocument"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=10b04285b4170fecf440d263f59a521c4f453c0d#10b04285b4170fecf440d263f59a521c4f453c0d"
+source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=c9536813357506625d627a8c66b655be59f50e0a#c9536813357506625d627a8c66b655be59f50e0a"
 dependencies = [
  "acadrust",
  "serde",

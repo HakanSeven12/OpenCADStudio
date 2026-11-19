@@ -57,7 +57,16 @@ fn aabb_rejects(
     eye: glam::DVec3,
     bounds: Rectangle,
 ) -> bool {
-    let [minx, miny, maxx, maxy] = aabb;
+    // The box is stored in f32, rounded to nearest: at georeferenced
+    // coordinates (millions of units) a step is up to half a unit, so a thin
+    // wire's box can round inside the wire and reject clicks right on it at a
+    // close zoom. One step outward bounds the rounding.
+    let [minx, miny, maxx, maxy] = [
+        aabb[0].next_down(),
+        aabb[1].next_down(),
+        aabb[2].next_up(),
+        aabb[3].next_up(),
+    ];
     // Project all four corners — a plan view can be rotated about Z, so the
     // screen footprint isn't axis-aligned and the two diagonal corners alone
     // wouldn't bound it.

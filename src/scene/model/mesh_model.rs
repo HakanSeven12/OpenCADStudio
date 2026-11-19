@@ -617,7 +617,7 @@ mod solid_snap_tests {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod lod_tests {
-    use super::{simplified_lods, MeshModel};
+    use super::{simplified_lods, MeshLodSet, MeshModel};
 
     fn mesh_of(body: &ocs_solid::model::Brep) -> MeshModel {
         let mesh = crate::scene::model::solid_model::tessellate(
@@ -681,6 +681,29 @@ mod lod_tests {
             let error = worst(&mesh, &lod.indices, off);
             assert!(error < base + 0.05, "{error} vs {base}");
         }
+    }
+
+    /// A block reference places shared geometry and holds no mesh of its
+    /// own: the levels it draws are the ones of the geometry it places.
+    #[test]
+    fn a_placement_draws_the_levels_of_the_geometry_it_places() {
+        let body = ocs_solid::model::make_sphere([0.0; 3], 10.0).unwrap();
+        let mut solid = MeshLodSet::from_single(mesh_of(&body));
+        solid.build_display_lods();
+        solid.prepare_instance_source(document::Handle::new(7));
+        let mut placed = solid.clone();
+        placed.lods.clear();
+        placed.display_lods = Default::default();
+        placed.instance_transform = Some(document::types::Transform::identity());
+        for level in [1, 2] {
+            let own = solid.display_lod(level).expect("the solid has the level");
+            let drawn = placed
+                .display_lod(level)
+                .unwrap_or_else(|| panic!("the placement has no level {level}"));
+            assert_eq!(drawn.indices, own.indices, "level {level}");
+        }
+        assert!(placed.display_lod(0).is_none());
+        assert!(placed.display_lod(3).is_none());
     }
 
     #[test]

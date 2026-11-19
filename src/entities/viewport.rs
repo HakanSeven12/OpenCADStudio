@@ -466,6 +466,16 @@ fn resize_from_corners(vp: &mut Viewport, a: (f64, f64), b: (f64, f64)) -> bool 
 }
 
 fn apply_transform(vp: &mut Viewport, t: &EntityTransform) {
+    // Moving, scaling or rotating the frame on the sheet leaves the model view
+    // where it was: target, view direction and UCS are model-space values, and
+    // transforming them with the sheet point shifted the content (#3329).
+    let model_view = (
+        vp.view_target,
+        vp.view_direction,
+        vp.ucs_origin,
+        vp.ucs_x_axis,
+        vp.ucs_y_axis,
+    );
     crate::scene::view::transform::apply_standard_entity_transform(vp, t, |entity, p1, p2| {
         crate::scene::view::transform::reflect_xy_point(
             &mut entity.center.x,
@@ -474,6 +484,13 @@ fn apply_transform(vp: &mut Viewport, t: &EntityTransform) {
             p2,
         );
     });
+    (
+        vp.view_target,
+        vp.view_direction,
+        vp.ucs_origin,
+        vp.ucs_x_axis,
+        vp.ucs_y_axis,
+    ) = model_view;
 }
 
 crate::impl_entity_basics!(Viewport);

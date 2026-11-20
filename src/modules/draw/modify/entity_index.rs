@@ -29,7 +29,7 @@ pub(super) fn modify_aabb(entity: &EntityType) -> Option<[f64; 4]> {
     })
 }
 
-pub(super) struct ModifyEntityIndex {
+pub(crate) struct ModifyEntityIndex {
     by_handle: FxHashMap<Handle, usize>,
     tree: Option<QuadTree>,
     unbounded: Vec<Handle>,

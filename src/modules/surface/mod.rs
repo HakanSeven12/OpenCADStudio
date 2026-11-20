@@ -4,7 +4,7 @@
 pub mod command;
 
 use crate::modules::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
-use command::{Filter, Opt, Step};
+use command::{Filter, Opt, OptKind, Step};
 
 pub struct SurfaceModule;
 
@@ -60,32 +60,32 @@ pub const COMMANDS: &[&str] = &[
 ];
 
 const BLEND_OPTIONS: &[Opt] = &[
-    Opt { label: "Continuity", keyword: "CON", key: "continuity", prompt: "Continuity at both edges (0 G0, 1 G1, 2 G2)" },
-    Opt { label: "Bulge magnitude", keyword: "B", key: "bulge", prompt: "Bulge magnitude (0 to 1)" },
+    Opt { label: "Continuity", keyword: "CON", key: "continuity", prompt: "Continuity at both edges (0 G0, 1 G1, 2 G2)", kind: OptKind::Number },
+    Opt { label: "Bulge magnitude", keyword: "B", key: "bulge", prompt: "Bulge magnitude (0 to 1)", kind: OptKind::Number },
 ];
 
 const FILLET_OPTIONS: &[Opt] = &[
-    Opt { label: "Radius", keyword: "R", key: "radius", prompt: "Specify radius" },
-    Opt { label: "Trim surface", keyword: "T", key: "trim", prompt: "Trim the surfaces to the fillet (1 yes, 0 no)" },
+    Opt { label: "Radius", keyword: "R", key: "radius", prompt: "Specify radius", kind: OptKind::Number },
+    Opt { label: "Trim surface", keyword: "T", key: "trim", prompt: "Trim the surfaces to the fillet (1 yes, 0 no)", kind: OptKind::Number },
 ];
 
 const EXTEND_OPTIONS: &[Opt] = &[
-    Opt { label: "Modes", keyword: "M", key: "stretch", prompt: "Extension mode (0 Extend, 1 Stretch)" },
+    Opt { label: "Modes", keyword: "M", key: "stretch", prompt: "Extension mode (0 Extend, 1 Stretch)", kind: OptKind::Number },
 ];
 
 const EXTRACT_OPTIONS: &[Opt] = &[
-    Opt { label: "Direction", keyword: "D", key: "direction", prompt: "Isoline direction (0 U, 1 V)" },
+    Opt { label: "Direction", keyword: "D", key: "direction", prompt: "Isoline direction (0 U, 1 V)", kind: OptKind::Number },
 ];
 
 const CV_OPTIONS: &[Opt] = &[
-    Opt { label: "Direction", keyword: "D", key: "direction", prompt: "Direction of the control vertex row (0 U, 1 V)" },
+    Opt { label: "Direction", keyword: "D", key: "direction", prompt: "Direction of the control vertex row (0 U, 1 V)", kind: OptKind::Number },
 ];
 
 const ANALYSIS_OPTIONS: &[Opt] = &[
-    Opt { label: "Stripes", keyword: "S", key: "stripes", prompt: "Number of zebra stripes" },
-    Opt { label: "Curvature", keyword: "C", key: "curvature", prompt: "Curvature shown (0 Gaussian, 1 mean, 2 maximum, 3 minimum)" },
-    Opt { label: "Minimum draft", keyword: "MI", key: "draft_min", prompt: "Draft angle shown at the low colour, degrees" },
-    Opt { label: "Maximum draft", keyword: "MA", key: "draft_max", prompt: "Draft angle shown at the high colour, degrees" },
+    Opt { label: "Stripes", keyword: "S", key: "stripes", prompt: "Number of zebra stripes", kind: OptKind::Number },
+    Opt { label: "Curvature", keyword: "C", key: "curvature", prompt: "Curvature shown (0 Gaussian, 1 mean, 2 maximum, 3 minimum)", kind: OptKind::Number },
+    Opt { label: "Minimum draft", keyword: "MI", key: "draft_min", prompt: "Draft angle shown at the low colour, degrees", kind: OptKind::Number },
+    Opt { label: "Maximum draft", keyword: "MA", key: "draft_max", prompt: "Draft angle shown at the high colour, degrees", kind: OptKind::Number },
 ];
 
 /// The steps of surface command `name`; `None` for a command this module does not run.

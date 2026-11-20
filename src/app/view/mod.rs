@@ -3394,7 +3394,7 @@ bg={bg_ms:.1}ms n={view_count}"
             crate::ui::wrap_bar::PosReport::new(VIEWPORT_CAPTURE_BOUNDS_ID, viewport_stack).into();
         // The drawing tabs sit over the drawing, between the docks, unless
         // they are set to run across the window above the palettes.
-        parts.push(if self.doc_tabs_in_center() {
+        let center: Element<'_, Message> = if self.doc_tabs_in_center() {
             column![
                 doc_tab_bar(
                     &self.tabs,
@@ -3410,12 +3410,7 @@ bg={bg_ms:.1}ms n={view_count}"
             .into()
         } else {
             viewport
-        });
-        if let Some(e) = right_edge {
-            parts.push(e);
-        }
-        let workspace: Element<'_, Message> = row(parts).width(Fill).height(Fill).into();
-
+        };
         let command_line = self.command_line.view(
             allow_autocomplete,
             dyn_capturing,
@@ -3426,11 +3421,12 @@ bg={bg_ms:.1}ms n={view_count}"
             self.pending_pick_label().is_some(),
             self.show_node_graph,
         );
-        let center_stack: Element<'_, Message> = if thumbnail_capture_clean {
-            workspace
+        let center: Element<'_, Message> = if thumbnail_capture_clean {
+            center
         } else {
-            // The command line floats over the bottom of the workspace, on
-            // the Start page as over a drawing, so no band runs under it.
+            // The command line floats over the bottom of the drawing area
+            // between the docks (not over a docked pallet, #3367), on the
+            // Start page as over a drawing, so no band runs under it.
             // Hidden (COMMANDLINEHIDE / Ctrl+9), the field stays in the tree,
             // collapsed, so it keeps the keyboard; Dynamic Input shows the
             // prompt and the typing at the cursor.
@@ -3452,11 +3448,16 @@ bg={bg_ms:.1}ms n={view_count}"
                         left: 0.0,
                     })
             };
-            iced::widget::stack![workspace, command_line_overlay]
+            iced::widget::stack![center, command_line_overlay]
                 .width(Fill)
                 .height(Fill)
                 .into()
         };
+        parts.push(center);
+        if let Some(e) = right_edge {
+            parts.push(e);
+        }
+        let center_stack: Element<'_, Message> = row(parts).width(Fill).height(Fill).into();
         // Floating pallets draw over the command line, so the bottom rows of
         // a tall one (Layer Manager with many layers) are not hidden by it.
         let center_stack = self.dock_overlay(center_stack, tab);

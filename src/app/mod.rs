@@ -2765,6 +2765,8 @@ pub enum ColorPickTarget {
     PropertiesBg,
     /// A named per-entity Properties colour field.
     PropertiesField(String),
+    /// An input of a node graph card.
+    GraphPort(graph::Port),
     /// Current creation colour (ribbon).
     Ribbon,
     /// The ribbon's displayed layer, independent of Layer Manager selection.

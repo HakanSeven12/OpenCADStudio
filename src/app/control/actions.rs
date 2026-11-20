@@ -3,7 +3,7 @@ use super::*;
 use crate::io::plot_style::PlotStyleTableExt as _;
 use crate::scene::model::object::PropValue;
 
-fn control_color(value: &Value) -> Result<document::types::Color, Value> {
+pub(crate) fn control_color(value: &Value) -> Result<document::types::Color, Value> {
     if let Some(index) = value.as_i64().and_then(|v| i16::try_from(v).ok()) {
         return Ok(document::types::Color::from_index(index));
     }
@@ -40,7 +40,7 @@ fn control_lineweight(value: &Value) -> Result<document::types::LineWeight, Valu
         .ok_or_else(|| failure("invalid_lineweight", "Value is not a standard lineweight"))
 }
 
-fn color_value(color: document::types::Color) -> Value {
+pub(crate) fn color_value(color: document::types::Color) -> Value {
     if let Some((r, g, b)) = color.true_color_rgb() {
         json!({"rgb":[r,g,b]})
     } else {

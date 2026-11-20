@@ -2323,7 +2323,7 @@ mod actions;
 #[cfg(not(target_arch = "wasm32"))]
 pub(in crate::app) use actions::EmbedImageRead;
 pub(crate) mod vision;
-pub(crate) use actions::{property_json, row_id};
+pub(crate) use actions::{color_value, control_color, property_json, row_id};
 mod dgn_import;
 mod entities;
 #[cfg(not(target_arch = "wasm32"))]

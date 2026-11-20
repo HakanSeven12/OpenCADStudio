@@ -109,6 +109,8 @@ fn typed_value(row: &NodeRow, raw: &str) -> Option<Value> {
             }
             value => typed_point(&value).map(graph::value::point_value),
         },
+        // A name, even one that reads as a number.
+        RowWidget::EditChoice(_) => Some(Value::String(text.to_owned())),
         _ => Some(parsed()),
     }
 }
@@ -206,6 +208,46 @@ impl OpenCADStudio {
     /// and coordinate rows folded under a group row.
     fn graph_entity_sections(&self, i: usize, handle: Handle) -> Vec<NodeSection> {
         use crate::ui::properties::{coord_base, coord_component, coord_group_len};
+        let doc = &self.tabs[i].scene.document;
+        let named = |names: Vec<String>| names.into_iter().map(|n| (Value::String(n.clone()), n)).collect();
+        // The Properties panel's widget for each kind of row.
+        let widget = |json: &Value| match json["kind"].as_str() {
+            Some("number") => RowWidget::Measure,
+            Some("bool") => RowWidget::Toggle,
+            Some("color") => RowWidget::Color,
+            Some("choice") => RowWidget::Choice(
+                json["options"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(|o| (Value::String(o.to_owned()), crate::ui::properties::LocalizedChoice::new(o.to_owned()).to_string()))
+                    .collect(),
+            ),
+            Some("editable_choice") => RowWidget::EditChoice(
+                json["options"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect(),
+            ),
+            Some("lineweight") => RowWidget::Choice(
+                crate::ui::properties::lw_options()
+                    .into_iter()
+                    .map(|lw| (Value::from(lw.0.value()), lw.to_string()))
+                    .collect(),
+            ),
+            Some("layer") => RowWidget::Choice(named(crate::app::properties::property_layer_names(doc))),
+            Some("linetype") => RowWidget::Choice(named(
+                crate::app::properties::property_linetype_items(doc)
+                    .into_iter()
+                    .map(|item| item.name)
+                    .collect(),
+            )),
+            _ => RowWidget::Field,
+        };
         self.graph_panel_sections(i, handle)
             .into_iter()
             .map(|section| {
@@ -220,11 +262,7 @@ impl OpenCADStudio {
                         input: !matches!(json["kind"].as_str(), Some("readonly" | "specialized")),
                         output: true,
                         value: json["value"].clone(),
-                        widget: if json["kind"] == "number" {
-                            RowWidget::Measure
-                        } else {
-                            RowWidget::Field
-                        },
+                        widget: widget(&json),
                         group,
                     }
                 };

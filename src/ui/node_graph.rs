@@ -506,6 +506,13 @@ pub enum RowWidget {
         step: f64,
     },
     Toggle,
+    /// One of a list, as `(value, label)`: the Properties panel's choice,
+    /// layer, linetype and lineweight rows.
+    Choice(Vec<(Value, String)>),
+    /// Typed text, or one of a list (a block reference's Name).
+    EditChoice(Vec<String>),
+    /// A colour, valued as the control protocol writes it.
+    Color,
 }
 
 /// A group of rows; an empty title has no header and is always open.
@@ -682,6 +689,8 @@ pub struct Graph {
     /// The input whose label is under the pointer; its wire shows.
     pub hovered_label: Option<Port>,
     pub picker: Option<Picker>,
+    /// The input whose dropdown or colour list is open.
+    pub menu: Option<Port>,
 }
 
 impl Graph {
@@ -707,6 +716,7 @@ impl Graph {
         self.drag = None;
         self.hovered_label = None;
         self.picker = None;
+        self.menu = None;
         if self.selected.is_some_and(|id| !self.ui.contains_key(&id)) {
             self.selected = None;
         }
@@ -760,6 +770,9 @@ pub enum GraphMsg {
     /// The picker's Disconnect: the input loses its link.
     PickClear(Port),
     PickClose,
+    /// Opens an input's dropdown or colour list, or closes it when it is
+    /// open; `None` closes any.
+    Menu(Option<Port>),
 }
 
 fn msg(m: GraphMsg) -> Message {
@@ -1267,7 +1280,13 @@ impl Graph {
             let driven = self.driven_fields(id, node_sections);
             for section in node_sections.iter().filter(|s| self.is_open(id, s)) {
                 for row in &section.rows {
-                    let typed = !matches!(row.widget, RowWidget::Slider { .. } | RowWidget::Toggle);
+                    let typed = !matches!(
+                        row.widget,
+                        RowWidget::Slider { .. }
+                            | RowWidget::Toggle
+                            | RowWidget::Choice(_)
+                            | RowWidget::Color
+                    );
                     if typed && row.input && self.is_shown(id, row) && !driven.contains(&row.field)
                     {
                         fields.push(Port {
@@ -1759,7 +1778,11 @@ impl Graph {
                                 field: node_row.field.clone(),
                             })
                             .map(|names| folded_text(names));
+                        // Every row of a card shows its dropdown carets, as
+                        // the selected row of a property grid does.
+                        crate::ui::kit::building_row(None, true);
                         col = col.push(self.row_view(id, node_row, locked, label, folded));
+                        crate::ui::kit::building_row(None, false);
                     }
                 }
             }
@@ -1882,32 +1905,133 @@ impl Graph {
                         .width(Length::Fill)
                         .into()
                 }
+                RowWidget::Choice(options) => {
+                    let open = self.menu.as_ref() == Some(&port);
+                    let current = options.iter().position(|(v, _)| *v == node_row.value);
+                    let head = crate::ui::kit::dropdown_head(
+                        current.map_or(shown, |k| options[k].1.clone()),
+                        current.is_none(),
+                        open,
+                        msg(GraphMsg::Menu(Some(port.clone()))),
+                    );
+                    let width = crate::ui::kit::dropdown_width(
+                        options.iter().map(|(_, label)| label.as_str()),
+                        NODE_W - LABEL_W,
+                    );
+                    let rows = options
+                        .into_iter()
+                        .enumerate()
+                        .map(|(k, (value, label))| {
+                            crate::ui::kit::dropdown_option(
+                                label.clone(),
+                                label,
+                                msg(GraphMsg::Set(port.clone(), value)),
+                                Some(k) == current,
+                            )
+                        })
+                        .collect();
+                    let list = crate::ui::dropdown_list::DropdownList::new(rows)
+                        .selected(current)
+                        .select_first_by_default(current.is_some())
+                        .on_escape(msg(GraphMsg::Menu(None)));
+                    crate::ui::kit::dropdown(head, list, width, msg(GraphMsg::Menu(None)), open)
+                }
+                RowWidget::Color => {
+                    let color = crate::app::control::control_color(&node_row.value).ok();
+                    let set = port.clone();
+                    let on_pick = move |c| msg(GraphMsg::Set(set.clone(), crate::app::control::color_value(c)));
+                    let extras = crate::ui::color_select::ColorExtras {
+                        by_layer: true,
+                        by_block: true,
+                        ..Default::default()
+                    };
+                    let open = self.menu.as_ref() == Some(&port);
+                    let toggle = msg(GraphMsg::Menu(Some(port.clone())));
+                    let more = Message::OpenColorWindow(
+                        crate::app::ColorPickTarget::GraphPort(port),
+                        color.unwrap_or(document::types::Color::ByLayer),
+                    );
+                    match color {
+                        Some(color) => crate::ui::color_select::color_selector(color, open, extras, on_pick, toggle, more),
+                        None => crate::ui::color_select::color_selector_varies(open, extras, on_pick, toggle, more),
+                    }
+                }
                 RowWidget::Field
                 | RowWidget::Number
                 | RowWidget::Measure
                 | RowWidget::Coordinate
-                | RowWidget::Group => {
+                | RowWidget::Group
+                | RowWidget::EditChoice(_) => {
                     let numeric = matches!(node_row.widget, RowWidget::Number);
                     let draft = self.drafts.get(&port).cloned().unwrap_or(shown);
                     let edit = port.clone();
                     let held = draft.clone();
-                    text_input("", &draft)
+                    let input = text_input("", &draft)
                         .id(field_id(&port))
                         .on_input(move |s| {
                             let accepted = !numeric || number_prefix(&s);
                             let s = if accepted { s } else { held.clone() };
                             msg(GraphMsg::Input(edit.clone(), s))
                         })
-                        .on_submit(msg(GraphMsg::Commit(port)))
+                        .on_submit(msg(GraphMsg::Commit(port.clone())))
                         .size(11)
                         .padding([2, 4])
-                        .width(Length::Fill)
-                        .into()
+                        .width(Length::Fill);
+                    let RowWidget::EditChoice(options) = node_row.widget else {
+                        return self.row_frame(in_port, label, input.into(), out_port, tip);
+                    };
+                    // The field, and a caret that lists the names to pick.
+                    let open = self.menu.as_ref() == Some(&port);
+                    let caret = button(if open {
+                        crate::ui::icons::themed_arrow_up(9.0)
+                    } else {
+                        crate::ui::icons::themed_arrow_down(9.0)
+                    })
+                    .on_press(msg(GraphMsg::Menu(Some(port.clone()))))
+                    .style(button::text)
+                    .padding([2, 3]);
+                    let width = crate::ui::kit::dropdown_width(
+                        options.iter().map(String::as_str),
+                        NODE_W - LABEL_W,
+                    );
+                    let rows = options
+                        .into_iter()
+                        .map(|option| {
+                            let current = Value::String(option.clone()) == node_row.value;
+                            crate::ui::kit::dropdown_option(
+                                option.clone(),
+                                option.clone(),
+                                msg(GraphMsg::Set(port.clone(), Value::String(option))),
+                                current,
+                            )
+                        })
+                        .collect();
+                    let list = crate::ui::dropdown_list::DropdownList::new(rows)
+                        .on_escape(msg(GraphMsg::Menu(None)));
+                    crate::ui::kit::dropdown(
+                        row![input, caret].align_y(iced::Center).into(),
+                        list,
+                        width,
+                        msg(GraphMsg::Menu(None)),
+                        open,
+                    )
                 }
             }
         } else {
             text(shown).size(11).width(Length::Fill).into()
         };
+        self.row_frame(in_port, label, value, out_port, tip)
+    }
+
+    /// A row's ports, label and value on one line, with its tooltip.
+    fn row_frame<'a>(
+        &self,
+        in_port: Element<'a, Message>,
+        label: Element<'a, Message>,
+        value: Element<'a, Message>,
+        out_port: Element<'a, Message>,
+        tip: String,
+    ) -> Element<'a, Message> {
         with_tip(
             row![in_port, label, value, out_port]
                 .spacing(2)
@@ -2140,6 +2264,10 @@ impl Graph {
             GraphMsg::Input(port, value) => {
                 self.drafts.insert(port.clone(), value.clone());
             }
+            GraphMsg::Menu(port) => {
+                self.menu = port.clone().filter(|port| self.menu.as_ref() != Some(port));
+            }
+            GraphMsg::Set(..) => self.menu = None,
             _ => {}
         }
     }
@@ -2305,6 +2433,13 @@ struct ZoomedOverlay<'a> {
     origin: Point,
 }
 
+impl ZoomedOverlay<'_> {
+    /// Overlay content → screen.
+    fn transformation(&self) -> Transformation {
+        Transformation::translate(self.origin.x, self.origin.y) * Transformation::scale(self.zoom)
+    }
+}
+
 impl overlay::Overlay<Message, Theme, iced::Renderer> for ZoomedOverlay<'_> {
     fn layout(&mut self, renderer: &iced::Renderer, bounds: Size) -> layout::Node {
         let room = Size::new(
@@ -2322,13 +2457,50 @@ impl overlay::Overlay<Message, Theme, iced::Renderer> for ZoomedOverlay<'_> {
         layout: Layout<'_>,
         cursor: mouse::Cursor,
     ) {
-        let transformation = Transformation::translate(self.origin.x, self.origin.y)
-            * Transformation::scale(self.zoom);
-        renderer.with_transformation(transformation, |renderer| {
+        renderer.with_transformation(self.transformation(), |renderer| {
             self.inner
                 .as_overlay()
                 .draw(renderer, theme, style, layout, cursor);
         });
+    }
+
+    // The lists of the cards' dropdowns take the pointer through the zoom
+    // the overlay is drawn with.
+    fn update(
+        &mut self,
+        event: &iced::Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let cursor = cursor * self.transformation().inverse();
+        self.inner
+            .as_overlay_mut()
+            .update(event, layout, cursor, renderer, shell);
+    }
+
+    fn mouse_interaction(
+        &self,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+    ) -> mouse::Interaction {
+        let cursor = cursor * self.transformation().inverse();
+        self.inner
+            .as_overlay()
+            .mouse_interaction(layout, cursor, renderer)
+    }
+
+    fn operate(
+        &mut self,
+        layout: Layout<'_>,
+        renderer: &iced::Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        self.inner
+            .as_overlay_mut()
+            .operate(layout, renderer, operation);
     }
 }
 

@@ -3006,8 +3006,10 @@ mod tests {
     }
 
     fn civil_point_entity(blob: &[u8]) -> ExtendedEntity {
+        let mut common = EntityCommon::new();
+        common.graphic_data = Some(blob.to_vec());
         ExtendedEntity {
-            common: EntityCommon::new(),
+            common,
             data: ExtendedEntityData::Arch(document::classes::arch::ArchEntityData::from_parts(
                 "AECC_COGO_POINT",
                 "",

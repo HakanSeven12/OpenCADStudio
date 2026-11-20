@@ -2371,6 +2371,12 @@ impl MountRegistry {
         self.scene_caches.borrow_mut().remove(panel_id);
     }
 
+    /// (wasm32) No scene-projection cache — nothing to drop; the §16
+    /// release rule's scene edition is a no-op there (the paired stub of
+    /// the desktop arm above).
+    #[cfg(target_arch = "wasm32")]
+    fn drop_scene_cache_slot(&mut self, _panel_id: &str) {}
+
     // -- SCN-032: the scene drag rail (the machine + the wiring) ------------
 
     /// The surface's scene-drag slot, born on first need (the cache-slot
@@ -3565,6 +3571,11 @@ impl MountRegistry {
     pub(crate) fn record_panel_events_forwarded_owned(&mut self, count: usize) {
         self.counters.mount_event_forwards += count as u64;
     }
+
+    /// (wasm32) Nothing forwards on the web runtime — the probe stays put
+    /// (the paired stub of the desktop arm above).
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn record_panel_events_forwarded_owned(&mut self, _count: usize) {}
 
     /// The demand-forward probe tick ([`MountCounters::mount_demand_forwards`])
     /// — one per demand raised (the store reads' page misses).

@@ -20,7 +20,7 @@ const ATTACH_FILTERS: [(&str, &[&str]); 8] = [
     ("All DGN Files (*.*)", &["*"]),
     ("PDF files (*.pdf)", &["pdf"]),
     ("Point Cloud (*.rcp; *.rcs)", &["rcp", "rcs"]),
-    ("Drawing (*.dwg)", &["dwg"]),
+    ("Drawing", &["dwg", "dxf"]),
     ("All files (*.*)", &["*"]),
 ];
 const ALL_DGN_FILTER: u32 = 4;
@@ -35,9 +35,11 @@ type AttachFileRead = (Option<iced::widget::image::Handle>, i16);
 fn read_attach_file(path: &str) -> AttachFileRead {
     let file = std::path::Path::new(path);
     let preview = crate::io::thumbnail::read_handle(file);
-    let units = crate::io::load_file(file)
-        .map(|doc| doc.header.insertion_units)
-        .unwrap_or(0);
+    let read = read_reference(
+        path,
+        file.parent().unwrap_or_else(|| std::path::Path::new(".")),
+    );
+    let units = read.insertion_units().unwrap_or(0);
     (preview, units)
 }
 
@@ -476,7 +478,6 @@ impl OpenCADStudio {
         mut entity: document::EntityType,
         read: Option<crate::io::xref::XrefRead>,
     ) {
-        let pending = self.begin_undo(i, "XATTACH", 1, false);
         let host = self.tabs[i].current_path.clone();
         let read = read.or_else(|| {
             let (path, base) =
@@ -484,6 +485,20 @@ impl OpenCADStudio {
             Some(crate::io::xref::read_xref_file(&path, &base?, None))
         });
         let source_content = read.as_ref().and_then(|r| r.source_content());
+        if source_content.as_ref().is_some_and(|content| {
+            content.format() != document::ifccad::IfccadExternalSourceFormat::Dwg
+        }) && !self.tabs[i]
+            .ifccad_session
+            .as_ref()
+            .is_some_and(ocs_save::IfccadSession::has_native_context)
+        {
+            self.command_line.push_rejection("Open an IFCCAD host drawing before attaching a DXF or IFCCAD source; this CAD tab cannot retain its source format");
+            self.tabs[i].active_cmd = None;
+            self.tabs[i].scene.clear_preview_wire();
+            self.restore_pre_cmd_tangent();
+            return;
+        }
+        let pending = self.begin_undo(i, "XATTACH", 1, false);
         let stem = path_to_block_name(&request.path);
         let name = crate::modules::insert::xattach::prepare_named_xref_definition_with(
             &mut self.tabs[i].scene,
@@ -511,10 +526,7 @@ impl OpenCADStudio {
             if let Some(record) = doc.block_records.get(&name) {
                 let handle = record.handle;
                 let path = record.xref_path.clone();
-                let document::ifccad::IfccadExternalSourceContent::Dwg {
-                    fingerprint_guid, ..
-                } = &content;
-                if let Some(guid) = fingerprint_guid.as_ref().filter(|_| {
+                if let Some(guid) = content.fingerprint_guid().filter(|_| {
                     !doc.file_dependencies
                         .iter()
                         .any(|d| d.feature.eq_ignore_ascii_case("Acad:XRef") && d.file_name == path)
@@ -999,6 +1011,56 @@ mod xref_attach_read_tests {
             .entities()
             .filter(|entity| matches!(entity, document::EntityType::Insert(_)))
             .count()
+    }
+
+    #[test]
+    fn non_dwg_xref_attach_requires_a_native_host_context() {
+        let mut source = document::Document::new();
+        source.header.insertion_units = 6;
+        source
+            .add_entity(document::EntityType::Line(
+                document::entities::Line::from_coords(0., 0., 0., 2., 0., 0.),
+            ))
+            .unwrap();
+        let native = document::Ifcx.export_ifccad(&source).unwrap().drawing;
+        let json = document::ifccad::encode_ifccad_document(&native).unwrap();
+        let dxf = document::DxfWriter::new(&source).write_to_vec().unwrap();
+        for (name, bytes) in [("source.dxf", dxf.as_slice())] {
+            let mut app = OpenCADStudio::new_for_test();
+            app.automation_op(r#"{"op":"new"}"#);
+            let i = app.active_tab;
+            let (request, entity) = attach(name);
+            let read = crate::io::xref::read_source_bytes(name, bytes);
+            assert!(read.source_content().is_some());
+            app.place_xref_attach(i, request, entity, Some(read));
+            assert_eq!(
+                references(&app, i),
+                0,
+                "an untyped CAD host must not lose the source format"
+            );
+            assert_eq!(inserts(&app, i), 0);
+            // The same attachment succeeds in an opened native host, retaining
+            // its actual format through the production native save/read route.
+            let (loaded, session) = ocs_save::read_ifccad_for_edit(json.bytes()).unwrap();
+            app.tabs[i].scene.document = loaded.document;
+            app.tabs[i].ifccad_session = session;
+            let (request, entity) = attach(name);
+            let read = crate::io::xref::read_source_bytes(name, bytes);
+            let expected = read.source_content().unwrap();
+            app.place_xref_attach(i, request, entity, Some(read));
+            assert_eq!(references(&app, i), 1);
+            assert_eq!(inserts(&app, i), 1);
+            let saved = ocs_save::write_external_for_edit(
+                &app.tabs[i].scene.document_for_save(),
+                ocs_save::external_format("ifccad").unwrap(),
+                false,
+                app.tabs[i].ifccad_session.as_ref(),
+            )
+            .unwrap();
+            let checked = document::ifccad::load_ifccad_bytes(&saved, Default::default()).unwrap();
+            assert_eq!(checked.document().external_sources.len(), 1);
+            assert_eq!(checked.document().external_sources[0].source, expected);
+        }
     }
 
     /// The window's unit for a file in `units`, as the window shows it.

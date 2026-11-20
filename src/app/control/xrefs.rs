@@ -318,16 +318,14 @@ impl OpenCADStudio {
         let file_name = req["file_name"]
             .as_str()
             .filter(|s| {
-                !s.is_empty()
-                    && !s.contains(['/', '\\', '\0', ':'])
-                    && s.to_ascii_lowercase().ends_with(".dwg")
+                !s.is_empty() && !s.contains(['/', '\\', '\0', ':']) && !matches!(*s, "." | "..")
             })
-            .ok_or_else(|| failure("invalid_source", "Choose a DWG filename"))?;
+            .ok_or_else(|| failure("invalid_source", "Choose a drawing filename"))?;
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(req["data_base64"].as_str().unwrap_or_default())
             .map_err(|e| failure("invalid_source", e))?;
         if bytes.is_empty() {
-            return Err(failure("invalid_source", "The DWG is empty"));
+            return Err(failure("invalid_source", "The drawing is empty"));
         }
         let i = self.active_tab;
         let session = self.tabs[i]

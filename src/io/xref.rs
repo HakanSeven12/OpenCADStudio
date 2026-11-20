@@ -9,10 +9,64 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
+mod source_read;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod native_attachment_tests {
     use super::*;
+    #[test]
+    fn registered_dxf_source_uses_declared_format_with_misleading_filename() {
+        let (mut host, root, session) = fixture("{E5B4A9AF-CF20-4FC9-A30F-FFB20FD987E1}");
+        let record = host.block_records.get("grondplan").unwrap().clone();
+        let mut source = Document::new();
+        source.header.insertion_units = 6;
+        source.header.model_space_insertion_base = Vector3::new(10., 20., 0.);
+        source.header.fingerprint_guid = "{E5B4A9AF-CF20-4FC9-A30F-FFB20FD987E1}".into();
+        source
+            .add_entity(EntityType::Line(document::entities::Line::from_coords(
+                10., 20., 0., 12., 20., 0.,
+            )))
+            .unwrap();
+        session
+            .register_external_source(
+                &host,
+                record.handle,
+                document::dxf_external_source_content(&source),
+            )
+            .unwrap();
+        let bytes = document::DxfWriter::new(&source).write_to_vec().unwrap();
+        session
+            .bind_external_source_bytes(
+                record.handle,
+                &record.xref_path,
+                "misleading.dwg".into(),
+                Arc::new(bytes),
+            )
+            .unwrap();
+        let keys = [record.handle].into_iter().collect();
+        let infos = resolve_xrefs_for_keys_in_session(
+            &mut host,
+            &root.join("Tekeningen"),
+            &keys,
+            Some(&session),
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            infos[0].status,
+            XrefStatus::Loaded,
+            "{:?}",
+            infos[0].diagnostics
+        );
+        let line = host
+            .entities()
+            .find_map(|entity| match entity {
+                EntityType::Line(line) if line.common.owner_handle == record.handle => Some(line),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(line.start, Vector3::ZERO);
+        assert_eq!(line.end, Vector3::new(2., 0., 0.));
+    }
     fn fixture(guid: &str) -> (Document, PathBuf, ocs_save::IfccadSession) {
         let root = std::env::temp_dir().join(format!(
             "ocs-native-xref-{}-{}",
@@ -878,10 +932,18 @@ fn resolve_xrefs_with_filter(
                     });
                 callback
             });
+            let format = session
+                .and_then(|s| s.external_source(br_handle))
+                .map(|source| source.source.format());
             let read = if let Some(bytes) =
                 session.and_then(|s| s.external_source_bytes(br_handle, &raw_path))
             {
-                read_source_bytes(&bytes.file_name, &bytes.bytes)
+                read_source_bytes_for_format(
+                    &bytes.file_name,
+                    &bytes.bytes,
+                    format.unwrap_or_else(|| source_read::inferred_format(&bytes.bytes)),
+                    nested_progress,
+                )
             } else if cfg!(target_arch = "wasm32")
                 && session.and_then(|s| s.external_source(br_handle)).is_some()
             {
@@ -889,9 +951,10 @@ fn resolve_xrefs_with_filter(
                     resolved: None,
                     outcome: None,
                     source_sha256: None,
+                    content: None,
                 }
             } else {
-                read_xref_file(&raw_path, base_dir, nested_progress)
+                read_xref_file_for_format(&raw_path, base_dir, nested_progress, format)
             };
             parse_units[xref_index].store(1000, std::sync::atomic::Ordering::Relaxed);
             if let Some(progress) = &progress {
@@ -917,29 +980,54 @@ pub struct XrefRead {
     resolved: Option<PathBuf>,
     outcome: Option<Result<document::ReadOutcome, String>>,
     source_sha256: Option<String>,
+    content: Option<document::ifccad::IfccadExternalSourceContent>,
 }
 
 impl XrefRead {
+    pub(crate) fn insertion_units(&self) -> Option<i16> {
+        Some(
+            self.outcome
+                .as_ref()?
+                .as_ref()
+                .ok()?
+                .document
+                .header
+                .insertion_units,
+        )
+    }
+
     pub fn source_content(&self) -> Option<document::ifccad::IfccadExternalSourceContent> {
         let outcome = self.outcome.as_ref()?.as_ref().ok()?;
-        (outcome.stats.source_format == Some(document::SourceFormat::Dwg))
-            .then(|| document::dwg_external_source_content(&outcome.document))
+        if let Some(content) = &self.content {
+            return Some(content.clone());
+        }
+        match outcome.stats.source_format {
+            Some(document::SourceFormat::Dwg) => {
+                Some(document::dwg_external_source_content(&outcome.document))
+            }
+            Some(document::SourceFormat::Dxf) => {
+                Some(document::dxf_external_source_content(&outcome.document))
+            }
+            _ => None,
+        }
     }
 }
 
 pub fn read_source_bytes(name: &str, bytes: &[u8]) -> XrefRead {
-    let outcome = document::DwgReader::from_stream(std::io::Cursor::new(bytes.to_vec()))
-        .read_with_stats()
-        .map_err(|error| error.to_string())
-        .map(|mut outcome| {
-            finalize_xref_outcome(&mut outcome);
-            outcome
-        });
-    XrefRead {
-        resolved: Some(PathBuf::from(name)),
-        outcome: Some(outcome),
-        source_sha256: None,
+    read_source_bytes_for_format(name, bytes, source_read::inferred_format(bytes), None)
+}
+
+fn read_source_bytes_for_format(
+    name: &str,
+    bytes: &[u8],
+    format: document::ifccad::IfccadExternalSourceFormat,
+    progress: Option<Arc<dyn Fn(u16) + Send + Sync>>,
+) -> XrefRead {
+    let mut read = source_read::read(name, bytes, format, progress);
+    if let Some(Ok(outcome)) = read.outcome.as_mut() {
+        finalize_xref_outcome(outcome);
     }
+    read
 }
 
 /// Read and parse the drawing that a reference stored as `raw_path` names,
@@ -949,6 +1037,15 @@ pub fn read_xref_file(
     raw_path: &str,
     base_dir: &Path,
     progress: Option<std::sync::Arc<dyn Fn(u16) + Send + Sync>>,
+) -> XrefRead {
+    read_xref_file_for_format(raw_path, base_dir, progress, None)
+}
+
+fn read_xref_file_for_format(
+    raw_path: &str,
+    base_dir: &Path,
+    progress: Option<Arc<dyn Fn(u16) + Send + Sync>>,
+    format: Option<document::ifccad::IfccadExternalSourceFormat>,
 ) -> XrefRead {
     // Native unknown schemes are retained, but must never reach filename fallback.
     if let Err(error) = document::external_source_location_from_cad_path(raw_path)
@@ -960,6 +1057,7 @@ pub fn read_xref_file(
                 "Unsupported source location {raw_path}: {error}"
             ))),
             source_sha256: None,
+            content: None,
         };
     }
     let resolved = resolve_path(raw_path, base_dir);
@@ -967,16 +1065,65 @@ pub fn read_xref_file(
     let initial_fingerprint = resolved
         .as_ref()
         .and_then(|path| crate::io::edit_lock::FileFingerprint::capture(path).ok());
+    let mut content = None;
     #[cfg(not(target_arch = "wasm32"))]
-    let outcome = resolved
-        .as_ref()
-        .map(|path| super::load_file_with_progress(path, progress));
+    let outcome = resolved.as_ref().map(|path| {
+        use document::ifccad::IfccadExternalSourceFormat;
+        let ext = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let ordinary_cad_path = match format {
+            Some(IfccadExternalSourceFormat::Dwg) => matches!(ext.as_str(), "dwg" | "dwt" | "dws"),
+            Some(IfccadExternalSourceFormat::Dxf) => ext == "dxf",
+            Some(IfccadExternalSourceFormat::Ifccad) => false,
+            None => matches!(ext.as_str(), "dwg" | "dwt" | "dws" | "dxf"),
+        };
+        if ordinary_cad_path {
+            return super::load_file_with_progress(path, progress);
+        }
+        let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+        let read = source_read::read(
+            &path.to_string_lossy(),
+            &bytes,
+            format.unwrap_or_else(|| source_read::inferred_format(&bytes)),
+            progress,
+        );
+        content = read.content;
+        read.outcome
+            .unwrap_or_else(|| Err("Source read returned no outcome".into()))
+            .and_then(|outcome| super::finalize_loaded_outcome(path, outcome))
+    });
     // Web: read the registry — the cached off-thread parse when the
     // pick/open pre-pass made one, otherwise the registered bytes.
     #[cfg(target_arch = "wasm32")]
-    let outcome = resolved
-        .as_ref()
-        .map(|path| read_registered_outcome(&path.to_string_lossy(), progress));
+    let outcome = resolved.as_ref().map(|path| {
+        let bytes = registered_bytes(&path.to_string_lossy());
+        if format.is_none()
+            && bytes.as_ref().is_some_and(|bytes| {
+                source_read::inferred_format(bytes)
+                    != document::ifccad::IfccadExternalSourceFormat::Ifccad
+            })
+        {
+            return read_registered_outcome(&path.to_string_lossy(), progress);
+        }
+        let format = format.or_else(|| {
+            bytes
+                .as_ref()
+                .map(|bytes| source_read::inferred_format(bytes))
+        });
+        match (format, bytes) {
+            (Some(format), Some(bytes)) => {
+                let read =
+                    read_source_bytes_for_format(&path.to_string_lossy(), &bytes, format, progress);
+                content = read.content;
+                read.outcome
+                    .unwrap_or_else(|| Err("Source read returned no outcome".into()))
+            }
+            _ => read_registered_outcome(&path.to_string_lossy(), progress),
+        }
+    });
     let source_sha256 = resolved.as_ref().and_then(|path| {
         let needs_fingerprint = match &outcome {
             Some(Ok(outcome)) => {
@@ -1003,6 +1150,7 @@ pub fn read_xref_file(
         resolved,
         outcome,
         source_sha256,
+        content,
     }
 }
 
@@ -1029,28 +1177,44 @@ pub fn merge_xref_reads_in_session(
     let total_units = xref_count.saturating_mul(2000);
     result.reserve(parsed.len());
     for (merge_index, (block_name, raw_path, br_handle, read)) in parsed.into_iter().enumerate() {
+        let source_content = read.source_content();
         let XrefRead {
             resolved,
             outcome: xref_outcome,
             source_sha256,
+            ..
         } = read;
-        let xref_outcome = xref_outcome.map(|outcome| outcome.and_then(|outcome| {
-            if let Some(record) = doc.block_records.iter().find(|r| r.handle == br_handle) {
-                document::dwg_xref_fingerprint_guid(doc, record).map_err(|e| e.to_string())?;
-            }
-            if let (Some(found), Some(host)) = (&resolved, &doc.source_path) {
-                if std::fs::canonicalize(found).ok().zip(std::fs::canonicalize(host).ok()).is_some_and(|(a,b)| a == b) {
-                    return Err("Direct self-reference is unsupported".into());
-                }
-            }
-            if let Some(session) = session {
-                if session.external_source(br_handle).is_some() && outcome.stats.source_format != Some(document::SourceFormat::Dwg) {
-                    return Err("This native XREF requires a DWG source; other source formats are deferred".into());
-                }
-                session.check_external_source_reload(br_handle, &document::dwg_external_source_content(&outcome.document))?;
-            }
-            Ok(outcome)
-        }));
+        let self_reference =
+            resolved
+                .as_ref()
+                .zip(doc.source_path.as_ref())
+                .is_some_and(|(found, host)| {
+                    std::fs::canonicalize(found)
+                        .ok()
+                        .zip(std::fs::canonicalize(host).ok())
+                        .is_some_and(|(a, b)| a == b)
+                });
+        let xref_outcome = if self_reference {
+            Some(Err("Direct self-reference is unsupported".into()))
+        } else {
+            xref_outcome.map(|outcome| {
+                outcome.and_then(|outcome| {
+                    if let Some(record) = doc.block_records.iter().find(|r| r.handle == br_handle) {
+                        document::dwg_xref_fingerprint_guid(doc, record)
+                            .map_err(|e| e.to_string())?;
+                    }
+                    if let Some(session) = session {
+                        if session.external_source(br_handle).is_some() {
+                            let content = source_content
+                                .as_ref()
+                                .ok_or("Source format metadata is unavailable")?;
+                            session.check_external_source_reload(br_handle, content)?;
+                        }
+                    }
+                    Ok(outcome)
+                })
+            })
+        };
         let mut other_drawing = false;
         let (status, diagnostics, read_stats) = match xref_outcome {
             Some(Ok(outcome)) => {
@@ -1091,17 +1255,18 @@ pub fn merge_xref_reads_in_session(
                         .iter()
                         .find(|r| r.handle == br_handle)
                         .and_then(|r| document::dwg_xref_fingerprint_guid(doc, r).ok().flatten());
+                    let loaded_guid = match source_content.as_ref() {
+                        Some(content) => content.fingerprint_guid().unwrap_or(""),
+                        None => &outcome.document.header.fingerprint_guid,
+                    };
                     let observed = session.and_then(|session| {
-                        session.observe_external_source_guid(
-                            br_handle,
-                            &outcome.document.header.fingerprint_guid,
-                        )
+                        session.observe_external_source_guid(br_handle, loaded_guid)
                     });
                     if let Some(changed) = observed {
                         other_drawing = changed;
-                    } else if let Some(loaded) = document::ifccad::normalize_ifccad_fingerprint_guid(
-                        &outcome.document.header.fingerprint_guid,
-                    ) {
+                    } else if let Some(loaded) =
+                        document::ifccad::normalize_ifccad_fingerprint_guid(loaded_guid)
+                    {
                         let has_host_identity =
                             !doc.header.fingerprint_guid.is_empty() || doc.source_path.is_some();
                         let previous = if has_host_identity {

@@ -32,12 +32,13 @@ impl IfccadSession {
         guid: &str,
     ) -> Option<bool> {
         let source = self.external_source(handle)?;
+        if source.source.format() == document::ifccad::IfccadExternalSourceFormat::Ifccad {
+            return Some(false);
+        }
         let Some(loaded) = document::ifccad::normalize_ifccad_fingerprint_guid(guid) else {
             return Some(false);
         };
-        let document::ifccad::IfccadExternalSourceContent::Dwg {
-            fingerprint_guid, ..
-        } = source.source;
+        let fingerprint_guid = source.source.fingerprint_guid().map(str::to_owned);
         let previous = self
             .3
             .lock()
@@ -133,22 +134,14 @@ impl IfccadSession {
         let Some(source) = self.external_source(handle) else {
             return Ok(());
         };
-        let document::ifccad::IfccadExternalSourceContent::Dwg {
-            base_point,
-            insertion_unit,
-            ..
-        } = &source.source;
-        let document::ifccad::IfccadExternalSourceContent::Dwg {
-            base_point: actual,
-            insertion_unit: unit,
-            ..
-        } = content;
-        if base_point != actual
-            || insertion_unit
-                .as_ref()
-                .is_some_and(|u| Some(u) != unit.as_ref())
+        if source.source.format() != content.format()
+            || source.source.base_point() != content.base_point()
+            || source
+                .source
+                .insertion_unit()
+                .is_some_and(|unit| Some(unit) != content.insertion_unit())
         {
-            return Err(format!("XREF {}: source base point or insertion unit changed; reassess placement and scale before reloading",source.name));
+            return Err(format!("XREF {}: source format, base point or insertion unit changed; reassess placement and scale before reloading",source.name));
         }
         Ok(())
     }
@@ -180,11 +173,14 @@ impl IfccadSession {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
         for (handle, marker, path, source) in sources.into_iter().flatten() {
-            let document::ifccad::IfccadExternalSourceContent::Dwg {
-                base_point,
-                fingerprint_guid,
-                ..
-            } = source.source;
+            if source.source.format() != document::ifccad::IfccadExternalSourceFormat::Dwg {
+                return Err(format!(
+                    "XREF {}: convert the external source to DWG before CAD export",
+                    source.name
+                ));
+            }
+            let base_point = source.source.base_point();
+            let fingerprint_guid = source.source.fingerprint_guid();
             let base = document::Vector3::new(base_point[0], base_point[1], base_point[2]);
             if let Some(record) = doc.block_records.iter_mut().find(|r| r.handle == handle) {
                 record.base_point = base;
@@ -287,6 +283,16 @@ impl IfccadSession {
             "dxf" | "dwg" | "dwt" | "dws"
         ) {
             self.check_cad_plot_style_bindings(doc)?;
+            for record in doc.block_records.iter().filter(|r| r.flags.is_xref) {
+                if let Some(source) = self.external_source(record.handle) {
+                    if source.source.format() != document::ifccad::IfccadExternalSourceFormat::Dwg {
+                        return Err(format!(
+                            "XREF {}: convert the external source to DWG before CAD export",
+                            source.name
+                        ));
+                    }
+                }
+            }
             document::validate_cad_external_sources(doc).map_err(|e| e.to_string())?;
         }
         if super::is_ifccad_extension(ext) || !self.has_blocked_entities() {

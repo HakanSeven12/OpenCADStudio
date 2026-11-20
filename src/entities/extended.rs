@@ -2966,13 +2966,17 @@ mod tests {
     fn preview_blob() -> Vec<u8> {
         let mut polyline = Vec::new();
         polyline.extend_from_slice(&3u32.to_le_bytes());
-        for [x, y, z] in [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]] {
+        for [x, y, z] in
+            [[1.0f64, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
+        {
             polyline.extend_from_slice(&x.to_le_bytes());
             polyline.extend_from_slice(&y.to_le_bytes());
             polyline.extend_from_slice(&z.to_le_bytes());
         }
         let mut text = Vec::new();
-        for [x, y, z] in [[10.0, 20.0, 30.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]] {
+        for [x, y, z] in
+            [[10.0f64, 20.0, 30.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]]
+        {
             text.extend_from_slice(&x.to_le_bytes());
             text.extend_from_slice(&y.to_le_bytes());
             text.extend_from_slice(&z.to_le_bytes());

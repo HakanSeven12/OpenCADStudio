@@ -1158,4 +1158,30 @@ mod tests {
         assert_eq!(style(&app), before ^ 1);
         assert_eq!(app.ribbon.group_selection, before & 1 == 0);
     }
+
+    /// Ctrl+R opens the editor's Find and Replace while the multiline text
+    /// editor is open, instead of cycling the drawing's viewports.
+    #[test]
+    fn ctrl_r_opens_find_and_replace_in_the_text_editor() {
+        use crate::ui::window::mtext_dialogs::MTextDialog;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.open_mtext_editor(glam::DVec3::ZERO, None, "hello", 2.5, None);
+        let _ = app.run_action("NEXTVIEWPORT");
+        assert!(
+            matches!(app.mtext_dialog, Some(MTextDialog::Find(_))),
+            "the Find and Replace dialog opens"
+        );
+        assert!(app.mtext_editor.is_some(), "the editor stays open");
+    }
+
+    /// Without the editor, Ctrl+R keeps its viewport meaning: no Find and
+    /// Replace opens.
+    #[test]
+    fn ctrl_r_outside_the_editor_opens_no_find_and_replace() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_action("NEXTVIEWPORT");
+        assert!(app.mtext_dialog.is_none());
+    }
 }

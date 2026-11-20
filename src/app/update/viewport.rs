@@ -356,6 +356,8 @@ enum ScrollIntent {
     /// Trackpad movement to pan by, in screen pixels.
     ///
     Pan { dx: f32, dy: f32 },
+    /// Shift + trackpad movement to orbit by, in screen pixels.
+    Orbit { dx: f32, dy: f32 },
 }
 
 /// How far a ZOOM Dynamic drag must travel vertically before the magnifier
@@ -367,8 +369,14 @@ const ZOOM_DIR_FLIP_PX: f32 = 2.0;
 ///
 /// Delta units are not a reliable device identifier: smooth-scrolling mice
 /// can report pixels on macOS too. Honor the explicit touchpad option for
-/// both kinds of delta, with Ctrl+scroll always available for zooming.
-fn scroll_intent(delta: mouse::ScrollDelta, touchpad_pan: bool, ctrl: bool) -> ScrollIntent {
+/// both kinds of delta, with Ctrl+scroll always available for zooming and
+/// Shift+scroll orbiting instead of panning.
+fn scroll_intent(
+    delta: mouse::ScrollDelta,
+    touchpad_pan: bool,
+    ctrl: bool,
+    shift: bool,
+) -> ScrollIntent {
     /// Screen pixels one wheel line pans.
     const LINE_PX: f32 = 40.0;
     // A notched wheel reports lines and a trackpad never does there, so on
@@ -376,12 +384,14 @@ fn scroll_intent(delta: mouse::ScrollDelta, touchpad_pan: bool, ctrl: bool) -> S
     let wheel_notch =
         cfg!(target_os = "macos") && matches!(delta, mouse::ScrollDelta::Lines { .. });
     if touchpad_pan && !ctrl && !wheel_notch {
-        return match delta {
-            mouse::ScrollDelta::Pixels { x, y } => ScrollIntent::Pan { dx: x, dy: y },
-            mouse::ScrollDelta::Lines { x, y } => ScrollIntent::Pan {
-                dx: x * LINE_PX,
-                dy: y * LINE_PX,
-            },
+        let (dx, dy) = match delta {
+            mouse::ScrollDelta::Pixels { x, y } => (x, y),
+            mouse::ScrollDelta::Lines { x, y } => (x * LINE_PX, y * LINE_PX),
+        };
+        return if shift {
+            ScrollIntent::Orbit { dx, dy }
+        } else {
+            ScrollIntent::Pan { dx, dy }
         };
     }
     match delta {
@@ -9462,9 +9472,33 @@ properties={:.1}ms picked={}",
         Task::none()
     }
 
+    /// Orbit the active view by a screen-pixel movement: the active paper
+    /// viewport's view, or the model camera about the selection or the
+    /// surface at the view centre.
+    fn orbit_active_view(&mut self, i: usize, dx: f32, dy: f32) {
+        if self.tabs[i].scene.active_viewport.is_some() {
+            self.tabs[i].scene.orbit_active_viewport(dx, dy);
+        } else if self.tabs[i].scene.current_layout == "Model" {
+            let scene = &self.tabs[i].scene;
+            let (vw, vh) = scene.selection.borrow().view.vp_size;
+            let bounds = scene.active_model_tile_bounds(vw, vh);
+            let pivot = scene
+                .orbit_pivot()
+                .or_else(|| scene.view_center_surface_pivot(bounds))
+                .unwrap_or_else(|| scene.camera.borrow().target);
+            self.tabs[i].scene.refresh_projection_bounds();
+            self.tabs[i]
+                .scene
+                .camera
+                .borrow_mut()
+                .orbit(dx, dy, Some(pivot));
+        }
+        self.tabs[i].scene.camera_generation += 1;
+    }
+
     /// Apply the user's scroll navigation preference to either delta unit.
     pub(super) fn on_viewport_scroll(&mut self, delta: mouse::ScrollDelta) -> Task<Message> {
-        match scroll_intent(delta, self.touchpad_pan, self.ctrl_down) {
+        match scroll_intent(delta, self.touchpad_pan, self.ctrl_down, self.shift_down) {
             ScrollIntent::Zoom { notches } => {
                 crate::perf::note_scroll_zoom();
                 let mut s = notches * crate::app::settings::zoom_notch_steps(self.zoom_factor);
@@ -9472,6 +9506,14 @@ properties={:.1}ms picked={}",
                     s = -s;
                 }
                 self.zoom_view_at_cursor(s)
+            }
+            ScrollIntent::Orbit { dx, dy } => {
+                let i = self.active_tab;
+                if !self.tabs[i].is_start {
+                    self.clear_navigation_hover(i);
+                    self.orbit_active_view(i, dx, dy);
+                }
+                Task::none()
             }
             ScrollIntent::Pan { dx, dy } => {
                 let i = self.active_tab;
@@ -9532,26 +9574,7 @@ properties={:.1}ms picked={}",
                     }
                     tasks.push(self.zoom_view_at_cursor(pinch_zoom_steps(factor - 1.0)));
                 }
-                TouchAction::Orbit(delta) => {
-                    if self.tabs[i].scene.active_viewport.is_some() {
-                        self.tabs[i].scene.orbit_active_viewport(delta.x, delta.y);
-                    } else if self.tabs[i].scene.current_layout == "Model" {
-                        let scene = &self.tabs[i].scene;
-                        let (vw, vh) = scene.selection.borrow().view.vp_size;
-                        let bounds = scene.active_model_tile_bounds(vw, vh);
-                        let pivot = scene
-                            .orbit_pivot()
-                            .or_else(|| scene.view_center_surface_pivot(bounds))
-                            .unwrap_or_else(|| scene.camera.borrow().target);
-                        self.tabs[i].scene.refresh_projection_bounds();
-                        self.tabs[i]
-                            .scene
-                            .camera
-                            .borrow_mut()
-                            .orbit(delta.x, delta.y, Some(pivot));
-                    }
-                    self.tabs[i].scene.camera_generation += 1;
-                }
+                TouchAction::Orbit(delta) => self.orbit_active_view(i, delta.x, delta.y),
                 TouchAction::Tap(2) => {
                     tasks.push(self.update(Message::ViewportRightPress));
                     tasks.push(self.update(Message::ViewportRightRelease));
@@ -11177,14 +11200,14 @@ mod scroll_intent_tests {
     #[test]
     fn touchpad_pan_scrolls_pan_and_ctrl_zooms() {
         assert_eq!(
-            scroll_intent(ScrollDelta::Lines { x: 0.5, y: -0.25 }, true, false),
+            scroll_intent(ScrollDelta::Lines { x: 0.5, y: -0.25 }, true, false, false),
             ScrollIntent::Pan {
                 dx: 20.0,
                 dy: -10.0
             }
         );
         assert_eq!(
-            scroll_intent(ScrollDelta::Lines { x: 0.0, y: 1.0 }, true, true),
+            scroll_intent(ScrollDelta::Lines { x: 0.0, y: 1.0 }, true, true, false),
             ScrollIntent::Zoom { notches: 1.0 }
         );
     }
@@ -11192,7 +11215,7 @@ mod scroll_intent_tests {
     #[test]
     fn wheel_notches_zoom() {
         assert_eq!(
-            scroll_intent(ScrollDelta::Lines { x: 0.0, y: 1.0 }, false, false),
+            scroll_intent(ScrollDelta::Lines { x: 0.0, y: 1.0 }, false, false, false),
             ScrollIntent::Zoom { notches: 1.0 }
         );
     }
@@ -11201,7 +11224,7 @@ mod scroll_intent_tests {
     fn smooth_mouse_scroll_zooms_without_touchpad_mode() {
         for (y, notches) in [(100.0, 1.0), (-100.0, -1.0), (0.0, 0.0)] {
             assert_eq!(
-                scroll_intent(ScrollDelta::Pixels { x: 4.0, y }, false, false),
+                scroll_intent(ScrollDelta::Pixels { x: 4.0, y }, false, false, false),
                 ScrollIntent::Zoom { notches }
             );
         }
@@ -11211,7 +11234,7 @@ mod scroll_intent_tests {
     #[test]
     fn two_finger_scroll_pans_in_touchpad_mode() {
         assert_eq!(
-            scroll_intent(ScrollDelta::Pixels { x: 4.0, y: 6.0 }, true, false),
+            scroll_intent(ScrollDelta::Pixels { x: 4.0, y: 6.0 }, true, false, false),
             ScrollIntent::Pan { dx: 4.0, dy: 6.0 }
         );
     }
@@ -11219,7 +11242,7 @@ mod scroll_intent_tests {
     #[test]
     fn ctrl_pixel_scroll_zooms_in_touchpad_mode() {
         assert_eq!(
-            scroll_intent(ScrollDelta::Pixels { x: 4.0, y: 100.0 }, true, true),
+            scroll_intent(ScrollDelta::Pixels { x: 4.0, y: 100.0 }, true, true, false),
             ScrollIntent::Zoom { notches: 1.0 }
         );
     }

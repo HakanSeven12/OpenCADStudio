@@ -333,6 +333,15 @@ pub(crate) fn entity_type_matches(entity: &document::EntityType, requested: &str
     if record_name != "ENTITY" && record_name.eq_ignore_ascii_case(requested) {
         return true;
     }
+    // A civil / AEC Extended entity's identity is its class record's dxf_name
+    // ("AECC_ALIGNMENT", "AECC_COGO_POINT"), which `dxf_name()` hides behind
+    // the "ENTITY" blacklisted above. Compare the class name too, so scripts
+    // can query these by class instead of only via `where /data/Arch/...`.
+    if let document::EntityType::Extended(extended) = entity {
+        if extended.class_name().eq_ignore_ascii_case(requested) {
+            return true;
+        }
+    }
     // The node library's object names ("Construction Line", "2D Solid").
     use crate::ui::node_graph::{ObjectKind, OBJECTS};
     OBJECTS.iter().any(|kind| {
@@ -7059,5 +7068,43 @@ mod type_name_tests {
         assert!(super::entity_type_matches(&xline, "XLine"));
         assert!(!super::entity_type_matches(&xline, "Line"));
         assert!(!super::entity_type_matches(&xline, "Object"));
+    }
+
+    fn civil_entity(dxf_name: &str) -> document::EntityType {
+        document::EntityType::Extended(Box::new(document::entities::ExtendedEntity {
+            common: document::entities::EntityCommon::new(),
+            data: document::entities::ExtendedEntityData::Arch(
+                document::classes::arch::ArchEntityData::from_parts(dxf_name, "", None),
+            ),
+        }))
+    }
+
+    /// R3.2: a civil entity is findable by its class name, not only as
+    /// "Extended Entity" or through `where /data/Arch/dxf_name`.
+    #[test]
+    fn civil_class_names_find_extended_entities() {
+        let alignment = civil_entity("AECC_ALIGNMENT");
+        assert!(super::entity_type_matches(&alignment, "AECC_ALIGNMENT"));
+        // Case-insensitive, like every other name comparison here.
+        assert!(super::entity_type_matches(&alignment, "aecc_alignment"));
+        // The registered-class arm reports its dxf_name through `class_name`
+        // too; a class the query did not ask for still does not match.
+        let point = civil_entity("AECC_COGO_POINT");
+        assert!(super::entity_type_matches(&point, "AECC_COGO_POINT"));
+        assert!(!super::entity_type_matches(&point, "AECC_ALIGNMENT"));
+        assert!(!super::entity_type_matches(&alignment, "AECC_COGO_POINT"));
+    }
+
+    /// Existing behavior is untouched: the UI name still matches, and the
+    /// "ENTITY" placeholder stays blacklisted.
+    #[test]
+    fn extended_entities_keep_their_ui_name_and_entity_blacklist() {
+        let point = civil_entity("AECC_COGO_POINT");
+        assert!(super::entity_type_matches(&point, "Extended Entity"));
+        assert!(!super::entity_type_matches(&point, "ENTITY"));
+        // A native entity does not start matching civil class names.
+        let line = document::EntityType::Line(Default::default());
+        assert!(super::entity_type_matches(&line, "Line"));
+        assert!(!super::entity_type_matches(&line, "AECC_ALIGNMENT"));
     }
 }

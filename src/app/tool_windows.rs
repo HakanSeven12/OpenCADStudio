@@ -54,6 +54,7 @@ impl ModalKind {
             | K::AecDropWarning
             | K::ImportFile
             | K::DgnImport
+            | K::IfcPlan
             | K::TdsImport
             | K::TdsMaterial
             | K::TdsMissingMap

@@ -37,6 +37,7 @@ pub mod graphic_attributes;
 pub mod hatch_dialogs;
 pub mod hatch_panel;
 pub mod hyperlink_dialog;
+pub mod ifc_plan;
 pub mod import_dialogs;
 pub mod insert_attr_dialog;
 pub mod layer_state_manager;

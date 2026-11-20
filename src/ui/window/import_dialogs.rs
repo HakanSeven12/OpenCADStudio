@@ -29,6 +29,7 @@ pub struct ReadTicket {
 /// One edit in the Import File or DGN Import window.
 #[derive(Debug, Clone)]
 pub enum ImportDialogMsg {
+    IfcPlan(super::ifc_plan::IfcPlanMsg),
     // Import File
     Path(String),
     Browse,
@@ -218,7 +219,7 @@ const fn format(
 }
 
 /// The reference's Import File types, in its order of groups.
-pub const FORMATS: [ImportFormat; 22] = [
+pub const FORMATS: [ImportFormat; 23] = [
     format("PDF Files", "*.pdf", &["pdf"], 0, Support::Yes),
     format("MicroStation DGN", "*.dgn", &["dgn"], 0, Support::Yes),
     format("All DGN Files", "*.*", &["*"], 0, Support::Yes),
@@ -270,6 +271,7 @@ pub const FORMATS: [ImportFormat; 22] = [
         1,
         Support::Yes,
     ),
+    format("IFC (*.ifc)", "*.ifc", &["ifc"], 2, Support::Yes),
     format("All Files", "*.*", &["*"], 2, Support::ByExtension),
 ];
 
@@ -348,6 +350,8 @@ pub struct TdsMaterialState {
 /// The windows' working copies and the files imported this session.
 #[derive(Default)]
 pub struct ImportDialogs {
+    pub(crate) ifc_plan: Option<super::ifc_plan::IfcPlanDialog>,
+    pub(crate) previous_ifc_plan: Option<super::ifc_plan::PreviousIfcPlan>,
     pub file: Option<ImportFileState>,
     pub dgn: Option<DgnImportState>,
     pub tds: Option<TdsImportState>,

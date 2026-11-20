@@ -101,6 +101,7 @@ impl OpenCADStudio {
             Some(K::Spell) => crate::ui::window::spell_dialog::title(),
             Some(K::PdfImportFile) => crate::t!("Import PDF").into_owned(),
             Some(K::ImportFile) => crate::t!("Import File").into_owned(),
+            Some(K::IfcPlan) => crate::tr!("ifc2plan", "title"),
             Some(K::DgnImport) => crate::t!("DGN Import").into_owned(),
             Some(K::TdsImport) => crate::tr!("import-3ds", "title"),
             Some(K::TdsMaterial) => crate::tr!("import-3ds-alert", "title"),
@@ -812,6 +813,12 @@ impl OpenCADStudio {
                 let map = self.import_dialogs.tds_maps.first()?;
                 sized_flow(ex, 460, 240, |flow| {
                     crate::ui::window::import_dialogs::view_tds_map(map, flow)
+                })
+            }
+            super::super::ModalKind::IfcPlan => {
+                let state = self.import_dialogs.ifc_plan.as_ref()?;
+                sized_flow(ex, 430, 285, |flow| {
+                    crate::ui::window::ifc_plan::view(state, flow)
                 })
             }
             super::super::ModalKind::DgnImport => {

@@ -280,7 +280,6 @@ impl Scene {
 
     /// Batch-add several entities, publishing geometry changes once at the end.
     /// This is the fast path used by plugin `add_entities` requests.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn add_entities(&mut self, entities: Vec<EntityType>) -> Vec<Handle> {
         let mut handles = Vec::with_capacity(entities.len());
         let mut changes = Vec::with_capacity(entities.len());

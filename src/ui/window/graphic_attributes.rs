@@ -27,8 +27,11 @@ const TRANSPARENCY_LABEL_W: f32 = 38.0;
 /// Width of the hatch pattern flyout and its height.
 const HATCH_FLYOUT_W: f32 = 352.0;
 const HATCH_FLYOUT_H: f32 = 724.0;
-/// Width of the gradient editor flyout.
+/// Width of the gradient editor flyout and its height. The height is fixed
+/// (content is ~289 px) so the drop-down moves the editor up when the panel
+/// sits low in the window instead of clipping it to the space below.
 const GRADIENT_FLYOUT_W: f32 = 390.0;
+const GRADIENT_FLYOUT_H: f32 = 296.0;
 const TRANSPARENCY_ICON: &[u8] =
     include_bytes!("../../../assets/icons/attributes/transparency.svg");
 const LINEWEIGHT_ICON: &[u8] = include_bytes!("../../../assets/icons/attributes/lineweight.svg");
@@ -964,6 +967,12 @@ fn preview_row<'a>(
             },
             ..Default::default()
         });
+    // The hatch picker closes on an outside click; the gradient editor has
+    // its own Cancel / OK and stays up while its colour window is open.
+    let hatch_flyout = matches!(
+        toggle,
+        GraphicAttributesMsg::HatchEditorOpen | GraphicAttributesMsg::HatchEditorClose
+    );
     let edit = button(compact_button_content("⋮"))
         .on_press(msg(toggle))
         .style(kit::box_button_style(editor_open))
@@ -977,9 +986,12 @@ fn preview_row<'a>(
                 .alignment(popup_alignment(side))
                 .offset(km::TOOL_GAP);
             if let Some(height) = height {
-                drop_down = drop_down
-                    .height(Length::Fixed(height))
-                    .on_dismiss(msg(GraphicAttributesMsg::HatchEditorClose));
+                // A fixed height keeps the flyout whole: the drop-down only
+                // clips a shrinking overlay to the room below its button.
+                drop_down = drop_down.height(Length::Fixed(height));
+            }
+            if hatch_flyout {
+                drop_down = drop_down.on_dismiss(msg(GraphicAttributesMsg::HatchEditorClose));
             }
             drop_down.into()
         }
@@ -1363,7 +1375,7 @@ pub fn view<'a>(
                     (
                         crate::ui::window::gradient_editor::view(editor, gradient_color_picking),
                         GRADIENT_FLYOUT_W,
-                        None,
+                        Some(GRADIENT_FLYOUT_H),
                     )
                 });
                 let open = state.gradient_editor.is_some();

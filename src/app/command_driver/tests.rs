@@ -4704,6 +4704,85 @@ mod mission_m062_tests {
         let _ = app.run_command_line("EXPORTPDF ");
         assert!(all_output(&app).contains("Usage: EXPORTPDF"));
     }
+
+    fn temp_dwf(tag: &str) -> std::path::PathBuf {
+        temp_pdf(tag).with_extension("dwf")
+    }
+
+    #[test]
+    fn exporting_the_current_layout_to_dwf_writes_it_as_a_sheet() {
+        use crate::scene::model::underlay_vector::dwf as reader;
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(100.0, 100.0, 0.0),
+            )));
+        let layout = app.tabs[i].scene.current_layout.clone();
+        let path = temp_dwf("current");
+
+        let _ = app.run_command_line(&format!("EXPORTDWF {}", path.display()));
+
+        let output = all_output(&app);
+        assert!(output.contains("Exported:"), "{output}");
+        assert!(output.contains("1 sheet(s)"), "{output}");
+        assert!(output.contains("mm"), "{output}");
+        let bytes = std::fs::read(&path).expect("the command must create the file");
+        let _ = std::fs::remove_file(&path);
+        assert!(bytes.starts_with(b"(DWF V06.00)"), "the package tag");
+        assert_eq!(reader::sheet_names(&bytes), Some(vec![layout.clone()]));
+        let sheet = reader::sheet(&bytes, &layout).expect("the sheet opens");
+        assert!(
+            sheet.paths.iter().any(|path| path.stroke.is_some()),
+            "the line is on the sheet: {output}"
+        );
+    }
+
+    #[test]
+    fn exporting_all_layouts_to_dwf_names_a_sheet_after_each() {
+        use crate::scene::model::underlay_vector::dwf as reader;
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(50.0, 25.0, 0.0),
+            )));
+        app.tabs[i].scene.add_layout("Sheet1").unwrap();
+        app.tabs[i].scene.initialize_layout_page_setup("Sheet1");
+        app.tabs[i].scene.add_layout_default_viewport("Sheet1");
+        let layouts: Vec<String> = app.tabs[i]
+            .scene
+            .layout_names()
+            .into_iter()
+            .filter(|name| name != "Model")
+            .collect();
+        let path = temp_dwf("all");
+
+        let _ = app.run_command_line(&format!("EXPORTDWF {} ALL", path.display()));
+
+        let output = all_output(&app);
+        assert!(
+            output.contains(&format!("{} sheet(s)", layouts.len())),
+            "one sheet for each paper layout: {output}"
+        );
+        let bytes = std::fs::read(&path).expect("the command must create the file");
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(reader::sheet_names(&bytes), Some(layouts));
+    }
+
+    #[test]
+    fn a_missing_dwf_path_is_refused_with_usage_text() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("EXPORTDWF ");
+        assert!(all_output(&app).contains("Usage: EXPORTDWF"));
+    }
 }
 
 #[cfg(test)]

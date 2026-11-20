@@ -66,5 +66,6 @@ From the Sheet Set Manager you can open sheets, add layouts from drawings, renum
 ## Exporting other formats
 
 - `EXPORTSVG` saves the drawing as SVG.
+- `EXPORTDWF` saves the drawing as DWF, one sheet for each layout.
 - `EXPORT` lists every export format.
 - 3D exports (STL, STEP) are on [3D Modelling](3D-Modelling#exporting).

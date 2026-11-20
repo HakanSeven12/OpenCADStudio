@@ -1087,6 +1087,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "BMAKE",
         "EXPORTPDF",
         "EXPORTSVG",
+        "EXPORTDWF",
         "PRINTALL",
         "PUBLISH",
         "DDIM",

@@ -1,6 +1,6 @@
 ---
-summary: Exports the current layout or model space straight to a PDF or SVG file, using the current plot settings.
-related: EXPORTPDF, EXPORTSVG, PLOT, PUBLISH, STLOUT, STEPOUT
+summary: Exports the current layout or model space straight to a PDF, SVG or DWF file, using the current plot settings.
+related: EXPORTPDF, EXPORTSVG, EXPORTDWF, PLOT, PUBLISH, STLOUT, STEPOUT
 web: In the web app the file is downloaded by the browser instead of saved to a folder you pick.
 ---
 
@@ -11,8 +11,8 @@ web: In the web app the file is downloaded by the browser instead of saved to a 
 
 ## Notes
 - No plot dialog opens. The export uses the settings last chosen in the plot dialog (sheet, scale, plot style, and so on).
-- The file type is chosen from the extension: `.svg` writes SVG, anything else writes PDF.
+- The file type is chosen from the extension: `.svg` writes SVG, `.dwf` writes DWF, anything else writes PDF.
 - If the plot settings name an output folder, the file goes there directly and no save dialog opens.
 - If "open when done" is set in the plot settings, the file opens in your viewer afterwards.
 - If model space has nothing to print, you see `Nothing to plot: model space contains no printable geometry.`
-- Use [`EXPORTPDF`](EXPORTPDF-Command) or [`EXPORTSVG`](EXPORTSVG-Command) to force one format, and [`PLOT`](PLOT-Command) for the full plot dialog.
+- Use [`EXPORTPDF`](EXPORTPDF-Command), [`EXPORTSVG`](EXPORTSVG-Command) or [`EXPORTDWF`](EXPORTDWF-Command) to force one format, and [`PLOT`](PLOT-Command) for the full plot dialog.

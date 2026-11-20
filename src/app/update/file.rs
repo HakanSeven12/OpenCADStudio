@@ -6467,6 +6467,62 @@ impl OpenCADStudio {
         path: &std::path::Path,
         all_layouts: bool,
     ) -> Result<(usize, u64, (f64, f64)), String> {
+        let pages = self.direct_export_pages(all_layouts)?;
+        let style = self.dialog_plot_style(&self.plot_dialog);
+        if !all_layouts {
+            self.validate_geopdf_page(&pages[0])?;
+        }
+        crate::io::pdf_export::export_plot_pdf_pages(&pages, path, style.as_ref())?;
+        let bytes = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+        let sheet = pages
+            .first()
+            .map(|page| (page.paper_w, page.paper_h))
+            .unwrap_or((0.0, 0.0));
+        Ok((pages.len(), bytes, sheet))
+    }
+
+    /// [`Self::export_pdf_direct`] writing a DWF file: one sheet for each
+    /// page, under its layout's name.
+    ///
+    /// Returns the sheet count, byte size and the first sheet's size in
+    /// millimetres.
+    pub(in crate::app) fn export_dwf_direct(
+        &mut self,
+        path: &std::path::Path,
+        all_layouts: bool,
+    ) -> Result<(usize, u64, (f64, f64)), String> {
+        let scene = &self.tabs[self.active_tab].scene;
+        let names: Vec<String> = if all_layouts {
+            scene
+                .layout_names()
+                .into_iter()
+                .filter(|name| name != "Model")
+                .collect()
+        } else {
+            vec![scene.current_layout.clone()]
+        };
+        let pages = self.direct_export_pages(all_layouts)?;
+        let style = self.dialog_plot_style(&self.plot_dialog);
+        let sheets: Vec<crate::io::dwf_export::DwfSheet> = pages
+            .iter()
+            .zip(names.iter())
+            .map(|(page, name)| crate::io::dwf_export::DwfSheet {
+                name: name.as_str(),
+                page,
+            })
+            .collect();
+        crate::io::dwf_export::export_dwf_pages(&sheets, path, style.as_ref())?;
+        let bytes = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+        let sheet = pages
+            .first()
+            .map(|page| (page.paper_w, page.paper_h))
+            .unwrap_or((0.0, 0.0));
+        Ok((sheets.len(), bytes, sheet))
+    }
+
+    /// The pages a direct export writes: the current layout's, or one for
+    /// every paper layout.
+    fn direct_export_pages(&mut self, all_layouts: bool) -> Result<Vec<PdfPageInput>, String> {
         self.stamp_plot_fields();
         let pages = if all_layouts {
             let i = self.active_tab;
@@ -6494,17 +6550,7 @@ impl OpenCADStudio {
                     .into_owned()
             })?]
         };
-        let style = self.dialog_plot_style(&self.plot_dialog);
-        if !all_layouts {
-            self.validate_geopdf_page(&pages[0])?;
-        }
-        crate::io::pdf_export::export_plot_pdf_pages(&pages, path, style.as_ref())?;
-        let bytes = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
-        let sheet = pages
-            .first()
-            .map(|page| (page.paper_w, page.paper_h))
-            .unwrap_or((0.0, 0.0));
-        Ok((pages.len(), bytes, sheet))
+        Ok(pages)
     }
 
     /// Publish named layouts into one PDF, each with its own page setup, and
@@ -6570,6 +6616,9 @@ impl OpenCADStudio {
         let is_svg = path
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("svg"));
+        let is_dwf = path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("dwf"));
         self.refresh_current_plot_context();
         let Some(page) = self.direct_plot_page() else {
             self.command_line.push_error(
@@ -6577,7 +6626,7 @@ impl OpenCADStudio {
             );
             return Task::none();
         };
-        if !is_svg {
+        if !is_svg && !is_dwf {
             if let Err(error) = self.validate_geopdf_page(&page) {
                 self.command_line.push_error(&error);
                 return Task::none();
@@ -6585,11 +6634,14 @@ impl OpenCADStudio {
         }
         let worker_path = path.clone();
         let open_when_done = self.plot_dialog.open_when_done;
+        let sheet = self.tabs[self.active_tab].scene.current_layout.clone();
         let work = move || {
-            // SVG shares the plot page with PDF: pick the writer from the
-            // chosen extension.
+            // SVG and DWF share the plot page with PDF: pick the writer from
+            // the chosen extension.
             let result = if is_svg {
                 crate::io::svg_export::export_svg(&page, &worker_path)
+            } else if is_dwf {
+                crate::io::dwf_export::export_dwf(&page, &sheet, &worker_path)
             } else {
                 crate::io::pdf_export::export_plot_pdf(&page, &worker_path)
             };
@@ -6613,6 +6665,9 @@ impl OpenCADStudio {
         let is_svg = path
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("svg"));
+        let is_dwf = path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("dwf"));
         let job = match self.plot_dialog.area.as_str() {
             "Display" => self.display_plot_job(),
             "Extents" => self.extents_plot_job(),
@@ -6623,7 +6678,7 @@ impl OpenCADStudio {
                 .push_error(crate::t!("Plot area is empty. Pick a larger window.").as_ref());
             return Task::none();
         };
-        if !is_svg {
+        if !is_svg && !is_dwf {
             if let Err(error) = self.validate_geopdf_page(&page) {
                 self.command_line.push_error(&error);
                 return Task::none();
@@ -6632,9 +6687,12 @@ impl OpenCADStudio {
         let worker_path = path.clone();
         self.close_active_modal();
         let open_when_done = self.plot_dialog.open_when_done;
+        let sheet = self.tabs[self.active_tab].scene.current_layout.clone();
         let work = move || {
             let result = if is_svg {
                 crate::io::svg_export::export_svg(&page, &worker_path)
+            } else if is_dwf {
+                crate::io::dwf_export::export_dwf(&page, &sheet, &worker_path)
             } else {
                 crate::io::pdf_export::export_plot_pdf(&page, &worker_path)
             };
@@ -9877,6 +9935,36 @@ mod plot_paper_tests {
             [true]
         );
         let _ = std::fs::remove_file(&direct_path);
+    }
+
+    #[test]
+    fn an_export_path_ending_in_dwf_writes_a_dwf() {
+        use crate::scene::model::underlay_vector::dwf as reader;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.tabs[app.active_tab]
+            .scene
+            .add_entity(document::EntityType::Line(
+                document::entities::Line::from_points(
+                    document::types::Vector3::ZERO,
+                    document::types::Vector3::new(10.0, 10.0, 0.0),
+                ),
+            ));
+        app.plot_dialog.background = false;
+        app.plot_dialog.open_when_done = false;
+        let layout = app.tabs[app.active_tab].scene.current_layout.clone();
+        let path = std::env::temp_dir().join(format!(
+            "ocs-export-by-extension-{}.DWF",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        let _ = app.on_plot_export_path_some(path.clone());
+
+        let bytes = std::fs::read(&path).expect("the export writes the file");
+        let _ = std::fs::remove_file(&path);
+        assert!(bytes.starts_with(b"(DWF V06.00)"), "a DWF, not a PDF");
+        assert_eq!(reader::sheet_names(&bytes), Some(vec![layout]));
     }
 
     #[test]

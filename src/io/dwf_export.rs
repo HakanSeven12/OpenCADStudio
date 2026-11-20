@@ -15,7 +15,6 @@
 //   has one): the stream itself clips nothing.
 
 use std::io::Write as _;
-#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
@@ -173,6 +172,20 @@ pub fn export_dwf_pages(
 #[cfg(not(target_arch = "wasm32"))]
 pub fn export_dwf(page: &PlotPage, name: &str, path: &Path) -> Result<(), String> {
     export_dwf_pages(&[DwfSheet { name, page }], path, None)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn export_dwf(_page: &PlotPage, _name: &str, _path: &Path) -> Result<(), String> {
+    Err("DWF export is not available in the web version.".into())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn export_dwf_pages(
+    _sheets: &[DwfSheet<'_>],
+    _path: &Path,
+    _fallback_plot_style: Option<&PlotStyleTable>,
+) -> Result<(), String> {
+    Err("DWF export is not available in the web version.".into())
 }
 
 /// An identifier in the format's `8-4-4-4-12` shape, fixed by what it names

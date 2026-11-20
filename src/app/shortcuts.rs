@@ -621,6 +621,8 @@ impl OpenCADStudio {
             // status-bar field): the pure on/off flip, quad panel updates
             // included, lives in the quad router (docs/quad-menu.md §3.6).
             "QUADTOGGLE" => Message::Quad(crate::ui::popup::quad_menu::QuadMsg::Toggle),
+            // Ctrl+R opens the text editor's Find and Replace.
+            "NEXTVIEWPORT" if self.mtext_editor.is_some() => Message::Command("_MTED FIND".into()),
             "NEXTVIEWPORT" => return self.next_viewport(),
             // Ctrl+Tab / Ctrl+Shift+Tab: the next / previous open drawing.
             "NEXTDRAWING" | "PREVDRAWING" => {
@@ -643,8 +645,6 @@ impl OpenCADStudio {
             "REDO" if self.mtext_editor.is_some() => Message::MTextRedo,
             // In the text editor Ctrl+F inserts a field instead of finding.
             "FIND" if self.mtext_editor.is_some() => Message::MTextInsertField,
-            // Ctrl+R opens the text editor's Find and Replace.
-            "NEXTVIEWPORT" if self.mtext_editor.is_some() => Message::Command("_MTED FIND".into()),
             // Ctrl+X cuts the editor's selected text, not drawing objects.
             "CUTCLIP" if self.mtext_editor.is_some() => Message::Command("_MTED CUT".into()),
 

@@ -56,6 +56,11 @@ pub struct Cli {
     #[arg(help = crate::t!("Open read-only: saving is disabled.").into_owned(), long_help = None)]
     pub read_only: bool,
 
+    /// Reduce cache budgets and open DWG without its verbatim save payloads.
+    #[arg(long, requires = "read_only", conflicts_with_all = ["batch", "each", "serve", "http", "export", "mcp"])]
+    #[arg(help = crate::t!("Reduce memory used by read-only DWG viewing.").into_owned(), long_help = None)]
+    pub low_memory: bool,
+
     /// Restrict the GPU backend (e.g. dx12, vulkan, gl, metal). Sets WGPU_BACKEND.
     #[arg(long, value_name = "BACKEND")]
     #[arg(help = crate::t!("GPU backend (dx12, vulkan, gl, metal). Sets WGPU_BACKEND.").into_owned(), long_help = None)]
@@ -162,6 +167,7 @@ pub struct GuiConfig {
     pub new: bool,
     /// Saving disabled for this session.
     pub read_only: bool,
+    pub low_memory: bool,
     /// Force storage-buffer-free wire and hatch pipelines.
     pub compat_renderer: bool,
     /// Command lines to run once the editor is up.
@@ -176,6 +182,10 @@ pub struct GuiConfig {
 
 /// Set once by `main` before the GUI boots; read by `app::boot`.
 pub static GUI_CONFIG: OnceLock<GuiConfig> = OnceLock::new();
+
+pub(crate) fn low_memory_viewing() -> bool {
+    GUI_CONFIG.get().is_some_and(|cfg| cfg.read_only && cfg.low_memory)
+}
 
 /// The GUI config, or a default empty one if `main` never set it (e.g. tests).
 pub fn gui_config() -> GuiConfig {

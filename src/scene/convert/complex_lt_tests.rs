@@ -79,7 +79,7 @@ fn strokes(wires: &[WireModel]) -> Vec<Vec<[f64; 2]>> {
                 out.push(std::mem::take(&mut stroke));
                 continue;
             }
-            let low = wire.points_low.get(i).copied().unwrap_or([0.0; 3]);
+            let low = wire.points_low.get(i).unwrap_or([0.0; 3]);
             stroke.push([p[0] as f64 + low[0] as f64, p[1] as f64 + low[1] as f64]);
         }
         out.push(stroke);
@@ -1446,7 +1446,7 @@ fn a_tapered_polyline_narrows_along_its_dashes() {
     for dash in dashes {
         assert_eq!(dash.taper_widths.len(), dash.points.len());
         for (point, width) in dash.points.iter().zip(&dash.taper_widths) {
-            let low = dash.points_low.first().map_or(0.0, |low| low[0]);
+            let low = dash.points_low.get(0).map_or(0.0, |low| low[0]);
             let x = point[0] + low;
             assert!((width - x * 0.06).abs() < 1e-2, "{width} at x={x}");
             widest = widest.max(*width);
@@ -1473,7 +1473,7 @@ fn a_tapered_polyline_restarts_its_pattern_at_each_vertex() {
     );
     let starts_at_vertex = |wires: &[WireModel]| {
         dash_wires(wires).iter().any(|dash| {
-            let low = dash.points_low.first().map_or(0.0, |low| low[0]);
+            let low = dash.points_low.get(0).map_or(0.0, |low| low[0]);
             (dash.points[0][0] + low - 60.0).abs() < 1e-3
         })
     };

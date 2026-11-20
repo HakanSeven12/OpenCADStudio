@@ -611,16 +611,18 @@ fn split_mixed_polyline(
                 geom: std::sync::Arc::new(crate::scene::WireGeom {
                     taper_widths,
                     pattern_stations: Vec::new(),
-                    pick_tris: arc_pt,
-                    pick_tris_low: arc_ptl,
                     text_verts: Vec::new(),
                     points,
-                    points_low,
+                    points_low: points_low.into(),
                     snap_pts: Vec::new(),
                     tangent_geoms: vec![tg.clone()],
                     key_vertices: Vec::new(),
-                    fill_tris: vec![],
-                    fill_tris_low: Vec::new(),
+                    surfaces: crate::scene::model::wire_model::WireSurfaces {
+                        pick_tris: arc_pt,
+                        pick_tris_low: arc_ptl,
+                        ..Default::default()
+                    }
+                    .into_optional(),
                     ..crate::scene::WireGeom::default()
                 }),
                 ..Default::default()
@@ -755,16 +757,18 @@ fn split_mixed_polyline(
             geom: std::sync::Arc::new(crate::scene::WireGeom {
                 taper_widths,
                 pattern_stations: Vec::new(),
-                pick_tris: pt,
-                pick_tris_low: ptl,
                 text_verts: Vec::new(),
                 points: line_pts,
-                points_low: line_pts_low,
+                points_low: line_pts_low.into(),
                 snap_pts,
                 tangent_geoms: straight_tangents,
                 key_vertices: key_vertices.to_vec(),
-                fill_tris: vec![],
-                fill_tris_low: Vec::new(),
+                surfaces: crate::scene::model::wire_model::WireSurfaces {
+                    pick_tris: pt,
+                    pick_tris_low: ptl,
+                    ..Default::default()
+                }
+                .into_optional(),
                 ..crate::scene::WireGeom::default()
             }),
             ..Default::default()
@@ -793,8 +797,12 @@ fn split_mixed_polyline(
                 display_visible: true,
                 plot_visible: true,
                 geom: std::sync::Arc::new(crate::scene::WireGeom {
-                    fill_tris,
-                    fill_tris_low,
+                    surfaces: crate::scene::model::wire_model::WireSurfaces {
+                        fill_tris,
+                        fill_tris_low,
+                        ..Default::default()
+                    }
+                    .into_optional(),
                     ..crate::scene::WireGeom::default()
                 }),
                 ..Default::default()
@@ -959,16 +967,18 @@ fn point_cloud_wires(
         geom: std::sync::Arc::new(crate::scene::WireGeom {
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),
-            pick_tris,
-            pick_tris_low,
             text_verts: Vec::new(),
             points,
-            points_low,
+            points_low: points_low.into(),
             snap_pts: rendered.snap_pts,
             tangent_geoms: rendered.tangent_geoms,
             key_vertices: rendered.key_vertices,
-            fill_tris: Vec::new(),
-            fill_tris_low: Vec::new(),
+            surfaces: crate::scene::model::wire_model::WireSurfaces {
+                pick_tris,
+                pick_tris_low,
+                ..Default::default()
+            }
+            .into_optional(),
             ..crate::scene::WireGeom::default()
         }),
         ..Default::default()
@@ -977,7 +987,7 @@ fn point_cloud_wires(
     if !frame_points.is_empty() {
         let (points, points_low) = points_to_ds(frame_points);
         let mut frame = WireModel::solid(handle.value().to_string(), points, color, selected);
-        frame.points_low = points_low;
+        frame.points_low = points_low.into();
         frame.line_weight_px = line_weight_px;
         frame.display_visible = mode != 0;
         frame.plot_visible = mode == 1;
@@ -1011,7 +1021,7 @@ pub(crate) fn shift_wire_to_world(w: &mut WireModel, origin: [f64; 3]) {
             lo.push(l);
         }
         w.points = hi;
-        w.points_low = lo;
+        w.points_low = lo.into();
     }
     for tv in &mut w.text_verts {
         let (h, l) = split_ds_xyz(
@@ -1080,7 +1090,7 @@ pub fn tessellate(
     let mut drawn = wires.iter_mut().filter(|wire| !wire.points.is_empty());
     if let (Some(wire), None) = (drawn.next(), drawn.next()) {
         let points = wire.points.iter().enumerate().map(|(index, p)| {
-            let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+            let low = wire.points_low.get(index).unwrap_or([0.0; 3]);
             [
                 p[0] as f64 + low[0] as f64,
                 p[1] as f64 + low[1] as f64,
@@ -1246,16 +1256,18 @@ fn tessellate_wires(
                     geom: std::sync::Arc::new(crate::scene::WireGeom {
                         taper_widths: Vec::new(),
                         pattern_stations: Vec::new(),
-                        pick_tris: Vec::new(),
-                        pick_tris_low: Vec::new(),
                         text_verts: Vec::new(),
                         points: Vec::new(),
-                        points_low: Vec::new(),
+                        points_low: Default::default(),
                         snap_pts: Vec::new(),
                         tangent_geoms: Vec::new(),
                         key_vertices: Vec::new(),
-                        fill_tris,
-                        fill_tris_low,
+                        surfaces: crate::scene::model::wire_model::WireSurfaces {
+                            fill_tris,
+                            fill_tris_low,
+                            ..Default::default()
+                        }
+                        .into_optional(),
                         ..crate::scene::WireGeom::default()
                     }),
                     ..Default::default()
@@ -1318,16 +1330,12 @@ fn tessellate_wires(
                     geom: std::sync::Arc::new(crate::scene::WireGeom {
                         taper_widths: Vec::new(),
                         pattern_stations: Vec::new(),
-                        pick_tris: Vec::new(),
-                        pick_tris_low: Vec::new(),
                         text_verts: Vec::new(),
                         points: pts,
-                        points_low: pts_low,
+                        points_low: pts_low.into(),
                         snap_pts: Vec::new(),
                         tangent_geoms: Vec::new(),
                         key_vertices: Vec::new(),
-                        fill_tris: Vec::new(),
-                        fill_tris_low: Vec::new(),
                         ..crate::scene::WireGeom::default()
                     }),
                     ..Default::default()
@@ -1706,8 +1714,12 @@ fn tessellate_wires(
                             aabb: WireModel::UNBOUNDED_AABB,
                             plinegen: true,
                             geom: std::sync::Arc::new(crate::scene::WireGeom {
-                                fill_tris: ft,
-                                fill_tris_low: ftl,
+                                surfaces: crate::scene::model::wire_model::WireSurfaces {
+                                    fill_tris: ft,
+                                    fill_tris_low: ftl,
+                                    ..Default::default()
+                                }
+                                .into_optional(),
                                 ..crate::scene::WireGeom::default()
                             }),
                             ..Default::default()
@@ -1792,16 +1804,18 @@ fn tessellate_wires(
                                         geom: std::sync::Arc::new(crate::scene::WireGeom {
                                             taper_widths: Vec::new(),
                                             pattern_stations: Vec::new(),
-                                            pick_tris: Vec::new(),
-                                            pick_tris_low: Vec::new(),
                                             text_verts: Vec::new(),
                                             points: vec![],
-                                            points_low: Vec::new(),
+                                            points_low: Default::default(),
                                             snap_pts: vec![],
                                             tangent_geoms: vec![],
                                             key_vertices: vec![],
-                                            fill_tris: ft,
-                                            fill_tris_low: ftl,
+                                            surfaces: crate::scene::model::wire_model::WireSurfaces {
+                                                fill_tris: ft,
+                                                fill_tris_low: ftl,
+                                                ..Default::default()
+                                            }
+                                            .into_optional(),
                                             ..crate::scene::WireGeom::default()
                                         }),
                                         ..Default::default()
@@ -1851,16 +1865,12 @@ fn tessellate_wires(
                                         geom: std::sync::Arc::new(crate::scene::WireGeom {
                                             taper_widths: Vec::new(),
                                             pattern_stations: Vec::new(),
-                                            pick_tris: Vec::new(),
-                                            pick_tris_low: Vec::new(),
                                             text_verts: Vec::new(),
                                             points: fp,
-                                            points_low: fpl,
+                                            points_low: fpl.into(),
                                             snap_pts: vec![],
                                             tangent_geoms: vec![],
                                             key_vertices: vec![],
-                                            fill_tris: vec![],
-                                            fill_tris_low: Vec::new(),
                                             ..crate::scene::WireGeom::default()
                                         }),
                                         ..Default::default()
@@ -1918,16 +1928,12 @@ fn tessellate_wires(
                             geom: std::sync::Arc::new(crate::scene::WireGeom {
                                 taper_widths: Vec::new(),
                                 pattern_stations: Vec::new(),
-                                pick_tris: Vec::new(),
-                                pick_tris_low: Vec::new(),
                                 text_verts: Vec::new(),
                                 points: pts,
-                                points_low: low,
+                                points_low: low.into(),
                                 snap_pts: Vec::new(),
                                 tangent_geoms: Vec::new(),
                                 key_vertices: Vec::new(),
-                                fill_tris: vec![],
-                                fill_tris_low: Vec::new(),
                                 ..crate::scene::WireGeom::default()
                             }),
                             ..Default::default()
@@ -1966,17 +1972,13 @@ fn tessellate_wires(
                         geom: std::sync::Arc::new(crate::scene::WireGeom {
                             taper_widths: Vec::new(),
                             pattern_stations: Vec::new(),
-                            pick_tris: Vec::new(),
-                            pick_tris_low: Vec::new(),
                             text_verts: sdf_verts,
                             searchable_text: searchable,
                             points: Vec::new(),
-                            points_low: Vec::new(),
+                            points_low: Default::default(),
                             snap_pts,
                             tangent_geoms: te.tangent_geoms,
                             key_vertices,
-                            fill_tris: vec![],
-                            fill_tris_low: Vec::new(),
                             ..crate::scene::WireGeom::default()
                         }),
                     });
@@ -2038,16 +2040,12 @@ fn tessellate_wires(
                             geom: std::sync::Arc::new(crate::scene::WireGeom {
                                 taper_widths: Vec::new(),
                                 pattern_stations: Vec::new(),
-                                pick_tris: Vec::new(),
-                                pick_tris_low: Vec::new(),
                                 text_verts: Vec::new(),
                                 points: bin.pts,
-                                points_low: bin.pts_low,
+                                points_low: bin.pts_low.into(),
                                 snap_pts: snap,
                                 tangent_geoms: tangents,
                                 key_vertices: keys,
-                                fill_tris: vec![],
-                                fill_tris_low: Vec::new(),
                                 ..crate::scene::WireGeom::default()
                             }),
                             ..Default::default()
@@ -2090,16 +2088,18 @@ fn tessellate_wires(
                             geom: std::sync::Arc::new(crate::scene::WireGeom {
                                 taper_widths: Vec::new(),
                                 pattern_stations: Vec::new(),
-                                pick_tris: Vec::new(),
-                                pick_tris_low: Vec::new(),
                                 text_verts: Vec::new(),
                                 points: Vec::new(),
-                                points_low: Vec::new(),
+                                points_low: Default::default(),
                                 snap_pts: snap,
                                 tangent_geoms: tangents,
                                 key_vertices: keys,
-                                fill_tris: bin.fill_tris,
-                                fill_tris_low: bin.fill_tris_low,
+                                surfaces: crate::scene::model::wire_model::WireSurfaces {
+                                    fill_tris: bin.fill_tris,
+                                    fill_tris_low: bin.fill_tris_low,
+                                    ..Default::default()
+                                }
+                                .into_optional(),
                                 ..crate::scene::WireGeom::default()
                             }),
                             ..Default::default()
@@ -2147,17 +2147,13 @@ fn tessellate_wires(
                         geom: std::sync::Arc::new(crate::scene::WireGeom {
                             taper_widths: Vec::new(),
                             pattern_stations: Vec::new(),
-                            pick_tris: Vec::new(),
-                            pick_tris_low: Vec::new(),
                             text_verts: sdf_verts,
                             searchable_text: searchable,
                             points: Vec::new(),
-                            points_low: Vec::new(),
+                            points_low: Default::default(),
                             snap_pts: Vec::new(),
                             tangent_geoms: Vec::new(),
                             key_vertices: Vec::new(),
-                            fill_tris: vec![],
-                            fill_tris_low: Vec::new(),
                             ..crate::scene::WireGeom::default()
                         }),
                     });
@@ -2189,16 +2185,12 @@ fn tessellate_wires(
                         geom: std::sync::Arc::new(crate::scene::WireGeom {
                             taper_widths: Vec::new(),
                             pattern_stations: Vec::new(),
-                            pick_tris: Vec::new(),
-                            pick_tris_low: Vec::new(),
                             text_verts: Vec::new(),
                             points: Vec::new(),
-                            points_low: Vec::new(),
+                            points_low: Default::default(),
                             snap_pts,
                             tangent_geoms: te.tangent_geoms,
                             key_vertices,
-                            fill_tris: vec![],
-                            fill_tris_low: Vec::new(),
                             ..crate::scene::WireGeom::default()
                         }),
                         ..Default::default()
@@ -2256,8 +2248,6 @@ fn tessellate_wires(
                             geom: std::sync::Arc::new(crate::scene::WireGeom {
                                 taper_widths: Vec::new(),
                                 pattern_stations: Vec::new(),
-                                pick_tris: Vec::new(),
-                                pick_tris_low: Vec::new(),
                                 text_verts: Vec::new(),
                                 points: vec![
                                     [x - s, y, z],
@@ -2269,12 +2259,10 @@ fn tessellate_wires(
                                 // (the cross arms are tiny, < 0.1 m, so the low
                                 // component of the centre is also the right one
                                 // for the arm tips at f32 precision).
-                                points_low: vec![[xl, yl, zl]; 4],
+                                points_low: vec![[xl, yl, zl]; 4].into(),
                                 snap_pts,
                                 tangent_geoms: te.tangent_geoms,
                                 key_vertices,
-                                fill_tris: vec![],
-                                fill_tris_low: Vec::new(),
                                 ..crate::scene::WireGeom::default()
                             }),
                             ..Default::default()
@@ -2422,16 +2410,18 @@ fn tessellate_wires(
                             geom: std::sync::Arc::new(crate::scene::WireGeom {
                                 taper_widths: Vec::new(),
                                 pattern_stations: Vec::new(),
-                                pick_tris,
-                                pick_tris_low,
                                 text_verts: Vec::new(),
                                 points: local_pts,
-                                points_low: local_pts_low,
+                                points_low: local_pts_low.into(),
                                 snap_pts: snap,
                                 tangent_geoms: tangents,
                                 key_vertices: keys,
-                                fill_tris: vec![],
-                                fill_tris_low: Vec::new(),
+                                surfaces: crate::scene::model::wire_model::WireSurfaces {
+                                    pick_tris,
+                                    pick_tris_low,
+                                    ..Default::default()
+                                }
+                                .into_optional(),
                                 ..crate::scene::WireGeom::default()
                             }),
                             ..Default::default()
@@ -2481,16 +2471,18 @@ fn tessellate_wires(
                         geom: std::sync::Arc::new(crate::scene::WireGeom {
                             taper_widths: Vec::new(),
                             pattern_stations: Vec::new(),
-                            pick_tris: Vec::new(),
-                            pick_tris_low: Vec::new(),
                             text_verts: Vec::new(),
                             points: Vec::new(),
-                            points_low: Vec::new(),
+                            points_low: Default::default(),
                             snap_pts: snap,
                             tangent_geoms: tangents,
                             key_vertices: keys,
-                            fill_tris,
-                            fill_tris_low,
+                            surfaces: crate::scene::model::wire_model::WireSurfaces {
+                                fill_tris,
+                                fill_tris_low,
+                                ..Default::default()
+                            }
+                            .into_optional(),
                             ..crate::scene::WireGeom::default()
                         }),
                         ..Default::default()
@@ -2523,16 +2515,12 @@ fn tessellate_wires(
                         geom: std::sync::Arc::new(crate::scene::WireGeom {
                             taper_widths: Vec::new(),
                             pattern_stations: Vec::new(),
-                            pick_tris: Vec::new(),
-                            pick_tris_low: Vec::new(),
                             text_verts: Vec::new(),
                             points: Vec::new(),
-                            points_low: Vec::new(),
+                            points_low: Default::default(),
                             snap_pts,
                             tangent_geoms: te.tangent_geoms,
                             key_vertices,
-                            fill_tris: vec![],
-                            fill_tris_low: Vec::new(),
                             ..crate::scene::WireGeom::default()
                         }),
                         ..Default::default()
@@ -2585,16 +2573,12 @@ fn tessellate_wires(
                     geom: std::sync::Arc::new(crate::scene::WireGeom {
                         taper_widths: Vec::new(),
                         pattern_stations: station_data,
-                        pick_tris: Vec::new(),
-                        pick_tris_low: Vec::new(),
                         text_verts: Vec::new(),
                         points: local_pts,
-                        points_low: local_pts_low,
+                        points_low: local_pts_low.into(),
                         snap_pts: te.snap_pts,
                         tangent_geoms: te.tangent_geoms,
                         key_vertices,
-                        fill_tris: Vec::new(),
-                        fill_tris_low: Vec::new(),
                         ..crate::scene::WireGeom::default()
                     }),
                     ..Default::default()
@@ -2613,7 +2597,7 @@ fn tessellate_wires(
                                 plinegen: true,
                                 geom: std::sync::Arc::new(crate::scene::WireGeom {
                                     points: base.points[start..end].to_vec(),
-                                    points_low: base.points_low[start..end].to_vec(),
+                                    points_low: base.points_low.iter().skip(start).take(end - start).collect::<Vec<_>>().into(),
                                     pattern_stations: Vec::new(),
                                     snap_pts: Vec::new(),
                                     tangent_geoms: Vec::new(),
@@ -2636,7 +2620,7 @@ fn tessellate_wires(
                         pattern: [0.0; 8],
                         geom: std::sync::Arc::new(crate::scene::WireGeom {
                             points: solid_pts,
-                            points_low: solid_pts_low,
+                            points_low: solid_pts_low.into(),
                             pattern_stations: Vec::new(),
                             snap_pts: base.snap_pts.clone(),
                             tangent_geoms: base.tangent_geoms.clone(),
@@ -2738,16 +2722,18 @@ fn tessellate_wires(
                     geom: std::sync::Arc::new(crate::scene::WireGeom {
                         taper_widths: Vec::new(),
                         pattern_stations: Vec::new(),
-                        pick_tris,
-                        pick_tris_low,
                         text_verts: Vec::new(),
                         points: local_pts,
-                        points_low: local_pts_low,
+                        points_low: local_pts_low.into(),
                         snap_pts,
                         tangent_geoms: te.tangent_geoms,
                         key_vertices,
-                        fill_tris: vec![],
-                        fill_tris_low: Vec::new(),
+                        surfaces: crate::scene::model::wire_model::WireSurfaces {
+                            pick_tris,
+                            pick_tris_low,
+                            ..Default::default()
+                        }
+                        .into_optional(),
                         ..crate::scene::WireGeom::default()
                     }),
                     ..Default::default()
@@ -2820,16 +2806,18 @@ fn tessellate_wires(
                     geom: std::sync::Arc::new(crate::scene::WireGeom {
                         taper_widths: widths,
                         pattern_stations: Vec::new(),
-                        pick_tris,
-                        pick_tris_low,
                         text_verts: Vec::new(),
                         points: local_pts,
-                        points_low: local_pts_low,
+                        points_low: local_pts_low.into(),
                         snap_pts,
                         tangent_geoms: te.tangent_geoms,
                         key_vertices,
-                        fill_tris: vec![],
-                        fill_tris_low: Vec::new(),
+                        surfaces: crate::scene::model::wire_model::WireSurfaces {
+                            pick_tris,
+                            pick_tris_low,
+                            ..Default::default()
+                        }
+                        .into_optional(),
                         ..crate::scene::WireGeom::default()
                     }),
                     ..Default::default()
@@ -2928,16 +2916,18 @@ fn tessellate_wires(
         geom: std::sync::Arc::new(crate::scene::WireGeom {
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),
-            pick_tris,
-            pick_tris_low,
             text_verts: Vec::new(),
             points,
-            points_low,
+            points_low: points_low.into(),
             snap_pts,
             tangent_geoms,
             key_vertices,
-            fill_tris: vec![],
-            fill_tris_low: Vec::new(),
+            surfaces: crate::scene::model::wire_model::WireSurfaces {
+                pick_tris,
+                pick_tris_low,
+                ..Default::default()
+            }
+            .into_optional(),
             ..crate::scene::WireGeom::default()
         }),
         ..Default::default()
@@ -3355,7 +3345,7 @@ fn append_custom_hatch_geometry(
 fn append_custom_band(wire: &WireModel, fill: &mut Vec<[f32; 3]>) {
     let at = |index: usize| {
         let point = wire.points[index];
-        let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+        let low = wire.points_low.get(index).unwrap_or([0.0; 3]);
         (!point[0].is_nan()).then(|| {
             [
                 point[0] as f64 + low[0] as f64,
@@ -3402,7 +3392,7 @@ fn append_custom_band(wire: &WireModel, fill: &mut Vec<[f32; 3]>) {
 
 fn append_custom_wire_points(
     points: &[[f32; 3]],
-    points_low: &[[f32; 3]],
+    points_low: &crate::scene::model::point_residuals::PointResiduals,
     base: document::types::Vector3,
     out: &mut Vec<[f32; 3]>,
 ) {
@@ -3419,7 +3409,7 @@ fn append_custom_wire_points(
             }
             continue;
         }
-        let low = points_low.get(index).copied().unwrap_or([0.0; 3]);
+        let low = points_low.get(index).unwrap_or([0.0; 3]);
         out.push([
             (point[0] as f64 + low[0] as f64 - base.x) as f32,
             (point[1] as f64 + low[1] as f64 - base.y) as f32,

@@ -214,8 +214,6 @@ impl CadCommand for ZoomWindowCommand {
             geom: std::sync::Arc::new(crate::scene::WireGeom {
                 taper_widths: Vec::new(),
                 pattern_stations: Vec::new(),
-                pick_tris: Vec::new(),
-                pick_tris_low: Vec::new(),
                 text_verts: Vec::new(),
                 points: vec![
                     [min.x, min.y, 0.0],
@@ -224,12 +222,10 @@ impl CadCommand for ZoomWindowCommand {
                     [min.x, max.y, 0.0],
                     [min.x, min.y, 0.0],
                 ],
-                points_low: Vec::new(),
+                points_low: Default::default(),
                 snap_pts: vec![],
                 tangent_geoms: vec![],
                 key_vertices: vec![],
-                fill_tris: vec![],
-                fill_tris_low: Vec::new(),
                 ..crate::scene::WireGeom::default()
             }),
             ..Default::default()

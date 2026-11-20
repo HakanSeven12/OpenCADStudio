@@ -64,7 +64,7 @@ fn heap_bytes(wires: &[WireModel]) -> usize {
         .iter()
         .map(|w| {
             w.points.capacity() * size_of::<[f32; 3]>()
-                + w.points_low.capacity() * size_of::<[f32; 3]>()
+                + w.points_low.allocated_bytes()
                 + w.key_vertices.capacity() * size_of::<[f64; 3]>()
                 + w.name.capacity()
         })

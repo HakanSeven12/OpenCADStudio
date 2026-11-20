@@ -1154,7 +1154,7 @@ mod tests {
             let mut geometry_xs = Vec::new();
             for wire in &wires {
                 for (index, point) in wire.points.iter().enumerate() {
-                    let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+                    let low = wire.points_low.get(index).unwrap_or([0.0; 3]);
                     geometry_xs.push(f64::from(point[0]) + f64::from(low[0]));
                 }
                 geometry_xs.extend(

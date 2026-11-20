@@ -168,16 +168,12 @@ pub fn table_grid_preview(table: &Table, plane: &WorkingPlane, point: DVec3) -> 
         geom: std::sync::Arc::new(crate::scene::WireGeom {
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),
-            pick_tris: Vec::new(),
-            pick_tris_low: Vec::new(),
             text_verts: Vec::new(),
             points,
-            points_low: Vec::new(),
+            points_low: Default::default(),
             snap_pts: Vec::new(),
             tangent_geoms: Vec::new(),
             key_vertices: Vec::new(),
-            fill_tris: Vec::new(),
-            fill_tris_low: Vec::new(),
             ..crate::scene::WireGeom::default()
         }),
         ..Default::default()

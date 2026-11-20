@@ -125,7 +125,7 @@ pub(crate) fn display_wires(
     for (color, width, points) in lines {
         let (lp, lp_low) = crate::scene::convert::tessellate::points_to_ds(points);
         let mut wire = content_wire(name, lp, color);
-        wire.points_low = lp_low;
+        wire.points_low = lp_low.into();
         if width < 0.0 {
             // A width in pixels (DGN line weights are not shown).
             wire.set_fixed_screen_width((-width) as f32);

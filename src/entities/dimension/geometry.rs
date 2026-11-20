@@ -1514,9 +1514,11 @@ pub(crate) fn map_wire_ocs_to_wcs(wire: &mut WireModel, normal: Vector3) {
     };
 
     let geom = wire.geom_mut();
-    map_split(&mut geom.points, &mut geom.points_low);
-    map_split(&mut geom.fill_tris, &mut geom.fill_tris_low);
-    map_split(&mut geom.pick_tris, &mut geom.pick_tris_low);
+    map_split(&mut geom.points, geom.points_low.dense_mut());
+    if let Some(surfaces) = geom.surfaces.as_deref_mut() {
+        map_split(&mut surfaces.fill_tris, &mut surfaces.fill_tris_low);
+        map_split(&mut surfaces.pick_tris, &mut surfaces.pick_tris_low);
+    }
     geom.text_verts = crate::scene::model::wire_model::map_text_verts(&geom.text_verts, map);
     // OCS→WCS is rigid: unit height scale, no in-plane rotation change.
     wire.map_searchable_runs(

@@ -3681,16 +3681,12 @@ fn wire(name: &str, points: Vec<[f32; 3]>) -> WireModel {
         geom: std::sync::Arc::new(crate::scene::WireGeom {
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),
-            pick_tris: Vec::new(),
-            pick_tris_low: Vec::new(),
             text_verts: Vec::new(),
             points,
-            points_low: Vec::new(),
+            points_low: Default::default(),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
-            fill_tris: vec![],
-            fill_tris_low: Vec::new(),
             ..crate::scene::WireGeom::default()
         }),
         ..Default::default()

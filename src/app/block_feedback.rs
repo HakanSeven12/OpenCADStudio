@@ -199,7 +199,7 @@ impl OpenCADStudio {
                     for wire in tab.scene.wire_models_for(&handles) {
                         let mut previous = None;
                         for (index, high) in wire.points.iter().enumerate() {
-                            let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+                            let low = wire.points_low.get(index).unwrap_or([0.0; 3]);
                             let point = DVec3::new(
                                 high[0] as f64 + low[0] as f64,
                                 high[1] as f64 + low[1] as f64,

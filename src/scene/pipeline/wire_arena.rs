@@ -525,22 +525,6 @@ fn make_const_bg(
     }))
 }
 
-fn alloc_inst_initialized(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    cap: u64,
-    data: &[WireInstance],
-) -> wgpu::Buffer {
-    super::gpu_upload::alloc_with_prefix(
-        device,
-        queue,
-        "wire_arena.ibuf",
-        cap * std::mem::size_of::<WireInstance>() as u64,
-        data,
-        wgpu::BufferUsages::VERTEX,
-    )
-}
-
 fn alloc_const_initialized(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -722,17 +706,45 @@ impl WireArena {
             return None;
         }
 
+        let inst_tail = inst_count as u32;
+        let const_tail = const_count as u32;
+        let inst_size = std::mem::size_of::<WireInstance>() as u64;
+        let inst_cap = ((inst_tail as u64 * HEADROOM_NUM / HEADROOM_DEN)
+            .max(MIN_INST_CAP)
+            .min(instance_limit)) as u32;
+        let const_cap = ((const_tail as u64 * HEADROOM_NUM / HEADROOM_DEN)
+            .max(MIN_CONST_CAP)
+            .min(constant_limit)) as u32;
+        let upload_started = iced::time::Instant::now();
+        let inst_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wire_arena.ibuf"),
+            size: u64::from(inst_cap) * inst_size,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        // Copy each packed slab straight to staging, avoiding another complete
+        // copy of the CPU instance array before the queue can consume it.
+        let mut staging = match wgpu::BufferSize::new(u64::from(inst_tail) * inst_size) {
+            Some(size) => Some(queue.write_buffer_with(&inst_buf, 0, size)?),
+            None => None,
+        };
+
         // const slot 0 = blank tombstone target.
-        let mut instances: Vec<WireInstance> = Vec::with_capacity(inst_count);
         let mut consts_cpu: Vec<WireConst> = Vec::with_capacity(const_count);
         consts_cpu.push(blank_const());
         let mut slabs: FxHashMap<Handle, Slab> =
             FxHashMap::with_capacity_and_hasher(packed.len(), Default::default());
+        let mut inst_off = 0u32;
         for mut packed_slab in packed {
-            let inst_off = instances.len() as u32;
             let inst_len = packed_slab.instances.len() as u32;
             let const_len = packed_slab.consts.len() as u32;
-            instances.append(&mut packed_slab.instances);
+            if let Some(staging) = staging.as_mut() {
+                let start = (u64::from(inst_off) * inst_size) as usize;
+                let bytes = bytemuck::cast_slice(&packed_slab.instances);
+                staging
+                    .slice(start..start + bytes.len())
+                    .copy_from_slice(bytes);
+            }
             consts_cpu.append(&mut packed_slab.consts);
             slabs.insert(
                 packed_slab.handle,
@@ -746,23 +758,10 @@ impl WireArena {
                     content: packed_slab.content,
                 },
             );
+            inst_off += inst_len;
         }
-
-        let inst_tail = instances.len() as u32;
-        let const_tail = consts_cpu.len() as u32;
-        // A batch bigger than one buffer can't be an arena — let the caller chunk
-        // it via the batched path.
-        if inst_tail as u64 > instance_limit || const_tail as u64 > constant_limit {
-            return None;
-        }
-        let inst_cap = ((inst_tail as u64 * HEADROOM_NUM / HEADROOM_DEN)
-            .max(MIN_INST_CAP)
-            .min(instance_limit)) as u32;
-        let const_cap = ((const_tail as u64 * HEADROOM_NUM / HEADROOM_DEN)
-            .max(MIN_CONST_CAP)
-            .min(constant_limit)) as u32;
-        let upload_started = iced::time::Instant::now();
-        let inst_buf = alloc_inst_initialized(device, queue, inst_cap as u64, &instances);
+        drop(staging);
+        debug_assert_eq!(inst_off, inst_tail);
         let const_buf = alloc_const_initialized(device, queue, const_cap as u64, &consts_cpu);
         let upload_ms = upload_started.elapsed().as_secs_f64() * 1000.0;
         let const_bind_group = make_const_bg(device, const_bgl, &const_buf);

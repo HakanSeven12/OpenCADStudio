@@ -196,16 +196,18 @@ impl MlineCommand {
             geom: std::sync::Arc::new(crate::scene::WireGeom {
                 taper_widths: Vec::new(),
                 pattern_stations: Vec::new(),
-                pick_tris: Vec::new(),
-                pick_tris_low: Vec::new(),
                 text_verts: Vec::new(),
                 points,
-                points_low,
+                points_low: points_low.into(),
                 snap_pts: Vec::new(),
                 tangent_geoms: Vec::new(),
                 key_vertices: Vec::new(),
-                fill_tris,
-                fill_tris_low,
+                surfaces: crate::scene::model::wire_model::WireSurfaces {
+                    fill_tris,
+                    fill_tris_low,
+                    ..Default::default()
+                }
+                .into_optional(),
                 ..crate::scene::WireGeom::default()
             }),
             ..Default::default()

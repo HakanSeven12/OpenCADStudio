@@ -58,7 +58,7 @@ fn rendered_wire_bounds_memo(
         let hw = wire.world_width as f64 * 0.5;
 
         for (index, &[x, y, z]) in wire.points.iter().enumerate() {
-            let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+            let low = wire.points_low.get(index).unwrap_or([0.0; 3]);
             let p = glam::DVec3::new(
                 x as f64 + low[0] as f64,
                 y as f64 + low[1] as f64,
@@ -1788,7 +1788,7 @@ impl Scene {
                     }
                 } else {
                     for (index, &[x, y, z]) in wire.points.iter().enumerate() {
-                        let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+                        let low = wire.points_low.get(index).unwrap_or([0.0; 3]);
                         include(
                             x as f64 + low[0] as f64,
                             y as f64 + low[1] as f64,

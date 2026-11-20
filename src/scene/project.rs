@@ -486,7 +486,7 @@ impl Scene {
                 // Paper coordinates are small sheet units — no relative-to-eye
                 // residual is needed, and keeping the model wire's points_low
                 // here would add a model-scale offset to the paper points.
-                out.points_low = Vec::new();
+                out.points_low = Default::default();
                 out.point_marker = None;
                 out.snap_pts = snap_pts;
                 out.key_vertices = key_vertices;

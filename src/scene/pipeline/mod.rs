@@ -538,6 +538,7 @@ pub struct Pipeline {
     /// occupant changes, all cache keys above belong to the previous one and are
     /// reset so every buffer re-uploads. `u64::MAX` = never used.
     pub slot_id: u64,
+    pub(in crate::scene) slot_owner: std::sync::Weak<()>,
 }
 
 /// The views and samplers the frame bind group carries beside its uniforms.
@@ -2693,6 +2694,7 @@ impl Pipeline {
             skip_background: false,
             occluded_edges: false,
             slot_id: u64::MAX,
+            slot_owner: std::sync::Weak::new(),
         }
     }
 
@@ -6971,6 +6973,35 @@ impl Pipeline {
 }
 
 impl MultiPipeline {
+    /// A closed scene no longer owns any GPU slot, even on the Start tab.
+    pub(in crate::scene) fn release_closed_slots(&mut self, device: &wgpu::Device) -> usize {
+        let mut released = 0;
+        for inner in &mut self.inners {
+            if inner.slot_id != u64::MAX && inner.slot_owner.strong_count() == 0 {
+                self.slot_by_instance.remove(&inner.slot_id);
+                inner.release_heavy_resources(device);
+                inner.slot_id = u64::MAX;
+                released += 1;
+            }
+        }
+        if released > 0 {
+            self.prune_shared_resources();
+        }
+        released
+    }
+
+    fn prune_shared_resources(&mut self) {
+        self.wire_buffer_cache.retain(|_, entry| {
+            std::sync::Arc::strong_count(&entry.0) > 1
+                || std::sync::Arc::strong_count(&entry.1) > 1
+                || std::sync::Arc::strong_count(&entry.3) > 1
+                || std::sync::Arc::strong_count(&entry.4) > 1
+        });
+        self.mesh_batch_cache
+            .retain(|_, entry| std::sync::Arc::strong_count(&entry.1) > 1);
+        self.block_geometry.clear();
+    }
+
     /// Release cold slots after 64 frames, or two frames under memory pressure.
     /// Current and previous frame slots remain reserved for sibling widgets.
     pub(crate) fn release_idle_slots(
@@ -7005,16 +7036,7 @@ impl MultiPipeline {
             released += 1;
         }
         if released > 0 {
-            self.wire_buffer_cache.retain(|_, entry| {
-                std::sync::Arc::strong_count(&entry.0) > 1
-                    || std::sync::Arc::strong_count(&entry.1) > 1
-                    || std::sync::Arc::strong_count(&entry.3) > 1
-            });
-            self.mesh_batch_cache
-                .retain(|_, entry| std::sync::Arc::strong_count(&entry.1) > 1);
-            // Block records are host memory a released slot no longer needs;
-            // the next build re-emits what it still draws.
-            self.block_geometry.clear();
+            self.prune_shared_resources();
         }
         released
     }
@@ -7411,6 +7433,11 @@ impl GpuStatus {
 
 /// The adapter of the most recently created device.
 static GPU_ADAPTER: std::sync::Mutex<Option<GpuAdapter>> = std::sync::Mutex::new(None);
+
+/// Check without constructing the drawing pipeline on an empty Start tab.
+pub(crate) fn viewport_pipeline_initialized() -> bool {
+    GPU_ADAPTER.lock().is_ok_and(|slot| slot.is_some())
+}
 
 /// How many times the viewport has asked the scene for a primitive. Counted
 /// in `ViewportPane::draw`, which every renderer calls; only wgpu goes on to

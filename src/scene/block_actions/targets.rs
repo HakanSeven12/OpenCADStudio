@@ -47,6 +47,21 @@ pub(super) fn geometry(
         if grips.as_ref().unwrap().contains(handle) {
             continue;
         }
+        // Visibility, lookup and alignment grips, and the alignment parameter,
+        // carry no frame another parameter reads: a selection that sweeps them
+        // in only keeps the link.
+        if matches!(
+            doc.objects.get(handle),
+            Some(ObjectType::DynamicBlock(o)) if matches!(
+                o.data,
+                DynamicBlockData::VisibilityGrip(_)
+                    | DynamicBlockData::LookupGrip(_)
+                    | DynamicBlockData::AlignmentGrip(_)
+                    | DynamicBlockData::AlignmentParameter(_)
+            )
+        ) {
+            continue;
+        }
         // Flip-linked parameters need frame transport; silently treating them
         // as bookkeeping would leave later grips and edits in the old frame.
         if kind == Kind::Flip {

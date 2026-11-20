@@ -2592,7 +2592,7 @@ impl OpenCADStudio {
         let idle = active_cmd.is_none();
         let over_object = idle && self.pick_auto & 2 != 0;
         let lasso = self.pick_auto & 4 != 0;
-        let rectangle = self.pick_drag_mode == 1 && self.pick_auto & 1 != 0;
+        let implied_window = self.pick_auto & 1 != 0;
         let command_drag = active_cmd.is_some_and(|cmd| cmd.accepts_drag_selection());
         let enabled = if idle {
             self.pick_first
@@ -2601,7 +2601,8 @@ impl OpenCADStudio {
         };
         if !enabled
             || self.drag_move.is_some()
-            || (!command_drag && (self.pick_drag_mode == 0 || !(lasso || rectangle || over_object)))
+            || (!command_drag
+                && (self.pick_drag_mode == 0 || !(lasso || implied_window || over_object)))
         {
             return;
         }
@@ -2616,20 +2617,23 @@ impl OpenCADStudio {
         let edit_cam = frame.map(|(cam, _)| cam);
         let bounds = iced::Rectangle::new(Point::ORIGIN, tile.size());
         let local_press = Point::new(press.x - tile.x, press.y - tile.y);
-        let table_cell = idle
+        let force_rectangle = !lasso || (command_drag && self.pick_drag_mode == 0);
+        // With over-object dragging enabled, the press target cannot change
+        // a forced rectangle. Table-cell ranges are resolved during the drag.
+        let needs_press_hit = !force_rectangle || !over_object;
+        let table_cell = needs_press_hit
+            && idle
             && self
                 .table_cell_under(i, local_press, bounds, &edit_cam, 0.0)
                 .is_some();
-        let hit = !command_drag
+        let hit = needs_press_hit
+            && !command_drag
             && !table_cell
             && self
                 .selection_object_under(i, local_press, bounds, &edit_cam)
                 .is_some();
 
-        let rectangle = table_cell
-            || hit
-            || (!lasso && (rectangle || over_object))
-            || (command_drag && self.pick_drag_mode == 0);
+        let rectangle = force_rectangle || table_cell || hit;
         let world_anchor =
             rectangle.then(|| self.cursor_model_point(i, &edit_cam, local_press, bounds));
         let mut state = tab.scene.selection.borrow_mut();

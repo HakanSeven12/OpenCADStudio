@@ -59,7 +59,7 @@ fn wires(document: &Document, insert: Insert) -> Vec<WireModel> {
 
 fn point(wire: &WireModel, index: usize) -> Option<[f64; 2]> {
     let high = wire.points[index];
-    let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+    let low = wire.points_low.get(index).unwrap_or([0.0; 3]);
     high[0]
         .is_finite()
         .then(|| [high[0] as f64 + low[0] as f64, high[1] as f64 + low[1] as f64])

@@ -301,7 +301,7 @@ fn wire_polyline_nearest(
     }
     let at = |i: usize| -> DVec3 {
         let hi = wire.points[i];
-        let lo = wire.points_low.get(i).copied().unwrap_or([0.0; 3]);
+        let lo = wire.points_low.get(i).unwrap_or([0.0; 3]);
         DVec3::new(
             hi[0] as f64 + lo[0] as f64,
             hi[1] as f64 + lo[1] as f64,

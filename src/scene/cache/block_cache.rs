@@ -383,6 +383,8 @@ struct ProtoNumericKey {
     bg_color: [u32; 4],
     anno_scale: u32,
     complex_lt_anno: u32,
+    ins_aci: u8,
+    layer_aci: u8,
     flags: u8,
 }
 
@@ -522,10 +524,62 @@ impl BlockPrototypeCache {
 #[derive(Debug)]
 struct CachedExpansion {
     translation: [f64; 3],
-    /// The wires every further reference repeats one by one.
-    wires: Arc<Vec<WireModel>>,
-    /// The part a further reference carries as one stub wire, and its XY box.
-    stubbed: Option<(Arc<Vec<WireModel>>, [f32; 4])>,
+    runs: Vec<PrototypeRun>,
+}
+
+#[derive(Debug)]
+enum PrototypeRun {
+    Shared(Arc<Vec<WireModel>>, [f32; 4]),
+    Individual(Vec<WireModel>),
+}
+
+impl CachedExpansion {
+    fn new(translation: [f64; 3], wires: &[WireModel]) -> Self {
+        use crate::scene::model::instance_model::{prototype_aabb, stubbable};
+
+        // Preserve the position of individual surfaces, text and curves
+        // in the submission order when replaying a cached cell.
+        let runs = wires
+            .chunk_by(|a, b| stubbable(a) == stubbable(b))
+            .map(|run| {
+                if stubbable(&run[0]) {
+                    PrototypeRun::Shared(Arc::new(run.to_vec()), prototype_aabb(run))
+                } else {
+                    PrototypeRun::Individual(run.to_vec())
+                }
+            })
+            .collect();
+        Self { translation, runs }
+    }
+
+    fn append_instance(
+        &self,
+        translation: [f64; 3],
+        name: &str,
+        selected: bool,
+        wires: &mut Vec<WireModel>,
+    ) {
+        let delta = std::array::from_fn(|i| translation[i] - self.translation[i]);
+        for run in &self.runs {
+            match run {
+                PrototypeRun::Shared(prototype, bounds) => {
+                    let mut stub = crate::scene::model::instance_model::stub_wire(
+                        Arc::clone(prototype),
+                        *bounds,
+                        delta,
+                        0.0,
+                    );
+                    stub.name = name.to_owned();
+                    stub.selected = selected;
+                    wires.push(stub);
+                }
+                PrototypeRun::Individual(run) => wires.extend(
+                    run.iter()
+                        .map(|wire| translated_prototype_wire(wire, name, delta)),
+                ),
+            }
+        }
+    }
 }
 
 fn lookup_ascii_upper<'a, V>(map: &'a HashMap<String, V>, key: &str) -> Option<&'a V> {
@@ -1097,7 +1151,7 @@ fn collect_referenced_blocks<'a>(
             EntityType::Insert(insert) => {
                 *raw_insert_counts
                     .entry(insert.block_name.as_str())
-                    .or_default() += insert.instance_count();
+                    .or_default() += 1;
             }
             EntityType::Dimension(dimension) => {
                 let name = dimension.base().block_name.trim();
@@ -1941,10 +1995,11 @@ fn tessellate_sub_local(
                 }
                 None => (lt_is_byblock, lt_l0, own_complex.clone(), complex_walk),
             };
+        let surfaces = geom.surfaces.map(|surfaces| *surfaces).unwrap_or_default();
         result.push(LocalWire {
             plot_member: (!doc.header.plotstyle_mode).then_some(sub.common().handle),
             points: geom.points,
-            points_low: geom.points_low,
+            points_low: geom.points_low.into_dense(),
             is_point: matches!(sub, EntityType::Point(_)),
             point_marker: wire.point_marker,
             text_verts: geom.text_verts,
@@ -1952,13 +2007,13 @@ fn tessellate_sub_local(
             key_vertices: geom.key_vertices,
             snap_pts: geom.snap_pts,
             tangent_geoms: geom.tangent_geoms,
-            fill_tris: geom.fill_tris,
-            fill_tris_low: geom.fill_tris_low,
+            fill_tris: surfaces.fill_tris,
+            fill_tris_low: surfaces.fill_tris_low,
             fill_is_3d: wire.fill_is_3d,
             fill_is_2d_solid: wire.fill_is_2d_solid,
             solid_normal: wire.solid_normal,
-            pick_tris: geom.pick_tris,
-            pick_tris_low: geom.pick_tris_low,
+            pick_tris: surfaces.pick_tris,
+            pick_tris_low: surfaces.pick_tris_low,
             color: wire_color,
             layer_locked,
             contrast_bg,
@@ -2159,37 +2214,6 @@ pub fn expand_insert(
     )
 }
 
-fn instantiate_cached_prototype(
-    cached: &CachedExpansion,
-    xform: &Transform,
-    name: &str,
-    selected: bool,
-) -> Vec<WireModel> {
-    let translation = transform_translation(xform);
-    let delta = [
-        translation[0] - cached.translation[0],
-        translation[1] - cached.translation[1],
-        translation[2] - cached.translation[2],
-    ];
-    let mut wires: Vec<WireModel> = cached
-        .wires
-        .iter()
-        .map(|wire| translated_prototype_wire(wire, name, delta))
-        .collect();
-    if let Some((prototype, aabb)) = &cached.stubbed {
-        let mut stub = crate::scene::model::instance_model::stub_wire(
-            Arc::clone(prototype),
-            *aabb,
-            delta,
-            0.0,
-        );
-        stub.name = name.to_string();
-        stub.selected = selected;
-        wires.push(stub);
-    }
-    wires
-}
-
 /// Expand one top-level INSERT using an already-resolved [`BlockDefn`].
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn expand_insert_with_defn(
@@ -2251,6 +2275,45 @@ pub(crate) fn expand_insert_with_defn(
         crate::scene::view::render::layer_locked_by_name(doc, &ins.common.layer);
     let inherited_layer = (!crate::scene::view::render::is_effective_layer_zero(&ins.common.layer))
         .then_some(ins.common.layer.as_str());
+    let offsets = crate::scene::render_graph::array_offsets(ins);
+    let cell_xform = |offset: &[f64; 3]| {
+        crate::scene::render_graph::insert_instance_transform(
+            doc,
+            ins,
+            *offset,
+            anno_scale,
+            scale_policy,
+        )
+    };
+    if view_aabb.is_some() || world_per_pixel.is_some() {
+        let bounds = offsets.iter().fold([0.0_f32; 4], |bounds, offset| {
+            aabb_union(
+                bounds,
+                transform_aabb_xy(defn.metrics.aabb_local, &cell_xform(offset)),
+            )
+        });
+        if view_aabb.is_some_and(|view| aabb_disjoint_xy(bounds, view))
+            || world_per_pixel.is_some_and(|wpp| {
+                !defn.metrics.has_point_marker && aabb_pixel_size(bounds, wpp) < MIN_PIXEL_SIZE
+            })
+        {
+            return Some(Vec::new());
+        }
+    }
+
+    let instantiate = |cached: &CachedExpansion| {
+        let mut wires = Vec::new();
+        cached.append_instance(transform_translation(&xform), &name, selected, &mut wires);
+        for offset in offsets.iter().skip(1) {
+            cached.append_instance(
+                transform_translation(&cell_xform(offset)),
+                &name,
+                selected,
+                &mut wires,
+            );
+        }
+        wires
+    };
     // Mask-bearing blocks must not reuse translated GPU prototypes: ordinary
     // strokes and wipeout fills have different upload paths. Their shared
     // source_id plus per-copy translated geometry can make a moved INSERT
@@ -2260,7 +2323,6 @@ pub(crate) fn expand_insert_with_defn(
     let can_prototype = cache.prototypes_enabled
         && defn.is_prototype
         && !defn.has_masks
-        && !ins.is_array()
         && !crate::scene::block_construction::is_construction(&ins.common);
     let proto_slot: Option<Arc<std::sync::Mutex<Option<Arc<CachedExpansion>>>>>;
     let mut proto_guard: Option<std::sync::MutexGuard<'_, Option<Arc<CachedExpansion>>>> = None;
@@ -2269,10 +2331,12 @@ pub(crate) fn expand_insert_with_defn(
         let numeric = proto_numeric_key(
             &xform,
             ins_resolved_color,
+            ins_aci,
             ins_pat_len,
             ins_pat,
             ins_lw_px,
             ins_layer,
+            ins_layer_aci,
             ins_layer_plottable,
             selected,
             pslt_factor,
@@ -2291,15 +2355,11 @@ pub(crate) fn expand_insert_with_defn(
         };
         let hash = key.hash_u64();
         if let Some(cached) = defn.prototypes.get_ready(hash, key) {
-            return Some(instantiate_cached_prototype(
-                &cached, &xform, &name, selected,
-            ));
+            return Some(instantiate(&cached));
         }
         match defn.prototypes.acquire_or_get(hash, key) {
             ProtoAcquire::Ready(cached) => {
-                return Some(instantiate_cached_prototype(
-                    &cached, &xform, &name, selected,
-                ));
+                return Some(instantiate(&cached));
             }
             ProtoAcquire::InFlight(slot) => {
                 proto_slot = Some(slot);
@@ -2309,9 +2369,7 @@ pub(crate) fn expand_insert_with_defn(
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
                 if let Some(cached) = guard.as_ref().cloned() {
                     drop(guard);
-                    return Some(instantiate_cached_prototype(
-                        &cached, &xform, &name, selected,
-                    ));
+                    return Some(instantiate(&cached));
                 }
                 proto_guard = Some(guard);
                 proto_lookup = Some((hash, numeric));
@@ -2320,43 +2378,6 @@ pub(crate) fn expand_insert_with_defn(
     }
     let mut batches = Batches::default();
     let mut visited: Vec<String> = vec![ins.block_name.clone()];
-
-    let offsets = crate::scene::render_graph::array_offsets(ins);
-    let cell_xform = |offset: &[f64; 3]| {
-        crate::scene::render_graph::insert_instance_transform(
-            doc,
-            ins,
-            *offset,
-            anno_scale,
-            scale_policy,
-        )
-    };
-    let insert_world = offsets.iter().fold([0.0_f32; 4], |aabb, offset| {
-        aabb_union(
-            aabb,
-            transform_aabb_xy(defn.metrics.aabb_local, &cell_xform(offset)),
-        )
-    });
-    let insert_local = [
-        insert_world[0] as f32,
-        insert_world[1] as f32,
-        insert_world[2] as f32,
-        insert_world[3] as f32,
-    ];
-
-    // Whole-Insert frustum cull.
-    if let Some(view) = view_aabb {
-        if aabb_disjoint_xy(insert_local, view) {
-            return Some(vec![]);
-        }
-    }
-    // Whole-Insert pixel-size LOD: if the entire Insert footprint projects
-    // to sub-pixel size, skip it entirely.
-    if let Some(wpp) = world_per_pixel {
-        if !defn.metrics.has_point_marker && aabb_pixel_size(insert_local, wpp) < MIN_PIXEL_SIZE {
-            return Some(vec![]);
-        }
-    }
 
     let ctx = ExpandCtx {
         cache,
@@ -2381,61 +2402,18 @@ pub(crate) fn expand_insert_with_defn(
         l0_complex,
         complex_lt_anno,
     };
-    if offsets.len() > 1 {
-        let first_xform = cell_xform(&offsets[0]);
-        let first_translation = transform_translation(&first_xform);
-        let mut first_batches = Batches::default();
-        expand_defn(
-            defn,
-            &first_xform,
-            &ctx,
-            &mut first_batches,
-            &mut visited,
-            0,
-            suppress_root_points,
-            (0.0, 1.0),
-        );
-        let mut first = first_batches.finalize(&name, selected, bg_color);
-        for wire in &mut first {
-            if !is_standalone_analytical_curve(wire) && wire.render_instance.is_none() {
-                wire.render_instance = Some(crate::scene::model::instance_model::RenderInstance {
-                    source_id: crate::scene::model::instance_model::next_source_id(),
-                    translation: first_translation,
-                });
-            }
-        }
-        let mut result = first.clone();
-        for offset in offsets.iter().skip(1) {
-            let translation = transform_translation(&cell_xform(offset));
-            let delta = [
-                translation[0] - first_translation[0],
-                translation[1] - first_translation[1],
-                translation[2] - first_translation[2],
-            ];
-            result.extend(
-                first
-                    .iter()
-                    .map(|wire| translated_prototype_wire(wire, &name, delta)),
-            );
-        }
-        return Some(result);
-    }
-
-    for offset in &offsets {
-        let base_xform = cell_xform(offset);
-        expand_defn(
-            defn,
-            &base_xform,
-            &ctx,
-            &mut batches,
-            &mut visited,
-            0,
-            suppress_root_points,
-            (0.0, 1.0),
-        );
-    }
+    expand_defn(
+        defn,
+        &xform,
+        &ctx,
+        &mut batches,
+        &mut visited,
+        0,
+        suppress_root_points,
+        (0.0, 1.0),
+    );
     let mut wires = batches.finalize(&name, selected, bg_color);
-    if let Some(mut guard) = proto_guard {
+    if proto_guard.is_some() || offsets.len() > 1 {
         let translation = transform_translation(&xform);
         for wire in &mut wires {
             if !is_standalone_analytical_curve(wire) && wire.render_instance.is_none() {
@@ -2445,31 +2423,27 @@ pub(crate) fn expand_insert_with_defn(
                 });
             }
         }
-        // Further references carry the block-drawn part as one stub instead
-        // of a wire per primitive (#1698).
-        let (stubbed, repeated): (Vec<_>, Vec<_>) = wires
-            .iter()
-            .cloned()
-            .partition(crate::scene::model::instance_model::stubbable);
-        let stubbed = (!stubbed.is_empty()).then(|| {
-            let aabb = crate::scene::model::instance_model::prototype_aabb(&stubbed);
-            (Arc::new(stubbed), aabb)
-        });
-        let cached = Arc::new(CachedExpansion {
-            translation,
-            wires: Arc::new(repeated),
-            stubbed,
-        });
-        *guard = Some(Arc::clone(&cached));
-        drop(guard);
-        if let Some((hash, numeric)) = proto_lookup {
-            let key = ProtoKeyRef {
-                numeric,
-                inherited_layer,
-                ins_complex: ctx.ins_complex.as_ref().map(|lt| lt.name.as_str()),
-                l0_complex: ctx.l0_complex.as_ref().map(|lt| lt.name.as_str()),
-            };
-            defn.prototypes.mark_ready(hash, key, cached);
+        let cached = Arc::new(CachedExpansion::new(translation, &wires));
+        if let Some(mut guard) = proto_guard {
+            *guard = Some(Arc::clone(&cached));
+            drop(guard);
+            if let Some((hash, numeric)) = proto_lookup {
+                let key = ProtoKeyRef {
+                    numeric,
+                    inherited_layer,
+                    ins_complex: ctx.ins_complex.as_ref().map(|lt| lt.name.as_str()),
+                    l0_complex: ctx.l0_complex.as_ref().map(|lt| lt.name.as_str()),
+                };
+                defn.prototypes.mark_ready(hash, key, Arc::clone(&cached));
+            }
+        }
+        for offset in offsets.iter().skip(1) {
+            cached.append_instance(
+                transform_translation(&cell_xform(offset)),
+                &name,
+                selected,
+                &mut wires,
+            );
         }
     }
     Some(wires)
@@ -2487,10 +2461,12 @@ fn transform_translation(transform: &Transform) -> [f64; 3] {
 fn proto_numeric_key(
     transform: &Transform,
     ins_color: [f32; 4],
+    ins_aci: u8,
     ins_pat_len: f32,
     ins_pat: [f32; 8],
     ins_lw_px: f32,
     ins_layer: crate::scene::view::render::InheritStyle,
+    layer_aci: u8,
     ins_layer_plottable: bool,
     selected: bool,
     pslt_factor: f32,
@@ -2531,6 +2507,8 @@ fn proto_numeric_key(
         bg_color: bg_color.map(f32::to_bits),
         anno_scale: anno_scale.to_bits(),
         complex_lt_anno: complex_lt_anno.to_bits(),
+        ins_aci,
+        layer_aci,
         flags,
     }
 }
@@ -2563,9 +2541,11 @@ pub(crate) fn translated_prototype_wire(
         }
     }
     let geom = wire.geom_mut();
-    translate_double_single(&mut geom.points, &mut geom.points_low, delta);
-    translate_double_single(&mut geom.fill_tris, &mut geom.fill_tris_low, delta);
-    translate_double_single(&mut geom.pick_tris, &mut geom.pick_tris_low, delta);
+    translate_double_single(&mut geom.points, geom.points_low.dense_mut(), delta);
+    if let Some(surfaces) = geom.surfaces.as_deref_mut() {
+        translate_double_single(&mut surfaces.fill_tris, &mut surfaces.fill_tris_low, delta);
+        translate_double_single(&mut surfaces.pick_tris, &mut surfaces.pick_tris_low, delta);
+    }
     if let Some(marker) = &mut wire.point_marker {
         marker.origin += glam::DVec3::from_array(delta);
     }
@@ -2608,10 +2588,7 @@ pub(crate) fn translated_prototype_wire(
         0.0,
     );
     if wire.aabb != WireModel::UNBOUNDED_AABB {
-        wire.aabb[0] += delta_f32[0];
-        wire.aabb[1] += delta_f32[1];
-        wire.aabb[2] += delta_f32[0];
-        wire.aabb[3] += delta_f32[1];
+        wire.aabb = crate::scene::model::instance_model::translated_aabb(wire.aabb, delta);
     }
     wire
 }
@@ -3166,17 +3143,21 @@ impl Batches {
                     geom: std::sync::Arc::new(crate::scene::WireGeom {
                         taper_widths: b.taper_widths,
                         pattern_stations: b.pattern_stations,
-                        pick_tris: b.pick_tris,
-                        pick_tris_low: b.pick_tris_low,
                         text_verts: b.text_verts,
                         searchable_text: b.searchable_text,
                         points: b.points,
-                        points_low: b.points_low,
+                        points_low: b.points_low.into(),
                         snap_pts: b.snap_pts,
                         tangent_geoms: b.tangent_geoms,
                         key_vertices: b.key_vertices,
-                        fill_tris: b.fill_tris,
-                        fill_tris_low: b.fill_tris_low,
+                        surfaces: crate::scene::model::wire_model::WireSurfaces {
+                            pick_tris: b.pick_tris,
+                            pick_tris_low: b.pick_tris_low,
+                            fill_tris: b.fill_tris,
+                            fill_tris_low: b.fill_tris_low,
+                            ..Default::default()
+                        }
+                        .into_optional(),
                         ..crate::scene::WireGeom::default()
                     }),
                 }
@@ -3886,7 +3867,7 @@ fn emit_complex_walk(
         let mut piece = plain.clone();
         let geom = std::sync::Arc::unwrap_or_clone(wire.geom);
         piece.points = geom.points;
-        piece.points_low = geom.points_low;
+        piece.points_low = geom.points_low.into_dense();
         piece.world_width = wire.world_width;
         piece.taper_widths = geom.taper_widths;
         piece.text_verts = geom.text_verts;
@@ -4486,16 +4467,12 @@ fn emit_wire(
                     geom: std::sync::Arc::new(crate::scene::WireGeom {
                         taper_widths: final_taper_widths,
                         pattern_stations: Vec::new(),
-                        pick_tris: Vec::new(),
-                        pick_tris_low: Vec::new(),
                         text_verts: Vec::new(),
                         points,
-                        points_low,
+                        points_low: points_low.into(),
                         snap_pts,
                         tangent_geoms: tangents,
                         key_vertices,
-                        fill_tris: Vec::new(),
-                        fill_tris_low: Vec::new(),
                         ..crate::scene::WireGeom::default()
                     }),
                     ..Default::default()

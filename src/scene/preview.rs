@@ -209,7 +209,7 @@ impl Scene {
         for wire in self.wire_models_for(&[handle]) {
             let mut ring = Vec::new();
             for (index, point) in wire.points.iter().enumerate() {
-                let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+                let low = wire.points_low.get(index).unwrap_or([0.0; 3]);
                 let x = point[0] as f64 + low[0] as f64;
                 let y = point[1] as f64 + low[1] as f64;
                 if x.is_finite() && y.is_finite() {
@@ -454,7 +454,7 @@ impl Scene {
                         }
                         // Reconstruct f64 world from the double-single pair (the
                         // low residual may be absent on some wires).
-                        let l = w.points_low.get(i).copied().unwrap_or([0.0; 3]);
+                        let l = w.points_low.get(i).unwrap_or([0.0; 3]);
                         let (x, y) = (p[0] as f64 + l[0] as f64, p[1] as f64 + l[1] as f64);
                         lo[0] = lo[0].min(x);
                         lo[1] = lo[1].min(y);

@@ -228,7 +228,7 @@ pub(crate) fn tessellate_entity(
                                 color,
                                 selected.contains(&handle),
                             );
-                            wire.points_low = points_low;
+                            wire.points_low = points_low.into();
                             wire.line_weight_px = line_weight_px;
                             boundaries.push(wire);
                         }
@@ -812,10 +812,10 @@ fn wire_meets_xy_box(wire: &WireModel, query: [f64; 4]) -> bool {
     }
     fn combine<'a>(
         high: &'a [[f32; 3]],
-        low: &'a [[f32; 3]],
+        low: model::point_residuals::ResidualView<'a>,
     ) -> impl Iterator<Item = [f64; 2]> + 'a {
         high.iter().enumerate().map(move |(index, point)| {
-            let residual = low.get(index).copied().unwrap_or([0.0; 3]);
+            let residual = low.get(index).unwrap_or([0.0; 3]);
             [
                 point[0] as f64 + residual[0] as f64,
                 point[1] as f64 + residual[1] as f64,
@@ -828,8 +828,11 @@ fn wire_meets_xy_box(wire: &WireModel, query: [f64; 4]) -> bool {
         f64::NEG_INFINITY,
         f64::NEG_INFINITY,
     ];
-    for [x, y] in combine(&wire.points, &wire.points_low)
-        .chain(combine(&wire.fill_tris, &wire.fill_tris_low))
+    for [x, y] in combine(&wire.points, wire.points_low.view())
+        .chain(combine(
+            &wire.fill_tris,
+            model::point_residuals::ResidualView::Xyz(&wire.fill_tris_low),
+        ))
         .chain(wire.key_vertices.iter().map(|point| [point[0], point[1]]))
         .chain(wire.snap_pts.iter().map(|(point, _)| [point.x, point.y]))
     {
@@ -1124,6 +1127,7 @@ const CACHE_CATEGORY_INSERT_HATCH: u16 = 1 << 7;
 /// rebuilding this directory by grouping every WireModel was the dominant
 /// edit-time CPU cost on dense drawings.
 struct ResidentWireSet {
+    estimated_bytes: usize,
     epoch: u64,
     gen: u64,
     /// [`resident_touch`] stamp of the last build or reuse: pruning gives up
@@ -2067,15 +2071,6 @@ pub fn prepare_open_geometry(
         let index =
             Arc::new(crate::scene::pick::interaction_index::InteractionIndex::build(&wires));
         let build_ms = crate::perf::elapsed_ms(t_index);
-        // The projected 3D broad phases only serve perspective/orbit picking,
-        // and were the largest single cost of opening a big drawing. Build
-        // them behind the open instead: each is a `OnceLock`, so a pick that
-        // arrives first waits for the one build in flight rather than
-        // repeating it.
-        let screen_index = Arc::clone(&index);
-        let _ = std::thread::Builder::new()
-            .name("ocs-index-screen".to_string())
-            .spawn(move || screen_index.prepare_screen());
         if perf {
             crate::perf_record!("[perf] open-index build={:.1}ms", build_ms);
         }
@@ -2880,6 +2875,7 @@ pub struct Scene {
     /// Process-wide identity of this scene, so that viewports of different
     /// documents sharing the renderer keep separate GPU slots (#2304).
     render_id: u64,
+    render_lifetime: Arc<()>,
     /// Layer visibility changes since a `block_epoch` (`from`, `to`, and the
     /// definitions they touched): a cache built at `from` is brought to `to`
     /// by rebuilding only those definitions, not all of them (#2696).
@@ -3783,6 +3779,7 @@ impl Scene {
             projection_bounds_epoch: std::cell::Cell::new(0),
             block_epoch: GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed),
             render_id: GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed),
+            render_lifetime: Arc::new(()),
             block_visibility_edits: None,
             selection_generation: 0,
             hover_generation: 0,
@@ -4246,6 +4243,7 @@ impl Scene {
         self.resident_wire_sets.borrow_mut().insert(
             key,
             ResidentWireSet {
+                estimated_bytes: Self::resident_wire_bytes(&prepared.wires),
                 epoch: self.geometry_epoch,
                 gen,
                 used: std::cell::Cell::new(resident_touch()),
@@ -10254,6 +10252,7 @@ impl Scene {
         let markers_ms = crate::perf::elapsed_ms(t_post);
         let t_fade = perf.then(iced::time::Instant::now);
         self.apply_refedit_fade(&mut wires, bg);
+        wires.iter_mut().for_each(WireModel::compact_resident_geometry);
         let fade_ms = crate::perf::elapsed_ms(t_fade);
         let t_layout = perf.then(iced::time::Instant::now);
         let layout = Self::resident_wire_layout(&wires);
@@ -10310,10 +10309,10 @@ impl Scene {
         };
         let cur_epoch = self.geometry_epoch;
         let mut sets = self.resident_wire_sets.borrow_mut();
-        self.prune_resident_wire_sets(&mut sets, shown);
         let evicted = sets.insert(
             key,
             ResidentWireSet {
+                estimated_bytes: Self::resident_wire_bytes(&arc),
                 epoch: cur_epoch,
                 gen,
                 used: std::cell::Cell::new(resident_touch()),
@@ -10321,6 +10320,7 @@ impl Scene {
                 layout,
             },
         );
+        self.prune_resident_wire_sets(&mut sets, shown);
         // Tearing down the previous set walks every wire's String, layer Arc
         // and point Vec (~39 ms for 200k wires); drop it off the rebuild path.
         if let Some(evicted) = evicted {
@@ -10329,39 +10329,42 @@ impl Scene {
         arc
     }
 
-    /// Make room in the resident-set map for a freshly built or patched set.
-    ///
-    /// A stale entry is not dead weight: it is exactly what
-    /// [`Self::try_resident_patch`] moves forward, which refuses an entry
-    /// already at the current epoch. Pruning by epoch alone therefore deleted
-    /// the other viewports' bases every time one of them stored its own set,
-    /// so on a layout with N content viewports one patched and the other N-1
-    /// reported `resident-patch-skip reason=no-entry` and paid a full
-    /// assembly plus an arena build on every edit.
-    ///
-    /// Keep whatever the journal can still replay — `replay_since` refuses
-    /// anything below the floor — and bound the map by giving up the stalest
-    /// bases first, falling back to the wholesale clear only when the live
-    /// sets alone exceed the cap.
+    fn low_memory_viewing() -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            crate::cli::low_memory_viewing()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            false
+        }
+    }
+
+    fn resident_wire_bytes(wires: &[WireModel]) -> usize {
+        wires.iter().map(WireModel::estimated_resident_bytes).sum()
+    }
+
+    /// Idle sets are bounded by bytes as well as count. Keep the visible
+    /// layout and its content viewports even when one drawing exceeds budget.
     fn prune_resident_wire_sets(&self, sets: &mut HashMap<u64, ResidentWireSet>, shown: usize) {
-        let cur_epoch = self.geometry_epoch;
         let floor = self.geometry_journal_floor.get();
-        sets.retain(|_, set| set.epoch == cur_epoch || set.epoch >= floor);
-        // Each set is a whole model's wires. Switching layouts leaves the
-        // epoch unchanged, so the other layouts' sets never went stale and a
-        // floor of 16 kept up to 16 of them: memory grew with every layout
-        // visited until the app froze (#3260). Keep the shown viewports' sets
-        // (they were used last) and a little slack; model tiles count as 4.
+        let mut bytes: usize = sets.values().map(|set| set.estimated_bytes).sum();
         let cap = shown.max(4) + 2;
-        while sets.len() > cap {
-            let Some(key) = sets
-                .iter()
-                .min_by_key(|(_, set)| set.used.get())
-                .map(|(key, _)| *key)
-            else {
-                break;
-            };
+        let protected = shown + 1;
+        let budget = if Self::low_memory_viewing() { 128 } else { 512 } << 20;
+
+        // Journal-compatible stale sets can be patched on the next use.
+        while let Some((&key, _)) = sets
+            .iter()
+            .filter(|(_, set)| {
+                set.epoch < floor || sets.len() > cap || (sets.len() > protected && bytes > budget)
+            })
+            .min_by_key(|(_, set)| (set.epoch >= floor, set.used.get()))
+        {
             if let Some(evicted) = sets.remove(&key) {
+                bytes = bytes.saturating_sub(evicted.estimated_bytes);
+                let source = Arc::as_ptr(&evicted.wires) as usize;
+                self.interaction_index_cache.borrow_mut().retain(|(_, ptr, _, _)| *ptr != source);
                 reaper::reap(evicted);
             }
         }
@@ -10687,10 +10690,11 @@ impl Scene {
         // Take ownership of the cached assembly (guaranteed unique above).
         // `prev_gen` is the content id the GPU currently holds for this set — the
         // base the wire-arena patch replays from.
-        let (prev_gen, owned, mut layout) = {
+        let (prev_gen, mut estimated_bytes, owned, mut layout) = {
             let removed = self.resident_wire_sets.borrow_mut().remove(&key)?;
             (
                 removed.gen,
+                removed.estimated_bytes,
                 Arc::try_unwrap(removed.wires).ok()?,
                 removed.layout?,
             )
@@ -10843,6 +10847,7 @@ impl Scene {
             // path is an empty shell). Enrich before the memo/assembly split
             // so both share the same snap-bearing wires.
             self.attach_solid_snaps(h, &mut raw);
+            raw.iter_mut().for_each(WireModel::compact_resident_geometry);
             // A set the memo shares its runs with holds these wires as they
             // are: the memo is bound to it below and needs no copy of its
             // own. Should the patch decline first, a pending entry counts as
@@ -10888,6 +10893,16 @@ impl Scene {
             })
         });
 
+        for (handle, _) in &deltas {
+            if let Some(&(start, len)) = layout.ranges.get(handle) {
+                if let Some(old) = owned.get(start..start + len) {
+                    estimated_bytes = estimated_bytes.saturating_sub(Self::resident_wire_bytes(old));
+                }
+            }
+            if let Some(new) = new_runs.get(handle) {
+                estimated_bytes = estimated_bytes.saturating_add(Self::resident_wire_bytes(new));
+            }
+        }
         // Keep the submission-order directory current. Adds are inserted by
         // the same effective SortEntitiesTable key used by the full builder;
         // hidden Modified entities retain a zero-length placeholder so grip
@@ -11204,10 +11219,10 @@ impl Scene {
             self.paper_viewport_handles().2.len()
         };
         let mut sets = self.resident_wire_sets.borrow_mut();
-        self.prune_resident_wire_sets(&mut sets, shown);
         sets.insert(
             key,
             ResidentWireSet {
+                estimated_bytes,
                 epoch: cur_epoch,
                 gen,
                 used: std::cell::Cell::new(resident_touch()),
@@ -11215,6 +11230,7 @@ impl Scene {
                 layout: Some(layout),
             },
         );
+        self.prune_resident_wire_sets(&mut sets, shown);
         if perf {
             let ms = |from: std::time::Duration, to: std::time::Duration| {
                 to.saturating_sub(from).as_secs_f64() * 1000.0
@@ -14582,7 +14598,15 @@ impl Scene {
         }
         let expanded = candidates.materialize_stubs();
         if let Some(wires) = expanded.snapshot_arc() {
-            *self.stub_expansion_cache.borrow_mut() = Some((
+            let budget = if Self::low_memory_viewing() { 16 } else { 64 } << 20;
+            let mut cache = self.stub_expansion_cache.borrow_mut();
+            if wires.len() * std::mem::size_of::<WireModel>() > budget
+                || Self::resident_wire_bytes(&wires) > budget
+            {
+                *cache = None;
+                return expanded;
+            }
+            *cache = Some((
                 Arc::downgrade(&source),
                 self.geometry_epoch,
                 self.block_epoch,
@@ -14596,6 +14620,9 @@ impl Scene {
         wires.len() >= Self::INTERACTION_INDEX_MIN_WIRES
             || crate::scene::pick::interaction_index::InteractionIndex::estimated_work(wires)
                 >= Self::INTERACTION_INDEX_MIN_WORK
+            // A slot can stand for a whole block. Keep aperture queries
+            // indexed even when the number of resident slots is small.
+            || wires.iter().any(|wire| wire.stub.is_some())
             || self.hatches.len() >= Self::INTERACTION_INDEX_MIN_WIRES
             || self.meshes.len().saturating_add(self.block_meshes.len())
                 >= Self::INTERACTION_INDEX_MIN_WIRES
@@ -14612,6 +14639,26 @@ impl Scene {
                         .first()
                         .is_some_and(|mesh| mesh.verts.len() >= Self::INTERACTION_INDEX_MIN_WORK)
                 })
+    }
+
+    pub(crate) fn view_needs_projected_interaction(&self) -> bool {
+        let camera = self.navigation_camera();
+        camera.projection == view::camera::Projection::Perspective
+            || (camera.rotation * glam::Vec3::Z).truncate().length_squared() > 1.0e-12
+    }
+
+    /// Navigation can start building a projected index before the first pick.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn prepare_projected_interaction(&self) {
+        if !self.view_needs_projected_interaction() {
+            return;
+        }
+        let cache = self.interaction_index_cache.borrow();
+        if let Some((_, _, _, index)) = cache.iter().rev().find(|(epoch, _, source, _)| {
+            *epoch == self.geometry_epoch && source.strong_count() > 0
+        }) {
+            index.prepare_screen_in_background();
+        }
     }
 
     fn cached_interaction_index(
@@ -18654,7 +18701,7 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                 continue;
             }
             for (index, &[x, y, z]) in wire.points.iter().enumerate() {
-                let [lx, ly, lz] = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+                let [lx, ly, lz] = wire.points_low.get(index).unwrap_or([0.0; 3]);
                 include(glam::DVec3::new(
                     x as f64 + lx as f64,
                     y as f64 + ly as f64,

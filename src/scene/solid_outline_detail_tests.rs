@@ -93,7 +93,7 @@ fn segments(wire: &WireModel) -> Vec<[[f64; 3]; 2]> {
         .iter()
         .enumerate()
         .map(|(index, point)| {
-            let low = shape.points_low.get(index).copied().unwrap_or([0.0; 3]);
+            let low = shape.points_low.get(index).unwrap_or([0.0; 3]);
             point[0].is_finite().then(|| {
                 [
                     point[0] as f64 + low[0] as f64 + delta[0],

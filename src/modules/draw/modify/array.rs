@@ -141,7 +141,7 @@ fn selection_size(wires: &[WireModel], plane: WorkingPlane) -> (f64, f64) {
             continue;
         }
         for (i, p) in w.points.iter().enumerate() {
-            let low = w.points_low.get(i).copied().unwrap_or([0.0; 3]);
+            let low = w.points_low.get(i).unwrap_or([0.0; 3]);
             take(DVec3::new(
                 p[0] as f64 + low[0] as f64,
                 p[1] as f64 + low[1] as f64,

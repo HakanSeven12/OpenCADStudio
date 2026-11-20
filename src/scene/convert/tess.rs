@@ -277,7 +277,7 @@ fn walk_mline_element(
     let path: Vec<[f64; 3]> = (0..wire.points.len())
         .map(|index| {
             let p = wire.points[index];
-            let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+            let low = wire.points_low.get(index).unwrap_or([0.0; 3]);
             [
                 p[0] as f64 + low[0] as f64,
                 p[1] as f64 + low[1] as f64,
@@ -751,7 +751,7 @@ fn section_symbol_wires(
     // Lines (ticks + shafts + glyphs): a fill-free wire so the strokes render.
     let (lp, lp_low) = convert::tessellate::points_to_ds(lines);
     let mut lw = WireModel::solid(h.value().to_string(), lp, color, sel);
-    lw.points_low = lp_low;
+    lw.points_low = lp_low.into();
     lw.line_weight_px = lw_px;
     wires.push(lw);
     // Filled arrowheads: a separate wire carrying only triangles.
@@ -867,7 +867,7 @@ fn proxy_preview_wires(
         let (color, aci, pattern_length, pattern, lw_px) = resolve(style);
         let (pts, pts_low) = convert::tessellate::points_to_ds(lines);
         let mut w = WireModel::solid(name.clone(), pts, color, sel);
-        w.points_low = pts_low;
+        w.points_low = pts_low.into();
         let (tris, tris_low) = convert::tessellate::points_to_ds(tris);
         w.fill_tris = tris;
         w.fill_tris_low = tris_low;
@@ -1422,16 +1422,18 @@ fn tessellate_entity_inner(
             geom: std::sync::Arc::new(crate::scene::WireGeom {
                 taper_widths: Vec::new(),
                 pattern_stations: Vec::new(),
-                pick_tris,
-                pick_tris_low,
                 text_verts: Vec::new(),
                 points,
-                points_low: Vec::new(),
+                points_low: Default::default(),
                 snap_pts: vec![],
                 tangent_geoms: vec![],
                 key_vertices: vec![[x0, y0, 0.0], [x1, y1, 0.0]],
-                fill_tris: vec![],
-                fill_tris_low: Vec::new(),
+                surfaces: crate::scene::model::wire_model::WireSurfaces {
+                    pick_tris,
+                    pick_tris_low,
+                    ..Default::default()
+                }
+                .into_optional(),
                 ..crate::scene::WireGeom::default()
             }),
             ..Default::default()
@@ -1680,16 +1682,12 @@ fn tessellate_entity_inner(
             geom: std::sync::Arc::new(crate::scene::WireGeom {
                 taper_widths: Vec::new(),
                 pattern_stations: Vec::new(),
-                pick_tris: Vec::new(),
-                pick_tris_low: Vec::new(),
                 text_verts: Vec::new(),
                 points: vec![],
-                points_low: Vec::new(),
+                points_low: Default::default(),
                 snap_pts: vec![(ip, model::wire_model::SnapHint::Insertion)],
                 tangent_geoms: vec![],
                 key_vertices: vec![],
-                fill_tris: vec![],
-                fill_tris_low: Vec::new(),
                 ..crate::scene::WireGeom::default()
             }),
             ..Default::default()
@@ -1818,7 +1816,7 @@ fn tessellate_entity_inner(
         for piece in crate::scene::model::pdf_vector::underlay_snap_geometry(underlay, document) {
             let (points, points_low) = convert::tessellate::points_to_ds(piece.points);
             let mut wire = WireModel::solid(h.value().to_string(), points, entity_color, sel);
-            wire.points_low = points_low;
+            wire.points_low = points_low.into();
             wire.display_visible = false;
             wire.plot_visible = false;
             // Snaps find it; a click on the page does not select the underlay.
@@ -1902,7 +1900,7 @@ fn tessellate_entity_inner(
                         if p[0].is_nan() {
                             return [f64::NAN; 3];
                         }
-                        let l = base.points_low.get(i).copied().unwrap_or([0.0; 3]);
+                        let l = base.points_low.get(i).unwrap_or([0.0; 3]);
                         [
                             p[0] as f64 + l[0] as f64,
                             p[1] as f64 + l[1] as f64,
@@ -2134,8 +2132,6 @@ fn lod_stub_wire(
         geom: std::sync::Arc::new(crate::scene::WireGeom {
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),
-            pick_tris: Vec::new(),
-            pick_tris_low: Vec::new(),
             text_verts: Vec::new(),
             // Diagonal of the entity's 3D AABB so depth tests against
             // shaded / hidden-line geometry are correct — the stub doesn't
@@ -2143,12 +2139,10 @@ fn lod_stub_wire(
             // different elevation. 2D entities (text fallbacks) pass
             // z_min = z_max = 0 to keep the historical behaviour.
             points: vec![[ax, ay, z_min], [bx, by, z_max]],
-            points_low: Vec::new(),
+            points_low: Default::default(),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![[cx as f64, cy as f64, cz as f64]],
-            fill_tris: vec![],
-            fill_tris_low: Vec::new(),
             ..crate::scene::WireGeom::default()
         }),
         ..Default::default()
@@ -2235,19 +2229,15 @@ fn lod_stub_wire_3d(
         geom: std::sync::Arc::new(crate::scene::WireGeom {
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),
-            pick_tris: Vec::new(),
-            pick_tris_low: Vec::new(),
             text_verts: Vec::new(),
             points,
-            points_low: Vec::new(),
+            points_low: Default::default(),
             snap_pts: vec![],
             tangent_geoms: vec![],
             // No `key_vertices` — Face3DGpu requires 4 corners to emit a
             // fill quad, and we don't want this stub painted as a solid
             // face. The wire pass still draws its 12 edges.
             key_vertices: vec![],
-            fill_tris: vec![],
-            fill_tris_low: Vec::new(),
             ..crate::scene::WireGeom::default()
         }),
         ..Default::default()
@@ -2269,7 +2259,7 @@ pub(crate) fn wire_points_aabb(w: &WireModel) -> [f32; 4] {
     let mut max = [f32::NEG_INFINITY; 2];
     let mut any = false;
     for (i, p) in w.points.iter().enumerate() {
-        let lo = w.points_low.get(i).copied().unwrap_or([0.0; 3]);
+        let lo = w.points_low.get(i).unwrap_or([0.0; 3]);
         let (x, y) = (p[0] + lo[0], p[1] + lo[1]);
         if x.is_finite() && y.is_finite() {
             min[0] = min[0].min(x);
@@ -2317,7 +2307,7 @@ pub(crate) fn set_wire_aabb(w: &mut WireModel, entity_box: [f32; 4]) {
     };
 
     for (i, &p) in w.points.iter().enumerate() {
-        extend(p, w.points_low.get(i).copied().unwrap_or([0.0; 3]));
+        extend(p, w.points_low.get(i).unwrap_or([0.0; 3]));
     }
     for (i, &p) in w.pick_tris.iter().enumerate() {
         extend(p, w.pick_tris_low.get(i).copied().unwrap_or([0.0; 3]));

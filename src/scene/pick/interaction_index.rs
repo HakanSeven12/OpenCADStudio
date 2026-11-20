@@ -51,14 +51,57 @@ pub struct GlyphRef {
     pub start: u32,
 }
 
+/// Round coarse boxes outward. Only the bounds are compacted, so a
+/// slightly larger box may add candidates but every hit keeps its precision.
+#[derive(Clone, Copy)]
+struct Bounds3([f32; 6]);
+
+impl Bounds3 {
+    fn new(bounds: [f64; 6]) -> Self {
+        Self(std::array::from_fn(|i| {
+            let value = bounds[i];
+            debug_assert!(value.is_finite());
+            let rounded = value as f32;
+            let decoded = f64::from(rounded);
+            if i < 3 && decoded > value {
+                rounded.next_down()
+            } else if i >= 3 && decoded < value {
+                rounded.next_up()
+            } else {
+                rounded
+            }
+        }))
+    }
+
+    fn at(self, i: usize) -> f64 {
+        // Extreme finite doubles outside the f32 range get the largest
+        // finite bound in this direction, keeping the grid coordinates finite.
+        f64::from(self.0[i]).clamp(-f64::MAX, f64::MAX)
+    }
+
+    fn xyz(self) -> [f64; 6] {
+        std::array::from_fn(|i| self.at(i))
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Entry3<T> {
-    aabb: [f64; 6],
+    aabb: Bounds3,
     value: T,
 }
 
+impl<T> Entry3<T> {
+    fn new(aabb: [f64; 6], value: T) -> Self {
+        Self {
+            aabb: Bounds3::new(aabb),
+            value,
+        }
+    }
+}
+
 fn entry_aabb2<T>(entry: &Entry3<T>) -> [f64; 4] {
-    [entry.aabb[0], entry.aabb[1], entry.aabb[3], entry.aabb[4]]
+    let bounds = entry.aabb;
+    [bounds.at(0), bounds.at(1), bounds.at(3), bounds.at(4)]
 }
 
 #[derive(Clone, Copy)]
@@ -200,7 +243,7 @@ impl SpatialBvh3 {
                 for &entry_idx in &self.order[node.start as usize..(node.start + node.len) as usize]
                 {
                     let entry = entries[entry_idx as usize];
-                    if aabb3_projects_into(entry.aabb, screen_rect, view_rot, eye, bounds) {
+                    if aabb3_projects_into(entry.aabb.xyz(), screen_rect, view_rot, eye, bounds) {
                         entry_indices.push(entry.value);
                     }
                 }
@@ -230,7 +273,7 @@ fn build_bvh3_node<T>(
         f64::NEG_INFINITY,
     ];
     for &idx in order.iter() {
-        let aabb = entries[idx as usize].aabb;
+        let aabb = entries[idx as usize].aabb.xyz();
         for axis in 0..3 {
             bounds[axis] = bounds[axis].min(aabb[axis]);
             bounds[axis + 3] = bounds[axis + 3].max(aabb[axis + 3]);
@@ -257,7 +300,7 @@ fn build_bvh3_node<T>(
     order.select_nth_unstable_by(mid, |&a, &b| {
         let aa = entries[a as usize].aabb;
         let bb = entries[b as usize].aabb;
-        (aa[axis] + aa[axis + 3]).total_cmp(&(bb[axis] + bb[axis + 3]))
+        (aa.at(axis) + aa.at(axis + 3)).total_cmp(&(bb.at(axis) + bb.at(axis + 3)))
     });
     let (left_order, right_order) = order.split_at_mut(mid);
     let left = build_bvh3_node(entries, left_order, base, nodes);
@@ -588,6 +631,7 @@ impl<T: Copy + Ord + Sync> SpatialSet<T> {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn prepare_screen(&self) {
         self.xyz.get_or_init(|| SpatialBvh3::build(&self.entries));
     }
@@ -605,7 +649,55 @@ impl<T: Copy + Ord + Sync> SpatialSet<T> {
     }
 }
 
+// Keep contiguous tessellation segments together in the broad phase. The
+// exact hit test still evaluates the original world-space segment endpoints.
+const SEGMENTS_PER_RUN: usize = 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct SegmentRun {
+    wire: u32,
+    start: u32,
+    valid: u8,
+}
+
+struct SegmentSet(SpatialSet<SegmentRun>);
+
+impl SegmentSet {
+    fn expand(runs: Vec<SegmentRun>) -> Vec<SegmentRef> {
+        runs.into_iter()
+            .flat_map(|run| {
+                (0..SEGMENTS_PER_RUN as u32)
+                    .filter(move |offset| run.valid & (1 << offset) != 0)
+                    .map(move |offset| SegmentRef {
+                        wire: run.wire,
+                        start: run.start + offset,
+                    })
+            })
+            .collect()
+    }
+
+    fn query_xy(&self, aabb: [f64; 4]) -> Vec<SegmentRef> {
+        Self::expand(self.0.query_xy(aabb))
+    }
+
+    fn query_xy_selection(&self, aabb: [f64; 4], ordered: bool) -> Vec<SegmentRef> {
+        Self::expand(self.0.query_xy_selection(aabb, ordered))
+    }
+
+    fn query_screen(
+        &self,
+        screen_rect: [f32; 4],
+        view_rot: Mat4,
+        eye: DVec3,
+        bounds: Rectangle,
+    ) -> Vec<SegmentRef> {
+        Self::expand(self.0.query_screen(screen_rect, view_rot, eye, bounds))
+    }
+}
+
 pub struct InteractionIndex {
+    #[cfg(not(target_arch = "wasm32"))]
+    screen_preparing: std::sync::atomic::AtomicBool,
     wires: SpatialSet<u32>,
     box_entities: SpatialSet<u64>,
     box_entity_wires: rustc_hash::FxHashMap<u64, Vec<u32>>,
@@ -619,7 +711,7 @@ pub struct InteractionIndex {
     /// nearby wires from the current resident memo instead of cloning every
     /// wire emitted by a large INSERT.
     wire_ordinals: Vec<Option<u32>>,
-    segments: SpatialSet<SegmentRef>,
+    segments: SegmentSet,
     snap_points: SpatialSet<SnapPointRef>,
     key_vertices: SpatialSet<KeyVertexRef>,
     key_segments: SpatialSet<KeySegmentRef>,
@@ -636,9 +728,9 @@ pub struct InteractionHandleIndex {
     handles: SpatialSet<u64>,
 }
 
-struct WireIndexBatch {
+struct WireIndexEntries {
     wire_entries: Vec<Entry3<u32>>,
-    segments: Vec<Entry3<SegmentRef>>,
+    segments: Vec<Entry3<SegmentRun>>,
     snap_points: Vec<Entry3<SnapPointRef>>,
     key_vertices: Vec<Entry3<KeyVertexRef>>,
     key_segments: Vec<Entry3<KeySegmentRef>>,
@@ -677,9 +769,13 @@ impl SnapQueryCategory {
     }
 }
 
-impl WireIndexBatch {
-    fn with_capacity_for_chunk(chunk: &[WireModel]) -> Self {
-        let total_segs: usize = chunk.iter().map(|w| w.points.len().saturating_sub(1)).sum();
+impl WireIndexEntries {
+    fn with_capacity(chunk: &[WireModel]) -> Self {
+        let total_segs: usize = chunk
+            .iter()
+            .filter(|w| !w.is_display_only() && w.point_marker.is_none() && !w.is_node_marker())
+            .map(|w| w.points.len().saturating_sub(1).div_ceil(SEGMENTS_PER_RUN))
+            .sum();
         let total_snaps: usize = chunk.iter().map(|w| w.snap_pts.len()).sum();
         let total_key_verts: usize = chunk.iter().map(|w| w.key_vertices.len()).sum();
         let total_key_segs: usize = chunk
@@ -707,16 +803,13 @@ impl WireIndexBatch {
     }
 }
 
-fn append_wire_index_entries(wire_idx: u32, wire: &WireModel, batch: &mut WireIndexBatch) {
+fn append_wire_index_entries(wire_idx: u32, wire: &WireModel, batch: &mut WireIndexEntries) {
     // Drawn underlay content: neither picked nor snapped.
     if wire.is_display_only() {
         return;
     }
     if let Some(aabb) = finite_wire_aabb3(wire) {
-        batch.wire_entries.push(Entry3 {
-            aabb,
-            value: wire_idx,
-        });
+        batch.wire_entries.push(Entry3::new(aabb, wire_idx));
     } else if !holds_nothing(wire) {
         // Every query lists a wire with no finite box. A blank slot of the
         // resident set has none either, and nothing to pick or snap.
@@ -737,40 +830,51 @@ fn append_wire_index_entries(wire_idx: u32, wire: &WireModel, batch: &mut WireIn
     }
 
     if wire.point_marker.is_none() && !wire.is_node_marker() {
-        for start in 0..wire.points.len().saturating_sub(1) {
-            let Some(aabb) = points_aabb3([wire_point(wire, start), wire_point(wire, start + 1)])
-            else {
-                continue;
-            };
-            batch.segments.push(Entry3 {
-                aabb,
-                value: SegmentRef {
-                    wire: wire_idx,
-                    start: start as u32,
-                },
-            });
+        let segment_count = wire.points.len().saturating_sub(1);
+        for start in (0..segment_count).step_by(SEGMENTS_PER_RUN) {
+            let end = (start + SEGMENTS_PER_RUN).min(segment_count);
+            let mut bounds = [
+                f64::INFINITY, f64::INFINITY, f64::INFINITY,
+                f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY,
+            ];
+            let mut valid = 0;
+            for i in start..end {
+                if let Some(aabb) = points_aabb3([wire_point(wire, i), wire_point(wire, i + 1)]) {
+                    for axis in 0..3 {
+                        bounds[axis] = bounds[axis].min(aabb[axis]);
+                        bounds[axis + 3] = bounds[axis + 3].max(aabb[axis + 3]);
+                    }
+                    valid |= 1 << (i - start);
+                }
+            }
+            if valid != 0 {
+                batch.segments.push(Entry3::new(
+                    bounds,
+                    SegmentRun { wire: wire_idx, start: start as u32, valid },
+                ));
+            }
         }
     }
     for (index, (point, _)) in wire.snap_pts.iter().enumerate() {
         if point.is_finite() {
-            batch.snap_points.push(Entry3 {
-                aabb: [point.x, point.y, point.z, point.x, point.y, point.z],
-                value: SnapPointRef {
+            batch.snap_points.push(Entry3::new(
+                [point.x, point.y, point.z, point.x, point.y, point.z],
+                SnapPointRef {
                     wire: wire_idx,
                     index: index as u32,
                 },
-            });
+            ));
         }
     }
     for (index, &point) in wire.key_vertices.iter().enumerate() {
         if point.iter().all(|value| value.is_finite()) {
-            batch.key_vertices.push(Entry3 {
-                aabb: [point[0], point[1], point[2], point[0], point[1], point[2]],
-                value: KeyVertexRef {
+            batch.key_vertices.push(Entry3::new(
+                [point[0], point[1], point[2], point[0], point[1], point[2]],
+                KeyVertexRef {
                     wire: wire_idx,
                     index: index as u32,
                 },
-            });
+            ));
         }
     }
     for start in 0..wire.key_vertices.len().saturating_sub(1) {
@@ -778,13 +882,13 @@ fn append_wire_index_entries(wire_idx: u32, wire: &WireModel, batch: &mut WireIn
         else {
             continue;
         };
-        batch.key_segments.push(Entry3 {
+        batch.key_segments.push(Entry3::new(
             aabb,
-            value: KeySegmentRef {
+            KeySegmentRef {
                 wire: wire_idx,
                 start: start as u32,
             },
-        });
+        ));
     }
     append_triangle_entries(
         wire_idx,
@@ -811,13 +915,13 @@ fn append_wire_index_entries(wire_idx: u32, wire: &WireModel, batch: &mut WireIn
         })) else {
             continue;
         };
-        batch.glyphs.push(Entry3 {
+        batch.glyphs.push(Entry3::new(
             aabb,
-            value: GlyphRef {
+            GlyphRef {
                 wire: wire_idx,
                 start: start as u32,
             },
-        });
+        ));
     }
 }
 
@@ -833,7 +937,7 @@ impl InteractionHandleIndex {
                             && aabb[1] <= aabb[4]
                             && aabb[2] <= aabb[5]
                     })
-                    .map(|(value, aabb)| Entry3 { aabb, value })
+                    .map(|(value, aabb)| Entry3::new(aabb, value))
                     .collect(),
             ),
         }
@@ -893,83 +997,30 @@ impl InteractionIndex {
         #[cfg(not(target_arch = "wasm32"))]
         let collect_started = iced::time::Instant::now();
 
-        const CHUNK_SIZE: usize = 256;
-
-        #[cfg(not(target_arch = "wasm32"))]
-        let batches: Vec<WireIndexBatch> = {
-            use crate::par::prelude::*;
-            wires
-                .par_chunks(CHUNK_SIZE)
-                .enumerate()
-                .map(|(chunk_idx, chunk)| {
-                    let mut batch = WireIndexBatch::with_capacity_for_chunk(chunk);
-                    let base_idx = (chunk_idx * CHUNK_SIZE) as u32;
-                    for (i, wire) in chunk.iter().enumerate() {
-                        append_wire_index_entries(base_idx + i as u32, wire, &mut batch);
-                    }
-                    batch
-                })
-                .collect()
-        };
-        #[cfg(target_arch = "wasm32")]
-        let batches: Vec<WireIndexBatch> = wires
-            .chunks(CHUNK_SIZE)
-            .enumerate()
-            .map(|(chunk_idx, chunk)| {
-                let mut batch = WireIndexBatch::with_capacity_for_chunk(chunk);
-                let base_idx = (chunk_idx * CHUNK_SIZE) as u32;
-                for (i, wire) in chunk.iter().enumerate() {
-                    append_wire_index_entries(base_idx + i as u32, wire, &mut batch);
-                }
-                batch
-            })
-            .collect();
-
+        // Write straight into final buffers. Flattening every worker's batch
+        // kept a second copy of almost the entire index alive during open.
+        let mut entries = WireIndexEntries::with_capacity(wires);
+        for (index, wire) in wires.iter().enumerate() {
+            append_wire_index_entries(index as u32, wire, &mut entries);
+        }
+        let WireIndexEntries {
+            wire_entries,
+            segments: segment_entries,
+            snap_points: snap_point_entries,
+            key_vertices: key_vertex_entries,
+            key_segments: key_segment_entries,
+            fill_triangles: fill_triangle_entries,
+            pick_triangles: pick_triangle_entries,
+            glyphs: glyph_entries,
+            unbounded_wires,
+            screen_unbounded_wires,
+            max_line_half_width_px,
+            max_marker_radius_fraction,
+        } = entries;
         #[cfg(not(target_arch = "wasm32"))]
         let collect_elapsed = collect_started.elapsed();
         #[cfg(not(target_arch = "wasm32"))]
-        let flatten_started = iced::time::Instant::now();
-
-        let total_wires: usize = batches.iter().map(|b| b.wire_entries.len()).sum();
-        let total_segments: usize = batches.iter().map(|b| b.segments.len()).sum();
-        let total_snaps: usize = batches.iter().map(|b| b.snap_points.len()).sum();
-        let total_key_verts: usize = batches.iter().map(|b| b.key_vertices.len()).sum();
-        let total_key_segs: usize = batches.iter().map(|b| b.key_segments.len()).sum();
-        let total_fills: usize = batches.iter().map(|b| b.fill_triangles.len()).sum();
-        let total_picks: usize = batches.iter().map(|b| b.pick_triangles.len()).sum();
-        let total_glyphs: usize = batches.iter().map(|b| b.glyphs.len()).sum();
-        let total_unbounded: usize = batches.iter().map(|b| b.unbounded_wires.len()).sum();
-        let total_screen_unbounded: usize =
-            batches.iter().map(|b| b.screen_unbounded_wires.len()).sum();
-
-        let mut wire_entries = Vec::with_capacity(total_wires);
-        let mut segment_entries = Vec::with_capacity(total_segments);
-        let mut snap_point_entries = Vec::with_capacity(total_snaps);
-        let mut key_vertex_entries = Vec::with_capacity(total_key_verts);
-        let mut key_segment_entries = Vec::with_capacity(total_key_segs);
-        let mut fill_triangle_entries = Vec::with_capacity(total_fills);
-        let mut pick_triangle_entries = Vec::with_capacity(total_picks);
-        let mut glyph_entries = Vec::with_capacity(total_glyphs);
-        let mut unbounded_wires = Vec::with_capacity(total_unbounded);
-        let mut screen_unbounded_wires = Vec::with_capacity(total_screen_unbounded);
-        let mut max_line_half_width_px = 0.0f32;
-        let mut max_marker_radius_fraction = 0.0f32;
-
-        for mut batch in batches {
-            max_line_half_width_px = max_line_half_width_px.max(batch.max_line_half_width_px);
-            max_marker_radius_fraction =
-                max_marker_radius_fraction.max(batch.max_marker_radius_fraction);
-            wire_entries.append(&mut batch.wire_entries);
-            segment_entries.append(&mut batch.segments);
-            snap_point_entries.append(&mut batch.snap_points);
-            key_vertex_entries.append(&mut batch.key_vertices);
-            key_segment_entries.append(&mut batch.key_segments);
-            fill_triangle_entries.append(&mut batch.fill_triangles);
-            pick_triangle_entries.append(&mut batch.pick_triangles);
-            glyph_entries.append(&mut batch.glyphs);
-            unbounded_wires.append(&mut batch.unbounded_wires);
-            screen_unbounded_wires.append(&mut batch.screen_unbounded_wires);
-        }
+        let spatial_started = iced::time::Instant::now();
 
         // Window/crossing selection starts with one conservative box per CAD
         // entity. Its wires remain grouped for exact boundary hit tests.
@@ -984,19 +1035,14 @@ impl InteractionIndex {
             box_entity_wires.entry(handle).or_default().push(entry.value);
             box_bounds.entry(handle).and_modify(|bounds| {
                 for axis in 0..3 {
-                    bounds[axis] = bounds[axis].min(entry.aabb[axis]);
-                    bounds[axis + 3] = bounds[axis + 3].max(entry.aabb[axis + 3]);
+                    bounds[axis] = bounds[axis].min(entry.aabb.at(axis));
+                    bounds[axis + 3] = bounds[axis + 3].max(entry.aabb.at(axis + 3));
                 }
-            }).or_insert(entry.aabb);
+            }).or_insert_with(|| entry.aabb.xyz());
         }
         let box_entities = SpatialSet::build(box_bounds.into_iter()
-            .map(|(value, aabb)| Entry3 { aabb, value }).collect());
+            .map(|(value, aabb)| Entry3::new(aabb, value)).collect());
         let box_anonymous_wires = SpatialSet::build(box_anonymous);
-
-        #[cfg(not(target_arch = "wasm32"))]
-        let flatten_elapsed = flatten_started.elapsed();
-        #[cfg(not(target_arch = "wasm32"))]
-        let spatial_started = iced::time::Instant::now();
 
         #[cfg(not(target_arch = "wasm32"))]
         let (
@@ -1008,7 +1054,7 @@ impl InteractionIndex {
                     || {
                         crate::par::join(
                             || SpatialSet::build(wire_entries),
-                            || SpatialSet::build(segment_entries),
+                            || SegmentSet(SpatialSet::build(segment_entries)),
                         )
                     },
                     || {
@@ -1048,7 +1094,7 @@ impl InteractionIndex {
             glyphs,
         ) = (
             SpatialSet::build(wire_entries),
-            SpatialSet::build(segment_entries),
+            SegmentSet(SpatialSet::build(segment_entries)),
             SpatialSet::build(snap_point_entries),
             SpatialSet::build(key_vertex_entries),
             SpatialSet::build(key_segment_entries),
@@ -1059,16 +1105,17 @@ impl InteractionIndex {
         #[cfg(not(target_arch = "wasm32"))]
         if perf {
             crate::perf_record!(
-                "[perf] interaction-index-detail total={:.1}ms handles={:.1} collect={:.1} flatten={:.1} spatial={:.1}",
+                "[perf] interaction-index-detail total={:.1}ms handles={:.1} collect={:.1} spatial={:.1}",
                 build_started.elapsed().as_secs_f64() * 1000.0,
                 handles_elapsed.as_secs_f64() * 1000.0,
                 collect_elapsed.as_secs_f64() * 1000.0,
-                flatten_elapsed.as_secs_f64() * 1000.0,
                 spatial_started.elapsed().as_secs_f64() * 1000.0,
             );
         }
 
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
+            screen_preparing: std::sync::atomic::AtomicBool::new(false),
             wires,
             box_entities,
             box_entity_wires,
@@ -1089,17 +1136,37 @@ impl InteractionIndex {
         }
     }
 
-    /// Build every projected 3D broad phase before the index reaches the UI
-    /// thread. Perspective/orbit hover must never pay this one-time cost.
-    pub fn prepare_screen(&self) {
-        #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn prepare_screen_in_background(self: &Arc<Self>) {
+        use std::sync::atomic::Ordering;
+
+        if self.screen_preparing.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        let index = Arc::downgrade(self);
+        if std::thread::Builder::new()
+            .name("ocs-index-screen".into())
+            .spawn(move || {
+                if let Some(index) = index.upgrade() {
+                    index.prepare_screen();
+                }
+            })
+            .is_err()
+        {
+            self.screen_preparing.store(false, Ordering::Relaxed);
+        }
+    }
+
+    /// Prewarm the projected broad phases when entering a 3D view.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn prepare_screen(&self) {
         crate::par::join(
             || {
                 crate::par::join(
                     || {
                         crate::par::join(
                             || self.wires.prepare_screen(),
-                            || self.segments.prepare_screen(),
+                            || self.segments.0.prepare_screen(),
                         )
                     },
                     || {
@@ -1127,17 +1194,6 @@ impl InteractionIndex {
                 )
             },
         );
-        #[cfg(target_arch = "wasm32")]
-        {
-            self.wires.prepare_screen();
-            self.segments.prepare_screen();
-            self.snap_points.prepare_screen();
-            self.key_vertices.prepare_screen();
-            self.key_segments.prepare_screen();
-            self.fill_triangles.prepare_screen();
-            self.pick_triangles.prepare_screen();
-            self.glyphs.prepare_screen();
-        }
     }
 
     pub fn pick_radius_px(
@@ -1946,7 +2002,7 @@ impl std::fmt::Debug for InteractionIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InteractionIndex")
             .field("wires", &self.wire_handles.len())
-            .field("segments", &self.segments.entries.len())
+            .field("segments", &self.segments.0.entries.len())
             .field("fill_triangles", &self.fill_triangles.entries.len())
             .field("pick_triangles", &self.pick_triangles.entries.len())
             .finish()
@@ -3037,7 +3093,7 @@ fn finite_wire_aabb3(wire: &WireModel) -> Option<[f64; 6]> {
 
 fn wire_point(wire: &WireModel, index: usize) -> [f64; 3] {
     let high = wire.points[index];
-    let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+    let low = wire.points_low.get(index).unwrap_or([0.0; 3]);
     [
         high[0] as f64 + low[0] as f64,
         high[1] as f64 + low[1] as f64,
@@ -3092,13 +3148,13 @@ fn append_triangle_entries(
         else {
             continue;
         };
-        out.push(Entry3 {
+        out.push(Entry3::new(
             aabb,
-            value: TriangleRef {
+            TriangleRef {
                 wire,
                 start: start as u32,
             },
-        });
+        ));
     }
 }
 

@@ -10,7 +10,7 @@ fn points(wires: &[WireModel]) -> Vec<[f64; 3]> {
     let mut points = Vec::new();
     for wire in wires {
         for (i, p) in wire.points.iter().enumerate() {
-            let lo = wire.points_low.get(i).copied().unwrap_or([0.; 3]);
+            let lo = wire.points_low.get(i).unwrap_or([0.; 3]);
             let point = std::array::from_fn(|j| f64::from(p[j]) + f64::from(lo[j]));
             // NaN vertices separate batched wire segments; they are not geometry.
             if point.iter().all(|coordinate| coordinate.is_finite()) {

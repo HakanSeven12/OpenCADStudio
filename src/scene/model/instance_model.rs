@@ -40,7 +40,6 @@ pub fn stubbable(wire: &WireModel) -> bool {
         || (wire.render_instance.is_some()
             && wire.text_verts.is_empty()
             && wire.fill_tris.is_empty()
-            && wire.pick_tris.is_empty()
             && !wire.fill_is_3d
             && wire.point_marker.is_none()
             && wire.searchable_text.is_empty())
@@ -73,14 +72,8 @@ pub fn stub_wire(
     delta: [f64; 3],
     depth_delta: f32,
 ) -> WireModel {
-    let aabb = [
-        (prototype_aabb[0] as f64 + delta[0]) as f32,
-        (prototype_aabb[1] as f64 + delta[1]) as f32,
-        (prototype_aabb[2] as f64 + delta[0]) as f32,
-        (prototype_aabb[3] as f64 + delta[1]) as f32,
-    ];
     WireModel {
-        aabb,
+        aabb: translated_aabb(prototype_aabb, delta),
         stub: Some(Arc::new(InstanceStub {
             prototype,
             delta,
@@ -88,6 +81,20 @@ pub fn stub_wire(
         })),
         ..Default::default()
     }
+}
+
+pub(crate) fn translated_aabb(aabb: [f32; 4], delta: [f64; 3]) -> [f32; 4] {
+    std::array::from_fn(|index| {
+        let value = f64::from(aabb[index]) + delta[index % 2];
+        let rounded = value as f32;
+        if index < 2 && f64::from(rounded) > value {
+            rounded.next_down()
+        } else if index >= 2 && f64::from(rounded) < value {
+            rounded.next_up()
+        } else {
+            rounded
+        }
+    })
 }
 
 /// Every wire `wires` stands for, stubs expanded into translated copies
@@ -186,10 +193,9 @@ pub fn expand_stub_near_into(
     // many repeated low-poly parts paid the cost at every nesting depth.
     expand_stub_near_recursive(
         stub_wire,
-        &stub_wire.name,
+        stub_wire,
         [0.0; 3],
         0.0,
-        stub_wire.selected,
         stub_wire.display_visible,
         near,
         out,
@@ -199,20 +205,20 @@ pub fn expand_stub_near_into(
 #[allow(clippy::too_many_arguments)]
 fn expand_stub_near_recursive(
     wire: &WireModel,
-    owner_name: &str,
+    owner: &WireModel,
     offset: [f64; 3],
     depth_offset: f32,
-    owner_selected: bool,
     parent_visible: bool,
     near: Option<[f64; 4]>,
     out: &mut Vec<WireModel>,
 ) {
     let Some(stub) = wire.stub.as_ref() else {
         let mut copy =
-            crate::scene::cache::block_cache::translated_prototype_wire(wire, owner_name, offset);
+            crate::scene::cache::block_cache::translated_prototype_wire(wire, &owner.name, offset);
         shift_depth(&mut copy, depth_offset);
-        copy.selected = owner_selected;
+        copy.selected = owner.selected;
         copy.display_visible &= parent_visible;
+        copy.reference_only |= owner.reference_only;
         out.push(copy);
         return;
     };
@@ -240,10 +246,9 @@ fn expand_stub_near_recursive(
         }
         expand_stub_near_recursive(
             child,
-            owner_name,
+            owner,
             offset,
             depth_offset,
-            owner_selected,
             parent_visible,
             near,
             out,

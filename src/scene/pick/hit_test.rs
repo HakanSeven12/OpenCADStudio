@@ -2263,13 +2263,6 @@ pub fn box_hit<W: WireSource + ?Sized>(
                 continue;
             };
 
-            // Low residual parallel to `pts` (empty for the AABB fallback,
-            // whose coarse f32 box doesn't carry one).
-            let low: &[[f32; 3]] = if !wire.points.is_empty() {
-                &wire.points_low
-            } else {
-                &[]
-            };
             let mut hit = false;
             let mut prev: Option<Point> = None;
 
@@ -2281,7 +2274,7 @@ pub fn box_hit<W: WireSource + ?Sized>(
                 let world = if !wire.points.is_empty() {
                     wire_point_world(wire, i, view_rot, eye)
                 } else {
-                    wp64([px, py, pz], low, i)
+                    glam::DVec3::new(f64::from(px), f64::from(py), f64::from(pz))
                 };
                 let Some(sp) = projection::project_screen(view_rot, eye, bounds, world) else {
                     prev = None;
@@ -2372,11 +2365,6 @@ pub fn box_hit<W: WireSource + ?Sized>(
                 continue;
             };
 
-            let low: &[[f32; 3]] = if !wire.points.is_empty() {
-                &wire.points_low
-            } else {
-                &[]
-            };
             let mut all_inside = true;
             let mut has_points = false;
 
@@ -2388,7 +2376,7 @@ pub fn box_hit<W: WireSource + ?Sized>(
                 let world = if !wire.points.is_empty() {
                     wire_point_world(wire, i, view_rot, eye)
                 } else {
-                    wp64([px, py, pz], low, i)
+                    glam::DVec3::new(f64::from(px), f64::from(py), f64::from(pz))
                 };
                 // A vertex behind the eye has no pixel of its own; the window
                 // cannot contain the wire (#64).
@@ -2489,11 +2477,6 @@ pub fn poly_hit<'a, W: WireSource + ?Sized>(
                 continue;
             };
 
-            let low: &[[f32; 3]] = if !wire.points.is_empty() {
-                &wire.points_low
-            } else {
-                &[]
-            };
             let mut hit = false;
             let mut prev: Option<Point> = None;
 
@@ -2505,7 +2488,7 @@ pub fn poly_hit<'a, W: WireSource + ?Sized>(
                 let world = if !wire.points.is_empty() {
                     wire_point_world(wire, i, view_rot, eye)
                 } else {
-                    wp64([px, py, pz], low, i)
+                    glam::DVec3::new(f64::from(px), f64::from(py), f64::from(pz))
                 };
                 let Some(sp) = projection::project_screen(view_rot, eye, bounds, world) else {
                     prev = None;
@@ -2578,11 +2561,6 @@ pub fn poly_hit<'a, W: WireSource + ?Sized>(
                 continue;
             };
 
-            let low: &[[f32; 3]] = if !wire.points.is_empty() {
-                &wire.points_low
-            } else {
-                &[]
-            };
             let mut all_inside = true;
             let mut prev: Option<Point> = None;
 
@@ -2594,7 +2572,7 @@ pub fn poly_hit<'a, W: WireSource + ?Sized>(
                 let world = if !wire.points.is_empty() {
                     wire_point_world(wire, i, view_rot, eye)
                 } else {
-                    wp64([px, py, pz], low, i)
+                    glam::DVec3::new(f64::from(px), f64::from(py), f64::from(pz))
                 };
                 let Some(sp) = projection::project_screen(view_rot, eye, bounds, world) else {
                     all_inside = false;

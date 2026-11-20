@@ -1,3 +1,4 @@
+use super::point_residuals::PointResiduals;
 /// Tag for pre-baked snap candidates stored inside a WireModel.
 /// Kept separate from `snap::SnapType` to avoid circular module dependencies.
 #[derive(Clone, Copy, Debug)]
@@ -713,10 +714,6 @@ pub enum DashClosure {
 /// hot-field change.
 #[derive(Clone, Debug, Default)]
 pub struct WireGeom {
-    /// Paper-space clip ring for a wire projected through a nonrectangular
-    /// viewport for plotting. It clips the rendered ink, including pen caps
-    /// and text, without cutting the path or changing its dash phase.
-    pub plot_clip: Option<std::sync::Arc<[[f32; 2]]>>,
     /// Ordered world-space positions forming a strip of quads. Each entry is
     /// the "high" half of a double-single f32 pair; [`points_low`] carries the
     /// matching residual so the shader can reconstruct the f64 source.
@@ -724,7 +721,7 @@ pub struct WireGeom {
     /// Low-bit residual paired index-for-index with [`points`]. Empty means
     /// "all-zero residual" (interactive draw / preview wires whose coordinates
     /// don't need sub-f32 precision). Tessellation from CAD f64 fills it.
-    pub points_low: Vec<[f32; 3]>,
+    pub points_low: PointResiduals,
     /// Per-point full band width (drawing units), aligned index-for-index with
     /// [`points`], for a polyline whose width VARIES (a taper). Empty = a
     /// constant band of `world_width`. The wire shader reads the two endpoint
@@ -741,6 +738,34 @@ pub struct WireGeom {
     /// Non-empty only for entities with distinct vertex positions (Line, LwPolyline).
     /// Empty for tessellated curves (Circle, Arc, Ellipse) which use snap_pts instead.
     pub key_vertices: Vec<[f64; 3]>,
+    /// Allocated only by wires that carry fills, pick surfaces or plot clips.
+    pub surfaces: Option<Box<WireSurfaces>>,
+    /// SDF glyph quads for this entity's text (TEXT / MTEXT / dimension text /
+    /// block-internal text). Non-empty only when SDF text is enabled and this
+    /// wire carries a text run. Rides with the wire so it is cached by the
+    /// tess memo, cloned on hit, and transformed by the block-expand loop
+    /// exactly like `points` — no separate collector pass. The renderer
+    /// gathers these across all wires into the text vertex buffer.
+    pub text_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex>,
+    /// Searchable text runs for PDF export (real text, not outlines).
+    ///
+    /// The SDF `text_verts` above carry only tessellated quads — the source
+    /// string is lost by the time the PDF exporter runs, so searchable text
+    /// was impossible without re-layout. Each entry preserves one laid-out
+    /// run (already positioned: MTEXT attachment/width/wrap, rotation and
+    /// block placement are baked into `origin`/`rotation`/`height`), letting
+    /// `io::pdf_export` emit `BT … Tj ET` with an embedded font instead of
+    /// vector outlines. Empty on non-text wires; transformed alongside
+    /// `text_verts` by the block-expand loop and preview clones.
+    pub searchable_text: Vec<SearchableTextRun>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct WireSurfaces {
+    /// Paper-space clip ring for a wire projected through a nonrectangular
+    /// viewport for plotting. It clips the rendered ink, including pen caps
+    /// and text, without cutting the path or changing its dash phase.
+    pub plot_clip: Option<std::sync::Arc<[[f32; 2]]>>,
     /// Pre-triangulated solid fill: flat vertex list, 3 per triangle (world-offset applied).
     /// Non-empty only for PolyfaceMesh / PolygonMesh entities.
     pub fill_tris: Vec<[f32; 3]>,
@@ -767,24 +792,41 @@ pub struct WireGeom {
     pub pick_tris: Vec<[f32; 3]>,
     /// Low residual paired with [`pick_tris`] (double-single). Empty = all-zero.
     pub pick_tris_low: Vec<[f32; 3]>,
-    /// SDF glyph quads for this entity's text (TEXT / MTEXT / dimension text /
-    /// block-internal text). Non-empty only when SDF text is enabled and this
-    /// wire carries a text run. Rides with the wire so it is cached by the
-    /// tess memo, cloned on hit, and transformed by the block-expand loop
-    /// exactly like `points` — no separate collector pass. The renderer
-    /// gathers these across all wires into the text vertex buffer.
-    pub text_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex>,
-    /// Searchable text runs for PDF export (real text, not outlines).
-    ///
-    /// The SDF `text_verts` above carry only tessellated quads — the source
-    /// string is lost by the time the PDF exporter runs, so searchable text
-    /// was impossible without re-layout. Each entry preserves one laid-out
-    /// run (already positioned: MTEXT attachment/width/wrap, rotation and
-    /// block placement are baked into `origin`/`rotation`/`height`), letting
-    /// `io::pdf_export` emit `BT … Tj ET` with an embedded font instead of
-    /// vector outlines. Empty on non-text wires; transformed alongside
-    /// `text_verts` by the block-expand loop and preview clones.
-    pub searchable_text: Vec<SearchableTextRun>,
+}
+
+impl WireSurfaces {
+    fn is_empty(&self) -> bool {
+        self.plot_clip.is_none()
+            && self.fill_tris.is_empty()
+            && self.fill_tris_low.is_empty()
+            && self.pick_tris.is_empty()
+            && self.pick_tris_low.is_empty()
+    }
+
+    pub(crate) fn into_optional(self) -> Option<Box<Self>> {
+        (!self.is_empty()).then(|| Box::new(self))
+    }
+}
+
+impl std::ops::Deref for WireGeom {
+    type Target = WireSurfaces;
+
+    fn deref(&self) -> &Self::Target {
+        static EMPTY: WireSurfaces = WireSurfaces {
+            plot_clip: None,
+            fill_tris: Vec::new(),
+            fill_tris_low: Vec::new(),
+            pick_tris: Vec::new(),
+            pick_tris_low: Vec::new(),
+        };
+        self.surfaces.as_deref().unwrap_or(&EMPTY)
+    }
+}
+
+impl std::ops::DerefMut for WireGeom {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.surfaces.get_or_insert_with(Default::default)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -895,6 +937,22 @@ pub struct WireModel {
 }
 
 impl WireModel {
+    pub(crate) fn estimated_resident_bytes(&self) -> usize {
+        std::mem::size_of::<Self>() + self.name.capacity() + self.geom.estimated_bytes()
+    }
+
+    pub(crate) fn compact_resident_geometry(&mut self) {
+        if let Some(geom) = std::sync::Arc::get_mut(&mut self.geom) {
+            geom.points_low.compact_planar();
+            if geom.surfaces.as_deref().is_some_and(WireSurfaces::is_empty) {
+                geom.surfaces = None;
+            }
+            if geom.text_verts.capacity() - geom.text_verts.len() >= 6 {
+                geom.text_verts.shrink_to_fit();
+            }
+        }
+    }
+
     pub const WHITE: [f32; 4] = [1.00, 1.00, 1.00, 1.0];
     pub const CYAN: [f32; 4] = [0.25, 0.85, 1.00, 1.0];
     pub const SELECTED: [f32; 4] = [0.15, 0.55, 1.00, 1.0];
@@ -980,7 +1038,7 @@ impl WireModel {
             lo.push([lx, ly, lz]);
         }
         let mut w = Self::solid(name, hi, color, selected);
-        w.points_low = lo;
+        w.points_low = lo.into();
         w
     }
 
@@ -1012,7 +1070,7 @@ impl WireModel {
         out.selected = false;
         {
             let geom = out.geom_mut();
-            map_points(&mut geom.points, &mut geom.points_low, |point| {
+            map_points(&mut geom.points, geom.points_low.dense_mut(), |point| {
                 point + delta.as_dvec3()
             });
         }
@@ -1041,7 +1099,7 @@ impl WireModel {
         out.selected = false;
         {
             let geom = out.geom_mut();
-            map_points(&mut geom.points, &mut geom.points_low, &map);
+            map_points(&mut geom.points, geom.points_low.dense_mut(), &map);
         }
         if let Some(marker) = &mut out.point_marker {
             marker.origin = map(marker.origin);
@@ -1084,7 +1142,7 @@ impl WireModel {
             let mapped = center + rotation * (glam::Vec3::from_array(*p) - center);
             *p = mapped.to_array();
         }
-        for p in &mut out.points_low {
+        for p in out.points_low.dense_mut() {
             *p = (rotation * glam::Vec3::from_array(*p)).to_array();
         }
         if let Some(marker) = &mut out.point_marker {
@@ -1133,7 +1191,7 @@ impl WireModel {
             let target_origin = center + (marker.origin - center) * factor;
             {
                 let geom = out.geom_mut();
-                map_points(&mut geom.points, &mut geom.points_low, |point| {
+                map_points(&mut geom.points, geom.points_low.dense_mut(), |point| {
                     let delta = point - marker.origin;
                     let axial = normal * delta.dot(normal);
                     target_origin + (delta - axial) + axial * factor
@@ -1145,7 +1203,7 @@ impl WireModel {
         } else {
             {
                 let geom = out.geom_mut();
-                map_points(&mut geom.points, &mut geom.points_low, |point| {
+                map_points(&mut geom.points, geom.points_low.dense_mut(), |point| {
                     center + (point - center) * factor
                 });
             }
@@ -1196,7 +1254,7 @@ impl WireModel {
         // World position is the double-single sum `points + points_low` (text /
         // UTM wires split it), so the residual must reflect too — as a direction
         // (linear reflection about the axis, no `p1` offset).
-        for p in &mut out.points_low {
+        for p in out.points_low.dense_mut() {
             let point = glam::Vec3::from_array(*p);
             *p = (point - 2.0 * plane_normal.dot(point) * plane_normal).to_array();
         }
@@ -1361,12 +1419,12 @@ impl WireModel {
             low.push((p - high.as_dvec3()).as_vec3().to_array());
         }
         self.points = points;
-        self.points_low = low;
+        self.points_low = low.into();
     }
 
     pub fn point_world(&self, index: usize, view_height: f64) -> glam::DVec3 {
         let high = self.points[index];
-        let low = self.points_low.get(index).copied().unwrap_or([0.0; 3]);
+        let low = self.points_low.get(index).unwrap_or([0.0; 3]);
         let point = glam::DVec3::new(
             high[0] as f64 + low[0] as f64,
             high[1] as f64 + low[1] as f64,
@@ -1555,6 +1613,30 @@ pub(crate) fn map_text_verts(
 }
 
 impl WireGeom {
+    pub(crate) fn estimated_bytes(&self) -> usize {
+        fn bytes<T>(values: &Vec<T>) -> usize {
+            values.capacity() * std::mem::size_of::<T>()
+        }
+        std::mem::size_of::<Self>()
+            + self.surfaces.as_deref().map_or(0, |surfaces| {
+                std::mem::size_of::<WireSurfaces>()
+                    + surfaces.plot_clip.as_deref().map_or(0, std::mem::size_of_val)
+                    + bytes(&surfaces.fill_tris)
+                    + bytes(&surfaces.fill_tris_low)
+                    + bytes(&surfaces.pick_tris)
+                    + bytes(&surfaces.pick_tris_low)
+            })
+            + bytes(&self.points)
+            + self.points_low.allocated_bytes()
+            + bytes(&self.taper_widths)
+            + bytes(&self.pattern_stations)
+            + bytes(&self.snap_pts)
+            + bytes(&self.tangent_geoms)
+            + bytes(&self.key_vertices)
+            + bytes(&self.text_verts)
+            + bytes(&self.searchable_text)
+    }
+
     /// The empty geometry as a shared `Arc`: a wire built from `Default` costs
     /// one refcount bump, not an allocation, until it is written. Clones of the
     /// shared empty value detach on their first write.

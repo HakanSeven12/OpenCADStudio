@@ -281,6 +281,7 @@ pub struct ViewportData {
 
 #[derive(Debug)]
 pub struct Primitive {
+    pub(in crate::scene) scene_owner: std::sync::Weak<()>,
     /// One entry per viewport drawn this frame (≥1).
     pub(in crate::scene) viewports: Vec<ViewportData>,
     /// Background color used to clear each viewport's MSAA buffer.
@@ -395,6 +396,13 @@ impl shader::Primitive for Primitive {
         bounds: &Rectangle,
         viewport: &Viewport,
     ) {
+        let closed = pipeline.release_closed_slots(device);
+        if self.viewports.is_empty() {
+            if closed > 0 {
+                report_gpu_live(pipeline);
+            }
+            return;
+        }
         let nav_prepare_started = iced::time::Instant::now();
         if let Some(gap_ms) = crate::perf::take_view_to_prepare_ms() {
             if gap_ms >= 1.0 && crate::perf::has_pending_pointer_moves() {
@@ -461,6 +469,7 @@ impl shader::Primitive for Primitive {
             // the surviving viewport's text/geometry vanish.
             if inner.slot_id != vp.instance_id {
                 inner.slot_id = vp.instance_id;
+                inner.slot_owner = self.scene_owner.clone();
                 inner.forget_cached_keys();
             }
             // Round texture coverage, retaining fractional raster placement.
@@ -1507,6 +1516,9 @@ retained_contributors={}",
         target: &iced::wgpu::TextureView,
         clip: &Rectangle<u32>,
     ) {
+        if self.viewports.is_empty() {
+            return;
+        }
         let nav_render_started = iced::time::Instant::now();
         pipeline
             .frame_rendered
@@ -1886,7 +1898,8 @@ fn hash_preview_wires(wires: &[WireModel], h: &mut impl std::hash::Hasher) {
     wires.len().hash(h);
     for w in wires {
         w.name.hash(h);
-        for data in [&w.points, &w.points_low, &w.fill_tris, &w.fill_tris_low] {
+        w.points_low.hash_into(h);
+        for data in [&w.points, &w.fill_tris, &w.fill_tris_low] {
             bytemuck::cast_slice::<_, u8>(data).hash(h);
         }
         for data in [
@@ -2080,7 +2093,7 @@ mod preview_signature_tests {
         assert!(!Arc::ptr_eq(&wires, &rebuilt));
         assert_eq!(signature(&wires), signature(&rebuilt));
         // Sub-f32 motion must still invalidate at large world coordinates.
-        Arc::make_mut(&mut rebuilt)[0].points_low[1][0] += 0.001;
+        Arc::make_mut(&mut rebuilt)[0].points_low.dense_mut()[1][0] += 0.001;
         assert_ne!(signature(&wires), signature(&rebuilt));
         let mut style = wires.as_ref().clone();
         style[0].color = WireModel::WHITE;
@@ -5028,6 +5041,7 @@ impl Scene {
             sample
         });
         Primitive {
+            scene_owner: std::sync::Arc::downgrade(&self.render_lifetime),
             viewports,
             bg_color,
             viewcube_text_color,
@@ -5061,6 +5075,7 @@ impl Scene {
         let tiles = self.model_tiles.borrow();
         let Some(tile) = tiles.get(tile_idx) else {
             return Primitive {
+                scene_owner: std::sync::Arc::downgrade(&self.render_lifetime),
                 viewports: vec![],
                 bg_color,
                 viewcube_text_color,
@@ -5124,6 +5139,7 @@ impl Scene {
             sample
         });
         Primitive {
+            scene_owner: std::sync::Arc::downgrade(&self.render_lifetime),
             viewports,
             bg_color,
             viewcube_text_color,

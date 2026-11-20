@@ -913,7 +913,7 @@ impl OpenCADStudio {
             })
             .into()
         } else if tab.is_start {
-            start_page_view(
+            let page = start_page_view(
                 &self.patrons,
                 &self.videos,
                 self.videos_loading,
@@ -928,7 +928,18 @@ impl OpenCADStudio {
                 self.start_action_w.clone(),
                 self.start_section,
                 self.start_templates.as_deref(),
-            )
+            );
+            if crate::scene::pipeline::viewport_pipeline_initialized() {
+                stack![
+                    page,
+                    shader(crate::scene::view::viewport_pane::ReleaseClosedViewports)
+                        .width(1)
+                        .height(1),
+                ]
+                .into()
+            } else {
+                page
+            }
         } else if is_paper {
             shader(ViewportPane::model(
                 &tab.scene,

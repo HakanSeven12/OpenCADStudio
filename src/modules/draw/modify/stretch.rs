@@ -609,7 +609,7 @@ impl StretchCommand {
 /// A wire vertex rebuilt from its double-single halves.
 fn wire_point(wire: &WireModel, index: usize) -> DVec3 {
     let high = wire.points[index];
-    let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+    let low = wire.points_low.get(index).unwrap_or([0.0; 3]);
     DVec3::new(
         high[0] as f64 + low[0] as f64,
         high[1] as f64 + low[1] as f64,

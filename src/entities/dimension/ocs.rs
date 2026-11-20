@@ -149,9 +149,11 @@ pub(crate) fn translate_wire_from_origin(wire: &mut WireModel, origin: Vector3) 
         }
     };
     let geom = wire.geom_mut();
-    translate(&mut geom.points, &mut geom.points_low);
-    translate(&mut geom.fill_tris, &mut geom.fill_tris_low);
-    translate(&mut geom.pick_tris, &mut geom.pick_tris_low);
+    translate(&mut geom.points, geom.points_low.dense_mut());
+    if let Some(surfaces) = geom.surfaces.as_deref_mut() {
+        translate(&mut surfaces.fill_tris, &mut surfaces.fill_tris_low);
+        translate(&mut surfaces.pick_tris, &mut surfaces.pick_tris_low);
+    }
     for point in &mut wire.key_vertices {
         point[0] += origin.x;
         point[1] += origin.y;

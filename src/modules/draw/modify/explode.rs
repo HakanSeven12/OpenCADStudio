@@ -516,13 +516,13 @@ fn explode_multileader(
     let arrows = tessellate(&geometry).into_iter().next();
     if let (Some(path), Some(mut model)) = (models.first(), arrows) {
         type Run = Vec<([f32; 3], [f32; 3])>;
-        let runs = |points: &[[f32; 3]], low: &[[f32; 3]]| -> Vec<Run> {
+        let runs = |points: &[[f32; 3]], low: &crate::scene::model::point_residuals::PointResiduals| -> Vec<Run> {
             let mut out: Vec<Vec<_>> = vec![Vec::new()];
             for (i, p) in points.iter().enumerate() {
                 if p[0].is_nan() {
                     out.push(Vec::new());
                 } else {
-                    let l = low.get(i).copied().unwrap_or([0.0; 3]);
+                    let l = low.get(i).unwrap_or([0.0; 3]);
                     out.last_mut().unwrap().push((*p, l));
                 }
             }
@@ -546,7 +546,7 @@ fn explode_multileader(
             }
         }
         model.points = points;
-        model.points_low = points_low;
+        model.points_low = points_low.into();
         pieces.extend(explode_leader_wire(&model, common));
     }
     let ctx = &ml.context;
@@ -728,11 +728,11 @@ fn explode_leader_wire(
     model: &crate::scene::model::wire_model::WireModel,
     common: EntityCommon,
 ) -> Vec<EntityType> {
-    let restore = |high: &[[f32; 3]], low: &[[f32; 3]]| -> Vec<Vector3> {
+    let restore = |high: &[[f32; 3]], low: crate::scene::model::point_residuals::ResidualView<'_>| -> Vec<Vector3> {
         high.iter()
             .enumerate()
             .map(|(i, h)| {
-                let l = low.get(i).copied().unwrap_or([0.0; 3]);
+                let l = low.get(i).unwrap_or([0.0; 3]);
                 Vector3::new(
                     h[0] as f64 + l[0] as f64,
                     h[1] as f64 + l[1] as f64,
@@ -741,8 +741,8 @@ fn explode_leader_wire(
             })
             .collect()
     };
-    let points = restore(&model.points, &model.points_low);
-    let fill = restore(&model.fill_tris, &model.fill_tris_low);
+    let points = restore(&model.points, model.points_low.view());
+    let fill = restore(&model.fill_tris, crate::scene::model::point_residuals::ResidualView::Xyz(&model.fill_tris_low));
     let mut pieces = Vec::new();
     for (index, run) in points.split(|p| p.x.is_nan()).enumerate() {
         for pair in run.windows(2) {

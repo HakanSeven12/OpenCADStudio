@@ -5394,19 +5394,15 @@ impl OpenCADStudio {
                             geom: std::sync::Arc::new(crate::scene::WireGeom {
                                 taper_widths: Vec::new(),
                                 pattern_stations: Vec::new(),
-                                pick_tris: Vec::new(),
-                                pick_tris_low: Vec::new(),
                                 text_verts: Vec::new(),
                                 points: vec![
                                     [far_neg.x, far_neg.y, far_neg.z],
                                     [far_pos.x, far_pos.y, far_pos.z],
                                 ],
-                                points_low: Vec::new(),
+                                points_low: Default::default(),
                                 snap_pts: vec![],
                                 tangent_geoms: vec![],
                                 key_vertices: vec![],
-                                fill_tris: vec![],
-                                fill_tris_low: Vec::new(),
                                 ..crate::scene::WireGeom::default()
                             }),
                             ..Default::default()
@@ -9681,6 +9677,8 @@ properties={:.1}ms picked={}",
                 .borrow_mut()
                 .orbit(dx, dy, Some(pivot));
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.tabs[i].scene.prepare_projected_interaction();
         self.tabs[i].scene.camera_generation += 1;
     }
 
@@ -10116,6 +10114,8 @@ properties={:.1}ms picked={}",
                 cam.snap_to_direction(eye_dir, r_ucs);
             }
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.tabs[i].scene.prepare_projected_interaction();
         self.tabs[i].scene.camera_generation += 1;
         if cube {
             self.command_line
@@ -10573,13 +10573,18 @@ properties={:.1}ms picked={}",
             .mark_interaction_index_pending(epoch, source);
         self.active_interaction_index = Some(key);
         let weak = Arc::downgrade(&wires);
+        #[cfg(not(target_arch = "wasm32"))]
+        let projected = self.tabs[i].scene.view_needs_projected_interaction();
         Some(Task::perform(
             async move {
                 let started = iced::time::Instant::now();
                 let index = Arc::new(
                     crate::scene::pick::interaction_index::InteractionIndex::build(&wires),
                 );
-                index.prepare_screen();
+                #[cfg(not(target_arch = "wasm32"))]
+                if projected {
+                    index.prepare_screen_in_background();
+                }
                 Message::InteractionIndexReady {
                     tab_id,
                     epoch,

@@ -524,7 +524,12 @@ async fn open_path_with_phase_attempt(
                         (finalize_loaded_outcome(&path2, outcome)?, session)
                     } else {
                         (
-                            load_file_for_open(&path2, Some(parser_progress), &attempt)?,
+                            load_file_for_open(
+                                &path2,
+                                Some(parser_progress),
+                                &attempt,
+                                crate::cli::low_memory_viewing(),
+                            )?,
                             None,
                         )
                     };
@@ -1176,12 +1181,12 @@ pub(crate) fn load_file_with_progress(
 ) -> Result<document::ReadOutcome, String> {
     // Headless reads (--export, xrefs, imports) have no recovery prompt:
     // fall back to the recovery read as soon as the strict one fails.
-    match load_file_for_open(path, progress.clone(), &OpenAttempt::Strict) {
+    match load_file_for_open(path, progress.clone(), &OpenAttempt::Strict, false) {
         Ok(outcome) => Ok(outcome),
         Err(failure) if failure.recoverable => {
             let attempt = OpenAttempt::Recovery(failure.message, failure.read_stats);
             let mut outcome =
-                load_file_for_open(path, progress, &attempt).map_err(|failure| failure.message)?;
+                load_file_for_open(path, progress, &attempt, false).map_err(|failure| failure.message)?;
             repair_drawing(&mut outcome.document);
             Ok(outcome)
         }
@@ -1194,11 +1199,12 @@ fn load_file_for_open(
     path: &Path,
     progress: Option<Arc<dyn Fn(u16) + Send + Sync>>,
     attempt: &OpenAttempt,
+    low_memory_viewing: bool,
 ) -> Result<document::ReadOutcome, OpenAttemptFailure> {
     let outcome = match attempt {
         OpenAttempt::Strict => {
             let outcome =
-                read_file_attempt(path, progress, false).map_err(|failure| OpenAttemptFailure {
+                read_file_attempt(path, progress, false, low_memory_viewing).map_err(|failure| OpenAttemptFailure {
                     message: failure.message,
                     read_stats: None,
                     recoverable: failure.recoverable,
@@ -1232,7 +1238,7 @@ fn load_file_for_open(
         }
         OpenAttempt::Recovery(initial_error, initial_stats) => {
             let mut outcome =
-                read_file_attempt(path, progress, true).map_err(|failure| OpenAttemptFailure {
+                read_file_attempt(path, progress, true, low_memory_viewing).map_err(|failure| OpenAttemptFailure {
                     message: format!(
                         "initial read failed: {initial_error}; recovery read failed: {}",
                         failure.message
@@ -1347,6 +1353,7 @@ fn read_file_attempt(
     path: &Path,
     progress: Option<Arc<dyn Fn(u16) + Send + Sync>>,
     failsafe: bool,
+    low_memory_viewing: bool,
 ) -> Result<document::ReadOutcome, ReaderFailure> {
     let ext = path
         .extension()
@@ -1362,7 +1369,7 @@ fn read_file_attempt(
     };
 
     match effective.as_str() {
-        "dwg" | "dwt" | "dws" => read_dwg_path(path, progress, failsafe),
+        "dwg" | "dwt" | "dws" => read_dwg_path(path, progress, failsafe, low_memory_viewing),
         "dxf" => read_dxf_path(path, failsafe),
         other => match ocs_save::external_format(other) {
             Some(format) => std::fs::read(path)
@@ -1407,11 +1414,17 @@ fn read_dwg_path(
     path: &Path,
     progress: Option<Arc<dyn Fn(u16) + Send + Sync>>,
     failsafe: bool,
+    low_memory_viewing: bool,
 ) -> Result<document::ReadOutcome, ReaderFailure> {
     let options = if failsafe {
         DwgReadOptions::failsafe()
     } else {
         DwgReadOptions::default()
+    };
+    let options = if low_memory_viewing {
+        options.without_roundtrip_data()
+    } else {
+        options
     };
     #[cfg(not(target_arch = "wasm32"))]
     {

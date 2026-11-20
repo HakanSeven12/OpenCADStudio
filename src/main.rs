@@ -237,6 +237,7 @@ fn main() -> iced::Result {
             files: if args.new { Vec::new() } else { args.files },
             new: args.new,
             read_only: args.read_only,
+            low_memory: args.low_memory,
             compat_renderer,
             script_lines,
             gpu_fallback_notice,

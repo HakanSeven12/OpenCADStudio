@@ -3681,7 +3681,7 @@ fn indexed_segments<W: WireSource + ?Sized>(wires: &W) -> Option<Vec<IndexedSegm
 #[inline]
 fn wp_f64(wire: &WireModel, i: usize) -> glam::DVec3 {
     let h = wire.points[i];
-    let l = wire.points_low.get(i).copied().unwrap_or([0.0; 3]);
+    let l = wire.points_low.get(i).unwrap_or([0.0; 3]);
     glam::DVec3::new(
         h[0] as f64 + l[0] as f64,
         h[1] as f64 + l[1] as f64,
@@ -5535,7 +5535,7 @@ mod ext_tests {
                     [a[0] as f32, a[1] as f32, a[2] as f32],
                     [b[0] as f32, b[1] as f32, b[2] as f32],
                 ],
-                points_low: vec![],
+                points_low: Default::default(),
                 ..crate::scene::WireGeom::default()
             }),
             ..Default::default()
@@ -5875,7 +5875,7 @@ mod ext_tests {
         let a = [origin - 10.0, origin, 0.0];
         let b = [origin + 10.0, origin, 0.0];
         let points = [a, b].map(|point| point.map(|value| value as f32));
-        let low = [a, b]
+        let low: Vec<_> = [a, b]
             .into_iter()
             .zip(points)
             .map(|(point, high)| {
@@ -5885,7 +5885,7 @@ mod ext_tests {
         let line = WireModel {
             geom: std::sync::Arc::new(crate::scene::WireGeom {
                 points: points.to_vec(),
-                points_low: low,
+                points_low: low.into(),
                 tangent_geoms: vec![TangentGeom::Line {
                     p1: points[0],
                     p2: points[1],

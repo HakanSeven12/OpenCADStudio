@@ -2872,6 +2872,8 @@ impl OpenCADStudio {
         // selected — see #21.
         self.sync_ribbon_from_selection();
         self.tabs[i].scene.restore_saved_camera();
+        #[cfg(not(target_arch = "wasm32"))]
+        self.tabs[i].scene.prepare_projected_interaction();
         // Grid/snap are per-drawing view settings — adopt the opened
         // file's active viewport state rather than a global preference.
         self.adopt_view_display(i);
@@ -5587,6 +5589,9 @@ impl OpenCADStudio {
     /// touches the original file or the dirty flag.
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn on_autosave(&mut self) -> Task<Message> {
+        if crate::cli::low_memory_viewing() {
+            return Task::none();
+        }
         let mut tasks = Vec::new();
         for i in 0..self.tabs.len() {
             if self.tabs[i].block_test.is_some()

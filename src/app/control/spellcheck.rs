@@ -298,14 +298,19 @@ pub(crate) mod windows_impl {
         language: String,
     }
 
-    // Windows COM objects created with CLSCTX_INPROC_SERVER are safe to invoke from our control thread.
+    // The spell-checker factory is free-threaded (registry ThreadingModel
+    // "Free") and we initialise the MTA, so the checker can be called from any
+    // thread and its DLL stays loaded for the life of the process.
     unsafe impl Send for WindowsSpeller {}
     unsafe impl Sync for WindowsSpeller {}
 
     impl WindowsSpeller {
         pub fn new(lang_tag: &str) -> Option<Self> {
             unsafe {
-                CoInitializeEx(std::ptr::null(), 0);
+                // COINIT_MULTITHREADED: an STA would be torn down when this
+                // thread exits, unloading the DLL while other threads still
+                // hold checkers.
+                CoInitializeEx(std::ptr::null(), 2);
 
                 let mut factory_obj: *mut c_void = std::ptr::null_mut();
                 let hr = CoCreateInstance(

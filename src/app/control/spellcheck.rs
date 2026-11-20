@@ -793,3 +793,40 @@ pub(crate) mod linux_impl {
 mod fallback_impl {
     pub struct FallbackSpeller;
 }
+
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+    use super::SystemSpeller;
+    use std::cell::RefCell;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    thread_local! {
+        static HELD: RefCell<Option<SystemSpeller>> = const { RefCell::new(None) };
+    }
+
+    // The editor keeps its speller in a thread-local, so the checker is
+    // released as its thread exits. The speller lives in the process-wide
+    // MTA, so thread exit must not unload the spell-checker DLL out from
+    // under the next thread that uses it.
+    #[test]
+    fn speller_survives_com_unload_reload_cycles() {
+        const ROUNDS: usize = 64;
+        let completed = Arc::new(AtomicUsize::new(0));
+        for _ in 0..ROUNDS {
+            let completed = Arc::clone(&completed);
+            let handle = std::thread::spawn(move || {
+                HELD.with(|cell| {
+                    let mut cell = cell.borrow_mut();
+                    *cell = Some(SystemSpeller::new(None));
+                    let speller = cell.as_ref().expect("speller just made");
+                    let (ok, _) = speller.check_word("house", false);
+                    assert!(ok, "'house' must be judged correct");
+                });
+                completed.fetch_add(1, Ordering::Relaxed);
+            });
+            handle.join().expect("speller thread panicked");
+        }
+        assert_eq!(completed.load(Ordering::Relaxed), ROUNDS);
+    }
+}

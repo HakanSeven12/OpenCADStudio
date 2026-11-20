@@ -10,6 +10,232 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod native_attachment_tests {
+    use super::*;
+    fn fixture(guid: &str) -> (Document, PathBuf, ocs_save::IfccadSession) {
+        let root = std::env::temp_dir().join(format!(
+            "ocs-native-xref-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("Tekeningen")).unwrap();
+        std::fs::create_dir_all(root.join("Referenties")).unwrap();
+        let mut source = Document::new();
+        source.header.insertion_units = 6;
+        source.header.model_space_insertion_base = Vector3::new(10., 20., 0.);
+        source.header.fingerprint_guid = guid.into();
+        source
+            .add_entity(EntityType::Line(document::entities::Line::from_coords(
+                10., 20., 0., 12., 20., 0.,
+            )))
+            .unwrap();
+        std::fs::write(
+            root.join("Referenties/grondplan.dwg"),
+            document::DwgWriter::write_to_vec(&source).unwrap(),
+        )
+        .unwrap();
+        let (loaded, session) = ocs_save::read_ifccad_for_edit(include_bytes!(
+            "../../crates/ocs_save/tests/fixtures/xref.ifcx"
+        ))
+        .unwrap();
+        let mut host = loaded.document;
+        host.source_path = Some(
+            root.join("Tekeningen/hoofd.ifcx")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        host.header.fingerprint_guid = format!("native-host-{}", root.display());
+        crate::io::normalize_block_origins(&mut host);
+        (host, root, session.unwrap())
+    }
+
+    #[test]
+    fn native_xref_source_base_is_subtracted_once_before_effective_scale() {
+        let (mut host, root, _session) = fixture("{E5B4A9AF-CF20-4FC9-A30F-FFB20FD987E1}");
+        let infos = resolve_xrefs(&mut host, &root.join("Tekeningen"));
+        assert_eq!(infos[0].status, XrefStatus::Loaded);
+        let owner = host.block_records.get("grondplan").unwrap().handle;
+        let line = host
+            .entities()
+            .find_map(|e| match e {
+                EntityType::Line(l) if l.common.owner_handle == owner => Some(l),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(line.start, Vector3::ZERO);
+        assert_eq!(line.end, Vector3::new(2., 0., 0.));
+        let insert = host
+            .model_space_entities()
+            .find_map(|e| match e {
+                EntityType::Insert(i) => Some(i),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(insert.x_scale(), 500.);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn native_and_dwg_file_dependency_guid_seed_the_same_warning() {
+        let (mut host, root, _session) = fixture("{11111111-2222-3333-4444-555555555555}");
+        let infos = resolve_xrefs(&mut host, &root.join("Tekeningen"));
+        assert_eq!(infos[0].status, XrefStatus::Loaded);
+        assert!(infos[0].other_drawing);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn native_source_bytes_are_scoped_and_failed_reload_keeps_body() {
+        let (mut first, root, session) = fixture("{E5B4A9AF-CF20-4FC9-A30F-FFB20FD987E1}");
+        let (second, other_root, other_session) = fixture("{E5B4A9AF-CF20-4FC9-A30F-FFB20FD987E1}");
+        let record = first.block_records.get("grondplan").unwrap().clone();
+        let bytes = Arc::new(std::fs::read(root.join("Referenties/grondplan.dwg")).unwrap());
+        session
+            .bind_external_source_bytes(
+                record.handle,
+                &record.xref_path,
+                "grondplan.dwg".into(),
+                bytes,
+            )
+            .unwrap();
+        let other_record = second.block_records.get("grondplan").unwrap();
+        assert!(other_session
+            .external_source_bytes(other_record.handle, &other_record.xref_path)
+            .is_none());
+        let keys = [record.handle].into_iter().collect();
+        let infos = resolve_xrefs_for_keys_in_session(&mut first, &root, &keys, Some(&session));
+        assert_eq!(infos[0].status, XrefStatus::Loaded);
+        let before = first
+            .entities()
+            .filter(|e| e.common().owner_handle == record.handle)
+            .count();
+        let mut changed = Document::new();
+        changed.header.insertion_units = 6;
+        changed.header.model_space_insertion_base = Vector3::new(11., 20., 0.);
+        changed
+            .add_entity(EntityType::Line(document::entities::Line::from_coords(
+                11., 20., 0., 14., 20., 0.,
+            )))
+            .unwrap();
+        let bytes = document::DwgWriter::write_to_vec(&changed).unwrap();
+        let mut infos = Vec::new();
+        merge_xref_reads_in_session(
+            &mut first,
+            vec![(
+                record.name.clone(),
+                record.xref_path.clone(),
+                record.handle,
+                read_source_bytes("grondplan.dwg", &bytes),
+            )],
+            &mut infos,
+            None,
+            Some(&session),
+        );
+        assert_eq!(infos[0].status, XrefStatus::Failed);
+        assert!(infos[0]
+            .diagnostics
+            .iter()
+            .any(|d| d.contains("base point")));
+        assert_eq!(
+            first
+                .entities()
+                .filter(|e| e.common().owner_handle == record.handle)
+                .count(),
+            before
+        );
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(other_root).unwrap();
+    }
+
+    #[test]
+    fn native_xref_search_order_is_direct_host_structured_then_configured() {
+        let (_, root, _) = fixture("{E5B4A9AF-CF20-4FC9-A30F-FFB20FD987E1}");
+        let host = root.join("Tekeningen");
+        std::fs::create_dir_all(host.join("xref")).unwrap();
+        let configured = root.join("search");
+        std::fs::create_dir_all(&configured).unwrap();
+        let name = "ground.dwg";
+        for path in [
+            configured.join(name),
+            host.join("xref").join(name),
+            host.join(name),
+        ] {
+            std::fs::write(&path, b"chosen").unwrap();
+        }
+        let dirs = [configured.clone()];
+        assert_eq!(
+            resolve_path_in("../missing/ground.dwg", &host, &dirs),
+            Some(host.join(name))
+        );
+        std::fs::remove_file(host.join(name)).unwrap();
+        assert_eq!(
+            resolve_path_in("../missing/ground.dwg", &host, &dirs),
+            Some(host.join("xref").join(name))
+        );
+        std::fs::remove_file(host.join("xref").join(name)).unwrap();
+        assert_eq!(
+            resolve_path_in("../missing/ground.dwg", &host, &dirs),
+            Some(configured.join(name))
+        );
+        assert_eq!(
+            resolve_path_in("../Referenties/grondplan.dwg", &host, &dirs),
+            Some(host.join("../Referenties/grondplan.dwg"))
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn native_guid_warning_is_scoped_to_same_named_open_documents() {
+        let (mut first, first_root, first_session) =
+            fixture("{E5B4A9AF-CF20-4FC9-A30F-FFB20FD987E1}");
+        let (mut second, second_root, second_session) =
+            fixture("{11111111-2222-3333-4444-555555555555}");
+        for (doc, root, session) in [
+            (&mut first, &first_root, &first_session),
+            (&mut second, &second_root, &second_session),
+        ] {
+            doc.header.fingerprint_guid.clear();
+            doc.source_path = Some("same.ifcx".into());
+            let record = doc.block_records.get("grondplan").unwrap();
+            session
+                .bind_external_source_bytes(
+                    record.handle,
+                    &record.xref_path,
+                    "grondplan.dwg".into(),
+                    Arc::new(std::fs::read(root.join("Referenties/grondplan.dwg")).unwrap()),
+                )
+                .unwrap();
+        }
+        let keys = [first.block_records.get("grondplan").unwrap().handle]
+            .into_iter()
+            .collect();
+        let first_info =
+            resolve_xrefs_for_keys_in_session(&mut first, &first_root, &keys, Some(&first_session));
+        assert_eq!(first_info[0].status, XrefStatus::Loaded, "{first_info:?}");
+        assert!(!first_info[0].other_drawing);
+        let second_info = resolve_xrefs_for_keys_in_session(
+            &mut second,
+            &second_root,
+            &keys,
+            Some(&second_session),
+        );
+        assert_eq!(second_info[0].status, XrefStatus::Loaded, "{second_info:?}");
+        assert!(second_info[0].other_drawing);
+        let first_reload =
+            resolve_xrefs_for_keys_in_session(&mut first, &first_root, &keys, Some(&first_session));
+        assert!(
+            !first_reload[0].other_drawing,
+            "the second tab must not change the first tab's GUID baseline"
+        );
+        std::fs::remove_dir_all(first_root).unwrap();
+        std::fs::remove_dir_all(second_root).unwrap();
+    }
+}
+
 /// Status of an external reference block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum XrefStatus {
@@ -121,16 +347,15 @@ fn source_cache() -> &'static Mutex<(HashMap<String, Arc<Vec<u8>>>, VecDeque<Str
 // `matches_block`) and closed tabs keep theirs. A reopened host starts empty
 // and fills it as its xrefs are merged.
 fn merged_copies() -> &'static Mutex<HashMap<Handle, HashMap<Handle, Handle>>> {
-    static MERGED: OnceLock<Mutex<HashMap<Handle, HashMap<Handle, Handle>>>> =
-        OnceLock::new();
+    static MERGED: OnceLock<Mutex<HashMap<Handle, HashMap<Handle, Handle>>>> = OnceLock::new();
     MERGED.get_or_init(|| Mutex::new(HashMap::default()))
 }
 
 /// FingerprintGUID of the drawing each xref block last loaded, keyed by the
 /// host's own GUID and the block, so a reload can tell a revision (same
 /// GUID) from another drawing that took the file's place.
-// ponytail: session-only; a reopened host has no expected GUID until the
-// file's dependency list (AcDb:FileDepList) records it.
+// Observations are session-only; the first load also uses the stored
+// AcDb:FileDepList expectation (native import populates that same list).
 fn loaded_identities() -> &'static Mutex<HashMap<(String, Handle), String>> {
     static IDS: OnceLock<Mutex<HashMap<(String, Handle), String>>> = OnceLock::new();
     IDS.get_or_init(|| Mutex::new(HashMap::default()))
@@ -138,6 +363,7 @@ fn loaded_identities() -> &'static Mutex<HashMap<(String, Handle), String>> {
 
 /// Record `loaded` as the drawing behind `br_handle`; true when the block
 /// held a different known drawing before.
+#[cfg(test)]
 fn replaced_by_other_drawing(host_guid: &str, br_handle: Handle, loaded: &str) -> bool {
     if host_guid.is_empty() || loaded.is_empty() {
         return false;
@@ -477,7 +703,6 @@ pub(crate) fn registered_document(key: &str) -> Result<Document, String> {
 
 /// Apply the same post-parse fixups the file-open tail applies, so merged
 /// xref content behaves like natively loaded content.
-#[cfg(target_arch = "wasm32")]
 fn finalize_xref_outcome(outcome: &mut document::ReadOutcome) {
     let doc = &mut outcome.document;
     super::normalize_block_origins(doc);
@@ -537,7 +762,7 @@ fn read_outcome_from_bytes(
 ///
 /// Returns a list of [`XrefInfo`] describing each xref block found.
 pub fn resolve_xrefs(doc: &mut Document, base_dir: &Path) -> Vec<XrefInfo> {
-    resolve_xrefs_with_filter(doc, base_dir, None, None, false)
+    resolve_xrefs_with_filter(doc, base_dir, None, None, false, None)
 }
 
 /// Reload only the direct xref block records identified by `keys`.
@@ -550,7 +775,16 @@ pub fn resolve_xrefs_for_keys(
     base_dir: &Path,
     keys: &HashSet<Handle>,
 ) -> Vec<XrefInfo> {
-    resolve_xrefs_with_filter(doc, base_dir, None, Some(keys), false)
+    resolve_xrefs_with_filter(doc, base_dir, None, Some(keys), false, None)
+}
+
+pub fn resolve_xrefs_for_keys_in_session(
+    doc: &mut Document,
+    base_dir: &Path,
+    keys: &HashSet<Handle>,
+    session: Option<&ocs_save::IfccadSession>,
+) -> Vec<XrefInfo> {
+    resolve_xrefs_with_filter(doc, base_dir, None, Some(keys), false, session)
 }
 
 /// Resolve XREFs while reporting completed work units. This is the open
@@ -564,7 +798,16 @@ pub fn resolve_xrefs_with_progress(
     base_dir: &Path,
     progress: Option<std::sync::Arc<dyn Fn(usize, usize) + Send + Sync>>,
 ) -> Vec<XrefInfo> {
-    resolve_xrefs_with_filter(doc, base_dir, progress, None, true)
+    resolve_xrefs_with_filter(doc, base_dir, progress, None, true, None)
+}
+
+pub fn resolve_xrefs_with_progress_in_session(
+    doc: &mut Document,
+    base_dir: &Path,
+    progress: Option<Arc<dyn Fn(usize, usize) + Send + Sync>>,
+    session: Option<&ocs_save::IfccadSession>,
+) -> Vec<XrefInfo> {
+    resolve_xrefs_with_filter(doc, base_dir, progress, None, true, session)
 }
 
 fn resolve_xrefs_with_filter(
@@ -573,6 +816,7 @@ fn resolve_xrefs_with_filter(
     progress: Option<std::sync::Arc<dyn Fn(usize, usize) + Send + Sync>>,
     only: Option<&HashSet<Handle>>,
     honor_unloaded: bool,
+    session: Option<&ocs_save::IfccadSession>,
 ) -> Vec<XrefInfo> {
     let mut result = Vec::new();
     // Auto-resolve every xref — frustum + LOD culling keep GPU cost bounded.
@@ -634,7 +878,21 @@ fn resolve_xrefs_with_filter(
                     });
                 callback
             });
-            let read = read_xref_file(&raw_path, base_dir, nested_progress);
+            let read = if let Some(bytes) =
+                session.and_then(|s| s.external_source_bytes(br_handle, &raw_path))
+            {
+                read_source_bytes(&bytes.file_name, &bytes.bytes)
+            } else if cfg!(target_arch = "wasm32")
+                && session.and_then(|s| s.external_source(br_handle)).is_some()
+            {
+                XrefRead {
+                    resolved: None,
+                    outcome: None,
+                    source_sha256: None,
+                }
+            } else {
+                read_xref_file(&raw_path, base_dir, nested_progress)
+            };
             parse_units[xref_index].store(1000, std::sync::atomic::Ordering::Relaxed);
             if let Some(progress) = &progress {
                 let completed = parse_units
@@ -647,7 +905,7 @@ fn resolve_xrefs_with_filter(
         })
         .collect();
 
-    merge_xref_reads(doc, parsed, &mut result, progress.as_ref());
+    merge_xref_reads_in_session(doc, parsed, &mut result, progress.as_ref(), session);
     result
 }
 
@@ -661,6 +919,29 @@ pub struct XrefRead {
     source_sha256: Option<String>,
 }
 
+impl XrefRead {
+    pub fn source_content(&self) -> Option<document::ifccad::IfccadExternalSourceContent> {
+        let outcome = self.outcome.as_ref()?.as_ref().ok()?;
+        (outcome.stats.source_format == Some(document::SourceFormat::Dwg))
+            .then(|| document::dwg_external_source_content(&outcome.document))
+    }
+}
+
+pub fn read_source_bytes(name: &str, bytes: &[u8]) -> XrefRead {
+    let outcome = document::DwgReader::from_stream(std::io::Cursor::new(bytes.to_vec()))
+        .read_with_stats()
+        .map_err(|error| error.to_string())
+        .map(|mut outcome| {
+            finalize_xref_outcome(&mut outcome);
+            outcome
+        });
+    XrefRead {
+        resolved: Some(PathBuf::from(name)),
+        outcome: Some(outcome),
+        source_sha256: None,
+    }
+}
+
 /// Read and parse the drawing that a reference stored as `raw_path` names,
 /// resolved against `base_dir`. It touches no host document, so it can run
 /// on any thread; [`merge_xref_reads`] merges the result.
@@ -669,6 +950,18 @@ pub fn read_xref_file(
     base_dir: &Path,
     progress: Option<std::sync::Arc<dyn Fn(u16) + Send + Sync>>,
 ) -> XrefRead {
+    // Native unknown schemes are retained, but must never reach filename fallback.
+    if let Err(error) = document::external_source_location_from_cad_path(raw_path)
+        .and_then(|location| document::external_source_location_to_cad_path(&location))
+    {
+        return XrefRead {
+            resolved: None,
+            outcome: Some(Err(format!(
+                "Unsupported source location {raw_path}: {error}"
+            ))),
+            source_sha256: None,
+        };
+    }
     let resolved = resolve_path(raw_path, base_dir);
     #[cfg(not(target_arch = "wasm32"))]
     let initial_fingerprint = resolved
@@ -722,6 +1015,16 @@ pub fn merge_xref_reads(
     result: &mut Vec<XrefInfo>,
     progress: Option<&std::sync::Arc<dyn Fn(usize, usize) + Send + Sync>>,
 ) {
+    merge_xref_reads_in_session(doc, parsed, result, progress, None)
+}
+
+pub fn merge_xref_reads_in_session(
+    doc: &mut Document,
+    parsed: Vec<(String, String, Handle, XrefRead)>,
+    result: &mut Vec<XrefInfo>,
+    progress: Option<&Arc<dyn Fn(usize, usize) + Send + Sync>>,
+    session: Option<&ocs_save::IfccadSession>,
+) {
     let xref_count = parsed.len();
     let total_units = xref_count.saturating_mul(2000);
     result.reserve(parsed.len());
@@ -731,6 +1034,23 @@ pub fn merge_xref_reads(
             outcome: xref_outcome,
             source_sha256,
         } = read;
+        let xref_outcome = xref_outcome.map(|outcome| outcome.and_then(|outcome| {
+            if let Some(record) = doc.block_records.iter().find(|r| r.handle == br_handle) {
+                document::dwg_xref_fingerprint_guid(doc, record).map_err(|e| e.to_string())?;
+            }
+            if let (Some(found), Some(host)) = (&resolved, &doc.source_path) {
+                if std::fs::canonicalize(found).ok().zip(std::fs::canonicalize(host).ok()).is_some_and(|(a,b)| a == b) {
+                    return Err("Direct self-reference is unsupported".into());
+                }
+            }
+            if let Some(session) = session {
+                if session.external_source(br_handle).is_some() && outcome.stats.source_format != Some(document::SourceFormat::Dwg) {
+                    return Err("This native XREF requires a DWG source; other source formats are deferred".into());
+                }
+                session.check_external_source_reload(br_handle, &document::dwg_external_source_content(&outcome.document))?;
+            }
+            Ok(outcome)
+        }));
         let mut other_drawing = false;
         let (status, diagnostics, read_stats) = match xref_outcome {
             Some(Ok(outcome)) => {
@@ -766,11 +1086,43 @@ pub fn merge_xref_reads(
                     // re-apply onto the freshly merged layers below. Without this
                     // every reload silently reset frozen/off/color tweaks the
                     // user made on `name|*` layers back to file defaults.
-                    other_drawing = replaced_by_other_drawing(
-                        &doc.header.fingerprint_guid,
-                        br_handle,
+                    let expected = doc
+                        .block_records
+                        .iter()
+                        .find(|r| r.handle == br_handle)
+                        .and_then(|r| document::dwg_xref_fingerprint_guid(doc, r).ok().flatten());
+                    let observed = session.and_then(|session| {
+                        session.observe_external_source_guid(
+                            br_handle,
+                            &outcome.document.header.fingerprint_guid,
+                        )
+                    });
+                    if let Some(changed) = observed {
+                        other_drawing = changed;
+                    } else if let Some(loaded) = document::ifccad::normalize_ifccad_fingerprint_guid(
                         &outcome.document.header.fingerprint_guid,
-                    );
+                    ) {
+                        let has_host_identity =
+                            !doc.header.fingerprint_guid.is_empty() || doc.source_path.is_some();
+                        let previous = if has_host_identity {
+                            let host_key = format!(
+                                "{}|{}",
+                                doc.header.fingerprint_guid,
+                                doc.source_path.as_deref().unwrap_or_default()
+                            );
+                            loaded_identities()
+                                .lock()
+                                .ok()
+                                .and_then(|mut ids| {
+                                    ids.insert((host_key, br_handle), loaded.clone())
+                                })
+                                .or(expected)
+                        } else {
+                            expected
+                        };
+                        other_drawing = previous
+                            .is_some_and(|previous| !previous.eq_ignore_ascii_case(&loaded));
+                    }
                     let visretain = doc.header.retain_xref_visibility;
                     let kept_layers = if visretain {
                         snapshot_dependent_layers(doc, &block_name)
@@ -951,49 +1303,29 @@ pub(crate) fn resolve_path(raw: &str, _base_dir: &Path) -> Option<PathBuf> {
 /// Handles absolute paths, relative paths, and Windows-style separators.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn resolve_path(raw: &str, base_dir: &Path) -> Option<PathBuf> {
-    let normalised = raw.replace('\\', "/");
-    let p = PathBuf::from(&normalised);
+    let dirs = std::env::var_os("OCS_XREF_PATH")
+        .map(|v| std::env::split_paths(&v).collect::<Vec<_>>())
+        .unwrap_or_default();
+    resolve_path_in(raw, base_dir, &dirs)
+}
 
-    if p.is_absolute() {
-        if p.exists() {
-            return Some(p);
-        }
-        // Fallback: try the filename in base_dir.
-        if let Some(fname) = p.file_name() {
-            let c = base_dir.join(fname);
-            if c.exists() {
-                return Some(c);
-            }
-            let structured = base_dir.join("xref").join(fname);
-            if structured.is_file() {
-                return Some(structured);
-            }
-        }
-        return None;
+#[cfg(not(target_arch = "wasm32"))]
+fn resolve_path_in(raw: &str, base_dir: &Path, search_dirs: &[PathBuf]) -> Option<PathBuf> {
+    let p = PathBuf::from(raw.replace('\\', "/"));
+    let direct = if p.is_absolute() {
+        p.clone()
+    } else {
+        base_dir.join(&p)
+    };
+    if direct.is_file() {
+        return Some(direct);
     }
-
-    // Relative path against base_dir.
-    let candidate = base_dir.join(&p);
-    if candidate.exists() {
-        return Some(candidate);
-    }
-
-    // Last resort: just the filename.
-    if let Some(fname) = p.file_name() {
-        let c = base_dir.join(fname);
-        if c.exists() {
-            return Some(c);
-        }
-        // Flat references from older packages also resolve into the structured
-        // AutoCAD-style xref/ folder. The reverse (an xref/ path with a flat
-        // package) is covered by the bare-name fallback above.
-        let structured = base_dir.join("xref").join(fname);
-        if structured.is_file() {
-            return Some(structured);
-        }
-    }
-
-    None
+    let name = p.file_name()?;
+    std::iter::once(base_dir.to_path_buf())
+        .chain(std::iter::once(base_dir.join("xref")))
+        .chain(search_dirs.iter().cloned())
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
 }
 
 /// Give a block record its BLOCK / ENDBLK markers, linked through the
@@ -1635,6 +1967,8 @@ fn merge_source_entities(
         // Paper-space / unknown owners are skipped.
         let old_owner = entity.common().owner_handle;
         let new_owner = if old_owner == source_ms_handle {
+            let base = source.header.model_space_insertion_base;
+            entity.translate(Vector3::new(-base.x, -base.y, -base.z));
             target_br
         } else if let Some(&h) = maps.br_handles.get(&old_owner) {
             h
@@ -1712,6 +2046,39 @@ pub fn collect_entries_with_prev(
     prev: &std::collections::HashMap<u64, std::time::SystemTime>,
 ) -> Vec<crate::io::xref_model::ReferenceEntry> {
     collect_entries_impl(doc, base_dir, unloaded, prev, true)
+}
+
+/// Apply explicit per-tab source choices to the existing manager/report rows.
+pub fn apply_native_source_status(
+    entries: &mut [crate::io::xref_model::ReferenceEntry],
+    session: Option<&ocs_save::IfccadSession>,
+) {
+    use crate::io::xref_model::{RefKind, RefStatus};
+    let Some(session) = session else {
+        return;
+    };
+    for entry in entries {
+        if entry.kind != RefKind::DwgXref || entry.parent_key.is_some() {
+            continue;
+        }
+        if let Some(source) =
+            session.external_source_bytes(Handle::new(entry.key), &entry.saved_path)
+        {
+            entry.found_at = Some(source.file_name);
+            entry.size_bytes = Some(source.bytes.len() as u64);
+            if entry.status != RefStatus::Unloaded {
+                entry.status = RefStatus::Loaded;
+            }
+        } else if cfg!(target_arch = "wasm32")
+            && session.external_source(Handle::new(entry.key)).is_some()
+        {
+            entry.found_at = None;
+            entry.size_bytes = None;
+            if entry.status != RefStatus::Unloaded {
+                entry.status = RefStatus::NotFound;
+            }
+        }
+    }
 }
 
 /// Resolve one host-owned row without applying the manager's nested-row
@@ -3950,8 +4317,8 @@ mod tests {
     #[test]
     fn a_reload_relinks_dimension_references_to_the_new_copies() {
         use document::objects::{
-            AssocDimensionAssociation, AssocDimensionReference, AssociativeData,
-            AssociativeObject, ObjectType,
+            AssocDimensionAssociation, AssocDimensionReference, AssociativeData, AssociativeObject,
+            ObjectType,
         };
         let dir = xref_tmpdir("relink");
         let mut source = document::Document::new();
@@ -3961,8 +4328,11 @@ mod tests {
         let source_line = source.add_entity(document::EntityType::Line(line)).unwrap();
         let path = dir.join("walls.dwg");
         let write = |doc: &document::Document| {
-            std::fs::write(&path, crate::io::save_to_bytes(doc, "dwg", doc.version).unwrap())
-                .unwrap();
+            std::fs::write(
+                &path,
+                crate::io::save_to_bytes(doc, "dwg", doc.version).unwrap(),
+            )
+            .unwrap();
         };
         write(&source);
 
@@ -5258,4 +5628,3 @@ mod web_registry_tests {
         assert!(unresolved_xref_names(&[]).is_empty());
     }
 }
-

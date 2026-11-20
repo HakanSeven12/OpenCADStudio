@@ -174,9 +174,7 @@ impl OpenCADStudio {
         let entries = self.refresh_xref_report(i);
         let rows: Vec<(String, String, String, String)> = entries
             .iter()
-            .filter(|e| {
-                e.parent_key.is_none() && e.kind == crate::io::xref_model::RefKind::DwgXref
-            })
+            .filter(|e| e.parent_key.is_none() && e.kind == crate::io::xref_model::RefKind::DwgXref)
             .filter(|e| pattern == "*" || crate::io::xref_model::wildcard_match(&e.name, pattern))
             .map(|e| {
                 let kind = match e.ref_type {
@@ -415,6 +413,12 @@ impl OpenCADStudio {
     ) {
         let pending = self.begin_undo(i, "XATTACH", 1, false);
         let host = self.tabs[i].current_path.clone();
+        let read = read.or_else(|| {
+            let (path, base) =
+                crate::modules::insert::xattach::xref_read_inputs(&request, host.as_deref());
+            Some(crate::io::xref::read_xref_file(&path, &base?, None))
+        });
+        let source_content = read.as_ref().and_then(|r| r.source_content());
         let stem = path_to_block_name(&request.path);
         let name = crate::modules::insert::xattach::prepare_named_xref_definition_with(
             &mut self.tabs[i].scene,
@@ -427,7 +431,56 @@ impl OpenCADStudio {
             self.tabs[i].xref_relative_on_save.insert(name.clone());
         }
         if let document::EntityType::Insert(insert) = &mut entity {
-            insert.block_name = name;
+            let doc = &self.tabs[i].scene.document;
+            let source_units = doc.block_records.get(&name).map(|r| r.units).unwrap_or(0);
+            let factor =
+                crate::app::properties::insert_unit_scale(doc.header.insertion_units, source_units)
+                    .unwrap_or(1.0);
+            insert.set_x_scale(insert.x_scale() * factor);
+            insert.set_y_scale(insert.y_scale() * factor);
+            insert.set_z_scale(insert.z_scale() * factor);
+            insert.block_name = name.clone();
+        }
+        if let Some(content) = source_content {
+            let doc = &mut self.tabs[i].scene.document;
+            if let Some(record) = doc.block_records.get(&name) {
+                let handle = record.handle;
+                let path = record.xref_path.clone();
+                let document::ifccad::IfccadExternalSourceContent::Dwg {
+                    fingerprint_guid, ..
+                } = &content;
+                if let Some(guid) = fingerprint_guid.as_ref().filter(|_| {
+                    !doc.file_dependencies
+                        .iter()
+                        .any(|d| d.feature.eq_ignore_ascii_case("Acad:XRef") && d.file_name == path)
+                }) {
+                    doc.file_dependencies
+                        .push(document::acadrust::document::FileDependency {
+                            feature: "Acad:XRef".into(),
+                            file_name: path,
+                            found_path: String::new(),
+                            fingerprint_guid: Some(format!("{{{}}}", guid.to_ascii_uppercase())),
+                            version_guid: None,
+                            timestamp: 0,
+                            file_size: 0,
+                            affects_graphics: true,
+                            reference_count: 1,
+                        });
+                }
+                if let Some(session) = self.tabs[i]
+                    .ifccad_session
+                    .as_ref()
+                    .filter(|s| s.external_source(handle).is_none())
+                {
+                    if let Err(error) = session.register_external_source(
+                        &self.tabs[i].scene.document,
+                        handle,
+                        content,
+                    ) {
+                        log::error!("{error}");
+                    }
+                }
+            }
         }
         // Resolving merged the reference's layers and linetypes — mirror
         // them into the Layers panel and ribbon dropdowns now (#407).

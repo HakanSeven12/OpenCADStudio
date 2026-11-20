@@ -28,7 +28,8 @@ pub use dxf_reference_integrity::{has_omitted_dxf_records, prune_omitted_dxf_rec
 /// `serialize` action and extends the runtime-field sidecar with
 /// `graphic_data`.
 /// v6 selects the updated Document codec for external plot styles.
-pub const PROTOCOL_VERSION: u16 = 6;
+/// v7 includes typed DWG FileDepList records in the serialized Document.
+pub const PROTOCOL_VERSION: u16 = 7;
 
 /// Serialize a document to an in-memory byte buffer, format chosen by `ext`
 /// (`dxf` → DXF, a listed converter's extension → that converter, anything

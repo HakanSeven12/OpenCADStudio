@@ -115,7 +115,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.6.8"
-source = "git+https://github.com/hakanaktt/acadrust.git?rev=13f16ebc0429e5a6058d118bcc8918664dfa2568#13f16ebc0429e5a6058d118bcc8918664dfa2568"
+source = "git+https://github.com/BjornFidder/acadrust.git?rev=c041f271d0ccb3b8e040533655e62a732dffe914#c041f271d0ccb3b8e040533655e62a732dffe914"
 dependencies = [
  "anyhow",
  "bitflags 2.13.1",
@@ -1947,6 +1947,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fnv"
+version = "1.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
+
+[[package]]
 name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3004,8 +3010,8 @@ dependencies = [
 
 [[package]]
 name = "ifccad"
-version = "2026.46.1"
-source = "git+https://github.com/OpenAEC-Foundation/ifccad.git?rev=9ca1cf1ff4c71dad8d380677e9eb657818b03d80#9ca1cf1ff4c71dad8d380677e9eb657818b03d80"
+version = "2026.47.0"
+source = "git+https://github.com/OpenAEC-Foundation/ifccad.git?rev=96895aea607e3f2a54f9b286115844554f59df77#96895aea607e3f2a54f9b286115844554f59df77"
 dependencies = [
  "base64",
  "fpmath",
@@ -3017,6 +3023,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "uriparse",
 ]
 
 [[package]]
@@ -4555,7 +4562,7 @@ dependencies = [
 [[package]]
 name = "opencaddocument"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=353bdef5a4235d0afdc1b6b32f67155c3a636bcf#353bdef5a4235d0afdc1b6b32f67155c3a636bcf"
+source = "git+https://github.com/BjornFidder/opencaddocument.git?rev=9bd7e655e05ee7b39367e32c46a5ec5f12839fde#9bd7e655e05ee7b39367e32c46a5ec5f12839fde"
 dependencies = [
  "acadrust",
  "ifccad",
@@ -7047,6 +7054,16 @@ dependencies = [
  "http",
  "httparse",
  "log",
+]
+
+[[package]]
+name = "uriparse"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0200d0fc04d809396c2ad43f3c95da3582a2556eba8d453c1087f4120ee352ff"
+dependencies = [
+ "fnv",
+ "lazy_static",
 ]
 
 [[package]]

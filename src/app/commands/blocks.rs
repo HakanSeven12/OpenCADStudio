@@ -9,9 +9,7 @@ fn xref_source_path(
     base_dir: &std::path::Path,
 ) -> Result<std::path::PathBuf, String> {
     let Some(record) = doc.block_records.get(name) else {
-        return Err(format!(
-            "XOPEN: no definition for \"{name}\"."
-        ));
+        return Err(format!("XOPEN: no definition for \"{name}\"."));
     };
     if !record.flags.is_xref && !record.flags.is_xref_overlay {
         return Err("XOPEN: select an external reference (xref) to open.".to_string());
@@ -1487,10 +1485,12 @@ impl OpenCADStudio {
                                 .filter(|br| reload_keys.contains(&br.handle.value()))
                                 .map(|br| br.handle)
                                 .collect();
-                            let infos = crate::io::xref::resolve_xrefs_for_keys(
+                            let xref_session = self.tabs[i].ifccad_session.clone();
+                            let infos = crate::io::xref::resolve_xrefs_for_keys_in_session(
                                 &mut self.tabs[i].scene.document,
                                 base_dir,
                                 &handles,
+                                xref_session.as_ref(),
                             );
                             // Targeted reload updates only the selected rows.
                             {
@@ -2097,22 +2097,24 @@ impl OpenCADStudio {
                     .into_iter()
                     .find(|(_, e)| matches!(e, document::EntityType::Insert(_)))
                 {
-                    return Some(match xref_source_path(
-                        &self.tabs[i].scene.document,
-                        &insert.block_name,
-                        &base_dir,
-                    ) {
-                        Ok(path) => {
-                            self.command_line.push_output(
-                                crate::tf!("XOPEN: opening \"{}\".", path.display()).as_ref(),
-                            );
-                            Task::done(Message::OpenRecent(path))
-                        }
-                        Err(message) => {
-                            self.command_line.push_error(&message);
-                            self.finish_dispatch(cmd)
-                        }
-                    });
+                    return Some(
+                        match xref_source_path(
+                            &self.tabs[i].scene.document,
+                            &insert.block_name,
+                            &base_dir,
+                        ) {
+                            Ok(path) => {
+                                self.command_line.push_output(
+                                    crate::tf!("XOPEN: opening \"{}\".", path.display()).as_ref(),
+                                );
+                                Task::done(Message::OpenRecent(path))
+                            }
+                            Err(message) => {
+                                self.command_line.push_error(&message);
+                                self.finish_dispatch(cmd)
+                            }
+                        },
+                    );
                 }
                 if had_selection {
                     self.command_line.push_error(
@@ -2136,8 +2138,7 @@ impl OpenCADStudio {
                     })
                     .collect();
                 use crate::command::CadCommand;
-                let command =
-                    crate::modules::insert::xref_cmd::XOpenPickCommand::new(references);
+                let command = crate::modules::insert::xref_cmd::XOpenPickCommand::new(references);
                 self.command_line.push_info(&command.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(command));
                 return Some(Task::none());
@@ -2164,22 +2165,24 @@ impl OpenCADStudio {
                         return Some(self.finish_dispatch(cmd));
                     }
                 };
-                return Some(match xref_source_path(
-                    &self.tabs[i].scene.document,
-                    &insert.block_name,
-                    &base_dir,
-                ) {
-                    Ok(path) => {
-                        self.command_line.push_output(
-                            crate::tf!("XOPEN: opening \"{}\".", path.display()).as_ref(),
-                        );
-                        Task::done(Message::OpenRecent(path))
-                    }
-                    Err(message) => {
-                        self.command_line.push_error(&message);
-                        self.finish_dispatch(cmd)
-                    }
-                });
+                return Some(
+                    match xref_source_path(
+                        &self.tabs[i].scene.document,
+                        &insert.block_name,
+                        &base_dir,
+                    ) {
+                        Ok(path) => {
+                            self.command_line.push_output(
+                                crate::tf!("XOPEN: opening \"{}\".", path.display()).as_ref(),
+                            );
+                            Task::done(Message::OpenRecent(path))
+                        }
+                        Err(message) => {
+                            self.command_line.push_error(&message);
+                            self.finish_dispatch(cmd)
+                        }
+                    },
+                );
             }
 
             "NCOPY" | "NCOPYALL" => {

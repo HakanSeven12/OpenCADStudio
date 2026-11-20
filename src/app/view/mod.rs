@@ -3162,10 +3162,28 @@ bg={bg_ms:.1}ms n={view_count}"
                 ));
             }
 
+            if self.selection_cycling > 0 && self.cycle_candidates.is_none() {
+                if let Some((_, point)) = self.cycle_badge.filter(|&(id, point)| {
+                    id == tab.id
+                        && tab.scene.selection.borrow().input.last_move_pos == Some(point)
+                        && !tab.scene.selection.borrow().input.pointer_away
+                }) {
+                    let icon = iced::widget::svg::<Theme>(iced::widget::svg::Handle::from_memory(
+                        include_bytes!("../../../assets/icons/status/selcycle.svg").as_slice(),
+                    ))
+                    .width(14)
+                    .height(14);
+                    let badge: Element<'_, Message> = iced::widget::pin(icon)
+                        .position(iced::Point::new(point.x + 13.0, point.y + 13.0))
+                        .into();
+                    viewport_stack = viewport_stack.push(badge);
+                }
+            }
             // Selection-cycling list box: pick among overlapping objects.
-            if let Some((pt, cands)) = &self.cycle_candidates {
-                if !tab.is_start {
-                    let items: Vec<crate::ui::popup::cycle_popup::CycleCandidate> = cands
+            if let Some(cycle) = &self.cycle_candidates {
+                if !tab.is_start && cycle.tab_id == tab.id {
+                    let items: Vec<crate::ui::popup::cycle_popup::CycleCandidate> = cycle
+                        .handles
                         .iter()
                         .filter_map(|&h| {
                             tab.scene.document.get_entity(h).map(|e| {
@@ -3186,7 +3204,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         .collect();
                     if !items.is_empty() {
                         viewport_stack = viewport_stack.push(
-                            crate::ui::popup::cycle_popup::cycle_popup_overlay(*pt, items),
+                            crate::ui::popup::cycle_popup::cycle_popup_overlay(cycle.point, items),
                         );
                     }
                 }
@@ -3638,7 +3656,7 @@ bg={bg_ms:.1}ms n={view_count}"
                             transparency_display: tab.scene.transparency_display,
                             quick_properties: self.quick_properties,
                             selection_filter_active: tab.scene.selection_filter_active(),
-                            selection_cycling: self.selection_cycling,
+                            selection_cycling: self.selection_cycling > 0,
                         },
                         crate::ui::statusbar::StatusBarReadout {
                             cursor_world: cursor_coord,

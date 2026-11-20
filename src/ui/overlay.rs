@@ -2475,46 +2475,45 @@ impl canvas::Program<Message> for SelectionCanvas {
                 );
             }
 
-            if self.selection.borrow().gesture.poly_active
-                && self.selection.borrow().gesture.poly_points.len() > 1
-            {
-                let crossing = self.selection.borrow().gesture.poly_crossing;
+            let state = self.selection.borrow();
+            if state.gesture.poly_active && state.gesture.poly_points.len() > 1 {
+                let crossing = state.gesture.poly_crossing;
+                let fence = state.gesture.poly_fence;
                 let base = resolve_selection_base_color(
-                    crossing,
+                    crossing || fence,
                     theme,
                     &self.selection_visual,
                     self.crosshair_bg,
                 );
                 let canvas_light = crate::ui::style::common::canvas_is_light(self.crosshair_bg);
-                if self.selection_visual.area && self.selection_visual.opacity > 0 {
-                    let alpha =
-                        selection_fill_alpha(self.selection_visual.opacity as f32, canvas_light);
-                    let fill = base.scale_alpha(alpha);
-                    if let Some(cur) = self.selection.borrow().input.last_move_pos {
-                        let start = self.selection.borrow().gesture.poly_points[0];
-                        let fill_path = canvas::Path::new(|p| {
-                            p.move_to(start);
-                            for pt in &self.selection.borrow().gesture.poly_points[1..] {
-                                p.line_to(*pt);
-                            }
-                            p.line_to(cur);
-                            p.line_to(start);
-                        });
-                        frame.fill(&fill_path, fill);
+                let start = state.gesture.poly_points[0];
+                let path = canvas::Path::new(|path| {
+                    path.move_to(start);
+                    for &point in &state.gesture.poly_points[1..] {
+                        path.line_to(point);
                     }
-                }
-                let stroke_alpha = if canvas_light { 0.95 } else { 0.90 };
-                let stroke = base.scale_alpha(stroke_alpha);
-                let path = canvas::Path::new(|p| {
-                    p.move_to(self.selection.borrow().gesture.poly_points[0]);
-                    for pt in &self.selection.borrow().gesture.poly_points[1..] {
-                        p.line_to(*pt);
+                    if let Some(cursor) = state.input.last_move_pos {
+                        if state.gesture.poly_points.last() != Some(&cursor) {
+                            path.line_to(cursor);
+                        }
+                    }
+                    if !fence {
+                        path.close();
                     }
                 });
+                if !fence && self.selection_visual.area && self.selection_visual.opacity > 0 {
+                    let alpha =
+                        selection_fill_alpha(self.selection_visual.opacity as f32, canvas_light);
+                    frame.fill(&path, base.scale_alpha(alpha));
+                }
                 let stroke_style = canvas::Stroke {
                     width: 1.0,
-                    style: canvas::Style::Solid(stroke),
-                    line_dash: if crossing {
+                    style: canvas::Style::Solid(base.scale_alpha(if canvas_light {
+                        0.95
+                    } else {
+                        0.90
+                    })),
+                    line_dash: if crossing || fence {
                         canvas::LineDash {
                             segments: &[4.0, 4.0],
                             offset: 0,

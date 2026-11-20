@@ -14,7 +14,7 @@ Most editing commands work on a set of selected objects. You can select first an
 | **Ctrl+A** | Everything in the current space, except objects on layers that are off or frozen. |
 | **Esc** | Clears the selection. |
 
-Set `PICKDRAG` to make a press-and-drag draw a rectangle instead of a lasso. With `PICKADD` set to 0 (**Options › Selection › Use Shift to add to selection**), a click replaces the selection instead of adding to it; Shift then adds.
+Set `PICKDRAG` to choose the gesture. `PICKAUTO 1` with `PICKDRAG 2` gives classic two-click windows. Hold the button and press Space during a lasso to cycle through Window, Crossing and Fence. With `PICKADD` set to 0 (**Options › Selection › Use Shift to add to selection**), a click replaces the selection instead of adding to it; Shift then adds.
 
 Objects on locked layers can be seen and snapped to, but not selected.
 

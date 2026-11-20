@@ -6918,7 +6918,7 @@ mod grip_limit_tests {
         app.show_viewcube = false;
         app.show_ucs_icon = false;
         app.ucs_icon_at_origin = false;
-        app.selection_cycling = true;
+        app.selection_cycling = 2;
 
         let saved = app.current_settings();
         let mut restored = OpenCADStudio::new_for_test();
@@ -6927,7 +6927,7 @@ mod grip_limit_tests {
         assert!(!restored.show_viewcube, "the ViewCube must stay off");
         assert!(!restored.show_ucs_icon);
         assert!(!restored.ucs_icon_at_origin);
-        assert!(restored.selection_cycling);
+        assert_eq!(restored.selection_cycling, 2);
     }
 
     /// The Options card writes these four straight onto the app and relies on
@@ -6938,7 +6938,8 @@ mod grip_limit_tests {
     fn the_selection_settings_survive_a_save_and_load() {
         let mut app = OpenCADStudio::new_for_test();
         app.pick_add = false;
-        app.pick_drag_rect = true;
+        app.pick_drag_mode = 1;
+        app.pick_auto = 1;
         app.pick_box = 11;
         app.grip_object_limit = 0;
 
@@ -6947,7 +6948,8 @@ mod grip_limit_tests {
         restored.apply_settings(&saved);
 
         assert!(!restored.pick_add);
-        assert!(restored.pick_drag_rect);
+        assert_eq!(restored.pick_drag_mode, 1);
+        assert_eq!(restored.pick_auto, 1);
         assert_eq!(restored.pick_box, 11);
         assert_eq!(
             restored.grip_object_limit, 0,

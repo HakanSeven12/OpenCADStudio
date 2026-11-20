@@ -2253,7 +2253,7 @@ impl OpenCADStudio {
         self.tabs[i].scene.clear_preview_wire();
         self.restore_pre_cmd_tangent();
 
-        if handle == document::Handle::NULL && self.selection_cycling {
+        if handle == document::Handle::NULL && self.selection_cycling == 2 {
             let mut candidates = Vec::new();
             for entity in self.tabs[i].scene.document.entities() {
                 if let document::EntityType::Table(table) = entity {
@@ -2275,7 +2275,12 @@ impl OpenCADStudio {
                 }
             }
             if candidates.len() >= 2 {
-                self.cycle_candidates = Some((self.quick_properties_anchor, candidates));
+                self.cycle_candidates = Some(crate::app::SelectionCycle {
+                    tab_id: self.tabs[i].id,
+                    point: self.quick_properties_anchor,
+                    handles: candidates,
+                    modifiers: None,
+                });
                 return Some(Task::none());
             }
         }

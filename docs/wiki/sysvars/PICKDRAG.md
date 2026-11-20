@@ -1,17 +1,16 @@
 ---
-summary: Sets what pressing and dragging in an empty area draws when you select objects.
-type: On/Off (0/1)
+summary: Chooses how to start and finish an automatic selection area.
+type: Integer (0–2)
 saved: Program settings
-default: 0 (Lasso)
-related: PICKADD, PICKBOX
+default: 2
+related: PICKADD, PICKAUTO, PICKBOX
 ---
 
 ## Values
 | Value | Meaning |
 |---|---|
-| 0 | Press and drag draws a freeform lasso. |
-| 1 | Press and drag draws a rectangle. |
+| 0 | Pick two corners with separate clicks. |
+| 1 | Press, drag and release to select an area. |
+| 2 | Allow both gestures, according to PICKAUTO. |
 
-## Notes
-- Set it in [`OPTIONS`](OPTIONS-Command), Selection Modes: "Press and drag draws a rectangle instead of a lasso".
-- Only 0 and 1 are accepted.
+With PICKAUTO bit 4 set, dragging from empty space draws a lasso. With PICKAUTO set to 1 and PICKDRAG set to 2, click both corners for classic Window or Crossing selection.

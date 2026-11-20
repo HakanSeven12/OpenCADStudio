@@ -884,79 +884,6 @@ impl OpenCADStudio {
                     );
                 }
             }
-            // ── PICKADD / PICKDRAG — selection UX (#226, app settings) ───
-            // Bare form reports; `<name> 0|1` sets and persists. Defaults keep
-            // today's behaviour (PICKADD 1, PICKDRAG 0).
-            "PICKADD" | "PICKDRAG" => {
-                use crate::command::ValuePromptCommand;
-                let (name, prompt) = if cmd == "PICKADD" {
-                    ("PICKADD", "PICKADD  1 = click adds to selection (default), 0 = click replaces  <Enter reports>:")
-                } else {
-                    ("PICKDRAG", "PICKDRAG  0 = press-drag lassoes (default), 1 = press-drag draws a rectangle  <Enter reports>:")
-                };
-                let c = ValuePromptCommand::new(name, prompt);
-                self.command_line.push_info(&c.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(c));
-            }
-            cmd if cmd.starts_with("PICKADD ") || cmd.starts_with("PICKDRAG ") => {
-                let is_add = cmd.starts_with("PICKADD");
-                let arg = cmd.split_once(' ').map(|x| x.1).unwrap_or("").trim();
-                if arg.is_empty() {
-                    let v = if is_add {
-                        u8::from(self.pick_add)
-                    } else {
-                        u8::from(self.pick_drag_rect)
-                    };
-                    self.command_line.push_output(
-                        crate::tf!("{} = {v}", if is_add { "PICKADD" } else { "PICKDRAG" })
-                            .as_ref(),
-                    );
-                } else {
-                    match arg {
-                        "0" | "1" => {
-                            let on = arg == "1";
-                            if is_add {
-                                self.pick_add = on;
-                                self.command_line.push_output(
-                                    crate::tf!(
-                                        "PICKADD = {} ({})",
-                                        arg,
-                                        if on {
-                                            "click adds to selection"
-                                        } else {
-                                            "click replaces selection, Shift toggles"
-                                        }
-                                    )
-                                    .as_ref(),
-                                );
-                            } else {
-                                self.pick_drag_rect = on;
-                                self.command_line.push_output(
-                                    crate::tf!(
-                                        "PICKDRAG = {} ({})",
-                                        arg,
-                                        if on {
-                                            "press-drag draws a rectangle"
-                                        } else {
-                                            "press-drag lassoes"
-                                        }
-                                    )
-                                    .as_ref(),
-                                );
-                            }
-                            self.persist_settings_if_changed();
-                        }
-                        _ => self.command_line.push_error(
-                            crate::tf!(
-                                "{}: expected 0 or 1.",
-                                if is_add { "PICKADD" } else { "PICKDRAG" }
-                            )
-                            .as_ref(),
-                        ),
-                    }
-                }
-            }
-
             // ── COMMANDLINEFADETIME — command-line history fade time ───
             // How long history lines stay visible above the command window,
             // in ms (0–60000, default 3000). Bare form prompts for a value
@@ -991,7 +918,11 @@ impl OpenCADStudio {
                     | "QUADWIDTH"
                     | "QUADCOMMANDLAUNCH"
                     | "CURSORSIZE"
+                    | "PICKADD"
+                    | "PICKAUTO"
                     | "PICKBOX"
+                    | "PICKDRAG"
+                    | "PICKFIRST"
                     | "APERTURE"
                     | "HPASSOC"
                     | "HPGAPTOL"
@@ -1199,6 +1130,9 @@ impl OpenCADStudio {
                     self.command_line
                         .push_info(&super::plotvars::setvar_listing());
                     self.command_line.push_info("SETVAR (view): UCSFOLLOW");
+                    self.command_line.push_info(
+                        "SETVAR (selection): PICKADD PICKAUTO PICKDRAG PICKFIRST SELECTIONCYCLING",
+                    );
                     self.command_line
                         .push_info(&super::blockvars::setvar_listing());
                     self.command_line
@@ -1884,24 +1818,21 @@ impl OpenCADStudio {
                         return Some(self.finish_dispatch(cmd));
                     }
                     if name == "SELECTIONCYCLING" {
-                        // 1 and 2 both turn cycling on; the candidate list
-                        // always shows.
-                        let current = if self.selection_cycling { 2 } else { 0 };
+                        let current = self.selection_cycling;
                         let prompt =
                             crate::ui::command_line::value_prompt("SELECTIONCYCLING", &current);
                         match value
                             .as_deref()
-                            .map(|v| v.trim().parse::<i16>().ok().filter(|v| (0..=2).contains(v)))
+                            .map(|v| v.trim().parse::<i16>().ok().filter(|v| (-2..=2).contains(v)))
                         {
                             Some(Some(mode)) => {
-                                if self.selection_cycling != (mode != 0) {
-                                    self.selection_cycling = mode != 0;
-                                    self.cycle_candidates = None;
+                                if self.selection_cycling != mode {
+                                    self.set_selection_cycling(mode);
                                     self.persist_settings_if_changed();
                                 }
                             }
                             Some(None) => {
-                                let (min, max) = (0, 2);
+                                let (min, max) = (-2, 2);
                                 self.command_line.push_rejection(&crate::tf!(
                                     "Requires an integer between {min} and {max}."
                                 ));
@@ -2613,6 +2544,41 @@ impl OpenCADStudio {
                                 },
                                 None => Ok((format!("CURSORSIZE = {}", self.cursor_size), false)),
                             },
+                            "PICKADD" | "PICKAUTO" | "PICKDRAG" | "PICKFIRST" => {
+                                let (current, max) = match name.as_str() {
+                                    "PICKADD" => (
+                                        if self.pick_add {
+                                            1 + u8::from(self.pick_add_retains)
+                                        } else {
+                                            0
+                                        },
+                                        2,
+                                    ),
+                                    "PICKAUTO" => (self.pick_auto, 7),
+                                    "PICKDRAG" => (self.pick_drag_mode, 2),
+                                    _ => (u8::from(self.pick_first), 1),
+                                };
+                                match &value {
+                                    None => Ok((format!("{name} = {current}"), false)),
+                                    Some(value) => match value.parse::<u8>() {
+                                        Ok(value) if value <= max => {
+                                            match name.as_str() {
+                                                "PICKADD" => {
+                                                    self.pick_add = value != 0;
+                                                    self.pick_add_retains = value == 2;
+                                                }
+                                                "PICKAUTO" => self.pick_auto = value,
+                                                "PICKDRAG" => self.pick_drag_mode = value,
+                                                _ => self.set_pick_first(value != 0),
+                                            }
+                                            Ok((format!("{name} = {value}"), true))
+                                        }
+                                        _ => Err(format!(
+                                            "{name}: integer from 0 to {max} required."
+                                        )),
+                                    },
+                                }
+                            }
                             "PICKBOX" => match &value {
                                 Some(v) => match v.parse::<i32>() {
                                     Ok(size) if (0..=50).contains(&size) => {
@@ -3856,7 +3822,11 @@ impl OpenCADStudio {
                                         | "QUADWIDTH"
                                         | "QUADCOMMANDLAUNCH"
                                         | "CURSORSIZE"
+                                        | "PICKADD"
+                                        | "PICKAUTO"
                                         | "PICKBOX"
+                                        | "PICKDRAG"
+                                        | "PICKFIRST"
                                         | "APERTURE"
                                         | "HPASSOC"
                                         | "HPGAPTOL"

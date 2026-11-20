@@ -377,10 +377,22 @@ pub type OpenedDrawing = (
     Option<ocs_save::IfccadSession>,
 );
 
-fn is_ifccad_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(ocs_save::is_ifccad_extension)
+/// Whether `path` holds IFCCAD content. A `.bak`/`.sv$` copy is judged by its
+/// leading bytes (`bytes`, or the file itself when they are not at hand).
+fn is_ifccad_path(path: &Path, bytes: Option<&[u8]>) -> bool {
+    let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
+        return false;
+    };
+    if !(ext.eq_ignore_ascii_case("bak") || ext.eq_ignore_ascii_case("sv$")) {
+        return ocs_save::is_ifccad_extension(ext);
+    }
+    match bytes {
+        Some(bytes) => sniff_dwg_or_dxf_bytes(bytes) == "ifccad",
+        #[cfg(not(target_arch = "wasm32"))]
+        None => sniff_dwg_or_dxf(path) == "ifccad",
+        #[cfg(target_arch = "wasm32")]
+        None => false,
+    }
 }
 
 /// Load a CAD file from a known path. Parsing and cache building run on a
@@ -506,7 +518,7 @@ async fn open_path_with_phase_attempt(
                             recoverable: false,
                         }
                     })?;
-                    let (outcome, ifccad_session) = if is_ifccad_path(&path2) {
+                    let (outcome, ifccad_session) = if is_ifccad_path(&path2, None) {
                         let bytes = std::fs::read(&path2).map_err(|error| error.to_string())?;
                         let (outcome, session) = ocs_save::read_ifccad_for_edit(&bytes)?;
                         (finalize_loaded_outcome(&path2, outcome)?, session)
@@ -832,7 +844,8 @@ async fn load_web_bytes(
     mut initial_stats: Option<document::ReadStats>,
 ) -> Result<OpenedDrawing, OpenLoadError> {
     progress.set(crate::app::OPEN_PHASE_PARSING, 1000, 0, 1);
-    let (outcome, mut source_sha256, ifccad_session) = if is_ifccad_path(Path::new(name)) {
+    let is_ifccad = is_ifccad_path(Path::new(name), Some(bytes));
+    let (outcome, mut source_sha256, ifccad_session) = if is_ifccad {
         let (outcome, session) =
             ocs_save::read_ifccad_for_edit(bytes).map_err(OpenLoadError::from)?;
         (outcome, None, session)
@@ -1095,13 +1108,14 @@ pub fn load_bytes_finalized(path: &Path, bytes: Vec<u8>) -> Result<Document, Str
 }
 
 /// Load a DWG or DXF file directly from a path (auto-detect by extension).
-/// Peek at a file's leading bytes to tell a DWG (version tag "AC10xx") from a
-/// DXF. Used for `.bak` copies, whose extension hides the real format.
+/// Peek at a file's leading bytes to tell a DWG (version tag "AC10xx") or an
+/// IFCCAD drawing (JSON or Zstd) from a DXF. Used for `.bak` copies, whose
+/// extension hides the real format.
 /// Native-only: the web reads registered bytes instead of the filesystem.
 #[cfg(not(target_arch = "wasm32"))]
 fn sniff_dwg_or_dxf(path: &Path) -> String {
     use std::io::Read;
-    let mut buf = [0u8; 6];
+    let mut buf = [0u8; 64];
     if let Ok(mut f) = std::fs::File::open(path) {
         let _ = f.read(&mut buf);
     }
@@ -1111,6 +1125,15 @@ fn sniff_dwg_or_dxf(path: &Path) -> String {
 fn sniff_dwg_or_dxf_bytes(bytes: &[u8]) -> &'static str {
     if bytes.starts_with(b"AC10") {
         "dwg"
+    } else if bytes.starts_with(&[0x28, 0xB5, 0x2F, 0xFD])
+        || bytes
+            .strip_prefix(b"\xEF\xBB\xBF")
+            .unwrap_or(bytes)
+            .trim_ascii_start()
+            .starts_with(b"{")
+    {
+        // IFCCAD: IFCX JSON, or one Zstd frame around its CBOR envelope.
+        "ifccad"
     } else {
         "dxf"
     }

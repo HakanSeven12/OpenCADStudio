@@ -747,7 +747,10 @@ mod w2d {
         Some((paths, view, texts))
     }
 
-    /// A W2D string: quoted ASCII, or a count followed by UTF-16 units.
+    /// A W2D string: quoted ASCII; between braces, a 32-bit count of
+    /// characters and their UTF-16 units, which is how a binary stream
+    /// writes a string that is not plain ASCII; or a short count followed by
+    /// UTF-16 units.
     fn read_string(r: &mut Reader) -> Option<String> {
         if r.b.get(r.i) == Some(&b'\'') {
             r.i += 1;
@@ -757,6 +760,8 @@ mod w2d {
             }
             r.i += 1;
             Some(String::from_utf8_lossy(&r.b[start..r.i - 1]).to_string())
+        } else if let Some(text) = braced_string(r) {
+            Some(text)
         } else {
             let n = r.count()?;
             let units: Vec<u16> =
@@ -767,6 +772,33 @@ mod w2d {
             r.i += n * 2;
             Some(String::from_utf16_lossy(&units))
         }
+    }
+
+    /// "{" count units "}": the string, with the reader past it. `None`
+    /// leaves the reader where it was: the bytes are not that form unless
+    /// the closing brace stands where the count says.
+    fn braced_string(r: &mut Reader) -> Option<String> {
+        let start = r.i;
+        let text = (|| {
+            if r.u8()? != b'{' {
+                return None;
+            }
+            let count = usize::try_from(r.i32()?).ok()?;
+            let end = r.i.checked_add(count.checked_mul(2)?)?;
+            if r.b.get(end) != Some(&b'}') {
+                return None;
+            }
+            let units: Vec<u16> = r.b[r.i..end]
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
+            r.i = end + 1;
+            Some(String::from_utf16_lossy(&units))
+        })();
+        if text.is_none() {
+            r.i = start;
+        }
+        text
     }
 }
 

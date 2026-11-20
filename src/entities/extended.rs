@@ -2789,11 +2789,11 @@ fn map_point_run(
 /// The point count of a `u32 n, [f64;3]×n` payload, when it fits.
 fn point_count(d: &[u8]) -> Option<usize> {
     let count = u32_at(d, 0)? as usize;
-    (2..=100_000).contains(&count).then_some(count).filter(|_| {
-        4usize
-            .checked_add(count.checked_mul(24)?)
-            .is_some_and(|needed| needed <= d.len())
-    })
+    if !(2..=100_000).contains(&count) {
+        return None;
+    }
+    let needed = 4usize.checked_add(count.checked_mul(24)?)?;
+    (needed <= d.len()).then_some(count)
 }
 
 /// Read an `[f64;3]` at `offset`, map it, write it back. `None` (and no

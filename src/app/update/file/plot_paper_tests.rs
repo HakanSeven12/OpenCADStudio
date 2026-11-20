@@ -323,25 +323,38 @@ fn geopdf_flag_cannot_be_toggled_while_its_checkbox_is_hidden() {
 }
 
 #[test]
-fn non_scaling_stroke_is_an_svg_only_plot_preference() {
+fn svg_only_plot_preferences_are_stored_but_ignored_by_pdf() {
+    // Both SVG-only flags follow the same path: stored when SVG is the output,
+    // ignored by the PDF options. One app covers both instead of two.
     let mut app = OpenCADStudio::new_for_test();
     assert!(!app.plot_dialog.non_scaling_stroke);
+    assert!(!app.plot_dialog.text_as_outlines);
     assert!(!super::OpenCADStudio::pdf_plot_options(&app.plot_dialog).non_scaling_stroke);
+    assert!(!super::OpenCADStudio::pdf_plot_options(&app.plot_dialog).text_as_outlines);
 
     let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_SVG.into()));
-    let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
+    for flag in [
         crate::ui::window::plot::PlotFlag::NonScalingStroke,
-    ));
+        crate::ui::window::plot::PlotFlag::TextAsOutlines,
+    ] {
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(flag));
+    }
     assert!(app.plot_dialog.non_scaling_stroke);
+    assert!(app.plot_dialog.text_as_outlines);
     assert!(super::OpenCADStudio::pdf_plot_options(&app.plot_dialog).non_scaling_stroke);
+    assert!(super::OpenCADStudio::pdf_plot_options(&app.plot_dialog).text_as_outlines);
 
     // PDF ignores the stored SVG preference, and its hidden checkbox cannot
     // be toggled by a synthetic message.
     let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_PDF.into()));
-    let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
+    for flag in [
         crate::ui::window::plot::PlotFlag::NonScalingStroke,
-    ));
+        crate::ui::window::plot::PlotFlag::TextAsOutlines,
+    ] {
+        let _ = app.on_plot_dlg(PlotDlgMsg::Flag(flag));
+    }
     assert!(app.plot_dialog.non_scaling_stroke);
+    assert!(app.plot_dialog.text_as_outlines);
 }
 
 /// A Model plot resolves top-level fills against the white sheet, not the
@@ -1463,27 +1476,6 @@ fn svg_device_is_session_state_and_stores_as_pdf() {
     assert_eq!(ps.printer_name, "DWG To PDF.pc3");
 }
 
-#[test]
-fn text_as_outlines_is_an_svg_only_plot_preference() {
-    let mut app = OpenCADStudio::new_for_test();
-    assert!(!app.plot_dialog.text_as_outlines);
-    assert!(!super::OpenCADStudio::pdf_plot_options(&app.plot_dialog).text_as_outlines);
-
-    let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_SVG.into()));
-    let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
-        crate::ui::window::plot::PlotFlag::TextAsOutlines,
-    ));
-    assert!(app.plot_dialog.text_as_outlines);
-    assert!(super::OpenCADStudio::pdf_plot_options(&app.plot_dialog).text_as_outlines);
-
-    // PDF ignores the stored SVG preference, and its hidden checkbox cannot
-    // be toggled by a synthetic message.
-    let _ = app.on_plot_dlg(PlotDlgMsg::Printer(crate::ui::window::plot::OUT_PDF.into()));
-    let _ = app.on_plot_dlg(PlotDlgMsg::Flag(
-        crate::ui::window::plot::PlotFlag::TextAsOutlines,
-    ));
-    assert!(app.plot_dialog.text_as_outlines);
-}
 
 #[test]
 fn legacy_pdf_label_is_upgraded_on_save() {

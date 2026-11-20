@@ -501,10 +501,11 @@ fn color_info(
     draw_depth: &DrawDepth,
 ) -> Option<ColorInfo> {
     let (top, color, varies) = shared_value(document, handles, draw_depth, |c| c.color)?;
-    let (rgba, _, _, _, aci) =
-        crate::scene::view::render::render_style_for_common_viewport(document, top, None);
-    // Colour 7 is drawn black on a light canvas; show the swatch the same way.
-    let display = if aci == 7 {
+    let rgba = crate::scene::view::render::render_style_for_common_viewport(document, top, None).0;
+    // The canvas swaps pure white and pure black with its background (colour 7,
+    // or ByBlock outside a block); authored whites are nudged off them
+    // (`adapt_to_bg`). Show the swatch as the line is drawn.
+    let display = if rgba[..3] == [1.0; 3] || rgba[..3] == [0.0; 3] {
         crate::ui::properties::acad_color_display(AcadColor::Index(7)).0
     } else {
         iced::Color::from_rgba(rgba[0], rgba[1], rgba[2], 1.0)
@@ -933,13 +934,24 @@ fn fill_picker<'a>(current: GraphicAttribute, open: bool) -> Element<'a, Message
     )
 }
 
+/// The editor a [`preview_row`] opens beside its `⋮` button.
+struct Flyout<'a> {
+    content: Element<'a, Message>,
+    width: f32,
+    /// Fixed, so the drop-down can move the flyout up when there is little
+    /// room below the button instead of clipping it.
+    height: f32,
+    /// Sent on a click outside, for a flyout without its own Cancel / OK.
+    on_dismiss: Option<Message>,
+}
+
 /// A preview button plus the `⋮` button that toggles its editor flyout.
 fn preview_row<'a>(
     preview: Element<'a, Message>,
     editor_open: bool,
     toggle: GraphicAttributesMsg,
     tooltip_label: std::borrow::Cow<'static, str>,
-    flyout: Option<(Element<'a, Message>, f32, Option<f32>)>,
+    flyout: Option<Flyout<'a>>,
     side: DockSide,
 ) -> Element<'a, Message> {
     let preview = button(preview)
@@ -962,12 +974,6 @@ fn preview_row<'a>(
             },
             ..Default::default()
         });
-    // The hatch picker closes on an outside click; the gradient editor has
-    // its own Cancel / OK and stays up while its colour window is open.
-    let hatch_flyout = matches!(
-        toggle,
-        GraphicAttributesMsg::HatchEditorOpen | GraphicAttributesMsg::HatchEditorClose
-    );
     let edit = button(compact_button_content("⋮"))
         .on_press(msg(toggle))
         .style(kit::box_button_style(editor_open))
@@ -975,18 +981,16 @@ fn preview_row<'a>(
         .padding([0.0, km::LINE * 3.0]);
     let edit = kit::tooltip(edit, tooltip_label, kit::TipPosition::Bottom);
     let edit: Element<'a, Message> = match flyout {
-        Some((popup, width, height)) => {
-            let mut drop_down = iced_aw::DropDown::new(edit, popup, true)
-                .width(Length::Fixed(width))
+        Some(flyout) => {
+            // A fixed height keeps the flyout whole: the drop-down only clips
+            // a shrinking overlay to the room below its button.
+            let mut drop_down = iced_aw::DropDown::new(edit, flyout.content, true)
+                .width(Length::Fixed(flyout.width))
+                .height(Length::Fixed(flyout.height))
                 .alignment(popup_alignment(side))
                 .offset(km::TOOL_GAP);
-            if let Some(height) = height {
-                // A fixed height keeps the flyout whole: the drop-down only
-                // clips a shrinking overlay to the room below its button.
-                drop_down = drop_down.height(Length::Fixed(height));
-            }
-            if hatch_flyout {
-                drop_down = drop_down.on_dismiss(msg(GraphicAttributesMsg::HatchEditorClose));
+            if let Some(dismiss) = flyout.on_dismiss {
+                drop_down = drop_down.on_dismiss(dismiss);
             }
             drop_down.into()
         }
@@ -1329,7 +1333,12 @@ pub fn view<'a>(
                 let popup = container(picker)
                     .padding(km::line())
                     .style(crate::ui::kit::menu::frame_style);
-                (popup.into(), HATCH_FLYOUT_W, Some(HATCH_FLYOUT_H))
+                Flyout {
+                    content: popup.into(),
+                    width: HATCH_FLYOUT_W,
+                    height: HATCH_FLYOUT_H,
+                    on_dismiss: Some(msg(GraphicAttributesMsg::HatchEditorClose)),
+                }
             });
             let open = state.hatch_editor.is_some();
             body = body.push(preview_row(
@@ -1366,12 +1375,16 @@ pub fn view<'a>(
                 } else {
                     preview
                 };
-                let flyout = state.gradient_editor.as_ref().map(|editor| {
-                    (
-                        crate::ui::window::gradient_editor::view(editor, gradient_color_picking),
-                        crate::ui::window::gradient_editor::WIDTH,
-                        Some(crate::ui::window::gradient_editor::HEIGHT),
-                    )
+                // No dismiss: the editor has its own Cancel / OK and stays up
+                // while its colour window is open.
+                let flyout = state.gradient_editor.as_ref().map(|editor| Flyout {
+                    content: crate::ui::window::gradient_editor::view(
+                        editor,
+                        gradient_color_picking,
+                    ),
+                    width: crate::ui::window::gradient_editor::WIDTH,
+                    height: crate::ui::window::gradient_editor::HEIGHT,
+                    on_dismiss: None,
                 });
                 let open = state.gradient_editor.is_some();
                 body = body.push(preview_row(

@@ -8679,6 +8679,17 @@ impl OpenCADStudio {
             }
 
             // ── Drafting Settings Dialog ──────────────────────────────────
+            Message::OpenDraftingSettings(tab) => {
+                let task = if self.focus_dialog(super::ModalKind::DraftingSettings) {
+                    Task::none()
+                } else {
+                    self.update(Message::ToggleSnapPopup)
+                };
+                if let Some(state) = &mut self.drafting_settings_state {
+                    state.active_tab = tab;
+                }
+                task
+            }
             Message::DraftingSettingsTabChanged(tab) => {
                 if let Some(state) = &mut self.drafting_settings_state {
                     state.active_tab = tab;

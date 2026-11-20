@@ -5118,6 +5118,9 @@ pub enum Message {
     SnapClearAll,
     // ── Drafting Settings Dialog ──────────────────────────────────────────
     DraftingSettingsTabChanged(crate::ui::window::drafting_settings::DraftingSettingsTab),
+    /// Open Drafting Settings (or bring it up) on `tab`: a status pill's
+    /// "… Settings..." entry.
+    OpenDraftingSettings(crate::ui::window::drafting_settings::DraftingSettingsTab),
     DraftingSettingsToggleGrid,
     DraftingSettingsToggleSnap,
     DraftingSettingsSnapXChanged(String),

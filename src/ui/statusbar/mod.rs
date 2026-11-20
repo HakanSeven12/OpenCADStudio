@@ -24,6 +24,7 @@ use crate::app::Message;
 use crate::snap::Snapper;
 use crate::t;
 use crate::ui::statusbar::status_menu::Entry as StatusMenuEntry;
+use crate::ui::window::drafting_settings::DraftingSettingsTab;
 use crate::ui::statusbar::statusbar_config::{StatusBarConfig, StatusPill};
 use crate::ui::wrap_bar::WrapBar;
 
@@ -384,15 +385,23 @@ impl StatusBar {
             );
         }
         if vis(StatusPill::Grid) {
-            pills.push(tip(
-                toggle_pill(crate::ui::icons::GRID, grid, Message::ToggleGrid),
-                t!("Toggle Grid"),
+            pills.push(with_settings(
+                tip(
+                    toggle_pill(crate::ui::icons::GRID, grid, Message::ToggleGrid),
+                    t!("Toggle Grid"),
+                ),
+                t!("Grid Settings..."),
+                DraftingSettingsTab::SnapAndGrid,
             ));
         }
         if vis(StatusPill::Snap) {
-            pills.push(tip(
-                toggle_pill(crate::ui::icons::SNAP, grid_snap, Message::ToggleGridSnap),
-                t!("Toggle Grid Snap"),
+            pills.push(with_settings(
+                tip(
+                    toggle_pill(crate::ui::icons::SNAP, grid_snap, Message::ToggleGridSnap),
+                    t!("Toggle Grid Snap"),
+                ),
+                t!("Snap Settings..."),
+                DraftingSettingsTab::SnapAndGrid,
             ));
         }
         if vis(StatusPill::Ortho) {
@@ -423,15 +432,23 @@ impl StatusBar {
             ));
         }
         if vis(StatusPill::Dyn) {
-            pills.push(tip(
-                toggle_pill(crate::ui::icons::ST_DYN, dyn_input, Message::ToggleDynInput),
-                t!("Dynamic Input\nF12"),
+            pills.push(with_settings(
+                tip(
+                    toggle_pill(crate::ui::icons::ST_DYN, dyn_input, Message::ToggleDynInput),
+                    t!("Dynamic Input\nF12"),
+                ),
+                t!("Dynamic Input Settings..."),
+                DraftingSettingsTab::DynamicInput,
             ));
         }
         if vis(StatusPill::Otrack) {
-            pills.push(tip(
-                toggle_pill(crate::ui::icons::ST_OTRACK, otrack, Message::ToggleOTrack),
-                t!("Object Snap Tracking\nF11"),
+            pills.push(with_settings(
+                tip(
+                    toggle_pill(crate::ui::icons::ST_OTRACK, otrack, Message::ToggleOTrack),
+                    t!("Object Snap Tracking\nF11"),
+                ),
+                t!("Object Snap Tracking Settings..."),
+                DraftingSettingsTab::ObjectSnap,
             ));
         }
         if vis(StatusPill::Ducs) {
@@ -559,13 +576,17 @@ impl StatusBar {
             ));
         }
         if vis(StatusPill::QuickProps) {
-            pills.push(tip(
-                toggle_pill(
-                    crate::ui::icons::ST_QUICKPROPS,
-                    quick_properties,
-                    Message::ToggleQuickProperties,
+            pills.push(with_settings(
+                tip(
+                    toggle_pill(
+                        crate::ui::icons::ST_QUICKPROPS,
+                        quick_properties,
+                        Message::ToggleQuickProperties,
+                    ),
+                    t!("Quick Properties\nFloating panel on selection"),
                 ),
-                t!("Quick Properties\nFloating panel on selection"),
+                t!("Quick Properties Settings..."),
+                DraftingSettingsTab::QuickProperties,
             ));
         }
         if vis(StatusPill::SelFilter) {
@@ -587,13 +608,17 @@ impl StatusBar {
             ));
         }
         if vis(StatusPill::SelCycle) {
-            pills.push(tip(
-                toggle_pill(
-                    crate::ui::icons::ST_SELCYCLE,
-                    selection_cycling,
-                    Message::ToggleSelectionCycling,
+            pills.push(with_settings(
+                tip(
+                    toggle_pill(
+                        crate::ui::icons::ST_SELCYCLE,
+                        selection_cycling,
+                        Message::ToggleSelectionCycling,
+                    ),
+                    t!("Selection Cycling\nRepeat-click to step through overlapping objects"),
                 ),
-                t!("Selection Cycling\nRepeat-click to step through overlapping objects"),
+                t!("Selection Cycling Settings..."),
+                DraftingSettingsTab::SelectionCycling,
             ));
         }
         if vis(StatusPill::Vp) && !vp_label.is_empty() {
@@ -803,6 +828,22 @@ fn tip_node<'a>(content: Element<'a, Message>, body: Element<'a, Message>) -> El
 /// A status-bar toggle, drawn as a tinted icon (issue #216: the old size-10
 /// text labels were too small to read). The name lives in the tooltip each
 /// call site already wraps it with.
+/// `pill` with a right-click menu of one row, `label`, that opens Drafting
+/// Settings on `tab`.
+fn with_settings<'a>(
+    pill: Element<'a, Message>,
+    label: std::borrow::Cow<'static, str>,
+    tab: DraftingSettingsTab,
+) -> Element<'a, Message> {
+    ContextMenu::new(pill, move || {
+        crate::ui::kit::menu::view(vec![crate::ui::kit::menu::Item::new(
+            label.clone(),
+            Message::OpenDraftingSettings(tab),
+        )])
+    })
+    .into()
+}
+
 fn toggle_pill(icon: &'static [u8], active: bool, msg: Message) -> Element<'static, Message> {
     let icon = if active {
         crate::ui::icons::themed_primary_weak_text(icon, 17.0)

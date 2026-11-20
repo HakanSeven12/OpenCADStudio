@@ -593,6 +593,9 @@ pub(crate) fn decoded(data: &ArchEntityData, handle: u64, document: &document::D
             subassembly(data, handle, document, &mut out);
         }
         CivilKind::Other if data.dxf_name == "AECC_PIPE" => pipe(data, document, &mut out)?,
+        CivilKind::Other if data.dxf_name == "AECC_STRUCTURE" => structure(handle, document, &mut out)?,
+        CivilKind::Other if data.dxf_name == "AECC_PRESSUREPIPE" => pressure_pipe(data, &mut out)?,
+        CivilKind::Other if matches!(data.dxf_name.as_str(), "AECC_FITTING" | "AECC_APPURTENANCE") => pressure_part(data, &mut out)?,
         CivilKind::Other if data.dxf_name == "AECC_FEATURE_LINE" => feature_line(data, handle, document, &mut out)?,
         CivilKind::Other if data.dxf_name == "AECC_COGO_POINT" => cogo_point(data, document, &mut out)?,
         CivilKind::Other if data.dxf_name == "AECC_GRAPH_SECTION_VIEW" => section_view(data, &mut out)?,
@@ -687,7 +690,10 @@ fn cogo_point(data: &ArchEntityData, document: &document::Document, out: &mut De
     Some(())
 }
 
-/// Number and position of a selected COGO point.
+/// The Properties field of a COGO point's name, which the codec's point database keeps.
+pub(crate) const COGO_POINT_NAME: &str = "ext_civil_point_name";
+
+/// Number, name, description and position of a selected COGO point.
 pub(crate) fn properties(entity: &EntityType, document: &document::Document) -> Vec<crate::scene::model::object::PropSection> {
     use crate::entities::common::ro_prop;
     let EntityType::Extended(e) = entity else { return Vec::new() };
@@ -697,6 +703,12 @@ pub(crate) fn properties(entity: &EntityType, document: &document::Document) -> 
         title: crate::t!("Class").into_owned(),
         props: vec![
             ro_prop(crate::t!("Point Number").as_ref(), "ext_civil_point_number", point.number.to_string()),
+            crate::scene::model::object::Property {
+                label: crate::t!("Name").into_owned(),
+                field: COGO_POINT_NAME,
+                value: crate::scene::model::object::PropValue::PlainText(point.name.clone().unwrap_or_default()),
+            },
+            ro_prop(crate::t!("Description").as_ref(), "ext_civil_description", point.description.clone().unwrap_or_default()),
             ro_prop(crate::t!("Easting").as_ref(), "ext_civil_easting", format!("{:.4}", point.position.x)),
             ro_prop(crate::t!("Northing").as_ref(), "ext_civil_northing", format!("{:.4}", point.position.y)),
             ro_prop(crate::t!("Elevation").as_ref(), "ext_civil_elevation", format!("{:.4}", point.position.z)),
@@ -1216,12 +1228,21 @@ fn pipe(data: &ArchEntityData, document: &document::Document, out: &mut Decoded)
     let (a, b) = (Vector2::new(a3.x, a3.y), Vector2::new(b3.x, b3.y));
     let handles = data.decode().handles;
     let size = part_size(document, &handles);
-    let inner = size.get("PipeInnerDiameter").or_else(|| size.get("BodyGeometry_Diameter")).copied()?;
-    let outer = inner + 2.0 * size.get("WallThickness").copied().unwrap_or(0.0);
     let u = unit2(b - a)?;
     let normal = Vector2::new(-u.y, u.x);
     let components = style_components(document, &handles, "AECC_PIPE_STYLE");
     let structures = pipe_structures(document, &handles);
+    let Some(inner) = size.get("PipeInnerDiameter").or_else(|| size.get("BodyGeometry_Diameter")).copied() else {
+        // A part definition whose sizes do not read: one line along the pipe, styled as
+        // its walls (a style often hides the centerline).
+        let style = component(document, components.as_deref(), PIPE_OUTSIDE_WALLS)
+            .or_else(|| component(document, components.as_deref(), PIPE_CENTERLINE));
+        for (p, q) in outside_footprints(a, b, &structures) {
+            styled(out, style, vec![[p.x, p.y, 0.0], [q.x, q.y, 0.0]]);
+        }
+        return Some(());
+    };
+    let outer = inner + 2.0 * size.get("WallThickness").copied().unwrap_or(0.0);
     let inside_any = |p: Vector2| structures.iter().any(|f| f.contains(p));
     let mut draw = |index: usize, offsets: &[f64]| {
         let style = component(document, components.as_deref(), index);
@@ -1240,6 +1261,53 @@ fn pipe(data: &ArchEntityData, document: &document::Document, out: &mut Decoded)
             let (p, q) = (end + normal * (outer / 2.0), end - normal * (outer / 2.0));
             styled(out, style, vec![[p.x, p.y, 0.0], [q.x, q.y, 0.0]]);
         }
+    }
+    Some(())
+}
+
+/// A structure without a drawn cache: its footprint in plan.
+fn structure(handle: u64, document: &document::Document, out: &mut Decoded) -> Option<()> {
+    let points = match structure_footprint(document, handle)? {
+        Footprint::Circle(c, r) => (0..=48)
+            .map(|k| {
+                let t = std::f64::consts::TAU * k as f64 / 48.0;
+                [c.x + r * t.cos(), c.y + r * t.sin(), 0.0]
+            })
+            .collect(),
+        Footprint::Box(lo, hi) => vec![[lo.x, lo.y, 0.0], [hi.x, lo.y, 0.0], [hi.x, hi.y, 0.0], [lo.x, hi.y, 0.0], [lo.x, lo.y, 0.0]],
+    };
+    styled(out, Some(ProxyStyle::default()), points);
+    Some(())
+}
+
+/// A pressure pipe without a drawn cache: its centerline, straight or curved.
+fn pressure_pipe(data: &ArchEntityData, out: &mut Decoded) -> Option<()> {
+    let pipe = data.pressure_pipe()?;
+    let (a, b) = (pipe.start, pipe.end);
+    let points = match ocs_geom::geom2d::BulgeArc::from_bulge([a.x, a.y], [b.x, b.y], pipe.bulge) {
+        Some(arc) => {
+            let n = ((arc.sweep.abs() / std::f64::consts::TAU * 64.0).ceil() as usize).max(2);
+            (0..=n)
+                .map(|k| {
+                    let f = k as f64 / n as f64;
+                    let t = arc.start_angle + arc.sweep * f;
+                    [arc.center[0] + arc.radius * t.cos(), arc.center[1] + arc.radius * t.sin(), a.z + (b.z - a.z) * f]
+                })
+                .collect()
+        }
+        None => vec![[a.x, a.y, a.z], [b.x, b.y, b.z]],
+    };
+    styled(out, Some(ProxyStyle::default()), points);
+    Some(())
+}
+
+/// A fitting or appurtenance without a drawn cache: a leg from its middle to each port.
+fn pressure_part(data: &ArchEntityData, out: &mut Decoded) -> Option<()> {
+    let ports = data.pressure_ports().filter(|p| !p.is_empty())?;
+    let n = ports.len() as f64;
+    let mid = ports.iter().fold([0.0; 3], |m, p| [m[0] + p.position.x / n, m[1] + p.position.y / n, m[2] + p.position.z / n]);
+    for p in &ports {
+        styled(out, Some(ProxyStyle::default()), vec![mid, [p.position.x, p.position.y, p.position.z]]);
     }
     Some(())
 }

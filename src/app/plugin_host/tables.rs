@@ -292,7 +292,7 @@ impl<'a> HostSession<'a> {
     }
 
     /// Simple linetype create/modify/rename/delete.
-    fn linetype_operation(
+    pub(super) fn linetype_operation(
         &mut self,
         operation: ocs_plugin_api::host::TableOperation,
     ) -> Result<Handle, String> {
@@ -372,7 +372,7 @@ impl<'a> HostSession<'a> {
     /// Paper-space layout operations (create, rename, delete, switch, page).
     /// They act on the active document because switching layouts drives the
     /// application's view state.
-    fn layout_operation(
+    pub(super) fn layout_operation(
         &mut self,
         operation: ocs_plugin_api::host::TableOperation,
     ) -> Result<Handle, String> {

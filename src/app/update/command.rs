@@ -5429,6 +5429,9 @@ impl OpenCADStudio {
             }
             return Task::none();
         }
+        if field == crate::entities::civil::COGO_POINT_NAME {
+            return self.commit_cogo_point_name();
+        }
         if field == "authoring_grip_count" {
             return self.commit_block_grip_count();
         }

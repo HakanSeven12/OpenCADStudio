@@ -25,6 +25,7 @@ use crate::io::plot_style::PlotStyleTable;
 use crate::io::svg_export::plotted_color;
 use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
 use crate::scene::model::underlay_vector::CAP_PER_EM;
+use crate::scene::text::glyph_to_world::GlyphSnapshot;
 use crate::scene::WireModel;
 
 /// Graphics units to a millimetre of paper: each is 1/1200 inch.
@@ -56,6 +57,15 @@ pub struct DwfSheet<'a> {
 pub fn build_dwf(
     sheets: &[DwfSheet<'_>],
     fallback_plot_style: Option<&PlotStyleTable>,
+) -> Result<Vec<u8>, String> {
+    build_dwf_with_glyphs(sheets, fallback_plot_style, None)
+}
+
+/// [`build_dwf`] with the glyphs of the atlas the pages' text was laid out on.
+fn build_dwf_with_glyphs(
+    sheets: &[DwfSheet<'_>],
+    fallback_plot_style: Option<&PlotStyleTable>,
+    _glyphs: Option<&GlyphSnapshot>,
 ) -> Result<Vec<u8>, String> {
     if sheets.is_empty() {
         return Err("Nothing to export: no sheet was given.".to_string());
@@ -1257,6 +1267,65 @@ mod tests {
         reader::sheet(&bytes, "Model").expect("the reader opens the sheet")
     }
 
+    /// [`read`] with the glyphs of the atlas the page's text was laid out on.
+    fn read_with(page: &PlotPage, glyphs: &GlyphSnapshot) -> Sheet {
+        let bytes = build_dwf_with_glyphs(
+            &[DwfSheet {
+                name: "Model",
+                page,
+            }],
+            None,
+            Some(glyphs),
+        )
+        .expect("builds");
+        reader::sheet(&bytes, "Model").expect("the reader opens the sheet")
+    }
+
+    /// `text` 10 high at (20, 20) in a font of pen strokes: its glyph quads,
+    /// the run the search layer carries for it and the atlas it was laid out
+    /// on. An atlas of its own, so no other test moves its tiles.
+    fn pen_text(text: &str) -> (WireModel, GlyphSnapshot) {
+        let mut atlas = crate::scene::text::sdf_atlas::GlyphAtlas::new(256, 256);
+        let (quads, _) = crate::scene::text::glyph_quads::layout_glyph_quads(
+            &mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, text,
+        );
+        let mut wire = run(text, [20.0, 20.0], 10.0, 0.0, "txt");
+        crate::scene::pipeline::text_gpu::push_glyph_vertices(
+            &mut wire.text_verts,
+            &quads,
+            [20.0, 20.0, 0.0],
+            1.0,
+            [0.0, 0.0, 1.0, 1.0],
+            0.0,
+        );
+        (wire, GlyphSnapshot::from_atlas(&atlas))
+    }
+
+    /// Makes a glyph of the atlas a filled one: the lower right half of its
+    /// tile.
+    fn fill_half(glyph: &mut crate::scene::text::sdf_atlas::GlyphExport) {
+        let (low, high) = (glyph.plane_min, glyph.plane_max);
+        glyph.fill_tris = vec![low, [high[0], low[1]], high];
+    }
+
+    /// The corners of a glyph quad: lower left, lower right, upper right,
+    /// upper left.
+    fn quad_corners(quad: &[crate::scene::pipeline::text_gpu::TextVertex]) -> [[f64; 2]; 4] {
+        [0, 1, 2, 5].map(|index| {
+            let vertex = &quad[index];
+            [
+                vertex.pos[0] as f64 + vertex.pos_low[0] as f64,
+                vertex.pos[1] as f64 + vertex.pos_low[1] as f64,
+            ]
+        })
+    }
+
+    /// The area of a glyph quad.
+    fn quad_area(quad: &[crate::scene::pipeline::text_gpu::TextVertex]) -> f64 {
+        let [a, b, _, d] = quad_corners(quad);
+        ((b[0] - a[0]) * (d[1] - a[1]) - (b[1] - a[1]) * (d[0] - a[0])).abs()
+    }
+
     /// The straight pieces of the sheet's stroked paths, in order.
     fn strokes(sheet: &Sheet) -> Vec<[[f64; 2]; 2]> {
         sheet
@@ -1727,6 +1796,198 @@ mod tests {
                 .windows(string.len())
                 .any(|window| window == string.as_slice()),
             "the string in the stream's binary form"
+        );
+    }
+
+    #[test]
+    fn text_in_a_font_of_pen_strokes_goes_out_as_its_strokes() {
+        use crate::scene::text::glyph_to_world::{self, QuadBasis};
+
+        let (text, glyphs) = pen_text("A");
+        // Every piece of the glyph's strokes, where its quad places it.
+        let quad = glyph_to_world::wire_quads(&text).next().expect("a glyph");
+        let glyph = glyphs
+            .glyph(glyph_to_world::quad_uv_key(quad))
+            .expect("the glyph of the quad");
+        assert!(glyph.fill_tris.is_empty(), "a glyph of pen strokes");
+        let basis = QuadBasis::of(quad, glyph).expect("a quad with a size");
+        let expected: Vec<[[f64; 2]; 2]> = glyph
+            .strokes
+            .iter()
+            .flat_map(|stroke| stroke.windows(2))
+            .map(|piece| [basis.world(&piece[0]), basis.world(&piece[1])])
+            .collect();
+        assert!(expected.len() >= 3, "{expected:?}");
+        let pen_mm = glyph_to_world::nominal_pen_world_mm(false, basis.glyph_unit_mm() as f32);
+
+        let sheet = read_with(&page(wires(vec![text]), 297.0, 210.0), &glyphs);
+
+        assert!(sheet.texts.is_empty(), "{:?}", sheet.texts);
+        let drawn = strokes(&sheet);
+        assert_eq!(drawn.len(), expected.len(), "{drawn:?}");
+        for (got, want) in drawn.iter().zip(&expected) {
+            assert!(
+                near(got[0], want[0], UNIT_MM) && near(got[1], want[1], UNIT_MM),
+                "{got:?} for {want:?}"
+            );
+        }
+        for path in &sheet.paths {
+            let (color, width) = path.stroke.expect("a stroke");
+            assert_eq!(color, [0, 0, 255]);
+            assert!(
+                (width - pen_mm).abs() <= UNIT_MM,
+                "{width} for a pen of {pen_mm}"
+            );
+            assert!(path.fill.is_none());
+        }
+    }
+
+    #[test]
+    fn text_whose_glyphs_the_atlas_does_not_know_stays_text() {
+        let (mut text, glyphs) = pen_text("A");
+        for vertex in &mut text.text_verts {
+            vertex.uv = [-1.0, -1.0];
+        }
+
+        let sheet = read_with(&page(wires(vec![text]), 297.0, 210.0), &glyphs);
+
+        let texts: Vec<&str> = sheet.texts.iter().map(|text| text.text.as_str()).collect();
+        assert_eq!(texts, vec!["A"]);
+        assert!(sheet.paths.is_empty(), "{:?}", sheet.paths);
+    }
+
+    #[test]
+    fn a_filled_glyph_stays_text_until_outlines_are_asked_for() {
+        let (text, mut glyphs) = pen_text("A");
+        glyphs.table.values_mut().for_each(fill_half);
+        let half_quad = quad_area(&text.text_verts[..6]) / 2.0;
+        let mut written = page(wires(vec![text]), 297.0, 210.0);
+
+        let as_text = read_with(&written, &glyphs);
+        written.options.text_as_outlines = true;
+        let as_outlines = read_with(&written, &glyphs);
+
+        let texts: Vec<&str> = as_text
+            .texts
+            .iter()
+            .map(|text| text.text.as_str())
+            .collect();
+        assert_eq!(texts, vec!["A"]);
+        assert!(as_text.paths.is_empty(), "{:?}", as_text.paths);
+
+        assert!(as_outlines.texts.is_empty(), "{:?}", as_outlines.texts);
+        assert!(
+            strokes(&as_outlines).is_empty(),
+            "a filled glyph has no pen"
+        );
+        let area = filled_area(&as_outlines);
+        assert!(
+            (area - half_quad).abs() < half_quad * 0.01,
+            "{area} of {half_quad}"
+        );
+        assert!(as_outlines
+            .paths
+            .iter()
+            .all(|path| path.fill == Some([0, 0, 255])));
+    }
+
+    #[test]
+    fn a_wire_of_pen_and_filled_glyphs_goes_out_drawn() {
+        let (text, mut glyphs) = pen_text("AB");
+        glyphs
+            .table
+            .values_mut()
+            .filter(|glyph| glyph.ch == 'B')
+            .for_each(fill_half);
+        let half_quad = quad_area(&text.text_verts[6..12]) / 2.0;
+
+        let sheet = read_with(&page(wires(vec![text]), 297.0, 210.0), &glyphs);
+
+        assert!(sheet.texts.is_empty(), "{:?}", sheet.texts);
+        assert!(!strokes(&sheet).is_empty(), "the strokes of the A");
+        let area = filled_area(&sheet);
+        assert!(
+            (area - half_quad).abs() < half_quad * 0.01,
+            "{area} of {half_quad}"
+        );
+    }
+
+    #[test]
+    fn an_underline_goes_out_as_a_filled_bar() {
+        use crate::scene::text::glyph_to_world;
+
+        // Under text that is drawn, and under text that stays text.
+        for filled in [false, true] {
+            let (text, mut glyphs) = pen_text(r"\LG\l");
+            if filled {
+                glyphs.table.values_mut().for_each(fill_half);
+            }
+            let bar = glyph_to_world::wire_quads(&text)
+                .find(|quad| glyph_to_world::quad_uv_key(quad) == glyphs.solid_key)
+                .expect("the bar of the underline");
+            let bar_area = quad_area(bar);
+            let [low, _, high, _] = quad_corners(bar);
+            // Each edge may move half a graphics unit.
+            let slack = ((high[0] - low[0]) + (high[1] - low[1])) * UNIT_MM;
+
+            let sheet = read_with(&page(wires(vec![text]), 297.0, 210.0), &glyphs);
+
+            assert_eq!(sheet.texts.len(), usize::from(filled));
+            let area = filled_area(&sheet);
+            assert!(
+                (area - bar_area).abs() <= slack,
+                "{area} of {bar_area}, filled glyphs: {filled}"
+            );
+            let bar_path = sheet
+                .paths
+                .iter()
+                .find(|path| path.fill.is_some())
+                .expect("a filled path");
+            for segment in &bar_path.subpaths[0].segments {
+                let (Segment::Line(a, _) | Segment::Cubic(a, _, _, _)) = segment;
+                assert!(
+                    a[0] >= low[0] - UNIT_MM
+                        && a[0] <= high[0] + UNIT_MM
+                        && a[1] >= low[1] - UNIT_MM
+                        && a[1] <= high[1] + UNIT_MM,
+                    "{a:?} outside the bar {low:?} {high:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_pen_font_text_turns_with_the_page_and_follows_the_plot_scale() {
+        use crate::scene::text::glyph_to_world::{self, QuadBasis};
+
+        let (text, glyphs) = pen_text("A");
+        let quad = glyph_to_world::wire_quads(&text).next().expect("a glyph");
+        let glyph = glyphs
+            .glyph(glyph_to_world::quad_uv_key(quad))
+            .expect("the glyph of the quad");
+        let basis = QuadBasis::of(quad, glyph).expect("a quad with a size");
+        let first = basis.world(&glyph.strokes[0][0]);
+        let pen_mm = glyph_to_world::nominal_pen_world_mm(false, basis.glyph_unit_mm() as f32);
+        let mut written = page(wires(vec![text]), 297.0, 210.0);
+        written.scale = 0.5;
+        written.rotation_deg = 90;
+
+        let sheet = read_with(&written, &glyphs);
+
+        // The sheet reads back in drawing units: a quarter turn about the
+        // origin, then the paper's width (594 at this scale) to the right.
+        let turned = [594.0 - first[1], first[0]];
+        let drawn = strokes(&sheet);
+        assert!(
+            near(drawn[0][0], turned, 2.0 * UNIT_MM),
+            "{:?} for {turned:?}",
+            drawn[0][0]
+        );
+        // The pen is the glyph's: half as wide on paper at half the scale.
+        let width = sheet.paths[0].stroke.expect("a stroke").1;
+        assert!(
+            (width - pen_mm).abs() <= 2.0 * UNIT_MM,
+            "{width} for a pen of {pen_mm}"
         );
     }
 

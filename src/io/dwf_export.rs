@@ -1133,17 +1133,16 @@ impl Stream {
             self.out.extend_from_slice(text.as_bytes());
             self.out.push(b'\'');
         } else {
-            // A count, then UTF-16 units. A count of 39 is the byte of a
-            // quote, which opens the plain form: one more unit, a space,
-            // keeps the two apart.
-            let mut units: Vec<u16> = text.encode_utf16().take(MAX_COUNT - 1).collect();
-            if units.len() == usize::from(b'\'') {
-                units.push(u16::from(b' '));
-            }
-            self.count(units.len());
+            // What is not plain goes between braces: a 32-bit count of
+            // characters and their UTF-16 units.
+            let units: Vec<u16> = text.encode_utf16().collect();
+            self.out.push(b'{');
+            self.out
+                .extend_from_slice(&(units.len() as i32).to_le_bytes());
             for unit in units {
                 self.out.extend_from_slice(&unit.to_le_bytes());
             }
+            self.out.push(b'}');
         }
     }
 }
@@ -1694,6 +1693,41 @@ mod tests {
 
         let texts: Vec<&str> = sheet.texts.iter().map(|text| text.text.as_str()).collect();
         assert_eq!(texts, vec!["Ñandú ø 25 — «sala»", "it's 3\\4"]);
+    }
+
+    #[test]
+    fn text_beyond_ascii_goes_between_braces() {
+        let content = wires(vec![run("Ñandú", [20.0, 30.0], 5.0, 0.0, "Arial")]);
+        let written = page(content, 297.0, 210.0);
+
+        let bytes = build_dwf(
+            &[DwfSheet {
+                name: "Model",
+                page: &written,
+            }],
+            None,
+        )
+        .expect("builds");
+
+        let files = unzip(&bytes);
+        let stream = files
+            .iter()
+            .find(|(name, _)| name.ends_with(".w2d"))
+            .map(|(_, data)| data)
+            .expect("a graphics stream");
+        // A brace, the count of characters in 32 bits, the UTF-16 units, a brace.
+        let mut string = vec![b'{'];
+        string.extend_from_slice(&5i32.to_le_bytes());
+        for unit in "Ñandú".encode_utf16() {
+            string.extend_from_slice(&unit.to_le_bytes());
+        }
+        string.push(b'}');
+        assert!(
+            stream
+                .windows(string.len())
+                .any(|window| window == string.as_slice()),
+            "the string in the stream's binary form"
+        );
     }
 
     #[test]

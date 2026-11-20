@@ -342,6 +342,11 @@ impl OpenCADStudio {
         set_current_path: bool,
         require_new_destination: bool,
     ) -> Result<(), crate::io::SaveFailure> {
+        if self.read_only {
+            return Err(crate::io::SaveFailure::other(
+                "Read-only session (--read-only): saving is disabled.",
+            ));
+        }
         if self.tabs[i].block_test.is_some() {
             return Err(crate::io::SaveFailure::other(
                 "Test Block is temporary and cannot be saved",
@@ -893,7 +898,9 @@ impl OpenCADStudio {
         // selected — see #21.
         self.sync_ribbon_from_selection();
         self.tabs[i].scene.restore_saved_camera();
-        // Grid/snap are per-drawing view settings — adopt the opened
+        #[cfg(not(target_arch = "wasm32"))]
+        self.tabs[i].scene.prepare_projected_interaction();
+        // Grid/snap are per-drawing view settings - adopt the opened
         // file's active viewport state rather than a global preference.
         self.adopt_view_display(i);
         self.sync_render_mode_to_active_tile(i);

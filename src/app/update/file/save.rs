@@ -1022,6 +1022,15 @@ impl OpenCADStudio {
         if self.refuse_block_test_save(i) {
             return Task::none();
         }
+        // Every native write funnels here, including the close / quit
+        // prompts' Save; a read-only session (possibly opened without the
+        // DWG's round-trip data) must not rewrite any file.
+        if self.read_only {
+            self.command_line.push_error(
+                crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
+            );
+            return Task::none();
+        }
         let allow_conversion_loss = std::mem::take(&mut self.conversion_loss_allowed);
         if !allow_conversion_loss && purpose != crate::app::SavePurpose::Autosave {
             let ext = path

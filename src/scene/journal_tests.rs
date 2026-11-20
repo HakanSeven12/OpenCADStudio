@@ -548,6 +548,7 @@ fn the_handed_over_draw_depth_map_matches_a_recompute() {
         draw_depths: Some(handed_over),
         resident_layout: None,
         handle_index: None,
+        insert_hatches: None,
     });
     assert_eq!(
         *scene.draw_depth_map(),

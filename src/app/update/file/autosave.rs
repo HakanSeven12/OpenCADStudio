@@ -120,6 +120,9 @@ impl OpenCADStudio {
     /// touches the original file or the dirty flag.
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn on_autosave(&mut self) -> Task<Message> {
+        if crate::cli::low_memory_viewing() {
+            return Task::none();
+        }
         let mut tasks = Vec::new();
         for i in 0..self.tabs.len() {
             if self.tabs[i].block_test.is_some()

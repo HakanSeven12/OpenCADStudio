@@ -98,6 +98,10 @@ impl OpenCADStudio {
         // Pending client interactive requests pinned to this drawing
         // can never be answered once the tab is gone — cancel them.
         let closing_tab_id = self.tabs.get(idx).map(|t| t.id);
+        if let Some(closing_id) = closing_tab_id {
+            self.queued_interaction_indices
+                .retain(|(tab_id, ..)| *tab_id != closing_id);
+        }
         let pinned = self
             .control
             .get_point

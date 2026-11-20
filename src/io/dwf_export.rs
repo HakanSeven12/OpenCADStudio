@@ -25,7 +25,8 @@ use crate::io::plot_style::PlotStyleTable;
 use crate::io::svg_export::plotted_color;
 use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
 use crate::scene::model::underlay_vector::CAP_PER_EM;
-use crate::scene::text::glyph_to_world::GlyphSnapshot;
+use crate::scene::text::glyph_to_world::{self, GlyphSnapshot, QuadBasis};
+use crate::scene::text::sdf_atlas::GlyphExport;
 use crate::scene::WireModel;
 
 /// Graphics units to a millimetre of paper: each is 1/1200 inch.
@@ -58,14 +59,22 @@ pub fn build_dwf(
     sheets: &[DwfSheet<'_>],
     fallback_plot_style: Option<&PlotStyleTable>,
 ) -> Result<Vec<u8>, String> {
-    build_dwf_with_glyphs(sheets, fallback_plot_style, None)
+    // The atlas as it stands, once for the package, when a page has text
+    // laid out on it.
+    let glyphs = sheets
+        .iter()
+        .flat_map(|sheet| sheet.page.content.wires.iter())
+        .any(|wire| !wire.wire.text_verts.is_empty())
+        .then(GlyphSnapshot::snapshot)
+        .flatten();
+    build_dwf_with_glyphs(sheets, fallback_plot_style, glyphs.as_ref())
 }
 
 /// [`build_dwf`] with the glyphs of the atlas the pages' text was laid out on.
 fn build_dwf_with_glyphs(
     sheets: &[DwfSheet<'_>],
     fallback_plot_style: Option<&PlotStyleTable>,
-    _glyphs: Option<&GlyphSnapshot>,
+    glyphs: Option<&GlyphSnapshot>,
 ) -> Result<Vec<u8>, String> {
     if sheets.is_empty() {
         return Err("Nothing to export: no sheet was given.".to_string());
@@ -75,7 +84,7 @@ fn build_dwf_with_glyphs(
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
     for (index, sheet) in sheets.iter().enumerate() {
         let page = sheet.page;
-        let stream = page_stream(page, fallback_plot_style);
+        let stream = page_stream(page, fallback_plot_style, glyphs);
         let section_id = object_id(&stream, index, 0);
         let stream_id = object_id(&stream, index, 1);
         let section = format!("{EPLOT_SECTION}_{section_id}");
@@ -270,7 +279,11 @@ impl PageMap {
 }
 
 /// The sheet's graphics stream.
-fn page_stream(page: &PlotPage, fallback_plot_style: Option<&PlotStyleTable>) -> Vec<u8> {
+fn page_stream(
+    page: &PlotPage,
+    fallback_plot_style: Option<&PlotStyleTable>,
+    glyphs: Option<&GlyphSnapshot>,
+) -> Vec<u8> {
     let paper_w = page.paper_w.max(1.0);
     let paper_h = page.paper_h.max(1.0);
     let map = PageMap {
@@ -344,7 +357,7 @@ fn page_stream(page: &PlotPage, fallback_plot_style: Option<&PlotStyleTable>) ->
         "Viewport '' (Contour 1 4 {w},0 {w},{h} 0,{h} 0,0) (Units '' {units})"
     ));
     if bounds[0] < bounds[2] && bounds[1] < bounds[3] {
-        emit_page_content(&mut stream, page, plot_style, &map, bounds);
+        emit_page_content(&mut stream, page, plot_style, glyphs, &map, bounds);
     }
     stream.extended("EndOfDWF");
     stream.out
@@ -363,6 +376,7 @@ fn emit_page_content(
     stream: &mut Stream,
     page: &PlotPage,
     plot_style: Option<&PlotStyleTable>,
+    glyphs: Option<&GlyphSnapshot>,
     map: &PageMap,
     bounds: [f64; 4],
 ) {
@@ -391,7 +405,7 @@ fn emit_page_content(
             }
             items.push((wire.draw_depth, 2u8, sequence, DrawItem::Wire(wire)));
             sequence += 1;
-            if !wire.wire.searchable_text.is_empty() {
+            if !wire.wire.searchable_text.is_empty() || !wire.wire.text_verts.is_empty() {
                 items.push((wire.draw_depth, 3u8, sequence, DrawItem::Text(wire)));
                 sequence += 1;
             }
@@ -409,6 +423,7 @@ fn emit_page_content(
             let context = Context {
                 offset,
                 plot_style,
+                glyphs,
                 options,
                 map,
                 bounds,
@@ -426,6 +441,8 @@ fn emit_page_content(
 struct Context<'a> {
     offset: (f64, f64),
     plot_style: Option<&'a PlotStyleTable>,
+    /// The atlas the page's text was laid out on, when it could be read.
+    glyphs: Option<&'a GlyphSnapshot>,
     options: PlotOptions,
     map: &'a PageMap,
     bounds: [f64; 4],
@@ -790,15 +807,178 @@ fn fill_polygon(stream: &mut Stream, color: [u8; 3], polygon: &[[f64; 2]], bound
 
 // ── Text ────────────────────────────────────────────────────────────────────
 
+/// What a glyph quad of a wire draws.
+enum PlacedQuad<'a> {
+    /// A glyph of the atlas and the basis that places its geometry.
+    Glyph(&'a GlyphExport, QuadBasis),
+    /// The atlas' solid tile, by its corners: an underline, overline or
+    /// strike bar.
+    Bar([[f64; 2]; 4]),
+}
+
+/// The visible glyph quads of a wire against the atlas they were laid out
+/// on, each with its colour. `None` when one of them cannot be placed: the
+/// wire's runs then stand for all of its text.
+fn placed_quads<'a>(
+    wire: &WireModel,
+    glyphs: &'a GlyphSnapshot,
+) -> Option<Vec<(PlacedQuad<'a>, [f32; 4])>> {
+    if !wire.text_verts.len().is_multiple_of(6) {
+        return None;
+    }
+    let finite = |point: &[f32; 2]| point.iter().all(|v| v.is_finite());
+    let mut placed = Vec::with_capacity(wire.text_verts.len() / 6);
+    for quad in glyph_to_world::wire_quads(wire) {
+        let color = quad[0].color;
+        if !color[3].is_finite() {
+            return None;
+        }
+        if color[3] < 0.01 {
+            continue;
+        }
+        // Lower left, lower right, upper right, upper left.
+        let corners = [0, 1, 2, 5].map(|index| {
+            let vertex = &quad[index];
+            [
+                vertex.pos[0] as f64 + vertex.pos_low[0] as f64,
+                vertex.pos[1] as f64 + vertex.pos_low[1] as f64,
+            ]
+        });
+        if corners.iter().flatten().any(|v| !v.is_finite()) {
+            return None;
+        }
+        let key = glyph_to_world::quad_uv_key(quad);
+        if let Some(glyph) = glyphs.glyph(key) {
+            let basis = QuadBasis::of(quad, glyph)?;
+            let drawable = if glyph.fill_tris.is_empty() {
+                glyph.strokes.iter().any(|stroke| !stroke.is_empty())
+                    && glyph.strokes.iter().flatten().all(finite)
+            } else {
+                glyph.fill_tris.len().is_multiple_of(3) && glyph.fill_tris.iter().all(finite)
+            };
+            if !drawable || !finite(&glyph.plane_min) || !finite(&glyph.plane_max) {
+                return None;
+            }
+            placed.push((PlacedQuad::Glyph(glyph, basis), color));
+        } else if key == glyphs.solid_key {
+            placed.push((PlacedQuad::Bar(corners), color));
+        } else {
+            return None;
+        }
+    }
+    Some(placed)
+}
+
+/// A wire's text. A font of pen strokes has no outline a reader could load
+/// by its name, so its glyphs are drawn: strokes with the pen the screen
+/// gives them. Text in an outline font stays text, in its font, unless the
+/// page asks for `text_as_outlines`; its underline, overline and strike bars
+/// are drawn either way.
 fn emit_text(stream: &mut Stream, wire: &WireModel, context: &Context) {
     let mut style_color: Option<[f32; 3]> = None;
+    let mut style_mm: Option<f64> = None;
     let mut screening = 1.0;
     if let Some(table) = context.plot_style {
         if wire.aci > 0 {
             style_color = table.resolve_color(wire.aci);
             screening = table.resolve_screening(wire.aci);
+            if context.options.object_lineweights {
+                style_mm = table.resolve_lineweight(wire.aci).map(|mm| mm as f64);
+            }
         }
     }
+    let plotted = |[r, g, b, a]: [f32; 4]| {
+        let rgb = style_color.unwrap_or_else(|| adapt_to_paper([r, g, b]));
+        rgb_bytes(plotted_color(rgb, a, screening, context.options))
+    };
+
+    let quads = context
+        .glyphs
+        .and_then(|glyphs| placed_quads(wire, glyphs))
+        .unwrap_or_default();
+    // One pen glyph and the wire's text is drawn whole, so that none of it is
+    // written twice.
+    let drawn = quads.iter().any(|(quad, _)| match quad {
+        PlacedQuad::Glyph(glyph, _) => {
+            context.options.text_as_outlines || glyph.fill_tris.is_empty()
+        }
+        PlacedQuad::Bar(_) => false,
+    });
+    let scale = context.map.scale;
+    for (quad, color) in &quads {
+        let color = plotted(*color);
+        match quad {
+            PlacedQuad::Bar(corners) => {
+                let corners = corners.map(|[x, y]| context.place(x, y));
+                fill_polygon(stream, color, &corners, context.bounds);
+            }
+            PlacedQuad::Glyph(..) if !drawn => {}
+            PlacedQuad::Glyph(glyph, basis) if !glyph.fill_tris.is_empty() => {
+                for triangle in glyph.fill_tris.chunks_exact(3) {
+                    let corners: Vec<[f64; 2]> = triangle
+                        .iter()
+                        .map(|point| {
+                            let [x, y] = basis.world(point);
+                            context.place(x, y)
+                        })
+                        .collect();
+                    fill_polygon(stream, color, &corners, context.bounds);
+                }
+            }
+            PlacedQuad::Glyph(glyph, basis) => {
+                // The plot style's lineweight when it sets one, else the pen
+                // the glyph was drawn with; a bold glyph's is 1.7 times as wide.
+                let width_mm = match style_mm {
+                    Some(mm) => {
+                        let mm = if glyph.bold { mm * 1.7 } else { mm };
+                        if context.options.scale_lineweights {
+                            mm * scale
+                        } else {
+                            mm
+                        }
+                    }
+                    None => {
+                        glyph_to_world::nominal_pen_world_mm(
+                            glyph.bold,
+                            basis.glyph_unit_mm() as f32,
+                        ) * scale
+                    }
+                }
+                .max(0.1 * PT_TO_MM);
+                let pen = context.pen(width_mm);
+                for stroke in &glyph.strokes {
+                    let points: Vec<[f64; 2]> = stroke
+                        .iter()
+                        .map(|point| {
+                            let [x, y] = basis.world(point);
+                            context.place(x, y)
+                        })
+                        .collect();
+                    let pieces = match points[..] {
+                        // A stroke of one point is a dot: a mark one pen wide.
+                        [[x, y]] => {
+                            let half = pen as f64 / 2.0;
+                            clip_polyline(&[[x - half, y], [x + half, y]], context.bounds)
+                        }
+                        _ => clip_polyline(&points, context.bounds),
+                    };
+                    for piece in pieces {
+                        let piece = rounded(&piece);
+                        if piece.len() < 2 {
+                            continue;
+                        }
+                        stream.color(color);
+                        stream.weight(pen);
+                        stream.polyline(&piece);
+                    }
+                }
+            }
+        }
+    }
+    if drawn {
+        return;
+    }
+
     let page_turn = (context.map.rotation_deg as f64).to_radians();
     for run in &wire.searchable_text {
         if run.text.is_empty() || run.height <= 0.0 || !run.height.is_finite() {
@@ -814,9 +994,7 @@ fn emit_text(stream: &mut Stream, wire: &WireModel, context: &Context) {
         {
             continue;
         }
-        let rgb = style_color
-            .unwrap_or_else(|| adapt_to_paper([run.color[0], run.color[1], run.color[2]]));
-        let color = rgb_bytes(plotted_color(rgb, run.color[3], screening, context.options));
+        let color = plotted(run.color);
         // The run's height is its capitals'; the stream's font height is the em.
         let em = (run.height as f64 * context.map.scale * UNITS_PER_MM / CAP_PER_EM)
             .round()

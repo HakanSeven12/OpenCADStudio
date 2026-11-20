@@ -3082,7 +3082,6 @@ mod tests {
     }
 
     use super::*;
-    use crate::io::plot_style::PlotStyleTableExt as _;
 
     #[test]
     fn only_colour_7_adapts_to_the_white_sheet() {

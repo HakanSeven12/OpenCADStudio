@@ -11,7 +11,7 @@ use crate::app::Message;
 use crate::tr;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{button_style, dialog_button, field_style};
-use crate::ui::window::pdf_dialogs::{card, card_style};
+use crate::ui::window::pdf_dialogs::card;
 use document::objects::{
     BlockContentConnectionType, LeaderContentType, MultiLeaderPathType, MultiLeaderStyle,
     TextAttachmentDirectionType, TextAttachmentType,

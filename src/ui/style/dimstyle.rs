@@ -18,7 +18,7 @@ use crate::ui::style::mleaderstyle::{
     record_label, reload_card, sample_list, weight_sample, LinetypeRow, LoadDraft, Reload,
     ReloadAsk,
 };
-use crate::ui::window::pdf_dialogs::{accent_text, card, card_style, well_style};
+use crate::ui::window::pdf_dialogs::{accent_text, card};
 use document::tables::DimStyle;
 use document::types::{Color as AcadColor, LineWeight};
 use iced::widget::{

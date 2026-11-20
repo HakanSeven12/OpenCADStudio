@@ -252,7 +252,7 @@ fn lassoed(scene: &Scene, poly: &[Point], crossing: bool) -> (Vec<u64>, Vec<u64>
 /// the selection is what looking at every vertex of every solid gives.
 #[test]
 fn a_selection_takes_what_looking_at_every_vertex_takes() {
-    let mut scene = solids_every_which_way();
+    let scene = solids_every_which_way();
     let mut state = 0x9e37_79b9_7f4a_7c15u64;
     let mut next = |below: u32| {
         state = state

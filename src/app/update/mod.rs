@@ -239,6 +239,9 @@ impl OpenCADStudio {
         if self.active_modal == Some(BlockEditorSettings) {
             self.block_editor_settings = None;
         }
+        if self.active_modal == Some(VisualStyles) {
+            self.visual_styles_crease = None;
+        }
         if self.active_modal == Some(BlockCycleOrder) {
             self.block_cycle_order = None;
         }
@@ -12008,6 +12011,25 @@ impl OpenCADStudio {
                     self.tabs[i].action_bars.hidden.insert(handle);
                 }
                 Task::none()
+            }
+            Message::VisualStylesCreaseInput(value) => {
+                if let Some(crease) = &mut self.visual_styles_crease {
+                    *crease = value;
+                }
+                Task::none()
+            }
+            Message::VisualStylesCreaseApply => {
+                let Some(value) = self.visual_styles_crease.clone() else {
+                    return Task::none();
+                };
+                let task =
+                    self.run_one_command_line(&format!("SETVAR VSEDGESMOOTH {}", value.trim()));
+                // A refused value goes back to the one in force.
+                self.visual_styles_crease = Some(self.model_space.edge_smooth.to_string());
+                task
+            }
+            Message::VisualStylesOccludedEdges(on) => {
+                self.run_one_command_line(&format!("SETVAR VSOCCLUDEDEDGES {}", u8::from(on)))
             }
             Message::BlockEditorSettingsInput(index, value) => {
                 if let Some(state) = &mut self.block_editor_settings {

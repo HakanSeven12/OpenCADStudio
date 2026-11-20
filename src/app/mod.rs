@@ -1026,6 +1026,8 @@ pub(super) struct OpenCADStudio {
     block_visibility_mode: bool,
     block_editor_preferences: settings::BlockEditorPreferences,
     block_editor_settings: Option<crate::ui::window::block_editor_settings::State>,
+    /// Visual Styles Manager: the crease angle being typed; `None` while closed.
+    visual_styles_crease: Option<String>,
     block_cycle_order: Option<crate::ui::window::block_cycle_order::State>,
     block_dependency_cache: std::cell::RefCell<Option<block_feedback::DependencyCache>>,
     /// PDF dialogs' working copies; `None` while closed.
@@ -3571,6 +3573,7 @@ pub enum ModalKind {
     Aliases,
     NamedParameters,
     BlockEditorSettings,
+    VisualStyles,
     BlockCycleOrder,
     ScaleManager,
     /// Add / remove the annotation scales a single selected object has a
@@ -5498,6 +5501,10 @@ pub enum Message {
     /// `Scene::named_parameters`.
     NamedParametersOpen,
     BlockEditorSettingsInput(usize, String),
+    /// Visual Styles Manager: crease angle typed / submitted, occluded edges toggled.
+    VisualStylesCreaseInput(String),
+    VisualStylesCreaseApply,
+    VisualStylesOccludedEdges(bool),
     BlockConstraintColorInput(usize, String),
     ToggleBlockConstraintStatus,
     BlockEditorSettingsReset,
@@ -6581,6 +6588,7 @@ impl OpenCADStudio {
             block_visibility_mode: false,
             block_editor_preferences: settings::BlockEditorPreferences::default(),
             block_editor_settings: None,
+            visual_styles_crease: None,
             block_cycle_order: None,
             block_dependency_cache: std::cell::RefCell::new(None),
             pdf_attach: None,

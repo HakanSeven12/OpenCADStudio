@@ -32,6 +32,7 @@ impl OpenCADStudio {
             Some(K::Aliases) => crate::tr!("modal", "command-aliases"),
             Some(K::NamedParameters) => crate::t!("Named Parameters").into_owned(),
             Some(K::BlockEditorSettings) => crate::t!("Block Editor Settings").into_owned(),
+            Some(K::VisualStyles) => crate::t!("Visual Styles Manager").into_owned(),
             Some(K::BlockCycleOrder) => crate::t!("Grip Cycle Order").into_owned(),
             Some(K::Options) => crate::tr!("action", "options"),
             Some(K::FindReplace) => crate::tr!("modal", "find-replace"),
@@ -245,6 +246,17 @@ impl OpenCADStudio {
             }
             super::super::ModalKind::BlockCycleOrder => {
                 crate::ui::window::block_cycle_order::view_window(self.block_cycle_order.as_ref()?)
+            }
+            super::super::ModalKind::VisualStyles => {
+                let tab = &self.tabs[self.active_tab];
+                crate::ui::window::visual_styles::view_window(
+                    crate::ui::window::visual_styles::View {
+                        current: tab.render_mode,
+                        crease: self.visual_styles_crease.as_deref()?,
+                        occluded: self.model_space.occluded_edges,
+                        silhouette: tab.scene.document.header.display_silhouette,
+                    },
+                )
             }
             super::super::ModalKind::Options => {
                 let dirty = self.options_dirty();

@@ -27,11 +27,6 @@ const TRANSPARENCY_LABEL_W: f32 = 38.0;
 /// Width of the hatch pattern flyout and its height.
 const HATCH_FLYOUT_W: f32 = 352.0;
 const HATCH_FLYOUT_H: f32 = 724.0;
-/// Width of the gradient editor flyout and its height. The height is fixed
-/// (content is ~289 px) so the drop-down moves the editor up when the panel
-/// sits low in the window instead of clipping it to the space below.
-const GRADIENT_FLYOUT_W: f32 = 390.0;
-const GRADIENT_FLYOUT_H: f32 = 296.0;
 const TRANSPARENCY_ICON: &[u8] =
     include_bytes!("../../../assets/icons/attributes/transparency.svg");
 const LINEWEIGHT_ICON: &[u8] = include_bytes!("../../../assets/icons/attributes/lineweight.svg");
@@ -1374,8 +1369,8 @@ pub fn view<'a>(
                 let flyout = state.gradient_editor.as_ref().map(|editor| {
                     (
                         crate::ui::window::gradient_editor::view(editor, gradient_color_picking),
-                        GRADIENT_FLYOUT_W,
-                        Some(GRADIENT_FLYOUT_H),
+                        crate::ui::window::gradient_editor::WIDTH,
+                        Some(crate::ui::window::gradient_editor::HEIGHT),
                     )
                 });
                 let open = state.gradient_editor.is_some();

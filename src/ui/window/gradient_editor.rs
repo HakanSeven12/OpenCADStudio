@@ -10,6 +10,20 @@ use iced::widget::{
 };
 use iced::{Background, Border, Color, Element, Fill, Length, Theme};
 
+/// Every row of the editor has a fixed height, so the flyout's height is known
+/// up front: the palette's drop-down needs it to move the editor up rather
+/// than clip it when there is little room below the button.
+const ROW_H: f32 = crate::ui::style::form::ROW_H;
+const PREVIEW_H: f32 = 80.0;
+const TYPE_H: f32 = 48.0;
+const GAP: f32 = 8.0;
+const PAD: f32 = 10.0;
+/// Width of the editor flyout.
+pub const WIDTH: f32 = 390.0;
+/// Height of the editor flyout: preview, colour mode, colours, type, angle
+/// and the Cancel / OK row, with the gaps between them and the padding.
+pub const HEIGHT: f32 = 2.0 * PAD + PREVIEW_H + 4.0 * ROW_H + TYPE_H + 5.0 * GAP;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GradientColorMode {
     One,
@@ -299,9 +313,11 @@ fn icon(kind: GradientKind, inverted: bool) -> &'static [u8] {
 pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
     let segment = |label, mode| {
         let selected = state.color_mode == mode;
-        button(text(label).size(11))
+        button(container(text(label).size(11)).center_y(Fill))
             .on_press(msg(GradientMsg::ColorMode(mode)))
             .width(Fill)
+            .height(ROW_H)
+            .padding([0, 10])
             .style(move |theme: &Theme, status| {
                 if selected {
                     button::primary(theme, status)
@@ -345,7 +361,7 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
                 ..Default::default()
             }
         })
-        .height(crate::ui::style::form::ROW_H)
+        .height(ROW_H)
         .padding([3, 6])
         .width(Fill);
         row![text(label).size(11).width(43), picker]
@@ -375,7 +391,7 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
         )
         .on_press(msg(GradientMsg::Kind(kind)))
         .width(48)
-        .height(48)
+        .height(TYPE_H)
         .style(move |theme: &Theme, status| {
             let mut s = button::subtle(theme, status);
             if selected {
@@ -396,7 +412,7 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
     )
     .on_press_maybe((state.kind != GradientKind::Linear).then(|| msg(GradientMsg::InvertToggled)))
     .width(42)
-    .height(48)
+    .height(TYPE_H)
     .style(move |theme: &Theme, status| {
         let mut style = button::secondary(theme, status);
         if invert_selected {
@@ -421,6 +437,7 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
             color_field(crate::t!("Color 2"), 2, state.color_2)
         ]
         .spacing(6)
+        .height(ROW_H)
         .into()
     } else {
         row![
@@ -434,10 +451,11 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
             ]
             .spacing(4)
             .align_y(iced::Center)
-            .height(crate::ui::style::form::ROW_H)
+            .height(ROW_H)
             .width(Fill)
         ]
         .spacing(6)
+        .height(ROW_H)
         .align_y(iced::Center)
         .into()
     };
@@ -453,7 +471,7 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
                 .style(button::subtle)
                 .padding(3)
                 .width(24)
-                .height(crate::ui::style::form::ROW_H),
+                .height(ROW_H),
             text(crate::t!("Reset angle")).size(10),
             tooltip::Position::Bottom,
         ),
@@ -465,27 +483,32 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
             .text_size(11)
     ]
     .spacing(6)
+    .height(ROW_H)
     .align_y(iced::Center);
     let types = row![text(crate::t!("Type")).size(11).width(43), type_row]
         .spacing(4)
+        .height(TYPE_H)
         .align_y(iced::Center);
     let actions = container(
         row![
-            button(text(crate::t!("Cancel")).size(11))
+            button(container(text(crate::t!("Cancel")).size(11)).center_y(Fill))
                 .on_press(msg(GradientMsg::Cancel))
                 .style(button::secondary)
-                .padding([5, 14]),
-            button(text(crate::t!("OK")).size(11))
+                .height(ROW_H)
+                .padding([0, 14]),
+            button(container(text(crate::t!("OK")).size(11)).center_y(Fill))
                 .on_press(msg(GradientMsg::Apply))
                 .style(button::primary)
-                .padding([5, 18]),
+                .height(ROW_H)
+                .padding([0, 18]),
         ]
         .spacing(8),
     )
     .width(Fill)
+    .height(ROW_H)
     .align_x(iced::alignment::Horizontal::Right);
     let content = column![
-        container(preview(state)).width(Fill).height(80),
+        container(preview(state)).width(Fill).height(PREVIEW_H),
         row![
             segment(crate::t!("One Color"), GradientColorMode::One),
             segment(crate::t!("Two Colors"), GradientColorMode::Two)
@@ -496,10 +519,11 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
         angle,
         actions
     ]
-    .spacing(8)
-    .padding(10);
+    .spacing(GAP)
+    .padding(PAD);
     let panel: Element<'_, Message> = container(content)
-        .width(Length::Fixed(390.0))
+        .width(Length::Fixed(WIDTH))
+        .height(Length::Fixed(HEIGHT))
         .style(|theme: &Theme| container::Style {
             background: Some(Background::Color(theme.palette().background.base.color)),
             border: Border {
@@ -521,7 +545,7 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
                 ..Default::default()
             });
         iced::widget::stack![panel, iced::widget::opaque(shield)]
-            .width(Length::Fixed(390.0))
+            .width(Length::Fixed(WIDTH))
             .into()
     } else {
         panel

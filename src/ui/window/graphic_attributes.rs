@@ -503,10 +503,17 @@ fn color_info(
     draw_depth: &DrawDepth,
 ) -> Option<ColorInfo> {
     let (top, color, varies) = shared_value(document, handles, draw_depth, |c| c.color)?;
-    let rgba = crate::scene::view::render::render_style_for_common_viewport(document, top, None).0;
+    let (rgba, _, _, _, aci) =
+        crate::scene::view::render::render_style_for_common_viewport(document, top, None);
+    // Colour 7 is drawn black on a light canvas; show the swatch the same way.
+    let display = if aci == 7 {
+        crate::ui::properties::acad_color_display(AcadColor::Index(7)).0
+    } else {
+        iced::Color::from_rgba(rgba[0], rgba[1], rgba[2], 1.0)
+    };
     Some(ColorInfo {
         color,
-        display: iced::Color::from_rgba(rgba[0], rgba[1], rgba[2], 1.0),
+        display,
         varies,
     })
 }

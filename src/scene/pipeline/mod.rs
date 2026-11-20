@@ -322,6 +322,9 @@ pub struct Pipeline {
     msaa_view: wgpu::TextureView,
     /// Single-sample texture that receives the MSAA resolve result.
     resolve_view: wgpu::TextureView,
+    /// The final wire/text highlight pass can be composited over the cached 2D drawing.
+    wire_highlight_target: Option<(wgpu::TextureView, wgpu::BindGroup)>,
+    wire_highlight_dirty: bool,
     /// Pipeline + resources for blitting the resolve texture to the surface target.
     blit_pipeline: wgpu::RenderPipeline,
     blit_bind_group_layout: wgpu::BindGroupLayout,
@@ -2608,6 +2611,8 @@ impl Pipeline {
             depth_view,
             msaa_view,
             resolve_view,
+            wire_highlight_target: None,
+            wire_highlight_dirty: false,
             blit_pipeline,
             blit_bind_group_layout: blit_bgl,
             blit_sampler,
@@ -4554,6 +4559,29 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         );
     }
 
+    pub(in crate::scene) fn has_hovered_mesh(
+        &self,
+        meshes: &std::sync::Arc<Vec<MeshLodSet>>,
+        hovered: &rustc_hash::FxHashSet<document::Handle>,
+    ) -> bool {
+        if hovered.is_empty() {
+            return false;
+        }
+        if self
+            .cached_mesh_source
+            .as_ref()
+            .is_some_and(|source| std::sync::Arc::ptr_eq(source, meshes))
+        {
+            return hovered
+                .iter()
+                .any(|handle| self.mesh_ranges_by_handle.contains_key(handle));
+        }
+        meshes
+            .iter()
+            .filter_map(MeshLodSet::entity_handle)
+            .any(|handle| hovered.contains(&handle))
+    }
+
     /// The highlight draws for the picked and the hovered solids: the resident
     /// ranges of each, leaving out the ones highlighted by their edges.
     fn mesh_highlight_draws(
@@ -5078,6 +5106,146 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                 uv_scale[1] * fy,
             ]),
         );
+    }
+
+    fn has_wire_highlights(&self) -> bool {
+        !self.gpu_selected_wires.is_empty()
+            || !self.gpu_selected_block_wires.is_empty()
+            || !self.gpu_selected_circles.is_empty()
+            || !self.gpu_selected_ellipses.is_empty()
+            || !self.text_highlight_gpu.is_empty()
+            || !self.block_text_highlight_gpu.is_empty()
+    }
+
+    fn render_wire_highlights(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        raster: Rectangle,
+        stencil_ref: u32,
+        occluded: bool,
+        overlay: Option<&wgpu::TextureView>,
+    ) {
+        let multisampled = msaa_samples() > 1;
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("selection_xray.render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: if multisampled {
+                    &self.msaa_view
+                } else {
+                    overlay.unwrap_or(&self.msaa_view)
+                },
+                depth_slice: None,
+                resolve_target: overlay.filter(|_| multisampled),
+                ops: wgpu::Operations {
+                    load: if overlay.is_some() {
+                        wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                    } else {
+                        wgpu::LoadOp::Load
+                    },
+                    store: if multisampled && overlay.is_some() {
+                        wgpu::StoreOp::Discard
+                    } else {
+                        wgpu::StoreOp::Store
+                    },
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                }),
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_viewport(raster.x, raster.y, raster.width, raster.height, 0.0, 1.0);
+        pass.set_bind_group(0, &self.selection_uniform_bind_group, &[]);
+        pass.set_stencil_reference(stencil_ref);
+        if !self.gpu_selected_wires.is_empty() {
+            pass.set_pipeline(if occluded {
+                &self.wire_pipeline
+            } else {
+                &self.wire_xray_pipeline
+            });
+            for wire in &self.gpu_selected_wires {
+                if wire.instance_count > 0 {
+                    if let Some(bg) = &wire.const_bind_group {
+                        pass.set_bind_group(1, bg.as_ref(), &[]);
+                    }
+                    pass.set_vertex_buffer(0, wire.instance_buffer.slice(..));
+                    pass.draw(
+                        0..6,
+                        wire.first_instance..wire.first_instance + wire.instance_count,
+                    );
+                }
+            }
+        }
+        if !self.gpu_selected_block_wires.is_empty() {
+            pass.set_pipeline(if occluded {
+                &self.block_wire_pipeline
+            } else {
+                &self.block_wire_xray_pipeline
+            });
+            for wire in &self.gpu_selected_block_wires {
+                if wire.instance_count == 0 {
+                    continue;
+                }
+                bind_and_draw_block_wire(&mut pass, wire);
+            }
+        }
+        if !self.gpu_selected_circles.is_empty() {
+            pass.set_pipeline(if occluded {
+                &self.circle_pipeline
+            } else {
+                &self.circle_xray_pipeline
+            });
+            pass.set_bind_group(0, &self.selection_uniform_bind_group, &[]);
+            for cg in &self.gpu_selected_circles {
+                if cg.instance_count > 0 {
+                    pass.set_vertex_buffer(0, cg.instance_buffer.slice(..));
+                    pass.draw(0..6, 0..cg.instance_count);
+                }
+            }
+        }
+        if !self.gpu_selected_ellipses.is_empty() {
+            pass.set_pipeline(if occluded {
+                &self.ellipse_pipeline
+            } else {
+                &self.ellipse_xray_pipeline
+            });
+            pass.set_bind_group(0, &self.selection_uniform_bind_group, &[]);
+            for eg in &self.gpu_selected_ellipses {
+                if eg.instance_count > 0 {
+                    pass.set_vertex_buffer(0, eg.instance_buffer.slice(..));
+                    pass.draw(0..6, 0..eg.instance_count);
+                }
+            }
+        }
+        if let Some(atlas) = &self.text_atlas_gpu {
+            if !self.text_highlight_gpu.is_empty() {
+                pass.set_pipeline(&self.text_highlight_pipeline);
+                pass.set_bind_group(1, &atlas.bind_group, &[]);
+                for text in &self.text_highlight_gpu {
+                    pass.set_vertex_buffer(0, text.vertex_buffer.slice(..));
+                    pass.draw(0..text.vertex_count, 0..1);
+                }
+            }
+        }
+        if let Some(atlas) = &self.text_atlas_gpu {
+            if !self.block_text_highlight_gpu.is_empty() {
+                pass.set_pipeline(&self.block_text_highlight_pipeline);
+                pass.set_bind_group(1, &atlas.bind_group, &[]);
+                for text in &self.block_text_highlight_gpu {
+                    text.draw(&mut pass);
+                }
+            }
+        }
     }
 
     /// Render geometry at its fractional pixel rectangle and blit the resolve
@@ -6125,128 +6293,14 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                 }
             }
 
-            // ── Pass 7: selection overlay pass ───────────────────────────────
-            // Redraws selected wires and text with depth_compare=Always so both
-            // appear on top of all other geometry at full brightness — unless
-            // faces are drawn: then edges behind a surface stay hidden while
-            // selected, as they are when not (#1031).
-            let occluded = hidden_line || !mesh_wireframe;
-            let have_text_highlight =
-                (!self.text_highlight_gpu.is_empty()) || !self.block_text_highlight_gpu.is_empty();
-            if !self.gpu_selected_wires.is_empty()
-                || !self.gpu_selected_block_wires.is_empty()
-                || !self.gpu_selected_circles.is_empty()
-                || !self.gpu_selected_ellipses.is_empty()
-                || have_text_highlight
-            {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("selection_xray.render_pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: msaa,
-                        depth_slice: None,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &self.depth_view,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        }),
-                    }),
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                pass.set_viewport(raster.x, raster.y, raster.width, raster.height, 0.0, 1.0);
-                pass.set_bind_group(0, &self.selection_uniform_bind_group, &[]);
-                pass.set_stencil_reference(stencil_ref);
-                if !self.gpu_selected_wires.is_empty() {
-                    pass.set_pipeline(if occluded {
-                        &self.wire_pipeline
-                    } else {
-                        &self.wire_xray_pipeline
-                    });
-                    for wire in &self.gpu_selected_wires {
-                        if wire.instance_count > 0 {
-                            if let Some(bg) = &wire.const_bind_group {
-                                pass.set_bind_group(1, bg.as_ref(), &[]);
-                            }
-                            pass.set_vertex_buffer(0, wire.instance_buffer.slice(..));
-                            pass.draw(
-                                0..6,
-                                wire.first_instance..wire.first_instance + wire.instance_count,
-                            );
-                        }
-                    }
-                }
-                if !self.gpu_selected_block_wires.is_empty() {
-                    pass.set_pipeline(if occluded {
-                        &self.block_wire_pipeline
-                    } else {
-                        &self.block_wire_xray_pipeline
-                    });
-                    for wire in &self.gpu_selected_block_wires {
-                        if wire.instance_count == 0 {
-                            continue;
-                        }
-                        bind_and_draw_block_wire(&mut pass, wire);
-                    }
-                }
-                if !self.gpu_selected_circles.is_empty() {
-                    pass.set_pipeline(if occluded {
-                        &self.circle_pipeline
-                    } else {
-                        &self.circle_xray_pipeline
-                    });
-                    pass.set_bind_group(0, &self.selection_uniform_bind_group, &[]);
-                    for cg in &self.gpu_selected_circles {
-                        if cg.instance_count > 0 {
-                            pass.set_vertex_buffer(0, cg.instance_buffer.slice(..));
-                            pass.draw(0..6, 0..cg.instance_count);
-                        }
-                    }
-                }
-                if !self.gpu_selected_ellipses.is_empty() {
-                    pass.set_pipeline(if occluded {
-                        &self.ellipse_pipeline
-                    } else {
-                        &self.ellipse_xray_pipeline
-                    });
-                    pass.set_bind_group(0, &self.selection_uniform_bind_group, &[]);
-                    for eg in &self.gpu_selected_ellipses {
-                        if eg.instance_count > 0 {
-                            pass.set_vertex_buffer(0, eg.instance_buffer.slice(..));
-                            pass.draw(0..6, 0..eg.instance_count);
-                        }
-                    }
-                }
-                if let Some(atlas) = &self.text_atlas_gpu {
-                    if !self.text_highlight_gpu.is_empty() {
-                        pass.set_pipeline(&self.text_highlight_pipeline);
-                        pass.set_bind_group(1, &atlas.bind_group, &[]);
-                        for text in &self.text_highlight_gpu {
-                            pass.set_vertex_buffer(0, text.vertex_buffer.slice(..));
-                            pass.draw(0..text.vertex_count, 0..1);
-                        }
-                    }
-                }
-                if let Some(atlas) = &self.text_atlas_gpu {
-                    if !self.block_text_highlight_gpu.is_empty() {
-                        pass.set_pipeline(&self.block_text_highlight_pipeline);
-                        pass.set_bind_group(1, &atlas.bind_group, &[]);
-                        for text in &self.block_text_highlight_gpu {
-                            text.draw(&mut pass);
-                        }
-                    }
-                }
+            if self.wire_highlight_target.is_none() && self.has_wire_highlights() {
+                self.render_wire_highlights(
+                    encoder,
+                    raster,
+                    stencil_ref,
+                    hidden_line || !mesh_wireframe,
+                    None,
+                );
             }
 
             // ── Resolve MSAA → resolve texture ────────────────────────────────
@@ -6274,6 +6328,16 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                 // No draw calls — the pass itself triggers the MSAA resolve.
             }
         } // end `if !self.skip_geometry`
+
+        let wire_highlight = self
+            .wire_highlight_target
+            .as_ref()
+            .filter(|_| self.has_wire_highlights());
+        // After the base resolve, the MSAA color target is available as scratch.
+        // Keep the existing depth/stencil and resolve the highlight separately.
+        if let Some((view, _)) = wire_highlight.filter(|_| self.wire_highlight_dirty) {
+            self.render_wire_highlights(encoder, raster, stencil_ref, false, Some(view));
+        }
 
         // ── Blit resolve texture → surface target at surface_dest position ──
         // The viewport maps the NDC quad to exactly `surface_dest` in the
@@ -6314,6 +6378,10 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             );
             pass.set_bind_group(0, &self.blit_bind_group, &[]);
             pass.draw(0..6, 0..1);
+            if let Some((_, blit)) = wire_highlight {
+                pass.set_bind_group(0, blit, &[]);
+                pass.draw(0..6, 0..1);
+            }
         }
 
         // Simple line-command previews live above the cached base scene. The
@@ -6370,6 +6438,8 @@ analytic={:.1} regular={:.1} blocks={:.1}",
 
     /// Reset every cache key that describes this slot's uploaded content.
     pub(crate) fn forget_cached_keys(&mut self) {
+        self.wire_highlight_target = None;
+        self.wire_highlight_dirty = false;
         self.selected_highlight_gpu_cache = None;
         self.highlight_wire_cache.clear();
         self.highlight_wire_cache_bytes = 0;
@@ -6520,6 +6590,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         let alloc = Size::new(round_up_tex(size.width), round_up_tex(size.height));
         if self.alloc_size != alloc {
             let size = alloc;
+            self.wire_highlight_target = None;
             let depth_tex = create_depth_texture(device, size);
             self.depth_view = depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
             let resolve_tex = create_resolve_texture(device, size, self.surface_format);
@@ -6530,27 +6601,53 @@ analytic={:.1} regular={:.1} blocks={:.1}",
             } else {
                 resolve_tex.create_view(&wgpu::TextureViewDescriptor::default())
             };
-            self.blit_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("blit.bind_group"),
-                layout: &self.blit_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&resolve_view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.blit_sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: self.blit_uniform_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            self.blit_bind_group = self.resolve_blit_bind_group(device, &resolve_view);
             self.resolve_view = resolve_view;
             self.alloc_size = alloc;
         }
+    }
+
+    pub(in crate::scene) fn prepare_wire_highlight_overlay(
+        &mut self,
+        device: &wgpu::Device,
+        separate: bool,
+        dirty: bool,
+    ) {
+        self.wire_highlight_dirty = separate && dirty;
+        if !separate {
+            self.wire_highlight_target = None;
+        } else if self.wire_highlight_target.is_none() && self.has_wire_highlights() {
+            let view = create_resolve_texture(device, self.alloc_size, self.surface_format)
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            let blit = self.resolve_blit_bind_group(device, &view);
+            self.wire_highlight_target = Some((view, blit));
+            self.wire_highlight_dirty = true;
+        }
+    }
+
+    fn resolve_blit_bind_group(
+        &self,
+        device: &wgpu::Device,
+        view: &wgpu::TextureView,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("blit.bind_group"),
+            layout: &self.blit_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.blit_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.blit_uniform_buffer.as_entire_binding(),
+                },
+            ],
+        })
     }
 }
 
@@ -6857,7 +6954,11 @@ impl Pipeline {
                 .map_or(0, |(texture, _)| counter.texture(texture));
         bytes.render_targets = counter.texture(self.depth_view.texture())
             + counter.texture(self.msaa_view.texture())
-            + counter.texture(self.resolve_view.texture());
+            + counter.texture(self.resolve_view.texture())
+            + self
+                .wire_highlight_target
+                .as_ref()
+                .map_or(0, |(view, _)| counter.texture(view.texture()));
         bytes.text_atlas = self
             .text_atlas_gpu
             .as_ref()

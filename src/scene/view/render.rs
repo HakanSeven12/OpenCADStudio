@@ -266,6 +266,7 @@ pub struct ViewportData {
     /// the xray overlay rebuild its (small) hover half on a rollover without
     /// re-emitting the committed selection's GPU buffers.
     pub(in crate::scene) hover_generation: u64,
+    separate_wire_highlights: bool,
     /// Signature of the *selected set* only (not hover). Gates the static-buffer
     /// re-upload (hatch tint, issue #71) so a hover doesn't re-upload every
     /// hatch / face3d buffer on hatch-heavy drawings.
@@ -548,7 +549,15 @@ impl shader::Primitive for Primitive {
             } else {
                 inner.preview_overlay_direct = false;
             }
-            let sig = render_signature(vp, &placement, inner.preview_overlay_direct);
+            // Mesh tint is drawn with the mesh passes even in 2D wireframe.
+            let hover_changes_base = !vp.separate_wire_highlights
+                || inner.has_hovered_mesh(&vp.meshes, &vp.hover_handles);
+            let sig = render_signature(
+                vp,
+                &placement,
+                inner.preview_overlay_direct,
+                hover_changes_base,
+            );
             // REDRAW bypass: pin render_sig to force a full pass this frame
             // even if the signature is otherwise unchanged. The request is
             // one-shot per viewport (consumed by the builder that produced
@@ -571,6 +580,20 @@ impl shader::Primitive for Primitive {
             inner.skip_background = vp.skip_background;
             inner.occluded_edges = vp.occluded_edges;
             if skip {
+                if !hover_changes_base
+                    && inner.cached_hover_generation != Some(vp.hover_generation)
+                {
+                    if let (Some(wires), Some(depths)) =
+                        (vp.wires.upgrade(), vp.draw_depths.upgrade())
+                    {
+                        self.prepare_wire_highlights(inner, device, queue, vp, &wires, &depths);
+                        inner.prepare_wire_highlight_overlay(device, true, true);
+                    } else {
+                        inner.prepare_wire_highlight_overlay(device, false, false);
+                    }
+                } else {
+                    inner.prepare_wire_highlight_overlay(device, vp.separate_wire_highlights, false);
+                }
                 if vp.show_viewcube {
                     inner.viewcube.upload(
                         queue,
@@ -1271,92 +1294,9 @@ retained_contributors={}",
                     );
                 }
             }
-            // Selection xray overlay — split into two independently cached
-            // halves. The committed-selection half re-emits only when the
-            // selection (or the wires under it) changed: a pick bumps
-            // selection_generation and refreshes the overlay without
-            // re-tessellating or re-uploading the main wire buffers. The
-            // hover half re-emits on rollover / marquee ticks (hover_generation)
-            // and on selection changes, because the hover overlay is
-            // `hovered − selected`.
-            let sel_key = (vp.wire_content_id, vp.selection_generation);
-            let highlighted_geometry_unchanged = vp.selected_handles.is_empty()
-                && vp.hover_handles.is_empty()
-                || vp.wire_patch.as_ref().is_some_and(|(previous, patch)| {
-                    *previous == inner.cached_selection.0
-                        && patch.changes.iter().all(|(handle, _)| {
-                            !vp.selected_handles.contains(handle)
-                                && !vp.hover_handles.contains(handle)
-                        })
-                });
-            let selection_changed = inner.cached_selection.1 != vp.selection_generation;
-            let hover_changed = inner.cached_hover_generation != Some(vp.hover_generation);
-            let highlighted_geometry_changed =
-                inner.cached_selection.0 != vp.wire_content_id && !highlighted_geometry_unchanged;
-            let annotation_context_changed = inner
-                .cached_annotation_highlight_source
-                .as_ref()
-                .map_or(!vp.annotation_context_wires.is_empty(), |previous| {
-                    !(previous.is_empty() && vp.annotation_context_wires.is_empty())
-                        && !Arc::ptr_eq(previous, &vp.annotation_context_wires)
-                });
-            let selected_annotation_changed = inner
-                .cached_selected_annotation_source
-                .as_ref()
-                .map_or(!vp.selected_annotation_context_wires.is_empty(), |previous| {
-                    !(previous.is_empty() && vp.selected_annotation_context_wires.is_empty())
-                        && !Arc::ptr_eq(previous, &vp.selected_annotation_context_wires)
-                });
-            let refresh_selected =
-                selection_changed || highlighted_geometry_changed || selected_annotation_changed;
-            let refresh_hover = hover_changed
-                || selection_changed
-                || highlighted_geometry_changed
-                || annotation_context_changed;
-            if refresh_selected || refresh_hover {
-                inner.prepare_highlight_wire_cache(vp.wire_content_id, vp.draw_depth_generation);
-                let sel_color = if self.selection_effect {
-                    Some(self.selection_color)
-                } else {
-                    None
-                };
-                // Identity of the hover half's inputs for the text-upload
-                // cache: generations + wire content + depth generation mix,
-                // plus the hover-annotation source pointer (the Arc content
-                // is immutable, so pointer equality is content equality).
-                let hover_key = (
-                    vp.hover_generation
-                        ^ vp.selection_generation.rotate_left(32)
-                        ^ vp.wire_content_id.rotate_left(16)
-                        ^ vp.draw_depth_generation.rotate_left(48),
-                    std::sync::Arc::as_ptr(&vp.annotation_context_wires) as usize as u64,
-                );
-                inner.upload_split_highlights(
-                    device,
-                    queue,
-                    &vp_wires[..],
-                    &vp.selected_handles,
-                    &vp.hover_handles,
-                    &vp.selected_annotation_context_wires,
-                    &vp.annotation_context_wires,
-                    &draw_depths,
-                    sel_color,
-                    vp.wire_content_id,
-                    vp.draw_depth_generation,
-                    refresh_selected,
-                    refresh_hover,
-                    hover_key,
-                );
-                inner.cached_annotation_highlight_source =
-                    Some(Arc::clone(&vp.annotation_context_wires));
-                inner.cached_selected_annotation_source =
-                    Some(Arc::clone(&vp.selected_annotation_context_wires));
-            }
-            // Advance the content id even when an unrelated entity patch kept
-            // the existing overlay valid, so future deltas compare to the
-            // arena generation actually on screen.
-            inner.cached_selection = sel_key;
-            inner.cached_hover_generation = Some(vp.hover_generation);
+            let (selected_annotation_changed, annotation_context_changed) =
+                self.prepare_wire_highlights(inner, device, queue, vp, &vp_wires, &draw_depths);
+            inner.prepare_wire_highlight_overlay(device, vp.separate_wire_highlights, true);
             // Batched solid meshes stay resident while unrelated entity
             // categories change.
             if inner
@@ -1647,6 +1587,106 @@ retained_contributors={}",
     }
 }
 
+impl Primitive {
+    fn prepare_wire_highlights(
+        &self,
+        inner: &mut crate::scene::pipeline::Pipeline,
+        device: &iced::wgpu::Device,
+        queue: &iced::wgpu::Queue,
+        vp: &ViewportData,
+        wires: &[WireModel],
+        draw_depths: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+    ) -> (bool, bool) {
+        // Selection xray overlay — split into two independently cached
+        // halves. The committed-selection half re-emits only when the
+        // selection (or the wires under it) changed: a pick bumps
+        // selection_generation and refreshes the overlay without
+        // re-tessellating or re-uploading the main wire buffers. The
+        // hover half re-emits on rollover / marquee ticks (hover_generation)
+        // and on selection changes, because the hover overlay is
+        // `hovered − selected`.
+        let sel_key = (vp.wire_content_id, vp.selection_generation);
+        let highlighted_geometry_unchanged = vp.selected_handles.is_empty()
+            && vp.hover_handles.is_empty()
+            || vp.wire_patch.as_ref().is_some_and(|(previous, patch)| {
+                *previous == inner.cached_selection.0
+                    && patch.changes.iter().all(|(handle, _)| {
+                        !vp.selected_handles.contains(handle)
+                            && !vp.hover_handles.contains(handle)
+                    })
+            });
+        let selection_changed = inner.cached_selection.1 != vp.selection_generation;
+        let hover_changed = inner.cached_hover_generation != Some(vp.hover_generation);
+        let highlighted_geometry_changed =
+            inner.cached_selection.0 != vp.wire_content_id && !highlighted_geometry_unchanged;
+        let annotation_context_changed = inner
+            .cached_annotation_highlight_source
+            .as_ref()
+            .map_or(!vp.annotation_context_wires.is_empty(), |previous| {
+                !(previous.is_empty() && vp.annotation_context_wires.is_empty())
+                    && !Arc::ptr_eq(previous, &vp.annotation_context_wires)
+            });
+        let selected_annotation_changed = inner
+            .cached_selected_annotation_source
+            .as_ref()
+            .map_or(!vp.selected_annotation_context_wires.is_empty(), |previous| {
+                !(previous.is_empty() && vp.selected_annotation_context_wires.is_empty())
+                    && !Arc::ptr_eq(previous, &vp.selected_annotation_context_wires)
+            });
+        let refresh_selected =
+            selection_changed || highlighted_geometry_changed || selected_annotation_changed;
+        let refresh_hover = hover_changed
+            || selection_changed
+            || highlighted_geometry_changed
+            || annotation_context_changed;
+        if refresh_selected || refresh_hover {
+            inner.prepare_highlight_wire_cache(vp.wire_content_id, vp.draw_depth_generation);
+            let sel_color = if self.selection_effect {
+                Some(self.selection_color)
+            } else {
+                None
+            };
+            // Identity of the hover half's inputs for the text-upload
+            // cache: generations + wire content + depth generation mix,
+            // plus the hover-annotation source pointer (the Arc content
+            // is immutable, so pointer equality is content equality).
+            let hover_key = (
+                vp.hover_generation
+                    ^ vp.selection_generation.rotate_left(32)
+                    ^ vp.wire_content_id.rotate_left(16)
+                    ^ vp.draw_depth_generation.rotate_left(48),
+                std::sync::Arc::as_ptr(&vp.annotation_context_wires) as usize as u64,
+            );
+            inner.upload_split_highlights(
+                device,
+                queue,
+                wires,
+                &vp.selected_handles,
+                &vp.hover_handles,
+                &vp.selected_annotation_context_wires,
+                &vp.annotation_context_wires,
+                draw_depths,
+                sel_color,
+                vp.wire_content_id,
+                vp.draw_depth_generation,
+                refresh_selected,
+                refresh_hover,
+                hover_key,
+            );
+            inner.cached_annotation_highlight_source =
+                Some(Arc::clone(&vp.annotation_context_wires));
+            inner.cached_selected_annotation_source =
+                Some(Arc::clone(&vp.selected_annotation_context_wires));
+        }
+        // Advance the content id even when an unrelated entity patch kept
+        // the existing overlay valid, so future deltas compare to the
+        // arena generation actually on screen.
+        inner.cached_selection = sel_key;
+        inner.cached_hover_generation = Some(vp.hover_generation);
+        (selected_annotation_changed, annotation_context_changed)
+    }
+}
+
 /// Hash of everything that determines one viewport's rendered scene image.
 /// Two consecutive frames with the same signature are pixel-identical, so the
 /// second may skip the geometry passes and re-blit the resolve texture (see the
@@ -1660,6 +1700,7 @@ fn render_signature(
     vp: &ViewportData,
     placement: &PhysicalViewport,
     direct_wire_preview: bool,
+    hover_changes_base: bool,
 ) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = rustc_hash::FxHasher::default();
@@ -1697,7 +1738,11 @@ fn render_signature(
     }
     vp.geometry_epoch.hash(&mut h);
     vp.selection_generation.hash(&mut h);
-    vp.hover_generation.hash(&mut h);
+    vp.separate_wire_highlights.hash(&mut h);
+    hover_changes_base.hash(&mut h);
+    if hover_changes_base {
+        vp.hover_generation.hash(&mut h);
+    }
     vp.selected_sig.hash(&mut h);
     vp.wire_content_id.hash(&mut h);
     vp.fill_mode.hash(&mut h);
@@ -5771,6 +5816,10 @@ impl Scene {
                 .hover_generation
                 .wrapping_mul(2)
                 .wrapping_add(u64::from(!show_interaction)),
+            separate_wire_highlights: self.current_layout == "Model"
+                && wireframe_2d
+                && !flags.mesh_fill
+                && !flags.hidden_line,
             selected_sig: interaction_sig,
             screen_rect,
         })

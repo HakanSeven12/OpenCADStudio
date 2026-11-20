@@ -1271,6 +1271,8 @@ pub struct PreparedOpenGeometry {
         u64,
         Arc<crate::scene::pick::interaction_index::InteractionHandleIndex>,
     )>,
+    /// Placed block hatches already built as input to the loader's handle index.
+    insert_hatches: Option<(u64, Arc<HashMap<Handle, Vec<HatchModel>>>)>,
 }
 
 impl std::fmt::Debug for PreparedOpenGeometry {
@@ -2103,6 +2105,11 @@ pub fn prepare_open_geometry(
         .borrow_mut()
         .take()
         .map(|(_, space_key, index)| (space_key, index));
+    let insert_hatches = scene
+        .insert_hatch_cache
+        .borrow_mut()
+        .take()
+        .map(|(_, space_key, hatches)| (space_key, hatches));
     if perf {
         crate::perf_record!(
             "[perf] open-handle-index={:.1}ms",
@@ -2156,6 +2163,7 @@ pub fn prepare_open_geometry(
             draw_depths,
             resident_layout,
             handle_index,
+            insert_hatches,
         },
     )
 }
@@ -4279,6 +4287,9 @@ impl Scene {
         if let Some((space_key, index)) = prepared.handle_index {
             *self.interaction_handle_index_cache.borrow_mut() =
                 Some((self.geometry_epoch, space_key, index));
+        }
+        if let Some((space_key, hatches)) = prepared.insert_hatches {
+            *self.insert_hatch_cache.borrow_mut() = Some((self.geometry_epoch, space_key, hatches));
         }
     }
 
@@ -19614,6 +19625,7 @@ mod journal_tests {
             draw_depths: Some(handed_over),
             resident_layout: None,
             handle_index: None,
+            insert_hatches: None,
         });
         assert_eq!(
             *scene.draw_depth_map(),

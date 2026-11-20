@@ -1774,7 +1774,7 @@ impl OpenCADStudio {
 
         self.push_undo_snapshot(i, "DWGUNITS");
         self.tabs[i].scene.document.header.insertion_units = to;
-        self.tabs[i].scene.sync_annotation_scale_from_header();
+        self.tabs[i].scene.insertion_units_changed(from);
 
         let factor = units::conversion_factor(from, to).filter(|f| (f - 1.0).abs() > 1e-12);
         let (from_label, to_label) = (units::label(from), units::label(to));

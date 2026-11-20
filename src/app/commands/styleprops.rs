@@ -2330,6 +2330,7 @@ impl OpenCADStudio {
                         .then(|| value.as_deref()?.parse::<i16>().ok())
                         .flatten()
                         .filter(|value| (0..=3).contains(value));
+                    let units_before = self.tabs[i].scene.document.header.insertion_units;
                     let outcome: Result<(String, bool), String> = {
                         let h = &mut self.tabs[i].scene.document.header;
                         match name.as_str() {
@@ -3843,8 +3844,7 @@ impl OpenCADStudio {
                                         self.tabs[i].scene.document.header.pick_style & 1 != 0;
                                 }
                                 if name == "INSUNITS" {
-                                    self.tabs[i].scene.sync_annotation_scale_from_header();
-                                    self.tabs[i].scene.invalidate_annotation_dependencies();
+                                    self.tabs[i].scene.insertion_units_changed(units_before);
                                 }
                                 if matches!(
                                     name.as_str(),

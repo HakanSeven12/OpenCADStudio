@@ -299,6 +299,13 @@ impl SnapDwell {
 /// when the moving pick (`hover_pick_due`) has not already answered it.
 pub const HOVER_DWELL_MS: u128 = 500;
 
+struct SelectionCycle {
+    tab_id: u64,
+    point: Point,
+    handles: Vec<document::Handle>,
+    modifiers: Option<(bool, bool)>,
+}
+
 /// The settled hover pick skips its wire sweep when the pick aperture holds
 /// more than this many candidate segments: past it, every wire in the box is
 /// a plausible hit and the sweep costs more than the rollover highlight is
@@ -979,9 +986,9 @@ pub(super) struct OpenCADStudio {
     /// QPLOCATION (see `Settings::quick_properties_float`).
     quick_properties_float: bool,
     quick_properties_pos: Point,
-    /// Selection cycling: clicking where objects overlap opens a list box
-    /// to pick which one; the pick is added to the current selection.
-    selection_cycling: bool,
+    /// Selection cycling display mode; its negative value keeps the mode disabled.
+    selection_cycling: i16,
+    cycle_badge: Option<(u64, Point)>,
     /// OSNAPZ (see `Settings::osnap_z`).
     osnap_z: bool,
     /// SELECTSIMILARMODE (see `Settings::select_similar_mode`).
@@ -989,6 +996,7 @@ pub(super) struct OpenCADStudio {
     /// PICKADD (#226): true (default) = clicks accumulate; false = OS-style
     /// replace-on-click with Shift toggling.
     pick_add: bool,
+    pick_add_retains: bool,
     /// The Remove selection keyword: picks take objects out of the set instead
     /// of putting them in, until Add turns it off or the command ends. This is
     /// what Shift already does per-click, not PICKADD — PICKADD decides whether
@@ -1111,15 +1119,15 @@ pub(super) struct OpenCADStudio {
     wblock: Option<crate::ui::window::wblock::WblockState>,
     /// Working copy of the structured feature-control-frame editor.
     geometric_tolerance: Option<crate::ui::window::geometric_tolerance::State>,
-    /// PICKDRAG (#226): false (default) = press-drag lassoes; true =
-    /// press-drag draws a rectangle marquee.
-    pick_drag_rect: bool,
+    /// PICKDRAG: 0 = two clicks, 1 = drag, 2 = either.
+    pick_drag_mode: u8,
+    pick_auto: u8,
+    pick_first: bool,
     /// Frame-budget HUD (Phase 5.3): overlays the last wire re-tessellation
     /// cost and the shared performance trace on the active viewport. Toggled
     /// by the `PERF` command.
     perf_hud: bool,
-    /// When set, the cycling list box is open: (canvas point, candidates).
-    cycle_candidates: Option<(iced::Point, Vec<document::Handle>)>,
+    cycle_candidates: Option<SelectionCycle>,
     /// Which status-bar pills the user has chosen to show (persisted).
     statusbar_config: crate::ui::statusbar::statusbar_config::StatusBarConfig,
     /// Add selected scales to existing annotative objects.
@@ -3975,8 +3983,9 @@ pub enum Message {
     SelectionPreviewCommandToggled(bool),
     /// Toggle "use Shift to add to selection"; this is the inverse of PICKADD.
     ShiftToAddToggled(bool),
-    /// Toggle press-and-drag drawing a rectangle instead of a lasso (PICKDRAG).
-    PickDragRectToggled(bool),
+    PickDragModeChanged(u8),
+    PickAutoBitToggled(u8, bool),
+    PickFirstToggled(bool),
     /// Change the automatic-save interval in minutes; 0 disables it (SAVETIME).
     SaveTimeChanged(i32),
     /// Toggle keeping a `.bak` copy when overwriting a drawing (ISAVEBAK).
@@ -6583,10 +6592,12 @@ impl OpenCADStudio {
             quick_properties_anchor: Point::new(12.0, 12.0),
             quick_properties_float: false,
             quick_properties_pos: Point::new(40.0, 40.0),
-            selection_cycling: false,
+            selection_cycling: 0,
+            cycle_badge: None,
             osnap_z: false,
             select_similar_mode: crate::scene::SELECT_SIMILAR_DEFAULT,
             pick_add: true,
+            pick_add_retains: true,
             select_remove_mode: false,
             selection_reprompt: false,
             last_layer_translation: None,
@@ -6651,7 +6662,9 @@ impl OpenCADStudio {
             xref_attach: None,
             wblock: None,
             geometric_tolerance: None,
-            pick_drag_rect: false,
+            pick_drag_mode: 2,
+            pick_auto: 5,
+            pick_first: true,
             perf_hud: false,
             cycle_candidates: None,
             pre_cmd_tangent: None,

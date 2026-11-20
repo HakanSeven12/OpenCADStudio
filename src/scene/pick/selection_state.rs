@@ -47,9 +47,26 @@ pub struct SelectionGesture {
     pub poly_active: bool,
     pub poly_points: Vec<Point>,
     pub poly_crossing: bool,
+    pub poly_fence: bool,
 }
 
 impl SelectionGesture {
+    pub fn lasso_path(&self, cursor: Point) -> Vec<Point> {
+        let mut points = self.poly_points.clone();
+        if points.last() != Some(&cursor) {
+            points.push(cursor);
+        }
+        points
+    }
+
+    pub fn cycle_lasso(&mut self) {
+        (self.poly_crossing, self.poly_fence) = match (self.poly_crossing, self.poly_fence) {
+            (_, true) => (true, false),
+            (true, false) => (false, false),
+            (false, false) => (false, true),
+        };
+    }
+
     /// End the in-progress box/lasso gesture (left-button release path).
     pub fn clear_left(&mut self) {
         self.box_anchor = None;
@@ -60,6 +77,7 @@ impl SelectionGesture {
         self.poly_active = false;
         self.poly_points.clear();
         self.poly_crossing = false;
+        self.poly_fence = false;
     }
 }
 
@@ -75,6 +93,7 @@ pub struct SelectionInput {
     pub left_press_pos: Option<Point>,
     pub left_press_time: Option<Instant>,
     pub left_dragging: bool,
+    pub area_drag_blocked: bool,
     pub right_down: bool,
     pub right_press_pos: Option<Point>,
     pub right_press_time: Option<Instant>,
@@ -105,6 +124,7 @@ impl SelectionInput {
         self.left_press_pos = None;
         self.left_press_time = None;
         self.left_dragging = false;
+        self.area_drag_blocked = false;
     }
 }
 

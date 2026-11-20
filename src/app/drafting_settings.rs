@@ -48,7 +48,7 @@ impl DraftingSettingsState {
             },
             quick_props_on: app.quick_properties,
             quick_props_float: app.quick_properties_float,
-            selection_cycling_on: app.selection_cycling,
+            selection_cycling_on: app.selection_cycling > 0,
         }
     }
 }
@@ -170,7 +170,7 @@ impl OpenCADStudio {
         }
         self.quick_properties = state.quick_props_on;
         self.quick_properties_float = state.quick_props_float;
-        self.selection_cycling = state.selection_cycling_on;
+        self.toggle_selection_cycling(state.selection_cycling_on);
         self.sync_vport_display(self.active_tab);
         true
     }

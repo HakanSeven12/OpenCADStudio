@@ -186,9 +186,6 @@ pub struct DrawingPrefs {
 /// The Selection-card settings that live on `UserSettings` rather than on the
 /// model-space theme.
 ///
-/// Gathered into one value instead of four more positional parameters: the
-/// function already takes seventeen, and `pick_add` / `pick_drag_rect` are two
-/// adjacent `bool`s that would swap silently at the call site.
 #[derive(Clone, Copy)]
 pub struct SelectionPrefs {
     /// PICKBOX, 0..=50.
@@ -197,8 +194,9 @@ pub struct SelectionPrefs {
     pub aperture: i32,
     /// PICKADD: true = a click adds to the selection.
     pub pick_add: bool,
-    /// PICKDRAG: true = press-drag draws a rectangle instead of a lasso.
-    pub pick_drag_rect: bool,
+    pub pick_drag_mode: u8,
+    pub pick_auto: u8,
+    pub pick_first: bool,
     /// GRIPOBJLIMIT, 0..=32767; 0 = no limit.
     pub grip_object_limit: i32,
     /// Selection cycling: a click where objects overlap opens a picker.
@@ -1182,13 +1180,54 @@ pub fn view_window<'a>(
         .align_y(iced::Center),
         Space::new().height(10),
         row![
-            iced::widget::checkbox(selection.pick_drag_rect)
-                .on_toggle(Message::PickDragRectToggled)
+            iced::widget::checkbox(selection.pick_first)
+                .on_toggle(Message::PickFirstToggled)
                 .size(15),
-            text(crate::t!(
-                "Press and drag draws a rectangle instead of a lasso (PICKDRAG)"
-            ))
-            .size(12),
+            text(crate::t!("Noun/Verb Selection (PICKFIRST)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(selection.pick_auto & 1 != 0)
+                .on_toggle(|checked| Message::PickAutoBitToggled(1, checked))
+                .size(15),
+            text(crate::t!("Implied Windowing (PICKAUTO)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(selection.pick_auto & 2 != 0)
+                .on_toggle(|checked| Message::PickAutoBitToggled(2, checked))
+                .size(15),
+            text(crate::t!("Allow Press and Drag on Object")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(selection.pick_auto & 4 != 0)
+                .on_toggle(|checked| Message::PickAutoBitToggled(4, checked))
+                .size(15),
+            text(crate::t!("Allow Press and Drag for Lasso")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(10),
+        row![
+            text(crate::t!("Window Selection Method (PICKDRAG)")).size(12),
+            crate::ui::dropdown_list::pick_list(
+                Some(selection.pick_drag_mode),
+                vec![0_u8, 1, 2],
+                |mode| match mode {
+                    0 => crate::t!("Two clicks").into_owned(),
+                    1 => crate::t!("Press and drag").into_owned(),
+                    _ => crate::t!("Two clicks or drag").into_owned(),
+                },
+            )
+            .on_select(Message::PickDragModeChanged)
+            .width(Fill),
         ]
         .spacing(8)
         .align_y(iced::Center),
@@ -1197,7 +1236,7 @@ pub fn view_window<'a>(
             iced::widget::checkbox(selection.selection_cycling)
                 .on_toggle(Message::SelectionCyclingChanged)
                 .size(15),
-            text(crate::t!("Clicking overlapping objects opens a picker")).size(12),
+            text(crate::t!("Selection Cycling")).size(12),
         ]
         .spacing(8)
         .align_y(iced::Center),

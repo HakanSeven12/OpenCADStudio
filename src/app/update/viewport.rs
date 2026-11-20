@@ -71,27 +71,23 @@ fn box_preview_rect(a: Point, b: Point, bounds: iced::Rectangle) -> Option<[f32;
     (rect[0] < rect[2] && rect[1] < rect[3]).then_some(rect)
 }
 
-/// Decide whether a selection press has become a drag. A fast mouse
-/// movement alone must not turn the first click of a click-click rectangle
-/// into a lasso. Hold-to-lasso gets the normal dwell; PICKDRAG=1 keeps its
-/// deliberate immediate rectangular-drag shortcut.
-fn selection_drag_should_start(dist2: f32, held_ms: u128, pick_drag_rect: bool) -> bool {
-    const MIN_DIST2: f32 = 12.0 * 12.0;
-    const RECT_FAST_DIST2: f32 = 24.0 * 24.0;
-    dist2 > MIN_DIST2
-        && (held_ms >= POLY_START_DELAY_MS || (pick_drag_rect && dist2 > RECT_FAST_DIST2))
+// A few logical pixels of travel filter mouse jitter while the button is down.
+fn selection_drag_should_start(press: Point, cursor: Point) -> bool {
+    let dx = cursor.x - press.x;
+    let dy = cursor.y - press.y;
+    dx * dx + dy * dy >= 25.0
 }
 
 /// For a short selection click, use the actual mouse-down position even if
-/// the user starts moving immediately. Commands and active drag gestures
-/// continue using the live cursor position.
+/// the user starts moving immediately. Active drag gestures use the live
+/// cursor; point commands capture their own press.
 fn selection_click_position(
     last: Point,
     pressed: Option<Point>,
     is_click: bool,
-    no_command: bool,
+    use_press: bool,
 ) -> Point {
-    if is_click && no_command {
+    if is_click && use_press {
         pressed.unwrap_or(last)
     } else {
         last
@@ -103,35 +99,13 @@ mod selection_gesture_priority_tests {
     use super::*;
 
     #[test]
-    fn fast_first_click_never_becomes_a_lasso_solely_from_cursor_speed() {
-        assert!(!selection_drag_should_start(25.0 * 25.0, 20, false));
-        assert!(!selection_drag_should_start(120.0 * 120.0, 80, false));
+    fn selection_drag_filters_pointer_jitter() {
+        let start = Point::new(100.0, 100.0);
         assert!(!selection_drag_should_start(
-            500.0 * 500.0,
-            POLY_START_DELAY_MS - 1,
-            false
+            start,
+            Point::new(103.0, 102.0)
         ));
-        assert!(selection_drag_should_start(
-            25.0 * 25.0,
-            POLY_START_DELAY_MS,
-            false
-        ));
-        assert!(!selection_drag_should_start(
-            11.0 * 11.0,
-            POLY_START_DELAY_MS + 500,
-            false
-        ));
-    }
-
-    #[test]
-    fn pickdrag_rectangle_keeps_its_fast_drag_shortcut() {
-        assert!(selection_drag_should_start(25.0 * 25.0, 20, true));
-        assert!(!selection_drag_should_start(23.0 * 23.0, 20, true));
-        assert!(selection_drag_should_start(
-            13.0 * 13.0,
-            POLY_START_DELAY_MS,
-            true
-        ));
+        assert!(selection_drag_should_start(start, Point::new(106.0, 100.0)));
     }
 
     #[test]
@@ -1216,7 +1190,7 @@ impl OpenCADStudio {
             }
         };
         let selection = tab.scene.selection.borrow();
-        let active = selection.gesture.box_anchor.is_some() && !selection.gesture.poly_active;
+        let active = selection.gesture.box_anchor.is_some() || selection.gesture.poly_active;
         drop(selection);
         if enabled && active && !tab.orbit_mode && !tab.pan_mode && !tab.zoom_dynamic_mode {
             self.box_preview_pending = Some((p, i, tab.id));
@@ -1239,9 +1213,10 @@ impl OpenCADStudio {
         let Some((p, i, tab_id)) = self.box_preview_pending else {
             return Task::none();
         };
-        if i != self.active_tab || i >= self.tabs.len() || self.tabs[i].id != tab_id
-            || self.tabs[i].scene.selection.borrow().gesture.box_anchor.is_none()
-        {
+        if i != self.active_tab || i >= self.tabs.len() || self.tabs[i].id != tab_id || {
+            let state = self.tabs[i].scene.selection.borrow();
+            state.gesture.box_anchor.is_none() && !state.gesture.poly_active
+        } {
             self.box_preview_pending = None;
             self.box_preview_due = None;
             self.box_preview_cache = None;
@@ -1282,9 +1257,31 @@ impl OpenCADStudio {
         };
         let navigating =
             self.tabs[i].orbit_mode || self.tabs[i].pan_mode || self.tabs[i].zoom_dynamic_mode;
+        let lasso_active = self.tabs[i].scene.selection.borrow().gesture.poly_active;
+        if lasso_active && enabled && !navigating {
+            self.box_preview_cache = None;
+            let scene = &self.tabs[i].scene;
+            let canvas_size = scene.selection.borrow().view.vp_size;
+            let frame = scene.viewport_edit_frame(canvas_size);
+            let tile = frame.as_ref().map_or_else(
+                || scene.active_model_tile_bounds(canvas_size.0, canvas_size.1),
+                |(_, tile)| *tile,
+            );
+            let edit_cam = frame.map(|(cam, _)| cam);
+            let bounds = iced::Rectangle::new(Point::ORIGIN, tile.size());
+            let (mut handles, _) =
+                self.lasso_selection_handles(i, &edit_cam, bounds, p, Point::new(tile.x, tile.y));
+            handles.retain(|&h| self.tabs[i].scene.passes_selection_filter(h));
+            self.filter_handles_reject_locked(i, &mut handles);
+            self.tabs[i].scene.set_box_hover_highlights_limited(
+                &handles,
+                self.model_space.selection_preview_limit as usize,
+            );
+            return;
+        }
         let (anchor, crossing) = {
             let sel = self.tabs[i].scene.selection.borrow();
-            let anchor = sel.gesture.box_anchor.filter(|_| !sel.gesture.poly_active);
+            let anchor = sel.gesture.box_anchor;
             let crossing = match anchor {
                 Some(a) if !sel.gesture.box_crossing_locked => p.x < a.x,
                 _ => sel.gesture.box_crossing,
@@ -2387,6 +2384,275 @@ impl OpenCADStudio {
             .unwrap_or_else(Task::none)
     }
 
+    pub(in crate::app) fn set_selection_cycling(&mut self, mode: i16) {
+        if self.selection_cycling != mode {
+            self.selection_cycling = mode;
+            self.cycle_candidates = None;
+            self.cycle_badge = None;
+            self.tabs[self.active_tab].scene.set_hover_highlight(None);
+        }
+    }
+
+    pub(in crate::app) fn toggle_selection_cycling(&mut self, enabled: bool) {
+        if enabled != (self.selection_cycling > 0) {
+            let mode = if enabled && self.selection_cycling == 0 {
+                2
+            } else {
+                -self.selection_cycling
+            };
+            self.set_selection_cycling(mode);
+        }
+    }
+
+    pub(in crate::app) fn commit_point_selection(
+        &mut self,
+        i: usize,
+        handle: Handle,
+        shift: bool,
+        remove: bool,
+    ) -> bool {
+        let tab = &mut self.tabs[i];
+        if tab
+            .active_cmd
+            .as_ref()
+            .is_some_and(|cmd| cmd.selection_rejects_locked_layers())
+            && tab.scene.is_layer_locked(handle)
+        {
+            self.command_line.push_info("1 was on a locked layer.");
+            return false;
+        }
+        let add = self.pick_add
+            || tab
+                .active_cmd
+                .as_ref()
+                .is_some_and(|cmd| cmd.selection_forces_add());
+        let selected = tab.scene.selected.contains(&handle);
+        let remove = remove || (shift && (add || selected));
+        let replace = !add && !shift && !remove;
+        if tab
+            .active_cmd
+            .as_ref()
+            .is_some_and(|cmd| cmd.is_selection_gathering())
+        {
+            self.last_pick = Some((vec![handle], remove));
+        }
+        if remove {
+            tab.scene.deselect_entity(handle);
+        } else {
+            if replace {
+                if let Some(command) = tab.active_cmd.as_mut() {
+                    command.clear_selection_markers();
+                }
+                tab.last_crossing_window = None;
+            }
+            tab.scene.select_entity(handle, replace);
+            tab.scene.expand_selection_for_groups(&[handle]);
+        }
+        self.queue_properties_refresh(i);
+        true
+    }
+
+    fn commit_area_selection(
+        &mut self,
+        i: usize,
+        handles: &[Handle],
+        marker_hit: bool,
+        add: bool,
+        gathering: bool,
+    ) {
+        let scene = &mut self.tabs[i].scene;
+        if !self.select_remove_mode && self.shift_down && !add {
+            let grouped = scene.handles_expanded_for_selectable_groups(handles);
+            let (removed, added): (Vec<_>, Vec<_>) = grouped
+                .into_iter()
+                .partition(|handle| scene.selected.contains(handle));
+            scene.deselect_entities(&removed);
+            scene.select_entities(&added);
+            self.last_pick = None;
+            return;
+        }
+        let remove = self.select_remove_mode || (self.shift_down && add);
+        if gathering {
+            self.last_pick = Some((handles.to_vec(), remove));
+        }
+        if remove {
+            scene.deselect_entities(handles);
+        } else {
+            if !add && (!handles.is_empty() || marker_hit) {
+                scene.deselect_all();
+            }
+            scene.select_entities(handles);
+            scene.expand_selection_for_groups(handles);
+        }
+    }
+
+    pub(in crate::app) fn set_pick_first(&mut self, enabled: bool) {
+        self.pick_first = enabled;
+        if !enabled {
+            for tab in self.tabs.iter_mut().filter(|tab| tab.active_cmd.is_none()) {
+                tab.scene
+                    .selection
+                    .borrow_mut()
+                    .clear_left_selection_gesture();
+                tab.scene.deselect_all();
+                tab.scene.set_hover_highlight(None);
+            }
+            self.cycle_candidates = None;
+            self.cycle_badge = None;
+            self.refresh_properties();
+        }
+    }
+
+    pub(super) fn cycle_lasso_mode(&mut self) -> bool {
+        let i = self.active_tab;
+        let cursor = {
+            let mut state = self.tabs[i].scene.selection.borrow_mut();
+            if !state.gesture.poly_active {
+                return false;
+            }
+            state.gesture.cycle_lasso();
+            state.input.last_move_pos
+        };
+        if let Some(cursor) = cursor {
+            self.queue_box_selection_preview(i, cursor);
+        }
+        true
+    }
+
+    fn lasso_selection_handles(
+        &self,
+        i: usize,
+        edit_cam: &Option<crate::scene::view::camera::Camera>,
+        bounds: iced::Rectangle,
+        cursor: Point,
+        offset: Point,
+    ) -> (Vec<Handle>, Vec<Point>) {
+        let tab = &self.tabs[i];
+        let (mut points, crossing, open_fence) = {
+            let state = tab.scene.selection.borrow();
+            (
+                state.gesture.lasso_path(cursor),
+                state.gesture.poly_crossing,
+                state.gesture.poly_fence,
+            )
+        };
+        for point in &mut points {
+            point.x -= offset.x;
+            point.y -= offset.y;
+        }
+        let (view, eye, wires) = self.pick_view(i, edit_cam, bounds);
+        let handles = tab.scene.path_hit_handles(
+            &points,
+            crossing,
+            open_fence,
+            wires,
+            view,
+            eye,
+            bounds,
+            |point| self.cursor_model_point(i, edit_cam, point, bounds),
+        );
+        (handles, points)
+    }
+
+    fn update_selection_gesture(&self, i: usize, cursor: Point) {
+        let tab = &self.tabs[i];
+        let mut state = tab.scene.selection.borrow_mut();
+        state.input.last_move_pos = Some(cursor);
+        if let Some(anchor) = state.gesture.box_anchor {
+            state.gesture.box_current = Some(cursor);
+            if !state.gesture.box_crossing_locked {
+                state.gesture.box_crossing = crate::scene::selection_box_crossing(anchor, cursor);
+            }
+            return;
+        }
+        if !state.input.left_down {
+            return;
+        }
+        if state.gesture.poly_active {
+            if state.gesture.poly_points.last().is_none_or(|point| {
+                let dx = cursor.x - point.x;
+                let dy = cursor.y - point.y;
+                dx * dx + dy * dy > 16.0
+            }) {
+                state.gesture.poly_points.push(cursor);
+            }
+            return;
+        }
+        let Some(press) = state
+            .input
+            .left_press_pos
+            .filter(|_| !state.input.left_dragging && !state.input.area_drag_blocked)
+        else {
+            return;
+        };
+        if !selection_drag_should_start(press, cursor) {
+            return;
+        }
+        let active_cmd = tab.active_cmd.as_ref();
+        let idle = active_cmd.is_none();
+        let over_object = idle && self.pick_auto & 2 != 0;
+        let lasso = self.pick_auto & 4 != 0;
+        let rectangle = self.pick_drag_mode == 1 && self.pick_auto & 1 != 0;
+        let command_drag = active_cmd.is_some_and(|cmd| cmd.accepts_drag_selection());
+        let enabled = if idle {
+            self.pick_first
+        } else {
+            command_drag || active_cmd.is_some_and(|cmd| cmd.is_selection_gathering())
+        };
+        if !enabled
+            || self.drag_move.is_some()
+            || (!command_drag && (self.pick_drag_mode == 0 || !(lasso || rectangle || over_object)))
+        {
+            return;
+        }
+
+        let (width, height) = state.view.vp_size;
+        drop(state);
+        let frame = tab.scene.viewport_edit_frame((width, height));
+        let tile = frame.as_ref().map_or_else(
+            || tab.scene.active_model_tile_bounds(width, height),
+            |(_, tile)| *tile,
+        );
+        let edit_cam = frame.map(|(cam, _)| cam);
+        let bounds = iced::Rectangle::new(Point::ORIGIN, tile.size());
+        let local_press = Point::new(press.x - tile.x, press.y - tile.y);
+        let table_cell = idle
+            && self
+                .table_cell_under(i, local_press, bounds, &edit_cam, 0.0)
+                .is_some();
+        let hit = !command_drag
+            && !table_cell
+            && self
+                .selection_object_under(i, local_press, bounds, &edit_cam)
+                .is_some();
+
+        let rectangle = table_cell
+            || hit
+            || (!lasso && (rectangle || over_object))
+            || (command_drag && self.pick_drag_mode == 0);
+        let world_anchor =
+            rectangle.then(|| self.cursor_model_point(i, &edit_cam, local_press, bounds));
+        let mut state = tab.scene.selection.borrow_mut();
+        if hit && !over_object {
+            state.input.area_drag_blocked = true;
+            return;
+        }
+        state.input.left_dragging = true;
+        let crossing = crate::scene::selection_box_crossing(press, cursor);
+        if rectangle {
+            state.gesture.box_anchor = Some(press);
+            state.gesture.box_anchor_world = world_anchor;
+            state.gesture.box_current = Some(cursor);
+            state.gesture.box_crossing = crossing;
+        } else {
+            state.gesture.poly_active = true;
+            state.gesture.poly_crossing = crossing;
+            state.gesture.poly_fence = false;
+            state.gesture.poly_points.clear();
+            state.gesture.poly_points.extend([press, cursor]);
+        }
+    }
+
     fn on_viewport_move_inner(&mut self, p: Point) -> Task<Message> {
         crate::perf::note_pointer_move();
         // A ribbon dropdown is open over the viewport. Its backdrop
@@ -2424,7 +2690,6 @@ impl OpenCADStudio {
             self.tabs[i].scene.set_constraint_hover_highlights(&[]);
         }
         self.refresh_ducs_face_highlight(i, p);
-        self.queue_box_selection_preview(i, p);
         if self.tabs[i]
             .active_cmd
             .as_ref()
@@ -2506,67 +2771,9 @@ impl OpenCADStudio {
         }
 
         let grip_hover_ms = crate::perf::elapsed_ms(grip_hover_started);
+        self.update_selection_gesture(i, p);
+        self.queue_box_selection_preview(i, p);
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
-        sel.input.last_move_pos = Some(p);
-
-        if sel.input.left_down {
-            let press = sel.input.left_press_pos.unwrap_or(p);
-            let dx = p.x - press.x;
-            let dy = p.y - press.y;
-            let dist2 = dx * dx + dy * dy;
-            let elapsed_ms = sel
-                .input
-                .left_press_time
-                .map(|t| Instant::now().duration_since(t).as_millis())
-                .unwrap_or(u128::MAX);
-            // In default PICKDRAG=0, cursor speed must never promote a
-            // quick click into a lasso. The 250 ms press dwell distinguishes
-            // an intentional hold-drag from a fast click-move-click box.
-            // PICKDRAG=1 retains fast press-drag rectangular selection;
-            // grip dragging is handled separately.
-            let dragged = selection_drag_should_start(dist2, elapsed_ms, self.pick_drag_rect);
-            if !sel.input.left_dragging && dragged {
-                sel.input.left_dragging = true;
-                if self.pick_drag_rect {
-                    // PICKDRAG 1 (#226): press-drag spans a RECTANGLE
-                    // marquee — drive the existing box machinery (its
-                    // overlay and completion) instead of the lasso.
-                    sel.gesture.box_anchor = Some(press);
-                    sel.gesture.box_current = Some(p);
-                    if !sel.gesture.box_crossing_locked {
-                        sel.gesture.box_crossing = crate::scene::selection_box_crossing(press, p);
-                    }
-                } else {
-                    sel.gesture.poly_active = true;
-                    sel.gesture.poly_crossing = p.x < press.x;
-                    sel.gesture.poly_points.clear();
-                    sel.gesture.poly_points.push(press);
-                    sel.gesture.poly_points.push(p);
-                }
-            } else if sel.input.left_dragging && sel.gesture.poly_active {
-                if sel.gesture.poly_points.last().is_none_or(|lp| {
-                    let ddx = p.x - lp.x;
-                    let ddy = p.y - lp.y;
-                    ddx * ddx + ddy * ddy > 16.0
-                }) {
-                    sel.gesture.poly_points.push(p);
-                }
-            } else if sel.input.left_dragging {
-                if let Some(a) = sel.gesture.box_anchor {
-                    sel.gesture.box_current = Some(p);
-                    if !sel.gesture.box_crossing_locked {
-                        sel.gesture.box_crossing = crate::scene::selection_box_crossing(a, p);
-                    }
-                }
-            }
-        } else if sel.gesture.box_anchor.is_some() {
-            sel.gesture.box_current = Some(p);
-            if let Some(a) = sel.gesture.box_anchor {
-                if !sel.gesture.box_crossing_locked {
-                    sel.gesture.box_crossing = crate::scene::selection_box_crossing(a, p);
-                }
-            }
-        }
 
         let (mid_down, mid_last, vp_size) = (
             sel.input.middle_down,
@@ -6161,6 +6368,137 @@ impl OpenCADStudio {
             .then_some((table, cell))
     }
 
+    fn selection_click_hit(
+        &self,
+        i: usize,
+        p: Point,
+        context: crate::command::PointPickContext,
+        click_candidates: &crate::scene::pick::interaction_index::InteractionCandidates,
+        candidate_handles: Option<&rustc_hash::FxHashSet<Handle>>,
+        t_arm: Option<Instant>,
+        candidate_ms: f64,
+        handles_ms: f64,
+    ) -> Option<Handle> {
+        let crate::command::PointPickContext {
+            view: view_rot,
+            eye,
+            bounds,
+            aperture_px: pick_aperture,
+        } = context;
+        let wire_started = crate::perf::enabled().then(Instant::now);
+        let mut hit = scene::pick::hit_test::click_hit(
+            p,
+            click_candidates,
+            view_rot,
+            eye,
+            bounds,
+            self.tabs[i].scene.document.header.lineweight_display,
+            pick_aperture,
+            &self.tabs[i].scene.draw_depth_map(),
+        )
+        .and_then(Scene::handle_from_wire_name);
+        let wire_ms = crate::perf::elapsed_ms(wire_started);
+        let mut hatch_models_ms = 0.0;
+        let mut hatch_test_ms = 0.0;
+        let mut hatch_count = 0usize;
+        if hit.is_none() {
+            let models_started = crate::perf::enabled().then(Instant::now);
+            let hatches = self.tabs[i]
+                .scene
+                .visible_hatches_for_click(candidate_handles);
+            hatch_count = hatches.len();
+            hatch_models_ms = crate::perf::elapsed_ms(models_started);
+            let hatch_started = crate::perf::enabled().then(Instant::now);
+            hit = scene::pick::hit_test::click_hit_hatch(
+                p,
+                &hatches,
+                view_rot,
+                eye,
+                bounds,
+                pick_aperture,
+                &self.tabs[i].scene.draw_depth_map(),
+                candidate_handles,
+            );
+            hatch_test_ms = crate::perf::elapsed_ms(hatch_started);
+        }
+        let mut insert_ms = 0.0;
+        if hit.is_none() {
+            // Block-internal hatch: resolve to the parent Insert.
+            let insert_started = crate::perf::enabled().then(Instant::now);
+            hit = scene::pick::hit_test::click_hit_insert_hatch(
+                p,
+                self.tabs[i].scene.insert_hatches_for_click().as_ref(),
+                view_rot,
+                eye,
+                bounds,
+                pick_aperture,
+                &self.tabs[i].scene.draw_depth_map(),
+                candidate_handles,
+            );
+            insert_ms = crate::perf::elapsed_ms(insert_started);
+        }
+        let mut solid_ms = 0.0;
+        if hit.is_none() {
+            // Normal 3D selection follows the displayed B-rep
+            // edges. Face-interior picking remains reserved for
+            // modelling commands that explicitly request it.
+            let solid_started = crate::perf::enabled().then(Instant::now);
+            hit = self.solid_select_hit(
+                i,
+                p,
+                view_rot,
+                eye,
+                bounds,
+                candidate_handles,
+                pick_aperture,
+            );
+            solid_ms = crate::perf::elapsed_ms(solid_started);
+        }
+        let hit_hatch = hit.is_some_and(|handle| {
+            matches!(
+                self.tabs[i].scene.document.get_entity(handle),
+                Some(document::EntityType::Hatch(_))
+            )
+        });
+        let pick_ms = crate::perf::elapsed_ms(t_arm);
+        if crate::perf::enabled() && pick_ms >= 1.0 {
+            crate::perf_record!(
+                "[perf] select-click total={pick_ms:.1}ms candidates={candidate_ms:.2}ms handles={handles_ms:.2}ms wire={wire_ms:.2}ms hatch-models={hatch_models_ms:.2}ms hatch-test={hatch_test_ms:.2}ms insert={insert_ms:.2}ms solid={solid_ms:.2}ms candidate_wires={} hatch_candidates={hatch_count} hit_hatch={hit_hatch}",
+                click_candidates.len(),
+            );
+        }
+        hit
+    }
+
+    fn selection_object_under(
+        &self,
+        i: usize,
+        p: Point,
+        bounds: iced::Rectangle,
+        edit_cam: &Option<crate::scene::view::camera::Camera>,
+    ) -> Option<Handle> {
+        let (view, eye, wires) = self.pick_view(i, edit_cam, bounds);
+        let aperture_px = crate::ui::overlay::pick_box_aperture_px(self.pick_box);
+        let world = self.cursor_model_point(i, edit_cam, p, bounds);
+        let scene = &self.tabs[i].scene;
+        let candidates = scene.interaction_pick_candidates_near(
+            wires,
+            world,
+            view,
+            eye,
+            bounds,
+            aperture_px * 2.0,
+        );
+        let handles = scene.interaction_candidate_handles(&candidates);
+        let context = crate::command::PointPickContext {
+            view,
+            eye,
+            bounds,
+            aperture_px,
+        };
+        self.selection_click_hit(i, p, context, &candidates, handles.as_ref(), None, 0.0, 0.0)
+    }
+
     /// The topmost object drawn under `p`.
     fn object_under(
         &self,
@@ -7049,6 +7387,9 @@ impl OpenCADStudio {
         let picks_on_press = self.command_picks_on_press();
         // A press on a selected object may become a drag of the selection.
         self.drag_move = (self.tabs[i].active_cmd.is_none()
+            && self.pick_first
+            && (self.pick_drag_mode == 0 || self.pick_auto & 2 == 0)
+            && self.tabs[i].scene.selection.borrow().gesture.box_anchor.is_none()
             && !self.shift_down
             && !self.tabs[i].scene.selected.is_empty()
             // A press inside a table cell drags out a cell range instead.
@@ -7070,6 +7411,7 @@ impl OpenCADStudio {
         sel.input.left_press_pos = Some(p_full);
         sel.input.left_press_time = Some(Instant::now());
         sel.input.left_dragging = false;
+        sel.input.area_drag_blocked = false;
         drop(sel);
         if picks_on_press {
             // The command path clears `left_down`, so the real release
@@ -7185,7 +7527,10 @@ impl OpenCADStudio {
                 last,
                 sel.input.left_press_pos,
                 is_click,
-                self.tabs[i].active_cmd.is_none(),
+                self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .is_none_or(|command| command.is_selection_gathering()),
             );
             (p, is_click, sel.input.left_down)
         };
@@ -8193,16 +8538,22 @@ impl OpenCADStudio {
             return Task::none();
         }
 
-        let (is_down2, is_dragging, box_anchor, box_crossing, _vp_size, poly_drag, poly_crossing) = {
+        let (is_down2, is_dragging, box_anchor, box_crossing, poly_drag, poly_crossing, poly_fence) = {
             let sel = self.tabs[i].scene.selection.borrow();
             (
                 sel.input.left_down,
                 sel.input.left_dragging,
                 sel.gesture.box_anchor,
-                sel.gesture.box_crossing,
-                sel.view.vp_size,
+                if sel.gesture.box_crossing_locked {
+                    sel.gesture.box_crossing
+                } else {
+                    sel.gesture
+                        .box_anchor
+                        .is_some_and(|anchor| crate::scene::selection_box_crossing(anchor, p_full))
+                },
                 sel.gesture.poly_active,
                 sel.gesture.poly_crossing,
+                sel.gesture.poly_fence,
             )
         };
 
@@ -8217,7 +8568,13 @@ impl OpenCADStudio {
             y: a.y - tile_off.y,
         });
 
-        if is_down2 {
+        if is_down2 && !self.pick_first && self.tabs[i].active_cmd.is_none() {
+            self.tabs[i]
+                .scene
+                .selection
+                .borrow_mut()
+                .clear_left_selection_gesture();
+        } else if is_down2 {
             let bounds = iced::Rectangle {
                 x: 0.0,
                 y: 0.0,
@@ -8227,30 +8584,20 @@ impl OpenCADStudio {
 
             if is_dragging {
                 let drag_geometry = if poly_drag {
-                    let mut points: Vec<iced::Point> = self.tabs[i]
+                    let mut points = self.tabs[i]
                         .scene
                         .selection
                         .borrow()
                         .gesture
-                        .poly_points
-                        .iter()
-                        .map(|point| iced::Point {
-                            x: point.x - tile_off.x,
-                            y: point.y - tile_off.y,
-                        })
-                        .collect();
-                    if points.last().is_none_or(|last| {
-                        (last.x - p.x).abs() > f32::EPSILON || (last.y - p.y).abs() > f32::EPSILON
-                    }) {
-                        points.push(p);
-                    }
-                    if let Some(first) = points.first().copied() {
-                        points.push(first);
+                        .lasso_path(p_full);
+                    if !poly_fence {
+                        points.push(points[0]);
                     }
                     let fence = points
                         .into_iter()
                         .map(|point| {
-                            let world = self.cursor_model_point(i, &edit_cam, point, bounds);
+                            let local = Point::new(point.x - tile_off.x, point.y - tile_off.y);
+                            let world = self.cursor_model_point(i, &edit_cam, local, bounds);
                             [world.x, world.y]
                         })
                         .collect::<Vec<_>>();
@@ -8267,7 +8614,7 @@ impl OpenCADStudio {
                             (min, max)
                         },
                     );
-                    Some((fence, Some((min, max))))
+                    Some((fence, (!poly_fence).then_some((min, max))))
                 } else if let Some(anchor) = box_anchor {
                     let points = [
                         anchor,
@@ -8313,7 +8660,15 @@ impl OpenCADStudio {
                     }
                     let result = self.tabs[i].active_cmd.as_mut().and_then(|command| {
                         command.set_shift(self.shift_down);
-                        command.on_drag_selection(&fence, window, box_crossing)
+                        command.on_drag_selection(
+                            &fence,
+                            window,
+                            if poly_drag {
+                                poly_crossing
+                            } else {
+                                box_crossing
+                            },
+                        )
                     });
                     if let Some(result) = result {
                         let mut selection = self.tabs[i].scene.selection.borrow_mut();
@@ -8354,9 +8709,7 @@ impl OpenCADStudio {
                     self.refresh_properties();
                     selection_just_completed = true;
                 } else if !poly_drag {
-                    // PICKDRAG 1 (#226): the press-drag spanned a
-                    // rectangle through the box machinery — complete
-                    // it here on release.
+                    // Complete the press-and-drag rectangle on release.
                     if let Some(a) = box_anchor {
                         let crossing = box_crossing;
                         let (mut handles, timing) =
@@ -8376,30 +8729,19 @@ impl OpenCADStudio {
                                 !handles.is_empty(),
                             );
                         let cand_ms = timing.candidates;
-                        // Box/lasso accumulates like individual picks
-                        // (issue #83): a plain box adds to the current
-                        // selection, Shift+box removes the boxed
-                        // entities. Esc / empty-space click still clears.
-                        // PICKADD 0 (#226): a plain box REPLACES.
                         let hit_ms = timing.hit;
                         let t_apply = crate::perf::enabled().then(Instant::now);
-                        // PICKADD 0: Shift+box/lasso adds instead (#3111).
-                        if self.select_remove_mode || (self.shift_down && selection_pick_add) {
-                            self.tabs[i].scene.deselect_entities(&handles);
-                        } else {
-                            if !selection_pick_add
-                                && !self.shift_down
-                                && (!handles.is_empty() || marker_hit)
-                            {
-                                self.tabs[i].scene.deselect_all();
-                            }
-                            self.tabs[i].scene.select_entities(&handles);
-                            self.tabs[i].scene.expand_selection_for_groups(&handles);
-                        }
+                        self.commit_area_selection(
+                            i,
+                            &handles,
+                            marker_hit,
+                            selection_pick_add,
+                            is_gathering,
+                        );
                         self.pick_authoring_box(a, p, crossing, !handles.is_empty());
                         let apply_ms = t_apply.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
                         let t_props = crate::perf::enabled().then(Instant::now);
-                        self.refresh_properties();
+                        self.queue_properties_refresh(i);
                         if crate::perf::enabled() {
                             crate::perf_record!(
                                 "[perf] select-commit kind=drag-box crossing={crossing} \
@@ -8412,70 +8754,29 @@ properties={:.1}ms picked={}",
                         selection_just_completed = true;
                     }
                 } else {
-                    let (poly_pts, crossing) = {
-                        let sel = self.tabs[i].scene.selection.borrow();
-                        // Map lasso points into the active tile.
-                        let pts: Vec<iced::Point> = sel
-                            .gesture
-                            .poly_points
-                            .iter()
-                            .map(|pp| iced::Point {
-                                x: pp.x - tile_off.x,
-                                y: pp.y - tile_off.y,
-                            })
-                            .collect();
-                        (pts, sel.gesture.poly_crossing)
-                    };
-                    let (view_rot, eye, all_wires) = self.pick_view(i, &edit_cam, bounds);
-                    let mut handles = self.tabs[i].scene.path_hit_handles(
-                        &poly_pts,
-                        crossing,
-                        false,
-                        all_wires,
-                        view_rot,
-                        eye,
-                        bounds,
-                        |point| self.cursor_model_point(i, &edit_cam, point, bounds),
-                    );
+                    let (mut handles, poly_pts) =
+                        self.lasso_selection_handles(i, &edit_cam, bounds, p_full, tile_off);
                     handles.retain(|&h| self.tabs[i].scene.passes_selection_filter(h));
                     self.filter_handles_reject_locked(i, &mut handles);
                     let marker_hit = is_gathering
+                        && !poly_fence
                         && self.select_command_marker_region(
                             i,
                             &edit_cam,
                             bounds,
                             &poly_pts,
-                            crossing,
+                            poly_crossing,
                             !selection_pick_add,
                             !handles.is_empty(),
                         );
-                    // Accumulate like the box path (issue #83): plain
-                    // lasso adds, Shift+lasso removes. An empty lasso
-                    // leaves the current selection untouched so a stray
-                    // drag never discards hard-won picks.
-                    if is_gathering {
-                        self.last_pick = Some((
-                            handles.clone(),
-                            self.select_remove_mode || (self.shift_down && selection_pick_add),
-                        ));
-                    }
-                    // PICKADD 0: Shift+box/lasso adds instead (#3111).
-                    if self.select_remove_mode || (self.shift_down && selection_pick_add) {
-                        self.tabs[i].scene.deselect_entities(&handles);
-                    } else {
-                        // PICKADD 0 (#226): a plain marquee REPLACES
-                        // the selection (empty results still leave it
-                        // alone, matching the box rule).
-                        if !selection_pick_add
-                            && !self.shift_down
-                            && (!handles.is_empty() || marker_hit)
-                        {
-                            self.tabs[i].scene.deselect_all();
-                        }
-                        self.tabs[i].scene.select_entities(&handles);
-                        self.tabs[i].scene.expand_selection_for_groups(&handles);
-                    }
-                    self.refresh_properties();
+                    self.commit_area_selection(
+                        i,
+                        &handles,
+                        marker_hit,
+                        selection_pick_add,
+                        is_gathering,
+                    );
+                    self.queue_properties_refresh(i);
                     selection_just_completed = true;
                 }
                 let mut sel = self.tabs[i].scene.selection.borrow_mut();
@@ -8637,7 +8938,7 @@ properties={:.1}ms picked={}",
                         // Gated behind the toggle, so default picking is
                         // unchanged when off.
                         let mut handled_by_cycling = false;
-                        if self.selection_cycling {
+                        if self.selection_cycling == 2 {
                             let cands: Vec<Handle> = scene::pick::hit_test::click_hits_all(
                                 p,
                                 &click_candidates,
@@ -8659,149 +8960,42 @@ properties={:.1}ms picked={}",
                                 cands.into_iter().filter(|h| seen.insert(*h)).collect();
                             if cands.len() >= 2 {
                                 // Overlap: open the list box at the cursor.
-                                self.cycle_candidates = Some((p_full, cands));
+                                self.cycle_candidates = Some(crate::app::SelectionCycle {
+                                    tab_id: self.tabs[i].id,
+                                    point: p_full,
+                                    handles: cands,
+                                    modifiers: Some((self.shift_down, self.select_remove_mode)),
+                                });
                                 handled_by_cycling = true;
                             }
                         }
 
                         if !handled_by_cycling {
-                            let wire_started = crate::perf::enabled().then(Instant::now);
-                            let mut hit = scene::pick::hit_test::click_hit(
-                                p,
-                                &click_candidates,
-                                view_rot,
+                            let context = crate::command::PointPickContext {
+                                view: view_rot,
                                 eye,
                                 bounds,
-                                self.tabs[i].scene.document.header.lineweight_display,
-                                pick_aperture,
-                                &self.tabs[i].scene.draw_depth_map(),
-                            )
-                            .and_then(Scene::handle_from_wire_name);
-                            let wire_ms = crate::perf::elapsed_ms(wire_started);
-                            let mut hatch_models_ms = 0.0;
-                            let mut hatch_test_ms = 0.0;
-                            let mut hatch_count = 0usize;
-                            if hit.is_none() {
-                                let models_started = crate::perf::enabled().then(Instant::now);
-                                let hatches = self.tabs[i]
-                                    .scene
-                                    .visible_hatches_for_click(candidate_handles.as_ref());
-                                hatch_count = hatches.len();
-                                hatch_models_ms = crate::perf::elapsed_ms(models_started);
-                                let hatch_started = crate::perf::enabled().then(Instant::now);
-                                hit = scene::pick::hit_test::click_hit_hatch(
-                                    p,
-                                    &hatches,
-                                    view_rot,
-                                    eye,
-                                    bounds,
-                                    crate::ui::overlay::pick_box_aperture_px(self.pick_box),
-                                    &self.tabs[i].scene.draw_depth_map(),
-                                    candidate_handles.as_ref(),
-                                );
-                                hatch_test_ms = crate::perf::elapsed_ms(hatch_started);
-                            }
-                            let mut insert_ms = 0.0;
-                            if hit.is_none() {
-                                // Block-internal hatch: resolve to the parent Insert.
-                                let insert_started = crate::perf::enabled().then(Instant::now);
-                                hit = scene::pick::hit_test::click_hit_insert_hatch(
-                                    p,
-                                    self.tabs[i].scene.insert_hatches_for_click().as_ref(),
-                                    view_rot,
-                                    eye,
-                                    bounds,
-                                    crate::ui::overlay::pick_box_aperture_px(self.pick_box),
-                                    &self.tabs[i].scene.draw_depth_map(),
-                                    candidate_handles.as_ref(),
-                                );
-                                insert_ms = crate::perf::elapsed_ms(insert_started);
-                            }
-                            let mut solid_ms = 0.0;
-                            if hit.is_none() {
-                                // Normal 3D selection follows the displayed B-rep
-                                // edges. Face-interior picking remains reserved for
-                                // modelling commands that explicitly request it.
-                                let solid_started = crate::perf::enabled().then(Instant::now);
-                                hit = self.solid_select_hit(
+                                aperture_px: pick_aperture,
+                            };
+                            let hit = self
+                                .selection_click_hit(
                                     i,
                                     p,
-                                    view_rot,
-                                    eye,
-                                    bounds,
+                                    context,
+                                    &click_candidates,
                                     candidate_handles.as_ref(),
-                                    pick_aperture,
-                                );
-                                solid_ms = crate::perf::elapsed_ms(solid_started);
-                            }
-                            let hit_hatch = hit.is_some_and(|handle| {
-                                matches!(
-                                    self.tabs[i].scene.document.get_entity(handle),
-                                    Some(document::EntityType::Hatch(_))
+                                    t_arm,
+                                    candidate_ms,
+                                    handles_ms,
                                 )
-                            });
-                            let pick_ms = crate::perf::elapsed_ms(t_arm);
-                            if crate::perf::enabled() && pick_ms >= 1.0 {
-                                crate::perf_record!(
-                                    "[perf] select-click total={pick_ms:.1}ms candidates={candidate_ms:.2}ms handles={handles_ms:.2}ms wire={wire_ms:.2}ms hatch-models={hatch_models_ms:.2}ms hatch-test={hatch_test_ms:.2}ms insert={insert_ms:.2}ms solid={solid_ms:.2}ms candidate_wires={} hatch_candidates={hatch_count} hit_hatch={hit_hatch}",
-                                    click_candidates.len(),
-                                );
-                            }
-                            // Selection filter: drop a pick whose type is excluded.
-                            let hit =
-                                hit.filter(|&h| self.tabs[i].scene.passes_selection_filter(h));
+                                .filter(|&h| self.tabs[i].scene.passes_selection_filter(h));
                             if let Some(handle) = hit {
-                                if is_gathering {
-                                    self.last_pick = Some((
-                                        vec![handle],
-                                        self.shift_down || self.select_remove_mode,
-                                    ));
-                                }
-                                if self.tabs[i]
-                                    .active_cmd
-                                    .as_ref()
-                                    .is_some_and(|c| c.selection_rejects_locked_layers())
-                                    && self.tabs[i].scene.is_layer_locked(handle)
-                                {
-                                    self.command_line.push_info("1 was on a locked layer.");
-                                } else {
-                                    // Individual picks accumulate (issue #47):
-                                    // each plain click adds to the selection,
-                                    // Shift+click removes the picked entity.
-                                    // PICKADD 0 (#226): a plain click
-                                    // REPLACES the selection instead and
-                                    // Shift+click toggles membership.
-                                    if self.shift_down || self.select_remove_mode {
-                                        // Remove was asked for by name, so it only
-                                        // ever takes away — the toggle below is
-                                        // Shift's PICKADD-0 behaviour, not its.
-                                        if !self.select_remove_mode
-                                            && !selection_pick_add
-                                            && !self.tabs[i].scene.selected.contains(&handle)
-                                        {
-                                            self.tabs[i].scene.select_entity(handle, false);
-                                            self.tabs[i]
-                                                .scene
-                                                .expand_selection_for_groups(&[handle]);
-                                        } else {
-                                            self.tabs[i].scene.deselect_entity(handle);
-                                        }
-                                    } else {
-                                        if !selection_pick_add {
-                                            if let Some(command) = self.tabs[i].active_cmd.as_mut()
-                                            {
-                                                command.clear_selection_markers();
-                                            }
-                                            self.tabs[i].last_crossing_window = None;
-                                        }
-                                        self.tabs[i]
-                                            .scene
-                                            .select_entity(handle, !selection_pick_add);
-                                        self.tabs[i].scene.expand_selection_for_groups(&[handle]);
-                                    }
-                                    self.queue_properties_refresh(i);
-                                    selection_just_completed = true;
-                                }
+                                selection_just_completed = self.commit_point_selection(
+                                    i,
+                                    handle,
+                                    self.shift_down,
+                                    self.select_remove_mode,
+                                );
                             } else {
                                 // Empty-space click only ARMS a box here; it
                                 // no longer clears the selection, so a box can
@@ -8817,6 +9011,15 @@ properties={:.1}ms picked={}",
                                     self.tabs[i].scene.deselect_all();
                                     self.tabs[i].last_crossing_window = None;
                                     self.queue_properties_refresh(i);
+                                }
+                                if self.pick_auto & 1 == 0 || self.pick_drag_mode == 1 {
+                                    self.tabs[i]
+                                        .scene
+                                        .selection
+                                        .borrow_mut()
+                                        .input
+                                        .clear_left_buttons();
+                                    return Task::none();
                                 }
                                 // Pin the anchor to the world point under it
                                 // so a zoom/pan mid-drag re-projects it
@@ -8934,30 +9137,13 @@ was_selected={}",
                         );
                     let filter_ms = t_filter.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
                     let t_apply = crate::perf::enabled().then(Instant::now);
-                    // Accumulate (issue #83): a plain box adds to the
-                    // current selection, Shift+box removes the boxed
-                    // entities. An empty box leaves the selection alone
-                    // so an accidental empty drag never discards it.
-                    // PICKADD 0 (#226): a plain box REPLACES instead.
-                    if is_gathering {
-                        self.last_pick = Some((
-                            handles.clone(),
-                            self.select_remove_mode || (self.shift_down && selection_pick_add),
-                        ));
-                    }
-                    // PICKADD 0: Shift+box/lasso adds instead (#3111).
-                    if self.select_remove_mode || (self.shift_down && selection_pick_add) {
-                        self.tabs[i].scene.deselect_entities(&handles);
-                    } else {
-                        if !selection_pick_add
-                            && !self.shift_down
-                            && (!handles.is_empty() || marker_hit)
-                        {
-                            self.tabs[i].scene.deselect_all();
-                        }
-                        self.tabs[i].scene.select_entities(&handles);
-                        self.tabs[i].scene.expand_selection_for_groups(&handles);
-                    }
+                    self.commit_area_selection(
+                        i,
+                        &handles,
+                        marker_hit,
+                        selection_pick_add,
+                        is_gathering,
+                    );
                     let apply_ms = t_apply.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
                     let t_props = crate::perf::enabled().then(Instant::now);
                     self.pick_authoring_box(a, p, crossing, !handles.is_empty());
@@ -9010,6 +9196,8 @@ properties={:.1}ms picked={}",
         // ── Double-click in Model Space: DDEDIT for Text/MText ────
         if is_click
             && is_down
+            && box_anchor.is_none()
+            && self.pick_first
             && self.tabs[i].active_cmd.is_none()
             && self.tabs[i].scene.current_layout == "Model"
         {
@@ -10079,6 +10267,31 @@ properties={:.1}ms picked={}",
         // skip the wire test rather than stall the UI thread (#3339). Click
         // picks keep their full sweep — a deliberate user action earns it.
         let over_candidate_cap = candidate_count > crate::app::HOVER_CANDIDATE_CAP;
+        self.cycle_badge = if self.selection_cycling > 0
+            && !over_candidate_cap
+            && (is_gathering || (self.tabs[i].active_cmd.is_none() && self.pick_first))
+        {
+            let scene = &self.tabs[i].scene;
+            let mut hits = scene::pick::hit_test::click_hits_all(
+                p,
+                &hover_candidates,
+                view_rot,
+                eye,
+                bounds,
+                scene.document.header.lineweight_display,
+                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+            )
+            .into_iter()
+            .filter_map(Scene::handle_from_wire_name)
+            .filter(|&handle| {
+                scene.passes_selection_filter(handle) && !scene.is_reference_only(handle)
+            });
+            hits.next()
+                .filter(|first| hits.any(|other| other != *first))
+                .and(cursor.map(|point| (self.tabs[i].id, point)))
+        } else {
+            None
+        };
         let mut hovered = if over_candidate_cap {
             None
         } else {

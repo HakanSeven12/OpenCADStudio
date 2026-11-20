@@ -275,9 +275,11 @@ impl OpenCADStudio {
                             pick_box: self.pick_box,
                             aperture: self.snapper.osnap_radius_px.round() as i32,
                             pick_add: self.pick_add,
-                            pick_drag_rect: self.pick_drag_rect,
+                            pick_drag_mode: self.pick_drag_mode,
+                            pick_auto: self.pick_auto,
+                            pick_first: self.pick_first,
                             grip_object_limit: self.grip_object_limit,
-                            selection_cycling: self.selection_cycling,
+                            selection_cycling: self.selection_cycling > 0,
                         },
                         crate::ui::window::options::AppPrefs {
                             savetime_min: self.savetime_min,

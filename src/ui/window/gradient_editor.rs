@@ -2,22 +2,38 @@
 
 use crate::app::Message;
 use crate::scene::model::hatch_model::GradientKind;
+use crate::ui::kit;
+use crate::ui::style::{chrome, kit_metrics as km, text as ui_text};
 use crate::ui::window::graphic_attributes::GraphicAttributesMsg;
 use document::types::Color as AcadColor;
 use iced::widget::{
-    button, checkbox, column, container, image, mouse_area, row, slider, text, text_input, tooltip,
-    Space,
+    button, checkbox, column, container, image, mouse_area, row, slider, text, text_input, Space,
 };
-use iced::{Background, Border, Color, Element, Fill, Length, Theme};
+use iced::{Background, Color, Element, Fill, Length, Theme};
 
-/// Every row of the editor has a fixed height, so the flyout's height is known
-/// up front: the palette's drop-down needs it to move the editor up rather
-/// than clip it when there is little room below the button.
-const ROW_H: f32 = crate::ui::style::form::ROW_H;
+// Layout of the editor, built on the UI kit (`kit`, `km`, `chrome`,
+// `ui_text`). Every row has a fixed height, so the flyout's height is known
+// up front: the palette's drop-down needs it to move the editor up rather
+// than clip it when there is little room below the button.
+
+/// A row of the editor: the kit's toolbar / field height.
+const ROW_H: f32 = km::TOOL_H;
+/// The large preview at the top.
 const PREVIEW_H: f32 = 80.0;
+/// A gradient type button: its icon above its name.
 const TYPE_H: f32 = 48.0;
-const GAP: f32 = 8.0;
-const PAD: f32 = 10.0;
+const TYPE_W: f32 = 48.0;
+const TYPE_ICON: f32 = 25.0;
+const INVERT_W: f32 = 42.0;
+/// The line between the types and Invert.
+const SEPARATOR_H: f32 = 36.0;
+/// The name column in front of each row.
+const LABEL_W: f32 = 43.0;
+const ANGLE_W: f32 = 92.0;
+/// Room between the rows.
+const GAP: f32 = km::TOP_INSET;
+/// Room inside the frame, inside its 1 px border.
+const PAD: f32 = km::MENU_PAD_X;
 /// Width of the editor flyout.
 pub const WIDTH: f32 = 390.0;
 /// Height of the editor flyout: preview, colour mode, colours, type, angle
@@ -311,61 +327,46 @@ fn icon(kind: GradientKind, inverted: bool) -> &'static [u8] {
 }
 
 pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
-    let segment = |label, mode| {
-        let selected = state.color_mode == mode;
-        button(container(text(label).size(11)).center_y(Fill))
-            .on_press(msg(GradientMsg::ColorMode(mode)))
-            .width(Fill)
-            .height(ROW_H)
-            .padding([0, 10])
-            .style(move |theme: &Theme, status| {
-                if selected {
-                    button::primary(theme, status)
-                } else {
-                    button::secondary(theme, status)
-                }
-            })
+    let label = |caption: std::borrow::Cow<'static, str>| {
+        text(caption)
+            .size(ui_text::UI)
+            .line_height(ui_text::line())
+            .width(LABEL_W)
     };
-    let color_field = |label: std::borrow::Cow<'static, str>, index, color: AcadColor| {
+    let segment = |caption, mode| {
+        button(
+            container(text(caption).size(ui_text::UI).line_height(ui_text::line()))
+                .center_x(Fill)
+                .center_y(Fill),
+        )
+        .on_press(msg(GradientMsg::ColorMode(mode)))
+        .width(Fill)
+        .height(ROW_H)
+        .padding(0)
+        .style(kit::text_button_style(state.color_mode == mode))
+    };
+    let color_field = |caption, index, color: AcadColor| {
         let (background, _) = crate::ui::properties::acad_color_display(color);
-        let value = crate::ui::color_select::color_display_name(color);
         let picker = button(
             row![
                 crate::ui::color_select::swatch(background),
-                text(value).size(10),
-                Space::new().width(Fill),
+                text(crate::ui::color_select::color_display_name(color))
+                    .size(ui_text::UI)
+                    .line_height(ui_text::line()),
             ]
-            .spacing(5)
+            .spacing(km::TOOL_GAP)
             .align_y(iced::Center),
         )
         .on_press(Message::OpenColorWindow(
             crate::app::ColorPickTarget::Gradient(index),
             color,
         ))
-        .style(|theme: &Theme, status| {
-            let palette = theme.palette();
-            button::Style {
-                background: Some(Background::Color(
-                    if matches!(status, button::Status::Hovered) {
-                        palette.background.weak.color
-                    } else {
-                        palette.background.base.color
-                    },
-                )),
-                text_color: palette.background.base.text,
-                border: Border {
-                    color: palette.background.neutral.color,
-                    width: 1.0,
-                    radius: 2.0.into(),
-                },
-                ..Default::default()
-            }
-        })
+        .style(kit::box_button_style(false))
         .height(ROW_H)
-        .padding([3, 6])
+        .padding([0.0, km::CELL_PAD_X])
         .width(Fill);
-        row![text(label).size(11).width(43), picker]
-            .spacing(4)
+        row![label(caption), picker]
+            .spacing(km::TOOL_GAP)
             .align_y(iced::Center)
             .width(Fill)
     };
@@ -376,144 +377,134 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
         (GradientKind::Hemispherical, crate::t!("Hemi.")),
         (GradientKind::Curved, crate::t!("Curved")),
     ];
-    let mut type_row = row![].spacing(3);
-    for (kind, label) in kinds {
-        let selected = state.kind == kind;
-        let b = button(
-            column![
-                crate::ui::icons::semantic(
-                    icon(kind, state.inverted && kind != GradientKind::Linear),
-                    25.0
-                ),
-                text(label).size(9)
-            ]
-            .align_x(iced::Center),
-        )
-        .on_press(msg(GradientMsg::Kind(kind)))
-        .width(48)
-        .height(TYPE_H)
-        .style(move |theme: &Theme, status| {
-            let mut s = button::subtle(theme, status);
-            if selected {
-                s.border.color = theme.palette().primary.base.color;
-                s.border.width = 1.0;
-            }
-            s
-        });
-        type_row = type_row.push(tooltip(
-            b,
-            text(kind.choice_label(false)).size(10),
-            tooltip::Position::Bottom,
+    let type_button = |content: Element<'static, Message>, message, active, width| {
+        button(container(content).center(Fill))
+            .on_press_maybe(message)
+            .width(width)
+            .height(TYPE_H)
+            .padding(0)
+            .style(kit::flat_button_style(active))
+    };
+    let caption = |glyph: Element<'static, Message>, caption: std::borrow::Cow<'static, str>| {
+        column![
+            glyph,
+            text(caption)
+                .size(ui_text::UI_SMALL)
+                .line_height(ui_text::line())
+        ]
+        .align_x(iced::Center)
+        .into()
+    };
+    let mut type_row = row![].spacing(km::TOOL_GAP).align_y(iced::Center);
+    for (kind, name) in kinds {
+        let glyph = crate::ui::icons::semantic(
+            icon(kind, state.inverted && kind != GradientKind::Linear),
+            TYPE_ICON,
+        );
+        type_row = type_row.push(kit::tooltip(
+            type_button(
+                caption(glyph, name),
+                Some(msg(GradientMsg::Kind(kind))),
+                state.kind == kind,
+                TYPE_W,
+            ),
+            kind.choice_label(false),
+            kit::TipPosition::Bottom,
         ));
     }
-    let invert_selected = state.inverted && state.kind != GradientKind::Linear;
-    let invert = button(
-        column![text("⇄").size(18), text(crate::t!("Invert")).size(9)].align_x(iced::Center),
-    )
-    .on_press_maybe((state.kind != GradientKind::Linear).then(|| msg(GradientMsg::InvertToggled)))
-    .width(42)
-    .height(TYPE_H)
-    .style(move |theme: &Theme, status| {
-        let mut style = button::secondary(theme, status);
-        if invert_selected {
-            style.border.color = theme.palette().primary.base.color;
-            style.border.width = 1.0;
-        }
-        style
-    });
+    let invert = type_button(
+        caption(
+            text("⇄").size(ui_text::UI_TITLE).into(),
+            crate::t!("Invert"),
+        ),
+        (state.kind != GradientKind::Linear).then(|| msg(GradientMsg::InvertToggled)),
+        state.inverted && state.kind != GradientKind::Linear,
+        INVERT_W,
+    );
     let separator =
-        container(Space::new().width(1).height(36)).style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.neutral.color)),
-            ..Default::default()
+        container(Space::new().width(km::line()).height(SEPARATOR_H)).style(|theme: &Theme| {
+            container::Style {
+                background: Some(Background::Color(chrome::edge(theme))),
+                ..Default::default()
+            }
         });
-    type_row = type_row.push(separator).push(tooltip(
+    type_row = type_row.push(separator).push(kit::tooltip(
         invert,
-        text(crate::t!("Invert gradient")).size(10),
-        tooltip::Position::Bottom,
+        crate::t!("Invert gradient"),
+        kit::TipPosition::Bottom,
     ));
     let colors: Element<'_, Message> = if state.color_mode == GradientColorMode::Two {
         row![
             color_field(crate::t!("Color 1"), 1, state.color_1),
             color_field(crate::t!("Color 2"), 2, state.color_2)
         ]
-        .spacing(6)
+        .spacing(km::TOOL_GAP)
         .height(ROW_H)
         .into()
     } else {
         row![
             color_field(crate::t!("Color 1"), 1, state.color_1),
             row![
-                text(crate::t!("Tone")).size(11).width(43),
+                label(crate::t!("Tone")),
                 slider(0..=100, (state.shade_tint * 100.0) as i32, |v| {
                     msg(GradientMsg::ShadeTint(v as f32 / 100.0))
                 })
                 .width(Fill)
             ]
-            .spacing(4)
+            .spacing(km::TOOL_GAP)
             .align_y(iced::Center)
-            .height(ROW_H)
             .width(Fill)
         ]
-        .spacing(6)
+        .spacing(km::TOOL_GAP)
         .height(ROW_H)
         .align_y(iced::Center)
         .into()
     };
     let angle = row![
-        text(crate::t!("Angle")).size(11).width(43),
+        label(crate::t!("Angle")),
         text_input("0.0°", &state.angle)
             .on_input(|value| msg(GradientMsg::Angle(value)))
-            .size(11)
-            .width(Length::Fixed(92.0)),
-        tooltip(
-            button(crate::ui::icons::themed_undo(11.0, true))
-                .on_press(msg(GradientMsg::AngleReset))
-                .style(button::subtle)
-                .padding(3)
-                .width(24)
-                .height(ROW_H),
-            text(crate::t!("Reset angle")).size(10),
-            tooltip::Position::Bottom,
+            .size(ui_text::UI)
+            .line_height(ui_text::line())
+            .padding(kit::BOX_PAD)
+            .style(kit::combo_style)
+            .width(ANGLE_W),
+        kit::tool_button(
+            crate::ui::icons::themed_undo(km::BAR_ICON, true),
+            crate::t!("Reset angle"),
+            Some(msg(GradientMsg::AngleReset)),
+            false,
         ),
         Space::new().width(Fill),
         checkbox(state.centered)
             .label(crate::t!("Centered"))
             .on_toggle(|value| msg(GradientMsg::Centered(value)))
-            .size(14)
-            .text_size(11)
+            .size(km::CHECK)
+            .text_size(ui_text::UI)
     ]
-    .spacing(6)
+    .spacing(km::TOOL_GAP)
     .height(ROW_H)
     .align_y(iced::Center);
-    let types = row![text(crate::t!("Type")).size(11).width(43), type_row]
-        .spacing(4)
+    let types = row![label(crate::t!("Type")), type_row]
+        .spacing(km::TOOL_GAP)
         .height(TYPE_H)
         .align_y(iced::Center);
-    let actions = container(
-        row![
-            button(container(text(crate::t!("Cancel")).size(11)).center_y(Fill))
-                .on_press(msg(GradientMsg::Cancel))
-                .style(button::secondary)
-                .height(ROW_H)
-                .padding([0, 14]),
-            button(container(text(crate::t!("OK")).size(11)).center_y(Fill))
-                .on_press(msg(GradientMsg::Apply))
-                .style(button::primary)
-                .height(ROW_H)
-                .padding([0, 18]),
-        ]
-        .spacing(8),
-    )
-    .width(Fill)
+    let actions = row![
+        Space::new().width(Fill),
+        kit::text_button(crate::t!("Cancel"), Some(msg(GradientMsg::Cancel)), false),
+        kit::text_button(crate::t!("OK"), Some(msg(GradientMsg::Apply)), true),
+    ]
+    .spacing(km::TOOL_GAP)
     .height(ROW_H)
-    .align_x(iced::alignment::Horizontal::Right);
+    .align_y(iced::Center);
     let content = column![
         container(preview(state)).width(Fill).height(PREVIEW_H),
         row![
             segment(crate::t!("One Color"), GradientColorMode::One),
             segment(crate::t!("Two Colors"), GradientColorMode::Two)
         ]
-        .spacing(2),
+        .spacing(km::TOOL_GAP)
+        .height(ROW_H),
         colors,
         types,
         angle,
@@ -521,27 +512,18 @@ pub fn view(state: &GradientEditorState, dimmed: bool) -> Element<'_, Message> {
     ]
     .spacing(GAP)
     .padding(PAD);
+    // The kit menu frame, as the hatch pattern flyout beside it.
     let panel: Element<'_, Message> = container(content)
         .width(Length::Fixed(WIDTH))
         .height(Length::Fixed(HEIGHT))
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.base.color)),
-            border: Border {
-                color: theme.palette().primary.base.color,
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..Default::default()
-        })
+        .style(kit::menu::frame_style)
         .into();
     let panel: Element<'_, Message> = if dimmed {
         let shield = container(Space::new())
             .width(Fill)
             .height(Fill)
             .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(
-                    theme.palette().background.strongest.color.scale_alpha(0.55),
-                )),
+                background: Some(Background::Color(chrome::surface(theme).scale_alpha(0.55))),
                 ..Default::default()
             });
         iced::widget::stack![panel, iced::widget::opaque(shield)]

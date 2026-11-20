@@ -20,6 +20,7 @@ src/ui/properties.rs
 src/ui/command_line.rs
 src/ui/node_graph.rs
 src/ui/window/graphic_attributes.rs
+src/ui/window/gradient_editor.rs
 src/ui/window/browser.rs
 src/ui/window/pc_manager.rs
 src/ui/window/authoring_palettes.rs

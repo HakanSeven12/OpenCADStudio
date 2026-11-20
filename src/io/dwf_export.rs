@@ -1463,11 +1463,30 @@ mod tests {
     /// the run the search layer carries for it and the atlas it was laid out
     /// on. An atlas of its own, so no other test moves its tiles.
     fn pen_text(text: &str) -> (WireModel, GlyphSnapshot) {
+        laid_out(text, 0.0, 1.0, 0.0)
+    }
+
+    /// [`pen_text`] turned by `rotation`, with a width factor and an oblique
+    /// angle; its run is turned with it.
+    fn laid_out(
+        text: &str,
+        rotation: f32,
+        width_factor: f32,
+        oblique: f32,
+    ) -> (WireModel, GlyphSnapshot) {
         let mut atlas = crate::scene::text::sdf_atlas::GlyphAtlas::new(256, 256);
         let (quads, _) = crate::scene::text::glyph_quads::layout_glyph_quads(
-            &mut atlas, 10.0, 0.0, 1.0, 0.0, 1.0, "txt", false, text,
+            &mut atlas,
+            10.0,
+            rotation,
+            width_factor,
+            oblique,
+            1.0,
+            "txt",
+            false,
+            text,
         );
-        let mut wire = run(text, [20.0, 20.0], 10.0, 0.0, "txt");
+        let mut wire = run(text, [20.0, 20.0], 10.0, rotation, "txt");
         crate::scene::pipeline::text_gpu::push_glyph_vertices(
             &mut wire.text_verts,
             &quads,
@@ -2167,6 +2186,70 @@ mod tests {
             (width - pen_mm).abs() <= 2.0 * UNIT_MM,
             "{width} for a pen of {pen_mm}"
         );
+    }
+
+    #[test]
+    fn a_filled_glyph_stays_text_when_its_run_turns_with_it() {
+        let (text, mut glyphs) = laid_out("A", 0.5, 1.0, 0.0);
+        glyphs.table.values_mut().for_each(fill_half);
+
+        let sheet = read_with(&page(wires(vec![text]), 297.0, 210.0), &glyphs);
+
+        assert_eq!(sheet.texts.len(), 1, "{:?}", sheet.texts);
+        assert!(
+            (sheet.texts[0].rotation - 0.5).abs() < 1e-3,
+            "{}",
+            sheet.texts[0].rotation
+        );
+        assert!(sheet.paths.is_empty(), "{:?}", sheet.paths);
+    }
+
+    #[test]
+    fn a_filled_glyph_a_run_cannot_place_goes_out_as_outlines() {
+        // A run carries a font, a height and a rotation. It does not carry a
+        // width factor or an oblique angle, a glyph seen from the side, a
+        // mirrored one, or a baseline other than its own.
+        let narrow = laid_out("A", 0.0, 0.5, 0.0);
+        let slanted = laid_out("A", 0.0, 1.0, 0.35);
+        let mut tilted = laid_out("A", 0.0, 1.0, 0.0);
+        for vertex in &mut tilted.0.text_verts {
+            let (dx, dy) = (vertex.pos[0] - 20.0, vertex.pos[1] - 20.0);
+            vertex.pos[0] = 20.0 + dx + 0.5 * dy;
+            vertex.pos[1] = 20.0 + 0.5 * dy;
+        }
+        let mut mirrored = laid_out("A", 0.0, 1.0, 0.0);
+        for vertex in &mut mirrored.0.text_verts {
+            vertex.pos[0] = 40.0 - vertex.pos[0];
+        }
+        let mut astray = laid_out("A", 0.0, 1.0, 0.0);
+        astray.0.searchable_text[0].rotation = 0.5;
+
+        for (case, (text, mut glyphs)) in [
+            ("a width factor", narrow),
+            ("an oblique angle", slanted),
+            ("seen from the side", tilted),
+            ("mirrored", mirrored),
+            ("off its run's baseline", astray),
+        ] {
+            glyphs.table.values_mut().for_each(fill_half);
+
+            let sheet = read_with(&page(wires(vec![text]), 297.0, 210.0), &glyphs);
+
+            assert!(sheet.texts.is_empty(), "{case}: {:?}", sheet.texts);
+            assert!(filled_area(&sheet) > 1.0, "{case}: nothing is drawn");
+        }
+    }
+
+    #[test]
+    fn filled_glyphs_without_a_run_are_drawn() {
+        let (mut text, mut glyphs) = laid_out("A", 0.0, 1.0, 0.0);
+        text.searchable_text.clear();
+        glyphs.table.values_mut().for_each(fill_half);
+
+        let sheet = read_with(&page(wires(vec![text]), 297.0, 210.0), &glyphs);
+
+        assert!(sheet.texts.is_empty(), "{:?}", sheet.texts);
+        assert!(filled_area(&sheet) > 1.0, "nothing is drawn");
     }
 
     #[test]

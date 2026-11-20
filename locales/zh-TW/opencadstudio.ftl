@@ -50,7 +50,7 @@ mtext-object-origin = MTEXT
     .new-text-style = 新增文字型式
     .new-style-from-selection = 從所選內容新增樣式…
     .update-style-from-selection = 從所選內容更新“__ocs_fmt_0__”
-    .text-style-manager-dialog = 文字型式管理員
+    .text-style-manager-dialog = 文字型式管理員…
     .style-updated = 型式“__ocs_fmt_0__”已更新。
 
 mtext-commit-errors = MTEXT
@@ -1931,6 +1931,7 @@ common =
     .mcp-is-handling-a-request = MCP 正在處理要求
     .mcp-control-is-ready = MCP 控制已就緒
     .copy-mcp-client-setup = 複製 MCP 用戶端設定
+    .drag-to-move-double-click-to-dock = 拖曳以移動；按兩下以停靠
     .mcp-client-setup-copied = 已將 MCP 用戶端設定複製到剪貼簿
     .save-all = { common.save } ({ common.all })
     .close-all = { action.close } ({ common.all })

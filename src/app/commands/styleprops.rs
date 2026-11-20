@@ -195,7 +195,12 @@ impl OpenCADStudio {
                 let describe = |c: &Color| match c {
                     Color::ByLayer => "ByLayer".to_string(),
                     Color::ByBlock => "ByBlock".to_string(),
-                    Color::Index(n) => crate::tf!("index {n}").into_owned(),
+                    // 1-7 by their (translated) names, the rest by number.
+                    Color::Index(n @ 1..=7) => crate::t!(
+                        crate::ui::window::attman_dialog::COLORS[*n as usize + 1]
+                    )
+                    .into_owned(),
+                    Color::Index(n) => n.to_string(),
                     _ => "(custom)".to_string(),
                 };
                 let arg = if cmd == "BYLAYER" {
@@ -4923,7 +4928,13 @@ fn command_color(arg: &str) -> Option<document::types::Color> {
         "BLUE" => Some(Color::Index(5)),
         "MAGENTA" => Some(Color::Index(6)),
         "WHITE" => Some(Color::Index(7)),
-        index => index.parse::<i16>().ok().map(Color::from_index),
+        index => index.parse::<i16>().ok().map(Color::from_index).or_else(|| {
+            // The colour names as the prompt shows them in the UI language.
+            let colors = &crate::ui::window::attman_dialog::COLORS;
+            (2..colors.len())
+                .find(|&n| crate::t!(colors[n]).to_uppercase() == index.to_uppercase())
+                .map(|n| Color::Index(n as u8 - 1))
+        }),
     }
 }
 

@@ -684,12 +684,14 @@ mod tests {
             CrsDefinition::from_text(&definition).unwrap().code(),
             Some(5514)
         );
-        let unaliased = definition
-            .replace(
-                "<Namespace>EPSG Code</Namespace>",
-                "<Namespace>Other</Namespace>",
-            )
-            .replace(r#"type="CoordinateSystem""#, r#"type="Datum""#);
+        let datum_alias =
+            definition.replace(r#"type="CoordinateSystem""#, r#"type="Datum""#);
+        assert_eq!(mapguide_xml_epsg_code(&datum_alias), None);
+        let other_namespace = definition.replace(
+            "<Namespace>EPSG Code</Namespace>",
+            "<Namespace>Other</Namespace>",
+        );
+        assert_eq!(mapguide_xml_epsg_code(&other_namespace), None);
     }
 
     #[test]

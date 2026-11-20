@@ -244,7 +244,7 @@ fn bigfont_code_page(path: &str, file: &ShxFile) -> &'static str {
         .next()
         .unwrap_or(path)
         .to_ascii_lowercase();
-    if name.contains("whg") || name.contains("kor") || name.contains("han") {
+    if name.starts_with("wh") || name.contains("kor") || name.contains("han") {
         "ansi_949"
     } else if name.contains("bigfont") || name.contains("extfont") || name.contains("jp") {
         "ansi_932"
@@ -558,6 +558,54 @@ fn emit_bulge(
     }
 }
 
+/// Draw an extended big font's primitive scaled into the `width` × `height`
+/// box at `(x, y)` from the pen, all in font units. The primitive is designed
+/// on the font's character-height square. The pen stays where it was, so the
+/// next primitive's origin is measured from the same point.
+fn draw_primitive(
+    file: &ShxFile,
+    prim: u16,
+    [bx, by, w, h]: [f64; 4],
+    st: &mut InterpState,
+    cur: &mut Vec<[f64; 2]>,
+    out: &mut Vec<Vec<[f64; 2]>>,
+    depth: usize,
+) {
+    let unit = file
+        .shapes
+        .get(&0)
+        .and_then(|(_, spec)| spec.first())
+        .map_or(0.0, |&v| v as f64);
+    if unit <= 0.0 {
+        return;
+    }
+    let mut sub_st = InterpState {
+        x: 0.0,
+        y: 0.0,
+        scale: 1.0,
+        pen_down: true,
+        stack: Vec::new(),
+    };
+    let mut sub_cur = vec![[0.0, 0.0]];
+    let mut sub_out = Vec::new();
+    interpret(file, prim, &mut sub_st, &mut sub_cur, &mut sub_out, depth + 1);
+    if sub_cur.len() > 1 {
+        sub_out.push(sub_cur);
+    }
+    let (ox, oy) = (st.x + bx * st.scale, st.y + by * st.scale);
+    let (sx, sy) = (st.scale * w / unit, st.scale * h / unit);
+    if cur.len() > 1 {
+        out.push(std::mem::take(cur));
+    }
+    cur.clear();
+    cur.push([st.x, st.y]);
+    out.extend(sub_out.into_iter().map(|p| {
+        p.into_iter()
+            .map(|[x, y]| [ox + x * sx, oy + y * sy])
+            .collect::<Vec<_>>()
+    }));
+}
+
 fn interpret(
     file: &ShxFile,
     shape_number: u16,
@@ -630,7 +678,9 @@ fn interpret(
                 // A unifont names its subshape by a two-byte code point
                 // (`7, hi, lo`); read as one byte, the low byte ran on as an
                 // opcode and the glyph came out mangled (ISOCP's `9`, #1556).
-                // A big font uses `7, 0, hi, lo`; a shape file one byte.
+                // A big font's `7, 0` is the extended form: a two-byte
+                // primitive, then its origin, width and height (one byte
+                // each). A shape file names its subshape in one byte.
                 let sub = if file.kind == ShxKind::Unifont {
                     i += 2;
                     two_bytes(i - 2)
@@ -638,11 +688,16 @@ fn interpret(
                     let sub = *b.get(i).unwrap_or(&0) as u16;
                     i += 1;
                     if file.kind == ShxKind::Bigfont && sub == 0 {
-                        i += 2;
-                        two_bytes(i - 2)
-                    } else {
-                        sub
+                        let prim = two_bytes(i);
+                        let byte = |k: usize| *b.get(i + k).unwrap_or(&0) as f64;
+                        let (bx, by, w, h) = (byte(2), byte(3), byte(4), byte(5));
+                        i += 6;
+                        if !skipping && prim != 0 && prim != shape_number {
+                            draw_primitive(file, prim, [bx, by, w, h], st, cur, out, depth);
+                        }
+                        continue;
                     }
+                    sub
                 };
                 if !skipping && sub != 0 && sub != shape_number {
                     interpret(file, sub, st, cur, out, depth + 1);

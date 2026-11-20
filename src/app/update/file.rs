@@ -1902,10 +1902,26 @@ impl OpenCADStudio {
     /// persists immediately without thrashing native or browser storage.
     pub(in crate::app) fn save_config(&mut self) {
         let cur = self.current_config();
-        if self.last_saved_config.as_ref() != Some(&cur) {
+        let Some(prev) = self.last_saved_config.as_ref() else {
             cur.save();
             self.last_saved_config = Some(cur);
+            return;
+        };
+        if *prev == cur {
+            return;
         }
+        // This runs after every message. A value that never equals itself (a
+        // NaN width or weight) makes the structs differ forever, and the file
+        // was then rewritten on every pointer move (#3392). What lands on disk
+        // is the JSON, so that decides.
+        let same_on_disk = matches!(
+            (serde_json::to_string(prev), serde_json::to_string(&cur)),
+            (Ok(a), Ok(b)) if a == b
+        );
+        if !same_on_disk {
+            cur.save();
+        }
+        self.last_saved_config = Some(cur);
     }
 
     /// Back-compat name for the many "a preference changed, persist it" sites.

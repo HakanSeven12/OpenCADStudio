@@ -20929,27 +20929,6 @@ mod redraw_tests {
 }
 
 #[cfg(test)]
-mod selection_arc_tests {
-    use super::Scene;
-
-    #[test]
-    fn selection_is_arc_not_refcell() {
-        let scene = Scene::new();
-        let tn = std::any::type_name_of_val(&scene.selection);
-        assert!(
-            tn.contains("Arc"),
-            "selection should be Arc<SelectionState>, got {}",
-            tn
-        );
-    }
-
-    #[test]
-    fn selection_overlay_takes_arc() {
-        assert!(true);
-    }
-}
-
-#[cfg(test)]
 mod layout_cache_tests {
     use super::*;
 

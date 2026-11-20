@@ -13,6 +13,7 @@ pub(crate) mod dwf;
 mod model;
 mod wires;
 
+pub(crate) use model::CAP_PER_EM;
 pub(crate) use wires::display_wires;
 
 use std::collections::HashMap;

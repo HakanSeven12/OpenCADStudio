@@ -1301,7 +1301,12 @@ fn emit_image(
 // ── Colour / dash / formatting helpers ─────────────────────────────────────
 
 /// Screening/alpha blend towards white, mirroring `plotted_color` in PDF export.
-fn plotted_color(rgb: [f32; 3], alpha: f32, screening: f32, options: PlotOptions) -> [f32; 3] {
+pub(super) fn plotted_color(
+    rgb: [f32; 3],
+    alpha: f32,
+    screening: f32,
+    options: PlotOptions,
+) -> [f32; 3] {
     let amount = screening.clamp(0.0, 1.0)
         * if options.transparency {
             alpha.clamp(0.0, 1.0)

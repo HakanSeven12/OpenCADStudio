@@ -1337,7 +1337,7 @@ const CULL_MARGIN_MM: f64 = 10.0;
 
 /// Shortest linetype pattern, in paper mm, that plots as dashes; a shorter
 /// one is below what a pen resolves and plots solid.
-const MIN_PLOT_PATTERN_MM: f32 = 0.25;
+pub(super) const MIN_PLOT_PATTERN_MM: f32 = 0.25;
 
 fn sheet_overlaps(b: [f64; 4], window: [f64; 4]) -> bool {
     b[0] <= window[2] + CULL_MARGIN_MM

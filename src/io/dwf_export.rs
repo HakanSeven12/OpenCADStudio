@@ -7,15 +7,45 @@
 // Scope of this first version:
 // - Wires (curves flattened, dashes cut as on screen), lineweights, colours
 //   through the plot style, solid fills, hatches, wipeouts and text runs.
-// - Raster images are left out.
+// - Raster images and the plot stamp are left out.
 // - Graphics units are 1/1200 inch on paper, y up, origin at the sheet's
 //   lower left. The stream's `Units` carry the plot scale, so a reader maps
 //   the sheet back to the units it was plotted from.
+// - Everything is cut to the sheet (and to the plot window, when the page
+//   has one): the stream itself clips nothing.
 
+use std::io::Write as _;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
-use crate::io::plot::PlotPage;
+use sha2::{Digest, Sha256};
+
+use crate::io::pdf_export::{adapt_to_paper, dash_ranges, MIN_PLOT_PATTERN_MM};
+use crate::io::plot::{PlotOptions, PlotPage, PlotWire};
 use crate::io::plot_style::PlotStyleTable;
+use crate::io::svg_export::plotted_color;
+use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
+use crate::scene::model::underlay_vector::CAP_PER_EM;
+use crate::scene::WireModel;
+
+/// Graphics units to a millimetre of paper: each is 1/1200 inch.
+const UNITS_PER_MM: f64 = 1200.0 / 25.4;
+/// Screen pixels (96 dpi) to millimetres.
+const PX_TO_MM: f64 = 25.4 / 96.0;
+/// Points to millimetres: the thinnest pen is a tenth of a point.
+const PT_TO_MM: f64 = 25.4 / 72.0;
+/// The most points one polyline or triangle strip of the stream counts: a
+/// byte, or a zero byte and sixteen bits more for the counts past 255.
+const MAX_COUNT: usize = 255 + 1 + u16::MAX as usize;
+/// How far a flattened curve may leave its curve, in graphics units.
+const CURVE_TOLERANCE: f64 = 0.5;
+/// The package tag every DWF 6 file starts with, before its zip.
+const PACKAGE_TAG: &[u8] = b"(DWF V06.00)";
+/// The format's own identifiers for a plotted sheet: its section type and
+/// the interface a package of such sheets declares.
+const EPLOT_SECTION: &str = "com.autodesk.dwf.ePlot";
+const EPLOT_INTERFACE_ID: &str = "715941D4-1AC2-4545-8185-BC40E053B551";
+const EPLOT_INTERFACE_HREF: &str = "http://www.autodesk.com/viewers";
 
 /// One sheet of the package: a plot page under the name readers list it by.
 pub struct DwfSheet<'a> {
@@ -25,10 +55,98 @@ pub struct DwfSheet<'a> {
 
 /// The bytes of a DWF 6 package with one section per sheet, in order.
 pub fn build_dwf(
-    _sheets: &[DwfSheet<'_>],
-    _fallback_plot_style: Option<&PlotStyleTable>,
+    sheets: &[DwfSheet<'_>],
+    fallback_plot_style: Option<&PlotStyleTable>,
 ) -> Result<Vec<u8>, String> {
-    Err("DWF export is not written yet".to_string())
+    if sheets.is_empty() {
+        return Err("Nothing to export: no sheet was given.".to_string());
+    }
+    let unit_mm = 1.0 / UNITS_PER_MM;
+    let mut manifest_sections = String::new();
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    for (index, sheet) in sheets.iter().enumerate() {
+        let page = sheet.page;
+        let stream = page_stream(page, fallback_plot_style);
+        let section_id = object_id(&stream, index, 0);
+        let stream_id = object_id(&stream, index, 1);
+        let section = format!("{EPLOT_SECTION}_{section_id}");
+        let stream_href = format!("{section}\\{stream_id}.w2d");
+        let descriptor_href = format!("{section}\\descriptor.xml");
+        let (paper_w, paper_h) = (page.paper_w.max(1.0), page.paper_h.max(1.0));
+        let descriptor = format!(
+            concat!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+                "<ePlot:Page xmlns:ePlot=\"DWF-ePlot:1.2\" version=\"1.2\" name=\"{name}\" ",
+                "plotOrder=\"{order}\" color=\"128 128 128\">",
+                "<ePlot:Paper units=\"mm\" width=\"{w}\" height=\"{h}\" color=\"255 255 255\" ",
+                "clip=\"0 0 {w} {h}\"/>",
+                "<ePlot:Resources>",
+                "<ePlot:GraphicResource role=\"2d streaming graphics\" mime=\"application/x-w2d\" ",
+                "href=\"{href}\" size=\"{size}\" objectId=\"{id}\" ",
+                "transform=\"{unit} 0 0 0 0 {unit} 0 0 0 0 1 0 0 0 0 1\"/>",
+                "</ePlot:Resources></ePlot:Page>\n",
+            ),
+            name = xml_attr(sheet.name),
+            order = index + 1,
+            w = number(paper_w),
+            h = number(paper_h),
+            href = xml_attr(&stream_href),
+            size = stream.len(),
+            id = stream_id,
+            unit = unit_mm,
+        );
+        manifest_sections.push_str(&format!(
+            concat!(
+                "<dwf:Section type=\"{kind}\" name=\"{section}\" title=\"{title}\"><dwf:Toc>",
+                "<dwf:Resource role=\"2d streaming graphics\" mime=\"application/x-w2d\" ",
+                "href=\"{stream}\"/>",
+                "<dwf:Resource role=\"descriptor\" mime=\"text/xml\" href=\"{descriptor}\"/>",
+                "</dwf:Toc></dwf:Section>",
+            ),
+            kind = EPLOT_SECTION,
+            section = xml_attr(&section),
+            title = xml_attr(sheet.name),
+            stream = xml_attr(&stream_href),
+            descriptor = xml_attr(&descriptor_href),
+        ));
+        files.push((descriptor_href.replace('\\', "/"), descriptor.into_bytes()));
+        files.push((stream_href.replace('\\', "/"), stream));
+    }
+    let manifest_id = object_id(manifest_sections.as_bytes(), sheets.len(), 2);
+    let manifest = format!(
+        concat!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+            "<dwf:Manifest xmlns:dwf=\"DWF-Manifest:6.0\" version=\"6.0\" objectId=\"{id}\">",
+            "<dwf:Interfaces><dwf:Interface objectId=\"{interface}\" name=\"ePlot\" ",
+            "href=\"{href}\"/></dwf:Interfaces>",
+            "<dwf:Properties>",
+            "<dwf:Property name=\"SourceProductName\" value=\"Open CAD Studio\"/>",
+            "<dwf:Property name=\"SourceProductVersion\" value=\"{version}\"/>",
+            "</dwf:Properties>",
+            "<dwf:Sections>{sections}</dwf:Sections></dwf:Manifest>\n",
+        ),
+        id = manifest_id,
+        interface = EPLOT_INTERFACE_ID,
+        href = EPLOT_INTERFACE_HREF,
+        version = xml_attr(env!("OCS_APP_VERSION")),
+        sections = manifest_sections,
+    );
+
+    // The zip follows the tag in one file, its offsets counted from the
+    // start of the file: the writer begins after the tag.
+    let mut cursor = std::io::Cursor::new(PACKAGE_TAG.to_vec());
+    cursor.set_position(PACKAGE_TAG.len() as u64);
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    let failed = |error: &dyn std::fmt::Display| format!("Failed to build DWF package: {error}");
+    for (name, data) in
+        std::iter::once(("manifest.xml".to_string(), manifest.into_bytes())).chain(files)
+    {
+        zip.start_file(name, options).map_err(|e| failed(&e))?;
+        zip.write_all(&data).map_err(|e| failed(&e))?;
+    }
+    Ok(zip.finish().map_err(|e| failed(&e))?.into_inner())
 }
 
 /// Export several sheets into one DWF file.
@@ -55,6 +173,966 @@ pub fn export_dwf_pages(
 #[cfg(not(target_arch = "wasm32"))]
 pub fn export_dwf(page: &PlotPage, name: &str, path: &Path) -> Result<(), String> {
     export_dwf_pages(&[DwfSheet { name, page }], path, None)
+}
+
+/// An identifier in the format's `8-4-4-4-12` shape, fixed by what it names
+/// so the same sheets always build the same package.
+fn object_id(data: &[u8], index: usize, role: u8) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hasher.update((index as u64).to_le_bytes());
+    hasher.update([role]);
+    let hash = hasher.finalize();
+    let hex: String = hash[..16].iter().map(|b| format!("{b:02X}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
+}
+
+/// A number as short as it reads back exactly: no exponent, no trailing zeros.
+fn number(value: f64) -> String {
+    let text = format!("{value:.9}");
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    if text.is_empty() || text == "-" || text == "-0" {
+        "0".to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn xml_attr(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            // Controls an XML 1.0 document cannot carry.
+            c if (c as u32) < 0x20 && !matches!(c, '\t' | '\n' | '\r') => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+// ── The page on the sheet ───────────────────────────────────────────────────
+
+/// Plot coordinates to graphics units: the plot scale and the page's quarter
+/// turns, as the PDF and SVG backends place them, with y up.
+struct PageMap {
+    paper_w: f64,
+    paper_h: f64,
+    scale: f64,
+    rotation_deg: i32,
+}
+
+impl PageMap {
+    fn apply(&self, x: f64, y: f64) -> [f64; 2] {
+        let s = self.scale;
+        let (xt, yt) = match self.rotation_deg {
+            90 => (self.paper_w - s * y, s * x),
+            180 => (self.paper_w - s * x, self.paper_h - s * y),
+            270 => (s * y, self.paper_h - s * x),
+            _ => (s * x, s * y),
+        };
+        [xt * UNITS_PER_MM, yt * UNITS_PER_MM]
+    }
+}
+
+/// The sheet's graphics stream.
+fn page_stream(page: &PlotPage, fallback_plot_style: Option<&PlotStyleTable>) -> Vec<u8> {
+    let paper_w = page.paper_w.max(1.0);
+    let paper_h = page.paper_h.max(1.0);
+    let map = PageMap {
+        paper_w,
+        paper_h,
+        scale: page.scale.max(1e-6) as f64,
+        rotation_deg: page.rotation_deg,
+    };
+    let plot_style = page.plot_style.as_ref().or(fallback_plot_style);
+    let (w, h) = (
+        (paper_w * UNITS_PER_MM).round() as i32,
+        (paper_h * UNITS_PER_MM).round() as i32,
+    );
+    // What is drawn: the sheet, narrowed to the plot window when there is
+    // one. Half a unit of slack keeps what lies on an edge.
+    let mut bounds = [
+        -0.49,
+        -0.49,
+        paper_w * UNITS_PER_MM + 0.49,
+        paper_h * UNITS_PER_MM + 0.49,
+    ];
+    if let Some((cx, cy, cw, ch)) = page.clip {
+        let corners = [
+            map.apply(cx as f64, cy as f64),
+            map.apply((cx + cw) as f64, cy as f64),
+            map.apply((cx + cw) as f64, (cy + ch) as f64),
+            map.apply(cx as f64, (cy + ch) as f64),
+        ];
+        let low = |axis: usize| {
+            corners
+                .iter()
+                .map(|p| p[axis])
+                .fold(f64::INFINITY, f64::min)
+        };
+        let high = |axis: usize| {
+            corners
+                .iter()
+                .map(|p| p[axis])
+                .fold(f64::NEG_INFINITY, f64::max)
+        };
+        let window = [low(0), low(1), high(0), high(1)];
+        if window.iter().all(|v| v.is_finite()) && window[0] < window[2] && window[1] < window[3] {
+            bounds = [
+                bounds[0].max(window[0]),
+                bounds[1].max(window[1]),
+                bounds[2].min(window[2]),
+                bounds[3].min(window[3]),
+            ];
+        }
+    }
+
+    let units_per_drawing_unit = UNITS_PER_MM * map.scale;
+    let step = number(units_per_drawing_unit);
+    let units = format!("(({step} 0 0 0)(0 {step} 0 0)(0 0 1 0)(0 0 0 1))");
+    let unit_mm = number(1.0 / UNITS_PER_MM);
+    let mut stream = Stream::new();
+    stream.extended("W2D V06.00");
+    stream.extended(&format!(
+        "Creator 'Open CAD Studio {}'",
+        env!("OCS_APP_VERSION")
+    ));
+    stream.extended(&format!("Units '' {units}"));
+    stream.extended(&format!("View 0,0 {w},{h}"));
+    stream.extended(&format!(
+        "PlotInfo show 0 mm {pw} {ph} 0 0 {pw} {ph} (({unit_mm} 0 0)(0 {unit_mm} 0)(0 0 1))",
+        pw = number(paper_w),
+        ph = number(paper_h),
+    ));
+    stream.out.push(b'V');
+    stream.extended(&format!(
+        "Viewport '' (Contour 1 4 {w},0 {w},{h} 0,{h} 0,0) (Units '' {units})"
+    ));
+    if bounds[0] < bounds[2] && bounds[1] < bounds[3] {
+        emit_page_content(&mut stream, page, plot_style, &map, bounds);
+    }
+    stream.extended("EndOfDWF");
+    stream.out
+}
+
+enum DrawItem<'a> {
+    WireFill(&'a PlotWire),
+    Hatch(&'a HatchModel),
+    Wire(&'a PlotWire),
+    Text(&'a PlotWire),
+}
+
+/// The page's content in the order the PDF and SVG backends draw it: by
+/// depth, fills under hatches under lines under text.
+fn emit_page_content(
+    stream: &mut Stream,
+    page: &PlotPage,
+    plot_style: Option<&PlotStyleTable>,
+    map: &PageMap,
+    bounds: [f64; 4],
+) {
+    let content = &page.content;
+    let offset = (page.offset_x, page.offset_y);
+    let options = page.options;
+    let (first_wires, second_wires) = content
+        .wires
+        .split_at(content.group_splits.wires.min(content.wires.len()));
+    let (first_hatches, second_hatches) = content
+        .hatches
+        .split_at(content.group_splits.hatches.min(content.hatches.len()));
+    let (first_wipeouts, second_wipeouts) = content
+        .wipeouts
+        .split_at(content.group_splits.wipeouts.min(content.wipeouts.len()));
+    for (wires, hatches, wipeouts) in [
+        (first_wires, first_hatches, first_wipeouts),
+        (second_wires, second_hatches, second_wipeouts),
+    ] {
+        let mut items = Vec::with_capacity(wires.len() * 2 + hatches.len() + wipeouts.len());
+        let mut sequence = 0usize;
+        for wire in wires {
+            if !wire.wire.fill_tris.is_empty() {
+                items.push((wire.draw_depth, 0u8, sequence, DrawItem::WireFill(wire)));
+                sequence += 1;
+            }
+            items.push((wire.draw_depth, 2u8, sequence, DrawItem::Wire(wire)));
+            sequence += 1;
+            if !wire.wire.searchable_text.is_empty() {
+                items.push((wire.draw_depth, 3u8, sequence, DrawItem::Text(wire)));
+                sequence += 1;
+            }
+        }
+        for hatch in wipeouts.iter().chain(hatches.iter()) {
+            items.push((hatch.draw_depth, 1u8, sequence, DrawItem::Hatch(hatch)));
+            sequence += 1;
+        }
+        items.sort_by(|a, b| {
+            a.0.total_cmp(&b.0)
+                .then_with(|| a.1.cmp(&b.1))
+                .then_with(|| a.2.cmp(&b.2))
+        });
+        for (_, _, _, item) in items {
+            let context = Context {
+                offset,
+                plot_style,
+                options,
+                map,
+                bounds,
+            };
+            match item {
+                DrawItem::WireFill(wire) => emit_wire_fills(stream, &wire.wire, &context),
+                DrawItem::Hatch(hatch) => emit_hatch(stream, hatch, &context),
+                DrawItem::Wire(wire) => emit_wire(stream, &wire.wire, &context),
+                DrawItem::Text(wire) => emit_text(stream, &wire.wire, &context),
+            }
+        }
+    }
+}
+
+struct Context<'a> {
+    offset: (f64, f64),
+    plot_style: Option<&'a PlotStyleTable>,
+    options: PlotOptions,
+    map: &'a PageMap,
+    bounds: [f64; 4],
+}
+
+impl Context<'_> {
+    /// A plot coordinate on the sheet, in graphics units.
+    fn place(&self, x: f64, y: f64) -> [f64; 2] {
+        self.map.apply(x + self.offset.0, y + self.offset.1)
+    }
+
+    /// A pen width in graphics units, at least one.
+    fn pen(&self, width_mm: f64) -> i32 {
+        (width_mm * UNITS_PER_MM)
+            .round()
+            .clamp(1.0, i32::MAX as f64) as i32
+    }
+
+    /// The width a lineweight plots at, in millimetres: the plot style's
+    /// when it sets one, as the other backends resolve it.
+    fn lineweight_mm(&self, style_mm: Option<f64>, line_weight_px: f32) -> f64 {
+        let physical = if self.options.object_lineweights {
+            style_mm.unwrap_or(line_weight_px as f64 * PX_TO_MM)
+        } else {
+            0.1 * PT_TO_MM
+        }
+        .max(0.1 * PT_TO_MM);
+        if self.options.scale_lineweights {
+            physical * self.map.scale
+        } else {
+            physical
+        }
+    }
+}
+
+fn rgb_bytes([r, g, b]: [f32; 3]) -> [u8; 3] {
+    let channel = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    [channel(r), channel(g), channel(b)]
+}
+
+// ── Wires ───────────────────────────────────────────────────────────────────
+
+fn emit_wire(stream: &mut Stream, wire: &WireModel, context: &Context) {
+    let [mut r, mut g, mut b, a] = wire.color;
+    if a < 0.01 {
+        return;
+    }
+    if matches!(
+        wire.name.as_str(),
+        "__paper_boundary__" | "paper_printable_area"
+    ) {
+        return;
+    }
+    let mut style_mm: Option<f64> = None;
+    let mut screening = 1.0;
+    let mut color_overridden = false;
+    if let Some(table) = context.plot_style {
+        if wire.aci > 0 {
+            if let Some(color) = table.resolve_color(wire.aci) {
+                [r, g, b] = color;
+                color_overridden = true;
+            }
+            style_mm = table.resolve_lineweight(wire.aci).map(|mm| mm as f64);
+            screening = table.resolve_screening(wire.aci);
+        }
+    }
+    if !color_overridden && (wire.aci != 0 || [r, g, b] == [1.0; 3]) {
+        [r, g, b] = adapt_to_paper([r, g, b]);
+    }
+    let color = rgb_bytes(plotted_color([r, g, b], a, screening, context.options));
+    let scale = context.map.scale;
+    let width_mm = if wire.world_width > 0.0 {
+        wire.world_width as f64 * scale
+    } else {
+        context.lineweight_mm(style_mm, wire.line_weight_px)
+    };
+    let pen = context.pen(width_mm);
+    let view_h = context.map.paper_h / scale;
+
+    // A dashed wire is cut into its dashes as the screen lays them out. A
+    // pattern shorter on paper than a pen resolves plots as a solid line.
+    let dashed = wire.pattern_length > 1e-6
+        && wire.pattern.iter().any(|v| *v != 0.0)
+        && wire.pattern_length * scale as f32 >= MIN_PLOT_PATTERN_MM;
+    let mut runs: Vec<Vec<[f64; 2]>> = Vec::new();
+    if dashed {
+        let dashes = crate::scene::pipeline::wire_gpu::wire_distances(wire);
+        let mut run: Vec<[f64; 2]> = Vec::new();
+        for index in 0..wire.points.len().saturating_sub(1) {
+            if !wire.points[index][0].is_finite() || !wire.points[index + 1][0].is_finite() {
+                runs.push(std::mem::take(&mut run));
+                continue;
+            }
+            let start = wire.point_world(index, view_h);
+            let end = wire.point_world(index + 1, view_h);
+            let point = |t: f32| {
+                context.place(
+                    start.x + (end.x - start.x) * t as f64,
+                    start.y + (end.y - start.y) * t as f64,
+                )
+            };
+            let ranges = dash_ranges(
+                dashes.dists[index],
+                dashes.dists[index + 1],
+                dashes.run_totals[index],
+                wire.pattern_length,
+                &wire.pattern,
+            );
+            if ranges.is_empty() {
+                runs.push(std::mem::take(&mut run));
+            }
+            for [from, to] in ranges {
+                // A dash running on across a vertex stays one stroke.
+                if from > 1e-5 || run.is_empty() {
+                    runs.push(std::mem::take(&mut run));
+                    run.push(point(from));
+                }
+                run.push(point(to));
+                if to < 1.0 - 1e-5 {
+                    runs.push(std::mem::take(&mut run));
+                }
+            }
+        }
+        runs.push(run);
+    } else if let Some(spans) = crate::io::plot::wire_arc_beziers(wire, view_h) {
+        // A circle or arc is drawn along its curve, not along the screen's
+        // chords.
+        let mut run: Vec<[f64; 2]> = Vec::new();
+        for span in spans {
+            let [p0, c1, c2, p3] = span.map(|p| context.place(p.x, p.y));
+            if run.is_empty() {
+                run.push(p0);
+            }
+            flatten_cubic(&mut run, p0, c1, c2, p3);
+        }
+        runs.push(run);
+    } else {
+        let mut run: Vec<[f64; 2]> = Vec::new();
+        for (index, &[x, y, _]) in wire.points.iter().enumerate() {
+            if x.is_nan() || y.is_nan() {
+                runs.push(std::mem::take(&mut run));
+                continue;
+            }
+            let p = wire.point_world(index, view_h);
+            run.push(context.place(p.x, p.y));
+        }
+        runs.push(run);
+    }
+
+    let mut styled = false;
+    for run in runs {
+        for piece in clip_polyline(&run, context.bounds) {
+            let points = rounded(&piece);
+            if points.len() < 2 {
+                continue;
+            }
+            if !styled {
+                stream.color(color);
+                stream.weight(pen);
+                styled = true;
+            }
+            stream.polyline(&points);
+        }
+    }
+}
+
+/// The points of a cubic after its start, close enough to it that the
+/// polyline through them never leaves the curve by more than the tolerance.
+fn flatten_cubic(out: &mut Vec<[f64; 2]>, p0: [f64; 2], c1: [f64; 2], c2: [f64; 2], p3: [f64; 2]) {
+    let second = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| {
+        ((a[0] - 2.0 * b[0] + c[0]).powi(2) + (a[1] - 2.0 * b[1] + c[1]).powi(2)).sqrt()
+    };
+    let bend = second(p0, c1, c2).max(second(c1, c2, p3));
+    let pieces = if bend.is_finite() {
+        ((0.75 * bend / CURVE_TOLERANCE).sqrt().ceil() as usize).clamp(1, 1024)
+    } else {
+        1
+    };
+    for step in 1..=pieces {
+        let t = step as f64 / pieces as f64;
+        let u = 1.0 - t;
+        let weight = [u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t];
+        out.push([
+            weight[0] * p0[0] + weight[1] * c1[0] + weight[2] * c2[0] + weight[3] * p3[0],
+            weight[0] * p0[1] + weight[1] * c1[1] + weight[2] * c2[1] + weight[3] * p3[1],
+        ]);
+    }
+}
+
+/// Solid triangle fills (SOLID fills, arrowheads, 2-D overlays).
+fn emit_wire_fills(stream: &mut Stream, wire: &WireModel, context: &Context) {
+    let [mut r, mut g, mut b, a] = wire.color;
+    if a < 0.01 {
+        return;
+    }
+    if wire
+        .bg_adapt
+        .as_deref()
+        .is_some_and(|adapt| adapt.canvas_color)
+    {
+        [r, g, b] = [1.0, 1.0, 1.0];
+    } else {
+        let mut screening = 1.0;
+        let mut color_overridden = false;
+        if let Some(table) = context.plot_style {
+            if wire.aci > 0 {
+                if let Some(color) = table.resolve_color(wire.aci) {
+                    [r, g, b] = color;
+                    color_overridden = true;
+                }
+                screening = table.resolve_screening(wire.aci);
+            }
+        }
+        if !color_overridden {
+            [r, g, b] = adapt_to_paper([r, g, b]);
+        }
+        [r, g, b] = plotted_color([r, g, b], a, screening, context.options);
+    }
+    let color = rgb_bytes([r, g, b]);
+    for (index, triangle) in wire.fill_tris.chunks_exact(3).enumerate() {
+        let corner = |k: usize| {
+            let [x, y, _] = triangle[k];
+            let low = wire
+                .fill_tris_low
+                .get(index * 3 + k)
+                .copied()
+                .unwrap_or([0.0; 3]);
+            context.place(x as f64 + low[0] as f64, y as f64 + low[1] as f64)
+        };
+        fill_polygon(
+            stream,
+            color,
+            &[corner(0), corner(1), corner(2)],
+            context.bounds,
+        );
+    }
+}
+
+// ── Hatches and wipeouts ────────────────────────────────────────────────────
+
+fn emit_hatch(stream: &mut Stream, hatch: &HatchModel, context: &Context) {
+    if hatch.boundary.is_empty() {
+        return;
+    }
+    let is_wipeout = hatch.name == "WIPEOUT_FILL";
+    let [mut r, mut g, mut b, a] = hatch.color;
+    if a < 0.01 {
+        return;
+    }
+    let mut screening = 1.0;
+    let mut style_mm: Option<f64> = None;
+    let mut color_overridden = false;
+    if !is_wipeout {
+        if let Some(table) = context.plot_style {
+            if hatch.aci > 0 {
+                if let Some(color) = table.resolve_color(hatch.aci) {
+                    [r, g, b] = color;
+                    color_overridden = true;
+                }
+                screening = table.resolve_screening(hatch.aci);
+                style_mm = table.resolve_lineweight(hatch.aci).map(|mm| mm as f64);
+            }
+        }
+    }
+    if is_wipeout {
+        [r, g, b] = [1.0, 1.0, 1.0];
+    } else if !color_overridden
+        && hatch.aci != 0
+        && !(hatch.aci == 7 && matches!(hatch.pattern, HatchPattern::Solid))
+    {
+        [r, g, b] = adapt_to_paper([r, g, b]);
+    }
+    [r, g, b] = plotted_color([r, g, b], a, screening, context.options);
+
+    if matches!(hatch.pattern, HatchPattern::Pattern(_)) {
+        let pen = context.pen(context.lineweight_mm(style_mm, hatch.line_weight_px));
+        let fine = crate::io::plot::hatch_with_fine_arcs(hatch);
+        let segments = fine.as_ref().unwrap_or(hatch).pattern_segments_for_plot();
+        let color = rgb_bytes([r, g, b]);
+        let mut styled = false;
+        for [p, q] in segments {
+            let (a, b) = (context.place(p[0], p[1]), context.place(q[0], q[1]));
+            let Some((a, b)) = clip_segment(a, b, context.bounds) else {
+                continue;
+            };
+            let mut points = rounded(&[a, b]);
+            if points.len() < 2 {
+                // A dot of the pattern: a mark one pen wide.
+                let [x, y] = points[0];
+                points.push([x.saturating_add(pen.max(1)), y]);
+            }
+            if !styled {
+                stream.color(color);
+                stream.weight(pen);
+                styled = true;
+            }
+            stream.polyline(&points);
+        }
+        return;
+    }
+
+    if let HatchPattern::Gradient { color2, .. } = &hatch.pattern {
+        // One colour between the gradient's two.
+        let second = plotted_color(
+            adapt_to_paper([color2[0], color2[1], color2[2]]),
+            color2[3],
+            screening,
+            context.options,
+        );
+        [r, g, b] = [
+            (r + second[0]) * 0.5,
+            (g + second[1]) * 0.5,
+            (b + second[2]) * 0.5,
+        ];
+    }
+    let color = rgb_bytes([r, g, b]);
+    let (vertices, indices) = hatch.fill_mesh();
+    let corner = |index: u32| {
+        let [x, y] = vertices[index as usize];
+        context.place(
+            x as f64 + hatch.world_origin[0],
+            y as f64 + hatch.world_origin[1],
+        )
+    };
+    for triangle in indices.chunks_exact(3) {
+        if triangle
+            .iter()
+            .any(|index| *index as usize >= vertices.len())
+        {
+            continue;
+        }
+        fill_polygon(
+            stream,
+            color,
+            &[
+                corner(triangle[0]),
+                corner(triangle[1]),
+                corner(triangle[2]),
+            ],
+            context.bounds,
+        );
+    }
+}
+
+/// A convex polygon filled inside `bounds`, as triangles.
+fn fill_polygon(stream: &mut Stream, color: [u8; 3], polygon: &[[f64; 2]], bounds: [f64; 4]) {
+    if polygon.iter().flatten().any(|v| !v.is_finite()) {
+        return;
+    }
+    let points = rounded_ring(&clip_polygon(polygon, bounds));
+    for k in 1..points.len().saturating_sub(1) {
+        let triangle = [points[0], points[k], points[k + 1]];
+        let [a, b, c] = triangle.map(|p| [p[0] as i64, p[1] as i64]);
+        // A triangle without area draws nothing.
+        if (b[0] - a[0]) * (c[1] - a[1]) == (c[0] - a[0]) * (b[1] - a[1]) {
+            continue;
+        }
+        stream.color(color);
+        stream.triangles(&triangle);
+    }
+}
+
+// ── Text ────────────────────────────────────────────────────────────────────
+
+fn emit_text(stream: &mut Stream, wire: &WireModel, context: &Context) {
+    let mut style_color: Option<[f32; 3]> = None;
+    let mut screening = 1.0;
+    if let Some(table) = context.plot_style {
+        if wire.aci > 0 {
+            style_color = table.resolve_color(wire.aci);
+            screening = table.resolve_screening(wire.aci);
+        }
+    }
+    let page_turn = (context.map.rotation_deg as f64).to_radians();
+    for run in &wire.searchable_text {
+        if run.text.is_empty() || run.height <= 0.0 || !run.height.is_finite() {
+            continue;
+        }
+        let origin = context.place(run.origin[0], run.origin[1]);
+        let b = context.bounds;
+        if !(origin[0].is_finite() && origin[1].is_finite())
+            || origin[0] < b[0]
+            || origin[0] > b[2]
+            || origin[1] < b[1]
+            || origin[1] > b[3]
+        {
+            continue;
+        }
+        let rgb = style_color
+            .unwrap_or_else(|| adapt_to_paper([run.color[0], run.color[1], run.color[2]]));
+        let color = rgb_bytes(plotted_color(rgb, run.color[3], screening, context.options));
+        // The run's height is its capitals'; the stream's font height is the em.
+        let em = (run.height as f64 * context.map.scale * UNITS_PER_MM / CAP_PER_EM)
+            .round()
+            .clamp(1.0, i32::MAX as f64) as i32;
+        let turn = (run.rotation as f64 + page_turn).rem_euclid(std::f64::consts::TAU);
+        let rotation = (turn / std::f64::consts::TAU * 65536.0).round() as u32 % 65536;
+        stream.color(color);
+        stream.font(&font_family(&run.font), em, rotation as u16);
+        stream.text(
+            [origin[0].round() as i32, origin[1].round() as i32],
+            &run.text,
+        );
+    }
+}
+
+/// The font a run is named by in the stream: its family, without the code
+/// page and big-font parts a resolved stroke font carries.
+fn font_family(name: &str) -> String {
+    let family = name
+        .split([
+            crate::scene::text::font_face::BIG_FONT_SEP,
+            crate::scene::text::font_face::CODE_PAGE_SEP,
+        ])
+        .next()
+        .unwrap_or(name)
+        .trim();
+    let family: String = family
+        .chars()
+        .filter(|c| !matches!(c, '\'' | '(' | ')' | '\\') && !c.is_control())
+        .collect();
+    if family.is_empty() {
+        "Arial".to_string()
+    } else {
+        family
+    }
+}
+
+// ── Cutting to the sheet ────────────────────────────────────────────────────
+
+/// The part of a segment inside `bounds` (min x, min y, max x, max y).
+fn clip_segment(a: [f64; 2], b: [f64; 2], bounds: [f64; 4]) -> Option<([f64; 2], [f64; 2])> {
+    if [a[0], a[1], b[0], b[1]].iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let (mut t0, mut t1) = (0.0f64, 1.0f64);
+    for (p, q) in [
+        (-dx, a[0] - bounds[0]),
+        (dx, bounds[2] - a[0]),
+        (-dy, a[1] - bounds[1]),
+        (dy, bounds[3] - a[1]),
+    ] {
+        if p == 0.0 {
+            if q < 0.0 {
+                return None;
+            }
+            continue;
+        }
+        let t = q / p;
+        if p < 0.0 {
+            if t > t1 {
+                return None;
+            }
+            t0 = t0.max(t);
+        } else {
+            if t < t0 {
+                return None;
+            }
+            t1 = t1.min(t);
+        }
+    }
+    // An end that is not cut stays the very point it was, so the pieces of
+    // a polyline still meet.
+    let at = |t: f64| {
+        if t <= 0.0 {
+            a
+        } else if t >= 1.0 {
+            b
+        } else {
+            [a[0] + dx * t, a[1] + dy * t]
+        }
+    };
+    Some((at(t0), at(t1)))
+}
+
+/// A polyline as the pieces of it inside `bounds`.
+fn clip_polyline(points: &[[f64; 2]], bounds: [f64; 4]) -> Vec<Vec<[f64; 2]>> {
+    let mut pieces: Vec<Vec<[f64; 2]>> = Vec::new();
+    let mut piece: Vec<[f64; 2]> = Vec::new();
+    for pair in points.windows(2) {
+        match clip_segment(pair[0], pair[1], bounds) {
+            Some((a, b)) => {
+                if piece.last() != Some(&a) {
+                    if piece.len() > 1 {
+                        pieces.push(std::mem::take(&mut piece));
+                    }
+                    piece.clear();
+                    piece.push(a);
+                }
+                piece.push(b);
+            }
+            None => {
+                if piece.len() > 1 {
+                    pieces.push(std::mem::take(&mut piece));
+                }
+                piece.clear();
+            }
+        }
+    }
+    if piece.len() > 1 {
+        pieces.push(piece);
+    }
+    pieces
+}
+
+/// A convex polygon cut to `bounds`.
+fn clip_polygon(polygon: &[[f64; 2]], bounds: [f64; 4]) -> Vec<[f64; 2]> {
+    let mut ring = polygon.to_vec();
+    // Each side of the rectangle in turn: the axis, the limit, and whether
+    // inside is above it.
+    for (axis, limit, above) in [
+        (0, bounds[0], true),
+        (0, bounds[2], false),
+        (1, bounds[1], true),
+        (1, bounds[3], false),
+    ] {
+        if ring.is_empty() {
+            break;
+        }
+        let inside = |p: &[f64; 2]| {
+            if above {
+                p[axis] >= limit
+            } else {
+                p[axis] <= limit
+            }
+        };
+        let mut cut = Vec::with_capacity(ring.len() + 4);
+        for index in 0..ring.len() {
+            let (from, to) = (ring[index], ring[(index + 1) % ring.len()]);
+            if inside(&from) {
+                cut.push(from);
+            }
+            if inside(&from) != inside(&to) {
+                let t = (limit - from[axis]) / (to[axis] - from[axis]);
+                let mut crossing = [
+                    from[0] + (to[0] - from[0]) * t,
+                    from[1] + (to[1] - from[1]) * t,
+                ];
+                crossing[axis] = limit;
+                cut.push(crossing);
+            }
+        }
+        ring = cut;
+    }
+    ring
+}
+
+/// Points on the stream's integer grid, without repeats in a row.
+fn rounded(points: &[[f64; 2]]) -> Vec<[i32; 2]> {
+    let mut out: Vec<[i32; 2]> = Vec::with_capacity(points.len());
+    for p in points {
+        if !p[0].is_finite() || !p[1].is_finite() {
+            continue;
+        }
+        let q = [p[0].round() as i32, p[1].round() as i32];
+        if out.last() != Some(&q) {
+            out.push(q);
+        }
+    }
+    out
+}
+
+/// [`rounded`] for a closed ring: its last point is not its first again.
+fn rounded_ring(points: &[[f64; 2]]) -> Vec<[i32; 2]> {
+    let mut out = rounded(points);
+    while out.len() > 1 && out.first() == out.last() {
+        out.pop();
+    }
+    out
+}
+
+// ── The W2D stream ──────────────────────────────────────────────────────────
+
+/// A W2D stream being written. Coordinates are relative: each point is
+/// given from the one before it, across opcodes, so the writer keeps where
+/// the last one ended. Colour, pen and font are written when they change.
+struct Stream {
+    out: Vec<u8>,
+    at: [i32; 2],
+    color: Option<[u8; 3]>,
+    weight: Option<i32>,
+    font_name: Option<String>,
+    font: Option<(i32, u16)>,
+}
+
+impl Stream {
+    fn new() -> Self {
+        Self {
+            out: Vec::new(),
+            at: [0, 0],
+            color: None,
+            weight: None,
+            font_name: None,
+            font: None,
+        }
+    }
+
+    /// An extended ASCII opcode: "(Name operands)".
+    fn extended(&mut self, body: &str) {
+        self.out.push(b'(');
+        self.out.extend_from_slice(body.as_bytes());
+        self.out.push(b')');
+    }
+
+    fn color(&mut self, rgb: [u8; 3]) {
+        if self.color != Some(rgb) {
+            self.out.push(0x03);
+            self.out.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+            self.color = Some(rgb);
+        }
+    }
+
+    fn weight(&mut self, weight: i32) {
+        if self.weight != Some(weight) {
+            self.out.push(0x17);
+            self.out.extend_from_slice(&weight.to_le_bytes());
+            self.weight = Some(weight);
+        }
+    }
+
+    /// A count of points or characters: a byte, or zero and sixteen bits
+    /// holding what is past 256.
+    fn count(&mut self, count: usize) {
+        if count <= 255 {
+            self.out.push(count as u8);
+        } else {
+            self.out.push(0);
+            self.out
+                .extend_from_slice(&((count - 256) as u16).to_le_bytes());
+        }
+    }
+
+    /// `points` under one opcode, each relative to the point before it:
+    /// `short` with 16-bit steps when every step fits, `wide` with 32-bit
+    /// steps otherwise.
+    fn run(&mut self, short: u8, wide: u8, points: &[[i32; 2]]) {
+        let mut from = self.at;
+        let steps: Vec<[i32; 2]> = points
+            .iter()
+            .map(|p| {
+                let step = [p[0].wrapping_sub(from[0]), p[1].wrapping_sub(from[1])];
+                from = *p;
+                step
+            })
+            .collect();
+        let fits = steps.iter().flatten().all(|v| i16::try_from(*v).is_ok());
+        self.out.push(if fits { short } else { wide });
+        self.count(points.len());
+        for [dx, dy] in steps {
+            if fits {
+                self.out.extend_from_slice(&(dx as i16).to_le_bytes());
+                self.out.extend_from_slice(&(dy as i16).to_le_bytes());
+            } else {
+                self.out.extend_from_slice(&dx.to_le_bytes());
+                self.out.extend_from_slice(&dy.to_le_bytes());
+            }
+        }
+        self.at = from;
+    }
+
+    /// A polyline through `points`, split where it outgrows one count; each
+    /// piece starts on the point the one before ended on.
+    fn polyline(&mut self, points: &[[i32; 2]]) {
+        let mut start = 0;
+        while start + 1 < points.len() {
+            let end = (start + MAX_COUNT).min(points.len());
+            self.run(0x10, b'p', &points[start..end]);
+            start = end - 1;
+        }
+    }
+
+    /// A strip of filled triangles: each point closes one with the two
+    /// before it.
+    fn triangles(&mut self, points: &[[i32; 2]]) {
+        if (3..=MAX_COUNT).contains(&points.len()) {
+            self.run(0x14, b't', points);
+        }
+    }
+
+    /// The font of the text that follows: its family, em height in graphics
+    /// units and rotation in 65536ths of a turn.
+    fn font(&mut self, family: &str, em: i32, rotation: u16) {
+        if self.font_name.as_deref() != Some(family) {
+            self.extended(&format!("FontExtension '{family}' '{family}'"));
+            self.font_name = Some(family.to_string());
+            self.font = None;
+        }
+        if self.font != Some((em, rotation)) {
+            // The fields the mask names, in its bit order: character set,
+            // family class (swiss), height and rotation.
+            self.out.push(0x06);
+            self.out.extend_from_slice(&0x006au16.to_le_bytes());
+            self.out.push(0);
+            self.out.push(32);
+            self.out.extend_from_slice(&em.to_le_bytes());
+            self.out.extend_from_slice(&rotation.to_le_bytes());
+            self.font = Some((em, rotation));
+        }
+    }
+
+    /// Text with its baseline starting at `origin`.
+    fn text(&mut self, origin: [i32; 2], text: &str) {
+        self.out.push(b'x');
+        self.out
+            .extend_from_slice(&origin[0].wrapping_sub(self.at[0]).to_le_bytes());
+        self.out
+            .extend_from_slice(&origin[1].wrapping_sub(self.at[1]).to_le_bytes());
+        self.at = origin;
+        let plain = text
+            .bytes()
+            .all(|b| (0x20..0x7f).contains(&b) && b != b'\'' && b != b'\\');
+        if plain {
+            self.out.push(b'\'');
+            self.out.extend_from_slice(text.as_bytes());
+            self.out.push(b'\'');
+        } else {
+            // A count, then UTF-16 units. A count of 39 is the byte of a
+            // quote, which opens the plain form: one more unit, a space,
+            // keeps the two apart.
+            let mut units: Vec<u16> = text.encode_utf16().take(MAX_COUNT - 1).collect();
+            if units.len() == usize::from(b'\'') {
+                units.push(u16::from(b' '));
+            }
+            self.count(units.len());
+            for unit in units {
+                self.out.extend_from_slice(&unit.to_le_bytes());
+            }
+        }
+    }
 }
 
 #[cfg(test)]

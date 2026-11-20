@@ -1,7 +1,8 @@
 //! Check DIMTMOVE through the scene's actual dimension tessellation: text
 //! moved off a linear or aligned dimension never drags the dimension line
-//! out to it. DIMTMOVE 1 text near its line keeps to it; further away it
-//! hangs on a leader from the line's middle.
+//! out past it. The line may run on under text beside it, up to the text's
+//! far end (#3332), never beyond. DIMTMOVE 1 text near its line keeps to it;
+//! further away it hangs on a leader from the line's middle.
 
 use document::entities::{Dimension, DimensionAligned, DimensionLinear};
 use document::types::Vector3;
@@ -9,6 +10,9 @@ use document::xdata::XDataValue;
 use document::EntityType;
 use OpenCADStudio::entities::dim_override as ov;
 use OpenCADStudio::scene::Scene;
+
+/// Slightly over half the width of the "60" text at DIMTXT 3.5.
+const TEXT_HALF_WIDTH: f64 = 3.5;
 
 #[test]
 fn dim_line_never_runs_out_to_moved_text() {
@@ -64,9 +68,9 @@ fn dim_line_never_runs_out_to_moved_text() {
                             && (a.y - 86.0).abs() < 1e-4
                             && (b.y - 86.0).abs() < 1e-4
                             && if text_x > 80.0 {
-                                b.x > text_x
+                                b.x > text_x + TEXT_HALF_WIDTH
                             } else {
-                                b.x < text_x
+                                b.x < text_x - TEXT_HALF_WIDTH
                             }
                     })
                 });

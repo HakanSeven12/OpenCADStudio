@@ -3000,7 +3000,8 @@ mod tests {
             blob.extend_from_slice(&kind.to_le_bytes());
             blob.extend_from_slice(&payload);
         }
-        blob[0..4].copy_from_slice(&(blob.len() as u32).to_le_bytes());
+        let total = blob.len() as u32;
+        blob[0..4].copy_from_slice(&total.to_le_bytes());
         blob
     }
 

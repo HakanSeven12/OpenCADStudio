@@ -9,7 +9,7 @@
 
 mod dgn7;
 mod dgn8;
-mod dwf;
+pub(crate) mod dwf;
 mod model;
 mod wires;
 

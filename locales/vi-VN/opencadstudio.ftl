@@ -1933,6 +1933,7 @@ common =
     .mcp-is-handling-a-request = MCP đang xử lý yêu cầu
     .mcp-control-is-ready = Điều khiển MCP đã sẵn sàng
     .copy-mcp-client-setup = Copy MCP client setup
+    .drag-to-move-double-click-to-dock = Drag to move; double-click to dock
     .mcp-client-setup-copied = MCP client setup copied to the clipboard
     .save-all = Lưu tất cả
     .close-all = Đóng tất cả

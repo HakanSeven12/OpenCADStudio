@@ -1932,6 +1932,7 @@ common =
     .mcp-is-handling-a-request = MCP traite une requête
     .mcp-control-is-ready = Contrôle MCP prêt
     .copy-mcp-client-setup = Copy MCP client setup
+    .drag-to-move-double-click-to-dock = Drag to move; double-click to dock
     .mcp-client-setup-copied = MCP client setup copied to the clipboard
     .save-all = { common.save } ({ common.all })
     .close-all = { action.close } ({ common.all })

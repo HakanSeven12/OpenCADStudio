@@ -228,6 +228,9 @@ pub struct CommandLine {
     pub history_open: bool,
     /// Persisted height of the full-history editor in logical pixels.
     pub history_height: f32,
+    /// Offset of the floating command line from its docked spot (bottom
+    /// centre of the drawing area), in logical pixels. Zero is docked.
+    pub float_offset: iced::Vector,
     /// Index of the currently-highlighted autocomplete suggestion. `None`
     /// means the first match is pre-selected (highlighted) before keyboard
     /// navigation begins. Reset when input changes.
@@ -290,6 +293,7 @@ impl Default for CommandLine {
             recall_draft: String::new(),
             history_open: false,
             history_height: 0.0,
+            float_offset: iced::Vector::ZERO,
             autocomplete_cursor: None,
             contextual_suggestions: Vec::new(),
             dynamic_commands: Vec::new(),
@@ -1417,7 +1421,20 @@ impl CommandLine {
         .padding([km::LINE * 2.0, km::TOOL_GAP]);
         let enter_btn =
             crate::ui::kit::tooltip(enter_btn, t!("Enter"), crate::ui::kit::TipPosition::Top);
+        // Drag to float the command line elsewhere; double-click docks it.
+        let move_grip = crate::ui::kit::tooltip(
+            iced::widget::mouse_area(
+                container(crate::ui::icons::themed(crate::ui::icons::MOVE, km::BAR_ICON))
+                    .padding([km::LINE * 2.0, km::TOOL_GAP]),
+            )
+            .on_press(Message::CommandLineMoveGrab)
+            .on_double_click(Message::CommandLineDock)
+            .interaction(iced::mouse::Interaction::Grab),
+            t!("Drag to move; double-click to dock"),
+            crate::ui::kit::TipPosition::Top,
+        );
         let input_row = row![
+            move_grip,
             prompt,
             literal_btn,
             input_with_history,

@@ -1931,6 +1931,7 @@ common =
     .mcp-is-handling-a-request = MCP가 요청을 처리 중입니다
     .mcp-control-is-ready = MCP 제어가 준비되었습니다
     .copy-mcp-client-setup = Copy MCP client setup
+    .drag-to-move-double-click-to-dock = Drag to move; double-click to dock
     .mcp-client-setup-copied = MCP client setup copied to the clipboard
     .save-all = { common.save } ({ common.all })
     .close-all = { action.close } ({ common.all })

@@ -1931,6 +1931,7 @@ common =
     .mcp-is-handling-a-request = MCP 正在處理要求
     .mcp-control-is-ready = MCP 控制已就緒
     .copy-mcp-client-setup = 複製 MCP 用戶端設定
+    .drag-to-move-double-click-to-dock = Drag to move; double-click to dock
     .mcp-client-setup-copied = 已將 MCP 用戶端設定複製到剪貼簿
     .save-all = { common.save } ({ common.all })
     .close-all = { action.close } ({ common.all })

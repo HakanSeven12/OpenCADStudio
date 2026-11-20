@@ -1931,6 +1931,7 @@ common =
     .mcp-is-handling-a-request = MCP is handling a request
     .mcp-control-is-ready = MCP control is ready
     .copy-mcp-client-setup = Copy MCP client setup
+    .drag-to-move-double-click-to-dock = Drag to move; double-click to dock
     .mcp-client-setup-copied = MCP client setup copied to the clipboard
     .save-all = Save All
     .close-all = Close All

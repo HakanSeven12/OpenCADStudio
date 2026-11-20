@@ -6404,6 +6404,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "MCP is handling a request" => Some(("common", "mcp-is-handling-a-request")),
         "MCP control is ready" => Some(("common", "mcp-control-is-ready")),
         "Copy MCP client setup" => Some(("common", "copy-mcp-client-setup")),
+        "Drag to move; double-click to dock" => Some(("common", "drag-to-move-double-click-to-dock")),
         "MCP client setup copied to the clipboard" => Some(("common", "mcp-client-setup-copied")),
         "Save All" => Some(("common", "save-all")),
         "Close All" => Some(("common", "close-all")),

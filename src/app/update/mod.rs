@@ -4734,6 +4734,35 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::CommandLineMoveGrab => {
+                self.command_line_moving = true;
+                self.command_history_drag_last = None;
+                Task::none()
+            }
+
+            Message::CommandLineMoveMove(point) => {
+                if self.command_line_moving {
+                    if let Some(last) = self.command_history_drag_last {
+                        self.command_line.float_offset =
+                            self.command_line.float_offset + (point - last);
+                    }
+                    self.command_history_drag_last = Some(point);
+                }
+                Task::none()
+            }
+
+            Message::CommandLineMoveRelease => {
+                self.command_line_moving = false;
+                self.command_history_drag_last = None;
+                Task::none()
+            }
+
+            Message::CommandLineDock => {
+                self.command_line_moving = false;
+                self.command_line.float_offset = iced::Vector::ZERO;
+                Task::none()
+            }
+
             Message::CommandHistoryResizeGrab => {
                 if self.command_line.history_open {
                     self.command_history_resizing = true;

@@ -932,6 +932,7 @@ pub(super) struct OpenCADStudio {
     /// Pointer state while the command-history panel's top edge is dragged.
     command_history_resizing: bool,
     command_history_drag_last: Option<Point>,
+    command_line_moving: bool,
     status_bar: StatusBar,
     cursor_pos: Point,
     vp_size: (f32, f32),
@@ -4530,6 +4531,12 @@ pub enum Message {
     CommandHistoryToggle,
     /// Grab/move/release the expanded history panel's top resize edge.
     CommandHistoryResizeGrab,
+    /// Drag the command line by its grip (floating mode).
+    CommandLineMoveGrab,
+    CommandLineMoveMove(Point),
+    CommandLineMoveRelease,
+    /// Put a floating command line back at the bottom of the drawing area.
+    CommandLineDock,
     CommandHistoryResizeMove(Point),
     CommandHistoryResizeRelease,
     /// Restore the expanded history panel to its default height.
@@ -6528,6 +6535,7 @@ impl OpenCADStudio {
             history_content: iced::widget::text_editor::Content::new(),
             command_history_resizing: false,
             command_history_drag_last: None,
+            command_line_moving: false,
             status_bar: StatusBar::new(),
             cursor_pos: Point::ORIGIN,
             vp_size: (1280.0, 720.0),

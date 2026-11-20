@@ -1930,6 +1930,7 @@ common =
     .mcp-is-handling-a-request = Az MCP kérést dolgoz fel
     .mcp-control-is-ready = MCP-vezérlés kész
     .copy-mcp-client-setup = MCP-kliensbeállítás másolása
+    .drag-to-move-double-click-to-dock = Drag to move; double-click to dock
     .mcp-client-setup-copied = Az MCP-kliensbeállítás a vágólapra másolva
     .save-all = Összes mentése
     .close-all = Összes bezárása

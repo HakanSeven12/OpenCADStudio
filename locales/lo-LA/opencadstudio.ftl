@@ -1937,6 +1937,7 @@ common =
     .mcp-is-handling-a-request = MCP ກຳລັງຈັດການຄຳຮ້ອງຂໍ
     .mcp-control-is-ready = ການຄວບຄຸມ MCP ພ້ອມແລ້ວ
     .copy-mcp-client-setup = Copy MCP client setup
+    .drag-to-move-double-click-to-dock = Drag to move; double-click to dock
     .mcp-client-setup-copied = MCP client setup copied to the clipboard
     .save-all = ບັນທຶກທັງໝົດ
     .close-all = ປິດທັງໝົດ

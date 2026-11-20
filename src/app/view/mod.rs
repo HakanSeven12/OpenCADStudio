@@ -3436,6 +3436,9 @@ bg={bg_ms:.1}ms n={view_count}"
                     .height(iced::Length::Fixed(0.0))
                     .clip(true)
             } else {
+                // Floating: shift from the bottom centre by the dragged
+                // offset (padding on one side moves a centred box by half).
+                let off = self.command_line.float_offset;
                 iced::widget::container(command_line)
                     .width(Fill)
                     .height(Fill)
@@ -3443,9 +3446,9 @@ bg={bg_ms:.1}ms n={view_count}"
                     .align_y(iced::alignment::Vertical::Bottom)
                     .padding(iced::Padding {
                         top: 0.0,
-                        right: 0.0,
-                        bottom: 2.0,
-                        left: 0.0,
+                        right: (-2.0 * off.x).max(0.0),
+                        bottom: (2.0 - off.y).max(0.0),
+                        left: (2.0 * off.x).max(0.0),
                     })
             };
             iced::widget::stack![center, command_line_overlay]
@@ -3462,7 +3465,13 @@ bg={bg_ms:.1}ms n={view_count}"
         // a tall one (Layer Manager with many layers) are not hidden by it.
         let center_stack = self.dock_overlay(center_stack, tab);
 
-        let center_stack: Element<'_, Message> = if self.command_history_resizing {
+        let center_stack: Element<'_, Message> = if self.command_line_moving {
+            mouse_area(center_stack)
+                .on_move(Message::CommandLineMoveMove)
+                .on_release(Message::CommandLineMoveRelease)
+                .interaction(iced::mouse::Interaction::Grabbing)
+                .into()
+        } else if self.command_history_resizing {
             mouse_area(center_stack)
                 .on_move(Message::CommandHistoryResizeMove)
                 .on_release(Message::CommandHistoryResizeRelease)

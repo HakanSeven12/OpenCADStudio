@@ -1918,6 +1918,7 @@ common =
     .mcp-is-handling-a-request = MCP bir isteği işliyor
     .mcp-control-is-ready = MCP denetimi hazır
     .copy-mcp-client-setup = MCP istemci kurulumunu kopyala
+    .drag-to-move-double-click-to-dock = Taşımak için sürükleyin; yerleştirmek için çift tıklayın
     .mcp-client-setup-copied = MCP istemci kurulumu panoya kopyalandı
     .save-all = { common.save } ({ common.all })
     .close-all = { action.close } ({ common.all })

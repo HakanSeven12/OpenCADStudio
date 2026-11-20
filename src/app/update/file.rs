@@ -2252,10 +2252,12 @@ impl OpenCADStudio {
                 .as_deref()
                 .and_then(|p| p.parent().map(|p| p.to_path_buf()))
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
-            let infos = crate::io::xref::resolve_xrefs_for_keys(
+            let xref_session = self.tabs[j].ifccad_session.clone();
+            let infos = crate::io::xref::resolve_xrefs_for_keys_in_session(
                 &mut self.tabs[j].scene.document,
                 &base_dir,
                 &keys,
+                xref_session.as_ref(),
             );
             if infos.is_empty() {
                 continue;
@@ -3391,31 +3393,35 @@ impl OpenCADStudio {
                 Some((acis, solid, mesh, name, layer, [r, g, b].map(f64::from)))
             })
             .collect();
-        let unit_mm =
-            crate::app::properties::insunits_to_mm(scene.document.header.insertion_units)
-                .unwrap_or(1.0);
+        let unit_mm = crate::app::properties::insunits_to_mm(scene.document.header.insertion_units)
+            .unwrap_or(1.0);
         let schema = self.step_schema;
         let product = self.tabs[i]
             .current_path
             .as_deref()
             .and_then(|p| p.file_stem())
-            .map_or_else(|| "OpenCADStudio".to_string(), |s| s.to_string_lossy().into_owned());
+            .map_or_else(
+                || "OpenCADStudio".to_string(),
+                |s| s.to_string_lossy().into_owned(),
+            );
         let worker_path = path.clone();
         background_task(
             crate::t!("STEP export"),
             move || {
                 let items: Vec<_> = objects
                     .into_iter()
-                    .map(|(acis, solid, mesh, name, layer, color)| crate::io::step::StepItem {
-                        body: acis.as_ref().and_then(
-                            crate::scene::convert::solid3d_tess::acis_record,
-                        ),
-                        solid,
-                        mesh: Some(mesh),
-                        name,
-                        layer,
-                        color: Some(color.map(|c| c.clamp(0.0, 1.0))),
-                    })
+                    .map(
+                        |(acis, solid, mesh, name, layer, color)| crate::io::step::StepItem {
+                            body: acis
+                                .as_ref()
+                                .and_then(crate::scene::convert::solid3d_tess::acis_record),
+                            solid,
+                            mesh: Some(mesh),
+                            name,
+                            layer,
+                            color: Some(color.map(|c| c.clamp(0.0, 1.0))),
+                        },
+                    )
                     .collect();
                 let text = crate::io::step::build_step(&items, unit_mm, schema, &product)?;
                 write_export(&worker_path, text.as_bytes())
@@ -5538,9 +5544,7 @@ impl OpenCADStudio {
             if session_running(session) {
                 continue;
             }
-            let kept = copy.with_file_name(format!(
-                "OpenCADStudio_{stem}.ocs-recovered.sv$"
-            ));
+            let kept = copy.with_file_name(format!("OpenCADStudio_{stem}.ocs-recovered.sv$"));
             if std::fs::rename(&copy, &kept).is_ok() {
                 self.command_line.push_warning(&crate::tr!(
                     "recovery",
@@ -6914,9 +6918,8 @@ impl OpenCADStudio {
             _ => ("png", "PNG", image::ImageFormat::Png),
         };
         let Some((page, width, height)) = self.raster_out_page(handles) else {
-            self.command_line.push_error(
-                crate::t!("None of the selected entities could be exported.").as_ref(),
-            );
+            self.command_line
+                .push_error(crate::t!("None of the selected entities could be exported.").as_ref());
             return Task::none();
         };
         let start = move |path: std::path::PathBuf| {
@@ -9048,7 +9051,12 @@ impl OpenCADStudio {
         (half_w > 1e-9 && half_h > 1e-9).then_some(())?;
         let center = crate::scene::named_view_center(view);
         let (cx, cy) = (center.x, center.y);
-        self.area_plot_job(self.view_frame_box((cx - half_w, cy - half_h, cx + half_w, cy + half_h)))
+        self.area_plot_job(self.view_frame_box((
+            cx - half_w,
+            cy - half_h,
+            cx + half_w,
+            cy + half_h,
+        )))
     }
 
     pub(in crate::app) fn extents_plot_job(&self) -> Option<PdfPageInput> {
@@ -9147,10 +9155,8 @@ impl OpenCADStudio {
             iced::Point::new(0.0, bounds.height),
         ] {
             let world = camera.unproject_on_plane(point, bounds, glam::Vec3::Z, glam::DVec3::ZERO);
-            let world = glam::DVec2::new(
-                cos * world.x - sin * world.y,
-                sin * world.x + cos * world.y,
-            );
+            let world =
+                glam::DVec2::new(cos * world.x - sin * world.y, sin * world.x + cos * world.y);
             x0 = x0.min(world.x);
             y0 = y0.min(world.y);
             x1 = x1.max(world.x);
@@ -9168,9 +9174,7 @@ impl OpenCADStudio {
     /// `Ok(None)` means the drawing has no CRS, or a projected CRS without the
     /// drawing units needed to georeference it. Those drawings still export as
     /// plain PDF. Malformed GEODATA and unsupported plot frames remain errors.
-    fn geopdf_eligibility(
-        &self,
-    ) -> Result<Option<crate::io::crs::CrsDefinition>, String> {
+    fn geopdf_eligibility(&self) -> Result<Option<crate::io::crs::CrsDefinition>, String> {
         let scene = &self.tabs[self.active_tab].scene;
         if scene.current_layout != "Model"
             || scene.block_edit_block.is_some()
@@ -9235,9 +9239,9 @@ impl OpenCADStudio {
             return Ok(());
         }
         match self.geopdf_eligibility()? {
-            Some(_) => Err(
-                "The selected model window cannot be represented as a GeoPDF frame".to_string(),
-            ),
+            Some(_) => {
+                Err("The selected model window cannot be represented as a GeoPDF frame".to_string())
+            }
             None => Ok(()),
         }
     }
@@ -9502,15 +9506,16 @@ impl OpenCADStudio {
                     host_bridge::emit_error("read_only", "Read-only session: saving is disabled.");
                     return Task::none();
                 }
-                let Some(fmt) = format.filter(|f| {
-                    f.eq_ignore_ascii_case("dxf") || f.eq_ignore_ascii_case("dwg")
-                }) else {
+                let Some(fmt) = format
+                    .filter(|f| f.eq_ignore_ascii_case("dxf") || f.eq_ignore_ascii_case("dwg"))
+                else {
                     return self.on_save_file();
                 };
                 if let Some(busy_tab) = crate::io::fs_access::web_save_in_flight() {
                     if self.tabs.iter().any(|tab| tab.id == busy_tab) {
-                        self.command_line
-                            .push_info(crate::t!("Save already running for this drawing.").as_ref());
+                        self.command_line.push_info(
+                            crate::t!("Save already running for this drawing.").as_ref(),
+                        );
                         return Task::none();
                     }
                     crate::io::fs_access::end_web_save(busy_tab);
@@ -9610,9 +9615,9 @@ mod plot_paper_tests {
         if let Some(document::objects::ObjectType::Dictionary(dictionary)) =
             document.objects.get_mut(&dictionary)
         {
-            dictionary
-                .entries
-                .retain(|(key, _)| !key.eq_ignore_ascii_case(crate::io::crs::GEODATA_DICTIONARY_KEY));
+            dictionary.entries.retain(|(key, _)| {
+                !key.eq_ignore_ascii_case(crate::io::crs::GEODATA_DICTIONARY_KEY)
+            });
         }
     }
 
@@ -9666,8 +9671,7 @@ mod plot_paper_tests {
             .iter()
             .zip(expected_visible)
             .any(|(actual, expected)| {
-                (actual - GEO_ORIGIN[0]).abs() < 1e-6
-                    && *actual != expected as f32 as f64
+                (actual - GEO_ORIGIN[0]).abs() < 1e-6 && *actual != expected as f32 as f64
             }));
         let survey_window = [
             GEO_ORIGIN[0],
@@ -9723,10 +9727,7 @@ mod plot_paper_tests {
             .document
             .header
             .insertion_units = 6;
-        assert!(app
-            .geopdf_frame_for_window(window)
-            .unwrap()
-            .is_some());
+        assert!(app.geopdf_frame_for_window(window).unwrap().is_some());
 
         let original_rotation = app.tabs[app.active_tab].scene.camera.borrow().rotation;
         app.tabs[app.active_tab]
@@ -9790,7 +9791,10 @@ mod plot_paper_tests {
         app.export_pdf_direct(&path, false)
             .expect("missing CRS must fall back to plain PDF");
         assert!(path.exists());
-        assert_eq!(vp_by_page(std::fs::read(&path).expect("fallback PDF")), [false]);
+        assert_eq!(
+            vp_by_page(std::fs::read(&path).expect("fallback PDF")),
+            [false]
+        );
         let _ = std::fs::remove_file(&path);
     }
 

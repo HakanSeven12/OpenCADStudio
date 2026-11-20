@@ -256,7 +256,10 @@ impl OpenCADStudio {
     fn visit_find_result(&mut self, result: &FindResult) -> Task<Message> {
         let i = self.active_tab;
         let mut task = Task::none();
-        if !result.location.eq_ignore_ascii_case(&self.tabs[i].scene.current_layout) {
+        if !result
+            .location
+            .eq_ignore_ascii_case(&self.tabs[i].scene.current_layout)
+        {
             task = self.on_layout_switch(result.location.clone());
         }
         let zoom = if result.height > 0.0 {
@@ -311,7 +314,10 @@ impl OpenCADStudio {
             return Task::none();
         }
         let first = picked[0].location.clone();
-        if picked.iter().any(|r| !r.location.eq_ignore_ascii_case(&first)) {
+        if picked
+            .iter()
+            .any(|r| !r.location.eq_ignore_ascii_case(&first))
+        {
             self.find_replace.notice = Some(FindNotice::CannotSelect);
             return Task::none();
         }
@@ -445,10 +451,7 @@ impl OpenCADStudio {
                             let doc = &self.tabs[i].scene.document;
                             layer
                                 .iter()
-                                .chain(
-                                    doc.get_entity(key.owner)
-                                        .map(|e| &e.common().layer),
-                                )
+                                .chain(doc.get_entity(key.owner).map(|e| &e.common().layer))
                                 .cloned()
                                 .collect()
                         };
@@ -538,7 +541,10 @@ impl OpenCADStudio {
                         }
                         if result.kind == FindKind::Xref {
                             if let Some(name) = definition {
-                                if !xref_writes.iter().any(|n: &String| n.eq_ignore_ascii_case(&name)) {
+                                if !xref_writes
+                                    .iter()
+                                    .any(|n: &String| n.eq_ignore_ascii_case(&name))
+                                {
                                     xref_writes.push(name);
                                 }
                             }
@@ -711,10 +717,12 @@ impl OpenCADStudio {
             for key in &insert_keys {
                 self.tabs[i].xref_stat_cache.0.remove(&key.value());
             }
-            let _ = crate::io::xref::resolve_xrefs_for_keys(
+            let xref_session = self.tabs[i].ifccad_session.clone();
+            let _ = crate::io::xref::resolve_xrefs_for_keys_in_session(
                 &mut self.tabs[i].scene.document,
                 &base_dir,
                 &insert_keys,
+                xref_session.as_ref(),
             );
         }
     }
@@ -882,7 +890,16 @@ impl Walk<'_> {
             .is_some_and(|l| l.flags.off || l.flags.frozen)
     }
 
-    fn push(&mut self, owner: Handle, target: Handle, part: FindPart, kind: FindKind, location: &str, value: &str, height: f64) {
+    fn push(
+        &mut self,
+        owner: Handle,
+        target: Handle,
+        part: FindPart,
+        kind: FindKind,
+        location: &str,
+        value: &str,
+        height: f64,
+    ) {
         // Formatted texts are searched and listed as they read.
         let value = &shown_text(self.doc, target, part, value);
         if crate::app::text_match::str_ranges(value, self.pattern, &self.matching).is_empty() {
@@ -920,17 +937,37 @@ impl Walk<'_> {
             None => kind,
         };
         match entity {
-            EntityType::Text(t) if self.opts.texts => {
-                self.push(owner, target, FindPart::Text, inner(FindKind::Text), location, &t.value, t.height)
-            }
-            EntityType::MText(t) if self.opts.texts => {
-                self.push(owner, target, FindPart::Text, inner(FindKind::MText), location, &t.value, t.height)
-            }
+            EntityType::Text(t) if self.opts.texts => self.push(
+                owner,
+                target,
+                FindPart::Text,
+                inner(FindKind::Text),
+                location,
+                &t.value,
+                t.height,
+            ),
+            EntityType::MText(t) if self.opts.texts => self.push(
+                owner,
+                target,
+                FindPart::Text,
+                inner(FindKind::MText),
+                location,
+                &t.value,
+                t.height,
+            ),
             EntityType::Dimension(d) if self.opts.dimensions => {
                 if let Some(text) = d.base().text_override() {
                     if !text.trim().is_empty() && text.trim() != "<>" {
                         let height = dim_text_height(self.doc, &d.base().style_name);
-                        self.push(owner, target, FindPart::Text, inner(FindKind::Dimension), location, text, height);
+                        self.push(
+                            owner,
+                            target,
+                            FindPart::Text,
+                            inner(FindKind::Dimension),
+                            location,
+                            text,
+                            height,
+                        );
                     }
                 }
             }
@@ -951,7 +988,15 @@ impl Walk<'_> {
                     for col in 0..table.column_count() {
                         if let Some(text) = table.cell_text(row, col) {
                             let text = text.to_string();
-                            self.push(owner, target, FindPart::Cell(row, col), inner(FindKind::Table), location, &text, height);
+                            self.push(
+                                owner,
+                                target,
+                                FindPart::Cell(row, col),
+                                inner(FindKind::Table),
+                                location,
+                                &text,
+                                height,
+                            );
                         }
                     }
                 }
@@ -961,10 +1006,26 @@ impl Walk<'_> {
         if within.is_none() {
             if let Some(link) = crate::scene::hyperlink::Link::of(entity) {
                 if self.opts.link_texts && !link.text.is_empty() {
-                    self.push(owner, target, FindPart::LinkText, FindKind::LinkText, location, &link.text, 0.0);
+                    self.push(
+                        owner,
+                        target,
+                        FindPart::LinkText,
+                        FindKind::LinkText,
+                        location,
+                        &link.text,
+                        0.0,
+                    );
                 }
                 if self.opts.links && !link.url.is_empty() {
-                    self.push(owner, target, FindPart::LinkUrl, FindKind::Link, location, &link.url, 0.0);
+                    self.push(
+                        owner,
+                        target,
+                        FindPart::LinkUrl,
+                        FindKind::Link,
+                        location,
+                        &link.url,
+                        0.0,
+                    );
                 }
             }
         }
@@ -994,7 +1055,11 @@ impl Walk<'_> {
                 return;
             };
             let xref = record.flags.is_xref || record.flags.is_xref_overlay;
-            let go = if xref { self.opts.xrefs } else { self.opts.blocks };
+            let go = if xref {
+                self.opts.xrefs
+            } else {
+                self.opts.blocks
+            };
             if !go || depth > 16 {
                 return;
             }
@@ -1049,7 +1114,9 @@ fn field_text(doc: &document::Document, key: FindMatchKey) -> Option<String> {
 /// Write a match's text back.
 fn set_field_text(doc: &mut document::Document, key: FindMatchKey, value: String) -> bool {
     if let FindPart::LinkText | FindPart::LinkUrl = key.part {
-        let Some(mut link) = doc.get_entity(key.target).and_then(crate::scene::hyperlink::Link::of)
+        let Some(mut link) = doc
+            .get_entity(key.target)
+            .and_then(crate::scene::hyperlink::Link::of)
         else {
             return false;
         };
@@ -1114,7 +1181,14 @@ fn match_quads(
     // (cells of one line share their bottom).
     let runs = |cells: &[(usize, [f64; 4])], visible: &str| -> Vec<[f64; 4]> {
         let chars: Vec<Option<char>> = visible.chars().map(Some).collect();
-        let join = |a: [f64; 4], c: [f64; 4]| [a[0].min(c[0]), a[1].min(c[1]), a[2].max(c[2]), a[3].max(c[3])];
+        let join = |a: [f64; 4], c: [f64; 4]| {
+            [
+                a[0].min(c[0]),
+                a[1].min(c[1]),
+                a[2].max(c[2]),
+                a[3].max(c[3]),
+            ]
+        };
         let frame = cells.iter().map(|(_, c)| *c).reduce(join);
         let mut out: Vec<[f64; 4]> = frame.into_iter().collect();
         for (start, end) in crate::app::text_match::find_ranges(&chars, pattern, opts) {
@@ -1222,7 +1296,9 @@ fn highlight(
         .chain(matched.iter().map(|q| (q, FIND_MATCH_FILL)))
         .map(|(q, color)| {
             let origin = q[0];
-            let ring = q.iter().map(|p| [(p[0] - origin[0]) as f32, (p[1] - origin[1]) as f32]);
+            let ring = q
+                .iter()
+                .map(|p| [(p[0] - origin[0]) as f32, (p[1] - origin[1]) as f32]);
             crate::scene::HatchModel {
                 entity: None,
                 effective_layer: None,
@@ -1282,8 +1358,10 @@ const FIND_FRAME_FILL: [f32; 4] = [0.0, 0.0, 0.0, 0.28];
 fn shown_text(doc: &document::Document, target: Handle, part: FindPart, value: &str) -> String {
     let formatted = matches!(
         (part, doc.get_entity(target)),
-        (FindPart::Text, Some(EntityType::MText(_) | EntityType::MultiLeader(_) | EntityType::Dimension(_)))
-            | (FindPart::Cell(..), Some(EntityType::Table(_)))
+        (
+            FindPart::Text,
+            Some(EntityType::MText(_) | EntityType::MultiLeader(_) | EntityType::Dimension(_))
+        ) | (FindPart::Cell(..), Some(EntityType::Table(_)))
     );
     if formatted {
         document::entities::mtext_format::parse_mtext(value, true).to_plain_text()

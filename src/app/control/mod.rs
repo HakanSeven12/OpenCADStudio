@@ -1472,6 +1472,7 @@ impl OpenCADStudio {
             "plot" => self.control_plot(req)?,
             "entities_create" => self.control_entities_create(req)?,
             "entities_set" => self.control_entities_set(req)?,
+            "xref_source_register" => self.control_xref_source_register(req)?,
             "xref_reload" => self.control_xref_reload(req)?,
             "xref_unload" => self.control_xref_unload(req)?,
             "xref_detach" => self.control_xref_detach(req)?,
@@ -1572,7 +1573,7 @@ impl OpenCADStudio {
                         true,
                         require_new_destination,
                     )
-                        .map_err(|e| failure("save_failed", e))?;
+                    .map_err(|e| failure("save_failed", e))?;
                     Task::none()
                 } else {
                     self.prepare_native_save(i);
@@ -4658,7 +4659,11 @@ mod tests {
 
         let measured = app.control_measure(&json!({"handles":[handle_text]}));
         let mesh = &measured["measurements"][0]["mesh"];
-        assert!((mesh["volume"].as_f64().unwrap() - 50.0).abs() < 1e-9, "{}", mesh["volume"]);
+        assert!(
+            (mesh["volume"].as_f64().unwrap() - 50.0).abs() < 1e-9,
+            "{}",
+            mesh["volume"]
+        );
         assert_eq!(mesh["principal_moments"].as_array().unwrap().len(), 3);
         assert!(matches!(
             app.tabs[app.active_tab]
@@ -5009,7 +5014,10 @@ mod tests {
     fn block_definition_dialog_fields_are_automatable() {
         use crate::app::ModalKind;
         let mut app = OpenCADStudio::new_for_test();
-        assert_eq!(request(&mut app, json!({"op":"new"}))["status"], "completed");
+        assert_eq!(
+            request(&mut app, json!({"op":"new"}))["status"],
+            "completed"
+        );
         let drawn = request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
         assert_eq!(drawn["ok"], true, "{drawn}");
         let selected = request(&mut app, json!({"op":"run","cmd":"SELECTALL"}));
@@ -5896,11 +5904,8 @@ mod tests {
             .header
             .insertion_units = 6;
         let crs = crate::io::crs::CrsDefinition::from_epsg(5514).unwrap();
-        crate::io::crs::set_document_crs(
-            &mut app.tabs[app.active_tab].scene.document,
-            &crs,
-        )
-        .unwrap();
+        crate::io::crs::set_document_crs(&mut app.tabs[app.active_tab].scene.document, &crs)
+            .unwrap();
         app.plot_dialog.geopdf = true;
         // The destination extension, not this stale device selection, decides
         // whether the output is PDF and needs GeoPDF validation.
@@ -5928,8 +5933,7 @@ mod tests {
                 std::process::id()
             ));
             let _ = std::fs::remove_file(&path);
-            let mut plot =
-                json!({"op":"plot","layout":layout,"path":path.to_string_lossy()});
+            let mut plot = json!({"op":"plot","layout":layout,"path":path.to_string_lossy()});
             if kind == "mixed" {
                 // Paper-space non-Layout areas are deliberately plain. They
                 // must not inherit the model page's GeoPDF eligibility check.
@@ -5944,9 +5948,10 @@ mod tests {
             } else {
                 assert!(flags.len() > 1);
                 assert!(flags[model_index]);
-                assert!(flags.iter().enumerate().all(|(index, vp)| {
-                    index == model_index || !vp
-                }));
+                assert!(flags
+                    .iter()
+                    .enumerate()
+                    .all(|(index, vp)| { index == model_index || !vp }));
             }
             let _ = std::fs::remove_file(&path);
         }
@@ -5997,23 +6002,20 @@ mod tests {
 
         // A drawing without a CRS exports as an ordinary plain PDF; the
         // GeoPDF opt-in neither fails the plot nor writes geospatial metadata.
-        let response = request(
-            &mut app,
-            json!({"op":"plot","path":pdf.to_string_lossy()}),
-        );
+        let response = request(&mut app, json!({"op":"plot","path":pdf.to_string_lossy()}));
         assert_eq!(response["status"], "completed", "{response}");
         assert!(pdf.exists(), "{response}");
-        assert_eq!(vp_by_page(std::fs::read(&pdf).expect("fallback PDF")), [false]);
+        assert_eq!(
+            vp_by_page(std::fs::read(&pdf).expect("fallback PDF")),
+            [false]
+        );
         let _ = std::fs::remove_file(&pdf);
 
         let svg = std::env::temp_dir().join(format!(
             "ocs-geopdf-control-missing-crs-{}.svg",
             std::process::id()
         ));
-        let response = request(
-            &mut app,
-            json!({"op":"plot","path":svg.to_string_lossy()}),
-        );
+        let response = request(&mut app, json!({"op":"plot","path":svg.to_string_lossy()}));
         assert_eq!(response["status"], "completed", "{response}");
         roxmltree::Document::parse(&std::fs::read_to_string(&svg).unwrap()).unwrap();
         let _ = std::fs::remove_file(&svg);
@@ -6918,47 +6920,60 @@ mod tests {
         let before = app.tabs[0].scene.document.clone();
         let before_undo = app.tabs[0].history.undo_stack.len();
 
-        let response = request(&mut app, json!({
-            "op": "panel_input",
-            "panel_id": panel_id,
-            "control_id": "SegmentLength",
-            "text": "101.5",
-        }));
+        let response = request(
+            &mut app,
+            json!({
+                "op": "panel_input",
+                "panel_id": panel_id,
+                "control_id": "SegmentLength",
+                "text": "101.5",
+            }),
+        );
         assert_eq!(response["ok"], true, "{response}");
         assert_eq!(
-            app.plugin_panels[panel_id].text_values.get("SegmentLength").map(String::as_str),
+            app.plugin_panels[panel_id]
+                .text_values
+                .get("SegmentLength")
+                .map(String::as_str),
             Some("101.5"),
         );
         assert_eq!(app.tabs[0].scene.document, before);
         assert_eq!(app.tabs[0].history.undo_stack.len(), before_undo);
 
-        let response = request(&mut app, json!({
-            "op": "panel_button",
-            "panel_id": panel_id,
-            "control_id": "reset",
-        }));
+        let response = request(
+            &mut app,
+            json!({
+                "op": "panel_button",
+                "panel_id": panel_id,
+                "control_id": "reset",
+            }),
+        );
         assert_eq!(response["ok"], true, "{response}");
         assert_eq!(
-            app.plugin_panels[panel_id].text_values.get("SegmentLength").map(String::as_str),
+            app.plugin_panels[panel_id]
+                .text_values
+                .get("SegmentLength")
+                .map(String::as_str),
             Some("100"),
         );
         assert_eq!(
             app.plugin_panels[panel_id].owner_plugin_id.as_deref(),
             Some("opencad.civil_ifc"),
         );
-        let declared_action = OpenCADStudio::panel_button_action(
-            &app.plugin_panels[panel_id].def.controls,
-            "apply",
-        );
+        let declared_action =
+            OpenCADStudio::panel_button_action(&app.plugin_panels[panel_id].def.controls, "apply");
         assert_eq!(declared_action.as_deref(), Some("CVI_IFC_PANEL_APPLY"));
         assert_eq!(app.tabs[0].scene.document, before);
         assert_eq!(app.tabs[0].history.undo_stack.len(), before_undo);
 
-        let response = request(&mut app, json!({
-            "op": "panel_button",
-            "panel_id": panel_id,
-            "control_id": "apply",
-        }));
+        let response = request(
+            &mut app,
+            json!({
+                "op": "panel_button",
+                "panel_id": panel_id,
+                "control_id": "apply",
+            }),
+        );
         assert_eq!(response["ok"], true, "{response}");
         assert_eq!(app.tabs[0].scene.document, before);
         assert_eq!(app.tabs[0].history.undo_stack.len(), before_undo);

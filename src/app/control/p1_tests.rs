@@ -469,8 +469,7 @@ fn layout_lifecycle_is_case_insensitive_undoable_and_passive() {
     assert_eq!(app.tabs[i].scene.document, before_doc);
     assert_eq!(app.tabs[i].history.undo_stack.len(), before_undo);
     assert_eq!(app.tabs[i].edit_revision, before_revision);
-    let setup_before_activation =
-        app.automation_op(r#"{"op":"page_setup_get","layout":"PLAN"}"#);
+    let setup_before_activation = app.automation_op(r#"{"op":"page_setup_get","layout":"PLAN"}"#);
     let entities_before_activation = app.tabs[i].scene.document.entities().count();
     assert!(!app.tabs[i].dirty);
 
@@ -4296,9 +4295,108 @@ fn ifccad_undo_does_not_reissue_a_saved_linetype_handle() {
     cmd(&mut app, "-LINETYPE CREATE FIRST 1,-1");
     let first_id = saved_pattern_id(&app, "FIRST");
     assert_eq!(request(&mut app, json!({"op":"undo"}))["ok"], true);
-    assert!(app.tabs[tab].scene.document.line_types.get("FIRST").is_none());
+    assert!(app.tabs[tab]
+        .scene
+        .document
+        .line_types
+        .get("FIRST")
+        .is_none());
     cmd(&mut app, "-LINETYPE CREATE SECOND 2,-2");
     assert_ne!(saved_pattern_id(&app, "SECOND"), first_id);
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn native_xref_host_source_edit_grip_undo_and_offline_save() {
+    use base64::Engine;
+    use document::{EntityType, Vector3};
+    let input = include_bytes!("../../../crates/ocs_save/tests/fixtures/xref.ifcx");
+    let original = document::ifccad::load_ifccad_bytes(input, Default::default())
+        .unwrap()
+        .into_document();
+    let (loaded, session) = ocs_save::read_ifccad_for_edit(input).unwrap();
+    let session = session.unwrap();
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i].scene.document = loaded.document;
+    crate::io::normalize_block_origins(&mut app.tabs[i].scene.document);
+    app.tabs[i].ifccad_session = Some(session.clone());
+    let handle = app.tabs[i]
+        .scene
+        .document
+        .model_space_entities()
+        .find_map(|e| matches!(e, EntityType::Insert(_)).then_some(e.common().handle))
+        .unwrap();
+    for endpoint in [12., 13.] {
+        let mut source = document::Document::new();
+        source.header.insertion_units = 6;
+        source.header.model_space_insertion_base = Vector3::new(10., 20., 0.);
+        source.header.fingerprint_guid = "{E5B4A9AF-CF20-4FC9-A30F-FFB20FD987E1}".into();
+        source
+            .add_entity(EntityType::Line(document::entities::Line::from_coords(
+                10., 20., 0., endpoint, 20., 0.,
+            )))
+            .unwrap();
+        let data = base64::engine::general_purpose::STANDARD
+            .encode(document::DwgWriter::write_to_vec(&source).unwrap());
+        let reply = control(
+            &mut app,
+            json!({"op":"xref_source_register","source_id":original.external_sources[0].id.0.to_string(),"file_name":"grondplan.dwg","data_base64":data}),
+        );
+        assert_eq!(reply["ok"], true, "{reply}");
+        let doc = &app.tabs[i].scene.document;
+        let owner = doc.block_records.get("grondplan").unwrap().handle;
+        let line = doc
+            .entities()
+            .find_map(|e| match e {
+                EntityType::Line(l) if l.common.owner_handle == owner => Some(l),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(line.start, Vector3::ZERO);
+        assert_eq!(line.end, Vector3::new(endpoint - 10., 0., 0.));
+    }
+    let reply = control(
+        &mut app,
+        json!({"op":"grip_drag","handle":handle.to_string(),"grip_id":0,"point":[11000,5000,0]}),
+    );
+    assert_eq!(reply["ok"], true, "{reply}");
+    for op in ["undo", "redo"] {
+        let reply = control(&mut app, json!({"op":op}));
+        assert_eq!(reply["ok"], true, "{reply}");
+    }
+    let prepared = app.tabs[i].scene.document_for_save();
+    let bytes = ocs_save::write_external_for_edit(
+        &prepared,
+        ocs_save::external_format("ifccad").unwrap(),
+        false,
+        Some(&session),
+    )
+    .unwrap();
+    let saved = document::ifccad::load_ifccad_bytes(&bytes, Default::default())
+        .unwrap()
+        .into_document();
+    assert_eq!(saved.external_sources, original.external_sources);
+    assert_eq!(saved.model.entities.len(), original.model.entities.len());
+    let native = saved
+        .model
+        .entities
+        .iter()
+        .filter_map(|e| e.as_native())
+        .find_map(|e| match &e.kind {
+            document::ifccad::IfccadEntityKind::Xref(x) => Some(x),
+            _ => None,
+        })
+        .unwrap();
+    for (actual, expected) in native.placement.origin.iter().zip([11000., 5000., 0.]) {
+        assert!(
+            (actual - expected).abs() <= 0.001,
+            "grip placement {actual} vs {expected}"
+        );
+    }
+    assert_eq!(native.scale, 500.);
+    assert!(saved.blocks.is_empty());
 }
 
 #[test]

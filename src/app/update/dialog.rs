@@ -710,6 +710,10 @@ impl OpenCADStudio {
             )
         };
         let tab = &mut self.tabs[i];
+        crate::io::xref::apply_native_source_status(
+            &mut self.xref_manager.entries,
+            tab.ifccad_session.as_ref(),
+        );
         for (key, mtime) in baselines {
             tab.xref_stat_cache.insert(key, mtime);
         }
@@ -757,11 +761,15 @@ impl OpenCADStudio {
             .as_ref()
             .and_then(|p| p.parent().map(|p| p.to_path_buf()))
             .unwrap_or_else(|| std::path::PathBuf::from("."));
-        let entries = crate::io::xref::collect_entries_with_prev(
+        let mut entries = crate::io::xref::collect_entries_with_prev(
             &self.tabs[i].scene.document,
             &base_dir,
             self.tabs[i].xref_unloaded.as_set(),
             &self.tabs[i].xref_stat_cache.0,
+        );
+        crate::io::xref::apply_native_source_status(
+            &mut entries,
+            self.tabs[i].ifccad_session.as_ref(),
         );
         self.tabs[i].xref_report = entries
             .iter()
@@ -1032,10 +1040,12 @@ impl OpenCADStudio {
                     .filter(|br| dwg_picked.iter().any(|(key, _)| *key == br.handle.value()))
                     .map(|br| br.handle)
                     .collect();
-                let infos = crate::io::xref::resolve_xrefs_for_keys(
+                let xref_session = self.tabs[i].ifccad_session.clone();
+                let infos = crate::io::xref::resolve_xrefs_for_keys_in_session(
                     &mut self.tabs[i].scene.document,
                     &base_dir,
                     &handles,
+                    xref_session.as_ref(),
                 );
                 // Targeted reload updates baselines only for selected rows.
                 {
@@ -2076,8 +2086,10 @@ mod tests {
 
     #[test]
     fn test_interactive_dialog_action_pick_updates_table() {
-        use ocs_plugin_api::dialog::{DialogActionResponse, DialogControl, DialogDef, DialogEvent, DialogValue};
         use crate::command::{CadCommand, CmdResult};
+        use ocs_plugin_api::dialog::{
+            DialogActionResponse, DialogControl, DialogDef, DialogEvent, DialogValue,
+        };
         use std::collections::HashMap;
 
         struct MockStartupCommand {
@@ -2104,9 +2116,14 @@ mod tests {
                         let mut updates = HashMap::new();
                         updates.insert(
                             "scripts_table".to_string(),
-                            DialogValue::Table(self.scripts.iter().map(|s| vec![s.clone()]).collect()),
+                            DialogValue::Table(
+                                self.scripts.iter().map(|s| vec![s.clone()]).collect(),
+                            ),
                         );
-                        updates.insert("file_input".to_string(), DialogValue::FilePath(String::new()));
+                        updates.insert(
+                            "file_input".to_string(),
+                            DialogValue::FilePath(String::new()),
+                        );
                         return DialogActionResponse::UpdateValues(updates);
                     }
                 }
@@ -2116,7 +2133,9 @@ mod tests {
 
         let mut app = fresh();
         let i = app.active_tab;
-        app.tabs[i].active_cmd = Some(Box::new(MockStartupCommand { scripts: Vec::new() }));
+        app.tabs[i].active_cmd = Some(Box::new(MockStartupCommand {
+            scripts: Vec::new(),
+        }));
 
         let def = DialogDef::new("Startup Test")
             .with_control(DialogControl::FilePicker {
@@ -2138,7 +2157,13 @@ mod tests {
 
         app.open_plugin_dialog(def);
 
-        let initial_table = app.plugin_dialog_state.as_ref().unwrap().table_values.get("scripts_table").unwrap();
+        let initial_table = app
+            .plugin_dialog_state
+            .as_ref()
+            .unwrap()
+            .table_values
+            .get("scripts_table")
+            .unwrap();
         assert_eq!(initial_table.len(), 0);
 
         // Simulate typing into the file input (should send "change", not "pick")
@@ -2149,7 +2174,10 @@ mod tests {
         {
             let state = app.plugin_dialog_state.as_ref().unwrap();
             assert_eq!(state.table_values.get("scripts_table").unwrap().len(), 0);
-            assert_eq!(state.file_values.get("file_input").unwrap(), "C:/AutoLISP/partial");
+            assert_eq!(
+                state.file_values.get("file_input").unwrap(),
+                "C:/AutoLISP/partial"
+            );
         }
 
         // Simulate picking a file via Browse dialog (sends "pick")
@@ -2167,8 +2195,10 @@ mod tests {
 
     #[test]
     fn test_interactive_dialog_choice_static_and_dynamic_text_and_tab_routing() {
-        use ocs_plugin_api::dialog::{DialogActionResponse, DialogControl, DialogDef, DialogEvent, DialogValue};
         use crate::command::{CadCommand, CmdResult};
+        use ocs_plugin_api::dialog::{
+            DialogActionResponse, DialogControl, DialogDef, DialogEvent, DialogValue,
+        };
         use std::collections::HashMap;
         use std::sync::{Arc, Mutex};
 
@@ -2203,11 +2233,14 @@ mod tests {
                             selected_index: 1,
                         },
                     );
-                    self.pending_updates.push(("Choice Test".to_string(), updates));
+                    self.pending_updates
+                        .push(("Choice Test".to_string(), updates));
                 }
                 DialogActionResponse::None
             }
-            fn take_pending_panel_updates(&mut self) -> Vec<(String, HashMap<String, DialogValue>)> {
+            fn take_pending_panel_updates(
+                &mut self,
+            ) -> Vec<(String, HashMap<String, DialogValue>)> {
                 std::mem::take(&mut self.pending_updates)
             }
         }
@@ -2326,25 +2359,69 @@ mod tests {
         app.open_plugin_dialog(def);
 
         // Mutate text value, then test "clear" button fallback
-        let _ = app.update(Message::PluginDialogTextChange("txt".to_string(), "modified".to_string()));
-        let _ = app.update(Message::PluginDialogButtonClick("btn_clear".to_string(), Some("clear".to_string())));
-        assert!(app.plugin_dialog_state.as_ref().unwrap().table_values.get("tbl").unwrap().is_empty());
-        assert_eq!(app.plugin_dialog_state.as_ref().unwrap().text_values.get("txt").unwrap(), "modified");
+        let _ = app.update(Message::PluginDialogTextChange(
+            "txt".to_string(),
+            "modified".to_string(),
+        ));
+        let _ = app.update(Message::PluginDialogButtonClick(
+            "btn_clear".to_string(),
+            Some("clear".to_string()),
+        ));
+        assert!(app
+            .plugin_dialog_state
+            .as_ref()
+            .unwrap()
+            .table_values
+            .get("tbl")
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            app.plugin_dialog_state
+                .as_ref()
+                .unwrap()
+                .text_values
+                .get("txt")
+                .unwrap(),
+            "modified"
+        );
 
         // Test "reset" button fallback restores initial defaults
-        let _ = app.update(Message::PluginDialogButtonClick("btn_reset".to_string(), Some("reset".to_string())));
-        assert_eq!(app.plugin_dialog_state.as_ref().unwrap().text_values.get("txt").unwrap(), "initial");
-        assert_eq!(app.plugin_dialog_state.as_ref().unwrap().table_values.get("tbl").unwrap().len(), 1);
+        let _ = app.update(Message::PluginDialogButtonClick(
+            "btn_reset".to_string(),
+            Some("reset".to_string()),
+        ));
+        assert_eq!(
+            app.plugin_dialog_state
+                .as_ref()
+                .unwrap()
+                .text_values
+                .get("txt")
+                .unwrap(),
+            "initial"
+        );
+        assert_eq!(
+            app.plugin_dialog_state
+                .as_ref()
+                .unwrap()
+                .table_values
+                .get("tbl")
+                .unwrap()
+                .len(),
+            1
+        );
 
         // Test "close" button fallback closes the dialog
-        let _ = app.update(Message::PluginDialogButtonClick("btn_close".to_string(), Some("close".to_string())));
+        let _ = app.update(Message::PluginDialogButtonClick(
+            "btn_close".to_string(),
+            Some("close".to_string()),
+        ));
         assert!(app.plugin_dialog_state.is_none());
     }
 
     #[test]
     fn test_interactive_dialog_autolisp_exact_flow() {
-        use ocs_plugin_api::dialog::*;
         use crate::command::CadCommand;
+        use ocs_plugin_api::dialog::*;
 
         let mut app = fresh();
         let opening_tab = app.active_tab;
@@ -2374,37 +2451,66 @@ mod tests {
                     // Like interactive_dialog_test.lsp:
                     // (setq picked (oca-get "picker" values))
                     // (setq current-tbl (oca-get "tbl_files" values))
-                    let picked = event.current_values.get("picker").and_then(|v| match v {
-                        DialogValue::FilePath(p) => Some(p.clone()),
-                        _ => None,
-                    }).unwrap_or_default();
-                    let mut tbl = event.current_values.get("tbl_files").and_then(|v| match v {
-                        DialogValue::Table(rows) => Some(rows.clone()),
-                        _ => None,
-                    }).unwrap_or_default();
+                    let picked = event
+                        .current_values
+                        .get("picker")
+                        .and_then(|v| match v {
+                            DialogValue::FilePath(p) => Some(p.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let mut tbl = event
+                        .current_values
+                        .get("tbl_files")
+                        .and_then(|v| match v {
+                            DialogValue::Table(rows) => Some(rows.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
 
                     if !picked.is_empty() {
                         tbl.push(vec![picked, "Active".to_string()]);
                         updates.insert("tbl_files".to_string(), DialogValue::Table(tbl.clone()));
                         updates.insert("picker".to_string(), DialogValue::FilePath(String::new()));
-                        updates.insert("lbl_status".to_string(), DialogValue::Text(format!("Added file. Total in list: {}", tbl.len())));
+                        updates.insert(
+                            "lbl_status".to_string(),
+                            DialogValue::Text(format!("Added file. Total in list: {}", tbl.len())),
+                        );
                         return DialogActionResponse::UpdateValues(updates);
                     }
                 } else if event.control_id == "btn_clear" {
                     // Empty list clears table:
                     updates.insert("tbl_files".to_string(), DialogValue::Table(Vec::new()));
-                    updates.insert("lbl_status".to_string(), DialogValue::Text("List cleared. 0 items in table.".to_string()));
+                    updates.insert(
+                        "lbl_status".to_string(),
+                        DialogValue::Text("List cleared. 0 items in table.".to_string()),
+                    );
                     return DialogActionResponse::UpdateValues(updates);
                 } else if event.control_id == "btn_inspect" {
-                    let mode = event.current_values.get("cmb_mode").and_then(|v| match v {
-                        DialogValue::Choice { text, .. } => Some(text.clone()),
-                        _ => None,
-                    }).unwrap_or_default();
-                    let log = event.current_values.get("chk_log").and_then(|v| match v {
-                        DialogValue::Bool(b) => Some(*b),
-                        _ => None,
-                    }).unwrap_or(false);
-                    updates.insert("lbl_status".to_string(), DialogValue::Text(format!("Active Mode: \"{}\" | Console Log: {}", mode, if log { "ON" } else { "OFF" })));
+                    let mode = event
+                        .current_values
+                        .get("cmb_mode")
+                        .and_then(|v| match v {
+                            DialogValue::Choice { text, .. } => Some(text.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let log = event
+                        .current_values
+                        .get("chk_log")
+                        .and_then(|v| match v {
+                            DialogValue::Bool(b) => Some(*b),
+                            _ => None,
+                        })
+                        .unwrap_or(false);
+                    updates.insert(
+                        "lbl_status".to_string(),
+                        DialogValue::Text(format!(
+                            "Active Mode: \"{}\" | Console Log: {}",
+                            mode,
+                            if log { "ON" } else { "OFF" }
+                        )),
+                    );
                     return DialogActionResponse::UpdateValues(updates);
                 }
 
@@ -2451,7 +2557,11 @@ mod tests {
             .with_control(DialogControl::Choice {
                 id: "cmb_mode".to_string(),
                 label: "Execution Mode".to_string(),
-                options: vec!["Standard".to_string(), "Fast".to_string(), "Debug".to_string()],
+                options: vec![
+                    "Standard".to_string(),
+                    "Fast".to_string(),
+                    "Debug".to_string(),
+                ],
                 default_index: 0,
             })
             .with_control(DialogControl::Checkbox {
@@ -2471,7 +2581,12 @@ mod tests {
 
         // 1. Verify initial status text
         assert_eq!(
-            app.plugin_dialog_state.as_ref().unwrap().text_values.get("lbl_status").unwrap(),
+            app.plugin_dialog_state
+                .as_ref()
+                .unwrap()
+                .text_values
+                .get("lbl_status")
+                .unwrap(),
             "Ready - Pick a file or click buttons to test reactivity"
         );
 
@@ -2562,7 +2677,12 @@ fn xref_dimension_targets(
             _ => None,
         })
         .flat_map(|association| association.references.iter().flatten())
-        .flat_map(|reference| reference.xrefs.iter().chain(&reference.intersection_objects))
+        .flat_map(|reference| {
+            reference
+                .xrefs
+                .iter()
+                .chain(&reference.intersection_objects)
+        })
         .filter(|handle| {
             doc.get_entity(**handle)
                 .is_some_and(|entity| xref_blocks.contains(&entity.common().owner_handle))

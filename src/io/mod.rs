@@ -4,9 +4,9 @@
 // Default save format: DWG (AC1032 / R2018+).
 
 #[cfg(not(target_arch = "wasm32"))]
-pub mod edit_lock;
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod connection_workers;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod edit_lock;
 // Same split as web_session/web_autosave: the save-routing decision (and
 // its tests) is pure and compiles everywhere; the showSaveFilePicker half
 // inside is wasm-only.
@@ -548,10 +548,11 @@ async fn open_path_with_phase_attempt(
                             callback
                         };
                         crate::io::xref::register_underlay_sources(&doc, base_dir);
-                        crate::io::xref::resolve_xrefs_with_progress(
+                        crate::io::xref::resolve_xrefs_with_progress_in_session(
                             &mut doc,
                             base_dir,
                             Some(xref_progress),
+                            ifccad_session.as_ref(),
                         )
                     } else {
                         Vec::new()
@@ -889,7 +890,7 @@ async fn load_web_bytes(
     // registry (see `resolve_web_xrefs`) before the caches snapshot the
     // document, so merged xref geometry is part of the caches — the same
     // phase order the native open uses.
-    let xref_infos = resolve_web_xrefs(&mut doc, progress.clone()).await;
+    let xref_infos = resolve_web_xrefs(&mut doc, progress.clone(), ifccad_session.as_ref()).await;
     let mut caches = crate::scene::build_derived_caches(&doc);
     caches.read_stats = Some(outcome.stats);
     caches.xrefs = xref_infos;
@@ -967,6 +968,7 @@ pub async fn parse_drawing_bytes_web(name: &str, bytes: &[u8]) -> Result<Documen
 async fn resolve_web_xrefs(
     doc: &mut Document,
     progress: Arc<OpenProgressState>,
+    session: Option<&ocs_save::IfccadSession>,
 ) -> Vec<crate::io::xref::XrefInfo> {
     let pending: Vec<String> = doc
         .block_records
@@ -999,7 +1001,12 @@ async fn resolve_web_xrefs(
             progress.set(crate::app::OPEN_PHASE_XREF, 5900, completed, total);
         })
     };
-    crate::io::xref::resolve_xrefs_with_progress(doc, Path::new(""), Some(xref_progress))
+    crate::io::xref::resolve_xrefs_with_progress_in_session(
+        doc,
+        Path::new(""),
+        Some(xref_progress),
+        session,
+    )
 }
 
 /// Web XATTACH pick: read the chosen drawing's bytes, keep them in the xref
@@ -1519,7 +1526,7 @@ fn read_dxf_path(path: &Path, failsafe: bool) -> Result<document::ReadOutcome, R
 /// on the structural BLOCK entity. Rendering, picking, exploding and nested
 /// insertion can then share the ordinary zero-origin transform without each
 /// path having to reinterpret this compatibility field.
-fn normalize_block_origins(doc: &mut Document) {
+pub(crate) fn normalize_block_origins(doc: &mut Document) {
     use document::types::Vector3;
     use document::EntityType;
 
@@ -2333,7 +2340,10 @@ mod save_failure_tests {
         )
         .unwrap_err();
         assert!(error.externally_modified);
-        assert_eq!(std::fs::read(&path).unwrap(), b"another application's drawing");
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"another application's drawing"
+        );
         assert!(!path.with_extension("bak").exists());
         let _ = std::fs::remove_file(path);
     }
@@ -2648,7 +2658,10 @@ pub(crate) fn verify_save_destination(logical: &Path, physical: &Path) -> Result
             "Current-file alias has a different destination extension; save to a new matching path",
         ));
     }
-    match (std::fs::canonicalize(logical), std::fs::canonicalize(physical)) {
+    match (
+        std::fs::canonicalize(logical),
+        std::fs::canonicalize(physical),
+    ) {
         (Ok(logical), Ok(physical)) if logical == physical => Ok(()),
         _ => Err(SaveFailure::externally_modified(logical)),
     }
@@ -2687,6 +2700,13 @@ where
         session
             .check_destination(&doc, &ext)
             .map_err(SaveFailure::other)?;
+    }
+    if !ocs_save::is_ifccad_extension(&ext) {
+        if let Some(session) = ifccad_session {
+            session
+                .prepare_cad_external_sources(&mut doc)
+                .map_err(SaveFailure::other)?;
+        }
     }
     let write_started = iced::time::Instant::now();
     if ext == "dxf" {
@@ -2832,8 +2852,13 @@ fn replace_save_file_inner(
         // Omitting MOVEFILE_REPLACE_EXISTING makes the final placement
         // reject a name that appeared after the control request.
         return if unsafe {
-            MoveFileExW(source.as_ptr(), destination.as_ptr(), MOVEFILE_WRITE_THROUGH)
-        } == 0 {
+            MoveFileExW(
+                source.as_ptr(),
+                destination.as_ptr(),
+                MOVEFILE_WRITE_THROUGH,
+            )
+        } == 0
+        {
             Err(std::io::Error::last_os_error())
         } else {
             Ok(())
@@ -3109,6 +3134,14 @@ pub async fn serialize_prepared_document(
             ifccad_session,
         );
     }
+    let mut cad_copy;
+    let prepared = if let Some(session) = ifccad_session {
+        cad_copy = prepared.clone();
+        session.prepare_cad_external_sources(&mut cad_copy)?;
+        &cad_copy
+    } else {
+        prepared
+    };
     let encoded = match ocs_save::encode_request(prepared, ext) {
         Ok(encoded) => encoded,
         // The worker cannot help if the document cannot even be encoded —

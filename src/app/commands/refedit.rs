@@ -743,10 +743,12 @@ impl OpenCADStudio {
             .xref_stat_cache
             .0
             .remove(&session.br_handle.value());
-        let _ = crate::io::xref::resolve_xrefs_for_keys(
+        let xref_session = self.tabs[i].ifccad_session.clone();
+        let _ = crate::io::xref::resolve_xrefs_for_keys_in_session(
             &mut self.tabs[i].scene.document,
             &base_dir,
             &keys,
+            xref_session.as_ref(),
         );
         Ok(())
     }

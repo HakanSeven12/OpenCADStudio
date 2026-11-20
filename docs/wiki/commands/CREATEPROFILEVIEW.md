@@ -9,8 +9,9 @@ related: CREATEPROFILE, CREATEALIGNMENT
 3. Press Enter, or first set options:
    - **Start station** and **End station**: the stations the view shows; the elevations then fit the profiles between them.
    - **Minimum elevation** and **Maximum elevation**: the elevations the view shows.
+   - **Vertical exaggeration**: how much the view stretches elevations against stations.
 
 ## Notes
-- The view shows every profile of the alignment at a vertical scale of 10. Without options its stations run from 200 before the alignment's start to 200 past its end and its elevations around the profiles.
+- The view shows every profile of the alignment at a vertical scale of 10, or at the vertical exaggeration given; another exaggeration uses the drawing's profile view style with it, or a new style named Exaggeration and the value. Without options its stations run from 200 before the alignment's start to 200 past its end and its elevations around the profiles.
 - A range needs both of its ends.
 - A drawing that lacks the profile view style gets it.

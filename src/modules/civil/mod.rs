@@ -27,8 +27,13 @@ pub const COMMANDS: &[&str] = &[
     "CREATEPOINTS",
     "CREATEPOINTGROUP",
     "CREATEALIGNMENT",
+    "CREATEOFFSETALIGNMENT",
     "CREATESURFACE",
+    "ADDDESIGNSPEEDS",
+    "ADDSTATIONEQUATIONS",
     "CREATEPROFILE",
+    "CREATESURFACEPROFILE",
+    "CREATEOFFSETPROFILE",
     "CREATEPROFILEVIEW",
     "CREATEFEATURELINE",
     "CREATEPARCEL",
@@ -46,6 +51,7 @@ const VIEW_OPTIONS: &[Opt] = &[
     Opt { label: "End station", keyword: "E", key: "station_end", prompt: "End station of the view", kind: OptKind::Number },
     Opt { label: "Minimum elevation", keyword: "MI", key: "elevation_min", prompt: "Minimum elevation of the view", kind: OptKind::Number },
     Opt { label: "Maximum elevation", keyword: "MA", key: "elevation_max", prompt: "Maximum elevation of the view", kind: OptKind::Number },
+    Opt { label: "Vertical exaggeration", keyword: "V", key: "exaggeration", prompt: "Vertical exaggeration of the view", kind: OptKind::Number },
 ];
 
 const ASSEMBLY_OPTIONS: &[Opt] = &[
@@ -58,9 +64,40 @@ const ASSEMBLY_OPTIONS: &[Opt] = &[
     Opt { label: "Side slope", keyword: "G", key: "SideSlope", prompt: "Side slope (rise over run, -0.5 is 2:1 down)", kind: OptKind::Number },
 ];
 
+/// The alignment types CREATEALIGNMENT writes.
+pub const ALIGNMENT_TYPES: [&str; 3] = ["Centerline", "Utility", "Rail"];
+
+fn alignment_types() -> Vec<&'static str> {
+    ALIGNMENT_TYPES.to_vec()
+}
+
 const ALIGNMENT_OPTIONS: &[Opt] = &[
     Opt { label: "Radius", keyword: "R", key: "radius", prompt: "Curve radius at the corners (0 for none)", kind: OptKind::Number },
     Opt { label: "Spiral length", keyword: "S", key: "spiral", prompt: "Spiral length on each side of a curve (0 for none)", kind: OptKind::Number },
+    Opt { label: "Type", keyword: "T", key: "type", prompt: "Alignment type (? to list)", kind: OptKind::Choice(alignment_types) },
+    Opt { label: "Gauge", keyword: "G", key: "gauge", prompt: "Track gauge of a rail alignment", kind: OptKind::Number },
+];
+
+/// What CREATEPROFILE's curve value gives.
+pub const PROFILE_CURVES: [&str; 3] = ["Length", "K value", "Radius"];
+
+fn profile_curves() -> Vec<&'static str> {
+    PROFILE_CURVES.to_vec()
+}
+
+const PROFILE_OPTIONS: &[Opt] = &[
+    Opt { label: "Curve type", keyword: "C", key: "curve_type", prompt: "What the curve value gives (? to list)", kind: OptKind::Choice(profile_curves) },
+];
+
+/// Which way the stations ahead of ADDSTATIONEQUATIONS' equations run.
+pub const EQUATION_DIRECTIONS: [&str; 2] = ["Increasing", "Decreasing"];
+
+fn equation_directions() -> Vec<&'static str> {
+    EQUATION_DIRECTIONS.to_vec()
+}
+
+const EQUATION_OPTIONS: &[Opt] = &[
+    Opt { label: "Direction", keyword: "D", key: "direction", prompt: "Whether the stations ahead increase or decrease (? to list)", kind: OptKind::Choice(equation_directions) },
 ];
 
 const POINT_GROUP_OPTIONS: &[Opt] = &[
@@ -91,8 +128,16 @@ fn corridor_surfaces() -> Vec<&'static str> {
     CORRIDOR_SURFACES.to_vec()
 }
 
+/// What CREATECORRIDOR locks its region to.
+pub const CORRIDOR_LOCKS: [&str; 2] = ["Stations", "Geometry"];
+
+fn corridor_locks() -> Vec<&'static str> {
+    CORRIDOR_LOCKS.to_vec()
+}
+
 const CORRIDOR_OPTIONS: &[Opt] = &[
     Opt { label: "Surfaces", keyword: "S", key: "surfaces", prompt: "Corridor surfaces to build (? to list)", kind: OptKind::Choice(corridor_surfaces) },
+    Opt { label: "Lock", keyword: "L", key: "lock", prompt: "Lock the region to the alignment's stations or geometry (? to list)", kind: OptKind::Choice(corridor_locks) },
 ];
 
 const PIPE_NETWORK_OPTIONS: &[Opt] = &[
@@ -125,26 +170,53 @@ pub fn steps(name: &str) -> Option<Vec<Step>> {
         ],
         "CREATEALIGNMENT" => vec![
             Step::Objects { prompt: "Select a line or polyline to make an alignment of:", filter: Paths, slot: 0 },
-            Step::Accept { prompt: "Press Enter to create the alignment or [Radius/Spiral length]:", options: ALIGNMENT_OPTIONS },
+            Step::Accept { prompt: "Press Enter to create the alignment or [Radius/Spiral length/Type/Gauge]:", options: ALIGNMENT_OPTIONS },
         ],
-        "CREATESURFACE" => vec![Step::Objects { prompt: "Select COGO points or points to make the surface of:", filter: SurfacePoints, slot: 0 }],
+        "CREATEOFFSETALIGNMENT" => vec![
+            Step::Objects { prompt: "Select the parent alignment:", filter: Alignments, slot: 0 },
+            Step::Value { prompt: "Specify offset from the parent (negative to the left)", key: "offset", default: 3.5 },
+        ],
+        "ADDDESIGNSPEEDS" => vec![
+            Step::Objects { prompt: "Select an alignment for the design speeds:", filter: Alignments, slot: 0 },
+            Step::Points { prompt: "Specify station,design speed or press Enter to end:" },
+        ],
+        "ADDSTATIONEQUATIONS" => vec![
+            Step::Objects { prompt: "Select an alignment for the station equations:", filter: Alignments, slot: 0 },
+            Step::Points { prompt: "Specify station,station ahead or press Enter to end:" },
+            Step::Accept { prompt: "Press Enter to add the station equations or [Direction]:", options: EQUATION_OPTIONS },
+        ],
+        "CREATESURFACE" => vec![
+            Step::Objects { prompt: "Select COGO points or points to make the surface of:", filter: SurfacePoints, slot: 0 },
+            Step::Objects { prompt: "Select lines or polylines to use as breaklines or press Enter for none:", filter: OptionalPaths, slot: 1 },
+            Step::Objects { prompt: "Select a closed polyline as the outer boundary or press Enter for none:", filter: OptionalPaths, slot: 2 },
+        ],
         "CREATEPROFILE" => vec![
             Step::Objects { prompt: "Select an alignment for the profile:", filter: Alignments, slot: 0 },
             Step::Points { prompt: "Specify PVI (station,elevation) or press Enter to end:" },
-            Step::Value { prompt: "Specify vertical curve length at the inner PVIs (0 for none)", key: "curve", default: 0.0 },
+            Step::Value { prompt: "Specify vertical curve length, K value or radius at the inner PVIs (0 for none)", key: "curve", default: 0.0 },
+            Step::Accept { prompt: "Press Enter to create the profile or [Curve type]:", options: PROFILE_OPTIONS },
+        ],
+        "CREATESURFACEPROFILE" => vec![
+            Step::Objects { prompt: "Select an alignment for the surface profile:", filter: Alignments, slot: 0 },
+            Step::Objects { prompt: "Select the TIN surface to sample:", filter: TinSurfaces, slot: 1 },
+            Step::Value { prompt: "Specify offset from the alignment (negative to the left)", key: "offset", default: 0.0 },
+        ],
+        "CREATEOFFSETPROFILE" => vec![
+            Step::Objects { prompt: "Select an offset alignment:", filter: Alignments, slot: 0 },
+            Step::Value { prompt: "Specify slope across the offset (rise over run)", key: "slope", default: 0.0 },
         ],
         "CREATEPROFILEVIEW" => vec![
             Step::Objects { prompt: "Select an alignment for the profile view:", filter: Alignments, slot: 0 },
             Step::Point { prompt: "Specify lower left corner of the profile view:" },
             Step::Accept {
-                prompt: "Press Enter to create the view or [Start station/End station/Minimum elevation/Maximum elevation]:",
+                prompt: "Press Enter to create the view or [Start station/End station/Minimum elevation/Maximum elevation/Vertical exaggeration]:",
                 options: VIEW_OPTIONS,
             },
         ],
         "CREATECORRIDOR" => vec![
             Step::Objects { prompt: "Select a baseline alignment that has a profile:", filter: Alignments, slot: 0 },
             Step::Objects { prompt: "Select an assembly:", filter: Assemblies, slot: 1 },
-            Step::Accept { prompt: "Press Enter to create the corridor or [Surfaces]:", options: CORRIDOR_OPTIONS },
+            Step::Accept { prompt: "Press Enter to create the corridor or [Surfaces/Lock]:", options: CORRIDOR_OPTIONS },
         ],
         "CREATESAMPLELINES" => vec![
             Step::Objects { prompt: "Select an alignment for the sample lines:", filter: Alignments, slot: 0 },
@@ -154,7 +226,7 @@ pub fn steps(name: &str) -> Option<Vec<Step>> {
         ],
         "CREATESECTIONVIEWS" => vec![
             Step::Objects { prompt: "Select a sample line group:", filter: SampleLineGroups, slot: 0 },
-            Step::Point { prompt: "Specify the center line point of the first section view:" },
+            Step::Point { prompt: "Specify the lower left corner of the section views:" },
         ],
         "CREATEINTERSECTION" => vec![
             Step::Objects { prompt: "Select the main road alignment:", filter: Alignments, slot: 0 },
@@ -205,8 +277,13 @@ impl CadModule for CivilModule {
                     title: "Design",
                     tools: vec![
                         tool("CREATEALIGNMENT", "Create Alignment", icon!("alignment")),
+                        tool("CREATEOFFSETALIGNMENT", "Create Offset Alignment", icon!("offsetalignment")),
+                        tool("ADDDESIGNSPEEDS", "Add Design Speeds", icon!("designspeeds")),
+                        tool("ADDSTATIONEQUATIONS", "Add Station Equations", icon!("stationequations")),
                         tool("CREATESURFACE", "Create Surface", icon!("surface")),
                         tool("CREATEPROFILE", "Create Profile", icon!("profile")),
+                        tool("CREATESURFACEPROFILE", "Create Surface Profile", icon!("surfaceprofile")),
+                        tool("CREATEOFFSETPROFILE", "Create Offset Profile", icon!("offsetprofile")),
                         tool("CREATEPROFILEVIEW", "Create Profile View", icon!("profileview")),
                         tool("CREATEFEATURELINE", "Create Feature Line", icon!("featureline")),
                         tool("CREATEPARCEL", "Create Parcel", icon!("parcel")),

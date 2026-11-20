@@ -216,13 +216,51 @@ impl OpenCADStudio {
                 } else {
                     c3d::VertexCurve::SpiralCurveSpiral { spiral_in: spiral, radius, spiral_out: spiral }
                 };
+                let kind = match req.text("type") {
+                    Some("Utility") => c3d::AlignmentKind::Utility,
+                    Some("Rail") => c3d::AlignmentKind::Rail { gauge: req.value("gauge", 1.435) },
+                    _ => c3d::AlignmentKind::Centerline,
+                };
                 let alignment = next_name(doc, "AECC_ALIGNMENT", "Alignment");
                 self.push_undo_snapshot(i, name);
                 let doc = &mut self.tabs[i].scene.document;
                 let curves = vec![corner; points.len().saturating_sub(2)];
-                let h = c3d::add_alignment_with_curves(doc, &alignment, &points, &curves, layer).map_err(refused)?;
+                let h = c3d::add_alignment_of_kind(doc, &alignment, &points, &curves, kind, layer).map_err(refused)?;
                 changes.push((h, ChangeKind::Added));
                 crate::tf!("Alignment {} created.", alignment).into_owned()
+            }
+            "CREATEOFFSETALIGNMENT" => {
+                let parent = *req.objects[0].first().ok_or("no alignment")?;
+                let offset = req.value("offset", 3.5);
+                let alignment = next_name(&self.tabs[i].scene.document, "AECC_ALIGNMENT", "Alignment");
+                self.push_undo_snapshot(i, name);
+                let doc = &mut self.tabs[i].scene.document;
+                let h = c3d::add_offset_alignment(doc, parent, &alignment, offset, None, layer).map_err(refused)?;
+                changes.push((parent, ChangeKind::Modified));
+                changes.push((h, ChangeKind::Added));
+                crate::tf!("Offset alignment {} created.", alignment).into_owned()
+            }
+            "ADDDESIGNSPEEDS" | "ADDSTATIONEQUATIONS" => {
+                let alignment = *req.objects[0].first().ok_or("no alignment")?;
+                if req.points.is_empty() {
+                    return Err(crate::t!("No stations given.").into_owned());
+                }
+                let label = arch(&self.tabs[i].scene.document, alignment).and_then(|a| a.decode().strings.get(3).cloned()).unwrap_or_default();
+                self.push_undo_snapshot(i, name);
+                let doc = &mut self.tabs[i].scene.document;
+                changes.push((alignment, ChangeKind::Modified));
+                if name == "ADDDESIGNSPEEDS" {
+                    let mut speeds: Vec<(f64, f64)> = req.points.iter().map(|p| (p.x, p.y)).collect();
+                    speeds.sort_by(|a, b| a.0.total_cmp(&b.0));
+                    c3d::add_design_speeds(doc, alignment, &speeds).map_err(refused)?;
+                    crate::tf!("{} design speed(s) added to {}.", speeds.len(), label).into_owned()
+                } else {
+                    let increasing = req.text("direction") != Some(crate::modules::civil::EQUATION_DIRECTIONS[1]);
+                    let mut equations: Vec<(f64, f64, bool)> = req.points.iter().map(|p| (p.x, p.y, increasing)).collect();
+                    equations.sort_by(|a, b| a.0.total_cmp(&b.0));
+                    c3d::add_station_equations(doc, alignment, &equations).map_err(refused)?;
+                    crate::tf!("{} station equation(s) added to {}.", equations.len(), label).into_owned()
+                }
             }
             "CREATESURFACE" => {
                 let doc = &self.tabs[i].scene.document;
@@ -248,11 +286,37 @@ impl OpenCADStudio {
                 if points.len() < 3 {
                     return Err(crate::t!("A surface needs three or more points apart in plan.").into_owned());
                 }
+                let count = points.len();
+                // The points, then the selected breaklines and outer boundary, each a definition
+                // whose lines come from the selected objects.
+                let definition = |operation, texts: &[&str], sources: &[Handle]| c3d::TinDefinition {
+                    operation,
+                    id: [0; 16],
+                    texts: texts.iter().map(|t| t.to_string()).collect(),
+                    sources: sources.iter().map(|h| h.value()).collect(),
+                };
+                let lines = |sources: &[Handle]| c3d::TinLines {
+                    objects: sources.len() as u32,
+                    polylines: Vec::new(),
+                    mid_ordinate: 1.0,
+                    maximum_distance: 0.0,
+                    weeding_distance: 0.0,
+                    weeding_angle: 0.0,
+                };
+                let mut definitions = vec![definition(c3d::TinOperation::AddPoints(points), &[], &[])];
+                if let breaklines @ [_, ..] = req.objects[1].as_slice() {
+                    let operation = c3d::TinOperation::Breaklines(c3d::TinBreaklineType::Standard, lines(breaklines));
+                    definitions.push(definition(operation, &["Breaklines"], breaklines));
+                }
+                if let boundary @ [_, ..] = req.objects[2].as_slice() {
+                    let operation = c3d::TinOperation::Boundary { boundary_type: c3d::TinBoundaryType::Outer, non_destructive: false, lines: lines(boundary) };
+                    definitions.push(definition(operation, &["Boundary"], boundary));
+                }
                 let surface = next_name(doc, "AECC_TIN_SURFACE", "Surface");
                 self.push_undo_snapshot(i, name);
-                let h = c3d::add_tin_surface(&mut self.tabs[i].scene.document, &surface, &points, layer).map_err(refused)?;
+                let h = c3d::add_tin_surface_with(&mut self.tabs[i].scene.document, &surface, &definitions, false, layer).map_err(refused)?;
                 changes.push((h, ChangeKind::Added));
-                crate::tf!("Surface {} created from {} point(s).", surface, points.len()).into_owned()
+                crate::tf!("Surface {} created from {} point(s).", surface, count).into_owned()
             }
             "CREATEPROFILE" => {
                 let alignment = *req.objects[0].first().ok_or("no alignment")?;
@@ -260,14 +324,49 @@ impl OpenCADStudio {
                 if pvis.len() < 2 {
                     return Err(crate::t!("A profile needs two or more PVIs.").into_owned());
                 }
-                let curves = vec![req.value("curve", 0.0); pvis.len() - 2];
+                let value = req.value("curve", 0.0);
+                let curve = match req.text("curve_type") {
+                    _ if value == 0.0 => c3d::VerticalCurve::None,
+                    Some("K value") => c3d::VerticalCurve::ParabolaK(value),
+                    Some("Radius") => c3d::VerticalCurve::ParabolaRadius(value),
+                    _ => c3d::VerticalCurve::Parabola(value),
+                };
+                let curves = vec![curve; pvis.len() - 2];
                 let profile = next_name(&self.tabs[i].scene.document, "AECC_PROFILE", "Profile");
                 self.push_undo_snapshot(i, name);
                 let doc = &mut self.tabs[i].scene.document;
-                let h = c3d::add_profile(doc, alignment, &profile, &pvis, &curves, layer).map_err(refused)?;
+                let h = c3d::add_profile_with_curves(doc, alignment, &profile, &pvis, &curves, layer).map_err(refused)?;
                 changes.push((alignment, ChangeKind::Modified));
                 changes.push((h, ChangeKind::Added));
                 crate::tf!("Profile {} created.", profile).into_owned()
+            }
+            "CREATESURFACEPROFILE" => {
+                let alignment = *req.objects[0].first().ok_or("no alignment")?;
+                let surface = *req.objects[1].first().ok_or_else(|| crate::t!("Select a TIN surface.").into_owned())?;
+                let offset = req.value("offset", 0.0);
+                let profile = next_name(&self.tabs[i].scene.document, "AECC_PROFILE", "Profile");
+                self.push_undo_snapshot(i, name);
+                let doc = &mut self.tabs[i].scene.document;
+                let h = c3d::add_surface_profile(doc, alignment, surface, &profile, offset, None, layer).map_err(refused)?;
+                changes.push((alignment, ChangeKind::Modified));
+                changes.push((h, ChangeKind::Added));
+                crate::tf!("Surface profile {} created.", profile).into_owned()
+            }
+            "CREATEOFFSETPROFILE" => {
+                let doc = &self.tabs[i].scene.document;
+                let alignment = *req.objects[0].first().ok_or("no alignment")?;
+                let parent = arch(doc, alignment)
+                    .and_then(|a| a.alignment_offset_parent())
+                    .map(Handle::new)
+                    .ok_or_else(|| crate::t!("Select an offset alignment.").into_owned())?;
+                // The parent's newest profile, as a corridor takes its baseline's.
+                let source = newest_profile(doc, parent).ok_or_else(|| crate::t!("The offset alignment's parent has no profile.").into_owned())?;
+                let profile = next_name(doc, "AECC_PROFILE", "Profile");
+                self.push_undo_snapshot(i, name);
+                let doc = &mut self.tabs[i].scene.document;
+                let h = c3d::add_offset_profile(doc, source, alignment, &profile, req.value("slope", 0.0), layer).map_err(refused)?;
+                changes.extend([(parent, ChangeKind::Modified), (alignment, ChangeKind::Modified), (source, ChangeKind::Modified), (h, ChangeKind::Added)]);
+                crate::tf!("Offset profile {} created.", profile).into_owned()
             }
             "CREATEPROFILEVIEW" => {
                 let alignment = *req.objects[0].first().ok_or("no alignment")?;
@@ -285,7 +384,21 @@ impl OpenCADStudio {
                 };
                 let stations = range("station_start", "station_end")?;
                 let elevations = range("elevation_min", "elevation_max")?;
-                c3d::add_profile_view_with_range(doc, alignment, &view, Vector2::new(corner.x, corner.y), stations, elevations, layer)
+                // Another vertical exaggeration: the drawing's view style with it, or a new one.
+                let style = match req.values.get("exaggeration").copied() {
+                    None => None,
+                    Some(v) => {
+                        let found = doc.objects.values().find_map(|o| match o {
+                            document::objects::ObjectType::Arch(a) if a.profile_view_style_settings().is_some_and(|s| s.vertical_exaggeration == v) => Some(a.handle),
+                            _ => None,
+                        });
+                        match found {
+                            Some(h) => Some(h),
+                            None => Some(c3d::add_profile_view_style(doc, &format!("Exaggeration {v}"), v).map_err(refused)?),
+                        }
+                    }
+                };
+                c3d::add_profile_view_with_style(doc, alignment, &view, Vector2::new(corner.x, corner.y), style, stations, elevations, layer)
                     .map_err(refused)?;
                 // The view brings its label groups: redraw everything.
                 crate::tf!("Profile view {} created.", view).into_owned()
@@ -437,10 +550,20 @@ impl OpenCADStudio {
                     stations: Vec::new(),
                     built: false,
                 };
-                let def = c3d::CorridorDefinition { name: corridor.clone(), surfaces, boundaries, baselines: vec![baseline], ..c3d::CorridorDefinition::default() };
+                let geometry_lock = req.text("lock") == Some(crate::modules::civil::CORRIDOR_LOCKS[1]);
+                let def = c3d::CorridorDefinition {
+                    name: corridor.clone(),
+                    surfaces,
+                    boundaries,
+                    baselines: vec![baseline],
+                    geometry_lock,
+                    ..c3d::CorridorDefinition::default()
+                };
                 self.push_undo_snapshot(i, name);
                 let doc = &mut self.tabs[i].scene.document;
                 let h = c3d::add_corridor_with(doc, &def, layer).map_err(refused)?;
+                // A geometry lock writes the alignment again with an anchor at each region end.
+                changes.push((alignment, ChangeKind::Modified));
                 changes.push((h, ChangeKind::Added));
                 crate::tf!("Corridor {} created; it is built when the corridor is rebuilt.", corridor).into_owned()
             }
@@ -496,6 +619,17 @@ impl OpenCADStudio {
                 }
                 self.push_undo_snapshot(i, name);
                 let doc = &mut self.tabs[i].scene.document;
+                // The group's own group plot when the codec writes one (lines with at most one
+                // section, not sampled yet); otherwise a view per line.
+                if let Ok(views) = c3d::add_section_view_group(doc, group, Vector2::new(at.x, at.y), layer) {
+                    changes.push((group, ChangeKind::Modified));
+                    changes.extend(lines.iter().map(|l| (*l, ChangeKind::Modified)));
+                    changes.extend(views.iter().map(|v| (*v, ChangeKind::Added)));
+                    let message = crate::tf!("{} section view(s) created.", views.len()).into_owned();
+                    self.tabs[i].dirty = true;
+                    self.tabs[i].scene.bump_entities(&changes);
+                    return Ok(message);
+                }
                 // Five views a row, spaced by the first view's frame.
                 const COLUMNS: usize = 5;
                 const GAP: f64 = 20.0;
@@ -531,15 +665,19 @@ impl OpenCADStudio {
             "CREATEINTERSECTION" => {
                 let doc = &self.tabs[i].scene.document;
                 let main = *req.objects[0].first().ok_or("no alignment")?;
-                let other = *req.objects[1].first().ok_or("no alignment")?;
-                let no_profile = || crate::t!("The alignment has no profile.").into_owned();
-                let main_profile = newest_profile(doc, main).ok_or_else(no_profile)?;
-                let other_profile = newest_profile(doc, other).ok_or_else(no_profile)?;
+                // The second step's selection keeps the main road picked before it.
+                let other = *req.objects[1].iter().find(|h| **h != main).ok_or("no alignment")?;
+                let profiles = newest_profile(doc, main).zip(newest_profile(doc, other));
                 let intersection = next_name(doc, "AECC_INTERSECTION", "Intersection");
                 self.push_undo_snapshot(i, name);
                 let doc = &mut self.tabs[i].scene.document;
-                let h = c3d::add_intersection(doc, &intersection, main, main_profile, other, other_profile, ["", ""], layer)
-                    .map_err(refused)?;
+                // A crossing takes the roads' profiles; a tee junction (one road ending on the
+                // other) is written without them.
+                let add = |doc: &mut document::Document, (a, b): (Handle, Handle)| c3d::add_intersection(doc, &intersection, main, a, other, b, ["", ""], layer);
+                let h = match profiles.map(|p| add(doc, p)) {
+                    Some(Ok(h)) => h,
+                    _ => add(doc, (Handle::NULL, Handle::NULL)).map_err(refused)?,
+                };
                 changes.push((h, ChangeKind::Added));
                 crate::tf!("Intersection {} created.", intersection).into_owned()
             }

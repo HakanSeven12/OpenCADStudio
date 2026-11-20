@@ -358,15 +358,21 @@ impl Ribbon {
         } else {
             (TO_SIDE_ICON, crate::tr!("ribbon-menu", "float-title-side"))
         };
-        iced::widget::row![
-            hover_button(
-                RETURN_ICON,
-                crate::tr!("ribbon-menu", "return-to-ribbon"),
-                FloatMsg::Return(key.clone()),
-            ),
-            hover_button(toggle, tip, FloatMsg::ToggleOrientation(key)),
-        ]
-        .spacing(metrics::FLOAT_HOVER_GAP)
+        let toggle = hover_button(toggle, tip, FloatMsg::ToggleOrientation(key.clone()));
+        // With the ribbon closed there is no ribbon to return to.
+        let row = if self.closed {
+            iced::widget::row![toggle]
+        } else {
+            iced::widget::row![
+                hover_button(
+                    RETURN_ICON,
+                    crate::tr!("ribbon-menu", "return-to-ribbon"),
+                    FloatMsg::Return(key),
+                ),
+                toggle,
+            ]
+        };
+        row.spacing(metrics::FLOAT_HOVER_GAP)
         .into()
     }
 
@@ -609,6 +615,7 @@ impl Ribbon {
                 hover_flag(&mut self.float_ui.tab_hover, key, over);
                 false
             }
+            FloatMsg::Return(_) if self.closed => false,
             FloatMsg::Return(key) => self.dock_floating(&key),
             FloatMsg::ToggleOrientation(key) => {
                 self.float_ui.strip_hover = None;
@@ -667,8 +674,10 @@ impl Ribbon {
                 false
             }
             FloatMsg::Move { at, free } => {
-                let over_ribbon = crate::ui::wrap_bar::recent_bounds(super::TOOL_AREA_ID)
-                    .is_some_and(|area| area.contains(at));
+                // A closed ribbon's last bounds are stale: nothing to dock on.
+                let over_ribbon = !self.closed
+                    && crate::ui::wrap_bar::recent_bounds(super::TOOL_AREA_ID)
+                        .is_some_and(|area| area.contains(at));
                 let Some(drag) = self.float_ui.drag.as_mut() else {
                     return false;
                 };
@@ -693,6 +702,7 @@ impl Ribbon {
                         .collect();
                     let window = Rectangle::new(Point::ORIGIN, Size::new(self.win_w, self.win_h));
                     let ribbon_bottom = crate::ui::wrap_bar::recent_bounds(super::RIBBON_ID)
+                        .filter(|_| !self.closed)
                         .map(|ribbon| ribbon.y + ribbon.height);
                     snap(
                         Rectangle::new(corner, Size::new(size.0, size.1)),

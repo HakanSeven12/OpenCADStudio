@@ -3375,6 +3375,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::RibbonFloat(msg) => {
+                self.ribbon.closed = self.ribbon_closed;
                 if self.ribbon.on_float(msg, iced::time::Instant::now()) {
                     self.save_config();
                 }

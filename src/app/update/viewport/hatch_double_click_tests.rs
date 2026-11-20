@@ -64,8 +64,8 @@ fn double_clicking_a_hatch_starts_hatchedit_on_it() {
     let i = app.active_tab;
     // The first click of the pair, 100 ms ago at the same spot.
     app.last_vp_click_time =
-        Some(std::time::Instant::now() - std::time::Duration::from_millis(100));
-    app.last_vp_click_pos = Some(cursor_local);
+        Some(std::time::Instant::now() - std::time::Duration::from_millis(10));
+    app.last_vp_click_pos = Some(cursor);
     click(&mut app, cursor);
 
     let command = app.tabs[i].active_cmd.as_ref().map(|cmd| cmd.name());

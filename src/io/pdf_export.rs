@@ -750,12 +750,32 @@ fn append_pdf_page(
         // Everything outside the export window would only be clipped away, yet
         // still written: a window over a corner of a large drawing came out as a
         // blank page of several megabytes. Drop items whose ink misses the window.
-        if let Some((cx, cy, cw, ch)) = clip {
-            let marker_h = paper_h as f64 / scale.max(1e-6) as f64;
-            let window = crate::io::plot::turned_bounds(
-                -turn,
-                [cx as f64, cy as f64, (cx + cw) as f64, (cy + ch) as f64],
-            );
+        // Without a window the sheet itself is the window: an extents plot
+        // wrote everything beyond the page edge too, 7 MB a page (#3382).
+        {
+            let s = f64::from(scale.max(1e-6));
+            let window = match clip {
+                Some((cx, cy, cw, ch)) => [cx as f64, cy as f64, (cx + cw) as f64, (cy + ch) as f64],
+                None => {
+                    let (tx, ty) = match rotation_deg {
+                        90 => (paper_w as f64, 0.0),
+                        180 => (paper_w as f64, paper_h as f64),
+                        270 => (0.0, paper_h as f64),
+                        _ => (0.0, 0.0),
+                    };
+                    crate::io::plot::turned_bounds(
+                        -f64::from(rotation_deg).to_radians(),
+                        [
+                            -tx / s,
+                            -ty / s,
+                            (paper_w as f64 - tx) / s,
+                            (paper_h as f64 - ty) / s,
+                        ],
+                    )
+                }
+            };
+            let marker_h = paper_h as f64 / s;
+            let window = crate::io::plot::turned_bounds(-turn, window);
             draw_items.retain(|(_, _, _, item)| {
                 let bounds = match item {
                     DrawItem::WireFill(wire) | DrawItem::Wire(wire) | DrawItem::Text(wire) => {

@@ -2,6 +2,7 @@ src/ui/properties.rs 7 22
 src/ui/command_line.rs 6 1
 src/ui/node_graph.rs 0 25
 src/ui/window/graphic_attributes.rs 1 0
+src/ui/window/gradient_editor.rs 2 0
 src/ui/window/browser.rs 0 0
 src/ui/window/pc_manager.rs 0 0
 src/ui/window/authoring_palettes.rs 0 0

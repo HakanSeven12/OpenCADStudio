@@ -5741,12 +5741,24 @@ fn append_linear_dimension(
     let reach =
         |default: f32, toward_text: Option<f32>| toward_text.map_or(default, |t| t.max(default));
     let stub = params.arrow_len * 2.0;
+    // Text centred on the line stops the line at its near end; text that sits
+    // beside it (lifted above or below) has the line run on under the whole
+    // text (#3332).
+    let lifted = params.text_break.is_some_and(|text_break| {
+        let axis_angle = dir_d1_to_d2.y.atan2(dir_d1_to_d2.x) as f64;
+        let (sin, cos) = (text_break.rotation - axis_angle).sin_cos();
+        let half_across = (text_break.half_width as f64 * sin).abs()
+            + (text_break.half_height as f64 * cos).abs();
+        let offset = text_break.center - d1;
+        let across = (offset - dir_d1_to_d2 * offset.dot(dir_d1_to_d2)).length() as f64;
+        across > half_across * 0.5
+    });
     let text_beyond_d1 = text_span
         .filter(|(_, hi)| *hi < 0.0 && !hooks_out_horizontally)
-        .map(|(_, hi)| -hi as f32);
+        .map(|(lo, hi)| -(if lifted { lo } else { hi }) as f32);
     let text_beyond_d2 = text_span
         .filter(|(lo, _)| *lo > gap as f64 && !hooks_out_horizontally)
-        .map(|(lo, _)| (lo - gap as f64) as f32);
+        .map(|(lo, hi)| ((if lifted { hi } else { lo }) - gap as f64) as f32);
     // DIMTMOVE=2 leaves moved text outside the dimension without a fine
     // leader or an extension that chases the text. Keep genuine arrow-fit
     // stubs, but do not turn a user-placed text point into another segment.

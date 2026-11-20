@@ -2718,7 +2718,6 @@ pub enum PasteFocus {
     Field,
 }
 
-<<<<<<< HEAD
 mod message;
 pub use self::message::*;
 

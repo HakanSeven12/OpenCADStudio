@@ -1560,6 +1560,7 @@ common =
     .start-with-a-new-empty-drawing = Iniciar con un dibujo nuevo vacío.
     .start-a-new-editor-process = Iniciar un nuevo proceso del editor.
     .open-read-only-saving-is-disabled = Sesión de solo lectura (--read-only): el guardado está deshabilitado.
+    .reduce-memory-used-by-read-only-dwg-viewing = Reducir la memoria usada al ver DWG en solo lectura.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = Motor de GPU (dx12, vulkan, gl, metal). Establece WGPU_BACKEND.
     .gpu-unavailable-rendering-in-software-on-the-cpu = GPU no disponible — se renderiza por software en la CPU (__ocs_fmt_0__). Los dibujos grandes se navegarán con lentitud; compruebe el controlador gráfico (la causa habitual es una actualización del controlador sin reiniciar).
     .safe-mode-use-the-gl-backend = Modo seguro: usar el motor GL.

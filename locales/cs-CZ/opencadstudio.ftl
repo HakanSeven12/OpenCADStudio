@@ -1564,6 +1564,7 @@ common =
     .start-with-a-new-empty-drawing = Spustit s novým prázdným výkresem.
     .start-a-new-editor-process = Spustit nový proces editoru.
     .open-read-only-saving-is-disabled = Relace pouze pro čtení (--read-only): ukládání je zakázáno.
+    .reduce-memory-used-by-read-only-dwg-viewing = Snížit paměť použitou při prohlížení DWG jen pro čtení.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = Backend GPU (dx12, vulkan, gl, metal). Nastaví WGPU_BACKEND.
     .gpu-unavailable-rendering-in-software-on-the-cpu = GPU není k dispozici — vykresluje se softwarově na CPU (__ocs_fmt_0__). Navigace ve velkých výkresech bude pomalá; zkontrolujte grafický ovladač (obvyklou příčinou je aktualizace ovladače bez restartu).
     .safe-mode-use-the-gl-backend = Nouzový režim: použít backend GL.

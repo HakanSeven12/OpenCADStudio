@@ -1534,6 +1534,7 @@ common =
     .start-with-a-new-empty-drawing = Yeni, boş bir çizimle başlat.
     .start-a-new-editor-process = Yeni bir düzenleyici işlemi başlat.
     .open-read-only-saving-is-disabled = Salt okunur oturum (--read-only): Kaydetme devre dışı.
+    .reduce-memory-used-by-read-only-dwg-viewing = Salt okunur DWG görüntülemede kullanılan belleği azalt.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPU arka ucu (dx12, vulkan, gl, metal). WGPU_BACKEND değerini ayarlar.
     .gpu-unavailable-rendering-in-software-on-the-cpu = GPU kullanılamıyor — CPU üzerinde yazılımla işleniyor (__ocs_fmt_0__). Büyük çizimlerde gezinme yavaş olacaktır; grafik sürücüsünü denetleyin (olağan neden, yeniden başlatma yapılmadan uygulanan bir sürücü güncellemesidir).
     .safe-mode-use-the-gl-backend = Güvenli mod: GL arka ucunu kullan.

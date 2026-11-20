@@ -1565,6 +1565,7 @@ common =
     .start-with-a-new-empty-drawing = ເລີ່ມຕົ້ນດ້ວຍຮູບແຕ້ມໃໝ່ທີ່ຫວ່າງເປົ່າ.
     .start-a-new-editor-process = ເລີ່ມໂ प्रक्रियाຕົວແກ້ໄຂໃໝ່.
     .open-read-only-saving-is-disabled = ເປີດແບບອ່ານຢ່າງດຽວ: ປິດການບັນທຶກ.
+    .reduce-memory-used-by-read-only-dwg-viewing = ຫຼຸດໜ່ວຍຄວາມຈຳທີ່ໃຊ້ໃນການເບິ່ງ DWG ແບບອ່ານຢ່າງດຽວ.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = ແບັກເອັນ GPU (dx12, vulkan, gl, metal). ຕັ້ງຄ່າ WGPU_BACKEND.
     .gpu-unavailable-rendering-in-software-on-the-cpu = ບໍ່ມີ GPU — ປະມວນຜົນດ້ວຍຊອບແວເທິງ CPU (__ocs_fmt_0__). ຮູບແຕ້ມຂະໜາດໃຫຍ່ຈະເລື່ອນຊ້າ; ກວດສອບໄດຣເວີກຣາຟິກ (ສາເຫດທົ່ວໄປແມ່ນການອັບເດດໄດຣເວີທີ່ຍັງບໍ່ໄດ້ຣີສະຕາດເຄື່ອງ).
     .safe-mode-use-the-gl-backend = ໂໝດປອດໄພ: ໃຊ້ແບັກເອັນ GL.

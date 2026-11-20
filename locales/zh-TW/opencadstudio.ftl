@@ -1559,6 +1559,7 @@ common =
     .start-with-a-new-empty-drawing = 以新的空白圖面啟動。
     .start-a-new-editor-process = 啟動新的編輯器處理程序。
     .open-read-only-saving-is-disabled = 唯讀工作階段：已停用儲存功能。
+    .reduce-memory-used-by-read-only-dwg-viewing = 減少唯讀檢視 DWG 時使用的記憶體。
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPU 後端 (dx12, vulkan, gl, metal)。設定 WGPU_BACKEND。
     .gpu-unavailable-rendering-in-software-on-the-cpu = GPU 無法使用 — 正在 CPU 上以軟體方式算繪 (__ocs_fmt_0__)。大型圖面的瀏覽速度會很慢；請檢查顯示卡驅動程式（通常原因是更新驅動程式後未重新啟動）。
     .safe-mode-use-the-gl-backend = 安全模式：使用 GL 後端。

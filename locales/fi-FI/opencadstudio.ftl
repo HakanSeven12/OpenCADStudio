@@ -1559,6 +1559,7 @@ common =
     .start-with-a-new-empty-drawing = Aloita uudella tyhjällä piirustuksella.
     .start-a-new-editor-process = Käynnistä uusi editoriprosessi.
     .open-read-only-saving-is-disabled = Vain luku -istunto (--vain luku): tallennus ei ole käytössä.
+    .reduce-memory-used-by-read-only-dwg-viewing = Vähennä vain luku -tilassa avatun DWG:n muistinkäyttöä.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPU-taustajärjestelmä (dx12, vulkan, gl, metal). Asettaa WGPU_BACKEND-arvon.
     .gpu-unavailable-rendering-in-software-on-the-cpu = GPU ei ole käytettävissä — piirto tehdään ohjelmallisesti suorittimella (__ocs_fmt_0__). Suurten piirustusten selaaminen on hidasta; tarkista näytönohjaimen ajuri (tavallinen syy on ajuripäivitys ilman uudelleenkäynnistystä).
     .safe-mode-use-the-gl-backend = Vikasietotila: käytä GL-taustajärjestelmää.

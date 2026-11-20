@@ -1559,6 +1559,7 @@ common =
     .start-with-a-new-empty-drawing = 새 빈 도면으로 시작합니다.
     .start-a-new-editor-process = 새 편집기 프로세스를 시작합니다.
     .open-read-only-saving-is-disabled = 읽기 전용 세션(--read-only): 저장이 비활성화됩니다.
+    .reduce-memory-used-by-read-only-dwg-viewing = 읽기 전용 DWG 보기에 사용하는 메모리를 줄입니다.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPU 백엔드(dx12, vulkan, gl, metal). WGPU_BACKEND를 설정합니다.
     .gpu-unavailable-rendering-in-software-on-the-cpu = GPU를 사용할 수 없음 — CPU에서 소프트웨어로 렌더링 중입니다 (__ocs_fmt_0__). 큰 도면은 탐색이 느려집니다. 그래픽 드라이버를 확인하세요 (재부팅 없이 드라이버를 업데이트한 것이 일반적인 원인입니다).
     .safe-mode-use-the-gl-backend = 안전 모드: GL 백엔드를 사용합니다.

@@ -1559,6 +1559,7 @@ common =
     .start-with-a-new-empty-drawing = Uruchom z nowym pustym rysunkiem.
     .start-a-new-editor-process = Uruchom nowy proces edytora.
     .open-read-only-saving-is-disabled = Sesja tylko do odczytu (--tylko do odczytu): zapisywanie jest wyłączone.
+    .reduce-memory-used-by-read-only-dwg-viewing = Zmniejsz pamięć używaną przy przeglądaniu DWG tylko do odczytu.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = Zaplecze GPU (dx12, vulkan, gl, metal). Ustawia WGPU_BACKEND.
     .gpu-unavailable-rendering-in-software-on-the-cpu = GPU niedostępny — renderowanie programowe na CPU (__ocs_fmt_0__). Nawigacja w dużych rysunkach będzie powolna; sprawdź sterownik graficzny (zwykłą przyczyną jest aktualizacja sterownika bez ponownego uruchomienia).
     .safe-mode-use-the-gl-backend = Tryb bezpieczny: użyj zaplecza GL.

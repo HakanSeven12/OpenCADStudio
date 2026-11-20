@@ -1560,6 +1560,7 @@ common =
     .start-with-a-new-empty-drawing = Mit einer neuen leeren Zeichnung starten.
     .start-a-new-editor-process = Einen neuen Editorprozess starten.
     .open-read-only-saving-is-disabled = Schreibgeschütze Sitzung (--read-only): Speichern ist deaktiviert.
+    .reduce-memory-used-by-read-only-dwg-viewing = Speicherbedarf beim schreibgeschützten Anzeigen von DWG verringern.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPU-Backend (dx12, vulkan, gl, metal). Setzt WGPU_BACKEND.
     .gpu-unavailable-rendering-in-software-on-the-cpu = GPU nicht verfügbar — es wird per Software auf der CPU gerendert (__ocs_fmt_0__). Große Zeichnungen lassen sich nur langsam navigieren; prüfen Sie den Grafiktreiber (eine Treiberaktualisierung ohne Neustart ist die häufigste Ursache).
     .safe-mode-use-the-gl-backend = Abgesicherter Modus: GL-Backend verwenden.

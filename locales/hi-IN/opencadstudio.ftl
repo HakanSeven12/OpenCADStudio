@@ -1548,6 +1548,7 @@ common =
     .start-with-a-new-empty-drawing = नए खाली चित्र से शुरू करें।
     .start-a-new-editor-process = संपादक की नई प्रक्रिया शुरू करें।
     .open-read-only-saving-is-disabled = केवल-पढ़ने योग्य सत्र: सहेजना अक्षम है।
+    .reduce-memory-used-by-read-only-dwg-viewing = केवल-पठन DWG देखने में उपयोग की जाने वाली मेमोरी कम करें।
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPU बैकएंड (dx12, vulkan, gl, metal)। WGPU_BACKEND सेट करता है।
     .gpu-unavailable-rendering-in-software-on-the-cpu = GPU उपलब्ध नहीं है — CPU पर सॉफ़्टवेयर से रेंडर किया जा रहा है (__ocs_fmt_0__)। बड़े आरेखणों में नेविगेशन धीमा होगा; ग्राफ़िक्स ड्राइवर की जाँच करें (सामान्य कारण बिना रीबूट किए ड्राइवर अपडेट करना है)।
     .safe-mode-use-the-gl-backend = सुरक्षित मोड: GL बैकएंड का उपयोग करें।

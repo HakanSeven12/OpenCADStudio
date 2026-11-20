@@ -1561,6 +1561,7 @@ common =
     .start-with-a-new-empty-drawing = Εκκίνηση με νέο κενό σχέδιο.
     .start-a-new-editor-process = Εκκίνηση νέας διεργασίας επεξεργαστή.
     .open-read-only-saving-is-disabled = Συνεδρία μόνο για ανάγνωση (--read-only): η αποθήκευση είναι απενεργοποιημένη.
+    .reduce-memory-used-by-read-only-dwg-viewing = Μείωση της μνήμης για προβολή DWG μόνο για ανάγνωση.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = Σύστημα GPU (dx12, vulkan, gl, metal). Ορίζει το WGPU_BACKEND.
     .gpu-unavailable-rendering-in-software-on-the-cpu = Η GPU δεν είναι διαθέσιμη — η σχεδίαση γίνεται με λογισμικό στη CPU (__ocs_fmt_0__). Τα μεγάλα σχέδια θα πλοηγούνται αργά· ελέγξτε τον οδηγό γραφικών (συνήθης αιτία είναι ενημέρωση οδηγού χωρίς επανεκκίνηση).
     .safe-mode-use-the-gl-backend = Ασφαλής λειτουργία: χρήση του συστήματος GL.

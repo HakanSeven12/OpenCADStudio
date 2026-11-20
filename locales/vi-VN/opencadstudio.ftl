@@ -1560,6 +1560,7 @@ common =
     .start-with-a-new-empty-drawing = Bắt đầu với một bản vẽ trống mới.
     .start-a-new-editor-process = Bắt đầu một quá trình soạn thảo mới.
     .open-read-only-saving-is-disabled = Mở chỉ đọc: việc lưu bị vô hiệu hóa.
+    .reduce-memory-used-by-read-only-dwg-viewing = Giảm bộ nhớ dùng khi xem DWG chỉ đọc.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = Backend GPU (dx12, vulkan, gl, metal). Đặt WGPU_BACKEND.
     .gpu-unavailable-rendering-in-software-on-the-cpu = GPU không khả dụng — hiển thị trong phần mềm trên CPU (__ocs_fmt_0__). Các bản vẽ lớn sẽ di chuyển chậm; kiểm tra trình điều khiển đồ họa (cập nhật trình điều khiển mà không khởi động lại là nguyên nhân thông thường).
     .safe-mode-use-the-gl-backend = Chế độ an toàn: sử dụng phụ trợ GL.

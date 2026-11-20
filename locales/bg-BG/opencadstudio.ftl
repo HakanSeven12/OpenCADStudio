@@ -1559,6 +1559,7 @@ common =
     .start-with-a-new-empty-drawing = Стартиране с нов празен чертеж.
     .start-a-new-editor-process = Стартиране на нов процес на редактора.
     .open-read-only-saving-is-disabled = Сесия само за четене (--read-only): запазването е изключено.
+    .reduce-memory-used-by-read-only-dwg-viewing = Намалява паметта при преглед на DWG само за четене.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = Графичен бекенд (dx12, vulkan, gl, metal). Задава WGPU_BACKEND.
     .gpu-unavailable-rendering-in-software-on-the-cpu = GPU не е наличен — изчертаването се извършва софтуерно на CPU (__ocs_fmt_0__). Навигацията в големи чертежи ще бъде бавна; проверете графичния драйвер (обичайната причина е актуализация на драйвера без рестартиране).
     .safe-mode-use-the-gl-backend = Безопасен режим: използване на GL бекенд.

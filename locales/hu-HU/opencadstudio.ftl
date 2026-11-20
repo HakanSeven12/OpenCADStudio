@@ -1557,6 +1557,7 @@ common =
     .start-with-a-new-empty-drawing = Indítás új, üres rajzzal.
     .start-a-new-editor-process = Új szerkesztőfolyamat indítása.
     .open-read-only-saving-is-disabled = Megnyitás csak olvasásra: a mentés letiltva.
+    .reduce-memory-used-by-read-only-dwg-viewing = Csökkenti a csak olvasható DWG-megtekintés memóriaigényét.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPU-háttérrendszer (dx12, vulkan, gl, metal). Beállítja a WGPU_BACKEND értékét.
     .gpu-unavailable-rendering-in-software-on-the-cpu = A GPU nem érhető el — a megjelenítés szoftveresen, a CPU-n történik (__ocs_fmt_0__). A nagy rajzokban a navigáció lassú lesz; ellenőrizze a grafikus illesztőprogramot (a szokásos ok egy újraindítás nélküli illesztőprogram-frissítés).
     .safe-mode-use-the-gl-backend = Csökkentett mód: a GL-háttérrendszer használata.

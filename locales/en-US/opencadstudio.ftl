@@ -1547,6 +1547,7 @@ common =
     .start-with-a-new-empty-drawing = Start with a new empty drawing.
     .start-a-new-editor-process = Start a new editor process.
     .open-read-only-saving-is-disabled = Open read-only: saving is disabled.
+    .reduce-memory-used-by-read-only-dwg-viewing = Reduce memory used by read-only DWG viewing.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPU backend (dx12, vulkan, gl, metal). Sets WGPU_BACKEND.
     .gpu-unavailable-rendering-in-software-on-the-cpu = GPU unavailable — rendering in software on the CPU (__ocs_fmt_0__). Large drawings will navigate slowly; check the graphics driver (a driver update without a reboot is the usual cause).
     .safe-mode-use-the-gl-backend = Safe mode: use the GL backend.

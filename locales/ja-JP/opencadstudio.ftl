@@ -1550,6 +1550,7 @@ common =
     .start-with-a-new-empty-drawing = 新しい空の図面で起動します。
     .start-a-new-editor-process = エディターの新しいプロセスを起動します。
     .open-read-only-saving-is-disabled = 読み取り専用セッション (--read-only): 保存は無効です。
+    .reduce-memory-used-by-read-only-dwg-viewing = 読み取り専用の DWG 表示で使用するメモリを減らします。
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPUバックエンド（dx12, vulkan, gl, metal）。WGPU_BACKENDを設定します。
     .gpu-unavailable-rendering-in-software-on-the-cpu = GPU が利用できません — CPU 上でソフトウェア描画しています (__ocs_fmt_0__)。大きな図面では操作が遅くなります。グラフィックドライバーを確認してください (再起動せずにドライバーを更新したことが主な原因です)。
     .safe-mode-use-the-gl-backend = セーフモード: GLバックエンドを使用します。

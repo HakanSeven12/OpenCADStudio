@@ -1572,6 +1572,7 @@ common =
     .start-with-a-new-empty-drawing = البدء برسم جديد فارغ.
     .start-a-new-editor-process = بدء عملية محرر جديدة.
     .open-read-only-saving-is-disabled = جلسة للقراءة فقط (--read-only): الحفظ معطّل.
+    .reduce-memory-used-by-read-only-dwg-viewing = تقليل الذاكرة المستخدمة لعرض DWG للقراءة فقط.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = واجهة GPU الخلفية (dx12, vulkan, gl, metal). تضبط WGPU_BACKEND.
     .gpu-unavailable-rendering-in-software-on-the-cpu = وحدة GPU غير متاحة — يتم الرسم برمجيًا على المعالج CPU (__ocs_fmt_0__). سيكون التنقل في الرسومات الكبيرة بطيئًا؛ تحقق من برنامج تشغيل الرسومات (السبب المعتاد هو تحديث برنامج التشغيل دون إعادة التشغيل).
     .safe-mode-use-the-gl-backend = الوضع الآمن: استخدام واجهة GL الخلفية.

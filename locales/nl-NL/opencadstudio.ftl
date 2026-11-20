@@ -1558,6 +1558,7 @@ common =
     .start-with-a-new-empty-drawing = Starten met een nieuwe lege tekening.
     .start-a-new-editor-process = Een nieuw editorproces starten.
     .open-read-only-saving-is-disabled = Alleen-lezen sessie (---lezen-alleen): opslaan is uitgeschakeld.
+    .reduce-memory-used-by-read-only-dwg-viewing = Minder geheugen gebruiken bij alleen-lezen weergave van DWG.
     .gpu-backend-dx12-vulkan-gl-metal-sets-wgpu-backend = GPU-backend (dx12, vulkan, gl, metal). Stelt WGPU_BACKEND in.
     .gpu-unavailable-rendering-in-software-on-the-cpu = GPU niet beschikbaar — er wordt in software op de CPU gerenderd (__ocs_fmt_0__). Grote tekeningen navigeren traag; controleer het grafische stuurprogramma (een stuurprogramma-update zonder herstart is de gebruikelijke oorzaak).
     .safe-mode-use-the-gl-backend = Veilige modus: gebruik de GL-backend.

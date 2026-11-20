@@ -2321,6 +2321,11 @@ impl OpenCADStudio {
         set_current_path: bool,
         require_new_destination: bool,
     ) -> Result<(), crate::io::SaveFailure> {
+        if self.read_only {
+            return Err(crate::io::SaveFailure::other(
+                "Read-only session (--read-only): saving is disabled.",
+            ));
+        }
         if self.tabs[i].block_test.is_some() {
             return Err(crate::io::SaveFailure::other(
                 "Test Block is temporary and cannot be saved",
@@ -3987,6 +3992,15 @@ impl OpenCADStudio {
         check_external_change: bool,
     ) -> Task<Message> {
         if self.refuse_block_test_save(i) {
+            return Task::none();
+        }
+        // Every native write funnels here, including the close / quit
+        // prompts' Save; a read-only session (possibly opened without the
+        // DWG's round-trip data) must not rewrite any file.
+        if self.read_only {
+            self.command_line.push_error(
+                crate::t!("Read-only session (--read-only): saving is disabled.").as_ref(),
+            );
             return Task::none();
         }
         let allow_conversion_loss = std::mem::take(&mut self.conversion_loss_allowed);

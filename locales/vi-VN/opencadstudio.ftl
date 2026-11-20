@@ -10585,3 +10585,6 @@ civil-cmd =
     .pipe-network-created = Pipe network __ocs_fmt_0__ created with __ocs_fmt_1__ structure(s).
     .pressure-network-created = Pressure network __ocs_fmt_0__ created with __ocs_fmt_1__ pipe(s).
     .point-group-created = Point group __ocs_fmt_0__ created.
+    .accept-corridor = Press Enter to create the corridor or [Surfaces]:
+    .corridor-surfaces = Surfaces
+    .corridor-surfaces-prompt = Corridor surfaces to build (? to list)

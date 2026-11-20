@@ -20,6 +20,10 @@ fn next_name(document: &document::Document, dxf: &str, base: &str) -> String {
     format!("{base} {}", n + 1)
 }
 
+/// The boundary kind of a corridor surface drawn along the corridor's extents (the codec's
+/// `EXTENTS`).
+const CORRIDOR_EXTENTS: u32 = 0x8000_0002;
+
 /// The Civil 3D record of `handle`.
 fn arch(document: &document::Document, handle: Handle) -> Option<&document::classes::arch::ArchEntityData> {
     match document.get_entity(handle)? {
@@ -384,10 +388,59 @@ impl OpenCADStudio {
                 let assembly = *req.objects[1].first().ok_or("no assembly")?;
                 let profile = newest_profile(doc, alignment).ok_or_else(|| crate::t!("The alignment has no profile.").into_owned())?;
                 let corridor = next_name(doc, "AECC_CORRIDOR", "Corridor");
+                let al = arch(doc, alignment).ok_or("no alignment")?;
+                let start = al.alignment_start_station().ok_or("the alignment has no start station")?;
+                let length = al.alignment_geometry_points().last().map(|g| g.distance).ok_or("the alignment has no length")?;
+                // Each surface follows one link code, corrected to the top or the bottom links,
+                // and is bounded by the corridor's extents.
+                let codes: &[(&str, i32)] = match req.text("surfaces").unwrap_or(crate::modules::civil::CORRIDOR_SURFACES[0]) {
+                    "Top" => &[("Top", 1)],
+                    "Datum" => &[("Datum", 2)],
+                    "Top and Datum" => &[("Top", 1), ("Datum", 2)],
+                    _ => &[],
+                };
+                let surfaces: Vec<c3d::CorridorSurfaceDefinition> = codes
+                    .iter()
+                    .map(|(code, correction)| c3d::CorridorSurfaceDefinition {
+                        name: format!("{corridor} - {code}"),
+                        build: true,
+                        link_codes: vec![(code.to_string(), true)],
+                        feature_line_codes: Vec::new(),
+                        overhang_correction: *correction,
+                    })
+                    .collect();
+                let boundaries = surfaces
+                    .iter()
+                    .map(|s| c3d::CorridorBoundary {
+                        surface: s.name.clone(),
+                        name: "Corridor Extents".into(),
+                        description: String::new(),
+                        kind: CORRIDOR_EXTENTS,
+                        corners: Vec::new(),
+                        components: 0,
+                    })
+                    .collect();
+                let region = c3d::CorridorRegion {
+                    name: "Region (1)".into(),
+                    assembly: assembly.value(),
+                    start,
+                    end: start + length,
+                    frequency: c3d::RegionFrequency::default(),
+                    targets: Vec::new(),
+                };
+                let baseline = c3d::CorridorBaseline {
+                    name: "Baseline (1)".into(),
+                    feature_line: 0,
+                    alignment: alignment.value(),
+                    profile: profile.value(),
+                    regions: vec![region],
+                    stations: Vec::new(),
+                    built: false,
+                };
+                let def = c3d::CorridorDefinition { name: corridor.clone(), surfaces, boundaries, baselines: vec![baseline], ..c3d::CorridorDefinition::default() };
                 self.push_undo_snapshot(i, name);
                 let doc = &mut self.tabs[i].scene.document;
-                let h = c3d::add_corridor(doc, &corridor, "Baseline (1)", "Region (1)", alignment, profile, assembly, layer)
-                    .map_err(refused)?;
+                let h = c3d::add_corridor_with(doc, &def, layer).map_err(refused)?;
                 changes.push((h, ChangeKind::Added));
                 crate::tf!("Corridor {} created; it is built when the corridor is rebuilt.", corridor).into_owned()
             }

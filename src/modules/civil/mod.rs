@@ -84,6 +84,17 @@ fn pipe_families() -> Vec<&'static str> {
     document::classes::civil::network_part_families().into_iter().filter(|f| is_pipe_family(f)).collect()
 }
 
+/// The surfaces CREATECORRIDOR offers to build, by the link codes they follow.
+pub const CORRIDOR_SURFACES: [&str; 4] = ["Top", "Datum", "Top and Datum", "None"];
+
+fn corridor_surfaces() -> Vec<&'static str> {
+    CORRIDOR_SURFACES.to_vec()
+}
+
+const CORRIDOR_OPTIONS: &[Opt] = &[
+    Opt { label: "Surfaces", keyword: "S", key: "surfaces", prompt: "Corridor surfaces to build (? to list)", kind: OptKind::Choice(corridor_surfaces) },
+];
+
 const PIPE_NETWORK_OPTIONS: &[Opt] = &[
     Opt { label: "Structure family", keyword: "S", key: "structure", prompt: "Structure family (? to list)", kind: OptKind::Choice(structure_families) },
     Opt { label: "Pipe family", keyword: "P", key: "pipe", prompt: "Pipe family (? to list)", kind: OptKind::Choice(pipe_families) },
@@ -133,6 +144,7 @@ pub fn steps(name: &str) -> Option<Vec<Step>> {
         "CREATECORRIDOR" => vec![
             Step::Objects { prompt: "Select a baseline alignment that has a profile:", filter: Alignments, slot: 0 },
             Step::Objects { prompt: "Select an assembly:", filter: Assemblies, slot: 1 },
+            Step::Accept { prompt: "Press Enter to create the corridor or [Surfaces]:", options: CORRIDOR_OPTIONS },
         ],
         "CREATESAMPLELINES" => vec![
             Step::Objects { prompt: "Select an alignment for the sample lines:", filter: Alignments, slot: 0 },

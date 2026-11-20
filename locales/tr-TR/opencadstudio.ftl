@@ -10507,3 +10507,6 @@ civil-cmd =
     .pipe-network-created = __ocs_fmt_0__ boru ağı __ocs_fmt_1__ yapıyla oluşturuldu.
     .pressure-network-created = __ocs_fmt_0__ basınçlı ağı __ocs_fmt_1__ boruyla oluşturuldu.
     .point-group-created = __ocs_fmt_0__ nokta grubu oluşturuldu.
+    .accept-corridor = Koridoru oluşturmak için Enter'a basın veya [Yüzeyler]:
+    .corridor-surfaces = Yüzeyler
+    .corridor-surfaces-prompt = Oluşturulacak koridor yüzeyleri (listelemek için ?)

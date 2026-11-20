@@ -3,6 +3,9 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "Press Enter to create the corridor or [Surfaces]:" => Some(("civil-cmd", "accept-corridor")),
+        "Surfaces" => Some(("civil-cmd", "corridor-surfaces")),
+        "Corridor surfaces to build (? to list)" => Some(("civil-cmd", "corridor-surfaces-prompt")),
         "Select COGO points for the point group or press Enter to choose them by name, description or elevation:" => Some(("civil-cmd", "select-points-for-group-or-rule")),
         "Press Enter to create the point group or [Name pattern/Description pattern/Minimum elevation/Maximum elevation]:" => Some(("civil-cmd", "accept-point-group")),
         "Name pattern" => Some(("civil-cmd", "name-pattern")),

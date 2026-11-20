@@ -20,7 +20,7 @@ const ATTACH_FILTERS: [(&str, &[&str]); 8] = [
     ("All DGN Files (*.*)", &["*"]),
     ("PDF files (*.pdf)", &["pdf"]),
     ("Point Cloud (*.rcp; *.rcs)", &["rcp", "rcs"]),
-    ("Drawing", &["dwg", "dxf"]),
+    ("Drawing", &["dwg", "dxf", "ifccad", "ifcx", "cbor"]),
     ("All files (*.*)", &["*"]),
 ];
 const ALL_DGN_FILTER: u32 = 4;
@@ -738,7 +738,10 @@ impl OpenCADStudio {
                     .map(|e| e.to_string_lossy().to_ascii_lowercase())
                     .unwrap_or_default();
                 // Any file picked under "All DGN Files" is a DGN.
-                let known = ["dwg", "dxf", "pdf", "dwf", "dwfx", "dgn", "rcp", "rcs"];
+                let known = [
+                    "dwg", "dxf", "ifccad", "ifcx", "cbor", "pdf", "dwf", "dwfx", "dgn", "rcp",
+                    "rcs",
+                ];
                 if crate::sys::attach_filter() == ALL_DGN_FILTER
                     && !known.contains(&ext.as_str())
                     && !IMAGE_EXTENSIONS.contains(&ext.as_str())
@@ -829,7 +832,10 @@ impl OpenCADStudio {
                     async {
                         let handle = crate::sys::file_dialog()
                             .set_title(crate::t!("Select Reference File").as_ref())
-                            .add_filter(crate::t!("Drawing").as_ref(), &["dwg", "dxf"])
+                            .add_filter(
+                                crate::t!("Drawing").as_ref(),
+                                &["dwg", "dxf", "ifccad", "ifcx", "cbor"],
+                            )
                             .pick_file()
                             .await;
                         match handle {
@@ -1025,7 +1031,10 @@ mod xref_attach_read_tests {
         let native = document::Ifcx.export_ifccad(&source).unwrap().drawing;
         let json = document::ifccad::encode_ifccad_document(&native).unwrap();
         let dxf = document::DxfWriter::new(&source).write_to_vec().unwrap();
-        for (name, bytes) in [("source.dxf", dxf.as_slice())] {
+        for (name, bytes) in [
+            ("source.ifccad", json.bytes()),
+            ("source.dxf", dxf.as_slice()),
+        ] {
             let mut app = OpenCADStudio::new_for_test();
             app.automation_op(r#"{"op":"new"}"#);
             let i = app.active_tab;
@@ -1061,6 +1070,22 @@ mod xref_attach_read_tests {
             assert_eq!(checked.document().external_sources.len(), 1);
             assert_eq!(checked.document().external_sources[0].source, expected);
         }
+    }
+
+    #[test]
+    fn attach_window_reads_native_cbor_source_units() {
+        let mut source = document::Document::new();
+        source.header.insertion_units = 6;
+        let native = document::Ifcx.export_ifccad(&source).unwrap().drawing;
+        let bytes = document::ifccad::encode_ifccad_cbor_document(&native).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "ocs-xattach-cbor-units-{}.cbor",
+            std::process::id()
+        ));
+        std::fs::write(&path, bytes.bytes()).unwrap();
+        let (_, unit) = read_attach_file(path.to_str().unwrap());
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(unit, 6);
     }
 
     /// The window's unit for a file in `units`, as the window shows it.

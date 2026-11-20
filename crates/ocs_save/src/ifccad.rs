@@ -379,6 +379,36 @@ fn ifccad_plot_layout(doc: &Document, name: &str) -> Option<document::Handle> {
         })
 }
 
+/// Read an external native drawing without importing a recursive source graph.
+/// This does not change the main drawing's file-open or save encoding policy.
+pub fn read_ifccad_source(
+    bytes: &[u8],
+) -> Result<
+    (
+        document::ReadOutcome,
+        document::ifccad::IfccadExternalSourceContent,
+    ),
+    String,
+> {
+    if bytes.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) {
+        return Err("Zstd-compressed IFCCAD sources are unavailable in this host build".into());
+    }
+    let read = || -> Result<_, Error> {
+        let drawing = if bytes.iter().find(|byte| !byte.is_ascii_whitespace()) == Some(&b'{') {
+            document::ifccad::load_ifccad_bytes(bytes, Default::default())?.into_document()
+        } else {
+            document::ifccad::load_ifccad_cbor_bytes(bytes, Default::default())?.into_document()
+        };
+        let content = document::ifccad_external_source_content(&drawing)?;
+        let (outcome, _) = document::Ifcx.import_ifccad_preserving(&drawing)?;
+        Ok((
+            super::external_read_outcome(outcome.document, outcome.losses),
+            content,
+        ))
+    };
+    read().map_err(|error| error.to_string())
+}
+
 /// Read IFCCAD for a drawing tab. A context is needed while it retains roots.
 pub fn read_ifccad_for_edit(
     bytes: &[u8],

@@ -14,6 +14,170 @@ mod source_read;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod native_attachment_tests {
     use super::*;
+    fn native_source_drawing() -> document::ifccad::IfccadDocument {
+        let mut source = Document::new();
+        source.header.insertion_units = 6;
+        source
+            .add_entity(EntityType::Line(document::entities::Line::from_coords(
+                0., 0., 0., 2., 0., 0.,
+            )))
+            .unwrap();
+        document::Ifcx.export_ifccad(&source).unwrap().drawing
+    }
+
+    #[test]
+    fn native_ifccad_source_json_and_cbor_load_with_declared_metadata() {
+        for binary in [false, true] {
+            for registered in [true, false] {
+                let (_, root, _) = fixture("{E5B4A9AF-CF20-4FC9-A30F-FFB20FD987E1}");
+                let source = native_source_drawing();
+                let mut main = document::ifccad::load_ifccad_bytes(
+                    include_bytes!("../../crates/ocs_save/tests/fixtures/xref.ifcx"),
+                    Default::default(),
+                )
+                .unwrap()
+                .into_document();
+                main.external_sources[0].source =
+                    document::ifccad_external_source_content(&source).unwrap();
+                let main_bytes = document::ifccad::encode_ifccad_document(&main).unwrap();
+                let (loaded, session) = ocs_save::read_ifccad_for_edit(main_bytes.bytes()).unwrap();
+                let mut host = loaded.document;
+                let session = session.unwrap();
+                let record = host.block_records.get("grondplan").unwrap().clone();
+                let bytes = if binary {
+                    document::ifccad::encode_ifccad_cbor_document(&source)
+                        .unwrap()
+                        .bytes()
+                        .to_vec()
+                } else {
+                    document::ifccad::encode_ifccad_document(&source)
+                        .unwrap()
+                        .bytes()
+                        .to_vec()
+                };
+                if registered {
+                    session
+                        .bind_external_source_bytes(
+                            record.handle,
+                            &record.xref_path,
+                            "source.dwg".into(),
+                            Arc::new(bytes),
+                        )
+                        .unwrap();
+                } else {
+                    std::fs::write(root.join("Referenties/grondplan.dwg"), bytes).unwrap();
+                }
+                let keys = [record.handle].into_iter().collect();
+                let infos = resolve_xrefs_for_keys_in_session(
+                    &mut host,
+                    &root.join("Tekeningen"),
+                    &keys,
+                    Some(&session),
+                );
+                std::fs::remove_dir_all(&root).unwrap();
+                assert_eq!(
+                    infos[0].status,
+                    XrefStatus::Loaded,
+                    "{:?}",
+                    infos[0].diagnostics
+                );
+                assert!(!infos[0].other_drawing);
+                let line = host
+                    .entities()
+                    .find_map(|entity| match entity {
+                        EntityType::Line(line) if line.common.owner_handle == record.handle => {
+                            Some(line)
+                        }
+                        _ => None,
+                    })
+                    .unwrap();
+                assert_eq!(line.start, Vector3::ZERO);
+                assert_eq!(line.end, Vector3::new(2., 0., 0.));
+            }
+        }
+    }
+
+    #[test]
+    fn native_ifccad_source_nested_failure_keeps_previous_body() {
+        let (mut host, root, session) = fixture("{E5B4A9AF-CF20-4FC9-A30F-FFB20FD987E1}");
+        let record = host.block_records.get("grondplan").unwrap().clone();
+        let keys = [record.handle].into_iter().collect();
+        let loaded = resolve_xrefs_for_keys_in_session(
+            &mut host,
+            &root.join("Tekeningen"),
+            &keys,
+            Some(&session),
+        );
+        assert_eq!(loaded[0].status, XrefStatus::Loaded);
+        let before = host
+            .entities()
+            .filter(|entity| entity.common().owner_handle == record.handle)
+            .count();
+        session
+            .register_external_source(
+                &host,
+                record.handle,
+                document::ifccad_external_source_content(&native_source_drawing()).unwrap(),
+            )
+            .unwrap();
+        session
+            .bind_external_source_bytes(
+                record.handle,
+                &record.xref_path,
+                "nested.ifccad".into(),
+                Arc::new(include_bytes!("../../crates/ocs_save/tests/fixtures/xref.ifcx").to_vec()),
+            )
+            .unwrap();
+        let infos = resolve_xrefs_for_keys_in_session(&mut host, &root, &keys, Some(&session));
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(infos[0].status, XrefStatus::Failed);
+        assert!(
+            infos[0]
+                .diagnostics
+                .iter()
+                .any(|message| message.contains("nested")),
+            "{:?}",
+            infos[0].diagnostics
+        );
+        assert_eq!(
+            host.entities()
+                .filter(|entity| entity.common().owner_handle == record.handle)
+                .count(),
+            before
+        );
+    }
+
+    #[test]
+    fn native_ifccad_source_direct_self_reference_has_a_clear_diagnostic() {
+        let (mut host, root, session) = fixture("{E5B4A9AF-CF20-4FC9-A30F-FFB20FD987E1}");
+        let record = host.block_records.get("grondplan").unwrap().clone();
+        let path = host.source_path.clone().unwrap();
+        std::fs::write(
+            &path,
+            include_bytes!("../../crates/ocs_save/tests/fixtures/xref.ifcx"),
+        )
+        .unwrap();
+        session
+            .register_external_source(
+                &host,
+                record.handle,
+                document::ifccad_external_source_content(&native_source_drawing()).unwrap(),
+            )
+            .unwrap();
+        host.block_records.get_mut("grondplan").unwrap().xref_path = path;
+        let keys = [record.handle].into_iter().collect();
+        let infos = resolve_xrefs_for_keys_in_session(&mut host, &root, &keys, Some(&session));
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(infos[0].status, XrefStatus::Failed);
+        assert!(
+            infos[0]
+                .diagnostics
+                .iter()
+                .any(|message| message.contains("self-reference")),
+            "{:?}",
+            infos[0].diagnostics
+        );
+    }
     #[test]
     fn registered_dxf_source_uses_declared_format_with_misleading_filename() {
         let (mut host, root, session) = fixture("{E5B4A9AF-CF20-4FC9-A30F-FFB20FD987E1}");

@@ -2188,6 +2188,7 @@ bg={bg_ms:.1}ms n={view_count}"
             && tab.scene.drawing_feedback_shown()
             && (tab.active_cmd.is_some() || tab.active_grip.is_some() || plugin_grip_active)
             && (!tab.dyn_fields.is_empty() || dyn_picks_object)
+            && !self.dyn_pointer_tooltip_hidden(i)
         {
             let w = tab.last_cursor_world;
             let base = tab.dyn_anchor.or(self.last_point);

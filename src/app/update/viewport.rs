@@ -8132,7 +8132,7 @@ impl OpenCADStudio {
                 // restore the running osnap configuration (#337).
                 self.snapper.clear_override();
                 self.dyn_user_reshaped = false;
-                self.dyn_coord_absolute = false;
+                self.dyn_coord_absolute = self.dyn_pointer_absolute;
                 self.sync_dyn_fields();
                 self.reset_tracking_after_point();
                 // A running Tangent snap may carry a tangent object; a

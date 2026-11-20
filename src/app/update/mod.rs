@@ -8845,6 +8845,12 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::DraftingSettingsDynPrefs(prefs) => {
+                if let Some(state) = &mut self.drafting_settings_state {
+                    state.dyn_prefs = prefs;
+                }
+                Task::none()
+            }
             Message::DraftingSettingsToggleDynInput => {
                 if let Some(state) = &mut self.drafting_settings_state {
                     state.dyn_input_on = !state.dyn_input_on;

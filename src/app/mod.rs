@@ -1341,6 +1341,13 @@ pub(super) struct OpenCADStudio {
     dyn_input: bool,
     /// Dynamic input mode (DYNMODE): 0=off, 1=pointer, 2=dimensional, 3=both.
     dyn_mode: i16,
+    /// DYNPIFORMAT: second points typed as pointer input are X,Y rather
+    /// than distance<angle.
+    dyn_pointer_cartesian: bool,
+    /// DYNPICOORDS: second points typed as pointer input are absolute.
+    dyn_pointer_absolute: bool,
+    /// DYNPIVIS 0: pointer tooltips show only once coordinates are typed.
+    dyn_pointer_on_type: bool,
     /// Currently visible page in the application Options dialog.
     options_tab: crate::ui::window::options::OptionsTab,
     /// Saved graphics options (backend, compat renderer); read at launch, so
@@ -5136,6 +5143,7 @@ pub enum Message {
     DraftingSettingsSnapClearAll,
     DraftingSettingsToggle3dOsnap,
     DraftingSettingsToggleDynInput,
+    DraftingSettingsDynPrefs(crate::ui::window::drafting_settings::DynInputPrefs),
     DraftingSettingsToggleQuickProps,
     /// Quick Properties palette location: floating (true) or by the cursor.
     DraftingSettingsQuickPropsFloat(bool),
@@ -6727,6 +6735,9 @@ impl OpenCADStudio {
             grid_axes: true,
             dyn_input: true,
             dyn_mode: 3,
+            dyn_pointer_cartesian: false,
+            dyn_pointer_absolute: false,
+            dyn_pointer_on_type: false,
             options_tab: crate::ui::window::options::OptionsTab::General,
             #[cfg(not(target_arch = "wasm32"))]
             graphics_prefs: crate::gpu_backend::load_prefs(),

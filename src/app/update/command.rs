@@ -932,7 +932,7 @@ impl OpenCADStudio {
                         }
                         self.tabs[i].dyn_active = 0;
                         self.dyn_user_reshaped = false;
-                        self.dyn_coord_absolute = false;
+                        self.dyn_coord_absolute = self.dyn_pointer_absolute;
 
                         self.tabs[i].dirty = true;
 
@@ -1201,7 +1201,7 @@ impl OpenCADStudio {
                 }
                 self.last_point = Some(wcs_pt);
                 self.dyn_user_reshaped = false;
-                self.dyn_coord_absolute = false;
+                self.dyn_coord_absolute = self.dyn_pointer_absolute;
                 self.sync_dyn_fields();
                 self.reset_tracking_after_point();
                 self.snapper.clear_override();
@@ -1356,7 +1356,7 @@ impl OpenCADStudio {
 
         self.last_point = Some(pt);
         self.dyn_user_reshaped = false;
-        self.dyn_coord_absolute = false;
+        self.dyn_coord_absolute = self.dyn_pointer_absolute;
         self.sync_dyn_fields();
         self.reset_tracking_after_point();
         self.snapper.clear_override();
@@ -5429,6 +5429,9 @@ impl OpenCADStudio {
             }
             return Task::none();
         }
+        if field == crate::entities::civil::COGO_POINT_NAME {
+            return self.commit_cogo_point_name();
+        }
         if field == "authoring_grip_count" {
             return self.commit_block_grip_count();
         }
@@ -5520,7 +5523,7 @@ impl OpenCADStudio {
                 .remove(&crate::ui::properties::FieldKey::Geom(field))
             {
                 let val = if evaluates_expression {
-                    crate::app::expr_eval::eval_to_string(&raw_val)
+                    self.property_expression_value(&raw_val)
                 } else {
                     raw_val
                 };

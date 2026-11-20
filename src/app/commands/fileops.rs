@@ -250,7 +250,15 @@ impl OpenCADStudio {
             // draw command; the shaded ribbon button drives `SetWireframe`.)
             // One interactive picker behind every verb that asks for a style,
             // offering exactly what the render-mode widget offers. (#621)
-            "VS" | "VSCURRENT" | "SHADEMODE" | "VISUALSTYLES" => {
+            // VISUALSTYLES opens the manager; VS, VSCURRENT and SHADEMODE ask
+            // for a style at the command line.
+            "VISUALSTYLES" => {
+                self.visual_styles_crease = Some(self.model_space.edge_smooth.to_string());
+                self.active_modal = Some(crate::app::ModalKind::VisualStyles);
+                self.modal_resize = iced::Vector::ZERO;
+                return Some(Task::none());
+            }
+            "VS" | "VSCURRENT" | "SHADEMODE" => {
                 use crate::command::KeywordCommand;
                 use crate::modules::view::visual_style;
                 let c = KeywordCommand::new(

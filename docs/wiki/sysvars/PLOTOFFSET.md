@@ -13,5 +13,5 @@ related: PLOT, PLOTROTMODE
 | 1 | The offset is measured from the edge of the paper. |
 
 ## Notes
-- It applies to the X and Y offset in the [`PLOT`](PLOT-Command) dialog.
+- It applies to editable X and Y offsets in the [`PLOT`](PLOT-Command) dialog. Saved offsets for the Layout plot area use the printable corner.
 - Only 0 and 1 are accepted.

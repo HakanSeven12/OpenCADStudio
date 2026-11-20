@@ -2962,8 +2962,11 @@ impl super::Scene {
             }
             changes.push((handle, super::ChangeKind::Modified));
         }
+        // Only the dimensions' look changed: no solve, no associative pass and
+        // no native-graph sweep (a full bump here froze every zoom for ~1 s on
+        // large drawings). The block variant also redraws a block that holds one.
         if !changes.is_empty() {
-            self.bump_entities(&changes);
+            self.bump_entities_restyled_with_block_deps(&changes, &[], &[]);
         }
     }
 

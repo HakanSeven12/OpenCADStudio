@@ -790,11 +790,12 @@ impl PropertyEditable for AttributeDefinition {
                 )
             },
             // Fixed by the style when the style fixes its height.
-            crate::entities::common::num_prop(
+            crate::entities::common::text_height_prop(
                 t!("Height").as_ref(),
                 "att_h",
                 self.height,
-                crate::entities::common::style_fixed_height(&self.text_style).is_none(),
+                &self.text_style,
+                true,
             ),
             edit_angle(
                 t!("Rotation").as_ref(),
@@ -994,7 +995,8 @@ impl PropertyEditable for AttributeDefinition {
 
 impl Transformable for AttributeDefinition {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
+        let normal = self.normal;
+        transform::apply_ocs_entity_transform(self, t, normal, |entity, p1, p2| {
             transform::reflect_xy_point(
                 &mut entity.insertion_point.x,
                 &mut entity.insertion_point.y,
@@ -1166,11 +1168,12 @@ impl PropertyEditable for AttributeEntity {
                         bool_yn(self.flags.annotative),
                     ),
                     // Fixed by the style when the style fixes its height.
-                    crate::entities::common::num_prop(
+                    crate::entities::common::text_height_prop(
                         t!("Height").as_ref(),
                         "atte_h",
                         self.height,
-                        crate::entities::common::style_fixed_height(&self.text_style).is_none(),
+                        &self.text_style,
+                        true,
                     ),
                     edit_angle(
                         t!("Rotation").as_ref(),
@@ -1309,7 +1312,8 @@ impl PropertyEditable for AttributeEntity {
 
 impl Transformable for AttributeEntity {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        transform::apply_standard_entity_transform(self, t, |entity, p1, p2| {
+        let normal = self.normal;
+        transform::apply_ocs_entity_transform(self, t, normal, |entity, p1, p2| {
             transform::reflect_xy_point(
                 &mut entity.insertion_point.x,
                 &mut entity.insertion_point.y,
@@ -1390,5 +1394,42 @@ mod wrapping_tests {
             max_y - min_y > attribute.height as f32,
             "defined width must produce multiple baselines: {min_y}..{max_y}"
         );
+    }
+
+    #[test]
+    fn fixed_height_style_marks_attribute_definition_height_readonly_with_tooltip() {
+        let mut document = document::Document::new();
+        let mut fixed = document::tables::TextStyle::new("VL_h 1 annot");
+        fixed.height = 0.1;
+        let _ = document.text_styles.add(fixed);
+        crate::entities::common::set_fixed_text_heights(&document);
+
+        let mut def = AttributeDefinition::new("H".into(), "".into(), "H".into());
+        def.text_style = "VL_h 1 annot".into();
+        def.height = 0.1;
+
+        let sections = def.geometry_properties(&["VL_h 1 annot".into(), "Standard".into()]);
+        let row = sections
+            .iter()
+            .flat_map(|s| s.props.iter())
+            .find(|p| p.field == "att_h")
+            .expect("att_h row");
+        match &row.value {
+            PropValue::ReadOnlyWithTooltip { tooltip, .. } => {
+                assert!(tooltip.contains("VL_h 1 annot"), "tooltip: {tooltip}");
+                assert!(tooltip.contains("STYLE"), "tooltip: {tooltip}");
+            }
+            other => panic!("expected ReadOnlyWithTooltip, got {other:?}"),
+        }
+
+        // Switching to a variable-height style makes Height editable again.
+        def.text_style = "Standard".into();
+        let sections = def.geometry_properties(&["VL_h 1 annot".into(), "Standard".into()]);
+        let row = sections
+            .iter()
+            .flat_map(|s| s.props.iter())
+            .find(|p| p.field == "att_h")
+            .expect("att_h row");
+        assert!(matches!(row.value, PropValue::EditText(_)));
     }
 }

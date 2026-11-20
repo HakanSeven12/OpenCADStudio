@@ -619,7 +619,7 @@ impl MeasureGeomCommand {
             bulges.push(0.0);
         }
         if bulges.iter().all(|bulge| *bulge == 0.0) {
-            return AreaCommand::point_measurement(&points, true);
+            return AreaCommand::plane_measurement(self.plane, &points);
         }
         // Arcs: measured exactly as a closed bulged polyline in the plane.
         let mut polyline = LwPolyline::new();
@@ -635,7 +635,7 @@ impl MeasureGeomCommand {
             })
             .collect();
         AreaCommand::entity_measurement(&EntityType::LwPolyline(polyline))
-            .unwrap_or_else(|| AreaCommand::point_measurement(&points, true))
+            .unwrap_or_else(|| AreaCommand::plane_measurement(self.plane, &points))
     }
 
     fn area_message(measurement: AreaMeasurement, circle: bool) -> String {

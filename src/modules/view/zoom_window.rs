@@ -22,6 +22,9 @@ pub fn tool() -> ToolDef {
 pub struct ZoomWindowCommand {
     first: Option<Vec3>,
     scale_prompt: bool,
+    /// Center option: `Some(None)` asks for the center point,
+    /// `Some(Some(c))` for the magnification or height.
+    center: Option<Option<DVec3>>,
 }
 
 impl Default for ZoomWindowCommand {
@@ -35,6 +38,7 @@ impl ZoomWindowCommand {
         Self {
             first: None,
             scale_prompt: false,
+            center: None,
         }
     }
 }
@@ -45,7 +49,12 @@ impl CadCommand for ZoomWindowCommand {
     }
 
     fn prompt(&self) -> String {
-        if self.scale_prompt {
+        if let Some(center) = self.center {
+            match center {
+                None => t!("ZOOM CENTER  Specify center point:").into_owned(),
+                Some(_) => t!("ZOOM CENTER  Enter magnification or height:").into_owned(),
+            }
+        } else if self.scale_prompt {
             t!("ZOOM  scale factor (e.g. 2 or 0.5):").into_owned()
         } else if self.first.is_none() {
             t!("ZOOM WINDOW  Specify first corner:").into_owned()
@@ -55,11 +64,12 @@ impl CadCommand for ZoomWindowCommand {
     }
 
     fn options(&self) -> Vec<CmdOption> {
-        if self.first.is_some() || self.scale_prompt {
+        if self.first.is_some() || self.scale_prompt || self.center.is_some() {
             return Vec::new();
         }
         vec![
             CmdOption::new("Window", "W"),
+            CmdOption::new("Center", "C"),
             CmdOption::new("Extents", "E"),
             CmdOption::new("Previous", "P"),
             CmdOption::new("Object", "O"),
@@ -81,12 +91,23 @@ impl CadCommand for ZoomWindowCommand {
         if text.is_empty() {
             return None;
         }
+        if let Some(Some(c)) = self.center {
+            return Some(CmdResult::Dispatch(format!(
+                "ZOOM CENTER {} {} {} {text}",
+                c.x, c.y, c.z
+            )));
+        }
         if self.scale_prompt {
             return Some(CmdResult::Dispatch(format!("ZOOM SCALE {text}")));
         }
         let command = match text.to_uppercase().as_str() {
             "W" | "WINDOW" => {
                 self.first = None;
+                return Some(CmdResult::NeedPoint);
+            }
+            "C" | "CENTER" => {
+                self.first = None;
+                self.center = Some(None);
                 return Some(CmdResult::NeedPoint);
             }
             "E" | "EXTENTS" => "ZOOM EXTENTS",
@@ -116,7 +137,11 @@ impl CadCommand for ZoomWindowCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
-        if self.scale_prompt {
+        if self.center == Some(None) {
+            self.center = Some(Some(pt));
+            return CmdResult::NeedPoint;
+        }
+        if self.scale_prompt || self.center.is_some() {
             return CmdResult::NeedPoint;
         }
         let pt = pt.as_vec3();
@@ -132,7 +157,13 @@ impl CadCommand for ZoomWindowCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        CmdResult::Cancel
+        // Enter at the magnification prompt keeps the current height.
+        match self.center {
+            Some(Some(c)) => {
+                CmdResult::Dispatch(format!("ZOOM CENTER {} {} {} 1X", c.x, c.y, c.z))
+            }
+            _ => CmdResult::Cancel,
+        }
     }
 
     fn on_escape(&mut self) -> CmdResult {

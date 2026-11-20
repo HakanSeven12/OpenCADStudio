@@ -8,11 +8,21 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from drawing_interaction import Client, LOCAL_MEASUREMENTS, assert_state, distribution, frame_summaries, isolation_layout, local_output, prepare_config, recovery_updates
+from drawing_interaction import Client, LOCAL_MEASUREMENTS, assert_state, distribution, frame_summaries, isolation_layout, local_output, model_space_owner, prepare_config, recovery_updates
 from summarize_drawing_interaction import artifact_csv, summarize
 
 
 class InteractionReportTests(unittest.TestCase):
+    def test_edit_owner_comes_from_records_independent_of_capture_annotations(self):
+        client = unittest.mock.Mock()
+        client.call.return_value = {"records": [
+            {"handle": "A", "name": "BLOCK_DEFINITION"},
+            {"handle": "B", "name": "*MODEL_SPACE"}]}
+        self.assertEqual(model_space_owner(client), "B")
+        client.call.return_value = {"records": [{"handle": "A", "name": "BLOCK_DEFINITION"}]}
+        with self.assertRaisesRegex(RuntimeError, "model-space block"):
+            model_space_owner(client)
+
     def test_recovery_observations_ignore_temporary_and_unchanged_files(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -65,6 +75,21 @@ class InteractionReportTests(unittest.TestCase):
         self.assertEqual(phases, [("layout", "SINGLE", [("commands", {"cmd": "VPORTS SINGLE"})], .25)])
         self.assertEqual(client.call.call_args_list,
                          [unittest.mock.call("history"), unittest.mock.call("commands", cmd="ZOOM EXTENTS")])
+
+    def test_edit_layout_fits_every_pane_before_timing_edits(self):
+        phases = []
+        args = SimpleNamespace(scenario="edits", layout_settle_seconds=.25, edit_steps=1)
+        client = unittest.mock.Mock()
+        client.call.side_effect = [
+            {"entries": [{"kind": "Output", "text": "VPORTS: 4 viewport(s)."}]},
+            {"viewport_size": [800, 600]}]
+        isolation_layout(client, args, "4", "SINGLE", "88", lambda *v: phases.append(v))
+        self.assertEqual([p[0] for p in phases], ["layout", "fit_panes", "move_retained"])
+        events = phases[1][2]
+        centers = [fields["events"][0]["move"] for op, fields in events if op == "pointer"]
+        self.assertEqual(centers, [[200, 150], [600, 150], [200, 450], [600, 450], [200, 150]])
+        self.assertEqual(sum(op == "commands" and fields["cmd"] == "ZOOM EXTENTS"
+                             for op, fields in events), 5)
 
     def test_measurement_outputs_are_confined_to_ignored_folder(self):
         allowed = LOCAL_MEASUREMENTS / "example" / "run.json"

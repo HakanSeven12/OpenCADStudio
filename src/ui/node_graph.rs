@@ -15,8 +15,8 @@ use iced::advanced::widget::{self, tree, Widget};
 use iced::advanced::{overlay, renderer, Renderer as _, Shell};
 use iced::keyboard;
 use iced::widget::{
-    button, canvas, checkbox, column, container, hover, mouse_area, opaque, pin, row, slider,
-    stack, text, text_input, tooltip, Space,
+    button, canvas, checkbox, column, container, hover, mouse_area, opaque, pin, row, scrollable,
+    slider, stack, text, text_input, tooltip, Space,
 };
 use iced::{
     mouse, Background, Border, Element, Length, Point, Rectangle, Size, Theme, Transformation,
@@ -506,6 +506,13 @@ pub enum RowWidget {
         step: f64,
     },
     Toggle,
+    /// One of a list, as `(value, label)`: the Properties panel's choice,
+    /// layer, linetype and lineweight rows.
+    Choice(Vec<(Value, String)>),
+    /// Typed text, or one of a list (a block reference's Name).
+    EditChoice(Vec<String>),
+    /// A colour, valued as the control protocol writes it.
+    Color,
 }
 
 /// A group of rows; an empty title has no header and is always open.
@@ -527,6 +534,90 @@ pub struct NodeRow {
     pub group: Option<String>,
 }
 
+/// How the canvas shows links. A view setting kept with the user's
+/// preferences, never in the `.ocg` file: one graph reads the same either way.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LinkDisplay {
+    /// Every link is a wire.
+    #[default]
+    Wires,
+    /// A linked input names its source; its wire shows while hovered.
+    Labels,
+    /// Labels, plus the wires of the selected node.
+    Selection,
+}
+
+impl LinkDisplay {
+    pub const ALL: [Self; 3] = [Self::Wires, Self::Labels, Self::Selection];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Wires => "Wires",
+            Self::Labels => "Labels",
+            Self::Selection => "Selection",
+        }
+    }
+
+    /// Whether linked inputs show a label in place of their wire.
+    pub fn labels(self) -> bool {
+        self != Self::Wires
+    }
+}
+
+/// An output a picker offers: its port, and how it reads (`Node.output`).
+pub struct Source {
+    pub port: Port,
+    pub name: String,
+    pub value: Value,
+}
+
+/// The source picker of one input, open where it was clicked.
+pub struct Picker {
+    pub to: Port,
+    pub at: Point,
+    pub search: String,
+}
+
+const PICKER_W: f32 = 260.0;
+const PICKER_LIST_H: f32 = 220.0;
+const PICKER_ROW_H: f32 = 20.0;
+
+/// The widget id of the picker's search box.
+pub fn picker_search_id() -> widget::Id {
+    widget::Id::from("node-graph-picker-search")
+}
+
+/// What labels mode shows of a graph's links; see [`Graph::link_labels`].
+#[derive(Default)]
+pub(crate) struct LinkLabels {
+    /// Linked inputs that show as rows, each naming its source.
+    pub rows: HashMap<Port, String>,
+    /// The sources of folded inputs, by the row that stands for them: a
+    /// closed section's header ([`section_key`]) or a closed group's row.
+    pub folded: HashMap<Port, Vec<String>>,
+    /// Each folded input, with the row that stands for it.
+    pub folded_by: HashMap<Port, Port>,
+}
+
+/// The key a closed section's header goes by in [`LinkLabels::folded`] and
+/// in hover; no field starts with `§`.
+fn section_key(node: NodeId, title: &str) -> Port {
+    Port {
+        node,
+        field: format!("§{title}"),
+    }
+}
+
+/// A folded row's sum-up of its links: the first source, and how many more.
+fn folded_text(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => format!("← {one}"),
+        [first, rest @ ..] => format!("← {first} +{}", rest.len()),
+    }
+}
+
 pub enum Drag {
     Palette(PaletteItem),
     Node(NodeId, Vector),
@@ -544,6 +635,29 @@ pub struct GraphUndo {
     applied: Vec<(Handle, EntityType)>,
     applied_records: Vec<(Handle, document::objects::ObjectType)>,
     created: Vec<Handle>,
+}
+
+/// A graph read from a file on a worker ([`Graph::from_file`]), with the
+/// drawing fingerprint it was saved against, for a message: it is taken
+/// once.
+#[derive(Clone)]
+pub struct LoadedGraph(std::sync::Arc<std::sync::Mutex<Option<(Graph, String)>>>);
+
+impl LoadedGraph {
+    pub fn new(read: (Graph, String)) -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(Some(read))))
+    }
+
+    /// The graph and its fingerprint; `None` once taken.
+    pub fn take(&self) -> Option<(Graph, String)> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).take()
+    }
+}
+
+impl std::fmt::Debug for LoadedGraph {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("LoadedGraph")
+    }
 }
 
 #[derive(Default)]
@@ -570,6 +684,13 @@ pub struct Graph {
     /// Objects the last evaluation's operations created; the next one
     /// erases them first.
     pub created: Vec<Handle>,
+    /// The node pressed last; Selection mode draws its links.
+    pub selected: Option<NodeId>,
+    /// The input whose label is under the pointer; its wire shows.
+    pub hovered_label: Option<Port>,
+    pub picker: Option<Picker>,
+    /// The input whose dropdown or colour list is open.
+    pub menu: Option<Port>,
 }
 
 impl Graph {
@@ -593,6 +714,12 @@ impl Graph {
         self.created = state.created;
         self.drafts.clear();
         self.drag = None;
+        self.hovered_label = None;
+        self.picker = None;
+        self.menu = None;
+        if self.selected.is_some_and(|id| !self.ui.contains_key(&id)) {
+            self.selected = None;
+        }
     }
 }
 
@@ -625,9 +752,27 @@ pub enum GraphMsg {
     Saved(Option<Result<String, String>>),
     Open,
     Loaded(Option<Vec<u8>>),
+    /// The file of an Open parsed on a worker, for the drawing (tab id,
+    /// document generation) it was opened in, or why it is no graph.
+    Parsed(u64, u64, Result<LoadedGraph, String>),
     /// The button was released over the panel entry it was pressed on.
     PaletteRelease,
     Search(String),
+    /// The panel's switch chose how links show.
+    Links(LinkDisplay),
+    /// The pointer entered (`Some`) or left (`None`) an input's label.
+    LabelHover(Option<Port>),
+    /// Opens the source picker of an input, or closes it when it is open.
+    Pick(Port),
+    PickSearch(String),
+    /// The picker chose an output (first) for an input (second).
+    PickSource(Port, Port),
+    /// The picker's Disconnect: the input loses its link.
+    PickClear(Port),
+    PickClose,
+    /// Opens an input's dropdown or colour list, or closes it when it is
+    /// open; `None` closes any.
+    Menu(Option<Port>),
 }
 
 fn msg(m: GraphMsg) -> Message {
@@ -1135,7 +1280,13 @@ impl Graph {
             let driven = self.driven_fields(id, node_sections);
             for section in node_sections.iter().filter(|s| self.is_open(id, s)) {
                 for row in &section.rows {
-                    let typed = !matches!(row.widget, RowWidget::Slider { .. } | RowWidget::Toggle);
+                    let typed = !matches!(
+                        row.widget,
+                        RowWidget::Slider { .. }
+                            | RowWidget::Toggle
+                            | RowWidget::Choice(_)
+                            | RowWidget::Color
+                    );
                     if typed && row.input && self.is_shown(id, row) && !driven.contains(&row.field)
                     {
                         fields.push(Port {
@@ -1149,20 +1300,156 @@ impl Graph {
         fields
     }
 
-    pub fn view(&self, sections: Vec<Vec<NodeSection>>) -> Element<'_, Message> {
+    /// A node's card title: its operation, or its object kind and count.
+    fn title(&self, node: &graph::Node) -> String {
+        match &node.kind {
+            Kind::Op(spec) => t!(spec.name).into_owned(),
+            Kind::Object(name) => {
+                let count = self.ui.get(&node.id).map_or(0, |ui| ui.handles.len());
+                let name = t!(name.as_str()).into_owned();
+                if count > 1 {
+                    format!("{name} ×{count}")
+                } else {
+                    name
+                }
+            }
+        }
+    }
+
+    /// Every output of the graph as a picker offers it, `Node.output`, in
+    /// card order. A section's header output is listed by its title.
+    pub(crate) fn sources(&self, sections: &[Vec<NodeSection>]) -> Vec<Source> {
+        let mut sources = Vec::new();
+        for (node, node_sections) in self.engine.nodes.iter().zip(sections) {
+            let title = self.title(node);
+            for section in node_sections {
+                let rows = section.header.iter().chain(&section.rows);
+                for row in rows.filter(|row| row.output) {
+                    let label = if section
+                        .header
+                        .as_ref()
+                        .is_some_and(|h| h.field == row.field)
+                    {
+                        &section.title
+                    } else {
+                        &row.label
+                    };
+                    sources.push(Source {
+                        port: Port {
+                            node: node.id,
+                            field: row.field.clone(),
+                        },
+                        name: format!("{title}.{label}"),
+                        value: node.outputs.get(&row.field).cloned().unwrap_or(Value::Null),
+                    });
+                }
+            }
+        }
+        sources
+    }
+
+    /// The outputs `to` can take a link from: any whose node `to`'s node
+    /// does not reach, so the link closes no loop.
+    pub(crate) fn sources_for<'s>(&self, sources: &'s [Source], to: &Port) -> Vec<&'s Source> {
+        sources
+            .iter()
+            .filter(|source| !self.engine.reaches(to.node, source.port.node))
+            .collect()
+    }
+
+    /// What the labels show of the graph's links. A linked input that
+    /// shows as a row names its source; one folded away, in a closed section
+    /// or coordinate group, is summed up on the row that stands for it.
+    /// Links into a section's header port keep their wires.
+    pub(crate) fn link_labels(
+        &self,
+        sections: &[Vec<NodeSection>],
+        sources: &[Source],
+    ) -> LinkLabels {
+        let mut labels = LinkLabels::default();
+        for (node, node_sections) in self.engine.nodes.iter().zip(sections) {
+            for section in node_sections {
+                let open = self.is_open(node.id, section);
+                for row in section.rows.iter().filter(|row| row.input) {
+                    let port = Port {
+                        node: node.id,
+                        field: row.field.clone(),
+                    };
+                    let Some(link) = self.engine.links.iter().find(|link| link.to == port) else {
+                        continue;
+                    };
+                    let name = sources
+                        .iter()
+                        .find(|source| source.port == link.from)
+                        .map_or_else(|| link.from.field.clone(), |source| source.name.clone());
+                    let stand_in = if !open {
+                        section_key(node.id, &section.title)
+                    } else if let Some(group) =
+                        row.group.as_ref().filter(|_| !self.is_shown(node.id, row))
+                    {
+                        Port {
+                            node: node.id,
+                            field: group.clone(),
+                        }
+                    } else {
+                        labels.rows.insert(port, name);
+                        continue;
+                    };
+                    labels
+                        .folded
+                        .entry(stand_in.clone())
+                        .or_default()
+                        .push(name);
+                    labels.folded_by.insert(port, stand_in);
+                }
+            }
+        }
+        labels
+    }
+
+    pub fn view(
+        &self,
+        sections: Vec<Vec<NodeSection>>,
+        links: LinkDisplay,
+    ) -> Element<'_, Message> {
         let fields = self.tab_order(&sections);
         let drafts = self.drafts.keys().cloned().collect();
+        let sources = self.sources(&sections);
+        let labels = if links.labels() {
+            self.link_labels(&sections, &sources)
+        } else {
+            LinkLabels::default()
+        };
+        let selected = self.selected.filter(|_| links == LinkDisplay::Selection);
         let wires = self
             .engine
             .links
             .iter()
             .filter_map(|link| {
+                // A labelled link shows its wire, faintly, while its label (or
+                // the row that sums it up) is hovered, or one of its nodes is
+                // selected.
+                let stand_in = labels.folded_by.get(&link.to);
+                let faint = stand_in.is_some() || labels.rows.contains_key(&link.to);
+                let hovered = self.hovered_label.as_ref();
+                let shown = !faint
+                    || hovered == Some(&link.to)
+                    || (hovered.is_some() && hovered == stand_in)
+                    || selected.is_some_and(|id| link.from.node == id || link.to.node == id);
+                if !shown {
+                    return None;
+                }
                 Some((
                     self.port_point(&sections, &link.from, false)?,
                     self.port_point(&sections, &link.to, true)?,
+                    faint,
                 ))
             })
             .collect();
+        let picker = self.picker.as_ref().map(|picker| {
+            let offered = self.sources_for(&sources, &picker.to);
+            self.picker_view(picker, &offered)
+        });
         let pending = match &self.drag {
             Some(Drag::Link(from)) => self
                 .port_point(&sections, from, false)
@@ -1179,8 +1466,9 @@ impl Graph {
             let Some(ui) = self.ui.get(&node.id) else {
                 continue;
             };
+            let lit = selected == Some(node.id);
             nodes = nodes.push(
-                pin(self.node_view(node, node_sections))
+                pin(self.node_view(node, node_sections, &labels, lit))
                     .x(ui.pos.x + shift.x)
                     .y(ui.pos.y + shift.y),
             );
@@ -1205,6 +1493,9 @@ impl Graph {
                 .padding([3, 8])
                 .style(container::bordered_box);
             layers = layers.push(pin(ghost).x(self.cursor.x + 10.0).y(self.cursor.y + 10.0));
+        }
+        if let (Some(picker), Some(view)) = (&self.picker, picker) {
+            layers = layers.push(pin(view).x(picker.at.x).y(picker.at.y + 4.0));
         }
         let area = mouse_area(layers.width(Length::Fill).height(Length::Fill))
             .on_move(|p| msg(GraphMsg::Moved(p)))
@@ -1285,7 +1576,12 @@ impl Graph {
     /// The node library as a docked panel: title bar, a search box with the
     /// graph's New / Open / Save beside it, then the categories. Entries are
     /// clicked or dragged onto the canvas.
-    pub fn panel(&self, width: f32, chrome: crate::ui::dock::Chrome) -> Element<'_, Message> {
+    pub fn panel(
+        &self,
+        width: f32,
+        chrome: crate::ui::dock::Chrome,
+        links: LinkDisplay,
+    ) -> Element<'_, Message> {
         use crate::ui::dock::{self, PanelId};
         use crate::ui::kit;
         let tool = |icon: &'static [u8], tip: &str, message: GraphMsg| {
@@ -1307,6 +1603,18 @@ impl Graph {
             ]
             .spacing(km::TOOL_GAP)
             .align_y(iced::Center),
+        );
+
+        // How links show: a view setting, the same for every graph.
+        let link_switch = kit::tabs(
+            LinkDisplay::ALL
+                .iter()
+                .map(|mode| (t!(mode.label()).into_owned(), msg(GraphMsg::Links(*mode))))
+                .collect(),
+            LinkDisplay::ALL
+                .iter()
+                .position(|mode| *mode == links)
+                .unwrap_or(0),
         );
 
         let query = self.search.trim().to_lowercase();
@@ -1355,26 +1663,25 @@ impl Graph {
             column![
                 toolbar,
                 Space::new().height(km::TOOL_GAP),
+                link_switch,
+                Space::new().height(km::TOOL_GAP),
                 kit::scroll_area(tree)
             ],
             width,
         )
     }
 
-    fn node_view(&self, node: &graph::Node, sections: Vec<NodeSection>) -> Element<'_, Message> {
+    /// `labels` names the sources of the linked rows that show a label;
+    /// `lit` outlines the card as the selected node.
+    fn node_view(
+        &self,
+        node: &graph::Node,
+        sections: Vec<NodeSection>,
+        labels: &LinkLabels,
+        lit: bool,
+    ) -> Element<'_, Message> {
         let id = node.id;
-        let title = match &node.kind {
-            Kind::Op(spec) => t!(spec.name).into_owned(),
-            Kind::Object(name) => {
-                let count = self.ui.get(&id).map_or(0, |ui| ui.handles.len());
-                let name = t!(name.as_str()).into_owned();
-                if count > 1 {
-                    format!("{name} ×{count}")
-                } else {
-                    name
-                }
-            }
-        };
+        let title = self.title(node);
         let zoom = self.zoom();
         let spec = match &node.kind {
             Kind::Op(spec) => Some(*spec),
@@ -1427,19 +1734,23 @@ impl Graph {
                         Space::new().width(PORT_W).into(),
                     ),
                 };
-                let toggle = button(
-                    row![
-                        crate::ui::icons::themed_arrow_toggle(open, 9.0),
-                        text(section.title.clone()).size(11)
-                    ]
-                    .spacing(4)
-                    .align_y(iced::Center),
-                )
-                .on_press(msg(GraphMsg::Section(id, section.title.clone())))
-                .style(button::secondary)
-                .width(Length::Fill)
-                .height(SECTION_H)
-                .padding([0, 6]);
+                let mut caption = row![
+                    crate::ui::icons::themed_arrow_toggle(open, 9.0),
+                    text(section.title.clone()).size(11)
+                ]
+                .spacing(4)
+                .align_y(iced::Center);
+                // A closed section sums up the links into its rows.
+                let key = section_key(id, &section.title);
+                if let Some(names) = labels.folded.get(&key) {
+                    caption = caption.push(folded_label(key, folded_text(names)));
+                }
+                let toggle = button(caption)
+                    .on_press(msg(GraphMsg::Section(id, section.title.clone())))
+                    .style(button::secondary)
+                    .width(Length::Fill)
+                    .height(SECTION_H)
+                    .padding([0, 6]);
                 col = col.push(with_tip(
                     row![in_port, toggle, out_port]
                         .spacing(2)
@@ -1453,7 +1764,25 @@ impl Graph {
                 for node_row in section.rows {
                     if self.is_shown(id, &node_row) {
                         let locked = driven.contains(&node_row.field);
-                        col = col.push(self.row_view(id, node_row, locked));
+                        let label = labels
+                            .rows
+                            .get(&Port {
+                                node: id,
+                                field: node_row.field.clone(),
+                            })
+                            .cloned();
+                        let folded = labels
+                            .folded
+                            .get(&Port {
+                                node: id,
+                                field: node_row.field.clone(),
+                            })
+                            .map(|names| folded_text(names));
+                        // Every row of a card shows its dropdown carets, as
+                        // the selected row of a property grid does.
+                        crate::ui::kit::building_row(None, true);
+                        col = col.push(self.row_view(id, node_row, locked, label, folded));
+                        crate::ui::kit::building_row(None, false);
                     }
                 }
             }
@@ -1461,11 +1790,15 @@ impl Graph {
         opaque(
             container(col)
                 .width(NODE_W)
-                .style(|theme: &Theme| container::Style {
+                .style(move |theme: &Theme| container::Style {
                     background: Some(Background::Color(crate::ui::style::chrome::surface(theme))),
                     border: Border {
-                        color: crate::ui::style::chrome::border(theme),
-                        width: 1.0,
+                        color: if lit {
+                            crate::ui::style::chrome::accent(theme)
+                        } else {
+                            crate::ui::style::chrome::border(theme)
+                        },
+                        width: if lit { 2.0 } else { 1.0 },
                         radius: 4.0.into(),
                     },
                     ..Default::default()
@@ -1501,8 +1834,20 @@ impl Graph {
         (in_port, out_port)
     }
 
-    fn row_view(&self, id: NodeId, node_row: NodeRow, locked: bool) -> Element<'_, Message> {
-        let tip = row_tip(&node_row);
+    /// `source` is the label of a linked input, naming the output it reads.
+    fn row_view(
+        &self,
+        id: NodeId,
+        node_row: NodeRow,
+        locked: bool,
+        source: Option<String>,
+        folded: Option<String>,
+    ) -> Element<'_, Message> {
+        let tip = match (&source, &folded) {
+            (Some(name), _) => format!("{}\n← {name}", row_tip(&node_row)),
+            (None, Some(summary)) => format!("{}\n{summary}", row_tip(&node_row)),
+            (None, None) => row_tip(&node_row),
+        };
         let (in_port, out_port) = self.port_views(id, &node_row);
         let label: Element<'_, Message> = match node_row.widget {
             RowWidget::Group => {
@@ -1531,7 +1876,11 @@ impl Graph {
             field: node_row.field,
         };
         let shown = display(&node_row.value);
-        let value: Element<'_, Message> = if node_row.input && !locked {
+        let value: Element<'_, Message> = if let Some(name) = source {
+            link_label(port, name)
+        } else if let Some(summary) = folded {
+            folded_label(port, summary)
+        } else if node_row.input && !locked {
             match node_row.widget {
                 RowWidget::Slider { min, max, step } => {
                     let current = graph::value::num(&node_row.value).unwrap_or(min);
@@ -1556,32 +1905,133 @@ impl Graph {
                         .width(Length::Fill)
                         .into()
                 }
+                RowWidget::Choice(options) => {
+                    let open = self.menu.as_ref() == Some(&port);
+                    let current = options.iter().position(|(v, _)| *v == node_row.value);
+                    let head = crate::ui::kit::dropdown_head(
+                        current.map_or(shown, |k| options[k].1.clone()),
+                        current.is_none(),
+                        open,
+                        msg(GraphMsg::Menu(Some(port.clone()))),
+                    );
+                    let width = crate::ui::kit::dropdown_width(
+                        options.iter().map(|(_, label)| label.as_str()),
+                        NODE_W - LABEL_W,
+                    );
+                    let rows = options
+                        .into_iter()
+                        .enumerate()
+                        .map(|(k, (value, label))| {
+                            crate::ui::kit::dropdown_option(
+                                label.clone(),
+                                label,
+                                msg(GraphMsg::Set(port.clone(), value)),
+                                Some(k) == current,
+                            )
+                        })
+                        .collect();
+                    let list = crate::ui::dropdown_list::DropdownList::new(rows)
+                        .selected(current)
+                        .select_first_by_default(current.is_some())
+                        .on_escape(msg(GraphMsg::Menu(None)));
+                    crate::ui::kit::dropdown(head, list, width, msg(GraphMsg::Menu(None)), open)
+                }
+                RowWidget::Color => {
+                    let color = crate::app::control::control_color(&node_row.value).ok();
+                    let set = port.clone();
+                    let on_pick = move |c| msg(GraphMsg::Set(set.clone(), crate::app::control::color_value(c)));
+                    let extras = crate::ui::color_select::ColorExtras {
+                        by_layer: true,
+                        by_block: true,
+                        ..Default::default()
+                    };
+                    let open = self.menu.as_ref() == Some(&port);
+                    let toggle = msg(GraphMsg::Menu(Some(port.clone())));
+                    let more = Message::OpenColorWindow(
+                        crate::app::ColorPickTarget::GraphPort(port),
+                        color.unwrap_or(document::types::Color::ByLayer),
+                    );
+                    match color {
+                        Some(color) => crate::ui::color_select::color_selector(color, open, extras, on_pick, toggle, more),
+                        None => crate::ui::color_select::color_selector_varies(open, extras, on_pick, toggle, more),
+                    }
+                }
                 RowWidget::Field
                 | RowWidget::Number
                 | RowWidget::Measure
                 | RowWidget::Coordinate
-                | RowWidget::Group => {
+                | RowWidget::Group
+                | RowWidget::EditChoice(_) => {
                     let numeric = matches!(node_row.widget, RowWidget::Number);
                     let draft = self.drafts.get(&port).cloned().unwrap_or(shown);
                     let edit = port.clone();
                     let held = draft.clone();
-                    text_input("", &draft)
+                    let input = text_input("", &draft)
                         .id(field_id(&port))
                         .on_input(move |s| {
                             let accepted = !numeric || number_prefix(&s);
                             let s = if accepted { s } else { held.clone() };
                             msg(GraphMsg::Input(edit.clone(), s))
                         })
-                        .on_submit(msg(GraphMsg::Commit(port)))
+                        .on_submit(msg(GraphMsg::Commit(port.clone())))
                         .size(11)
                         .padding([2, 4])
-                        .width(Length::Fill)
-                        .into()
+                        .width(Length::Fill);
+                    let RowWidget::EditChoice(options) = node_row.widget else {
+                        return self.row_frame(in_port, label, input.into(), out_port, tip);
+                    };
+                    // The field, and a caret that lists the names to pick.
+                    let open = self.menu.as_ref() == Some(&port);
+                    let caret = button(if open {
+                        crate::ui::icons::themed_arrow_up(9.0)
+                    } else {
+                        crate::ui::icons::themed_arrow_down(9.0)
+                    })
+                    .on_press(msg(GraphMsg::Menu(Some(port.clone()))))
+                    .style(button::text)
+                    .padding([2, 3]);
+                    let width = crate::ui::kit::dropdown_width(
+                        options.iter().map(String::as_str),
+                        NODE_W - LABEL_W,
+                    );
+                    let rows = options
+                        .into_iter()
+                        .map(|option| {
+                            let current = Value::String(option.clone()) == node_row.value;
+                            crate::ui::kit::dropdown_option(
+                                option.clone(),
+                                option.clone(),
+                                msg(GraphMsg::Set(port.clone(), Value::String(option))),
+                                current,
+                            )
+                        })
+                        .collect();
+                    let list = crate::ui::dropdown_list::DropdownList::new(rows)
+                        .on_escape(msg(GraphMsg::Menu(None)));
+                    crate::ui::kit::dropdown(
+                        row![input, caret].align_y(iced::Center).into(),
+                        list,
+                        width,
+                        msg(GraphMsg::Menu(None)),
+                        open,
+                    )
                 }
             }
         } else {
             text(shown).size(11).width(Length::Fill).into()
         };
+        self.row_frame(in_port, label, value, out_port, tip)
+    }
+
+    /// A row's ports, label and value on one line, with its tooltip.
+    fn row_frame<'a>(
+        &self,
+        in_port: Element<'a, Message>,
+        label: Element<'a, Message>,
+        value: Element<'a, Message>,
+        out_port: Element<'a, Message>,
+        tip: String,
+    ) -> Element<'a, Message> {
         with_tip(
             row![in_port, label, value, out_port]
                 .spacing(2)
@@ -1589,6 +2039,117 @@ impl Graph {
                 .align_y(iced::Center),
             tip,
             self.zoom(),
+        )
+    }
+
+    /// The source picker: a search box, Disconnect when the input has a
+    /// link, and the outputs it can read, filtered by the search. The
+    /// current source is lit.
+    fn picker_view(&self, picker: &Picker, offered: &[&Source]) -> Element<'_, Message> {
+        use crate::ui::style::chrome;
+        let current = self
+            .engine
+            .links
+            .iter()
+            .find(|link| link.to == picker.to)
+            .map(|link| link.from.clone());
+        let query = picker.search.trim().to_lowercase();
+        let mut list = column![];
+        let mut count = 0;
+        for source in offered
+            .iter()
+            .filter(|source| query.is_empty() || source.name.to_lowercase().contains(&query))
+        {
+            count += 1;
+            let lit = current.as_ref() == Some(&source.port);
+            let entry = row![
+                text(source.name.clone())
+                    .size(11)
+                    .wrapping(iced::widget::text::Wrapping::None)
+                    .width(Length::Fill),
+                text(display(&source.value))
+                    .size(10)
+                    .wrapping(iced::widget::text::Wrapping::None)
+                    .style(|theme: &Theme| iced::widget::text::Style {
+                        color: Some(chrome::muted(theme)),
+                    }),
+            ]
+            .spacing(6)
+            .align_y(iced::Center);
+            list = list.push(
+                button(container(entry).clip(true))
+                    .on_press(msg(GraphMsg::PickSource(
+                        source.port.clone(),
+                        picker.to.clone(),
+                    )))
+                    .width(Length::Fill)
+                    .height(PICKER_ROW_H)
+                    .padding([2, 6])
+                    .style(move |theme: &Theme, status| {
+                        let hovered =
+                            matches!(status, button::Status::Hovered | button::Status::Pressed);
+                        button::Style {
+                            background: (lit || hovered).then(|| {
+                                Background::Color(if lit {
+                                    chrome::row_selected(theme)
+                                } else {
+                                    chrome::hover(theme)
+                                })
+                            }),
+                            text_color: chrome::text(theme),
+                            ..Default::default()
+                        }
+                    }),
+            );
+        }
+        if count == 0 {
+            list = list.push(
+                container(text(t!("No outputs to link")).size(11))
+                    .padding([4, 6])
+                    .style(|theme: &Theme| container::Style {
+                        text_color: Some(chrome::muted(theme)),
+                        ..Default::default()
+                    }),
+            );
+        }
+        let search = text_input(&t!("Search outputs…"), &picker.search)
+            .id(picker_search_id())
+            .on_input(|value| msg(GraphMsg::PickSearch(value)))
+            .size(11)
+            .padding([3, 6]);
+        let mut body = column![row![
+            search,
+            button(crate::ui::icons::themed(crate::ui::icons::CLOSE, 10.0))
+                .on_press(msg(GraphMsg::PickClose))
+                .style(button::text)
+                .padding([4, 6]),
+        ]
+        .align_y(iced::Center)]
+        .spacing(4);
+        if current.is_some() {
+            body = body.push(
+                button(text(t!("Disconnect")).size(11))
+                    .on_press(msg(GraphMsg::PickClear(picker.to.clone())))
+                    .style(button::secondary)
+                    .padding([2, 6])
+                    .width(Length::Fill),
+            );
+        }
+        let height = (count.max(1) as f32 * PICKER_ROW_H).min(PICKER_LIST_H);
+        body = body.push(scrollable(list).height(height));
+        opaque(
+            container(body)
+                .padding(6)
+                .width(PICKER_W)
+                .style(|theme: &Theme| container::Style {
+                    background: Some(Background::Color(chrome::surface_raised(theme))),
+                    border: Border {
+                        color: chrome::border(theme),
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }),
         )
     }
 
@@ -1615,8 +2176,51 @@ impl Graph {
                     _ => {}
                 }
             }
-            GraphMsg::Pressed => self.drag = Some(Drag::Pan(self.cursor, self.pan)),
+            GraphMsg::Pressed => {
+                // A press on the bare canvas also ends the selection and
+                // closes the picker.
+                self.drag = Some(Drag::Pan(self.cursor, self.pan));
+                self.selected = None;
+                self.picker = None;
+            }
+            GraphMsg::LabelHover(port) => self.hovered_label = port.clone(),
+            GraphMsg::Pick(port) => {
+                let same = self.picker.as_ref().is_some_and(|open| open.to == *port);
+                self.picker = (!same).then(|| Picker {
+                    to: port.clone(),
+                    at: self.cursor,
+                    search: String::new(),
+                });
+            }
+            GraphMsg::PickSearch(value) => {
+                if let Some(picker) = self.picker.as_mut() {
+                    picker.search = value.clone();
+                }
+            }
+            GraphMsg::PickSource(..) | GraphMsg::PickClear(_) | GraphMsg::PickClose => {
+                self.picker = None;
+            }
+            GraphMsg::NodeDelete(id) => {
+                if self.selected == Some(*id) {
+                    self.selected = None;
+                }
+                if self
+                    .picker
+                    .as_ref()
+                    .is_some_and(|picker| picker.to.node == *id)
+                {
+                    self.picker = None;
+                }
+                if self
+                    .hovered_label
+                    .as_ref()
+                    .is_some_and(|port| port.node == *id)
+                {
+                    self.hovered_label = None;
+                }
+            }
             GraphMsg::NodePress(id) => {
+                self.selected = Some(*id);
                 // Raise the grabbed node above the others.
                 if let Some(index) = self.engine.nodes.iter().position(|node| node.id == *id) {
                     let node = self.engine.nodes.remove(index);
@@ -1660,9 +2264,66 @@ impl Graph {
             GraphMsg::Input(port, value) => {
                 self.drafts.insert(port.clone(), value.clone());
             }
+            GraphMsg::Menu(port) => {
+                self.menu = port.clone().filter(|port| self.menu.as_ref() != Some(port));
+            }
+            GraphMsg::Set(..) => self.menu = None,
             _ => {}
         }
     }
+}
+
+/// The label of a linked input, `← Node.output` in the wire colour.
+/// Clicking it opens the source picker; hovering it shows the wire.
+fn link_label<'a>(port: Port, name: String) -> Element<'a, Message> {
+    use crate::ui::style::chrome;
+    let caption = row![
+        text(format!("← {name}"))
+            .size(11)
+            .wrapping(iced::widget::text::Wrapping::None)
+            .width(Length::Fill)
+            .style(|theme: &Theme| iced::widget::text::Style {
+                color: Some(chrome::accent(theme)),
+            }),
+        crate::ui::icons::dropdown_arrow(),
+    ]
+    .spacing(2)
+    .align_y(iced::Center);
+    let field = container(caption)
+        .padding([1, 4])
+        .width(Length::Fill)
+        .clip(true)
+        .style(|theme: &Theme| container::Style {
+            border: Border {
+                color: chrome::accent(theme).scale_alpha(0.5),
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        });
+    mouse_area(field)
+        .on_press(msg(GraphMsg::Pick(port.clone())))
+        .on_enter(msg(GraphMsg::LabelHover(Some(port))))
+        .on_exit(msg(GraphMsg::LabelHover(None)))
+        .interaction(mouse::Interaction::Pointer)
+        .into()
+}
+
+/// The sum-up of links folded into a closed section or group, in the wire
+/// colour; hovering it shows their wires. Clicks go to the row beneath, which
+/// opens the fold.
+fn folded_label<'a>(stand_in: Port, summary: String) -> Element<'a, Message> {
+    let caption = text(summary)
+        .size(11)
+        .wrapping(iced::widget::text::Wrapping::None)
+        .width(Length::Fill)
+        .style(|theme: &Theme| iced::widget::text::Style {
+            color: Some(crate::ui::style::chrome::accent(theme)),
+        });
+    mouse_area(container(caption).width(Length::Fill).clip(true))
+        .on_enter(msg(GraphMsg::LabelHover(Some(stand_in))))
+        .on_exit(msg(GraphMsg::LabelHover(None)))
+        .into()
 }
 
 fn port_dot<'a>(linked: bool) -> Element<'a, Message> {
@@ -1690,7 +2351,9 @@ fn port_dot<'a>(linked: bool) -> Element<'a, Message> {
 
 /// Translucent backdrop plus link curves.
 struct Wires {
-    wires: Vec<(Point, Point)>,
+    /// Each link's ends, and whether it shows faintly: a labelled link
+    /// revealed by hover or selection.
+    wires: Vec<(Point, Point, bool)>,
     pending: Option<(Point, Point)>,
     width: f32,
 }
@@ -1723,7 +2386,12 @@ impl canvas::Program<Message> for Wires {
         let stroke = canvas::Stroke::default()
             .with_color(crate::ui::style::chrome::accent(theme))
             .with_width(self.width);
-        for (a, b) in &self.wires {
+        for (a, b, faint) in &self.wires {
+            let stroke = if *faint {
+                stroke.with_color(crate::ui::style::chrome::accent(theme).scale_alpha(0.5))
+            } else {
+                stroke
+            };
             frame.stroke(&wire_path(*a, *b), stroke);
         }
         if let Some((a, b)) = self.pending {
@@ -1765,6 +2433,13 @@ struct ZoomedOverlay<'a> {
     origin: Point,
 }
 
+impl ZoomedOverlay<'_> {
+    /// Overlay content → screen.
+    fn transformation(&self) -> Transformation {
+        Transformation::translate(self.origin.x, self.origin.y) * Transformation::scale(self.zoom)
+    }
+}
+
 impl overlay::Overlay<Message, Theme, iced::Renderer> for ZoomedOverlay<'_> {
     fn layout(&mut self, renderer: &iced::Renderer, bounds: Size) -> layout::Node {
         let room = Size::new(
@@ -1782,13 +2457,50 @@ impl overlay::Overlay<Message, Theme, iced::Renderer> for ZoomedOverlay<'_> {
         layout: Layout<'_>,
         cursor: mouse::Cursor,
     ) {
-        let transformation = Transformation::translate(self.origin.x, self.origin.y)
-            * Transformation::scale(self.zoom);
-        renderer.with_transformation(transformation, |renderer| {
+        renderer.with_transformation(self.transformation(), |renderer| {
             self.inner
                 .as_overlay()
                 .draw(renderer, theme, style, layout, cursor);
         });
+    }
+
+    // The lists of the cards' dropdowns take the pointer through the zoom
+    // the overlay is drawn with.
+    fn update(
+        &mut self,
+        event: &iced::Event,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let cursor = cursor * self.transformation().inverse();
+        self.inner
+            .as_overlay_mut()
+            .update(event, layout, cursor, renderer, shell);
+    }
+
+    fn mouse_interaction(
+        &self,
+        layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+    ) -> mouse::Interaction {
+        let cursor = cursor * self.transformation().inverse();
+        self.inner
+            .as_overlay()
+            .mouse_interaction(layout, cursor, renderer)
+    }
+
+    fn operate(
+        &mut self,
+        layout: Layout<'_>,
+        renderer: &iced::Renderer,
+        operation: &mut dyn widget::Operation,
+    ) {
+        self.inner
+            .as_overlay_mut()
+            .operate(layout, renderer, operation);
     }
 }
 

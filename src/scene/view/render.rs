@@ -21,7 +21,10 @@ use crate::scene::{
     SceneLight, Uniforms, ViewportInstance, WireModel,
 };
 
-const DISPLAY_STYLE_CACHE_LIMIT: usize = if cfg!(target_arch = "wasm32") { 4 } else { 24 };
+/// Floor for the display plot style caches. Each entry is a styled copy of a
+/// whole wire set, so the cap follows what one frame draws: a floor of 24 kept
+/// a copy per layout visited until memory ran out (#3260).
+const DISPLAY_STYLE_CACHE_LIMIT: usize = 4;
 const MM_TO_PX: f32 = 96.0 / 25.4;
 
 // ── Camera hover state (shader::Program::State) ───────────────────────────
@@ -127,6 +130,13 @@ pub struct ViewportData {
     /// in the previous shader Primitive prevented the next UI event from
     /// splicing a changed entity in place and forced a full rebuild.
     pub(in crate::scene) wires: std::sync::Weak<Vec<WireModel>>,
+    /// Keeps `wires` alive when they are a copy made for display (the set
+    /// without its 3D faces, recoloured by a plot style, the sheet's own)
+    /// and not the resident set. Only a bounded cache owns such a copy, and
+    /// it can let the copy go while the frame's other viewports are built:
+    /// the viewport was then left out of the frame and kept showing the
+    /// image it had.
+    pub(in crate::scene) _wires_copy: Option<Arc<Vec<WireModel>>>,
     /// This content viewport's non-rectangular clip boundary (paper layouts
     /// only), as a polygon already projected into the viewport's render-target
     /// NDC. The GPU stamps it into the stencil so content is clipped to the
@@ -221,6 +231,8 @@ pub struct ViewportData {
     /// occluded by closer geometry are culled by the LessEqual depth
     /// test on the wire passes that follow.
     pub(in crate::scene) hidden_line: bool,
+    /// HiddenLine draws the edges behind faces dashed.
+    pub(in crate::scene) occluded_edges: bool,
     /// Interaction LOD: when true the (per-pixel, GPU-dominating) hatch pass is
     /// skipped this frame because the view is actively being navigated. Folded
     /// into the render signature so the settle frame re-renders hatches once and
@@ -250,6 +262,10 @@ pub struct ViewportData {
     /// Bumped on selection / hover change. Paired with `wire_content_id` to
     /// decide when the xray overlay batch needs rebuilding.
     pub(in crate::scene) selection_generation: u64,
+    /// Bumped on hover / box-preview / constraint / filter changes only. Lets
+    /// the xray overlay rebuild its (small) hover half on a rollover without
+    /// re-emitting the committed selection's GPU buffers.
+    pub(in crate::scene) hover_generation: u64,
     /// Signature of the *selected set* only (not hover). Gates the static-buffer
     /// re-upload (hatch tint, issue #71) so a hover doesn't re-upload every
     /// hatch / face3d buffer on hatch-heavy drawings.
@@ -553,6 +569,7 @@ impl shader::Primitive for Primitive {
             // Interaction LOD: skip the hatch draw this frame while navigating.
             inner.skip_hatch_frame = vp.skip_hatch;
             inner.skip_background = vp.skip_background;
+            inner.occluded_edges = vp.occluded_edges;
             if skip {
                 if vp.show_viewcube {
                     inner.viewcube.upload(
@@ -1254,10 +1271,14 @@ retained_contributors={}",
                     );
                 }
             }
-            // Selection xray overlay — rebuilt when the selection changes or the
-            // underlying wires changed. A pick bumps only selection_generation,
-            // so this refreshes without re-tessellating or re-uploading the main
-            // wire buffers.
+            // Selection xray overlay — split into two independently cached
+            // halves. The committed-selection half re-emits only when the
+            // selection (or the wires under it) changed: a pick bumps
+            // selection_generation and refreshes the overlay without
+            // re-tessellating or re-uploading the main wire buffers. The
+            // hover half re-emits on rollover / marquee ticks (hover_generation)
+            // and on selection changes, because the hover overlay is
+            // `hovered − selected`.
             let sel_key = (vp.wire_content_id, vp.selection_generation);
             let highlighted_geometry_unchanged = vp.selected_handles.is_empty()
                 && vp.hover_handles.is_empty()
@@ -1269,6 +1290,7 @@ retained_contributors={}",
                         })
                 });
             let selection_changed = inner.cached_selection.1 != vp.selection_generation;
+            let hover_changed = inner.cached_hover_generation != Some(vp.hover_generation);
             let highlighted_geometry_changed =
                 inner.cached_selection.0 != vp.wire_content_id && !highlighted_geometry_unchanged;
             let annotation_context_changed = inner
@@ -1285,17 +1307,30 @@ retained_contributors={}",
                     !(previous.is_empty() && vp.selected_annotation_context_wires.is_empty())
                         && !Arc::ptr_eq(previous, &vp.selected_annotation_context_wires)
                 });
-            if selection_changed
+            let refresh_selected =
+                selection_changed || highlighted_geometry_changed || selected_annotation_changed;
+            let refresh_hover = hover_changed
+                || selection_changed
                 || highlighted_geometry_changed
-                || annotation_context_changed
-                || selected_annotation_changed
-            {
+                || annotation_context_changed;
+            if refresh_selected || refresh_hover {
                 inner.prepare_highlight_wire_cache(vp.wire_content_id, vp.draw_depth_generation);
                 let sel_color = if self.selection_effect {
                     Some(self.selection_color)
                 } else {
                     None
                 };
+                // Identity of the hover half's inputs for the text-upload
+                // cache: generations + wire content + depth generation mix,
+                // plus the hover-annotation source pointer (the Arc content
+                // is immutable, so pointer equality is content equality).
+                let hover_key = (
+                    vp.hover_generation
+                        ^ vp.selection_generation.rotate_left(32)
+                        ^ vp.wire_content_id.rotate_left(16)
+                        ^ vp.draw_depth_generation.rotate_left(48),
+                    std::sync::Arc::as_ptr(&vp.annotation_context_wires) as usize as u64,
+                );
                 inner.upload_split_highlights(
                     device,
                     queue,
@@ -1308,6 +1343,9 @@ retained_contributors={}",
                     sel_color,
                     vp.wire_content_id,
                     vp.draw_depth_generation,
+                    refresh_selected,
+                    refresh_hover,
+                    hover_key,
                 );
                 inner.cached_annotation_highlight_source =
                     Some(Arc::clone(&vp.annotation_context_wires));
@@ -1318,6 +1356,7 @@ retained_contributors={}",
             // the existing overlay valid, so future deltas compare to the
             // arena generation actually on screen.
             inner.cached_selection = sel_key;
+            inner.cached_hover_generation = Some(vp.hover_generation);
             // Batched solid meshes stay resident while unrelated entity
             // categories change.
             if inner
@@ -1349,6 +1388,7 @@ retained_contributors={}",
                 vp.selection_generation,
             );
             if hl_key != inner.cached_highlight_key
+                || inner.cached_mesh_hover_generation != Some(vp.hover_generation)
                 || selected_annotation_changed
                 || annotation_context_changed
             {
@@ -1359,6 +1399,7 @@ retained_contributors={}",
                     &vp.selected_annotation_context_wires,
                 );
                 inner.cached_highlight_key = hl_key;
+                inner.cached_mesh_hover_generation = Some(vp.hover_generation);
             }
             // Live overlay (command preview / interim / grip drag) — small and
             // refreshed every frame it's present, so a drag never re-uploads
@@ -1656,6 +1697,7 @@ fn render_signature(
     }
     vp.geometry_epoch.hash(&mut h);
     vp.selection_generation.hash(&mut h);
+    vp.hover_generation.hash(&mut h);
     vp.selected_sig.hash(&mut h);
     vp.wire_content_id.hash(&mut h);
     vp.fill_mode.hash(&mut h);
@@ -1665,6 +1707,7 @@ fn render_signature(
     vp.show_3d_edges.hash(&mut h);
     vp.display_silhouette.hash(&mut h);
     vp.hidden_line.hash(&mut h);
+    vp.occluded_edges.hash(&mut h);
     // ViewCube visibility is excluded from the *scene* signature elsewhere only
     // for the live-hover pass; here it MUST invalidate the cache so toggling the
     // cube (NAVVCUBE) re-renders and actually clears the last cube frame
@@ -3615,6 +3658,24 @@ impl Scene {
         self.document.header.lineweight_display
     }
 
+    /// How many wire sets one frame of the shown layout draws at most: the
+    /// sheet's and one for every content viewport, each of which can have a
+    /// set of its own (a scale, a set of frozen layers). A cache of the
+    /// copies made from those sets has to hold that many, or it empties and
+    /// fills again on every frame, as the resident sets did (#1769).
+    pub(in crate::scene) fn frame_wire_set_count(&self) -> usize {
+        if self.current_layout == "Model" {
+            1
+        } else {
+            self.paper_viewport_handles().2.len() + 1
+        }
+    }
+
+    /// Entries the display plot style caches hold before they are emptied.
+    fn display_style_cache_limit(&self) -> usize {
+        DISPLAY_STYLE_CACHE_LIMIT.max(self.frame_wire_set_count() + 1)
+    }
+
     fn display_plot_style(&self) -> Option<Arc<crate::io::plot_style::PlotStyleTable>> {
         if self.current_layout == "Model" {
             return None;
@@ -3699,8 +3760,9 @@ impl Scene {
         }
         let wires = Arc::new(wires);
         let gen = crate::scene::WIRE_CONTENT_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let limit = self.display_style_cache_limit();
         let mut cache = self.styled_wire_cache.borrow_mut();
-        if cache.len() >= DISPLAY_STYLE_CACHE_LIMIT {
+        if cache.len() >= limit {
             cache.clear();
         }
         cache.insert(key, (gen, Arc::clone(&wires)));
@@ -3759,9 +3821,10 @@ impl Scene {
             hatches.extend(wire_fills.iter().cloned());
         }
         let hatches = Arc::new(hatches);
+        let limit = self.display_style_cache_limit() * 2;
         let mut cache = self.styled_hatch_cache.borrow_mut();
         cache.retain(|(epoch, _, _, _, _), _| *epoch == self.geometry_epoch);
-        if cache.len() >= DISPLAY_STYLE_CACHE_LIMIT * 2 {
+        if cache.len() >= limit {
             cache.clear();
         }
         cache.insert(key, Arc::clone(&hatches));
@@ -3850,8 +3913,9 @@ impl Scene {
             }
         }
         let hatches = Arc::new(hatches);
+        let limit = self.display_style_cache_limit();
         let mut cache = self.styled_wire_fill_cache.borrow_mut();
-        if cache.len() >= DISPLAY_STYLE_CACHE_LIMIT {
+        if cache.len() >= limit {
             cache.clear();
         }
         cache.insert(key, Arc::clone(&hatches));
@@ -4594,13 +4658,44 @@ impl Scene {
             self.paper_bg_color
         };
         let all_visible = self.annotation_all_visible();
+        // The outline of a solid is built for the size its edges show at, so
+        // in a drawing that has solids the wires follow the steps of this
+        // view's scale. A perspective view shows an edge at more than one
+        // size and outlines the solids in full.
+        let interaction_meshes = self.interaction_meshes_arc();
+        let outline_step = (!interaction_meshes.is_empty()
+            && inst.camera.projection == crate::scene::view::camera::Projection::Orthographic)
+            .then(|| {
+                crate::scene::outline_detail::step(
+                    (inst.screen_rect.height * 0.5 / inst.camera.ortho_size() * device_scale())
+                        as f64,
+                )
+            })
+            .flatten();
+        // While the view is being zoomed the outlines stay the ones it had:
+        // they are built again once it rests, not at every step it crosses.
+        let outline_step = {
+            let mut steps = self.outline_steps.borrow_mut();
+            let view = (inst.handle, inst.tile_idx);
+            match (outline_step, steps.get(&view)) {
+                (Some(_), Some(kept)) if self.navigating_lod() => *kept,
+                _ => {
+                    steps.insert(view, outline_step);
+                    outline_step
+                }
+            }
+        };
 
         let mut key = 0xcbf2_9ce4_8422_2325_u64;
         let mut mix =
             |value: u64| key = key.rotate_left(17) ^ value.wrapping_mul(0x9E37_79B9_7F4A_7C15);
         mix(self.geometry_epoch);
+        mix(outline_step.map_or(u64::MAX, |step| step as u32 as u64));
         if !selected_part {
+            // The hover part is `hovered − selected`: it changes on a rollover
+            // or marquee tick (hover_generation) and on a selection change.
             mix(self.selection_generation);
+            mix(self.hover_generation);
         }
         mix(target_block.value());
         mix(annotation_scale_handle.map_or(0, |handle| handle.value()));
@@ -4643,7 +4738,6 @@ impl Scene {
         highlighted.sort_unstable_by_key(|(handle, _)| handle.value());
 
         let empty_selection = rustc_hash::FxHashSet::default();
-        let interaction_meshes = self.interaction_meshes_arc();
         // Avoid rescanning every mesh for every highlighted entity. A large
         // cumulative selection contains mostly non-mesh entities, so index
         // the comparatively small mesh set once for this rebuild.
@@ -4655,6 +4749,7 @@ impl Scene {
         }
         let mut wires = Vec::new();
         let mut edge_prototypes = rustc_hash::FxHashMap::default();
+        let mut outline_detail = OutlineDetail::new(outline_step);
         for (handle, selected) in highlighted {
             let Some(entity) = self.document.get_entity(handle) else {
                 continue;
@@ -4688,17 +4783,27 @@ impl Scene {
             }
             for set in meshes_by_handle.get(&handle).into_iter().flatten() {
                 let name = format!("mesh-edge:{}", handle.value());
-                if let Some(stub) =
-                    moved_edge_outline(set, &mut edge_prototypes, &name, tint, selected)
-                {
+                let level = outline_detail.step_of(set);
+                if let Some(stub) = moved_edge_outline(
+                    set,
+                    &mut edge_prototypes,
+                    &mut outline_detail,
+                    level,
+                    &name,
+                    tint,
+                    selected,
+                ) {
                     wires.push(stub);
                     continue;
                 }
-                let (edges, edges_low) = set.geometry_edges();
+                let (edges, _) = set.geometry_edges();
                 if edges.len() < 2 {
                     continue;
                 }
-                let points = edge_outline_points(edges, edges_low, set.instance_transform.as_ref());
+                let points = placed_edge_points(
+                    &outline_detail.edges(set, level),
+                    set.instance_transform.as_ref(),
+                );
                 wires.push(edge_outline(name, points, tint, selected));
             }
 
@@ -5154,10 +5259,15 @@ impl Scene {
                         (Arc::new(Vec::new()), None)
                     }
                 };
-                let mut c = self.split_cache.borrow_mut();
                 // Ids change on rebuild, so old keys die naturally; the cap
-                // just bounds pathological churn.
-                if c.len() > 8 {
+                // just bounds pathological churn. It stays above what one
+                // frame draws: below it, the cache emptied on every frame.
+                // Each entry splits a whole set, so no fixed floor beyond
+                // that: other layouts' splits held memory until it ran out
+                // (#3260).
+                let cap = self.frame_wire_set_count() + 1;
+                let mut c = self.split_cache.borrow_mut();
+                if c.len() > cap {
                     c.clear();
                 }
                 c.insert(base_wire_content_id, (fa.clone(), oa.clone()));
@@ -5444,6 +5554,7 @@ impl Scene {
         } else {
             self.images_for_viewport(inst.handle, &vp_frozen)
         };
+        vp_mark("images");
         // The paper sheet shows the layout's own 2-D content (fills, borders,
         // annotation) — never the model's 3-D solids. Those are drawn inside
         // the floating content viewports, whose model camera + per-viewport
@@ -5461,6 +5572,7 @@ impl Scene {
             &vp_frozen,
             inst.paper_sheet || wireframe_2d,
         );
+        vp_mark("meshes-clouds");
 
         // SDF text quads (behind OCS_TEXT_SDF). The glyph quads ride on each
         // entity's own wire (produced by the tessellator, transformed for
@@ -5570,10 +5682,16 @@ impl Scene {
                 second.y, second.z, 0.0,
             ]
         };
+        // Cached per (selection, hover) generation: rebuilding the two sets
+        // and the signature every frame per viewport scaled with the selection
+        // size even while idle.
+        let (interaction_selected, interaction_hover, interaction_sig) =
+            self.cached_viewport_interaction_sets(show_interaction);
         Some(ViewportData {
             instance_id,
             force_rasterize,
             wires: Arc::downgrade(&all_wires),
+            _wires_copy: (!self.is_resident_wire_set(&all_wires)).then(|| Arc::clone(&all_wires)),
             clip_boundary_ndc,
             preview_wires,
             annotation_context_wires,
@@ -5622,6 +5740,13 @@ impl Scene {
                         style.silhouette_width > 0 && style.edges_visible()
                     })),
             hidden_line: flags.hidden_line,
+            // VSOCCLUDEDEDGES, or the style's obscured edge flag (4).
+            occluded_edges: flags.hidden_line
+                && (self.occluded_edges
+                    || display
+                        .visual_style
+                        .as_ref()
+                        .is_some_and(|style| style.edge_style & 4 != 0)),
             // Interaction LOD: suppress the costly hatch pass while the view is
             // actively moving; the scene-render cache holds the full-quality
             // (hatched) frame once it settles. Only applied to the on-screen
@@ -5636,34 +5761,17 @@ impl Scene {
             camera_generation: self.camera_generation,
             wire_content_id,
             wire_patch,
-            selected_handles: Arc::new(if show_interaction {
-                // A partly picked polyline lights only its picked segments,
-                // drawn with the highlight wires.
-                // A table whose cells are picked draws plain under its labels.
-                let cells = self.table_cells_handle();
-                self.selected
-                    .iter()
-                    .copied()
-                    .filter(|handle| self.picked_segments(*handle).is_none())
-                    .filter(|handle| Some(*handle) != cells)
-                    .collect()
-            } else {
-                rustc_hash::FxHashSet::default()
-            }),
-            hover_handles: Arc::new(if show_interaction {
-                self.hover_highlight_handles()
-            } else {
-                rustc_hash::FxHashSet::default()
-            }),
+            selected_handles: interaction_selected,
+            hover_handles: interaction_hover,
             selection_generation: self
                 .selection_generation
                 .wrapping_mul(2)
                 .wrapping_add(u64::from(!show_interaction)),
-            selected_sig: if show_interaction {
-                self.selected_set_sig()
-            } else {
-                0
-            },
+            hover_generation: self
+                .hover_generation
+                .wrapping_mul(2)
+                .wrapping_add(u64::from(!show_interaction)),
+            selected_sig: interaction_sig,
             screen_rect,
         })
     }
@@ -6229,29 +6337,96 @@ pub fn device_scale() -> f32 {
     f32::from_bits(DEVICE_SCALE.load(std::sync::atomic::Ordering::Relaxed))
 }
 
-/// The edge outline of a highlighted solid: its edge pairs as one line broken
-/// between pairs, placed by `transform` when the solid is a block's.
-fn edge_outline_points(
-    edges: &[[f32; 3]],
-    edges_low: &[[f32; 3]],
-    transform: Option<&document::types::Transform>,
-) -> Vec<[f64; 3]> {
-    let mut points = Vec::with_capacity(edges.len() / 2 * 3);
+/// The edges of a solid in its own coordinates: the two ends of each pair,
+/// one after the other.
+fn local_edge_points(edges: &[[f32; 3]], edges_low: &[[f32; 3]]) -> Vec<[f64; 3]> {
+    let mut points = Vec::with_capacity(edges.len());
     for pair_start in (0..edges.len().saturating_sub(1)).step_by(2) {
         for index in [pair_start, pair_start + 1] {
             let high = edges[index];
             let low = edges_low.get(index).copied().unwrap_or([0.0; 3]);
-            let local = document::types::Vector3::new(
+            points.push([
                 high[0] as f64 + low[0] as f64,
                 high[1] as f64 + low[1] as f64,
                 high[2] as f64 + low[2] as f64,
-            );
+            ]);
+        }
+    }
+    points
+}
+
+/// The edge outline of a highlighted solid: its edge pairs as one line broken
+/// between pairs, placed by `transform` when the solid is a block's.
+fn placed_edge_points(
+    pairs: &[[f64; 3]],
+    transform: Option<&document::types::Transform>,
+) -> Vec<[f64; 3]> {
+    let mut points = Vec::with_capacity(pairs.len() / 2 * 3);
+    for pair in pairs.chunks_exact(2) {
+        for local in pair {
+            let local = document::types::Vector3::new(local[0], local[1], local[2]);
             let world = transform.map_or(local, |transform| transform.apply(local));
             points.push([world.x, world.y, world.z]);
         }
         points.push([f64::NAN; 3]);
     }
     points
+}
+
+/// What the outlines of one build share: the step of the view's scale they
+/// are built for, and the edges of each solid geometry as thinned for a step
+/// (see [`crate::scene::outline_detail`]).
+struct OutlineDetail {
+    step: Option<i32>,
+    edges: rustc_hash::FxHashMap<(usize, Option<i32>), Arc<Vec<[f64; 3]>>>,
+}
+
+impl OutlineDetail {
+    fn new(step: Option<i32>) -> Self {
+        Self {
+            step,
+            edges: rustc_hash::FxHashMap::default(),
+        }
+    }
+
+    /// The step of the scale `set` shows at: the view's, and what its
+    /// reference stretches it by. `None` outlines it in full.
+    fn step_of(&self, set: &crate::scene::model::mesh_model::MeshLodSet) -> Option<i32> {
+        let step = self.step?;
+        // The longest a unit of the solid gets where the reference places it.
+        let stretch = set.instance_transform.as_ref().map_or(1.0, |transform| {
+            let m = &transform.matrix.m;
+            (0..3)
+                .map(|column| (0..3).map(|row| m[row][column].powi(2)).sum::<f64>())
+                .fold(0.0, f64::max)
+                .sqrt()
+        });
+        Some(step + crate::scene::outline_detail::step(stretch)?)
+    }
+
+    /// The edges of `set` for the scale of `step`, in its own coordinates.
+    /// References of one block share their edges, and so the answer.
+    fn edges(
+        &mut self,
+        set: &crate::scene::model::mesh_model::MeshLodSet,
+        step: Option<i32>,
+    ) -> Arc<Vec<[f64; 3]>> {
+        let (edges, edges_low) = set.geometry_edges();
+        let key = (edges.as_ptr() as usize, step);
+        if let Some(found) = self.edges.get(&key) {
+            return Arc::clone(found);
+        }
+        let whole = local_edge_points(edges, edges_low);
+        let shown = Arc::new(match step {
+            Some(step) => crate::scene::outline_detail::simplified(
+                &whole,
+                crate::scene::outline_detail::small_line(step),
+            ),
+            None => whole,
+        });
+        self.edges.insert(key, Arc::clone(&shown));
+        shown
+    }
 }
 
 fn edge_outline(name: String, points: Vec<[f64; 3]>, tint: [f32; 4], selected: bool) -> WireModel {
@@ -6268,7 +6443,9 @@ fn edge_outline(name: String, points: Vec<[f64; 3]>, tint: [f32; 4], selected: b
 /// a block's, or the reference turns, scales or mirrors it.
 fn moved_edge_outline(
     set: &crate::scene::model::mesh_model::MeshLodSet,
-    prototypes: &mut rustc_hash::FxHashMap<(usize, bool), Arc<Vec<WireModel>>>,
+    prototypes: &mut rustc_hash::FxHashMap<(usize, bool, Option<i32>), Arc<Vec<WireModel>>>,
+    detail: &mut OutlineDetail,
+    level: Option<i32>,
     name: &str,
     tint: [f32; 4],
     selected: bool,
@@ -6280,10 +6457,11 @@ fn moved_edge_outline(
     }
     let prototype = prototypes
         // The tint follows `selected`, so a hovered and a selected
-        // reference of one block each get their own shape.
-        .entry((Arc::as_ptr(source) as usize, selected))
+        // reference of one block each get their own shape; so does each
+        // step of scale.
+        .entry((Arc::as_ptr(source) as usize, selected, level))
         .or_insert_with(|| {
-            let points = edge_outline_points(&source.edge_verts, &source.edge_verts_low, None);
+            let points = placed_edge_points(&detail.edges(set, level), None);
             let mut outline = edge_outline(name.to_string(), points, tint, selected);
             outline.render_instance = Some(crate::scene::model::instance_model::RenderInstance {
                 source_id: crate::scene::model::instance_model::next_source_id(),

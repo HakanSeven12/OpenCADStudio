@@ -401,6 +401,11 @@ pub(crate) const LAYER_SEARCH_ID: &str = "LAYER_SEARCH";
 pub(super) const PROP_COLOR_ID: &str = "PROP_COLOR";
 pub(super) const PROP_LINETYPE_ID: &str = "PROP_LINETYPE";
 pub(super) const PROP_LW_ID: &str = "PROP_LW";
+/// Icons in front of the Properties panel's Color / Linetype / Lineweight
+/// combos.
+const PROP_COLOR_ICON: &[u8] = include_bytes!("../../../assets/icons/color_palette.svg");
+const PROP_LINETYPE_ICON: &[u8] = include_bytes!("../../../assets/icons/attributes/linetype.svg");
+const PROP_LW_ICON: &[u8] = include_bytes!("../../../assets/icons/attributes/lineweight.svg");
 
 // ── Style context (passed from Ribbon to render_large) ────────────────────
 
@@ -1505,19 +1510,25 @@ fn large_item<'a>(
             );
             let lw_row = prop_row(LwItem(active_lineweight).to_string(), PROP_LW_ID, None);
 
+            // Each combo is led by the icon of the property it sets.
+            let labelled =
+                |icon: &'static [u8], dd_id: &'static str, combo| -> Element<'a, Message> {
+                    row![
+                        icons::tool(icon, SMALL_ICON),
+                        super::qat::list_target(dd_id, PosReport::new(dd_id, combo)),
+                    ]
+                    .spacing(4)
+                    .align_y(iced::Center)
+                    .into()
+                };
+
             // Top-pinned like every combo panel, so the Color dropdown shares
             // the same baseline as the Layers / style selectors.
             let combos = container(
                 column![
-                    super::qat::list_target(
-                        PROP_COLOR_ID,
-                        PosReport::new(PROP_COLOR_ID, color_row)
-                    ),
-                    super::qat::list_target(
-                        PROP_LINETYPE_ID,
-                        PosReport::new(PROP_LINETYPE_ID, lt_row)
-                    ),
-                    super::qat::list_target(PROP_LW_ID, PosReport::new(PROP_LW_ID, lw_row)),
+                    labelled(PROP_COLOR_ICON, PROP_COLOR_ID, color_row),
+                    labelled(PROP_LINETYPE_ICON, PROP_LINETYPE_ID, lt_row),
+                    labelled(PROP_LW_ICON, PROP_LW_ID, lw_row),
                 ]
                 .spacing(2)
                 .align_x(iced::Left),

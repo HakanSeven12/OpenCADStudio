@@ -143,7 +143,7 @@ impl OpenCADStudio {
         self.axis_lock_dir = None;
         self.angle_override = None;
         self.dyn_user_reshaped = false;
-        self.dyn_coord_absolute = false;
+        self.dyn_coord_absolute = self.dyn_pointer_absolute;
         self.grip_hover = None;
         self.grip_popup = None;
         self.grip_pending = None;
@@ -292,6 +292,7 @@ impl OpenCADStudio {
         // Grip-menu toggles live only as long as the gesture.
         self.tabs[i].grip_copy = false;
         self.tabs[i].grip_base_pending = false;
+        self.tabs[i].scene.table_fill_fields = None;
         let had_grip = self.tabs[i].active_grip.take().is_some()
             || had_plugin_grip
             || self.grip_add_provisional.is_some()
@@ -858,15 +859,17 @@ impl OpenCADStudio {
     /// belongs to other geometry, so it leaves the UCS alone.
     /// Dynamic UCS: outline the solid face under the cursor while a command
     /// that would align to it waits for its first point.
+    /// `UCS FACE`'s pick outlines the face it would take the same way.
     pub(in crate::app) fn refresh_ducs_face_highlight(&mut self, i: usize, cursor: iced::Point) {
-        let wanted = self.dynamic_ucs
+        let command = self.tabs[i].active_cmd.as_ref();
+        let ucs_face_pick = command.is_some_and(|command| {
+            command.name() == "UCS" && command.entity_pick_uses_surface_point()
+        });
+        let dynamic = self.dynamic_ucs
             && self.dynamic_ucs_restore.is_none()
             && self.last_point.is_none()
-            && self.tabs[i].editing_model_space()
-            && self.tabs[i]
-                .active_cmd
-                .as_ref()
-                .is_some_and(|command| dynamic_ucs_applies(command.name()));
+            && command.is_some_and(|command| dynamic_ucs_applies(command.name()));
+        let wanted = self.tabs[i].editing_model_space() && (ucs_face_pick || dynamic);
         let at = wanted.then(|| {
             let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
             let bounds = self.tabs[i].scene.active_model_tile_bounds(vw, vh);
@@ -1014,7 +1017,7 @@ impl OpenCADStudio {
             };
             self.last_point = Some(*point);
             self.dyn_user_reshaped = false;
-            self.dyn_coord_absolute = false;
+            self.dyn_coord_absolute = self.dyn_pointer_absolute;
             self.sync_dyn_fields();
             self.reset_tracking_after_point();
             self.push_ucs_to_cmd(i);
@@ -1174,6 +1177,15 @@ impl OpenCADStudio {
         let mut tasks = Vec::new();
         while !tokens.is_empty() {
             if self.tabs[tab_idx].active_cmd.is_none() {
+                break;
+            }
+            // A command that waits for a read takes the rest when it ends.
+            if self.tabs[tab_idx]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.waits_for_read())
+            {
+                self.tabs[tab_idx].pending_pause_tokens = Some(tokens);
                 break;
             }
             let token = tokens.remove(0);
@@ -1473,6 +1485,22 @@ impl OpenCADStudio {
             }
             tasks.push(self.feed_active_cmd(unquote(tok)));
             consumed += 1;
+            // A command that waits for a read takes the rest of the line
+            // when the read ends, as after a PAUSE.
+            if self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.waits_for_read())
+            {
+                let mut remainder: Vec<String> = tokens[1 + idx + 1..].to_vec();
+                if finish {
+                    remainder.push("ENTER".to_string());
+                }
+                self.tabs[i].pending_pause_tokens = Some(remainder);
+                consumed = tokens.len();
+                paused = true;
+                break;
+            }
         }
         if !editor_was_open && self.text_inline.is_some() && consumed < tokens.len() {
             // Fill the editor the same way `Message::TextInlineInput` does, then

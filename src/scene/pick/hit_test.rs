@@ -15,6 +15,12 @@ use crate::scene::model::mesh_model::MeshModel;
 use crate::scene::model::wire_model::WireModel;
 use crate::scene::pick::interaction_index::{SegmentRef, WireSource};
 use crate::scene::view::projection;
+use crate::par::prelude::*;
+
+/// Coincident edges (a rectangle side on an xline) sit at the same pixel
+/// distance give or take float noise; within this band the front-most
+/// entity in draw order wins instead of whichever was measured first. (#1439)
+const TIE_PX: f32 = 0.5;
 
 /// Pick radius for one wire, in screen pixels.
 ///
@@ -57,7 +63,16 @@ fn aabb_rejects(
     eye: glam::DVec3,
     bounds: Rectangle,
 ) -> bool {
-    let [minx, miny, maxx, maxy] = aabb;
+    // The box is stored in f32, rounded to nearest: at georeferenced
+    // coordinates (millions of units) a step is up to half a unit, so a thin
+    // wire's box can round inside the wire and reject clicks right on it at a
+    // close zoom. One step outward bounds the rounding.
+    let [minx, miny, maxx, maxy] = [
+        aabb[0].next_down(),
+        aabb[1].next_down(),
+        aabb[2].next_up(),
+        aabb[3].next_up(),
+    ];
     // Project all four corners — a plan view can be rotated about Z, so the
     // screen footprint isn't axis-aligned and the two diagonal corners alone
     // wouldn't bound it.
@@ -210,7 +225,78 @@ fn text_quad_hit_area(
 /// within that wire's [`pick_tolerance_px`] of `cursor`.
 ///
 /// Returns `None` when no wire is close enough.
-pub fn click_hit<'a, W: WireSource + ?Sized>(
+/// One chunk of the indexed segment scan: the chunk's best hit under the
+/// same closest-distance / front-most-depth rule the sequential scan uses.
+/// Dense linework hands the pick thousands of candidate segments; scanning
+/// them in parallel chunks keeps the hover sweep off the UI thread's critical
+/// path while preserving the winner the sequential scan would settle on.
+fn scan_segment_chunk<'a, W: WireSource + ?Sized>(
+    wires: &'a W,
+    chunk: &[SegmentRef],
+    cursor: Point,
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: Rectangle,
+    lw_display: bool,
+    base_radius_px: f32,
+    draw_depth: &HashMap<u64, [f32; 2]>,
+) -> Option<(f32, &'a str)> {
+    let front = |name: &str| {
+        crate::scene::Scene::handle_from_wire_name(name)
+            .and_then(|handle| draw_depth.get(&handle.value()))
+            .map_or(f32::MIN, |depth| depth[0])
+    };
+    let beats = |d: f32, name: &str, best_dist: f32, best: Option<&str>| {
+        if (d - best_dist).abs() > TIE_PX {
+            return d < best_dist;
+        }
+        let (mine, theirs) = (front(name), best.map_or(f32::MIN, front));
+        mine > theirs || (mine == theirs && d < best_dist)
+    };
+    let mut best_dist = f32::MAX;
+    let mut best: Option<&str> = None;
+    for segment in chunk {
+        let Some(wire) = wires.source_wire(segment.wire) else {
+            continue;
+        };
+        if (wire.snap_only && !wire.region_boundary_click) || wire.reference_only {
+            continue;
+        }
+        if wire.point_marker.is_some() {
+            continue;
+        }
+        let start = segment.start as usize;
+        if start + 1 >= wire.points.len() {
+            continue;
+        }
+        let (Some(p0), Some(p1)) = (
+            projection::project_screen(
+                view_rot,
+                eye,
+                bounds,
+                wire_point_world(wire, start, view_rot, eye),
+            ),
+            projection::project_screen(
+                view_rot,
+                eye,
+                bounds,
+                wire_point_world(wire, start + 1, view_rot, eye),
+            ),
+        ) else {
+            continue;
+        };
+        let d = dist_point_to_segment(cursor, p0, p1);
+        if d < pick_tolerance_px(wire, lw_display, base_radius_px)
+            && beats(d, &wire.name, best_dist, best)
+        {
+            best_dist = d;
+            best = Some(&wire.name);
+        }
+    }
+    best.map(|name| (best_dist, name))
+}
+
+pub fn click_hit<'a, W: WireSource + Sync + ?Sized>(
     cursor: Point,
     wires: &'a W,
     view_rot: Mat4,
@@ -220,10 +306,6 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
     base_radius_px: f32,
     draw_depth: &HashMap<u64, [f32; 2]>,
 ) -> Option<&'a str> {
-    // Coincident edges (a rectangle side on an xline) sit at the same pixel
-    // distance give or take float noise; within this band the front-most
-    // entity in draw order wins instead of whichever was measured first. (#1439)
-    const TIE_PX: f32 = 0.5;
     let front = |name: &str| {
         crate::scene::Scene::handle_from_wire_name(name)
             .and_then(|handle| draw_depth.get(&handle.value()))
@@ -292,43 +374,47 @@ pub fn click_hit<'a, W: WireSource + ?Sized>(
     if let Some(segments) = wires.segments() {
         // The interaction index already narrowed long/batched wires to segments
         // touching the cursor aperture. Hover and click therefore project only
-        // those local edges, not every point of every candidate wire.
-        for segment in segments {
-            let Some(wire) = wires.source_wire(segment.wire) else {
-                continue;
-            };
-            if (wire.snap_only && !wire.region_boundary_click) || wire.reference_only {
-                continue;
-            }
-            if wire.point_marker.is_some() {
-                continue;
-            }
-            let start = segment.start as usize;
-            if start + 1 >= wire.points.len() {
-                continue;
-            }
-            let (Some(p0), Some(p1)) = (
-                projection::project_screen(
-                    view_rot,
-                    eye,
-                    bounds,
-                    wire_point_world(wire, start, view_rot, eye),
-                ),
-                projection::project_screen(
-                    view_rot,
-                    eye,
-                    bounds,
-                    wire_point_world(wire, start + 1, view_rot, eye),
-                ),
-            ) else {
-                continue;
-            };
-            let d = dist_point_to_segment(cursor, p0, p1);
-            if d < pick_tolerance_px(wire, lw_display, base_radius_px)
-                && beats(d, &wire.name, best_dist, best)
-            {
+        // those local edges, not every point of every candidate wire. Dense
+        // linework still hands over thousands of segments; scan them in
+        // parallel chunks and fold each chunk's best with the same
+        // closest-distance / front-most-depth rule, so the sweep costs a
+        // fraction of the sequential one on every core.
+        const PAR_SEGMENTS_MIN: usize = 512;
+        const PAR_SEGMENTS_CHUNK: usize = 256;
+        let chunk_bests: Vec<Option<(f32, &str)>> = if segments.len() >= PAR_SEGMENTS_MIN {
+            segments
+                .par_chunks(PAR_SEGMENTS_CHUNK)
+                .map(|chunk| {
+                    scan_segment_chunk(
+                        wires,
+                        chunk,
+                        cursor,
+                        view_rot,
+                        eye,
+                        bounds,
+                        lw_display,
+                        base_radius_px,
+                        draw_depth,
+                    )
+                })
+                .collect::<Vec<_>>()
+        } else {
+            vec![scan_segment_chunk(
+                wires,
+                segments,
+                cursor,
+                view_rot,
+                eye,
+                bounds,
+                lw_display,
+                base_radius_px,
+                draw_depth,
+            )]
+        };
+        for (d, name) in chunk_bests.into_iter().flatten() {
+            if beats(d, name, best_dist, best) {
                 best_dist = d;
-                best = Some(&wire.name);
+                best = Some(name);
             }
         }
     } else {
@@ -2735,29 +2821,36 @@ fn segments_intersect(a: Point, b: Point, c: Point, d: Point) -> bool {
 
 // ── Hatch hit-testing ─────────────────────────────────────────────────────
 
-/// Return the Handle of the first hatch whose screen-space boundary polygon
-/// contains `cursor`.
+/// Return the Handle of the fill picked at `cursor`: of the fills hit there,
+/// the one drawn on top by `draw_depth`.
+///
+/// A solid or gradient fill is hit anywhere inside its boundary. A pattern
+/// fill is hit on its lines: inside its boundary and within `aperture_px` of
+/// a stroke of the pattern. Between the lines of a pattern nothing is drawn
+/// to pick, so a click there reaches what lies under it, or starts a
+/// selection box.
 pub fn click_hit_hatch(
     cursor: Point,
     hatches: &HashMap<Handle, HatchModel>,
     view_rot: Mat4,
     eye: glam::DVec3,
     bounds: Rectangle,
+    aperture_px: f32,
+    draw_depth: &HashMap<u64, [f32; 2]>,
     candidate_handles: Option<&HashSet<Handle>>,
 ) -> Option<Handle> {
-    for (&handle, hatch) in hatches {
-        if candidate_handles.is_some_and(|handles| !handles.contains(&handle)) {
-            continue;
-        }
-        if hatch_contains_screen_point(hatch, cursor, view_rot, eye, bounds) {
-            return Some(handle);
-        }
-    }
-    None
+    front_most(
+        hatches
+            .iter()
+            .filter(|(handle, _)| candidate_handles.is_none_or(|handles| handles.contains(handle)))
+            .filter(|(_, hatch)| hatch_picked_at(hatch, cursor, view_rot, eye, bounds, aperture_px))
+            .map(|(&handle, _)| handle),
+        draw_depth,
+    )
 }
 
 /// Same as `click_hit_hatch` but tests block-internal hatches grouped by
-/// their parent Insert handle. The first matching model returns its Insert so
+/// their parent Insert handle. A hit model returns its Insert so
 /// clicking a sub-hatch of a block selects the Insert, matching
 /// AutoCAD's behaviour for block sub-entities.
 pub fn click_hit_insert_hatch(
@@ -2766,31 +2859,143 @@ pub fn click_hit_insert_hatch(
     view_rot: Mat4,
     eye: glam::DVec3,
     bounds: Rectangle,
+    aperture_px: f32,
+    draw_depth: &HashMap<u64, [f32; 2]>,
     candidate_handles: Option<&HashSet<Handle>>,
 ) -> Option<Handle> {
+    let picked = |hatches: &Vec<HatchModel>| {
+        hatches
+            .iter()
+            .any(|hatch| hatch_picked_at(hatch, cursor, view_rot, eye, bounds, aperture_px))
+    };
     if let Some(handles) = candidate_handles {
-        for handle in handles {
-            let Some(hatches) = insert_hatches.get(handle) else {
-                continue;
-            };
-            if hatches
+        return front_most(
+            handles
                 .iter()
-                .any(|hatch| hatch_contains_screen_point(hatch, cursor, view_rot, eye, bounds))
-            {
-                return Some(*handle);
-            }
+                .filter(|handle| insert_hatches.get(handle).is_some_and(picked))
+                .copied(),
+            draw_depth,
+        );
+    }
+    front_most(
+        insert_hatches
+            .iter()
+            .filter(|(_, hatches)| picked(hatches))
+            .map(|(&handle, _)| handle),
+        draw_depth,
+    )
+}
+
+/// Of the fills hit at one point, the one drawn on top: the highest draw
+/// depth, and of equals the newest handle. Which fill a map happens to list
+/// first does not tell.
+fn front_most(
+    hits: impl Iterator<Item = Handle>,
+    draw_depth: &HashMap<u64, [f32; 2]>,
+) -> Option<Handle> {
+    let depth = |handle: Handle| draw_depth.get(&handle.value()).copied().unwrap_or([0.0; 2]);
+    hits.max_by(|&a, &b| {
+        let (da, db) = (depth(a), depth(b));
+        da[0]
+            .total_cmp(&db[0])
+            .then(da[1].total_cmp(&db[1]))
+            .then(a.value().cmp(&b.value()))
+    })
+}
+
+/// Whether a pick at `cursor` takes this fill: inside its boundary and, for
+/// a pattern, within `aperture_px` of one of its strokes.
+fn hatch_picked_at(
+    hatch: &HatchModel,
+    cursor: Point,
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: Rectangle,
+    aperture_px: f32,
+) -> bool {
+    if !hatch_contains_screen_point(hatch, cursor, view_rot, eye, bounds) {
+        return false;
+    }
+    // A sloped fill shows its pattern foreshortened; it keeps the area test.
+    if !hatch.lies_level() {
+        return true;
+    }
+    let Some((point, pixels_per_unit)) = ground_point_under(hatch, cursor, view_rot, eye, bounds)
+    else {
+        return true;
+    };
+    hatch
+        .pattern_distance(point)
+        .is_none_or(|distance| distance * pixels_per_unit <= f64::from(aperture_px))
+}
+
+/// The point of the hatch's boundary plane (world XY, as the boundary is
+/// projected) under `cursor`, and how many pixels a world unit spans there.
+/// The projection is followed from the boundary's own frame, a few steps so
+/// a perspective view lands on the cursor too.
+fn ground_point_under(
+    hatch: &HatchModel,
+    cursor: Point,
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: Rectangle,
+) -> Option<([f64; 2], f64)> {
+    let (mut min, mut max) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    for &[x, y] in hatch
+        .boundary
+        .iter()
+        .filter(|v| v[0].is_finite() && v[1].is_finite())
+    {
+        let point = [
+            x as f64 + hatch.world_origin[0],
+            y as f64 + hatch.world_origin[1],
+        ];
+        for axis in 0..2 {
+            min[axis] = min[axis].min(point[axis]);
+            max[axis] = max[axis].max(point[axis]);
         }
+    }
+    let span = (max[0] - min[0]).max(max[1] - min[1]);
+    if !span.is_finite() || span <= 0.0 {
         return None;
     }
-    for (handle, hatches) in insert_hatches {
-        if hatches
-            .iter()
-            .any(|hatch| hatch_contains_screen_point(hatch, cursor, view_rot, eye, bounds))
-        {
-            return Some(*handle);
+    let screen = |point: [f64; 2]| {
+        projection::project_screen(
+            view_rot,
+            eye,
+            bounds,
+            glam::DVec3::new(point[0], point[1], 0.0),
+        )
+        .map(|p| [f64::from(p.x), f64::from(p.y)])
+    };
+    let mut point = [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5];
+    let mut pixels_per_unit = 0.0;
+    for _ in 0..4 {
+        let at = screen(point)?;
+        let along_x = screen([point[0] + span, point[1]])?;
+        let along_y = screen([point[0], point[1] + span])?;
+        // Screen pixels per world unit along world X and along world Y.
+        let ux = [(along_x[0] - at[0]) / span, (along_x[1] - at[1]) / span];
+        let uy = [(along_y[0] - at[0]) / span, (along_y[1] - at[1]) / span];
+        let det = ux[0] * uy[1] - uy[0] * ux[1];
+        if !det.is_finite() || det.abs() < 1e-18 {
+            return None;
+        }
+        pixels_per_unit = det.abs().sqrt();
+        let off = [f64::from(cursor.x) - at[0], f64::from(cursor.y) - at[1]];
+        let step = [
+            (off[0] * uy[1] - uy[0] * off[1]) / det,
+            (ux[0] * off[1] - off[0] * ux[1]) / det,
+        ];
+        point = [point[0] + step[0], point[1] + step[1]];
+        if step[0].hypot(step[1]) * pixels_per_unit < 1e-3 {
+            break;
         }
     }
-    None
+    point
+        .iter()
+        .all(|v| v.is_finite())
+        .then_some((point, pixels_per_unit))
 }
 
 fn hatch_contains_screen_point(

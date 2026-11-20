@@ -39,6 +39,13 @@ impl DraftingSettingsState {
             osnap3d_on: app.snapper.snap3d_enabled,
             snap3d_modes: app.snapper.enabled3d.clone(),
             dyn_input_on: app.dyn_input,
+            dyn_prefs: crate::ui::window::drafting_settings::DynInputPrefs {
+                pointer: app.dyn_pointer_input(),
+                dimension: app.dyn_dimension_input(),
+                cartesian: app.dyn_pointer_cartesian,
+                absolute: app.dyn_pointer_absolute,
+                on_type: app.dyn_pointer_on_type,
+            },
             quick_props_on: app.quick_properties,
             quick_props_float: app.quick_properties_float,
             selection_cycling_on: app.selection_cycling,
@@ -57,6 +64,16 @@ impl OpenCADStudio {
             (true, mode) => mode,
             (false, mode) => -mode,
         };
+    }
+
+    /// DYNMODE bit 1: pointer input, regardless of F12.
+    pub(in crate::app) fn dyn_pointer_input(&self) -> bool {
+        self.dyn_mode.abs() & 1 != 0
+    }
+
+    /// DYNMODE bit 2: dimension input, regardless of F12.
+    pub(in crate::app) fn dyn_dimension_input(&self) -> bool {
+        self.dyn_mode.abs() & 2 != 0
     }
 
     pub(super) fn drafting_settings_dirty(&self) -> bool {
@@ -130,7 +147,14 @@ impl OpenCADStudio {
         self.snapper.enabled = state.snap_modes.clone();
         self.snapper.snap3d_enabled = state.osnap3d_on;
         self.snapper.enabled3d = state.snap3d_modes.clone();
-        self.set_dyn_input(state.dyn_input_on);
+        let prefs = state.dyn_prefs;
+        let mode = i16::from(prefs.pointer) | i16::from(prefs.dimension) << 1;
+        self.dyn_mode = mode;
+        self.dyn_pointer_cartesian = prefs.cartesian;
+        self.dyn_pointer_absolute = prefs.absolute;
+        self.dyn_pointer_on_type = prefs.on_type;
+        // Both inputs off is DYNMODE 0: Dynamic Input is off.
+        self.set_dyn_input(state.dyn_input_on && mode != 0);
         // A quick-properties list belongs to that panel; switching the panel
         // off here takes the list with it, so switching it back on cannot
         // revive it. Lists are per-tab and a tab switch closes them, so only
@@ -184,6 +208,13 @@ mod tests {
             osnap3d_on: false,
             snap3d_modes: rustc_hash::FxHashSet::default(),
             dyn_input_on: false,
+            dyn_prefs: crate::ui::window::drafting_settings::DynInputPrefs {
+                pointer: true,
+                dimension: true,
+                cartesian: false,
+                absolute: false,
+                on_type: false,
+            },
             quick_props_on: false,
             quick_props_float: false,
             selection_cycling_on: false,
@@ -228,6 +259,13 @@ mod tests {
             osnap3d_on: false,
             snap3d_modes: rustc_hash::FxHashSet::default(),
             dyn_input_on: false,
+            dyn_prefs: crate::ui::window::drafting_settings::DynInputPrefs {
+                pointer: true,
+                dimension: true,
+                cartesian: false,
+                absolute: false,
+                on_type: false,
+            },
             quick_props_on: false,
             quick_props_float: false,
             selection_cycling_on: false,

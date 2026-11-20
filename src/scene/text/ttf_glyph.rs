@@ -1872,9 +1872,19 @@ mod tests {
             .iter()
             .find(|f| glyph(f, 'A').is_some())
             .expect("family");
+        let latin = shape_run(fam, "A").expect("shaped");
         let run = shape_run(fam, "A中").expect("shaped");
         eprintln!("fallback run glyphs={}", run.glyphs.len());
         assert!(!run.glyphs.is_empty());
+        // The ideograph is resolved, not dropped: the run keeps a positive
+        // advance and grows by at least the Latin letter's own share.
+        assert!(run.advance > 0.0, "advance {}", run.advance);
+        assert!(
+            run.advance >= latin.advance,
+            "A中 advance {} must not shrink below A's {}",
+            run.advance,
+            latin.advance
+        );
     }
 
     #[test]

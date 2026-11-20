@@ -10,11 +10,6 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-#[cfg(not(target_arch = "wasm32"))]
-type SourceFingerprint = crate::io::edit_lock::FileFingerprint;
-#[cfg(target_arch = "wasm32")]
-type SourceFingerprint = ();
-
 /// Status of an external reference block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum XrefStatus {
@@ -43,6 +38,10 @@ pub struct XrefInfo {
     pub diagnostics: Vec<String>,
     pub read_stats: Option<document::ReadStats>,
     pub source_sha256: Option<String>,
+    /// The reference loaded a drawing whose FingerprintGUID differs from
+    /// the one it held before in this session: another drawing took the
+    /// file's place, not a revision of it.
+    pub other_drawing: bool,
 }
 
 /// Names of the xrefs that resolved to nothing (`NotFound`) — the list the
@@ -115,15 +114,39 @@ fn source_cache() -> &'static Mutex<(HashMap<String, Arc<Vec<u8>>>, VecDeque<Str
 /// Source handle → host copy of every entity merged from a DWG xref, per
 /// xref block. The copies get fresh handles on every merge, so a reload
 /// re-links the dimension references that point at the old copies through
-/// the source handle, which the source file keeps.
+/// the source handle, which the source file keeps. A save writes those
+/// references by that handle ([`store_references_by_source`]).
 // ponytail: process-global and session-only. Hosts whose xref blocks share a
 // handle share a slot (a map that does not match the block is ignored, see
-// `matches_block`), closed tabs keep theirs, and a reopened host starts empty:
-// that needs the source handle written into the reference in the file.
+// `matches_block`) and closed tabs keep theirs. A reopened host starts empty
+// and fills it as its xrefs are merged.
 fn merged_copies() -> &'static Mutex<HashMap<Handle, HashMap<Handle, Handle>>> {
     static MERGED: OnceLock<Mutex<HashMap<Handle, HashMap<Handle, Handle>>>> =
         OnceLock::new();
     MERGED.get_or_init(|| Mutex::new(HashMap::default()))
+}
+
+/// FingerprintGUID of the drawing each xref block last loaded, keyed by the
+/// host's own GUID and the block, so a reload can tell a revision (same
+/// GUID) from another drawing that took the file's place.
+// ponytail: session-only; a reopened host has no expected GUID until the
+// file's dependency list (AcDb:FileDepList) records it.
+fn loaded_identities() -> &'static Mutex<HashMap<(String, Handle), String>> {
+    static IDS: OnceLock<Mutex<HashMap<(String, Handle), String>>> = OnceLock::new();
+    IDS.get_or_init(|| Mutex::new(HashMap::default()))
+}
+
+/// Record `loaded` as the drawing behind `br_handle`; true when the block
+/// held a different known drawing before.
+fn replaced_by_other_drawing(host_guid: &str, br_handle: Handle, loaded: &str) -> bool {
+    if host_guid.is_empty() || loaded.is_empty() {
+        return false;
+    }
+    let Ok(mut ids) = loaded_identities().lock() else {
+        return false;
+    };
+    ids.insert((host_guid.to_string(), br_handle), loaded.to_string())
+        .is_some_and(|previous| !previous.eq_ignore_ascii_case(loaded))
 }
 
 /// Point every dimension reference at an old xref copy to the copy of the
@@ -194,6 +217,148 @@ fn matches_block(doc: &Document, br_handle: Handle, copies: &HashMap<Handle, Han
         }
     }
     direct == owned.len()
+}
+
+/// The INSERTs that place the xref block `br_handle`.
+fn xref_inserts(doc: &Document, br_handle: Handle) -> HashSet<Handle> {
+    doc.entities()
+        .filter_map(|entity| match entity {
+            EntityType::Insert(insert)
+                if doc
+                    .block_records
+                    .get(&insert.block_name)
+                    .is_some_and(|br| br.handle == br_handle) =>
+            {
+                Some(insert.common.handle)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Write the dimension references that end on a copy of an object of the
+/// xref `br_handle` the way a file keeps them: the chain as far as the INSERT
+/// that places the xref, and the handles the rest of it has in the xref's
+/// own drawing (`xref_paths`). A file does not hold the copies, and their
+/// handles last one session; [`link_stored_references`] is the way back.
+fn store_references_by_source(doc: &mut Document, br_handle: Handle) {
+    let sources: HashMap<Handle, Handle> = match merged_copies().lock() {
+        Ok(map) => match map.get(&br_handle) {
+            Some(copies) if matches_block(doc, br_handle, copies) => copies
+                .iter()
+                .map(|(source, copy)| (*copy, *source))
+                .collect(),
+            _ => return,
+        },
+        Err(_) => return,
+    };
+    let inserts = xref_inserts(doc, br_handle);
+    if inserts.is_empty() {
+        return;
+    }
+    let store = |chain: &mut Vec<Handle>, paths: &mut Vec<String>| {
+        let Some(at) = chain.iter().position(|handle| inserts.contains(handle)) else {
+            return;
+        };
+        if at + 1 == chain.len() || !paths.is_empty() {
+            return;
+        }
+        let stored: Option<Vec<String>> = chain[at + 1..]
+            .iter()
+            .map(|copy| {
+                sources
+                    .get(copy)
+                    .map(|source| format!("{:X}", source.value()))
+            })
+            .collect();
+        if let Some(stored) = stored {
+            *paths = stored;
+            chain.truncate(at + 1);
+        }
+    };
+    use document::objects::{AssociativeData, ObjectType};
+    for object in doc.objects.values_mut() {
+        let ObjectType::Associative(object) = object else {
+            continue;
+        };
+        let AssociativeData::DimensionAssociation(association) = &mut object.data else {
+            continue;
+        };
+        for reference in association.references.iter_mut().flatten() {
+            store(&mut reference.xrefs, &mut reference.xref_paths);
+            store(
+                &mut reference.intersection_objects,
+                &mut reference.intersection_xref_paths,
+            );
+        }
+    }
+}
+
+/// Point the dimension references a file kept by source handle (see
+/// [`store_references_by_source`]) at the copies the merge of the xref
+/// `br_handle` just made, and make the dimension's association a reactor of
+/// them. A reference whose object the xref no longer has stays as it was read.
+fn link_stored_references(doc: &mut Document, br_handle: Handle, copies: &HashMap<Handle, Handle>) {
+    use document::objects::{AssociativeData, ObjectType};
+    let stored = doc.objects.values().any(|object| match object {
+        ObjectType::Associative(object) => match &object.data {
+            AssociativeData::DimensionAssociation(association) => {
+                association.references.iter().flatten().any(|reference| {
+                    !reference.xref_paths.is_empty()
+                        || !reference.intersection_xref_paths.is_empty()
+                })
+            }
+            _ => false,
+        },
+        _ => false,
+    });
+    if !stored {
+        return;
+    }
+    let inserts = xref_inserts(doc, br_handle);
+    let link = |chain: &mut Vec<Handle>, paths: &mut Vec<String>| -> Vec<Handle> {
+        if paths.is_empty() || !chain.last().is_some_and(|last| inserts.contains(last)) {
+            return Vec::new();
+        }
+        let found: Option<Vec<Handle>> = paths
+            .iter()
+            .map(|path| {
+                let source = u64::from_str_radix(path.trim(), 16).ok()?;
+                copies.get(&Handle::new(source)).copied()
+            })
+            .collect();
+        let Some(found) = found else {
+            return Vec::new();
+        };
+        chain.extend(found.iter().copied());
+        paths.clear();
+        found
+    };
+    let mut reactors: Vec<(Handle, Handle)> = Vec::new();
+    for (handle, object) in doc.objects.iter_mut() {
+        let ObjectType::Associative(object) = object else {
+            continue;
+        };
+        let AssociativeData::DimensionAssociation(association) = &mut object.data else {
+            continue;
+        };
+        for reference in association.references.iter_mut().flatten() {
+            let linked = link(&mut reference.xrefs, &mut reference.xref_paths)
+                .into_iter()
+                .chain(link(
+                    &mut reference.intersection_objects,
+                    &mut reference.intersection_xref_paths,
+                ));
+            reactors.extend(linked.map(|copy| (copy, *handle)));
+        }
+    }
+    for (entity, association) in reactors {
+        if let Some(entity) = doc.get_entity_mut(entity) {
+            if !entity.common().reactors.contains(&association) {
+                entity.common_mut().reactors.push(association);
+            }
+        }
+    }
 }
 
 fn parsed_cache() -> &'static Mutex<HashMap<String, document::ReadOutcome>> {
@@ -427,6 +592,7 @@ fn resolve_xrefs_with_filter(
                 diagnostics: Vec::new(),
                 read_stats: None,
                 source_sha256: None,
+                other_drawing: false,
             });
             continue;
         }
@@ -449,25 +615,10 @@ fn resolve_xrefs_with_filter(
             .map(|_| std::sync::atomic::AtomicU16::new(0))
             .collect(),
     );
-    let parsed: Vec<(
-        String,
-        String,
-        Handle,
-        Option<PathBuf>,
-        Option<Result<document::ReadOutcome, String>>,
-        Option<String>,
-        Option<SourceFingerprint>,
-    )> = xref_entries
+    let parsed: Vec<(String, String, Handle, XrefRead)> = xref_entries
         .into_par_iter()
         .enumerate()
         .map(|(xref_index, (block_name, raw_path, br_handle))| {
-            let resolved = resolve_path(&raw_path, base_dir);
-            #[cfg(not(target_arch = "wasm32"))]
-            let initial_fingerprint = resolved
-                .as_ref()
-                .and_then(|path| crate::io::edit_lock::FileFingerprint::capture(path).ok());
-            #[cfg(target_arch = "wasm32")]
-            let initial_fingerprint = None;
             let units = std::sync::Arc::clone(&parse_units);
             let nested_progress = progress.as_ref().map(|progress| {
                 let progress = std::sync::Arc::clone(progress);
@@ -483,38 +634,7 @@ fn resolve_xrefs_with_filter(
                     });
                 callback
             });
-            #[cfg(not(target_arch = "wasm32"))]
-            let xref_outcome = resolved
-                .as_ref()
-                .map(|path| super::load_file_with_progress(path, nested_progress));
-            // Web: read the registry — the cached off-thread parse when the
-            // pick/open pre-pass made one, otherwise the registered bytes.
-            #[cfg(target_arch = "wasm32")]
-            let xref_outcome = resolved
-                .as_ref()
-                .map(|path| read_registered_outcome(&path.to_string_lossy(), nested_progress));
-            let source_sha256 = resolved.as_ref().and_then(|path| {
-                let needs_fingerprint = match &xref_outcome {
-                    Some(Ok(outcome)) => {
-                        outcome.stats.recovered()
-                            || outcome.stats.skipped_source_records > 0
-                            || !outcome.stats.stream_completed
-                    }
-                    Some(Err(_)) => true,
-                    None => false,
-                };
-                if !needs_fingerprint {
-                    return None;
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    super::stable_sha256_file(path, initial_fingerprint.as_ref())
-                }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    crate::io::recovery::sha256_file(path).ok()
-                }
-            });
+            let read = read_xref_file(&raw_path, base_dir, nested_progress);
             parse_units[xref_index].store(1000, std::sync::atomic::Ordering::Relaxed);
             if let Some(progress) = &progress {
                 let completed = parse_units
@@ -523,37 +643,97 @@ fn resolve_xrefs_with_filter(
                     .sum();
                 progress(completed, total_units);
             }
-            (
-                block_name,
-                raw_path,
-                br_handle,
-                resolved,
-                xref_outcome,
-                source_sha256,
-                initial_fingerprint,
-            )
+            (block_name, raw_path, br_handle, read)
         })
         .collect();
 
-    // Phase 2 — merge each parsed xref into the host document, in the original
-    // block order (par_iter preserves it), so handle allocation is deterministic.
+    merge_xref_reads(doc, parsed, &mut result, progress.as_ref());
+    result
+}
+
+/// What the read of one referenced drawing found, before the merge: the
+/// file it resolved to, the reader's outcome (none when no file was found)
+/// and the source hash of a damaged read.
+#[derive(Clone, Debug)]
+pub struct XrefRead {
+    resolved: Option<PathBuf>,
+    outcome: Option<Result<document::ReadOutcome, String>>,
+    source_sha256: Option<String>,
+}
+
+/// Read and parse the drawing that a reference stored as `raw_path` names,
+/// resolved against `base_dir`. It touches no host document, so it can run
+/// on any thread; [`merge_xref_reads`] merges the result.
+pub fn read_xref_file(
+    raw_path: &str,
+    base_dir: &Path,
+    progress: Option<std::sync::Arc<dyn Fn(u16) + Send + Sync>>,
+) -> XrefRead {
+    let resolved = resolve_path(raw_path, base_dir);
+    #[cfg(not(target_arch = "wasm32"))]
+    let initial_fingerprint = resolved
+        .as_ref()
+        .and_then(|path| crate::io::edit_lock::FileFingerprint::capture(path).ok());
+    #[cfg(not(target_arch = "wasm32"))]
+    let outcome = resolved
+        .as_ref()
+        .map(|path| super::load_file_with_progress(path, progress));
+    // Web: read the registry — the cached off-thread parse when the
+    // pick/open pre-pass made one, otherwise the registered bytes.
+    #[cfg(target_arch = "wasm32")]
+    let outcome = resolved
+        .as_ref()
+        .map(|path| read_registered_outcome(&path.to_string_lossy(), progress));
+    let source_sha256 = resolved.as_ref().and_then(|path| {
+        let needs_fingerprint = match &outcome {
+            Some(Ok(outcome)) => {
+                outcome.stats.recovered()
+                    || outcome.stats.skipped_source_records > 0
+                    || !outcome.stats.stream_completed
+            }
+            Some(Err(_)) => true,
+            None => false,
+        };
+        if !needs_fingerprint {
+            return None;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            super::stable_sha256_file(path, initial_fingerprint.as_ref())
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            crate::io::recovery::sha256_file(path).ok()
+        }
+    });
+    XrefRead {
+        resolved,
+        outcome,
+        source_sha256,
+    }
+}
+
+/// Merge each read into its reference's block (`block_name`, the stored
+/// `raw_path`, the block record `br_handle`), in the order given, so handle
+/// allocation is deterministic. It reads no file.
+pub fn merge_xref_reads(
+    doc: &mut Document,
+    parsed: Vec<(String, String, Handle, XrefRead)>,
+    result: &mut Vec<XrefInfo>,
+    progress: Option<&std::sync::Arc<dyn Fn(usize, usize) + Send + Sync>>,
+) {
+    let xref_count = parsed.len();
+    let total_units = xref_count.saturating_mul(2000);
     result.reserve(parsed.len());
-    #[allow(unused_mut, unused_variables)]
-    for (
-        merge_index,
-        (
-            block_name,
-            raw_path,
-            br_handle,
+    for (merge_index, (block_name, raw_path, br_handle, read)) in parsed.into_iter().enumerate() {
+        let XrefRead {
             resolved,
-            xref_outcome,
-            mut source_sha256,
-            initial_fingerprint,
-        ),
-    ) in parsed.into_iter().enumerate()
-    {
+            outcome: xref_outcome,
+            source_sha256,
+        } = read;
+        let mut other_drawing = false;
         let (status, diagnostics, read_stats) = match xref_outcome {
-            Some(Ok(mut outcome)) => {
+            Some(Ok(outcome)) => {
                 let recovered = outcome.stats.recovered()
                     || outcome.stats.skipped_source_records > 0
                     || !outcome.stats.stream_completed
@@ -586,6 +766,11 @@ fn resolve_xrefs_with_filter(
                     // re-apply onto the freshly merged layers below. Without this
                     // every reload silently reset frozen/off/color tweaks the
                     // user made on `name|*` layers back to file defaults.
+                    other_drawing = replaced_by_other_drawing(
+                        &doc.header.fingerprint_guid,
+                        br_handle,
+                        &outcome.document.header.fingerprint_guid,
+                    );
                     let visretain = doc.header.retain_xref_visibility;
                     let kept_layers = if visretain {
                         snapshot_dependent_layers(doc, &block_name)
@@ -627,6 +812,7 @@ fn resolve_xrefs_with_filter(
             diagnostics,
             read_stats,
             source_sha256,
+            other_drawing,
         });
         if let Some(progress) = &progress {
             progress(
@@ -637,8 +823,6 @@ fn resolve_xrefs_with_filter(
             );
         }
     }
-
-    result
 }
 
 /// Underlay files named by a relative (or moved) path: read them from where
@@ -1386,6 +1570,7 @@ fn merge_xref_into_block(
     if let Ok(mut merged) = merged_copies().lock() {
         merged.insert(br_handle, entity_handle_map.clone());
     }
+    link_stored_references(doc, br_handle, &entity_handle_map);
 
     // ── Draw-order overrides (shared helper) ──────────────────────────────
     copy_xref_sortents(
@@ -2990,6 +3175,9 @@ pub fn strip_resolved_xref_content(doc: &mut Document) {
         .map(|br| (br.name.clone(), br.handle))
         .collect();
     for (name, handle) in xrefs {
+        // Before the copies go: what refers to them is written by the
+        // handles their objects have in the xref's drawing.
+        store_references_by_source(doc, handle);
         let (begin, end) = doc
             .block_records
             .get(&name)
@@ -3833,6 +4021,336 @@ mod tests {
         let relinked = doc.get_entity(second).unwrap();
         assert!(relinked.common().reactors.contains(&association_handle));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    use super::{ensure_block_entities, merged_copies, strip_resolved_xref_content};
+    use document::types::{Handle, Vector3};
+    use document::EntityType;
+
+    /// A host with a dimension association on the line of a DWG xref, as a
+    /// session leaves it: the INSERT that places the xref, then the host's
+    /// copy of the line.
+    struct DimensionedXref {
+        dir: std::path::PathBuf,
+        path: std::path::PathBuf,
+        source: document::Document,
+        source_line: Handle,
+        host: document::Document,
+        br_handle: Handle,
+        insert: Handle,
+        association: Handle,
+    }
+
+    impl DimensionedXref {
+        /// `spare` handles are allocated first, so the session map of the
+        /// copies is this fixture's own.
+        fn new(tag: &str, spare: usize) -> Self {
+            use document::objects::{
+                AssocDimensionAssociation, AssocDimensionReference, AssociativeData,
+                AssociativeObject, ObjectType,
+            };
+            let dir = xref_tmpdir(tag);
+            let mut source = document::Document::new();
+            let mut line = document::entities::Line::new();
+            line.end = Vector3::new(5.0, 0.0, 0.0);
+            line.common.owner_handle = source.header.model_space_block_handle;
+            let source_line = source.add_entity(EntityType::Line(line)).unwrap();
+            let path = dir.join("walls.dwg");
+            let mut host = document::Document::new();
+            for _ in 0..spare {
+                host.allocate_handle();
+            }
+            let mut br = document::tables::BlockRecord::new("WALLS");
+            br.flags.is_xref = true;
+            br.xref_path = path.to_string_lossy().into_owned();
+            br.handle = host.allocate_handle();
+            let br_handle = br.handle;
+            host.block_records.add(br).unwrap();
+            ensure_block_entities(&mut host, "WALLS");
+            let mut insert = document::entities::Insert::new("WALLS", Vector3::ZERO);
+            insert.common.owner_handle = host.header.model_space_block_handle;
+            let insert = host.add_entity(EntityType::Insert(insert)).unwrap();
+            let mut fixture = Self {
+                dir,
+                path,
+                source,
+                source_line,
+                host,
+                br_handle,
+                insert,
+                association: Handle::NULL,
+            };
+            fixture.write_source();
+            let keys: HashSet<_> = [br_handle].into_iter().collect();
+            resolve_xrefs_for_keys(&mut fixture.host, &fixture.dir, &keys);
+            let copy = Self::copy_of_the_line(&fixture.host);
+
+            let association = fixture.host.allocate_handle();
+            let mut object = AssociativeObject::new("DIMASSOC", "AcDbDimAssoc");
+            object.handle = association;
+            let mut references: [Vec<AssocDimensionReference>; 4] = Default::default();
+            references[0].push(AssocDimensionReference {
+                class_name: "AcDbOsnapPointRef".to_owned(),
+                osnap_type: 1,
+                xrefs: vec![insert, copy],
+                ..Default::default()
+            });
+            object.data = AssociativeData::DimensionAssociation(AssocDimensionAssociation {
+                associativity: 1,
+                references,
+                ..Default::default()
+            });
+            fixture
+                .host
+                .objects
+                .insert(association, ObjectType::Associative(object));
+            fixture.association = association;
+            fixture
+        }
+
+        fn write_source(&self) {
+            let bytes = crate::io::save_to_bytes(&self.source, "dwg", self.source.version).unwrap();
+            std::fs::write(&self.path, bytes).unwrap();
+        }
+
+        /// The host's copy of the xref's line.
+        fn copy_of_the_line(host: &document::Document) -> Handle {
+            let br = host.block_records.get("WALLS").unwrap().handle;
+            host.entities()
+                .find(|e| e.common().owner_handle == br && matches!(e, EntityType::Line(_)))
+                .map(|e| e.common().handle)
+                .expect("the xref is loaded")
+        }
+
+        /// The first reference of the only dimension association of `doc`.
+        fn reference(doc: &document::Document) -> document::objects::AssocDimensionReference {
+            Self::reference_at(doc, 0)
+        }
+
+        /// The reference in `slot` of the only dimension association of `doc`.
+        fn reference_at(
+            doc: &document::Document,
+            slot: usize,
+        ) -> document::objects::AssocDimensionReference {
+            use document::objects::{AssociativeData, ObjectType};
+            doc.objects
+                .values()
+                .find_map(|object| match object {
+                    ObjectType::Associative(object) => match &object.data {
+                        AssociativeData::DimensionAssociation(association) => {
+                            association.references[slot].first().cloned()
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .expect("the dimension association")
+        }
+
+        /// The host as a save writes it and another session reads it.
+        fn reopened(&self, format: &str) -> document::Document {
+            let mut saved = self.host.clone();
+            strip_resolved_xref_content(&mut saved);
+            let bytes = crate::io::save_to_bytes(&saved, format, saved.version).unwrap();
+            // Nothing is left of the copies of the session that saved it.
+            merged_copies().lock().unwrap().remove(&self.br_handle);
+            let host_path = self.dir.join(format!("host.{format}"));
+            let mut reopened = crate::io::load_bytes_finalized(&host_path, bytes).unwrap();
+            let br = reopened.block_records.get("WALLS").unwrap().handle;
+            let keys: HashSet<_> = [br].into_iter().collect();
+            resolve_xrefs_for_keys(&mut reopened, &self.dir, &keys);
+            reopened
+        }
+    }
+
+    /// A file does not hold the objects of an xref, and the copies a session
+    /// works with have handles of that session. What the file keeps of a
+    /// reference to one is the INSERT of the xref and the handle the object
+    /// has in the xref's own drawing.
+    #[test]
+    fn a_saved_host_keeps_a_dimension_reference_by_the_handle_in_the_xref_drawing() {
+        let fixture = DimensionedXref::new("stored", 8192);
+        let mut saved = fixture.host.clone();
+        strip_resolved_xref_content(&mut saved);
+        let stored = DimensionedXref::reference(&saved);
+        assert_eq!(stored.xrefs, vec![fixture.insert]);
+        assert_eq!(
+            stored.xref_paths,
+            vec![format!("{:X}", fixture.source_line.value())]
+        );
+        // The open drawing is not touched: it still follows its copy.
+        let open = DimensionedXref::reference(&fixture.host);
+        assert_eq!(
+            open.xrefs,
+            vec![
+                fixture.insert,
+                DimensionedXref::copy_of_the_line(&fixture.host)
+            ]
+        );
+        assert!(open.xref_paths.is_empty());
+        std::fs::remove_dir_all(&fixture.dir).ok();
+    }
+
+    #[test]
+    fn a_reopened_host_points_the_dimension_reference_at_the_xref_copy() {
+        for (format, spare) in [("dwg", 12288), ("dxf", 16384)] {
+            let fixture = DimensionedXref::new(&format!("reopen_{format}"), spare);
+            let reopened = fixture.reopened(format);
+            let copy = DimensionedXref::copy_of_the_line(&reopened);
+            let reference = DimensionedXref::reference(&reopened);
+            assert_eq!(reference.xrefs, vec![fixture.insert, copy], "{format}");
+            assert!(reference.xref_paths.is_empty(), "{format}");
+            let reactors = &reopened.get_entity(copy).unwrap().common().reactors;
+            assert!(reactors.contains(&fixture.association), "{format}");
+            std::fs::remove_dir_all(&fixture.dir).ok();
+        }
+    }
+
+    /// The case of the report: the host is saved and reopened, the source
+    /// changes, and the xref is reloaded.
+    #[test]
+    fn a_reload_after_the_host_was_reopened_keeps_the_dimension_on_the_xref_line() {
+        let mut fixture = DimensionedXref::new("reopen_reload", 20480);
+        let mut reopened = fixture.reopened("dwg");
+        let first = DimensionedXref::copy_of_the_line(&reopened);
+        if let Some(EntityType::Line(line)) = fixture.source.get_entity_mut(fixture.source_line) {
+            line.end.x = 6.0;
+        }
+        fixture.write_source();
+        let br = reopened.block_records.get("WALLS").unwrap().handle;
+        let keys: HashSet<_> = [br].into_iter().collect();
+        resolve_xrefs_for_keys(&mut reopened, &fixture.dir, &keys);
+        let second = DimensionedXref::copy_of_the_line(&reopened);
+        assert_ne!(first, second, "the reload merged a fresh copy");
+        let Some(EntityType::Line(line)) = reopened.get_entity(second) else {
+            panic!("the copy is a line");
+        };
+        assert_eq!(line.end.x, 6.0);
+        let reference = DimensionedXref::reference(&reopened);
+        assert_eq!(reference.xrefs, vec![fixture.insert, second]);
+        let reactors = &reopened.get_entity(second).unwrap().common().reactors;
+        assert!(reactors.contains(&fixture.association));
+        std::fs::remove_dir_all(&fixture.dir).ok();
+    }
+
+    /// An object the xref no longer has leaves the reference as it was read.
+    #[test]
+    fn a_reference_to_an_object_the_xref_lost_stays_as_it_was_saved() {
+        let mut fixture = DimensionedXref::new("lost", 24576);
+        let mut saved = fixture.host.clone();
+        strip_resolved_xref_content(&mut saved);
+        let bytes = crate::io::save_to_bytes(&saved, "dwg", saved.version).unwrap();
+        merged_copies().lock().unwrap().remove(&fixture.br_handle);
+        // The source is drawn again: its line has another handle.
+        let stored = format!("{:X}", fixture.source_line.value());
+        fixture.source = document::Document::new();
+        for _ in 0..64 {
+            fixture.source.allocate_handle();
+        }
+        let mut line = document::entities::Line::new();
+        line.end = Vector3::new(5.0, 0.0, 0.0);
+        line.common.owner_handle = fixture.source.header.model_space_block_handle;
+        let redrawn = fixture.source.add_entity(EntityType::Line(line)).unwrap();
+        assert_ne!(redrawn, fixture.source_line);
+        fixture.write_source();
+        let host_path = fixture.dir.join("host.dwg");
+        let mut reopened = crate::io::load_bytes_finalized(&host_path, bytes).unwrap();
+        let br = reopened.block_records.get("WALLS").unwrap().handle;
+        let keys: HashSet<_> = [br].into_iter().collect();
+        resolve_xrefs_for_keys(&mut reopened, &fixture.dir, &keys);
+        let reference = DimensionedXref::reference(&reopened);
+        assert_eq!(reference.xrefs, vec![fixture.insert]);
+        assert_eq!(reference.xref_paths, vec![stored]);
+        std::fs::remove_dir_all(&fixture.dir).ok();
+    }
+
+    /// A reference to an object in a block of the xref goes through the
+    /// INSERT of that block inside the xref. The file keeps a handle for each
+    /// step after the INSERT of the xref itself.
+    #[test]
+    fn a_reference_through_a_block_of_the_xref_keeps_a_handle_for_each_step() {
+        use document::objects::{AssocDimensionReference, AssociativeData, ObjectType};
+        let mut fixture = DimensionedXref::new("nested", 28672);
+        // The source gets a block that holds a line, and a reference of it.
+        let mut post = document::tables::BlockRecord::new("POST");
+        post.handle = fixture.source.allocate_handle();
+        let post_handle = post.handle;
+        fixture.source.block_records.add(post).unwrap();
+        ensure_block_entities(&mut fixture.source, "POST");
+        let mut inner = document::entities::Line::new();
+        inner.end = Vector3::new(0.0, 3.0, 0.0);
+        inner.common.owner_handle = post_handle;
+        let inner = fixture.source.add_entity(EntityType::Line(inner)).unwrap();
+        let mut placed = document::entities::Insert::new("POST", Vector3::new(2.0, 0.0, 0.0));
+        placed.common.owner_handle = fixture.source.header.model_space_block_handle;
+        let placed = fixture
+            .source
+            .add_entity(EntityType::Insert(placed))
+            .unwrap();
+        fixture.write_source();
+        let keys: HashSet<_> = [fixture.br_handle].into_iter().collect();
+        resolve_xrefs_for_keys(&mut fixture.host, &fixture.dir, &keys);
+
+        // The host's copies of those two: the INSERT in the xref's block and
+        // the line in the block it places.
+        let steps = |host: &document::Document| -> Vec<Handle> {
+            let walls = host.block_records.get("WALLS").unwrap().handle;
+            let (insert, block) = host
+                .entities()
+                .find_map(|e| match e {
+                    EntityType::Insert(insert) if insert.common.owner_handle == walls => Some((
+                        insert.common.handle,
+                        host.block_records.get(&insert.block_name)?.handle,
+                    )),
+                    _ => None,
+                })
+                .expect("the copy of the INSERT");
+            let line = host
+                .entities()
+                .find(|e| e.common().owner_handle == block && matches!(e, EntityType::Line(_)))
+                .map(|e| e.common().handle)
+                .expect("the copy of the line");
+            vec![insert, line]
+        };
+        let chain: Vec<Handle> = std::iter::once(fixture.insert)
+            .chain(steps(&fixture.host))
+            .collect();
+        let Some(ObjectType::Associative(object)) =
+            fixture.host.objects.get_mut(&fixture.association)
+        else {
+            panic!("the association");
+        };
+        let AssociativeData::DimensionAssociation(association) = &mut object.data else {
+            panic!("a dimension association");
+        };
+        association.associativity |= 2;
+        association.references[1].push(AssocDimensionReference {
+            class_name: "AcDbOsnapPointRef".to_owned(),
+            osnap_type: 1,
+            xrefs: chain,
+            ..Default::default()
+        });
+
+        let mut saved = fixture.host.clone();
+        strip_resolved_xref_content(&mut saved);
+        let stored = DimensionedXref::reference_at(&saved, 1);
+        assert_eq!(stored.xrefs, vec![fixture.insert]);
+        assert_eq!(
+            stored.xref_paths,
+            vec![
+                format!("{:X}", placed.value()),
+                format!("{:X}", inner.value())
+            ]
+        );
+
+        let reopened = fixture.reopened("dwg");
+        let linked = DimensionedXref::reference_at(&reopened, 1);
+        let expected: Vec<Handle> = std::iter::once(fixture.insert)
+            .chain(steps(&reopened))
+            .collect();
+        assert_eq!(linked.xrefs, expected);
+        assert!(linked.xref_paths.is_empty());
+        std::fs::remove_dir_all(&fixture.dir).ok();
     }
 
     #[test]
@@ -4703,6 +5221,7 @@ mod web_registry_tests {
                 diagnostics: Vec::new(),
                 read_stats: None,
                 source_sha256: None,
+                other_drawing: false,
             },
             XrefInfo {
                 name: "Missing A.dwg".into(),
@@ -4711,6 +5230,7 @@ mod web_registry_tests {
                 diagnostics: Vec::new(),
                 read_stats: None,
                 source_sha256: None,
+                other_drawing: false,
             },
             XrefInfo {
                 name: "Broken.dwg".into(),
@@ -4719,6 +5239,7 @@ mod web_registry_tests {
                 diagnostics: Vec::new(),
                 read_stats: None,
                 source_sha256: None,
+                other_drawing: false,
             },
             XrefInfo {
                 name: "Missing B.dxf".into(),
@@ -4727,6 +5248,7 @@ mod web_registry_tests {
                 diagnostics: Vec::new(),
                 read_stats: None,
                 source_sha256: None,
+                other_drawing: false,
             },
         ];
         assert_eq!(

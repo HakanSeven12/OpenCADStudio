@@ -994,9 +994,9 @@ impl Scene {
             .filter(|entity| matches!(entity, EntityType::Underlay(_)))
             .map(|entity| entity.common().handle)
             .collect();
-        for handle in &handles {
-            self.reseed_derived_caches(*handle);
-        }
+        // The bump draws each picture again (its loop over the modified
+        // image-bearing objects): drawing it here first too made every
+        // zoom step cost two renders of each picture.
         let changes: Vec<_> = handles
             .iter()
             .map(|handle| (*handle, crate::scene::ChangeKind::Modified))
@@ -1006,6 +1006,7 @@ impl Scene {
 
     /// Rebuild every OLE picture's raster, after the view scale it follows
     /// moved.
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn reseed_ole_frames(&mut self) {
         let handles: Vec<Handle> = self
             .document
@@ -1013,9 +1014,9 @@ impl Scene {
             .filter(|entity| matches!(entity, EntityType::Ole2Frame(_)))
             .map(|entity| entity.common().handle)
             .collect();
-        for handle in &handles {
-            self.reseed_derived_caches(*handle);
-        }
+        // The bump draws each picture again (its loop over the modified
+        // image-bearing objects): drawing it here first too made every
+        // zoom step cost two renders of each picture.
         let changes: Vec<_> = handles
             .iter()
             .map(|handle| (*handle, crate::scene::ChangeKind::Modified))
@@ -1246,14 +1247,18 @@ impl Scene {
 
     /// The definitions an operator can place by name. Generated records
     /// (`*U`, `*D`, …) are not definitions anybody authored, so listing them
-    /// would advertise a block nobody made.
+    /// would advertise a block nobody made. Sorted by name, ignoring case,
+    /// as the block lists show them.
     pub fn custom_block_names(&self) -> Vec<String> {
-        self.document
+        let mut names: Vec<String> = self
+            .document
             .block_records
             .iter()
             .filter(|br| !br.is_standard() && !br.is_layout() && !br.is_anonymous())
             .map(|br| br.name.clone())
-            .collect()
+            .collect();
+        names.sort_by_cached_key(|name| name.to_lowercase());
+        names
     }
 
     pub fn create_block_from_entities(
@@ -3673,49 +3678,10 @@ impl Scene {
     ) -> Option<ImageModel> {
         match entity {
             EntityType::RasterImage(img) => ImageModel::from_raster_image(img),
-            EntityType::Ole2Frame(ole) => {
-                // Pictures of the layout in view follow its scale; others
-                // keep the size used when the view is unknown.
-                let in_view = ole.common.owner_handle == self.current_layout_block_handle();
-                let scale = &self.ole_scale;
-                let (wpp, view) = if in_view {
-                    (scale.world_per_pixel, scale.view)
-                } else {
-                    (None, None)
-                };
-                ImageModel::from_ole2frame_in_view(ole, wpp, view).map(|(model, sharp)| {
-                    if sharp {
-                        scale.region_used.set(true);
-                    }
-                    model
-                })
+            EntityType::Ole2Frame(_) | EntityType::Underlay(_) => {
+                let input = self.raster_input_for(entity)?;
+                self.render_raster_input(&input)
             }
-            EntityType::Underlay(u) => match self.document.objects.get(&u.definition_handle) {
-                Some(document::objects::ObjectType::UnderlayDefinition(def)) => {
-                    // A paper-space underlay adjusts to the sheet, not the canvas.
-                    let owner = u.common.owner_handle;
-                    let background = if owner.is_null() || owner == self.model_space_block_handle()
-                    {
-                        self.bg_color
-                    } else {
-                        self.paper_bg_color
-                    };
-                    ImageModel::from_underlay_in_view(
-                        u,
-                        def,
-                        background,
-                        self.underlay_scale.world_per_pixel,
-                        self.underlay_scale.view,
-                    )
-                    .map(|(model, sharp)| {
-                        if sharp {
-                            self.underlay_scale.region_used.set(true);
-                        }
-                        model
-                    })
-                }
-                _ => None,
-            },
             _ => None,
         }
     }
@@ -5096,4 +5062,10 @@ pub(crate) fn wire_thumbnail_bgra(wires: &[WireModel], size: usize) -> Option<Ve
         }
     }
     Some(pixels)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The image rasters drawn on this thread, for the tests that count them.
+    pub(super) static IMAGE_SEEDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }

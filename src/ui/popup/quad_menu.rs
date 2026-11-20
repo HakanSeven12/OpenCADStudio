@@ -691,18 +691,26 @@ mod quad_tests {
     fn icon_falls_back_to_glyph_for_unknown_command() {
         let icon = quad_command_icon("DEFINITELYNOTACOMMAND");
         match icon {
-            QuadIcon::Glyph(abbrev) => assert!(!abbrev.is_empty()),
+            QuadIcon::Glyph(abbrev) => assert_eq!(abbrev, "DE"),
             QuadIcon::Svg(_) | QuadIcon::SvgOwned(_) => {
                 panic!("unknown command must use the glyph fallback")
             }
         }
-        // A known ribbon command resolves the same SVG everywhere it appears.
+        // Initials of up to four words, else the label's first two letters.
+        assert_eq!(glyph_abbrev("Hatch Edit"), "HE");
+        assert_eq!(glyph_abbrev("Line"), "LI");
+        // A known ribbon command resolves the registry's own SVG.
         let known = quad_command_icon("MOVE");
         match known {
-            QuadIcon::Svg(bytes) => assert!(!bytes.is_empty()),
+            QuadIcon::Svg(bytes) => {
+                assert_eq!(
+                    Some(bytes),
+                    crate::modules::registry::command_icon("MOVE")
+                );
+            }
             QuadIcon::SvgOwned(_) | QuadIcon::Glyph(_) => panic!("MOVE resolved wrong icon"),
         }
         let label = quad_command_label("MOVE");
-        assert!(!label.is_empty());
+        assert!(label.eq_ignore_ascii_case("Move"), "label {label:?}");
     }
 }

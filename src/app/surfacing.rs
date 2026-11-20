@@ -234,7 +234,11 @@ impl OpenCADStudio {
         self.tabs[i].scene.clear_preview_wire();
         self.restore_pre_cmd_tangent();
         let name = request.command;
-        let outcome = self.surfacing(i, &request);
+        let outcome = if crate::modules::civil::COMMANDS.contains(&name) {
+            self.civil(i, &request)
+        } else {
+            self.surfacing(i, &request)
+        };
         match outcome {
             Ok(message) => {
                 if !message.is_empty() {
@@ -579,8 +583,12 @@ impl OpenCADStudio {
             }
             return None;
         }
-        let name: &'static str = crate::modules::surface::COMMANDS.iter().copied().find(|c| *c == verb)?;
-        let steps = crate::modules::surface::steps(name)?;
+        let name: &'static str = crate::modules::surface::COMMANDS
+            .iter()
+            .chain(crate::modules::civil::COMMANDS)
+            .copied()
+            .find(|c| *c == verb)?;
+        let steps = crate::modules::surface::steps(name).or_else(|| crate::modules::civil::steps(name))?;
         let selected = self.tabs[i]
             .scene
             .selected_entities()

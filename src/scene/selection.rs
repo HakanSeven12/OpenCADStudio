@@ -1356,6 +1356,27 @@ impl Scene {
                 }
             }
             self.remember_removed_cache_categories(h);
+            // A COGO point leaves the drawing's point database and point groups with it.
+            if self.document.get_entity(h).is_some_and(|e| {
+                crate::modules::surface::command::civil_class(e) == Some("AECC_COGO_POINT")
+            }) {
+                if self.is_recording_undo() {
+                    let points: Vec<(Handle, ObjectType)> = self
+                        .document
+                        .objects
+                        .iter()
+                        .filter(|(_, o)| {
+                            matches!(o, ObjectType::Arch(a) if a.dxf_name.starts_with("AECC_POINT")
+                                || a.dxf_name == "AECC_QUERY_STATEMENT")
+                        })
+                        .map(|(h, o)| (*h, o.clone()))
+                        .collect();
+                    for (handle, before) in points {
+                        self.record_undo_object_before(handle, Some(before));
+                    }
+                }
+                let _ = document::classes::civil::remove_cogo_point(&mut self.document, h);
+            }
             self.document.remove_entity_arc(h);
             // The set entry dies with its entity (an absent entity is never
             // reference-only). Undo restores it through the recorded channel.
@@ -1363,6 +1384,7 @@ impl Scene {
             selection_changed |= self.selected.remove(&h);
             if self.hover_highlight == Some(h) {
                 self.hover_highlight = None;
+                self.hover_expanded.clear();
                 hover_changed = true;
             }
             hover_changed |= self.constraint_hover_highlights.remove(&h);
@@ -1387,7 +1409,7 @@ impl Scene {
                 .retain(|selected| !handle_set.contains(selected));
             self.bump_selection_set();
         } else if hover_changed {
-            self.bump_selection();
+            self.bump_hover();
         }
         // Capture exactly the group objects that this erase will rewrite, plus
         // the group dictionary when an emptied group will be removed. Do this

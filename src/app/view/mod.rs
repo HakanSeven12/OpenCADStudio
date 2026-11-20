@@ -27,11 +27,14 @@ mod table_inplace_widget_tests;
 /// positionless press message; capturing the cursor in the actual button
 /// event avoids using the previous hover location when clicking quickly.
 #[derive(Debug, Clone, Copy)]
-struct ViewportPickSurface;
+/// The flag keeps a click-move-click selection box waiting for its second
+/// corner following the pointer past the canvas edge (#3365).
+struct ViewportPickSurface(bool);
 
 #[derive(Default)]
 struct ViewportPointerState {
     middle_drag: bool,
+    left_drag: bool,
     position: Option<iced::Point>,
 }
 
@@ -186,6 +189,7 @@ impl iced::widget::canvas::Program<Message> for ViewportPickSurface {
         let cursor = state.event_cursor(event, cursor);
         match event {
             Mouse::ButtonPressed(Button::Left) => cursor.position_in(bounds).map(|position| {
+                state.left_drag = true;
                 Action::publish(Message::ViewportLeftPressAt(position)).and_capture()
             }),
             Mouse::ButtonPressed(Button::Middle) => {
@@ -196,7 +200,9 @@ impl iced::widget::canvas::Program<Message> for ViewportPickSurface {
             // MouseArea around this canvas reports no moves of its own. Left
             // uncaptured so it still tracks hover for `on_exit`. A middle
             // drag keeps following the pointer past the viewport edge.
-            Mouse::CursorMoved { position } if cursor.is_over(bounds) || state.middle_drag => {
+            Mouse::CursorMoved { position }
+                if cursor.is_over(bounds) || state.middle_drag || state.left_drag || self.0 =>
+            {
                 Some(Action::publish(Message::ViewportMove(iced::Point::new(
                     position.x - bounds.x,
                     position.y - bounds.y,
@@ -205,6 +211,10 @@ impl iced::widget::canvas::Program<Message> for ViewportPickSurface {
             Mouse::ButtonReleased(Button::Middle) if state.middle_drag => {
                 state.middle_drag = false;
                 (!cursor.is_over(bounds)).then(|| Action::publish(Message::ViewportMiddleRelease))
+            }
+            Mouse::ButtonReleased(Button::Left) if state.left_drag => {
+                state.left_drag = false;
+                (!cursor.is_over(bounds)).then(|| Action::publish(Message::ViewportLeftRelease))
             }
             _ => None,
         }
@@ -247,13 +257,16 @@ impl iced::widget::canvas::Program<Message> for PaneDragSurface {
         let cursor = state.event_cursor(event, cursor);
         match event {
             Mouse::ButtonPressed(Button::Left) => cursor.position_in(bounds).map(|position| {
+                state.left_drag = true;
                 Action::publish(Message::PanePressAt(self.0, position)).and_capture()
             }),
             Mouse::ButtonPressed(Button::Middle) => {
                 state.middle_drag = cursor.is_over(bounds);
                 None
             }
-            Mouse::CursorMoved { position } if cursor.is_over(bounds) || state.middle_drag => {
+            Mouse::CursorMoved { position }
+                if cursor.is_over(bounds) || state.middle_drag || state.left_drag =>
+            {
                 let local = iced::Point::new(position.x - bounds.x, position.y - bounds.y);
                 Some(Action::publish(Message::PaneMove(self.0, local)))
             }
@@ -261,6 +274,10 @@ impl iced::widget::canvas::Program<Message> for PaneDragSurface {
                 state.middle_drag = false;
                 (!cursor.is_over(bounds))
                     .then(|| Action::publish(Message::PaneMiddleRelease(self.0)))
+            }
+            Mouse::ButtonReleased(Button::Left) if state.left_drag => {
+                state.left_drag = false;
+                (!cursor.is_over(bounds)).then(|| Action::publish(Message::PaneRelease(self.0)))
             }
             _ => None,
         }
@@ -360,6 +377,20 @@ const VIEWCUBE_GAP: f32 = 12.0;
 /// no longer fits at all (its `DensitySwap`).
 fn viewcube_has_room(bar_w: f32, tile_w: f32) -> bool {
     bar_w + VIEWCUBE_GAP + VIEWCUBE_REGION_PX + VIEWCUBE_PAD <= tile_w
+}
+
+/// `main_window_event`, after watching the keys for Windows Alt codes
+/// (#3317); kept out of `main_window_event` so tests never type keys.
+fn window_event(
+    ev: iced::Event,
+    status: iced::event::Status,
+    win_id: window::Id,
+) -> Option<Message> {
+    #[cfg(windows)]
+    if let iced::Event::Keyboard(key) = &ev {
+        crate::app::alt_code::observe(key);
+    }
+    main_window_event(ev, status, win_id)
 }
 
 /// The app-wide input events: keys for the command line and shortcuts,
@@ -2220,9 +2251,12 @@ bg={bg_ms:.1}ms n={view_count}"
 
         mark("viewport_mouse");
         let viewport_mouse = mouse_area(container(
-            iced::widget::canvas(ViewportPickSurface)
-                .width(Fill)
-                .height(Fill),
+            iced::widget::canvas(ViewportPickSurface({
+                let sel = tab.scene.selection.borrow();
+                sel.gesture.box_anchor.is_some() || sel.gesture.poly_active
+            }))
+            .width(Fill)
+            .height(Fill),
         ))
         // Moves come from the canvas (mouse and touch) in event order.
         // Left mouse presses are captured by the canvas with their exact
@@ -2285,6 +2319,7 @@ bg={bg_ms:.1}ms n={view_count}"
             && tab.scene.drawing_feedback_shown()
             && (tab.active_cmd.is_some() || tab.active_grip.is_some() || plugin_grip_active)
             && (!tab.dyn_fields.is_empty() || dyn_picks_object)
+            && !self.dyn_pointer_tooltip_hidden(i)
         {
             let w = tab.last_cursor_world;
             let base = tab.dyn_anchor.or(self.last_point);
@@ -2364,17 +2399,13 @@ bg={bg_ms:.1}ms n={view_count}"
                     )
                 });
             let rectangle_values = tab
-                .active_grip
-                .as_ref()
-                .and_then(|grip| grip.rectangle_frame)
+                .dyn_rect_frame()
                 .map(|(opposite, width_axis, height_axis)| {
                     let delta = w - opposite;
                     (delta.dot(width_axis).abs(), delta.dot(height_axis).abs())
                 });
             let rectangle_label_screens = tab
-                .active_grip
-                .as_ref()
-                .and_then(|grip| grip.rectangle_frame)
+                .dyn_rect_frame()
                 .and_then(|(opposite, width_axis, height_axis)| {
                     let delta = w - opposite;
                     let width = delta.dot(width_axis);
@@ -3468,7 +3499,7 @@ bg={bg_ms:.1}ms n={view_count}"
 
         if self.show_node_graph && !tab.is_start {
             let sections = self.graph_all_sections(self.active_tab);
-            viewport_stack = viewport_stack.push(tab.graph.view(sections));
+            viewport_stack = viewport_stack.push(tab.graph.view(sections, self.node_graph_links));
         }
 
         // Docked pallets: each edge's icon strip and shown group (see
@@ -3495,7 +3526,7 @@ bg={bg_ms:.1}ms n={view_count}"
             crate::ui::wrap_bar::PosReport::new(VIEWPORT_CAPTURE_BOUNDS_ID, viewport_stack).into();
         // The drawing tabs sit over the drawing, between the docks, unless
         // they are set to run across the window above the palettes.
-        parts.push(if self.doc_tabs_in_center() {
+        let center: Element<'_, Message> = if self.doc_tabs_in_center() {
             column![
                 doc_tab_bar(
                     &self.tabs,
@@ -3511,12 +3542,7 @@ bg={bg_ms:.1}ms n={view_count}"
             .into()
         } else {
             viewport
-        });
-        if let Some(e) = right_edge {
-            parts.push(e);
-        }
-        let workspace: Element<'_, Message> = row(parts).width(Fill).height(Fill).into();
-
+        };
         let command_line = self.command_line.view(
             allow_autocomplete,
             dyn_capturing,
@@ -3527,11 +3553,12 @@ bg={bg_ms:.1}ms n={view_count}"
             self.pending_pick_label().is_some(),
             self.show_node_graph,
         );
-        let center_stack: Element<'_, Message> = if thumbnail_capture_clean {
-            workspace
+        let center: Element<'_, Message> = if thumbnail_capture_clean {
+            center
         } else {
-            // The command line floats over the bottom of the workspace, on
-            // the Start page as over a drawing, so no band runs under it.
+            // The command line floats over the bottom of the drawing area
+            // between the docks (not over a docked pallet, #3367), on the
+            // Start page as over a drawing, so no band runs under it.
             // Hidden (COMMANDLINEHIDE / Ctrl+9), the field stays in the tree,
             // collapsed, so it keeps the keyboard; Dynamic Input shows the
             // prompt and the typing at the cursor.
@@ -3541,6 +3568,9 @@ bg={bg_ms:.1}ms n={view_count}"
                     .height(iced::Length::Fixed(0.0))
                     .clip(true)
             } else {
+                // Floating: shift from the bottom centre by the dragged
+                // offset (padding on one side moves a centred box by half).
+                let off = self.command_line.float_offset;
                 iced::widget::container(command_line)
                     .width(Fill)
                     .height(Fill)
@@ -3548,21 +3578,32 @@ bg={bg_ms:.1}ms n={view_count}"
                     .align_y(iced::alignment::Vertical::Bottom)
                     .padding(iced::Padding {
                         top: 0.0,
-                        right: 0.0,
-                        bottom: 2.0,
-                        left: 0.0,
+                        right: (-2.0 * off.x).max(0.0),
+                        bottom: (2.0 - off.y).max(0.0),
+                        left: (2.0 * off.x).max(0.0),
                     })
             };
-            iced::widget::stack![workspace, command_line_overlay]
+            iced::widget::stack![center, command_line_overlay]
                 .width(Fill)
                 .height(Fill)
                 .into()
         };
+        parts.push(center);
+        if let Some(e) = right_edge {
+            parts.push(e);
+        }
+        let center_stack: Element<'_, Message> = row(parts).width(Fill).height(Fill).into();
         // Floating pallets draw over the command line, so the bottom rows of
         // a tall one (Layer Manager with many layers) are not hidden by it.
         let center_stack = self.dock_overlay(center_stack, tab);
 
-        let center_stack: Element<'_, Message> = if self.command_history_resizing {
+        let center_stack: Element<'_, Message> = if self.command_line_moving {
+            mouse_area(center_stack)
+                .on_move(Message::CommandLineMoveMove)
+                .on_release(Message::CommandLineMoveRelease)
+                .interaction(iced::mouse::Interaction::Grabbing)
+                .into()
+        } else if self.command_history_resizing {
             mouse_area(center_stack)
                 .on_move(Message::CommandHistoryResizeMove)
                 .on_release(Message::CommandHistoryResizeRelease)
@@ -4163,6 +4204,13 @@ impl OpenCADStudio {
         } else {
             Subscription::none()
         };
+        // A deferred Properties rebuild (huge selection commit) runs on the
+        // next frame instead of blocking the click that committed it.
+        let properties_refresh = if self.properties_refresh_pending.is_some() {
+            crate::app::tool_windows::main_window_frames().map(|_| Message::PropertiesRefreshTick)
+        } else {
+            Subscription::none()
+        };
         let snap_dwell = if self
             .snap_dwell
             .as_ref()
@@ -4357,7 +4405,7 @@ impl OpenCADStudio {
             // keys) stays in the ordinary app flow via `main_window_event`.
             event::listen_with(mount_key_event)
         } else {
-            event::listen_with(main_window_event)
+            event::listen_with(window_event)
         };
         #[cfg(not(target_arch = "wasm32"))]
         let control = iced::Subscription::batch([
@@ -4405,6 +4453,7 @@ impl OpenCADStudio {
             snap_dwell,
             move_coalesce,
             box_preview,
+            properties_refresh,
             nav_settle,
             gpu_probe,
             thumbnail_capture,
@@ -6331,7 +6380,7 @@ mod tests {
         ] {
             let event = iced::Event::Mouse(Mouse::CursorMoved { position });
             let expected = iced::Point::new(position.x - bounds.x, position.y - bounds.y);
-            let (motion, _, _) = ViewportPickSurface
+            let (motion, _, _) = ViewportPickSurface(false)
                 .update(&mut viewport, &event, bounds, final_cursor)
                 .unwrap()
                 .into_inner();
@@ -6342,7 +6391,7 @@ mod tests {
                 .into_inner();
             assert!(matches!(motion, Some(Message::PaneMove(2, p)) if p == expected));
             let press = iced::Event::Mouse(Mouse::ButtonPressed(Button::Left));
-            let (pick, _, status) = ViewportPickSurface
+            let (pick, _, status) = ViewportPickSurface(false)
                 .update(&mut viewport, &press, bounds, final_cursor)
                 .unwrap()
                 .into_inner();
@@ -6361,7 +6410,7 @@ mod tests {
             Cursor::Unavailable,
             Cursor::Levitating(iced::Point::new(250.0, 200.0)),
         ] {
-            assert!(ViewportPickSurface
+            assert!(ViewportPickSurface(false)
                 .update(&mut viewport, &press, bounds, hidden)
                 .is_none());
             assert!(PaneDragSurface(2)

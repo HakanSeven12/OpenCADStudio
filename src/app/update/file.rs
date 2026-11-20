@@ -149,7 +149,7 @@ where
 /// Render a panic payload the way `std` reports it: `&'static str` messages,
 /// `String` messages, or a fallback for foreign payloads.
 #[cfg(not(target_arch = "wasm32"))]
-fn panic_detail(payload: Box<dyn std::any::Any + Send>) -> String {
+pub(in crate::app) fn panic_detail(payload: Box<dyn std::any::Any + Send>) -> String {
     if let Some(text) = payload.downcast_ref::<&'static str>() {
         (*text).to_string()
     } else if let Some(text) = payload.downcast_ref::<String>() {
@@ -953,6 +953,9 @@ impl OpenCADStudio {
             spacemouse: self.spacemouse_preferences,
             dyn_input: self.dyn_input,
             dyn_mode: self.dyn_mode,
+            dyn_pointer_cartesian: self.dyn_pointer_cartesian,
+            dyn_pointer_absolute: self.dyn_pointer_absolute,
+            dyn_pointer_on_type: self.dyn_pointer_on_type,
             polar: self.polar_mode,
             polar_increment_deg: self.polar_increment_deg,
             zoom_wheel_reversed: self.zoom_wheel_reversed,
@@ -976,6 +979,7 @@ impl OpenCADStudio {
             command_line_hidden: self.command_line_hidden,
             layer_columns: crate::ui::window::layers::column_layout_names(),
             ribbon_layers_follow_filter: self.ribbon_layers_follow_filter,
+            node_graph_links: self.node_graph_links,
             options_tab: self.options_tab,
             show_viewcube: self.show_viewcube,
             navvcube_opacity: self.navvcube_opacity,
@@ -1147,6 +1151,9 @@ impl OpenCADStudio {
     /// Apply restored preferences to live state.
     pub(in crate::app) fn apply_settings(&mut self, s: &crate::app::settings::UserSettings) {
         self.dyn_mode = s.dyn_mode;
+        self.dyn_pointer_cartesian = s.dyn_pointer_cartesian;
+        self.dyn_pointer_absolute = s.dyn_pointer_absolute;
+        self.dyn_pointer_on_type = s.dyn_pointer_on_type;
         self.set_dyn_input(s.dyn_input);
         self.polar_mode = s.polar;
         self.polar_increment_deg = s.polar_increment_deg;
@@ -1193,6 +1200,7 @@ impl OpenCADStudio {
         self.command_line_hidden = s.command_line_hidden;
         crate::ui::window::layers::set_column_layout_names(&s.layer_columns);
         self.ribbon_layers_follow_filter = s.ribbon_layers_follow_filter;
+        self.node_graph_links = s.node_graph_links;
         self.options_tab = s.options_tab;
         self.spacemouse_preferences = s.spacemouse;
         // These four drive real features with commands and status-bar pills,
@@ -1925,6 +1933,7 @@ impl OpenCADStudio {
             tab.scene.selection_effect = sel_effect;
             let old_sel_widen = std::mem::replace(&mut tab.scene.selection_widen, sel_widen);
             tab.scene.edge_color = self.model_space.edge_color;
+            tab.scene.occluded_edges = self.model_space.occluded_edges;
             tab.bg_color = Some(model_bg);
             tab.paper_bg_color = Some(paper_bg);
 
@@ -2541,6 +2550,16 @@ impl OpenCADStudio {
                 crate::io::xref::XrefStatus::Loaded => {
                     self.command_line
                         .push_output(crate::tf!("XREF  Loaded \"{}\"", info.name).as_ref());
+                    if info.other_drawing {
+                        self.command_line.push_warning(
+                            crate::tf!(
+                                "XREF  \"{}\" now loads a different drawing ({})",
+                                info.name,
+                                info.path
+                            )
+                            .as_ref(),
+                        );
+                    }
                 }
                 crate::io::xref::XrefStatus::Recovered => {
                     self.command_line.push_warning(
@@ -6106,18 +6125,21 @@ impl OpenCADStudio {
         });
     }
 
+    fn dialog_plot_offsets_mm(&self) -> (f64, f64) {
+        let d = &self.plot_dialog;
+        let millimetres = |offset: &str| {
+            d.paper_units
+                .to_mm(offset.trim().parse::<f64>().unwrap_or(0.0))
+        };
+        (millimetres(&d.offset_x), millimetres(&d.offset_y))
+    }
+
     /// The plot origin in millimetres from the sheet's corner: the dialog's
     /// offsets in the page-setup unit, counted from the printable area's
     /// corner unless `PLOTOFFSET` says from the paper edge.
     fn dialog_plot_origin_mm(&self) -> (f64, f64) {
-        let d = &self.plot_dialog;
-        let x = d
-            .paper_units
-            .to_mm(d.offset_x.trim().parse::<f64>().unwrap_or(0.0));
-        let y = d
-            .paper_units
-            .to_mm(d.offset_y.trim().parse::<f64>().unwrap_or(0.0));
-        if d.plot_offset_from_edge {
+        let (x, y) = self.dialog_plot_offsets_mm();
+        if self.plot_dialog.plot_offset_from_edge {
             return (x, y);
         }
         let ps = self.plot_settings_from_dialog(self.dialog_base_settings());
@@ -6219,17 +6241,9 @@ impl OpenCADStudio {
             }
         }
         ps.flags.plot_centered = d.center && !layout_area;
-        // Offsets are typed in the page-setup unit; the file keeps millimetres.
-        let (origin_x, origin_y) = if layout_area {
-            (0.0, 0.0)
-        } else {
-            (
-                d.paper_units
-                    .to_mm(d.offset_x.trim().parse::<f64>().unwrap_or(0.0)),
-                d.paper_units
-                    .to_mm(d.offset_y.trim().parse::<f64>().unwrap_or(0.0)),
-            )
-        };
+        // The file keeps millimetres. A Layout offset is relative to the
+        // printable corner, like the saved CAD page setup it came from.
+        let (origin_x, origin_y) = self.dialog_plot_offsets_mm();
         ps.origin_x = origin_x;
         ps.origin_y = origin_y;
         ps.paper_units = match d.paper_units {
@@ -7069,7 +7083,11 @@ impl OpenCADStudio {
             // Only the explicit upside-down choice rotates layout content here.
             let rotation = dialog_rotation;
             let centered = self.plot_dialog.center;
-            let (origin_x, origin_y) = self.dialog_plot_origin_mm();
+            let (origin_x, origin_y) = if plot_layout {
+                self.dialog_plot_offsets_mm()
+            } else {
+                self.dialog_plot_origin_mm()
+            };
 
             let (scale, offset_x, offset_y) = if plot_extents {
                 let (min_x, min_y, max_x, max_y) =
@@ -7151,6 +7169,13 @@ impl OpenCADStudio {
                     })
             } else {
                 None
+            };
+            // Move the ink relative to the printable corner. Keep the clip
+            // anchored to the physical page.
+            let (offset_x, offset_y) = if plot_layout {
+                (offset_x + origin_x / scale, offset_y + origin_y / scale)
+            } else {
+                (offset_x, offset_y)
             };
             return PdfPageInput {
                 content,
@@ -7973,7 +7998,7 @@ impl OpenCADStudio {
                 if self.plot_dialog.area == "Layout" && s != "Layout" {
                     self.normalize_common_plot_dialog();
                 }
-                if s == "Layout" {
+                if s == "Layout" && self.plot_dialog.area != "Layout" {
                     self.plot_dialog.center = false;
                     self.plot_dialog.offset_x = "0.0".into();
                     self.plot_dialog.offset_y = "0.0".into();
@@ -8523,8 +8548,16 @@ impl OpenCADStudio {
             document::objects::PlotPaperUnits::Inches => PaperUnits::Inches,
             _ => PaperUnits::Millimeters,
         };
-        d.offset_x = trim_decimals(&format!("{:.4}", d.paper_units.from_mm(ps.origin_x)));
-        d.offset_y = trim_decimals(&format!("{:.4}", d.paper_units.from_mm(ps.origin_y)));
+        let format_offset = |origin_mm| {
+            let offset = d.paper_units.from_mm(origin_mm);
+            if d.area == "Layout" {
+                offset.to_string()
+            } else {
+                trim_decimals(&format!("{offset:.4}"))
+            }
+        };
+        d.offset_x = format_offset(ps.origin_x);
+        d.offset_y = format_offset(ps.origin_y);
         d.hide_paperspace = ps.flags.plot_hidden;
         let deg = ps.rotation.to_degrees() as i32;
         if matches!(deg, 90 | 270) {
@@ -10424,6 +10457,24 @@ mod plot_paper_tests {
             (at.0 - 50.0).abs() < 1e-6 && (at.1 - 40.0).abs() < 1e-6,
             "paper (50,40) plots at {at:?}"
         );
+    }
+
+    #[test]
+    fn layout_plot_moves_the_content_and_keeps_the_printable_clip_on_the_sheet() {
+        use document::objects::PlotRotation;
+
+        let mut app =
+            layout_with_margins_and_stale_limmin((5.0, 7.0, 11.0, 13.0), PlotRotation::None);
+        edit_layout_settings(&mut app, |ps| {
+            ps.origin_x = 7.0;
+            ps.origin_y = -10.0;
+        });
+        let _ = app.on_plot_dialog_open();
+        let page = app.layout_plot_page_for("Layout");
+        assert_eq!((page.offset_x, page.offset_y), (12.0, -3.0));
+        assert_eq!(page.clip, Some((5.0, 7.0, 194.0, 277.0)));
+        let saved = app.dialog_to_plotsettings();
+        assert_eq!((saved.origin_x, saved.origin_y), (7.0, -10.0));
     }
 
     /// With margins the sheet starts at minus the margins as they land on the

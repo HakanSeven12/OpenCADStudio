@@ -169,6 +169,8 @@ pub(super) mod tool_palettes;
 pub(in crate::app) use file::background_task;
 #[cfg(not(target_arch = "wasm32"))]
 pub(in crate::app) use file::native_paths_match;
+#[cfg(not(target_arch = "wasm32"))]
+pub(in crate::app) use file::panic_detail;
 mod page_setup_import;
 #[cfg(not(target_arch = "wasm32"))]
 mod plugin_grips;
@@ -190,6 +192,8 @@ pub(in crate::app) mod viewport_snap;
 pub(in crate::app) mod widget_mount;
 mod widget_prompt;
 pub(crate) mod widget_drag;
+#[cfg(test)]
+mod xref_manager_preview_tests;
 
 impl OpenCADStudio {
     pub(in crate::app) fn reset_modal_geometry(&mut self) {
@@ -240,6 +244,9 @@ impl OpenCADStudio {
         }
         if self.active_modal == Some(BlockEditorSettings) {
             self.block_editor_settings = None;
+        }
+        if self.active_modal == Some(VisualStyles) {
+            self.visual_styles_crease = None;
         }
         if self.active_modal == Some(BlockCycleOrder) {
             self.block_cycle_order = None;
@@ -675,6 +682,15 @@ impl OpenCADStudio {
             )
         });
         let mut task = self.update_message(msg);
+        // A selection or a refresh in the Xref Manager asked for a preview:
+        // it decodes on a worker.
+        if let Some(request) = self.xref_manager.take_preview_request() {
+            let read = self.read_xref_manager_preview_with(
+                request,
+                crate::ui::window::xref_manager::read_preview,
+            );
+            task = Task::batch([task, read]);
+        }
         if let Some((resized, key)) = outline_switch_before {
             if resized || self.outline_switch_key() != key {
                 self.outline_switch_hover = false;
@@ -1544,6 +1560,10 @@ impl OpenCADStudio {
             }
             Message::ControlCaptureFrame { redrew } => self.on_control_capture_frame(redrew),
             Message::Graph(message) => self.on_graph(message),
+            Message::GraphFileRead(read) => self.finish_graph_file_read(*read),
+            Message::GraphLoadRead(tab_id, generation, read) => {
+                self.finish_control_graph_load(tab_id, generation, read)
+            }
 
             Message::ControlToggle => {
                 self.control.enabled = !self.control.enabled;
@@ -2662,10 +2682,7 @@ impl OpenCADStudio {
                 }
             }
 
-            Message::XAttachPickResult(Ok(path)) => {
-                self.open_xref_attach_dialog(path);
-                Task::none()
-            }
+            Message::XAttachPickResult(Ok(path)) => self.open_xref_attach_dialog(path),
             message @ (Message::AttachPick
             | Message::UnderlayAttachPick(_)
             | Message::PointCloudAttachPick
@@ -3128,6 +3145,11 @@ impl OpenCADStudio {
                 self.finish_model_import(tab_id, generation, &path, format, result)
             }
 
+            Message::LandXmlImportFinished(tab_id, generation, path, result) => {
+                self.finish_landxml_import(tab_id, generation, &path, result);
+                Task::none()
+            }
+
             Message::PictureImportFinished(tab_id, generation, path, format, prompt, read) => self
                 .finish_picture_import(tab_id, generation, path.as_deref(), format, prompt, read),
 
@@ -3274,6 +3296,14 @@ impl OpenCADStudio {
                 if self.ribbon.click_tab(idx, iced::time::Instant::now()) {
                     self.save_config();
                 }
+                Task::none()
+            }
+            Message::RibbonWheel(delta) => {
+                self.ribbon.on_wheel(delta, iced::time::Instant::now());
+                Task::none()
+            }
+            Message::RibbonRefit => {
+                self.ribbon.refit();
                 Task::none()
             }
             Message::RibbonMinimize(msg) => {
@@ -4726,6 +4756,35 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::CommandLineMoveGrab => {
+                self.command_line_moving = true;
+                self.command_history_drag_last = None;
+                Task::none()
+            }
+
+            Message::CommandLineMoveMove(point) => {
+                if self.command_line_moving {
+                    if let Some(last) = self.command_history_drag_last {
+                        self.command_line.float_offset =
+                            self.command_line.float_offset + (point - last);
+                    }
+                    self.command_history_drag_last = Some(point);
+                }
+                Task::none()
+            }
+
+            Message::CommandLineMoveRelease => {
+                self.command_line_moving = false;
+                self.command_history_drag_last = None;
+                Task::none()
+            }
+
+            Message::CommandLineDock => {
+                self.command_line_moving = false;
+                self.command_line.float_offset = iced::Vector::ZERO;
+                Task::none()
+            }
+
             Message::CommandHistoryResizeGrab => {
                 if self.command_line.history_open {
                     self.command_history_resizing = true;
@@ -4963,6 +5022,7 @@ impl OpenCADStudio {
             // path the native typed-path command feeds.
             #[cfg(target_arch = "wasm32")]
             Message::DataLinkCsvPicked(picked) => self.on_datalink_csv_picked(picked),
+            Message::DataLinkCsvRead(read, result) => self.finish_data_link_csv_read(&read, result),
 
             // Web CENTERLTYPEFILE: the picked .lin/.dnl file's text arrived —
             // load its linetypes, then record the setting under the file's
@@ -5084,6 +5144,10 @@ impl OpenCADStudio {
             }
             Message::XrefManagerTogglePreview => {
                 self.xref_manager.show_preview ^= true;
+                Task::none()
+            }
+            Message::XrefPreviewRead(generation, key, preview) => {
+                self.xref_manager.preview_read(generation, key, preview);
                 Task::none()
             }
             Message::XrefManagerAttachMenu => {
@@ -5354,30 +5418,17 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
-            Message::LayerTranslatorLoaded(path) => {
-                use crate::modules::draw::layers::laytrans;
-                match laytrans::load_targets(&path) {
-                    Ok(targets) => {
-                        let state = self.layer_translator.get_or_insert_with(Default::default);
-                        state.source_file = path
-                            .file_name()
-                            .map(|name| name.to_string_lossy().into_owned())
-                            .unwrap_or_default();
-                        state.targets = targets;
-                        // A target set that no longer contains a mapped name
-                        // would translate onto nothing.
-                        let names: Vec<String> =
-                            state.targets.iter().map(|t| t.name.clone()).collect();
-                        state
-                            .mappings
-                            .retain(|m| names.iter().any(|n| n.eq_ignore_ascii_case(&m.to)));
-                        state.selected_to = None;
-                    }
-                    Err(why) => self
-                        .command_line
-                        .push_error(crate::tf!("LAYTRANS: {why}.").as_ref()),
-                }
+            Message::ShortcutsFileRead(path, rows) => {
+                self.finish_shortcuts_import(&path, rows);
                 Task::none()
+            }
+            Message::LayerTranslatorLoaded(path) => {
+                use crate::app::commands::layer_file_reads::{LayerFileJob, LayerFiles};
+                let files = LayerFiles {
+                    standards: Some(path),
+                    ..LayerFiles::default()
+                };
+                self.read_layer_files(self.active_tab, LayerFileJob::WindowStandards, files)
             }
             Message::LayerTranslatorSelectFrom(name) => {
                 if let Some(state) = self.layer_translator.as_mut() {
@@ -5456,9 +5507,9 @@ impl OpenCADStudio {
                 },
             ),
             Message::LayerTranslatorMappingsPath(path, save) => {
-                self.layer_translator_mappings_file(&path, save);
-                Task::none()
+                self.layer_translator_mappings_file(&path, save)
             }
+            Message::LayerFileRead(done) => self.finish_layer_file_read(*done),
             Message::LayerTranslatorTranslate => {
                 use crate::modules::draw::layers::laytrans;
                 let Some(state) = self.layer_translator.take() else {
@@ -6817,6 +6868,7 @@ impl OpenCADStudio {
                 self.on_mount_move_coalesce_tick(),
             ]),
             Message::BoxPreviewTick => self.on_box_preview_tick(),
+            Message::PropertiesRefreshTick => self.on_properties_refresh_tick(),
 
             Message::SnapDwellTick => self.on_snap_dwell_tick(),
 
@@ -8654,6 +8706,17 @@ impl OpenCADStudio {
             }
 
             // ── Drafting Settings Dialog ──────────────────────────────────
+            Message::OpenDraftingSettings(tab) => {
+                let task = if self.focus_dialog(super::ModalKind::DraftingSettings) {
+                    Task::none()
+                } else {
+                    self.update(Message::ToggleSnapPopup)
+                };
+                if let Some(state) = &mut self.drafting_settings_state {
+                    state.active_tab = tab;
+                }
+                task
+            }
             Message::DraftingSettingsTabChanged(tab) => {
                 if let Some(state) = &mut self.drafting_settings_state {
                     state.active_tab = tab;
@@ -8817,6 +8880,12 @@ impl OpenCADStudio {
             Message::DraftingSettingsToggle3dOsnap => {
                 if let Some(state) = &mut self.drafting_settings_state {
                     state.osnap3d_on = !state.osnap3d_on;
+                }
+                Task::none()
+            }
+            Message::DraftingSettingsDynPrefs(prefs) => {
+                if let Some(state) = &mut self.drafting_settings_state {
+                    state.dyn_prefs = prefs;
                 }
                 Task::none()
             }
@@ -9299,8 +9368,9 @@ impl OpenCADStudio {
                 self.mtext_pick_style(s);
                 Task::none()
             }
-            Message::MTextImport(path) => {
-                self.mtext_import(&path);
+            Message::MTextImport(path) => self.mtext_import(&path),
+            Message::MTextImportRead(opened, read) => {
+                self.finish_mtext_import(opened, read);
                 Task::none()
             }
             Message::MTextFontPicker(event) => {
@@ -9652,6 +9722,9 @@ impl OpenCADStudio {
                 }
             }
             Message::MTextSelStart(off) => {
+                // A hit past the last glyph (an empty text's phantom line)
+                // is the end of the text.
+                let off = off.min(self.mtext_vis_count());
                 // Count quick same-spot clicks: 1 = place caret, 2 = select the
                 // word, 3 = select all.
                 let now = Instant::now();
@@ -9683,6 +9756,7 @@ impl OpenCADStudio {
                 self.unfocus_widgets()
             }
             Message::MTextSelTo(off) => {
+                let off = off.min(self.mtext_vis_count());
                 if let Some(ed) = self.mtext_editor.as_mut() {
                     ed.typing_format = Default::default();
                     let a = ed.sel_anchor;
@@ -9692,6 +9766,7 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::MTextFieldSubmit => self.unfocus_widgets(),
             Message::MTextSelEnd => {
                 self.mtext_match_apply();
                 Task::none()
@@ -11532,6 +11607,7 @@ impl OpenCADStudio {
                 self.shortcut_filter.clear();
                 self.shortcut_capture_row = None;
                 self.shortcut_pending_add = false;
+                self.shortcut_suggest = None;
                 self.shortcut_reset_confirm = false;
                 self.shortcut_close_confirm = false;
                 self.active_modal = Some(super::ModalKind::Shortcuts);
@@ -11564,14 +11640,37 @@ impl OpenCADStudio {
                 if let Some(row) = self.shortcut_editor_rows.get_mut(idx) {
                     match field {
                         ShortcutField::Key => row.0 = value.to_uppercase(),
-                        ShortcutField::Command => row.1 = value.to_uppercase(),
+                        ShortcutField::Command => {
+                            row.1 = value.to_uppercase();
+                            // Typing opens this row's suggestion list.
+                            self.shortcut_suggest = Some((idx, row.1.clone()));
+                        }
                     }
                 }
                 // Typing never finishes the addition — only the draft row's
                 // check button does, so no half-visible "ghost" row appears.
                 Task::none()
             }
+            Message::ShortcutEditorSuggestionPick { idx, command } => {
+                if let Some(row) = self.shortcut_editor_rows.get_mut(idx) {
+                    row.1 = command;
+                }
+                self.shortcut_suggest = None;
+                // The box keeps the caret where the typed prefix ended; put
+                // it after the picked name (and keep the box focused after a
+                // mouse pick) so typing continues at the end.
+                let id = crate::ui::window::shortcuts::command_input_id(idx);
+                Task::batch([
+                    iced::widget::operation::focus(id.clone()),
+                    iced::widget::operation::move_cursor_to_end(id),
+                ])
+            }
+            Message::ShortcutEditorSuggestionDismiss => {
+                self.shortcut_suggest = None;
+                Task::none()
+            }
             Message::ShortcutEditorAdd => {
+                self.shortcut_suggest = None;
                 if self.shortcut_pending_add {
                     // One draft at a time: re-arm its Key cell instead.
                     self.shortcut_capture_row = Some(0);
@@ -11609,6 +11708,7 @@ impl OpenCADStudio {
             Message::ShortcutCaptureCancel => {
                 // Esc backs out of capture and abandons an unfinished draft.
                 self.shortcut_capture_row = None;
+                self.shortcut_suggest = None;
                 if self.shortcut_pending_add {
                     self.shortcut_editor_rows.remove(0);
                     self.shortcut_pending_add = false;
@@ -11616,6 +11716,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ShortcutEditorRemove(idx) => {
+                self.shortcut_suggest = None;
                 if idx < self.shortcut_editor_rows.len() {
                     self.shortcut_editor_rows.remove(idx);
                 }
@@ -11645,6 +11746,36 @@ impl OpenCADStudio {
                 // working table) without applying it. Only complete drafts
                 // can be accepted — the button is disabled otherwise.
                 self.finish_pending_add();
+                Task::none()
+            }
+            Message::ShortcutEditorImport => Task::perform(
+                async {
+                    let handle = rfd::AsyncFileDialog::new()
+                        .add_filter(
+                            crate::t!("Shortcut lists (*.xlsx, *.csv, *.txt)").as_ref(),
+                            &["xlsx", "csv", "txt"],
+                        )
+                        .pick_file()
+                        .await?;
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let bytes = std::fs::read(handle.path()).map_err(|e| e.to_string());
+                    #[cfg(target_arch = "wasm32")]
+                    let bytes: Result<Vec<u8>, String> = Ok(handle.read().await);
+                    Some(bytes)
+                },
+                Message::ShortcutEditorImported,
+            ),
+            Message::ShortcutEditorImported(result) => {
+                // A picker can finish after the modal was dismissed.
+                if self.dialog_open(super::ModalKind::Shortcuts) {
+                    match result {
+                        Some(Ok(bytes)) => self.import_shortcut_rows(&bytes),
+                        Some(Err(e)) => self.command_line.push_error(
+                            crate::tf!("Shortcuts: cannot read the file: {e}").as_ref(),
+                        ),
+                        None => {}
+                    }
+                }
                 Task::none()
             }
             Message::ShortcutEditorResetAsk => {
@@ -11953,6 +12084,25 @@ impl OpenCADStudio {
                     self.tabs[i].action_bars.hidden.insert(handle);
                 }
                 Task::none()
+            }
+            Message::VisualStylesCreaseInput(value) => {
+                if let Some(crease) = &mut self.visual_styles_crease {
+                    *crease = value;
+                }
+                Task::none()
+            }
+            Message::VisualStylesCreaseApply => {
+                let Some(value) = self.visual_styles_crease.clone() else {
+                    return Task::none();
+                };
+                let task =
+                    self.run_one_command_line(&format!("SETVAR VSEDGESMOOTH {}", value.trim()));
+                // A refused value goes back to the one in force.
+                self.visual_styles_crease = Some(self.model_space.edge_smooth.to_string());
+                task
+            }
+            Message::VisualStylesOccludedEdges(on) => {
+                self.run_one_command_line(&format!("SETVAR VSOCCLUDEDEDGES {}", u8::from(on)))
             }
             Message::BlockEditorSettingsInput(index, value) => {
                 if let Some(state) = &mut self.block_editor_settings {
@@ -12607,6 +12757,18 @@ impl OpenCADStudio {
             Message::RibbonVisibleChanged(shown) => {
                 self.ribbon_closed = !shown;
                 self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::RibbonCenteredChanged(centered) => {
+                self.ribbon.set_centered(centered);
+                self.save_config();
+                Task::none()
+            }
+
+            Message::RibbonWheelTabsChanged(on) => {
+                self.ribbon.set_wheel_switches_tabs(on);
+                self.save_config();
                 Task::none()
             }
 
@@ -14586,6 +14748,7 @@ impl OpenCADStudio {
             }
             Message::BlockEditPickerApply => self.apply_bedit_dialog(),
             Message::Rename(msg) => self.on_rename_dialog(msg),
+            Message::DesignCenter(msg) => self.on_design_center(msg),
             Message::Purge(msg) => self.on_purge_dialog(msg),
             Message::DwgProps(msg) => self.on_drawing_properties(msg),
             Message::GeographicLocation(msg) => self.on_geographic_location(msg),
@@ -15035,8 +15198,17 @@ impl OpenCADStudio {
                     .push_error(crate::tf!("{context} failed: {detail}").as_ref());
                 Task::none()
             }
+            Message::UnderlayRastersDrawn(tab_id, generation, done) => {
+                self.finish_underlay_reseed(tab_id, generation, *done);
+                Task::none()
+            }
             Message::PointCloudRead(done) => {
                 self.finish_point_cloud_display_read(&done);
+                Task::none()
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::EmbedImageRead(tab_id, generation, read) => {
+                self.finish_control_embed_image(tab_id, generation, *read);
                 Task::none()
             }
 
@@ -16947,5 +17119,62 @@ mod doc_tab_layouts_tests {
             after: false,
         });
         assert_eq!(app.doc_tab_layouts, None);
+    }
+}
+
+#[cfg(test)]
+mod shortcut_suggestion_tests {
+    use super::Message;
+    use crate::app::OpenCADStudio;
+    use crate::ui::window::shortcuts::command_input_id;
+    use iced::futures::StreamExt;
+    use iced::widget::text_input::{cursor, Value};
+
+    type Paragraph = <iced::Renderer as iced::advanced::text::Renderer>::Paragraph;
+
+    #[test]
+    fn picking_a_suggestion_puts_the_caret_after_the_name() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.shortcut_editor_rows = vec![
+            ("CTRL+L".to_owned(), "LIN".to_owned()),
+            ("CTRL+D".to_owned(), "DI".to_owned()),
+        ];
+        app.shortcut_suggest = Some((0, "LIN".to_owned()));
+        // Row 0's box after typing "lin": caret after the third character,
+        // focus lost to the list click. Row 1's box must stay untouched.
+        let mut picked = iced::widget::text_input::State::<Paragraph>::new();
+        picked.move_cursor_to(3);
+        let mut other = iced::widget::text_input::State::<Paragraph>::new();
+        other.move_cursor_to(1);
+
+        let task = app.update(Message::ShortcutEditorSuggestionPick {
+            idx: 0,
+            command: "LINE".to_owned(),
+        });
+        if let Some(mut stream) = iced_runtime::task::into_stream(task) {
+            while let Some(action) = iced::futures::executor::block_on(stream.next()) {
+                if let iced_runtime::Action::Widget(mut operation) = action {
+                    for (idx, state) in [(0, &mut picked), (1, &mut other)] {
+                        let id = command_input_id(idx);
+                        operation.focusable(Some(&id), iced::Rectangle::default(), state);
+                        operation.text_input(Some(&id), iced::Rectangle::default(), state);
+                    }
+                }
+            }
+        }
+
+        assert_eq!(app.shortcut_editor_rows[0].1, "LINE");
+        assert_eq!(app.shortcut_suggest, None);
+        assert_eq!(
+            picked.cursor().state(&Value::new("LINE")),
+            cursor::State::Index(4),
+            "the caret must follow the picked name, not the typed prefix"
+        );
+        assert!(picked.is_focused(), "typing must go on in the picked box");
+        assert_eq!(
+            other.cursor().state(&Value::new("DI")),
+            cursor::State::Index(1)
+        );
+        assert!(!other.is_focused());
     }
 }

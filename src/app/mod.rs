@@ -1,4 +1,6 @@
 pub(crate) mod alias;
+#[cfg(windows)]
+pub(crate) mod alt_code;
 mod automation;
 pub(crate) mod control;
 pub(crate) fn automation_action_names() -> &'static [&'static str] {
@@ -81,6 +83,8 @@ mod layers;
 mod linetype_manager_tests;
 mod measurement;
 mod model_ops;
+mod civil;
+mod civil_packages;
 mod surfacing;
 mod solid_edit_ops;
 mod mtext_editor;
@@ -89,6 +93,8 @@ pub(crate) use mtext_editor::prefs as mtext_prefs;
 mod import_command_tests;
 #[cfg(test)]
 mod mtext_follows_style_tests;
+#[cfg(test)]
+mod mtext_import_tests;
 #[cfg(test)]
 mod mtext_style_from_selection_tests;
 mod navigation;
@@ -109,6 +115,7 @@ mod quick_calc;
 mod recent;
 mod record_api;
 mod rename_dialog;
+mod design_center;
 mod saved_filters;
 pub(crate) mod settings;
 mod shortcuts;
@@ -213,6 +220,11 @@ pub struct HoverDwell {
     pub point: iced::Point,
     pub tile_size: (f32, f32),
     pub tab: usize,
+    /// The camera generation when the cursor came to rest. A wheel zoom
+    /// keeps the cursor still, so a dwell armed before the zoom would fire
+    /// mid-navigation and stall it; a tick that finds this changed restarts
+    /// the rest clock on the new view instead of picking (#3339).
+    pub camera_generation: u64,
 }
 
 /// Raw (unfiltered) box hits from the last preview. This is only used for
@@ -286,6 +298,13 @@ impl SnapDwell {
 /// How long the cursor must sit still before the idle rollover pick runs
 /// when the moving pick (`hover_pick_due`) has not already answered it.
 pub const HOVER_DWELL_MS: u128 = 500;
+
+/// The settled hover pick skips its wire sweep when the pick aperture holds
+/// more than this many candidate segments: past it, every wire in the box is
+/// a plausible hit and the sweep costs more than the rollover highlight is
+/// worth. Click picks keep their full sweep — a deliberate user action earns
+/// the cost.
+pub const HOVER_CANDIDATE_CAP: usize = 16384;
 /// How long the cursor must sit still before the active-command object-snap pass runs.
 pub const SNAP_DWELL_MS: u128 = 60;
 /// Shortest gap between full snap passes while the pointer keeps moving. A
@@ -913,6 +932,7 @@ pub(super) struct OpenCADStudio {
     /// Pointer state while the command-history panel's top edge is dragged.
     command_history_resizing: bool,
     command_history_drag_last: Option<Point>,
+    command_line_moving: bool,
     status_bar: StatusBar,
     cursor_pos: Point,
     vp_size: (f32, f32),
@@ -991,6 +1011,8 @@ pub(super) struct OpenCADStudio {
     block_definition_open_editor: Option<String>,
     block_edit_picker: Option<crate::ui::window::block_edit_picker::State>,
     rename_dialog: Option<crate::ui::window::rename::State>,
+    /// DESIGN CENTER; kept after closing so browsed drawings stay listed.
+    design_center: Option<crate::ui::window::design_center::State>,
     drawing_properties: Option<crate::ui::window::drawing_properties::State>,
     geographic_location: Option<crate::ui::window::geographic_location::State>,
     purge_dialog: Option<crate::ui::window::purge::State>,
@@ -1005,6 +1027,8 @@ pub(super) struct OpenCADStudio {
     block_visibility_mode: bool,
     block_editor_preferences: settings::BlockEditorPreferences,
     block_editor_settings: Option<crate::ui::window::block_editor_settings::State>,
+    /// Visual Styles Manager: the crease angle being typed; `None` while closed.
+    visual_styles_crease: Option<String>,
     block_cycle_order: Option<crate::ui::window::block_cycle_order::State>,
     block_dependency_cache: std::cell::RefCell<Option<block_feedback::DependencyCache>>,
     /// PDF dialogs' working copies; `None` while closed.
@@ -1013,6 +1037,12 @@ pub(super) struct OpenCADStudio {
     /// The read that the -POINTCLOUDATTACH file name prompt started: the
     /// tab and the file. A failed read ends that command when it ends.
     point_cloud_prompt_read: Option<(u64, std::path::PathBuf)>,
+    /// The reader of the files that node graph nodes read; a test gives
+    /// one that panics.
+    graph_file_reader: crate::app::node_graph::files::Reader,
+    /// The number of the newest read of an import window (3D Studio
+    /// Import, DGN Import, Import PDF); see `ReadTicket`.
+    import_window_read: u64,
     /// ATTDEF dialog and Edit Attribute Definition dialog; `None` while closed.
     attdef_dialog: Option<crate::ui::window::attdef_dialog::AttdefDialogState>,
     attdef_edit: Option<crate::ui::window::attdef_dialog::AttdefEditState>,
@@ -1023,6 +1053,9 @@ pub(super) struct OpenCADStudio {
     field_dialog: Option<crate::ui::window::field_dialog::FieldDialogState>,
     /// The Formula dialog kept while Insert Field has another one open.
     field_formula_parent: Option<crate::ui::window::field_dialog::FieldDialogState>,
+    /// The number format the last formula / object field was placed with;
+    /// a new field starts from it (#3288).
+    field_number_format: crate::ui::window::field_dialog::NumberFormat,
     point_cloud_color_map: Option<crate::ui::window::pdf_dialogs::PointCloudColorMapState>,
     pc_section: Option<crate::ui::window::pdf_dialogs::PcSectionState>,
     /// -VIEW sEttings Background dialog.
@@ -1308,6 +1341,13 @@ pub(super) struct OpenCADStudio {
     dyn_input: bool,
     /// Dynamic input mode (DYNMODE): 0=off, 1=pointer, 2=dimensional, 3=both.
     dyn_mode: i16,
+    /// DYNPIFORMAT: second points typed as pointer input are X,Y rather
+    /// than distance<angle.
+    dyn_pointer_cartesian: bool,
+    /// DYNPICOORDS: second points typed as pointer input are absolute.
+    dyn_pointer_absolute: bool,
+    /// DYNPIVIS 0: pointer tooltips show only once coordinates are typed.
+    dyn_pointer_on_type: bool,
     /// Currently visible page in the application Options dialog.
     options_tab: crate::ui::window::options::OptionsTab,
     /// Saved graphics options (backend, compat renderer); read at launch, so
@@ -1558,6 +1598,10 @@ pub(super) struct OpenCADStudio {
     move_owed: Option<(iced::Point, usize)>,
     /// Latest box-preview position awaiting a frame, and its tab.
     box_preview_pending: Option<(iced::Point, usize, u64)>,
+    /// Tab whose Properties panel rebuild was deferred off the commit event
+    /// (a huge selection's build can take ~100 ms). Drives the
+    /// `PropertiesRefreshTick` frame subscription; cleared when it runs.
+    properties_refresh_pending: Option<usize>,
     /// Adaptive earliest time for the next expensive preview calculation.
     box_preview_due: Option<Instant>,
     box_preview_cache: Option<BoxPreviewCache>,
@@ -1665,6 +1709,9 @@ pub(super) struct OpenCADStudio {
     authoring_palette_tab: crate::ui::window::authoring_palettes::Tab,
     /// Node graph overlay over the viewport.
     pub(crate) show_node_graph: bool,
+    /// How the node graph shows links; a view setting, saved with the
+    /// preferences and not in the graph's file.
+    pub(crate) node_graph_links: crate::ui::node_graph::LinkDisplay,
     /// Entity the Properties handlers act on instead of the selection, set
     /// only for the duration of a node-graph property write.
     pub(crate) property_target_override: Option<document::Handle>,
@@ -2316,6 +2363,11 @@ pub(super) struct OpenCADStudio {
     /// only until its key and command are filled (success) or it is cancelled
     /// (Esc / ✕ / dialog close), so the list never keeps an empty row.
     shortcut_pending_add: bool,
+    /// The row whose Command box offers its suggestion list, with the text
+    /// the list was opened for. Typing in a Command box sets it; the list
+    /// shows only while that row still holds that text, so a row that moved
+    /// or changed in any other way never shows a stale list.
+    shortcut_suggest: Option<(usize, String)>,
     /// True while the "Reset to default" confirmation is showing.
     shortcut_reset_confirm: bool,
     /// True while the "unsaved changes will be discarded" confirmation
@@ -2734,6 +2786,8 @@ pub enum ColorPickTarget {
     PropertiesBg,
     /// A named per-entity Properties colour field.
     PropertiesField(String),
+    /// An input of a node graph card.
+    GraphPort(graph::Port),
     /// Current creation colour (ribbon).
     Ribbon,
     /// The ribbon's displayed layer, independent of Layer Manager selection.
@@ -2869,6 +2923,8 @@ impl PartialEq for BlockDef {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ClipExtObjects {
     pub entity_index: usize,
+    #[serde(default)]
+    pub attribute_index: Option<usize>,
     pub src_entity_handle: document::Handle,
     pub root: document::Handle,
     pub objects: Vec<(document::Handle, document::objects::ObjectType)>,
@@ -3006,41 +3062,56 @@ impl ClipboardDeps {
                 }
             }
         }
-        // Extension-dictionary subtree per entity (XCLIP filters etc.).
+        // Extension-dictionary subtree per entity (XCLIP filters, annotation
+        // contexts, …) and per inline INSERT attribute.
         let mut ext_objects = Vec::new();
+        let mut push_ext = |entity_index: usize,
+                            attribute_index: Option<usize>,
+                            src_entity_handle: document::Handle,
+                            root: document::Handle| {
+            if root.is_null() {
+                return;
+            }
+            let objects = Self::collect_ext_subtree(doc, root);
+            if objects.is_empty() {
+                return;
+            }
+            let mut annotation_scales = Vec::new();
+            for (_, object) in &objects {
+                let document::objects::ObjectType::ObjectContextData(context) = object else {
+                    continue;
+                };
+                if annotation_scales
+                    .iter()
+                    .any(|(handle, _)| *handle == context.scale)
+                {
+                    continue;
+                }
+                if let Some(document::objects::ObjectType::Scale(scale)) =
+                    doc.objects.get(&context.scale)
+                {
+                    annotation_scales.push((context.scale, scale.clone()));
+                }
+            }
+            ext_objects.push(ClipExtObjects {
+                entity_index,
+                attribute_index,
+                src_entity_handle,
+                root,
+                objects,
+                annotation_scales,
+            });
+        };
         for (entity_index, e) in entities.iter().enumerate() {
             let c = e.common();
             if let Some(root) = c.xdictionary_handle {
-                if root.is_null() {
-                    continue;
-                }
-                let objects = Self::collect_ext_subtree(doc, root);
-                if !objects.is_empty() {
-                    let mut annotation_scales = Vec::new();
-                    for (_, object) in &objects {
-                        let document::objects::ObjectType::ObjectContextData(context) = object
-                        else {
-                            continue;
-                        };
-                        if annotation_scales
-                            .iter()
-                            .any(|(handle, _)| *handle == context.scale)
-                        {
-                            continue;
-                        }
-                        if let Some(document::objects::ObjectType::Scale(scale)) =
-                            doc.objects.get(&context.scale)
-                        {
-                            annotation_scales.push((context.scale, scale.clone()));
-                        }
+                push_ext(entity_index, None, c.handle, root);
+            }
+            if let EntityType::Insert(ins) = e {
+                for (attr_index, att) in ins.attributes.iter().enumerate() {
+                    if let Some(root) = att.common.xdictionary_handle {
+                        push_ext(entity_index, Some(attr_index), att.common.handle, root);
                     }
-                    ext_objects.push(ClipExtObjects {
-                        entity_index,
-                        src_entity_handle: c.handle,
-                        root,
-                        objects,
-                        annotation_scales,
-                    });
                 }
             }
         }
@@ -3239,6 +3310,9 @@ impl ClipboardDeps {
                             .filter_map(|entry| entry.value.as_handle()),
                     );
                 }
+                // A field's nested fields (a formula's operands) hang off it,
+                // not off a dictionary entry.
+                ObjectType::Field(f) => queue.extend(f.child_fields.iter().copied()),
                 _ => {}
             }
             out.push((h, obj.clone()));
@@ -3496,6 +3570,7 @@ pub enum ModalKind {
     BlockEditChanges,
     BlockEditPicker,
     Rename,
+    DesignCenter,
     Purge,
     DrawingProperties,
     GeographicLocation,
@@ -3529,6 +3604,7 @@ pub enum ModalKind {
     Aliases,
     NamedParameters,
     BlockEditorSettings,
+    VisualStyles,
     BlockCycleOrder,
     ScaleManager,
     /// Add / remove the annotation scales a single selected object has a
@@ -3658,6 +3734,16 @@ pub enum Message {
     ControlCopySetup,
     /// Node graph overlay interaction.
     Graph(crate::ui::node_graph::GraphMsg),
+    /// The end of a read of a file that a node graph node reads.
+    GraphFileRead(Box<crate::app::node_graph::files::FileRead>),
+    /// The end of the automation `node_graph` `load` read: the drawing it
+    /// was read for, that document's generation, and the file's bytes or
+    /// the failure.
+    GraphLoadRead(
+        u64,
+        u64,
+        Result<crate::ui::node_graph::LoadedGraph, serde_json::Value>,
+    ),
     Tick(Instant),
     /// Periodic drain of plugin-to-host requests that arrived outside a host
     /// call (e.g. mutations from the Python REPL).
@@ -3953,6 +4039,10 @@ pub enum Message {
     MenuBarChanged(bool),
     /// Options: show the ribbon (RIBBON / RIBBONCLOSE).
     RibbonVisibleChanged(bool),
+    /// Options: center the ribbon's tabs and panels.
+    RibbonCenteredChanged(bool),
+    /// Options: the mouse wheel over the ribbon steps through its tabs.
+    RibbonWheelTabsChanged(bool),
     /// Options: new hatches are associative (HPASSOC).
     HatchAssociativeChanged(bool),
     /// Interface scale in percent (Options > Display).
@@ -4033,6 +4123,11 @@ pub enum Message {
     LayerTranslatorLoad,
     /// A target set was read from `path`.
     LayerTranslatorLoaded(std::path::PathBuf),
+    /// The end of a read of LAYERSTATE IMPORT's or LAYTRANS's files.
+    LayerFileRead(Box<crate::app::commands::layer_file_reads::LayerFileRead>),
+    /// The end of a CUIIMPORT read: the file, and its shortcuts or why it
+    /// cannot be read.
+    ShortcutsFileRead(String, Result<Vec<(String, String)>, String>),
     /// Web: a standards drawing picked and parsed in the browser, with the
     /// target layers already extracted — a name-only path has nothing behind
     /// it for `load_targets` to read. `Ok(None)` = cancelled.
@@ -4075,6 +4170,11 @@ pub enum Message {
     SetProjection(bool),
     /// Select a ribbon module tab by index.
     RibbonSelectTab(usize),
+    /// The mouse wheel turned over the ribbon: step through its tabs.
+    RibbonWheel(iced::mouse::ScrollDelta),
+    /// The ribbon's layout changed what its last view was built on (the
+    /// room for the search box): view it anew.
+    RibbonRefit,
     /// The ribbon's right-click menu.
     RibbonMenu(crate::ui::ribbon::RibbonMenuMsg),
     /// A menu-bar entry: its command line, run like a ribbon button's. A
@@ -4242,6 +4342,7 @@ pub enum Message {
     BlockEditPickerSelect(String),
     BlockEditPickerApply,
     Rename(crate::ui::window::rename::RenameMsg),
+    DesignCenter(crate::ui::window::design_center::DesignCenterMsg),
     Purge(crate::ui::window::purge::PurgeMsg),
     DwgProps(crate::ui::window::drawing_properties::DwgPropsMsg),
     GeographicLocation(crate::ui::window::geographic_location::GeographicLocationMsg),
@@ -4410,6 +4511,13 @@ pub enum Message {
     /// the native typed-path command uses. `None` = cancelled.
     #[cfg(target_arch = "wasm32")]
     DataLinkCsvPicked(Option<(String, Vec<u8>)>),
+    /// Completion of a DATALINK read off the UI thread: the read (tab,
+    /// generation, command line, file), and the file's text or why it
+    /// cannot be read.
+    DataLinkCsvRead(
+        Box<crate::app::commands::display::DataLinkRead>,
+        Result<crate::app::commands::display::DataLinkCsv, String>,
+    ),
     /// Append one typed character to the command-line input from the
     /// global key-press subscription. Used when the text-input widget
     /// itself isn't focused (focus parked on viewport / button / etc.)
@@ -4464,6 +4572,12 @@ pub enum Message {
     CommandHistoryToggle,
     /// Grab/move/release the expanded history panel's top resize edge.
     CommandHistoryResizeGrab,
+    /// Drag the command line by its grip (floating mode).
+    CommandLineMoveGrab,
+    CommandLineMoveMove(Point),
+    CommandLineMoveRelease,
+    /// Put a floating command line back at the bottom of the drawing area.
+    CommandLineDock,
     CommandHistoryResizeMove(Point),
     CommandHistoryResizeRelease,
     /// Restore the expanded history panel to its default height.
@@ -4532,6 +4646,10 @@ pub enum Message {
     XrefSplitRelease,
     /// Flip the palette's details/preview lower pane.
     XrefManagerTogglePreview,
+    /// The end of the worker that decoded an Xref Manager preview: the
+    /// panel's refresh count when it was asked for, the cache key, and the
+    /// preview (`None`: the file has none).
+    XrefPreviewRead(u64, (u64, String), Option<iced::widget::image::Handle>),
     /// Toggle the Attach dropdown menu.
     XrefManagerAttachMenu,
     /// Toggle the Refresh dropdown menu.
@@ -4760,6 +4878,10 @@ pub enum Message {
     /// full pass at the position the gate withheld.
     MoveCoalesceTick,
     BoxPreviewTick,
+    /// Frame pulse while a huge selection's Properties rebuild is queued, so
+    /// the click / box release that committed the selection is not blocked by
+    /// the (potentially hundred-millisecond) panel build.
+    PropertiesRefreshTick,
     /// Large projected interaction index finished preparing off the UI thread.
     InteractionIndexReady {
         tab_id: u64,
@@ -5030,6 +5152,9 @@ pub enum Message {
     SnapClearAll,
     // ── Drafting Settings Dialog ──────────────────────────────────────────
     DraftingSettingsTabChanged(crate::ui::window::drafting_settings::DraftingSettingsTab),
+    /// Open Drafting Settings (or bring it up) on `tab`: a status pill's
+    /// "… Settings..." entry.
+    OpenDraftingSettings(crate::ui::window::drafting_settings::DraftingSettingsTab),
     DraftingSettingsToggleGrid,
     DraftingSettingsToggleSnap,
     DraftingSettingsSnapXChanged(String),
@@ -5055,6 +5180,7 @@ pub enum Message {
     DraftingSettingsSnapClearAll,
     DraftingSettingsToggle3dOsnap,
     DraftingSettingsToggleDynInput,
+    DraftingSettingsDynPrefs(crate::ui::window::drafting_settings::DynInputPrefs),
     DraftingSettingsToggleQuickProps,
     /// Quick Properties palette location: floating (true) or by the cursor.
     DraftingSettingsQuickPropsFloat(bool),
@@ -5335,6 +5461,14 @@ pub enum Message {
         field: crate::ui::window::shortcuts::ShortcutField,
         value: String,
     },
+    /// A row of a Command box's suggestion list was picked: the command
+    /// replaces the typed text of row `idx`.
+    ShortcutEditorSuggestionPick {
+        idx: usize,
+        command: String,
+    },
+    /// Close the suggestion list (Esc, or a click outside it).
+    ShortcutEditorSuggestionDismiss,
     ShortcutEditorFilter(String),
     ShortcutEditorAdd,
     ShortcutEditorRemove(usize),
@@ -5343,6 +5477,10 @@ pub enum Message {
     ShortcutEditorApplyExit,
     /// The check button on a draft row: finish the addition without applying.
     ShortcutEditorDraftAccept,
+    /// Pick an xlsx/csv/txt shortcut file and merge it into the editor rows.
+    ShortcutEditorImport,
+    /// The picked file's bytes, or the read error (none when cancelled).
+    ShortcutEditorImported(Option<Result<Vec<u8>, String>>),
     /// Show the "Reset to default" confirmation.
     ShortcutEditorResetAsk,
     /// Reset bindings and rows to the shipped defaults.
@@ -5415,6 +5553,10 @@ pub enum Message {
     /// `Scene::named_parameters`.
     NamedParametersOpen,
     BlockEditorSettingsInput(usize, String),
+    /// Visual Styles Manager: crease angle typed / submitted, occluded edges toggled.
+    VisualStylesCreaseInput(String),
+    VisualStylesCreaseApply,
+    VisualStylesOccludedEdges(bool),
     BlockConstraintColorInput(usize, String),
     ToggleBlockConstraintStatus,
     BlockEditorSettingsReset,
@@ -5728,6 +5870,8 @@ pub enum Message {
     /// Switch the editor body between raw code input (`false`) and the
     /// rendered preview (`true`).
     MTextShowPreview(bool),
+    /// Enter in a toolbar field: typing goes back to the text.
+    MTextFieldSubmit,
     /// Begin a preview text selection at the given visible-character offset.
     MTextSelStart(usize),
     /// Extend the preview selection to the given visible-character offset.
@@ -5738,6 +5882,9 @@ pub enum Message {
     MTextSelEnd,
     /// Import Text: the file picked.
     MTextImport(String),
+    /// The end of the worker that read an Import Text file: the editor it
+    /// was read for, and the file's MTEXT source or why it cannot be read.
+    MTextImportRead(u64, Result<String, String>),
     /// Timer tick toggling the preview caret's blink phase.
     MTextCaretBlink,
     TableEditorClick(iced::Point),
@@ -5893,7 +6040,16 @@ pub enum Message {
     /// process down with it.
     /// A point cloud read that the drawing started ended: its clouds draw
     /// again with the points.
+    /// The end of the worker that drew a zoom step's underlay and OLE
+    /// rasters: the drawing it was started for, that document's generation,
+    /// and the rasters.
+    UnderlayRastersDrawn(u64, u64, Box<crate::scene::ReseedDone>),
     PointCloudRead(crate::scene::model::point_cloud::ReadDone),
+    /// The end of the worker that read an automation `embed_image` picture:
+    /// the drawing it was started for, that document's generation, and the
+    /// read.
+    #[cfg(not(target_arch = "wasm32"))]
+    EmbedImageRead(u64, u64, Box<control::EmbedImageRead>),
     BackgroundTaskFailed {
         /// Which operation the worker was running (e.g. "STL export").
         context: String,
@@ -6333,6 +6489,10 @@ pub enum Message {
         crate::io::model_import::ModelFormat,
         Result<crate::io::model_import::Imported, crate::io::model_import::ImportFailure>,
     ),
+    /// Completion of a LANDXMLIMPORT read off the UI thread: the tab it
+    /// was started for, that document's generation, the file, and its
+    /// survey points or why it cannot be read.
+    LandXmlImportFinished(u64, u64, String, Result<Vec<[f64; 3]>, String>),
     // ── Picture import (WMF/SVG) ──────────────────────────────────────────
     /// Completion of a WMF or SVG import read off the UI thread: the tab it
     /// was started for, that document's generation, the file (none for SVG
@@ -6443,6 +6603,7 @@ impl OpenCADStudio {
             history_content: iced::widget::text_editor::Content::new(),
             command_history_resizing: false,
             command_history_drag_last: None,
+            command_line_moving: false,
             status_bar: StatusBar::new(),
             cursor_pos: Point::ORIGIN,
             vp_size: (1280.0, 720.0),
@@ -6490,6 +6651,7 @@ impl OpenCADStudio {
             block_definition_open_editor: None,
             block_edit_picker: None,
             rename_dialog: None,
+            design_center: None,
             drawing_properties: None,
             geographic_location: None,
             purge_dialog: None,
@@ -6502,17 +6664,21 @@ impl OpenCADStudio {
             block_visibility_mode: false,
             block_editor_preferences: settings::BlockEditorPreferences::default(),
             block_editor_settings: None,
+            visual_styles_crease: None,
             block_cycle_order: None,
             block_dependency_cache: std::cell::RefCell::new(None),
             pdf_attach: None,
             point_cloud_attach: None,
             point_cloud_prompt_read: None,
+            graph_file_reader: crate::app::node_graph::files::read_file,
+            import_window_read: 0,
             attdef_dialog: None,
             insert_attr_dialog: None,
             attman: None,
             attdef_edit: None,
             field_dialog: None,
             field_formula_parent: None,
+            field_number_format: Default::default(),
             point_cloud_color_map: None,
             pc_section: None,
             view_background: None,
@@ -6629,6 +6795,9 @@ impl OpenCADStudio {
             grid_axes: true,
             dyn_input: true,
             dyn_mode: 3,
+            dyn_pointer_cartesian: false,
+            dyn_pointer_absolute: false,
+            dyn_pointer_on_type: false,
             options_tab: crate::ui::window::options::OptionsTab::General,
             #[cfg(not(target_arch = "wasm32"))]
             graphics_prefs: crate::gpu_backend::load_prefs(),
@@ -6735,6 +6904,7 @@ impl OpenCADStudio {
             hover_pick_due: iced::time::Instant::now(),
             move_owed: None,
             box_preview_pending: None,
+            properties_refresh_pending: None,
             box_preview_due: None,
             box_preview_cache: None,
             move_pass_due: None,
@@ -6775,6 +6945,7 @@ impl OpenCADStudio {
             show_parameters_manager: false,
             authoring_palette_tab: Default::default(),
             show_node_graph: false,
+            node_graph_links: Default::default(),
             property_target_override: None,
             graph_undo_open: false,
             show_external_references: false,
@@ -7053,6 +7224,7 @@ impl OpenCADStudio {
             shortcut_filter: String::new(),
             shortcut_capture_row: None,
             shortcut_pending_add: false,
+            shortcut_suggest: None,
             shortcut_reset_confirm: false,
             shortcut_close_confirm: false,
             // Command aliases (populated from ocad.pgp just after construction)

@@ -143,6 +143,21 @@ impl OpenCADStudio {
         self.quick_calc.context(base_unit(tab), Some(sysvars(tab)))
     }
 
+    /// A numeric Properties entry as the value it stands for: the
+    /// QuickCalc engine's number when it reads the whole entry
+    /// (`sqrt(2)*$w`, `r2d(atan(1))`, `ans`), else the arithmetic and
+    /// embedded-expression evaluation every typed field shares.
+    pub(in crate::app) fn property_expression_value(&self, raw: &str) -> String {
+        if crate::app::expr_eval::eval_number(raw.trim()).is_none() {
+            if let Ok(crate::app::calc::Value::Number(n)) =
+                crate::app::calc::value_of(raw, &self.quick_calc_context())
+            {
+                return format!("{n}");
+            }
+        }
+        crate::app::expr_eval::eval_to_string(raw)
+    }
+
     /// QUICKCALC / QC: show the pallet (docked on the right the first time)
     /// with the input focused, or close it when it is showing.
     pub(in crate::app) fn toggle_quick_calc(&mut self) -> Task<Message> {

@@ -360,7 +360,10 @@ impl OpenCADStudio {
 
 impl OpenCADStudio {
     /// PDFATTACH's end: every page's definition (created or reused, with the
-    /// definitions dictionary) and underlay in one undo step.
+    /// definitions dictionary) and underlay in one undo step. When the
+    /// pages can be placed by their geospatial data (`auto_place` and a
+    /// coordinate system), the PDF is read off the UI thread first, and the
+    /// pages are placed when the read ends ([`Self::finish_attach_pdf_pages`]).
     pub(crate) fn attach_pdf_pages(
         &mut self,
         i: usize,
@@ -369,11 +372,94 @@ impl OpenCADStudio {
         path: &str,
         pages: Vec<(String, document::EntityType)>,
         auto_place: bool,
+    ) -> iced::Task<crate::app::Message> {
+        self.attach_pdf_pages_with(i, label, kind, path, pages, auto_place, placements_in)
+    }
+
+    /// [`Self::attach_pdf_pages`] with the placement read given, so a test
+    /// can give one that panics.
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::app) fn attach_pdf_pages_with(
+        &mut self,
+        i: usize,
+        label: String,
+        kind: document::entities::UnderlayType,
+        path: &str,
+        pages: Vec<(String, document::EntityType)>,
+        auto_place: bool,
+        placer: GeoPdfPlacer,
+    ) -> iced::Task<crate::app::Message> {
+        let Some(context) = geo_context(&self.tabs[i].scene, kind, auto_place) else {
+            let placements = vec![None; pages.len()];
+            self.place_pdf_pages(i, label, kind, path, pages, &placements);
+            return iced::Task::none();
+        };
+        let tab_id = self.tabs[i].id;
+        let generation = self.tabs[i].document_generation;
+        let path = path.to_string();
+        crate::app::update::background_task(
+            "PDFATTACH",
+            move || {
+                let placements = placer(Some(&context), &path, &pages);
+                Box::new(crate::ui::window::pdf_dialogs::PlacedPdfPages {
+                    label,
+                    kind,
+                    path,
+                    pages,
+                    placements,
+                })
+            },
+            move |placed| {
+                crate::app::Message::PdfDialog(
+                    crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachPlaced(
+                        tab_id, generation, placed,
+                    ),
+                )
+            },
+        )
+    }
+
+    /// The end of the placement read: the pages are placed in the drawing
+    /// the attach was started for. A result for a drawing that was closed,
+    /// replaced or cleared is dropped, and so is one for a drawing that is
+    /// not the current one now (`commit_entity_handle` writes to the
+    /// current drawing).
+    pub(in crate::app) fn finish_attach_pdf_pages(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        placed: crate::ui::window::pdf_dialogs::PlacedPdfPages,
     ) {
-        // Resolve every page before opening the existing single transaction.
-        // A bad or unsupported page retains the values built by PDFATTACH;
-        // it never prevents a sibling page from being placed geospatially.
-        let placements = auto_pdf_placements(&self.tabs[i].scene, kind, path, &pages, auto_place);
+        let Some(i) = self.import_target(tab_id, generation) else {
+            return;
+        };
+        if i != self.active_tab {
+            self.command_line.push_error(
+                "Attach PDF cancelled: a different drawing became current while the file was read.",
+            );
+            return;
+        }
+        let crate::ui::window::pdf_dialogs::PlacedPdfPages {
+            label,
+            kind,
+            path,
+            pages,
+            placements,
+        } = placed;
+        self.place_pdf_pages(i, label, kind, &path, pages, &placements);
+    }
+
+    /// The pages in one undo step, each placed by its GeoPDF placement when
+    /// it has one.
+    fn place_pdf_pages(
+        &mut self,
+        i: usize,
+        label: String,
+        kind: document::entities::UnderlayType,
+        path: &str,
+        pages: Vec<(String, document::EntityType)>,
+        placements: &[Option<crate::io::geopdf::GeoPlacement>],
+    ) {
         let pending = self.begin_undo(i, label, pages.len(), false);
 
         for (index, (page, mut entity)) in pages.into_iter().enumerate() {
@@ -411,8 +497,27 @@ fn apply_geo_placement(
 
 /// Build final underlays without manual placement prompts only when every
 /// selected PDF page has an unambiguous transform in the current host context.
+#[cfg(test)]
 pub(super) fn fully_georeferenced_pdf_pages(
     scene: &crate::scene::Scene,
+    kind: document::entities::UnderlayType,
+    path: &str,
+    page_names: &[String],
+    plane: crate::command::WorkingPlane,
+) -> Option<Vec<(String, document::EntityType)>> {
+    georeferenced_pages_in(
+        geo_context(scene, kind, true).as_ref(),
+        kind,
+        path,
+        page_names,
+        plane,
+    )
+}
+
+/// [`fully_georeferenced_pdf_pages`] with the drawing's part given
+/// ([`geo_context`]): it reads only the PDF, so a worker can run it.
+pub(super) fn georeferenced_pages_in(
+    context: Option<&GeoContext>,
     kind: document::entities::UnderlayType,
     path: &str,
     page_names: &[String],
@@ -431,7 +536,7 @@ pub(super) fn fully_georeferenced_pdf_pages(
     .into_iter()
     .map(|(page, entity)| (page, plane.place_entity(entity)))
     .collect::<Vec<_>>();
-    let placements = auto_pdf_placements(scene, kind, path, &pages, true);
+    let placements = placements_in(context, path, &pages);
     if placements.iter().any(Option::is_none) {
         return None;
     }
@@ -443,14 +548,35 @@ pub(super) fn fully_georeferenced_pdf_pages(
     Some(pages)
 }
 
-fn auto_pdf_placements(
+/// The drawing's coordinate system and its millimetres per drawing unit.
+pub(super) type GeoContext = (crate::io::crs::CrsDefinition, f64);
+
+/// A GeoPDF check without the drawing: [`georeferenced_pages_in`], or a
+/// test's check.
+pub(super) type GeoPdfCheck = fn(
+    Option<&GeoContext>,
+    document::entities::UnderlayType,
+    &str,
+    &[String],
+    crate::command::WorkingPlane,
+) -> Option<Vec<(String, document::EntityType)>>;
+
+/// The GeoPDF placement of each page without the drawing: [`placements_in`],
+/// or a test's.
+pub(in crate::app) type GeoPdfPlacer = fn(
+    Option<&GeoContext>,
+    &str,
+    &[(String, document::EntityType)],
+) -> Vec<Option<crate::io::geopdf::GeoPlacement>>;
+
+/// The part of a GeoPDF placement that comes from the drawing: `None` when
+/// PDF pages cannot be placed by their geospatial data here.
+pub(super) fn geo_context(
     scene: &crate::scene::Scene,
     kind: document::entities::UnderlayType,
-    path: &str,
-    pages: &[(String, document::EntityType)],
     enabled: bool,
-) -> Vec<Option<crate::io::geopdf::GeoPlacement>> {
-    let context = (enabled
+) -> Option<GeoContext> {
+    (enabled
         && kind == document::entities::UnderlayType::Pdf
         && scene.current_layout == "Model"
         && scene.block_edit_block.is_none())
@@ -465,11 +591,31 @@ fn auto_pdf_placements(
         };
         Some((crs, unit_mm))
     })
-    .flatten();
+    .flatten()
+}
+
+#[cfg(test)]
+fn auto_pdf_placements(
+    scene: &crate::scene::Scene,
+    kind: document::entities::UnderlayType,
+    path: &str,
+    pages: &[(String, document::EntityType)],
+    enabled: bool,
+) -> Vec<Option<crate::io::geopdf::GeoPlacement>> {
+    placements_in(geo_context(scene, kind, enabled).as_ref(), path, pages)
+}
+
+/// The GeoPDF placement of each page for a drawing context; it reads only
+/// the PDF.
+fn placements_in(
+    context: Option<&GeoContext>,
+    path: &str,
+    pages: &[(String, document::EntityType)],
+) -> Vec<Option<crate::io::geopdf::GeoPlacement>> {
     pages
         .iter()
         .map(|(page, entity)| {
-            let (crs, unit_mm) = context.as_ref()?;
+            let (crs, unit_mm) = context?;
             let document::EntityType::Underlay(underlay) = entity else {
                 return None;
             };
@@ -598,7 +744,7 @@ mod geo_attach_tests {
         let path = "interactive-geopdf.pdf";
         crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
         let before = app.tabs[i].history.undo_stack.len();
-        app.attach_pdf_pages(
+        let placed = app.attach_pdf_pages(
             i,
             "PDFATTACH".to_string(),
             UnderlayType::Pdf,
@@ -606,6 +752,7 @@ mod geo_attach_tests {
             pages(DVec3::new(10.0, 20.0, 0.0)),
             true,
         );
+        app.drive_headless_task(placed).expect("the placement read");
         app.finish_all_pending_history();
         assert_eq!(app.tabs[i].history.undo_stack.len(), before + 1);
 
@@ -645,7 +792,8 @@ mod geo_attach_tests {
         app.tabs[i].scene.selected.insert(selected);
         let path = "/virtual/dialog-geopdf.pdf";
         crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
-        let _ = app.open_pdf_attach_dialog(path);
+        let read = app.open_pdf_attach_dialog(path);
+        app.drive_headless_task(read).expect("the read task");
         let state = app.pdf_attach.as_mut().expect("attach dialog");
         state.path_type =
             crate::ui::window::pdf_dialogs::PathTypeChoice(crate::io::xref_model::Pathtype::None);
@@ -655,9 +803,10 @@ mod geo_attach_tests {
         assert!(state.geopdf_available);
         assert!(state.geopdf_auto);
 
-        let _ = app.update(crate::app::Message::PdfDialog(
+        let ok = app.update(crate::app::Message::PdfDialog(
             crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachOk,
         ));
+        app.drive_headless_task(ok).expect("OK's GeoPDF read");
 
         assert!(app.tabs[i].active_cmd.is_none());
         assert!(app.pdf_attach.is_none());
@@ -682,7 +831,8 @@ mod geo_attach_tests {
         set_crs(&mut app);
         let path = "dialog-manual-geopdf.pdf";
         crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
-        let _ = app.open_pdf_attach_dialog(path);
+        let read = app.open_pdf_attach_dialog(path);
+        app.drive_headless_task(read).expect("the read task");
         assert!(app.pdf_attach.as_ref().unwrap().geopdf_auto);
 
         let _ = app.update(crate::app::Message::PdfDialog(
@@ -721,12 +871,14 @@ mod geo_attach_tests {
         set_crs(&mut app);
         let path = "dialog-mixed-geopdf.pdf";
         crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
-        let _ = app.open_pdf_attach_dialog(path);
+        let read = app.open_pdf_attach_dialog(path);
+        app.drive_headless_task(read).expect("the read task");
         app.ctrl_down = true;
-        let _ = app.update(crate::app::Message::PdfDialog(
+        let check = app.update(crate::app::Message::PdfDialog(
             crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachPage(1),
         ));
         app.ctrl_down = false;
+        app.drive_headless_task(check).expect("the GeoPDF check");
         let state = app.pdf_attach.as_mut().expect("attach dialog");
         assert_eq!(state.selected, vec![0, 1]);
         assert!(!state.geopdf_available);
@@ -746,6 +898,331 @@ mod geo_attach_tests {
         assert!(attached(&app).is_empty());
         let command = app.tabs[i].active_cmd.as_ref().expect("manual fallback");
         assert_eq!(command.prompt(), "Specify insertion point:");
+    }
+
+    /// A GeoPDF check that panics gives an error, and the window stays
+    /// without GeoPDF placement.
+    #[test]
+    fn a_geopdf_check_that_panics_is_an_error() {
+        let mut app = app();
+        set_crs(&mut app);
+        let path = "dialog-geopdf-panic.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let read = app.open_pdf_attach_dialog(path);
+        app.drive_headless_task(read).expect("the read task");
+        assert!(app.pdf_attach.as_ref().unwrap().geopdf_available);
+        app.pdf_attach.as_mut().unwrap().selected = vec![1];
+        let check = app.check_pdf_attach_geopdf_with(|_, _, _, _, _| panic!("a reader bug"));
+        app.drive_headless_task(check).expect("the GeoPDF check");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("PDFATTACH failed: a reader bug")
+        );
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::PdfAttach));
+        assert!(
+            app.pdf_attach.as_ref().unwrap().geopdf_available,
+            "no answer, no change"
+        );
+    }
+
+    /// The answer of a check is taken only for the file and the pages that
+    /// the open window shows.
+    #[test]
+    fn a_geopdf_answer_for_other_pages_or_a_closed_window_changes_nothing() {
+        use crate::ui::window::pdf_dialogs::PdfDialogMsg;
+        let mut app = app();
+        let path = "dialog-geopdf-answers.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let read = app.open_pdf_attach_dialog(path);
+        app.drive_headless_task(read).expect("the read task");
+        let available = |app: &OpenCADStudio| app.pdf_attach.as_ref().unwrap().geopdf_available;
+        assert!(!available(&app), "no coordinate system");
+        let answer = |path: &str, page: &str| {
+            crate::app::Message::PdfDialog(PdfDialogMsg::AttachGeoChecked(
+                path.to_string(),
+                vec![page.to_string()],
+                true,
+            ))
+        };
+        let _ = app.update(answer(path, "2"));
+        assert!(!available(&app), "other pages");
+        let _ = app.update(answer("other.pdf", "1"));
+        assert!(!available(&app), "another file");
+        app.active_modal = None;
+        let _ = app.update(answer(path, "1"));
+        assert!(!available(&app), "a closed window");
+        app.active_modal = Some(crate::app::ModalKind::PdfAttach);
+        let _ = app.update(answer(path, "1"));
+        let state = app.pdf_attach.as_ref().unwrap();
+        assert!(state.geopdf_available, "the pages shown");
+        assert!(state.geopdf_auto);
+    }
+
+    /// A name change checks the new file: a file with no page shows no
+    /// GeoPDF placement, also after a GeoPDF file.
+    #[test]
+    fn a_name_change_checks_the_new_file_for_geopdf() {
+        use crate::ui::window::pdf_dialogs::PdfDialogMsg;
+        let mut app = app();
+        set_crs(&mut app);
+        let (geo, empty) = ("dialog-geopdf-name.pdf", "dialog-geopdf-name-empty.pdf");
+        crate::scene::model::pdf_raster::register_source(geo, Arc::new(two_page_pdf()));
+        crate::scene::model::pdf_raster::register_source(empty, Arc::new(b"not a PDF".to_vec()));
+        let read = app.open_pdf_attach_dialog(geo);
+        app.drive_headless_task(read).expect("the read task");
+        let state = app.pdf_attach.as_mut().unwrap();
+        assert!(state.geopdf_available);
+        state.existing = vec![("empty".to_string(), empty.to_string())];
+        let read = app.update(crate::app::Message::PdfDialog(PdfDialogMsg::AttachName(
+            "empty".to_string(),
+        )));
+        app.drive_headless_task(read).expect("the name read");
+        let state = app.pdf_attach.as_ref().unwrap();
+        assert_eq!(state.path, empty);
+        assert!(!state.geopdf_available);
+        assert!(!state.geopdf_auto);
+    }
+
+    /// The underlays in drawing `i`.
+    fn underlays_in(app: &OpenCADStudio, i: usize) -> usize {
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter(|entity| matches!(entity, document::EntityType::Underlay(_)))
+            .count()
+    }
+
+    /// A PDFATTACH with automatic placement reads the placements on a
+    /// worker: nothing is placed until the read ends.
+    #[test]
+    fn geopdf_pages_are_placed_only_when_the_read_ends() {
+        let mut app = app();
+        let i = app.active_tab;
+        set_crs(&mut app);
+        let path = "placed-on-a-worker.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let placed = app.attach_pdf_pages(
+            i,
+            "PDFATTACH".to_string(),
+            UnderlayType::Pdf,
+            path,
+            pages(DVec3::ZERO),
+            true,
+        );
+        assert_eq!(
+            underlays_in(&app, i),
+            0,
+            "nothing is placed during the read"
+        );
+        app.drive_headless_task(placed).expect("the placement read");
+        assert_eq!(underlays_in(&app, i), 2);
+    }
+
+    /// The command's end (`CmdResult::AttachPdfPages` with automatic
+    /// placement) returns the placement read, and the pages are placed
+    /// when it ends.
+    #[test]
+    fn the_command_result_returns_the_placement_read() {
+        let mut app = app();
+        let i = app.active_tab;
+        set_crs(&mut app);
+        let path = "placed-by-the-command.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let placed = app.apply_cmd_result(crate::command::CmdResult::AttachPdfPages {
+            kind: UnderlayType::Pdf,
+            path: path.to_string(),
+            pages: pages(DVec3::ZERO),
+            auto_place: true,
+        });
+        assert_eq!(
+            underlays_in(&app, i),
+            0,
+            "nothing is placed during the read"
+        );
+        app.drive_headless_task(placed).expect("the placement read");
+        assert_eq!(underlays_in(&app, i), 2);
+    }
+
+    /// Without automatic placement nothing is read: the pages are placed at
+    /// once.
+    #[test]
+    fn pages_without_automatic_placement_are_placed_at_once() {
+        let mut app = app();
+        let i = app.active_tab;
+        set_crs(&mut app);
+        let path = "placed-at-once.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let _ = app.attach_pdf_pages_with(
+            i,
+            "PDFATTACH".to_string(),
+            UnderlayType::Pdf,
+            path,
+            pages(DVec3::ZERO),
+            false,
+            |_, _, _| panic!("no read"),
+        );
+        assert_eq!(underlays_in(&app, i), 2);
+    }
+
+    /// A placement read that panics gives an error, and nothing is placed.
+    #[test]
+    fn a_placement_read_that_panics_is_an_error() {
+        let mut app = app();
+        let i = app.active_tab;
+        set_crs(&mut app);
+        let before = app.tabs[i].history.undo_stack.len();
+        let placed = app.attach_pdf_pages_with(
+            i,
+            "PDFATTACH".to_string(),
+            UnderlayType::Pdf,
+            "placement-panics.pdf",
+            pages(DVec3::ZERO),
+            true,
+            |_, _, _| panic!("a reader bug"),
+        );
+        app.drive_headless_task(placed).expect("the placement read");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("PDFATTACH failed: a reader bug")
+        );
+        assert_eq!(underlays_in(&app, i), 0);
+        app.finish_all_pending_history();
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before);
+    }
+
+    /// A result for a drawing that was replaced is dropped.
+    #[test]
+    fn a_placement_for_a_replaced_drawing_is_dropped() {
+        let mut app = app();
+        let i = app.active_tab;
+        set_crs(&mut app);
+        let path = "placement-replaced.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let placed = app.attach_pdf_pages(
+            i,
+            "PDFATTACH".to_string(),
+            UnderlayType::Pdf,
+            path,
+            pages(DVec3::ZERO),
+            true,
+        );
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.drive_headless_task(placed).expect("the placement read");
+        assert_eq!(underlays_in(&app, app.active_tab), 0);
+        let history = app
+            .command_line
+            .history
+            .iter()
+            .map(|entry| entry.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(history.contains("was replaced"), "{history}");
+    }
+
+    /// A result for a drawing that is no longer the current one is dropped
+    /// with a message: the commit writes to the current drawing.
+    #[test]
+    fn a_placement_for_a_drawing_that_is_not_current_is_dropped() {
+        let mut app = app();
+        let i = app.active_tab;
+        set_crs(&mut app);
+        let path = "placement-not-current.pdf";
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let placed = app.attach_pdf_pages(
+            i,
+            "PDFATTACH".to_string(),
+            UnderlayType::Pdf,
+            path,
+            pages(DVec3::ZERO),
+            true,
+        );
+        app.push_test_document();
+        app.active_tab = app.tabs.len() - 1;
+        app.drive_headless_task(placed).expect("the placement read");
+        assert_eq!(underlays_in(&app, i), 0);
+        assert_eq!(underlays_in(&app, app.active_tab), 0);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some(
+                "Attach PDF cancelled: a different drawing became current while the file was read."
+            )
+        );
+    }
+
+    /// The Attach window open on a GeoPDF file with the automatic choice
+    /// on and the placement on screen.
+    fn geopdf_window(app: &mut OpenCADStudio, path: &str) {
+        set_crs(app);
+        crate::scene::model::pdf_raster::register_source(path, Arc::new(two_page_pdf()));
+        let read = app.open_pdf_attach_dialog(path);
+        app.drive_headless_task(read).expect("the read task");
+        let state = app.pdf_attach.as_mut().expect("attach dialog");
+        state.path_type =
+            crate::ui::window::pdf_dialogs::PathTypeChoice(crate::io::xref_model::Pathtype::None);
+        state.insert_on_screen = true;
+        state.scale_on_screen = true;
+        state.rotation_on_screen = true;
+        assert!(state.geopdf_auto);
+    }
+
+    /// OK with the automatic GeoPDF choice reads the placement on a worker:
+    /// the window stays open and nothing is attached until the read ends.
+    #[test]
+    fn ok_reads_the_geopdf_placement_on_a_worker() {
+        let mut app = app();
+        geopdf_window(&mut app, "ok-on-a-worker.pdf");
+        let ok = app.update(crate::app::Message::PdfDialog(
+            crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachOk,
+        ));
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::PdfAttach));
+        assert!(
+            attached(&app).is_empty(),
+            "nothing is attached during the read"
+        );
+        app.drive_headless_task(ok).expect("OK's GeoPDF read");
+        assert!(app.pdf_attach.is_none());
+        assert_eq!(attached(&app).len(), 1);
+    }
+
+    /// OK's GeoPDF read that panics gives an error, and the window stays
+    /// open with nothing attached.
+    #[test]
+    fn an_ok_read_that_panics_keeps_the_window() {
+        let mut app = app();
+        let i = app.active_tab;
+        geopdf_window(&mut app, "ok-panics.pdf");
+        let ok = app.pdf_attach_ok_with(i, |_, _, _, _, _| panic!("a reader bug"));
+        app.drive_headless_task(ok).expect("OK's GeoPDF read");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("PDFATTACH failed: a reader bug")
+        );
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::PdfAttach));
+        assert!(app.pdf_attach.is_some());
+        assert!(attached(&app).is_empty());
+    }
+
+    /// An answer for a window that changed (the automatic choice turned
+    /// off, another page) or that closed during the read is dropped.
+    #[test]
+    fn an_ok_answer_for_a_changed_or_closed_window_is_dropped() {
+        for change in 0..3 {
+            let mut app = app();
+            geopdf_window(&mut app, "ok-changed.pdf");
+            let ok = app.update(crate::app::Message::PdfDialog(
+                crate::ui::window::pdf_dialogs::PdfDialogMsg::AttachOk,
+            ));
+            let state = app.pdf_attach.as_mut().unwrap();
+            match change {
+                0 => state.geopdf_auto = false,
+                1 => state.selected = vec![1],
+                _ => app.active_modal = None,
+            }
+            app.drive_headless_task(ok).expect("OK's GeoPDF read");
+            assert!(attached(&app).is_empty(), "change {change}");
+            assert!(app.pdf_attach.is_some(), "change {change}");
+        }
     }
 
     fn unit_geographic_pdf() -> Vec<u8> {
@@ -815,7 +1292,7 @@ mod geo_attach_tests {
         );
         set_crs(&mut app);
         let authored = sample.clone();
-        app.attach_pdf_pages(
+        let _ = app.attach_pdf_pages(
             i,
             "PDFATTACH".to_string(),
             UnderlayType::Pdf,
@@ -919,7 +1396,7 @@ mod pdfimport_tests {
             1.0,
             0.0,
         );
-        app.attach_pdf_pages(
+        let _ = app.attach_pdf_pages(
             i,
             "PDFATTACH".to_string(),
             UnderlayType::Pdf,
@@ -1148,6 +1625,177 @@ mod pdfimport_tests {
         let (mut texts, _) = content(&app);
         texts.sort();
         assert_eq!(texts, ["Hello PDF", "Tilted"]);
+    }
+
+    /// A script line with all the answers waits at the read, as at a PAUSE,
+    /// and takes the rest of the line when the read ends.
+    #[test]
+    fn a_one_line_script_takes_its_answers_after_the_read() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = inkscape().replace('\\', "\\\\");
+        let response = app.automation_op(&format!(
+            r#"{{"op":"run","cmd":"-PDFIMPORT F \"{path}\" 1 5,5 3 0"}}"#
+        ));
+        assert!(app.tabs[i].active_cmd.is_none(), "{response}");
+        assert_eq!(app.tabs[i].history.undo_stack.len(), 1);
+        let (mut texts, _) = content(&app);
+        texts.sort();
+        assert_eq!(texts, ["Hello PDF", "Tilted"]);
+    }
+
+    /// A script line whose file needs a password keeps its answers while
+    /// the password window is open; cancelling the window drops them, so
+    /// they do not go to the next file name.
+    #[test]
+    fn a_cancelled_password_drops_the_rest_of_the_line() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path =
+            std::env::temp_dir().join(format!("pdfimport-locked-{}.pdf", std::process::id()));
+        let file = "%PDF-1.4\ntrailer\n<< /Encrypt << /Filter /Standard /V 1 /R 2 \
+            /O <95fe1f4219662a774442fb072e3d9f19e9d130ec09a4d0061e78fe920f7ab62f> \
+            /U <0102030405060708090a0b0c0d0e0f100102030405060708090a0b0c0d0e0f10> /P -44 >> >>\n%%EOF\n";
+        std::fs::write(&path, file).expect("write the locked file");
+        let _ = app.automation_op(&format!(
+            r#"{{"op":"run","cmd":"-PDFIMPORT F \"{}\" 1 5,5 3 0"}}"#,
+            path.to_string_lossy().replace('\\', "\\\\")
+        ));
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::PdfPassword));
+        assert!(
+            app.tabs[i].pending_pause_tokens.is_some(),
+            "the answers wait"
+        );
+        let _ = app.cancel_pdf_password();
+        assert_eq!(app.tabs[i].pending_pause_tokens, None);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// -PDFIMPORT at its file name prompt, the File option taken.
+    fn at_file_name(app: &mut OpenCADStudio) {
+        let _ = app.update(Message::Command("-PDFIMPORT".to_string()));
+        let task = app.feed_command(StepInput::Text("F".to_string()));
+        app.drive_headless_task(task).expect("the command's task");
+    }
+
+    fn prompt(app: &OpenCADStudio) -> String {
+        app.tabs[app.active_tab]
+            .active_cmd
+            .as_ref()
+            .map(|command| command.prompt())
+            .unwrap_or_default()
+    }
+
+    /// The file name prompt reads the file on a worker: the command waits,
+    /// after a `Reading` line, and asks for the page when the read ends.
+    #[test]
+    fn the_file_name_prompt_waits_for_the_read() {
+        let mut app = new_app();
+        let path = inkscape();
+        at_file_name(&mut app);
+        let read = app.feed_command(StepInput::Text(path.clone()));
+        assert_eq!(prompt(&app), "Reading the file…");
+        // Input waits until the read ends.
+        let _ = app.feed_command(StepInput::Text("other.pdf".to_string()));
+        assert_eq!(prompt(&app), "Reading the file…");
+        assert!(
+            history(&app).contains(&format!(
+                "Reading {}…",
+                crate::entities::underlay::display_path(&path)
+            )),
+            "{}",
+            history(&app)
+        );
+        app.drive_headless_task(read).expect("the read task");
+        assert_eq!(prompt(&app), "Enter page number or [?] <1>:");
+    }
+
+    /// A reader that panics gives an error, and the command asks for the
+    /// file name again; it does not wait for ever.
+    #[test]
+    fn a_reader_panic_at_the_prompt_asks_for_the_file_again() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = inkscape();
+        at_file_name(&mut app);
+        let _ = app.feed_command(StepInput::Text(path.clone()));
+        let read = app.read_pdf_for_import_prompt_with(i, path, |_| panic!("a reader bug"));
+        app.drive_headless_task(read).expect("the read task");
+        assert!(
+            history(&app).contains("PDFIMPORT failed: a reader bug"),
+            "{}",
+            history(&app)
+        );
+        assert_eq!(prompt(&app), "Enter filename for PDF import:");
+    }
+
+    /// A read for a command that ended changes nothing.
+    #[test]
+    fn a_prompt_read_after_the_command_ended_changes_nothing() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        at_file_name(&mut app);
+        let read = app.feed_command(StepInput::Text(inkscape()));
+        let _ = app.update(Message::Command("LINE".to_string()));
+        let line = prompt(&app);
+        app.drive_headless_task(read).expect("the read task");
+        assert_eq!(prompt(&app), line);
+        assert!(app.tabs[i].active_cmd.is_some());
+    }
+
+    /// The read of a file named before the command started again changes
+    /// nothing; the read of the file named now goes on.
+    #[test]
+    fn the_read_of_an_older_file_name_changes_nothing() {
+        let mut app = new_app();
+        at_file_name(&mut app);
+        let older = app.feed_command(StepInput::Text("pdfimport-older-name.pdf".to_string()));
+        let _ = app.feed_command(StepInput::Escape);
+        at_file_name(&mut app);
+        let newer = app.feed_command(StepInput::Text(inkscape()));
+        app.drive_headless_task(older).expect("the older read");
+        assert_eq!(prompt(&app), "Reading the file…");
+        assert!(!history(&app).contains("pdfimport-older-name.pdf does not exist."));
+        app.drive_headless_task(newer).expect("the newer read");
+        assert_eq!(prompt(&app), "Enter page number or [?] <1>:");
+    }
+
+    /// The read for a command in a drawing that is not the current one
+    /// moves that command on to the page prompt, without messages here.
+    #[test]
+    fn a_prompt_read_in_another_drawing_moves_its_command_on() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        at_file_name(&mut app);
+        let read = app.feed_command(StepInput::Text(inkscape()));
+        app.push_test_document();
+        app.active_tab = app.tabs.len() - 1;
+        app.drive_headless_task(read).expect("the read task");
+        let waiting = app.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+        assert_eq!(waiting.as_deref(), Some("Enter page number or [?] <1>:"));
+    }
+
+    /// A read in another drawing that ends with an error sends that
+    /// drawing's command back to the file name prompt, and shows nothing
+    /// in the current drawing.
+    #[test]
+    fn a_failed_prompt_read_in_another_drawing_shows_nothing_here() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        at_file_name(&mut app);
+        let read = app.feed_command(StepInput::Text(
+            "pdfimport-elsewhere-missing.pdf".to_string(),
+        ));
+        app.push_test_document();
+        app.active_tab = app.tabs.len() - 1;
+        app.drive_headless_task(read).expect("the read task");
+        assert!(
+            !history(&app).contains("does not exist"),
+            "{}",
+            history(&app)
+        );
+        let waiting = app.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
+        assert_eq!(waiting.as_deref(), Some("Enter filename for PDF import:"));
     }
 
     /// The import reads and converts on a worker: nothing changes in the

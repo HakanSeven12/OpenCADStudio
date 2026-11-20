@@ -293,8 +293,10 @@ impl CadCommand for UcsPickCommand {
         self.face
     }
 
+    /// A face pick outlines the face under the cursor instead of the whole
+    /// solid (`refresh_ducs_face_highlight`).
     fn entity_pick_highlights_hover(&self) -> bool {
-        true
+        !self.face
     }
 
     fn on_entity_pick(&mut self, handle: Handle, pt: DVec3) -> CmdResult {
@@ -2033,6 +2035,14 @@ pub enum CmdResult {
     /// point: the command continues. If no scan can be read, the host ends
     /// the command with the reference's two lines when the read ends.
     ReadPointCloud(std::path::PathBuf),
+    /// Read the PDF file named at the -PDFIMPORT file name prompt off the
+    /// UI thread; the command waits, and the host gives it the read with
+    /// `on_pdf_import_read` when it ends.
+    ReadPdfForImport(String),
+    /// Read the DGN file named at the -DGNIMPORT file name prompt off the
+    /// UI thread; the command waits, and the host gives it the read with
+    /// `on_dgn_import_read` when it ends.
+    ReadDgnForImport(String),
     /// Attach a point cloud: the host creates or reuses its definition,
     /// commits the cloud in one undo step, then ends the command. The
     /// message is the last prompt's echo.
@@ -3349,6 +3359,34 @@ pub trait CadCommand: Send {
         None
     }
 
+    /// The command waits for a read that it asked for (it reads no input
+    /// until then): a script line or a typed line keeps its remaining
+    /// answers, as at a PAUSE, and the host feeds them when the read ends.
+    fn waits_for_read(&self) -> bool {
+        false
+    }
+
+    /// The end of a read asked for with `CmdResult::ReadPdfForImport`:
+    /// `None` when the command does not wait for that file.
+    fn on_pdf_import_read(
+        &mut self,
+        _path: &str,
+        _read: crate::modules::insert::pdf_import::PdfPromptRead,
+    ) -> Option<CmdResult> {
+        None
+    }
+
+    /// The end of a read asked for with `CmdResult::ReadDgnForImport`: the
+    /// file's models or the error. `None` when the command does not wait
+    /// for that file.
+    fn on_dgn_import_read(
+        &mut self,
+        _path: &str,
+        _read: Result<Vec<String>, String>,
+    ) -> Option<CmdResult> {
+        None
+    }
+
     /// Called when a modal dialog is submitted or cancelled.
     fn on_dialog_response(
         &mut self,
@@ -3918,6 +3956,10 @@ pub trait CadCommand: Send {
     fn xattach_request(&self) -> Option<crate::modules::insert::xattach::XrefAttachRequest> {
         None
     }
+
+    /// The placement ghost of an XATTACH whose reference was read off the
+    /// UI thread: the reference's wires and its unit scale. Default: ignored.
+    fn on_xref_preview(&mut self, _wires: Vec<WireModel>, _unit: f64) {}
 
     /// The block reference an ATTEDIT pick has resolved to, awaiting the
     /// attribute editor dialog; else None.

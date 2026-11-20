@@ -127,6 +127,8 @@ struct MTextPreview {
     translucent: bool,
     /// The misspelled words, underlined (visible ranges).
     marks: Vec<(usize, usize)>,
+    /// The fields' text (visible ranges), shaded gray under FIELDDISPLAY.
+    fields: Vec<(usize, usize)>,
     /// The selection's fill (None: the theme's).
     highlight: Option<Color>,
     /// The in-place box is filled (Show Background).
@@ -535,6 +537,22 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                 }
             }
         }
+        // A field's gray background, as the canvas draws it.
+        let [r, g, blue, _] = crate::entities::field::BACKGROUND;
+        let gray = Color::from_rgb(r, g, blue);
+        for &(a, b) in &self.fields {
+            for bx in self.boxes.iter().filter(|bx| bx.vis >= a && bx.vis < b) {
+                let (low, high) = line_band(&self.boxes, bx);
+                let quad = Path::new(|p| {
+                    p.move_to(map(bx.xmin, low));
+                    p.line_to(map(bx.xmax, low));
+                    p.line_to(map(bx.xmax, high));
+                    p.line_to(map(bx.xmin, high));
+                    p.close();
+                });
+                frame.fill(&quad, gray);
+            }
+        }
         // Selection highlight behind the glyphs, over the whole line height
         // (descenders and accents included), turned with the text.
         if let Some((a, b)) = self.sel {
@@ -695,6 +713,15 @@ fn ed_marks(ed: &super::super::mtext_editor::MTextEditorState) -> Vec<(usize, us
     ed.spell_marks.clone()
 }
 
+/// The fields the editor shades, when FIELDDISPLAY is on.
+fn ed_fields(ed: &super::super::mtext_editor::MTextEditorState) -> Vec<(usize, usize)> {
+    if crate::entities::field::display() {
+        ed.field_shading()
+    } else {
+        Vec::new()
+    }
+}
+
 /// The selection fill set with Text Highlight Color.
 fn ed_highlight() -> Option<Color> {
     crate::app::mtext_prefs::prefs()
@@ -768,6 +795,7 @@ pub(super) fn table_cell_editor_overlay(
         inplace: false,
         translucent: false,
         marks: ed_marks(ed),
+        fields: ed_fields(ed),
         highlight: ed_highlight(),
         background: false,
     };
@@ -861,6 +889,7 @@ pub(super) fn mtext_inplace_overlay<'a>(
         // A multileader owns additional graphics and cannot be hidden whole.
         translucent: ed.editing.is_none() || ed.hidden_source_tab.is_some(),
         marks: ed_marks(ed),
+        fields: ed_fields(ed),
         highlight: ed_highlight(),
         background: crate::app::mtext_prefs::prefs().show_background,
     };
@@ -1023,6 +1052,7 @@ fn mtext_editor_content<'a>(
      -> Element<'static, Message> {
         text_input(placeholder, val)
             .on_input(on)
+            .on_submit(Message::MTextFieldSubmit)
             .width(iced::Length::Fixed(w))
             .padding(3)
             .size(12)
@@ -1408,6 +1438,7 @@ fn mtext_editor_content<'a>(
             inplace: false,
             translucent: false,
             marks: ed_marks(ed),
+            fields: ed_fields(ed),
             highlight: ed_highlight(),
             background: false,
         };
@@ -3202,6 +3233,7 @@ mod cell_editor_wheel_tests {
             inplace,
             translucent: false,
             marks: Vec::new(),
+            fields: Vec::new(),
             highlight: None,
             background: false,
         };

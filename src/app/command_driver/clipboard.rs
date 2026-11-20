@@ -470,6 +470,9 @@ impl OpenCADStudio {
         let doc = &mut self.tabs[i].scene.document;
         let records = block_record_map(doc, &self.clipboard_deps.blocks);
         for cap in &captures {
+            if cap.attribute_index.is_some() {
+                continue;
+            }
             if let Some(new_root) = recreate_ext_subtree(doc, cap, None, &records) {
                 out.insert(cap.entity_index, new_root);
             }
@@ -1219,6 +1222,29 @@ pub(crate) enum PasteSpace<'a> {
     Block(Handle),
 }
 
+/// Recreate the records, image definitions, block definitions and
+/// multileader styles `deps` names that `doc` lacks, with fresh handles;
+/// existing names are kept. Shared by the paste and DESIGN CENTER.
+/// Returns the APPID, image definition and record maps the pasted
+/// entities are remapped with.
+pub(crate) fn merge_named_content(
+    doc: &mut document::Document,
+    deps: &crate::app::ClipboardDeps,
+) -> (
+    rustc_hash::FxHashMap<u64, u64>,
+    rustc_hash::FxHashMap<Handle, Handle>,
+    std::collections::HashMap<Handle, Handle>,
+) {
+    // Table records first; the dimension styles they add are re-pointed at
+    // their arrow blocks once the block merge has recreated those.
+    let added_dim_styles = merge_table_records(doc, deps);
+    let apps = eed_app_map(doc, deps);
+    let image_definitions = merge_image_definitions(doc, deps);
+    let (_, records) = merge_blocks_and_mleader_styles(doc, deps, &apps, &image_definitions);
+    repoint_added_dim_style_blocks(doc, deps, &added_dim_styles);
+    (apps, image_definitions, records)
+}
+
 pub(crate) fn paste_entities_kernel(
     doc: &mut document::Document,
     entities: &[document::EntityType],
@@ -1226,14 +1252,7 @@ pub(crate) fn paste_entities_kernel(
     translate: Option<&crate::command::EntityTransform>,
     space: PasteSpace,
 ) -> (Vec<Handle>, rustc_hash::FxHashMap<Handle, Handle>) {
-    // Shared table-record merge (also used by `merge_dependencies`): recreate
-    // missing records with fresh handles from the target document.
-    let added_dim_styles = merge_table_records(doc, deps);
-    // Shared block-definition merge (also used by `merge_clipboard_blocks`).
-    let apps = eed_app_map(doc, deps);
-    let image_definitions = merge_image_definitions(doc, deps);
-    let (_, records) = merge_blocks_and_mleader_styles(doc, deps, &apps, &image_definitions);
-    repoint_added_dim_style_blocks(doc, deps, &added_dim_styles);
+    let (apps, image_definitions, records) = merge_named_content(doc, deps);
 
     let by_index: Vec<Handle> = entities
         .iter()
@@ -1310,6 +1329,39 @@ pub(crate) fn paste_entities_kernel(
             continue;
         };
         if new_entity.is_null() {
+            continue;
+        }
+        if let Some(attr_index) = cap.attribute_index {
+            let Some(new_attr_handle) = (match doc.get_entity(new_entity) {
+                Some(document::EntityType::Insert(ins)) => {
+                    ins.attributes.get(attr_index).map(|a| a.common.handle)
+                }
+                _ => None,
+            }) else {
+                continue;
+            };
+            if let Some(new_root) =
+                recreate_ext_subtree(doc, cap, Some(new_attr_handle), &records)
+            {
+                let copied_attr = match doc.get_entity_mut(new_entity) {
+                    Some(document::EntityType::Insert(ins)) => {
+                        if let Some(att) = ins.attributes.get_mut(attr_index) {
+                            att.common.xdictionary_handle = Some(new_root);
+                            Some(att.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(attribute) = copied_attr {
+                    crate::scene::annotative::translate_insert_attribute_contexts(
+                        doc,
+                        &attribute,
+                        annotation_delta,
+                    );
+                }
+            }
             continue;
         }
         if let Some(new_root) = recreate_ext_subtree(doc, cap, Some(new_entity), &records) {
@@ -1734,6 +1786,18 @@ pub(crate) fn remap_object(
             object.handle = new_handle;
             object.visit_handles_mut(&mut |h| *h = map(*h));
         }
+        // A FIELD under ACAD_FIELD: the paste evaluates and edits its own
+        // field tree, so its handle, owner and nested fields move with it.
+        ObjectType::Field(f) => {
+            f.handle = new_handle;
+            f.owner = map(f.owner);
+            for child in &mut f.child_fields {
+                *child = map(*child);
+            }
+            for r in &mut f.referenced_objects {
+                *r = map(*r);
+            }
+        }
         // Other leaf object kinds don't appear in an entity xdictionary; if one
         // does, it's inserted with the fresh handle below via the caller's key,
         // but its internal owner is left as-is (best effort).
@@ -1774,6 +1838,7 @@ mod clipboard_xdict_clone_tests {
 
         crate::app::ClipExtObjects {
             entity_index: 0,
+            attribute_index: None,
             src_entity_handle: src_entity,
             root: src_root,
             objects: vec![
@@ -3538,5 +3603,157 @@ mod paste_assoc_array_tests {
             actions_before,
             "no array cloned"
         );
+    }
+
+    #[test]
+    fn pasting_annotative_insert_clones_and_translates_attribute_contexts() {
+        use document::entities::{AttributeEntity, Insert};
+        use document::objects::{
+            Dictionary, MTextAttributeContext, ObjectContextData, ObjectContextKind, ObjectType,
+            Scale,
+        };
+        use document::types::{Vector2, Vector3};
+
+        let mut src_doc = document::Document::new();
+        let at_100 = crate::scene::annotative::ensure_scale_object(
+            &mut src_doc,
+            &Scale {
+                name: "1:100".into(),
+                paper_units: 1.0,
+                drawing_units: 100.0,
+                ..Scale::default()
+            },
+        );
+        let mut att = AttributeEntity::new("L".into(), "110".into());
+        att.common.handle = src_doc.allocate_handle();
+        att.insertion_point = Vector3::new(10.0, 20.0, 0.0);
+        att.alignment_point = Vector3::new(10.0, 20.0, 0.0);
+
+        let att_xdict = src_doc.allocate_handle();
+        let att_mgr = src_doc.allocate_handle();
+        let att_coll = src_doc.allocate_handle();
+        let att_leaf = src_doc.allocate_handle();
+
+        let mut d_root = Dictionary::new();
+        d_root.handle = att_xdict;
+        d_root.owner = att.common.handle;
+        d_root.hard_owner = true;
+        d_root.add_entry("AcDbContextDataManager", att_mgr);
+
+        let mut d_mgr = Dictionary::new();
+        d_mgr.handle = att_mgr;
+        d_mgr.owner = att_xdict;
+        d_mgr.add_entry("ACDB_ANNOTATIONSCALES", att_coll);
+
+        let mut d_coll = Dictionary::new();
+        d_coll.handle = att_coll;
+        d_coll.owner = att_mgr;
+        d_coll.add_entry("*A1", att_leaf);
+
+        let leaf = ObjectType::ObjectContextData(ObjectContextData {
+            handle: att_leaf,
+            owner_handle: att_coll,
+            reactors: vec![att_coll],
+            xdictionary_handle: None,
+            class_version: 4,
+            has_file_to_extension_dictionary: true,
+            uses_legacy_mleader_context_base: false,
+            is_default: true,
+            scale: at_100,
+            kind: ObjectContextKind::MTextAttribute(MTextAttributeContext {
+                horizontal_mode: 0,
+                rotation: 0.0,
+                insertion: Vector2::new(12.0, 24.0),
+                alignment: Vector2::new(12.0, 24.0),
+                enable_context: false,
+                context: None,
+            }),
+        });
+
+        src_doc
+            .objects
+            .insert(att_xdict, ObjectType::Dictionary(d_root));
+        src_doc
+            .objects
+            .insert(att_mgr, ObjectType::Dictionary(d_mgr));
+        src_doc
+            .objects
+            .insert(att_coll, ObjectType::Dictionary(d_coll));
+        src_doc.objects.insert(att_leaf, leaf);
+        att.common.xdictionary_handle = Some(att_xdict);
+
+        let mut ins = Insert::new("DOOR_SYM", Vector3::new(10.0, 20.0, 0.0));
+        ins.attributes.push(att);
+        let src_handle = src_doc.add_entity(document::EntityType::Insert(ins)).unwrap();
+        let copied_entities = vec![src_doc.get_entity(src_handle).unwrap().clone()];
+        let deps = crate::app::ClipboardDeps::capture(&src_doc, &copied_entities);
+
+        let delta = glam::DVec3::new(25.0, 15.0, 0.0);
+        let translate = crate::command::EntityTransform::Translate(delta);
+
+        // 1. Same-document paste: attribute xdict must be cloned (distinct handle) and translated.
+        let (same_pasted, _) = super::paste_entities_kernel(
+            &mut src_doc,
+            &copied_entities,
+            &deps,
+            Some(&translate),
+            super::PasteSpace::Model,
+        );
+        let pasted_h = same_pasted[0];
+        let document::EntityType::Insert(pasted_ins) = src_doc.get_entity(pasted_h).unwrap() else {
+            panic!("expected pasted INSERT")
+        };
+        assert!(pasted_ins.attributes[0].common.xdictionary_handle.is_some());
+        assert_ne!(
+            pasted_ins.attributes[0].common.xdictionary_handle,
+            Some(att_xdict),
+            "pasted attribute must not alias source xdictionary"
+        );
+        let mut placed = pasted_ins.attributes[0].clone();
+        assert!(crate::scene::annotative::place_attribute_for_annotation_scale(
+            &src_doc,
+            &mut placed,
+            Some(at_100),
+        ));
+        assert!((placed.insertion_point.x - 37.0).abs() < 1e-9);
+        assert!((placed.insertion_point.y - 39.0).abs() < 1e-9);
+
+        // Source attribute context stays untouched.
+        let document::EntityType::Insert(src_ins) = src_doc.get_entity(src_handle).unwrap() else {
+            panic!("expected source INSERT")
+        };
+        let mut src_placed = src_ins.attributes[0].clone();
+        assert!(crate::scene::annotative::place_attribute_for_annotation_scale(
+            &src_doc,
+            &mut src_placed,
+            Some(at_100),
+        ));
+        assert!((src_placed.insertion_point.x - 12.0).abs() < 1e-9);
+        assert!((src_placed.insertion_point.y - 24.0).abs() < 1e-9);
+
+        // 2. Cross-document paste: attribute xdict and scale are recreated and translated.
+        let mut dst_doc = document::Document::new();
+        let (cross_pasted, _) = super::paste_entities_kernel(
+            &mut dst_doc,
+            &copied_entities,
+            &deps,
+            Some(&translate),
+            super::PasteSpace::Model,
+        );
+        let dst_scale = crate::scene::annotative::scale_handle_by_name(&dst_doc, "1:100")
+            .expect("1:100 scale recreated in target document");
+        let document::EntityType::Insert(cross_ins) =
+            dst_doc.get_entity(cross_pasted[0]).unwrap()
+        else {
+            panic!("expected cross-pasted INSERT")
+        };
+        let mut cross_placed = cross_ins.attributes[0].clone();
+        assert!(crate::scene::annotative::place_attribute_for_annotation_scale(
+            &dst_doc,
+            &mut cross_placed,
+            Some(dst_scale),
+        ));
+        assert!((cross_placed.insertion_point.x - 37.0).abs() < 1e-9);
+        assert!((cross_placed.insertion_point.y - 39.0).abs() < 1e-9);
     }
 }

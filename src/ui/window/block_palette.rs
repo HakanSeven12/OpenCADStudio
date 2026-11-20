@@ -204,6 +204,8 @@ pub enum MenuAction {
     Edit,
     Rename,
     Remove,
+    /// List the blocks of a library drawing.
+    ShowBlocks,
 }
 
 /// Every message the block palette emits. Wrapped in `Message::BlockPalette`.
@@ -222,6 +224,8 @@ pub enum BlockPaletteMsg {
     Option(OptionMsg),
     ToggleOptions,
     LibraryBrowse,
+    /// Pick a drawing whose blocks the Libraries tab lists.
+    LibraryBrowseDrawing,
     LibraryPicked(Result<PathBuf, String>),
     LibrarySelect(String),
     LibraryUp,
@@ -343,6 +347,8 @@ pub struct LibraryEntry {
     pub path: PathBuf,
     pub folder: bool,
     pub thumb: Option<image::Handle>,
+    /// A block of the drawing `path`, when the library shown is a drawing.
+    pub block: Option<String>,
 }
 
 /// Panel state held on the app.
@@ -442,9 +448,19 @@ impl BlockPalette {
             Tab::Libraries => self
                 .library_entries
                 .iter()
-                .filter(|e| e.folder || pass(&display_name(&e.path)))
+                .filter(|e| match &e.block {
+                    Some(name) => pass(name),
+                    None => e.folder || pass(&display_name(&e.path)),
+                })
                 .map(|e| {
-                    if e.folder {
+                    if let Some(name) = &e.block {
+                        Item::Ref(PaletteBlockRef {
+                            name: name.clone(),
+                            source: e.path.display().to_string(),
+                            time: 0,
+                            drawing: false,
+                        })
+                    } else if e.folder {
                         Item::Folder(e.path.clone())
                     } else {
                         Item::File(e.path.clone())
@@ -828,12 +844,20 @@ fn item_menu(tab: Tab, item: Item, in_drawing: bool, external: bool) -> Element<
         Tab::Recent | Tab::Favorites => true,
         Tab::Libraries => false,
     };
-    crate::ui::kit::menu::view(vec![
-        entry(
-            crate::t!("Insert").into_owned(),
-            MenuAction::Insert,
-            !matches!(item, Item::Folder(_)),
-        ),
+    let show_blocks = matches!(item, Item::File(_));
+    let mut rows = vec![entry(
+        crate::t!("Insert").into_owned(),
+        MenuAction::Insert,
+        !matches!(item, Item::Folder(_)),
+    )];
+    if show_blocks {
+        rows.push(entry(
+            crate::t!("Show Blocks").into_owned(),
+            MenuAction::ShowBlocks,
+            true,
+        ));
+    }
+    rows.extend([
         entry(
             crate::t!("Redefine").into_owned(),
             MenuAction::Redefine,
@@ -856,7 +880,8 @@ fn item_menu(tab: Tab, item: Item, in_drawing: bool, external: bool) -> Element<
             MenuAction::Remove,
             remove_enabled,
         ),
-    ])
+    ]);
+    crate::ui::kit::menu::view(rows)
 }
 
 /// One item as a card / row, with press, release and the context menu.
@@ -1153,6 +1178,12 @@ pub fn view(
                 kit::tool_icon(crate::ui::icons::FOLDER_OPEN),
                 crate::t!("Browse...").into_owned(),
                 Some(pm(BlockPaletteMsg::LibraryBrowse)),
+                false,
+            ),
+            kit::tool_button(
+                kit::tool_icon(crate::ui::icons::DOC),
+                crate::t!("Open a drawing's blocks...").into_owned(),
+                Some(pm(BlockPaletteMsg::LibraryBrowseDrawing)),
                 false,
             ),
         ]

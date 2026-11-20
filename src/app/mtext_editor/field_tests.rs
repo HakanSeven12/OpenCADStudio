@@ -136,6 +136,19 @@ fn text_around_a_field_is_edited_and_saved_as_the_codec_would() {
     assert_eq!(other_field_objects(&app, handle), others);
 }
 
+/// The editor shades each field's text gray, as the canvas does, also past
+/// a line break and after an edit before it.
+#[test]
+fn the_editor_shades_each_fields_text() {
+    let (mut app, _) = host(r"a %<\_FldIdx 0>%\P%<\_FldIdx 1>% b", &["12", "345"]);
+    assert_eq!(ed(&app).field_shading(), vec![(2, 4), (5, 8)]);
+    caret(&mut app, 0);
+    app.mtext_type("x");
+    assert_eq!(ed(&app).field_shading(), vec![(3, 5), (6, 9)]);
+    let (app, _) = plain();
+    assert!(ed(&app).field_shading().is_empty());
+}
+
 #[test]
 fn a_fields_own_text_cannot_be_typed_into_or_split() {
     let (mut app, _) = host(r"a %<\_FldIdx 0>% b", &["12"]);
@@ -387,6 +400,102 @@ fn a_cancelled_insert_changes_nothing() {
     app.mtext_cancel();
     assert_eq!(value(&app, h), "ab");
     assert_eq!(count(&app), before);
+}
+
+/// An MTEXT that is one field, the area of a 2×2 square shown as "4.0",
+/// not yet open in the editor.
+fn area_text() -> (OpenCADStudio, Handle) {
+    let mut app = OpenCADStudio::new_for_test();
+    app.tabs
+        .push(crate::app::tab_document::DocumentTab::new_drawing(1));
+    app.active_tab = 1;
+    let doc = &mut app.tabs[1].scene.document;
+    let mut square = document::entities::LwPolyline::new();
+    for (x, y) in [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)] {
+        square.add_point(document::types::Vector2::new(x, y));
+    }
+    square.is_closed = true;
+    let square = doc.add_entity(EntityType::LwPolyline(square)).unwrap();
+    let h = doc
+        .add_entity(EntityType::MText(Box::new(MText::new())))
+        .unwrap();
+    crate::entities::field::set_text_field(
+        doc,
+        h,
+        Some((
+            "\\AcObjProp Object(%<\\_ObjIdx 0>%).Area \\f \"%lu2%pr1\"".to_string(),
+            vec![square],
+        )),
+        "4.0",
+    );
+    (app, h)
+}
+
+#[test]
+fn editing_a_text_that_is_one_field_opens_the_editor_on_it() {
+    let (mut app, h) = area_text();
+    let _ = app.begin_text_edit(h);
+    assert!(app.field_dialog.is_none(), "not the Field dialog");
+    assert_eq!(raw(&app), "4.0");
+    assert_eq!(ed(&app).field_host.as_ref().unwrap().spans, vec![0..3]);
+    // Text typed after the field is kept with it.
+    caret(&mut app, 3);
+    app.mtext_type(" m²");
+    assert!(app.mtext_commit());
+    assert_eq!(value(&app, h), "4.0 m²");
+    assert_eq!(container(&app, h).1, r"%<\_FldIdx 0>% m²");
+}
+
+#[test]
+fn a_double_click_on_a_field_in_the_editor_opens_its_field_dialog() {
+    use crate::ui::window::field_dialog::{FieldDialogMsg, FieldTarget};
+    let (mut app, h) = area_text();
+    let _ = app.begin_text_edit(h);
+    caret(&mut app, 3);
+    app.mtext_type(" m²");
+    app.mtext_select_word(1);
+    assert_eq!(ed(&app).sel, Some((0, 3)), "the whole field is selected");
+    let state = app.field_dialog.as_ref().expect("the Field dialog opens");
+    assert_eq!(state.target, FieldTarget::EditorInsert);
+    assert_eq!((state.name, state.object_prop), ("Object", Some("Area")));
+    assert_eq!((state.formula_format, state.formula_precision), (2, 2));
+    // OK puts the changed field in place of the old one.
+    let _ = app.on_field_dialog(FieldDialogMsg::FormulaPrecision(4));
+    let _ = app.on_field_dialog(FieldDialogMsg::Ok);
+    assert!(app.field_dialog.is_none());
+    assert_eq!(raw(&app), "4.000 m²");
+    assert!(app.mtext_commit());
+    assert_eq!(value(&app, h), "4.000 m²");
+    assert_eq!(container(&app, h).1, r"%<\_FldIdx 0>% m²");
+    let doc = &app.tabs[1].scene.document;
+    let codes: Vec<_> = doc
+        .fields
+        .values()
+        .filter(|f| f.evaluator != "_text")
+        .map(|f| f.code.clone())
+        .collect();
+    assert_eq!(codes.len(), 1, "one field, no orphan: {codes:?}");
+    assert!(codes[0].ends_with("\\f \"%lu2%pr3\""), "{codes:?}");
+}
+
+#[test]
+fn a_cancelled_field_dialog_from_the_editor_keeps_the_field() {
+    let (mut app, h) = area_text();
+    let _ = app.begin_text_edit(h);
+    app.mtext_select_word(1);
+    assert!(app.field_dialog.is_some());
+    let _ = app.update(Message::CloseModal);
+    assert!(app.field_dialog.is_none());
+    assert_eq!(raw(&app), "4.0");
+    assert_eq!(ed(&app).field_host.as_ref().unwrap().spans, vec![0..3]);
+}
+
+#[test]
+fn a_double_click_beside_a_field_selects_a_word() {
+    let (mut app, _) = host(r"abc %<\_FldIdx 0>%", &["12"]);
+    app.mtext_select_word(1);
+    assert!(app.field_dialog.is_none());
+    assert_eq!(ed(&app).sel, Some((0, 3)));
 }
 
 #[test]

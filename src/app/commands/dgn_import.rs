@@ -250,13 +250,95 @@ impl OpenCADStudio {
         } else {
             "IMPORT"
         };
+        let ticket = self.start_window_read(crate::app::ModalKind::DgnImport);
         let path = path.to_string();
         let worker_path = path.clone();
         crate::app::update::background_task(
             context,
             move || reader(&worker_path, code_page).map(Arc::new),
-            move |read| Message::ImportDialog(ImportDialogMsg::DgnRead(path, read, from)),
+            move |read| Message::ImportDialog(ImportDialogMsg::DgnRead(ticket, path, read, from)),
         )
+    }
+
+    /// The -DGNIMPORT file name prompt: the file is read off the UI thread,
+    /// and the command waits for the read
+    /// ([`Self::finish_dgn_import_prompt_read`]). A panic in the reader is
+    /// the read's error (`DGNIMPORT failed: <message>`), so the command
+    /// goes back to the file name prompt and does not wait for ever.
+    pub(in crate::app) fn read_dgn_for_import_prompt(
+        &mut self,
+        i: usize,
+        path: String,
+    ) -> Task<Message> {
+        self.read_dgn_for_import_prompt_with(
+            i,
+            path,
+            crate::modules::insert::dgn_import::read_models_for_prompt,
+        )
+    }
+
+    /// [`Self::read_dgn_for_import_prompt`] with the reader given, so a test
+    /// can give one that panics.
+    pub(in crate::app) fn read_dgn_for_import_prompt_with(
+        &mut self,
+        i: usize,
+        path: String,
+        reader: fn(&str) -> Result<Vec<String>, String>,
+    ) -> Task<Message> {
+        self.command_line.push_info(&format!("Reading {path}…"));
+        let tab_id = self.tabs[i].id;
+        let worker_path = path.clone();
+        crate::app::update::background_task(
+            "DGNIMPORT",
+            move || {
+                // The web build runs the read in place, without unwinding.
+                #[cfg(target_arch = "wasm32")]
+                {
+                    reader(&worker_path)
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| reader(&worker_path)))
+                        .unwrap_or_else(|payload| {
+                            Err(format!(
+                                "DGNIMPORT failed: {}",
+                                crate::app::update::panic_detail(payload)
+                            ))
+                        })
+                }
+            },
+            move |read| Message::ImportDialog(ImportDialogMsg::DgnPromptRead(tab_id, path, read)),
+        )
+    }
+
+    /// The end of the prompt's read: the command of that drawing takes it,
+    /// if it still waits for that file. In the current drawing the command
+    /// goes on (the model prompt or the error); in another drawing it only
+    /// takes the models, or goes back to the file name prompt, and its
+    /// messages are not shown.
+    fn finish_dgn_import_prompt_read(
+        &mut self,
+        tab_id: u64,
+        path: &str,
+        read: Result<Vec<String>, String>,
+    ) -> Task<Message> {
+        let Some(j) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            return Task::none();
+        };
+        let Some(result) = self.tabs[j]
+            .active_cmd
+            .as_mut()
+            .and_then(|command| command.on_dgn_import_read(path, read))
+        else {
+            return Task::none();
+        };
+        if j != self.active_tab {
+            return Task::none();
+        }
+        // The rest of a script line goes on after the read.
+        let applied = self.apply_cmd_result(result);
+        let rest = self.drain_pending_pause_tokens(j);
+        Task::batch([applied, rest])
     }
 
     /// IMPORT with FILEDIA off: finds off the UI thread if the file is a
@@ -291,10 +373,14 @@ impl OpenCADStudio {
     /// not open.
     pub(in crate::app) fn open_dgn_import_dialog(
         &mut self,
+        ticket: crate::ui::window::import_dialogs::ReadTicket,
         path: &str,
         read: Option<Arc<DgnWindowRead>>,
         from: DgnReadFrom,
     ) {
+        if !self.window_read_current(ticket, crate::app::ModalKind::DgnImport) {
+            return;
+        }
         let import_file_open = self.active_modal == Some(crate::app::ModalKind::ImportFile);
         let Some(read) = read else {
             match from {
@@ -613,7 +699,9 @@ impl OpenCADStudio {
                 });
             }
             ImportDialogMsg::TdsPicked(Some(path)) => return self.read_tds_for_dialog(&path),
-            ImportDialogMsg::TdsRead(path, scene) => self.open_tds_import_dialog(&path, scene),
+            ImportDialogMsg::TdsRead(ticket, path, scene) => {
+                self.open_tds_import_dialog(ticket, &path, scene)
+            }
             ImportDialogMsg::TdsConverted(tab_id, generation, request, scene, import) => {
                 self.finish_tds_import(tab_id, generation, *request, scene, *import)
             }
@@ -696,8 +784,11 @@ impl OpenCADStudio {
             ImportDialogMsg::DgnPicked(Some(path)) => {
                 return self.read_dgn_for_dialog(&path, DgnReadFrom::DgnImport)
             }
-            ImportDialogMsg::DgnRead(path, read, from) => {
-                self.open_dgn_import_dialog(&path, read, from)
+            ImportDialogMsg::DgnRead(ticket, path, read, from) => {
+                self.open_dgn_import_dialog(ticket, &path, read, from)
+            }
+            ImportDialogMsg::DgnPromptRead(tab_id, path, read) => {
+                return self.finish_dgn_import_prompt_read(tab_id, &path, read);
             }
             ImportDialogMsg::DgnChecked(path, dgn, not_dgn) => {
                 if !dgn {
@@ -709,6 +800,9 @@ impl OpenCADStudio {
             }
             ImportDialogMsg::DgnDecoded(path, model, code_page, import) => {
                 self.apply_dgn_decode(&path, &model, code_page, import)
+            }
+            ImportDialogMsg::DgnOpPrepared(tab_id, generation, read) => {
+                return self.finish_control_dgn_import(tab_id, generation, *read);
             }
             ImportDialogMsg::DgnPrepared(tab_id, generation, request, prepared) => {
                 return self.finish_dgn_import(tab_id, generation, *request, *prepared);
@@ -847,7 +941,12 @@ impl OpenCADStudio {
         let worker_request = request.clone();
         crate::app::update::background_task(
             "DGNIMPORT",
-            move || reader(&worker_request),
+            move || {
+                reader(&worker_request).map(|mut prepared| {
+                    read_reference_drawings(&worker_request, &mut prepared);
+                    prepared
+                })
+            },
             move |prepared| {
                 Message::ImportDialog(ImportDialogMsg::DgnPrepared(
                     tab_id,
@@ -902,25 +1001,12 @@ impl OpenCADStudio {
         }
     }
 
-    /// Fallible execution for semantic callers (the automation `dgn_import`
-    /// operation), in one step: it reads the files on the UI thread. On
-    /// success the count is the model's top-level converted entities,
-    /// excluding block-definition members and any reference entities
-    /// attached afterwards.
-    pub(in crate::app) fn try_run_dgn_import(
-        &mut self,
-        i: usize,
-        request: DgnImportRequest,
-    ) -> Result<(Task<Message>, usize), dgn_import::DgnImportError> {
-        let prepared = dgn_import::prepare_import(&request)?;
-        Ok(self.place_dgn_import(i, &request, prepared))
-    }
-
     /// Places a prepared import, one undo step: into a new drawing unless
     /// the request chose drawing `i`; then the model's reference
-    /// attachments as the request says. The count is as for
-    /// [`Self::try_run_dgn_import`].
-    fn place_dgn_import(
+    /// attachments as the request says. The count is the model's top-level
+    /// converted entities, excluding block-definition members and any
+    /// reference entities attached afterwards.
+    pub(in crate::app) fn place_dgn_import(
         &mut self,
         i: usize,
         request: &DgnImportRequest,
@@ -994,6 +1080,7 @@ impl OpenCADStudio {
             file,
             model,
             converted,
+            drawing,
         } = prepared;
         let path = file.to_string_lossy().into_owned();
         // Sub units scale the placement and the size alike.
@@ -1028,15 +1115,24 @@ impl OpenCADStudio {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
         let target = dgn_import::reference_drawing(&file, &model);
-        // A converted model is written; none keeps the drawing on disk.
-        if let Some(converted) = converted {
-            let mut scene = crate::scene::Scene::new();
-            place_converted(&mut scene, converted, &Naming::Number);
-            if let Err(error) = crate::io::save(&scene.document, &target) {
+        let read = match drawing {
+            Some(Ok(read)) => Some(read),
+            Some(Err(error)) => {
                 self.command_line.push_error(&error);
                 return;
             }
-        }
+            // Not written and read on a worker (`read_reference_drawings`):
+            // a converted model is written here, and the attach reads it.
+            None => {
+                if let Some(converted) = converted {
+                    if let Err(error) = write_reference_drawing(converted, &target) {
+                        self.command_line.push_error(&error);
+                        return;
+                    }
+                }
+                None
+            }
+        };
         let xref = crate::modules::insert::xattach::XrefAttachRequest {
             path: target.to_string_lossy().into_owned(),
             overlay: false,
@@ -1047,11 +1143,12 @@ impl OpenCADStudio {
         self.command_line
             .push_output(&format!("Attach Xref \"{name}\": {full}"));
         let host = self.tabs[i].current_path.clone();
-        let block = crate::modules::insert::xattach::prepare_named_xref_definition(
+        let block = crate::modules::insert::xattach::prepare_named_xref_definition_with(
             &mut self.tabs[i].scene,
             &xref,
             host.as_deref(),
             &name,
+            read,
         );
         if host.is_none() {
             self.tabs[i].xref_relative_on_save.insert(block.clone());
@@ -1110,6 +1207,47 @@ impl Naming {
             }
         }
     }
+}
+
+/// The reference drawings of a translation, for the import's worker: each
+/// converted model is written beside its file as "<file>-<model>.dwg", and
+/// each drawing is then read, so the placing of the import on the UI thread
+/// writes and reads no file. An underlay reads nothing here.
+pub(in crate::app) fn read_reference_drawings(
+    request: &DgnImportRequest,
+    prepared: &mut dgn_import::PreparedImport,
+) {
+    if matches!(
+        request.references,
+        ReferenceMode::Ignore | ReferenceMode::Underlay
+    ) {
+        return;
+    }
+    for reference in &mut prepared.references {
+        let target = dgn_import::reference_drawing(&reference.file, &reference.model);
+        if let Some(converted) = reference.converted.take() {
+            if let Err(error) = write_reference_drawing(converted, &target) {
+                reference.drawing = Some(Err(error));
+                continue;
+            }
+        }
+        let base = target.parent().unwrap_or(std::path::Path::new(""));
+        reference.drawing = Some(Ok(crate::io::xref::read_xref_file(
+            &target.to_string_lossy(),
+            base,
+            None,
+        )));
+    }
+}
+
+/// Writes a translated reference's model as the drawing `target`.
+fn write_reference_drawing(
+    converted: dgn_import::Converted,
+    target: &std::path::Path,
+) -> Result<(), String> {
+    let mut scene = crate::scene::Scene::new();
+    place_converted(&mut scene, converted, &Naming::Number);
+    crate::io::save(&scene.document, target)
 }
 
 /// Adds converted objects to a drawing under the naming rule; returns the
@@ -1534,6 +1672,36 @@ mod dgn_worker_tests {
             .is_some_and(|e| e.starts_with("DGN Import cancelled")));
     }
 
+    /// A window closed while its Change… read runs does not open again
+    /// when the read ends.
+    #[test]
+    fn a_window_closed_during_a_change_read_stays_closed() {
+        let mut app = app_with_new_drawing();
+        let first = app.read_dgn_for_dialog(&v7_file("closed-first"), DgnReadFrom::DgnImport);
+        app.drive_headless_task(first).expect("the first read");
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::DgnImport));
+        let task = app.read_dgn_for_dialog(&v7_file("closed-change"), DgnReadFrom::DgnImport);
+        let _ = app.update(Message::CloseModal);
+        app.drive_headless_task(task).expect("the change read");
+        assert_eq!(app.active_modal, None);
+    }
+
+    /// When two reads overlap, the window shows the newer file, also when
+    /// the older read ends last.
+    #[test]
+    fn only_the_newest_read_fills_the_window() {
+        let mut app = app_with_new_drawing();
+        let older_path = v7_file("older");
+        let newer_path = v7_file("newer");
+        let older = app.read_dgn_for_dialog(&older_path, DgnReadFrom::DgnImport);
+        let newer = app.read_dgn_for_dialog(&newer_path, DgnReadFrom::DgnImport);
+        app.drive_headless_task(newer).expect("the newer read");
+        app.drive_headless_task(older).expect("the older read");
+        assert_eq!(app.active_modal, Some(crate::app::ModalKind::DgnImport));
+        let s = app.import_dialogs.dgn.as_ref().expect("window state");
+        assert_eq!(s.path, newer_path);
+    }
+
     /// IMPORT in the Import File window: the window stays open during the
     /// read; a file that is no DGN model shows the error there, a DGN model
     /// opens the DGN Import window in its place.
@@ -1800,6 +1968,7 @@ mod dgn_worker_tests {
             file: folder.join("site.dgn"),
             model: "Default".to_string(),
             converted: Some(prepared.converted.clone()),
+            drawing: None,
         };
         let prepared = PreparedImport {
             references: vec![reference],
@@ -1823,5 +1992,248 @@ mod dgn_worker_tests {
         assert!(written, "the drawing is written");
         assert_eq!(inserts, ["site - Default"], "the reference is attached");
         assert!(document.block_records.get("site - Default").is_some());
+    }
+
+    /// The folder that [`with_a_reference`] puts its reference file in.
+    fn reference_folder(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("ocs-dgn-worker-{name}-{}", std::process::id()))
+    }
+
+    /// A reader for the worker tests: the request's model, with one
+    /// translated reference attachment, "site.dgn" in the folder named by
+    /// the request's model file.
+    fn with_a_reference(
+        request: &DgnImportRequest,
+    ) -> Result<PreparedImport, dgn_import::DgnImportError> {
+        let prepared = dgn_import::prepare_import(request)?;
+        let folder = request.path.rsplit('-').nth(1).unwrap_or_default();
+        let reference = dgn_import::PreparedReference {
+            reference: Default::default(),
+            file: reference_folder(folder).join("site.dgn"),
+            model: "Default".to_string(),
+            converted: Some(prepared.converted.clone()),
+            drawing: None,
+        };
+        Ok(PreparedImport {
+            references: vec![reference],
+            ..prepared
+        })
+    }
+
+    /// The layers that a reference brought into the drawing.
+    fn reference_layers(app: &OpenCADStudio, i: usize) -> usize {
+        app.tabs[i]
+            .scene
+            .document
+            .layers
+            .iter()
+            .filter(|layer| layer.name.starts_with("site - Default|"))
+            .count()
+    }
+
+    /// A translated reference is written and read on the import's worker:
+    /// the drawing is attached from that read, so the UI thread reads no
+    /// file. Here the file is gone before the result reaches it.
+    #[test]
+    fn a_translated_reference_is_written_and_read_on_the_worker() {
+        let folder = reference_folder("written");
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let mut translate = request(&v7_file("written"), true);
+        translate.references = ReferenceMode::Translate;
+        let task = app.run_dgn_import_with(i, translate, with_a_reference);
+        let message = OpenCADStudio::first_task_message(task);
+        let written = folder.join("site-Default.dwg");
+        let on_worker = written.is_file();
+        let _ = std::fs::remove_dir_all(&folder);
+        let task = app.update(message);
+        app.drive_headless_task(task).expect("the import's task");
+        assert!(on_worker, "the worker writes the drawing");
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("site - Default")
+            .is_some());
+        assert!(reference_layers(&app, i) > 0, "the worker's read is merged");
+    }
+
+    /// A reference drawing that cannot be written is reported, and is not
+    /// attached; the model is still placed.
+    #[test]
+    fn a_reference_drawing_that_cannot_be_written_is_reported() {
+        let folder = reference_folder("unwritable");
+        let _ = std::fs::remove_dir_all(&folder);
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let errors = app.command_line.error_revision;
+        let mut translate = request(&v7_file("unwritable"), true);
+        translate.references = ReferenceMode::Translate;
+        let task = app.run_dgn_import_with(i, translate, with_a_reference);
+        app.drive_headless_task(task).expect("the import's task");
+        assert_ne!(
+            app.command_line.error_revision, errors,
+            "the error is shown"
+        );
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("site - Default")
+            .is_none());
+        assert_eq!(
+            app.tabs[i].history.undo_stack.len(),
+            1,
+            "the model is placed"
+        );
+    }
+}
+
+#[cfg(test)]
+mod dgn_prompt_read_tests {
+    use super::*;
+    use crate::command::StepInput;
+    use crate::modules::insert::dgn_import::test_files;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    /// A file registered under a name of its own: a V7 file with one line,
+    /// or bytes that are no design file.
+    fn file(name: &str, dgn: bool) -> String {
+        let path = format!("memory://dgn-prompt-{name}-{}.dgn", std::process::id());
+        let bytes = if dgn {
+            test_files::minimal_v7_line()
+        } else {
+            b"not a design file".to_vec()
+        };
+        crate::scene::model::pdf_raster::register_source(&path, Arc::new(bytes));
+        path
+    }
+
+    fn prompt(app: &OpenCADStudio, i: usize) -> String {
+        app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .map(|command| command.prompt())
+            .unwrap_or_default()
+    }
+
+    fn history(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|entry| entry.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn at_file_name(app: &mut OpenCADStudio) {
+        let _ = app.update(Message::Command("-DGNIMPORT".to_string()));
+        assert_eq!(
+            prompt(app, app.active_tab),
+            "Enter filename for DGN import:"
+        );
+    }
+
+    /// The file name prompt reads the file on a worker: the command waits,
+    /// after a `Reading` line, input waits, and the model prompt follows the
+    /// read.
+    #[test]
+    fn the_file_name_prompt_waits_for_the_read() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = file("waits", true);
+        at_file_name(&mut app);
+        let read = app.feed_command(StepInput::Text(path.clone()));
+        assert_eq!(prompt(&app, i), "Reading the file…");
+        assert!(
+            history(&app).contains(&format!("Reading {path}…")),
+            "{}",
+            history(&app)
+        );
+        let _ = app.feed_command(StepInput::Text("other.dgn".to_string()));
+        assert_eq!(prompt(&app, i), "Reading the file…");
+        app.drive_headless_task(read).expect("the read task");
+        assert_eq!(prompt(&app, i), "Enter name of model or [?] <Default>:");
+    }
+
+    /// A file that is no DGN model gives the reader's error when the read
+    /// ends, and the command asks for the file name again.
+    #[test]
+    fn a_bad_file_gives_its_error_when_the_read_ends() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        at_file_name(&mut app);
+        let read = app.feed_command(StepInput::Text(file("bad", false)));
+        app.drive_headless_task(read).expect("the read task");
+        assert!(app.command_line.last_error.is_some());
+        assert_eq!(prompt(&app, i), "Enter filename for DGN import:");
+    }
+
+    /// A reader that panics gives an error, and the command asks for the
+    /// file name again; it does not wait for ever.
+    #[test]
+    fn a_reader_panic_asks_for_the_file_again() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = file("panics", true);
+        at_file_name(&mut app);
+        let _ = app.feed_command(StepInput::Text(path.clone()));
+        let read = app.read_dgn_for_import_prompt_with(i, path, |_| panic!("a reader bug"));
+        app.drive_headless_task(read).expect("the read task");
+        assert!(
+            history(&app).contains("DGNIMPORT failed: a reader bug"),
+            "{}",
+            history(&app)
+        );
+        assert_eq!(prompt(&app, i), "Enter filename for DGN import:");
+    }
+
+    /// The read of a file named before the command started again changes
+    /// nothing; the read of the file named now goes on.
+    #[test]
+    fn the_read_of_an_older_file_name_changes_nothing() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        at_file_name(&mut app);
+        let older = app.feed_command(StepInput::Text(file("older", false)));
+        let _ = app.feed_command(StepInput::Escape);
+        at_file_name(&mut app);
+        let newer = app.feed_command(StepInput::Text(file("newer", true)));
+        app.drive_headless_task(older).expect("the older read");
+        assert_eq!(prompt(&app, i), "Reading the file…");
+        assert!(app.command_line.last_error.is_none());
+        app.drive_headless_task(newer).expect("the newer read");
+        assert_eq!(prompt(&app, i), "Enter name of model or [?] <Default>:");
+    }
+
+    /// A read in a drawing that is not the current one moves that drawing's
+    /// command on, and a failed read there shows nothing here.
+    #[test]
+    fn a_read_in_another_drawing_moves_its_command_on_quietly() {
+        for (name, dgn, expected) in [
+            (
+                "elsewhere-good",
+                true,
+                "Enter name of model or [?] <Default>:",
+            ),
+            ("elsewhere-bad", false, "Enter filename for DGN import:"),
+        ] {
+            let mut app = new_app();
+            let i = app.active_tab;
+            at_file_name(&mut app);
+            let read = app.feed_command(StepInput::Text(file(name, dgn)));
+            app.push_test_document();
+            app.active_tab = app.tabs.len() - 1;
+            app.drive_headless_task(read).expect("the read task");
+            assert!(app.command_line.last_error.is_none(), "{name}");
+            assert_eq!(prompt(&app, i), expected, "{name}");
+        }
     }
 }

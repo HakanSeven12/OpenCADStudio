@@ -89,6 +89,12 @@ fn clip_triangles_px(img: &document::entities::RasterImage) -> Vec<[f64; 2]> {
 #[derive(Clone, Debug)]
 pub struct ImageModel {
     pub render_instance: Option<super::instance_model::RenderInstance>,
+    /// The drawing entity this model serves, stamped by the gather that walks
+    /// with real handles (a seed can run before the handle is assigned). A
+    /// gathered cached list matches its entries to a reseeded raster by this,
+    /// so the fresh pixels are spliced in place instead of re-walking the
+    /// drawing for a rebuild.
+    pub entity: Option<document::Handle>,
     /// Original file path (used for reload / display in properties).
     pub file_path: String,
     /// RGBA8 pixel data in row-major order. Arc-wrapped so cloning ImageModel
@@ -254,6 +260,7 @@ impl ImageModel {
         let decoded = resolve_image(&img.file_path)?;
         Some(Self {
             render_instance: None,
+            entity: None,
             file_path: img.file_path.clone(),
             pixels: adjusted_image_pixels(
                 &img.file_path,
@@ -467,6 +474,7 @@ impl ImageModel {
 
         Some((Self {
             render_instance: None,
+            entity: None,
             file_path: def.file_path.clone(),
             pixels,
             width,
@@ -655,6 +663,7 @@ impl ImageModel {
             world_per_pixel,
             view,
         )
+        .map(|(model, sharp)| (Self { entity: Some(ole.common.handle), ..model }, sharp))
     }
 
     /// An OLE picture filling the world rectangle `rect` (min x, min y, max x,
@@ -767,6 +776,9 @@ impl ImageModel {
         Some((
             Self {
                 render_instance: None,
+                // The entity is stamped by [`Self::from_ole2frame_in_view`],
+                // the one caller that knows which frame this picture serves.
+                entity: None,
                 file_path: "OLE2FRAME".to_string(),
                 pixels,
                 width,

@@ -11,10 +11,13 @@
 
 mod data;
 mod expr;
+pub(crate) mod files;
 pub(crate) mod ops;
 
 #[cfg(test)]
 mod field_tests;
+#[cfg(test)]
+mod open_tests;
 
 use super::{Message, OpenCADStudio};
 use crate::scene::model::object::PropSection;
@@ -106,6 +109,8 @@ fn typed_value(row: &NodeRow, raw: &str) -> Option<Value> {
             }
             value => typed_point(&value).map(graph::value::point_value),
         },
+        // A name, even one that reads as a number.
+        RowWidget::EditChoice(_) => Some(Value::String(text.to_owned())),
         _ => Some(parsed()),
     }
 }
@@ -159,6 +164,16 @@ fn unchanged(row: &NodeRow, raw: &str, value: &Value) -> bool {
         }
 }
 
+/// Parses an `.ocg` file's bytes into a graph.
+pub(in crate::app) type GraphParser =
+    fn(&[u8]) -> Result<crate::ui::node_graph::LoadedGraph, String>;
+
+/// Parse an `.ocg` file's bytes (run on a worker thread).
+pub(in crate::app) fn parse_graph(
+    bytes: &[u8],
+) -> Result<crate::ui::node_graph::LoadedGraph, String> {
+    crate::ui::node_graph::Graph::from_file(bytes).map(crate::ui::node_graph::LoadedGraph::new)
+}
 impl OpenCADStudio {
     /// The Properties panel's single-object page for `handle`.
     fn graph_panel_sections(&self, i: usize, handle: Handle) -> Vec<PropSection> {
@@ -193,6 +208,46 @@ impl OpenCADStudio {
     /// and coordinate rows folded under a group row.
     fn graph_entity_sections(&self, i: usize, handle: Handle) -> Vec<NodeSection> {
         use crate::ui::properties::{coord_base, coord_component, coord_group_len};
+        let doc = &self.tabs[i].scene.document;
+        let named = |names: Vec<String>| names.into_iter().map(|n| (Value::String(n.clone()), n)).collect();
+        // The Properties panel's widget for each kind of row.
+        let widget = |json: &Value| match json["kind"].as_str() {
+            Some("number") => RowWidget::Measure,
+            Some("bool") => RowWidget::Toggle,
+            Some("color") => RowWidget::Color,
+            Some("choice") => RowWidget::Choice(
+                json["options"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(|o| (Value::String(o.to_owned()), crate::ui::properties::LocalizedChoice::new(o.to_owned()).to_string()))
+                    .collect(),
+            ),
+            Some("editable_choice") => RowWidget::EditChoice(
+                json["options"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect(),
+            ),
+            Some("lineweight") => RowWidget::Choice(
+                crate::ui::properties::lw_options()
+                    .into_iter()
+                    .map(|lw| (Value::from(lw.0.value()), lw.to_string()))
+                    .collect(),
+            ),
+            Some("layer") => RowWidget::Choice(named(crate::app::properties::property_layer_names(doc))),
+            Some("linetype") => RowWidget::Choice(named(
+                crate::app::properties::property_linetype_items(doc)
+                    .into_iter()
+                    .map(|item| item.name)
+                    .collect(),
+            )),
+            _ => RowWidget::Field,
+        };
         self.graph_panel_sections(i, handle)
             .into_iter()
             .map(|section| {
@@ -207,11 +262,7 @@ impl OpenCADStudio {
                         input: !matches!(json["kind"].as_str(), Some("readonly" | "specialized")),
                         output: true,
                         value: json["value"].clone(),
-                        widget: if json["kind"] == "number" {
-                            RowWidget::Measure
-                        } else {
-                            RowWidget::Field
-                        },
+                        widget: widget(&json),
                         group,
                     }
                 };
@@ -454,14 +505,27 @@ impl OpenCADStudio {
         edit: impl FnOnce(&mut Self) -> Vec<Task<Message>>,
     ) -> Task<Message> {
         self.push_undo_snapshot(i, "GRAPH");
+        self.tabs[i].graph_files.edited();
         let before = self.tabs[i].graph.undo_state();
         if let Some(pending) = self.tabs[i].history.pending.as_mut() {
             pending.graph_before = Some(before);
         }
+        self.graph_evaluate(i, edit)
+    }
+
+    /// Runs the graph of drawing `i` in the open undo step. While a file
+    /// that a node reads is still read, the step stays open (`held`), so
+    /// that the run after the read joins it.
+    fn graph_evaluate(
+        &mut self,
+        i: usize,
+        edit: impl FnOnce(&mut Self) -> Vec<Task<Message>>,
+    ) -> Task<Message> {
         self.graph_undo_open = true;
         self.graph_unwind(i);
         let mut tasks = edit(self);
         self.graph_drop_driven_params(i);
+        self.tabs[i].graph_files.begin_run();
         let mut engine = std::mem::take(&mut self.tabs[i].graph.engine);
         let mut host = AppHost {
             app: self,
@@ -471,8 +535,31 @@ impl OpenCADStudio {
         engine.evaluate(&mut host);
         tasks.append(&mut host.tasks);
         self.tabs[i].graph.engine = engine;
+        self.tabs[i].graph_files.end_run();
+        let reading = self.tabs[i].graph_files.reading();
+        if let Some(pending) = self.tabs[i].history.pending.as_mut() {
+            pending.held = reading;
+        }
         self.graph_undo_open = false;
         Task::batch(tasks)
+    }
+
+    /// The run after a node's file was read: in the graph's undo step when
+    /// it is still open, otherwise in a new one.
+    pub(super) fn graph_rerun_after_read(&mut self, i: usize) -> Task<Message> {
+        let joins = self.tabs[i]
+            .history
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.held && pending.graph_before.is_some());
+        if !joins {
+            self.push_undo_snapshot(i, "GRAPH");
+            let before = self.tabs[i].graph.undo_state();
+            if let Some(pending) = self.tabs[i].history.pending.as_mut() {
+                pending.graph_before = Some(before);
+            }
+        }
+        self.graph_evaluate(i, |_| Vec::new())
     }
 
     /// Takes back the last evaluation's edits: objects edited in place get
@@ -636,6 +723,52 @@ impl OpenCADStudio {
                 return self.graph_commit(i, ports);
             }
             GraphMsg::Set(port, value) => return self.graph_set(i, port, value),
+            GraphMsg::Links(links) => {
+                self.node_graph_links = links;
+                let graph = &mut self.tabs[i].graph;
+                graph.hovered_label = None;
+                graph.picker = None;
+                self.persist_settings_if_changed();
+            }
+            // With labels, pressing an unlinked input's port picks its
+            // source; a linked one is still dragged off to re-route it.
+            GraphMsg::InPress(port)
+                if self.node_graph_links.labels()
+                    && !matches!(self.tabs[i].graph.drag, Some(Drag::Link(_))) =>
+            {
+                return self.on_graph(GraphMsg::Pick(port));
+            }
+            GraphMsg::Pick(_) => {
+                if self.tabs[i].graph.picker.is_some() {
+                    return iced::widget::operation::focus(
+                        crate::ui::node_graph::picker_search_id(),
+                    );
+                }
+            }
+            GraphMsg::PickSource(from, to) => {
+                // Choosing the current source changes nothing; a source the
+                // input's node reaches would close a loop.
+                let engine = &self.tabs[i].graph.engine;
+                let current = engine
+                    .links
+                    .iter()
+                    .any(|link| link.to == to && link.from == from);
+                if current || engine.reaches(to.node, from.node) {
+                    return Task::none();
+                }
+                return self.graph_step(i, |app| {
+                    app.graph_connect(i, from, to);
+                    Vec::new()
+                });
+            }
+            GraphMsg::PickClear(to) => {
+                if self.tabs[i].graph.engine.is_linked(&to) {
+                    return self.graph_step(i, |app| {
+                        app.tabs[i].graph.engine.disconnect(&to);
+                        Vec::new()
+                    });
+                }
+            }
             // The last evaluation's edits stay in the drawing as they are.
             GraphMsg::New => self.tabs[i].graph = Default::default(),
             GraphMsg::Save => {
@@ -681,59 +814,91 @@ impl OpenCADStudio {
                     |bytes| Message::Graph(GraphMsg::Loaded(bytes)),
                 );
             }
-            GraphMsg::Loaded(Some(bytes)) => {
-                let (mut graph, drawing) = match crate::ui::node_graph::Graph::from_file(&bytes) {
-                    Ok(loaded) => loaded,
+            GraphMsg::Loaded(Some(bytes)) => return self.graph_parse_with(i, bytes, parse_graph),
+            GraphMsg::Parsed(tab_id, generation, parsed) => {
+                let graph = match parsed {
+                    Ok(graph) => graph.take(),
                     Err(error) => {
                         self.command_line.push_error(&error);
                         return Task::none();
                     }
                 };
-                // Entities are reused only in the drawing the graph was saved
-                // against, and only while they are still the node's kind;
-                // otherwise evaluation creates fresh ones. The same holds for
-                // the last evaluation's edits, which the next one takes back.
-                let document = &self.tabs[i].scene.document;
-                let same_drawing =
-                    !drawing.is_empty() && drawing == document.header.fingerprint_guid;
-                for node in &graph.engine.nodes {
-                    let kind = match &node.kind {
-                        Kind::Object(name) => {
-                            ObjectKind::from_name(name).filter(|kind| kind.owns())
-                        }
-                        Kind::Op(_) => None,
-                    };
-                    if let Some(ui) = graph.ui.get_mut(&node.id) {
-                        ui.handles.retain(|handle| {
-                            same_drawing
-                                && kind
-                                    .zip(document.get_entity(*handle))
-                                    .is_some_and(|(kind, entity)| kind.matches(entity))
-                        });
-                    }
-                }
-                if !same_drawing {
-                    graph.applied.clear();
-                    graph.created.clear();
-                }
-                // Evaluating unwinds what the open graph did first.
-                let (applied, created, records) = {
-                    let open = &mut self.tabs[i].graph;
-                    (
-                        std::mem::take(&mut open.applied),
-                        std::mem::take(&mut open.created),
-                        std::mem::take(&mut open.applied_records),
-                    )
+                // The graph goes into the drawing it was opened in, while
+                // that drawing is open and not replaced.
+                let (Some(i), Some((graph, drawing))) =
+                    (self.import_target(tab_id, generation), graph)
+                else {
+                    return Task::none();
                 };
-                graph.applied_records.splice(0..0, records);
-                graph.applied.splice(0..0, applied);
-                graph.created.extend(created);
-                self.tabs[i].graph = graph;
-                return self.graph_run(i);
+                return self.graph_loaded(i, graph, drawing);
             }
             _ => {}
         }
         Task::none()
+    }
+
+    /// Parse an Open's `.ocg` bytes on a worker (`parser`; a test can give
+    /// one that panics); the graph loads into drawing `i` when the parse
+    /// ends ([`GraphMsg::Parsed`]).
+    pub(in crate::app) fn graph_parse_with(
+        &mut self,
+        i: usize,
+        bytes: Vec<u8>,
+        parser: GraphParser,
+    ) -> Task<Message> {
+        let (tab_id, generation) = (self.tabs[i].id, self.tabs[i].document_generation);
+        crate::app::update::background_task(
+            crate::t!("Open Node Graph"),
+            move || parser(&bytes),
+            move |parsed| Message::Graph(GraphMsg::Parsed(tab_id, generation, parsed)),
+        )
+    }
+
+    /// Load a graph read from a file into drawing `i`, and evaluate it.
+    pub(in crate::app) fn graph_loaded(
+        &mut self,
+        i: usize,
+        mut graph: crate::ui::node_graph::Graph,
+        drawing: String,
+    ) -> Task<Message> {
+        // Entities are reused only in the drawing the graph was saved
+        // against, and only while they are still the node's kind;
+        // otherwise evaluation creates fresh ones. The same holds for
+        // the last evaluation's edits, which the next one takes back.
+        let document = &self.tabs[i].scene.document;
+        let same_drawing = !drawing.is_empty() && drawing == document.header.fingerprint_guid;
+        for node in &graph.engine.nodes {
+            let kind = match &node.kind {
+                Kind::Object(name) => ObjectKind::from_name(name).filter(|kind| kind.owns()),
+                Kind::Op(_) => None,
+            };
+            if let Some(ui) = graph.ui.get_mut(&node.id) {
+                ui.handles.retain(|handle| {
+                    same_drawing
+                        && kind
+                            .zip(document.get_entity(*handle))
+                            .is_some_and(|(kind, entity)| kind.matches(entity))
+                });
+            }
+        }
+        if !same_drawing {
+            graph.applied.clear();
+            graph.created.clear();
+        }
+        // Evaluating unwinds what the open graph did first.
+        let (applied, created, records) = {
+            let open = &mut self.tabs[i].graph;
+            (
+                std::mem::take(&mut open.applied),
+                std::mem::take(&mut open.created),
+                std::mem::take(&mut open.applied_records),
+            )
+        };
+        graph.applied_records.splice(0..0, records);
+        graph.applied.splice(0..0, applied);
+        graph.created.extend(created);
+        self.tabs[i].graph = graph;
+        self.graph_run(i)
     }
 
     /// Links `from` into `to`; false when that would close a loop. The link

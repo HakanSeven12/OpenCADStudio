@@ -400,6 +400,8 @@ pub struct ModelSpaceThemeConfig {
     /// VSEDGESMOOTH: crease angle in degrees; mesh edges whose faces meet
     /// flatter are not drawn in the shaded-with-edges modes (default 1).
     pub edge_smooth: f32,
+    /// VSOCCLUDEDEDGES: the Hidden style draws edges behind faces dashed.
+    pub occluded_edges: bool,
     /// COMPARECOLORADDED / REMOVED / MODIFIED: COMPARE's overlay colours.
     pub compare_added: [u8; 3],
     pub compare_removed: [u8; 3],
@@ -452,6 +454,7 @@ impl Default for ModelSpaceThemeConfig {
             selection_highlight_color: 0,
             edge_color: None,
             edge_smooth: 1.0,
+            occluded_edges: false,
             compare_added: crate::scene::compare::CompareSettings::default().colors[0],
             compare_removed: crate::scene::compare::CompareSettings::default().colors[1],
             compare_modified: crate::scene::compare::CompareSettings::default().colors[2],
@@ -920,6 +923,39 @@ mod tests {
         assert_eq!(value["ribbon"]["qat_below"], true);
         let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
         assert!(restored.ribbon == original.ribbon);
+    }
+
+    #[test]
+    fn ribbon_centering_and_wheel_default_and_round_trip() {
+        // A config saved before these options keeps the ribbon at its left
+        // edge and lets the wheel step through the tabs.
+        let old: AppConfig =
+            serde_json::from_str(r#"{"ribbon":{"qat_below":true}}"#).expect("old config");
+        assert!(!old.ribbon.layout.centered);
+        assert!(old.ribbon.layout.wheel_switches_tabs);
+
+        let mut original = AppConfig::default();
+        original.ribbon.layout.centered = true;
+        original.ribbon.layout.wheel_switches_tabs = false;
+        let serialized = serde_json::to_string(&original).expect("serialize config");
+        let value: serde_json::Value = serde_json::from_str(&serialized).expect("json");
+        assert_eq!(value["ribbon"]["centered"], true);
+        assert_eq!(value["ribbon"]["wheel_switches_tabs"], false);
+        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
+        assert!(restored.ribbon == original.ribbon);
+    }
+
+    #[test]
+    fn the_ribbon_options_reach_the_ribbon_and_the_saved_config() {
+        use crate::app::{Message, OpenCADStudio};
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.update(Message::RibbonCenteredChanged(true));
+        let _ = app.update(Message::RibbonWheelTabsChanged(false));
+        assert!(app.ribbon.layout().centered);
+        assert!(!app.ribbon.layout().wheel_switches_tabs);
+        let saved = app.current_config();
+        assert!(saved.ribbon.layout.centered);
+        assert!(!saved.ribbon.layout.wheel_switches_tabs);
     }
 
     #[test]

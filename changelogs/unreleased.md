@@ -18,6 +18,7 @@
 * **Localized Command Names:** Accepts localized command names typed directly at the command line (`#3077`). *([@HakanSeven12](https://github.com/HakanSeven12))*
 * **Annotation Scale Question:** Prompts for annotation scale before creating annotative dimensions, multileaders and block references (`#3090`). *([@ramox81](https://github.com/ramox81))*
 * **PDF and SVG Hatch Boundary Curves:** Plots hatch boundary arcs as smooth curves rather than faceted chords in PDF and SVG exports (`#3076`). *([@HakanSeven12](https://github.com/HakanSeven12))*
+* **Centered Ribbon & Wheel Tab Switching:** The ribbon's right-click menu and Options › Window Elements can center the tabs and panels on wide screens (off by default), and turning the mouse wheel or swiping sideways over the ribbon steps through its tabs (on by default; ignored while a dropdown, the ribbon menu or search results are open, or with a modifier key held). The command search box now collapses to its magnifier exactly when the tab row could no longer hold it beside the Quick Access Toolbar and the tabs, before those wrap onto two rows, rather than below a fixed window width.
 * **`CIRCLE` Tangent Snaps & `MASSPROP` Prompt:** `CIRCLE` `2P` and `3P` accept Tangent object snaps; `MASSPROP` prompts for objects when nothing is selected. *([@HakanSeven12](https://github.com/HakanSeven12))*
 
 ---
@@ -28,6 +29,12 @@
 * **Modify, Layers & Naming:** `COPY` preserves the original objects' drawing order; `RENAME` keeps names with spaces whole whether typed quoted or answered step by step (`#3083`); each `LAYER` option commits as a single undo step (`#3080`). *([@KarimJerbi](https://github.com/KarimJerbi), [@assamaral](https://github.com/assamaral), [@travisjhughes](https://github.com/travisjhughes) and [@HakanSeven12](https://github.com/HakanSeven12))*
 * **PDF, DGN, WMF & 3DS Interchange:** PDF export embeds TrueType faces with their real glyph widths; PDF reader skips path segments that have no current point (`#3085`); DGN V8 reads level names from every non-model stream and UTF-16 string linkages; WMF import skips records claiming more points than they hold (`#3071`); 3D Studio import bounds chunk lengths safely without 32-bit overflow. *([@HakanSeven12](https://github.com/HakanSeven12) and [@travisjhughes](https://github.com/travisjhughes))*
 * **Web, CI & Regression Tests:** Kept `proj4wkt` native-only so the WASM web app links cleanly; added regression suites for PDF import (`#3087`), Windows metafile import (`#3081`), 3D Studio import (`#3075`), a 31-command undo sweep (`#3079`), `RENAME` quoted names, hatch panel cached fill rebuilds, and group save/reload persistence; fixed UTC release code-health measurement (`#3073`) and wiki CI error reporting (`#3074`). *([@HakanSeven12](https://github.com/HakanSeven12), [@travisjhughes](https://github.com/travisjhughes), [@KarimJerbi](https://github.com/KarimJerbi) and [@assamaral](https://github.com/assamaral))*
+
+---
+
+### ⚡ Performance
+
+* **Selection Preview at Scale:** Rollover and marquee (`SELECTIONPREVIEW`) highlight updates no longer rebuild the committed selection's GPU overlay: hover changes ride a separate hover generation, so previewing a selection box over a drawing with thousands of objects already selected stays smooth. Selectable-group expansion reads a cached group snapshot instead of scanning every document object on every pointer move, marquee tick and rendered frame; the per-frame viewport selection data is cached per selection generation; dense-entity highlights reuse a persistent overlay constant buffer with partial updates instead of cloning the whole scene's constants; hovered text highlights are cached per hover identity; a marquee over `SELECTIONPREVIEWLIMIT` now caps the preview (stable subset) instead of dropping it entirely; and committing a huge selection defers the Properties panel rebuild by one frame so the click or box release returns instantly. *([@emrahoksak](https://github.com/emrahoksak))*
 
 ---
 

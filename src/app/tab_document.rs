@@ -336,6 +336,8 @@ pub(super) struct DocumentTab {
     pub(super) ole_frames: std::collections::HashMap<u64, crate::entities::ole2frame::FrameState>,
     /// Node graph shown by the command line's graph button.
     pub(super) graph: crate::ui::node_graph::Graph,
+    /// The files that the graph's nodes read, read off the UI thread.
+    pub(super) graph_files: crate::app::node_graph::files::GraphFiles,
     /// Currently active UCS. `None` means WCS (identity transform).
     pub(super) active_ucs: Option<Ucs>,
     /// Open sketch, if CREATESKETCH is in effect. `None` is the normal
@@ -521,6 +523,25 @@ impl DocumentTab {
     /// Every consumer that needs UCS-relative coordinates goes through this.
     pub(super) fn ucs_xform(&self) -> super::helpers::UcsXform {
         super::helpers::UcsXform::from_active(self.active_ucs.as_ref())
+    }
+
+    /// Rectangle width/height frame `(corner, width_axis, height_axis)` the
+    /// dynamic W/H boxes measure in: a rectangle grip's frame, or a command's
+    /// `RectSides` step whose `ref_point` gives a rotated width direction.
+    pub(super) fn dyn_rect_frame(&self) -> Option<(glam::DVec3, glam::DVec3, glam::DVec3)> {
+        if let Some(grip) = self.active_grip.as_ref() {
+            return grip.rectangle_frame;
+        }
+        if self.dyn_guide != crate::command::DynGuide::RectSides {
+            return None;
+        }
+        let (anchor, reference) = (self.dyn_anchor?, self.dyn_ref?);
+        let width_axis = (reference - anchor).normalize_or_zero();
+        if width_axis == glam::DVec3::ZERO {
+            return None;
+        }
+        let normal = self.ucs_xform().vec_to_wcs(glam::DVec3::Z);
+        Some((anchor, width_axis, normal.cross(width_axis).normalize_or_zero()))
     }
 
     /// World-space UCS origin in full f64 precision (stored f64 in the header /
@@ -898,6 +919,7 @@ impl DocumentTab {
             props_asym_scale: std::collections::HashSet::new(),
             ole_frames: std::collections::HashMap::new(),
             graph: Default::default(),
+            graph_files: Default::default(),
             active_ucs: None,
             sketch_session: None,
             sketch_count: 0,

@@ -365,6 +365,12 @@ pub struct MeshBatchChunk {
     /// The LOD 1 and LOD 2 index buffers the entries' ranges point into,
     /// over this chunk's own vertex buffer.
     pub lod_index_buffers: Vec<wgpu::Buffer>,
+    /// Set on a chunk of instances that carries display LODs: the bounds
+    /// that hold all of its instances. Its one entry in `lod_entries` then
+    /// covers every opaque triangle and holds the box of the largest
+    /// instance, and all the instances draw the level that box needs where
+    /// these bounds come closest to the eye ([`instance_lod_boxes`]).
+    pub instance_lod_bounds: Option<[f32; 6]>,
 }
 
 /// One opaque part of a chunk at each display LOD: `ranges[level]` is
@@ -532,6 +538,7 @@ fn make_chunk(
         edge_vertex_count: edge_verts.len() as u32,
         lod_entries: Vec::new(),
         lod_index_buffers: Vec::new(),
+        instance_lod_bounds: None,
         instance_buffer: {
             let buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("mesh.batch.instances"),
@@ -1351,25 +1358,91 @@ fn attach_lods(
             .collect();
         chunk.lod_index_buffers = buffers
             .iter()
-            .map(|data| {
-                // A level no part has still gets a (never drawn) buffer, so
-                // `lod_index_buffers[level - 1]` always exists.
-                let bytes: &[u8] = if data.is_empty() {
-                    &[0; 4]
-                } else {
-                    bytemuck::cast_slice(data)
-                };
-                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("mesh.batch.lod_ibuf"),
-                    size: bytes.len() as u64,
-                    usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
-                queue.write_buffer(&buffer, 0, bytes);
-                buffer
-            })
+            .map(|data| lod_index_buffer(device, queue, data))
             .collect();
     }
+}
+
+/// The index buffer of one display level. A level no part has still gets a
+/// (never drawn) buffer, so `lod_index_buffers[level - 1]` always exists.
+fn lod_index_buffer(device: &wgpu::Device, queue: &wgpu::Queue, data: &[u32]) -> wgpu::Buffer {
+    let bytes: &[u8] = if data.is_empty() {
+        &[0; 4]
+    } else {
+        bytemuck::cast_slice(data)
+    };
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("mesh.batch.lod_ibuf"),
+        size: bytes.len() as u64,
+        usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(&buffer, 0, bytes);
+    buffer
+}
+
+/// Gives a chunk of instances the display LODs of the geometry it repeats:
+/// the two coarser index lists, over the vertex buffer the instances share,
+/// and one entry for all of its opaque triangles. `largest` is the box of
+/// its largest instance and `bounds` hold every instance.
+fn attach_instance_lods(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    chunk: &mut MeshBatchChunk,
+    lods: &[Option<std::sync::Arc<[u32]>>; 2],
+    largest: [f32; 6],
+    bounds: [f32; 6],
+) {
+    let level = |at: usize| lods[at].as_deref().unwrap_or(&[]);
+    if chunk.index_count == 0 || (level(0).is_empty() && level(1).is_empty()) {
+        return;
+    }
+    chunk.lod_index_buffers = (0..2)
+        .map(|at| lod_index_buffer(device, queue, level(at)))
+        .collect();
+    chunk.lod_entries = vec![MeshLodEntry {
+        aabb: largest,
+        ranges: [
+            (0, chunk.index_count),
+            (0, level(0).len() as u32),
+            (0, level(1).len() as u32),
+        ],
+    }];
+    chunk.instance_lod_bounds = Some(bounds);
+}
+
+/// The boxes to measure for a chunk of instances: `largest`, the box of its
+/// largest instance, moved inside `bounds` (which hold every instance) to
+/// where they come closest to `eye` and to each of their corners. No
+/// instance shows larger than the largest of these, so the level that one
+/// takes is fine enough for all of them. Under an orthographic view they
+/// all measure the same.
+pub fn instance_lod_boxes(largest: [f32; 6], bounds: [f32; 6], eye: glam::DVec3) -> [[f32; 6]; 9] {
+    let eye = [eye.x as f32, eye.y as f32, eye.z as f32];
+    let half: [f32; 3] = std::array::from_fn(|axis| (largest[axis + 3] - largest[axis]) * 0.5);
+    // Where the centre of an instance can sit along each axis.
+    let low: [f32; 3] = std::array::from_fn(|axis| bounds[axis] + half[axis]);
+    let high: [f32; 3] = std::array::from_fn(|axis| bounds[axis + 3] - half[axis]);
+    std::array::from_fn(|candidate| {
+        let centre: [f32; 3] = std::array::from_fn(|axis| {
+            if low[axis] > high[axis] {
+                (bounds[axis] + bounds[axis + 3]) * 0.5
+            } else if candidate == 8 {
+                eye[axis].clamp(low[axis], high[axis])
+            } else if (candidate >> axis) & 1 == 0 {
+                low[axis]
+            } else {
+                high[axis]
+            }
+        });
+        std::array::from_fn(|slot| {
+            if slot < 3 {
+                centre[slot] - half[slot]
+            } else {
+                centre[slot - 3] + half[slot - 3]
+            }
+        })
+    })
 }
 
 /// Screen-size thresholds of the LOD ladder, in pixels of projected
@@ -1735,16 +1808,28 @@ fn build_instanced_chunks(
         f32::NEG_INFINITY,
         f32::NEG_INFINITY,
     ];
+    // The box of the largest instance, with its squared diagonal.
+    let mut largest = ([0.0f32; 6], f32::NEG_INFINITY);
     for part in parts {
         let transform = part.set.instance_transform?;
         let instance_start = instances.len() as u32;
         instances.push(MeshInstanceGpu::from_transform(transform));
-        bounds[0] = bounds[0].min(part.set.world_aabb[0]);
-        bounds[1] = bounds[1].min(part.set.world_aabb[1]);
-        bounds[2] = bounds[2].min(part.set.z_aabb[0]);
-        bounds[3] = bounds[3].max(part.set.world_aabb[2]);
-        bounds[4] = bounds[4].max(part.set.world_aabb[3]);
-        bounds[5] = bounds[5].max(part.set.z_aabb[1]);
+        let own = [
+            part.set.world_aabb[0],
+            part.set.world_aabb[1],
+            part.set.z_aabb[0],
+            part.set.world_aabb[2],
+            part.set.world_aabb[3],
+            part.set.z_aabb[1],
+        ];
+        let diagonal: f32 = (0..3).map(|axis| (own[axis + 3] - own[axis]).powi(2)).sum();
+        if diagonal.is_finite() && diagonal > largest.1 {
+            largest = (own, diagonal);
+        }
+        for axis in 0..3 {
+            bounds[axis] = bounds[axis].min(own[axis]);
+            bounds[axis + 3] = bounds[axis + 3].max(own[axis + 3]);
+        }
         if let Some(handle) = part.entity_handle {
             handles.insert(handle);
             if first.include_faces {
@@ -1874,6 +1959,10 @@ fn build_instanced_chunks(
             .vertices
             .entry(vertex_key)
             .or_insert_with(|| chunk.vertex_buffer.clone());
+        // The coarser levels of the shared geometry, for the opaque fill.
+        if first.include_faces && !transparent && largest.1.is_finite() {
+            attach_instance_lods(device, queue, &mut chunk, &first.lods, largest.0, bounds);
+        }
         geometry.push(chunk);
     }
     let mut chunks = Vec::new();
@@ -2972,7 +3061,87 @@ pub fn build_mesh_batch_filtered(
 
 #[cfg(test)]
 mod lod_selection_tests {
-    use super::{lod_level, projected_diagonal};
+    use super::{instance_lod_boxes, lod_level, projected_diagonal};
+
+    /// The largest size the boxes of [`instance_lod_boxes`] measure.
+    fn largest_size(
+        largest: [f32; 6],
+        bounds: [f32; 6],
+        view: &glam::Mat4,
+        eye: glam::DVec3,
+    ) -> f32 {
+        instance_lod_boxes(largest, bounds, eye)
+            .into_iter()
+            .map(|aabb| projected_diagonal(aabb, view, eye, [200.0, 200.0]))
+            .fold(0.0, f32::max)
+    }
+
+    #[test]
+    fn instances_measure_as_one_of_them_under_an_orthographic_view() {
+        // 1 world unit = 1 px. A 30 x 40 x 5 instance somewhere in a field
+        // of them: 50 px wherever the field and the eye are.
+        let ortho = glam::Mat4::orthographic_rh(-100.0, 100.0, -100.0, 100.0, -1000.0, 1000.0);
+        let instance = [510.0, 210.0, 0.0, 540.0, 250.0, 5.0];
+        let field = [-2000.0, -900.0, 0.0, 3000.0, 800.0, 60.0];
+        for eye in [glam::DVec3::ZERO, glam::DVec3::new(900.0, -300.0, 500.0)] {
+            let size = largest_size(instance, field, &ortho, eye);
+            assert!((size - 50.0).abs() < 1e-2, "{size}");
+        }
+        // Every box keeps the size of the instance and stays in the field.
+        for moved in instance_lod_boxes(instance, field, glam::DVec3::ZERO) {
+            for axis in 0..3 {
+                let size = moved[axis + 3] - moved[axis];
+                assert!((size - (instance[axis + 3] - instance[axis])).abs() < 1e-3);
+                assert!(
+                    moved[axis] >= field[axis] - 1e-3 && moved[axis + 3] <= field[axis + 3] + 1e-3
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn instances_measure_as_the_nearest_of_them_under_a_perspective_view() {
+        // The eye looks down -Z from the origin at a field of unit cubes
+        // between 10 and 100 away. None of them shows larger than the size
+        // the boxes give, and the one nearest the eye shows about that size.
+        let perspective = glam::Mat4::perspective_rh(1.0, 1.0, 0.1, 1000.0);
+        let eye = glam::DVec3::ZERO;
+        let field = [-40.0, -40.0, -100.0, 40.0, 40.0, -10.0];
+        let cube = |x: f32, y: f32, z: f32| [x, y, z - 1.0, x + 1.0, y + 1.0, z];
+        let limit = largest_size(cube(5.0, 5.0, -50.0), field, &perspective, eye);
+        let mut seen = 0.0f32;
+        for x in [-40.0, -17.0, -0.5, 12.0, 39.0] {
+            for y in [-40.0, -3.0, 39.0] {
+                for z in [-10.0, -33.0, -99.0] {
+                    let size = projected_diagonal(cube(x, y, z), &perspective, eye, [200.0, 200.0]);
+                    assert!(size <= limit * 1.001, "{size} > {limit} at {x} {y} {z}");
+                    seen = seen.max(size);
+                }
+            }
+        }
+        assert!(seen > limit * 0.5, "{seen} of {limit}");
+        // With the eye inside the field an instance can be as near as can be.
+        let inside = largest_size(
+            cube(5.0, 5.0, -50.0),
+            [-40.0, -40.0, -100.0, 40.0, 40.0, 100.0],
+            &perspective,
+            eye,
+        );
+        assert!(inside.is_infinite());
+    }
+
+    #[test]
+    fn an_instance_larger_than_its_field_is_measured_in_the_middle() {
+        // Bounds narrower than the box on an axis (a rounding of either).
+        let boxes = instance_lod_boxes(
+            [0.0, 0.0, 0.0, 10.0, 10.0, 10.0],
+            [100.0, 100.0, 100.0, 108.0, 130.0, 130.0],
+            glam::DVec3::ZERO,
+        );
+        for moved in boxes {
+            assert!((moved[0] - 99.0).abs() < 1e-4 && (moved[3] - 109.0).abs() < 1e-4);
+        }
+    }
 
     #[test]
     fn a_mesh_on_a_threshold_keeps_its_level_until_clearly_past_it() {

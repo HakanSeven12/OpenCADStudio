@@ -152,10 +152,10 @@ const MENUS: &[(&str, &[Entry])] = &[
                     Cmd("Realtime", "PAN", ""),
                     Cmd("Point", "-PAN", ""),
                     Sep,
-                    Cmd("Left", "PAN LEFT", ""),
-                    Cmd("Right", "PAN RIGHT", ""),
-                    Cmd("Up", "PAN UP", ""),
-                    Cmd("Down", "PAN DOWN", ""),
+                    Cmd("Left", "PANLEFT", ""),
+                    Cmd("Right", "PANRIGHT", ""),
+                    Cmd("Up", "PANUP", ""),
+                    Cmd("Down", "PANDOWN", ""),
                 ],
             ),
             Sep,
@@ -172,7 +172,7 @@ const MENUS: &[(&str, &[Entry])] = &[
                     Cmd("3 Viewports", "-VPORTS 3", ""),
                     Cmd("4 Viewports", "-VPORTS 4", ""),
                     Sep,
-                    Cmd("Join", "-VPORTS J", ""),
+                    Cmd("Join", "VPJOIN", ""),
                 ],
             ),
             Cmd("Named Views...", "VIEW", ""),
@@ -1315,39 +1315,7 @@ impl<'a> From<Title<'a>> for Element<'a, Message> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Entry, MENUS};
-
-    fn commands(entries: &'static [Entry], out: &mut Vec<&'static str>) {
-        for entry in entries {
-            match *entry {
-                Entry::Cmd(_, line, _) => out.push(line.split_whitespace().next().unwrap()),
-                Entry::Sep => {}
-                Entry::Sub(_, entries) => commands(entries, out),
-            }
-        }
-    }
-
-    /// Lists the menu commands OCS's command table does not know: a to-do
-    /// list, not a failure. Running one reports it on the command line.
-    #[test]
-    fn menu_commands_ocs_does_not_have_yet() {
-        let known = crate::command::all_registered_command_names();
-        let mut all = Vec::new();
-        for (_, entries) in MENUS {
-            commands(entries, &mut all);
-        }
-        let mut missing: Vec<_> = all
-            .into_iter()
-            .filter(|command| !known.iter().any(|k| k.eq_ignore_ascii_case(command)))
-            .collect();
-        missing.sort_unstable();
-        missing.dedup();
-        println!(
-            "Menu commands OCS does not have yet ({}):\n{}",
-            missing.len(),
-            missing.join("\n")
-        );
-    }
+    use super::MENUS;
 
     #[test]
     fn the_menu_tree_has_every_menu_of_the_design() {

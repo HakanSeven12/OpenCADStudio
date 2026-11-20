@@ -5,13 +5,15 @@ impl Scene {
     /// Collect model-space wires projected into paper space for all (or one specific)
     /// user viewports.  `only_vp = Some(h)` restricts output to that viewport.
     /// `plot` adds the edges of 3-D meshes, which the screen draws on the GPU
-    /// and the plot must draw as wires; such a set is not cached.
+    /// and the plot must draw as wires; such a set is not cached. `shade` is
+    /// the plotted render mode of those meshes (see [`Self::mesh_plot_wires`]).
     pub(super) fn viewport_content_wires(
         &self,
         paper_block: Handle,
         only_vp: Option<Handle>,
         exclude_vp: Option<Handle>,
         plot: bool,
+        shade: Option<document::entities::ViewportRenderMode>,
     ) -> Vec<WireModel> {
         use document::entities::Viewport;
 
@@ -96,7 +98,7 @@ impl Scene {
                 let frozen: HashSet<Handle> = vp.frozen_layers.iter().copied().collect();
                 let meshes = self.meshes_for_viewport(vp_handle, &frozen);
                 let view = (cam_frame.rotation * glam::Vec3::Z).as_dvec3().to_array();
-                let mesh_wires = self.mesh_plot_wires(&meshes, view, Some(vp_handle));
+                let mesh_wires = self.mesh_plot_wires(&meshes, view, Some(vp_handle), shade);
                 model_wires.to_mut().extend(mesh_wires);
                 for wire in model_wires.to_mut() {
                     wire.resample_plot_curve();
@@ -108,6 +110,17 @@ impl Scene {
             let vp_x1 = pcx + hw;
             let vp_y0 = pcy - hh;
             let vp_y1 = pcy + hh;
+
+            let plot_clip = if plot && crate::entities::viewport::is_clipped(vp) {
+                let ring = self.clip_boundary_polygon(vp.clip_boundary_handle, pcz);
+                (ring.len() >= 3).then(|| {
+                    ring.into_iter()
+                        .map(|[x, y, _]| [x, y])
+                        .collect::<std::sync::Arc<[[f32; 2]]>>()
+                })
+            } else {
+                None
+            };
 
             // camera_dist: how far the camera is from the target plane.
             let use_perspective = vp.status.perspective && vp.lens_length > 1.0;
@@ -180,6 +193,25 @@ impl Scene {
                 }
             };
             let in_vp = |x: f32, y: f32| x >= vp_x0 && x <= vp_x1 && y >= vp_y0 && y <= vp_y1;
+            // DVIEW Clip: depth toward the eye from the target, kept between
+            // the back and front planes the viewport switches on — the cut the
+            // screen makes with its near/far planes.
+            let depth_of = |p: glam::DVec3| {
+                (p.x - display_center_x) * view_fwd_d.0
+                    + (p.y - display_center_y) * view_fwd_d.1
+                    + (p.z - display_center_z) * view_fwd_d.2
+            };
+            let front = vp.status.front_clipping && vp.status.front_clip_not_at_eye;
+            let depth_range = (front || vp.status.back_clipping).then(|| {
+                (
+                    if vp.status.back_clipping {
+                        vp.back_clip_z
+                    } else {
+                        f64::NEG_INFINITY
+                    },
+                    if front { vp.front_clip_z } else { f64::INFINITY },
+                )
+            });
 
             for wire in model_wires.iter() {
                 let marker_view_height = wire.point_marker.map_or(view_height_eff, |marker| {
@@ -193,18 +225,29 @@ impl Scene {
                         + relative.z * view_fwd_d.2;
                     view_height_eff * (camera_dist_d - depth).max(0.001) / camera_dist_d.max(0.001)
                 });
-                let projected_pts: Vec<[f32; 3]> = wire
+                let depth_pts: Vec<([f32; 3], f64)> = wire
                     .points
                     .iter()
                     .enumerate()
                     .map(|(pi, &[mx, my, mz])| {
                         if mx.is_nan() || my.is_nan() || mz.is_nan() {
-                            return [f32::NAN; 3];
+                            return ([f32::NAN; 3], 0.0);
                         }
                         let point = wire.point_world(pi, marker_view_height);
-                        proj_abs(point.x, point.y, point.z)
+                        (proj_abs(point.x, point.y, point.z), depth_of(point))
                     })
                     .collect();
+                let depth_clipped = depth_range.is_some_and(|(back, front)| {
+                    depth_pts
+                        .iter()
+                        .any(|(p, d)| p[0].is_finite() && (*d < back || *d > front))
+                });
+                let projected_pts: Vec<[f32; 3]> = match depth_range {
+                    Some((back, front)) if depth_clipped => {
+                        clip_polyline_to_depth(&depth_pts, back, front)
+                    }
+                    _ => depth_pts.iter().map(|(p, _)| *p).collect(),
+                };
 
                 // SDF glyph quads ride `text_verts` in absolute WCS, so they need
                 // the same projection the points get — a bare clone leaves the
@@ -248,6 +291,22 @@ impl Scene {
                         );
                         [p[0], p[1]]
                     };
+                    if let Some((back, front)) = depth_range {
+                        let outside = (0..3).any(|k| {
+                            let low = wire.fill_tris_low.get(ti * 3 + k).copied();
+                            let low = low.unwrap_or([0.0; 3]);
+                            let d = depth_of(glam::DVec3::new(
+                                tri[k][0] as f64 + low[0] as f64,
+                                tri[k][1] as f64 + low[1] as f64,
+                                tri[k][2] as f64 + low[2] as f64,
+                            ));
+                            d < back || d > front
+                        });
+                        // ponytail: a fill crossing a clip plane drops whole; split it if plots need the sliver.
+                        if outside {
+                            continue;
+                        }
+                    }
                     let corners = [corner(0), corner(1), corner(2)];
                     if corners
                         .iter()
@@ -294,7 +353,7 @@ impl Scene {
                     continue;
                 }
 
-                let stationed = wire.pattern_stations.len() > wire.points.len();
+                let stationed = !depth_clipped && wire.pattern_stations.len() > wire.points.len();
                 let source_length = stationed.then(|| wire.pattern_stations[wire.points.len()]);
                 let (clipped, mut clipped_stations) = clip_polyline_to_rect(
                     &projected_pts,
@@ -361,16 +420,15 @@ impl Scene {
                     .collect();
 
                 let adapted = view::render::adapt_to_bg(wire.color, self.paper_bg_color);
-                let [r, g, b, a] = adapted;
-                // Glyphs carry their own per-vertex colour, so dim them through
-                // the same adapt + 0.80/0.85 the wire colour below gets, or the
-                // text reads brighter than its own dimension lines.
+                // Glyphs carry their own colour: use the same screen-only
+                // dimming as wires, preserving source RGBA when plotting.
                 for v in &mut projected_text {
                     let [tr, tg, tb, ta] = view::render::adapt_to_bg(v.color, self.paper_bg_color);
-                    v.color = [tr * 0.80, tg * 0.80, tb * 0.80, ta * 0.85];
+                    v.color = super::viewport_color::projected_color([tr, tg, tb, ta], plot);
                 }
                 let mut out = wire.clone();
                 out.points = clipped;
+                out.plot_clip = plot_clip.clone();
                 // A wide polyline's band width is a geometric width in model
                 // units; the points were just projected into paper units, so
                 // the band (and any per-point taper) must follow the same
@@ -449,7 +507,7 @@ impl Scene {
                 } else {
                     WireModel::UNBOUNDED_AABB
                 };
-                out.color = [r * 0.80, g * 0.80, b * 0.80, a * 0.85];
+                out.color = super::viewport_color::projected_color(adapted, plot);
                 out.line_weight_px = wire.line_weight_px;
                 // Wire patterns stay in their base model units. Projection
                 // normally scales them with the geometry; PSLTSCALE instead
@@ -801,9 +859,25 @@ impl Scene {
         meshes: &[MeshLodSet],
         view: [f64; 3],
         viewport: Option<Handle>,
+        shade: Option<document::entities::ViewportRenderMode>,
     ) -> Vec<WireModel> {
         use document::types::Vector3;
-        let mut wires = Vec::new();
+        let flags = shade.map(view::render::render_mode_flags);
+        // Hidden and shaded modes hide the edges that faces cover; shaded
+        // modes also fill the faces, and drop the edges unless the mode
+        // shows them.
+        let hidden = flags.is_some_and(|f| f.mesh_fill);
+        let shaded = flags.is_some_and(|f| f.mesh_fill && !f.hidden_line);
+        let edges = !shaded || flags.is_some_and(|f| f.show_3d_edges);
+        let mut wires = if shaded {
+            self.mesh_plot_faces(meshes, view)
+        } else {
+            Vec::new()
+        };
+        if !edges {
+            return wires;
+        }
+        let occluders = hidden.then(|| Occluders::new(meshes, view));
         for set in meshes {
             let Some(handle) = set.entity_handle() else {
                 continue;
@@ -866,6 +940,12 @@ impl Scene {
                     points.extend([pair[0], pair[1], [f64::NAN; 3]]);
                 }
             }
+            if let Some(occluders) = &occluders {
+                points = points
+                    .chunks_exact(3)
+                    .flat_map(|seg| occluders.visible_parts(seg[0], seg[1]))
+                    .collect();
+            }
             if points.is_empty() {
                 continue;
             }
@@ -884,6 +964,212 @@ impl Scene {
             wires.push(wire);
         }
         wires
+    }
+
+    /// The faces of every plotted mesh as filled triangles, shaded by how
+    /// squarely they face the viewer and ordered far to near, so nearer
+    /// faces paint over farther ones. Each triangle is its own wire (one
+    /// colour per wire); all carry the depth of the lowest mesh in draw
+    /// order, so they sort together under the edges.
+    fn mesh_plot_faces(&self, meshes: &[MeshLodSet], view: [f64; 3]) -> Vec<WireModel> {
+        use document::types::Vector3;
+        let w = glam::DVec3::from(view).normalize_or(glam::DVec3::Z);
+        let depths = self.draw_depth_map();
+        let mut owner: Option<(f32, Handle)> = None;
+        let mut faces: Vec<(f64, [glam::DVec3; 3], usize)> = Vec::new();
+        let mut styles: Vec<([f32; 4], Option<std::sync::Arc<str>>)> = Vec::new();
+        for set in meshes {
+            let Some(handle) = set.entity_handle() else {
+                continue;
+            };
+            let Some(mesh) = set.geometry_lods().first() else {
+                continue;
+            };
+            if let Some(entity) = self.document.get_entity(handle) {
+                let plotted = self
+                    .document
+                    .layers
+                    .get(&entity.common().layer)
+                    .is_none_or(|layer| layer.is_plottable);
+                if !plotted {
+                    continue;
+                }
+            }
+            let depth = depths.get(&handle.value()).map_or(0.0, |d| d[0]);
+            if owner.is_none_or(|(d, _)| depth < d) {
+                owner = Some((depth, handle));
+            }
+            let style = styles.len();
+            styles.push((
+                set.display_color().unwrap_or([0.7, 0.7, 0.7, 1.0]),
+                set.effective_layer.clone(),
+            ));
+            let vertex = |i: u32| {
+                let i = i as usize;
+                let low = mesh.verts_low.get(i).copied().unwrap_or([0.0; 3]);
+                let p: [f64; 3] = std::array::from_fn(|k| mesh.verts[i][k] as f64 + low[k] as f64);
+                let p = set.instance_transform.map_or(p, |xform| {
+                    let q = xform.apply(Vector3::new(p[0], p[1], p[2]));
+                    [q.x, q.y, q.z]
+                });
+                glam::DVec3::from(p)
+            };
+            for tri in mesh.indices.chunks_exact(3) {
+                let corners = [vertex(tri[0]), vertex(tri[1]), vertex(tri[2])];
+                if !corners.iter().all(|c| c.is_finite()) {
+                    continue;
+                }
+                let center = (corners[0] + corners[1] + corners[2]) / 3.0;
+                faces.push((center.dot(w), corners, style));
+            }
+        }
+        let Some((_, owner)) = owner else {
+            return Vec::new();
+        };
+        faces.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let name = owner.value().to_string();
+        faces
+            .into_iter()
+            .filter_map(|(_, corners, style)| {
+                let normal = (corners[1] - corners[0]).cross(corners[2] - corners[0]);
+                let normal = normal.try_normalize()?;
+                // A headlight from the viewer: square faces full tone, edge-on
+                // faces darkest.
+                let light = 0.35 + 0.65 * normal.dot(w).abs() as f32;
+                let (color, layer) = &styles[style];
+                let shaded = [color[0] * light, color[1] * light, color[2] * light, color[3]];
+                let mut wire = WireModel::solid(name.clone(), Vec::new(), shaded, false);
+                let mut high = Vec::with_capacity(3);
+                let mut low = Vec::with_capacity(3);
+                for c in corners {
+                    let split = c.to_array().map(WireModel::split_ds);
+                    high.push(split.map(|(h, _)| h));
+                    low.push(split.map(|(_, l)| l));
+                }
+                wire.fill_tris = high;
+                wire.fill_tris_low = low;
+                wire.fill_is_3d = true;
+                wire.effective_layer = layer.clone();
+                Some(wire)
+            })
+            .collect()
+    }
+}
+
+/// The faces of every plotted mesh, for hiding the edges they cover when a
+/// viewport plots hidden or shaded.
+struct Occluders {
+    /// Triangle corners, then the triangle's extent across the view
+    /// (`[min_u, min_v, max_u, max_v]`) and its nearest depth toward the viewer.
+    tris: Vec<([[f64; 3]; 3], [f64; 4], f64)>,
+    axes: [glam::DVec3; 3],
+    eps: f64,
+}
+
+impl Occluders {
+    fn new(meshes: &[MeshLodSet], view: [f64; 3]) -> Self {
+        use document::types::Vector3;
+        let w = glam::DVec3::from(view).normalize_or(glam::DVec3::Z);
+        let u = w.any_orthonormal_vector();
+        let axes = [u, w.cross(u), w];
+        let mut tris = Vec::new();
+        let (mut lo, mut hi) = (glam::DVec3::splat(f64::MAX), glam::DVec3::splat(f64::MIN));
+        for set in meshes {
+            let Some(mesh) = set.geometry_lods().first() else {
+                continue;
+            };
+            let vertex = |i: u32| {
+                let i = i as usize;
+                let low = mesh.verts_low.get(i).copied().unwrap_or([0.0; 3]);
+                let p: [f64; 3] =
+                    std::array::from_fn(|k| mesh.verts[i][k] as f64 + low[k] as f64);
+                set.instance_transform.map_or(p, |xform| {
+                    let q = xform.apply(Vector3::new(p[0], p[1], p[2]));
+                    [q.x, q.y, q.z]
+                })
+            };
+            for tri in mesh.indices.chunks_exact(3) {
+                let corners = [vertex(tri[0]), vertex(tri[1]), vertex(tri[2])];
+                let mut extent = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
+                let mut near = f64::MIN;
+                for c in corners {
+                    let c = glam::DVec3::from(c);
+                    lo = lo.min(c);
+                    hi = hi.max(c);
+                    let (pu, pv) = (c.dot(axes[0]), c.dot(axes[1]));
+                    extent = [
+                        extent[0].min(pu),
+                        extent[1].min(pv),
+                        extent[2].max(pu),
+                        extent[3].max(pv),
+                    ];
+                    near = near.max(c.dot(w));
+                }
+                tris.push((corners, extent, near));
+            }
+        }
+        let eps = if tris.is_empty() {
+            0.0
+        } else {
+            (hi - lo).length() * 1e-7
+        };
+        Self { tris, axes, eps }
+    }
+
+    /// Whether a face lies between `p` and the viewer.
+    // ponytail: linear scan of every face per sample; bin the extents in a
+    // grid if hidden-line plots of large models get slow.
+    fn hidden(&self, p: glam::DVec3) -> bool {
+        let [u, v, w] = self.axes;
+        let (pu, pv, pw) = (p.dot(u), p.dot(v), p.dot(w));
+        self.tris.iter().any(|(c, e, near)| {
+            if *near <= pw + self.eps || pu < e[0] || pu > e[2] || pv < e[1] || pv > e[3] {
+                return false;
+            }
+            // Ray from `p` toward the viewer against the triangle.
+            let [a, b, c] = c.map(glam::DVec3::from);
+            let (e1, e2) = (b - a, c - a);
+            let h = w.cross(e2);
+            let det = e1.dot(h);
+            if det.abs() < 1e-18 {
+                return false;
+            }
+            let s = p - a;
+            let bu = s.dot(h) / det;
+            if !(0.0..=1.0).contains(&bu) {
+                return false;
+            }
+            let q = s.cross(e1);
+            let bv = w.dot(q) / det;
+            bv >= 0.0 && bu + bv <= 1.0 && e2.dot(q) / det > self.eps
+        })
+    }
+
+    /// The pieces of `a`–`b` no face hides, as `[start, end, NaN]` triples.
+    fn visible_parts(&self, a: [f64; 3], b: [f64; 3]) -> Vec<[f64; 3]> {
+        let (a, b) = (glam::DVec3::from(a), glam::DVec3::from(b));
+        if !a.is_finite() || !b.is_finite() {
+            return Vec::new();
+        }
+        let n = (((b - a).length() / (self.eps * 1e4)).ceil() as usize).clamp(1, 64);
+        let at = |i: usize| a.lerp(b, i as f64 / n as f64);
+        let mut out = Vec::new();
+        let mut start = None;
+        for i in 0..n {
+            let shown = !self.hidden(a.lerp(b, (i as f64 + 0.5) / n as f64));
+            match (shown, start) {
+                (true, None) => start = Some(i),
+                (false, Some(s)) => {
+                    out.extend([at(s).to_array(), at(i).to_array(), [f64::NAN; 3]]);
+                    start = None;
+                }
+                _ => {}
+            }
+        }
+        if let Some(s) = start {
+            out.extend([at(s).to_array(), b.to_array(), [f64::NAN; 3]]);
+        }
+        out
     }
 }
 
@@ -1219,6 +1505,75 @@ fn cs_clip(
 
 /// Clip a projected polyline (NaN-separated segments) to the viewport rectangle.
 /// Returns a new points vec with proper NaN separators at clip boundaries.
+/// Cut a projected polyline (each point with its depth toward the eye) to
+/// the depths `back..=front`, breaking it with NaN where it leaves them.
+/// Crossings interpolate linearly, which is exact for a parallel projection.
+fn clip_polyline_to_depth(pts: &[([f32; 3], f64)], back: f64, front: f64) -> Vec<[f32; 3]> {
+    const NAN3: [f32; 3] = [f32::NAN, f32::NAN, f32::NAN];
+    let lerp = |a: [f32; 3], b: [f32; 3], t: f64| {
+        let t = t as f32;
+        [
+            a[0] + (b[0] - a[0]) * t,
+            a[1] + (b[1] - a[1]) * t,
+            a[2] + (b[2] - a[2]) * t,
+        ]
+    };
+    let mut out: Vec<[f32; 3]> = Vec::new();
+    let mut open = false;
+    for pair in pts.windows(2) {
+        let ((a, da), (b, db)) = (pair[0], pair[1]);
+        if !a[0].is_finite() || !b[0].is_finite() {
+            if open {
+                out.push(NAN3);
+                open = false;
+            }
+            continue;
+        }
+        // Parametric extent of the segment inside the slab.
+        let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
+        for (limit, below) in [(back, true), (front, false)] {
+            if !limit.is_finite() {
+                continue;
+            }
+            let (sa, sb) = if below {
+                (da - limit, db - limit)
+            } else {
+                (limit - da, limit - db)
+            };
+            if sa < 0.0 && sb < 0.0 {
+                t0 = 1.0;
+                t1 = 0.0;
+            } else if sa < 0.0 {
+                t0 = t0.max(sa / (sa - sb));
+            } else if sb < 0.0 {
+                t1 = t1.min(sa / (sa - sb));
+            }
+        }
+        if t0 > t1 {
+            if open {
+                out.push(NAN3);
+                open = false;
+            }
+            continue;
+        }
+        if !open || t0 > 0.0 {
+            if open {
+                out.push(NAN3);
+            }
+            out.push(lerp(a, b, t0));
+        }
+        out.push(lerp(a, b, t1));
+        open = t1 >= 1.0;
+        if !open {
+            out.push(NAN3);
+        }
+    }
+    while out.last().is_some_and(|p| !p[0].is_finite()) {
+        out.pop();
+    }
+    out
+}
+
 fn clip_polyline_to_rect(
     pts: &[[f32; 3]],
     stations: Option<&[f32]>,

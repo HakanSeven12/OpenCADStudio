@@ -75,6 +75,12 @@ pub struct Camera {
     /// shrinks with the zoom, so geometry above or below the target slipped
     /// out of a close-zoomed view on the first edit (#2812).
     pub stale_bounds: Option<(DVec3, DVec3)>,
+
+    /// A floating viewport's front/back clipping planes, as eye distances
+    /// (`None` on either side leaves that side unclipped). They narrow the
+    /// projection's near/far, so everything in front of the front plane or
+    /// behind the back plane is cut from the view.
+    pub clip_depth: (Option<f32>, Option<f32>),
 }
 
 impl Default for Camera {
@@ -95,6 +101,7 @@ impl Default for Camera {
             depth_half_range: 0.0,
             model_bounds: None,
             stale_bounds: None,
+            clip_depth: (None, None),
         }
     }
 }
@@ -274,6 +281,15 @@ impl Camera {
         (self.distance - r, self.distance + r)
     }
 
+    /// `range` narrowed to the viewport's front/back clipping planes. A
+    /// back plane in front of the front one leaves a sliver, not an
+    /// inverted projection.
+    fn clipped_depth(&self, (near, far): (f32, f32)) -> (f32, f32) {
+        let near = self.clip_depth.0.map_or(near, |front| near.max(front));
+        let far = self.clip_depth.1.map_or(far, |back| far.min(back));
+        (near, far.max(near + self.distance * 1e-4))
+    }
+
     /// Relative-to-eye view-projection: identical projection, but the view
     /// matrix carries rotation only (translation zeroed). Positions fed to it
     /// must already be expressed relative to the eye (done per-vertex with
@@ -300,16 +316,15 @@ impl Camera {
         view.w_axis = glam::vec4(0.0, 0.0, 0.0, 1.0);
 
         let proj = match self.projection {
-            Projection::Perspective => perspective(
-                self.fov_y,
-                aspect,
-                self.distance * 0.001,
-                self.distance * 1000.0,
-            ),
+            Projection::Perspective => {
+                let (near, far) =
+                    self.clipped_depth((self.distance * 0.001, self.distance * 1000.0));
+                perspective(self.fov_y, aspect, near.max(self.distance * 0.001), far)
+            }
             Projection::Orthographic => {
                 let h = self.ortho_size();
                 let w = h * aspect;
-                let (near, far) = self.ortho_depth_range();
+                let (near, far) = self.clipped_depth(self.ortho_depth_range());
                 orthographic(-w, w, -h, h, near, far)
             }
         };

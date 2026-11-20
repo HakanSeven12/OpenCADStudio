@@ -251,6 +251,30 @@ fn vs_edge(
     return out;
 }
 
+struct OccludedEdgeOut {
+    @invariant @builtin(position) clip_pos: vec4<f32>,
+    @location(0) color: vec4<f32>,
+    @location(1) here: vec4<f32>,
+    // One end of the line (the same for the whole line): the dash is
+    // measured from it.
+    @location(2) @interpolate(flat) start: vec4<f32>,
+};
+
+@vertex
+fn vs_edge_occluded(
+    v: EdgeVertexIn,
+    i: InstanceIn,
+) -> OccludedEdgeOut {
+    var out: OccludedEdgeOut;
+    let instance = mesh_instance(i);
+    let rel = relative_position(v.position, v.position_low, instance);
+    out.clip_pos = u.view_rot * vec4<f32>(rel, 1.0);
+    out.color = v.color;
+    out.here = out.clip_pos;
+    out.start = out.clip_pos;
+    return out;
+}
+
 fn map_weight(uv: vec2<f32>, tiling: u32) -> f32 {
     if (tiling == 2u) {
         return select(
@@ -615,6 +639,22 @@ fn fs_edge(in: EdgeVertexOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_edge_black(_in: EdgeVertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+}
+
+// HiddenLine's occluded edges: dashes of 6 px with 4 px gaps along the line.
+// ponytail: an end behind the eye (w <= 0) gives no sensible distance, so
+// such a line draws solid; clip it in the vertex shader if that shows.
+@fragment
+fn fs_edge_occluded(in: OccludedEdgeOut) -> @location(0) vec4<f32> {
+    if (in.start.w > 0.0) {
+        let half_size = u.viewport_size * 0.5;
+        let here = in.here.xy / in.here.w * half_size;
+        let start = in.start.xy / in.start.w * half_size;
+        if (fract(length(here - start) / 10.0) > 0.6) {
+            discard;
+        }
+    }
+    return vec4<f32>(in.color.rgb, 1.0);
 }
 
 @fragment

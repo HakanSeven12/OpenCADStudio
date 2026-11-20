@@ -182,6 +182,29 @@ fn properties(vp: &Viewport) -> Vec<PropSection> {
                 ro("Linked to Sheet View", "vp_sheet_view", String::new()),
             ],
         },
+        PropSection {
+            title: "Clipping".into(),
+            props: vec![
+                Property {
+                    label: "Front clip".into(),
+                    field: "vp_front_clipping",
+                    value: PropValue::BoolToggle {
+                        field: "vp_front_clipping",
+                        value: vp.status.front_clipping,
+                    },
+                },
+                edit("Front clip offset", "vp_front_clip", vp.front_clip_z),
+                Property {
+                    label: "Back clip".into(),
+                    field: "vp_back_clipping",
+                    value: PropValue::BoolToggle {
+                        field: "vp_back_clipping",
+                        value: vp.status.back_clipping,
+                    },
+                },
+                edit("Back clip offset", "vp_back_clip", vp.back_clip_z),
+            ],
+        },
     ]
 }
 
@@ -232,6 +255,24 @@ fn apply_geom_prop(vp: &mut Viewport, field: &str, value: &str) {
         "vp_ucs_icon" => {
             vp.ucs_icon_visible = if value == "toggle" {
                 !vp.ucs_icon_visible
+            } else {
+                value == "true"
+            };
+            return;
+        }
+        "vp_front_clipping" => {
+            vp.status.front_clipping = if value == "toggle" {
+                !vp.status.front_clipping
+            } else {
+                value == "true"
+            };
+            // The offset typed here places the plane; "at eye" ignores it.
+            vp.status.front_clip_not_at_eye |= vp.status.front_clipping;
+            return;
+        }
+        "vp_back_clipping" => {
+            vp.status.back_clipping = if value == "toggle" {
+                !vp.status.back_clipping
             } else {
                 value == "true"
             };
@@ -466,6 +507,16 @@ fn resize_from_corners(vp: &mut Viewport, a: (f64, f64), b: (f64, f64)) -> bool 
 }
 
 fn apply_transform(vp: &mut Viewport, t: &EntityTransform) {
+    // Moving, scaling or rotating the frame on the sheet leaves the model view
+    // where it was: target, view direction and UCS are model-space values, and
+    // transforming them with the sheet point shifted the content (#3329).
+    let model_view = (
+        vp.view_target,
+        vp.view_direction,
+        vp.ucs_origin,
+        vp.ucs_x_axis,
+        vp.ucs_y_axis,
+    );
     crate::scene::view::transform::apply_standard_entity_transform(vp, t, |entity, p1, p2| {
         crate::scene::view::transform::reflect_xy_point(
             &mut entity.center.x,
@@ -474,6 +525,13 @@ fn apply_transform(vp: &mut Viewport, t: &EntityTransform) {
             p2,
         );
     });
+    (
+        vp.view_target,
+        vp.view_direction,
+        vp.ucs_origin,
+        vp.ucs_x_axis,
+        vp.ucs_y_axis,
+    ) = model_view;
 }
 
 crate::impl_entity_basics!(Viewport);

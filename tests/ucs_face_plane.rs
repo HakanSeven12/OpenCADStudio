@@ -98,8 +98,8 @@ fn ucs_pick_command_enables_solid_face_picking() {
         "UCS FACE must use 3D surface point"
     );
     assert!(
-        cmd_face.entity_pick_highlights_hover(),
-        "UCS FACE must highlight hovered solid face"
+        !cmd_face.entity_pick_highlights_hover(),
+        "UCS FACE outlines the hovered face, not the whole solid"
     );
 
     let cmd_obj = UcsPickCommand { face: false };
@@ -109,6 +109,7 @@ fn ucs_pick_command_enables_solid_face_picking() {
         "UCS OBJECT operates on curves, not fills"
     );
     assert!(!cmd_obj.entity_pick_uses_surface_point());
+    assert!(cmd_obj.entity_pick_highlights_hover());
 
     let handle = document::Handle::new(0x2A);
     let pt = DVec3::new(10.5, 20.25, 30.125);

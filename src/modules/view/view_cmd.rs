@@ -426,6 +426,14 @@ impl CadCommand for DashViewCommand {
         }
     }
 
+    fn input_kind(&self) -> crate::command::InputKind {
+        // A view name may hold spaces: Space types one instead of ending it.
+        match self.step {
+            Step::Save | Step::WindowName | Step::Restore => crate::command::InputKind::FreeText,
+            _ => crate::command::InputKind::SingleToken,
+        }
+    }
+
     fn wants_text_input(&self) -> bool {
         true
     }

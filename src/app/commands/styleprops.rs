@@ -493,6 +493,9 @@ impl OpenCADStudio {
                         break;
                     }
                 }
+                if removed[pk::GROUPS] > 0 {
+                    self.tabs[i].scene.bump_groups_epoch();
+                }
 
                 // Remove draw-order tables whose owning blocks are gone.
                 let mut n_sortents = 0usize;
@@ -1137,6 +1140,7 @@ impl OpenCADStudio {
                     | "SELECTIONEFFECTCOLOR"
                     | "VSEDGECOLOR"
                     | "VSEDGESMOOTH"
+                    | "VSOCCLUDEDEDGES"
                     | "COMPARECOLORADDED"
                     | "COMPARECOLORREMOVED"
                     | "COMPARECOLORMODIFIED"
@@ -1160,6 +1164,9 @@ impl OpenCADStudio {
                     | "DYNCONSTRAINTDISPLAY"
                     | "CCONSTRAINTFORM"
                     | "DYNMODE"
+                    | "DYNPIFORMAT"
+                    | "DYNPICOORDS"
+                    | "DYNPIVIS"
                     | "TXT2MTXTCOMBINEMTEXT"
                     | "TXT2MTXTTEXTORDER"
                     | "TXT2MTXTWORDWRAP"
@@ -2430,6 +2437,31 @@ impl OpenCADStudio {
                                 },
                                 None => Ok((format!("DYNMODE = {}", self.dyn_mode), false)),
                             },
+                            // Pointer input for second points: polar or
+                            // cartesian, relative or absolute; and whether its
+                            // tooltip waits for typing (0) or the prompt (1).
+                            "DYNPIFORMAT" | "DYNPICOORDS" | "DYNPIVIS" => {
+                                let flag = match name.as_str() {
+                                    "DYNPIFORMAT" => &mut self.dyn_pointer_cartesian,
+                                    "DYNPICOORDS" => &mut self.dyn_pointer_absolute,
+                                    _ => &mut self.dyn_pointer_on_type,
+                                };
+                                // DYNPIVIS is 1 by default, so its flag reads inverted.
+                                let inverted = name == "DYNPIVIS";
+                                match &value {
+                                    Some(v) => match v.trim() {
+                                        "0" | "1" => {
+                                            *flag = (v.trim() == "1") != inverted;
+                                            self.dyn_coord_absolute = self.dyn_pointer_absolute;
+                                            Ok((format!("{name} = {}", v.trim()), true))
+                                        }
+                                        _ => Err("SETVAR: 0 or 1 required.".into()),
+                                    },
+                                    None => {
+                                        Ok((format!("{name} = {}", (*flag != inverted) as i32), false))
+                                    }
+                                }
+                            }
                             "ZOOMWHEEL" => match &value {
                                 Some(v) => match parse_bool(v) {
                                     Some(reversed) => {
@@ -2893,6 +2925,23 @@ impl OpenCADStudio {
                                 },
                                 None => Ok((
                                     format!("VSEDGESMOOTH = {}", self.model_space.edge_smooth),
+                                    false,
+                                )),
+                            },
+                            // Edges behind faces in the Hidden style: 0 off,
+                            // 1 dashed.
+                            "VSOCCLUDEDEDGES" => match value.as_deref().map(str::trim) {
+                                Some(v @ ("0" | "1")) => {
+                                    self.model_space.occluded_edges = v == "1";
+                                    self.sync_model_space_theme(false);
+                                    Ok((format!("VSOCCLUDEDEDGES = {v}"), true))
+                                }
+                                Some(_) => Err("SETVAR: 0 or 1 required.".into()),
+                                None => Ok((
+                                    format!(
+                                        "VSOCCLUDEDEDGES = {}",
+                                        u8::from(self.model_space.occluded_edges)
+                                    ),
                                     false,
                                 )),
                             },
@@ -3844,6 +3893,9 @@ impl OpenCADStudio {
                                         // modified instead of persisting.
                                         | "TEXTFILL"
                                         | "DYNMODE"
+                                        | "DYNPIFORMAT"
+                                        | "DYNPICOORDS"
+                                        | "DYNPIVIS"
                                 ) {
                                     self.persist_settings_if_changed();
                                 } else {

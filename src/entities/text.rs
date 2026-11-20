@@ -437,12 +437,13 @@ fn properties(t: &Text, text_style_names: &[String]) -> Vec<PropSection> {
                     },
                 },
                 // A style that fixes its height fixes this text's too, so the
-                // value shows but cannot be changed here.
-                crate::entities::common::num_prop(
+                // value shows read-only with a tooltip explaining why.
+                crate::entities::common::text_height_prop(
                     t!("Height").as_ref(),
                     "height",
                     t.height,
-                    !is_aligned && crate::entities::common::style_fixed_height(&t.style).is_none(),
+                    &t.style,
+                    !is_aligned,
                 ),
                 if is_two_point {
                     ro(
@@ -618,7 +619,8 @@ fn apply_grip(t: &mut Text, grip_id: usize, apply: GripApply) {
 }
 
 fn apply_transform(t: &mut Text, tr: &EntityTransform) {
-    crate::scene::view::transform::apply_standard_entity_transform(t, tr, |entity, p1, p2| {
+    let normal = t.normal;
+    crate::scene::view::transform::apply_ocs_entity_transform(t, tr, normal, |entity, p1, p2| {
         crate::scene::view::transform::reflect_xy_point(
             &mut entity.insertion_point.x,
             &mut entity.insertion_point.y,

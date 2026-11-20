@@ -9,10 +9,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 const MAX_LINES: usize = 2_000;
+/// Diagnostic marker lines (gesture clears, drag tracking, press/release
+/// bookends) survive ring eviction in their own small ring: an idle drawing
+/// floods the main ring in under a minute, and a reproduction the user makes
+/// minutes later must still be in the copy.
+const MAX_DIAGNOSTIC_LINES: usize = 240;
 
 static UI_ENABLED: AtomicBool = AtomicBool::new(false);
 static ENV_ENABLED: OnceLock<bool> = OnceLock::new();
 static LINES: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
+static DIAGNOSTIC_LINES: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
 static POINTER_MOVES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 static LAST_POINTER_MOVE: Mutex<Option<iced::time::Instant>> = Mutex::new(None);
 static FIRST_POINTER_MOVE: Mutex<Option<iced::time::Instant>> = Mutex::new(None);
@@ -25,6 +31,10 @@ static STDERR_TX: OnceLock<std::sync::mpsc::SyncSender<String>> = OnceLock::new(
 
 fn lines() -> &'static Mutex<VecDeque<String>> {
     LINES.get_or_init(|| Mutex::new(VecDeque::with_capacity(MAX_LINES)))
+}
+
+fn diagnostic_lines() -> &'static Mutex<VecDeque<String>> {
+    DIAGNOSTIC_LINES.get_or_init(|| Mutex::new(VecDeque::with_capacity(MAX_DIAGNOSTIC_LINES)))
 }
 
 /// Record a pointer move event received in update.
@@ -158,7 +168,21 @@ pub fn record(args: fmt::Arguments<'_>) {
     if !enabled() {
         return;
     }
+    keep(args.to_string(), &lines(), MAX_LINES);
+}
+
+/// Like [`record`], but the line also lands in the eviction-proof diagnostic
+/// ring appended at the end of [`snapshot_text`].
+pub fn record_diagnostic(args: fmt::Arguments<'_>) {
+    if !enabled() {
+        return;
+    }
     let line = args.to_string();
+    keep(line.clone(), &lines(), MAX_LINES);
+    keep(line, &diagnostic_lines(), MAX_DIAGNOSTIC_LINES);
+}
+
+fn keep(line: String, sink: &Mutex<VecDeque<String>>, max: usize) {
     // Terminal writes can block the UI/render thread when its pipe is slow.
     // PERF is diagnostic and must not create the hitch it is measuring.
     #[cfg(not(target_arch = "wasm32"))]
@@ -178,8 +202,8 @@ pub fn record(args: fmt::Arguments<'_>) {
     }
     #[cfg(target_arch = "wasm32")]
     eprintln!("{line}");
-    let mut entries = lines().lock().unwrap_or_else(|e| e.into_inner());
-    if entries.len() == MAX_LINES {
+    let mut entries = sink.lock().unwrap_or_else(|e| e.into_inner());
+    if entries.len() == max {
         entries.pop_front();
     }
     entries.push_back(line);
@@ -188,11 +212,23 @@ pub fn record(args: fmt::Arguments<'_>) {
 /// Plain-text snapshot used by the panel and its Copy button.
 pub fn snapshot_text() -> String {
     let entries = lines().lock().unwrap_or_else(|e| e.into_inner());
-    entries
+    let diagnostics = diagnostic_lines().lock().unwrap_or_else(|e| e.into_inner());
+    let mut text = entries
         .iter()
         .map(String::as_str)
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n");
+    if !diagnostics.is_empty() {
+        text.push_str("\n-- diagnostic markers (eviction-proof) --\n");
+        text.push_str(
+            &diagnostics
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
+    text
 }
 
 /// A short tail for the live HUD. The full 500-line history remains available
@@ -211,11 +247,22 @@ pub fn snapshot_tail_text(max_lines: usize) -> String {
 
 pub fn clear() {
     lines().lock().unwrap_or_else(|e| e.into_inner()).clear();
+    diagnostic_lines()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
 }
 
 #[macro_export]
 macro_rules! perf_record {
     ($($arg:tt)*) => {
         $crate::perf::record(format_args!($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! perf_record_diagnostic {
+    ($($arg:tt)*) => {
+        $crate::perf::record_diagnostic(format_args!($($arg)*))
     };
 }

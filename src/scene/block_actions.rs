@@ -2483,6 +2483,18 @@ pub(crate) fn constrain_value_set(
     value
 }
 
+/// An XY parameter's value sets bound its distances measured from the base
+/// toward the side the definition's end lies on, so a minimum of 0 keeps a
+/// parameter drawn down or left on that side.
+pub(crate) fn constrain_xy_distance(
+    value: f64,
+    definition: f64,
+    set: &document::objects::BlockParameterValueSet,
+) -> f64 {
+    let sign = if definition < 0.0 { -1.0 } else { 1.0 };
+    constrain_value_set(value * sign, set) * sign
+}
+
 pub(crate) fn constrain_angle(value: f64, set: &document::objects::BlockParameterValueSet) -> f64 {
     if set.flags == 0 {
         return value;
@@ -2539,8 +2551,8 @@ pub(super) fn constrain_parameter_position(
             let delta = position - p.base;
             position = p.base
                 + DVec3::new(
-                    constrain_value_set(delta.x, &parameter.x_value_set),
-                    constrain_value_set(delta.y, &parameter.y_value_set),
+                    constrain_xy_distance(delta.x, p.end.x - p.base.x, &parameter.x_value_set),
+                    constrain_xy_distance(delta.y, p.end.y - p.base.y, &parameter.y_value_set),
                     delta.z,
                 );
         }

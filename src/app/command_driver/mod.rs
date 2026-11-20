@@ -949,6 +949,20 @@ impl OpenCADStudio {
                     crate::app::commands::pdf_import::PdfImportSource::File(import),
                 );
             }
+            CmdResult::ReadPdfForImport(path) => {
+                let read = self.read_pdf_for_import_prompt(i, path);
+                return match self.handle_need_point() {
+                    Some(task) => Task::batch([read, task]),
+                    None => read,
+                };
+            }
+            CmdResult::ReadDgnForImport(path) => {
+                let read = self.read_dgn_for_import_prompt(i, path);
+                return match self.handle_need_point() {
+                    Some(task) => Task::batch([read, task]),
+                    None => read,
+                };
+            }
             CmdResult::ReadPointCloud(path) => {
                 let read = self.read_point_cloud_for_prompt(i, path);
                 return match self.handle_need_point() {
@@ -975,8 +989,9 @@ impl OpenCADStudio {
                 self.tabs[i].scene.clear_preview_wire();
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
-                self.attach_pdf_pages(i, label, kind, &path, pages, auto_place);
+                let placed = self.attach_pdf_pages(i, label, kind, &path, pages, auto_place);
                 self.restore_pre_cmd_tangent();
+                return placed;
             }
             CmdResult::PdfImport(request) => {
                 self.tabs[i].scene.clear_preview_wire();

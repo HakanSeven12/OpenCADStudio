@@ -19,6 +19,31 @@ pub enum Filter {
     Surfaces,
     /// Surfaces, solids and regions.
     Bodies,
+    /// Civil 3D COGO points.
+    CogoPoints,
+    /// COGO points and points.
+    SurfacePoints,
+    /// Civil 3D alignments.
+    Alignments,
+    /// Civil 3D assemblies.
+    Assemblies,
+    /// Civil 3D sample line groups.
+    SampleLineGroups,
+    /// Civil 3D TIN surfaces; a step of them may be passed with none selected.
+    TinSurfaces,
+    /// Lines, 2D and 3D polylines.
+    Paths,
+}
+
+/// The Civil 3D class of `entity`, if it is one.
+pub fn civil_class(entity: &EntityType) -> Option<&str> {
+    match entity {
+        EntityType::Extended(x) => match &x.data {
+            document::entities::ExtendedEntityData::Arch(a) => Some(a.dxf_name.as_str()),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 impl Filter {
@@ -42,6 +67,15 @@ impl Filter {
             Filter::Bodies => |e| {
                 matches!(e, EntityType::Surface(_) | EntityType::Solid3D(_) | EntityType::Region(_))
             },
+            Filter::CogoPoints => |e| civil_class(e) == Some("AECC_COGO_POINT"),
+            Filter::SurfacePoints => |e| matches!(e, EntityType::Point(_)) || civil_class(e) == Some("AECC_COGO_POINT"),
+            Filter::Alignments => |e| civil_class(e) == Some("AECC_ALIGNMENT"),
+            Filter::Assemblies => |e| civil_class(e) == Some("AECC_ASSEMBLY"),
+            Filter::SampleLineGroups => |e| civil_class(e) == Some("AECC_SAMPLE_LINE_GROUP"),
+            Filter::TinSurfaces => |e| civil_class(e) == Some("AECC_TIN_SURFACE"),
+            Filter::Paths => |e| {
+                matches!(e, EntityType::Line(_) | EntityType::LwPolyline(_) | EntityType::Polyline2D(_) | EntityType::Polyline3D(_))
+            },
         }
     }
 }
@@ -55,6 +89,18 @@ pub struct Opt {
     pub key: &'static str,
     /// What it asks.
     pub prompt: &'static str,
+    pub kind: OptKind,
+}
+
+/// What an option's value is.
+#[derive(Clone, Copy, Debug)]
+pub enum OptKind {
+    /// A number, kept in `values`.
+    Number,
+    /// Text, kept in `texts`.
+    Text,
+    /// One of a list (typed in part; `?` lists it), kept in `texts`.
+    Choice(fn() -> Vec<&'static str>),
 }
 
 /// One step of a surface command.
@@ -67,6 +113,8 @@ pub enum Step {
     Picks { prompt: &'static str, slot: usize, once: bool },
     /// A point, into `points`.
     Point { prompt: &'static str },
+    /// Points, into `points`, until Enter.
+    Points { prompt: &'static str },
     /// A number, kept under `key`, offered at its last value.
     Value { prompt: &'static str, key: &'static str, default: f64 },
     /// The closing prompt: Enter carries the command out; an option sets its value first.
@@ -81,6 +129,7 @@ pub struct SurfaceRequest {
     pub picks: [Vec<(Handle, DVec3)>; 3],
     pub points: Vec<DVec3>,
     pub values: HashMap<&'static str, f64>,
+    pub texts: HashMap<&'static str, String>,
 }
 
 impl SurfaceRequest {
@@ -88,6 +137,29 @@ impl SurfaceRequest {
     pub fn value(&self, key: &str, default: f64) -> f64 {
         self.values.get(key).copied().unwrap_or(default)
     }
+
+    /// The text under `key`, if one was given.
+    pub fn text(&self, key: &str) -> Option<&str> {
+        self.texts.get(key).map(String::as_str).filter(|t| !t.is_empty())
+    }
+}
+
+/// The texts commands took, offered next time like their values.
+fn remembered_texts() -> &'static Mutex<HashMap<(&'static str, &'static str), String>> {
+    static TEXTS: OnceLock<Mutex<HashMap<(&'static str, &'static str), String>>> = OnceLock::new();
+    TEXTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The entry of `choices` that `typed` names: the one equal to it, else the first that
+/// holds every word of it (case ignored).
+fn choose(choices: &[&'static str], typed: &str) -> Option<&'static str> {
+    let typed = typed.to_lowercase();
+    choices.iter().find(|c| c.to_lowercase() == typed).or_else(|| {
+        choices.iter().find(|c| {
+            let c = c.to_lowercase();
+            typed.split_whitespace().all(|word| c.contains(word))
+        })
+    }).copied()
 }
 
 /// The last value each command took for each key, offered next time.
@@ -182,6 +254,28 @@ impl SurfaceCommand {
         self.request.values.insert(key, value);
     }
 
+    fn set_text(&mut self, key: &'static str, text: String) {
+        remembered_texts()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert((self.request.command, key), text.clone());
+        self.request.texts.insert(key, text);
+    }
+
+    /// The text an option holds: given, else remembered, else a choice's first entry.
+    fn current_text(&self, opt: &Opt) -> String {
+        self.request.texts.get(opt.key).cloned().or_else(|| {
+            remembered_texts()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&(self.request.command, opt.key))
+                .cloned()
+        }).or_else(|| match opt.kind {
+            OptKind::Choice(choices) => choices().first().map(|c| c.to_string()),
+            _ => None,
+        }).unwrap_or_default()
+    }
+
     fn current(&self, key: &'static str, default: f64) -> f64 {
         self.request
             .values
@@ -202,14 +296,20 @@ impl CadCommand for SurfaceCommand {
 
     fn prompt(&self) -> String {
         if let Some(opt) = self.asking {
-            return format!(
-                "{} <{}>:",
-                crate::t!(opt.prompt),
-                crate::entities::common::format_length(self.current(opt.key, 0.0))
-            );
+            let current = match opt.kind {
+                OptKind::Number => crate::entities::common::format_length(self.current(opt.key, 0.0)),
+                OptKind::Text | OptKind::Choice(_) => self.current_text(&opt),
+            };
+            return format!("{} <{}>:", crate::t!(opt.prompt), current);
         }
         match self.step() {
-            Some(Step::Objects { prompt, .. } | Step::Picks { prompt, .. } | Step::Point { prompt } | Step::Accept { prompt, .. }) => {
+            Some(
+                Step::Objects { prompt, .. }
+                | Step::Picks { prompt, .. }
+                | Step::Point { prompt }
+                | Step::Points { prompt }
+                | Step::Accept { prompt, .. },
+            ) => {
                 crate::t!(prompt).into_owned()
             }
             Some(Step::Value { prompt, key, default }) => format!(
@@ -240,8 +340,23 @@ impl CadCommand for SurfaceCommand {
             return None;
         }
         if let Some(opt) = self.asking {
-            let value = number(text)?;
-            self.set(opt.key, value);
+            match opt.kind {
+                OptKind::Number => {
+                    let value = number(text)?;
+                    self.set(opt.key, value);
+                }
+                OptKind::Text => self.set_text(opt.key, text.to_string()),
+                OptKind::Choice(choices) => {
+                    let choices = choices();
+                    if text == "?" {
+                        return Some(CmdResult::ReportMessage(choices.join("\n")));
+                    }
+                    match choose(&choices, text) {
+                        Some(choice) => self.set_text(opt.key, choice.to_string()),
+                        None => return Some(CmdResult::ReportError(crate::t!("No such entry; type ? to list them.").into_owned())),
+                    }
+                }
+            }
             self.asking = None;
             return Some(CmdResult::NeedPoint);
         }
@@ -273,14 +388,26 @@ impl CadCommand for SurfaceCommand {
                 self.request.points.push(point);
                 self.advance()
             }
+            Some(Step::Points { .. }) => {
+                self.request.points.push(point);
+                CmdResult::NeedPoint
+            }
             _ => CmdResult::NeedPoint,
         }
     }
 
     fn on_enter(&mut self) -> CmdResult {
         if let Some(opt) = self.asking.take() {
-            let value = self.current(opt.key, 0.0);
-            self.set(opt.key, value);
+            match opt.kind {
+                OptKind::Number => {
+                    let value = self.current(opt.key, 0.0);
+                    self.set(opt.key, value);
+                }
+                OptKind::Text | OptKind::Choice(_) => {
+                    let text = self.current_text(&opt);
+                    self.set_text(opt.key, text);
+                }
+            }
             return CmdResult::NeedPoint;
         }
         // PLANESURF: Enter at its first corner selects the objects to make planar surfaces of.
@@ -290,7 +417,12 @@ impl CadCommand for SurfaceCommand {
         }
         match self.step() {
             // Enter with nothing selected ends the command.
-            Some(Step::Objects { slot, .. }) if self.request.objects[slot].is_empty() => CmdResult::Done,
+            Some(Step::Objects { slot, filter, .. })
+                if self.request.objects[slot].is_empty() && !matches!(filter, Filter::TinSurfaces | Filter::CogoPoints) =>
+            {
+                CmdResult::Done
+            }
+            Some(Step::Points { .. }) if self.request.points.is_empty() => CmdResult::Done,
             Some(Step::Picks { slot, .. }) if self.request.picks[slot].is_empty() => {
                 CmdResult::Measurement(crate::t!("Nothing picked.").into_owned())
             }
@@ -366,6 +498,11 @@ impl CadCommand for SurfaceCommand {
         }
         if let Some(Step::Picks { slot, .. }) = self.step() {
             if self.request.picks[slot].pop().is_some() {
+                return Some(CmdResult::NeedPoint);
+            }
+        }
+        if let Some(Step::Points { .. }) = self.step() {
+            if self.request.points.pop().is_some() {
                 return Some(CmdResult::NeedPoint);
             }
         }

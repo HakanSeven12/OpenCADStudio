@@ -39,6 +39,7 @@ impl Scene {
         {
             dict.add_entry(&name, gh);
         }
+        self.bump_groups_epoch();
         gh
     }
 
@@ -81,6 +82,7 @@ impl Scene {
         self.document
             .objects
             .insert(group_handle, ObjectType::Group(updated));
+        self.bump_groups_epoch();
         true
     }
 
@@ -101,6 +103,7 @@ impl Scene {
         self.document
             .objects
             .insert(group_handle, ObjectType::Group(updated));
+        self.bump_groups_epoch();
         true
     }
 
@@ -215,6 +218,9 @@ impl Scene {
             }
             copied += 1;
         }
+        if copied > 0 {
+            self.bump_groups_epoch();
+        }
         copied
     }
 
@@ -277,6 +283,9 @@ impl Scene {
             }
             self.document.objects.remove(gh);
         }
+        if count > 0 {
+            self.bump_groups_epoch();
+        }
         count
     }
 
@@ -284,20 +293,53 @@ impl Scene {
     /// of them. Selection and rollover highlighting share this expansion so the
     /// preview matches what a click will select.
     /// With PICKSTYLE group selection off a pick takes the object alone.
+    ///
+    /// Reads the lazily built selectable-group snapshot instead of scanning all
+    /// document objects: this runs on every pointer move, box-preview tick and
+    /// rendered frame, so an O(all objects) sweep per call showed up directly
+    /// in rollover / marquee latency on large drawings.
     pub fn handles_expanded_for_selectable_groups(&self, handles: &[Handle]) -> HashSet<Handle> {
         let mut expanded: HashSet<Handle> = handles.iter().copied().collect();
         if self.document.header.pick_style & 1 == 0 {
             return expanded;
         }
         let wanted: HashSet<Handle> = handles.iter().copied().collect();
-        for obj in self.document.objects.values() {
-            if let ObjectType::Group(g) = obj {
-                if g.selectable && g.entities.iter().any(|e| wanted.contains(e)) {
-                    expanded.extend(g.entities.iter().copied());
-                }
+        for (_, members) in self.selectable_group_snapshot().iter() {
+            if members.iter().any(|e| wanted.contains(e)) {
+                expanded.extend(members.iter().copied());
             }
         }
         expanded
+    }
+
+    /// Every selectable group's member list, snapshotted per
+    /// `(groups_epoch, PICKSTYLE group bit)`. Rebuilt (one O(all objects)
+    /// sweep) only after a group edit / undo / redo invalidates the epoch.
+    fn selectable_group_snapshot(
+        &self,
+    ) -> std::sync::Arc<Vec<(Handle, std::sync::Arc<Vec<Handle>>)>> {
+        let epoch = self.groups_epoch;
+        let group_select = self.document.header.pick_style & 1 != 0;
+        let mut snapshot = self.groups_snapshot.borrow_mut();
+        if let Some((cached_epoch, cached_group_select, groups)) = snapshot.as_ref() {
+            if *cached_epoch == epoch && *cached_group_select == group_select {
+                return std::sync::Arc::clone(groups);
+            }
+        }
+        let groups: Vec<(Handle, std::sync::Arc<Vec<Handle>>)> = self
+            .document
+            .objects
+            .values()
+            .filter_map(|obj| match obj {
+                ObjectType::Group(g) if g.selectable && !g.entities.is_empty() => {
+                    Some((g.handle, std::sync::Arc::new(g.entities.clone())))
+                }
+                _ => None,
+            })
+            .collect();
+        let groups = std::sync::Arc::new(groups);
+        *snapshot = Some((epoch, group_select, std::sync::Arc::clone(&groups)));
+        groups
     }
 
     /// How many selectable groups have a member among `handles`, under

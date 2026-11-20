@@ -36,6 +36,7 @@ pub(crate) mod hyperlink;
 pub mod model;
 pub mod pick;
 pub mod pipeline;
+pub(crate) mod raster_reseed;
 pub(crate) mod raster_scale;
 pub(crate) mod reaper;
 pub(crate) mod render_graph;
@@ -77,7 +78,10 @@ mod resident_patch_shorter_runs_tests;
 mod solid_box_select_tests;
 #[cfg(test)]
 mod solid_highlight_outline_tests;
+#[cfg(test)]
+mod solid_outline_detail_tests;
 pub use camera_ops::{add_background, copy_background, erase_background};
+pub use raster_reseed::{ReseedDone, ReseedJob};
 pub(crate) mod center_native;
 pub(crate) mod centerline;
 pub(crate) mod centermark;
@@ -100,6 +104,8 @@ mod group_layer;
 pub const GROUP_GRIP_ID: usize = usize::MAX - 2;
 #[cfg(test)]
 mod hatch_boundary;
+#[cfg(test)]
+mod selection_preview_tests;
 mod layout;
 #[cfg(test)]
 mod layout_viewport_tests;
@@ -112,10 +118,12 @@ pub(crate) use modify::remap_copied_reactors;
 pub(crate) use modify::remap_copied_viewport_clips;
 mod mspace;
 pub mod named_parameters;
+mod outline_detail;
 mod page_setup;
 mod paper;
 mod preview;
 mod project;
+mod viewport_color;
 pub mod reference_only;
 mod scene_markers;
 mod selection;
@@ -126,6 +134,10 @@ pub mod viewport_dimension_pick;
 mod viewport_depth_tests;
 #[cfg(test)]
 mod viewport_freeze_block_member_tests;
+#[cfg(test)]
+mod layout_frame_wires_tests;
+#[cfg(test)]
+mod layout_saved_without_sheet_tests;
 #[cfg(test)]
 mod paper_sheet_depth_tests;
 pub mod viewport_ref;
@@ -1114,8 +1126,17 @@ const CACHE_CATEGORY_INSERT_HATCH: u16 = 1 << 7;
 struct ResidentWireSet {
     epoch: u64,
     gen: u64,
+    /// [`resident_touch`] stamp of the last build or reuse: pruning gives up
+    /// the least recently used set first.
+    used: std::cell::Cell<u64>,
     wires: Arc<Vec<WireModel>>,
     layout: Option<ResidentWireLayout>,
+}
+
+/// Monotonic stamp for [`ResidentWireSet::used`].
+fn resident_touch() -> u64 {
+    static TOUCH: AtomicU64 = AtomicU64::new(0);
+    TOUCH.fetch_add(1, Ordering::Relaxed)
 }
 
 #[derive(Clone)]
@@ -2479,6 +2500,7 @@ fn transform_block_mesh_lod_set(
             edge_verts: set.edge_verts.clone(),
             edge_verts_low: set.edge_verts_low.clone(),
             curved_gens: set.curved_gens.clone(),
+            display_lods: set.display_lods.clone(),
         })
     });
     let mut bounds = [
@@ -2653,6 +2675,11 @@ pub struct Scene {
     annotation_highlight_cache: RefCell<HashMap<u64, Arc<Vec<WireModel>>>>,
     // The selected part is independent of box/rollover hover changes.
     annotation_selected_cache: RefCell<HashMap<u64, AnnotationSelectedEntry>>,
+    /// The step of scale the outlines of highlighted solids were last built
+    /// for in each view (its viewport handle and model tile; see
+    /// `outline_detail`). A view that is being zoomed keeps its step until
+    /// it rests.
+    outline_steps: RefCell<HashMap<(Handle, Option<usize>), Option<i32>>>,
     /// Per wire-source `(geometry_epoch, gathered text)` of the most recent
     /// SDF-text build. When a new content id misses the cache but the journal
     /// shows no text-bearing entity changed since that epoch, the same glyphs
@@ -2738,6 +2765,9 @@ pub struct Scene {
     /// The table whose fill grip is being dragged: its picked range stays
     /// drawn over the grip preview that hides it.
     pub table_fill_drag: Option<Handle>,
+    /// The cells the table fill being dragged copied from field cells, made
+    /// fields again when the drag is committed.
+    pub table_fill_fields: Option<(Handle, Vec<crate::entities::table::FillPair>)>,
     /// The table whose cell is open in the in-place editor: the editor's
     /// picture hides it, but its row and column labels stay drawn.
     pub table_cell_editing: Option<Handle>,
@@ -2760,6 +2790,13 @@ pub struct Scene {
     /// Entity drawn with the selection-highlight colour without being part
     /// of the real selection — used to preview a row in the cycling list box.
     pub hover_highlight: Option<Handle>,
+    /// The raw selectable-group expansion of `hover_highlight`, kept in sync
+    /// by [`Scene::set_hover_highlight`]. Storing it lets
+    /// [`Scene::hover_highlight_handles`] — called every rendered frame —
+    /// reuse the expansion instead of re-running the group scan, and lets
+    /// `set_hover_highlight` compare old vs new contribution without a second
+    /// expansion pass.
+    hover_expanded: HashSet<Handle>,
     /// All entities related to the constraint indicator currently under the cursor.
     constraint_hover_highlights: HashSet<Handle>,
     /// Entities a selection box still being drawn would catch on release
@@ -2785,6 +2822,8 @@ pub struct Scene {
     pub selection_widen: f32,
     /// VSEDGECOLOR: edge colour of the shaded-with-edges modes (`None`: black).
     pub edge_color: Option<[u8; 3]>,
+    /// VSOCCLUDEDEDGES: HiddenLine draws the edges behind faces dashed.
+    pub occluded_edges: bool,
     /// Whether entity transparency is honoured on screen. When false the
     /// wire shader forces every line opaque (a uniform toggle, no retessellate).
     pub transparency_display: bool,
@@ -2842,10 +2881,48 @@ pub struct Scene {
     /// pick only refreshes the GPU xray overlay (cheap) instead of bumping
     /// `geometry_epoch` and re-tessellating the whole model.
     pub selection_generation: u64,
+    /// Incremented when only the *hover / box-preview / constraint / filter*
+    /// highlight set changes, with no change to the committed selection.
+    /// The xray overlay splits its caches on the two generations: a rollover
+    /// or marquee tick rebuilds only the hover half, never the committed
+    /// selection's GPU buffers (which are sized by the whole selection).
+    pub hover_generation: u64,
+    /// Bumped whenever a group object is created, edited, or removed, and by
+    /// undo / redo (which can restore any of them). Invalidates
+    /// [`Scene::groups_snapshot`] so the next rollover sees the new groups.
+    pub groups_epoch: u64,
+    /// Lazily rebuilt snapshot of every selectable group's member list, keyed
+    /// by `(groups_epoch, PICKSTYLE group bit)`. Group-selection expansion used
+    /// to scan ALL document objects on every pointer move, box-preview tick and
+    /// rendered frame; with the snapshot those walk only the groups.
+    groups_snapshot: RefCell<
+        Option<(
+            u64,
+            bool,
+            std::sync::Arc<Vec<(Handle, std::sync::Arc<Vec<Handle>>)>>,
+        )>,
+    >,
     /// Cached fingerprint of `selected`, recomputed lazily after mutations.
     #[cfg(any(test, not(target_arch = "wasm32")))]
     selection_fingerprint_cache: u64,
     selection_fingerprint_dirty: bool,
+    /// Cached per-frame `ViewportData` interaction sets (bit-encoded
+    /// `(selection_generation, hover_generation)` keys → selected handles,
+    /// hover handles, selected signature). Building them used to clone the
+    /// selected set, expand the hover set and hash the selection on EVERY
+    /// rendered frame per viewport — idle CPU that scaled with the selection
+    /// size even when nothing moved. The two generations cover every input:
+    /// selection mutations, sub-segment picks and table-cell picks all bump
+    /// the selection generation; hover sets bump the hover one.
+    viewport_interaction_sets: RefCell<
+        Option<(
+            u64,
+            u64,
+            std::sync::Arc<rustc_hash::FxHashSet<Handle>>,
+            std::sync::Arc<rustc_hash::FxHashSet<Handle>>,
+            u64,
+        )>,
+    >,
     /// Cached tessellation of all visible entity wires for the current layout.
     /// Keyed by `(geometry_epoch, camera_generation)` so a camera change
     /// invalidates the cull-dependent wire list as well as a geometry change.
@@ -3221,6 +3298,11 @@ pub struct Scene {
     underlay_scale: raster_scale::RasterScale,
     /// The view scale the OLE pictures of the current layout are made for.
     ole_scale: raster_scale::RasterScale,
+    /// The rasters a zoom step asks a worker to draw (`raster_reseed`).
+    pending_reseed: Option<raster_reseed::ReseedJob>,
+    /// Rasters `apply_reseed` just took: the bump it makes does not draw them
+    /// again.
+    fresh_images: HashSet<Handle>,
     /// Session-only visibility overrides for constraint glyphs.
     hidden_parametric_constraints: HashSet<(
         parametric_constraints::ParametricScope,
@@ -3375,10 +3457,13 @@ pub struct Scene {
         )>,
     >,
     /// Viewport wire sets with the block lines on their frozen layers left
-    /// out, per frozen-set signature: the resident set they were made from
-    /// (held weakly) and the result.
-    viewport_frozen_member_cache:
-        RefCell<HashMap<u64, (std::sync::Weak<Vec<WireModel>>, Arc<Vec<WireModel>>)>>,
+    /// out, one for each resident set and frozen-set signature: the resident
+    /// set they were made from (held weakly, its address in the key) and the
+    /// result, `None` when the set holds no such line.
+    #[allow(clippy::type_complexity)]
+    viewport_frozen_member_cache: RefCell<
+        HashMap<(usize, u64), (std::sync::Weak<Vec<WireModel>>, Option<Arc<Vec<WireModel>>>)>,
+    >,
     /// Camera-independent model tessellation, separate from the culled memo.
     resident_tess_memo: RefCell<HashMap<Handle, MemoRun>>,
     /// The resident set `resident_tess_memo`'s `InSet` runs read from.
@@ -3630,6 +3715,7 @@ impl Scene {
             active_model_tile: std::cell::Cell::new(0),
             sdf_text_cache: RefCell::new(HashMap::default()),
             annotation_highlight_cache: RefCell::new(HashMap::default()),
+            outline_steps: RefCell::new(HashMap::default()),
             annotation_selected_cache: RefCell::new(HashMap::default()),
             last_sdf_text: RefCell::new(HashMap::default()),
             // One pane mapped to tile 0 — matches the single default tile above.
@@ -3652,6 +3738,7 @@ impl Scene {
             reference_only: Default::default(),
             preview_hidden: HashSet::default(),
             table_fill_drag: None,
+            table_fill_fields: None,
             table_cell_editing: None,
             command_preview_hidden: HashSet::default(),
             mtext_editor_hidden: None,
@@ -3659,6 +3746,7 @@ impl Scene {
             refedit_lock: false,
             count_display: None,
             hover_highlight: None,
+            hover_expanded: HashSet::default(),
             constraint_hover_highlights: HashSet::default(),
             box_hover_highlights: HashSet::default(),
             filter_preview_highlights: HashSet::default(),
@@ -3670,6 +3758,7 @@ impl Scene {
             selection_color: crate::scene::model::wire_model::WireModel::SELECTED,
             selection_widen: 0.0,
             edge_color: None,
+            occluded_edges: false,
             selection_effect: true,
             transparency_display: true,
             model_lineweight_scale: 1.0,
@@ -3688,9 +3777,13 @@ impl Scene {
             render_id: GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed),
             block_visibility_edits: None,
             selection_generation: 0,
+            hover_generation: 0,
+            groups_epoch: 0,
+            groups_snapshot: RefCell::new(None),
             #[cfg(any(test, not(target_arch = "wasm32")))]
             selection_fingerprint_cache: 0,
             selection_fingerprint_dirty: false,
+            viewport_interaction_sets: RefCell::new(None),
             wire_cache: RefCell::new(None),
             interaction_index_cache: RefCell::new(Vec::new()),
             interaction_index_pending_key: std::cell::Cell::new(None),
@@ -3782,6 +3875,8 @@ impl Scene {
             dynamic_dimension_camera_gen: None,
             underlay_scale: raster_scale::RasterScale::default(),
             ole_scale: raster_scale::RasterScale::default(),
+            pending_reseed: None,
+            fresh_images: HashSet::default(),
             hidden_parametric_constraints: HashSet::default(),
             shown_parametric_constraints: HashSet::default(),
             constraints_epoch: 0,
@@ -3869,6 +3964,9 @@ impl Scene {
                     .entities()
                     .any(|e| matches!(e, EntityType::Underlay(_)))
             {
+                #[cfg(not(target_arch = "wasm32"))]
+                self.queue_reseed(|e| matches!(e, EntityType::Underlay(_)));
+                #[cfg(target_arch = "wasm32")]
                 self.reseed_underlays();
             }
         }
@@ -3876,6 +3974,9 @@ impl Scene {
             let view = self.layout_plan_view_rect();
             let layout = self.current_layout.clone();
             if self.ole_scale.settle(wpp, view, &layout, generation, now) && self.has_ole_frames() {
+                #[cfg(not(target_arch = "wasm32"))]
+                self.queue_reseed(|e| matches!(e, EntityType::Ole2Frame(_)));
+                #[cfg(target_arch = "wasm32")]
                 self.reseed_ole_frames();
             }
         }
@@ -4056,9 +4157,9 @@ impl Scene {
                     );
                 }
                 let arc = Arc::new(built);
-                self.block_defn_cache
-                    .borrow_mut()
-                    .insert(key, (self.block_epoch, Arc::clone(&arc)));
+                let mut cache = self.block_defn_cache.borrow_mut();
+                self.bound_block_defn_cache(&mut cache);
+                cache.insert(key, (self.block_epoch, Arc::clone(&arc)));
                 return arc;
             }
         }
@@ -4088,8 +4189,22 @@ impl Scene {
         let arc = Arc::new(built);
         let mut cache = self.block_defn_cache.borrow_mut();
         cache.retain(|_, (epoch, _)| *epoch == self.block_epoch);
+        self.bound_block_defn_cache(&mut cache);
         cache.insert(key, (self.block_epoch, Arc::clone(&arc)));
         arc
+    }
+
+    /// Each entry holds every block definition built for one viewport, and
+    /// layout switches leave the block epoch alone: one entry per viewport
+    /// ever shown piled up until memory ran out (#3260). Keep what one frame
+    /// draws (model tiles count as 4) plus a little slack.
+    fn bound_block_defn_cache(
+        &self,
+        cache: &mut HashMap<u64, (u64, Arc<cache::block_cache::BlockCache>)>,
+    ) {
+        if cache.len() > self.frame_wire_set_count().max(4) + 2 {
+            cache.clear();
+        }
     }
 
     /// Install loader-thread geometry into this scene's Model resident cache.
@@ -4125,6 +4240,7 @@ impl Scene {
             ResidentWireSet {
                 epoch: self.geometry_epoch,
                 gen,
+                used: std::cell::Cell::new(resident_touch()),
                 wires: Arc::clone(&prepared.wires),
                 layout: prepared.resident_layout,
             },
@@ -5415,7 +5531,8 @@ impl Scene {
         // A modified image-bearing entity redraws its raster: an underlay's
         // display adjustments and clip live on the entity, not the image.
         for (handle, kind) in &changes {
-            if !matches!(kind, ChangeKind::Modified) {
+            // A raster a worker just drew (`apply_reseed`) is not drawn again.
+            if !matches!(kind, ChangeKind::Modified) || self.fresh_images.contains(handle) {
                 continue;
             }
             let seed = match self.document.get_entity(*handle) {
@@ -5975,6 +6092,22 @@ impl Scene {
     /// hover changes; use [`bump_geometry`] when the geometry itself changed.
     pub fn bump_selection(&mut self) {
         self.selection_generation = self.selection_generation.wrapping_add(1);
+    }
+
+    /// Mark the hover / box-preview / constraint / filter highlight set dirty
+    /// without touching the committed-selection generation. The xray overlay
+    /// keys its *selected* GPU buffers on `selection_generation`, so a
+    /// rollover or marquee tick never re-uploads the (potentially huge)
+    /// committed selection — only the small hover half.
+    pub fn bump_hover(&mut self) {
+        self.hover_generation = self.hover_generation.wrapping_add(1);
+    }
+
+    /// Invalidate the selectable-group snapshot. Call after any change that
+    /// creates, edits or removes a group object (and from undo / redo, which
+    /// can restore them wholesale).
+    pub fn bump_groups_epoch(&mut self) {
+        self.groups_epoch = self.groups_epoch.wrapping_add(1);
     }
 
     pub(crate) fn bump_selection_set(&mut self) {
@@ -6794,17 +6927,26 @@ impl Scene {
     /// Ensure a paper layout has its overall (`id == 1`) viewport; true when
     /// it had none (the layout opens for the first time).
     pub fn ensure_sheet_viewport(&mut self, layout_name: &str) -> bool {
+        Self::ensure_layout_sheet_viewport(&mut self.document, layout_name)
+    }
+
+    /// [`Self::ensure_sheet_viewport`] on a document, for the copy a save
+    /// writes.
+    pub(crate) fn ensure_layout_sheet_viewport(
+        document: &mut document::Document,
+        layout_name: &str,
+    ) -> bool {
         if layout_name == "Model" {
             return false;
         }
         // Locate the layout and its paper limits.
-        let info = self.document.objects.iter().find_map(|(h, obj)| {
+        let info = document.objects.iter().find_map(|(h, obj)| {
             if let ObjectType::Layout(l) = obj {
                 if l.name == layout_name {
                     return Some((
                         *h,
                         l.block_record,
-                        Self::layout_sheet_viewport_handle(&self.document, l),
+                        Self::layout_sheet_viewport_handle(document, l),
                         l.min_limits,
                         l.max_limits,
                     ));
@@ -6821,7 +6963,7 @@ impl Scene {
 
         if sheet.is_valid()
             && matches!(
-                self.document.get_entity(sheet),
+                document.get_entity(sheet),
                 Some(EntityType::Viewport(vp)) if vp.common.owner_handle == block_record
             )
         {
@@ -6833,13 +6975,27 @@ impl Scene {
         vp.id = 1;
         vp.status = document::entities::ViewportStatusFlags::default_on();
         fit_sheet_viewport(&mut vp, min_lim, max_lim);
-        if let Ok(handle) = self
-            .document
-            .add_entity_to_layout(EntityType::Viewport(Box::new(vp)), layout_name)
+        if let Ok(handle) =
+            document.add_entity_to_layout(EntityType::Viewport(Box::new(vp)), layout_name)
         {
-            if let Some(ObjectType::Layout(l)) = self.document.objects.get_mut(&layout_handle) {
+            if let Some(ObjectType::Layout(l)) = document.objects.get_mut(&layout_handle) {
                 l.viewports.retain(|candidate| *candidate != handle);
                 l.viewports.insert(0, handle);
+            }
+            // First in the block too: where a file keeps no viewport list
+            // (DXF), the block's first viewport is read as the sheet, and a
+            // layout can already hold viewports onto the model.
+            if let Some(block) = document
+                .block_records
+                .iter_mut()
+                .find(|block| block.handle == block_record)
+            {
+                if block.entity_handles.contains(&handle) {
+                    block
+                        .entity_handles
+                        .retain(|candidate| *candidate != handle);
+                    block.entity_handles.insert(0, handle);
+                }
             }
         }
         true
@@ -8907,33 +9063,110 @@ impl Scene {
         // Selectable groups roll over as one unit, matching click selection.
         // Exclude already-selected members because they already contribute to
         // the overlay and remain in the selected colour.
-        let contribution = |scene: &Scene, hovered: Option<Handle>| {
-            hovered
-                .map(|handle| scene.handles_expanded_for_selectable_groups(&[handle]))
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|handle| !scene.selected.contains(handle))
+        //
+        // The raw expansion of the new hover is computed once and stored
+        // (`hover_expanded`); the old → new comparison reuses the stored old
+        // expansion instead of re-running the group scan a second time, and
+        // `hover_highlight_handles` (every rendered frame) reads the stored
+        // set too.
+        let expanded = handle
+            .map(|handle| self.handles_expanded_for_selectable_groups(&[handle]))
+            .unwrap_or_default();
+        let contribution = |expanded: &HashSet<Handle>, selected: &HashSet<Handle>| {
+            expanded
+                .iter()
+                .filter(|handle| !selected.contains(*handle))
+                .copied()
                 .collect::<HashSet<_>>()
         };
-        let changed = contribution(self, self.hover_highlight) != contribution(self, handle);
+        let changed = contribution(&self.hover_expanded, &self.selected)
+            != contribution(&expanded, &self.selected);
         self.hover_highlight = handle;
+        self.hover_expanded = expanded;
         if changed {
-            self.bump_selection();
+            self.bump_hover();
         }
     }
 
     /// Handles that currently contribute the rollover colour. The stored hover
-    /// remains the picked member for hit-test/UI bookkeeping; rendering expands
-    /// it to the same selectable group that a click would select.
+    /// remains the picked member for hit-test/UI bookkeeping; rendering uses
+    /// the stored group expansion (`hover_expanded`) — no per-frame scan.
     pub fn hover_highlight_handles(&self) -> HashSet<Handle> {
-        let mut handles = self
-            .hover_highlight
-            .map(|handle| self.handles_expanded_for_selectable_groups(&[handle]))
-            .unwrap_or_default();
+        let mut handles = self.hover_expanded.clone();
         handles.extend(self.constraint_hover_highlights.iter().copied());
         handles.extend(self.box_hover_highlights.iter().copied());
         handles.extend(self.filter_preview_highlights.iter().copied());
         handles
+    }
+
+    /// Cached interaction sets for [`crate::scene::view`]'s `ViewportData`:
+    /// `(selected handles, hover handles, selected signature)` keyed by the
+    /// bit-encoded `(selection_generation, hover_generation)`. Per rendered
+    /// frame per viewport this used to rebuild a fresh selected-set clone,
+    /// expand the hover set and hash the selection — idle CPU that scaled
+    /// with the selection size even when nothing moved. Cache invalidation
+    /// rides the two generations: selection mutations, sub-segment picks and
+    /// table-cell picks bump the selection generation; hover / marquee /
+    /// constraint / filter sets bump the hover one.
+    fn cached_viewport_interaction_sets(
+        &self,
+        show_interaction: bool,
+    ) -> (
+        std::sync::Arc<rustc_hash::FxHashSet<Handle>>,
+        std::sync::Arc<rustc_hash::FxHashSet<Handle>>,
+        u64,
+    ) {
+        let sel_key = self
+            .selection_generation
+            .wrapping_mul(2)
+            .wrapping_add(u64::from(!show_interaction));
+        let hover_key = self
+            .hover_generation
+            .wrapping_mul(2)
+            .wrapping_add(u64::from(!show_interaction));
+        {
+            let cache = self.viewport_interaction_sets.borrow();
+            if let Some((cached_sel, cached_hover, selected, hover, sig)) = cache.as_ref() {
+                if *cached_sel == sel_key && *cached_hover == hover_key {
+                    return (
+                        std::sync::Arc::clone(selected),
+                        std::sync::Arc::clone(hover),
+                        *sig,
+                    );
+                }
+            }
+        }
+        let selected = if show_interaction {
+            let cells = self.table_cells_handle();
+            self.selected
+                .iter()
+                .copied()
+                .filter(|handle| self.picked_segments(*handle).is_none())
+                .filter(|handle| Some(*handle) != cells)
+                .collect()
+        } else {
+            rustc_hash::FxHashSet::default()
+        };
+        let hover = if show_interaction {
+            self.hover_highlight_handles()
+        } else {
+            rustc_hash::FxHashSet::default()
+        };
+        let sig = if show_interaction {
+            self.selected_set_sig()
+        } else {
+            0
+        };
+        let selected = std::sync::Arc::new(selected);
+        let hover = std::sync::Arc::new(hover);
+        *self.viewport_interaction_sets.borrow_mut() = Some((
+            sel_key,
+            hover_key,
+            std::sync::Arc::clone(&selected),
+            std::sync::Arc::clone(&hover),
+            sig,
+        ));
+        (selected, hover, sig)
     }
 
     #[cfg(test)]
@@ -8948,15 +9181,36 @@ impl Scene {
     }
 
     pub fn set_box_hover_highlights_limited(&mut self, handles: &[Handle], limit: usize) {
-        let handles = if handles.is_empty() {
+        // Over the limit the preview used to be dropped *entirely* — a huge
+        // marquee gave no feedback at all (and expanding tens of thousands of
+        // candidates per tick was pure waste). Cap to the limit instead,
+        // sorted ascending by handle so the highlighted subset stays stable
+        // across ticks instead of flickering with the hash-set order. Group
+        // expansion can multiply the count, so the cap applies to the
+        // expanded set too.
+        let mut handles: Vec<Handle> = handles.to_vec();
+        if handles.len() > limit {
+            handles.sort_unstable_by_key(|handle| handle.value());
+            handles.dedup();
+            handles.truncate(limit);
+        }
+        let mut handles = if handles.is_empty() {
             HashSet::default()
         } else {
-            self.handles_expanded_for_selectable_groups(handles)
+            self.handles_expanded_for_selectable_groups(&handles)
         };
-        let handles = if handles.len() > limit { HashSet::default() } else { handles };
+        if handles.len() > limit {
+            let mut ordered: Vec<Handle> = handles.iter().copied().collect();
+            ordered.sort_unstable_by_key(|handle| handle.value());
+            handles.clear();
+            handles.extend(ordered[..limit].iter().copied());
+        }
         if handles != self.box_hover_highlights {
             self.box_hover_highlights = handles;
-            self.bump_selection();
+            // Box preview only ever changes the marquee highlight; bumping the
+            // selection generation would rebuild the committed selection's GPU
+            // overlay on every ~16 ms tick.
+            self.bump_hover();
         }
     }
 
@@ -8966,7 +9220,7 @@ impl Scene {
         let handles: HashSet<Handle> = handles.iter().copied().collect();
         if handles != self.filter_preview_highlights {
             self.filter_preview_highlights = handles;
-            self.bump_selection();
+            self.bump_hover();
         }
     }
 
@@ -9011,7 +9265,7 @@ impl Scene {
         self.constraint_hover_refs = references;
         self.constraint_hover_highlights = handles;
         self.constraint_hover_wires = wires;
-        self.bump_selection();
+        self.bump_hover();
     }
 
     /// Keep the current selection visible and temporarily filter every other
@@ -9779,6 +10033,16 @@ impl Scene {
         v
     }
 
+    /// Whether `wires` is one of the resident sets themselves, which only the
+    /// scene may hold (see [`Self::try_resident_patch`]), and not a copy made
+    /// from one.
+    pub(in crate::scene) fn is_resident_wire_set(&self, wires: &Arc<Vec<WireModel>>) -> bool {
+        self.resident_wire_sets
+            .borrow()
+            .values()
+            .any(|set| Arc::ptr_eq(&set.wires, wires))
+    }
+
     fn resident_wires_for(
         &self,
         block: Handle,
@@ -9822,6 +10086,7 @@ impl Scene {
             let sets = self.resident_wire_sets.borrow();
             if let Some(set) = sets.get(&key) {
                 if set.epoch == self.geometry_epoch {
+                    set.used.set(resident_touch());
                     self.last_model_wire_gen.set(set.gen);
                     return Arc::clone(&set.wires);
                 }
@@ -9986,6 +10251,7 @@ impl Scene {
             ResidentWireSet {
                 epoch: cur_epoch,
                 gen,
+                used: std::cell::Cell::new(resident_touch()),
                 wires: Arc::clone(&arc),
                 layout,
             },
@@ -10016,21 +10282,22 @@ impl Scene {
         let cur_epoch = self.geometry_epoch;
         let floor = self.geometry_journal_floor.get();
         sets.retain(|_, set| set.epoch == cur_epoch || set.epoch >= floor);
-        let cap = 16.max(shown + 2);
+        // Each set is a whole model's wires. Switching layouts leaves the
+        // epoch unchanged, so the other layouts' sets never went stale and a
+        // floor of 16 kept up to 16 of them: memory grew with every layout
+        // visited until the app froze (#3260). Keep the shown viewports' sets
+        // (they were used last) and a little slack; model tiles count as 4.
+        let cap = shown.max(4) + 2;
         while sets.len() > cap {
-            let stalest = sets
+            let Some(key) = sets
                 .iter()
-                .filter(|(_, set)| set.epoch != cur_epoch)
-                .min_by_key(|(_, set)| set.epoch)
-                .map(|(key, _)| *key);
-            match stalest {
-                Some(key) => {
-                    sets.remove(&key);
-                }
-                None => {
-                    sets.clear();
-                    break;
-                }
+                .min_by_key(|(_, set)| set.used.get())
+                .map(|(key, _)| *key)
+            else {
+                break;
+            };
+            if let Some(evicted) = sets.remove(&key) {
+                reaper::reap(evicted);
             }
         }
     }
@@ -10878,6 +11145,7 @@ impl Scene {
             ResidentWireSet {
                 epoch: cur_epoch,
                 gen,
+                used: std::cell::Cell::new(resident_touch()),
                 wires: Arc::clone(&arc),
                 layout: Some(layout),
             },
@@ -10977,7 +11245,7 @@ impl Scene {
         // This composite is the CPU pick/snap set; the projection follows the
         // paper camera, so the key keeps `camera_generation`.
         let mut wires = (*self.paper_sheet_wires_arc()).clone();
-        wires.extend(self.viewport_content_wires(layout_block, None, None, false));
+        wires.extend(self.viewport_content_wires(layout_block, None, None, false, None));
         let arc = Arc::new(wires);
         let gen = WIRE_CONTENT_GEN.fetch_add(1, Ordering::Relaxed);
         self.last_model_wire_gen.set(gen);
@@ -11024,11 +11292,15 @@ impl Scene {
                 crate::scene::model::instance_model::expand_stubs(&self.entity_wires_arc())
                     .into_owned();
             // Model space plots in plan, so solids show their top view.
-            wires.extend(self.mesh_plot_wires(&self.meshes_arc(), [0.0, 0.0, 1.0], None));
-            apply_mode(
-                &mut wires,
-                render_mode_override.unwrap_or_else(|| self.active_model_tile_render_mode()),
-            );
+            let mode =
+                render_mode_override.unwrap_or_else(|| self.active_model_tile_render_mode());
+            wires.extend(self.mesh_plot_wires(
+                &self.meshes_arc(),
+                [0.0, 0.0, 1.0],
+                None,
+                Some(mode),
+            ));
+            apply_mode(&mut wires, mode);
             // On screen the wire shader multiplies dash patterns by this ratio;
             // a plot has no shader, so apply it to the patterns themselves.
             if let Some(ratio) = view::render::model_linetype_ratio(&self.document) {
@@ -11049,8 +11321,16 @@ impl Scene {
             if viewport.common.owner_handle != paper_block || !viewport.is_on() {
                 continue;
             }
-            let mode = render_mode_override.unwrap_or(viewport.render_mode);
-            let mut wires = self.viewport_content_wires(paper_block, Some(handle), None, true);
+            // The viewport's shade plot: 1 wireframe, 2 hidden, 3 rendered;
+            // anything else plots as displayed.
+            let mode = render_mode_override.unwrap_or(match viewport.shade_plot_mode {
+                1 => document::entities::ViewportRenderMode::Wireframe2D,
+                2 => document::entities::ViewportRenderMode::HiddenLine,
+                3 => document::entities::ViewportRenderMode::GouraudShaded,
+                _ => viewport.render_mode,
+            });
+            let mut wires =
+                self.viewport_content_wires(paper_block, Some(handle), None, true, Some(mode));
             apply_mode(&mut wires, mode);
             model_wires.extend(wires);
         }
@@ -11769,6 +12049,99 @@ impl Scene {
         arc
     }
 
+    /// Splice a re-delivered raster's fresh model into every cached gathered
+    /// image list. The reseed takes no geometry bump — the entity, its draw
+    /// order and every wire are untouched — so the lists stay valid and only
+    /// their pixels are refreshed; without this the gather would re-walk the
+    /// whole drawing on the UI thread right after the view settled (#3339).
+    /// A raster replacement changes only pixels and size — the gathered
+    /// placement, clip and draw depth stay valid — so lists that are current
+    /// are patched in place; lists already stale for other reasons, and lists
+    /// holding an instanced clone (an image inside a block reference), are
+    /// evicted so the next gather rebuilds them.
+    pub(crate) fn patch_image_caches(&self, prev_epoch: u64, handles: &[Handle]) {
+        if handles.is_empty() {
+            return;
+        }
+        let perf = crate::perf::enabled();
+        let started = perf.then(iced::time::Instant::now);
+        let a = self.patch_image_cache_entries(&self.image_cache, prev_epoch, handles);
+        let b = self.patch_image_cache_entries(&self.frozen_image_cache, prev_epoch, handles);
+        let counts = (a.0 + b.0, a.1 + b.1, a.2 + b.2);
+        if perf {
+            crate::perf_record!(
+                "[perf] image-patch   {:>7.2}ms entries={} lists_patched={} evicted={}",
+                started.map_or(0.0, |s| s.elapsed().as_secs_f64() * 1000.0),
+                counts.0,
+                counts.1,
+                counts.2,
+            );
+        }
+    }
+
+    /// Returns (entries seen, lists patched, lists evicted for a rebuild).
+    fn patch_image_cache_entries<K>(
+        &self,
+        cache: &RefCell<HashMap<K, (u64, Arc<Vec<ImageModel>>)>>,
+        prev_epoch: u64,
+        handles: &[Handle],
+    ) -> (usize, usize, usize) {
+        let epoch = self.geometry_epoch;
+        let mut seen = 0usize;
+        let mut patched = 0usize;
+        let mut stale = 0usize;
+        cache.borrow_mut().retain(|_, (entry_epoch, arc)| {
+            seen += 1;
+            // A list the patch cannot reason about — one that predates other
+            // changes, or holds an instanced clone whose transform the gather
+            // owns — is evicted: the reseed records no geometry change, so the
+            // journal replay would otherwise revalidate it with the old pixels.
+            if *entry_epoch != prev_epoch
+                || arc.iter().any(|model| {
+                    model.render_instance.is_some()
+                        && model.entity.is_some_and(|entity| handles.contains(&entity))
+                })
+            {
+                stale += 1;
+                return false;
+            }
+            let list = Arc::make_mut(arc);
+            let mut touched = false;
+            list.retain_mut(|model| {
+                let Some(entity) = model.entity else {
+                    return true;
+                };
+                if !handles.contains(&entity) {
+                    return true;
+                }
+                match self.images.get(&entity) {
+                    Some(fresh) => {
+                        if !Arc::ptr_eq(&model.pixels, &fresh.pixels) {
+                            model.file_path = fresh.file_path.clone();
+                            model.pixels = Arc::clone(&fresh.pixels);
+                            model.width = fresh.width;
+                            model.height = fresh.height;
+                        }
+                        touched = true;
+                        true
+                    }
+                    None => {
+                        // The raster did not come back; the cached list drops
+                        // the entry the rebuild would not gather either.
+                        touched = true;
+                        false
+                    }
+                }
+            });
+            if touched {
+                *entry_epoch = epoch;
+                patched += 1;
+            }
+            true
+        });
+        (seen, patched, stale)
+    }
+
     /// Image / OLE-frame models owned by `target_block`, optionally dropping
     /// those whose layer is frozen in a content viewport (`frozen`).
     fn image_models(
@@ -11899,6 +12272,9 @@ impl Scene {
                     .then(|| self.print_underlay_image(entity))
                     .flatten()
                     .unwrap_or_else(|| model.clone());
+                // Stamp the real handle: a seed can build the model before
+                // the entity's handle is assigned, so the builder cannot.
+                placed.entity = Some(handle);
                 if context.is_instanced() {
                     for (corner, low) in placed.corners.iter_mut().zip(&mut placed.corners_low) {
                         let point = document::types::Vector3::new(
@@ -15856,7 +16232,7 @@ impl Scene {
                 )
             })
             .unwrap_or_default();
-        self.bump_selection();
+        self.bump_hover();
     }
 
     /// The nearest drawn surface under `local` (relative to `bounds`): a solid
@@ -20549,27 +20925,6 @@ mod redraw_tests {
             !scene.refresh_consume(ghost),
             "nonexistent tile 99 has no membership"
         );
-    }
-}
-
-#[cfg(test)]
-mod selection_arc_tests {
-    use super::Scene;
-
-    #[test]
-    fn selection_is_arc_not_refcell() {
-        let scene = Scene::new();
-        let tn = std::any::type_name_of_val(&scene.selection);
-        assert!(
-            tn.contains("Arc"),
-            "selection should be Arc<SelectionState>, got {}",
-            tn
-        );
-    }
-
-    #[test]
-    fn selection_overlay_takes_arc() {
-        assert!(true);
     }
 }
 

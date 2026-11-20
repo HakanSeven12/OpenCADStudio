@@ -28,6 +28,34 @@ pub enum FilterRowEdit {
     Remove,
 }
 
+/// An Import reader: the saved filters of a file (name, filter).
+#[cfg(not(target_arch = "wasm32"))]
+type SavedFiltersReader = fn(&std::path::Path) -> Option<Vec<(String, Filter)>>;
+
+/// The Import reader: the saved filters of the file, or none when it
+/// cannot be read or has none in the form Export writes.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_saved_filters(path: &std::path::Path) -> Option<Vec<(String, Filter)>> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|value| {
+            value.get("filters")?.as_array().map(|list| {
+                list.iter()
+                    .filter_map(|item| {
+                        // The names Save as accepts: trimmed, not empty.
+                        let name = item.get("name")?.as_str()?.trim().to_string();
+                        if name.is_empty() {
+                            return None;
+                        }
+                        let filter = serde_json::from_value(item.get("filter")?.clone()).ok()?;
+                        Some((name, filter))
+                    })
+                    .collect()
+            })
+        })
+}
+
 /// A line of the live result, clicked to show only those objects.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FilterBucket {
@@ -83,6 +111,11 @@ pub enum FilterMsg {
     ExportTo(std::path::PathBuf),
     #[cfg(not(target_arch = "wasm32"))]
     ImportFrom(std::path::PathBuf),
+    /// The end of an Import read off the UI thread: the drawing it was
+    /// started for, that document's generation, and the saved filters
+    /// found (none when the file cannot be read or has none).
+    #[cfg(not(target_arch = "wasm32"))]
+    ImportRead(u64, u64, Option<Vec<(String, Filter)>>),
     /// Layer mode: FILTER for the objects on the layers found.
     ObjectsOnLayers,
     /// Tick or untick a picked object's property.
@@ -471,7 +504,11 @@ impl OpenCADStudio {
             }
             #[cfg(not(target_arch = "wasm32"))]
             FilterMsg::ImportFrom(path) => {
-                self.import_saved_filters(&path);
+                return self.import_saved_filters(&path);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            FilterMsg::ImportRead(tab_id, generation, filters) => {
+                self.finish_saved_filters_import(tab_id, generation, filters);
                 return Task::none();
             }
             FilterMsg::FromLayer(name) => {
@@ -751,7 +788,7 @@ impl OpenCADStudio {
             | FilterMsg::SampleCancel => {}
             // Files only on the desktop.
             #[cfg(not(target_arch = "wasm32"))]
-            FilterMsg::ExportTo(_) | FilterMsg::ImportFrom(_) => {}
+            FilterMsg::ExportTo(_) | FilterMsg::ImportFrom(_) | FilterMsg::ImportRead(..) => {}
         }
         if let Some(t) = types_changed {
             self.filter_load_properties(t);
@@ -824,28 +861,48 @@ impl OpenCADStudio {
 
     /// Import: saved filters from a file into the drawing, one undo step; a
     /// filter of the same name is replaced.
+    /// The file is read and parsed off the UI thread; the filters are
+    /// stored when the read ends ([`Self::finish_saved_filters_import`]).
     #[cfg(not(target_arch = "wasm32"))]
-    fn import_saved_filters(&mut self, path: &std::path::Path) {
+    fn import_saved_filters(&mut self, path: &std::path::Path) -> Task<Message> {
+        self.import_saved_filters_with(path, read_saved_filters)
+    }
+
+    /// [`Self::import_saved_filters`] with the reader given, so a test can
+    /// give one that panics.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn import_saved_filters_with(
+        &mut self,
+        path: &std::path::Path,
+        reader: SavedFiltersReader,
+    ) -> Task<Message> {
         let i = self.active_tab;
-        let parsed: Option<Vec<(String, Filter)>> = std::fs::read_to_string(path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-            .and_then(|value| {
-                value.get("filters")?.as_array().map(|list| {
-                    list.iter()
-                        .filter_map(|item| {
-                            // The names Save as accepts: trimmed, not empty.
-                            let name = item.get("name")?.as_str()?.trim().to_string();
-                            if name.is_empty() {
-                                return None;
-                            }
-                            let filter =
-                                serde_json::from_value(item.get("filter")?.clone()).ok()?;
-                            Some((name, filter))
-                        })
-                        .collect()
-                })
-            });
+        let (tab_id, generation) = (self.tabs[i].id, self.tabs[i].document_generation);
+        let path = path.to_path_buf();
+        self.command_line
+            .push_info(&format!("Reading {}…", path.display()));
+        crate::app::update::background_task(
+            "FILTER",
+            move || reader(&path),
+            move |filters| {
+                Message::FilterDialog(FilterMsg::ImportRead(tab_id, generation, filters))
+            },
+        )
+    }
+
+    /// Stores the saved filters of a finished Import read, one undo step;
+    /// a filter of the same name is replaced. A result for a drawing that
+    /// was closed, replaced or cleared is dropped.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn finish_saved_filters_import(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        parsed: Option<Vec<(String, Filter)>>,
+    ) {
+        let Some(i) = self.import_target(tab_id, generation) else {
+            return;
+        };
         let Some(filters) = parsed.filter(|f| !f.is_empty()) else {
             self.command_line
                 .push_error(crate::t!("No saved filters found in that file.").as_ref());
@@ -1913,8 +1970,59 @@ mod tests {
         filter(&mut app, FilterMsg::ExportTo(path.clone()));
         filter(&mut app, FilterMsg::DeleteSaved);
         assert!(app.saved_filter_names(i).is_empty());
-        filter(&mut app, FilterMsg::ImportFrom(path.clone()));
+        let task = app.update(Message::FilterDialog(FilterMsg::ImportFrom(path.clone())));
+        app.drive_headless_task(task).expect("the read task");
         assert_eq!(app.saved_filter_names(i), ["Circles"]);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// Import reads the file on a worker: nothing is stored during the
+    /// read; a result for a replaced drawing is dropped; a reader that
+    /// panics gives an error.
+    #[test]
+    fn saved_filters_import_reads_on_a_worker() {
+        let (mut app, _) = app_with_objects();
+        let i = app.active_tab;
+        filter(&mut app, FilterMsg::Open(None));
+        filter(
+            &mut app,
+            FilterMsg::Edit(
+                FilterRow::Root(0),
+                FilterRowEdit::Type(Some("Circle".into())),
+            ),
+        );
+        filter(&mut app, FilterMsg::SaveAs(Some("Circles".into())));
+        filter(&mut app, FilterMsg::SaveAsCommit);
+        let path = std::env::temp_dir().join(format!(
+            "ocs-filters-worker-{}.ocsfilter",
+            std::process::id()
+        ));
+        filter(&mut app, FilterMsg::ExportTo(path.clone()));
+        filter(&mut app, FilterMsg::DeleteSaved);
+
+        let task = app.update(Message::FilterDialog(FilterMsg::ImportFrom(path.clone())));
+        assert!(
+            app.saved_filter_names(i).is_empty(),
+            "nothing during the read"
+        );
+        app.tabs[i].document_generation += 1;
+        app.drive_headless_task(task).expect("the read task");
+        assert!(
+            app.saved_filter_names(i).is_empty(),
+            "dropped for a replaced drawing"
+        );
+        assert!(app
+            .command_line
+            .history_plain_text()
+            .contains("was replaced or cleared"));
+
+        let task = app.import_saved_filters_with(&path, |_| panic!("a reader bug"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("FILTER failed: a reader bug")
+        );
+        assert!(app.saved_filter_names(i).is_empty());
         let _ = std::fs::remove_file(path);
     }
 

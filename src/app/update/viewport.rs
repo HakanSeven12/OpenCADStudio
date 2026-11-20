@@ -207,6 +207,110 @@ fn snap_pixels_to_canvas(hit: &mut crate::snap::SnapResult, pane: iced::Rectangl
     }
 }
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod underlay_reseed_tests {
+    use crate::app::OpenCADStudio;
+    use document::types::Vector3;
+    use document::EntityType;
+
+    /// A new drawing with a PDF underlay; returns the app and the
+    /// underlay's handle.
+    fn app_with_underlay(name: &str) -> (OpenCADStudio, document::Handle) {
+        use printpdf::{Mm, PdfDocument, PdfPage, PdfSaveOptions};
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let mut pdf = PdfDocument::new("reseed app");
+        pdf.pages.push(PdfPage::new(Mm(25.4), Mm(25.4), Vec::new()));
+        let bytes = pdf.save(&PdfSaveOptions::default(), &mut Vec::new());
+        let path = format!("memory://reseed-app-{name}.pdf");
+        crate::scene::model::pdf_raster::register_source(&path, std::sync::Arc::new(bytes));
+        let scene = &mut app.tabs[app.active_tab].scene;
+        let definition = scene.document.allocate_handle();
+        scene.document.objects.insert(
+            definition,
+            document::objects::ObjectType::UnderlayDefinition(
+                document::objects::UnderlayDefinition::pdf(&path, "1"),
+            ),
+        );
+        let mut underlay = document::entities::Underlay::pdf();
+        underlay.definition_handle = definition;
+        underlay.insertion_point = Vector3::new(0.0, 0.0, 0.0);
+        let handle = scene.add_entity(EntityType::Underlay(underlay));
+        (app, handle)
+    }
+
+    /// Lets the view of drawing `i` rest on a new zoom step.
+    fn rest(app: &mut OpenCADStudio, i: usize) {
+        let scene = &mut app.tabs[i].scene;
+        scene.zoom_to_window(
+            glam::Vec3::new(0.0, 0.0, 0.0),
+            glam::Vec3::new(2.0, 2.0, 0.0),
+        );
+        scene.set_render_pixel_scale(1000.0, 1000.0);
+        let start = iced::time::Instant::now();
+        scene.refresh_underlay_resolution(start);
+        scene.refresh_underlay_resolution(start + std::time::Duration::from_millis(200));
+    }
+
+    /// The worker's rasters reach the drawing when it ends, and not for a
+    /// drawing that was replaced meanwhile.
+    #[test]
+    fn the_worker_rasters_reach_their_drawing_only() {
+        let (mut app, handle) = app_with_underlay("reach");
+        let i = app.active_tab;
+        let old = std::sync::Arc::clone(&app.tabs[i].scene.images[&handle].pixels);
+        rest(&mut app, i);
+        let task = app.start_underlay_reseed(i);
+        assert!(std::sync::Arc::ptr_eq(
+            &old,
+            &app.tabs[i].scene.images[&handle].pixels
+        ));
+        app.drive_headless_task(task).expect("the worker's task");
+        let new = std::sync::Arc::clone(&app.tabs[i].scene.images[&handle].pixels);
+        assert!(
+            !std::sync::Arc::ptr_eq(&old, &new),
+            "the new raster is taken"
+        );
+
+        rest_again(&mut app, i);
+        let task = app.start_underlay_reseed(i);
+        app.tabs[i].document_generation += 1;
+        app.drive_headless_task(task).expect("the worker's task");
+        assert!(
+            std::sync::Arc::ptr_eq(&new, &app.tabs[i].scene.images[&handle].pixels),
+            "a replaced drawing keeps its raster"
+        );
+    }
+
+    fn rest_again(app: &mut OpenCADStudio, i: usize) {
+        let scene = &mut app.tabs[i].scene;
+        scene.zoom_to_window(
+            glam::Vec3::new(0.0, 0.0, 0.0),
+            glam::Vec3::new(8.0, 8.0, 0.0),
+        );
+        let start = iced::time::Instant::now();
+        scene.refresh_underlay_resolution(start);
+        scene.refresh_underlay_resolution(start + std::time::Duration::from_millis(200));
+    }
+
+    /// The tick after a zoom step starts the worker, and its result
+    /// reaches the drawing.
+    #[test]
+    fn a_tick_after_a_zoom_step_starts_the_worker() {
+        let (mut app, handle) = app_with_underlay("tick");
+        let i = app.active_tab;
+        let old = std::sync::Arc::clone(&app.tabs[i].scene.images[&handle].pixels);
+        rest(&mut app, i);
+        let task = app.on_tick(iced::time::Instant::now());
+        assert!(task.units() > 0, "the tick starts the worker");
+        app.drive_headless_task(task).expect("the worker's task");
+        assert!(!std::sync::Arc::ptr_eq(
+            &old,
+            &app.tabs[i].scene.images[&handle].pixels
+        ));
+    }
+}
+
 #[cfg(test)]
 mod extension_canvas_tests {
     use super::*;
@@ -252,6 +356,8 @@ enum ScrollIntent {
     /// Trackpad movement to pan by, in screen pixels.
     ///
     Pan { dx: f32, dy: f32 },
+    /// Shift + trackpad movement to orbit by, in screen pixels.
+    Orbit { dx: f32, dy: f32 },
 }
 
 /// How far a ZOOM Dynamic drag must travel vertically before the magnifier
@@ -263,8 +369,14 @@ const ZOOM_DIR_FLIP_PX: f32 = 2.0;
 ///
 /// Delta units are not a reliable device identifier: smooth-scrolling mice
 /// can report pixels on macOS too. Honor the explicit touchpad option for
-/// both kinds of delta, with Ctrl+scroll always available for zooming.
-fn scroll_intent(delta: mouse::ScrollDelta, touchpad_pan: bool, ctrl: bool) -> ScrollIntent {
+/// both kinds of delta, with Ctrl+scroll always available for zooming and
+/// Shift+scroll orbiting instead of panning.
+fn scroll_intent(
+    delta: mouse::ScrollDelta,
+    touchpad_pan: bool,
+    ctrl: bool,
+    shift: bool,
+) -> ScrollIntent {
     /// Screen pixels one wheel line pans.
     const LINE_PX: f32 = 40.0;
     // A notched wheel reports lines and a trackpad never does there, so on
@@ -272,12 +384,14 @@ fn scroll_intent(delta: mouse::ScrollDelta, touchpad_pan: bool, ctrl: bool) -> S
     let wheel_notch =
         cfg!(target_os = "macos") && matches!(delta, mouse::ScrollDelta::Lines { .. });
     if touchpad_pan && !ctrl && !wheel_notch {
-        return match delta {
-            mouse::ScrollDelta::Pixels { x, y } => ScrollIntent::Pan { dx: x, dy: y },
-            mouse::ScrollDelta::Lines { x, y } => ScrollIntent::Pan {
-                dx: x * LINE_PX,
-                dy: y * LINE_PX,
-            },
+        let (dx, dy) = match delta {
+            mouse::ScrollDelta::Pixels { x, y } => (x, y),
+            mouse::ScrollDelta::Lines { x, y } => (x * LINE_PX, y * LINE_PX),
+        };
+        return if shift {
+            ScrollIntent::Orbit { dx, dy }
+        } else {
+            ScrollIntent::Pan { dx, dy }
         };
     }
     match delta {
@@ -1697,12 +1811,28 @@ impl OpenCADStudio {
         // grips participate, let the common cursor delta drive all of them.
         let axis = (targets.len() == 1).then_some(axis).flatten();
 
+        // A circle's quadrant grip edits its radius, as the grip menu's
+        // Radius does: Dynamic Input shows and takes the radius.
+        let radius = matches!(
+            targets.as_slice(),
+            [target] if !target.is_translate
+                && (1..=4).contains(&target.grip_id)
+                && matches!(
+                    self.tabs[i].scene.document.get_entity(target.handle),
+                    Some(document::EntityType::Circle(_))
+                )
+        );
+
         GripEdit {
             handle,
             grip_id,
             origin_world: world,
             last_world: world,
-            mode: GripEditMode::Stretch,
+            mode: if radius {
+                GripEditMode::Radius
+            } else {
+                GripEditMode::Stretch
+            },
             axis,
             targets,
             rectangle_frame: None,
@@ -1866,10 +1996,16 @@ impl OpenCADStudio {
     pub(super) fn on_tick(&mut self, t: Instant) -> Task<Message> {
         let i = self.active_tab;
         self.tabs[i].scene.update(t - self.start);
-        // Dynamic dimensions keep their screen size across zoom bands.
-        self.tabs[i].scene.refresh_dynamic_dimension_scales(false);
-        // Underlays are rasterised again for the zoom once it settles.
+        // Dynamic dimensions keep their screen size across zoom bands. The
+        // rewrite edits entities (a full geometry bump), so it waits until
+        // the view settles; `is_settling` keeps ticks coming until then.
+        if !self.tabs[i].scene.navigating_lod() {
+            self.tabs[i].scene.refresh_dynamic_dimension_scales(false);
+        }
+        // Underlays are rasterised again for the zoom once it settles, on a
+        // worker; the old rasters stay on screen until it ends.
         self.tabs[i].scene.refresh_underlay_resolution(t);
+        let reseed = self.start_underlay_reseed(i);
 
         // If the camera moved since we last synced, write it back to
         // the document and mark the file dirty.
@@ -1900,7 +2036,38 @@ impl OpenCADStudio {
             self.command_line.push_error(&msg);
         }
 
-        Task::none()
+        reseed
+    }
+
+    /// Starts the worker for the rasters a zoom step asked for in drawing
+    /// `i` ([`crate::scene::Scene::take_reseed_job`]).
+    pub(super) fn start_underlay_reseed(&mut self, i: usize) -> Task<Message> {
+        let Some(job) = self.tabs[i].scene.take_reseed_job() else {
+            return Task::none();
+        };
+        let (tab_id, generation) = (self.tabs[i].id, self.tabs[i].document_generation);
+        crate::app::update::background_task(
+            "Underlay raster",
+            move || job.render(),
+            move |done| Message::UnderlayRastersDrawn(tab_id, generation, Box::new(done)),
+        )
+    }
+
+    /// Takes the rasters a worker drew for a zoom step, into the drawing it
+    /// was started for while that drawing is still the same.
+    pub(super) fn finish_underlay_reseed(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        done: crate::scene::ReseedDone,
+    ) {
+        if let Some(tab) = self
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.id == tab_id && tab.document_generation == generation)
+        {
+            tab.scene.apply_reseed(done);
+        }
     }
 
     pub(super) fn on_set_render_mode(
@@ -3234,6 +3401,18 @@ impl OpenCADStudio {
             // to `last_cursor_world`. Keep it synchronized with the actual point used
             // by the grip, otherwise the guide and the edited geometry diverge.
             self.tabs[i].last_cursor_world = snapped;
+            // A typed (Tab-locked) Distance or Angle pins the stretch, as it
+            // pins a command's preview (#356): the preview shows what Enter
+            // commits.
+            if grip.mode == GripEditMode::Stretch
+                && grip.rectangle_frame.is_none()
+                && self.tabs[i].dyn_fields.iter().any(|f| f.buffer.is_some())
+            {
+                if let Some(point) = self.dyn_resolve_point() {
+                    snapped = point;
+                    self.tabs[i].last_cursor_world = snapped;
+                }
+            }
             self.tabs[i].last_cursor_screen = p_full;
 
             // Project the grip's original position into full-canvas coordinates.
@@ -3273,11 +3452,18 @@ impl OpenCADStudio {
             let delta = snapped - grip.last_world;
             // A table grip edits the table as it was when the drag started,
             // at the cursor: a fill, a break or a column line need not follow
-            // the cursor, so the drag is not rebased onto them.
+            // the cursor, so the drag is not rebased onto them. A viewport
+            // corner too: dragged past the opposite edge, the rebased frame
+            // would take the cursor as its fixed corner and fold flat (#3327).
             let table_targets: rustc_hash::FxHashSet<Handle> = self
                 .grip_originals
                 .iter()
-                .filter(|(_, entity)| matches!(entity, document::EntityType::Table(_)))
+                .filter(|(_, entity)| {
+                    matches!(
+                        entity,
+                        document::EntityType::Table(_) | document::EntityType::Viewport(_)
+                    )
+                })
                 .map(|(handle, _)| *handle)
                 .collect();
             let menu_action = match grip.mode {
@@ -3747,6 +3933,7 @@ impl OpenCADStudio {
                 point: p,
                 tile_size: vp_size,
                 tab: i,
+                camera_generation: self.tabs[i].scene.camera_generation,
             });
         } else {
             // Suppress the rollover during a command or a drag.
@@ -4662,6 +4849,8 @@ impl OpenCADStudio {
                         view_rot,
                         eye,
                         bounds,
+                        crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                        &self.tabs[i].scene.draw_depth_map(),
                         candidate_handles.as_ref(),
                     )
                 })
@@ -4673,6 +4862,8 @@ impl OpenCADStudio {
                             view_rot,
                             eye,
                             bounds,
+                            crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                            &self.tabs[i].scene.draw_depth_map(),
                             candidate_handles.as_ref(),
                         )
                     })?
@@ -4784,6 +4975,8 @@ impl OpenCADStudio {
                             view_rot,
                             eye,
                             bounds,
+                            crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                            &self.tabs[i].scene.draw_depth_map(),
                             candidate_handles.as_ref(),
                         )
                     })
@@ -4794,6 +4987,8 @@ impl OpenCADStudio {
                             view_rot,
                             eye,
                             bounds,
+                            crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                            &self.tabs[i].scene.draw_depth_map(),
                             candidate_handles.as_ref(),
                         )
                     })
@@ -5444,10 +5639,27 @@ impl OpenCADStudio {
         }
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
         sel.input.pointer_away = true;
-        sel.input.left_down = false;
-        sel.input.left_press_pos = None;
-        sel.input.left_press_time = None;
-        sel.input.left_dragging = false;
+        if crate::perf::enabled() {
+            crate::perf_record_diagnostic!(
+                "[perf] viewport-exit  left_down={} box_anchor={:?} dragging={}",
+                sel.input.left_down,
+                sel.gesture.box_anchor,
+                sel.input.left_dragging,
+            );
+        }
+        // A selection box or fence dragged over the command line, a panel or
+        // past the window edge keeps going: the input layer reports its moves
+        // and its release out there. A click-move-click box waiting for its
+        // second corner keeps going too — its button is up, so `left_down`
+        // alone would drop a selection the user has not finished or cancelled
+        // (#3339). Only a pointer with no selection gesture in flight clears.
+        let pending_box = sel.gesture.box_anchor.is_some() || sel.gesture.poly_active;
+        let left_drag = sel.input.left_down || pending_box;
+        if !sel.input.left_down {
+            sel.input.left_press_pos = None;
+            sel.input.left_press_time = None;
+            sel.input.left_dragging = false;
+        }
         sel.input.right_down = false;
         sel.input.right_press_pos = None;
         sel.input.right_press_time = None;
@@ -5461,19 +5673,23 @@ impl OpenCADStudio {
             sel.input.middle_last_pos = None;
             sel.orbit.pivot = None;
         }
-        sel.gesture.box_anchor = None;
-        sel.gesture.box_anchor_world = None;
-        sel.gesture.box_current = None;
-        sel.gesture.box_crossing = false;
-        sel.gesture.box_crossing_locked = false;
-        sel.gesture.poly_active = false;
-        sel.gesture.poly_points.clear();
-        sel.gesture.poly_crossing = false;
+        if !left_drag {
+            sel.gesture.box_anchor = None;
+            sel.gesture.box_anchor_world = None;
+            sel.gesture.box_current = None;
+            sel.gesture.box_crossing = false;
+            sel.gesture.box_crossing_locked = false;
+            sel.gesture.poly_active = false;
+            sel.gesture.poly_points.clear();
+            sel.gesture.poly_crossing = false;
+        }
         drop(sel);
-        self.box_preview_pending = None;
-        self.box_preview_due = None;
-        self.box_preview_cache = None;
-        self.tabs[i].scene.set_box_hover_highlights(&[]);
+        if !left_drag {
+            self.box_preview_pending = None;
+            self.box_preview_due = None;
+            self.box_preview_cache = None;
+            self.tabs[i].scene.set_box_hover_highlights(&[]);
+        }
         // Clear the rollover highlight when the cursor leaves the
         // viewport so it doesn't stick while the mouse is over the
         // ribbon / panels.
@@ -6596,6 +6812,16 @@ impl OpenCADStudio {
                         };
                         edit.grab = grabbed.map(|point| point - world);
                     }
+                    if edit.mode == GripEditMode::Radius {
+                        self.grip_pending = Some(crate::app::GripPendingValue {
+                            handle,
+                            grip_id,
+                            action: crate::scene::model::object::GripMenuAction::Radius,
+                            label: "New radius",
+                        });
+                        self.command_line
+                            .push_info(crate::t!("Specify point or enter radius:").as_ref());
+                    }
                     self.tabs[i].active_grip = Some(edit);
                     self.grip_ctrl_cycle = None;
                     self.grip_engage_press = Some(p);
@@ -6831,6 +7057,13 @@ impl OpenCADStudio {
         .then_some((self.tabs[i].last_cursor_world, false));
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
         sel.input.left_down = true;
+        if crate::perf::enabled() {
+            crate::perf_record_diagnostic!(
+                "[perf] viewport-press  press_pos={:?} cmd_active={}",
+                sel.input.left_press_pos,
+                self.tabs[i].active_cmd.is_some(),
+            );
+        }
         // Stored in full-canvas space (like ViewportMove's cursor and
         // the overlay box / lasso drawing); release maps it into the
         // active tile. Tile-local here would double-offset the anchor.
@@ -6848,6 +7081,15 @@ impl OpenCADStudio {
 
     pub(super) fn on_viewport_left_release(&mut self) -> Task<Message> {
         let i = self.active_tab;
+        if crate::perf::enabled() {
+            let sel = self.tabs[i].scene.selection.borrow();
+            crate::perf_record_diagnostic!(
+                "[perf] viewport-release left_down={} anchor={:?} dragging={}",
+                sel.input.left_down,
+                sel.gesture.box_anchor,
+                sel.input.left_dragging,
+            );
+        }
         // A click fires after the cursor has settled — clear any pending
         // deferred snap so the release's own snap runs at full fidelity.
         self.snap_dwell = None;
@@ -7501,6 +7743,8 @@ impl OpenCADStudio {
                         view_rot2,
                         eye2,
                         bounds,
+                        crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                        &self.tabs[i].scene.draw_depth_map(),
                         candidate_handles.as_ref(),
                     )
                 })
@@ -7512,6 +7756,8 @@ impl OpenCADStudio {
                             view_rot2,
                             eye2,
                             bounds,
+                            crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                            &self.tabs[i].scene.draw_depth_map(),
                             candidate_handles.as_ref(),
                         )
                     })?
@@ -7886,7 +8132,7 @@ impl OpenCADStudio {
                 // restore the running osnap configuration (#337).
                 self.snapper.clear_override();
                 self.dyn_user_reshaped = false;
-                self.dyn_coord_absolute = false;
+                self.dyn_coord_absolute = self.dyn_pointer_absolute;
                 self.sync_dyn_fields();
                 self.reset_tracking_after_point();
                 // A running Tangent snap may carry a tangent object; a
@@ -8449,6 +8695,8 @@ properties={:.1}ms picked={}",
                                     view_rot,
                                     eye,
                                     bounds,
+                                    crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                                    &self.tabs[i].scene.draw_depth_map(),
                                     candidate_handles.as_ref(),
                                 );
                                 hatch_test_ms = crate::perf::elapsed_ms(hatch_started);
@@ -8463,6 +8711,8 @@ properties={:.1}ms picked={}",
                                     view_rot,
                                     eye,
                                     bounds,
+                                    crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                                    &self.tabs[i].scene.draw_depth_map(),
                                     candidate_handles.as_ref(),
                                 );
                                 insert_ms = crate::perf::elapsed_ms(insert_started);
@@ -8549,7 +8799,7 @@ properties={:.1}ms picked={}",
                                             .select_entity(handle, !selection_pick_add);
                                         self.tabs[i].scene.expand_selection_for_groups(&[handle]);
                                     }
-                                    self.refresh_properties();
+                                    self.queue_properties_refresh(i);
                                     selection_just_completed = true;
                                 }
                             } else {
@@ -8566,7 +8816,7 @@ properties={:.1}ms picked={}",
                                     }
                                     self.tabs[i].scene.deselect_all();
                                     self.tabs[i].last_crossing_window = None;
-                                    self.refresh_properties();
+                                    self.queue_properties_refresh(i);
                                 }
                                 // Pin the anchor to the world point under it
                                 // so a zoom/pan mid-drag re-projects it
@@ -8711,7 +8961,7 @@ was_selected={}",
                     let apply_ms = t_apply.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
                     let t_props = crate::perf::enabled().then(Instant::now);
                     self.pick_authoring_box(a, p, crossing, !handles.is_empty());
-                    self.refresh_properties();
+                    self.queue_properties_refresh(i);
                     if crate::perf::enabled() {
                         crate::perf_record!(
                             "[perf] select-commit kind=window crossing={crossing} \
@@ -8974,6 +9224,8 @@ properties={:.1}ms picked={}",
                 view_rot,
                 eye,
                 bounds,
+                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                &self.tabs[i].scene.draw_depth_map(),
                 candidate_handles.as_ref(),
             )
         })
@@ -8984,6 +9236,8 @@ properties={:.1}ms picked={}",
                 view_rot,
                 eye,
                 bounds,
+                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                &self.tabs[i].scene.draw_depth_map(),
                 candidate_handles.as_ref(),
             )
         })
@@ -9179,6 +9433,7 @@ properties={:.1}ms picked={}",
             point: Point::new(cursor.x - tile.x, cursor.y - tile.y),
             tile_size: (tile.width, tile.height),
             tab: i,
+            camera_generation: self.tabs[i].scene.camera_generation,
         });
     }
 
@@ -9217,9 +9472,33 @@ properties={:.1}ms picked={}",
         Task::none()
     }
 
+    /// Orbit the active view by a screen-pixel movement: the active paper
+    /// viewport's view, or the model camera about the selection or the
+    /// surface at the view centre.
+    fn orbit_active_view(&mut self, i: usize, dx: f32, dy: f32) {
+        if self.tabs[i].scene.active_viewport.is_some() {
+            self.tabs[i].scene.orbit_active_viewport(dx, dy);
+        } else if self.tabs[i].scene.current_layout == "Model" {
+            let scene = &self.tabs[i].scene;
+            let (vw, vh) = scene.selection.borrow().view.vp_size;
+            let bounds = scene.active_model_tile_bounds(vw, vh);
+            let pivot = scene
+                .orbit_pivot()
+                .or_else(|| scene.view_center_surface_pivot(bounds))
+                .unwrap_or_else(|| scene.camera.borrow().target);
+            self.tabs[i].scene.refresh_projection_bounds();
+            self.tabs[i]
+                .scene
+                .camera
+                .borrow_mut()
+                .orbit(dx, dy, Some(pivot));
+        }
+        self.tabs[i].scene.camera_generation += 1;
+    }
+
     /// Apply the user's scroll navigation preference to either delta unit.
     pub(super) fn on_viewport_scroll(&mut self, delta: mouse::ScrollDelta) -> Task<Message> {
-        match scroll_intent(delta, self.touchpad_pan, self.ctrl_down) {
+        match scroll_intent(delta, self.touchpad_pan, self.ctrl_down, self.shift_down) {
             ScrollIntent::Zoom { notches } => {
                 crate::perf::note_scroll_zoom();
                 let mut s = notches * crate::app::settings::zoom_notch_steps(self.zoom_factor);
@@ -9227,6 +9506,14 @@ properties={:.1}ms picked={}",
                     s = -s;
                 }
                 self.zoom_view_at_cursor(s)
+            }
+            ScrollIntent::Orbit { dx, dy } => {
+                let i = self.active_tab;
+                if !self.tabs[i].is_start {
+                    self.clear_navigation_hover(i);
+                    self.orbit_active_view(i, dx, dy);
+                }
+                Task::none()
             }
             ScrollIntent::Pan { dx, dy } => {
                 let i = self.active_tab;
@@ -9287,26 +9574,7 @@ properties={:.1}ms picked={}",
                     }
                     tasks.push(self.zoom_view_at_cursor(pinch_zoom_steps(factor - 1.0)));
                 }
-                TouchAction::Orbit(delta) => {
-                    if self.tabs[i].scene.active_viewport.is_some() {
-                        self.tabs[i].scene.orbit_active_viewport(delta.x, delta.y);
-                    } else if self.tabs[i].scene.current_layout == "Model" {
-                        let scene = &self.tabs[i].scene;
-                        let (vw, vh) = scene.selection.borrow().view.vp_size;
-                        let bounds = scene.active_model_tile_bounds(vw, vh);
-                        let pivot = scene
-                            .orbit_pivot()
-                            .or_else(|| scene.view_center_surface_pivot(bounds))
-                            .unwrap_or_else(|| scene.camera.borrow().target);
-                        self.tabs[i].scene.refresh_projection_bounds();
-                        self.tabs[i]
-                            .scene
-                            .camera
-                            .borrow_mut()
-                            .orbit(delta.x, delta.y, Some(pivot));
-                    }
-                    self.tabs[i].scene.camera_generation += 1;
-                }
+                TouchAction::Orbit(delta) => self.orbit_active_view(i, delta.x, delta.y),
                 TouchAction::Tap(2) => {
                     tasks.push(self.update(Message::ViewportRightPress));
                     tasks.push(self.update(Message::ViewportRightRelease));
@@ -9329,7 +9597,7 @@ properties={:.1}ms picked={}",
 
     /// Pan the active view by `dx`/`dy` screen pixels: the body shared by the
     /// middle-button drag and the two-finger gesture.
-    fn pan_active_view(&mut self, i: usize, dx: f32, dy: f32, started: Instant) {
+    pub(in crate::app) fn pan_active_view(&mut self, i: usize, dx: f32, dy: f32, started: Instant) {
         // Pan scale uses the active tile's size (ortho size is relative to
         // viewport height), so a tiled pane pans at the correct rate.
         let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
@@ -9688,6 +9956,21 @@ properties={:.1}ms picked={}",
             self.hover_dwell = None;
             return Task::none();
         }
+        // A wheel zoom keeps the cursor still, so a dwell armed before the
+        // zoom would otherwise fire mid-navigation and stall it with the
+        // O(N) settled pick. The camera generation moved since the cursor
+        // came to rest: restart the rest clock on the new view and pick
+        // only once that has settled too (#3339).
+        if self.tabs[i].scene.camera_generation != dwell.camera_generation {
+            self.hover_dwell = Some(crate::app::HoverDwell {
+                last_move_at: Instant::now(),
+                point: dwell.point,
+                tile_size: dwell.tile_size,
+                tab: dwell.tab,
+                camera_generation: self.tabs[i].scene.camera_generation,
+            });
+            return Task::none();
+        }
         // While the quad's own hover dwell is counting with no quad open
         // (its configured delay is beyond the rollover's), re-running the
         // whole settled pick below would repeat identically: none of its
@@ -9718,6 +10001,7 @@ properties={:.1}ms picked={}",
                         point: dwell.point,
                         tile_size: dwell.tile_size,
                         tab: dwell.tab,
+                        camera_generation: self.tabs[dwell.tab].scene.camera_generation,
                     });
                 } else {
                     self.hover_dwell = None;
@@ -9790,18 +10074,33 @@ properties={:.1}ms picked={}",
         // highlights every selectable object: wire → hatch →
         // block-internal hatch → shaded 3D solid body.
         let wire_started = Instant::now();
-        let mut hovered = scene::pick::hit_test::click_hit(
-            p,
-            &hover_candidates,
-            view_rot,
-            eye,
-            bounds,
-            self.tabs[i].scene.document.header.lineweight_display,
-            crate::ui::overlay::pick_box_aperture_px(self.pick_box),
-            &self.tabs[i].scene.draw_depth_map(),
-        )
-        .and_then(Scene::handle_from_wire_name);
+        // A pathological draw (tens of thousands of segments inside the pick
+        // aperture) would still cost more than a hover highlight is worth;
+        // skip the wire test rather than stall the UI thread (#3339). Click
+        // picks keep their full sweep — a deliberate user action earns it.
+        let over_candidate_cap = candidate_count > crate::app::HOVER_CANDIDATE_CAP;
+        let mut hovered = if over_candidate_cap {
+            None
+        } else {
+            scene::pick::hit_test::click_hit(
+                p,
+                &hover_candidates,
+                view_rot,
+                eye,
+                bounds,
+                self.tabs[i].scene.document.header.lineweight_display,
+                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                &self.tabs[i].scene.draw_depth_map(),
+            )
+            .and_then(Scene::handle_from_wire_name)
+        };
         let wire_ms = wire_started.elapsed().as_secs_f64() * 1000.0;
+        if over_candidate_cap && perf {
+            crate::perf_record!(
+                "[perf] hover-capped   candidates={} wire sweep skipped",
+                candidate_count
+            );
+        }
         let mut hatch_ms = 0.0;
         let mut insert_ms = 0.0;
         let mut solid_ms = 0.0;
@@ -9815,6 +10114,8 @@ properties={:.1}ms picked={}",
                 view_rot,
                 eye,
                 bounds,
+                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                &self.tabs[i].scene.draw_depth_map(),
                 candidate_handles.as_ref(),
             );
             hatch_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -9827,6 +10128,8 @@ properties={:.1}ms picked={}",
                 view_rot,
                 eye,
                 bounds,
+                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                &self.tabs[i].scene.draw_depth_map(),
                 candidate_handles.as_ref(),
             );
             insert_ms = started.elapsed().as_secs_f64() * 1000.0;
@@ -9955,6 +10258,7 @@ properties={:.1}ms picked={}",
                 point: dwell.point,
                 tile_size: dwell.tile_size,
                 tab: dwell.tab,
+                camera_generation: self.tabs[i].scene.camera_generation,
             });
         } else {
             self.hover_dwell = None;
@@ -10608,6 +10912,21 @@ properties={:.1}ms picked={}",
                 for (handle, object) in edited_objects {
                     self.tabs[i].scene.document.objects.insert(handle, object);
                 }
+                // A fill copies formulas and fields as fields, inside the
+                // same history entry.
+                if let Some((table, pairs)) = self.tabs[i].scene.table_fill_fields.take() {
+                    let filled = grip.targets.iter().any(|target| {
+                        target.handle == table
+                            && target.grip_id == crate::entities::table::CELL_GRIP_FILL
+                    });
+                    if filled {
+                        crate::entities::table::commit_fill_fields(
+                            &mut self.tabs[i].scene.document,
+                            table,
+                            &pairs,
+                        );
+                    }
+                }
             }
             // Dimensions that follow the edited shapes update here; record
             // them so the one undo also brings back their saved pictures.
@@ -10881,14 +11200,14 @@ mod scroll_intent_tests {
     #[test]
     fn touchpad_pan_scrolls_pan_and_ctrl_zooms() {
         assert_eq!(
-            scroll_intent(ScrollDelta::Lines { x: 0.5, y: -0.25 }, true, false),
+            scroll_intent(ScrollDelta::Lines { x: 0.5, y: -0.25 }, true, false, false),
             ScrollIntent::Pan {
                 dx: 20.0,
                 dy: -10.0
             }
         );
         assert_eq!(
-            scroll_intent(ScrollDelta::Lines { x: 0.0, y: 1.0 }, true, true),
+            scroll_intent(ScrollDelta::Lines { x: 0.0, y: 1.0 }, true, true, false),
             ScrollIntent::Zoom { notches: 1.0 }
         );
     }
@@ -10896,7 +11215,7 @@ mod scroll_intent_tests {
     #[test]
     fn wheel_notches_zoom() {
         assert_eq!(
-            scroll_intent(ScrollDelta::Lines { x: 0.0, y: 1.0 }, false, false),
+            scroll_intent(ScrollDelta::Lines { x: 0.0, y: 1.0 }, false, false, false),
             ScrollIntent::Zoom { notches: 1.0 }
         );
     }
@@ -10905,7 +11224,7 @@ mod scroll_intent_tests {
     fn smooth_mouse_scroll_zooms_without_touchpad_mode() {
         for (y, notches) in [(100.0, 1.0), (-100.0, -1.0), (0.0, 0.0)] {
             assert_eq!(
-                scroll_intent(ScrollDelta::Pixels { x: 4.0, y }, false, false),
+                scroll_intent(ScrollDelta::Pixels { x: 4.0, y }, false, false, false),
                 ScrollIntent::Zoom { notches }
             );
         }
@@ -10915,7 +11234,7 @@ mod scroll_intent_tests {
     #[test]
     fn two_finger_scroll_pans_in_touchpad_mode() {
         assert_eq!(
-            scroll_intent(ScrollDelta::Pixels { x: 4.0, y: 6.0 }, true, false),
+            scroll_intent(ScrollDelta::Pixels { x: 4.0, y: 6.0 }, true, false, false),
             ScrollIntent::Pan { dx: 4.0, dy: 6.0 }
         );
     }
@@ -10923,7 +11242,7 @@ mod scroll_intent_tests {
     #[test]
     fn ctrl_pixel_scroll_zooms_in_touchpad_mode() {
         assert_eq!(
-            scroll_intent(ScrollDelta::Pixels { x: 4.0, y: 100.0 }, true, true),
+            scroll_intent(ScrollDelta::Pixels { x: 4.0, y: 100.0 }, true, true, false),
             ScrollIntent::Zoom { notches: 1.0 }
         );
     }
@@ -12995,6 +13314,7 @@ mod selection_preview_tests {
             point: iced::Point::new(400.0, 300.0),
             tile_size: (800.0, 600.0),
             tab: i,
+            camera_generation: app.tabs[i].scene.camera_generation,
         });
         let _ = app.on_hover_dwell_tick();
         app.tabs[i].scene.hover_highlight.is_some()
@@ -13039,6 +13359,7 @@ mod selection_preview_tests {
             point: iced::Point::new(400.0, 300.0),
             tile_size: (800.0, 600.0),
             tab: i,
+            camera_generation: app.tabs[i].scene.camera_generation,
         });
         // The first tick picks (the line under the cursor is highlighted)
         // and arms the quad dwell — rest 501 < 700, so the quad is waiting.
@@ -13082,6 +13403,7 @@ mod selection_preview_tests {
             point: iced::Point::new(400.0, 300.0),
             tile_size: (800.0, 600.0),
             tab: i,
+            camera_generation: app.tabs[i].scene.camera_generation,
         });
         let _ = app.on_hover_dwell_tick();
         assert!(
@@ -14049,6 +14371,30 @@ mod pointer_move_coalescing_tests {
             "answering a pre-press position after the press would send the \
              cursor backwards"
         );
+    }
+}
+
+#[cfg(test)]
+mod selection_drag_tracking_tests {
+    use super::*;
+
+    /// A click-move-click box waiting for its second corner survives the
+    /// pointer leaving the canvas (#3365).
+    #[test]
+    fn exit_keeps_a_pending_click_move_click_box() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        {
+            let mut sel = app.tabs[i].scene.selection.borrow_mut();
+            sel.input.left_down = false;
+            sel.gesture.box_anchor = Some(Point::new(100.0, 100.0));
+            sel.gesture.box_current = Some(Point::new(150.0, 150.0));
+        }
+        let _ = app.on_viewport_exit();
+        let sel = app.tabs[i].scene.selection.borrow();
+        assert_eq!(sel.gesture.box_anchor, Some(Point::new(100.0, 100.0)));
+        assert!(sel.input.pointer_away);
     }
 }
 

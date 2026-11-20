@@ -172,13 +172,16 @@ impl std::fmt::Debug for PreparedImport {
 /// A reference attachment that is placed: the attachment, the file it
 /// names as found beside the host file, and the model it shows. For a
 /// translation, `converted` is the model to write as "<file>-<model>.dwg";
-/// none when the drawing is already there and is kept.
+/// none when the drawing is already there and is kept. `drawing` is that
+/// drawing written and read on the import's worker, or why it could not
+/// be written; none when nothing read it there yet.
 #[derive(Clone)]
 pub struct PreparedReference {
     pub reference: crate::scene::model::underlay_vector::DgnReference,
     pub file: std::path::PathBuf,
     pub model: String,
     pub converted: Option<Converted>,
+    pub drawing: Option<Result<crate::io::xref::XrefRead, String>>,
 }
 
 /// The drawing a translated reference is written to, beside its file.
@@ -277,6 +280,7 @@ fn prepare_reference(
         file,
         model,
         converted,
+        drawing: None,
     })
 }
 
@@ -2181,6 +2185,12 @@ pub fn parse_mapping_token(text: &str) -> Result<(String, Option<u16>), String> 
     parse_mapping(text).map_err(|error| error.to_string())
 }
 
+/// The read of a file named at the -DGNIMPORT prompt: its models, checked
+/// by a read of the first; or the error to report.
+pub fn read_models_for_prompt(path: &str) -> Result<Vec<String>, String> {
+    import_models(path).map_err(|error| error.to_string())
+}
+
 /// Read the same design-model list, and apply the same first-model readability
 /// check, as the command's filename step.
 fn import_models(path: &str) -> Result<Vec<String>, DgnImportError> {
@@ -2295,6 +2305,8 @@ impl DgnImportRequest {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Step {
     Path,
+    /// The file named at the prompt is read off the UI thread.
+    Reading,
     Model,
     ListModels,
     Conversion,
@@ -2310,6 +2322,8 @@ pub struct DgnImportCommand {
     sub_units: bool,
     /// The effective V7 text code page (None: 1252), resolved at mapping.
     code_page: Option<u16>,
+    /// The file read off the UI thread.
+    reading: Option<String>,
 }
 
 impl Default for DgnImportCommand {
@@ -2327,6 +2341,7 @@ impl DgnImportCommand {
             model: String::new(),
             sub_units: false,
             code_page: None,
+            reading: None,
         }
     }
 
@@ -2335,9 +2350,17 @@ impl DgnImportCommand {
         if path.is_empty() {
             return CmdResult::NeedPoint;
         }
-        let models = match import_models(&path) {
+        self.step = Step::Reading;
+        self.reading = Some(path.clone());
+        CmdResult::ReadDgnForImport(path)
+    }
+
+    /// The command goes on with what the read of the file named at the
+    /// prompt found: the model prompt, or the error.
+    fn take_models(&mut self, path: String, read: Result<Vec<String>, String>) -> CmdResult {
+        let models = match read {
             Ok(models) => models,
-            Err(error) => return CmdResult::ReportError(error.to_string()),
+            Err(error) => return CmdResult::ReportError(error),
         };
         self.path = path;
         self.model = models[0].clone();
@@ -2414,6 +2437,7 @@ impl CadCommand for DgnImportCommand {
     fn prompt(&self) -> String {
         match self.step {
             Step::Path => "Enter filename for DGN import:".to_string(),
+            Step::Reading => "Reading the file…".to_string(),
             Step::Model => format!("Enter name of model or [?] <{}>:", self.models[0]),
             Step::ListModels => "Enter model(s) to list <*>:".to_string(),
             Step::Conversion => "Specify conversion units [Master/Sub] <Master>:".to_string(),
@@ -2432,7 +2456,7 @@ impl CadCommand for DgnImportCommand {
 
     fn input_kind(&self) -> InputKind {
         match self.step {
-            Step::Path | Step::Model => InputKind::FreeText,
+            Step::Path | Step::Reading | Step::Model => InputKind::FreeText,
             _ => InputKind::SingleToken,
         }
     }
@@ -2444,6 +2468,8 @@ impl CadCommand for DgnImportCommand {
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         Some(match self.step {
             Step::Path => self.accept_path(text),
+            // Input waits until the read ends.
+            Step::Reading => CmdResult::NeedPoint,
             Step::Model => self.accept_model(text),
             Step::ListModels => {
                 let models = self.models.clone();
@@ -2459,6 +2485,24 @@ impl CadCommand for DgnImportCommand {
                 other => other,
             },
         })
+    }
+
+    fn waits_for_read(&self) -> bool {
+        self.reading.is_some()
+    }
+
+    fn on_dgn_import_read(
+        &mut self,
+        path: &str,
+        read: Result<Vec<String>, String>,
+    ) -> Option<CmdResult> {
+        // `reading` is set only with the Reading step, and taken here.
+        if self.reading.as_deref() != Some(path) {
+            return None;
+        }
+        let path = self.reading.take()?;
+        self.step = Step::Path;
+        Some(self.take_models(path, read))
     }
 
     fn on_enter(&mut self) -> CmdResult {

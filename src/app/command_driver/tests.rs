@@ -5737,7 +5737,8 @@ mod mission_m076_tests {
             .document
             .layer_state("NEW-NAME")
             .is_none());
-        let _ = app.run_command_line(&format!("-LAYERSTATE IMPORT {}", path.display()));
+        let task = app.run_command_line(&format!("-LAYERSTATE IMPORT {}", path.display()));
+        app.drive_headless_task(task).expect("the read task");
         let imported = app.tabs[app.active_tab]
             .scene
             .document
@@ -5834,7 +5835,8 @@ mod mission_m078_tests {
         add_line(&mut app, "A-WALL");
         add_line(&mut app, "0");
 
-        let _ = app.run_command_line(&format!("-LAYTRANS {} A-WALL=WALLS", standards.display()));
+        let task = app.run_command_line(&format!("-LAYTRANS {} A-WALL=WALLS", standards.display()));
+        app.drive_headless_task(task).expect("the read task");
 
         let output = all_output(&app);
         assert!(
@@ -5877,7 +5879,8 @@ mod mission_m078_tests {
         let text = std::fs::read_to_string(&map_file).unwrap();
         assert!(text.contains("A-WALL -> WALLS"), "{text}");
 
-        let _ = app.run_command_line(&format!("-LAYTRANS LIST {}", standards.display()));
+        let task = app.run_command_line(&format!("-LAYTRANS LIST {}", standards.display()));
+        app.drive_headless_task(task).expect("the read task");
         let output = all_output(&app);
         assert!(output.contains("target layer(s)"), "{output}");
         assert!(output.contains("  WALLS"), "{output}");
@@ -5890,11 +5893,12 @@ mod mission_m078_tests {
         add_line(&mut app, "A-WALL");
         add_line(&mut app, "A-DOOR");
 
-        let _ = app.run_command_line(&format!(
+        let task = app.run_command_line(&format!(
             "-LAYTRANS LOAD {} {}",
             map_file.display(),
             standards.display()
         ));
+        app.drive_headless_task(task).expect("the read task");
         let output = all_output(&app);
         assert!(
             output.contains("translated 2 layer(s), 2 object(s)"),
@@ -5915,7 +5919,8 @@ mod mission_m078_tests {
         add_layer(&mut app, "A-WALL");
         add_line(&mut app, "A-WALL");
 
-        let _ = app.run_command_line(&format!("-LAYTRANS {} A-WALL=GHOST", standards.display()));
+        let task = app.run_command_line(&format!("-LAYTRANS {} A-WALL=GHOST", standards.display()));
+        app.drive_headless_task(task).expect("the read task");
 
         let output = all_output(&app);
         assert!(
@@ -6446,6 +6451,48 @@ mod batch4_tests {
         assert!(app.command_line.last_error.is_none(), "{}", out(&app));
         let text = out(&app);
         assert!(text.contains("1:50"), "{text}");
+    }
+
+    /// A ratio is a sheet scale whether or not the scale list names it: in a
+    /// metre drawing 1:40 and 1:750 sit beside 1:50, not a thousand times
+    /// away. A bare number stays the paper / model factor `ZOOM nXP` takes.
+    #[test]
+    fn vpscale_takes_a_ratio_the_list_does_not_name_as_a_sheet_scale_too() {
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        enter_layout(&mut app);
+        let _ = app.run_command_line("VPORTS SINGLE");
+        let _ = app.feed_active_cmd("F");
+        let handles = layout_viewport_handles(&app);
+        assert_eq!(handles.len(), 1, "{}", out(&app));
+        let i = app.active_tab;
+        app.tabs[i].scene.document.header.insertion_units = 6; // metres
+        let unit = app.tabs[i].scene.default_scale_unit_factor();
+        assert_eq!(unit, 1000.0, "millimetres of paper to a metre");
+
+        for (text, ratio) in [
+            ("1:50", 1.0 / 50.0),
+            ("1:40", 1.0 / 40.0),
+            ("1:750", 1.0 / 750.0),
+            ("2:3", 2.0 / 3.0),
+        ] {
+            let _ = app.run_command_line(&format!("VPSCALE {text}"));
+            assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+            let eff = effective_scale(&app, handles[0]);
+            let expected = ratio * unit;
+            assert!(
+                (eff - expected).abs() < 1e-9 * expected,
+                "VPSCALE {text}: the viewport is at {eff}, a sheet scale of {text} is {expected}"
+            );
+        }
+
+        let _ = app.run_command_line("VPSCALE 0.02");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let eff = effective_scale(&app, handles[0]);
+        assert!(
+            (eff - 0.02).abs() < 1e-12,
+            "a bare factor is paper units to a model unit, got {eff}"
+        );
     }
 
     #[test]
@@ -7890,6 +7937,7 @@ mod batch7_tests {
 
     #[test]
     fn sheet_set_with_a_custom_property_and_a_field() {
+        let _sets = crate::entities::field::sheet_sets_one_at_a_time();
         use document::objects::{Dictionary, ObjectType};
         use serde_json::json;
 
@@ -8192,12 +8240,11 @@ mod batch7_tests {
         app.active_tab = idx;
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let _ = app.run_command_line("-XREF");
-        let _ = app.feed_active_cmd("ATTACH");
-        let _ = app.feed_active_cmd(&source.display().to_string());
-        let _ = app.feed_active_cmd("0,0");
-        let _ = app.feed_active_cmd("1");
-        let _ = app.feed_active_cmd("");
-        let _ = app.feed_active_cmd("");
+        // The attach reads the reference off the UI thread: drive each task.
+        for input in ["ATTACH", &source.display().to_string(), "0,0", "1", "", ""] {
+            let task = app.feed_active_cmd(input);
+            app.drive_headless_task(task).expect("the attach's task");
+        }
         let record = app.tabs[idx]
             .scene
             .document
@@ -11686,7 +11733,8 @@ mod datalink_csv_command_tests {
         let path = std::env::temp_dir().join(format!("ocs_datalink_{}.csv", std::process::id()));
         std::fs::write(&path, "NAME,QTY\nBolt,12\nNut,30\n").unwrap();
         let escaped = path.to_string_lossy().replace('\\', "/");
-        let _ = app.run_command_line(&format!("DATALINK {escaped}"));
+        let task = app.run_command_line(&format!("DATALINK {escaped}"));
+        app.drive_headless_task(task).expect("the read task");
         let _ = app.feed_command(StepInput::Point(DVec3::new(10.0, 10.0, 0.0)));
 
         assert!(app.command_line.last_error.is_none());
@@ -11725,6 +11773,979 @@ mod datalink_csv_command_tests {
         );
         drop(app);
         let _ = std::fs::remove_file(&path);
+    }
+}
+
+
+// A table cell can hold a block; the Table Cell Block window's automation
+// fields drive that path, but no test covered the action + Ok round.
+mod table_cell_block_dialog_tests {
+    use super::super::*;
+    use crate::scene::TableCellSelection;
+    use document::entities::{Line, Table};
+    use document::types::Vector3;
+    use document::EntityType;
+
+    fn action(app: &mut OpenCADStudio, value: &str) -> serde_json::Value {
+        static SERIAL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let mut req = serde_json::json!({"op":"action","name":"table_cell_dialog","value":value});
+        let state = app.control_state();
+        req["protocol"] = serde_json::json!(1);
+        req["document_id"] = state["document_id"].clone();
+        req["revision"] = state["revision"].clone();
+        req["request_id"] = serde_json::json!(format!(
+            "tcell-{}",
+            SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let (reply, task) = app.control_request(req);
+        app.drive_headless_task(task).unwrap();
+        reply
+    }
+
+    #[test]
+    fn the_table_cell_block_dialog_installs_a_block_in_the_cell() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "CELLBLK",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(2.0, 0.0, 0.0),
+            ))],
+        );
+        let block = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("CELLBLK")
+            .unwrap()
+            .handle;
+        let table = app.tabs[i].scene.add_entity(EntityType::Table(Box::new(
+            Table::new(Vector3::ZERO, 2, 2),
+        )));
+        app.tabs[i]
+            .scene
+            .select_table_cells(TableCellSelection {
+                table,
+                anchor: (0, 0),
+                end: (0, 0),
+            });
+
+        let _ = app.run_command_line("_TCELLBLOCK");
+        assert_eq!(
+            app.active_modal,
+            Some(crate::app::ModalKind::TableCellBlock),
+            "the Block tab of the cell dialog opened"
+        );
+        assert_eq!(action(&mut app, "block=CELLBLK")["ok"], true);
+        assert_eq!(action(&mut app, "ok")["ok"], true);
+        assert_ne!(app.active_modal, Some(crate::app::ModalKind::TableCellBlock));
+
+        let document::EntityType::Table(table) = app.tabs[i]
+            .scene
+            .document
+            .get_entity(table)
+            .unwrap()
+        else {
+            panic!("the table remains a Table entity")
+        };
+        assert_eq!(
+            crate::app::command_driver::clipboard::table_cell_blocks(table).collect::<Vec<_>>(),
+            vec![block],
+            "the cell now points at the chosen block definition"
+        );
+        assert_eq!(
+            table.rows[0].cells[0].cell_type,
+            document::entities::table::CellType::Block,
+            "the cell's type follows its content"
+        );
+    }
+}
+
+
+// A layout viewport's standard scale and display lock are driven from its
+// Properties rows; the annotation scale is reported there too.
+mod viewport_properties_tests {
+    use super::super::*;
+    use document::entities::Viewport;
+    use document::objects::Scale;
+    use document::EntityType;
+
+    fn row(app: &OpenCADStudio, field: &str) -> crate::scene::model::object::Property {
+        app.tabs[app.active_tab]
+            .properties
+            .sections
+            .iter()
+            .flat_map(|section| &section.props)
+            .find(|property| property.field == field)
+            .unwrap_or_else(|| panic!("the {field} row is in Properties"))
+            .clone()
+    }
+
+    #[test]
+    fn a_viewport_scale_and_lock_follow_its_properties_rows() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        {
+            let scene = &mut app.tabs[i].scene;
+            scene.document.add_layout("Sheet").unwrap();
+            scene.set_current_layout("Sheet".into());
+            let mut viewport = Viewport::new();
+            viewport.id = 2;
+            viewport.width = 100.0;
+            viewport.height = 50.0;
+            viewport.view_height = 1000.0;
+            viewport.turn_on();
+            scene.add_entity(EntityType::Viewport(Box::new(viewport)));
+            for name in ["1:100", "1:50", "1:200"] {
+                crate::scene::annotative::ensure_scale_object(
+                    &mut scene.document,
+                    &Scale::new(name.into(), 1.0, 100.0),
+                );
+            }
+        }
+        let handle = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                EntityType::Viewport(viewport) if viewport.id == 2 => Some(viewport.common.handle),
+                _ => None,
+            })
+            .unwrap();
+        app.tabs[i].scene.select_entity(handle, true);
+        app.tabs[i].selected_handle = Some(handle);
+        app.refresh_properties();
+
+        assert!(matches!(
+            row(&app, "vscale_std").value,
+            crate::scene::model::object::PropValue::Choice { .. }
+        ));
+        assert!(matches!(
+            row(&app, "vp_anno_scale").value,
+            crate::scene::model::object::PropValue::ReadOnly(_)
+        ));
+        assert!(matches!(
+            row(&app, "vp_locked").value,
+            crate::scene::model::object::PropValue::BoolToggle { .. }
+        ));
+
+        let _ = app
+            .set_property_value(row(&app, "vscale_std"), &serde_json::json!("1:100"))
+            .unwrap();
+        app.finish_pending_history(i);
+        let document::EntityType::Viewport(before) =
+            app.tabs[i].scene.document.get_entity(handle).unwrap()
+        else {
+            panic!("the viewport stays a Viewport")
+        };
+        let before_scale = before.custom_scale;
+        let _ = app
+            .set_property_value(row(&app, "vscale_std"), &serde_json::json!("1:50"))
+            .unwrap();
+        app.finish_pending_history(i);
+
+        let document::EntityType::Viewport(viewport) =
+            app.tabs[i].scene.document.get_entity(handle).unwrap()
+        else {
+            panic!("the viewport stays a Viewport")
+        };
+        assert!(
+            (viewport.custom_scale - before_scale).abs() > 1e-6,
+            "the typed standard scale reached the viewport: {before_scale} -> {}",
+            viewport.custom_scale
+        );
+        let chosen_scale = viewport.custom_scale;
+
+        let _ = app
+            .set_property_value(row(&app, "vp_locked"), &serde_json::json!(true))
+            .unwrap();
+        app.finish_pending_history(i);
+        let document::EntityType::Viewport(locked) =
+            app.tabs[i].scene.document.get_entity(handle).unwrap()
+        else {
+            panic!("the viewport stays a Viewport")
+        };
+        assert!(locked.status.locked, "the Display locked row locked the viewport");
+
+        let _ = app
+            .set_property_value(row(&app, "vscale_std"), &serde_json::json!("1:200"))
+            .unwrap();
+        app.finish_pending_history(i);
+        let document::EntityType::Viewport(after) =
+            app.tabs[i].scene.document.get_entity(handle).unwrap()
+        else {
+            panic!("the viewport stays a Viewport")
+        };
+        assert!(
+            (after.custom_scale - chosen_scale).abs() < 1e-6,
+            "a locked viewport refuses a new scale"
+        );
+    }
+}
+
+
+// VPCLIP's polygonal boundary flow had no test: pick the viewport, choose
+// Polygonal, draw a closed shape and check the viewport is clipped to it.
+mod vpclip_polygonal_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::entities::Viewport;
+    use document::types::Vector3;
+    use document::EntityType;
+    use glam::DVec3;
+
+    #[test]
+    fn vpclip_clips_a_viewport_to_a_drawn_polygon() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let handle = {
+            let scene = &mut app.tabs[i].scene;
+            scene.document.add_layout("Sheet").unwrap();
+            scene.set_current_layout("Sheet".into());
+            let mut viewport = Viewport::new();
+            viewport.id = 2;
+            viewport.center = Vector3::new(50.0, 50.0, 0.0);
+            viewport.width = 100.0;
+            viewport.height = 100.0;
+            viewport.view_height = 1000.0;
+            viewport.turn_on();
+            scene.add_entity(EntityType::Viewport(Box::new(viewport)))
+        };
+
+        let _ = app.run_command_line("VPCLIP");
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("VPCLIP asks for a viewport")
+                .prompt(),
+            "Select viewport to clip:"
+        );
+        let _ = app.feed_command(StepInput::EntityPick(handle, DVec3::ZERO));
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("then asks for the clipping object")
+                .prompt(),
+            "Select clipping object or [Polygonal] <Polygonal>:"
+        );
+        let _ = app.feed_command(StepInput::Enter);
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("Polygonal asks for the start point")
+                .prompt(),
+            "Specify start point:"
+        );
+        for point in [(10.0, 10.0), (30.0, 10.0), (30.0, 25.0), (10.0, 25.0)] {
+            let _ = app.feed_command(StepInput::Point(DVec3::new(point.0, point.1, 0.0)));
+        }
+        let _ = app.feed_command(StepInput::Text("C".into()));
+
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "closing the polygon completes VPCLIP"
+        );
+        assert!(app.command_line.last_error.is_none());
+        let document::EntityType::Viewport(clipped) =
+            app.tabs[i].scene.document.get_entity(handle).unwrap()
+        else {
+            panic!("the viewport remains a Viewport")
+        };
+        assert!(
+            !clipped.clip_boundary_handle.is_null(),
+            "a clip boundary entity was created"
+        );
+        assert!(
+            clipped.status.non_rectangular_clipping,
+            "the viewport is marked as non-rectangularly clipped"
+        );
+        assert!(
+            (clipped.width - 20.0).abs() < 1e-6 && (clipped.height - 15.0).abs() < 1e-6,
+            "the viewport shrank to the drawn 20x15 boundary: {}x{}",
+            clipped.width,
+            clipped.height
+        );
+    }
+}
+
+
+// PLOTSTYLE's STATUS/CLEAR forms expose the loaded plot style table; no
+// command-surface test covered them.
+mod plotstyle_command_tests {
+    use super::super::*;
+    use crate::app::Message;
+    use crate::io::plot_style::PickedPlotStyle;
+    use document::plot_style::{PlotStyleEntry, PlotStyleTable};
+
+    #[test]
+    fn plotstyle_status_reports_the_loaded_table_and_clear_removes_it() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let layout = app.tabs[i].scene.current_layout.clone();
+        let mut table = PlotStyleTable::identity("review.ctb".to_string());
+        table.named_entries.insert(
+            "Normal".into(),
+            PlotStyleEntry {
+                name: "Normal".into(),
+                color: Some([255, 0, 0]),
+                ..Default::default()
+            },
+        );
+        let picked = PickedPlotStyle::from_bytes(
+            "review.ctb".into(),
+            table.to_bytes().unwrap(),
+        )
+        .unwrap();
+        let _ = app.update(Message::PlotStyleLoaded(
+            app.tabs[i].id,
+            layout.clone(),
+            Ok(Some(picked)),
+        ));
+
+        let _ = app.run_command_line("PLOTSTYLE STATUS");
+        let text = app.command_line.history_plain_text();
+        assert!(
+            text.contains("Plot style: review.ctb"),
+            "STATUS reports the active table: {text}"
+        );
+        assert!(app.active_plot_style.is_some());
+
+        let clear = app.run_command_line("PLOTSTYLE CLEAR");
+        app.drive_headless_task(clear).unwrap();
+        assert!(app.active_plot_style.is_none(), "CLEAR removes the table");
+        let _ = app.run_command_line("PLOTSTYLE STATUS");
+        assert!(
+            app.command_line.history_plain_text().contains("No plot style table loaded."),
+            "STATUS now reports no table"
+        );
+    }
+}
+
+
+// The External References palette's selection + operation path has no test:
+// opening the panel, selecting a row and detaching it must change the drawing.
+mod xref_palette_op_tests {
+    use super::super::*;
+    use crate::app::Message;
+    use crate::ui::window::xref_manager::{XrefPaletteOp, XrefRowId};
+    use document::tables::BlockRecord;
+
+    #[test]
+    fn the_xref_palette_detaches_the_selected_reference() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut block = BlockRecord::new("PLAN");
+        block.flags.is_xref = true;
+        block.xref_path = "plans/plan.dwg".to_string();
+        block.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i].scene.document.block_records.add(block).unwrap();
+
+        let _ = app.run_command_line("EXTERNALREFERENCES");
+        assert!(app.show_external_references, "the panel opened");
+        let row = app
+            .xref_manager
+            .entries
+            .iter()
+            .find(|entry| entry.name == "PLAN")
+            .expect("the palette lists the xref")
+            .clone();
+        let id = XrefRowId::of(row.key, &row.saved_path);
+        let _ = app.update(Message::XrefManagerSelect(id));
+
+        let _ = app.update(Message::XrefManagerOp(XrefPaletteOp::Detach));
+
+        assert!(
+            app.tabs[i].scene.document.block_records.get("PLAN").is_none(),
+            "the palette op detached the reference"
+        );
+        assert!(
+            app.command_line.history_plain_text().contains("DETACH")
+                || app.command_line.history_plain_text().contains("detach"),
+            "the palette op reported what it did: {}",
+            app.command_line.history_plain_text()
+        );
+    }
+}
+
+
+// The xref path-type conversion is exposed through the control protocol's
+// xref_set_path op; that surface had no test.
+mod xref_pathtype_control_tests {
+    use super::super::*;
+    use document::tables::BlockRecord;
+
+    fn set_path(app: &mut OpenCADStudio, id: &str, path_type: &str) -> serde_json::Value {
+        static SERIAL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let mut req = serde_json::json!({
+            "op": "xref_set_path",
+            "id": id,
+            "path_type": path_type
+        });
+        let state = app.control_state();
+        req["protocol"] = serde_json::json!(1);
+        req["document_id"] = state["document_id"].clone();
+        req["revision"] = state["revision"].clone();
+        req["request_id"] = serde_json::json!(format!(
+            "xref-path-{}",
+            SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let (reply, task) = app.control_request(req);
+        app.drive_headless_task(task).unwrap();
+        reply
+    }
+
+    #[test]
+    fn xref_set_path_converts_between_none_and_full_paths() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let host = std::env::temp_dir().join(format!("ocs_xref_host_{}.dwg", std::process::id()));
+        let _ = std::fs::remove_file(&host);
+        assert_eq!(
+            app.automation_op(&format!(
+                r#"{{"op":"save","path":"{}"}}"#,
+                host.to_string_lossy().replace('\\', "\\\\")
+            ))["ok"],
+            true
+        );
+        let mut block = BlockRecord::new("PLAN");
+        block.flags.is_xref = true;
+        block.xref_path = "plans/plan.dwg".to_string();
+        block.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i].scene.document.block_records.add(block).unwrap();
+
+        let refs = app.automation_op(r#"{"op":"xrefs"}"#);
+        let id = refs["xrefs"][0]["id"].as_str().unwrap().to_string();
+
+        let none = set_path(&mut app, &id, "none");
+        assert_eq!(none["ok"], true, "{none}");
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .block_records
+                .get("PLAN")
+                .unwrap()
+                .xref_path,
+            "plan.dwg",
+            "no-path mode strips the directory"
+        );
+
+        let full = set_path(&mut app, &id, "full");
+        assert_eq!(full["ok"], true, "{full}");
+        let stored = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PLAN")
+            .unwrap()
+            .xref_path
+            .clone();
+        assert!(
+            stored.ends_with("plan.dwg")
+                && (stored.starts_with("C:") || stored.starts_with('/')),
+            "full mode stores an absolute path: {stored}"
+        );
+        let sidecar = host.with_file_name(format!(
+            ".{}.ocs.lock",
+            host.file_name().unwrap().to_string_lossy()
+        ));
+        let _ = std::fs::remove_file(sidecar);
+        let _ = std::fs::remove_file(&host);
+    }
+}
+
+
+// XREF's Overlay option changes an existing reference's semantics; that
+// success path had no test (only the image-refusal path was covered).
+mod xref_overlay_option_tests {
+    use super::super::*;
+    use document::tables::BlockRecord;
+
+    #[test]
+    fn xref_overlay_option_flips_an_attached_reference_to_overlay() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut block = BlockRecord::new("PLAN");
+        block.flags.is_xref = true;
+        block.xref_path = "plan.dwg".to_string();
+        block.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i].scene.document.block_records.add(block).unwrap();
+
+        let _ = app.run_command_line("XREF Overlay PLAN");
+
+        let record = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PLAN")
+            .unwrap();
+        assert!(
+            record.flags.is_xref_overlay && !record.flags.is_xref,
+            "the reference is now an overlay: {:?}",
+            record.flags
+        );
+        assert!(
+            app.command_line.history_plain_text().contains("set to Overlay"),
+            "the conversion is reported: {}",
+            app.command_line.history_plain_text()
+        );
+
+        // An overlay stays an overlay when the command is repeated.
+        let _ = app.run_command_line("XREF Attach PLAN");
+        let record = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PLAN")
+            .unwrap();
+        assert!(
+            !record.flags.is_xref && record.flags.is_xref_overlay,
+            "the simple Attach-on-name path does not silently re-attach an overlay"
+        );
+    }
+}
+
+
+// The CLIP command's boundary workflow on a drawing-space reference had no
+// test (XCLIP was only covered inside the block editor).
+mod clip_boundary_workflow_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::entities::{Insert, Line};
+    use document::types::Vector3;
+    use document::EntityType;
+    use glam::DVec3;
+
+    #[test]
+    fn clip_adds_a_rectangular_boundary_to_a_placed_reference() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "VALVE",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+        let insert = app.tabs[i]
+            .scene
+            .add_entity(EntityType::Insert(Insert::new("VALVE", Vector3::ZERO)));
+
+        let _ = app.run_command_line("CLIP");
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("CLIP asks which object to clip")
+                .prompt(),
+            "Select Object to clip:"
+        );
+        let _ = app.feed_command(StepInput::EntityPick(insert, DVec3::ZERO));
+        let _ = app.feed_command(StepInput::Text("N".into()));
+        let _ = app.feed_command(StepInput::Text("R".into()));
+        let _ = app.feed_command(StepInput::Point(DVec3::new(1.0, 1.0, 0.0)));
+        let _ = app.feed_command(StepInput::Point(DVec3::new(8.0, 7.0, 0.0)));
+
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "the boundary completes CLIP"
+        );
+        assert!(app.command_line.last_error.is_none());
+        assert!(
+            crate::scene::pick::xclip::filter_handle(
+                &app.tabs[i].scene.document,
+                insert
+            )
+            .is_some(),
+            "the reference now carries a clip filter"
+        );
+        assert!(
+            app.tabs[i].scene.document.get_entity(insert).is_some(),
+            "the reference itself stays in the drawing"
+        );
+    }
+}
+
+
+// Bare REFCLOSE (with its Save/Discard option prompt) had no test; the
+// internal REFCLOSE_SAVE/REFCLOSE_DISCARD forms were covered.
+mod refclose_command_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use document::entities::{Insert, Line};
+    use document::types::Vector3;
+    use document::EntityType;
+
+    #[test]
+    fn refclose_prompt_saves_an_in_place_reference_edit() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "PANEL",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            ))],
+        );
+        let reference = app.tabs[i]
+            .scene
+            .document
+            .add_entity(EntityType::Insert(Insert::new("PANEL", Vector3::ZERO)))
+            .unwrap();
+        app.tabs[i].dirty = false;
+        app.tabs[i].scene.select_entity(reference, true);
+
+        let _ = app.run_command_line("-REFEDIT");
+        let command = app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("-REFEDIT asks about the nesting level");
+        assert!(command.prompt().contains("Select nesting level"), "{}", command.prompt());
+        let _ = app.feed_command(StepInput::Text("O".into()));
+        let _ = app.feed_command(StepInput::Enter);
+        let _ = app.feed_command(StepInput::Enter);
+        assert!(
+            app.tabs[i].refedit_session.is_some(),
+            "REFEDIT checked out the preselected reference"
+        );
+        let before = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PANEL")
+            .unwrap()
+            .entity_handles
+            .len();
+
+        let result = app.automation_op(r#"{"op":"run","cmd":"CIRCLE 3,0 2"}"#);
+        assert_eq!(result["ok"], true, "{result}");
+        app.finish_pending_history(i);
+
+        let _ = app.run_command_line("REFCLOSE");
+        assert_eq!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .expect("REFCLOSE asks what to do with the changes")
+                .prompt(),
+            "Enter option [Save/Discard reference changes] <Save>:"
+        );
+        let _ = app.feed_command(StepInput::Enter);
+
+        assert!(app.tabs[i].refedit_session.is_none(), "the session closed");
+        let after = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PANEL")
+            .unwrap()
+            .entity_handles
+            .len();
+        assert_eq!(after, before + 1, "the drawn circle was saved to the definition");
+    }
+}
+
+
+// The UNDERLAY command edits selected PDF/DGN underlays; no test drove
+// its property options from the command line.
+mod underlay_command_tests {
+    use super::super::*;
+    use document::entities::{Underlay, UnderlayDisplayFlags, UnderlayType};
+    use document::EntityType;
+
+    #[test]
+    fn underlay_command_edits_the_selected_underlay() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let handle = app.tabs[i]
+            .scene
+            .document
+            .add_entity(EntityType::Underlay(Underlay::new(UnderlayType::Pdf)))
+            .unwrap();
+        app.tabs[i].scene.select_entity(handle, true);
+
+        for command in [
+            "UNDERLAY FADE 50",
+            "UNDERLAY CONTRAST 70",
+            "UNDERLAY MONO ON",
+            "UNDERLAY CLIP ON",
+            "UNDERLAY OFF",
+        ] {
+            let _ = app.run_command_line(command);
+            assert!(app.command_line.last_error.is_none(), "{command}");
+        }
+
+        let document::EntityType::Underlay(underlay) =
+            app.tabs[i].scene.document.get_entity(handle).unwrap()
+        else {
+            panic!("the underlay remains an Underlay")
+        };
+        assert_eq!(underlay.fade, 50, "the fade was set");
+        assert_eq!(underlay.contrast, 70, "the contrast was set");
+        assert!(
+            underlay.flags.contains(UnderlayDisplayFlags::MONOCHROME),
+            "monochrome was switched on"
+        );
+        assert!(
+            underlay.flags.contains(UnderlayDisplayFlags::CLIPPING),
+            "clipping was switched on"
+        );
+        assert!(!underlay.is_on(), "the underlay was switched off");
+    }
+}
+
+
+// The Properties panel switches its rows to the selected entity's type: a
+// Table gets table-only rows that a Line does not.
+mod entity_specific_properties_tests {
+    use super::super::*;
+    use document::entities::Table;
+    use document::types::Vector3;
+    use document::EntityType;
+
+    fn has_field(app: &OpenCADStudio, field: &str) -> bool {
+        app.tabs[app.active_tab]
+            .properties
+            .sections
+            .iter()
+            .flat_map(|section| &section.props)
+            .any(|property| property.field == field)
+    }
+
+    #[test]
+    fn a_table_shows_table_rows_that_a_line_does_not() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let table = app.tabs[i]
+            .scene
+            .document
+            .add_entity(EntityType::Table(Box::new(Table::new(
+                Vector3::ZERO,
+                2,
+                2,
+            ))))
+            .unwrap();
+        let line = app.tabs[i].scene.add_entity(EntityType::Line(
+            document::entities::Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0)),
+        ));
+
+        app.tabs[i].scene.select_entity(table, true);
+        app.tabs[i].selected_handle = Some(table);
+        app.refresh_properties();
+        assert!(has_field(&app, "tbl_style_handle"), "a table style row is shown");
+        assert!(has_field(&app, "tbl_rows"), "the row count is shown");
+        assert!(has_field(&app, "tbl_cols"), "the column count is shown");
+        assert!(has_field(&app, "tbl_flow_direction"), "the direction row is shown");
+
+        let direction = app.tabs[i]
+            .properties
+            .sections
+            .iter()
+            .flat_map(|section| &section.props)
+            .find(|property| property.field == "tbl_flow_direction")
+            .unwrap()
+            .clone();
+        let crate::scene::model::object::PropValue::Choice { ref selected, .. } = direction.value
+        else {
+            panic!("the direction row is a choice")
+        };
+        let wanted = if selected == "Up" { "Down" } else { "Up" };
+        let _ = app
+            .set_property_value(direction, &serde_json::json!(wanted))
+            .unwrap();
+        app.finish_pending_history(i);
+        app.refresh_properties();
+        let after = app.tabs[i]
+            .properties
+            .sections
+            .iter()
+            .flat_map(|section| &section.props)
+            .find(|property| property.field == "tbl_flow_direction")
+            .unwrap();
+        assert!(
+            matches!(&after.value, crate::scene::model::object::PropValue::Choice { selected, .. } if selected == wanted),
+            "the table direction changed the row"
+        );
+
+        app.tabs[i].scene.select_entity(line, true);
+        app.tabs[i].selected_handle = Some(line);
+        app.refresh_properties();
+        assert!(
+            !has_field(&app, "tbl_style_handle"),
+            "a line does not get table rows"
+        );
+    }
+}
+
+
+// A quoted 'QSELECT can run transparently inside a command that is asking for
+// objects; that hand-back path had no test.
+mod transparent_qselect_tests {
+    use super::super::*;
+    use crate::app::Message;
+    use document::EntityType;
+
+    #[test]
+    fn transparent_qselect_hands_its_matches_back_to_the_running_command() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let _ = app.run_command_line("LINE 0,0 10,0");
+        let _ = app.run_command_line("CIRCLE 20,20 5");
+        let line = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| matches!(entity, EntityType::Line(_)).then(|| entity.common().handle))
+            .unwrap();
+        let circle = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| matches!(entity, EntityType::Circle(_)).then(|| entity.common().handle))
+            .unwrap();
+
+        let _ = app.run_command_line("MOVE");
+        assert!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.is_selection_gathering()),
+            "MOVE is asking for objects"
+        );
+        let _ = app.run_command_line("'QSELECT");
+        assert!(app.qselect.is_some(), "Quick Select opened transparently");
+        assert!(app.transparent_select.is_some(), "MOVE was parked");
+
+        let _ = app.update(Message::QSelectSetType(Some("Circle".into())));
+        let task = app.update(Message::QSelectApply);
+        app.drive_headless_task(task).unwrap();
+
+        assert!(app.qselect.is_none(), "Quick Select closed");
+        assert!(app.transparent_select.is_none(), "the parked command resumed");
+        assert!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.is_selection_gathering()
+                    && command.prompt().starts_with("MOVE")),
+            "the parent MOVE command is back at its object prompt: {:?}",
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .map(|command| (command.name(), command.prompt()))
+        );
+        let selected: Vec<_> = app.tabs[i].scene.selected.iter().copied().collect();
+        assert!(selected.contains(&circle) && !selected.contains(&line), "only the circle was handed back: {selected:?}");
+    }
+}
+
+
+// A converted dimensional constraint exposes Constraint Form and Reference
+// rows in Properties; driving them had no test.
+mod dimensional_constraint_properties_tests {
+    use super::super::*;
+    use crate::command::StepInput;
+    use crate::scene::parametric_constraints::DYNAMIC_DIMENSION_LAYER;
+    use document::EntityType;
+
+    #[test]
+    fn a_dimensional_constraints_properties_drive_its_form_and_reference() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 40,0"}"#);
+        let i = app.active_tab;
+        let line = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| matches!(entity, EntityType::Line(_)).then(|| entity.common().handle))
+            .unwrap();
+        let dimension = app.tabs[i].scene.add_entity(
+            crate::modules::annotate::linear_dim::linear_dimension_entity(
+                glam::DVec3::ZERO,
+                glam::DVec3::new(40.0, 0.0, 0.0),
+                glam::DVec3::new(20.0, 10.0, 0.0),
+                glam::DVec3::X,
+                None,
+            ),
+        );
+        app.tabs[i]
+            .scene
+            .attach_dimension_association(dimension, vec![Some(line), Some(line)]);
+
+        let _ = app.run_command_line("DCCONVERT");
+        let _ = app.feed_command(StepInput::SelectionComplete(vec![dimension]));
+        let _ = app.feed_command(StepInput::Enter);
+
+        app.tabs[i].scene.select_entity(dimension, true);
+        app.tabs[i].selected_handle = Some(dimension);
+        app.refresh_properties();
+        let rows: Vec<_> = app.tabs[i]
+            .properties
+            .sections
+            .iter()
+            .flat_map(|section| &section.props)
+            .cloned()
+            .collect();
+        let form = rows
+            .iter()
+            .find(|property| property.field == "dyn_constraint_form")
+            .expect("the Constraint Form row is shown")
+            .clone();
+        assert!(
+            matches!(&form.value, crate::scene::model::object::PropValue::Choice { selected, .. } if selected == "Dynamic"),
+            "a converted dimension starts dynamic: {:?}",
+            form.value
+        );
+        assert!(
+            rows.iter().any(|property| property.field == "dyn_constraint_reference"),
+            "the Reference row is shown too"
+        );
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(dimension)
+                .unwrap()
+                .common()
+                .layer,
+            DYNAMIC_DIMENSION_LAYER
+        );
+
+        let _ = app
+            .set_property_value(form, &serde_json::json!("Annotational"))
+            .unwrap();
+        app.finish_pending_history(i);
+        assert_ne!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(dimension)
+                .unwrap()
+                .common()
+                .layer,
+            DYNAMIC_DIMENSION_LAYER,
+            "the Annotational form moves it off the constraints layer"
+        );
     }
 }
 

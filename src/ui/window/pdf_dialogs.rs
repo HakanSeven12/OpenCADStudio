@@ -37,6 +37,30 @@ pub enum PdfDialogMsg {
     AttachRotation(String),
     AttachDetails(bool),
     AttachOk,
+    /// A PDF, DWF or DGN file read off the UI thread for the Attach window:
+    /// the underlay type, the file, and what the read found.
+    AttachRead(
+        document::entities::UnderlayType,
+        String,
+        std::sync::Arc<UnderlayAttachRead>,
+    ),
+    /// A file chosen in the Attach window's name list, read off the UI
+    /// thread: the file, and what the read found.
+    AttachNameRead(String, std::sync::Arc<UnderlayAttachRead>),
+    /// The GeoPDF check of the Attach window, run off the UI thread: the
+    /// file, the pages checked, and whether every one has a placement.
+    AttachGeoChecked(String, Vec<String>, bool),
+    /// PDF pages placed by their geospatial data off the UI thread: the
+    /// tab the attach was started for, that document's generation, and the
+    /// pages with their placements.
+    AttachPlaced(u64, u64, Box<PlacedPdfPages>),
+    /// OK's GeoPDF placement, read off the UI thread: the file, the pages,
+    /// and the placed underlays (None: a page has no placement here).
+    AttachOkChecked(
+        String,
+        Vec<String>,
+        Option<Vec<(String, document::EntityType)>>,
+    ),
     // Attach Point Cloud
     CloudBrowse,
     CloudPathType(PathTypeChoice),
@@ -144,9 +168,20 @@ pub enum PdfDialogMsg {
     ImportScale(String),
     ImportRotation(RotationChoice),
     ImportOk,
-    /// A PDF read off the UI thread for the Import PDF window: the file,
-    /// and what the read found.
-    ImportRead(String, std::sync::Arc<PdfImportFileRead>),
+    /// A PDF read off the UI thread for the Import PDF window: the read's
+    /// ticket, the file, and what the read found.
+    ImportRead(
+        crate::ui::window::import_dialogs::ReadTicket,
+        String,
+        std::sync::Arc<PdfImportFileRead>,
+    ),
+    /// The file named at the -PDFIMPORT prompt, read off the UI thread: the
+    /// tab of the command, the file, and what the read found.
+    ImportPromptRead(
+        u64,
+        String,
+        crate::modules::insert::pdf_import::PdfPromptRead,
+    ),
     /// A PDF import converted off the UI thread: the tab it was started
     /// for, that document's generation, the import, and the conversion.
     ImportConverted(
@@ -635,6 +670,13 @@ pub struct PdfAttachState {
     pub found_in: String,
     pub saved_path: String,
     pub page_size: String,
+    /// The size text and the DGN sub units per master unit of each page,
+    /// sheet or model, read with the file: a page change does not read.
+    pub item_sizes: Vec<String>,
+    pub item_units: Vec<f64>,
+    /// The file chosen in the name list while it is read off the UI
+    /// thread; a read for another file changes nothing.
+    pub pending_path: Option<String>,
     pub details: bool,
 }
 
@@ -669,6 +711,9 @@ impl PdfAttachState {
             found_in: String::new(),
             saved_path: String::new(),
             page_size: String::new(),
+            item_sizes: Vec::new(),
+            item_units: Vec::new(),
+            pending_path: None,
             details: memory.details,
         }
     }
@@ -1741,6 +1786,40 @@ pub enum PdfImportFileRead {
     Pages {
         pages: Vec<PageThumb>,
         page_sizes: Vec<String>,
+        remembered: bool,
+    },
+}
+
+/// The pages of a PDFATTACH with the GeoPDF placement that the read found
+/// for each (`None`: the page keeps the placement of the command).
+#[derive(Debug, Clone)]
+pub struct PlacedPdfPages {
+    pub label: String,
+    pub kind: document::entities::UnderlayType,
+    pub path: String,
+    pub pages: Vec<(String, document::EntityType)>,
+    pub placements: Vec<Option<crate::io::geopdf::GeoPlacement>>,
+}
+
+/// What the read of a PDF, DWF or DGN file for the Attach window found.
+#[derive(Debug)]
+pub enum UnderlayAttachRead {
+    /// The file cannot be read: the error.
+    Failed(String),
+    /// A DWF or DGN file that has no sheet or model.
+    NoItems,
+    /// The PDF file needs a password first.
+    Locked {
+        stage: crate::scene::model::pdf_password::Stage,
+        remembered: bool,
+    },
+    /// The pages (PDF), sheets (DWF) or models (DGN), with the size text
+    /// and the sub units per master unit of each; `remembered` when a
+    /// password supplied earlier opened the file.
+    Items {
+        pages: Vec<PageThumb>,
+        sizes: Vec<String>,
+        units: Vec<f64>,
         remembered: bool,
     },
 }

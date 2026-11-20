@@ -76,7 +76,9 @@ impl Rig {
         let mut messages = Vec::new();
         {
             let sections = self.app.graph_all_sections(self.i);
-            let view = self.app.tabs[self.i].graph.view(sections);
+            let view = self.app.tabs[self.i]
+                .graph
+                .view(sections, self.app.node_graph_links);
             let cache = self.cache.take().expect("cache");
             let mut ui =
                 UserInterface::build(view, Size::new(1200.0, 800.0), cache, &mut self.renderer);
@@ -102,7 +104,9 @@ impl Rig {
         self.cursor = at;
         let event = Event::Mouse(mouse::Event::CursorMoved { position: at });
         let sections = self.app.graph_all_sections(self.i);
-        let view = self.app.tabs[self.i].graph.view(sections);
+        let view = self.app.tabs[self.i]
+            .graph
+            .view(sections, self.app.node_graph_links);
         let cache = self.cache.take().expect("cache");
         let mut ui =
             UserInterface::build(view, Size::new(1200.0, 800.0), cache, &mut self.renderer);
@@ -1009,4 +1013,200 @@ fn removing_a_link_makes_the_field_editable_again() {
         rig.param(id, "corner"),
         graph::value::point_value([1.0, 2.0, 3.0])
     );
+}
+
+// Labels in place of wires, and the source picker (#3141).
+
+impl Rig {
+    fn links(&mut self, links: crate::ui::node_graph::LinkDisplay) {
+        let _ = self.app.on_graph(GraphMsg::Links(links));
+    }
+
+    /// The input port dot of `field`, at the card's left edge.
+    fn in_port(&self, id: NodeId, field: &str) -> Point {
+        let centre = self.field(id, field);
+        let pos = self.app.tabs[self.i].graph.ui[&id].pos;
+        Point::new(pos.x + 7.0, centre.y)
+    }
+
+    fn picker(&self) -> Option<Port> {
+        let graph = &self.app.tabs[self.i].graph;
+        graph.picker.as_ref().map(|picker| picker.to.clone())
+    }
+
+    fn source(&self, to: &Port) -> Option<Port> {
+        let engine = &self.app.tabs[self.i].graph.engine;
+        engine
+            .links
+            .iter()
+            .find(|link| &link.to == to)
+            .map(|link| link.from.clone())
+    }
+}
+
+#[test]
+fn a_linked_input_shows_its_source_by_name() {
+    let mut rig = Rig::new();
+    let number = rig.op("Number", Point::new(40.0, 40.0));
+    let point = rig.op("Point", Point::new(400.0, 40.0));
+    rig.link(number, "value", point, "x");
+    let graph = &rig.app.tabs[rig.i].graph;
+    let sections = rig.app.graph_all_sections(rig.i);
+    let sources = graph.sources(&sections);
+    let labels = graph.link_labels(&sections, &sources);
+    assert_eq!(labels.rows.len(), 1);
+    assert_eq!(labels.rows[&port(point, "x")], "Number.value");
+}
+
+#[test]
+fn clicking_a_label_opens_the_picker_and_a_choice_relinks() {
+    use crate::ui::node_graph::LinkDisplay;
+    let mut rig = Rig::new();
+    let a = rig.op("Number", Point::new(40.0, 40.0));
+    let b = rig.op("Number", Point::new(40.0, 200.0));
+    let point = rig.op("Point", Point::new(400.0, 40.0));
+    rig.link(a, "value", point, "x");
+    rig.links(LinkDisplay::Labels);
+    let label = rig.field(point, "x");
+    rig.click(label);
+    assert_eq!(rig.picker(), Some(port(point, "x")));
+    // The label took the press: the canvas did not start a pan.
+    assert!(rig.app.tabs[rig.i].graph.drag.is_none());
+
+    let _ = rig
+        .app
+        .on_graph(GraphMsg::PickSource(port(b, "value"), port(point, "x")));
+    assert_eq!(rig.source(&port(point, "x")), Some(port(b, "value")));
+    assert_eq!(rig.picker(), None);
+    // One undo step puts the old source back.
+    let _ = rig.app.automation_op(r#"{"op":"undo"}"#);
+    assert_eq!(rig.source(&port(point, "x")), Some(port(a, "value")));
+}
+
+#[test]
+fn the_picker_disconnects_and_leaves_the_typed_value() {
+    use crate::ui::node_graph::LinkDisplay;
+    let mut rig = Rig::new();
+    let number = rig.op("Number", Point::new(40.0, 40.0));
+    let point = rig.op("Point", Point::new(400.0, 40.0));
+    rig.link(number, "value", point, "x");
+    rig.links(LinkDisplay::Selection);
+    let _ = rig.app.on_graph(GraphMsg::Pick(port(point, "x")));
+    let _ = rig.app.on_graph(GraphMsg::PickClear(port(point, "x")));
+    assert_eq!(rig.source(&port(point, "x")), None);
+    assert_eq!(rig.picker(), None);
+    let _ = rig.app.automation_op(r#"{"op":"undo"}"#);
+    assert_eq!(rig.source(&port(point, "x")), Some(port(number, "value")));
+}
+
+#[test]
+fn the_picker_offers_no_source_that_closes_a_loop() {
+    let mut rig = Rig::new();
+    let number = rig.op("Number", Point::new(40.0, 40.0));
+    let point = rig.op("Point", Point::new(400.0, 40.0));
+    let other = rig.op("Number", Point::new(40.0, 200.0));
+    rig.link(number, "value", point, "x");
+    let graph = &rig.app.tabs[rig.i].graph;
+    let sections = rig.app.graph_all_sections(rig.i);
+    let sources = graph.sources(&sections);
+    let offered: Vec<NodeId> = graph
+        .sources_for(&sources, &port(number, "value"))
+        .iter()
+        .map(|source| source.port.node)
+        .collect();
+    // Number feeds Point, so neither Number itself nor Point may feed it.
+    assert!(!offered.contains(&number));
+    assert!(!offered.contains(&point));
+    assert!(offered.contains(&other));
+    // A choice that would close a loop anyway is refused.
+    let _ = rig.app.on_graph(GraphMsg::PickSource(
+        port(point, "point"),
+        port(number, "value"),
+    ));
+    assert_eq!(rig.source(&port(number, "value")), None);
+}
+
+#[test]
+fn with_labels_an_unlinked_port_opens_the_picker() {
+    use crate::ui::node_graph::LinkDisplay;
+    let mut rig = Rig::new();
+    let _number = rig.op("Number", Point::new(40.0, 40.0));
+    let point = rig.op("Point", Point::new(400.0, 40.0));
+    let dot = rig.in_port(point, "y");
+    rig.click(dot);
+    assert_eq!(rig.picker(), None, "wires mode keeps the port as it was");
+    rig.links(LinkDisplay::Labels);
+    rig.click(dot);
+    assert_eq!(rig.picker(), Some(port(point, "y")));
+    // A press on the bare canvas closes it.
+    rig.click(Point::new(800.0, 600.0));
+    assert_eq!(rig.picker(), None);
+}
+
+#[test]
+fn a_linked_port_still_drags_its_wire_with_labels() {
+    use crate::ui::node_graph::LinkDisplay;
+    let mut rig = Rig::new();
+    let number = rig.op("Number", Point::new(40.0, 40.0));
+    let point = rig.op("Point", Point::new(400.0, 40.0));
+    rig.link(number, "value", point, "x");
+    rig.links(LinkDisplay::Labels);
+    let dot = rig.in_port(point, "x");
+    rig.cursor = dot;
+    rig.send(Event::Mouse(mouse::Event::CursorMoved { position: dot }));
+    rig.send(Event::Mouse(mouse::Event::ButtonPressed(Button::Left)));
+    assert!(matches!(
+        rig.app.tabs[rig.i].graph.drag,
+        Some(crate::ui::node_graph::Drag::Link(_))
+    ));
+    assert_eq!(rig.picker(), None);
+}
+
+#[test]
+fn the_link_display_is_a_preference_not_part_of_the_file() {
+    use crate::ui::node_graph::LinkDisplay;
+    let mut rig = Rig::new();
+    rig.op("Number", Point::new(40.0, 40.0));
+    rig.links(LinkDisplay::Selection);
+    assert_eq!(
+        rig.app.current_settings().node_graph_links,
+        LinkDisplay::Selection
+    );
+    let bytes = rig.app.graph_file_bytes(rig.i);
+    let text = String::from_utf8(bytes).expect("utf-8");
+    assert!(!text.contains("selection"), "{text}");
+}
+
+#[test]
+fn folded_links_are_summed_up_on_the_row_that_stands_for_them() {
+    let mut rig = Rig::new();
+    let number = rig.op("Number", Point::new(40.0, 40.0));
+    let id = rig.object(ObjectKind::Point, Point::new(400.0, 40.0));
+    rig.link(number, "value", id, "loc_x");
+    rig.link(number, "value", id, "loc_y");
+    let labels = |rig: &Rig| {
+        let graph = &rig.app.tabs[rig.i].graph;
+        let sections = rig.app.graph_all_sections(rig.i);
+        let sources = graph.sources(&sections);
+        graph.link_labels(&sections, &sources)
+    };
+    // The components fold into their group's row, which sums them up.
+    let folded = labels(&rig);
+    assert!(folded.rows.is_empty());
+    assert_eq!(folded.folded[&port(id, LOCATION)].len(), 2);
+    assert_eq!(folded.folded_by[&port(id, "loc_x")], port(id, LOCATION));
+    // Open, each shows its own label.
+    rig.open_coordinates(id);
+    let open = labels(&rig);
+    assert_eq!(open.rows[&port(id, "loc_y")], "Number.value");
+    assert!(open.folded.is_empty());
+    // A closed section takes them over, under its header.
+    let _ = rig
+        .app
+        .on_graph(GraphMsg::Section(id, "Geometry".to_owned()));
+    let closed = labels(&rig);
+    assert!(closed.rows.is_empty());
+    let header = &closed.folded_by[&port(id, "loc_x")];
+    assert_eq!(header.field, "§Geometry");
+    assert_eq!(closed.folded[header].len(), 2);
 }

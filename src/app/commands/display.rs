@@ -12,6 +12,19 @@ impl OpenCADStudio {
                     crate::t!("PAN: drag with the left mouse button. Press Esc to exit.").as_ref(),
                 );
             }
+            // View menu steps: move the view a quarter of its height that way.
+            "PANLEFT" | "PANRIGHT" | "PANUP" | "PANDOWN" => {
+                let (vw, vh) = self.tabs[i].scene.selection.borrow().view.vp_size;
+                let step = self.tabs[i].scene.active_model_tile_bounds(vw, vh).height * 0.25;
+                let (dx, dy) = match cmd {
+                    "PANLEFT" => (step, 0.0),
+                    "PANRIGHT" => (-step, 0.0),
+                    "PANUP" => (0.0, step),
+                    _ => (0.0, -step),
+                };
+                self.tabs[i].scene.remember_current_view();
+                self.pan_active_view(i, dx, dy, iced::time::Instant::now());
+            }
 
             // ── TABLE structure and cell editing ───────────────────────────────
             cmd if cmd.starts_with("TABLE ") => {
@@ -2399,19 +2412,7 @@ impl OpenCADStudio {
                     ));
                 }
                 #[cfg(not(target_arch = "wasm32"))]
-                match std::fs::read_to_string(path) {
-                    Ok(text) => {
-                        let link_path = std::fs::canonicalize(path)
-                            .map(|value| value.to_string_lossy().into_owned())
-                            .unwrap_or_else(|_| path.to_string());
-                        self.place_data_link_table(&text, &link_path);
-                    }
-                    Err(e) => {
-                        self.command_line.push_error(
-                            crate::tf!("DATALINK: cannot read \"{path}\": {e}").as_ref(),
-                        );
-                    }
-                }
+                return Some(self.read_data_link_csv(i, cmd, path));
             }
 
             "DATALINKUPDATE" => {
@@ -2601,37 +2602,7 @@ impl OpenCADStudio {
                     );
                     return Some(Task::none());
                 }
-                match std::fs::read_to_string(path) {
-                    Ok(xml) => {
-                        let pts = parse_landxml_cgpoints(&xml);
-                        if pts.is_empty() {
-                            self.command_line.push_info(
-                                crate::t!("LANDXMLIMPORT: no <CgPoint> survey points found.")
-                                    .as_ref(),
-                            );
-                            return Some(Task::none());
-                        }
-                        self.push_undo_snapshot(i, "LANDXMLIMPORT");
-                        for [x, y, z] in &pts {
-                            let mut p = document::entities::Point::new();
-                            p.location = document::types::Vector3::new(*x, *y, *z);
-                            self.tabs[i]
-                                .scene
-                                .add_entity_clone(document::EntityType::Point(p));
-                        }
-                        self.tabs[i].dirty = true;
-                        self.command_line.push_output(
-                            crate::tf!(
-                            "LANDXMLIMPORT: imported {} survey point(s). Use ZOOM EXTENTS to view.",
-                            pts.len()
-                        )
-                            .as_ref(),
-                        );
-                    }
-                    Err(e) => self.command_line.push_error(
-                        crate::tf!("LANDXMLIMPORT: cannot read \"{path}\": {e}").as_ref(),
-                    ),
-                }
+                return Some(self.read_landxml(i, path));
             }
 
             "ULAYERS" => self.open_underlay_layers_dialog(i),
@@ -2643,6 +2614,82 @@ impl OpenCADStudio {
             _ => return None,
         }
         Some(self.finish_dispatch(cmd))
+    }
+
+    /// DATALINK with a typed path: reads the file off the UI thread; the
+    /// table's placement starts when the read ends
+    /// ([`Self::finish_data_link_csv_read`]).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn read_data_link_csv(
+        &mut self,
+        i: usize,
+        cmd: &str,
+        path: &str,
+    ) -> Task<Message> {
+        self.read_data_link_csv_with(i, cmd, path, read_data_link_file)
+    }
+
+    /// [`Self::read_data_link_csv`] with the reader given, so a test can
+    /// give one that panics.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn read_data_link_csv_with(
+        &mut self,
+        i: usize,
+        cmd: &str,
+        path: &str,
+        reader: fn(&str) -> Result<DataLinkCsv, String>,
+    ) -> Task<Message> {
+        let read = DataLinkRead {
+            tab_id: self.tabs[i].id,
+            generation: self.tabs[i].document_generation,
+            cmd: cmd.to_string(),
+            path: path.to_string(),
+        };
+        let worker_path = read.path.clone();
+        self.command_line.push_info(&format!("Reading {path}…"));
+        crate::app::update::background_task(
+            "DATALINK",
+            move || reader(&worker_path),
+            move |result| Message::DataLinkCsvRead(Box::new(read), result),
+        )
+    }
+
+    /// Starts the placement of a table read by DATALINK. A result for a
+    /// drawing that was closed, replaced or cleared is dropped; so is one
+    /// for a drawing that is not the current one now, or that started a
+    /// different command during the read (the placement is a command of
+    /// the current drawing).
+    pub(in crate::app) fn finish_data_link_csv_read(
+        &mut self,
+        read: &DataLinkRead,
+        result: Result<DataLinkCsv, String>,
+    ) -> Task<Message> {
+        let Some(i) = self.import_target(read.tab_id, read.generation) else {
+            return Task::none();
+        };
+        let csv = match result {
+            Ok(csv) => csv,
+            Err(e) => {
+                let path = &read.path;
+                self.command_line
+                    .push_error(crate::tf!("DATALINK: cannot read \"{path}\": {e}").as_ref());
+                return Task::none();
+            }
+        };
+        if i != self.active_tab {
+            self.command_line.push_error(
+                "DATALINK cancelled: a different drawing became current while the file was read.",
+            );
+            return Task::none();
+        }
+        if self.tabs[i].active_cmd.is_some() {
+            self.command_line.push_error(
+                "DATALINK cancelled: a different command started while the file was read.",
+            );
+            return Task::none();
+        }
+        self.place_data_link_table(&csv.text, &csv.link_path);
+        self.finish_dispatch(&read.cmd)
     }
 
     /// Build the linked table from CSV text and start the placement command —
@@ -2763,6 +2810,86 @@ impl OpenCADStudio {
     }
 }
 
+impl OpenCADStudio {
+    /// LANDXMLIMPORT: reads and parses the file off the UI thread; the
+    /// points are placed when the read ends ([`Self::finish_landxml_import`]).
+    pub(in crate::app) fn read_landxml(&mut self, i: usize, path: &str) -> Task<Message> {
+        self.read_landxml_with(i, path, read_landxml_points)
+    }
+
+    /// [`Self::read_landxml`] with the reader given, so a test can give one
+    /// that panics.
+    pub(in crate::app) fn read_landxml_with(
+        &mut self,
+        i: usize,
+        path: &str,
+        reader: fn(&str) -> Result<Vec<[f64; 3]>, String>,
+    ) -> Task<Message> {
+        let tab_id = self.tabs[i].id;
+        let generation = self.tabs[i].document_generation;
+        let path = path.to_string();
+        let worker_path = path.clone();
+        self.command_line.push_info(&format!("Reading {path}…"));
+        crate::app::update::background_task(
+            "LANDXMLIMPORT",
+            move || reader(&worker_path),
+            move |result| Message::LandXmlImportFinished(tab_id, generation, path, result),
+        )
+    }
+
+    /// Places the points of a finished LANDXMLIMPORT read, as one undo
+    /// step. A result for a drawing that was closed, replaced or cleared is
+    /// dropped.
+    pub(in crate::app) fn finish_landxml_import(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        path: &str,
+        result: Result<Vec<[f64; 3]>, String>,
+    ) {
+        let Some(i) = self.import_target(tab_id, generation) else {
+            return;
+        };
+        let pts = match result {
+            Ok(pts) => pts,
+            Err(e) => {
+                self.command_line
+                    .push_error(crate::tf!("LANDXMLIMPORT: cannot read \"{path}\": {e}").as_ref());
+                return;
+            }
+        };
+        if pts.is_empty() {
+            self.command_line
+                .push_info(crate::t!("LANDXMLIMPORT: no <CgPoint> survey points found.").as_ref());
+            return;
+        }
+        self.push_undo_snapshot(i, "LANDXMLIMPORT");
+        for [x, y, z] in &pts {
+            let mut p = document::entities::Point::new();
+            p.location = document::types::Vector3::new(*x, *y, *z);
+            self.tabs[i]
+                .scene
+                .add_entity_clone(document::EntityType::Point(p));
+        }
+        self.tabs[i].dirty = true;
+        self.command_line.push_output(
+            crate::tf!(
+                "LANDXMLIMPORT: imported {} survey point(s). Use ZOOM EXTENTS to view.",
+                pts.len()
+            )
+            .as_ref(),
+        );
+    }
+}
+
+/// The LANDXMLIMPORT reader: the file's `<CgPoint>` survey points, or why
+/// the file cannot be read.
+fn read_landxml_points(path: &str) -> Result<Vec<[f64; 3]>, String> {
+    std::fs::read_to_string(path)
+        .map(|xml| parse_landxml_cgpoints(&xml))
+        .map_err(|e| e.to_string())
+}
+
 // Scan LandXML text for <CgPoint> survey points. Each element's text content is
 // "northing easting elevation"; returned as [easting, northing, elevation] so it
 // maps to a Point at (X=easting, Y=northing, Z=elevation). Tolerant manual scan
@@ -2797,6 +2924,35 @@ fn parse_landxml_cgpoints(xml: &str) -> Vec<[f64; 3]> {
         rest = &body[close + "</CgPoint>".len()..];
     }
     out
+}
+
+/// A DATALINK read in progress: the tab it was started for, that
+/// document's generation, the command line that started it, and the file.
+#[derive(Debug, Clone)]
+pub struct DataLinkRead {
+    pub tab_id: u64,
+    pub generation: u64,
+    pub cmd: String,
+    pub path: String,
+}
+
+/// The text of a CSV file read by DATALINK, and the path the link stores
+/// (the full path when it can be found).
+#[derive(Debug, Clone)]
+pub struct DataLinkCsv {
+    pub text: String,
+    pub link_path: String,
+}
+
+/// The DATALINK reader: the file's text and the path to store, or why the
+/// file cannot be read.
+#[cfg(not(target_arch = "wasm32"))]
+fn read_data_link_file(path: &str) -> Result<DataLinkCsv, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let link_path = std::fs::canonicalize(path)
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.to_string());
+    Ok(DataLinkCsv { text, link_path })
 }
 
 pub(crate) fn parse_csv_table(text: &str) -> Vec<Vec<String>> {
@@ -3216,6 +3372,152 @@ mod tests {
 }
 
 #[cfg(test)]
+mod datalink_read_tests {
+    use crate::app::OpenCADStudio;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    /// A CSV file with a header row and two rows, written under `name`.
+    fn csv_file(name: &str) -> String {
+        let path =
+            std::env::temp_dir().join(format!("ocs-datalink-{name}-{}.csv", std::process::id()));
+        std::fs::write(&path, "NAME,QTY\nBolt,12\nNut,30\n").expect("write the CSV file");
+        path.to_string_lossy().replace('\\', "/")
+    }
+
+    fn command_name(app: &OpenCADStudio, i: usize) -> Option<&'static str> {
+        app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .map(|command| command.name())
+    }
+
+    fn last_line(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .last()
+            .map(|entry| entry.text.clone())
+            .unwrap_or_default()
+    }
+
+    /// The placement starts only when the read ends.
+    #[test]
+    fn the_placement_starts_only_when_the_read_ends() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = csv_file("placed");
+        let task = app.dispatch_command(&format!("DATALINK {path}"));
+        assert_eq!(command_name(&app, i), None, "no placement during the read");
+        assert_eq!(last_line(&app), format!("ⓘ Reading {path}…"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(command_name(&app, i), Some("DATALINK"));
+        assert_eq!(
+            app.tabs[i].last_cmd.as_deref(),
+            Some(format!("DATALINK {path}").as_str())
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A file that cannot be read gives the error when the read ends.
+    #[test]
+    fn a_missing_file_is_an_error() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let task = app.dispatch_command("DATALINK /no/such/table.csv");
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(command_name(&app, i), None);
+        assert!(app
+            .command_line
+            .last_error
+            .as_deref()
+            .is_some_and(|e| e.starts_with("DATALINK: cannot read \"/no/such/table.csv\"")));
+    }
+
+    /// A reader that panics gives an error, and no placement starts.
+    #[test]
+    fn a_reader_panic_is_an_error() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let task = app.read_data_link_csv_with(i, "DATALINK panics.csv", "panics.csv", |_| {
+            panic!("a reader bug")
+        });
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("DATALINK failed: a reader bug")
+        );
+        assert_eq!(command_name(&app, i), None);
+    }
+
+    /// A command started during the read stays; the table is not placed.
+    #[test]
+    fn a_command_started_during_the_read_stays() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = csv_file("other-command");
+        let task = app.dispatch_command(&format!("DATALINK {path}"));
+        let _ = app.dispatch_command("LINE");
+        let started = command_name(&app, i);
+        assert!(
+            started.is_some_and(|name| name != "DATALINK"),
+            "{started:?}"
+        );
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(command_name(&app, i), started);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("DATALINK cancelled: a different command started while the file was read.")
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// When a different drawing became current during the read, neither
+    /// drawing starts the placement.
+    #[test]
+    fn a_drawing_made_current_during_the_read_gets_no_placement() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = csv_file("other-drawing");
+        let task = app.dispatch_command(&format!("DATALINK {path}"));
+        app.push_test_document();
+        app.active_tab = app.tabs.len() - 1;
+        let j = app.active_tab;
+        assert_ne!(i, j);
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(command_name(&app, i), None);
+        assert_eq!(command_name(&app, j), None);
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("DATALINK cancelled: a different drawing became current while the file was read.")
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A result for a drawing that was replaced during the read is
+    /// dropped.
+    #[test]
+    fn a_read_for_a_replaced_drawing_is_dropped() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = csv_file("replaced");
+        let task = app.dispatch_command(&format!("DATALINK {path}"));
+        app.tabs[i].document_generation += 1;
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(command_name(&app, i), None);
+        assert!(app
+            .command_line
+            .history
+            .iter()
+            .any(|entry| entry.text.contains("was replaced or cleared")));
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[cfg(test)]
 mod printers_command_tests {
     use crate::app::OpenCADStudio;
 
@@ -3232,5 +3534,121 @@ mod printers_command_tests {
         // One line for the default printer, at least one for the list (a
         // count and names, "none", or the system's error).
         assert!(lines.len() >= 2, "{lines:?}");
+    }
+}
+
+#[cfg(test)]
+mod landxml_read_tests {
+    use crate::app::OpenCADStudio;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    /// A LandXML file with two survey points, written under `name`.
+    fn survey_file(name: &str) -> String {
+        let path =
+            std::env::temp_dir().join(format!("ocs-landxml-{name}-{}.xml", std::process::id()));
+        std::fs::write(
+            &path,
+            "<LandXML><CgPoints>\
+             <CgPoint name=\"1\">100 200 3</CgPoint>\
+             <CgPoint name=\"2\">110 210 4</CgPoint>\
+             </CgPoints></LandXML>",
+        )
+        .expect("write the survey file");
+        path.to_string_lossy().into_owned()
+    }
+
+    fn points(app: &OpenCADStudio, i: usize) -> Vec<[f64; 3]> {
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Point(p) => Some([p.location.x, p.location.y, p.location.z]),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn last_line(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .last()
+            .map(|entry| entry.text.clone())
+            .unwrap_or_default()
+    }
+
+    /// The command places nothing itself: the points come when the read
+    /// ends, as one undo step.
+    #[test]
+    fn the_points_are_placed_only_when_the_read_ends() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = survey_file("placed");
+        app.finish_all_pending_history();
+        let undo = app.tabs[i].history.undo_stack.len();
+        let task = app.dispatch_command(&format!("LANDXMLIMPORT {path}"));
+        assert!(points(&app, i).is_empty(), "nothing during the read");
+        assert_eq!(last_line(&app), format!("ⓘ Reading {path}…"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            points(&app, i),
+            vec![[200.0, 100.0, 3.0], [210.0, 110.0, 4.0]]
+        );
+        app.finish_all_pending_history();
+        assert_eq!(app.tabs[i].history.undo_stack.len(), undo + 1);
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// A file that cannot be read gives the error when the read ends.
+    #[test]
+    fn a_missing_file_is_an_error() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let task = app.dispatch_command("LANDXMLIMPORT /no/such/survey.xml");
+        app.drive_headless_task(task).expect("the read task");
+        assert!(points(&app, i).is_empty());
+        assert!(app
+            .command_line
+            .last_error
+            .as_deref()
+            .is_some_and(|e| e.starts_with("LANDXMLIMPORT: cannot read \"/no/such/survey.xml\"")));
+    }
+
+    /// A reader that panics gives an error, and nothing is placed.
+    #[test]
+    fn a_reader_panic_is_an_error() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let task = app.read_landxml_with(i, "panics.xml", |_| panic!("a reader bug"));
+        app.drive_headless_task(task).expect("the read task");
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some("LANDXMLIMPORT failed: a reader bug")
+        );
+        assert!(points(&app, i).is_empty());
+    }
+
+    /// A result for a drawing that was replaced during the read is
+    /// dropped.
+    #[test]
+    fn a_read_for_a_replaced_drawing_is_dropped() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        let path = survey_file("replaced");
+        let task = app.read_landxml(i, &path);
+        app.tabs[i].document_generation += 1;
+        app.drive_headless_task(task).expect("the read task");
+        assert!(points(&app, i).is_empty());
+        assert!(app
+            .command_line
+            .history
+            .iter()
+            .any(|entry| entry.text.contains("was replaced or cleared")));
+        let _ = std::fs::remove_file(path);
     }
 }

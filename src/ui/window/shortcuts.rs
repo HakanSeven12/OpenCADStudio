@@ -13,6 +13,31 @@ pub enum ShortcutField {
     Command,
 }
 
+/// Narrowest suggestion list; a longer command name widens it.
+const SUGGESTION_LIST_MIN_WIDTH: f32 = 220.0;
+
+/// Widget id of row `idx`'s Command box, so picking a suggestion can put the
+/// caret after the picked name instead of where the typed prefix ended.
+pub fn command_input_id(idx: usize) -> iced::widget::Id {
+    iced::widget::Id::from(format!("shortcut-command-{idx}"))
+}
+
+/// Commands to offer for the text typed in a Command box: the command
+/// line's own autocomplete list (names that start with the text first, then
+/// names that contain it; an alias offers the command it stands for). Empty
+/// when the text already is the only command it could become.
+pub fn suggestions(
+    typed: &str,
+    dynamic: &[String],
+    aliases: &rustc_hash::FxHashMap<String, String>,
+) -> Vec<String> {
+    let found = crate::ui::command_line::ranked_matches(typed, dynamic, aliases);
+    match found.as_slice() {
+        [only] if only.eq_ignore_ascii_case(typed.trim()) => Vec::new(),
+        _ => found,
+    }
+}
+
 /// Indices of the rows a search query keeps visible. The match is a
 /// case-insensitive substring of the key or the command; an empty query keeps
 /// every row. The unfinished draft row (index 0 while `pending_add`) is always
@@ -36,6 +61,8 @@ pub fn view_window<'a>(
     rows: &'a [(String, String)],
     filter: &str,
     capture_row: Option<usize>,
+    suggest_row: Option<usize>,
+    suggestions: &[String],
     pending_add: bool,
     reset_confirm: bool,
     duplicate_keys: &rustc_hash::FxHashSet<String>,
@@ -106,6 +133,7 @@ pub fn view_window<'a>(
         };
         let unknown_command = !command.is_empty() && unknown_commands.contains(command.trim());
         let command_box = text_input(t!("command").as_ref(), command)
+            .id(command_input_id(idx))
             .on_input(move |value| Message::ShortcutEditorInput {
                 idx,
                 field: ShortcutField::Command,
@@ -121,6 +149,44 @@ pub fn view_window<'a>(
         } else {
             command_box
         };
+        // The suggestion list floats under the box, so it moves no row and
+        // needs no room in the window. Every row carries the (closed) list:
+        // the box keeps its place in the widget tree, and with it its focus
+        // and caret, when its list opens.
+        let offered: &[String] = if suggest_row == Some(idx) {
+            suggestions
+        } else {
+            &[]
+        };
+        let options = offered
+            .iter()
+            .map(|name| {
+                crate::ui::kit::dropdown_option(
+                    name.clone(),
+                    name.clone(),
+                    Message::ShortcutEditorSuggestionPick {
+                        idx,
+                        command: name.clone(),
+                    },
+                    false,
+                )
+            })
+            .collect();
+        let command_box = crate::ui::kit::dropdown(
+            command_box.into(),
+            crate::ui::dropdown_list::DropdownList::new(options)
+                .query(command.clone())
+                // No row is marked until an arrow key marks one: Enter alone
+                // must leave the typed text as it is.
+                .select_first_by_default(false)
+                .on_escape(Message::ShortcutEditorSuggestionDismiss),
+            crate::ui::kit::dropdown_width(
+                offered.iter().map(String::as_str),
+                SUGGESTION_LIST_MIN_WIDTH,
+            ),
+            Message::ShortcutEditorSuggestionDismiss,
+            !offered.is_empty(),
+        );
         // Draft rows get a check (finish the addition, without applying) and
         // a cancel ✕; committed rows get the trash bin.
         let remove = if pending_add && idx == 0 {
@@ -221,6 +287,10 @@ pub fn view_window<'a>(
                     .style(button::secondary),
                 button(text(t!("Export...")).size(12))
                     .on_press(Message::KeyListExport(false))
+                    .padding([4, 10])
+                    .style(button::secondary),
+                button(text(t!("Import...")).size(12))
+                    .on_press_maybe((!pending_add).then_some(Message::ShortcutEditorImport))
                     .padding([4, 10])
                     .style(button::secondary),
             ]

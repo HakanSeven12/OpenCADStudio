@@ -185,6 +185,9 @@ pub struct MeshInstanceSource {
     pub edge_verts: Vec<[f32; 3]>,
     pub edge_verts_low: Vec<[f32; 3]>,
     pub curved_gens: Vec<CurvedGen>,
+    /// The display LODs of `lods[0]`, shared by every placement of this
+    /// geometry (see [`MeshLodSet::display_lods`]).
+    pub display_lods: std::sync::Arc<[DisplayLod]>,
 }
 
 /// 3D bounds of every LOD's vertices: `([min_x, min_y, max_x, max_y], [min_z, max_z])`.
@@ -284,9 +287,16 @@ impl MeshLodSet {
 
     /// Display LOD `level` (1 or 2) when it still matches the mesh it was
     /// built from.
+    ///
+    /// A placement of shared geometry holds no mesh of its own: its levels
+    /// are the ones of the geometry it places.
     pub fn display_lod(&self, level: usize) -> Option<&DisplayLod> {
-        let lod = self.display_lods.get(level.checked_sub(1)?)?;
-        let mesh = self.lods.first()?;
+        let (lods, mesh) = match (&self.instance_source, self.lods.first()) {
+            (_, Some(mesh)) => (&self.display_lods, mesh),
+            (Some(source), None) => (&source.display_lods, source.lods.first()?),
+            (None, None) => return None,
+        };
+        let lod = lods.get(level.checked_sub(1)?)?;
         (lod.source == (mesh.verts.len(), mesh.indices.len() / 3)).then_some(lod)
     }
 
@@ -313,6 +323,7 @@ impl MeshLodSet {
             edge_verts: self.edge_verts.clone(),
             edge_verts_low: self.edge_verts_low.clone(),
             curved_gens: self.curved_gens.clone(),
+            display_lods: self.display_lods.clone(),
         }));
         self.instance_transform = None;
         self.instance_handle = None;
@@ -617,7 +628,7 @@ mod solid_snap_tests {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod lod_tests {
-    use super::{simplified_lods, MeshModel};
+    use super::{simplified_lods, MeshLodSet, MeshModel};
 
     fn mesh_of(body: &ocs_solid::model::Brep) -> MeshModel {
         let mesh = crate::scene::model::solid_model::tessellate(
@@ -681,6 +692,29 @@ mod lod_tests {
             let error = worst(&mesh, &lod.indices, off);
             assert!(error < base + 0.05, "{error} vs {base}");
         }
+    }
+
+    /// A block reference places shared geometry and holds no mesh of its
+    /// own: the levels it draws are the ones of the geometry it places.
+    #[test]
+    fn a_placement_draws_the_levels_of_the_geometry_it_places() {
+        let body = ocs_solid::model::make_sphere([0.0; 3], 10.0).unwrap();
+        let mut solid = MeshLodSet::from_single(mesh_of(&body));
+        solid.build_display_lods();
+        solid.prepare_instance_source(document::Handle::new(7));
+        let mut placed = solid.clone();
+        placed.lods.clear();
+        placed.display_lods = Default::default();
+        placed.instance_transform = Some(document::types::Transform::identity());
+        for level in [1, 2] {
+            let own = solid.display_lod(level).expect("the solid has the level");
+            let drawn = placed
+                .display_lod(level)
+                .unwrap_or_else(|| panic!("the placement has no level {level}"));
+            assert_eq!(drawn.indices, own.indices, "level {level}");
+        }
+        assert!(placed.display_lod(0).is_none());
+        assert!(placed.display_lod(3).is_none());
     }
 
     #[test]

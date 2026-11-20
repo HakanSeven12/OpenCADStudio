@@ -235,6 +235,7 @@ impl OpenCADStudio {
     /// Open the Field dialog for `target`.
     pub(in crate::app) fn open_field_dialog(&mut self, target: FieldTarget) {
         let mut state = FieldDialogState::new(target);
+        state.set_number_format(&self.field_number_format);
         if matches!(target, FieldTarget::AttdefDefault | FieldTarget::AttdefEdit) {
             state.placeholder_block = self.tabs[self.active_tab]
                 .active_block_edit_session()
@@ -282,10 +283,25 @@ impl OpenCADStudio {
         else {
             return false;
         };
-        self.open_field_dialog(FieldTarget::EditText(host));
+        self.open_field_dialog_on(FieldTarget::EditText(host), &code, &objects);
+        true
+    }
+
+    /// Open the Field dialog for `target` on the field `code` with its
+    /// `objects`: its name, settings and the object property it reads.
+    pub(in crate::app) fn open_field_dialog_on(
+        &mut self,
+        target: FieldTarget,
+        code: &str,
+        objects: &[document::Handle],
+    ) {
+        let i = self.active_tab;
+        self.open_field_dialog(target);
         let document = &self.tabs[i].scene.document;
         if let Some(state) = self.field_dialog.as_mut() {
-            let property = state.seed_from_code(&code, &objects);
+            // An existing field shows its own format, not the remembered one.
+            state.set_number_format(&Default::default());
+            let property = state.seed_from_code(code, objects);
             let object = objects
                 .first()
                 .and_then(|handle| document.get_entity(*handle));
@@ -305,7 +321,6 @@ impl OpenCADStudio {
         }
         self.fill_named_objects();
         self.refresh_field_preview();
-        true
     }
 
     fn field_value(&self, code: &str, objects: &[document::Handle]) -> String {
@@ -579,6 +594,9 @@ impl OpenCADStudio {
         let (code, objects) = state.code();
         let value = state.preview.clone();
         let field = Some((code, objects));
+        if let Some(format) = state.number_format() {
+            self.field_number_format = format;
+        }
         match state.target {
             FieldTarget::NewText => {
                 self.close_active_modal();
@@ -876,7 +894,7 @@ mod tests {
             "4.0",
         );
 
-        let _ = app.begin_text_edit(text);
+        assert!(app.open_field_edit(text));
         let state = app.field_dialog.as_ref().expect("the Field dialog opens");
         assert_eq!(state.target, FieldTarget::EditText(text));
         assert_eq!((state.name, state.object_prop), ("Object", Some("Area")));
@@ -919,7 +937,7 @@ mod tests {
             "+3.50",
         );
 
-        let _ = app.begin_text_edit(text);
+        assert!(app.open_field_edit(text));
         assert!(app.field_dialog.is_some(), "the Field dialog opens");
         let _ = app.on_field_dialog(FieldDialogMsg::Ok);
         let (written, objects) =
@@ -951,7 +969,7 @@ mod tests {
             Some((code.to_string(), vec![object])),
             "",
         );
-        let _ = app.begin_text_edit(text);
+        assert!(app.open_field_edit(text));
         assert!(app.field_dialog.is_some(), "the Field dialog opens");
         (app, text, object)
     }
@@ -1091,6 +1109,28 @@ mod tests {
         assert_eq!(formula.preview, "8.000000");
     }
 
+    /// A hatch has no boundary wire, so Select object must hit-test fills
+    /// (as HATCHEDIT does): a click inside a hatch picks it.
+    #[test]
+    fn select_object_picks_a_hatch_by_a_click_inside_it() {
+        use crate::command::CadCommand;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.open_field_dialog(FieldTarget::NewText);
+        let _ = app.on_field_dialog(FieldDialogMsg::Name("Object"));
+        let _ = app.on_field_dialog(FieldDialogMsg::SelectObject);
+        let pick = app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("the object pick runs");
+        assert!(pick.needs_entity_pick());
+        assert!(
+            pick.entity_pick_includes_fills(),
+            "a click inside a hatch must pick it"
+        );
+    }
+
     #[test]
     fn closing_the_inserted_field_returns_to_the_formula_unchanged() {
         let (mut app, _) = formula_dialog("2*");
@@ -1127,7 +1167,7 @@ mod tests {
             "7",
         );
 
-        let _ = app.begin_text_edit(text);
+        assert!(app.open_field_edit(text));
         let state = app.field_dialog.as_ref().expect("the Field dialog opens");
         assert_eq!(state.name, "Formula");
         assert_eq!(

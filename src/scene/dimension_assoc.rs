@@ -808,6 +808,13 @@ pub fn resolve_reference_chain(
     reference: &AssocDimensionReference,
     from_space: Option<Vector3>,
 ) -> Result<ResolvedReference, ReferenceStatus> {
+    // A reference still held by the handle its object has in an xref's own
+    // drawing: the xref is not loaded, or no longer has the object. Its
+    // chain ends on the INSERT that places the xref, which is not what the
+    // dimension measures.
+    if !reference.xref_paths.is_empty() || !reference.intersection_xref_paths.is_empty() {
+        return Err(ReferenceStatus::Unresolved);
+    }
     let walked = match chain::walk_chain(&scene.document, &reference.xrefs) {
         Ok(walked) => walked,
         Err(ChainError::Missing(handle)) => return Err(ReferenceStatus::Broken(handle)),
@@ -2788,6 +2795,38 @@ mod tests {
         assert!(objects
             .iter()
             .any(|(handle, before)| *handle == association && before.is_some()));
+    }
+
+    /// A reference a file kept by the handle of an xref's object ends on the
+    /// INSERT that places the xref. While the xref is not loaded it has
+    /// nothing to measure from: the insertion point is not it.
+    #[test]
+    fn a_reference_to_an_object_of_an_xref_that_is_not_loaded_is_unresolved() {
+        let mut scene = Scene::new();
+        let mut walls = document::tables::BlockRecord::new("WALLS");
+        walls.flags.is_xref = true;
+        walls.handle = scene.document.allocate_handle();
+        scene.document.block_records.add(walls).unwrap();
+        let insert = scene.add_entity(EntityType::Insert(document::entities::Insert::new(
+            "WALLS",
+            Vector3::new(40.0, 10.0, 0.0),
+        )));
+        let on_the_insert = AssocDimensionReference {
+            osnap_type: chain::osnap::INS,
+            xrefs: vec![insert],
+            ..Default::default()
+        };
+        let resolved = resolve_reference_chain(&scene, &on_the_insert, None)
+            .expect("the insertion point of a block reference");
+        assert!((resolved.model.x - 40.0).abs() < 1e-9 && (resolved.model.y - 10.0).abs() < 1e-9);
+        let in_the_xref = AssocDimensionReference {
+            xref_paths: vec!["2F".to_owned()],
+            ..on_the_insert
+        };
+        assert_eq!(
+            resolve_reference_chain(&scene, &in_the_xref, None).err(),
+            Some(ReferenceStatus::Unresolved)
+        );
     }
 
     #[test]

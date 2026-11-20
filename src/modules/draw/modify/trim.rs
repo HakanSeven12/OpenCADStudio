@@ -2173,6 +2173,19 @@ enum TrimMode {
     ChooseMode,
 }
 
+impl TrimMode {
+    /// A fence or crossing-box point: the bare cursor, no object snap.
+    fn picks_selection_path(&self) -> bool {
+        matches!(
+            self,
+            TrimMode::Fence(_)
+                | TrimMode::QuickFence(_)
+                | TrimMode::CrossFirst
+                | TrimMode::CrossSecond(_)
+        )
+    }
+}
+
 /// Quick mode: an empty click in Pick starts a two-point fence, so the next
 /// click trims or extends everything the dashed line crosses. Standard mode
 /// keeps the crossing box.
@@ -4726,6 +4739,10 @@ impl CadCommand for TrimCommand {
         )
     }
 
+    fn wants_raw_point(&self) -> bool {
+        self.mode.picks_selection_path()
+    }
+
     fn entity_pick_includes_fills(&self) -> bool {
         matches!(self.mode, TrimMode::Pick)
     }
@@ -5671,6 +5688,10 @@ impl CadCommand for ExtendCommand {
 
     fn needs_entity_pick(&self) -> bool {
         matches!(self.mode, TrimMode::Pick | TrimMode::SelectEdges)
+    }
+
+    fn wants_raw_point(&self) -> bool {
+        self.mode.picks_selection_path()
     }
 
     fn on_entity_pick(&mut self, handle: Handle, pt: DVec3) -> CmdResult {
@@ -8948,102 +8969,6 @@ mod tests {
         let trim_l1 = pick_trim_at(&all, &geos, Handle::new(1), click_l1.x, click_l1.y);
         println!("angled trim_l1: {:?}", trim_l1);
         assert!(trim_l1.is_some(), "trimming line 1 must succeed");
-    }
-
-    #[test]
-    fn test_kernel_intersect_tangency() {
-        use std::f64::consts::FRAC_PI_2;
-        let line = Curve::Line(KernelLine {
-            start: [-10.0, 0.0],
-            end: [10.0, 0.0],
-        });
-
-        // Case 1: Exact tangency at interior of arc
-        let arc_exact = Curve::Arc(KernelArc {
-            centre: [0.0, 5.0],
-            radius: 5.0,
-            start_angle: -FRAC_PI_2 - 0.2,
-            end_angle: -FRAC_PI_2 + 0.2,
-        });
-        let hits_exact = kernel_intersect(&line, &arc_exact, KernelTolerance::new(CUT_TOLERANCE));
-        println!("hits_exact: {:?}", hits_exact);
-
-        // Case 2: Distance slightly greater than R by 1e-12 (within tolerance 1e-7)
-        let arc_eps = Curve::Arc(KernelArc {
-            centre: [0.0, 5.0 + 1e-12],
-            radius: 5.0,
-            start_angle: -FRAC_PI_2 - 0.2,
-            end_angle: -FRAC_PI_2 + 0.2,
-        });
-        let hits_eps = kernel_intersect(&line, &arc_eps, KernelTolerance::new(CUT_TOLERANCE));
-        println!("hits_eps: {:?}", hits_eps);
-
-        // Case 3: Distance slightly greater than R by 1e-9
-        let arc_eps9 = Curve::Arc(KernelArc {
-            centre: [0.0, 5.0 + 1e-9],
-            radius: 5.0,
-            start_angle: -FRAC_PI_2 - 0.2,
-            end_angle: -FRAC_PI_2 + 0.2,
-        });
-        let hits_eps9 = kernel_intersect(&line, &arc_eps9, KernelTolerance::new(CUT_TOLERANCE));
-        println!("hits_eps9: {:?}", hits_eps9);
-
-        // Case 4: Tangency at arc start endpoint
-        let arc_start = Curve::Arc(KernelArc {
-            centre: [0.0, 5.0],
-            radius: 5.0,
-            start_angle: -FRAC_PI_2,
-            end_angle: 0.0,
-        });
-        let hits_start = kernel_intersect(&line, &arc_start, KernelTolerance::new(CUT_TOLERANCE));
-        println!("hits_start (-PI/2): {:?}", hits_start);
-
-        // Case 5: Tangency at arc start endpoint with normalized angle 3*PI/2
-        let arc_norm = Curve::Arc(KernelArc {
-            centre: [0.0, 5.0],
-            radius: 5.0,
-            start_angle: 3.0 * FRAC_PI_2,
-            end_angle: 0.0, // wait! In CCW, from 3*PI/2 to 0 is span PI/2, or 2*PI?
-        });
-        let hits_norm = kernel_intersect(&line, &arc_norm, KernelTolerance::new(CUT_TOLERANCE));
-        println!("hits_norm (3*PI/2): {:?}", hits_norm);
-
-        // Case 6: Tangency at arc end endpoint
-        let arc_end = Curve::Arc(KernelArc {
-            centre: [0.0, 5.0],
-            radius: 5.0,
-            start_angle: std::f64::consts::PI,
-            end_angle: -FRAC_PI_2,
-        });
-        let hits_end = kernel_intersect(&line, &arc_end, KernelTolerance::new(CUT_TOLERANCE));
-        println!("hits_end (-PI/2): {:?}", hits_end);
-
-        // Case 7: Large coordinates (e.g. 5000, 5005)
-        let line_large = Curve::Line(KernelLine {
-            start: [4990.0, 5000.0],
-            end: [5010.0, 5000.0],
-        });
-        let arc_large = Curve::Arc(KernelArc {
-            centre: [5000.0, 5005.0],
-            radius: 5.0,
-            start_angle: -FRAC_PI_2,
-            end_angle: 0.0,
-        });
-        let hits_large =
-            kernel_intersect(&line_large, &arc_large, KernelTolerance::new(CUT_TOLERANCE));
-        println!("hits_large: {:?}", hits_large);
-
-        // Test with cut_params:
-        let geos_large = vec![Geo::Arc {
-            handle: Handle::new(2),
-            cx: 5000.0,
-            cy: 5005.0,
-            r: 5.0,
-            a0: -FRAC_PI_2,
-            a1: 0.0,
-        }];
-        let cuts_large = cut_params(&line_large, Handle::new(1), &geos_large);
-        let _ = cuts_large;
     }
 
     #[test]

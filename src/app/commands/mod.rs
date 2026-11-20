@@ -33,6 +33,7 @@ mod bvisibility;
 mod count;
 mod dash;
 mod dgn_import;
+pub(in crate::app) use dgn_import::read_reference_drawings;
 mod dim;
 mod dim_cmd;
 mod dim_inspect;
@@ -58,6 +59,7 @@ pub(crate) use group_display::{group_display_mode, set_group_display_mode};
 pub(crate) use anno_scale_prompt::{annotation_scale_prompt, set_annotation_scale_prompt};
 pub(crate) use hyperlink::{hyperlink_options, set_hyperlink_options};
 mod inquiry;
+pub(crate) mod layer_file_reads;
 mod layerprops;
 mod layers;
 mod model_import;
@@ -161,7 +163,7 @@ impl OpenCADStudio {
         // default (LIMITS then compares an unintended lower-left point with
         // the displayed default upper-right).
         self.dyn_user_reshaped = false;
-        self.dyn_coord_absolute = false;
+        self.dyn_coord_absolute = self.dyn_pointer_absolute;
         self.tabs[i].dyn_fields.clear();
         self.tabs[i].dyn_active = 0;
     }
@@ -1418,6 +1420,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "SELECTIONEFFECTCOLOR",
         "VSEDGECOLOR",
         "VSEDGESMOOTH",
+        "VSOCCLUDEDEDGES",
         "COMPARECOLORADDED",
         "COMPARECOLORREMOVED",
         "COMPARECOLORMODIFIED",

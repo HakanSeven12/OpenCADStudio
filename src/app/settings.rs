@@ -627,6 +627,22 @@ pub(crate) fn snaps_from_osmode(osmode: i32) -> (Vec<SnapType>, bool) {
     (modes, osmode & OSMODE_SUPPRESS == 0)
 }
 
+fn deserialize_link_display<'de, D>(
+    deserializer: D,
+) -> Result<crate::ui::node_graph::LinkDisplay, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use crate::ui::node_graph::LinkDisplay;
+    use serde::Deserialize;
+    let name = String::deserialize(deserializer).unwrap_or_default();
+    Ok(match name.as_str() {
+        "labels" => LinkDisplay::Labels,
+        "selection" => LinkDisplay::Selection,
+        _ => LinkDisplay::Wires,
+    })
+}
+
 fn deserialize_options_tab<'de, D>(
     deserializer: D,
 ) -> Result<crate::ui::window::options::OptionsTab, D::Error>
@@ -817,6 +833,9 @@ pub struct UserSettings {
     pub spacemouse: crate::input::spacemouse::Preferences,
     pub dyn_input: bool,
     pub dyn_mode: i16,
+    pub dyn_pointer_cartesian: bool,
+    pub dyn_pointer_absolute: bool,
+    pub dyn_pointer_on_type: bool,
     pub polar: bool,
     pub polar_increment_deg: f32,
     pub zoom_wheel_reversed: bool,
@@ -1006,6 +1025,10 @@ pub struct UserSettings {
     pub dgn_import: crate::modules::insert::dgn_import::DgnImportSettings,
     /// Nested-copy symbol handling: false inserts, true binds.
     pub ncopy_bind: bool,
+    /// How the node graph shows links (wires, labels, or labels with the
+    /// selected node's wires); unknown names fall back to wires.
+    #[serde(default, deserialize_with = "deserialize_link_display")]
+    pub node_graph_links: crate::ui::node_graph::LinkDisplay,
     /// Last Options page; unknown saved names fall back without rejecting the config.
     #[serde(default, deserialize_with = "deserialize_options_tab")]
     pub options_tab: crate::ui::window::options::OptionsTab,
@@ -1477,6 +1500,9 @@ impl Default for UserSettings {
             spacemouse: crate::input::spacemouse::Preferences::default(),
             dyn_input: true,
             dyn_mode: 3,
+            dyn_pointer_cartesian: false,
+            dyn_pointer_absolute: false,
+            dyn_pointer_on_type: false,
             polar: false,
             polar_increment_deg: 45.0,
             zoom_wheel_reversed: false,
@@ -1501,6 +1527,7 @@ impl Default for UserSettings {
             command_line_hidden: false,
             layer_columns: Vec::new(),
             ribbon_layers_follow_filter: false,
+            node_graph_links: crate::ui::node_graph::LinkDisplay::Wires,
             options_tab: crate::ui::window::options::OptionsTab::General,
             show_viewcube: true,
             navvcube_opacity: 50,
@@ -1891,6 +1918,26 @@ mod tests {
         assert_eq!(clamp_quad_hover_delay_ms(0), 0);
         assert_eq!(clamp_quad_hover_delay_ms(300), 300);
         assert_eq!(clamp_quad_hover_delay_ms(9999), 2000);
+    }
+
+    #[test]
+    fn node_graph_links_default_to_wires_and_round_trip() {
+        use crate::ui::node_graph::LinkDisplay;
+
+        let old: UserSettings = serde_json::from_str(r#"{"pick_add": true}"#).unwrap();
+        assert_eq!(old.node_graph_links, LinkDisplay::Wires);
+        let unknown: UserSettings =
+            serde_json::from_str(r#"{"node_graph_links": "ribbons"}"#).unwrap();
+        assert_eq!(unknown.node_graph_links, LinkDisplay::Wires);
+        for links in LinkDisplay::ALL {
+            let settings = UserSettings {
+                node_graph_links: links,
+                ..UserSettings::default()
+            };
+            let json = serde_json::to_string(&settings).unwrap();
+            let back: UserSettings = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.node_graph_links, links);
+        }
     }
 
     #[test]

@@ -32,6 +32,7 @@ impl OpenCADStudio {
             Some(K::Aliases) => crate::tr!("modal", "command-aliases"),
             Some(K::NamedParameters) => crate::t!("Named Parameters").into_owned(),
             Some(K::BlockEditorSettings) => crate::t!("Block Editor Settings").into_owned(),
+            Some(K::VisualStyles) => crate::t!("Visual Styles Manager").into_owned(),
             Some(K::BlockCycleOrder) => crate::t!("Grip Cycle Order").into_owned(),
             Some(K::Options) => crate::tr!("action", "options"),
             Some(K::FindReplace) => crate::tr!("modal", "find-replace"),
@@ -156,6 +157,7 @@ impl OpenCADStudio {
             Some(K::BlockEditChanges) => crate::t!("Block - Save Parameter Changes?").into_owned(),
             Some(K::BlockEditPicker) => crate::t!("Edit Block Definition").into_owned(),
             Some(K::Rename) => crate::tr!("rename-dialog", "title"),
+            Some(K::DesignCenter) => crate::tr!("design-center", "title"),
             Some(K::Purge) => crate::tr!("purge-dialog", "title"),
             Some(K::DrawingProperties) => crate::tr!("dwgprops-dialog", "title"),
             Some(K::GeographicLocation) => {
@@ -251,6 +253,17 @@ impl OpenCADStudio {
             super::super::ModalKind::BlockCycleOrder => {
                 crate::ui::window::block_cycle_order::view_window(self.block_cycle_order.as_ref()?)
             }
+            super::super::ModalKind::VisualStyles => {
+                let tab = &self.tabs[self.active_tab];
+                crate::ui::window::visual_styles::view_window(
+                    crate::ui::window::visual_styles::View {
+                        current: tab.render_mode,
+                        crease: self.visual_styles_crease.as_deref()?,
+                        occluded: self.model_space.occluded_edges,
+                        silhouette: tab.scene.document.header.display_silhouette,
+                    },
+                )
+            }
             super::super::ModalKind::Options => {
                 let dirty = self.options_dirty();
                 let close_confirm = self.options_close_confirm;
@@ -286,6 +299,8 @@ impl OpenCADStudio {
                             command_line_font_size: self.command_line.font_size(),
                             show_menu_bar: self.show_menu_bar,
                             show_ribbon: !self.ribbon_closed,
+                            ribbon_centered: self.ribbon.layout().centered,
+                            ribbon_wheel_tabs: self.ribbon.layout().wheel_switches_tabs,
                             hatch_associative: self.hatch_associative,
                             zoom_wheel_reversed: self.zoom_wheel_reversed,
                             navigation_style: self.navigation_style,
@@ -503,8 +518,18 @@ impl OpenCADStudio {
             super::super::ModalKind::RibbonCustomize => {
                 let state = self.ribbon_customize.as_ref()?;
                 let panels = self.ribbon.custom_panels();
+                let suggestions = crate::ui::window::ribbon_customize::suggestions(
+                    &state.draft,
+                    &self.command_line.dynamic_commands,
+                    &self.command_aliases,
+                );
                 sized_flow(ex, 640, 440, |flow| {
-                    crate::ui::window::ribbon_customize::view_window(state, panels, flow)
+                    crate::ui::window::ribbon_customize::view_window(
+                        state,
+                        &suggestions,
+                        panels,
+                        flow,
+                    )
                 })
             }
             super::super::ModalKind::DrawingUnits => {
@@ -538,6 +563,12 @@ impl OpenCADStudio {
                 let state = self.geographic_location.as_ref()?;
                 sized_flow(ex, 600, 250, |flow| {
                     crate::ui::window::geographic_location::view(state, flow)
+                })
+            }
+            super::super::ModalKind::DesignCenter => {
+                let state = self.design_center.as_ref()?;
+                sized_flow(ex, 760, 480, |flow| {
+                    crate::ui::window::design_center::view(state, flow)
                 })
             }
             super::super::ModalKind::Purge => {
@@ -1948,11 +1979,26 @@ impl OpenCADStudio {
                 (!command.is_empty() && !valid.contains(command)).then(|| command.to_string())
             })
             .collect();
+        // The row being typed in offers the commands the command line would
+        // complete its text to.
+        let suggest_row = self.shortcut_suggest.as_ref().and_then(|(idx, typed)| {
+            let (_, command) = self.shortcut_editor_rows.get(*idx)?;
+            (command == typed).then_some(*idx)
+        });
+        let suggestions = suggest_row.map_or_else(Vec::new, |idx| {
+            crate::ui::window::shortcuts::suggestions(
+                &self.shortcut_editor_rows[idx].1,
+                &self.command_line.dynamic_commands,
+                &self.command_aliases,
+            )
+        });
         sized_flow(ex, 720, 520, |flow| {
             crate::ui::window::shortcuts::view_window(
                 &self.shortcut_editor_rows,
                 &self.shortcut_filter,
                 self.shortcut_capture_row,
+                suggest_row,
+                &suggestions,
                 self.shortcut_pending_add,
                 self.shortcut_reset_confirm,
                 &duplicate_set,

@@ -121,7 +121,7 @@ impl Ribbon {
     }
 
     /// Whether a popup of the minimized ribbon shows.
-    fn popup_open(&self) -> bool {
+    pub(super) fn popup_open(&self) -> bool {
         match self.layout.minimize {
             RibbonMinimize::Tabs => self.min.tool_area,
             RibbonMinimize::Off | RibbonMinimize::PanelTitles | RibbonMinimize::PanelButtons => {
@@ -165,7 +165,7 @@ impl Ribbon {
             || self.search_flashing()
     }
 
-    fn open_popup(&mut self, opener: Opener) {
+    pub(super) fn open_popup(&mut self, opener: Opener) {
         self.min.opening = None;
         self.min.closing = None;
         match opener {
@@ -499,7 +499,12 @@ impl Ribbon {
                 })
                 .padding([0, 2])
                 .height(height + 1.0)
-                .width(Fill),
+                .width(Fill)
+                .align_x(if self.layout.centered {
+                    iced::Alignment::Center
+                } else {
+                    iced::Alignment::Start
+                }),
             line,
         ]
         .into()

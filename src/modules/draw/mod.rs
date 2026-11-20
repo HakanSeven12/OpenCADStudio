@@ -204,9 +204,9 @@ impl CadModule for DrawModule {
                     title: "Groups",
                     tools: vec![
                         RibbonItem::LargeTool(group::tool()),
-                        RibbonItem::LargeTool(ungroup::tool()),
-                        RibbonItem::LabeledTool(groups::edit_tool()),
-                        RibbonItem::LabeledTool(groups::selection_tool()),
+                        RibbonItem::Tool(ungroup::tool()),
+                        RibbonItem::Tool(groups::edit_tool()),
+                        RibbonItem::Tool(groups::selection_tool()),
                     ],
                 },
                 RibbonGroup {

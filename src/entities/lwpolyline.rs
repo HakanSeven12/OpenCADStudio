@@ -993,7 +993,8 @@ fn resize_arc_segment_radius(polyline: &mut LwPolyline, segment: usize, radius: 
     });
 }
 fn apply_transform(pline: &mut LwPolyline, t: &EntityTransform) {
-    crate::scene::view::transform::apply_standard_entity_transform(pline, t, |entity, p1, p2| {
+    let normal = pline.normal;
+    crate::scene::view::transform::apply_ocs_entity_transform(pline, t, normal, |entity, p1, p2| {
         for v in &mut entity.vertices {
             crate::scene::view::transform::reflect_xy_point(
                 &mut v.location.x,

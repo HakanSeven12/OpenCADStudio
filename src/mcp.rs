@@ -85,8 +85,13 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// digest repinned deliberately:
 /// d3748b0592a84ec18be3a52e2c5d5dea3a99ae197d977f49688885a924f6255d →
 /// 4c6627ce213cb24f0bb1bc1883cc93fc2087bd3846e13dba99037893454f1bc7.
+/// SCN-040 (upstream merge repin, the ONE sanctioned movement per
+/// SWG-005/ADR-011): upstream's `save` op now describes its `target_version`
+/// as the DWG version; digest repinned deliberately:
+/// 4c6627ce213cb24f0bb1bc1883cc93fc2087bd3846e13dba99037893454f1bc7 →
+/// cd5aae5238ad8ae88fa9b4f95ba36d4b8e32ca7f2b922f431963c889a8965bfb.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "4c6627ce213cb24f0bb1bc1883cc93fc2087bd3846e13dba99037893454f1bc7";
+const TOOL_SCHEMA_DIGEST: &str = "cd5aae5238ad8ae88fa9b4f95ba36d4b8e32ca7f2b922f431963c889a8965bfb";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

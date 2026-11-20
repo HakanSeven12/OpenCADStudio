@@ -25,6 +25,7 @@ use crate::io::plot_style::PlotStyleTable;
 use crate::io::svg_export::plotted_color;
 use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
 use crate::scene::model::underlay_vector::CAP_PER_EM;
+use crate::scene::model::wire_model::SearchableTextRun;
 use crate::scene::text::glyph_to_world::{self, GlyphSnapshot, QuadBasis};
 use crate::scene::text::sdf_atlas::GlyphExport;
 use crate::scene::WireModel;
@@ -869,11 +870,40 @@ fn placed_quads<'a>(
     Some(placed)
 }
 
+/// Whether one of `runs` can stand for a glyph placed on `basis`. A run
+/// carries a font, a height and a rotation: the glyph has to stand square
+/// and unmirrored on a run's baseline, as wide for its height as its font
+/// makes it. A width factor, an oblique angle, a mirrored glyph or one seen
+/// from the side, as through a viewport that looks at its plane askew, is
+/// beyond a run.
+fn run_can_place(basis: &QuadBasis, runs: &[SearchableTextRun]) -> bool {
+    let along = [basis.br[0] - basis.bl[0], basis.br[1] - basis.bl[1]];
+    let up = [basis.tl[0] - basis.bl[0], basis.tl[1] - basis.bl[1]];
+    let (length, height) = (along[0].hypot(along[1]), up[0].hypot(up[1]));
+    let [plane_w, plane_h] = basis.plane_size();
+    if !(length > 0.0 && height > 0.0 && plane_w.abs() > 0.0 && plane_h.abs() > 0.0) {
+        return false;
+    }
+    let square = (along[0] * up[0] + along[1] * up[1]).abs() <= 0.01 * length * height;
+    let unmirrored = along[0] * up[1] - along[1] * up[0] > 0.0;
+    let (wide, high) = (length / plane_w.abs(), height / plane_h.abs());
+    let even = (wide - high).abs() <= 0.02 * wide.max(high);
+    let turn = along[1].atan2(along[0]);
+    square
+        && unmirrored
+        && even
+        && runs.iter().any(|run| {
+            let apart = (turn - run.rotation as f64).rem_euclid(std::f64::consts::TAU);
+            apart.min(std::f64::consts::TAU - apart) <= 0.005
+        })
+}
+
 /// A wire's text. A font of pen strokes has no outline a reader could load
 /// by its name, so its glyphs are drawn: strokes with the pen the screen
-/// gives them. Text in an outline font stays text, in its font, unless the
-/// page asks for `text_as_outlines`; its underline, overline and strike bars
-/// are drawn either way.
+/// gives them. Text in an outline font stays text, in its font, while a run
+/// can place its glyphs ([`run_can_place`]) and the page does not ask for
+/// `text_as_outlines`; else its glyphs are drawn filled. Underline, overline
+/// and strike bars are drawn either way.
 fn emit_text(stream: &mut Stream, wire: &WireModel, context: &Context) {
     let mut style_color: Option<[f32; 3]> = None;
     let mut style_mm: Option<f64> = None;
@@ -896,11 +926,13 @@ fn emit_text(stream: &mut Stream, wire: &WireModel, context: &Context) {
         .glyphs
         .and_then(|glyphs| placed_quads(wire, glyphs))
         .unwrap_or_default();
-    // One pen glyph and the wire's text is drawn whole, so that none of it is
-    // written twice.
+    // One glyph that has to be drawn and the wire's text is drawn whole, so
+    // that none of it is written twice.
     let drawn = quads.iter().any(|(quad, _)| match quad {
-        PlacedQuad::Glyph(glyph, _) => {
-            context.options.text_as_outlines || glyph.fill_tris.is_empty()
+        PlacedQuad::Glyph(glyph, basis) => {
+            context.options.text_as_outlines
+                || glyph.fill_tris.is_empty()
+                || !run_can_place(basis, &wire.searchable_text)
         }
         PlacedQuad::Bar(_) => false,
     });
@@ -1342,7 +1374,6 @@ mod tests {
     use crate::scene::model::hatch_model::{HatchModel, HatchPattern, PatFamily};
     use crate::scene::model::underlay_vector::dwf as reader;
     use crate::scene::model::underlay_vector::{Segment, Sheet};
-    use crate::scene::model::wire_model::SearchableTextRun;
     use crate::scene::WireModel;
     use std::io::Read;
 

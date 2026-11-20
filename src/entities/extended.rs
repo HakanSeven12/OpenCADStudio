@@ -2625,11 +2625,210 @@ fn apply_transform(entity: &mut ExtendedEntity, requested: &EntityTransform) {
             data.ucs_y_direction = transform.apply_rotation(data.ucs_y_direction);
             data.ucs_z_direction = transform.apply_rotation(data.ucs_z_direction);
         }
+        // An Arch / civil class entity ("AECC_ALIGNMENT", "AECC_COGO_POINT",
+        // an AEC wall) carries its world-space drawing in the proxy-graphics
+        // blob: the profiles are decoded from it and `bounding_box()` measures
+        // them. Move the profiles and re-encode the blob's geometry records so
+        // the move reaches measure, snaps, and the saved record. The opaque
+        // native class body stays verbatim — the census passthrough must not
+        // regress (see `transform_arch_preview`).
+        ExtendedEntityData::Arch(data) => {
+            for point in data.profiles.iter_mut().flatten() {
+                *point = transform.apply(*point);
+            }
+        }
         _ => {}
+    }
+    if let ExtendedEntityData::Arch(_) = entity.data {
+        // The blob lives on `common`, outside the `data` borrow above.
+        transform_arch_preview(&mut entity.common, &transform);
     }
     if let Some(depth) = slice_depth {
         set_section_slice_metadata(entity, true, depth);
     }
+}
+
+/// Rewrite the world-space geometry inside an Arch entity's proxy-graphics
+/// blob. Records are patched in place — a coordinate swaps for a coordinate,
+/// so every record keeps its size and the blob its length. Returns without
+/// touching anything when the blob is absent or its framing is malformed; a
+/// record whose payload does not match its layout is left alone.
+///
+/// Not rewritten: the native class body (`raw_dwg_data`) and the bit-coded
+/// embedded LWPOLYLINE (record 33) — neither has a layout this crate can
+/// rewrite safely, so both keep their stored coordinates.
+fn transform_arch_preview(common: &mut document::entities::EntityCommon, transform: &Transform) {
+    let Some(bytes) = common.graphic_data.as_mut() else {
+        return;
+    };
+    let mut point = |p: Vector3| transform.apply(p);
+    let mut direction = |v: Vector3| {
+        // A direction carries no position: rotation moves it, translation
+        // does not, and the rotation part of a scale must not scale it.
+        let mapped = transform.apply_rotation(v);
+        let length_sq = mapped.x * mapped.x + mapped.y * mapped.y + mapped.z * mapped.z;
+        if length_sq > 1e-12 && length_sq.is_finite() {
+            mapped / length_sq.sqrt()
+        } else {
+            v
+        }
+    };
+    patch_preview_records(bytes, &mut point, &mut direction);
+}
+
+/// Apply `point` to every stored position and `direction` to every stored
+/// normal / text direction in the blob's modelled records. True when at least
+/// one coordinate changed.
+fn patch_preview_records(
+    bytes: &mut [u8],
+    point: &mut impl FnMut(Vector3) -> Vector3,
+    direction: &mut impl FnMut(Vector3) -> Vector3,
+) -> bool {
+    // Framing: `u32 total_size, u32 record_count`, then records of
+    // `u32 size (header included), u32 type, payload`.
+    let Some(total) = u32_at(bytes, 0).map(|v| v as usize) else {
+        return false;
+    };
+    if total < 8 || total > bytes.len() {
+        return false;
+    }
+    let count = u32_at(bytes, 4).unwrap_or(0);
+    if count > 1_000_000 {
+        return false;
+    }
+    let mut moved = false;
+    let mut pos = 8usize;
+    for _ in 0..count {
+        let Some(size) = u32_at(bytes, pos).map(|v| v as usize) else {
+            break;
+        };
+        if size < 8 || pos + size > total {
+            break;
+        }
+        let record_type = u32_at(bytes, pos + 4).unwrap_or(0);
+        let payload = &mut bytes[pos + 8..pos + size];
+        moved |= patch_preview_record(payload, record_type, point, direction);
+        pos += size;
+    }
+    moved
+}
+
+/// Patch one record payload per the layouts the proxy-graphics decoder reads:
+/// polyline / polygon (6/7) and shell (9) vertices, circle / arc centres
+/// (2/4) with their normals, three-point circles / arcs (3/5), the polyline
+/// plus normal form (32), and every text form's position, normal, and
+/// direction (10/11/36/38).
+fn patch_preview_record(
+    d: &mut [u8],
+    record_type: u32,
+    point: &mut impl FnMut(Vector3) -> Vector3,
+    direction: &mut impl FnMut(Vector3) -> Vector3,
+) -> bool {
+    let mut moved = false;
+    macro_rules! patch {
+        ($offset:expr, $map:expr) => {
+            if map_f64_triple(d, $offset, $map).is_some() {
+                moved = true;
+            }
+        };
+    }
+    match record_type {
+        // Poly-line, poly-gon, shell: `u32 n` then n points.
+        6 | 7 | 9 => map_point_run(d, point, &mut moved),
+        // A poly-line followed by its normal.
+        32 => {
+            map_point_run(d, point, &mut moved);
+            if let Some(count) = point_count(d) {
+                patch!(4 + count * 24, direction);
+            }
+        }
+        // Circle: centre, radius, normal.
+        2 => {
+            patch!(0, point);
+            patch!(32, direction);
+        }
+        // Circle / arc through three points.
+        3 | 5 => {
+            patch!(0, point);
+            patch!(24, point);
+            patch!(48, point);
+        }
+        // Arc: centre, radius, normal, start vector, sweep, arc type.
+        4 => {
+            patch!(0, point);
+            patch!(32, direction);
+            patch!(56, direction);
+        }
+        // Text forms: position, normal, direction — the string tail is bytes.
+        10 | 11 | 36 | 38 => {
+            patch!(0, point);
+            patch!(24, direction);
+            patch!(48, direction);
+        }
+        _ => {}
+    }
+    moved
+}
+
+/// `u32 n` then `n × [f64;3]` — map each point when the run is well-formed.
+fn map_point_run(
+    d: &mut [u8],
+    point: &mut impl FnMut(Vector3) -> Vector3,
+    moved: &mut bool,
+) {
+    let Some(count) = point_count(d) else {
+        return;
+    };
+    for index in 0..count {
+        if map_f64_triple(d, 4 + index * 24, point).is_some() {
+            *moved = true;
+        }
+    }
+}
+
+/// The point count of a `u32 n, [f64;3]×n` payload, when it fits.
+fn point_count(d: &[u8]) -> Option<usize> {
+    let count = u32_at(d, 0)? as usize;
+    (2..=100_000).contains(&count).then_some(count).filter(|_| {
+        4usize
+            .checked_add(count.checked_mul(24)?)
+            .is_some_and(|needed| needed <= d.len())
+    })
+}
+
+/// Read an `[f64;3]` at `offset`, map it, write it back. `None` (and no
+/// write) when the bytes are missing or not finite.
+fn map_f64_triple(
+    d: &mut [u8],
+    offset: usize,
+    map: &mut impl FnMut(Vector3) -> Vector3,
+) -> Option<()> {
+    let read = |d: &[u8], at: usize| -> Option<f64> {
+        let b = d.get(at..at + 8)?;
+        Some(f64::from_le_bytes(b.try_into().ok()?))
+    };
+    let v = Vector3::new(read(d, offset)?, read(d, offset + 8)?, read(d, offset + 16)?);
+    if ![v.x, v.y, v.z].iter().all(|c| c.is_finite()) {
+        return None;
+    }
+    let mapped = map(v);
+    if ![mapped.x, mapped.y, mapped.z].iter().all(|c| c.is_finite()) {
+        return None;
+    }
+    let write = |d: &mut [u8], at: usize, value: f64| {
+        if let Some(b) = d.get_mut(at..at + 8) {
+            b.copy_from_slice(&value.to_le_bytes());
+        }
+    };
+    write(d, offset, mapped.x);
+    write(d, offset + 8, mapped.y);
+    write(d, offset + 16, mapped.z);
+    Some(())
+}
+
+/// Little-endian `u32` at `offset`.
+fn u32_at(d: &[u8], offset: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(d.get(offset..offset + 4)?.try_into().ok()?))
 }
 
 impl RenderConvertible for ExtendedEntity {
@@ -2759,5 +2958,109 @@ mod tests {
         entity.apply_grip_menu(SECTION_GRIP_STATE, GripMenuAction::SectionSlice);
 
         assert_eq!(section_slice_depth(&entity), Some(0.25));
+    }
+
+    /// A minimal proxy-graphics blob: one type-6 polyline (the geometry the
+    /// profiles decode from), one type-36 unicode text, and one type-14
+    /// colour trait whose bytes must survive untouched.
+    fn preview_blob() -> Vec<u8> {
+        let mut polyline = Vec::new();
+        polyline.extend_from_slice(&3u32.to_le_bytes());
+        for [x, y, z] in [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]] {
+            polyline.extend_from_slice(&x.to_le_bytes());
+            polyline.extend_from_slice(&y.to_le_bytes());
+            polyline.extend_from_slice(&z.to_le_bytes());
+        }
+        let mut text = Vec::new();
+        for [x, y, z] in [[10.0, 20.0, 30.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]] {
+            text.extend_from_slice(&x.to_le_bytes());
+            text.extend_from_slice(&y.to_le_bytes());
+            text.extend_from_slice(&z.to_le_bytes());
+        }
+        text.extend_from_slice(&2.0f64.to_le_bytes()); // height
+        text.extend_from_slice(&1.0f64.to_le_bytes()); // width factor
+        text.extend_from_slice(&0.0f64.to_le_bytes()); // oblique
+        for unit in "PT".encode_utf16().chain([0u16]) {
+            text.extend_from_slice(&unit.to_le_bytes());
+        }
+        while text.len() % 4 != 0 {
+            text.push(0);
+        }
+        let color = 7u32.to_le_bytes().to_vec();
+        let records = [(6u32, polyline), (36, text), (14, color)];
+        let mut blob = Vec::new();
+        blob.extend_from_slice(&0u32.to_le_bytes()); // total, patched below
+        blob.extend_from_slice(&(records.len() as u32).to_le_bytes());
+        for (kind, payload) in records {
+            blob.extend_from_slice(&((payload.len() + 8) as u32).to_le_bytes());
+            blob.extend_from_slice(&kind.to_le_bytes());
+            blob.extend_from_slice(&payload);
+        }
+        blob[0..4].copy_from_slice(&(blob.len() as u32).to_le_bytes());
+        blob
+    }
+
+    fn civil_point_entity(blob: &[u8]) -> ExtendedEntity {
+        ExtendedEntity {
+            common: EntityCommon::new(),
+            data: ExtendedEntityData::Arch(document::classes::arch::ArchEntityData::from_parts(
+                "AECC_COGO_POINT",
+                "",
+                Some(blob),
+            )),
+        }
+    }
+
+    /// R3.1: a move on an Arch / civil entity moves its carried geometry —
+    /// the profiles measure reads and the persisted proxy-graphics records —
+    /// by exactly the delta, leaving the record framing and the untouched
+    /// records' bytes alone.
+    #[test]
+    fn arch_transform_moves_the_carried_geometry() {
+        let blob = preview_blob();
+        let mut entity = civil_point_entity(&blob);
+
+        entity.apply_transform(&EntityTransform::Translate(glam::DVec3::new(2.0, 0.0, 0.0)));
+
+        let ExtendedEntityData::Arch(data) = &entity.data else {
+            panic!("arch data");
+        };
+        let profile = &data.profiles[0];
+        assert_eq!(
+            profile
+                .iter()
+                .map(|p| (p.x, p.y, p.z))
+                .collect::<Vec<_>>(),
+            [(3.0, 2.0, 3.0), (6.0, 5.0, 6.0), (9.0, 8.0, 9.0)],
+            "profiles move by exactly the delta"
+        );
+        let bytes = entity.common.graphic_data.expect("blob kept");
+        assert_eq!(bytes.len(), blob.len(), "the re-encoded blob keeps its size");
+        let decoded = crate::scene::convert::proxy_graphics::decode(&bytes);
+        assert_eq!(
+            decoded.polylines[0].points,
+            [[3.0, 2.0, 3.0], [6.0, 5.0, 6.0], [9.0, 8.0, 9.0]],
+        );
+        assert_eq!(decoded.texts[0].position, [12.0, 20.0, 30.0]);
+        // The colour trait bytes are untouched.
+        assert_eq!(
+            u32::from_le_bytes(bytes[bytes.len() - 4..].try_into().unwrap()),
+            7
+        );
+    }
+
+    /// A transform a blob cannot represent leaves the blob alone, but the
+    /// profiles still move (measure follows them).
+    #[test]
+    fn arch_transform_survives_a_malformed_preview() {
+        let mut entity = civil_point_entity(&[0xFF; 10]);
+
+        entity.apply_transform(&EntityTransform::Translate(glam::DVec3::new(2.0, 0.0, 0.0)));
+
+        let ExtendedEntityData::Arch(data) = &entity.data else {
+            panic!("arch data");
+        };
+        assert!(data.profiles.is_empty());
+        assert_eq!(entity.common.graphic_data.as_deref(), Some(&[0xFF; 10][..]));
     }
 }

@@ -437,12 +437,13 @@ fn properties(t: &Text, text_style_names: &[String]) -> Vec<PropSection> {
                     },
                 },
                 // A style that fixes its height fixes this text's too, so the
-                // value shows but cannot be changed here.
-                crate::entities::common::num_prop(
+                // value shows read-only with a tooltip explaining why.
+                crate::entities::common::text_height_prop(
                     t!("Height").as_ref(),
                     "height",
                     t.height,
-                    !is_aligned && crate::entities::common::style_fixed_height(&t.style).is_none(),
+                    &t.style,
+                    !is_aligned,
                 ),
                 if is_two_point {
                     ro(

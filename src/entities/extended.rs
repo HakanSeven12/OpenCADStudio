@@ -1734,7 +1734,7 @@ fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
                     t!("Kind").as_ref(),
                     "ext_arch_kind",
                     data.civil_kind()
-                        .map_or_else(|| format!("{:?}", data.kind), |kind| format!("Civil 3D {kind:?}")),
+                        .map_or_else(|| format!("{:?}", data.kind), |kind| format!("{kind:?}")),
                 ),
             ];
             if let Some(kind) = data.civil_kind() {

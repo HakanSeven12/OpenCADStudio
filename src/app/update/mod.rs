@@ -186,6 +186,8 @@ pub(crate) mod style_import;
 pub(in crate::app) mod util;
 mod viewport;
 pub(in crate::app) mod viewport_snap;
+#[cfg(test)]
+mod xref_manager_preview_tests;
 
 impl OpenCADStudio {
     pub(in crate::app) fn reset_modal_geometry(&mut self) {
@@ -236,6 +238,9 @@ impl OpenCADStudio {
         }
         if self.active_modal == Some(BlockEditorSettings) {
             self.block_editor_settings = None;
+        }
+        if self.active_modal == Some(VisualStyles) {
+            self.visual_styles_crease = None;
         }
         if self.active_modal == Some(BlockCycleOrder) {
             self.block_cycle_order = None;
@@ -671,6 +676,15 @@ impl OpenCADStudio {
             )
         });
         let mut task = self.update_message(msg);
+        // A selection or a refresh in the Xref Manager asked for a preview:
+        // it decodes on a worker.
+        if let Some(request) = self.xref_manager.take_preview_request() {
+            let read = self.read_xref_manager_preview_with(
+                request,
+                crate::ui::window::xref_manager::read_preview,
+            );
+            task = Task::batch([task, read]);
+        }
         if let Some((resized, key)) = outline_switch_before {
             if resized || self.outline_switch_key() != key {
                 self.outline_switch_hover = false;
@@ -2653,10 +2667,7 @@ impl OpenCADStudio {
                 }
             }
 
-            Message::XAttachPickResult(Ok(path)) => {
-                self.open_xref_attach_dialog(path);
-                Task::none()
-            }
+            Message::XAttachPickResult(Ok(path)) => self.open_xref_attach_dialog(path),
             message @ (Message::AttachPick
             | Message::UnderlayAttachPick(_)
             | Message::PointCloudAttachPick
@@ -3270,6 +3281,14 @@ impl OpenCADStudio {
                 if self.ribbon.click_tab(idx, iced::time::Instant::now()) {
                     self.save_config();
                 }
+                Task::none()
+            }
+            Message::RibbonWheel(delta) => {
+                self.ribbon.on_wheel(delta, iced::time::Instant::now());
+                Task::none()
+            }
+            Message::RibbonRefit => {
+                self.ribbon.refit();
                 Task::none()
             }
             Message::RibbonMinimize(msg) => {
@@ -4715,6 +4734,35 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::CommandLineMoveGrab => {
+                self.command_line_moving = true;
+                self.command_history_drag_last = None;
+                Task::none()
+            }
+
+            Message::CommandLineMoveMove(point) => {
+                if self.command_line_moving {
+                    if let Some(last) = self.command_history_drag_last {
+                        self.command_line.float_offset =
+                            self.command_line.float_offset + (point - last);
+                    }
+                    self.command_history_drag_last = Some(point);
+                }
+                Task::none()
+            }
+
+            Message::CommandLineMoveRelease => {
+                self.command_line_moving = false;
+                self.command_history_drag_last = None;
+                Task::none()
+            }
+
+            Message::CommandLineDock => {
+                self.command_line_moving = false;
+                self.command_line.float_offset = iced::Vector::ZERO;
+                Task::none()
+            }
+
             Message::CommandHistoryResizeGrab => {
                 if self.command_line.history_open {
                     self.command_history_resizing = true;
@@ -5074,6 +5122,10 @@ impl OpenCADStudio {
             }
             Message::XrefManagerTogglePreview => {
                 self.xref_manager.show_preview ^= true;
+                Task::none()
+            }
+            Message::XrefPreviewRead(generation, key, preview) => {
+                self.xref_manager.preview_read(generation, key, preview);
                 Task::none()
             }
             Message::XrefManagerAttachMenu => {
@@ -8627,6 +8679,17 @@ impl OpenCADStudio {
             }
 
             // ── Drafting Settings Dialog ──────────────────────────────────
+            Message::OpenDraftingSettings(tab) => {
+                let task = if self.focus_dialog(super::ModalKind::DraftingSettings) {
+                    Task::none()
+                } else {
+                    self.update(Message::ToggleSnapPopup)
+                };
+                if let Some(state) = &mut self.drafting_settings_state {
+                    state.active_tab = tab;
+                }
+                task
+            }
             Message::DraftingSettingsTabChanged(tab) => {
                 if let Some(state) = &mut self.drafting_settings_state {
                     state.active_tab = tab;
@@ -8790,6 +8853,12 @@ impl OpenCADStudio {
             Message::DraftingSettingsToggle3dOsnap => {
                 if let Some(state) = &mut self.drafting_settings_state {
                     state.osnap3d_on = !state.osnap3d_on;
+                }
+                Task::none()
+            }
+            Message::DraftingSettingsDynPrefs(prefs) => {
+                if let Some(state) = &mut self.drafting_settings_state {
+                    state.dyn_prefs = prefs;
                 }
                 Task::none()
             }
@@ -9272,8 +9341,9 @@ impl OpenCADStudio {
                 self.mtext_pick_style(s);
                 Task::none()
             }
-            Message::MTextImport(path) => {
-                self.mtext_import(&path);
+            Message::MTextImport(path) => self.mtext_import(&path),
+            Message::MTextImportRead(opened, read) => {
+                self.finish_mtext_import(opened, read);
                 Task::none()
             }
             Message::MTextFontPicker(event) => {
@@ -11988,6 +12058,25 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::VisualStylesCreaseInput(value) => {
+                if let Some(crease) = &mut self.visual_styles_crease {
+                    *crease = value;
+                }
+                Task::none()
+            }
+            Message::VisualStylesCreaseApply => {
+                let Some(value) = self.visual_styles_crease.clone() else {
+                    return Task::none();
+                };
+                let task =
+                    self.run_one_command_line(&format!("SETVAR VSEDGESMOOTH {}", value.trim()));
+                // A refused value goes back to the one in force.
+                self.visual_styles_crease = Some(self.model_space.edge_smooth.to_string());
+                task
+            }
+            Message::VisualStylesOccludedEdges(on) => {
+                self.run_one_command_line(&format!("SETVAR VSOCCLUDEDEDGES {}", u8::from(on)))
+            }
             Message::BlockEditorSettingsInput(index, value) => {
                 if let Some(state) = &mut self.block_editor_settings {
                     if let Some(field) = state.values.get_mut(index) {
@@ -12641,6 +12730,18 @@ impl OpenCADStudio {
             Message::RibbonVisibleChanged(shown) => {
                 self.ribbon_closed = !shown;
                 self.persist_settings_if_changed();
+                Task::none()
+            }
+
+            Message::RibbonCenteredChanged(centered) => {
+                self.ribbon.set_centered(centered);
+                self.save_config();
+                Task::none()
+            }
+
+            Message::RibbonWheelTabsChanged(on) => {
+                self.ribbon.set_wheel_switches_tabs(on);
+                self.save_config();
                 Task::none()
             }
 
@@ -14620,6 +14721,7 @@ impl OpenCADStudio {
             }
             Message::BlockEditPickerApply => self.apply_bedit_dialog(),
             Message::Rename(msg) => self.on_rename_dialog(msg),
+            Message::DesignCenter(msg) => self.on_design_center(msg),
             Message::Purge(msg) => self.on_purge_dialog(msg),
             Message::DwgProps(msg) => self.on_drawing_properties(msg),
             Message::GeographicLocation(msg) => self.on_geographic_location(msg),
@@ -15075,6 +15177,11 @@ impl OpenCADStudio {
             }
             Message::PointCloudRead(done) => {
                 self.finish_point_cloud_display_read(&done);
+                Task::none()
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::EmbedImageRead(tab_id, generation, read) => {
+                self.finish_control_embed_image(tab_id, generation, *read);
                 Task::none()
             }
 

@@ -20,6 +20,10 @@ fn next_name(document: &document::Document, dxf: &str, base: &str) -> String {
     format!("{base} {}", n + 1)
 }
 
+/// The boundary kind of a corridor surface drawn along the corridor's extents (the codec's
+/// `EXTENTS`).
+const CORRIDOR_EXTENTS: u32 = 0x8000_0002;
+
 /// The Civil 3D record of `handle`.
 fn arch(document: &document::Document, handle: Handle) -> Option<&document::classes::arch::ArchEntityData> {
     match document.get_entity(handle)? {
@@ -65,7 +69,7 @@ fn add_on_site(
     doc: &mut document::Document,
     site: &mut Option<Handle>,
     site_name: &str,
-    add: impl Fn(&mut document::Document, Handle) -> Result<Handle, document::error::DxfError>,
+    mut add: impl FnMut(&mut document::Document, Handle) -> Result<Handle, document::error::DxfError>,
 ) -> Result<Handle, document::error::DxfError> {
     if let Some(s) = *site {
         if let Ok(h) = add(doc, s) {
@@ -155,13 +159,45 @@ impl OpenCADStudio {
                         _ => None,
                     })
                     .collect();
-                if numbers.is_empty() {
-                    return Err(crate::t!("No COGO points selected.").into_owned());
+                let patterns = |key: &str| {
+                    req.text(key).map(|t| t.split(',').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect::<Vec<_>>())
+                };
+                let (low, high) = (req.values.get("elevation_min").copied(), req.values.get("elevation_max").copied());
+                // One criterion: the selected points, or a name, description or elevation rule.
+                let mut criteria = Vec::new();
+                if !numbers.is_empty() {
+                    criteria.push(c3d::PointQuery::Numbers(numbers.clone()));
                 }
+                if let Some(names) = patterns("name") {
+                    criteria.push(c3d::PointQuery::Names(names));
+                }
+                if let Some(descriptions) = patterns("description") {
+                    criteria.push(c3d::PointQuery::RawDescription(descriptions));
+                }
+                match (low, high) {
+                    (Some(low), Some(high)) => criteria.push(c3d::PointQuery::ElevationRange(low.min(high), low.max(high))),
+                    (Some(low), None) => criteria.push(c3d::PointQuery::Elevation(c3d::Comparison::GreaterOrEqual, low)),
+                    (None, Some(high)) => criteria.push(c3d::PointQuery::Elevation(c3d::Comparison::LessOrEqual, high)),
+                    (None, None) => {}
+                }
+                let query = match criteria.len() {
+                    0 => return Err(crate::t!("No COGO points selected.").into_owned()),
+                    1 => criteria.remove(0),
+                    _ => return Err(crate::t!("Use one of: selected points, a name pattern, a description pattern or an elevation range.").into_owned()),
+                };
                 let group = next_name(doc, "AECC_POINT_PG", "Point Group");
                 self.push_undo_snapshot(i, name);
-                c3d::add_point_group(&mut self.tabs[i].scene.document, &group, None, &numbers).map_err(refused)?;
-                crate::tf!("Point group {} created with {} point(s).", group, numbers.len()).into_owned()
+                let doc = &mut self.tabs[i].scene.document;
+                match query {
+                    c3d::PointQuery::Numbers(_) => {
+                        c3d::add_point_group(doc, &group, None, &numbers).map_err(refused)?;
+                        crate::tf!("Point group {} created with {} point(s).", group, numbers.len()).into_owned()
+                    }
+                    query => {
+                        c3d::add_point_group_query(doc, &group, None, &query).map_err(refused)?;
+                        crate::tf!("Point group {} created.", group).into_owned()
+                    }
+                }
             }
             "CREATEALIGNMENT" => {
                 let doc = &self.tabs[i].scene.document;
@@ -285,34 +321,66 @@ impl OpenCADStudio {
             }
             "CREATEPARCEL" => {
                 let doc = &self.tabs[i].scene.document;
-                let boundaries = req.objects[0]
+                // Each line or polyline: its vertices with their bulges, and whether it closes.
+                let lines = req.objects[0]
                     .iter()
                     .filter_map(|h| doc.get_entity(*h))
                     .map(|e| {
                         let mut points = vertices(e)?;
                         let closed = points.len() > 3 && points.first().map(|p| (p.0.x, p.0.y)) == points.last().map(|p| (p.0.x, p.0.y));
-                        if !closed {
-                            return Err(crate::t!("A parcel needs a closed polyline.").into_owned());
+                        if closed {
+                            // A closed lot line closes back to its first vertex itself, with the
+                            // last vertex's bulge.
+                            points.pop();
                         }
-                        if points.iter().any(|p| p.1 != 0.0) {
-                            return Err(crate::t!("Polylines with arcs cannot be made into parcels yet.").into_owned());
-                        }
-                        // The lot line closes back to its first vertex itself.
-                        points.pop();
-                        Ok(points.iter().map(|p| Vector2::new(p.0.x, p.0.y)).collect::<Vec<_>>())
+                        Ok((points.iter().map(|p| (Vector2::new(p.0.x, p.0.y), p.1)).collect::<Vec<_>>(), closed))
                     })
                     .collect::<Result<Vec<_>, String>>()?;
                 let mut site = last_site(doc);
                 let site_name = next_name(doc, "AECC_PARCEL", "Site");
                 self.push_undo_snapshot(i, name);
                 let doc = &mut self.tabs[i].scene.document;
-                for boundary in &boundaries {
-                    let h = add_on_site(doc, &mut site, &site_name, |doc, s| c3d::add_parcel(doc, s, boundary, layer)).map_err(refused)?;
-                    changes.push((h, ChangeKind::Added));
+                let mut parcels = 0;
+                for (points, closed) in &lines {
+                    let mut made = Vec::new();
+                    add_on_site(doc, &mut site, &site_name, |doc, s| {
+                        let (line, new) = c3d::add_lot_line(doc, s, points, *closed, layer)?;
+                        made = new;
+                        Ok(line)
+                    })
+                    .map_err(refused)?;
+                    parcels += made.len();
                 }
-                // The lot lines are new entities too: redraw everything.
-                changes.clear();
-                crate::tf!("{} parcel(s) created.", boundaries.len()).into_owned()
+                // A crossing line changes earlier parcels too: redraw everything.
+                crate::tf!("{} parcel(s) created.", parcels).into_owned()
+            }
+            "CREATEASSEMBLY" => {
+                let at = *req.points.first().ok_or("no location")?;
+                let pkgs = super::civil_packages::road();
+                let sources = pkgs.iter().map(super::civil_packages::install).collect::<Result<Vec<_>, _>>()?;
+                // The values set at the closing prompt; the package's defaults for the rest.
+                let values: Vec<(String, c3d::pkt::PktValue)> = crate::modules::civil::ASSEMBLY_KEYS
+                    .iter()
+                    .filter_map(|k| req.values.get(k).map(|v| (k.to_string(), c3d::pkt::PktValue::Double(*v))))
+                    .collect();
+                let assembly = next_name(&self.tabs[i].scene.document, "AECC_ASSEMBLY", "Assembly");
+                self.push_undo_snapshot(i, name);
+                let doc = &mut self.tabs[i].scene.document;
+                let h = c3d::add_assembly(doc, &assembly, Vector3::new(at.x, at.y, at.z), layer).map_err(refused)?;
+                // Each side: the lane at the baseline, the shoulder on its outer point, the
+                // side slope on the shoulder's.
+                for (side, label) in [(c3d::pkt::PktSide::Right, "Right"), (c3d::pkt::PktSide::Left, "Left")] {
+                    let mut parent = None;
+                    for ((pkg, source), part) in pkgs.iter().zip(&sources).zip(["Lane", "Shoulder", "Side Slope"]) {
+                        let name = format!("{part} {label}");
+                        let made = match parent {
+                            None => c3d::add_pkt_subassembly(doc, h, &name, source, pkg, side, &values, layer),
+                            Some(p) => c3d::add_pkt_subassembly_on(doc, p, super::civil_packages::OUTER, &name, source, pkg, side, &values, layer),
+                        };
+                        parent = Some(made.map_err(refused)?);
+                    }
+                }
+                crate::tf!("Assembly {} created.", assembly).into_owned()
             }
             "CREATECORRIDOR" => {
                 let doc = &self.tabs[i].scene.document;
@@ -320,10 +388,59 @@ impl OpenCADStudio {
                 let assembly = *req.objects[1].first().ok_or("no assembly")?;
                 let profile = newest_profile(doc, alignment).ok_or_else(|| crate::t!("The alignment has no profile.").into_owned())?;
                 let corridor = next_name(doc, "AECC_CORRIDOR", "Corridor");
+                let al = arch(doc, alignment).ok_or("no alignment")?;
+                let start = al.alignment_start_station().ok_or("the alignment has no start station")?;
+                let length = al.alignment_geometry_points().last().map(|g| g.distance).ok_or("the alignment has no length")?;
+                // Each surface follows one link code, corrected to the top or the bottom links,
+                // and is bounded by the corridor's extents.
+                let codes: &[(&str, i32)] = match req.text("surfaces").unwrap_or(crate::modules::civil::CORRIDOR_SURFACES[0]) {
+                    "Top" => &[("Top", 1)],
+                    "Datum" => &[("Datum", 2)],
+                    "Top and Datum" => &[("Top", 1), ("Datum", 2)],
+                    _ => &[],
+                };
+                let surfaces: Vec<c3d::CorridorSurfaceDefinition> = codes
+                    .iter()
+                    .map(|(code, correction)| c3d::CorridorSurfaceDefinition {
+                        name: format!("{corridor} - {code}"),
+                        build: true,
+                        link_codes: vec![(code.to_string(), true)],
+                        feature_line_codes: Vec::new(),
+                        overhang_correction: *correction,
+                    })
+                    .collect();
+                let boundaries = surfaces
+                    .iter()
+                    .map(|s| c3d::CorridorBoundary {
+                        surface: s.name.clone(),
+                        name: "Corridor Extents".into(),
+                        description: String::new(),
+                        kind: CORRIDOR_EXTENTS,
+                        corners: Vec::new(),
+                        components: 0,
+                    })
+                    .collect();
+                let region = c3d::CorridorRegion {
+                    name: "Region (1)".into(),
+                    assembly: assembly.value(),
+                    start,
+                    end: start + length,
+                    frequency: c3d::RegionFrequency::default(),
+                    targets: Vec::new(),
+                };
+                let baseline = c3d::CorridorBaseline {
+                    name: "Baseline (1)".into(),
+                    feature_line: 0,
+                    alignment: alignment.value(),
+                    profile: profile.value(),
+                    regions: vec![region],
+                    stations: Vec::new(),
+                    built: false,
+                };
+                let def = c3d::CorridorDefinition { name: corridor.clone(), surfaces, boundaries, baselines: vec![baseline], ..c3d::CorridorDefinition::default() };
                 self.push_undo_snapshot(i, name);
                 let doc = &mut self.tabs[i].scene.document;
-                let h = c3d::add_corridor(doc, &corridor, "Baseline (1)", "Region (1)", alignment, profile, assembly, layer)
-                    .map_err(refused)?;
+                let h = c3d::add_corridor_with(doc, &def, layer).map_err(refused)?;
                 changes.push((h, ChangeKind::Added));
                 crate::tf!("Corridor {} created; it is built when the corridor is rebuilt.", corridor).into_owned()
             }
@@ -426,6 +543,62 @@ impl OpenCADStudio {
                 changes.push((h, ChangeKind::Added));
                 crate::tf!("Intersection {} created.", intersection).into_owned()
             }
+            "CREATEPIPENETWORK" => {
+                if req.points.is_empty() {
+                    return Ok(String::new());
+                }
+                let structure_family = req.text("structure").map(str::to_owned);
+                let pipe_family = req.text("pipe").map(str::to_owned);
+                let network = next_name(&self.tabs[i].scene.document, "AECC_NETWORK", "Network");
+                self.push_undo_snapshot(i, name);
+                let doc = &mut self.tabs[i].scene.document;
+                let h = c3d::add_pipe_network(doc, &network, layer).map_err(refused)?;
+                // A structure at each point, a pipe between each two, connected at its ends.
+                let mut structures = Vec::new();
+                for p in &req.points {
+                    let at = Vector3::new(p.x, p.y, p.z);
+                    let s = match &structure_family {
+                        Some(family) => c3d::add_structure_of_family(doc, h, family, at, 0.0),
+                        None => c3d::add_structure(doc, h, at, 0.0),
+                    };
+                    structures.push(s.map_err(refused)?);
+                }
+                for (k, w) in req.points.windows(2).enumerate() {
+                    let (a, b) = (Vector3::new(w[0].x, w[0].y, w[0].z), Vector3::new(w[1].x, w[1].y, w[1].z));
+                    let pipe = match &pipe_family {
+                        Some(family) => c3d::add_pipe_of_family(doc, h, family, a, b),
+                        None => c3d::add_pipe(doc, h, a, b),
+                    }
+                    .map_err(refused)?;
+                    c3d::connect_pipe(doc, pipe, Some(structures[k]), Some(structures[k + 1])).map_err(refused)?;
+                }
+                crate::tf!("Pipe network {} created with {} structure(s).", network, structures.len()).into_owned()
+            }
+            "CREATEPRESSURENETWORK" => {
+                if req.points.len() < 2 {
+                    return Err(crate::t!("A pressure network needs at least two points.").into_owned());
+                }
+                let size = req.text("pipe").map(str::to_owned);
+                let network = next_name(&self.tabs[i].scene.document, "AECC_PRESSUREPIPES_NETWORK", "Pressure Network");
+                self.push_undo_snapshot(i, name);
+                let doc = &mut self.tabs[i].scene.document;
+                let h = c3d::add_pressure_network(doc, &network, layer).map_err(refused)?;
+                // A pipe between each two points, joined end to start.
+                let mut previous = None;
+                for w in req.points.windows(2) {
+                    let (a, b) = (Vector3::new(w[0].x, w[0].y, w[0].z), Vector3::new(w[1].x, w[1].y, w[1].z));
+                    let pipe = match &size {
+                        Some(size) => c3d::add_pressure_pipe_of_size(doc, h, size, a, b, 0.0),
+                        None => c3d::add_pressure_pipe(doc, h, a, b),
+                    }
+                    .map_err(refused)?;
+                    if let Some(prev) = previous {
+                        c3d::connect_pressure_parts(doc, prev, 1, pipe, 0).map_err(refused)?;
+                    }
+                    previous = Some(pipe);
+                }
+                crate::tf!("Pressure network {} created with {} pipe(s).", network, req.points.len() - 1).into_owned()
+            }
             _ => return Err(crate::t!("Unknown civil command.").into_owned()),
         };
         self.tabs[i].dirty = true;
@@ -435,5 +608,29 @@ impl OpenCADStudio {
             self.tabs[i].scene.bump_entities(&changes);
         }
         Ok(message)
+    }
+
+    /// The Name row of a selected COGO point: the typed name, none when cleared.
+    pub(super) fn commit_cogo_point_name(&mut self) -> iced::Task<crate::app::Message> {
+        let i = self.active_tab;
+        let field = crate::entities::civil::COGO_POINT_NAME;
+        self.tabs[i].properties.active_field = None;
+        let Some(typed) = self.tabs[i].properties.edit_buf.remove(&crate::ui::properties::FieldKey::Geom(field)) else {
+            return iced::Task::none();
+        };
+        let name = Some(typed.trim()).filter(|t| !t.is_empty());
+        let handles = self.property_target_handles(i);
+        self.push_undo_snapshot(i, "PROPERTIES");
+        for h in handles {
+            match c3d::set_cogo_point_name(&mut self.tabs[i].scene.document, h, name) {
+                Err(document::error::DxfError::Parse(message)) => self.command_line.push_error(&message),
+                Err(e) => self.command_line.push_error(&e.to_string()),
+                Ok(()) => {}
+            }
+        }
+        self.tabs[i].dirty = true;
+        self.tabs[i].scene.bump_geometry();
+        self.refresh_properties();
+        iced::Task::none()
     }
 }

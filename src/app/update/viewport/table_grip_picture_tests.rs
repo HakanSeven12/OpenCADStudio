@@ -312,3 +312,109 @@ fn table_fill_drag_reaches_the_cell_under_the_cursor_with_drawing_aids_on() {
         );
     }
 }
+
+/// Dragging a formula cell's fill diamond copies the formula with its cell
+/// references moved, as a spreadsheet does (D1 =SUM(A1:C1) filled down
+/// gives D2 =SUM(A2:C2) and D3 =SUM(A3:C3)), each a formula field showing
+/// its own result; any other field is copied as a field. One undo takes
+/// the fill back.
+#[test]
+fn table_fill_copies_formulas_with_moved_references_and_fields() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.snapper.snap_enabled = false;
+    app.snapper.grid_snap_on = false;
+    app.snapper.otrack_enabled = false;
+    app.ortho_mode = false;
+    app.polar_mode = false;
+    let i = app.active_tab;
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+    let mut source = Table::new(Vector3::ZERO, 3, 5);
+    for column in &mut source.columns {
+        column.width = 20.0;
+    }
+    for row in &mut source.rows {
+        row.height = 10.0;
+    }
+    for (row, values) in [["1", "2", "3"], ["10", "20", "30"], ["100", "200", "300"]]
+        .iter()
+        .enumerate()
+    {
+        for (column, value) in values.iter().enumerate() {
+            source.set_cell_text(row, column, value);
+        }
+    }
+    source.set_cell_text(0, 3, "=SUM(A1:C1)");
+    let h = app.tabs[i]
+        .scene
+        .add_entity(EntityType::Table(Box::new(source)));
+    let document = &mut app.tabs[i].scene.document;
+    assert!(crate::entities::table::typed_formula_to_field(
+        document, h, 0, 3
+    ));
+    document
+        .set_table_cell_field(
+            h,
+            0,
+            4,
+            "%<\\_FldIdx 0>%",
+            vec![document::fields::NewField::new("\\AcVar Author", "someone")],
+        )
+        .expect("field cell");
+    let formula = |app: &OpenCADStudio, row: usize, column: usize| {
+        let document = &app.tabs[app.active_tab].scene.document;
+        crate::entities::table::cell_formula_text(document, table(document, h), row, column)
+    };
+    let field_code = |app: &OpenCADStudio, row: usize, column: usize| {
+        use document::objects::ObjectType;
+        let document = &app.tabs[app.active_tab].scene.document;
+        let container = table(document, h)
+            .cell(row, column)?
+            .contents
+            .first()?
+            .field_handle?;
+        let Some(ObjectType::Field(container)) = document.objects.get(&container) else {
+            return None;
+        };
+        let [child] = container.child_fields.as_slice() else {
+            return None;
+        };
+        match document.objects.get(child) {
+            Some(ObjectType::Field(child)) => Some(child.code.clone()),
+            _ => None,
+        }
+    };
+    let shown = |app: &OpenCADStudio, row: usize, column: usize| {
+        table(&app.tabs[app.active_tab].scene.document, h)
+            .cell(row, column)
+            .unwrap()
+            .text_value()
+            .to_string()
+    };
+    assert_eq!(formula(&app, 0, 3).as_deref(), Some("=SUM(A1:C1)"));
+    let fill = crate::entities::table::CELL_GRIP_FILL;
+    // D1:E1 picked; the diamond sits at E1's lower right corner (100, -10);
+    // the cursor goes into E3.
+    crate::entities::table::set_prop_cell_range(Some((0, 3, 0, 4)));
+    drag(&mut app, h, fill, glam::DVec3::new(-3.0, -16.0, 0.0));
+    let cells = app.tabs[i].scene.table_cells;
+    let _ = app.commit_active_grip_edit();
+    crate::entities::table::set_prop_cell_range(None);
+    let cells = cells.expect("fill span shown");
+    assert_eq!((cells.anchor, cells.end), ((0, 3), (2, 4)));
+    assert_eq!(formula(&app, 1, 3).as_deref(), Some("=SUM(A2:C2)"));
+    assert_eq!(formula(&app, 2, 3).as_deref(), Some("=SUM(A3:C3)"));
+    assert_eq!(shown(&app, 1, 3), "60");
+    assert_eq!(shown(&app, 2, 3), "600");
+    assert_eq!(field_code(&app, 1, 4).as_deref(), Some("\\AcVar Author"));
+    assert_eq!(field_code(&app, 2, 4).as_deref(), Some("\\AcVar Author"));
+    assert_eq!(shown(&app, 2, 4), "someone");
+    // The source cells keep their own formula and field.
+    assert_eq!(formula(&app, 0, 3).as_deref(), Some("=SUM(A1:C1)"));
+    assert_eq!(field_code(&app, 0, 4).as_deref(), Some("\\AcVar Author"));
+    app.undo_steps(1);
+    assert_eq!(formula(&app, 1, 3), None);
+    assert_eq!(field_code(&app, 2, 4), None);
+    assert_eq!(shown(&app, 1, 3), "");
+    assert_eq!(formula(&app, 0, 3).as_deref(), Some("=SUM(A1:C1)"));
+}

@@ -404,6 +404,32 @@ fn grips(t: &MText) -> Vec<GripDef> {
     result
 }
 
+/// Text without a defined width or height still shows its width and height
+/// grips, on the box the text is drawn in, instead of on the insertion grip.
+/// `None` when the stored box already places them.
+pub(crate) fn grips_on_drawn_box(t: &MText, document: &document::Document) -> Option<Vec<GripDef>> {
+    let no_width = t.rectangle_width <= 0.0 && t.column_data.column_type == 0;
+    let no_height = t
+        .rectangle_height
+        .or_else(|| t.column_data.heights.first().copied())
+        .is_none_or(|h| h <= 0.0);
+    if !no_width && !no_height {
+        return None;
+    }
+    let [min_x, min_y, max_x, max_y] = layout_of(t, document, false).local_bounds;
+    if min_x > max_x || min_y > max_y {
+        return None;
+    }
+    let mut drawn = t.clone();
+    if no_width {
+        drawn.rectangle_width = (max_x - min_x) as f64;
+    }
+    if no_height {
+        drawn.rectangle_height = Some((max_y - min_y) as f64);
+    }
+    Some(grips(&drawn))
+}
+
 fn columns_str(c: &document::entities::MTextColumnData) -> &'static str {
     match c.column_type {
         1 => "Static",
@@ -485,11 +511,12 @@ fn properties(t: &MText, text_style_names: &[String]) -> Vec<PropSection> {
                     },
                 },
                 // Fixed by the style when the style says so — see Text.
-                crate::entities::common::num_prop(
+                crate::entities::common::text_height_prop(
                     t!("Text height").as_ref(),
                     "height",
                     t.height,
-                    crate::entities::common::style_fixed_height(&t.style).is_none(),
+                    &t.style,
+                    true,
                 ),
                 edit_angle(t!("Rotation").as_ref(), "rotation", t.rotation.to_degrees()),
                 edit(

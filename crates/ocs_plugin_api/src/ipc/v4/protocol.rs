@@ -289,6 +289,9 @@ mod tests {
             TableOperation::LayoutSetTabOrder {
                 names: vec!["T".into(), "S".into()],
             },
+            TableOperation::CustomPropertiesSet {
+                properties: vec![("Job".into(), "42".into())],
+            },
         ] {
             let bytes = bincode::serialize(&PluginRequest::TableOperation {
                 operation: operation.clone(),

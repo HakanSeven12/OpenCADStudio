@@ -857,34 +857,9 @@ impl OpenCADStudio {
                 }
             }
 
-            // ADCENTER / CONTENTBROWSER — report the drawing's named content
-            // (blocks and layers) from the command line in place of the browser
-            // panel.
-            "ADCENTER" | "CONTENTBROWSER" => {
-                let blocks = self.tabs[i].scene.custom_block_names();
-                let layers: Vec<String> = self.tabs[i]
-                    .scene
-                    .document
-                    .layers
-                    .names()
-                    .map(|s| s.to_string())
-                    .collect();
-                self.command_line.push_output(
-                    crate::tf!(
-                        "Blocks ({}): {}",
-                        blocks.len(),
-                        if blocks.is_empty() {
-                            "(none)".to_string()
-                        } else {
-                            blocks.join(", ")
-                        }
-                    )
-                    .as_ref(),
-                );
-                self.command_line.push_output(
-                    crate::tf!("Layers ({}): {}", layers.len(), layers.join(", ")).as_ref(),
-                );
-            }
+            // ADCENTER / CONTENTBROWSER — browse another drawing's named
+            // content and add it to this one.
+            "ADCENTER" | "CONTENTBROWSER" => self.open_design_center(),
 
             // BLOCKSPALETTE opens the Blocks palette; BLOCKSPALETTECLOSE
             // closes it. `_BLOCKSPALETTE <tab>` opens it on a tab.
@@ -1424,6 +1399,7 @@ impl OpenCADStudio {
                             // Reloaded keys leave the session-unloaded set
                             // (so the listing agrees) with fresh stat
                             // baselines on the next palette refresh.
+                            let mut image_keys: Vec<u64> = Vec::new();
                             let reload_keys: Vec<u64> = {
                                 let entries = crate::io::xref::collect_entries_with_prev(
                                     &self.tabs[i].scene.document,
@@ -1449,6 +1425,8 @@ impl OpenCADStudio {
                                             "XREF: cannot reload nested reference '{}'. Reload it in its host drawing.",
                                             e.name
                                         ).as_ref());
+                                    } else if e.kind == crate::io::xref_model::RefKind::Image {
+                                        image_keys.push(e.key);
                                     } else if e.kind != crate::io::xref_model::RefKind::DwgXref {
                                         self.command_line.push_error(
                                             crate::tf!(
@@ -1468,6 +1446,9 @@ impl OpenCADStudio {
                             // return before snapshot + resolve so no empty
                             // undo entry is pushed and no spurious
                             // no-match error follows the per-entry reports.
+                            if !image_keys.is_empty() {
+                                self.reload_image_refs(i, &image_keys);
+                            }
                             if reload_keys.is_empty() && !pattern.is_empty() && pattern != "*" {
                                 return Some(self.finish_dispatch(cmd));
                             }
@@ -2863,10 +2844,9 @@ mod tests {
     }
 
     #[test]
-    fn xref_reload_image_keeps_flag_no_spurious_match() {
-        // CLI mirror of the palette F7 guard: reloading an image row reports
-        // the drawing-only error, leaves its unloaded flag untouched, and
-        // does not follow with a spurious no-match error.
+    fn xref_reload_image_reloads_it_no_spurious_match() {
+        // Reloading an unloaded image row loads it again (#3368) and does not
+        // follow with a spurious no-match error.
         use document::objects::{ImageDefinition, ObjectType};
         let mut app = fresh_app();
         let i = app.active_tab;
@@ -2894,7 +2874,7 @@ mod tests {
         app.tabs[i].xref_unloaded.add(h.value());
         let out = run_capture(&mut app, "XREF Reload img.png");
         assert!(
-            out.contains("reload applies to drawing references only"),
+            !out.contains("reload applies to drawing references only"),
             "got: {out:?}"
         );
         assert!(
@@ -2902,8 +2882,8 @@ mod tests {
             "spurious no-match, got: {out:?}"
         );
         assert!(
-            app.tabs[i].xref_unloaded.is_unloaded(h.value()),
-            "image flag must stay untouched"
+            !app.tabs[i].xref_unloaded.is_unloaded(h.value()),
+            "image must be loaded again"
         );
     }
 

@@ -1440,6 +1440,17 @@ mod tests {
 
         let preview = command.on_preview_wires(DVec3::new(4.0, 5.0, 0.0));
 
-        assert!(!preview.is_empty());
+        // Moving the legacy basepoint materializes a parameter whose preview
+        // is the captioned leader at the NEW point, not the old (2, 3).
+        assert_eq!(preview.len(), 1, "the materialized basepoint's leader");
+        let points = &preview[0].geom.points;
+        assert_eq!(points.len(), 2);
+        for (point, expected) in points.iter().zip([[4.0, 5.0], [4.25, 5.25]]) {
+            assert!(
+                (point[0] - expected[0]).abs() < 1e-4
+                    && (point[1] - expected[1]).abs() < 1e-4,
+                "leader point {point:?}, expected {expected:?}"
+            );
+        }
     }
 }

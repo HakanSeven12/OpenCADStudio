@@ -1247,14 +1247,18 @@ impl Scene {
 
     /// The definitions an operator can place by name. Generated records
     /// (`*U`, `*D`, …) are not definitions anybody authored, so listing them
-    /// would advertise a block nobody made.
+    /// would advertise a block nobody made. Sorted by name, ignoring case,
+    /// as the block lists show them.
     pub fn custom_block_names(&self) -> Vec<String> {
-        self.document
+        let mut names: Vec<String> = self
+            .document
             .block_records
             .iter()
             .filter(|br| !br.is_standard() && !br.is_layout() && !br.is_anonymous())
             .map(|br| br.name.clone())
-            .collect()
+            .collect();
+        names.sort_by_cached_key(|name| name.to_lowercase());
+        names
     }
 
     pub fn create_block_from_entities(

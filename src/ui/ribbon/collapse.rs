@@ -188,6 +188,8 @@ pub(crate) struct CollapsePanels<'a> {
     /// The message a drop off the ribbon sends: the panel id and where its
     /// top-left corner landed.
     on_float: Option<Box<dyn Fn(String, Point) -> Message + 'a>>,
+    /// Center the panels in the row while they have room to spare.
+    centered: bool,
 }
 
 /// How far the pointer moves from the press before the press becomes a drag.
@@ -258,6 +260,16 @@ fn drag_to(order: &mut [usize], panel: usize, x: f32, bounds: &[Rectangle]) -> b
         }
     }
     slot != start
+}
+
+/// How far a row `used` wide moves right to sit in the middle of `max_w`:
+/// nothing unless `centered` and the row leaves room to spare.
+fn centered_shift(centered: bool, used: f32, max_w: f32) -> f32 {
+    if centered && max_w.is_finite() && used < max_w {
+        ((max_w - used) / 2.0).floor()
+    } else {
+        0.0
+    }
 }
 
 /// Whether `at` is more than `FLOAT_MARGIN` above or below the row `row`:
@@ -332,7 +344,16 @@ impl<'a> CollapsePanels<'a> {
             drag_strip: 0.0,
             on_reorder: None,
             on_float: None,
+            centered: false,
         }
+    }
+
+    /// Center the panels in the row instead of starting them at its left
+    /// edge. Only spare room moves them: a row that needs its whole width
+    /// lays out as before.
+    pub fn centered(mut self, centered: bool) -> Self {
+        self.centered = centered;
+        self
     }
 
     /// Let a floatable panel dragged more than `FLOAT_MARGIN` above or below
@@ -346,7 +367,8 @@ impl<'a> CollapsePanels<'a> {
     /// Let a press on the bottom `strip` px of a full or compact panel drag
     /// it to another place; a drop sends `on_reorder` with the panel ids in
     /// their new order. The title strip continues after the last panel to
-    /// the right edge.
+    /// the right edge and, while the panels are centered, from the left
+    /// edge to the first panel.
     pub fn draggable(
         mut self,
         strip: f32,
@@ -599,6 +621,17 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
             }
             placed[i].1 = x;
             x += placed[i].0.size().width;
+        }
+        // Centered, the spare room is split over both ends of the row. A
+        // panel dragged off the row still counts, so the others close up
+        // toward the left instead of jumping to a new middle.
+        let dragged_out = left.map_or(0.0, |i| placed[i].0.size().width);
+        let shift = centered_shift(self.centered, x + dragged_out, max_w);
+        if shift > 0.0 {
+            for (_, node_x, _) in &mut placed {
+                *node_x += shift;
+            }
+            x += shift;
         }
 
         // The row is as tall as the tallest shown panel, so the ribbon height
@@ -879,19 +912,46 @@ impl<'a> Widget<Message, Theme, Renderer> for CollapsePanels<'a> {
         let wb = layout.bounds();
         // The title strip after the last panel, with its line on top, and a
         // divider closing the last panel.
-        let end = bounds.iter().map(|b| b.x + b.width).fold(wb.x, f32::max);
+        let quad = |x: f32, y: f32, width: f32, height: f32| renderer::Quad {
+            bounds: Rectangle {
+                x,
+                y,
+                width,
+                height,
+            },
+            border: Border::default(),
+            shadow: Shadow::default(),
+            snap: true,
+        };
+        // Centered, the strip also runs from the row's left edge to the first
+        // panel, which a divider opens. A panel dragged off the row is not
+        // in it.
+        let in_row = |i: &usize| !drag.is_some_and(|drag| drag.outside && drag.panel == *i);
+        let start = (0..bounds.len())
+            .filter(in_row)
+            .map(|i| bounds[i].x)
+            .fold(f32::INFINITY, f32::min);
+        if self.drag_strip > 0.0 && start.is_finite() && start > wb.x {
+            let top = wb.y + wb.height - self.drag_strip;
+            let width = start - wb.x;
+            renderer.fill_quad(
+                quad(wb.x, top, width, self.drag_strip),
+                Background::Color(chrome::title_bar(theme)),
+            );
+            renderer.fill_quad(
+                quad(wb.x, top, width, crate::ui::icons::hairline()),
+                Background::Color(chrome::page(theme)),
+            );
+            renderer.fill_quad(
+                quad(start, wb.y, crate::ui::icons::hairline(), wb.height),
+                Background::Color(chrome::page(theme)),
+            );
+        }
+        let end = (0..bounds.len())
+            .filter(in_row)
+            .map(|i| bounds[i].x + bounds[i].width)
+            .fold(wb.x, f32::max);
         if self.drag_strip > 0.0 && end < wb.x + wb.width {
-            let quad = |x: f32, y: f32, width: f32, height: f32| renderer::Quad {
-                bounds: Rectangle {
-                    x,
-                    y,
-                    width,
-                    height,
-                },
-                border: Border::default(),
-                shadow: Shadow::default(),
-                snap: true,
-            };
             let top = wb.y + wb.height - self.drag_strip;
             let width = wb.x + wb.width - end;
             renderer.fill_quad(
@@ -1168,6 +1228,72 @@ mod tests {
         ];
         assert!(!drag_to(&mut order, 0, 201.0, &after));
         assert_eq!(order, [1, 0]);
+    }
+
+    #[test]
+    fn centering_splits_only_spare_room() {
+        assert_eq!(centered_shift(true, 600.0, 1000.0), 200.0);
+        // Odd room rounds down to whole pixels.
+        assert_eq!(centered_shift(true, 601.0, 1000.0), 199.0);
+        // A full or overflowing row stays where it was.
+        assert_eq!(centered_shift(true, 1000.0, 1000.0), 0.0);
+        assert_eq!(centered_shift(true, 1200.0, 1000.0), 0.0);
+        // Unbounded or off, nothing moves.
+        assert_eq!(centered_shift(true, 600.0, f32::INFINITY), 0.0);
+        assert_eq!(centered_shift(false, 600.0, 1000.0), 0.0);
+    }
+
+    /// Lays two 200 px panels out in a row `width` wide and returns their x.
+    fn panel_xs(centered: bool, width: f32) -> Vec<f32> {
+        let panel = |id: &'static str| {
+            Panel::deferred(id, |level| {
+                let w = match level {
+                    Level::Full => 200.0,
+                    Level::Compact => 150.0,
+                    Level::Collapsed => 100.0,
+                    Level::Tight => 50.0,
+                };
+                iced::widget::container(iced::widget::text(""))
+                    .width(Length::Fixed(w))
+                    .height(Length::Fixed(80.0))
+                    .into()
+            })
+        };
+        let mut element: Element<'_, Message> =
+            CollapsePanels::new(vec![panel("a"), panel("b")], 80.0)
+                .centered(centered)
+                .into();
+        let _one = crate::headless_ui_lock();
+        let renderer = iced_test::futures::futures::executor::block_on(
+            <Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
+            ),
+        )
+        .expect("headless renderer");
+        let mut tree = widget::Tree::new(element.as_widget());
+        tree.diff(element.as_widget_mut());
+        let limits = layout::Limits::new(Size::ZERO, Size::new(width, 200.0));
+        let node = element
+            .as_widget_mut()
+            .layout(&mut tree, &renderer, &limits);
+        // The row spans the space either way, so its title strip does too.
+        assert_eq!(node.size().width, width);
+        node.children().iter().map(|c| c.bounds().x).collect()
+    }
+
+    #[test]
+    fn centered_panels_sit_in_the_middle_of_a_wide_row() {
+        assert_eq!(panel_xs(false, 1000.0), [0.0, 200.0]);
+        assert_eq!(panel_xs(true, 1000.0), [300.0, 500.0]);
+    }
+
+    #[test]
+    fn centered_panels_that_must_shrink_start_at_the_left_edge() {
+        // 400 px of full panels in 300 px: the right one shrinks to its
+        // 100 px button and the row is full, with nothing left to center.
+        assert_eq!(panel_xs(true, 300.0), [0.0, 200.0]);
+        assert_eq!(panel_xs(true, 300.0), panel_xs(false, 300.0));
     }
 
     #[test]

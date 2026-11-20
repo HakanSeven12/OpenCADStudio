@@ -137,7 +137,11 @@ fn base_geographic_gcs_matches_the_projected_drawing_crs() {
         "",
     );
     let pdf = make_pdf("2.0", &format!("/VP {vp}"), &[]);
-    assert!(placement_for_pdf_page(&pdf, 0, &crs, 1000.0).is_ok());
+    check_placement(
+        placement_for_pdf_page(&pdf, 0, &crs, 1000.0).unwrap(),
+        [-742_925.271_389_167_2, -1_043_020.310_123_933_5],
+        [144.0, 216.0],
+    );
     let mismatched = CrsDefinition::from_epsg(4326).unwrap();
     assert!(placement_for_pdf_page(&pdf, 0, &mismatched, 1000.0).is_err());
 }
@@ -167,7 +171,11 @@ fn indirect_viewport_and_lgit_arrays_are_supported_but_ambiguity_is_not() {
         "",
     );
     let pdf = make_pdf("1.7", "/VP 4 0 R", std::slice::from_ref(&vp));
-    assert!(placement_for_pdf_page(&pdf, 0, &crs, 1000.0).is_ok());
+    check_placement(
+        placement_for_pdf_page(&pdf, 0, &crs, 1000.0).unwrap(),
+        [-742_925.271_389_167_2, -1_043_020.310_123_933_5],
+        [144.0, 216.0],
+    );
     let pdf = make_pdf("1.7", &format!("/VP [{vp} {vp}]"), &[]);
     assert!(placement_for_pdf_page(&pdf, 0, &crs, 1000.0).is_err());
     let pdf = make_pdf(
@@ -193,7 +201,11 @@ fn lgit_gpts_takes_precedence_over_lower_precision_standard_values() {
         "/LPTS [0 0 0 0 0 0] /lgit:LPTS [0 0 1 0 0 1 1 1] /lgit:GPTS",
     );
     let pdf = make_pdf("1.7", &format!("/VP [{vp}]"), &[]);
-    assert!(placement_for_pdf_page(&pdf, 0, &crs, 1000.0).is_ok());
+    check_placement(
+        placement_for_pdf_page(&pdf, 0, &crs, 1000.0).unwrap(),
+        [-742_925.271_389_167_2, -1_043_020.310_123_933_5],
+        [144.0, 216.0],
+    );
 }
 
 fn legacy_wkt(crs: &CrsDefinition) -> String {

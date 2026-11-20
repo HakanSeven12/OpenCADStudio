@@ -771,6 +771,43 @@ pub fn num_prop(label: &str, field: &'static str, value: f64, editable: bool) ->
     }
 }
 
+/// Height row for a text or attribute entity. When its text style fixes a
+/// non-zero height, the row is read-only with a tooltip explaining how to make
+/// it editable (set the style height to 0 in STYLE or choose another style).
+pub fn text_height_prop(
+    label: &str,
+    field: &'static str,
+    height: f64,
+    style: &str,
+    editable_when_unfixed: bool,
+) -> Property {
+    if style_fixed_height(style).is_some() {
+        let style_name = style.trim();
+        let tooltip = if style_name.is_empty() {
+            crate::t!(
+                "Height is fixed by the text style. Set the style height to 0 in STYLE or choose another style to edit."
+            )
+            .into_owned()
+        } else {
+            crate::tf!(
+                "Height is fixed by text style \"{style}\". Set the style height to 0 in STYLE or choose another style to edit.",
+                style = style_name
+            )
+            .into_owned()
+        };
+        Property {
+            label: label.into(),
+            field,
+            value: PropValue::ReadOnlyWithTooltip {
+                value: format_length(height),
+                tooltip,
+            },
+        }
+    } else {
+        num_prop(label, field, height, editable_when_unfixed)
+    }
+}
+
 /// A ◀ / ▶ index navigator row (e.g. a polyline's Current Vertex). `display` is
 /// the label shown between the arrows (e.g. "2 / 7").
 pub fn stepper_prop(label: &str, field: &'static str, display: impl Into<String>) -> Property {

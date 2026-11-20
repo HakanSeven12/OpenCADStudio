@@ -163,7 +163,7 @@ impl OpenCADStudio {
         // default (LIMITS then compares an unintended lower-left point with
         // the displayed default upper-right).
         self.dyn_user_reshaped = false;
-        self.dyn_coord_absolute = false;
+        self.dyn_coord_absolute = self.dyn_pointer_absolute;
         self.tabs[i].dyn_fields.clear();
         self.tabs[i].dyn_active = 0;
     }

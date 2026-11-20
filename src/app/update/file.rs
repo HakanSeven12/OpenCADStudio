@@ -953,6 +953,9 @@ impl OpenCADStudio {
             spacemouse: self.spacemouse_preferences,
             dyn_input: self.dyn_input,
             dyn_mode: self.dyn_mode,
+            dyn_pointer_cartesian: self.dyn_pointer_cartesian,
+            dyn_pointer_absolute: self.dyn_pointer_absolute,
+            dyn_pointer_on_type: self.dyn_pointer_on_type,
             polar: self.polar_mode,
             polar_increment_deg: self.polar_increment_deg,
             zoom_wheel_reversed: self.zoom_wheel_reversed,
@@ -1148,6 +1151,9 @@ impl OpenCADStudio {
     /// Apply restored preferences to live state.
     pub(in crate::app) fn apply_settings(&mut self, s: &crate::app::settings::UserSettings) {
         self.dyn_mode = s.dyn_mode;
+        self.dyn_pointer_cartesian = s.dyn_pointer_cartesian;
+        self.dyn_pointer_absolute = s.dyn_pointer_absolute;
+        self.dyn_pointer_on_type = s.dyn_pointer_on_type;
         self.set_dyn_input(s.dyn_input);
         self.polar_mode = s.polar;
         self.polar_increment_deg = s.polar_increment_deg;

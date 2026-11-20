@@ -43,6 +43,14 @@ pub fn menu_entries<'a>(current: f32, custom: &'a str) -> Vec<Entry<'a>> {
     )
     .padding([5, 10]);
     entries.push(Entry::stay(custom_row));
+    entries.push(Entry::close(crate::ui::kit::menu::entry(
+        crate::ui::kit::menu::Item::new(
+            t!("Tracking Settings..."),
+            Message::OpenDraftingSettings(
+                crate::ui::window::drafting_settings::DraftingSettingsTab::PolarTracking,
+            ),
+        ),
+    )));
     entries
 }
 

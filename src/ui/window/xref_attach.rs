@@ -16,11 +16,19 @@ use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{button_style, dialog_button, field_style, form_radio, LABEL_WIDTH};
 use crate::ui::window::block_definition::{group, labeled_checkbox};
 
+/// What the read for an attach's placement ghost found in a file: its
+/// model-space objects and units; none when the file was not read or holds
+/// too many objects for a ghost.
+pub type XrefPreviewRead = Option<(Vec<document::EntityType>, i16)>;
+
 /// One edit in the dialog.
 #[derive(Debug, Clone)]
 pub enum XrefAttachMsg {
     /// Name box: a reference already in the drawing, picked or typed.
     Name(String),
+    /// The read of the chosen file, made off the UI thread: the file, its
+    /// thumbnail and its units.
+    FileRead(Box<(String, (Option<image::Handle>, i16))>),
     /// The reference's file, read off the UI thread for its attach: the tab
     /// it was started for, that document's generation, and the request, its
     /// INSERT and the read.
@@ -33,6 +41,10 @@ pub enum XrefAttachMsg {
             crate::io::xref::XrefRead,
         )>,
     ),
+    /// The placement ghost's read, made off the UI thread: the drawing it
+    /// was asked for, that document's generation, the file, and what the
+    /// read found.
+    PreviewRead(u64, u64, Box<(String, XrefPreviewRead)>),
     Browse,
     Overlay(bool),
     ScaleOnScreen(bool),

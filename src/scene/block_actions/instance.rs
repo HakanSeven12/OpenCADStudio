@@ -870,6 +870,7 @@ pub(crate) fn evaluate_frame(
     parameter: Handle,
     requested: ParameterFrame,
 ) -> Result<Option<Document>, &'static str> {
+    let requested = midpoint_frame(doc, insert, parameter, requested)?;
     evaluate_input(
         doc,
         insert,
@@ -877,6 +878,58 @@ pub(crate) fn evaluate_frame(
         Value::Point(requested.end),
         Some(requested),
     )
+}
+
+/// A linear parameter whose base location is Midpoint keeps its midpoint:
+/// moving one end moves the other end by the same amount the opposite way,
+/// and the value set constrains the whole distance.
+fn midpoint_frame(
+    doc: &Document,
+    insert: Handle,
+    parameter: Handle,
+    requested: ParameterFrame,
+) -> Result<ParameterFrame, &'static str> {
+    let Some(ObjectType::DynamicBlock(object)) = doc.objects.get(&parameter) else {
+        return Ok(requested);
+    };
+    let DynamicBlockData::LinearParameter(linear) = &object.data else {
+        return Ok(requested);
+    };
+    if linear.parameter.parameter_base_location != 1 {
+        return Ok(requested);
+    }
+    let Some(p) = definition(doc, insert)
+        .and_then(|def| all_parameters(doc, def).into_iter().find(|p| p.handle == parameter))
+    else {
+        return Ok(requested);
+    };
+    let previous = frame(doc, insert, &p)?;
+    let base_moved = requested.base.distance(previous.base) > 1e-10;
+    let end_moved = requested.end.distance(previous.end) > 1e-10;
+    if base_moved == end_moved {
+        return Ok(requested);
+    }
+    let mid = (previous.base + previous.end) * 0.5;
+    let axis = (previous.end - previous.base).normalize();
+    // Half of the requested distance, measured from the fixed midpoint.
+    let half = if end_moved {
+        (requested.end - mid).dot(axis)
+    } else {
+        (mid - requested.base).dot(axis)
+    };
+    if !(half > 1e-9) {
+        return Err("Specify a positive parameter length.");
+    }
+    let base = mid - axis * half;
+    let mut shifted = p.clone();
+    shifted.end += base - p.base;
+    shifted.base = base;
+    let end = super::constrain_parameter_position(doc, &shifted, mid + axis * half)?;
+    let half = (end - base).dot(axis) * 0.5;
+    Ok(ParameterFrame {
+        base: mid - axis * half,
+        end: mid + axis * half,
+    })
 }
 
 pub(crate) fn load_frames(

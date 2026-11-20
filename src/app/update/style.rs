@@ -1015,6 +1015,9 @@ impl OpenCADStudio {
             Some(crate::app::ColorPickTarget::PropertiesField(field)) => {
                 Some(Message::PropColorFieldChanged { field, color })
             }
+            Some(crate::app::ColorPickTarget::GraphPort(port)) => Some(Message::Graph(
+                crate::ui::node_graph::GraphMsg::Set(port, crate::app::control::color_value(color)),
+            )),
             Some(crate::app::ColorPickTarget::MText) => Some(Message::MTextColorChanged(color)),
             Some(crate::app::ColorPickTarget::AttrEditor) => {
                 Some(Message::AttrEditorColorValue(color))

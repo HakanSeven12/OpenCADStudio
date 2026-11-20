@@ -115,7 +115,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.6.8"
-source = "git+https://github.com/BjornFidder/acadrust.git?rev=c041f271d0ccb3b8e040533655e62a732dffe914#c041f271d0ccb3b8e040533655e62a732dffe914"
+source = "git+https://github.com/BjornFidder/acadrust.git?rev=a608c0ac149e49ac4718fc60ad4e196a407e910c#a608c0ac149e49ac4718fc60ad4e196a407e910c"
 dependencies = [
  "anyhow",
  "bitflags 2.13.1",
@@ -135,6 +135,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "web-time",
+ "whichever",
 ]
 
 [[package]]
@@ -4562,7 +4563,7 @@ dependencies = [
 [[package]]
 name = "opencaddocument"
 version = "0.1.0"
-source = "git+https://github.com/BjornFidder/opencaddocument.git?rev=9bd7e655e05ee7b39367e32c46a5ec5f12839fde#9bd7e655e05ee7b39367e32c46a5ec5f12839fde"
+source = "git+https://github.com/BjornFidder/opencaddocument.git?rev=997362f8d33af1add4b433c2df83152fbe62bfc1#997362f8d33af1add4b433c2df83152fbe62bfc1"
 dependencies = [
  "acadrust",
  "ifccad",
@@ -7623,6 +7624,26 @@ dependencies = [
  "log",
  "raw-window-handle",
  "web-sys",
+]
+
+[[package]]
+name = "whichever"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68887c9512981e597d730f1d95b2eb6abdd53385e4e76c35a95e7121e16232b0"
+dependencies = [
+ "whichever-macros",
+]
+
+[[package]]
+name = "whichever-macros"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb15ad553239d9fdefac12e31e16c7682dc62a2106ba035aec69c5dd15835a7b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
 ]
 
 [[package]]

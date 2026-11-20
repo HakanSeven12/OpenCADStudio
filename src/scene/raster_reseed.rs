@@ -180,8 +180,8 @@ impl Scene {
     }
 
     /// Takes the rasters of a finished job: each one whose input is still
-    /// the one this scene would use now replaces the object's raster, in
-    /// one bump that does not draw them again. Returns how many it took.
+    /// the one this scene would use now replaces the object's raster.
+    /// Returns how many it took.
     pub fn apply_reseed(&mut self, done: ReseedDone) -> usize {
         let mut changes = Vec::new();
         for (handle, input, raster) in done.items {
@@ -204,7 +204,15 @@ impl Scene {
         }
         let taken = changes.len();
         if taken > 0 {
-            self.bump_entities(&changes);
+            // A re-delivered raster is derived data: the entity, its draw
+            // order and every wire are untouched, so this takes no geometry
+            // bump. Bumping would drop every viewport cache and re-walk the
+            // whole drawing on the UI thread right after the view settled —
+            // the hitch that made every zoom rest feel broken (#3339). The
+            // fresh pixels go into the cached gathered lists directly, and
+            // the GPU re-uploads them off the pixel-buffer identity.
+            let handles: Vec<Handle> = changes.iter().map(|(handle, _)| *handle).collect();
+            self.patch_image_caches(self.geometry_epoch, &handles);
         }
         self.fresh_images.clear();
         taken
@@ -303,6 +311,37 @@ mod tests {
                 .all(|(a, b)| !std::sync::Arc::ptr_eq(a, b)),
             "the new rasters replace the old"
         );
+    }
+
+    /// Taking a reseed patches the cached gathered image list in place: the
+    /// next frame reuses the same list with the fresh pixels instead of
+    /// re-walking the whole drawing for a rebuild after the view settled.
+    #[test]
+    fn a_reseed_patches_the_cached_image_list_in_place() {
+        let (mut scene, handles) = model_with_underlays("patch-cache");
+        // Warm the gather cache the way a rendered frame does; only the list's
+        // address is kept, so the patch is free to splice the list in place.
+        let cached_ptr = std::sync::Arc::as_ptr(&scene.images_arc()) as usize;
+        rest_at(&mut scene, 0.0, 0.0, 8.0, 8.0);
+        let done = scene.take_reseed_job().expect("a job for the worker").render();
+        assert_eq!(scene.apply_reseed(done), handles.len());
+        let patched = scene.images_arc();
+        assert_eq!(
+            std::sync::Arc::as_ptr(&patched) as usize,
+            cached_ptr,
+            "the cached list is reused, not rebuilt"
+        );
+        for model in patched.iter() {
+            let entity = model.entity.expect("each gathered model names its entity");
+            let fresh = &scene.images[&entity];
+            assert!(
+                std::sync::Arc::ptr_eq(&model.pixels, &fresh.pixels),
+                "the list carries the reseeded raster's pixels"
+            );
+        }
+        let entities: std::collections::HashSet<_> =
+            patched.iter().filter_map(|model| model.entity).collect();
+        assert_eq!(entities.len(), handles.len(), "each entity is gathered once");
     }
 
     /// A result for an older zoom step is dropped; the newer one is taken.

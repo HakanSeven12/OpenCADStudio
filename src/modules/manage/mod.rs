@@ -3,6 +3,7 @@
 mod about;
 mod audit;
 pub mod compare;
+pub mod gapcheck;
 mod cui_export;
 mod cui_import;
 mod find_nonpurgeable;

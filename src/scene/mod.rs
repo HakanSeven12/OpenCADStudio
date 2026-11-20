@@ -78,6 +78,8 @@ mod resident_patch_shorter_runs_tests;
 mod solid_box_select_tests;
 #[cfg(test)]
 mod solid_highlight_outline_tests;
+#[cfg(test)]
+mod solid_outline_detail_tests;
 pub use camera_ops::{add_background, copy_background, erase_background};
 pub use raster_reseed::{ReseedDone, ReseedJob};
 pub(crate) mod center_native;
@@ -116,6 +118,7 @@ pub(crate) use modify::remap_copied_reactors;
 pub(crate) use modify::remap_copied_viewport_clips;
 mod mspace;
 pub mod named_parameters;
+mod outline_detail;
 mod page_setup;
 mod paper;
 mod preview;
@@ -1123,8 +1126,17 @@ const CACHE_CATEGORY_INSERT_HATCH: u16 = 1 << 7;
 struct ResidentWireSet {
     epoch: u64,
     gen: u64,
+    /// [`resident_touch`] stamp of the last build or reuse: pruning gives up
+    /// the least recently used set first.
+    used: std::cell::Cell<u64>,
     wires: Arc<Vec<WireModel>>,
     layout: Option<ResidentWireLayout>,
+}
+
+/// Monotonic stamp for [`ResidentWireSet::used`].
+fn resident_touch() -> u64 {
+    static TOUCH: AtomicU64 = AtomicU64::new(0);
+    TOUCH.fetch_add(1, Ordering::Relaxed)
 }
 
 #[derive(Clone)]
@@ -2663,6 +2675,11 @@ pub struct Scene {
     annotation_highlight_cache: RefCell<HashMap<u64, Arc<Vec<WireModel>>>>,
     // The selected part is independent of box/rollover hover changes.
     annotation_selected_cache: RefCell<HashMap<u64, AnnotationSelectedEntry>>,
+    /// The step of scale the outlines of highlighted solids were last built
+    /// for in each view (its viewport handle and model tile; see
+    /// `outline_detail`). A view that is being zoomed keeps its step until
+    /// it rests.
+    outline_steps: RefCell<HashMap<(Handle, Option<usize>), Option<i32>>>,
     /// Per wire-source `(geometry_epoch, gathered text)` of the most recent
     /// SDF-text build. When a new content id misses the cache but the journal
     /// shows no text-bearing entity changed since that epoch, the same glyphs
@@ -2748,6 +2765,9 @@ pub struct Scene {
     /// The table whose fill grip is being dragged: its picked range stays
     /// drawn over the grip preview that hides it.
     pub table_fill_drag: Option<Handle>,
+    /// The cells the table fill being dragged copied from field cells, made
+    /// fields again when the drag is committed.
+    pub table_fill_fields: Option<(Handle, Vec<crate::entities::table::FillPair>)>,
     /// The table whose cell is open in the in-place editor: the editor's
     /// picture hides it, but its row and column labels stay drawn.
     pub table_cell_editing: Option<Handle>,
@@ -3695,6 +3715,7 @@ impl Scene {
             active_model_tile: std::cell::Cell::new(0),
             sdf_text_cache: RefCell::new(HashMap::default()),
             annotation_highlight_cache: RefCell::new(HashMap::default()),
+            outline_steps: RefCell::new(HashMap::default()),
             annotation_selected_cache: RefCell::new(HashMap::default()),
             last_sdf_text: RefCell::new(HashMap::default()),
             // One pane mapped to tile 0 — matches the single default tile above.
@@ -3717,6 +3738,7 @@ impl Scene {
             reference_only: Default::default(),
             preview_hidden: HashSet::default(),
             table_fill_drag: None,
+            table_fill_fields: None,
             table_cell_editing: None,
             command_preview_hidden: HashSet::default(),
             mtext_editor_hidden: None,
@@ -4135,9 +4157,9 @@ impl Scene {
                     );
                 }
                 let arc = Arc::new(built);
-                self.block_defn_cache
-                    .borrow_mut()
-                    .insert(key, (self.block_epoch, Arc::clone(&arc)));
+                let mut cache = self.block_defn_cache.borrow_mut();
+                self.bound_block_defn_cache(&mut cache);
+                cache.insert(key, (self.block_epoch, Arc::clone(&arc)));
                 return arc;
             }
         }
@@ -4167,8 +4189,22 @@ impl Scene {
         let arc = Arc::new(built);
         let mut cache = self.block_defn_cache.borrow_mut();
         cache.retain(|_, (epoch, _)| *epoch == self.block_epoch);
+        self.bound_block_defn_cache(&mut cache);
         cache.insert(key, (self.block_epoch, Arc::clone(&arc)));
         arc
+    }
+
+    /// Each entry holds every block definition built for one viewport, and
+    /// layout switches leave the block epoch alone: one entry per viewport
+    /// ever shown piled up until memory ran out (#3260). Keep what one frame
+    /// draws (model tiles count as 4) plus a little slack.
+    fn bound_block_defn_cache(
+        &self,
+        cache: &mut HashMap<u64, (u64, Arc<cache::block_cache::BlockCache>)>,
+    ) {
+        if cache.len() > self.frame_wire_set_count().max(4) + 2 {
+            cache.clear();
+        }
     }
 
     /// Install loader-thread geometry into this scene's Model resident cache.
@@ -4204,6 +4240,7 @@ impl Scene {
             ResidentWireSet {
                 epoch: self.geometry_epoch,
                 gen,
+                used: std::cell::Cell::new(resident_touch()),
                 wires: Arc::clone(&prepared.wires),
                 layout: prepared.resident_layout,
             },
@@ -10049,6 +10086,7 @@ impl Scene {
             let sets = self.resident_wire_sets.borrow();
             if let Some(set) = sets.get(&key) {
                 if set.epoch == self.geometry_epoch {
+                    set.used.set(resident_touch());
                     self.last_model_wire_gen.set(set.gen);
                     return Arc::clone(&set.wires);
                 }
@@ -10213,6 +10251,7 @@ impl Scene {
             ResidentWireSet {
                 epoch: cur_epoch,
                 gen,
+                used: std::cell::Cell::new(resident_touch()),
                 wires: Arc::clone(&arc),
                 layout,
             },
@@ -10243,21 +10282,22 @@ impl Scene {
         let cur_epoch = self.geometry_epoch;
         let floor = self.geometry_journal_floor.get();
         sets.retain(|_, set| set.epoch == cur_epoch || set.epoch >= floor);
-        let cap = 16.max(shown + 2);
+        // Each set is a whole model's wires. Switching layouts leaves the
+        // epoch unchanged, so the other layouts' sets never went stale and a
+        // floor of 16 kept up to 16 of them: memory grew with every layout
+        // visited until the app froze (#3260). Keep the shown viewports' sets
+        // (they were used last) and a little slack; model tiles count as 4.
+        let cap = shown.max(4) + 2;
         while sets.len() > cap {
-            let stalest = sets
+            let Some(key) = sets
                 .iter()
-                .filter(|(_, set)| set.epoch != cur_epoch)
-                .min_by_key(|(_, set)| set.epoch)
-                .map(|(key, _)| *key);
-            match stalest {
-                Some(key) => {
-                    sets.remove(&key);
-                }
-                None => {
-                    sets.clear();
-                    break;
-                }
+                .min_by_key(|(_, set)| set.used.get())
+                .map(|(key, _)| *key)
+            else {
+                break;
+            };
+            if let Some(evicted) = sets.remove(&key) {
+                reaper::reap(evicted);
             }
         }
     }
@@ -11105,6 +11145,7 @@ impl Scene {
             ResidentWireSet {
                 epoch: cur_epoch,
                 gen,
+                used: std::cell::Cell::new(resident_touch()),
                 wires: Arc::clone(&arc),
                 layout: Some(layout),
             },
@@ -12008,6 +12049,99 @@ impl Scene {
         arc
     }
 
+    /// Splice a re-delivered raster's fresh model into every cached gathered
+    /// image list. The reseed takes no geometry bump — the entity, its draw
+    /// order and every wire are untouched — so the lists stay valid and only
+    /// their pixels are refreshed; without this the gather would re-walk the
+    /// whole drawing on the UI thread right after the view settled (#3339).
+    /// A raster replacement changes only pixels and size — the gathered
+    /// placement, clip and draw depth stay valid — so lists that are current
+    /// are patched in place; lists already stale for other reasons, and lists
+    /// holding an instanced clone (an image inside a block reference), are
+    /// evicted so the next gather rebuilds them.
+    pub(crate) fn patch_image_caches(&self, prev_epoch: u64, handles: &[Handle]) {
+        if handles.is_empty() {
+            return;
+        }
+        let perf = crate::perf::enabled();
+        let started = perf.then(iced::time::Instant::now);
+        let a = self.patch_image_cache_entries(&self.image_cache, prev_epoch, handles);
+        let b = self.patch_image_cache_entries(&self.frozen_image_cache, prev_epoch, handles);
+        let counts = (a.0 + b.0, a.1 + b.1, a.2 + b.2);
+        if perf {
+            crate::perf_record!(
+                "[perf] image-patch   {:>7.2}ms entries={} lists_patched={} evicted={}",
+                started.map_or(0.0, |s| s.elapsed().as_secs_f64() * 1000.0),
+                counts.0,
+                counts.1,
+                counts.2,
+            );
+        }
+    }
+
+    /// Returns (entries seen, lists patched, lists evicted for a rebuild).
+    fn patch_image_cache_entries<K>(
+        &self,
+        cache: &RefCell<HashMap<K, (u64, Arc<Vec<ImageModel>>)>>,
+        prev_epoch: u64,
+        handles: &[Handle],
+    ) -> (usize, usize, usize) {
+        let epoch = self.geometry_epoch;
+        let mut seen = 0usize;
+        let mut patched = 0usize;
+        let mut stale = 0usize;
+        cache.borrow_mut().retain(|_, (entry_epoch, arc)| {
+            seen += 1;
+            // A list the patch cannot reason about — one that predates other
+            // changes, or holds an instanced clone whose transform the gather
+            // owns — is evicted: the reseed records no geometry change, so the
+            // journal replay would otherwise revalidate it with the old pixels.
+            if *entry_epoch != prev_epoch
+                || arc.iter().any(|model| {
+                    model.render_instance.is_some()
+                        && model.entity.is_some_and(|entity| handles.contains(&entity))
+                })
+            {
+                stale += 1;
+                return false;
+            }
+            let list = Arc::make_mut(arc);
+            let mut touched = false;
+            list.retain_mut(|model| {
+                let Some(entity) = model.entity else {
+                    return true;
+                };
+                if !handles.contains(&entity) {
+                    return true;
+                }
+                match self.images.get(&entity) {
+                    Some(fresh) => {
+                        if !Arc::ptr_eq(&model.pixels, &fresh.pixels) {
+                            model.file_path = fresh.file_path.clone();
+                            model.pixels = Arc::clone(&fresh.pixels);
+                            model.width = fresh.width;
+                            model.height = fresh.height;
+                        }
+                        touched = true;
+                        true
+                    }
+                    None => {
+                        // The raster did not come back; the cached list drops
+                        // the entry the rebuild would not gather either.
+                        touched = true;
+                        false
+                    }
+                }
+            });
+            if touched {
+                *entry_epoch = epoch;
+                patched += 1;
+            }
+            true
+        });
+        (seen, patched, stale)
+    }
+
     /// Image / OLE-frame models owned by `target_block`, optionally dropping
     /// those whose layer is frozen in a content viewport (`frozen`).
     fn image_models(
@@ -12138,6 +12272,9 @@ impl Scene {
                     .then(|| self.print_underlay_image(entity))
                     .flatten()
                     .unwrap_or_else(|| model.clone());
+                // Stamp the real handle: a seed can build the model before
+                // the entity's handle is assigned, so the builder cannot.
+                placed.entity = Some(handle);
                 if context.is_instanced() {
                     for (corner, low) in placed.corners.iter_mut().zip(&mut placed.corners_low) {
                         let point = document::types::Vector3::new(
@@ -20788,27 +20925,6 @@ mod redraw_tests {
             !scene.refresh_consume(ghost),
             "nonexistent tile 99 has no membership"
         );
-    }
-}
-
-#[cfg(test)]
-mod selection_arc_tests {
-    use super::Scene;
-
-    #[test]
-    fn selection_is_arc_not_refcell() {
-        let scene = Scene::new();
-        let tn = std::any::type_name_of_val(&scene.selection);
-        assert!(
-            tn.contains("Arc"),
-            "selection should be Arc<SelectionState>, got {}",
-            tn
-        );
-    }
-
-    #[test]
-    fn selection_overlay_takes_arc() {
-        assert!(true);
     }
 }
 

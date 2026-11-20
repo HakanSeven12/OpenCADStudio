@@ -655,6 +655,26 @@ impl OpenCADStudio {
         Ok(name)
     }
 
+    /// Decode the Xref Manager preview that `request` asks for on a worker
+    /// (`reader`; a test can give one that panics); the panel takes it when
+    /// the decode ends.
+    pub(crate) fn read_xref_manager_preview_with(
+        &self,
+        request: crate::ui::window::xref_manager::PreviewRequest,
+        reader: crate::ui::window::xref_manager::PreviewReader,
+    ) -> Task<Message> {
+        let crate::ui::window::xref_manager::PreviewRequest {
+            generation,
+            key,
+            entry,
+        } = request;
+        crate::app::update::background_task(
+            crate::t!("External References"),
+            move || reader(&entry),
+            move |preview| Message::XrefPreviewRead(generation, key, preview),
+        )
+    }
+
     /// Rebuild the Reference Manager's entry list from the active drawing.
     /// Uses the tab's session sets (unloaded + stat baseline) so CLI and
     /// palette agree; writes fresh load-time mtimes back into the tab's stat
@@ -772,6 +792,18 @@ impl OpenCADStudio {
     /// repopulate scene caches, mirror xref layers into the Layers panel,
     /// and mark the tab dirty. Both call sites use it so the 5-line
     /// sequence cannot drift.
+    /// Reload raster image references: drop their session unload flag and
+    /// load-time baseline, forget decoded pixels so each file is read again
+    /// (a new path or an edited file), and repopulate the image models.
+    pub(crate) fn reload_image_refs(&mut self, i: usize, keys: &[u64]) {
+        for key in keys {
+            self.tabs[i].xref_unloaded.remove(key);
+            self.tabs[i].xref_stat_cache.remove(key);
+        }
+        crate::scene::model::image_model::clear_image_cache();
+        self.post_ref_op(i);
+    }
+
     pub(crate) fn post_ref_op(&mut self, i: usize) {
         self.tabs[i].scene.populate_hatches_from_document();
         self.tabs[i].scene.populate_images_from_document();
@@ -986,11 +1018,14 @@ impl OpenCADStudio {
                             }
                         }
                         self.tabs[i].scene.bump_geometry();
-                    } else if *kind != crate::io::xref_model::RefKind::DwgXref {
-                        self.command_line.push_error(
-                            crate::tf!("{}: reload applies to drawing references only.", name)
-                                .as_ref(),
-                        );
+                    } else if *kind == crate::io::xref_model::RefKind::Image {
+                        let keys: Vec<u64> = picked
+                            .iter()
+                            .filter(|(_, n, k, _)| k == kind && n == name)
+                            .map(|(key, ..)| *key)
+                            .collect();
+                        self.reload_image_refs(i, &keys);
+                        done += 1;
                     }
                 }
                 for (key, _) in &dwg_picked {
@@ -1999,10 +2034,8 @@ mod tests {
     }
 
     #[test]
-    fn palette_reload_skips_images_without_clearing_flags() {
-        // F7: palette Reload on an image/PDF row reports the drawing-only
-        // error and leaves its unloaded flag untouched (no spurious
-        // no-match after a flag clear).
+    fn palette_reload_loads_unloaded_image() {
+        // Palette Reload on an unloaded image row loads it again (#3368).
         use crate::io::xref_model::RefKind;
         use crate::ui::window::xref_manager::XrefPaletteOp;
         use document::objects::{ImageDefinition, ObjectType};
@@ -2043,11 +2076,10 @@ mod tests {
         let start = app.command_line.history.len();
         app.xref_manager_op(XrefPaletteOp::Reload);
         let out = palette_output(&app, start);
-        assert!(out.contains("img.png"), "got: {out:?}");
-        assert_eq!(app.command_line.history.len(), start + 1);
+        assert!(!out.contains("drawing references only"), "got: {out:?}");
         assert!(
-            app.tabs[i].xref_unloaded.is_unloaded(key),
-            "image flag must stay untouched"
+            !app.tabs[i].xref_unloaded.is_unloaded(key),
+            "image must be loaded again"
         );
         std::fs::remove_dir_all(&dir).ok();
     }

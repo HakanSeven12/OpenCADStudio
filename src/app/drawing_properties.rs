@@ -7,7 +7,7 @@ use document::document::SummaryInfo;
 use iced::Task;
 
 /// Why a custom property table cannot be stored.
-fn check_custom_names(properties: &[(String, String)]) -> Result<(), String> {
+pub(crate) fn check_custom_names(properties: &[(String, String)]) -> Result<(), String> {
     let mut seen = std::collections::HashSet::new();
     for (index, (name, _)) in properties.iter().enumerate() {
         // Validated trimmed and case-folded; stored as typed.

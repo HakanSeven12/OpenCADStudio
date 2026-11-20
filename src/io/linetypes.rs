@@ -353,9 +353,33 @@ pub fn extract_pattern(desc: &str) -> String {
 
 // ── Public API ────────────────────────────────────────────────────────────
 
-/// Add all standard OpenCADStudio linetypes to `doc`, skipping existing ones.
+/// Add the standard OpenCADStudio linetypes to `doc`, skipping existing ones.
+/// Linetypes drawing a shape only the bundled substitutes define (see
+/// [`is_own_shape`]) stay out: a new drawing would name a shape file no other
+/// reader can supply. The pickers still offer them ([`catalog_missing_from`]).
 pub fn populate_document(doc: &mut Document) {
-    populate_document_from_source(doc, &catalog().source, None);
+    let source = &catalog().source;
+    let complex = parse_complex(source);
+    populate_matching(doc, source, None, |name| {
+        complex
+            .get(&name.to_ascii_uppercase())
+            .is_none_or(|lt| {
+                !lt.segments.iter().any(|seg| {
+                    matches!(seg, LtSegment::Shape { name, shx_file, .. }
+                        if is_own_shape(shx_file, name))
+                })
+            })
+    });
+}
+
+/// Whether `name` in shape file `file` is one of the bundled shapes whose
+/// file or number exists only in this application (everything in
+/// [`BUNDLED_SHAPES`] but the standard `ltypeshp` 130–134).
+fn is_own_shape(file: &str, name: &str) -> bool {
+    let stem = shape_file_stem(file);
+    BUNDLED_SHAPES.iter().any(|(f, shape, number)| {
+        *f == stem && shape.eq_ignore_ascii_case(name) && !(*f == "ltypeshp" && *number <= 134)
+    })
 }
 
 /// Repair the catalog linetypes `doc` already has (see

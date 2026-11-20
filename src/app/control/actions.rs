@@ -3,7 +3,7 @@ use super::*;
 use crate::io::plot_style::PlotStyleTableExt as _;
 use crate::scene::model::object::PropValue;
 
-fn control_color(value: &Value) -> Result<document::types::Color, Value> {
+pub(crate) fn control_color(value: &Value) -> Result<document::types::Color, Value> {
     if let Some(index) = value.as_i64().and_then(|v| i16::try_from(v).ok()) {
         return Ok(document::types::Color::from_index(index));
     }
@@ -40,7 +40,7 @@ fn control_lineweight(value: &Value) -> Result<document::types::LineWeight, Valu
         .ok_or_else(|| failure("invalid_lineweight", "Value is not a standard lineweight"))
 }
 
-fn color_value(color: document::types::Color) -> Value {
+pub(crate) fn color_value(color: document::types::Color) -> Value {
     if let Some((r, g, b)) = color.true_color_rgb() {
         json!({"rgb":[r,g,b]})
     } else {
@@ -360,6 +360,25 @@ fn parse_calibrate(
     ))
 }
 
+/// Reads and decodes an `embed_image` picture.
+#[cfg(not(target_arch = "wasm32"))]
+type EmbedImageReader = fn(&str) -> Result<crate::io::ole_embed::EmbeddedImage, String>;
+
+/// What an `embed_image` read gives back: the request, the picture's path
+/// and the picture (or why it cannot be read).
+#[cfg(not(target_arch = "wasm32"))]
+pub(in crate::app) type EmbedImageRead = (
+    Value,
+    String,
+    Result<crate::io::ole_embed::EmbeddedImage, String>,
+);
+
+/// Read and decode an `embed_image` picture (run on a worker thread).
+#[cfg(not(target_arch = "wasm32"))]
+fn read_embed_image(path: &str) -> Result<crate::io::ole_embed::EmbeddedImage, String> {
+    crate::io::ole_embed::EmbeddedImage::from_file(std::path::Path::new(path))
+}
+
 impl OpenCADStudio {
     /// `embed_image` — pack the picture at `path` into an OLE2FRAME or linked RasterImage
     /// placed with its lower-left corner at `at` (default width ≈ pixel_width/100).
@@ -367,11 +386,73 @@ impl OpenCADStudio {
     /// `{"point_a": [px1, py1], "point_b": [px2, py2], "distance": 6500.0, "align_to": [0, 0]}`.
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn control_embed_image(&mut self, req: &Value) -> Result<Task<Message>, Value> {
-        let i = self.active_tab;
-        let path = string(req, "path")?;
-        let image = crate::io::ole_embed::EmbeddedImage::from_file(std::path::Path::new(&path))
-            .map_err(|e| failure("embed_failed", e))?;
+        let path = string(req, "path")?.to_string();
+        Ok(self.control_embed_image_with(req.clone(), path, read_embed_image))
+    }
 
+    /// The picture is read and decoded off the UI thread; it is placed when
+    /// the worker ends ([`Self::finish_control_embed_image`]), and the
+    /// operation settles then: with its result, or with the failure it
+    /// answered at once before (the same `code` and `error`). The reader is
+    /// given, so a test can give one that panics.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn control_embed_image_with(
+        &mut self,
+        req: Value,
+        path: String,
+        reader: EmbedImageReader,
+    ) -> Task<Message> {
+        let i = self.active_tab;
+        let (tab_id, generation) = (self.tabs[i].id, self.tabs[i].document_generation);
+        crate::app::update::background_task(
+            "embed_image",
+            {
+                let path = path.clone();
+                move || reader(&path)
+            },
+            move |read| Message::EmbedImageRead(tab_id, generation, Box::new((req, path, read))),
+        )
+    }
+
+    /// The end of the operation's read: the picture is placed in the drawing
+    /// the operation started in, as it was placed at once before, and the
+    /// operation's result or failure is set.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn finish_control_embed_image(
+        &mut self,
+        tab_id: u64,
+        generation: u64,
+        read: EmbedImageRead,
+    ) {
+        let (req, path, read) = read;
+        let image = match read {
+            Ok(image) => image,
+            Err(error) => {
+                self.set_control_failure(failure("embed_failed", error));
+                return;
+            }
+        };
+        let Some(i) = self.import_target(tab_id, generation) else {
+            self.set_control_failure(failure(
+                "document_closed",
+                "The drawing to place the picture in was closed or replaced during the read",
+            ));
+            return;
+        };
+        if let Err(error) = self.place_embedded_image(i, &req, &path, &image) {
+            self.set_control_failure(error);
+        }
+    }
+
+    /// Place the picture read for `embed_image` request `req` in drawing `i`.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn place_embedded_image(
+        &mut self,
+        i: usize,
+        req: &Value,
+        path: &str,
+        image: &crate::io::ole_embed::EmbeddedImage,
+    ) -> Result<(), Value> {
         let (at, width, scale) = if let Some(cal) = req.get("calibrate") {
             parse_calibrate(cal, image.pixel_width, image.pixel_height)?
         } else if let (Some(src_pts), Some(tgt_pts)) = (
@@ -452,13 +533,13 @@ impl OpenCADStudio {
                 "linked": true,
                 "layer": layer_name.unwrap_or("0"),
             }));
-            return Ok(Task::none());
+            return Ok(());
         }
 
         self.push_undo_snapshot(i, "IMAGEEMBED");
         let handle = crate::io::ole_embed::add_embedded_image(
             &mut self.tabs[i].scene.document,
-            &image,
+            image,
             final_at,
             final_width,
         )
@@ -496,7 +577,7 @@ impl OpenCADStudio {
             "linked": false,
             "layer": layer_name.unwrap_or("0"),
         }));
-        Ok(Task::none())
+        Ok(())
     }
 
     /// `wblock` — write the named block's entities or the listed entity handles

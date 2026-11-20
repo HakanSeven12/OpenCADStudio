@@ -2029,17 +2029,36 @@ impl OpenCADStudio {
                     .iter_mut()
                     .find(|row| row.field == height_field)
                 {
+                    let fixed_tooltip = match &row.value {
+                        crate::scene::model::object::PropValue::ReadOnlyWithTooltip {
+                            tooltip,
+                            ..
+                        } => Some(tooltip.clone()),
+                        _ => None,
+                    };
                     let editable = !aligned
                         && !matches!(
                             row.value,
                             crate::scene::model::object::PropValue::ReadOnly(_)
+                                | crate::scene::model::object::PropValue::ReadOnlyWithTooltip { .. }
                         );
-                    *row = crate::entities::common::num_prop(
-                        t!("Paper text height").as_ref(),
-                        height_field,
-                        paper_height,
-                        editable,
-                    );
+                    *row = if let Some(tooltip) = fixed_tooltip {
+                        crate::scene::model::object::Property {
+                            label: t!("Paper text height").into_owned(),
+                            field: height_field,
+                            value: crate::scene::model::object::PropValue::ReadOnlyWithTooltip {
+                                value: crate::entities::common::format_length(paper_height),
+                                tooltip,
+                            },
+                        }
+                    } else {
+                        crate::entities::common::num_prop(
+                            t!("Paper text height").as_ref(),
+                            height_field,
+                            paper_height,
+                            editable,
+                        )
+                    };
                 }
             }
             insert_row_after(
@@ -2381,33 +2400,8 @@ impl OpenCADStudio {
             crate::entities::common::set_fixed_text_heights(&self.tabs[i].scene.document);
         }
 
-        let layer_names: Vec<String> = self.tabs[i]
-            .scene
-            .document
-            .layers
-            .iter()
-            .map(|l| l.name.clone())
-            // The reference's hidden system layers (`*ADSK_CONSTRAINTS`) stay out.
-            .filter(|name| !name.starts_with('*'))
-            .collect();
-        let linetype_items: Vec<ui::properties::LinetypeItem> = self.tabs[i]
-            .scene
-            .document
-            .line_types
-            .iter()
-            .map(|lt| {
-                let name = if lt.name.is_empty() {
-                    "ByLayer".to_string()
-                } else {
-                    lt.name.clone()
-                };
-                let art = linetypes::extract_pattern(&lt.description);
-                ui::properties::LinetypeItem { name, art }
-            })
-            .chain(super::layers::catalog_linetype_items(
-                &self.tabs[i].scene.document,
-            ))
-            .collect();
+        let layer_names = property_layer_names(&self.tabs[i].scene.document);
+        let linetype_items = property_linetype_items(&self.tabs[i].scene.document);
         let text_style_names: Vec<String> = self.tabs[i]
             .scene
             .document
@@ -4200,6 +4194,14 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 self.tabs[i].scene.annotation_scale,
                 annotation_scale_handle,
             );
+        }
+        if let document::EntityType::MText(mtext) = contextual.as_ref() {
+            if let Some(grips) = crate::entities::mtext::grips_on_drawn_box(
+                mtext,
+                &self.tabs[i].scene.document,
+            ) {
+                entity_grips = grips;
+            }
         }
         if crate::scene::model::solid_history::has_specialized_primitive_properties(
             &self.tabs[i].scene.document,
@@ -7159,4 +7161,33 @@ mod custom_class_title_tests {
         let (_, title) = app.entity_property_sections(i, handle, source, &Vec::new(), None, 0);
         assert_eq!(title, "Line");
     }
+}
+
+/// The layers a Layer row offers: the reference's hidden system layers
+/// (`*ADSK_CONSTRAINTS`) stay out.
+pub(crate) fn property_layer_names(doc: &document::Document) -> Vec<String> {
+    doc.layers
+        .iter()
+        .map(|l| l.name.clone())
+        .filter(|name| !name.starts_with('*'))
+        .collect()
+}
+
+/// The linetypes a Linetype row offers: the drawing's, then the catalog's.
+pub(crate) fn property_linetype_items(
+    doc: &document::Document,
+) -> Vec<ui::properties::LinetypeItem> {
+    doc.line_types
+        .iter()
+        .map(|lt| {
+            let name = if lt.name.is_empty() {
+                "ByLayer".to_string()
+            } else {
+                lt.name.clone()
+            };
+            let art = linetypes::extract_pattern(&lt.description);
+            ui::properties::LinetypeItem { name, art }
+        })
+        .chain(super::layers::catalog_linetype_items(doc))
+        .collect()
 }

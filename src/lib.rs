@@ -19,6 +19,20 @@ pub(crate) fn headless_ui_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
+
+/// Runs a test that lays out or renders a large view (the whole ribbon,
+/// say): one at a time under `headless_ui_lock`, on a thread with the stack
+/// such a view needs.
+#[cfg(test)]
+pub(crate) fn with_headless_ui(test: impl FnOnce() + Send + 'static) {
+    let _guard = headless_ui_lock();
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(test)
+        .expect("spawn UI test")
+        .join()
+        .unwrap_or_else(|error| std::panic::resume_unwind(error));
+}
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cli;
 pub mod command;

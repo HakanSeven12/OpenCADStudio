@@ -140,6 +140,9 @@ impl std::fmt::Display for JustifyChoice {
 
 /// Live state of the open MText editor. Absent (`None`) when no editor is up.
 pub struct MTextEditorState {
+    /// Which editor this is: each one opens with a new number, so a file
+    /// read for an earlier editor does not go into this one.
+    pub(super) opened: u64,
     /// World insertion point (WCS, same convention the committed entity uses).
     pub pos: DVec3,
     /// The editable text buffer (raw value with inline codes).
@@ -303,7 +306,9 @@ pub struct MTextEditorState {
 
 impl MTextEditorState {
     pub fn new(pos: DVec3, initial: &str, height: f64, editing: Option<Handle>) -> Self {
+        static OPENED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         Self {
+            opened: OPENED.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             pos,
             content: text_editor::Content::with_text(initial),
             doc: parse_mtext(initial, true),

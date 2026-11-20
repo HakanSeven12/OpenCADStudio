@@ -191,13 +191,17 @@ impl XAttachCommand {
 
     /// Show `wires` (the reference's model space) while placing it.
     pub fn with_preview(mut self, wires: Vec<WireModel>, unit: f64) -> Self {
+        self.set_preview(wires, unit);
+        self
+    }
+
+    fn set_preview(&mut self, wires: Vec<WireModel>, unit: f64) {
         self.preview = wires;
         self.unit = if unit.is_finite() && unit != 0.0 {
             unit
         } else {
             1.0
         };
-        self
     }
 
     /// Placement shown for the cursor at `cursor` (local): insertion point,
@@ -537,6 +541,10 @@ impl CadCommand for XAttachCommand {
     fn xattach_request(&self) -> Option<XrefAttachRequest> {
         Some(self.request.clone())
     }
+
+    fn on_xref_preview(&mut self, wires: Vec<WireModel>, unit: f64) {
+        self.set_preview(wires, unit);
+    }
 }
 
 /// Reference name for a file: its name without the extension, case kept.
@@ -646,6 +654,7 @@ pub fn stored_path(request: &XrefAttachRequest, host_file: Option<&std::path::Pa
 /// A reference of the same name already in the drawing is reused ("Using
 /// existing definition."). The self-attach guard runs before this, where the
 /// host path is known.
+#[cfg(test)]
 pub fn prepare_xref_definition(
     scene: &mut Scene,
     request: &XrefAttachRequest,
@@ -660,6 +669,7 @@ pub fn prepare_xref_definition(
 }
 
 /// [`prepare_xref_definition`] under a chosen name instead of the file's.
+#[cfg(test)]
 pub fn prepare_named_xref_definition(
     scene: &mut Scene,
     request: &XrefAttachRequest,
@@ -688,7 +698,7 @@ pub fn xref_read_inputs(
     (stored_path(request, host_file), base_dir)
 }
 
-/// [`prepare_named_xref_definition`] with the reference's file already read
+/// `prepare_named_xref_definition` with the reference's file already read
 /// (off the UI thread, [`crate::io::xref::read_xref_file`] with
 /// [`xref_read_inputs`]): it merges `read` and reads no file. With `None` it
 /// reads the file here.

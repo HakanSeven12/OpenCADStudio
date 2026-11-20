@@ -462,7 +462,21 @@ mod w2d {
         (r[0] < r[2] && r[1] < r[3]).then_some(r)
     }
 
-    /// The stream's geometry and text in model units, and its plotted view.
+    /// The rectangle that holds both.
+    fn union(a: Option<[f64; 4]>, b: Option<[f64; 4]>) -> Option<[f64; 4]> {
+        match (a, b) {
+            (Some(a), Some(b)) => Some([
+                a[0].min(b[0]),
+                a[1].min(b[1]),
+                a[2].max(b[2]),
+                a[3].max(b[3]),
+            ]),
+            (a, b) => a.or(b),
+        }
+    }
+
+    /// The stream's geometry and text in model units, and the rectangle of
+    /// its sheet: its view together with the contours of its viewports.
     pub fn read(b: &[u8]) -> Option<(Vec<Path>, Option<[f64; 4]>, Vec<Text>)> {
         let mut r = Reader { b, i: 0 };
         // The current font: family, em height (graphics units), rotation
@@ -471,6 +485,9 @@ mod w2d {
         let mut texts: Vec<(String, [f64; 2], (String, f64, f64, f64), [u8; 3])> = Vec::new();
         let mut units = Units::identity();
         let mut view: Option<[f64; 4]> = None;
+        // The contours of the viewports: where the sheet's geometry is drawn.
+        // The view is only the rectangle to show first, and may hold less.
+        let mut drawn: Option<[f64; 4]> = None;
         let mut color = [0u8, 0, 0];
         let mut weight = 0.0f64;
         let mut visible = true;
@@ -490,11 +507,15 @@ mod w2d {
                     match name.as_str() {
                         "Units" => units = units_of(body).unwrap_or(units),
                         "View" => view = rect_of(&points_of(body)).or(view),
-                        "Viewport" if view.is_none() => {
-                            view = rect_of(&points_of(body));
-                            if let Some(u) = units_of(body) {
-                                units = u;
+                        "Viewport" => {
+                            let contour = rect_of(&points_of(body));
+                            if view.is_none() {
+                                view = contour;
+                                if let Some(u) = units_of(body) {
+                                    units = u;
+                                }
                             }
+                            drawn = union(drawn, contour);
                         }
                         "Color" => {
                             let v = super::numbers(&String::from_utf8_lossy(body));
@@ -722,7 +743,7 @@ mod w2d {
                 }
             })
             .collect();
-        let view = view.map(|v| {
+        let view = union(view, drawn).map(|v| {
             let a = units.model([v[0], v[1]]);
             let b = units.model([v[2], v[3]]);
             [

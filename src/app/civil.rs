@@ -113,6 +113,86 @@ fn vertices(entity: &EntityType) -> Result<Vec<(Vector3, f64)>, String> {
     Ok(points)
 }
 
+/// A feature line's own points (without the nodes other members' crossings put on it), as
+/// the codec takes them back.
+fn feature_line_vertices(document: &document::Document, line: Handle) -> Option<Vec<c3d::FeatureLineVertex>> {
+    let container = arch(document, line)?.feature_line_container()?;
+    let document::objects::ObjectType::Arch(o) = document.objects.get(&Handle::new(container))? else { return None };
+    let index = o.site_members().iter().position(|h| *h == line.value())?;
+    let topology = o.topology()?;
+    let mut run = topology.edges.get(index)?.clone();
+    // A closed edge repeats its first point last.
+    if topology.edge_flags.get(index).is_some_and(|f| f & 1 != 0) {
+        run.pop();
+    }
+    Some(
+        run.iter()
+            .filter(|v| v.flags & (0x400 | 2) != 0x400 || v.is_elevation_point())
+            .map(|v| c3d::FeatureLineVertex { point: Vector3::new(v.point.x, v.point.y, v.z), bulge: v.bulge, elevation_point: v.is_elevation_point() })
+            .collect(),
+    )
+}
+
+/// A profile through `pvis` as fixed entities: a fixed tangent between curves and a fixed
+/// symmetric parabola through its start, its middle and its end at each inner PVI whose
+/// curve `length` (from the grade change) is positive.
+fn fixed_profile(pvis: &[Vector2], length: impl Fn(f64) -> f64) -> Result<Vec<c3d::ProfileEntity>, String> {
+    let grade = |a: Vector2, b: Vector2| (b.y - a.y) / (b.x - a.x);
+    let mut out = Vec::new();
+    let mut at = pvis[0];
+    let tangent = |out: &mut Vec<c3d::ProfileEntity>, start: Vector2, end: Vector2| {
+        if end.x > start.x {
+            out.push(c3d::ProfileEntity::Tangent { start, end });
+        }
+    };
+    for k in 1..pvis.len() - 1 {
+        let (p, g1, g2) = (pvis[k], grade(pvis[k - 1], pvis[k]), grade(pvis[k], pvis[k + 1]));
+        let l = length((g2 - g1).abs());
+        if !(l > 0.0) || g1 == g2 {
+            tangent(&mut out, at, p);
+            at = p;
+            continue;
+        }
+        let (start, end) = (Vector2::new(p.x - l / 2.0, p.y - g1 * l / 2.0), Vector2::new(p.x + l / 2.0, p.y + g2 * l / 2.0));
+        if start.x < at.x - 1e-9 || end.x > pvis[k + 1].x + 1e-9 {
+            return Err(crate::t!("The vertical curves overlap or pass the PVIs beside them.").into_owned());
+        }
+        tangent(&mut out, at, start);
+        // A symmetric parabola passes (g2 - g1) L / 8 off its PVI.
+        out.push(c3d::ProfileEntity::ParabolaThreePoints { start, middle: Vector2::new(p.x, p.y + (g2 - g1) * l / 8.0), end });
+        at = end;
+    }
+    tangent(&mut out, at, pvis[pvis.len() - 1]);
+    Ok(out)
+}
+
+/// The curve elements of `alignment` in station order: id, start and end station, and
+/// whether the curve turns left.
+fn alignment_curves(a: &document::classes::arch::ArchEntityData) -> Option<Vec<(i16, f64, f64, bool)>> {
+    let elements = a.alignment_elements()?;
+    let pieces = a.alignment_pieces();
+    let start = a.alignment_start_station().unwrap_or(0.0);
+    let mut out = Vec::new();
+    let (mut used, mut from) = (0, 0.0);
+    let mut at = elements.iter().find(|e| e.previous == 0);
+    while let Some(e) = at {
+        // A spiral-curve-spiral solves into three pieces, every other element into one.
+        let n = if matches!(e.kind, c3d::AlignmentElementKind::FreeSpiralCurveSpiral { .. }) { 3 } else { 1 };
+        let own = pieces.get(used..used + n)?;
+        used += n;
+        let points: Vec<Vector2> = own.iter().flat_map(|(_, p)| p.iter().copied()).collect();
+        let length: f64 = own.iter().map(|(_, p)| p.windows(2).map(|w| w[0].distance(&w[1])).sum::<f64>()).sum();
+        if !matches!(e.kind, c3d::AlignmentElementKind::FixedLine { .. }) && points.len() >= 3 {
+            let (d0, d1) = (points[1] - points[0], points[points.len() - 1] - points[points.len() - 2]);
+            out.push((e.id, start + from, start + from + length, d0.x * d1.y - d0.y * d1.x > 0.0));
+        }
+        from += length;
+        (out.len() <= elements.len() && used <= pieces.len()).then_some(())?;
+        at = (e.next != 0).then(|| elements.iter().find(|x| x.id == e.next)).flatten();
+    }
+    Some(out)
+}
+
 impl OpenCADStudio {
     pub(super) fn civil(&mut self, i: usize, req: &SurfaceRequest) -> Result<String, String> {
         let name = req.command;
@@ -199,6 +279,45 @@ impl OpenCADStudio {
                     }
                 }
             }
+            "CREATEPOINTLABELSTYLE" => {
+                let points = req.objects[0].clone();
+                let height = req.values.get("height").copied();
+                let color = req.values.get("color").copied();
+                if height.is_some_and(|h| !(h > 0.0)) || color.is_some_and(|c| !(1.0..=255.0).contains(&c) || c.fract() != 0.0) {
+                    return Err(crate::t!("The text height must be positive and the color 1 to 255.").into_owned());
+                }
+                let orientation = req.text("orientation").and_then(|t| crate::modules::civil::LABEL_ORIENTATIONS.iter().position(|o| *o == t)).map(|o| o as i32);
+                self.push_undo_snapshot(i, name);
+                let doc = &mut self.tabs[i].scene.document;
+                // The first free "Point Label Style n".
+                let mut k = 1;
+                let (style, h) = loop {
+                    let style = format!("Point Label Style {k}");
+                    let made = c3d::add_point_label_style(doc, &style, |s| {
+                        if orientation.is_some() {
+                            s.settings.orientation = orientation;
+                        }
+                        for c in &mut s.components {
+                            if height.is_some() {
+                                c.height = height;
+                            }
+                            if let Some(c3) = color {
+                                c.text_color = Some(document::types::Color::from_index(c3 as i16));
+                            }
+                        }
+                    });
+                    match made {
+                        Ok(h) => break (style, h),
+                        Err(e) if k < 1000 && e.to_string().contains("exists") => k += 1,
+                        Err(e) => return Err(refused(e)),
+                    }
+                };
+                for p in &points {
+                    c3d::set_cogo_point_label_style(doc, *p, h).map_err(refused)?;
+                    changes.push((*p, ChangeKind::Modified));
+                }
+                crate::tf!("Label style {} created and given to {} point(s).", style, points.len()).into_owned()
+            }
             "CREATEALIGNMENT" => {
                 let doc = &self.tabs[i].scene.document;
                 let entity = req.objects[0].first().and_then(|h| doc.get_entity(*h)).ok_or("no object")?;
@@ -261,6 +380,49 @@ impl OpenCADStudio {
                     c3d::add_station_equations(doc, alignment, &equations).map_err(refused)?;
                     crate::tf!("{} station equation(s) added to {}.", equations.len(), label).into_owned()
                 }
+            }
+            "ADDSUPERELEVATION" => {
+                let alignment = *req.objects[0].first().ok_or("no alignment")?;
+                let (nc, e, lr) = (req.value("normal", 0.02), req.value("rate", 0.06), req.value("runoff", 30.0));
+                if !(nc > 0.0 && e > nc && lr > 0.0) {
+                    return Err(crate::t!("The superelevation needs a rate above the normal slope and a positive runoff length.").into_owned());
+                }
+                let a = arch(&self.tabs[i].scene.document, alignment).ok_or("no alignment")?;
+                let elements = alignment_curves(a).ok_or_else(|| crate::t!("The alignment cannot be solved.").into_owned())?;
+                if elements.is_empty() {
+                    return Err(crate::t!("The alignment has no curves.").into_owned());
+                }
+                // Each curve: from level crown through reverse crown to full superelevation a
+                // third of the runoff into the curve, and back the same way at its end. Lane
+                // slopes run away from the crown; the outside of the curve rises.
+                let curves: Vec<c3d::SuperelevationCurve> = elements
+                    .iter()
+                    .map(|&(element, s0, s1, left)| {
+                        let mid = (s0 + s1) / 2.0;
+                        let (begin, end) = ((s0 + lr / 3.0).min(mid), (s1 - lr / 3.0).max(mid));
+                        let side = |outside: f64, inside: f64| {
+                            let (l, r) = if left { (inside, outside) } else { (outside, inside) };
+                            [l, l, r, r, l, l, r, r]
+                        };
+                        let station = |kind, station, ending, slopes| c3d::CriticalStation { kind, station, ending, slopes };
+                        use c3d::CriticalStationKind as K;
+                        c3d::SuperelevationCurve {
+                            element,
+                            stations: vec![
+                                station(K::LevelCrown, begin - lr, false, side(0.0, -nc)),
+                                station(K::ReverseCrown, begin - lr + lr * nc / e, false, side(nc, -nc)),
+                                station(K::BeginFullSuper, begin, false, side(e, -e)),
+                                station(K::EndFullSuper, end, true, side(e, -e)),
+                                station(K::ReverseCrown, end + lr - lr * nc / e, true, side(nc, -nc)),
+                                station(K::LevelCrown, end + lr, true, side(0.0, -nc)),
+                            ],
+                        }
+                    })
+                    .collect();
+                self.push_undo_snapshot(i, name);
+                c3d::add_superelevation(&mut self.tabs[i].scene.document, alignment, &curves).map_err(refused)?;
+                changes.push((alignment, ChangeKind::Modified));
+                crate::tf!("Superelevation added to {} curve(s).", curves.len()).into_owned()
             }
             "CREATESURFACE" => {
                 let doc = &self.tabs[i].scene.document;
@@ -332,10 +494,24 @@ impl OpenCADStudio {
                     _ => c3d::VerticalCurve::Parabola(value),
                 };
                 let curves = vec![curve; pvis.len() - 2];
+                // Fixed entities: each curve's length from its grade change.
+                let fixed = match req.text("layout") == Some(crate::modules::civil::PROFILE_LAYOUTS[1]) {
+                    false => None,
+                    true => Some(fixed_profile(&pvis, |change| match curve {
+                        c3d::VerticalCurve::ParabolaK(k) => k * change * 100.0,
+                        c3d::VerticalCurve::ParabolaRadius(r) => r * change,
+                        c3d::VerticalCurve::Parabola(l) => l,
+                        _ => 0.0,
+                    })?),
+                };
                 let profile = next_name(&self.tabs[i].scene.document, "AECC_PROFILE", "Profile");
                 self.push_undo_snapshot(i, name);
                 let doc = &mut self.tabs[i].scene.document;
-                let h = c3d::add_profile_with_curves(doc, alignment, &profile, &pvis, &curves, layer).map_err(refused)?;
+                let h = match &fixed {
+                    Some(entities) => c3d::add_profile_entities(doc, alignment, &profile, entities, layer),
+                    None => c3d::add_profile_with_curves(doc, alignment, &profile, &pvis, &curves, layer),
+                }
+                .map_err(refused)?;
                 changes.push((alignment, ChangeKind::Modified));
                 changes.push((h, ChangeKind::Added));
                 crate::tf!("Profile {} created.", profile).into_owned()
@@ -431,6 +607,57 @@ impl OpenCADStudio {
                     changes.push((h, ChangeKind::Added));
                 }
                 crate::tf!("{} feature line(s) created.", changes.len()).into_owned()
+            }
+            "EDITFEATURELINE" => {
+                let line = *req.objects[0].first().ok_or("no feature line")?;
+                let mut vertices = feature_line_vertices(&self.tabs[i].scene.document, line).ok_or_else(|| crate::t!("The feature line cannot be read.").into_owned())?;
+                if req.points.is_empty() {
+                    return Err(crate::t!("No points given.").into_owned());
+                }
+                let delete = req.text("mode") == Some(crate::modules::civil::FEATURE_LINE_EDITS[1]);
+                let apart = |v: &c3d::FeatureLineVertex, p: Vector3| (v.point.x - p.x).hypot(v.point.y - p.y);
+                for p in &req.points {
+                    let p = Vector3::new(p.x, p.y, p.z);
+                    let nearest = (0..vertices.len()).min_by(|a, b| apart(&vertices[*a], p).total_cmp(&apart(&vertices[*b], p))).ok_or("no points")?;
+                    if delete {
+                        if vertices.len() <= 2 {
+                            return Err(crate::t!("A feature line keeps at least two points.").into_owned());
+                        }
+                        vertices.remove(nearest);
+                        continue;
+                    }
+                    // A point on one of the line's points sets its elevation; one beside a
+                    // straight segment becomes an elevation point there.
+                    if apart(&vertices[nearest], p) <= 1e-9 * (1.0 + p.x.abs().max(p.y.abs())) {
+                        vertices[nearest].point.z = p.z;
+                        continue;
+                    }
+                    let (k, t) = vertices
+                        .windows(2)
+                        .enumerate()
+                        .filter(|(_, w)| w[0].bulge == 0.0)
+                        .filter_map(|(k, w)| {
+                            let (a, b) = (w[0].point, w[1].point);
+                            let (dx, dy) = (b.x - a.x, b.y - a.y);
+                            let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy);
+                            let off = (p.x - a.x - t * dx).hypot(p.y - a.y - t * dy);
+                            (t > 0.0 && t < 1.0).then_some((k, t, off))
+                        })
+                        .min_by(|a, b| a.2.total_cmp(&b.2))
+                        .map(|(k, t, _)| (k, t))
+                        .ok_or_else(|| crate::t!("The point is not beside a straight segment of the feature line.").into_owned())?;
+                    let (a, b) = (vertices[k].point, vertices[k + 1].point);
+                    let at = Vector3::new(a.x + t * (b.x - a.x), a.y + t * (b.y - a.y), p.z);
+                    vertices.insert(k + 1, c3d::FeatureLineVertex { point: at, bulge: 0.0, elevation_point: true });
+                }
+                // The ends stay PIs.
+                let n = vertices.len();
+                vertices[0].elevation_point = false;
+                vertices[n - 1].elevation_point = false;
+                self.push_undo_snapshot(i, name);
+                c3d::set_feature_line_vertices(&mut self.tabs[i].scene.document, line, &vertices).map_err(refused)?;
+                // The site's container is written again: redraw everything.
+                crate::t!("Feature line edited.").into_owned()
             }
             "CREATEPARCEL" => {
                 let doc = &self.tabs[i].scene.document;

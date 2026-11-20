@@ -737,6 +737,9 @@ fn line(out: &mut Decoded, points: Vec<[f64; 3]>) {
 struct LabelStyle {
     layer: Option<u32>,
     components: Vec<LabelText>,
+    /// The text color of each component (by block when the style leaves it to the
+    /// defaults; none at all for a style drawn component by component).
+    colors: Vec<ProxyColor>,
     /// `(block record handle, plotted size)` of each tick component.
     ticks: Vec<(u64, f64)>,
     /// `(plotted length, angle to the anchor's direction)` of each line
@@ -844,18 +847,27 @@ fn collector(document: &document::Document, style: &ArchObject) -> LabelStyle {
             seen.push(**h);
             fresh
         })
-        .filter_map(|h| object_arch(document, *h)?.label_text())
+        .filter_map(|h| {
+            let o = object_arch(document, *h)?;
+            let color = match o.label_text_component().and_then(|c| c.text_color) {
+                Some(document::types::Color::Index(i)) => ProxyColor::Aci(i),
+                Some(document::types::Color::Rgb { r, g, b }) => ProxyColor::Rgb(r, g, b),
+                Some(document::types::Color::ByLayer) => ProxyColor::ByLayer,
+                _ => ProxyColor::ByBlock,
+            };
+            Some((o.label_text()?, color))
+        })
         .collect::<Vec<_>>();
     // A component whose height is not read takes its sibling's.
-    let sibling = components.iter().find_map(|c| c.height);
-    let components = components
+    let sibling = components.iter().find_map(|c| c.0.height);
+    let (components, colors): (Vec<LabelText>, Vec<ProxyColor>) = components
         .into_iter()
-        .filter(|c| c.visible)
-        .map(|mut c| {
+        .filter(|c| c.0.visible)
+        .map(|(mut c, color)| {
             c.height = c.height.or(sibling);
-            c
+            (c, color)
         })
-        .collect();
+        .unzip();
     let mut seen = Vec::new();
     let ticks = handles
         .iter()
@@ -887,7 +899,7 @@ fn collector(document: &document::Document, style: &ArchObject) -> LabelStyle {
         .filter_map(|h| object_arch(document, *h))
         .filter(|o| o.dxf_name == "AECC_LABEL_RADIAL_LINE_STYLE" && o.label_component_visible())
         .count();
-    LabelStyle { layer, components, ticks, lines, shown_lines }
+    LabelStyle { layer, components, colors, ticks, lines, shown_lines }
 }
 
 /// Stroke font of Civil 3D label text: the drawing's Standard text style
@@ -987,7 +999,7 @@ fn place(
 ) {
     let scale = drawing_scale(document);
     let (fs, fc) = frame.sin_cos();
-    for component in &style.components {
+    for (k, component) in style.components.iter().enumerate() {
         let Some(lines) = component_lines(component, value) else {
             continue;
         };
@@ -1031,6 +1043,7 @@ fn place(
                 font: label_font(document),
                 style: ProxyStyle {
                     layer: style.layer,
+                    color: style.colors.get(k).copied().unwrap_or(ProxyColor::ByBlock),
                     ..ProxyStyle::default()
                 },
                 align: [column, 1.0],
@@ -1633,7 +1646,7 @@ fn label_group(data: &ArchEntityData, handle: u64, document: &document::Document
                     // Anchored components sit at the piece's start, the rest
                     // at its middle.
                     let x = if component.anchor_point.is_some() { at(start) } else { at(start + length / 2.0) };
-                    let single = LabelStyle { layer: style.layer, components: vec![component.clone()], ticks: Vec::new(), lines: Vec::new(), shown_lines: 0 };
+                    let single = LabelStyle { layer: style.layer, components: vec![component.clone()], colors: Vec::new(), ticks: Vec::new(), lines: Vec::new(), shown_lines: 0 };
                     place(out, document, &single, Vector2::new(x, slot.top - slot.height / 2.0), 0.0, &value);
                 }
             }
@@ -1889,6 +1902,7 @@ fn label_group(data: &ArchEntityData, handle: u64, document: &document::Document
                             let single = LabelStyle {
                                 layer: style.layer,
                                 components: vec![component.clone()],
+                                colors: Vec::new(),
                                 ticks: Vec::new(),
                                 lines: Vec::new(),
                                 shown_lines: 0,
@@ -2026,6 +2040,7 @@ fn band_texts(
         let single = LabelStyle {
             layer: style.layer,
             components: vec![text.clone()],
+            colors: Vec::new(),
             ticks: Vec::new(),
             lines: Vec::new(),
             shown_lines: 0,

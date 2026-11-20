@@ -31,6 +31,8 @@ pub enum Filter {
     SampleLineGroups,
     /// Civil 3D TIN surfaces; a step of them may be passed with none selected.
     TinSurfaces,
+    /// Civil 3D feature lines.
+    FeatureLines,
     /// Lines, 2D and 3D polylines.
     Paths,
     /// Lines, 2D and 3D polylines; a step of them may be passed with none selected.
@@ -75,6 +77,7 @@ impl Filter {
             Filter::Assemblies => |e| civil_class(e) == Some("AECC_ASSEMBLY"),
             Filter::SampleLineGroups => |e| civil_class(e) == Some("AECC_SAMPLE_LINE_GROUP"),
             Filter::TinSurfaces => |e| civil_class(e) == Some("AECC_TIN_SURFACE"),
+            Filter::FeatureLines => |e| civil_class(e) == Some("AECC_FEATURE_LINE"),
             Filter::Paths | Filter::OptionalPaths => |e| {
                 matches!(e, EntityType::Line(_) | EntityType::LwPolyline(_) | EntityType::Polyline2D(_) | EntityType::Polyline3D(_))
             },

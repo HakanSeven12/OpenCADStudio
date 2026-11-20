@@ -805,52 +805,29 @@ mod tests {
         assert!(restored.show_graphic_attributes);
     }
 
+    // All four plot flags are serde-defaulted to false and round-trip through
+    // the same config; one parameterized test covers them without repeating the
+    // serialize/deserialize setup four times.
     #[test]
-    fn svg_text_as_outlines_defaults_off_and_round_trips() {
+    fn plot_flag_configs_default_off_and_round_trip() {
         let old: AppConfig = serde_json::from_str(r#"{"plot":{}}"#).expect("old config");
         assert!(!old.plot.text_as_outlines);
-
-        let mut original = AppConfig::default();
-        original.plot.text_as_outlines = true;
-        let serialized = serde_json::to_string(&original).expect("serialize config");
-        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
-        assert!(restored.plot.text_as_outlines);
-    }
-
-    #[test]
-    fn non_scaling_stroke_config_default_and_round_trip() {
-        let old: AppConfig = serde_json::from_str(r#"{"plot":{}}"#).expect("old config");
         assert!(!old.plot.non_scaling_stroke);
-
-        let mut original = AppConfig::default();
-        original.plot.non_scaling_stroke = true;
-        let serialized = serde_json::to_string(&original).expect("serialize config");
-        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
-        assert!(restored.plot.non_scaling_stroke);
-    }
-
-    #[test]
-    fn layer_attributes_config_default_and_round_trip() {
-        let old: AppConfig = serde_json::from_str(r#"{"plot":{}}"#).expect("old config");
         assert!(!old.plot.layer_attributes);
-
-        let mut original = AppConfig::default();
-        original.plot.layer_attributes = true;
-        let serialized = serde_json::to_string(&original).expect("serialize config");
-        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
-        assert!(restored.plot.layer_attributes);
-    }
-
-    #[test]
-    fn geopdf_config_defaults_off_and_round_trips() {
-        let old: AppConfig = serde_json::from_str(r#"{"plot":{}}"#).expect("old config");
         assert!(!old.plot.geopdf);
 
-        let mut original = AppConfig::default();
-        original.plot.geopdf = true;
-        let serialized = serde_json::to_string(&original).expect("serialize config");
-        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
-        assert!(restored.plot.geopdf);
+        fn round_trip(set: impl FnOnce(&mut AppConfig), get: impl FnOnce(&AppConfig) -> bool) {
+            let mut original = AppConfig::default();
+            set(&mut original);
+            let serialized = serde_json::to_string(&original).expect("serialize config");
+            let restored: AppConfig =
+                serde_json::from_str(&serialized).expect("deserialize config");
+            assert!(get(&restored));
+        }
+        round_trip(|c| c.plot.text_as_outlines = true, |c| c.plot.text_as_outlines);
+        round_trip(|c| c.plot.non_scaling_stroke = true, |c| c.plot.non_scaling_stroke);
+        round_trip(|c| c.plot.layer_attributes = true, |c| c.plot.layer_attributes);
+        round_trip(|c| c.plot.geopdf = true, |c| c.plot.geopdf);
     }
 
     #[test]

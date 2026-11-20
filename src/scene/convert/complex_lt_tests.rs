@@ -629,28 +629,20 @@ fn complex_linetype_in_a_block_stays_at_drawing_length_with_msltscale_off() {
 }
 
 #[test]
-fn complex_linetype_keeps_its_length_in_a_scaled_insert() {
-    let mut document = fence_document();
-    line_block(&mut document, "B", "0", "FENCE", 1.0);
-    let mut insert = Insert::new("B", Vector3::ZERO);
-    insert.set_x_scale(2.0);
-    insert.set_y_scale(2.0);
-    assert_same_stations(
-        &glyph_stations(&insert_wires(&document, insert, 1.0), [0.0, 0.0], 0.5),
-        &line_stations(200.0, 1.0, 1.0, 0.5),
-    );
-}
-
-#[test]
-fn complex_linetype_is_not_stretched_by_a_non_uniform_insert() {
-    let mut document = fence_document();
-    line_block(&mut document, "B", "0", "FENCE", 1.0);
-    let mut insert = Insert::new("B", Vector3::ZERO);
-    insert.set_x_scale(2.0);
-    assert_same_stations(
-        &glyph_stations(&insert_wires(&document, insert, 1.0), [0.0, 0.0], 0.5),
-        &line_stations(200.0, 1.0, 1.0, 0.5),
-    );
+fn complex_linetype_ignores_insert_scale() {
+    // Uniform and non-uniform INSERT scales are the same case for linetype
+    // length: both must leave the measured stations untouched.
+    for (x, y) in [(2.0, 2.0), (2.0, 1.0)] {
+        let mut document = fence_document();
+        line_block(&mut document, "B", "0", "FENCE", 1.0);
+        let mut insert = Insert::new("B", Vector3::ZERO);
+        insert.set_x_scale(x);
+        insert.set_y_scale(y);
+        assert_same_stations(
+            &glyph_stations(&insert_wires(&document, insert, 1.0), [0.0, 0.0], 0.5),
+            &line_stations(200.0, 1.0, 1.0, 0.5),
+        );
+    }
 }
 
 #[test]

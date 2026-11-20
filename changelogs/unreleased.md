@@ -18,6 +18,7 @@
 * **Localized Command Names:** Accepts localized command names typed directly at the command line (`#3077`). *([@HakanSeven12](https://github.com/HakanSeven12))*
 * **Annotation Scale Question:** Prompts for annotation scale before creating annotative dimensions, multileaders and block references (`#3090`). *([@ramox81](https://github.com/ramox81))*
 * **PDF and SVG Hatch Boundary Curves:** Plots hatch boundary arcs as smooth curves rather than faceted chords in PDF and SVG exports (`#3076`). *([@HakanSeven12](https://github.com/HakanSeven12))*
+* **Centered Ribbon & Wheel Tab Switching:** The ribbon's right-click menu and Options › Window Elements can center the tabs and panels on wide screens (off by default), and turning the mouse wheel or swiping sideways over the ribbon steps through its tabs (on by default; ignored while a dropdown, the ribbon menu or search results are open, or with a modifier key held). The command search box now collapses to its magnifier exactly when the tab row could no longer hold it beside the Quick Access Toolbar and the tabs, before those wrap onto two rows, rather than below a fixed window width.
 * **`CIRCLE` Tangent Snaps & `MASSPROP` Prompt:** `CIRCLE` `2P` and `3P` accept Tangent object snaps; `MASSPROP` prompts for objects when nothing is selected. *([@HakanSeven12](https://github.com/HakanSeven12))*
 
 ---

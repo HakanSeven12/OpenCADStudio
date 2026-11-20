@@ -20,6 +20,18 @@ pub enum DraftingSettingsTab {
     SelectionCycling,
 }
 
+/// Dynamic Input options: the pointer and dimension input switches
+/// (DYNMODE bits 1 and 2), the pointer format for second points
+/// (DYNPIFORMAT, DYNPICOORDS) and when pointer tooltips show (DYNPIVIS).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DynInputPrefs {
+    pub pointer: bool,
+    pub dimension: bool,
+    pub cartesian: bool,
+    pub absolute: bool,
+    pub on_type: bool,
+}
+
 /// Working buffer of drafting settings edited in the dialog.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DraftingSettingsState {
@@ -53,6 +65,7 @@ pub struct DraftingSettingsState {
     pub snap3d_modes: rustc_hash::FxHashSet<SnapType>,
     // Dynamic Input
     pub dyn_input_on: bool,
+    pub dyn_prefs: DynInputPrefs,
     // Quick Properties
     pub quick_props_on: bool,
     /// Palette location: floating rather than by the cursor (QPLOCATION).
@@ -89,6 +102,7 @@ impl DraftingSettingsState {
             || self.osnap3d_on != saved.osnap3d_on
             || self.snap3d_modes != saved.snap3d_modes
             || self.dyn_input_on != saved.dyn_input_on
+            || self.dyn_prefs != saved.dyn_prefs
             || self.quick_props_on != saved.quick_props_on
             || self.quick_props_float != saved.quick_props_float
             || self.selection_cycling_on != saved.selection_cycling_on
@@ -581,26 +595,96 @@ pub fn view_window<'a>(
     let dynamic_input_view = {
         let dyn_input_toggle = toggle(
             state.dyn_input_on,
-            crate::t!("Enable Pointer Input (F12)"),
+            crate::t!("Dynamic Input (F12)"),
             Message::DraftingSettingsToggleDynInput,
         );
 
+        let prefs = state.dyn_prefs;
+        let choice = |on: bool, label: &'static str, next: DynInputPrefs| {
+            row![
+                checkbox(on)
+                    .size(14)
+                    .on_toggle(move |_| Message::DraftingSettingsDynPrefs(next)),
+                text(crate::t!(label)).size(11),
+            ]
+            .spacing(7)
+            .align_y(iced::Center)
+        };
         let pointer_group = group(
             crate::t!("Pointer Input"),
             column![
-                row![
-                    checkbox(true).size(14),
-                    text(crate::t!("Display coordinate input near crosshairs")).size(11),
-                ]
-                .spacing(7)
-                .align_y(iced::Center),
-                row![
-                    checkbox(true).size(14),
-                    text(crate::t!("Enable dimension input fields")).size(11),
-                ]
-                .spacing(7)
-                .align_y(iced::Center),
+                choice(
+                    prefs.pointer,
+                    "Enable Pointer Input",
+                    DynInputPrefs {
+                        pointer: !prefs.pointer,
+                        ..prefs
+                    },
+                ),
+                text(crate::t!("Format for second or next points")).size(11),
+                choice(
+                    !prefs.cartesian,
+                    "Polar format",
+                    DynInputPrefs {
+                        cartesian: false,
+                        ..prefs
+                    },
+                ),
+                choice(
+                    prefs.cartesian,
+                    "Cartesian format",
+                    DynInputPrefs {
+                        cartesian: true,
+                        ..prefs
+                    },
+                ),
+                choice(
+                    !prefs.absolute,
+                    "Relative coordinates",
+                    DynInputPrefs {
+                        absolute: false,
+                        ..prefs
+                    },
+                ),
+                choice(
+                    prefs.absolute,
+                    "Absolute coordinates",
+                    DynInputPrefs {
+                        absolute: true,
+                        ..prefs
+                    },
+                ),
+                text(crate::t!("Show coordinate tooltips")).size(11),
+                choice(
+                    prefs.on_type,
+                    "As soon as I type coordinate data",
+                    DynInputPrefs {
+                        on_type: true,
+                        ..prefs
+                    },
+                ),
+                choice(
+                    !prefs.on_type,
+                    "When a command asks for a point",
+                    DynInputPrefs {
+                        on_type: false,
+                        ..prefs
+                    },
+                ),
             ]
+            .spacing(6),
+        );
+
+        let dimension_group = group(
+            crate::t!("Dimension Input"),
+            column![choice(
+                prefs.dimension,
+                "Enable Dimension Input where possible",
+                DynInputPrefs {
+                    dimension: !prefs.dimension,
+                    ..prefs
+                },
+            )]
             .spacing(6),
         );
 
@@ -622,6 +706,7 @@ pub fn view_window<'a>(
             dyn_input_toggle,
             Space::new().height(4),
             pointer_group,
+            dimension_group,
             prompt_group,
         ]
         .spacing(10)

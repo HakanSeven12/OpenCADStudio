@@ -189,7 +189,10 @@
 /// operations AI clients call over the automation bridge, with the
 /// `HostRequest::ListTools` / `CallTool` pair. Older runners cannot decode
 /// them, so the host asks only plugins whose manifest declares v25.
-pub const API_VERSION: u32 = 25;
+/// v26 appends `TableOperation::CustomPropertiesSet`: a plugin sets the
+/// drawing's custom properties (DWGPROPS Custom) in one undo step. A v25 host
+/// cannot decode it, so a plugin that sends it declares v26.
+pub const API_VERSION: u32 = 26;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

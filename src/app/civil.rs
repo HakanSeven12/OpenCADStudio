@@ -320,8 +320,8 @@ impl OpenCADStudio {
             }
             "CREATEASSEMBLY" => {
                 let at = *req.points.first().ok_or("no location")?;
-                let pkg = super::civil_packages::road();
-                let source = super::civil_packages::install(&pkg)?;
+                let pkgs = super::civil_packages::road();
+                let sources = pkgs.iter().map(super::civil_packages::install).collect::<Result<Vec<_>, _>>()?;
                 // The values set at the closing prompt; the package's defaults for the rest.
                 let values: Vec<(String, c3d::pkt::PktValue)> = crate::modules::civil::ASSEMBLY_KEYS
                     .iter()
@@ -331,8 +331,18 @@ impl OpenCADStudio {
                 self.push_undo_snapshot(i, name);
                 let doc = &mut self.tabs[i].scene.document;
                 let h = c3d::add_assembly(doc, &assembly, Vector3::new(at.x, at.y, at.z), layer).map_err(refused)?;
-                for (side, label) in [(c3d::pkt::PktSide::Right, "Road Right"), (c3d::pkt::PktSide::Left, "Road Left")] {
-                    c3d::add_pkt_subassembly(doc, h, label, &source, &pkg, side, &values, layer).map_err(refused)?;
+                // Each side: the lane at the baseline, the shoulder on its outer point, the
+                // side slope on the shoulder's.
+                for (side, label) in [(c3d::pkt::PktSide::Right, "Right"), (c3d::pkt::PktSide::Left, "Left")] {
+                    let mut parent = None;
+                    for ((pkg, source), part) in pkgs.iter().zip(&sources).zip(["Lane", "Shoulder", "Side Slope"]) {
+                        let name = format!("{part} {label}");
+                        let made = match parent {
+                            None => c3d::add_pkt_subassembly(doc, h, &name, source, pkg, side, &values, layer),
+                            Some(p) => c3d::add_pkt_subassembly_on(doc, p, super::civil_packages::OUTER, &name, source, pkg, side, &values, layer),
+                        };
+                        parent = Some(made.map_err(refused)?);
+                    }
                 }
                 crate::tf!("Assembly {} created.", assembly).into_owned()
             }

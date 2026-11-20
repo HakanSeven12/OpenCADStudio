@@ -1,26 +1,23 @@
 ---
-summary: Asks for one of the seven visual styles and applies it to the current viewport.
-related: VSCURRENT, VS, SHADEMODE
+summary: Opens the Visual Styles Manager, where you pick the current viewport's visual style and set the edge settings.
+related: VSCURRENT, VS, SHADEMODE, VSEDGESMOOTH, VSOCCLUDEDEDGES, DISPSILH
 ribbon: View tab › Visual Style panel
 ---
 ## Usage
-1. At `Visual style [Wireframe 2D/Wireframe 3D/Hidden Line/Flat Shaded/Gouraud Shaded/Flat Shaded + Edges/Gouraud Shaded + Edges]:`, pick a style.
-2. The current viewport redraws in that style, and the command line names the style.
+1. Run `VISUALSTYLES` (or `VSM`, or **View › Visual Styles › Visual Styles Manager…** in the menu bar).
+2. Under **Available Visual Styles**, click a style; the current viewport redraws in it. The highlighted style is the one in use.
+3. Under **Edge Settings**, change how edges are drawn. Changes apply at once.
+4. Click **Close**.
 
-You can also give the style on the same line, for example `VISUALSTYLES HIDDENLINE`.
+You can also give the style on the same line, for example `VISUALSTYLES HIDDENLINE`, to set it without opening the manager.
 
-## Options
-| Option | What it does |
+## Edge settings
+| Setting | What it does |
 |---|---|
-| **Wireframe 2D** (`2`) | Shows edges and curves only, flat. |
-| **Wireframe 3D** (`3` or `W`) | Shows edges and curves only, in 3D. |
-| **Hidden Line** (`H`) | Shows edges, hiding the ones behind faces. |
-| **Flat Shaded** | Shades faces without smoothing. |
-| **Gouraud Shaded** (`S`, `R` or `C`) | Shades faces smoothly. |
-| **Flat Shaded + Edges** | Flat shading with the edges drawn. |
-| **Gouraud Shaded + Edges** (`E`) | Smooth shading with the edges drawn. |
+| **Crease angle** (`VSEDGESMOOTH`) | Mesh edges between faces that meet at less than this angle (0–180 degrees) are not drawn, so the facets of curved meshes do not show. Type the angle and press Enter. |
+| **Show occluded edges dashed in Hidden Line** (`VSOCCLUDEDEDGES`) | In the Hidden Line style, edges behind faces are drawn dashed instead of hidden. |
+| **Show silhouette edges on solids** (`DISPSILH`) | Draws the silhouette edges of curved solids. Saved with the drawing. |
 
 ## Notes
-- This command only switches between the built-in styles. There is no manager for creating or editing your own visual styles.
-- The Visual Style drop-down on the ribbon and the style control in the viewport apply the same styles.
-- Same as [`VSCURRENT`](VSCURRENT-Command).
+- The manager switches between the seven built-in styles (Wireframe 2D, Wireframe 3D, Hidden Line, Flat Shaded, Gouraud Shaded and the two "+ Edges" styles); you cannot create your own styles yet.
+- The Visual Style drop-down on the ribbon and the style control in the viewport apply the same styles. To pick a style at the command line, use [`VSCURRENT`](VSCURRENT-Command) (or `VS`).

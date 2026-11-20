@@ -46,7 +46,7 @@ clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
 svgtypes = "0.15.3"
-document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "3c12c474d19b62e1ffa216a5721f510aff793f61", features = ["serde"] }
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "c9536813357506625d627a8c66b655be59f50e0a", features = ["serde"] }
 # 2D curve algebra, the B-rep model and the constraint solver (from
 # opencadkernel); the operations on solids are Solidcore's.
 ocs_geom = { path = "crates/ocs_geom" }
@@ -487,6 +487,10 @@ harness = false
 
 [[bench]]
 name = "save_batch_memory"
+harness = false
+
+[[bench]]
+name = "polygon_overlay_and_clip"
 harness = false
 
 [[test]]

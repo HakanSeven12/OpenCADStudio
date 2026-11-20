@@ -66,6 +66,10 @@ pub struct AppPrefs {
     pub show_menu_bar: bool,
     /// The ribbon shows (RIBBON / RIBBONCLOSE).
     pub show_ribbon: bool,
+    /// The ribbon's tabs and panels sit in its middle.
+    pub ribbon_centered: bool,
+    /// The mouse wheel over the ribbon steps through its tabs.
+    pub ribbon_wheel_tabs: bool,
     /// HPASSOC: new hatches follow their boundary objects.
     pub hatch_associative: bool,
     /// ZOOMWHEEL: reverse the mouse-wheel zoom direction.
@@ -989,6 +993,28 @@ pub fn view_window<'a>(
                     .on_toggle(Message::RibbonVisibleChanged)
                     .size(15),
                 text(crate::t!("Show the ribbon (RIBBON / RIBBONCLOSE)")).size(12),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+        )
+        .push(Space::new().height(8))
+        .push(
+            row![
+                iced::widget::checkbox(prefs.ribbon_centered)
+                    .on_toggle(Message::RibbonCenteredChanged)
+                    .size(15),
+                text(crate::tr!("ribbon-menu", "center-ribbon")).size(12),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+        )
+        .push(Space::new().height(8))
+        .push(
+            row![
+                iced::widget::checkbox(prefs.ribbon_wheel_tabs)
+                    .on_toggle(Message::RibbonWheelTabsChanged)
+                    .size(15),
+                text(crate::tr!("ribbon-menu", "wheel-switches-tabs")).size(12),
             ]
             .spacing(8)
             .align_y(iced::Center),

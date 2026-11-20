@@ -15,6 +15,7 @@ pub(crate) mod block_cycle_order;
 pub mod block_definition;
 pub mod block_edit_picker;
 pub(crate) mod block_editor_settings;
+pub(crate) mod visual_styles;
 pub mod block_lookup;
 pub mod block_palette;
 pub mod block_properties_table;

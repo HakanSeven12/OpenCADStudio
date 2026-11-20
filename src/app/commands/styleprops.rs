@@ -1164,6 +1164,9 @@ impl OpenCADStudio {
                     | "DYNCONSTRAINTDISPLAY"
                     | "CCONSTRAINTFORM"
                     | "DYNMODE"
+                    | "DYNPIFORMAT"
+                    | "DYNPICOORDS"
+                    | "DYNPIVIS"
                     | "TXT2MTXTCOMBINEMTEXT"
                     | "TXT2MTXTTEXTORDER"
                     | "TXT2MTXTWORDWRAP"
@@ -2434,6 +2437,31 @@ impl OpenCADStudio {
                                 },
                                 None => Ok((format!("DYNMODE = {}", self.dyn_mode), false)),
                             },
+                            // Pointer input for second points: polar or
+                            // cartesian, relative or absolute; and whether its
+                            // tooltip waits for typing (0) or the prompt (1).
+                            "DYNPIFORMAT" | "DYNPICOORDS" | "DYNPIVIS" => {
+                                let flag = match name.as_str() {
+                                    "DYNPIFORMAT" => &mut self.dyn_pointer_cartesian,
+                                    "DYNPICOORDS" => &mut self.dyn_pointer_absolute,
+                                    _ => &mut self.dyn_pointer_on_type,
+                                };
+                                // DYNPIVIS is 1 by default, so its flag reads inverted.
+                                let inverted = name == "DYNPIVIS";
+                                match &value {
+                                    Some(v) => match v.trim() {
+                                        "0" | "1" => {
+                                            *flag = (v.trim() == "1") != inverted;
+                                            self.dyn_coord_absolute = self.dyn_pointer_absolute;
+                                            Ok((format!("{name} = {}", v.trim()), true))
+                                        }
+                                        _ => Err("SETVAR: 0 or 1 required.".into()),
+                                    },
+                                    None => {
+                                        Ok((format!("{name} = {}", (*flag != inverted) as i32), false))
+                                    }
+                                }
+                            }
                             "ZOOMWHEEL" => match &value {
                                 Some(v) => match parse_bool(v) {
                                     Some(reversed) => {
@@ -3865,6 +3893,9 @@ impl OpenCADStudio {
                                         // modified instead of persisting.
                                         | "TEXTFILL"
                                         | "DYNMODE"
+                                        | "DYNPIFORMAT"
+                                        | "DYNPICOORDS"
+                                        | "DYNPIVIS"
                                 ) {
                                     self.persist_settings_if_changed();
                                 } else {

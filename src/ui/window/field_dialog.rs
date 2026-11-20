@@ -618,7 +618,43 @@ pub struct FieldDialogState {
     pub examples: Vec<String>,
 }
 
+/// The number format of a formula or object property field. A new field
+/// starts from the one the last numeric field was placed with (#3288).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct NumberFormat {
+    format: usize,
+    precision: usize,
+    conversion: String,
+    prefix: String,
+    suffix: String,
+    decimal_separator: usize,
+    thousands_separator: usize,
+}
+
 impl FieldDialogState {
+    /// The number format chosen, or `None` for a field that has none.
+    pub fn number_format(&self) -> Option<NumberFormat> {
+        matches!(self.name, "Formula" | "Object").then(|| NumberFormat {
+            format: self.formula_format,
+            precision: self.formula_precision,
+            conversion: self.conversion.clone(),
+            prefix: self.prefix.clone(),
+            suffix: self.suffix.clone(),
+            decimal_separator: self.decimal_separator,
+            thousands_separator: self.thousands_separator,
+        })
+    }
+
+    pub fn set_number_format(&mut self, format: &NumberFormat) {
+        self.formula_format = format.format;
+        self.formula_precision = format.precision;
+        self.conversion = format.conversion.clone();
+        self.prefix = format.prefix.clone();
+        self.suffix = format.suffix.clone();
+        self.decimal_separator = format.decimal_separator;
+        self.thousands_separator = format.thousands_separator;
+    }
+
     /// The rows of the field list: the category's fields, and under Document
     /// the drawing's custom properties after them, in stored order.
     pub fn entries(&self) -> Vec<(String, bool, FieldDialogMsg)> {

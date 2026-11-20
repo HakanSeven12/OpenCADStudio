@@ -1063,7 +1063,12 @@ mod tests {
     fn data_url_images_decode() {
         // 1×1 transparent PNG.
         let url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
-        assert!(decode_image(url).is_some());
+        let handle = decode_image(url).expect("a valid data URL decodes");
+        let image::Handle::Bytes(_, bytes) = handle else {
+            panic!("the payload must be kept as encoded bytes");
+        };
+        let png = ::image::load_from_memory(&bytes).expect("the extracted payload is the PNG");
+        assert_eq!((png.width(), png.height()), (1, 1));
         assert!(decode_image("data:image/png;base64,***").is_none());
     }
 }

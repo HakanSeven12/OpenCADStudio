@@ -1806,14 +1806,30 @@ mod find_replace_command_tests {
     /// taken from a case-mapped copy.
     #[test]
     fn find_replace_accepts_search_text_whose_case_mapping_changes_length() {
-        for cmd in [
-            "FIND ı REPLACE x",
-            "FINDALL ﬁ REPLACE fi",
-            "FIND ŉ replace n",
+        use crate::entities::traits::EntityTypeOps;
+        for (cmd, search, replacement) in [
+            ("FIND ı REPLACE x", "ı", "x"),
+            ("FINDALL ﬁ REPLACE fi", "ﬁ", "fi"),
+            ("FIND ŉ replace n", "ŉ", "n"),
         ] {
             let mut app = OpenCADStudio::new_for_test();
             let i = app.active_tab;
+            let mut text = document::entities::Text::new();
+            text.value = search.into();
+            let handle = app.tabs[i]
+                .scene
+                .add_entity(document::EntityType::Text(text));
             let _ = app.dispatch_inquiry(cmd, i);
+            let entity = app.tabs[i]
+                .scene
+                .document
+                .get_entity(handle)
+                .expect("the text is still there");
+            assert_eq!(
+                entity.text_content().as_deref(),
+                Some(replacement),
+                "{cmd}"
+            );
         }
     }
 

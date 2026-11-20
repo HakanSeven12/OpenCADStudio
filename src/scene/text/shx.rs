@@ -927,7 +927,9 @@ pub(crate) mod tests {
     fn a_gb_bigfont_is_known_by_its_codes() {
         // `中` is GB D6D0; `國` is not GB2312, its Big5 code B0EA is.
         let path = tmp("fsdb.shx", &bigfont_with(&[0xD6D0, 0xB0EA]));
-        assert!(bigfont_glyph(&path, '中').is_some());
+        let g = bigfont_glyph(&path, '中').expect("中 by its GB code");
+        assert!((g.advance - 1.125).abs() < 1e-4, "advance {}", g.advance);
+        assert_eq!(g.strokes.len(), 1);
         assert!(bigfont_glyph(&path, '國').is_none());
     }
 
@@ -936,8 +938,11 @@ pub(crate) mod tests {
         // Big5: `中` is A4A4, `一` is A440 (trail < A1), `筋` is B5AC.
         // In GBK `筋` is BDEE; BDEE in Big5 is `踐`.
         let path = tmp("china1.shx", &bigfont_with(&[0xA4A4, 0xA440, 0xB5AC]));
-        assert!(bigfont_glyph(&path, '中').is_some());
-        assert!(bigfont_glyph(&path, '筋').is_some());
+        for ch in ['中', '一', '筋'] {
+            let g = bigfont_glyph(&path, ch).unwrap_or_else(|| panic!("{ch} by Big5"));
+            assert!((g.advance - 1.125).abs() < 1e-4, "advance {}", g.advance);
+            assert_eq!(g.strokes.len(), 1);
+        }
     }
 
     #[test]

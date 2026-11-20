@@ -194,6 +194,11 @@ impl CadCommand for FieldObjectPickCommand {
         true
     }
 
+    /// A hatch has no boundary wire, so picking one must hit-test fills.
+    fn entity_pick_includes_fills(&self) -> bool {
+        true
+    }
+
     fn on_entity_pick(&mut self, handle: Handle, _pt: DVec3) -> CmdResult {
         if handle.is_null() {
             return CmdResult::NeedPoint;

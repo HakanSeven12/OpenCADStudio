@@ -198,6 +198,9 @@ pub enum Placing {
         sheet: String,
         drawing: String,
         view: Option<String>,
+        /// The model drawing, read on a worker for its reference (`None`:
+        /// the sheet has that reference already).
+        read: Option<Box<crate::io::xref::XrefRead>>,
     },
     /// A callout or view label block (file, block name) for sheet view `view`.
     Block {
@@ -272,11 +275,25 @@ pub enum SheetSetMsg {
     ImportRead(bool, Vec<(std::path::PathBuf, ImportRead)>),
     /// A drawing read for the cache, then the message that needed it.
     DrawingRead(String, ReadDrawing, Box<SheetSetMsg>),
+    /// Place on Sheet: the model drawing (and view) read on a worker for its
+    /// reference, for the sheet drawing at that path.
+    ViewReferenceRead(
+        String,
+        Option<String>,
+        Option<std::path::PathBuf>,
+        Box<crate::io::xref::XrefRead>,
+    ),
     /// The wizard's folder of existing drawings, scanned for layouts.
     FolderScanned(std::path::PathBuf, Vec<FoundLayout>),
     /// Rename & Renumber: apply and go to the previous / next sheet.
     Previous,
     Next,
+    /// Rename & Renumber: the closed sheet drawing's layout renamed in its
+    /// file on a worker (or why not); then OK (`None`) or Previous / Next.
+    RenameWritten(Box<Form>, Option<bool>, Result<(), String>),
+    /// New Sheet: its drawing written on a worker (its layout handle, or
+    /// why not).
+    SheetWritten(Box<Form>, Box<NewSheetWrite>, Result<String, String>),
     /// Sheet Views: by category or by sheet.
     ViewsByCategory(bool),
     NewCategory,
@@ -472,6 +489,20 @@ pub struct ImportRow {
     /// The drawing's sheet link names another sheet set (importable, warned).
     pub warn: bool,
     pub on: bool,
+}
+
+/// What New Sheet writes: its drawing at `path` (the set's `file` for it),
+/// from layout `template` of a drawing (none: a new drawing's first
+/// layout), with one layout `layout_name`, linked to the set `dst` at
+/// revision `version`.
+#[derive(Debug, Clone)]
+pub struct NewSheetWrite {
+    pub path: std::path::PathBuf,
+    pub file: String,
+    pub template: Option<(String, String)>,
+    pub layout_name: String,
+    pub dst: String,
+    pub version: i32,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -10,41 +10,62 @@ use document::classes::civil::PktSource;
 /// The folder under the user's documents that holds the packages.
 const FOLDER: [&str; 2] = ["OpenCAD Studio", "Subassemblies"];
 
-/// A road's half section: a lane from the baseline, a shoulder, and a side slope out from the
-/// shoulder, with the pavement under lane and shoulder.
-pub(super) fn road() -> PktPackage {
-    const NAME: &str = "OCSRoad";
-    let mut p = PktPackage::new_package(NAME, &new_part_name("OpenCAD Studio OCSRoad 1"));
-    p.description = "Lane, shoulder and side slope of one side of a road".into();
-    p.parameters = vec![
-        parameter_side(PktSide::Right),
-        parameter_double("LaneWidth", 3.5, "Lane width"),
-        parameter_grade("LaneSlope", -0.02, "Lane cross slope"),
-        parameter_double("ShoulderWidth", 1.0, "Shoulder width"),
-        parameter_grade("ShoulderSlope", -0.04, "Shoulder cross slope"),
-        parameter_double("PaveDepth", 0.3, "Pavement depth"),
-        parameter_double("SideSlopeWidth", 3.0, "Side slope width"),
-        parameter_grade("SideSlope", -0.5, "Side slope grade"),
-    ];
-    let none = PointTargets::default();
-    let (flowchart, start) = chain(vec![
-        point_delta(1, "P1", None, None, "0", "0", &["Crown"]),
-        point_slope(2, "P2", "P1", Some(("L1", &["Top", "Pave"])), "[LaneSlope]", "[LaneWidth]", none, &["ETW"]),
-        point_slope(3, "P3", "P2", Some(("L2", &["Top", "Pave"])), "[ShoulderSlope]", "[ShoulderWidth]", none, &["EPS"]),
-        point_slope(4, "P4", "P3", Some(("L3", &["Top", "Daylight"])), "[SideSlope]", "[SideSlopeWidth]", none, &["Daylight"]),
-        point_delta(5, "P5", Some("P3"), Some(("L4", &[])), "0", "[-PaveDepth]", &["EPS_Datum"]),
-        point_delta(6, "P6", Some("P1"), None, "0", "[-PaveDepth]", &["Crown_Datum"]),
-        link(7, "L5", "P5", "P6", &["Datum"]),
-        link(8, "L6", "P6", "P1", &[]),
-        shape(9, "S1", &["L1", "L2", "L4", "L5", "L6"], &["Pave"]),
-    ]);
-    p.flowchart = flowchart;
-    p.start = start;
+/// One package of a road's half section.
+fn package(name: &str, description: &str, parameters: Vec<pkt::PktParameter>, acts: Vec<pkt::PktActivity>) -> PktPackage {
+    let mut p = PktPackage::new_package(name, &new_part_name(&format!("OpenCAD Studio {name} 1")));
+    p.description = description.into();
+    p.parameters = parameters;
+    (p.flowchart, p.start) = chain(acts);
     p
 }
 
+/// Index of a package's outer point (its `P2`), where the next package hangs.
+pub(super) const OUTER: usize = 1;
+
+/// A road's half section, inside out: a lane from the baseline, a shoulder on the lane's
+/// outer point and a side slope on the shoulder's, with the pavement under lane and shoulder.
+pub(super) fn road() -> [PktPackage; 3] {
+    let none = PointTargets::default;
+    // A paved strip from P1 out to P2, with its datum PaveDepth below.
+    let paved = |width: &str, slope: &str, start: &'static [&'static str], edge: &'static str, datum: [&'static [&'static str]; 2]| {
+        vec![
+            point_delta(1, "P1", None, None, "0", "0", start),
+            point_slope(2, "P2", "P1", Some(("L1", &["Top", "Pave"])), slope, width, none(), &[edge]),
+            point_delta(3, "P3", Some("P2"), Some(("L2", &[])), "0", "[-PaveDepth]", datum[0]),
+            point_delta(4, "P4", Some("P1"), None, "0", "[-PaveDepth]", datum[1]),
+            link(5, "L3", "P3", "P4", &["Datum"]),
+            link(6, "L4", "P4", "P1", &[]),
+            shape(7, "S1", &["L1", "L2", "L3", "L4"], &["Pave"]),
+        ]
+    };
+    let depth = || parameter_double("PaveDepth", 0.3, "Pavement depth");
+    [
+        package(
+            "OCSLane",
+            "A paved lane from the baseline",
+            vec![parameter_side(PktSide::Right), parameter_double("LaneWidth", 3.5, "Lane width"), parameter_grade("LaneSlope", -0.02, "Lane cross slope"), depth()],
+            paved("[LaneWidth]", "[LaneSlope]", &["Crown"], "ETW", [&["ETW_Datum"], &["Crown_Datum"]]),
+        ),
+        package(
+            "OCSShoulder",
+            "A paved shoulder out from a lane's edge",
+            vec![parameter_side(PktSide::Right), parameter_double("ShoulderWidth", 1.0, "Shoulder width"), parameter_grade("ShoulderSlope", -0.04, "Shoulder cross slope"), depth()],
+            paved("[ShoulderWidth]", "[ShoulderSlope]", &[], "EPS", [&["EPS_Datum"], &[]]),
+        ),
+        package(
+            "OCSSideSlope",
+            "A side slope out to daylight",
+            vec![parameter_side(PktSide::Right), parameter_double("SideSlopeWidth", 3.0, "Side slope width"), parameter_grade("SideSlope", -0.5, "Side slope grade")],
+            vec![
+                point_delta(1, "P1", None, None, "0", "0", &[]),
+                point_slope(2, "P2", "P1", Some(("L1", &["Top", "Daylight"])), "[SideSlope]", "[SideSlopeWidth]", none(), &["Daylight"]),
+            ],
+        ),
+    ]
+}
+
 /// Writes `pkg` to the user's package folder (when the file there differs) and returns the
-/// texts a subassembly names it by: the host expands `%USERPROFILE%` to the same folder.
+/// texts a subassembly names it by.
 pub(super) fn install(pkg: &PktPackage) -> Result<PktSource, String> {
     let bytes = pkt::write_pkt(pkg).map_err(|e| e.to_string())?;
     let file = format!("{}.pkt", pkg.name);
@@ -55,6 +76,32 @@ pub(super) fn install(pkg: &PktPackage) -> Result<PktSource, String> {
     if std::fs::read(&path).ok().as_deref() != Some(bytes.as_slice()) {
         std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
     }
-    let host = format!("%USERPROFILE%\\Documents\\{}\\{}\\{file}", FOLDER[0], FOLDER[1]);
+    let profile = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(std::path::PathBuf::from);
+    let host = host_path(&path, profile.as_deref());
     Ok(PktSource { library: format!("[ \"{}\" ]", host.replace('\\', "\\\\")), path: host })
+}
+
+/// How the drawing names the package at `path`: the place it was written to, with
+/// `%USERPROFILE%` for the user's folder when the path lies under it (the documents folder
+/// may be redirected, so it is not assumed to be `%USERPROFILE%\Documents`), in the host's
+/// backslash form.
+fn host_path(path: &std::path::Path, profile: Option<&std::path::Path>) -> String {
+    let parts = |p: &std::path::Path| p.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>();
+    match profile.and_then(|home| path.strip_prefix(home).ok()) {
+        Some(rest) => std::iter::once("%USERPROFILE%".to_string()).chain(parts(rest)).collect::<Vec<_>>().join("\\"),
+        None => path.to_string_lossy().replace('/', "\\"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::host_path;
+    use std::path::Path;
+
+    #[test]
+    fn names_the_written_folder_under_the_profile() {
+        let home = Path::new("/home/u");
+        assert_eq!(host_path(&home.join("OneDrive/Documents/OpenCAD Studio/Subassemblies/OCSRoad.pkt"), Some(home)), "%USERPROFILE%\\OneDrive\\Documents\\OpenCAD Studio\\Subassemblies\\OCSRoad.pkt");
+        assert_eq!(host_path(Path::new("/data/docs/OCSRoad.pkt"), Some(home)), "\\data\\docs\\OCSRoad.pkt");
+    }
 }

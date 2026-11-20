@@ -12,6 +12,17 @@ use crate::ui::window::mtext_tool_dialogs::{
 };
 use iced::Task;
 
+/// Reads an Import Text file into MTEXT source.
+pub(in crate::app) type ImportReader = fn(&str) -> Result<String, String>;
+
+/// The MTEXT source of the text or Rich Text file `path` (run on a worker
+/// thread).
+fn read_import(path: &str) -> Result<String, String> {
+    let path = std::path::Path::new(path);
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    Ok(import_text::file_source(path, &bytes))
+}
+
 impl OpenCADStudio {
     /// The window `which` of this file, or None for another one.
     pub(super) fn mtext_tool_dialog(&self, which: &str) -> Option<MTextDialog> {
@@ -402,17 +413,47 @@ impl OpenCADStudio {
         )
     }
 
-    /// Put the text of the file `path` in at the caret.
-    pub(in crate::app) fn mtext_import(&mut self, path: &str) {
-        let path = std::path::Path::new(path);
-        match std::fs::read(path) {
-            Ok(bytes) => {
-                let source = import_text::file_source(path, &bytes);
-                if !source.is_empty() {
+    /// Put the text of the file `path` in at the caret. A worker reads the
+    /// file and makes its MTEXT source; it goes in when the read ends.
+    pub(in crate::app) fn mtext_import(&mut self, path: &str) -> Task<Message> {
+        self.mtext_import_with(path.to_string(), read_import)
+    }
+
+    /// [`Self::mtext_import`] with the reader (a test can give one that
+    /// panics).
+    pub(in crate::app) fn mtext_import_with(
+        &mut self,
+        path: String,
+        reader: ImportReader,
+    ) -> Task<Message> {
+        let Some(opened) = self.mtext_editor.as_ref().map(|ed| ed.opened) else {
+            return Task::none();
+        };
+        crate::app::update::background_task(
+            crate::t!("Import Text"),
+            move || reader(&path),
+            move |read| Message::MTextImportRead(opened, read),
+        )
+    }
+
+    /// The import's read ended: its text goes in at the caret of the editor
+    /// it was read for, if that editor is still open.
+    pub(in crate::app) fn finish_mtext_import(
+        &mut self,
+        opened: u64,
+        read: Result<String, String>,
+    ) {
+        match read {
+            Ok(source) => {
+                let open = self
+                    .mtext_editor
+                    .as_ref()
+                    .is_some_and(|ed| ed.opened == opened);
+                if open && !source.is_empty() {
                     self.raw_paste_fragment(&source);
                 }
             }
-            Err(error) => self.command_line.push_error(&error.to_string()),
+            Err(error) => self.command_line.push_error(&error),
         }
     }
 

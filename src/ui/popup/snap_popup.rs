@@ -81,6 +81,14 @@ pub fn menu_entries<'a>(
             snapper.is_on(snap_type),
         )));
     }
+    entries.push(Entry::close(crate::ui::kit::menu::entry(
+        crate::ui::kit::menu::Item::new(
+            t!("Osnap Settings..."),
+            Message::OpenDraftingSettings(
+                crate::ui::window::drafting_settings::DraftingSettingsTab::ObjectSnap,
+            ),
+        ),
+    )));
     entries
 }
 

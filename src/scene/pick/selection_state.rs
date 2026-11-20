@@ -173,8 +173,20 @@ impl SelectionState {
     /// End every left-button selection gesture without disturbing the previous
     /// completed-window record or command-owned preview marquee. Grip editing
     /// owns the left button while engaged and calls this before/after placement
-    /// so a small pointer move cannot also arm a box or lasso selection.
+    /// so a small pointer move cannot also arm a box or lasso selection. A
+    /// PERF trace names the caller that ended a drag the user did not end
+    /// themselves (#3339).
+    #[track_caller]
     pub fn clear_left_selection_gesture(&mut self) {
+        if crate::perf::enabled() && self.gesture.box_anchor.is_some() {
+            crate::perf_record_diagnostic!(
+                "[perf] gesture-clear {} anchor={:?} left_down={} pointer_away={}",
+                std::panic::Location::caller(),
+                self.gesture.box_anchor,
+                self.input.left_down,
+                self.input.pointer_away,
+            );
+        }
         self.input.clear_left_buttons();
         self.gesture.clear_left();
     }

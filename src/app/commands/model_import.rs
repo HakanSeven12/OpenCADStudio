@@ -1722,6 +1722,107 @@ mod import_tests {
 }
 
 #[cfg(test)]
+mod import_target_tests {
+    use super::*;
+
+    fn app_with_new_drawing() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    /// The target is the tab the import was started for, even while a
+    /// different drawing is current, and a found target says nothing.
+    #[test]
+    fn the_target_is_the_tab_the_import_was_started_for() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let (id, generation) = (app.tabs[i].id, app.tabs[i].document_generation);
+        app.push_test_document();
+        app.active_tab = app.tabs.len() - 1;
+        let lines = app.command_line.history.len();
+        assert_eq!(app.import_target(id, generation), Some(i));
+        assert_eq!(app.command_line.history.len(), lines);
+    }
+
+    /// A document replaced under the same tab id is not the target, and
+    /// the command line says the drawing was replaced, not closed.
+    #[test]
+    fn a_replaced_document_is_not_the_target() {
+        let mut app = app_with_new_drawing();
+        let i = app.active_tab;
+        let (id, generation) = (app.tabs[i].id, app.tabs[i].document_generation);
+        app.tabs[i].document_generation += 1;
+        assert_eq!(app.import_target(id, generation), None);
+        let text = app.command_line.history_plain_text();
+        assert!(text.contains("was replaced or cleared"), "{text}");
+        assert!(!text.contains("was closed"), "{text}");
+    }
+
+    /// A tab that is gone is not the target, and the command line says the
+    /// drawing was closed, not replaced.
+    #[test]
+    fn a_closed_tab_is_not_the_target() {
+        let mut app = app_with_new_drawing();
+        assert_eq!(app.import_target(u64::MAX, 0), None);
+        let text = app.command_line.history_plain_text();
+        assert!(text.contains("was closed"), "{text}");
+        assert!(!text.contains("was replaced"), "{text}");
+    }
+}
+
+#[cfg(test)]
+mod window_read_ticket_tests {
+    use super::*;
+    use crate::app::ModalKind;
+    use crate::ui::window::import_dialogs::ReadTicket;
+
+    /// Every read gets the next number, and the ticket remembers whether
+    /// its window was open when the read started. Only the newest read is
+    /// current.
+    #[test]
+    fn tickets_number_the_reads_and_only_the_newest_is_current() {
+        let mut app = OpenCADStudio::new_for_test();
+        let older = app.start_window_read(ModalKind::TdsImport);
+        assert!(!older.from_window, "no window is open yet");
+        app.active_modal = Some(ModalKind::TdsImport);
+        let newer = app.start_window_read(ModalKind::TdsImport);
+        assert!(newer.from_window, "the window is open now");
+        assert_eq!(newer.id, older.id + 1);
+        assert!(!app.window_read_current(older, ModalKind::TdsImport));
+        assert!(app.window_read_current(newer, ModalKind::TdsImport));
+    }
+
+    /// A read started from the window does not open it again once it
+    /// closed; a read of the same number that did not start from the
+    /// window (a script's) opens it regardless.
+    #[test]
+    fn a_closed_window_takes_only_results_not_started_from_it() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.active_modal = Some(ModalKind::TdsImport);
+        let ticket = app.start_window_read(ModalKind::TdsImport);
+        app.active_modal = None;
+        assert!(!app.window_read_current(ticket, ModalKind::TdsImport));
+        let script = ReadTicket {
+            id: ticket.id,
+            from_window: false,
+        };
+        assert!(app.window_read_current(script, ModalKind::TdsImport));
+    }
+
+    /// The window kind is part of the check: a ticket for the open 3D
+    /// Studio Import window is not current for the DGN Import window.
+    #[test]
+    fn a_ticket_is_current_only_for_its_own_window_kind() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.active_modal = Some(ModalKind::TdsImport);
+        let ticket = app.start_window_read(ModalKind::TdsImport);
+        assert!(app.window_read_current(ticket, ModalKind::TdsImport));
+        assert!(!app.window_read_current(ticket, ModalKind::DgnImport));
+    }
+}
+
+#[cfg(test)]
 mod picture_import_tests {
     use super::*;
 

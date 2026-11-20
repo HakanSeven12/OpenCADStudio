@@ -236,10 +236,21 @@ impl OpenCADStudio {
             // command line — show no scalar box, so digits reach the command
             // line instead of being captured into a dyn buffer.
             crate::command::DynField::Point if wants_text || picks_object => vec![],
-            crate::command::DynField::Point if has_base => {
-                vec![DynComponent::Distance, DynComponent::Angle]
+            // A second point: dimension input when it is on, else pointer
+            // input in its format for second points.
+            crate::command::DynField::Point
+                if has_base && (self.dyn_dimension_input() || !self.dyn_pointer_cartesian) =>
+            {
+                if self.dyn_dimension_input() || self.dyn_pointer_input() {
+                    vec![DynComponent::Distance, DynComponent::Angle]
+                } else {
+                    vec![]
+                }
             }
-            crate::command::DynField::Point => vec![DynComponent::X, DynComponent::Y],
+            crate::command::DynField::Point if self.dyn_pointer_input() => {
+                vec![DynComponent::X, DynComponent::Y]
+            }
+            crate::command::DynField::Point => vec![],
         };
         // Multiple shapes can satisfy the same command request — e.g. a
         // `Point` is happy with either `[Distance, Angle]` (polar) or
@@ -591,6 +602,26 @@ impl OpenCADStudio {
         }
     }
 
+    /// DYNPIVIS 0: a pointer input tooltip stays hidden until a coordinate is
+    /// typed. Pointer input is a coordinate set, or the polar pair standing
+    /// in for dimension input when that is off.
+    pub(in crate::app) fn dyn_pointer_tooltip_hidden(&self, i: usize) -> bool {
+        use crate::app::tab_document::DynComponent;
+        let fields = &self.tabs[i].dyn_fields;
+        if !self.dyn_pointer_on_type
+            || fields.is_empty()
+            || fields.iter().any(|field| field.buffer.is_some())
+        {
+            return false;
+        }
+        let comps: Vec<DynComponent> = fields.iter().map(|field| field.component).collect();
+        comps
+            .iter()
+            .all(|c| matches!(c, DynComponent::X | DynComponent::Y | DynComponent::Z))
+            || (!self.dyn_dimension_input()
+                && comps == [DynComponent::Distance, DynComponent::Angle])
+    }
+
     /// Whether the current dynamic field set represents a point coordinate
     /// that can be switched with `@` / `#`.
     pub(in crate::app) fn dyn_has_coordinate_fields(&self, i: usize) -> bool {
@@ -719,7 +750,7 @@ impl OpenCADStudio {
                         }
                         self.tabs[i].dyn_active = 0;
                         self.dyn_user_reshaped = false;
-                        self.dyn_coord_absolute = false;
+                        self.dyn_coord_absolute = self.dyn_pointer_absolute;
                         self.sync_dyn_fields();
                         self.reset_tracking_after_point();
                         self.snapper.clear_override();
@@ -794,7 +825,7 @@ impl OpenCADStudio {
         }
         self.last_point = Some(pt);
         self.dyn_user_reshaped = false;
-        self.dyn_coord_absolute = false;
+        self.dyn_coord_absolute = self.dyn_pointer_absolute;
         self.sync_dyn_fields();
         self.reset_tracking_after_point();
         self.snapper.clear_override();

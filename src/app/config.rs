@@ -926,6 +926,39 @@ mod tests {
     }
 
     #[test]
+    fn ribbon_centering_and_wheel_default_and_round_trip() {
+        // A config saved before these options keeps the ribbon at its left
+        // edge and lets the wheel step through the tabs.
+        let old: AppConfig =
+            serde_json::from_str(r#"{"ribbon":{"qat_below":true}}"#).expect("old config");
+        assert!(!old.ribbon.layout.centered);
+        assert!(old.ribbon.layout.wheel_switches_tabs);
+
+        let mut original = AppConfig::default();
+        original.ribbon.layout.centered = true;
+        original.ribbon.layout.wheel_switches_tabs = false;
+        let serialized = serde_json::to_string(&original).expect("serialize config");
+        let value: serde_json::Value = serde_json::from_str(&serialized).expect("json");
+        assert_eq!(value["ribbon"]["centered"], true);
+        assert_eq!(value["ribbon"]["wheel_switches_tabs"], false);
+        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
+        assert!(restored.ribbon == original.ribbon);
+    }
+
+    #[test]
+    fn the_ribbon_options_reach_the_ribbon_and_the_saved_config() {
+        use crate::app::{Message, OpenCADStudio};
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.update(Message::RibbonCenteredChanged(true));
+        let _ = app.update(Message::RibbonWheelTabsChanged(false));
+        assert!(app.ribbon.layout().centered);
+        assert!(!app.ribbon.layout().wheel_switches_tabs);
+        let saved = app.current_config();
+        assert!(saved.ribbon.layout.centered);
+        assert!(!saved.ribbon.layout.wheel_switches_tabs);
+    }
+
+    #[test]
     fn floating_panels_default_and_round_trip() {
         use crate::ui::ribbon::FloatingPanel;
 

@@ -94,6 +94,8 @@ mod import_command_tests;
 #[cfg(test)]
 mod mtext_follows_style_tests;
 #[cfg(test)]
+mod mtext_import_tests;
+#[cfg(test)]
 mod mtext_style_from_selection_tests;
 mod navigation;
 pub(crate) mod node_graph;
@@ -218,6 +220,11 @@ pub struct HoverDwell {
     pub point: iced::Point,
     pub tile_size: (f32, f32),
     pub tab: usize,
+    /// The camera generation when the cursor came to rest. A wheel zoom
+    /// keeps the cursor still, so a dwell armed before the zoom would fire
+    /// mid-navigation and stall it; a tick that finds this changed restarts
+    /// the rest clock on the new view instead of picking (#3339).
+    pub camera_generation: u64,
 }
 
 /// Raw (unfiltered) box hits from the last preview. This is only used for
@@ -291,6 +298,13 @@ impl SnapDwell {
 /// How long the cursor must sit still before the idle rollover pick runs
 /// when the moving pick (`hover_pick_due`) has not already answered it.
 pub const HOVER_DWELL_MS: u128 = 500;
+
+/// The settled hover pick skips its wire sweep when the pick aperture holds
+/// more than this many candidate segments: past it, every wire in the box is
+/// a plausible hit and the sweep costs more than the rollover highlight is
+/// worth. Click picks keep their full sweep — a deliberate user action earns
+/// the cost.
+pub const HOVER_CANDIDATE_CAP: usize = 16384;
 /// How long the cursor must sit still before the active-command object-snap pass runs.
 pub const SNAP_DWELL_MS: u128 = 60;
 /// Shortest gap between full snap passes while the pointer keeps moving. A
@@ -918,6 +932,7 @@ pub(super) struct OpenCADStudio {
     /// Pointer state while the command-history panel's top edge is dragged.
     command_history_resizing: bool,
     command_history_drag_last: Option<Point>,
+    command_line_moving: bool,
     status_bar: StatusBar,
     cursor_pos: Point,
     vp_size: (f32, f32),
@@ -1012,6 +1027,8 @@ pub(super) struct OpenCADStudio {
     block_visibility_mode: bool,
     block_editor_preferences: settings::BlockEditorPreferences,
     block_editor_settings: Option<crate::ui::window::block_editor_settings::State>,
+    /// Visual Styles Manager: the crease angle being typed; `None` while closed.
+    visual_styles_crease: Option<String>,
     block_cycle_order: Option<crate::ui::window::block_cycle_order::State>,
     block_dependency_cache: std::cell::RefCell<Option<block_feedback::DependencyCache>>,
     /// PDF dialogs' working copies; `None` while closed.
@@ -1036,6 +1053,9 @@ pub(super) struct OpenCADStudio {
     field_dialog: Option<crate::ui::window::field_dialog::FieldDialogState>,
     /// The Formula dialog kept while Insert Field has another one open.
     field_formula_parent: Option<crate::ui::window::field_dialog::FieldDialogState>,
+    /// The number format the last formula / object field was placed with;
+    /// a new field starts from it (#3288).
+    field_number_format: crate::ui::window::field_dialog::NumberFormat,
     point_cloud_color_map: Option<crate::ui::window::pdf_dialogs::PointCloudColorMapState>,
     pc_section: Option<crate::ui::window::pdf_dialogs::PcSectionState>,
     /// -VIEW sEttings Background dialog.
@@ -1321,6 +1341,13 @@ pub(super) struct OpenCADStudio {
     dyn_input: bool,
     /// Dynamic input mode (DYNMODE): 0=off, 1=pointer, 2=dimensional, 3=both.
     dyn_mode: i16,
+    /// DYNPIFORMAT: second points typed as pointer input are X,Y rather
+    /// than distance<angle.
+    dyn_pointer_cartesian: bool,
+    /// DYNPICOORDS: second points typed as pointer input are absolute.
+    dyn_pointer_absolute: bool,
+    /// DYNPIVIS 0: pointer tooltips show only once coordinates are typed.
+    dyn_pointer_on_type: bool,
     /// Currently visible page in the application Options dialog.
     options_tab: crate::ui::window::options::OptionsTab,
     /// Saved graphics options (backend, compat renderer); read at launch, so
@@ -3260,6 +3287,9 @@ impl ClipboardDeps {
                             .filter_map(|entry| entry.value.as_handle()),
                     );
                 }
+                // A field's nested fields (a formula's operands) hang off it,
+                // not off a dictionary entry.
+                ObjectType::Field(f) => queue.extend(f.child_fields.iter().copied()),
                 _ => {}
             }
             out.push((h, obj.clone()));
@@ -3551,6 +3581,7 @@ pub enum ModalKind {
     Aliases,
     NamedParameters,
     BlockEditorSettings,
+    VisualStyles,
     BlockCycleOrder,
     ScaleManager,
     /// Add / remove the annotation scales a single selected object has a
@@ -3675,7 +3706,11 @@ pub enum Message {
     /// The end of the automation `node_graph` `load` read: the drawing it
     /// was read for, that document's generation, and the file's bytes or
     /// the failure.
-    GraphLoadRead(u64, u64, Result<Vec<u8>, serde_json::Value>),
+    GraphLoadRead(
+        u64,
+        u64,
+        Result<crate::ui::node_graph::LoadedGraph, serde_json::Value>,
+    ),
     Tick(Instant),
     /// Periodic drain of plugin-to-host requests that arrived outside a host
     /// call (e.g. mutations from the Python REPL).
@@ -3971,6 +4006,10 @@ pub enum Message {
     MenuBarChanged(bool),
     /// Options: show the ribbon (RIBBON / RIBBONCLOSE).
     RibbonVisibleChanged(bool),
+    /// Options: center the ribbon's tabs and panels.
+    RibbonCenteredChanged(bool),
+    /// Options: the mouse wheel over the ribbon steps through its tabs.
+    RibbonWheelTabsChanged(bool),
     /// Options: new hatches are associative (HPASSOC).
     HatchAssociativeChanged(bool),
     /// Interface scale in percent (Options > Display).
@@ -4098,6 +4137,11 @@ pub enum Message {
     SetProjection(bool),
     /// Select a ribbon module tab by index.
     RibbonSelectTab(usize),
+    /// The mouse wheel turned over the ribbon: step through its tabs.
+    RibbonWheel(iced::mouse::ScrollDelta),
+    /// The ribbon's layout changed what its last view was built on (the
+    /// room for the search box): view it anew.
+    RibbonRefit,
     /// The ribbon's right-click menu.
     RibbonMenu(crate::ui::ribbon::RibbonMenuMsg),
     /// A menu-bar entry: its command line, run like a ribbon button's. A
@@ -4495,6 +4539,12 @@ pub enum Message {
     CommandHistoryToggle,
     /// Grab/move/release the expanded history panel's top resize edge.
     CommandHistoryResizeGrab,
+    /// Drag the command line by its grip (floating mode).
+    CommandLineMoveGrab,
+    CommandLineMoveMove(Point),
+    CommandLineMoveRelease,
+    /// Put a floating command line back at the bottom of the drawing area.
+    CommandLineDock,
     CommandHistoryResizeMove(Point),
     CommandHistoryResizeRelease,
     /// Restore the expanded history panel to its default height.
@@ -4563,6 +4613,10 @@ pub enum Message {
     XrefSplitRelease,
     /// Flip the palette's details/preview lower pane.
     XrefManagerTogglePreview,
+    /// The end of the worker that decoded an Xref Manager preview: the
+    /// panel's refresh count when it was asked for, the cache key, and the
+    /// preview (`None`: the file has none).
+    XrefPreviewRead(u64, (u64, String), Option<iced::widget::image::Handle>),
     /// Toggle the Attach dropdown menu.
     XrefManagerAttachMenu,
     /// Toggle the Refresh dropdown menu.
@@ -5065,6 +5119,9 @@ pub enum Message {
     SnapClearAll,
     // ── Drafting Settings Dialog ──────────────────────────────────────────
     DraftingSettingsTabChanged(crate::ui::window::drafting_settings::DraftingSettingsTab),
+    /// Open Drafting Settings (or bring it up) on `tab`: a status pill's
+    /// "… Settings..." entry.
+    OpenDraftingSettings(crate::ui::window::drafting_settings::DraftingSettingsTab),
     DraftingSettingsToggleGrid,
     DraftingSettingsToggleSnap,
     DraftingSettingsSnapXChanged(String),
@@ -5090,6 +5147,7 @@ pub enum Message {
     DraftingSettingsSnapClearAll,
     DraftingSettingsToggle3dOsnap,
     DraftingSettingsToggleDynInput,
+    DraftingSettingsDynPrefs(crate::ui::window::drafting_settings::DynInputPrefs),
     DraftingSettingsToggleQuickProps,
     /// Quick Properties palette location: floating (true) or by the cursor.
     DraftingSettingsQuickPropsFloat(bool),
@@ -5462,6 +5520,10 @@ pub enum Message {
     /// `Scene::named_parameters`.
     NamedParametersOpen,
     BlockEditorSettingsInput(usize, String),
+    /// Visual Styles Manager: crease angle typed / submitted, occluded edges toggled.
+    VisualStylesCreaseInput(String),
+    VisualStylesCreaseApply,
+    VisualStylesOccludedEdges(bool),
     BlockConstraintColorInput(usize, String),
     ToggleBlockConstraintStatus,
     BlockEditorSettingsReset,
@@ -5787,6 +5849,9 @@ pub enum Message {
     MTextSelEnd,
     /// Import Text: the file picked.
     MTextImport(String),
+    /// The end of the worker that read an Import Text file: the editor it
+    /// was read for, and the file's MTEXT source or why it cannot be read.
+    MTextImportRead(u64, Result<String, String>),
     /// Timer tick toggling the preview caret's blink phase.
     MTextCaretBlink,
     TableEditorClick(iced::Point),
@@ -5947,6 +6012,11 @@ pub enum Message {
     /// and the rasters.
     UnderlayRastersDrawn(u64, u64, Box<crate::scene::ReseedDone>),
     PointCloudRead(crate::scene::model::point_cloud::ReadDone),
+    /// The end of the worker that read an automation `embed_image` picture:
+    /// the drawing it was started for, that document's generation, and the
+    /// read.
+    #[cfg(not(target_arch = "wasm32"))]
+    EmbedImageRead(u64, u64, Box<control::EmbedImageRead>),
     BackgroundTaskFailed {
         /// Which operation the worker was running (e.g. "STL export").
         context: String,
@@ -6477,6 +6547,7 @@ impl OpenCADStudio {
             history_content: iced::widget::text_editor::Content::new(),
             command_history_resizing: false,
             command_history_drag_last: None,
+            command_line_moving: false,
             status_bar: StatusBar::new(),
             cursor_pos: Point::ORIGIN,
             vp_size: (1280.0, 720.0),
@@ -6537,6 +6608,7 @@ impl OpenCADStudio {
             block_visibility_mode: false,
             block_editor_preferences: settings::BlockEditorPreferences::default(),
             block_editor_settings: None,
+            visual_styles_crease: None,
             block_cycle_order: None,
             block_dependency_cache: std::cell::RefCell::new(None),
             pdf_attach: None,
@@ -6550,6 +6622,7 @@ impl OpenCADStudio {
             attdef_edit: None,
             field_dialog: None,
             field_formula_parent: None,
+            field_number_format: Default::default(),
             point_cloud_color_map: None,
             pc_section: None,
             view_background: None,
@@ -6666,6 +6739,9 @@ impl OpenCADStudio {
             grid_axes: true,
             dyn_input: true,
             dyn_mode: 3,
+            dyn_pointer_cartesian: false,
+            dyn_pointer_absolute: false,
+            dyn_pointer_on_type: false,
             options_tab: crate::ui::window::options::OptionsTab::General,
             #[cfg(not(target_arch = "wasm32"))]
             graphics_prefs: crate::gpu_backend::load_prefs(),

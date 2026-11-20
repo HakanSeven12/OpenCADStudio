@@ -136,6 +136,19 @@ fn text_around_a_field_is_edited_and_saved_as_the_codec_would() {
     assert_eq!(other_field_objects(&app, handle), others);
 }
 
+/// The editor shades each field's text gray, as the canvas does, also past
+/// a line break and after an edit before it.
+#[test]
+fn the_editor_shades_each_fields_text() {
+    let (mut app, _) = host(r"a %<\_FldIdx 0>%\P%<\_FldIdx 1>% b", &["12", "345"]);
+    assert_eq!(ed(&app).field_shading(), vec![(2, 4), (5, 8)]);
+    caret(&mut app, 0);
+    app.mtext_type("x");
+    assert_eq!(ed(&app).field_shading(), vec![(3, 5), (6, 9)]);
+    let (app, _) = plain();
+    assert!(ed(&app).field_shading().is_empty());
+}
+
 #[test]
 fn a_fields_own_text_cannot_be_typed_into_or_split() {
     let (mut app, _) = host(r"a %<\_FldIdx 0>% b", &["12"]);

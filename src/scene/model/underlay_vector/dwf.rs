@@ -1218,6 +1218,77 @@ mod xps {
 }
 
 #[cfg(test)]
+mod w2d_sheet_rect_tests {
+    use super::w2d;
+
+    /// Two graphics units to the model unit, the model's origin 100 of them
+    /// along x.
+    const UNITS: &str = "((2 0 0 0)(0 2 0 0)(0 0 1 0)(100 0 0 1))";
+    /// A viewport 1000 by 1000 model units from the origin, and one beside it.
+    const VIEWPORT: &str = "2100,0 2100,2000 100,2000 100,0";
+    const SECOND_VIEWPORT: &str = "4100,0 4100,2000 2100,2000 2100,0";
+
+    /// The sheet rectangle of a stream with the given view and viewport
+    /// contours.
+    fn sheet_rect(view: Option<&str>, contours: &[&str]) -> Option<[f64; 4]> {
+        let mut stream = format!("(W2D V06.00)(Units '' {UNITS})");
+        if let Some(view) = view {
+            stream.push_str(&format!("(View {view})"));
+        }
+        for contour in contours {
+            stream.push_str(&format!(
+                "(Viewport '' (Contour 1 4 {contour}) (Units '' {UNITS}))"
+            ));
+        }
+        stream.push_str("(EndOfDWF)");
+        w2d::read(stream.as_bytes()).expect("the stream reads").1
+    }
+
+    #[test]
+    fn a_view_narrower_than_its_viewport_does_not_narrow_the_sheet() {
+        // The view shows the viewport's whole width and the middle of its
+        // height: what the viewport draws above and below it is on the sheet.
+        let sheet = sheet_rect(Some("100,200 2100,1800"), &[VIEWPORT]);
+
+        assert_eq!(sheet, Some([0.0, 0.0, 1000.0, 1000.0]));
+    }
+
+    #[test]
+    fn the_sheet_holds_every_viewport() {
+        // The view shows the first of two viewports side by side.
+        let sheet = sheet_rect(Some("100,0 2100,2000"), &[VIEWPORT, SECOND_VIEWPORT]);
+
+        assert_eq!(sheet, Some([0.0, 0.0, 2000.0, 1000.0]));
+    }
+
+    #[test]
+    fn a_stream_without_a_view_is_as_large_as_its_viewports() {
+        assert_eq!(
+            sheet_rect(None, &[VIEWPORT]),
+            Some([0.0, 0.0, 1000.0, 1000.0])
+        );
+        assert_eq!(
+            sheet_rect(None, &[VIEWPORT, SECOND_VIEWPORT]),
+            Some([0.0, 0.0, 2000.0, 1000.0])
+        );
+    }
+
+    #[test]
+    fn a_view_wider_than_its_viewport_stays_the_sheet() {
+        let sheet = sheet_rect(Some("100,0 4100,3000"), &[VIEWPORT]);
+
+        assert_eq!(sheet, Some([0.0, 0.0, 2000.0, 1500.0]));
+    }
+
+    #[test]
+    fn a_view_alone_is_the_sheet() {
+        let sheet = sheet_rect(Some("100,200 2100,1800"), &[]);
+
+        assert_eq!(sheet, Some([0.0, 100.0, 1000.0, 900.0]));
+    }
+}
+
+#[cfg(test)]
 mod xps_depth_tests {
     use super::{xps, SheetEntry};
 

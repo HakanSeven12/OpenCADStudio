@@ -402,6 +402,9 @@ impl OpenCADStudio {
                         self.command_text_color,
                         &self.command_text_color_input,
                         self.lineweight_display_scale,
+                        self.tabs
+                            .get(self.active_tab)
+                            .is_some_and(|t| t.scene.document.header.lineweight_display),
                         &self.model_space,
                         &self.model_bg_input,
                         &self.paper_bg_input,

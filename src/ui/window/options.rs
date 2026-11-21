@@ -272,6 +272,7 @@ pub fn view_window<'a>(
     command_text_color: Option<[u8; 3]>,
     command_text_color_input: &'a str,
     lineweight_display_scale: i32,
+    lineweight_display: bool,
     model_space: &'a crate::app::config::ModelSpaceThemeConfig,
     model_bg_input: &'a str,
     paper_bg_input: &'a str,
@@ -936,6 +937,17 @@ pub fn view_window<'a>(
         )
         .push(Space::new().height(24))
         .push(text(crate::t!("Lineweight")).size(15))
+        .push(Space::new().height(10))
+        .push(
+            row![
+                iced::widget::checkbox(lineweight_display)
+                    .on_toggle(|_| Message::ToggleLineweightDisplay)
+                    .size(15),
+                text(crate::t!("Show Lineweight")).size(12),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+        )
         .push(Space::new().height(10))
         .push(
             row![

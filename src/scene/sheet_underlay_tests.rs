@@ -136,8 +136,9 @@ fn the_model_view_has_no_say_in_a_sheet_underlay() {
     );
 }
 
-/// A sheet's zoom is not the model's: with the sheet in view, an underlay
-/// of model space is left as it is.
+/// A sheet's zoom is not the model's: a sheet with no viewport shows
+/// nothing of the model, and its zoom leaves an underlay of model space as
+/// it is.
 #[test]
 fn a_sheet_zoom_leaves_a_model_underlay_alone() {
     let (mut scene, on_sheet) = sheet_with_underlay("model-underlay");

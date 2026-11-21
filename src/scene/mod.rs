@@ -145,6 +145,8 @@ pub mod viewport_dimension_pick;
 #[cfg(test)]
 mod viewport_freeze_block_member_tests;
 pub mod viewport_ref;
+#[cfg(test)]
+mod viewport_underlay_tests;
 pub(crate) use selection::pe_url_of;
 pub mod parametric_constraints;
 mod parametric_solve;

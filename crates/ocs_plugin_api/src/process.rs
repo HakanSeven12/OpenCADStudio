@@ -15,8 +15,9 @@
 //!    logging and UI display.
 //!
 //! `NullHost` is a dummy `HostApi` implementation used for V4 paths that do not
-//! supply a real host surface (e.g., interactive events). Timeouts and message
-//! size limits are centralized here.
+//! supply a real host surface (e.g., interactive events). Command-line messages
+//! a plugin sends during such a call are held and shown by the next call that
+//! has a host surface. Timeouts and message size limits are centralized here.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -170,11 +171,24 @@ impl std::fmt::Display for IoStream {
     }
 }
 
+/// A command-line message a plugin sent during a call that had no host surface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum HeldMessage {
+    Info(String),
+    Output(String),
+    Error(String),
+}
+
+/// Most messages one plugin can have waiting; the oldest are dropped beyond it.
+const HELD_MESSAGE_LIMIT: usize = 2000;
+
 /// A dummy `HostApi` used for V4 paths that do not supply a real host surface
-/// (e.g., interactive events). Nested plugin requests receive safe defaults.
+/// (e.g., interactive events). Nested plugin requests receive safe defaults,
+/// except command-line messages, which are kept for the caller to hold.
 #[derive(Default)]
 struct NullHost {
     scratch_doc: Option<Document>,
+    messages: Vec<HeldMessage>,
 }
 
 impl HostApi for NullHost {
@@ -218,9 +232,15 @@ impl HostApi for NullHost {
     }
     fn push_undo(&mut self, _label: &str) {}
     fn set_dirty(&mut self) {}
-    fn push_info(&mut self, _msg: &str) {}
-    fn push_output(&mut self, _msg: &str) {}
-    fn push_error(&mut self, _msg: &str) {}
+    fn push_info(&mut self, msg: &str) {
+        self.messages.push(HeldMessage::Info(msg.to_string()));
+    }
+    fn push_output(&mut self, msg: &str) {
+        self.messages.push(HeldMessage::Output(msg.to_string()));
+    }
+    fn push_error(&mut self, msg: &str) {
+        self.messages.push(HeldMessage::Error(msg.to_string()));
+    }
     fn start_interactive(&mut self, _command: Box<dyn crate::host::InteractiveCommand>) {}
     fn plugin_state_any(&self, _plugin_id: &str) -> Option<&(dyn std::any::Any + Send + Sync)> {
         None
@@ -460,6 +480,9 @@ pub struct PluginProcess {
     manifest: OwnedPluginManifest,
     ribbon: Vec<OwnedRibbonGroupAlias>,
     io_lines: Mutex<Option<mpsc::Receiver<PluginIoLine>>>,
+    /// Command-line messages the plugin sent during calls that had no host
+    /// surface, in order. `replay_held_messages` shows them.
+    held_messages: Mutex<Vec<HeldMessage>>,
 }
 
 impl PluginProcess {
@@ -722,6 +745,7 @@ impl PluginProcess {
             manifest,
             ribbon,
             io_lines: Mutex::new(Some(io_rx)),
+            held_messages: Mutex::new(Vec::new()),
         })
     }
 
@@ -914,17 +938,52 @@ impl PluginProcess {
         }
     }
 
+    /// Make a V4 call that has no host surface. Command-line messages the
+    /// plugin sends while it is served are held for `replay_held_messages`
+    /// instead of being discarded: a command prints its results while the
+    /// host is answering one of its prompts.
+    fn call_unhosted(
+        &self,
+        v4: &V4Connection,
+        req: HostRequest,
+        on_start_interactive: &mut dyn FnMut(u64),
+    ) -> Result<HostResponse, PluginError> {
+        let mut host = NullHost::default();
+        let result = v4.call(&mut host, req, on_start_interactive);
+        if !host.messages.is_empty() {
+            let mut held = self.held_messages.lock().unwrap_or_else(|e| e.into_inner());
+            held.append(&mut host.messages);
+            let excess = held.len().saturating_sub(HELD_MESSAGE_LIMIT);
+            held.drain(..excess);
+        }
+        result
+    }
+
+    /// Show the command-line messages held from calls that had no host
+    /// surface, in the order the plugin sent them.
+    pub fn replay_held_messages(&self, host: &mut dyn HostApi) {
+        let held =
+            std::mem::take(&mut *self.held_messages.lock().unwrap_or_else(|e| e.into_inner()));
+        for message in held {
+            match message {
+                HeldMessage::Info(msg) => host.push_info(&msg),
+                HeldMessage::Output(msg) => host.push_output(&msg),
+                HeldMessage::Error(msg) => host.push_error(&msg),
+            }
+        }
+    }
+
     /// Send an interactive event for `command_id` and return the step the
-    /// plugin command produces. Interactive events are not expected to trigger
-    /// nested host API calls, so this path does not supply a `HostApi`.
+    /// plugin command produces. This path does not supply a `HostApi`;
+    /// command-line messages the plugin sends meanwhile are held.
     pub fn interactive_event(
         &self,
         command_id: u64,
         event: InteractiveEvent,
     ) -> Result<CommandStep, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
+            let resp = self.call_unhosted(
+                v4,
                 HostRequest::InteractiveEvent { command_id, event },
                 &mut |_| {},
             )?;
@@ -950,11 +1009,7 @@ impl PluginProcess {
         let Some(v4) = &self.v4 else {
             return Ok(());
         };
-        match v4.call(
-            &mut NullHost::default(),
-            HostRequest::DropInteractive { command_id },
-            &mut |_| {},
-        )? {
+        match self.call_unhosted(v4, HostRequest::DropInteractive { command_id }, &mut |_| {})? {
             HostResponse::Bool(true) => Ok(()),
             other => Err(PluginError::UnexpectedResponse(Box::new(other))),
         }
@@ -963,11 +1018,8 @@ impl PluginProcess {
     /// Ask the plugin process for the current prompt of an interactive command.
     pub fn get_prompt(&self, command_id: u64) -> Result<String, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
-                HostRequest::GetPrompt { command_id },
-                &mut |_| {},
-            )?;
+            let resp =
+                self.call_unhosted(v4, HostRequest::GetPrompt { command_id }, &mut |_| {})?;
             match resp {
                 HostResponse::Text(s) => Ok(s),
                 other => Err(PluginError::UnexpectedResponse(Box::new(other))),
@@ -988,11 +1040,8 @@ impl PluginProcess {
     /// Ask the plugin process whether an interactive command wants object picks.
     pub fn needs_entity_pick(&self, command_id: u64) -> Result<bool, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
-                HostRequest::NeedsEntityPick { command_id },
-                &mut |_| {},
-            )?;
+            let resp =
+                self.call_unhosted(v4, HostRequest::NeedsEntityPick { command_id }, &mut |_| {})?;
             match resp {
                 HostResponse::Bool(b) => Ok(b),
                 other => Err(PluginError::UnexpectedResponse(Box::new(other))),
@@ -1013,8 +1062,8 @@ impl PluginProcess {
     /// Ask the plugin process whether an interactive command is in selection-gathering mode.
     pub fn is_selection_gathering(&self, command_id: u64) -> Result<bool, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
+            let resp = self.call_unhosted(
+                v4,
                 HostRequest::IsSelectionGathering { command_id },
                 &mut |_| {},
             )?;
@@ -1038,8 +1087,8 @@ impl PluginProcess {
     /// Ask the plugin process whether an interactive command accepts drag selections.
     pub fn accepts_drag_selection(&self, command_id: u64) -> Result<bool, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
+            let resp = self.call_unhosted(
+                v4,
                 HostRequest::AcceptsDragSelection { command_id },
                 &mut |_| {},
             )?;
@@ -1063,8 +1112,8 @@ impl PluginProcess {
     /// Ask the plugin process whether an interactive command rejects locked layers during selection.
     pub fn selection_rejects_locked_layers(&self, command_id: u64) -> Result<bool, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
+            let resp = self.call_unhosted(
+                v4,
                 HostRequest::SelectionRejectsLockedLayers { command_id },
                 &mut |_| {},
             )?;
@@ -1092,11 +1141,8 @@ impl PluginProcess {
         pt: [f64; 3],
     ) -> Result<Vec<crate::host::PreviewWire>, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
-                HostRequest::CursorMove { command_id, pt },
-                &mut |_| {},
-            )?;
+            let resp =
+                self.call_unhosted(v4, HostRequest::CursorMove { command_id, pt }, &mut |_| {})?;
             match resp {
                 HostResponse::PreviewWires(w) => Ok(w),
                 other => Err(PluginError::UnexpectedResponse(Box::new(other))),
@@ -1120,11 +1166,8 @@ impl PluginProcess {
         command_id: u64,
     ) -> Result<Option<crate::dialog::DialogDef>, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
-                HostRequest::GetModalDialog { command_id },
-                &mut |_| {},
-            )?;
+            let resp =
+                self.call_unhosted(v4, HostRequest::GetModalDialog { command_id }, &mut |_| {})?;
             match resp {
                 HostResponse::ModalDialog(d) => Ok(d),
                 other => Err(PluginError::UnexpectedResponse(Box::new(other))),
@@ -1150,8 +1193,8 @@ impl PluginProcess {
         event: crate::dialog::DialogEvent,
     ) -> Result<crate::dialog::DialogActionResponse, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
+            let resp = self.call_unhosted(
+                v4,
                 HostRequest::DialogAction { command_id, event },
                 &mut |_| {},
             )?;
@@ -1182,11 +1225,7 @@ impl PluginProcess {
             return Ok(None);
         }
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
-                HostRequest::UndoStep { command_id },
-                &mut |_| {},
-            )?;
+            let resp = self.call_unhosted(v4, HostRequest::UndoStep { command_id }, &mut |_| {})?;
             match resp {
                 HostResponse::UndoStep(step) => Ok(step.map(|s| *s)),
                 other => Err(PluginError::UnexpectedResponse(Box::new(other))),
@@ -1210,7 +1249,7 @@ impl PluginProcess {
         let Some(v4) = self.v4.as_ref().filter(|_| self.manifest.api_version >= 25) else {
             return Ok(Vec::new());
         };
-        match v4.call(&mut NullHost::default(), HostRequest::ListTools, &mut |_| {})? {
+        match self.call_unhosted(v4, HostRequest::ListTools, &mut |_| {})? {
             HostResponse::Tools(tools) => Ok(tools),
             other => Err(PluginError::UnexpectedResponse(Box::new(other))),
         }
@@ -1281,6 +1320,7 @@ impl PluginProcess {
         host: &mut dyn HostApi,
         on_start_interactive: &mut dyn FnMut(u64),
     ) -> Result<(), PluginError> {
+        self.replay_held_messages(host);
         if let Some(v4) = &self.v4 {
             v4.drain_requests(host, on_start_interactive)?;
         }
@@ -1890,6 +1930,7 @@ impl PluginProcess {
             manifest,
             ribbon: vec![],
             io_lines: Mutex::new(None),
+            held_messages: Mutex::new(Vec::new()),
         }
     }
 }
@@ -1995,6 +2036,8 @@ mod timeout_tests {
     struct DummyHost {
         doc: Document,
         push_info_messages: StdMutex<Vec<String>>,
+        /// Every command-line message in arrival order, tagged with its kind.
+        command_line: StdMutex<Vec<String>>,
     }
 
     impl DummyHost {
@@ -2002,6 +2045,7 @@ mod timeout_tests {
             Self {
                 doc,
                 push_info_messages: StdMutex::new(Vec::new()),
+                command_line: StdMutex::new(Vec::new()),
             }
         }
         fn take_push_info(&self) -> Vec<String> {
@@ -2043,8 +2087,18 @@ mod timeout_tests {
                 .unwrap()
                 .push(msg.to_string());
         }
-        fn push_output(&mut self, _msg: &str) {}
-        fn push_error(&mut self, _msg: &str) {}
+        fn push_output(&mut self, msg: &str) {
+            self.command_line
+                .lock()
+                .unwrap()
+                .push(format!("output: {msg}"));
+        }
+        fn push_error(&mut self, msg: &str) {
+            self.command_line
+                .lock()
+                .unwrap()
+                .push(format!("error: {msg}"));
+        }
         fn start_interactive(&mut self, _command: Box<dyn crate::host::InteractiveCommand>) {}
         fn plugin_state_any(&self, _plugin_id: &str) -> Option<&(dyn std::any::Any + Send + Sync)> {
             None
@@ -2133,6 +2187,7 @@ mod timeout_tests {
             manifest: fake_manifest(),
             ribbon: vec![],
             io_lines: Mutex::new(None),
+            held_messages: Mutex::new(Vec::new()),
         };
         (process, runner_stream)
     }
@@ -2305,6 +2360,86 @@ mod timeout_tests {
             Some(v) => std::env::set_var("OCS_PLUGIN_CALL_TIMEOUT_SECS", v),
             None => std::env::remove_var("OCS_PLUGIN_CALL_TIMEOUT_SECS"),
         }
+    }
+
+    /// A command prints while the host answers one of its prompts: the step
+    /// is served without a host surface, so the text is held, and the next
+    /// call that has one shows it, in order.
+    #[test]
+    fn messages_sent_during_an_interactive_step_are_shown_afterwards() {
+        use crate::ipc::v4::protocol::{HostToPluginV4, PluginToHostV4};
+        let _env_guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let (host_stream, mut peer) = connected_pair();
+        let handler: Arc<dyn Fn(Option<u64>, PluginNotification) + Send + Sync> =
+            Arc::new(|_, _| {});
+        let v4 = V4Connection::new(host_stream, handler, None).expect("v4 connection");
+        let (mut process, _unused_runner_stream) = fake_process();
+        process.v4 = Some(v4);
+
+        let runner = thread::spawn(move || {
+            let id = match recv::<HostToPluginV4>(&mut peer).expect("read event") {
+                HostToPluginV4::Request {
+                    id,
+                    payload: HostRequest::InteractiveEvent { command_id: 7, .. },
+                } => id,
+                other => panic!("unexpected: {other:?}"),
+            };
+            let nested = [
+                PluginRequest::PushOutput("result line".to_string()),
+                PluginRequest::PushError("a warning".to_string()),
+                PluginRequest::PushInfo("next prompt".to_string()),
+            ];
+            for (n, payload) in nested.into_iter().enumerate() {
+                send(
+                    &mut peer,
+                    &PluginToHostV4::Request {
+                        id: 90 + n as u64,
+                        tab_id: None,
+                        payload,
+                    },
+                )
+                .expect("send nested request");
+                let resp = recv::<HostToPluginV4>(&mut peer).expect("read nested response");
+                assert!(matches!(
+                    resp,
+                    HostToPluginV4::Response {
+                        payload: PluginResponse::Ok,
+                        ..
+                    }
+                ));
+            }
+            send(
+                &mut peer,
+                &PluginToHostV4::Response {
+                    id,
+                    payload: HostResponse::CommandStep(Box::new(CommandStep::NeedPoint)),
+                },
+            )
+            .expect("send step");
+            peer
+        });
+
+        let step = process
+            .interactive_event(7, InteractiveEvent::Enter)
+            .expect("step answered");
+        assert!(matches!(step, CommandStep::NeedPoint));
+        let _peer = runner.join().expect("runner thread");
+
+        let mut host = DummyHost::new(Document::default());
+        process.replay_held_messages(&mut host);
+        assert_eq!(
+            *host.command_line.lock().unwrap(),
+            vec![
+                "output: result line".to_string(),
+                "error: a warning".to_string()
+            ],
+            "text sent during the step must reach the command line"
+        );
+        assert_eq!(host.take_push_info(), vec!["next prompt".to_string()]);
+
+        process.replay_held_messages(&mut host);
+        assert_eq!(host.command_line.lock().unwrap().len(), 2, "shown once");
+        kill_fake_runner(&process);
     }
 
     fn kill_fake_runner(process: &PluginProcess) {

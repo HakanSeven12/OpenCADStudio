@@ -626,6 +626,14 @@ impl PluginManager {
         }
     }
 
+    /// Show the command-line messages plugins sent during calls that had no
+    /// host surface (an interactive step, a prompt query).
+    pub fn replay_held_messages(&self, host: &mut dyn HostApi) {
+        for p in &self.plugins {
+            p.process.replay_held_messages(host);
+        }
+    }
+
     /// Drain any plugin stdout/stderr lines that have accumulated across all
     /// loaded plugins. Errors are logged; this is best-effort.
     pub fn drain_io(&self) -> Vec<crate::process::PluginIoLine> {

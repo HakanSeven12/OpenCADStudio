@@ -346,6 +346,7 @@ modal =
     .find-replace = Keresés és csere
     .plugin-manager = Bővítménykezelő
     .update-available = Frissítés érhető el
+    .widget-confirmation = Widget Confirmation
     .layer-manager = Fóliakezelő
     .layer-state-manager = Fóliaállapot-kezelő
     .edit-layer-state = Fóliaállapot szerkesztése

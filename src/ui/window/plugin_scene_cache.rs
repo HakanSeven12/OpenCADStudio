@@ -1,0 +1,2460 @@
+//! Retained per-panel scene-projection layer caches + rebuild counters
+//! (SCN-011a, the layer-retention half).
+//!
+//! [`project_scene`](crate::ui::window::plugin_scene::project_scene) is the
+//! renderer-free flatten of a [`PanelScene`]; this module is the retention
+//! layer on top of it, mirroring `src/ui/overlay.rs`'s `CachedOverlayLayer`
+//! precedent exactly:
+//!
+//! - one [`CachedOverlayLayer`] per panel scene, keyed by a
+//!   [`SceneLayerKey`] that carries the scene revision, the paint bounds and
+//!   a palette fingerprint — a key EQUAL means the geometry inputs are
+//!   unchanged, so the cached layer replays verbatim (`bounds` equality is
+//!   what `draw_with_bounds`'s early return needs; revision equality means
+//!   the prim list is identical at this pane size; the fingerprint stands in
+//!   for palette `PartialEq`, which the key never relies on);
+//! - dynamic content stays out: SCN-003 gives no interaction-phase transform
+//!   yet (pan/zoom is a later task), so there is no `transient_layer`
+//!   equivalent here — per-frame rebuilds reclassify as revision bumps (the
+//!   panel-scene's own monotonic revision is the invalidation contract).
+//!
+//! Counter policy (the "full-rebuild is a defect" instrumentation): probes
+//! never mutate counters.
+//!
+//! - [`SceneProjectionCache::probe_draw_decision`] is the PURE decision
+//!   classifier (headless, no side effects);
+//! - the counted counterpart [`SceneProjectionCache::decide_counted`] runs
+//!   the same classification and then advances the counters; both the
+//!   renderer path ([`SceneProjectionCache::draw`]) and the headless seam
+//!   ([`SceneProjectionCache::apply_build`]) funnel through it, so the two
+//!   paths cannot drift;
+//! - tests pair a pure [`probe`](SceneProjectionCache::probe_draw_decision)
+//!   against an [`apply_build`](SceneProjectionCache::apply_build)
+//!   (a "simulated draw") on identically-primed caches and assert identical
+//!   decision sequences — pixel-path correctness itself is live-host work
+//!   (milestone 6+), exactly like the overlay tests which assert decisions
+//!   and key math headlessly.
+//!
+//! Scope: layer-level retention (SCN-011a) plus the report-driven per-subtree
+//! prim-store hook (SCN-011b). Pending-request cancellation
+//! (dropping in-flight patch requests when a surface goes away) is a
+//! wire-era concern for a later task and is likewise documented as
+//! out of scope here.
+//!
+//! SCN-011b layered truth (per-subtree retention): the cache optionally
+//! carries a [`ScenePrimStore`](crate::ui::window::plugin_scene::ScenePrimStore)
+//! that retains the projection SEGMENTED at root-level subtrees and refreshes,
+//! per applied patch, ONLY the segments the `AppliedPatchReport` names. The
+//! `CachedOverlayLayer` stays the pixel-path carrier: the layer still rebuilds
+//! on a revision bump (`layer_builds` — the cheap emit), but when the store is
+//! fresh the build paints from the store's segments instead of re-running
+//! the semantic flatten, and the honest cost proof is the store's
+//! `StoreCounters.subtree_reprojects` (segments actually re-projected, ==
+//! segments touched) vs `layer_builds`: prim re-projection avoided for
+//! untouched segments is the win being instrumented. The SCN-012 benchmark
+//! consumes these counters.
+//!
+//! SCN-031b fit-and-center law: a committed build NEVER paints the stream
+//! 1:1 any more — the stream's bounding box is fitted into the region's
+//! bounds (translate + uniform scale, centered, `SCENE_FIT_MARGIN` inset;
+//! see the transform section for the exact math and the determinism
+//! reasoning). That closed the live defect where an origin-centered graph
+//! (negative scene coordinates) landed entirely off a top-left-origin
+//! region and the mount rendered (nearly) nothing. The transform adds NO
+//! key field and NO counter: it is a pure function of the existing key
+//! inputs, so replay stays replay.
+//!
+//! SCN-036 draft-path emit law: upstream iced (rev 23604ff22) masks canvas
+//! geometry by its FRAME clip bounds pre-multiplied by the render
+//! translation, so under the mount's nested composition prims drawn
+//! DIRECTLY on the build frame mask away while prims emitted inside a
+//! `Frame::with_clip` draft paint correctly (proven live on host 26ad461d,
+//! 2026-11-17 — see the section docs above `emit_in_full_frame_draft`).
+//! The build emission therefore rides ONE full-frame draft through
+//! [`emit_in_full_frame_draft`]; keys, decisions and counters are untouched
+//! (the wrap happens after the decision, on the emit only).
+//!
+//! Palette-fingerprint scope decision: [`palette_fingerprint`] hashes EVERY
+//! bound slot named in its doc — deliberately WIDER than
+//! [`scene_color`](crate::ui/window/plugin_scene::scene_color)'s table
+//! actually reads (that table reads only `background.base.text`,
+//! `primary.base.color`, `primary.strong.color`, `success/warning/danger
+//! base.text` and the passthrough `Rgba` slot). Over-invalidation of the
+//! layer bitmap is acceptable at patch cadence (a theme slot change is
+//! coarse-grained, and reprojecting costs one prim walk); a stale-colored
+//! wrong result after an unbound-slot change is not. SIMPLE > subtle.
+
+#![allow(dead_code)]
+
+use std::collections::HashMap;
+
+use iced::widget::canvas;
+use iced::{Color, Point, Rectangle, Size};
+use ocs_plugin_api::scene::{
+    AppliedPatchReport, PanelScene, SceneError, SceneRevision, SceneSummary, StableId,
+};
+
+use crate::ui::overlay::CachedOverlayLayer;
+use crate::ui::window::plugin_scene::{
+    count_prims, emit_prims, project_scene, ScenePrim, ScenePrimStore, StoreCounters,
+};
+
+// ── Layer keys + palette fingerprinting ─────────────────────────────────────
+
+/// FNV-1a-64 offset basis and prime, mirrored verbatim from
+/// `ocs_plugin_api::version_info::wire_schema` (the crate's established
+/// fingerprint hash — same constants so both fingerprints read as one
+/// family and the choice stays reviewable in one place).
+const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+/// FNV-1a-64 prime (see [`FNV_OFFSET_BASIS`]).
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+/// Fold `bytes` into an FNV-1a-64 hash state.
+fn fnv1a_fold(mut hash: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes {
+        hash = (hash ^ u64::from(*byte)).wrapping_mul(FNV_PRIME);
+    }
+    hash
+}
+
+/// Fold one `f32` channel: fixed little-endian byte order. The fingerprint
+/// never crosses a wire (it is compared against itself in-process), so the
+/// endianness choice is free but pinned by the field-order tests.
+fn fnv1a_f32(hash: u64, value: f32) -> u64 {
+    fnv1a_fold(hash, &value.to_le_bytes())
+}
+
+/// Fold one `Color` in fixed `r, g, b, a` channel order.
+fn fnv1a_color(hash: u64, color: &Color) -> u64 {
+    let hash = fnv1a_f32(hash, color.r);
+    let hash = fnv1a_f32(hash, color.g);
+    let hash = fnv1a_f32(hash, color.b);
+    fnv1a_f32(hash, color.a)
+}
+
+/// Fold one `Pair` in fixed `color, text` order.
+fn fnv1a_pair(hash: u64, pair: &iced::theme::palette::Pair) -> u64 {
+    let hash = fnv1a_color(hash, &pair.color);
+    fnv1a_color(hash, &pair.text)
+}
+
+/// Fold one `Swatch` in fixed `base, weak, strong` order (each a `Pair`).
+fn fnv1a_swatch(hash: u64, swatch: &iced::theme::palette::Swatch) -> u64 {
+    let hash = fnv1a_pair(hash, &swatch.base);
+    let hash = fnv1a_pair(hash, &swatch.weak);
+    fnv1a_pair(hash, &swatch.strong)
+}
+
+/// Deterministic FNV-1a-64 fingerprint of the host theme palette, over the
+/// palette's float bytes in a FIXED documented field order:
+///
+/// 1. `background.base` pair (`{color, text}`),
+/// 2. the five swatches in struct order — `primary, secondary, success,
+///    warning, danger` — each folded `{base, weak, strong}` x `{color, text}`,
+/// 3. `is_dark` (one byte, `0`/`1`).
+///
+/// Any change to a bound slot therefore yields a different fingerprint, and
+/// today's concrete palettes hash to different values already.
+///
+/// This is deliberately WIDER than
+/// [`scene_color`](crate::ui/window/plugin_scene::scene_color)'s table: the
+/// projection reads only `background.base.text`, `primary.base.color`,
+/// `primary.strong.color`, `success/warning/danger base.text` (plus
+/// passthrough `Rgba`). Hashing every bound slot means a theme change in an
+/// UNREAD slot (say `secondary.weak.color`) still invalidates the layer —
+/// over-invalidation is acceptable at patch cadence, a stale (wrong) panel
+/// is not; see the module docs. Background's seven non-base pairs are NOT
+/// bound (the projection and the scene tier cannot reach them), which the
+/// fingerprint tests pin as the documented boundary.
+///
+/// The fingerprint is the single palette comparison surface: keys never rely
+/// on `Palette: PartialEq` (the vendored type does not promise it and the
+/// rewrite rules inside `Pair::new` would make structural equality a moving
+/// target).
+pub(crate) fn palette_fingerprint(palette: &iced::theme::Palette) -> u64 {
+    let hash = fnv1a_pair(FNV_OFFSET_BASIS, &palette.background.base);
+    let hash = fnv1a_swatch(hash, &palette.primary);
+    let hash = fnv1a_swatch(hash, &palette.secondary);
+    let hash = fnv1a_swatch(hash, &palette.success);
+    let hash = fnv1a_swatch(hash, &palette.warning);
+    let hash = fnv1a_swatch(hash, &palette.danger);
+    // is_dark last, as one byte — the only non-float slot in the digest.
+    fnv1a_fold(hash, &[u8::from(palette.is_dark)])
+}
+
+/// Layer key for one panel-scene projection: a key EQUAL means the geometry
+/// inputs are unchanged and the cached layer may replay verbatim.
+///
+/// - `bounds` equality is what `CachedOverlayLayer`'s
+///   `draw_with_bounds` early return needs (a changed pane size is in the
+///   key by construction, as in `overlay.rs`'s `DividerLayerKey`);
+/// - `revision` equality means the prim stream is identical at this pane
+///   size (the panel-scene's revision is the only valid invalidation signal
+///   the scene tier offers);
+/// - `palette_fingerprint` stands in for palette identity (SIMPLE > subtle:
+///   no `PartialEq` reliance — see the module docs).
+///
+/// SCN-031b: the committed layer's fit-and-center transform derives from
+/// EXACTLY these fields (bbox = f(revision)'s prim stream, bounds, and the
+/// constant margin) — no key field was added, so key-equal draws replay a
+/// layer built under the identical transform (pinned by tests).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SceneLayerKey {
+    /// Scene revision the cached projection was built from.
+    pub revision: SceneRevision,
+    /// Paint bounds of the layer (frame surface).
+    pub bounds: Rectangle,
+    /// [`palette_fingerprint`] of the palette the projection resolved
+    /// against.
+    pub palette_fingerprint: u64,
+}
+
+// ── SCN-031b: the region fit-and-center transform ───────────────────────────
+//
+// `project_scene` maps scene units 1:1 onto region-local pixels (the
+// documented stage-1 law; `bounds` only anchors the interaction-phase
+// transform). The reference demo's graph, however, is centered on the
+// SCENE ORIGIN — its node cards span negative coordinates — so under 1:1
+// into a region whose local origin is the TOP-LEFT, the negative-coordinate
+// geometry lands entirely OFF-REGION and the mounted region draws (nearly)
+// nothing. That was exactly the live defect this section closes.
+//
+// The fix lives HERE (the cache owns projection AND emit; the region
+// program only ever sees the finished `Geometry` blob): every committed
+// build fits the projected prim stream's bounding box into the region's
+// bounds with a TRANSLATE + UNIFORM-SCALE transform before emitting.
+//
+// Determinism / retention reasoning (pinned by tests): the transform is a
+// PURE function of (scene bbox, bounds.size(), margin) — and
+//   scene bbox = f(project_scene(scene)) = f(revision)  (the monotone law
+//     the layer key already relies on: an equal revision IS an equal prim
+//     stream — a content change always arrives at a greater revision), and
+//   bounds are a key field, and the margin is a compile-time constant.
+// The transform is therefore fully determined by the existing
+// [`SceneLayerKey`]: a key HIT replays a layer built under the IDENTICAL
+// transform; a key MISS recomputes it identically. The transform
+// deliberately adds NO key field and advances NO counter — replay stays
+// replay, and the retained counters keep proving rebuild-vs-reuse exactly
+// as before (a transform change with unchanged scene/bounds/palette is
+// impossible by this construction).
+//
+// SCN-032 contract: the transform is affine and INVERTIBLE —
+// [`SceneFitTransform::invert`] is the pointer→scene half of the coming
+// hit-testing. Keep [`SceneFitTransform::fit`] a pure function of
+// (scene bbox, region size); SCN-032 consumes it verbatim.
+
+/// The margin (logical px) a fitted scene keeps from the region's edges on
+/// every side (documented v1 value: a thin breathing frame).
+pub(crate) const SCENE_FIT_MARGIN: f32 = 8.0;
+
+/// Scene extents at or below this are DEGENERATE along their axis (a
+/// single point on it): the axis contributes NO scale constraint — the
+/// scale division is guarded, never executed. 0.001 scene units ≪ any
+/// real geometry.
+const FIT_DEGENERATE_EXTENT: f32 = 1.0e-3;
+
+/// The region's fit-and-center view transform: a scene point `p` paints at
+/// `(p - bbox_center) * scale + region_center`.
+///
+/// LAWS (all pinned by tests):
+/// - UNIFORM scale — the aspect ratio is preserved;
+/// - `scale = min(inner_w / sw, inner_h / sh)` over the NON-degenerate
+///   axes: the scene fits INSIDE the margin-inset bounds BOTH ways, and a
+///   small scene SCALES UP to use the region (the Excel-fit /
+///   diagram-viewport choice, decided and documented: the region is a
+///   scene VIEWER — 1:1 would strand origin-centered graphs off-canvas and
+///   waste the viewport on stamp-sized scenes);
+/// - the bbox center lands at the region center;
+/// - an EMPTY scene (no bbox) fits to the IDENTITY transform — nothing is
+///   drawn anyway; no panic, no NaN;
+/// - a degenerate bbox axis contributes no scale constraint (a single
+///   point with both axes degenerate keeps scale 1.0 and lands at the
+///   region center; a straight line fits along its extent axis only).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SceneFitTransform {
+    /// The uniform scale (strictly positive — `invert`'s division guard
+    /// never trips in practice, it only pins the law).
+    scale: f32,
+    /// The x translation (applied after scaling).
+    tx: f32,
+    /// The y translation (applied after scaling).
+    ty: f32,
+}
+
+impl SceneFitTransform {
+    /// The identity transform (1:1, no offset) — the empty-scene answer.
+    pub(crate) fn identity() -> Self {
+        Self {
+            scale: 1.0,
+            tx: 0.0,
+            ty: 0.0,
+        }
+    }
+
+    /// THE fit law: (scene bbox, region size, margin) → transform.
+    pub(crate) fn fit(bbox: Option<(Point, Point)>, size: Size, margin: f32) -> Self {
+        let Some((min, max)) = bbox else {
+            return Self::identity();
+        };
+        // The margin-inset inner area, clamped so a region smaller than
+        // twice the margin still yields a finite (1px) fit surface.
+        let inner_w = (size.width - 2.0 * margin).max(1.0);
+        let inner_h = (size.height - 2.0 * margin).max(1.0);
+        let sw = max.x - min.x;
+        let sh = max.y - min.y;
+        let wide = sw > FIT_DEGENERATE_EXTENT;
+        let tall = sh > FIT_DEGENERATE_EXTENT;
+        let mut scale = f32::INFINITY;
+        if wide {
+            scale = scale.min(inner_w / sw);
+        }
+        if tall {
+            scale = scale.min(inner_h / sh);
+        }
+        if !scale.is_finite() {
+            // Both axes degenerate (a single point): identity scale.
+            scale = 1.0;
+        }
+        // Center of the bbox per axis (a degenerate axis centers its point).
+        let cx = if wide { (min.x + max.x) * 0.5 } else { min.x };
+        let cy = if tall { (min.y + max.y) * 0.5 } else { min.y };
+        Self {
+            scale,
+            tx: size.width * 0.5 - cx * scale,
+            ty: size.height * 0.5 - cy * scale,
+        }
+    }
+
+    /// Scene point → region-local pixel point.
+    pub(crate) fn apply(&self, p: Point) -> Point {
+        Point::new(p.x * self.scale + self.tx, p.y * self.scale + self.ty)
+    }
+
+    /// Region-local pixel point → scene point — SCN-032's pointer→scene
+    /// half, the exact inverse of [`Self::apply`].
+    pub(crate) fn invert(&self, p: Point) -> Point {
+        let scale = if self.scale == 0.0 { 1.0 } else { self.scale };
+        Point::new((p.x - self.tx) / scale, (p.y - self.ty) / scale)
+    }
+
+    /// The uniform scale (the stroke-width / font-size multiplier).
+    pub(crate) fn scale(&self) -> f32 {
+        self.scale
+    }
+}
+
+/// The bounding box of one projected prim stream — the WHOLE scene as the
+/// fit law measures it (every geometry a prim paints: shape rings, the
+/// text anchor, clip rectangles). `None` when the stream paints nothing
+/// (an empty scene). Documented approximation: a text run contributes its
+/// BASELINE ANCHOR only — text metrics are not measurable headlessly, and
+/// the anchor is where iced starts painting the run.
+pub(crate) fn prims_bbox(prims: &[ScenePrim]) -> Option<(Point, Point)> {
+    fn acc(min: &mut Option<Point>, max: &mut Option<Point>, x: f32, y: f32) {
+        let lo = min.get_or_insert(Point::new(x, y));
+        lo.x = lo.x.min(x);
+        lo.y = lo.y.min(y);
+        let hi = max.get_or_insert(Point::new(x, y));
+        hi.x = hi.x.max(x);
+        hi.y = hi.y.max(y);
+    }
+    let mut min = None;
+    let mut max = None;
+    for prim in prims {
+        match prim {
+            ScenePrim::Fill { vertices, .. }
+            | ScenePrim::Stroke { vertices, .. }
+            | ScenePrim::FillStroke { vertices, .. } => {
+                for vertex in vertices {
+                    acc(&mut min, &mut max, vertex.x, vertex.y);
+                }
+            }
+            ScenePrim::Text { position, .. } => {
+                acc(&mut min, &mut max, position.x, position.y);
+            }
+            ScenePrim::ClipPush { rect, .. } => {
+                acc(&mut min, &mut max, rect.x, rect.y);
+                acc(&mut min, &mut max, rect.x + rect.width, rect.y + rect.height);
+            }
+            ScenePrim::ClipPop { .. } => {}
+        }
+    }
+    min.zip(max)
+}
+
+/// Merge two bboxes (the store-fed plan folds its segments' boxes).
+fn merge_bbox(
+    a: Option<(Point, Point)>,
+    b: Option<(Point, Point)>,
+) -> Option<(Point, Point)> {
+    match (a, b) {
+        (None, b) => b,
+        (a, None) => a,
+        (Some((amin, amax)), Some((bmin, bmax))) => Some((
+            Point::new(amin.x.min(bmin.x), amin.y.min(bmin.y)),
+            Point::new(amax.x.max(bmax.x), amax.y.max(bmax.y)),
+        )),
+    }
+}
+
+/// The transform a committed build paints under: the fit of the stream's
+/// [`prims_bbox`] into `size` at `margin`. Pure and deterministic per
+/// (prim stream, size) — see the section docs for why the existing layer
+/// key already covers it.
+pub(crate) fn fit_scene_prims(
+    prims: &[ScenePrim],
+    size: Size,
+    margin: f32,
+) -> SceneFitTransform {
+    SceneFitTransform::fit(prims_bbox(prims), size, margin)
+}
+
+/// Transform a prim stream IN PLACE through the fit: vertices, clip
+/// rectangles and text anchors move; stroke widths and font sizes scale by
+/// the uniform factor so the painted scene keeps its proportions. Paint
+/// order, element identity (`StableId`s) and the prim COUNT are untouched
+/// (the counters measure the same stream before and after).
+fn transform_prims(prims: &mut [ScenePrim], t: &SceneFitTransform) {
+    fn transform_vertices(vertices: &mut [Point], t: &SceneFitTransform) {
+        for vertex in vertices {
+            *vertex = t.apply(*vertex);
+        }
+    }
+    let scale = t.scale();
+    for prim in prims {
+        match prim {
+            ScenePrim::Fill { vertices, .. } => transform_vertices(vertices, t),
+            ScenePrim::Stroke {
+                vertices, width, ..
+            } => {
+                transform_vertices(vertices, t);
+                *width *= scale;
+            }
+            ScenePrim::FillStroke {
+                vertices,
+                stroke_width,
+                ..
+            } => {
+                transform_vertices(vertices, t);
+                *stroke_width *= scale;
+            }
+            ScenePrim::Text {
+                position, size, ..
+            } => {
+                *position = t.apply(*position);
+                *size *= scale;
+            }
+            ScenePrim::ClipPush { rect, .. } => {
+                // Scale is strictly positive, so min/max survive the trip.
+                let lo = t.apply(Point::new(rect.x, rect.y));
+                let hi = t.apply(Point::new(rect.x + rect.width, rect.y + rect.height));
+                *rect = Rectangle {
+                    x: lo.x,
+                    y: lo.y,
+                    width: hi.x - lo.x,
+                    height: hi.y - lo.y,
+                };
+            }
+            ScenePrim::ClipPop { .. } => {}
+        }
+    }
+}
+
+// ── Decision classification ─────────────────────────────────────────────────
+
+/// Why one draw decision was a cache miss (rebuild) rather than a hit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RebuildReason {
+    /// No key has ever been installed on this cache (fresh cache, or the
+    /// previous build failed validation and left the layer EMPTY).
+    FirstBuild,
+    /// The scene revision bumped since the cached build.
+    RevisionChanged,
+    /// The paint bounds changed since the cached build (either direction —
+    /// bounds are part of the key, so shrinking back to a previous size
+    /// rebuilds too).
+    BoundsChanged,
+    /// The palette fingerprint changed since the cached build.
+    PaletteChanged,
+    /// The layer was explicitly [`SceneProjectionCache::clear`]ed (evicted or
+    /// manually dropped) since the last successful build.
+    Cleared,
+}
+
+/// The decision the draw path made (or would make): replay the cached
+/// layer, or rebuild it for a reason.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DrawDecision {
+    /// The cached layer replays (zero path work).
+    LayerHit,
+    /// Rebuild the layer (the reason advances the matching counters).
+    LayerRebuild(RebuildReason),
+}
+
+/// Pure classifier for one key against a stored key. Reason precedence on a
+/// multi-field miss is fixed and documented: revision, then bounds, then
+/// palette fingerprint (reported as the FIRST mismatched field).
+fn classify(cached: Option<&SceneLayerKey>, key: &SceneLayerKey, cleared: bool) -> DrawDecision {
+    match cached {
+        None => {
+            if cleared {
+                DrawDecision::LayerRebuild(RebuildReason::Cleared)
+            } else {
+                DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+            }
+        }
+        Some(old) => {
+            if old == key {
+                DrawDecision::LayerHit
+            } else if old.revision != key.revision {
+                DrawDecision::LayerRebuild(RebuildReason::RevisionChanged)
+            } else if old.bounds != key.bounds {
+                DrawDecision::LayerRebuild(RebuildReason::BoundsChanged)
+            } else {
+                DrawDecision::LayerRebuild(RebuildReason::PaletteChanged)
+            }
+        }
+    }
+}
+
+/// Cheap proxy for the path work one build emitted: the sum of polygon
+/// vertex counts across the prim list. Text runs and clip boundaries carry
+/// no path vertices. Headless walk local to THIS module — `plugin_scene.rs`
+/// is outside this task's edit surface, and this avoids cross-task churn
+/// (the "renderer-free sink" pattern of `count_prims`).
+fn prim_vertex_count(prims: &[ScenePrim]) -> usize {
+    prims
+        .iter()
+        .map(|prim| match prim {
+            ScenePrim::Fill { vertices, .. }
+            | ScenePrim::Stroke { vertices, .. }
+            | ScenePrim::FillStroke { vertices, .. } => vertices.len(),
+            ScenePrim::Text { .. } | ScenePrim::ClipPush { .. } | ScenePrim::ClipPop { .. } => 0,
+        })
+        .sum()
+}
+
+// ── Rebuild counters ────────────────────────────────────────────────────────
+
+/// Rebuild instrumentation for one panel scene's projection layer: the
+/// numbers a reviewer reads to prove "full rebuilds are the defect, not the
+/// norm". All advances happen in the COUNTED decision funnel
+/// ([`SceneProjectionCache::decide_counted`]) or in the build outcomes the
+/// funnel drives — never in the pure probe.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ProjectionCounters {
+    /// Cache-miss rebuilds of any reason (including the very first build and
+    /// post-`clear` rebuilds — but not `rebuilds_cleared`'s own count, which
+    /// the explicit `clear()` call itself advances).
+    pub layer_builds: u64,
+    /// Rebuilds caused by a revision bump.
+    pub rebuilds_revision: u64,
+    /// Rebuilds caused by a bounds change (either direction).
+    pub rebuilds_bounds: u64,
+    /// Rebuilds caused by a palette fingerprint change.
+    pub rebuilds_palette: u64,
+    /// Explicit `clear()` calls (evict/manual). The rebuild a cleared state
+    /// causes is NOT counted here again — the rebuild lands in
+    /// `layer_builds`, this counter only measures the explicit call.
+    pub rebuilds_cleared: u64,
+    /// Draw decisions that reused the layer instead of rebuilding. The name
+    /// is the historical `probe` shape of the API surface; semantics are
+    /// "decision-funnel hits" (probes NEVER advance it — see the policy doc).
+    pub probe_hits: u64,
+    /// Prim count of the last committed build (0 when the last build failed
+    /// validation, leaving the layer blank).
+    pub prims_last_build: usize,
+    /// Sum of emitted polygon vertices at the last committed build (the
+    /// cheap path-work proxy; see [`prim_vertex_count`]).
+    pub path_work_last_build: usize,
+    /// `Display` of the last `project_scene` error, if any. An invalid scene
+    /// is a defect-capture surface, not a panic: the validated-first
+    /// projection renders the panel BLANK and the error surfaces here
+    /// instead. Sticky by design ("last" is the honest name): a later
+    /// successful build does not erase the evidence that one failed.
+    pub last_error: Option<String>,
+}
+
+// ── Per-panel retained projection ───────────────────────────────────────────
+
+// ── SCN-036: the draft-path emit law (the vanishing-prims defect) ───────────
+//
+// Upstream iced rev 23604ff22 (a git dependency) masks canvas geometry by
+// its FRAME clip bounds pre-multiplied by the render translation:
+//
+// - the canvas widget wraps the program's draw in
+//   `renderer.with_translation(Vector::new(bounds.x, bounds.y), ...)`
+//   (widget/src/canvas.rs `Canvas::draw`);
+// - the renderers push the geometry as one clip group carrying the
+//   frame-LOCAL clip bounds PRE-multiplied by the accumulated
+//   transformation — `Item::Group(primitives, clip_bounds * transformation,
+//   transformation)` in tiny_skia's `draw_primitive_group`, and wgpu's
+//   geometry `Frame::paste` bakes the frame's `clip_bounds` into every
+//   drafted mesh (`into_meshes(frame.clip_bounds)`);
+// - the flush masks every primitive against
+//   `(group.clip_bounds * scale_factor) ∩ layer_bounds`
+//   (tiny_skia lib.rs `Layer::draw`).
+//
+// The build frame is `Frame::with_bounds(renderer, bounds)`, i.e. its clip
+// bounds are the WIDGET bounds (nonzero x/y under the mount's nested panel
+// column / scrollable / dock composition), while the emitted geometry is in
+// FRAME-LOCAL coordinates. Direct prims therefore end up in a group whose
+// clip is the widget bounds shifted AGAIN by the widget's own
+// `with_translation` (and any outer translations) — under that nested
+// composition the group clip disagrees with the geometry's effective
+// transform and the prims mask away. Prims emitted inside a
+// `Frame::with_clip` draft instead carry the DRAFT's region (frame-local
+// origin (0,0)) as their clip and land exactly where the fit transform
+// paints them. This is the empirical law proven live on host 26ad461d
+// (2026-11-17): the demo's `with_clip` legend group (its Muted text + green
+// Success diamond) rendered EXACTLY on the SceneFitTransform prediction,
+// while every prim drawn directly on the program's frame (fills, strokes,
+// edges, markers) painted nothing. Text groups bypass the group clip in
+// the flush (tiny_skia's `draw_text_group` masks text by layer bounds
+// only), which is why text-ish prims survived. (On tiny_skia specifically
+// `paste` flattens the draft's primitives into the parent list, so the
+// wrap is paint-neutral there; the wgpu per-mesh clip is where the direct
+// frame's stale clip bounds were fatal. The wrap is mandated for BOTH
+// backends because the host renderer is the wgpu/tiny-skia fallback.)
+//
+// THE FIX (host-side only; no upstream PR): route ALL scene prims through
+// the draft path. [`emit_in_full_frame_draft`] wraps the build emission in
+// ONE `with_clip(Rectangle::with_size(frame.size()), ...)` — a full-frame
+// region at the frame-local origin, so the wrap itself introduces NO
+// visual clipping. The wrap happens AFTER the decision, on the emit only:
+// cache keys, decisions and counter semantics are byte-identical.
+
+/// THE single scene-prim emit funnel: run `emit` on `frame` inside ONE
+/// full-frame [`iced::widget::canvas::Frame::with_clip`] draft.
+///
+/// Every build-emit route ([`SceneProjectionCache::draw`]'s prim plan AND
+/// its store-fed segment plan) MUST paint through this funnel — a direct
+/// `emit_prims` on the build frame is the vanishing-prims defect (see the
+/// section docs). The region is
+/// `Rectangle::with_size(frame.size())`: the draft covers the whole frame
+/// at the frame-local origin, so nothing is excluded and the wrapped
+/// prims' clip lands in frame-local coordinates — the exact property the
+/// surviving legend prims had.
+fn emit_in_full_frame_draft(frame: &mut canvas::Frame, emit: impl FnOnce(&mut canvas::Frame)) {
+    frame.with_clip(Rectangle::with_size(frame.size()), emit);
+}
+
+/// The paint plan one committed rebuild produced: either the classic
+/// full flatten (a fresh prim list), or the store's segment lists
+/// (paint order; the report-driven retention products).
+/// Both paint with `emit_prims` through the SCN-036 full-frame draft
+/// funnel; the segments variant emits segment-wise
+/// — each segment is clip-balanced at root boundaries (the store's v1
+/// segmentation rule), so segment-wise emit equals the whole-list emit.
+/// BOTH plans are already FITTED (SCN-031b): the build transformed the
+/// geometry before handing it here, so every plan paints the whole scene
+/// inside the region's bounds. The segments plan holds OWNED copies — the
+/// store's Arcs stay untouched (the fit is build-local); production
+/// attaches no store today (the region path is always the prims plan),
+/// but the law is uniform.
+enum PaintPlan {
+    /// The classic `project_scene` output, fitted into the region.
+    Prims(Vec<ScenePrim>),
+    /// The store's live segment prim lists in paint order, each fitted.
+    Segments(Vec<Vec<ScenePrim>>),
+}
+
+/// One retained projection of one panel scene: the identity (`surface_id`),
+/// the one cached layer, the counters, and a local mirror of the last
+/// successfully-built scene's [`SceneSummary`].
+///
+/// The summary mirror rides each successful build (the API crate computes it
+/// in one walk; imported as-is, no mirror type needed here). It is consumed
+/// by later host integration (skip-rebuild heuristics / invalidation log),
+/// and is diagnostic: nothing in the draw path keys on it.
+pub(crate) struct SceneProjectionCache {
+    /// The panel-scene identity this cache serves (the PluginPanel's stable
+    /// scene id; today assigned per cache instance by the caller).
+    surface_id: StableId,
+    /// The one retained layer (the overlay retention precedent, keyed by
+    /// [`SceneLayerKey`]).
+    layer: CachedOverlayLayer<SceneLayerKey>,
+    counters: ProjectionCounters,
+    /// Optional per-subtree prim store (SCN-011b): when attached,
+    /// `sync_after_patch` refreshes exactly the report-named segments and a
+    /// fresh store feeds the layer build (see the module docs' layered
+    /// truth). `None` keeps the classic full-flatten build path.
+    store: Option<ScenePrimStore>,
+    /// Local mirror of the last SUCCESSFUL build's scene summary (see the
+    /// struct docs). Reset on a failed build.
+    last_summary: Option<SceneSummary>,
+    /// `true` between an explicit `clear()` and the next successful build:
+    /// turns the next decision's reason into
+    /// [`RebuildReason::Cleared`] instead of [`RebuildReason::FirstBuild`].
+    cleared: bool,
+    /// (SCN-032) THE TRANSFORM CUSTODY: the [`SceneFitTransform`] the last
+    /// committed build actually painted under — the SAME values the fitted
+    /// prims in the retained layer carry — retained at every commit so the
+    /// mount's live pointer mapping consumes the render's transform, never a
+    /// recomputation (a click must map to the scene point the user actually
+    /// sees). Identity until the first successful build, and reset to
+    /// identity on a failed build / explicit `clear` (a blank layer paints
+    /// under no fit). Read via [`Self::last_fit_transform`]; the pure
+    /// [`SceneFitTransform::invert`] is the pointer→scene half.
+    last_fit: SceneFitTransform,
+}
+
+/// Manual `Debug`: the retained layer's geometry is opaque renderer state
+/// (`canvas::Cache` in the vendored iced), so only its STORED KEY is
+/// printed, exactly as reviewers would want alongside the counters.
+impl std::fmt::Debug for SceneProjectionCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let key = self.layer.key.borrow().clone();
+        f.debug_struct("SceneProjectionCache")
+            .field("surface_id", &self.surface_id)
+            .field("layer_key", &key)
+            .field("counters", &self.counters)
+            .field("store_attached", &self.store.is_some())
+            .field("last_summary", &self.last_summary)
+            .field("cleared", &self.cleared)
+            .finish()
+    }
+}
+
+impl SceneProjectionCache {
+    /// A fresh cache for `surface_id`: no key, no geometry, counters at
+    /// defaults (store detached until `attach_store`).
+    pub(crate) fn new(surface_id: StableId) -> Self {
+        Self {
+            surface_id,
+            layer: CachedOverlayLayer::default(),
+            counters: ProjectionCounters::default(),
+            store: None,
+            last_summary: None,
+            cleared: false,
+            last_fit: SceneFitTransform::identity(),
+        }
+    }
+
+    /// The panel-scene identity this cache serves.
+    pub(crate) fn surface_id(&self) -> StableId {
+        self.surface_id
+    }
+
+    /// The counters (read side).
+    pub(crate) fn counters(&self) -> &ProjectionCounters {
+        &self.counters
+    }
+
+    /// The counters (write side, for host integration that must externalize
+    /// loss signals into them).
+    pub(crate) fn counters_mut(&mut self) -> &mut ProjectionCounters {
+        &mut self.counters
+    }
+
+    /// The local mirror of the last successful build's scene summary.
+    pub(crate) fn last_summary(&self) -> Option<&SceneSummary> {
+        self.last_summary.as_ref()
+    }
+
+    /// Attach the per-subtree prim store (SCN-011b): from here on
+    /// [`Self::sync_after_patch`] refreshes exactly the report-named segments
+    /// and a fresh store feeds the layer build (the module docs' layered
+    /// truth). Idempotent.
+    pub(crate) fn attach_store(&mut self) {
+        self.store
+            .get_or_insert_with(|| ScenePrimStore::new(self.surface_id));
+    }
+
+    /// The attached store's counters (read side); `None` while detached.
+    pub(crate) fn store_counters(&self) -> Option<&StoreCounters> {
+        self.store.as_ref().map(|store| store.counters())
+    }
+
+    /// Full re-provisioning of the attached store (panel snapshot / first
+    /// provisioning flows): the whole-tree flatten the report path falls
+    /// back to. A no-op while detached. `Err` when the scene fails
+    /// validation — the store ends up empty and never-synced (see
+    /// `ScenePrimStore::sync_full`).
+    pub(crate) fn sync_store_full(
+        &mut self,
+        scene: &PanelScene,
+        palette: &iced::theme::Palette,
+    ) -> Result<(), SceneError> {
+        match &mut self.store {
+            Some(store) => store.sync_full(scene, palette),
+            None => Ok(()),
+        }
+    }
+
+    /// The report-driven seam (SCN-011b): refresh the attached store's
+    /// segments from the patch report (O(touched) — the store's own counters
+    /// prove it), then run the layer's counted decision funnel. The LAYER
+    /// still rebuilds on the revision bump (the pixel-path carrier), but the
+    /// rebuild paints from the freshly synced segment lists — no semantic
+    /// flatten — and reuses the report's post-patch summary (computed once
+    /// by the single mutation path, `apply_patch_report`). Returns the same
+    /// decision `draw` would make.
+    ///
+    /// Detached store: the layer decision still runs (the classic path).
+    /// A store sync failure (an invalid post-patch scene) leaves the store
+    /// empty and never-synced, so the build below falls back to the classic
+    /// flatten and records the error exactly like a failed build.
+    #[doc(hidden)]
+    pub(crate) fn sync_after_patch(
+        &mut self,
+        scene: &PanelScene,
+        report: &AppliedPatchReport,
+        palette: &iced::theme::Palette,
+        bounds: Rectangle,
+    ) -> DrawDecision {
+        if let Some(store) = self.store.as_mut() {
+            let _ = store.sync_incremental(scene, report, palette);
+        }
+        let (decision, paint) = self.prepare_build(scene, palette, bounds, Some(&report.summary));
+        if let Some((key, _paint)) = paint {
+            // Key install AFTER the build commit (overlay discipline), the
+            // same post-build step the draw path performs.
+            *self.layer.key.borrow_mut() = Some(key);
+        }
+        decision
+    }
+
+    /// Clone of the currently stored layer key, if any.
+    pub(crate) fn layer_key(&self) -> Option<SceneLayerKey> {
+        self.layer.key.borrow().clone()
+    }
+
+    /// (SCN-032) The transform the LAST COMMITTED BUILD painted under — the
+    /// custody accessor the mount's scene-region program feeds its live
+    /// pointer mapping ([`SceneFitTransform::invert`]). The mount
+    /// deliberately does NOT recompute a fit at event time: hit-testing and
+    /// the pointer→scene mapping must use the SAME transform instance/values
+    /// the render used, or a click maps to the wrong scene point. Identity
+    /// until the first successful build and after a failed build / `clear`
+    /// (a blank layer paints under no fit). Note the accessor reads the
+    /// retained value only — it runs NO decision and NO projection (the
+    /// retained law: reads never rebuild).
+    pub(crate) fn last_fit_transform(&self) -> SceneFitTransform {
+        self.last_fit
+    }
+
+    /// Evict the retained layer: the cached geometry is dropped, the stored
+    /// key is reset (so the next draw rebuilds with reason
+    /// [`RebuildReason::Cleared`]) and [`ProjectionCounters::rebuilds_cleared`]
+    /// advances once for THIS call — the eventual rebuild is only counted in
+    /// `layer_builds`.
+    pub(crate) fn clear(&mut self) {
+        *self.layer.key.borrow_mut() = None;
+        self.cleared = true;
+        self.layer.cache.clear();
+        self.counters.rebuilds_cleared += 1;
+        // SCN-032 custody: the evicted layer paints under no fit.
+        self.last_fit = SceneFitTransform::identity();
+    }
+
+    /// Pure key math: what the decision for these draw inputs must compare.
+    fn key_for(
+        &self,
+        scene: &PanelScene,
+        palette: &iced::theme::Palette,
+        bounds: Rectangle,
+    ) -> SceneLayerKey {
+        SceneLayerKey {
+            revision: scene.revision,
+            bounds,
+            palette_fingerprint: palette_fingerprint(palette),
+        }
+    }
+
+    /// PURE headless equivalent of the draw-path decision: what `draw` WOULD
+    /// do for these inputs, read off the stored key — with ZERO side effects
+    /// on counters (that is the policy: probes never mutate counters;
+    /// counters only advance in the counted funnel both real paths share).
+    pub(crate) fn probe_draw_decision(
+        &self,
+        scene: &PanelScene,
+        palette: &iced::theme::Palette,
+        bounds: Rectangle,
+    ) -> DrawDecision {
+        let key = self.key_for(scene, palette, bounds);
+        let cached = self.layer.key.borrow().clone();
+        classify(cached.as_ref(), &key, self.cleared)
+    }
+
+    /// COUNTED decision funnel (the only counter-advancing classifier): same
+    /// classification as [`Self::probe_draw_decision`] by construction (the
+    /// shared [`classify`]), then the decision's counters. Both real paths —
+    /// [`Self::draw`] (renderer) and [`Self::apply_build`] (headless seam) —
+    /// funnel through here, so their counter outcomes cannot drift.
+    fn decide_counted(&mut self, key: &SceneLayerKey) -> DrawDecision {
+        // Scoped clone: the RefCell borrow must end before counter mutation.
+        let cached = self.layer.key.borrow().clone();
+        let decision = classify(cached.as_ref(), key, self.cleared);
+        match decision {
+            DrawDecision::LayerHit => self.counters.probe_hits += 1,
+            DrawDecision::LayerRebuild(reason) => {
+                self.counters.layer_builds += 1;
+                match reason {
+                    RebuildReason::RevisionChanged => self.counters.rebuilds_revision += 1,
+                    RebuildReason::BoundsChanged => self.counters.rebuilds_bounds += 1,
+                    RebuildReason::PaletteChanged => self.counters.rebuilds_palette += 1,
+                    // A fresh cache's first build IS `layer_builds`' job; a
+                    // post-`clear` rebuild likewise. The `clear()` call
+                    // itself already advanced `rebuilds_cleared`.
+                    RebuildReason::FirstBuild | RebuildReason::Cleared => {}
+                }
+            }
+        }
+        decision
+    }
+
+    /// Record one committed build's outcome exactly as the draw paths commit
+    /// it (shared by the renderer, headless, and store-fed paths — the only
+    /// shared MUTATION of the outcome stats). `summary_override` is the
+    /// report's post-patch [`SceneSummary`] when the build rides a patch
+    /// report (computed once by the single mutation path and reused as-is);
+    /// `None` recomputes the scene's own bounded walk, exactly like the
+    /// pre-store builds did.
+    fn record_committed(
+        &mut self,
+        prims_len: usize,
+        path_work: usize,
+        summary_override: Option<&SceneSummary>,
+        scene: &PanelScene,
+    ) {
+        self.counters.prims_last_build = prims_len;
+        self.counters.path_work_last_build = path_work;
+        self.last_summary = Some(match summary_override {
+            Some(summary) => summary.clone(),
+            None => scene.scene_summary(),
+        });
+        // The `cleared` flag is spent the moment a build actually commits.
+        self.cleared = false;
+    }
+
+    /// Record a FAILED build outcome exactly as the draw path commits it:
+    /// the last error is captured as `Display` text, the prim/path-work
+    /// counters are zeroed, the summary mirror is dropped, and the layer
+    /// stays EMPTY (no key installed), so the next draw rebuilds. The blank
+    /// render is the validated-first contract: an invalid scene NEVER panics
+    /// — it paints nothing and the failure surfaces in
+    /// [`ProjectionCounters::last_error`].
+    fn record_error(&mut self, error: &SceneError) {
+        self.counters.last_error = Some(error.to_string());
+        self.counters.prims_last_build = 0;
+        self.counters.path_work_last_build = 0;
+        self.last_summary = None;
+        // SCN-032 custody: a failed build commits NO layer (blank render), so
+        // no fit stands either — the pointer mapping goes back to identity
+        // rather than mapping clicks through a transform nothing painted.
+        self.last_fit = SceneFitTransform::identity();
+    }
+
+    /// Shared first half of [`Self::draw`], [`Self::apply_build`], and
+    /// [`Self::sync_after_patch`]: key math, the counted decision, the
+    /// projection on a rebuild, and outcome recording (stats; the key install
+    /// is returned to the caller so it lands after the frame work, matching
+    /// the overlay's key-write discipline). Returns the decision plus, on a
+    /// rebuild, the [`PaintPlan`] to paint together with the key to install
+    /// (`None` both on hits — replay — and on failed rebuilds — blank layer,
+    /// key stays unset).
+    ///
+    /// Paint-source rule (the SCN-011b layered truth): the decision and its
+    /// counters are exactly the SCN-011a key math, but when the attached
+    /// store is FRESH at this scene revision + palette fingerprint the build
+    /// paints from the store's segment lists instead of re-running the
+    /// semantic flatten — the report-driven sync already refreshed exactly
+    /// the touched segments, and [`Self::record_committed`] reuses the
+    /// report's post-patch summary instead of re-walking the scene.
+    fn prepare_build(
+        &mut self,
+        scene: &PanelScene,
+        palette: &iced::theme::Palette,
+        bounds: Rectangle,
+        report_summary: Option<&SceneSummary>,
+    ) -> (DrawDecision, Option<(SceneLayerKey, PaintPlan)>) {
+        let key = self.key_for(scene, palette, bounds);
+        let decision = self.decide_counted(&key);
+        if matches!(decision, DrawDecision::LayerHit) {
+            return (decision, None);
+        }
+        // Owned paint plan: the store borrow ends here, before the outcome
+        // recording below can take the cache mutably.
+        let from_store = self
+            .store
+            .as_ref()
+            .filter(|store| store.is_fresh(scene.revision, key.palette_fingerprint))
+            .map(|store| store.live_arcs());
+        let rebuilt = match from_store {
+            Some(parts) => {
+                // Store-fed build (SCN-011b): the segments are Arc-shared
+                // with the store, so the fit transforms an OWNED copy per
+                // rebuild — one bbox folded over all segments, one shared
+                // transform (the segments concatenate into exactly the
+                // whole-scene stream, so this IS `fit_scene_prims` of the
+                // concatenation, computed without materializing it).
+                let bbox = parts.iter().fold(None, |acc, part| {
+                    merge_bbox(acc, prims_bbox(part))
+                });
+                let transform =
+                    SceneFitTransform::fit(bbox, bounds.size(), SCENE_FIT_MARGIN);
+                let parts: Vec<Vec<ScenePrim>> = parts
+                    .iter()
+                    .map(|part| {
+                        let mut owned = (**part).clone();
+                        transform_prims(&mut owned, &transform);
+                        owned
+                    })
+                    .collect();
+                let prims_len: usize = parts.iter().map(|part| part.len()).sum();
+                let path_work: usize = parts.iter().map(|part| prim_vertex_count(part)).sum();
+                self.record_committed(prims_len, path_work, report_summary, scene);
+                // SCN-032 custody: the committed build's transform is THE
+                // pointer-mapping source from here on (the segments were
+                // transformed through exactly it).
+                self.last_fit = transform;
+                Some((key, PaintPlan::Segments(parts)))
+            }
+            None => match project_scene(scene, palette, bounds.size()) {
+                Ok(mut prims) => {
+                    // SCN-031b: fit-and-center the projected stream into
+                    // the region BEFORE committing — the transform moves
+                    // geometry, never counts, so the counters measure the
+                    // same stream they always did.
+                    let transform = fit_scene_prims(&prims, bounds.size(), SCENE_FIT_MARGIN);
+                    transform_prims(&mut prims, &transform);
+                    self.record_committed(
+                        count_prims(&prims),
+                        prim_vertex_count(&prims),
+                        report_summary,
+                        scene,
+                    );
+                    // SCN-032 custody: same law as the store-fed arm — the
+                    // fitted prims in the retained layer and the retained
+                    // transform are ONE committed pair.
+                    self.last_fit = transform;
+                    Some((key, PaintPlan::Prims(prims)))
+                }
+                Err(error) => {
+                    self.record_error(&error);
+                    None
+                }
+            },
+        };
+        (decision, rebuilt)
+    }
+
+    /// Draw the current revision of `scene` into the panel's layer,
+    /// rebuilding only on a key miss (revision bumped, bounds changed, or
+    /// palette fingerprint changed). On a hit the cached geometry REPLAYS —
+    /// the no-op closure short-circuits inside iced's
+    /// `draw_with_bounds` and `project_scene` never runs.
+    ///
+    /// The projection's `Err` case emits NOTHING (the layer paints blank)
+    /// and records the failure in
+    /// [`ProjectionCounters::last_error`] — an invalid scene never panics;
+    /// it renders a blank panel and the counters surface the defect.
+    pub(crate) fn draw(
+        &mut self,
+        renderer: &iced::Renderer,
+        scene: &PanelScene,
+        palette: &iced::theme::Palette,
+        bounds: Rectangle,
+    ) -> canvas::Geometry {
+        let (decision, paint) = self.prepare_build(scene, palette, bounds, None);
+        match decision {
+            DrawDecision::LayerHit => {}
+            DrawDecision::LayerRebuild(_) => {
+                // Clear FIRST, exactly like `CachedOverlayLayer::draw`: the
+                // closure below must run even when the bounds happen to
+                // match the previously cached frame (iced short-circuits a
+                // non-cleared cache on a bounds match).
+                self.layer.cache.clear();
+            }
+        }
+        match paint {
+            Some((key, PaintPlan::Prims(prims))) => {
+                let geometry = self
+                    .layer
+                    .cache
+                    .draw_with_bounds(renderer, bounds, move |frame| {
+                        // SCN-036: the emission rides the full-frame draft
+                        // (the draft-path emit law) — a direct emit on the
+                        // build frame is the vanishing-prims defect.
+                        emit_in_full_frame_draft(frame, |inner| emit_prims(inner, &prims));
+                    });
+                // Key install AFTER the build commit (overlay discipline).
+                *self.layer.key.borrow_mut() = Some(key);
+                geometry
+            }
+            // Store-fed build: segment-wise emit over the (possibly
+            // partially refreshed) segment lists — the pixel path identical
+            // to painting the concatenated list; no semantic flatten ran.
+            // The lists are the build's OWNED FITTED copies (the store's
+            // Arcs stay untouched — see `PaintPlan`).
+            Some((key, PaintPlan::Segments(parts))) => {
+                let geometry = self
+                    .layer
+                    .cache
+                    .draw_with_bounds(renderer, bounds, move |frame| {
+                        // SCN-036: same funnel as the prims plan — the
+                        // store-fed path paints under the identical
+                        // full-frame draft law.
+                        emit_in_full_frame_draft(frame, |inner| {
+                            for part in parts {
+                                emit_prims(inner, &part);
+                            }
+                        });
+                    });
+                // Key install AFTER the build commit (overlay discipline).
+                *self.layer.key.borrow_mut() = Some(key);
+                geometry
+            }
+            // Hits replay the cached geometry; failed rebuilds paint the
+            // blank (empty) frame the invalid-scene contract promises.
+            None => self
+                .layer
+                .cache
+                .draw_with_bounds(renderer, bounds, |_frame| {}),
+        }
+    }
+
+    /// Headless mirror of [`Self::draw`] minus every renderer-requiring step
+    /// (the bench/test seam, mirroring `overlay.rs`'s `store_pane_key`):
+    /// the same key math, the same counted decision funnel
+    /// ([`Self::decide_counted`]), the same projection run and the same
+    /// outcome recording as `draw` — and the same key install — so tests can
+    /// prove decision/counter parity with the renderer path WITHOUT
+    /// constructing an `iced::Renderer` (the pixel path itself is live-host
+    /// / milestone-6 concern). Returns the same decision `draw` would make.
+    #[doc(hidden)]
+    pub(crate) fn apply_build(
+        &mut self,
+        scene: &PanelScene,
+        palette: &iced::theme::Palette,
+        bounds: Rectangle,
+    ) -> DrawDecision {
+        let (decision, paint) = self.prepare_build(scene, palette, bounds, None);
+        if let Some((key, _paint)) = paint {
+            // Prims recorded in `record_committed`, then dropped: there is no
+            // renderer frame to paint them onto. The install mirrors the
+            // draw path's post-build step.
+            *self.layer.key.borrow_mut() = Some(key);
+        }
+        decision
+    }
+}
+
+// ── Multi-panel independence ────────────────────────────────────────────────
+
+/// Aggregate release statistics for a [`SceneProjectionCacheSet`].
+///
+/// Dropping a surface (tab/plugin close) releases its whole retained layer
+/// AND its counters with it — the release is recorded as ONE number here,
+/// not as a per-surface counter log (nothing downstream reads the dropped
+/// surfaces' counters; a per-surface audit trail would contradict the
+/// release). Pending-request cancellation when a surface goes away is a
+/// wire-era concern and lands with the per-subtree retention task's wire
+/// surface (documented as out of scope for SCN-011a).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct SceneCacheSetStats {
+    /// Surfaces released by [`SceneProjectionCacheSet::retain_alive`]
+    /// (cumulative).
+    pub surfaces_released: u64,
+}
+
+/// Per-panel independent set of retained projection caches: one
+/// [`SceneProjectionCache`] per panel scene, keyed by its surface id —
+/// the scene-side analogue of the overlay's per-pane `GridCanvasState`
+/// (a change to one surface's inputs never rebuilds another's layer).
+#[derive(Debug, Default)]
+pub(crate) struct SceneProjectionCacheSet {
+    by_surface: HashMap<StableId, SceneProjectionCache>,
+    stats: SceneCacheSetStats,
+}
+
+impl SceneProjectionCacheSet {
+    /// An empty set.
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    /// The cache of `surface_id`, created (empty, on a FirstBuild decision)
+    /// if absent.
+    pub(crate) fn get_or_insert(&mut self, surface_id: StableId) -> &mut SceneProjectionCache {
+        self.by_surface
+            .entry(surface_id)
+            .or_insert_with(|| SceneProjectionCache::new(surface_id))
+    }
+
+    /// Read only, no insert.
+    pub(crate) fn get(&self, surface_id: StableId) -> Option<&SceneProjectionCache> {
+        self.by_surface.get(&surface_id)
+    }
+
+    /// `true` when a cache is retained for `surface_id`.
+    pub(crate) fn contains(&self, surface_id: StableId) -> bool {
+        self.by_surface.contains_key(&surface_id)
+    }
+
+    /// Release the caches of dropped surfaces: `live` names every surface
+    /// that still exists (tab/plugin close drops the rest). Each release
+    /// drops the surface's layer + counters wholesale and advances
+    /// [`SceneCacheSetStats::surfaces_released`] once per surface; calling
+    /// `retain_alive` twice with the same `live` list is a no-op.
+    pub(crate) fn retain_alive(&mut self, live: &[StableId]) {
+        let before = self.by_surface.len();
+        self.by_surface.retain(|surface_id, _| live.contains(surface_id));
+        self.stats.surfaces_released += (before - self.by_surface.len()) as u64;
+    }
+
+    /// The set's aggregate stats.
+    pub(crate) fn stats(&self) -> SceneCacheSetStats {
+        self.stats
+    }
+}
+
+// ── Tests (headless: decisions, keys, counters — no Renderer) ───────────────
+//
+// Same discipline as the overlay's headless tests: decision+key math is
+// fully assertable without a renderer; the pixel path stays live-host work.
+// No sleeps, no randomness, no iced::Renderer construction anywhere.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::theme::palette::{Background, Pair, Swatch};
+    use ocs_plugin_api::scene::{SceneElement, SceneColor, ThemeColor, Vec2};
+
+    // -- fixtures ------------------------------------------------------------
+
+    fn tint(r: u8, g: u8, b: u8) -> Color {
+        Color::from_rgba8(r, g, b, 1.0)
+    }
+
+    fn pair(color: Color, text: Color) -> Pair {
+        Pair { color, text }
+    }
+
+    fn null_pair() -> Pair {
+        Pair {
+            color: Color::TRANSPARENT,
+            text: Color::TRANSPARENT,
+        }
+    }
+
+    /// The empty digest's palette: every slot transparent-black, `is_dark`
+    /// false. Its fingerprint is the FNV offset basis propagated through the
+    /// fixed field order (non-zero by construction; pinned below).
+    fn zero_palette() -> iced::theme::Palette {
+        iced::theme::Palette {
+            background: Background {
+                base: null_pair(),
+                weakest: null_pair(),
+                weaker: null_pair(),
+                weak: null_pair(),
+                neutral: null_pair(),
+                strong: null_pair(),
+                stronger: null_pair(),
+                strongest: null_pair(),
+            },
+            primary: Swatch {
+                base: null_pair(),
+                weak: null_pair(),
+                strong: null_pair(),
+            },
+            secondary: Swatch {
+                base: null_pair(),
+                weak: null_pair(),
+                strong: null_pair(),
+            },
+            success: Swatch {
+                base: null_pair(),
+                weak: null_pair(),
+                strong: null_pair(),
+            },
+            warning: Swatch {
+                base: null_pair(),
+                weak: null_pair(),
+                strong: null_pair(),
+            },
+            danger: Swatch {
+                base: null_pair(),
+                weak: null_pair(),
+                strong: null_pair(),
+            },
+            is_dark: false,
+        }
+    }
+
+    /// A struct-literal palette with distinctive channel values in the bound
+    /// slots (the same construction discipline as `plugin_scene.rs`'s
+    /// `pinned_palette`), so slot flips are provable one at a time.
+    fn distinct_palette(is_dark: bool) -> iced::theme::Palette {
+        let mut palette = zero_palette();
+        // background.base: {20, 21}
+        palette.background.base.color = tint(20, 0, 0);
+        palette.background.base.text = tint(21, 0, 0);
+        // primary.base {30, 31}, primary.strong {40, 41}
+        palette.primary.base = pair(tint(30, 0, 0), tint(31, 0, 0));
+        palette.primary.strong = pair(tint(40, 0, 0), tint(41, 0, 0));
+        // secondary.base {50, 51}
+        palette.secondary.base = pair(tint(50, 0, 0), tint(51, 0, 0));
+        // success.base {60, 61}
+        palette.success.base = pair(tint(60, 0, 0), tint(61, 0, 0));
+        // warning.base {70, 71}
+        palette.warning.base = pair(tint(70, 0, 0), tint(71, 0, 0));
+        // danger.base {80, 81}
+        palette.danger.base = pair(tint(80, 0, 0), tint(81, 0, 0));
+        palette.is_dark = is_dark;
+        palette
+    }
+
+    fn v2(x: f64, y: f64) -> Vec2 {
+        Vec2([x, y])
+    }
+
+    /// A fill-only rectangle (one prim per element on projection).
+    fn filled_rect(id: u64, x: f64) -> SceneElement {
+        SceneElement::Rect {
+            id: StableId(id),
+            name: None,
+            actions: Vec::new(),
+            drag: None,
+            pos: v2(x, 0.0),
+            size: v2(10.0, 8.0),
+            fill: Some(SceneColor::Theme(ThemeColor::Normal)),
+            stroke: None,
+        }
+    }
+
+    /// A valid scene of `n_rects` distinct rects at `revision`.
+    fn scene_at(revision: u64, n_rects: usize) -> PanelScene {
+        PanelScene {
+            revision: SceneRevision(revision),
+            elements: (0..n_rects as u64).map(|id| filled_rect(id, id as f64)).collect(),
+        }
+    }
+
+    /// An INVALID scene: two elements sharing one stable id
+    /// (`SceneError::DuplicateId` on the validator the projection re-runs).
+    fn invalid_scene_at(revision: u64) -> PanelScene {
+        PanelScene {
+            revision: SceneRevision(revision),
+            elements: vec![
+                SceneElement::Rect {
+                    id: StableId(7),
+                    name: None,
+                    actions: Vec::new(),
+                    drag: None,
+                    pos: v2(0.0, 0.0),
+                    size: v2(10.0, 8.0),
+                    fill: Some(SceneColor::Theme(ThemeColor::Normal)),
+                    stroke: None,
+                },
+                SceneElement::Rect {
+                    id: StableId(7),
+                    name: None,
+                    actions: Vec::new(),
+                    drag: None,
+                    pos: v2(20.0, 0.0),
+                    size: v2(10.0, 8.0),
+                    fill: Some(SceneColor::Theme(ThemeColor::Normal)),
+                    stroke: None,
+                },
+            ],
+        }
+    }
+
+    fn fixture_bounds() -> Rectangle {
+        Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 160.0,
+        }
+    }
+
+    fn bounds_at(x: f32, y: f32) -> Rectangle {
+        Rectangle {
+            x,
+            y,
+            width: 200.0,
+            height: 160.0,
+        }
+    }
+
+    // -- fingerprint test scaffolding -----------------------------------------
+
+    /// Identifies ONE hash-bound slot of [`palette_fingerprint`], in the
+    /// digest's FIELD ORDER (this enumeration IS the documented order pin).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum BoundSlot {
+        BackgroundBaseColor,
+        BackgroundBaseText,
+        /// Swatch index in field order (0=primary, 1=secondary, 2=success,
+        /// 3=warning, 4=danger), pair (0=base, 1=weak, 2=strong), and
+        /// `true` for the pair's `color` half / `false` for its `text` half.
+        SwatchSlot { swatch: usize, pair: usize, color: bool },
+        IsDark,
+    }
+
+    /// Every hash-bound slot (2 + 5x3x2 + 1), in digest field order.
+    fn all_bound_slots() -> Vec<BoundSlot> {
+        let mut slots = vec![BoundSlot::BackgroundBaseColor, BoundSlot::BackgroundBaseText];
+        for swatch in 0..5usize {
+            for pair in 0..3usize {
+                slots.push(BoundSlot::SwatchSlot {
+                    swatch,
+                    pair,
+                    color: true,
+                });
+                slots.push(BoundSlot::SwatchSlot {
+                    swatch,
+                    pair,
+                    color: false,
+                });
+            }
+        }
+        slots.push(BoundSlot::IsDark);
+        slots
+    }
+
+    fn swatch_by_index(palette: &mut iced::theme::Palette, index: usize) -> &mut Swatch {
+        match index {
+            0 => &mut palette.primary,
+            1 => &mut palette.secondary,
+            2 => &mut palette.success,
+            3 => &mut palette.warning,
+            4 => &mut palette.danger,
+            other => unreachable!("five swatches only, got {other}"),
+        }
+    }
+
+    /// Paint one slot with `mark`.
+    fn paint_slot(palette: &mut iced::theme::Palette, slot: BoundSlot, mark: Color) {
+        match slot {
+            BoundSlot::BackgroundBaseColor => palette.background.base.color = mark,
+            BoundSlot::BackgroundBaseText => palette.background.base.text = mark,
+            BoundSlot::SwatchSlot {
+                swatch,
+                pair,
+                color,
+            } => {
+                let swatch = swatch_by_index(palette, swatch);
+                let slot_pair = match pair {
+                    0 => &mut swatch.base,
+                    1 => &mut swatch.weak,
+                    2 => &mut swatch.strong,
+                    other => unreachable!("three pairs only, got {other}"),
+                };
+                if color {
+                    slot_pair.color = mark;
+                } else {
+                    slot_pair.text = mark;
+                }
+            }
+            BoundSlot::IsDark => palette.is_dark = !palette.is_dark,
+        }
+    }
+
+    // -- 1. decisions on a fresh cache ---------------------------------------
+
+    #[test]
+    fn first_draw_decision_is_first_build() {
+        let palette = distinct_palette(false);
+        let scene = scene_at(1, 2);
+        let cache = SceneProjectionCache::new(StableId(42));
+        // The pure probe classifies without any counter effect.
+        assert_eq!(
+            cache.probe_draw_decision(&scene, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild),
+            "a fresh cache has no stored key: the first decision is FirstBuild"
+        );
+        // Policy: probes NEVER mutate counters; the bookkeeping is exactly
+        // the pre-build default.
+        assert_eq!(
+            cache.counters(),
+            &ProjectionCounters::default(),
+            "probe must leave counters untouched"
+        );
+        // An explicitly cleared cache reports Cleared, not FirstBuild (the
+        // documented distinction between "never built" and "evicted").
+        let mut cleared = SceneProjectionCache::new(StableId(42));
+        cleared.clear();
+        assert_eq!(
+            cleared.probe_draw_decision(&scene, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::Cleared),
+            "an explicit clear must be visible in the next decision's reason"
+        );
+        assert_eq!(cleared.counters().rebuilds_cleared, 1);
+    }
+
+    // -- 2. same inputs replay the cached layer ------------------------------
+
+    #[test]
+    fn same_inputs_replay_cached_layer() {
+        let palette = distinct_palette(false);
+        let scene = scene_at(1, 2);
+        let mut cache = SceneProjectionCache::new(StableId(1));
+        // Parity policy in action: the pure probe and the counted funnel
+        // agree on the fresh cache (both say FirstBuild).
+        assert_eq!(
+            cache.probe_draw_decision(&scene, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+        );
+        assert_eq!(
+            cache.apply_build(&scene, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild),
+            "simulated draw: the counted funnel returned the same decision"
+        );
+        // Same inputs again: the cache hits; probe and funnel agree again.
+        assert_eq!(
+            cache.probe_draw_decision(&scene, &palette, fixture_bounds()),
+            DrawDecision::LayerHit
+        );
+        assert_eq!(
+            cache.apply_build(&scene, &palette, fixture_bounds()),
+            DrawDecision::LayerHit
+        );
+        // Counters: exactly one build, exactly one decision-funnel hit, and
+        // the pure probes in between did NOT advance anything.
+        let counters = cache.counters();
+        assert_eq!(counters.layer_builds, 1);
+        assert_eq!(counters.probe_hits, 1, "only the counted hit advanced");
+        assert_eq!(counters.rebuilds_revision, 0);
+        assert_eq!(counters.rebuilds_bounds, 0);
+        assert_eq!(counters.rebuilds_palette, 0);
+        assert_eq!(counters.rebuilds_cleared, 0);
+        assert_eq!(counters.prims_last_build, 2);
+        assert_eq!(counters.path_work_last_build, 10, "two closed rect rings of 5 vertices");
+        assert_eq!(counters.last_error, None);
+    }
+
+    // -- 3. revision bumps rebuild exactly once ------------------------------
+
+    #[test]
+    fn revision_bump_rebuilds_once() {
+        let palette = distinct_palette(false);
+        let mut cache = SceneProjectionCache::new(StableId(2));
+        // Three consecutive draws of the SAME revision.
+        let scene1 = scene_at(1, 3);
+        assert_eq!(
+            cache.apply_build(&scene1, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+        );
+        assert_eq!(
+            cache.apply_build(&scene1, &palette, fixture_bounds()),
+            DrawDecision::LayerHit
+        );
+        assert_eq!(
+            cache.apply_build(&scene1, &palette, fixture_bounds()),
+            DrawDecision::LayerHit
+        );
+        // The pure probe already predicted the bumped revision's miss before
+        // the actual build consumes it.
+        let scene2 = scene_at(2, 4);
+        assert_eq!(
+            cache.probe_draw_decision(&scene2, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::RevisionChanged)
+        );
+        // The bumped revision rebuilds exactly once.
+        assert_eq!(
+            cache.apply_build(&scene2, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::RevisionChanged)
+        );
+        assert_eq!(cache.counters().layer_builds, 2);
+        assert_eq!(cache.counters().rebuilds_revision, 1);
+        assert_eq!(cache.counters().probe_hits, 2, "two same-revision hits");
+        // prims_last_build reflects the NEW build (4 rects, 1:1 prims).
+        assert_eq!(cache.counters().prims_last_build, 4);
+    }
+
+    // -- 4. bounds changes rebuild (both directions) --------------------------
+
+    #[test]
+    fn bounds_change_rebuilds() {
+        let palette = distinct_palette(false);
+        let scene = scene_at(1, 2);
+        let mut cache = SceneProjectionCache::new(StableId(3));
+        assert_eq!(
+            cache.apply_build(&scene, &palette, bounds_at(0.0, 0.0)),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+        );
+        assert_eq!(
+            cache.apply_build(&scene, &palette, bounds_at(8.0, 0.0)),
+            DrawDecision::LayerRebuild(RebuildReason::BoundsChanged),
+            "bounds are part of the layer key (draw_with_bounds's early return)"
+        );
+        assert_eq!(cache.counters().rebuilds_bounds, 1);
+        assert_eq!(cache.counters().layer_builds, 2);
+    }
+
+    #[test]
+    fn bounds_back_rebuilds_again() {
+        let palette = distinct_palette(false);
+        let scene = scene_at(1, 2);
+        let mut cache = SceneProjectionCache::new(StableId(4));
+        assert_eq!(
+            cache.apply_build(&scene, &palette, bounds_at(0.0, 0.0)),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+        );
+        assert_eq!(
+            cache.apply_build(&scene, &palette, bounds_at(8.0, 0.0)),
+            DrawDecision::LayerRebuild(RebuildReason::BoundsChanged)
+        );
+        // Shrinking BACK to the original bounds is a miss too: bounds are in
+        // the key, so there is no shape-only memo of the first build.
+        assert_eq!(
+            cache.apply_build(&scene, &palette, bounds_at(0.0, 0.0)),
+            DrawDecision::LayerRebuild(RebuildReason::BoundsChanged)
+        );
+        assert_eq!(cache.counters().rebuilds_bounds, 2);
+        assert_eq!(cache.counters().layer_builds, 3);
+    }
+
+    // -- 5. palette changes invalidate the layer ------------------------------
+
+    #[test]
+    fn palette_change_invalidates_layer() {
+        let scene = scene_at(1, 2);
+        let mut cache = SceneProjectionCache::new(StableId(5));
+        assert_eq!(
+            cache.apply_build(&scene, &distinct_palette(false), fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+        );
+        // The same palette again: hit (the fingerprint is the comparison
+        // surface; no Palette::PartialEq reliance).
+        assert_eq!(
+            cache.apply_build(&scene, &distinct_palette(false), fixture_bounds()),
+            DrawDecision::LayerHit
+        );
+        // A BOUND slot change: the fingerprint moves, the key misses, and
+        // the reason is the fingerprint's own counter.
+        let mut darkened = distinct_palette(false);
+        darkened.background.base.text = tint(99, 0, 0);
+        assert_ne!(
+            palette_fingerprint(&distinct_palette(false)),
+            palette_fingerprint(&darkened),
+            "bound-slot change must move the fingerprint"
+        );
+        assert_eq!(
+            cache.apply_build(&scene, &darkened, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::PaletteChanged)
+        );
+        assert_eq!(cache.counters().rebuilds_palette, 1);
+        assert_eq!(cache.counters().probe_hits, 1);
+        assert_eq!(cache.counters().layer_builds, 2);
+    }
+
+    // -- 6. invalid scene: blank layer + recorded error -----------------------
+
+    #[test]
+    fn invalid_scene_renders_blank_and_records_error() {
+        let palette = distinct_palette(false);
+        let bad = invalid_scene_at(1);
+        let mut cache = SceneProjectionCache::new(StableId(6));
+        assert_eq!(
+            cache.apply_build(&bad, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild),
+            "the build attempt is still counted (a build ran and failed)"
+        );
+        // Defect-capture surface, not a panic: the error is recorded as
+        // Display text, the counters describe the BLANK outcome.
+        let counters = cache.counters();
+        let error = counters.last_error.as_ref().expect("error must be captured");
+        assert!(!error.is_empty(), "the Display text is the capture surface");
+        assert_eq!(counters.prims_last_build, 0, "nothing was emitted");
+        assert_eq!(counters.path_work_last_build, 0);
+        assert!(
+            cache.last_summary().is_none(),
+            "a failed build leaves no summary mirror"
+        );
+        // The layer stays EMPTY (no key installed): the next draw rebuilds.
+        let fixed = scene_at(2, 1);
+        assert_eq!(
+            cache.probe_draw_decision(&fixed, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild),
+            "no key was installed, so the next decision is a fresh build"
+        );
+        assert_eq!(
+            cache.apply_build(&fixed, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+        );
+        // A later successful build leaves the last-error evidence in place
+        // (documented stickiness: "last" is the honest name) and repopulates
+        // the outcome counters.
+        assert!(cache.counters().last_error.is_some());
+        assert_eq!(cache.counters().prims_last_build, 1);
+        // The REAL draw paints the blank frame for this case; the recording
+        // half proven here is exactly what that branch calls.
+    }
+
+    // -- 7. multi-surface independence (the §16 scene-side acceptance) --------
+
+    #[test]
+    fn multi_surfaces_are_independent() {
+        let palette = distinct_palette(false);
+        let mut set = SceneProjectionCacheSet::new();
+        let surface_a = StableId(101);
+        let surface_b = StableId(202);
+        let scene1 = scene_at(1, 2);
+        // Both surfaces absorb their own first build. Borrow discipline: a
+        // `&mut` borrow of the set covers the whole map, so surface work is
+        // always sequential here — the INDEPENDENCE being tested is decision
+        // isolation, which draws of A and B never need simultaneously.
+        {
+            let decision_a = set.get_or_insert(surface_a).apply_build(&scene1, &palette, fixture_bounds());
+            assert_eq!(
+                decision_a,
+                DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+            );
+            let decision_b = set.get_or_insert(surface_b).apply_build(&scene1, &palette, fixture_bounds());
+            assert_eq!(
+                decision_b,
+                DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+            );
+        }
+        // A patch that bumps ONLY surface A's revision (same bounds, same
+        // palette): the host feeds each panel its OWN scene, so B is
+        // re-probed at B's own unchanged inputs.
+        let scene2 = scene_at(2, 3);
+        let decision_a = set
+            .get_or_insert(surface_a)
+            .apply_build(&scene2, &palette, fixture_bounds());
+        assert_eq!(
+            decision_a,
+            DrawDecision::LayerRebuild(RebuildReason::RevisionChanged),
+            "A's own bump is exactly a RevisionChanged rebuild"
+        );
+        // B stayed at ITS scene (still the old revision): no global key or
+        // counter pollution may turn B's decision into a rebuild.
+        let decision_b = set
+            .get_or_insert(surface_b)
+            .probe_draw_decision(&scene1, &palette, fixture_bounds());
+        assert_eq!(
+            decision_b,
+            DrawDecision::LayerHit,
+            "B's inputs are untouched: its layer replays"
+        );
+        // And the counters agree: A's revision counter advanced, B's didn't.
+        let a_counters = set.get_or_insert(surface_a).counters().clone();
+        let b_counters = set.get_or_insert(surface_b).counters().clone();
+        assert_eq!(a_counters.rebuilds_revision, 1);
+        assert_eq!(a_counters.layer_builds, 2);
+        assert_eq!(a_counters.prims_last_build, 3);
+        assert_eq!(b_counters.rebuilds_revision, 0);
+        assert_eq!(b_counters.layer_builds, 1, "B never rebuilt past its first build");
+        assert_eq!(b_counters.prims_last_build, 2, "B's first build was 2 rects");
+    }
+
+    // -- 8. retain_alive releases dropped surfaces ----------------------------
+
+    #[test]
+    fn retain_alive_releases_dropped_surfaces() {
+        let palette = distinct_palette(false);
+        let scene = scene_at(1, 1);
+        let mut set = SceneProjectionCacheSet::new();
+        let surface_a = StableId(3);
+        let surface_b = StableId(4);
+        set.get_or_insert(surface_a).apply_build(&scene, &palette, fixture_bounds());
+        set.get_or_insert(surface_b).apply_build(&scene, &palette, fixture_bounds());
+
+        // The dropped surface's layer + counters release wholesale; the
+        // release count is recorded exactly once per dropped surface.
+        set.retain_alive(&[surface_b]);
+        assert_eq!(set.stats().surfaces_released, 1);
+        assert!(!set.contains(surface_a));
+        assert!(set.contains(surface_b));
+        // A no-op retain does not advance the recorded release count.
+        set.retain_alive(&[surface_b]);
+        assert_eq!(set.stats().surfaces_released, 1);
+        // B's cache survived the release with its state intact (the live
+        // surface keeps counting in place).
+        let decision_b = set.get_or_insert(surface_b).apply_build(&scene, &palette, fixture_bounds());
+        assert_eq!(decision_b, DrawDecision::LayerHit);
+        assert_eq!(set.get_or_insert(surface_b).counters().layer_builds, 1);
+        // A released surface that comes back is a NEW default cache.
+        let decision_a = set.get_or_insert(surface_a).probe_draw_decision(&scene, &palette, fixture_bounds());
+        assert_eq!(
+            decision_a,
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild),
+            "released state is gone; a returning surface starts clean"
+        );
+        assert_eq!(set.get_or_insert(surface_a).counters().layer_builds, 0);
+        assert_eq!(set.stats().surfaces_released, 1);
+    }
+
+    // -- 9. the fingerprint is complete, stable, and order-pinned -------------
+
+    #[test]
+    fn palette_fingerprint_is_complete_and_stable() {
+        // Stability: identical palettes hash identically.
+        assert_eq!(
+            palette_fingerprint(&distinct_palette(false)),
+            palette_fingerprint(&distinct_palette(false)),
+            "the fingerprint must be deterministic for identical inputs"
+        );
+
+        // The all-baseline palette still hashes NON-ZERO (the FNV offset
+        // basis survives an empty digest).
+        assert_ne!(palette_fingerprint(&zero_palette()), 0);
+
+        // COMPLETENESS + FIELD-ORDER PIN: flipping each bound slot in turn
+        // (to the same mark value) yields fingerprints that (a) differ from
+        // the baseline and (b) are all pairwise distinct — slot position
+        // matters, not just the value's bytes.
+        let baseline = distinct_palette(false);
+        let baseline_fp = palette_fingerprint(&baseline);
+        let mark = tint(240, 0, 0);
+        let mut flip_fps = Vec::new();
+        for slot in all_bound_slots() {
+            let mut flipped = distinct_palette(false);
+            paint_slot(&mut flipped, slot, mark);
+            let fingerprint = palette_fingerprint(&flipped);
+            assert_ne!(
+                fingerprint, baseline_fp,
+                "flipping bound slot {slot:?} must move the fingerprint"
+            );
+            flip_fps.push(fingerprint);
+        }
+        for (i, &fp) in flip_fps.iter().enumerate() {
+            for &other in &flip_fps[i + 1..] {
+                assert_ne!(
+                    fp, other,
+                    "the same mark in different bound slots must hash differently (field-order pin)"
+                );
+            }
+        }
+
+        // FIELD-ORDER PIN, shape level: swapping the SAME two values across
+        // the base pair's two slots breaks equality.
+        let mut swapped_a = distinct_palette(false);
+        swapped_a.background.base.color = tint(150, 0, 0);
+        swapped_a.background.base.text = tint(151, 0, 0);
+        let mut swapped_b = distinct_palette(false);
+        swapped_b.background.base.color = tint(151, 0, 0);
+        swapped_b.background.base.text = tint(150, 0, 0);
+        assert_ne!(
+            palette_fingerprint(&swapped_a),
+            palette_fingerprint(&swapped_b),
+            "field order is part of the digest, not a commutative mix"
+        );
+
+        // CHANNEL-ORDER PIN: within one color, swapped r/g channel bytes are
+        // a different byte stream.
+        let mut rg_a = distinct_palette(false);
+        rg_a.primary.base.color = Color::from_rgba8(1, 2, 0, 1.0);
+        let mut rg_b = distinct_palette(false);
+        rg_b.primary.base.color = Color::from_rgba8(2, 1, 0, 1.0);
+        assert_ne!(
+            palette_fingerprint(&rg_a),
+            palette_fingerprint(&rg_b),
+            "channels are hashed in fixed r,g,b,a little-endian order"
+        );
+
+        // DOCUMENTED BOUNDARY: background's non-base pairs are NOT bound —
+        // the projection cannot reach them, so a change there does not
+        // invalidate (over-invalidation was accepted only where simple).
+        let mut unbound = distinct_palette(false);
+        unbound.background.stronger.color = mark;
+        assert_eq!(
+            palette_fingerprint(&unbound),
+            baseline_fp,
+            "unbound slot flips deliberately keep the fingerprint (documented boundary)"
+        );
+    }
+
+    // -- 10. the stored key's fingerprint equals the recomputation ------------
+
+    #[test]
+    fn fingerprint_matches_cached_equality() {
+        let palette = distinct_palette(false);
+        let mut cache = SceneProjectionCache::new(StableId(9));
+        let scene = scene_at(1, 2);
+        cache.apply_build(&scene, &palette, fixture_bounds());
+        let footprint = palette_fingerprint(&palette);
+        let stored = cache.layer_key().expect("successful build installed a key");
+        assert_eq!(stored.palette_fingerprint, footprint);
+        let recomputed = SceneLayerKey {
+            revision: scene.revision,
+            bounds: fixture_bounds(),
+            palette_fingerprint: palette_fingerprint(&palette),
+        };
+        assert_eq!(
+            stored, recomputed,
+            "key equality (thus LayerHit) flows from the fingerprint surface"
+        );
+        // The recompute-equality proves the hit side of the decision path
+        // end to end: an identical rebuild-from-scratch key hits the layer.
+        assert_eq!(
+            cache.probe_draw_decision(&scene, &palette, fixture_bounds()),
+            DrawDecision::LayerHit
+        );
+    }
+
+    // -- 11. the summary mirror rides successful builds -----------------------
+
+    #[test]
+    fn last_summary_mirrors_the_built_scene() {
+        let palette = distinct_palette(false);
+        let mut cache = SceneProjectionCache::new(StableId(11));
+        assert!(
+            cache.last_summary().is_none(),
+            "a fresh cache holds no summary"
+        );
+        let scene = scene_at(1, 3);
+        cache.apply_build(&scene, &palette, fixture_bounds());
+        let summary = cache.last_summary().expect("successful build stores a mirror");
+        assert_eq!(summary.revision, SceneRevision(1));
+        assert_eq!(summary.nodes, 3);
+        // A later revision updates the mirror in place.
+        let newer = scene_at(5, 1);
+        cache.apply_build(&newer, &palette, fixture_bounds());
+        let summary = cache.last_summary().expect("mirror refreshed");
+        assert_eq!(summary.revision, SceneRevision(5));
+        assert_eq!(summary.nodes, 1);
+    }
+
+    // -- SCN-011b additions (store + cache parity, counters only) ------------
+
+    use ocs_plugin_api::scene::{PanelScenePatch, SceneOp};
+
+    /// A patch fixture for the report-driven flows (mirrors the API crate's
+    /// `patch` helper shape; local to these tests).
+    fn patch(base: u64, next: u64, ops: Vec<SceneOp>) -> PanelScenePatch {
+        PanelScenePatch {
+            base_revision: SceneRevision(base),
+            revision: SceneRevision(next),
+            ops,
+        }
+    }
+
+    #[test]
+    fn store_driven_sync_reprojects_only_touched_segments() {
+        let palette = distinct_palette(false);
+        // 60 root-level fill-only rect subtrees; the store syncs full once
+        // (the snapshot flow), then two patches ride the report path.
+        let mut cache = SceneProjectionCache::new(StableId(31));
+        assert!(cache.store_counters().is_none(), "detached by default");
+        cache.attach_store();
+        let scene1 = scene_at(1, 60);
+        cache
+            .sync_store_full(&scene1, &palette)
+            .expect("full store sync");
+        let store = cache.store_counters().expect("store attached");
+        assert_eq!(store.full_reprojects, 1);
+        assert_eq!(store.full_reprojects_explicit, 1);
+        assert_eq!(store.subtree_reprojects, 0);
+
+        // First build: the layer rebuild paints from the fresh segments (no
+        // semantic flatten; the store counters stay put).
+        assert_eq!(
+            cache.apply_build(&scene1, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+        );
+        assert_eq!(cache.counters().layer_builds, 1);
+        assert_eq!(cache.counters().prims_last_build, 60);
+        let store = cache.store_counters().unwrap();
+        assert_eq!(
+            store.full_reprojects, 1,
+            "the store-fed build re-flattens nothing"
+        );
+
+        // Patch 1 replaces root subtree 7 wholesale (a real report from the
+        // single mutation path); the sync re-projects exactly that segment
+        // while the layer rebuild (RevisionChanged) repaints from segments.
+        let mut scene2 = scene1.clone();
+        let report = scene2
+            .apply_patch_report(patch(
+                1,
+                2,
+                vec![SceneOp::Replace {
+                    element: filled_rect(7, 99.0),
+                }],
+            ))
+            .expect("patch 1 applies");
+        assert_eq!(
+            cache.sync_after_patch(&scene2, &report, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::RevisionChanged)
+        );
+        let store = cache.store_counters().unwrap();
+        assert_eq!(store.subtree_reprojects, 1);
+        assert_eq!(store.subtree_retained_hits, 59);
+        assert_eq!(store.full_reprojects, 1, "no fallback fired");
+        // The layer build reused the report's post-patch summary (no re-walk).
+        assert_eq!(cache.counters().layer_builds, 2);
+        assert_eq!(cache.counters().prims_last_build, 60);
+        assert_eq!(cache.last_summary().unwrap().revision, SceneRevision(2));
+        assert_eq!(
+            *cache.last_summary().expect("mirror refreshed from the report"),
+            report.summary,
+            "the report's summary is reused as-is"
+        );
+
+        // The installed key replays: the same scene draws as a hit.
+        assert_eq!(
+            cache.apply_build(&scene2, &palette, fixture_bounds()),
+            DrawDecision::LayerHit
+        );
+        assert_eq!(cache.counters().probe_hits, 1);
+
+        // Patch 2 touches a DIFFERENT subtree: the total re-projection count
+        // grows by exactly one — untouched segments are NEVER re-projected
+        // (the counter-only proof of the retention win).
+        let mut scene3 = scene2.clone();
+        let report2 = scene3
+            .apply_patch_report(patch(
+                2,
+                3,
+                vec![SceneOp::Replace {
+                    element: filled_rect(40, 77.0),
+                }],
+            ))
+            .expect("patch 2 applies");
+        assert_eq!(
+            cache.sync_after_patch(&scene3, &report2, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::RevisionChanged)
+        );
+        let store = cache.store_counters().unwrap();
+        assert_eq!(
+            store.subtree_reprojects, 2,
+            "second run touched one more segment, nothing else"
+        );
+        assert_eq!(store.subtree_retained_hits, 118, "59 + 59 retained");
+        assert_eq!(store.full_reprojects, 1, "still no fallback");
+        assert_eq!(cache.counters().layer_builds, 3);
+    }
+
+    // -- SCN-031b: the region fit-and-center transform ------------------------
+
+    use crate::ui::window::plugin_scene::project_scene;
+
+    /// One fill-only rect at an arbitrary scene position.
+    fn filled_rect_at(id: u64, x: f64, y: f64) -> SceneElement {
+        SceneElement::Rect {
+            id: StableId(id),
+            name: None,
+            actions: Vec::new(),
+            drag: None,
+            pos: v2(x, y),
+            size: v2(40.0, 20.0),
+            fill: Some(SceneColor::Theme(ThemeColor::Normal)),
+            stroke: None,
+        }
+    }
+
+    /// THE DEFECT FIXTURE: an ORIGIN-CENTERED two-card scene — negative AND
+    /// positive coordinates (the reference demo graph's shape) — which the
+    /// 1:1 stage-1 mapping drew entirely off a top-left-origin region.
+    fn origin_centered_scene(revision: u64) -> PanelScene {
+        PanelScene {
+            revision: SceneRevision(revision),
+            elements: vec![
+                filled_rect_at(1, -60.0, -40.0),
+                filled_rect_at(2, 20.0, 20.0),
+            ],
+        }
+    }
+
+    /// The closed rect rings' vertices (the geometry the visual-law pin
+    /// walks).
+    fn ring_vertices(prims: &[ScenePrim]) -> Vec<Point> {
+        prims
+            .iter()
+            .flat_map(|prim| match prim {
+                ScenePrim::Fill { vertices, .. }
+                | ScenePrim::Stroke { vertices, .. }
+                | ScenePrim::FillStroke { vertices, .. } => vertices.clone(),
+                _ => Vec::new(),
+            })
+            .collect()
+    }
+
+    /// THE VISUAL-LAW PIN (the off-region bug, dead): the origin-centered
+    /// fixture projects to negative coordinates (the defect's precondition,
+    /// pinned), and after the production fit EVERY transformed vertex lies
+    /// inside the bounds minus the margin — and the prim stream keeps its
+    /// count and paint order (the transform moves geometry, nothing else).
+    #[test]
+    fn fitted_prims_lie_inside_the_bounds_minus_margin() {
+        let palette = distinct_palette(false);
+        let scene = origin_centered_scene(1);
+        let prims = project_scene(&scene, &palette, fixture_bounds().size())
+            .expect("the fixture is valid");
+        let (raw_min, _) = prims_bbox(&prims).expect("the fixture has geometry");
+        assert!(
+            raw_min.x < 0.0 && raw_min.y < 0.0,
+            "precondition: the fixture spans negative scene coordinates (the defect)"
+        );
+
+        let bounds = fixture_bounds();
+        let transform = fit_scene_prims(&prims, bounds.size(), SCENE_FIT_MARGIN);
+        let mut fitted = prims.clone();
+        transform_prims(&mut fitted, &transform);
+        assert_eq!(fitted.len(), prims.len(), "the transform never adds/drops prims");
+
+        let eps = 1.0e-3;
+        for vertex in ring_vertices(&fitted) {
+            assert!(
+                vertex.x >= SCENE_FIT_MARGIN - eps
+                    && vertex.x <= bounds.width - SCENE_FIT_MARGIN + eps
+                    && vertex.y >= SCENE_FIT_MARGIN - eps
+                    && vertex.y <= bounds.height - SCENE_FIT_MARGIN + eps,
+                "every fitted vertex inside bounds minus margin (got {vertex:?})"
+            );
+        }
+        // And the bbox center landed at the region center.
+        let (min, max) = prims_bbox(&fitted).expect("geometry survives the fit");
+        assert!(((min.x + max.x) * 0.5 - bounds.width * 0.5).abs() < eps);
+        assert!(((min.y + max.y) * 0.5 - bounds.height * 0.5).abs() < eps);
+    }
+
+    /// FIT MATH: a wide scene (200x10) in a tall region (120x300) — the
+    /// width axis constrains the scale, the aspect ratio is preserved, and
+    /// the bbox center lands at the region center.
+    #[test]
+    fn wide_scene_in_tall_region_fits_width_and_centers() {
+        let scene = PanelScene {
+            revision: SceneRevision(1),
+            elements: vec![filled_rect_at(1, 0.0, 0.0), filled_rect_at(2, 160.0, 0.0)],
+        };
+        // filled_rect_at is 40x20, so the two cards at y=0 span x 0..200,
+        // y 0..20 — wide, not tall.
+        let prims = project_scene(&scene, &distinct_palette(false), Size::new(120.0, 300.0))
+            .expect("valid");
+        let (min, max) = prims_bbox(&prims).expect("geometry");
+        assert_eq!((max.x - min.x, max.y - min.y), (200.0, 20.0));
+
+        let bounds = Size::new(120.0, 300.0);
+        let transform = fit_scene_prims(&prims, bounds, SCENE_FIT_MARGIN);
+        let expected = (120.0 - 2.0 * SCENE_FIT_MARGIN) / 200.0; // 104/200, < 284/20
+        assert!(
+            (transform.scale() - expected).abs() < 1.0e-4,
+            "width-constrained uniform scale, got {}",
+            transform.scale()
+        );
+        // Centered: the bbox center (100, 10) maps to the region center.
+        let center = transform.apply(Point::new(100.0, 10.0));
+        assert!((center.x - 60.0).abs() < 1.0e-3 && (center.y - 150.0).abs() < 1.0e-3);
+    }
+
+    /// FIT MATH (the documented scale-up choice): a small scene SCALES UP
+    /// to use the region (the Excel-fit / diagram-viewport law) — the
+    /// defect fixture's 120x80 bbox in the 200x160 region fits at
+    /// min(184/120, 144/80) = 184/120 > 1.
+    #[test]
+    fn small_scene_scales_up_to_fill_the_region() {
+        let scene = origin_centered_scene(1);
+        let prims = project_scene(&scene, &distinct_palette(false), fixture_bounds().size())
+            .expect("valid");
+        let transform = fit_scene_prims(&prims, fixture_bounds().size(), SCENE_FIT_MARGIN);
+        let expected = (fixture_bounds().width - 2.0 * SCENE_FIT_MARGIN) / 120.0;
+        assert!(transform.scale() > 1.0, "the fit scales UP small scenes");
+        assert!((transform.scale() - expected).abs() < 1.0e-4);
+    }
+
+    /// EDGE (the pinned degenerate rule): a single-point bbox (both axes
+    /// degenerate) keeps scale 1.0 — the division is guarded, never run —
+    /// and lands at the region center; a straight LINE fits along its
+    /// extent axis only. Neither panics, neither yields NaN.
+    #[test]
+    fn degenerate_bbox_is_guarded_not_divided() {
+        // A single point at (5, 7) in the 200x160 region: scale 1.0,
+        // the point lands at the region center (100, 80).
+        let point = SceneFitTransform::fit(
+            Some((Point::new(5.0, 7.0), Point::new(5.0, 7.0))),
+            Size::new(200.0, 160.0),
+            SCENE_FIT_MARGIN,
+        );
+        assert_eq!(point.scale(), 1.0);
+        let landed = point.apply(Point::new(5.0, 7.0));
+        assert!((landed.x - 100.0).abs() < 1.0e-4 && (landed.y - 80.0).abs() < 1.0e-4);
+
+        // A horizontal line (zero height) fits by width only; the line's
+        // y stays pinned at the region center.
+        let line = SceneFitTransform::fit(
+            Some((Point::new(0.0, 3.0), Point::new(100.0, 3.0))),
+            Size::new(200.0, 160.0),
+            SCENE_FIT_MARGIN,
+        );
+        assert!((line.scale() - (200.0 - 2.0 * SCENE_FIT_MARGIN) / 100.0).abs() < 1.0e-4);
+        let left = line.apply(Point::new(0.0, 3.0));
+        let right = line.apply(Point::new(100.0, 3.0));
+        assert!((left.y - 80.0).abs() < 1.0e-3 && (right.y - 80.0).abs() < 1.0e-3);
+        assert!(left.x.is_finite() && right.x.is_finite());
+    }
+
+    /// EDGE: an EMPTY scene — no bbox, the IDENTITY transform, nothing
+    /// drawn, no panic; the cache treats it exactly like any other scene
+    /// (one build, then replay).
+    #[test]
+    fn empty_scene_fits_identity_and_draws_nothing() {
+        assert_eq!(prims_bbox(&[]), None);
+        assert_eq!(
+            SceneFitTransform::fit(None, Size::new(200.0, 160.0), SCENE_FIT_MARGIN),
+            SceneFitTransform::identity()
+        );
+        let palette = distinct_palette(false);
+        let scene = PanelScene {
+            revision: SceneRevision(1),
+            elements: Vec::new(),
+        };
+        let mut cache = SceneProjectionCache::new(StableId(31));
+        assert_eq!(
+            cache.apply_build(&scene, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+        );
+        assert_eq!(cache.counters().prims_last_build, 0, "nothing to paint");
+        assert_eq!(
+            cache.apply_build(&scene, &palette, fixture_bounds()),
+            DrawDecision::LayerHit
+        );
+    }
+
+    /// DETERMINISM: the same scene/bounds/palette compute the SAME
+    /// transform twice (different bounds compute a different one), and the
+    /// transform's presence advances NOTHING in the retained counters —
+    /// the defect fixture builds once, then replays (replay stays replay).
+    #[test]
+    fn fit_transform_is_deterministic_and_key_covered() {
+        let palette = distinct_palette(false);
+        let scene = origin_centered_scene(1);
+        let prims = project_scene(&scene, &palette, fixture_bounds().size())
+            .expect("valid");
+        let size = fixture_bounds().size();
+        let a = fit_scene_prims(&prims, size, SCENE_FIT_MARGIN);
+        let b = fit_scene_prims(&prims, size, SCENE_FIT_MARGIN);
+        assert_eq!(a, b, "same inputs, same transform");
+        assert_ne!(
+            fit_scene_prims(&prims, Size::new(300.0, 160.0), SCENE_FIT_MARGIN),
+            a,
+            "different bounds, different transform"
+        );
+
+        // Through the cache: build once, replay — the counters prove the
+        // transform forced no re-projection (it keys on nothing new).
+        let mut cache = SceneProjectionCache::new(StableId(32));
+        assert_eq!(
+            cache.apply_build(&scene, &palette, fixture_bounds()),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+        );
+        assert_eq!(
+            cache.apply_build(&scene, &palette, fixture_bounds()),
+            DrawDecision::LayerHit
+        );
+        let counters = cache.counters();
+        assert_eq!(counters.layer_builds, 1);
+        assert_eq!(counters.probe_hits, 1);
+        assert_eq!(counters.prims_last_build, 2);
+        assert_eq!(counters.path_work_last_build, 10);
+        assert_eq!(counters.last_error, None);
+    }
+
+    /// THE SCN-032 CONTRACT: the transform is affine and invertible —
+    /// `invert(apply(p))` round-trips scene points exactly (within float
+    /// epsilon) for the defect fixture's transform. SCN-032's hit-testing
+    /// consumes `fit` + `invert` verbatim.
+    #[test]
+    fn fit_transform_round_trips_through_invert() {
+        let scene = origin_centered_scene(1);
+        let prims = project_scene(&scene, &distinct_palette(false), fixture_bounds().size())
+            .expect("valid");
+        let transform = fit_scene_prims(&prims, fixture_bounds().size(), SCENE_FIT_MARGIN);
+        let (min, max) = prims_bbox(&prims).expect("geometry");
+        for p in [
+            min,
+            max,
+            Point::new((min.x + max.x) * 0.5, (min.y + max.y) * 0.5),
+            Point::new(min.x, max.y),
+            Point::new(17.3, -23.9),
+        ] {
+            let back = transform.invert(transform.apply(p));
+            assert!(
+                (back.x - p.x).abs() < 1.0e-2 * (1.0 + p.x.abs()) && (back.y - p.y).abs() < 1.0e-2 * (1.0 + p.y.abs()),
+                "round trip drifted: {p:?} -> {:?} -> {back:?}",
+                transform.apply(p)
+            );
+        }
+    }
+
+    /// THE SCN-032 CUSTODY PIN: after a committed build the cache RETAINS
+    /// the transform that build painted under
+    /// ([`SceneProjectionCache::last_fit_transform`]) — the exact
+    /// `fit_scene_prims` values the fitted prims carry — so the mount's live
+    /// pointer mapping consumes the render's transform, never a
+    /// recomputation. `invert(apply(p))` round-trips through the RETAINED
+    /// accessor (the click maps to the scene point the user actually sees),
+    /// and the custody resets: a `clear` (and a failed build) puts the
+    /// identity back — a blank layer paints under no fit.
+    #[test]
+    fn last_fit_transform_is_the_committed_builds_transform() {
+        let palette = distinct_palette(false);
+        let scene = origin_centered_scene(1);
+        let bounds = fixture_bounds();
+
+        // Before ANY build: identity (nothing painted under a fit).
+        let mut cache = SceneProjectionCache::new(StableId(41));
+        assert_eq!(cache.last_fit_transform(), SceneFitTransform::identity());
+
+        // The committed build retains ITS transform — equal to the pure fit
+        // of the projected stream (the same inputs, the same values: the
+        // accessor is custody, not recomputation).
+        cache.apply_build(&scene, &palette, bounds);
+        let prims = project_scene(&scene, &palette, bounds.size()).expect("valid");
+        let expected = fit_scene_prims(&prims, bounds.size(), SCENE_FIT_MARGIN);
+        let retained = cache.last_fit_transform();
+        assert_eq!(retained, expected, "the retained fit IS the committed fit");
+
+        // Round trip THROUGH the retained accessor (the mount's live law):
+        // a region-local pixel maps to the scene point the user sees.
+        let region_pixel = retained.apply(Point::new(-17.5, 40.25));
+        let back = retained.invert(region_pixel);
+        assert!((back.x + 17.5).abs() < 1.0e-2 && (back.y - 40.25).abs() < 1.0e-2);
+
+        // A replay (key hit) does NOT move the custody — same transform.
+        assert_eq!(cache.apply_build(&scene, &palette, bounds), DrawDecision::LayerHit);
+        assert_eq!(cache.last_fit_transform(), retained);
+
+        // The explicit clear resets the custody: no layer, no fit.
+        cache.clear();
+        assert_eq!(cache.last_fit_transform(), SceneFitTransform::identity());
+
+        // And a failed build commits no fit either (blank layer).
+        cache.apply_build(&scene, &palette, bounds);
+        assert_ne!(cache.last_fit_transform(), SceneFitTransform::identity());
+        cache.apply_build(&invalid_scene_at(9), &palette, bounds);
+        assert_eq!(
+            cache.last_fit_transform(),
+            SceneFitTransform::identity(),
+            "the failed build reset the custody"
+        );
+    }
+
+    // -- SCN-036: the draft-path emit law ------------------------------------
+
+    use std::cell::Cell;
+
+    /// A distinctive fill prim — the shape class that vanished when drawn
+    /// directly on the build frame (the live defect).
+    fn fill_prim(element: u64, x: f32, y: f32) -> ScenePrim {
+        ScenePrim::Fill {
+            element: StableId(element),
+            vertices: vec![
+                Point::new(x, y),
+                Point::new(x + 40.0, y),
+                Point::new(x + 40.0, y + 20.0),
+                Point::new(x, y + 20.0),
+            ],
+            color: tint(60, 0, 0),
+        }
+    }
+
+    /// A real CPU renderer (tiny-skia forced, so no GPU is touched) so the
+    /// tests can build an actual [`canvas::Frame`] headlessly — the same
+    /// frame type [`SceneProjectionCache::draw`] paints into.
+    fn headless_frame_renderer() -> iced::Renderer {
+        let _lock = crate::headless_ui_lock();
+        iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                Some("tiny-skia"),
+            ),
+        )
+        .expect("headless tiny-skia renderer")
+    }
+
+    /// THE STRUCTURAL PIN: the build-emit funnel routes the prim emission
+    /// through ONE full-frame `with_clip` draft — the closure runs exactly
+    /// once, on an inner frame whose size is the OUTER frame's size (the
+    /// draft region covers the whole frame at the frame-local origin, so
+    /// the wrap introduces no clipping of its own; this is the exact
+    /// property the surviving draft prims had in the live defect). The
+    /// wrapped frame still resolves to geometry.
+    #[test]
+    fn the_build_emit_rides_one_full_frame_draft() {
+        let renderer = headless_frame_renderer();
+        let size = Size::new(200.0, 160.0);
+
+        let mut frame = canvas::Frame::new(&renderer, size);
+        let entered = Cell::new(0u32);
+        emit_in_full_frame_draft(&mut frame, |inner| {
+            entered.set(entered.get() + 1);
+            assert_eq!(
+                inner.size(),
+                size,
+                "the draft must be FULL-FRAME: the wrap clips nothing"
+            );
+            emit_prims(inner, &[fill_prim(1, 10.0, 12.0)]);
+        });
+        assert_eq!(entered.get(), 1, "exactly one draft, one emit");
+        frame.into_geometry();
+    }
+
+    /// The nested-clip path (the demo's legend group): `emit_prims`' own
+    /// `with_clip` chaperoning must compose INSIDE the full-frame draft —
+    /// a draft within a draft — without panicking, with the enclosed prims
+    /// emitted through the nested draft and the stream balanced.
+    #[test]
+    fn nested_clips_nest_inside_the_full_frame_draft() {
+        let renderer = headless_frame_renderer();
+        let size = Size::new(200.0, 160.0);
+
+        let mut frame = canvas::Frame::new(&renderer, size);
+        let entered = Cell::new(0u32);
+        let prims = vec![
+            ScenePrim::ClipPush {
+                element: StableId(2),
+                rect: Rectangle::new(Point::new(0.0, 0.0), Size::new(100.0, 80.0)),
+            },
+            fill_prim(3, 4.0, 4.0),
+            ScenePrim::ClipPop {
+                element: StableId(2),
+            },
+        ];
+        emit_in_full_frame_draft(&mut frame, |inner| {
+            entered.set(entered.get() + 1);
+            assert_eq!(inner.size(), size, "outer draft full-frame");
+            emit_prims(inner, &prims);
+        });
+        assert_eq!(entered.get(), 1);
+        frame.into_geometry();
+    }
+
+    /// THE EMIT-SITE PIN (decision-side blindness): the wrap lives AFTER
+    /// the decision, on the emit only — a simulated draw before/after the
+    /// law lands the SAME decision sequence and the SAME counters, byte for
+    /// byte (keys never learned about the draft).
+    #[test]
+    fn the_wrap_changes_no_decision_and_no_counter() {
+        let palette = distinct_palette(false);
+        let scene = scene_at(1, 2);
+        let bounds = fixture_bounds();
+
+        // Before the law: the funnel is decision-blind, so the headless
+        // mirror (which shares the draw path's decision funnel) pins the
+        // decision/counter surface the renderer path sees.
+        let mut cache = SceneProjectionCache::new(StableId(51));
+        assert_eq!(
+            cache.apply_build(&scene, &palette, bounds),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild)
+        );
+        assert_eq!(
+            cache.apply_build(&scene, &palette, bounds),
+            DrawDecision::LayerHit
+        );
+        let counters = cache.counters().clone();
+        assert_eq!(counters.layer_builds, 1);
+        assert_eq!(counters.probe_hits, 1);
+        assert_eq!(counters.prims_last_build, 2);
+        assert_eq!(counters.path_work_last_build, 10);
+
+        // And the WRAPPED build's key replays: a key-equal draw is a hit,
+        // so the replayed geometry was BUILT under the wrap — the wrap
+        // rides the cached geometry forward without new decisions.
+        let key = cache.layer_key().expect("the build installed a key");
+        let fresh = SceneProjectionCache::new(StableId(52));
+        assert_eq!(
+            fresh.probe_draw_decision(&scene, &palette, bounds),
+            DrawDecision::LayerRebuild(RebuildReason::FirstBuild),
+            "a fresh cache rebuilds (the wrap forces no special decision)"
+        );
+        assert_eq!(key.bounds, bounds);
+    }
+}

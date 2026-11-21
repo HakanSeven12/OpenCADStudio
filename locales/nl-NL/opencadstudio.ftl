@@ -345,6 +345,7 @@ modal =
     .find-replace = Zoeken en vervangen
     .plugin-manager = Plug-inbeheer
     .update-available = Update beschikbaar
+    .widget-confirmation = Widget Confirmation
     .layer-manager = Lagenbeheer
     .layer-state-manager = Laagstatusbeheer
     .edit-layer-state = Laagstatus bewerken

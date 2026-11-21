@@ -33,7 +33,12 @@ pub use document::objects::{
 pub use document::xdata::{ExtendedDataRecord, XDataValue};
 pub use document::{Document, EntityType, Handle};
 
-use crate::ipc::protocol::{PluginRequest, PluginResponse};
+use crate::ipc::protocol::{
+    PanelStoreKind, PatchRejectCode, PatchRejectReport, PluginRequest, PluginResponse,
+    SceneOrWidgetPatch, SceneOrWidgetSurface, StoreRow, StoreStateDigest,
+};
+use crate::scene::StableId;
+use crate::widgets::{WidgetEvent, WidgetRange};
 
 /// Thread-safe handle that can issue host requests from plugin worker threads.
 /// Out-of-process V4 plugins implement this; in-process hosts may return `None`.
@@ -519,6 +524,57 @@ pub enum HostNotification {
         revision: u64,
         count: u64,
     },
+    /// V26 scene/widget semantic events for an attach-routed panel: the
+    /// SMALL semantic events the host produces and the owning plugin
+    /// consumes (tree expansions, selections, activations, command
+    /// invocations, cell facts) — the notify leg of the widgets module's
+    /// documented events-vs-patches split, forwarded when a panel's widget
+    /// mount is live. `surface_id` is the `WidgetSurface` identity the
+    /// panel's events stream names (the same id every event in `events`
+    /// carries); `events` is a bounded batch
+    /// ([`crate::ipc::protocol::MAX_WIDGET_EVENT_ROWS`]). Older plugins
+    /// decode it through the `Unknown` passthrough. Discriminant 15.
+    ///
+    /// Boundary (landed, SCN-025): the host-UI/mount publisher ATTACHES
+    /// this notification to live widget mounts — the drained batches
+    /// forward through the manager's v26 notify router. The crossing was
+    /// re-versioned 23 → 24 at the SCN-026 upstream merge (upstream's v23
+    /// = `TableOperation::LayoutSetTabOrder`); nothing here touches
+    /// host-UI state itself.
+    PanelSceneEvents {
+        /// Panel id (wire-capped like the v26 request tails).
+        panel_id: String,
+        /// The `WidgetSurface` identity within the panel's event stream.
+        surface_id: crate::scene::StableId,
+        /// The bounded semantic event batch.
+        events: Vec<crate::widgets::WidgetEvent>,
+    },
+    /// V26 host-driven lazy fetch demand: the host asks the owning plugin
+    /// to publish a bounded page of a store the plugin owns — a lazy
+    /// tree-branch's children, an item-list window, a typed-table window,
+    /// or a scene region (`parent_id` + `range`, the exact shape
+    /// [`crate::widgets::WidgetEvent::ChildrenRequested`] /
+    /// `TablePageRequested` carry). The ANSWER never rides the notification
+    /// channel: the plugin publishes the page through the ordinary
+    /// publish/patch requests (`PanelScenePublish` / `PanelScenePatch`), so
+    /// demand and delivery stay decoupled and rejections keep ONE mutation
+    /// path. Range width is capped by
+    /// [`crate::widgets::MAX_WIDGET_RANGE_LEN`]: an over-cap demand is a
+    /// structured refusal, never a bigger page. Older plugins decode it
+    /// through the `Unknown` passthrough; the runner gate rows
+    /// (notifications 15/16 ⇒ 26) hold both v26 tails back from pre-v26
+    /// plugins. Discriminant 16.
+    PanelStoreDemand {
+        /// Panel id (wire-capped like the v26 request tails).
+        panel_id: String,
+        /// The `WidgetSurface` identity the demand addresses.
+        surface_id: crate::scene::StableId,
+        /// The store the demand addresses (`None` = surface root / whole
+        /// collection).
+        parent_id: Option<crate::scene::StableId>,
+        /// The requested window (width-capped).
+        range: crate::widgets::WidgetRange,
+    },
     /// Fallback for notification variants added in future minor revisions.
     /// Carries the raw bincode payload so an older peer can ignore it without
     /// failing deserialization.
@@ -623,6 +679,31 @@ impl Serialize for HostNotification {
                     .map_err(serde::ser::Error::custom)?;
                 bincode::serialize_into(&mut bytes, count).map_err(serde::ser::Error::custom)?;
             }
+            HostNotification::PanelSceneEvents {
+                panel_id,
+                surface_id,
+                events,
+            } => {
+                bytes.push(15);
+                bincode::serialize_into(&mut bytes, panel_id).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, surface_id)
+                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, events).map_err(serde::ser::Error::custom)?;
+            }
+            HostNotification::PanelStoreDemand {
+                panel_id,
+                surface_id,
+                parent_id,
+                range,
+            } => {
+                bytes.push(16);
+                bincode::serialize_into(&mut bytes, panel_id).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, surface_id)
+                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, parent_id)
+                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, range).map_err(serde::ser::Error::custom)?;
+            }
             HostNotification::Unknown(raw) => bytes.extend_from_slice(raw),
         }
         bytes.serialize(serializer)
@@ -725,6 +806,64 @@ impl<'de> Deserialize<'de> for HostNotification {
                     HostNotification::SelectionChangedDigest { tab_id, revision, count }
                 })
                 .map_err(serde::de::Error::custom),
+            15 => {
+                // The v26 event batch: bounded at decode like the request
+                // tails — a past-cap batch (or a past-cap panel id) is a
+                // structured refusal, never materialized bigger.
+                let (panel_id, surface_id, events): (
+                    String,
+                    crate::scene::StableId,
+                    Vec<crate::widgets::WidgetEvent>,
+                ) = bincode::deserialize(rest).map_err(serde::de::Error::custom)?;
+                if panel_id.len()
+                    > crate::ipc::protocol::MAX_PANEL_ID_BYTES
+                {
+                    return Err(serde::de::Error::custom(format!(
+                        "panel_id exceeds the {}-byte cap",
+                        crate::ipc::protocol::MAX_PANEL_ID_BYTES
+                    )));
+                }
+                if events.len() > crate::ipc::protocol::MAX_WIDGET_EVENT_ROWS {
+                    return Err(serde::de::Error::custom(format!(
+                        "event batch exceeds the decoded payload budget ({})",
+                        crate::ipc::protocol::MAX_WIDGET_EVENT_ROWS
+                    )));
+                }
+                Ok(HostNotification::PanelSceneEvents {
+                    panel_id,
+                    surface_id,
+                    events,
+                })
+            }
+            16 => {
+                // The v26 store demand: same wire caps as the request tail.
+                let (panel_id, surface_id, parent_id, range): (
+                    String,
+                    crate::scene::StableId,
+                    Option<crate::scene::StableId>,
+                    crate::widgets::WidgetRange,
+                ) = bincode::deserialize(rest).map_err(serde::de::Error::custom)?;
+                if panel_id.len()
+                    > crate::ipc::protocol::MAX_PANEL_ID_BYTES
+                {
+                    return Err(serde::de::Error::custom(format!(
+                        "panel_id exceeds the {}-byte cap",
+                        crate::ipc::protocol::MAX_PANEL_ID_BYTES
+                    )));
+                }
+                if range.len > crate::widgets::MAX_WIDGET_RANGE_LEN {
+                    return Err(serde::de::Error::custom(format!(
+                        "store demand range exceeds the decoded page-width budget ({})",
+                        crate::widgets::MAX_WIDGET_RANGE_LEN
+                    )));
+                }
+                Ok(HostNotification::PanelStoreDemand {
+                    panel_id,
+                    surface_id,
+                    parent_id,
+                    range,
+                })
+            }
             _ => Ok(HostNotification::Unknown(bytes)),
         }
     }
@@ -1440,6 +1579,21 @@ macro_rules! export_plugin {
             }
         }
     };
+}
+
+/// The transport's structural gate for one v26 publish frame: `false` when
+/// the carried surface passes the crate's own `validate()` (structural
+/// validity only — budgets ran at frame decode). The trait's DEFAULT
+/// publish body runs it (the honest stub kept here so an out-of-crate
+/// implementor keeps today's behavior verbatim); a capable host override
+/// answers with this SAME gate — the attach's shim mirrors this helper
+/// body because the helper is crate-internal and the store re-checks
+/// anyway, so an in-process caller's frames never skip it.
+pub(crate) fn surface_structural_reject(surface: &SceneOrWidgetSurface) -> bool {
+    match surface {
+        SceneOrWidgetSurface::Scene(scene) => scene.validate().is_err(),
+        SceneOrWidgetSurface::Widgets(surface) => surface.validate().is_err(),
+    }
 }
 
 /// The plugin-facing runtime surface for one active document tab.
@@ -2243,6 +2397,104 @@ pub trait HostApi {
     /// `false` when the drawing had none (no undo step is recorded then).
     fn remove_geo_location(&mut self) -> Result<bool, String> {
         Err("Geographic location writes are not supported by this host".to_owned())
+    }
+
+    // ── Panel surface attach (API v26, additive defaults; appended at the
+    //    ABI tail) ─────────────────────────────────────────────────────────
+    //
+    // The v26 publish-or-patch contract's HOST side. The wire layer decodes
+    // and budget-gates the four tails and routes them here; `plugin_id` is
+    // the transport-authenticated caller (the same identity law as
+    // `register_panel_for_plugin`).
+    //
+    // The DEFAULTS BELOW ARE THE TRANSPORT-ERA STUBS, kept verbatim so an
+    // out-of-crate implementor (or a host without the attach support)
+    // compiles AND behaves exactly as at the wire crossing: mutating frames
+    // answer `PublisherUnattached` (honest, no silent Ok — the honest
+    // recognition that nothing needs to support yet), reads answer
+    // empty/bounded pages. A capable host OVERRIDES all four — the
+    // OpenCADStudio host's overrides are the mount/publisher attach
+    // (`src/app/plugin_host.rs`): publishes store, patches apply, reads
+    // page, and the widget-surface mount goes live.
+
+    /// V26 publish (the snapshot leg of the publish-or-patch contract):
+    /// `surface` stores host-side for `panel_id` and a `WidgetSurface`
+    /// registers into the host's mount. The default is the transport-era
+    /// stub: structurally invalid payloads refuse `InvalidOp`, everything
+    /// else `PublisherUnattached` — no state anywhere changes. The
+    /// `events` leg is the plugin's merge acknowledgment for host-observed
+    /// widget events (the events-vs-patches split); the default ignores it.
+    fn panel_scene_publish(
+        &mut self,
+        _plugin_id: &str,
+        _panel_id: &str,
+        surface: SceneOrWidgetSurface,
+        _events: Vec<WidgetEvent>,
+    ) -> PluginResponse {
+        PluginResponse::PatchRejected {
+            code: if surface_structural_reject(&surface) {
+                PatchRejectCode::InvalidOp
+            } else {
+                PatchRejectCode::PublisherUnattached
+            },
+            report: PatchRejectReport {
+                current_revision: None,
+                failed_op: None,
+            },
+        }
+    }
+
+    /// V26 patch (the incremental leg): `patch` applies ATOMICALLY via the
+    /// crate's `apply_patch(_report)` over the stored surface for
+    /// `panel_id`. The default is the transport-era stub: no publisher is
+    /// attached, so the frame refuses `PublisherUnattached` with zero
+    /// mutation, no matter the payload.
+    fn panel_scene_patch(
+        &mut self,
+        _plugin_id: &str,
+        _panel_id: &str,
+        _patch: SceneOrWidgetPatch,
+    ) -> PluginResponse {
+        PluginResponse::PatchRejected {
+            code: PatchRejectCode::PublisherUnattached,
+            report: PatchRejectReport {
+                current_revision: None,
+                failed_op: None,
+            },
+        }
+    }
+
+    /// V26 bounded store read: one window of the addressed store kind
+    /// ([`PanelStoreKind`]) for `panel_id`, resolved with checked
+    /// arithmetic (a past-the-end window is an empty page, never a panic;
+    /// the width already rides its decode cap — a host never answers a
+    /// bigger page). The default is the transport-era stub: an empty page.
+    fn panel_store_read(
+        &mut self,
+        _plugin_id: &str,
+        _panel_id: &str,
+        _kind: PanelStoreKind,
+        _parent_id: Option<StableId>,
+        _range: WidgetRange,
+    ) -> PluginResponse {
+        PluginResponse::StorePage {
+            rows: Vec::new(),
+            total_hint: 0,
+        }
+    }
+
+    /// V26 bounded recovery read: the current state of `panel_id`'s
+    /// surfaces as [`StoreRow::State`] digest plus the LEADING window of
+    /// the scene — never a full dump. The default is the transport-era
+    /// stub: the empty digest only.
+    fn panel_scene_snapshot2(&mut self, _plugin_id: &str, _panel_id: &str) -> PluginResponse {
+        PluginResponse::StorePage {
+            rows: vec![StoreRow::State(StoreStateDigest {
+                scene: None,
+                widgets: None,
+            })],
+            total_hint: 0,
+        }
     }
 }
 

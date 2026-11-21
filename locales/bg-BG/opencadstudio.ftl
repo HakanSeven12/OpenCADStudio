@@ -345,6 +345,7 @@ modal =
     .find-replace = Намери и замени
     .plugin-manager = Мениджър на приставки
     .update-available = Налична е актуализация
+    .widget-confirmation = Widget Confirmation
     .layer-manager = Мениджър на слоеве
     .layer-state-manager = Мениджър на състояния на слоеве
     .edit-layer-state = Редактирай състояние на слой

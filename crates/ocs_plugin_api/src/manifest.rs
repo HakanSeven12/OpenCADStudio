@@ -185,13 +185,42 @@
 /// hook, with the `HostRequest::UndoStep` / `HostResponse::UndoStep` pair. A
 /// v23 runner cannot decode the request, so the host sends it only to plugins
 /// whose manifest declares v24; older plugins keep the document undo.
+/// (SCN-038, upstream merge: upstream consumed the V24 label for THEIR
+/// UndoStep crossing — `HostRequest::UndoStep` at HostRequest slot 16,
+/// `HostResponse::UndoStep` at HostResponse slot 11; SCN-039: upstream also
+/// consumed V25 for THEIR AI-tools crossing — `ListTools`/`CallTool`. Per
+/// ADR-010 OUR crossing re-versions to v26 and upstream's V24/V25 labels
+/// keep their wire slots.)
+/// v26 crosses the scene/widget wire (ADR-008: the reviewed, approved append
+/// plan): panels expose their BOUNDED semantic state to out-of-process plugins
+/// — the append tail pesticide-pinned at requests 63..=66
+/// (`PluginRequest::PanelScenePublish` — publish-or-patch: the first publish
+/// carries the full bounded `PanelScene`/`WidgetSurface` snapshot, later state
+/// moves use `PluginRequest::PanelScenePatch` with a `base_revision` and are
+/// applied atomically — responses 49..=51: `PatchApplied` / the structured
+/// `PluginResponse::PatchRejected` with a bounded
+/// [`crate::ipc::protocol::PatchRejectReport`] / `PluginResponse::StorePage` —,
+/// `PanelStoreRead` — windowed rows, lazy children, scene regions; page width
+/// capped — and the bounded recovery snapshot `PanelSceneSnapshot2` — digest
+/// summaries plus a leading window, never a full dump). Host→plugin,
+/// `HostNotification::PanelSceneEvents` carries the small semantic widget
+/// events and `PanelStoreDemand` the lazy fetch demands (notifications
+/// 15..=16); both are routed only to plugins reporting v26+ (per-plugin
+/// routing, no duplicated variants). The host-UI/mount publisher attach is
+/// LIVE (SCN-025): panels holding a mounted body publish/patch through the
+/// app-owned surface store and the drained event/demand batches forward
+/// through the notify routers; a panel without an attached publisher still
+/// gets the honest structured answers (`PublisherUnattached` /
+/// `PublisherOwnedByOther`). A v25 host cannot decode any of these requests,
+/// so a plugin that sends them declares v26; v25 and older plugins remain
+/// supported unchanged (`API_VERSION_MIN_SUPPORTED` untouched).
 /// v25 appends `BuiltinPlugin::tools` / `BuiltinPlugin::call_tool`, typed
 /// operations AI clients call over the automation bridge, with the
 /// `HostRequest::ListTools` / `CallTool` pair. Older runners cannot decode
 /// them, so the host asks only plugins whose manifest declares v25.
-/// v26 appends `TableOperation::CustomPropertiesSet`: a plugin sets the
-/// drawing's custom properties (DWGPROPS Custom) in one undo step. A v25 host
-/// cannot decode it, so a plugin that sends it declares v26.
+/// v26 (upstream's leg) appends `TableOperation::CustomPropertiesSet`: a
+/// plugin sets the drawing's custom properties (DWGPROPS Custom) in one undo
+/// step. A v25 host cannot decode it, so a plugin that sends it declares v26.
 pub const API_VERSION: u32 = 26;
 
 /// Oldest plugin API major the current host still loads. This keeps previously

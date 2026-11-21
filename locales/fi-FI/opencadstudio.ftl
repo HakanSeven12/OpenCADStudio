@@ -345,6 +345,7 @@ modal =
     .find-replace = Etsi ja korvaa
     .plugin-manager = Liitännäisten hallinta
     .update-available = Päivitys saatavilla
+    .widget-confirmation = Widget Confirmation
     .layer-manager = Tasojen hallinta
     .layer-state-manager = Tasotilojen hallinta
     .edit-layer-state = Muokkaa tasotilaa

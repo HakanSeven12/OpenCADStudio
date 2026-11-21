@@ -36,10 +36,15 @@ pub mod dialog;
 pub mod entity_coverage;
 pub mod entity_coverage_types;
 pub mod manifest;
+pub mod revision;
 pub mod ribbon;
+pub mod scene;
+pub mod scene_builder;
 pub mod type_registry;
 pub mod type_registry_types;
 pub mod version_info;
+pub mod widgets;
+pub mod widgets_builder;
 
 /// Runtime host surface — only built with the `host` feature (pulls `document`).
 #[cfg(feature = "host")]
@@ -77,11 +82,29 @@ pub use manifest::{
     API_VERSION, API_VERSION_MIN_SUPPORTED, MAX_API_VERSION_ENV,
 };
 pub use ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, StyleKey, ToolDef};
+pub use scene::{
+    AppliedPatchReport, AssetKind, CubicSegment, DragMeta, MarkerKind, PanelScene, PanelScenePatch,
+    Rect2D, Rgba8, SceneColor, SceneElement, SceneError, SceneKindCounts, SceneOp, SceneRevision,
+    SceneSummary, StableId, Stroke, ThemeColor, Vec2,
+};
+pub use scene_builder::{
+    fixture_graph_scene, fixture_graph_scene_plan, fixture_scene_with_files, fixture_widget_surface,
+    try_fixture_graph_scene, PatchBuilder, SceneBuilder,
+};
+pub use revision::RevisionCursor;
 pub use type_registry::{
     get_embedded_type_registry_json, EnumVariantInfo, FieldInfo, MethodInfo, ParameterInfo, TypeId,
     TypeInfo, TypeKind, TypeRegistry,
 };
 pub use version_info::get_embedded_version_info_json;
+pub use widgets::{
+    AckBatch, Axis, BadgeTone, CellKind, ConfirmPolicy, DomainRef, IconActionDef, IconRef, ItemDef,
+    ItemListDef, MenuDef, MenuItemDef, PanelTableDef, TableCell, TableColumnDef, TableRef,
+    TableRowDef, TreeCapabilities, TreeRowDef, WidgetCellValue, WidgetError, WidgetEvent,
+    WidgetGroup, WidgetKindCounts, WidgetNode, WidgetOp, WidgetRange, WidgetSummary, WidgetSurface,
+    WidgetSurfacePatch, WidgetTreeDef,
+};
+pub use widgets_builder::{WidgetSurfaceBuilder, WidgetSurfacePatchBuilder};
 
 #[cfg(test)]
 pub(crate) mod test_lock {
@@ -95,3 +118,11 @@ pub(crate) mod test_lock {
 
 #[cfg(feature = "host")]
 pub use process::{DispatchResult, PluginError, PluginManager, PluginProcess};
+
+// V26 scene/widget wire vocabulary (add-only re-exports; the request/
+// response/notification variants themselves live on `ipc::protocol::…`).
+#[cfg(feature = "host")]
+pub use ipc::protocol::{
+    PatchRejectCode, PatchRejectReport, PanelStoreKind, SceneOrWidgetPatch, SceneOrWidgetSurface,
+    StoreRow, StoreStateDigest,
+};

@@ -345,6 +345,7 @@ modal =
     .find-replace = 検索と置換
     .plugin-manager = プラグインマネージャー
     .update-available = 更新があります
+    .widget-confirmation = Widget Confirmation
     .layer-manager = レイヤーマネージャー
     .layer-state-manager = レイヤー状態マネージャー
     .edit-layer-state = レイヤー状態を編集

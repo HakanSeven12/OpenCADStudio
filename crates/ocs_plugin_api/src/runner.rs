@@ -73,14 +73,29 @@ pub fn run_with_plugin(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use crate::version_info::{wire_schema, SELF_HOSTED_API_VERSION, WIRE_SCHEMA_ENV};
     if version >= SELF_HOSTED_API_VERSION {
-        if let Ok(host) = std::env::var(WIRE_SCHEMA_ENV) {
-            if host != wire_schema() {
-                return Err(format!(
-                    "plugin reads codec types of wire schema {}, but the host writes {host}; \
-                     rebuild the plugin against this host's ocs_plugin_api",
-                    wire_schema()
-                )
-                .into());
+        let host_env = std::env::var(WIRE_SCHEMA_ENV).ok();
+        match host_env.as_deref() {
+            Some(host) => {
+                if host != wire_schema() {
+                    return Err(format!(
+                        "plugin reads codec types of wire schema {}, but the host writes {host}; \
+                         rebuild the plugin against this host's ocs_plugin_api",
+                        wire_schema()
+                    )
+                    .into());
+                }
+            }
+            None => {
+                // The gate was SKIPPED, not passed: the plugin was not
+                // launched by the host (a standalone dev loop), so the wire
+                // schema was never compared. Say so ONCE, loudly — a codec
+                // mismatch will otherwise surface as a decode error far
+                // from its cause.
+                if let Some(warning) = crate::version_info::wire_schema_gate_skip_warning(
+                    host_env.as_deref(),
+                ) {
+                    eprintln!("{warning}");
+                }
             }
         }
     }
@@ -351,6 +366,18 @@ fn notification_api_version(notification: &crate::host::HostNotification) -> u32
     use crate::host::HostNotification as N;
     match notification {
         N::QuadAction { .. } => 15,
+        // V26 scene/widget wire tails (the crossing re-versioned thrice at
+        // upstream merges: 23→24 at SCN-026 — upstream's v23 = the
+        // `TableOperation::LayoutSetTabOrder` append — 24→25 at SCN-038,
+        // the V24 label collision where upstream consumed v24 for THEIR
+        // `HostRequest::UndoStep` crossing, and 25→26 at SCN-039, the V25
+        // label collision where upstream consumed v25 for THEIR
+        // `ListTools`/`CallTool` AI-tools crossing, so our scene/widget
+        // crossing claims 26 — see `manifest::API_VERSION`): the
+        // mount/publisher attach is LIVE (SCN-025), and the runner
+        // conversational gate was in place BEFORE the publisher existed (a
+        // pre-26 cdylib has no such variants and must never see the frames).
+        N::PanelSceneEvents { .. } | N::PanelStoreDemand { .. } => 26,
         N::SelectionChangedDigest { .. } => 22,
         N::DocumentChangedRegions { .. } => 13,
         N::DocumentOpened { .. } => 9,
@@ -1474,5 +1501,53 @@ mod tests {
             }
             other => panic!("expected error response, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn notification_gate_rows_hold_the_v26_tails_back_from_pre_v26_plugins() {
+        use crate::host::HostNotification as N;
+
+        let events = || N::PanelSceneEvents {
+            panel_id: "p".to_owned(),
+            surface_id: crate::scene::StableId(7),
+            events: Vec::new(),
+        };
+        let demand = || N::PanelStoreDemand {
+            panel_id: "p".to_owned(),
+            surface_id: crate::scene::StableId(7),
+            parent_id: None,
+            range: crate::widgets::WidgetRange { start: 0, len: 4 },
+        };
+        // The v26 wire tails gate at 26 (SCN-039 re-version: 24 stays
+        // upstream's UndoStep era, 25 their AI-tools era): a runner serving
+        // an api_version < 26 plugin must DROP both frames (the cdylib has
+        // no such variants — upstream's v24 and v25 plugins included).
+        assert_eq!(notification_api_version(&events()), 26);
+        assert_eq!(notification_api_version(&demand()), 26);
+        assert!(notification_api_version(&events()) > 25);
+        assert!(notification_api_version(&demand()) > 25);
+
+        // The v22 row is UNTOUCHED by the crossing: the digest still gates
+        // at 22 (this is the exact row the v22 selection router relies on).
+        assert_eq!(
+            notification_api_version(&N::SelectionChangedDigest {
+                tab_id: 1,
+                revision: 2,
+                count: 3,
+            }),
+            22
+        );
+
+        // And the pre-v22/v15 rows stay put (all legacy-gate discipline).
+        assert_eq!(
+            notification_api_version(&N::QuadAction {
+                panel_id: "p".to_owned(),
+                control_id: "c".to_owned(),
+                handles: Vec::new(),
+                type_keys: Vec::new(),
+                pick_point: [0.0; 3],
+            }),
+            15
+        );
     }
 }

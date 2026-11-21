@@ -345,6 +345,7 @@ modal =
     .find-replace = ຊອກຫາ ແລະ ແທນບ່ອນ
     .plugin-manager = ຕົວຈັດການປລັກອິນ
     .update-available = ມີເວີຊັນອັບເດດໃໝ່
+    .widget-confirmation = Widget Confirmation
     .layer-manager = ຕົວຈັດການເລເຢີ
     .layer-state-manager = ຕົວຈັດການສະຖານະເລເຢີ
     .edit-layer-state = ແກ້ໄຂສະຖານະເລເຢີ

@@ -762,6 +762,24 @@ impl OpenCADStudio {
             // registered form alive; the plugin re-registers (fresh panels
             // and states) when it re-attaches. Host-side registrations
             // (owner None) are kept.
+            // SWG-005 (§16's "closing a plugin cancels pending data
+            // requests and releases state"): a panel dropping out here
+            // releases its attached widget surface too — the registered
+            // machines, the armed prompt desc and the exactly-once marks go
+            // with the owner (the store's own entries stay until the
+            // plugin republishes, machines read-only).
+            let reaped_panels: Vec<String> = self
+                .plugin_panels
+                .iter()
+                .filter(|(_, panel)| {
+                    panel
+                        .owner_plugin_id
+                        .as_deref()
+                        .map(|owner| !visible(owner))
+                        .unwrap_or(false)
+                })
+                .map(|(id, _)| id.clone())
+                .collect();
             self.plugin_panels.retain(|_panel_id, panel| {
                 panel
                     .owner_plugin_id
@@ -769,6 +787,11 @@ impl OpenCADStudio {
                     .map(|owner| visible(owner))
                     .unwrap_or(true)
             });
+            for panel_id in &reaped_panels {
+                self.mount_registry
+                    .borrow_mut()
+                    .teardown_surface_owned(panel_id);
+            }
             let dying_drag = self
                 .active_plugin_grip()
                 .map(|active| !visible(&active.plugin))

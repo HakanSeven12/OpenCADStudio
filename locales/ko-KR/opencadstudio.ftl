@@ -345,6 +345,7 @@ modal =
     .find-replace = 찾기 및 바꾸기
     .plugin-manager = 플러그인 관리자
     .update-available = 업데이트 사용 가능
+    .widget-confirmation = Widget Confirmation
     .layer-manager = 레이어 관리자
     .layer-state-manager = 레이어 상태 관리자
     .edit-layer-state = 레이어 상태 편집

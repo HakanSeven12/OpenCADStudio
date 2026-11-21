@@ -292,6 +292,195 @@ mod tests {
     }
 
     #[test]
+    fn v26_scene_wire_tails_are_pinned() {
+        // Same discipline as `v4_additions_preserve_legacy_discriminants`
+        // above: the v26 crossing appends at the ENDS of every public enum,
+        // and these creation-time pins make a future insertion mid-enum
+        // fail loudly. Tag numbers: the contract review pack named the new
+        // request tail "61+". The crate had already appended v22's geo tail
+        // AFTER the pinned PanelSnapshot=60 (SetGeoLocation=61 /
+        // RemoveGeoLocation=62), so the TRUE append positions — measured,
+        // pinned here — are 63..=66 for requests and 49..=51 for responses
+        // (GeoLocationSet=47 / GeoLocationRemoved=48); `HostNotification`
+        // appends exactly at 15..=16 as the pack names. The append-only law
+        // (nothing shifts) is what carries; re-numbering would move legacy
+        // tags, which this crossing must not do.
+        fn discriminant<T: serde::Serialize>(value: &T) -> u32 {
+            let bytes = bincode::serialize(value).unwrap();
+            u32::from_le_bytes(bytes[..4].try_into().unwrap())
+        }
+
+        use crate::ipc::protocol::{PluginRequest, PluginResponse, SceneOrWidgetPatch, SceneOrWidgetSurface};
+
+        // Requests (the append tail; after the v22 geo additions):
+        let publish = PluginRequest::PanelScenePublish {
+            panel_id: "p".to_owned(),
+            surface: SceneOrWidgetSurface::Scene(crate::scene::PanelScene {
+                revision: crate::scene::SceneRevision(1),
+                elements: Vec::new(),
+            }),
+            events: Vec::new(),
+        };
+        assert_eq!(discriminant(&publish), 63);
+        assert_eq!(
+            discriminant(&PluginRequest::PanelScenePatch {
+                panel_id: "p".to_owned(),
+                patch: SceneOrWidgetPatch::Widgets(crate::widgets::WidgetSurfacePatch {
+                    base_revision: crate::scene::SceneRevision(1),
+                    revision: crate::scene::SceneRevision(2),
+                    ops: Vec::new(),
+                }),
+            }),
+            64
+        );
+        assert_eq!(
+            discriminant(&PluginRequest::PanelStoreRead {
+                panel_id: "p".to_owned(),
+                kind: crate::ipc::protocol::PanelStoreKind::TreeChildren,
+                parent_id: None,
+                range: crate::widgets::WidgetRange { start: 0, len: 1 },
+            }),
+            65
+        );
+        assert_eq!(
+            discriminant(&PluginRequest::PanelSceneSnapshot2 {
+                panel_id: "p".to_owned(),
+            }),
+            66
+        );
+        // The v22 surface stays byte-exact: geo tail 62 (dependency-free
+        // unit variant; its SetGeoLocation predecessor is the adjacent 61)
+        // and the earlier pinned PanelSnapshot 60.
+        assert_eq!(discriminant(&PluginRequest::RemoveGeoLocation), 62);
+        assert_eq!(
+            discriminant(&PluginRequest::PanelSnapshot {
+                panel_id: "p".to_owned(),
+            }),
+            60
+        );
+
+        // Responses (the append tail; after the v22 geo additions):
+        let (report_scene, report_code, report_page) = {
+            use crate::ipc::protocol::{PatchRejectCode, PatchRejectReport};
+            let mut scene = crate::scene::PanelScene {
+                revision: crate::scene::SceneRevision(1),
+                elements: vec![crate::scene::SceneElement::Rect {
+                    id: crate::scene::StableId(1),
+                    name: None,
+                    actions: Vec::new(),
+                    drag: None,
+                    pos: crate::scene::Vec2([0.0, 0.0]),
+                    size: crate::scene::Vec2([1.0, 1.0]),
+                    fill: None,
+                    stroke: None,
+                }],
+            };
+            let report = scene
+                .apply_patch_report(crate::scene::PanelScenePatch {
+                    base_revision: crate::scene::SceneRevision(1),
+                    revision: crate::scene::SceneRevision(2),
+                    ops: Vec::new(),
+                })
+                .expect("empty patch advances the revision");
+            (
+                report,
+                PatchRejectCode::StaleBase,
+                PatchRejectReport {
+                    current_revision: Some(crate::scene::SceneRevision(2)),
+                    failed_op: None,
+                },
+            )
+        };
+        assert_eq!(discriminant(&PluginResponse::PatchApplied(report_scene)), 49);
+        assert_eq!(
+            discriminant(&PluginResponse::PatchRejected {
+                code: report_code,
+                report: report_page,
+            }),
+            50
+        );
+        assert_eq!(
+            discriminant(&PluginResponse::StorePage {
+                rows: vec![],
+                total_hint: 0,
+            }),
+            51
+        );
+        // The v22 surface stays byte-exact: geo tail 48 (GeoLocationRemoved;
+        // its GeoLocationSet predecessor is the adjacent 47) and the earlier
+        // pinned PanelSnapshot 46.
+        assert_eq!(
+            discriminant(&PluginResponse::GeoLocationRemoved(Err("x".to_owned()))),
+            48
+        );
+        assert_eq!(
+            discriminant(&PluginResponse::PanelSnapshot(Err("unsupported".to_owned()))),
+            46
+        );
+
+        // Notifications (15..=16): the manual tag byte, then a full
+        // bincode roundtrip through the custom impls (both directions the
+        // crate encodes).
+        use crate::host::HostNotification;
+        let events = HostNotification::PanelSceneEvents {
+            panel_id: "p".to_owned(),
+            surface_id: crate::scene::StableId(7),
+            events: vec![crate::widgets::WidgetEvent::TreeExpanded {
+                surface_id: crate::scene::StableId(7),
+                node_id: crate::scene::StableId(2),
+                expanded: true,
+            }],
+        };
+        let bytes = bincode::serialize(&events).unwrap();
+        // Serialized Vec<u8> = u64 length prefix + the tag as bytes[0].
+        assert_eq!(bytes[8], 15);
+        let back: HostNotification = bincode::deserialize(&bytes).unwrap();
+        match back {
+            HostNotification::PanelSceneEvents {
+                panel_id,
+                surface_id,
+                events,
+            } => {
+                assert_eq!(panel_id, "p");
+                assert_eq!(surface_id, crate::scene::StableId(7));
+                assert_eq!(events.len(), 1);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+        // The v22 digest tail stays byte-exact: tag 14.
+        let digest = HostNotification::SelectionChangedDigest {
+            tab_id: 1,
+            revision: 2,
+            count: 3,
+        };
+        let bytes = bincode::serialize(&digest).unwrap();
+        assert_eq!(bytes[8], 14);
+        let demand = HostNotification::PanelStoreDemand {
+            panel_id: "p".to_owned(),
+            surface_id: crate::scene::StableId(7),
+            parent_id: Some(crate::scene::StableId(9)),
+            range: crate::widgets::WidgetRange { start: 0, len: 4 },
+        };
+        let bytes = bincode::serialize(&demand).unwrap();
+        assert_eq!(bytes[8], 16);
+        let back: HostNotification = bincode::deserialize(&bytes).unwrap();
+        match back {
+            HostNotification::PanelStoreDemand {
+                panel_id,
+                surface_id,
+                parent_id,
+                range,
+            } => {
+                assert_eq!(panel_id, "p");
+                assert_eq!(surface_id, crate::scene::StableId(7));
+                assert_eq!(parent_id, Some(crate::scene::StableId(9)));
+                assert_eq!(range, crate::widgets::WidgetRange { start: 0, len: 4 });
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
     fn v11_grip_frames_bincode_roundtrip() {
         // The whole custom-grip surface over the wire: a declaration batch
         // and a settle event with its preview-wire answer.

@@ -345,6 +345,7 @@ modal =
     .find-replace = 查找和替換
     .plugin-manager = 外掛程式管理器
     .update-available = 有可用更新
+    .widget-confirmation = Widget Confirmation
     .layer-manager = 圖層管理器
     .layer-state-manager = 圖層狀態管理器
     .edit-layer-state = 編輯圖層狀態

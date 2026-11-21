@@ -7,7 +7,13 @@ use document::xdata::ExtendedDataRecord;
 use ocs_plugin_api::host::{
     Document, EntityType, Handle, HostApi, HostSettingValue, PluginClassParameterRow,
 };
+use crate::ui::window::plugin_widget_mount::StoreReadOutcome;
+use ocs_plugin_api::ipc::protocol::{
+    PanelStoreKind, PluginResponse, SceneOrWidgetPatch, SceneOrWidgetSurface,
+};
+use ocs_plugin_api::scene::StableId;
 use ocs_plugin_api::shm::{DocumentSnapshotStore, DocumentViewData};
+use ocs_plugin_api::widgets::{WidgetEvent, WidgetRange};
 
 use super::OpenCADStudio;
 #[cfg(not(target_arch = "wasm32"))]

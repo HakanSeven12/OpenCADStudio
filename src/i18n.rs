@@ -1185,6 +1185,21 @@ mod tests {
     }
 
     #[test]
+    fn widget_prompt_modal_title_renders_translated_in_en_and_de() {
+        // SCN-025: the prompt modal's fixed frame title rides the `modal`
+        // block (`modal.widget-confirmation`). en + de carry the translated
+        // strings; every OTHER catalog covers the key with the source
+        // string (the completeness pin above) until translated — the same
+        // coverage discipline every key here lives under.
+        let en = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+        load_language(&en, Language::EnUs).expect("English Fluent resources must parse");
+        assert_eq!(en.get_attr("modal", "widget-confirmation"), "Widget Confirmation");
+        let de = FluentLanguageLoader::new("opencadstudio", "de-DE".parse().unwrap());
+        load_language(&de, Language::DeDe).expect("German Fluent resources must parse");
+        assert_eq!(de.get_attr("modal", "widget-confirmation"), "Widget-Bestätigung");
+    }
+
+    #[test]
     fn greek_language_setting_round_trips() {
         let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
         load_language(&loader, Language::ElGr).expect("Greek Fluent resources must parse");

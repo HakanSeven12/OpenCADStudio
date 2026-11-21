@@ -349,6 +349,62 @@ impl PluginManager {
         }
     }
 
+    /// Router for the v26 scene/widget event tail: the bounded semantic
+    /// event batch goes to endpoints reporting API v26+ only (pre-v26
+    /// cdylibs have no such variant — upstream's v24 UndoStep and v25
+    /// AI-tools plugins included; the
+    /// runner's `notification_api_version` rows gate it too — this
+    /// per-endpoint choice keeps a legacy plugin's stream byte-exact).
+    /// O(panels): the notification is built ONCE (one event-batch copy at
+    /// entry) and each endpoint's writer clone is the loop's own
+    /// per-plugin copy; nothing here re-serializes or rebuilds per event.
+    ///
+    /// Callers (the mount publisher that attaches widget events to live
+    /// panels) are LIVE since SCN-025: forwarded batches from the app-owned
+    /// surface store fan out HERE (SCN-026 re-versioned the gate row from
+    /// 23 to 24; SCN-038 re-versioned it 24 → 25 at the V24 label
+    /// collision — upstream's v24 = the UndoStep append; SCN-039
+    /// re-versioned it 25 → 26 at the V25 label collision — upstream's
+    /// v25 = the ListTools/CallTool append; the routing
+    /// predates the attach, so no attach ever fanned out unwrapped events
+    /// to an unprepared plugin).
+    pub fn broadcast_panel_scene_events(
+        &self,
+        panel_id: &str,
+        surface_id: crate::scene::StableId,
+        events: &[crate::widgets::WidgetEvent],
+    ) {
+        let notification = HostNotification::PanelSceneEvents {
+            panel_id: panel_id.to_owned(),
+            surface_id,
+            events: Vec::from(events),
+        };
+        self.broadcast_for_api(None, &|api: u32| (api >= 26).then(|| notification.clone()));
+    }
+
+    /// Router for the v26 store-demand tail: the bounded lazy-fetch demand
+    /// (`parent_id` + windowed `range`) goes to endpoints reporting API
+    /// v26+ only — the same per-endpoint gate as the event tail (SCN-026
+    /// re-versioned the row to 24; SCN-038 re-versioned it to 25; SCN-039
+    /// re-versioned it to 26 — 24 stays upstream's UndoStep era, 25 their
+    /// AI-tools era). O(panels): one notification build at
+    /// entry, per-plugin writer clones only, nothing rebuilt per demand.
+    pub fn broadcast_panel_store_demand(
+        &self,
+        panel_id: &str,
+        surface_id: crate::scene::StableId,
+        parent_id: Option<crate::scene::StableId>,
+        range: crate::widgets::WidgetRange,
+    ) {
+        let notification = HostNotification::PanelStoreDemand {
+            panel_id: panel_id.to_owned(),
+            surface_id,
+            parent_id,
+            range,
+        };
+        self.broadcast_for_api(None, &|api: u32| (api >= 26).then(|| notification.clone()));
+    }
+
     /// Mark a plugin's notification channel verifiably live and flush every
     /// notification deferred during its boot window (API v13). Called when
     /// the runner acks `PluginNotification::ChannelReady`.
@@ -885,6 +941,51 @@ mod tests {
         assert!(
             manager.entity_class_declarations(|_| false).is_empty(),
             "a dead plugin process must contribute no declarations"
+        );
+    }
+
+    #[test]
+    fn v26_scene_notification_routers_are_benign_without_routable_endpoints() {
+        // The v26 routers fan out O(panels) through `broadcast_for_api`:
+        // endpoints that are not alive V4 processes are skipped outright,
+        // and the api gate (`api >= 26`) is the per-endpoint decision the
+        // runner's `notification_api_version` rows redouble. Without a live
+        // v4 endpoint (the unit-test depth every other router here has)
+        // both routers must be a bounded no-op: no panic, no send.
+        let manager = PluginManager::new();
+        manager.broadcast_panel_scene_events(
+            "align_tools",
+            crate::scene::StableId(1),
+            &[crate::widgets::WidgetEvent::TreeExpanded {
+                surface_id: crate::scene::StableId(1),
+                node_id: crate::scene::StableId(2),
+                expanded: true,
+            }],
+        );
+        manager.broadcast_panel_store_demand(
+            "align_tools",
+            crate::scene::StableId(1),
+            Some(crate::scene::StableId(9)),
+            crate::widgets::WidgetRange { start: 0, len: 4 },
+        );
+        // And the same no-op-discipline holds when a fake (non-v4) endpoint
+        // is loaded: skipped by the V4 broadcast, never notified, never
+        // deferred.
+        let mut manager = PluginManager::new();
+        manager.plugins.push(LoadedPlugin {
+            process: Arc::new(PluginProcess::fake(plain_manifest("test.scene"))),
+            module: to_shared_module("test.scene".into(), "Scene".into(), vec![]),
+            attach: std::sync::Mutex::new(NotificationAttach {
+                grace_deadline: Some(std::time::Instant::now() + notification_boot_grace()),
+                ..Default::default()
+            }),
+        });
+        manager.broadcast_panel_scene_events("align_tools", crate::scene::StableId(1), &[]);
+        manager.broadcast_panel_store_demand(
+            "align_tools",
+            crate::scene::StableId(1),
+            None,
+            crate::widgets::WidgetRange { start: 0, len: 1 },
         );
     }
 }

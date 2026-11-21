@@ -345,6 +345,7 @@ modal =
     .find-replace = Bul ve Değiştir
     .plugin-manager = Eklenti Yöneticisi
     .update-available = Güncelleme Var
+    .widget-confirmation = Widget Confirmation
     .layer-manager = Katman Yöneticisi
     .layer-state-manager = Katman Durumu Yöneticisi
     .edit-layer-state = Katman Durumunu Düzenle

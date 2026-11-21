@@ -345,6 +345,7 @@ modal =
     .find-replace = खोजें और बदलें
     .plugin-manager = प्लग-इन प्रबंधक
     .update-available = अपडेट उपलब्ध है
+    .widget-confirmation = Widget Confirmation
     .layer-manager = लेयर प्रबंधक
     .layer-state-manager = लेयर स्थिति प्रबंधक
     .edit-layer-state = लेयर स्थिति संपादित करें

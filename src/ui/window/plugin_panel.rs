@@ -563,59 +563,116 @@ impl PluginPanelState {
         }
     }
 
-    pub fn view<'a>(&'a self, num_id: u32, width: f32, chrome: Chrome) -> Element<'a, Message> {
+    pub(crate) fn view<'a>(
+        &'a self,
+        num_id: u32,
+        width: f32,
+        chrome: Chrome,
+        // The app-owned mount store (SCN-016): the view reads the registry's
+        // entry for THIS panel through this shared-cell reference. The
+        // lending caller (`app::dock::view`) derefs the app's `Rc`; the
+        // view borrows per read (the body element is 'static, nothing
+        // holds the borrow).
+        mount_store: &'a std::cell::RefCell<crate::ui::window::plugin_widget_mount::MountRegistry>,
+    ) -> Element<'a, Message> {
         let tbar = title_bar(PanelId::Plugin(num_id), self.def.title.clone(), chrome);
 
-        if self.def.style == PanelStyle::Form {
-            const FORM_SPACING: f32 = 8.0;
-            const FORM_BODY_PAD: [u16; 2] = [8, 10];
-            let form_view = FormControlView {
-                panel_id: Some(&self.def.id),
-                text_values: &self.text_values,
-                bool_values: &self.bool_values,
-                choice_values: &self.choice_values,
-                color_values: &self.color_values,
-                file_values: &self.file_values,
-                table_values: &self.table_values,
-                collapsed_sections: &self.collapsed_sections,
-                disabled_controls: &self.disabled_controls,
-                hidden_controls: &self.hidden_controls,
-                dynamic_choice_options: &self.dynamic_choice_options,
-                svg_handles: &self.svg_handles,
-            };
-            let mut body_col = column![].spacing(FORM_SPACING).width(Fill);
-            for control in &self.def.controls {
-                if control
-                    .id()
-                    .is_some_and(|id| self.hidden_controls.contains(id))
-                {
-                    continue;
+        // SCN-013 widget-surface mount hook: when the app-owned mount
+        // registry has a mounted surface for THIS panel id, the mounted body
+        // renders and the legacy control loop below never runs. Panels
+        // without a mounted surface — every unmounted panel — fall to `None`
+        // and take the legacy branch untouched.
+        // SCN-014 made the gate's mapping REAL: each builder-emitted gesture
+        // rides `Message::WidgetMountMsg` — through the bridge's one
+        // `app_message` mapping — into `app::update::widget_mount`, which
+        // applies it to the registered machines and settles the forwarded
+        // commands' addresses (bridge-forwards-then-settle).
+        // SCN-020 wraps the mounted body in the pointer-capture shell: the
+        // surface-level press/move/release ride the SAME mount vocabulary
+        // (host-local; capture + coalesced moves in the registry's input
+        // store).
+        // SCN-016: the registry's storage is APP-OWNED
+        // (`OpenCADStudio::mount_registry`), and the view pass reads it
+        // through the registry ref handed down by the dock composition —
+        // zero entries still means the zero-code legacy path below.
+        // SCN-025: the surface registration and the wire attach are LIVE (the
+        // app store feeds the v26 wire crossing's publish/patch legs), so the
+        // `Some` arm is no longer aspirational; the legacy `None` branch
+        // remains the byte-identical fallback for unmounted panels.
+        // SCN-026 (upstream merge adaptation): upstream reworked this
+        // palette's legacy chrome onto the shared `kit` (title bar +
+        // `kit::scroll_area` + the `km::TOOL_GAP` band insets) and away from
+        // the hand-rolled scrollable/container/style composition. The seam
+        // keeps its exact call-forms (the `mount_store` parameter, the match,
+        // `pointer_capture_body` + `app_message`); the legacy arm renders
+        // upstream's reworked bytes exactly.
+        let body = match mount_store.borrow().mounted_body_owned(self.def.id.as_str()) {
+            Some(surface_view) => {
+                let surface_id = mount_store.borrow().panel_surface_id_owned(self.def.id.as_str());
+                crate::ui::window::plugin_widget_mount::pointer_capture_body(
+                    surface_view,
+                    surface_id,
+                )
+                .map(crate::ui::window::plugin_widget_mount::app_message)
+            }
+            None => {
+                // SCN-038 (upstream merge adaptation): upstream added the
+                // `PanelStyle::Form` rendering for dialog-like form panels
+                // between the title bar and the legacy palette loop. An
+                // unmounted form panel takes it exactly as upstream wrote it;
+                // the mount seam above still wins for any panel with a
+                // mounted surface (the mounted body replaces the legacy
+                // control loop, form or not).
+                if self.def.style == PanelStyle::Form {
+                    const FORM_SPACING: f32 = 8.0;
+                    const FORM_BODY_PAD: [u16; 2] = [8, 10];
+                    let form_view = FormControlView {
+                        panel_id: Some(&self.def.id),
+                        text_values: &self.text_values,
+                        bool_values: &self.bool_values,
+                        choice_values: &self.choice_values,
+                        color_values: &self.color_values,
+                        file_values: &self.file_values,
+                        table_values: &self.table_values,
+                        collapsed_sections: &self.collapsed_sections,
+                        disabled_controls: &self.disabled_controls,
+                        hidden_controls: &self.hidden_controls,
+                        dynamic_choice_options: &self.dynamic_choice_options,
+                        svg_handles: &self.svg_handles,
+                    };
+                    let mut body_col = column![].spacing(FORM_SPACING).width(Fill);
+                    for control in &self.def.controls {
+                        if control
+                            .id()
+                            .is_some_and(|id| self.hidden_controls.contains(id))
+                        {
+                            continue;
+                        }
+                        body_col = body_col.push(form_view.view_control_inner(control, false));
+                    }
+                    return kit::palette(
+                        tbar,
+                        kit::scroll_area(container(body_col).padding(FORM_BODY_PAD).width(Fill)),
+                        width,
+                    );
                 }
-                body_col = body_col.push(form_view.view_control_inner(control, false));
+                let mut body_col = column![].spacing(km::TOOL_GAP).width(Fill);
+                for control in &self.def.controls {
+                    if control
+                        .id()
+                        .is_some_and(|id| self.hidden_controls.contains(id))
+                    {
+                        continue;
+                    }
+                    body_col = body_col.push(self.view_control_inner(control, false));
+                }
+                container(body_col)
+                    .padding(Padding::ZERO.top(km::TOOL_GAP))
+                    .into()
             }
-            return kit::palette(
-                tbar,
-                kit::scroll_area(container(body_col).padding(FORM_BODY_PAD).width(Fill)),
-                width,
-            );
-        }
+        };
 
-        let mut body_col = column![].spacing(km::TOOL_GAP).width(Fill);
-        for control in &self.def.controls {
-            if control
-                .id()
-                .is_some_and(|id| self.hidden_controls.contains(id))
-            {
-                continue;
-            }
-            body_col = body_col.push(self.view_control_inner(control, false));
-        }
-
-        kit::palette(
-            tbar,
-            kit::scroll_area(container(body_col).padding(Padding::ZERO.top(km::TOOL_GAP))),
-            width,
-        )
+        kit::palette(tbar, kit::scroll_area(body), width)
     }
 
     /// A value control as a row of the Properties grid: its label in the
@@ -1627,13 +1684,18 @@ mod tests {
         let mut form_def = PanelDef::new("form_panel", "Form Panel").with_style(PanelStyle::Form);
         form_def.controls = controls.clone();
         let form_state = PluginPanelState::from_def(form_def);
-        let _ = form_state.view(1, TEST_PANEL_W, Chrome::default());
+        // SCN-038 merge adaptation: the mount seam's registry ref (an EMPTY
+        // registry = the zero-entry legacy path these tests exercise).
+        let mount_store = std::cell::RefCell::new(
+            crate::ui::window::plugin_widget_mount::MountRegistry::default(),
+        );
+        let _ = form_state.view(1, TEST_PANEL_W, Chrome::default(), &mount_store);
 
         let mut palette_def =
             PanelDef::new("palette_panel", "Palette Panel").with_style(PanelStyle::Palette);
         palette_def.controls = controls;
         let palette_state = PluginPanelState::from_def(palette_def);
-        let _ = palette_state.view(2, TEST_PANEL_W, Chrome::default());
+        let _ = palette_state.view(2, TEST_PANEL_W, Chrome::default(), &mount_store);
 
         assert_eq!(form_state.snapshot(1).values, palette_state.snapshot(1).values);
     }

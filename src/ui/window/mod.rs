@@ -55,9 +55,24 @@ pub mod pdf_dialogs;
 pub mod pdf_password_dialog;
 pub mod pdf_shx_dialog;
 pub mod plot;
+// Bench seam, SCN-024; ADR-007 item 3; never wire — inspect/drive-only app-wide visibility,
+// so the `widget_interaction` bench (a separate crate) can construct+drive the REAL drag
+// machines. Not part of the host's documentary API; NOT a wire change.
+#[doc(hidden)]
+pub mod plugin_drag;
 pub mod plugin_dialog;
 pub mod plugin_manager;
+pub mod plugin_scene;
+pub(crate) mod plugin_scene_cache;
 pub mod plugin_panel;
+pub(crate) mod plugin_widgets;
+pub(crate) mod plugin_widgets_dispatch;
+pub(crate) mod plugin_widgets_tables;
+// Bench seam, SCN-024; ADR-007 item 3; never wire — inspect/drive-only app-wide visibility,
+// so the `widget_interaction` bench (a separate crate) can construct+drive the REAL mount
+// registry/machines. Not part of the host's documentary API; NOT a wire change.
+#[doc(hidden)]
+pub mod plugin_widget_mount;
 pub mod print_all;
 pub mod purge;
 pub mod quick_calc;

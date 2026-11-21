@@ -345,6 +345,7 @@ modal =
     .find-replace = Znajdź i zamień
     .plugin-manager = Menedżer wtyczek
     .update-available = Dostępna aktualizacja
+    .widget-confirmation = Widget Confirmation
     .layer-manager = Menedżer warstw
     .layer-state-manager = Menedżer stanów warstw
     .edit-layer-state = Edytuj stan warstwy

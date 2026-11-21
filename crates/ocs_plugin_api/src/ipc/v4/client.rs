@@ -390,15 +390,35 @@ fn send_plugin_request(
 }
 
 /// Thread-safe wrapper around the V4 connection so worker threads can issue
-/// host requests for the originating document tab.
+/// host requests.
+///
+/// Frame law (SCN-027, from SCN-050b's live repro): plugins' cached request
+/// lines are TAB-AGNOSTIC by default — every frame sends `tab_id: None`, and
+/// the host serves it on whatever tab it dispatches to at that moment (the
+/// nested-serve guard in `process/v4.rs` serves `None` frames on any active
+/// tab and refuses a frame whose baked tab differs from it: "nested plugin
+/// request for tab N cannot be served inline while the host dispatches to
+/// tab M"). Baking the tab at sender-creation time instead stranded a
+/// plugin's whole data plane once the active tab moved: a plugin loaded and
+/// dispatched on tab 1 that cached its sender at `on_load` saw every later
+/// frame — including a scene re-publish — refused after a dispatch ran on
+/// tab 2. A plugin that needs a pinned tab says so explicitly per frame:
+/// either anchor the sender to one tab deliberately (the `Some` tailor below)
+/// or use a tab-carrying request payload per frame (e.g.
+/// `OpenDocumentViewV4 { tab_id }`); nothing may assume the host's dispatch
+/// tab stays fixed.
 struct V4PluginRequestSender {
     shared: Arc<Shared>,
-    tab_id: u64,
+    /// `None` (the default `plugin_request_sender()` tailor) sends
+    /// tab-agnostic frames; `Some` pins every frame of this sender to one
+    /// tab — legitimate only when the plugin itself knows that tab stays
+    /// fixed for the sender's whole life (see the frame law above).
+    tab_id: Option<u64>,
 }
 
 impl PluginRequestSender for V4PluginRequestSender {
     fn request(&self, req: PluginRequest) -> Result<PluginResponse, PluginRequestError> {
-        send_plugin_request(&self.shared, Some(self.tab_id), req)
+        send_plugin_request(&self.shared, self.tab_id, req)
             .map_err(|e| PluginRequestError(e.to_string()))
     }
 }
@@ -701,10 +721,22 @@ impl HostApi for V4PluginHostApi {
         queue.pop_front()
     }
 
+    /// Hands out the plugin's cached request line. See the frame law on
+    /// [`V4PluginRequestSender`]: the sender is TAB-AGNOSTIC by default —
+    /// frames resolve their tab at the host's dispatch time (the host serves
+    /// a `None` frame on whichever tab is active), never here at
+    /// sender-creation time. This is the SCN-027 fix for SCN-050b's live
+    /// repro: baking `tab_id()` at this call site — the `on_load` caching
+    /// pattern the contract explicitly blesses (worker threads must be set
+    /// up "before any user command runs") — pinned the sender to the load
+    /// tab forever, and the host's nested-serve guard refused every later
+    /// frame after the user dispatched on another tab. A plugin that needs a
+    /// pinned tab says so explicitly per frame (tab-carrying request
+    /// payloads such as `OpenDocumentViewV4 { tab_id }`).
     fn plugin_request_sender(&self) -> Option<Box<dyn PluginRequestSender>> {
         Some(Box::new(V4PluginRequestSender {
             shared: Arc::clone(&self.shared),
-            tab_id: self.tab_id(),
+            tab_id: None,
         }))
     }
 
@@ -1650,9 +1682,12 @@ mod tests {
     fn concurrent_requests_match_out_of_order_responses() {
         let (host_stream, mut runner_stream) = connect_pair();
         let client = V4Client::from_stream_for_test(host_stream);
+        // The explicit-pin escape hatch (SCN-027 frame law): a sender
+        // deliberately tailored to one tab keeps emitting `tab_id: Some(42)`
+        // frames — a pure field VALUE on the unchanged `Request` wire shape.
         let sender = Arc::new(V4PluginRequestSender {
             shared: Arc::clone(&client.shared),
-            tab_id: 42,
+            tab_id: Some(42),
         });
 
         let runner = thread::spawn(move || {
@@ -1696,6 +1731,105 @@ mod tests {
             second.join().unwrap(),
             PluginResponse::Bool(false)
         ));
+        runner.join().unwrap();
+    }
+
+    #[test]
+    fn v4_client_cached_sender_frames_go_out_tab_agnostic_across_tab_switch() {
+        // The SCN-027 pin for SCN-050b's live repro, at the client's socket
+        // -pair depth: the plugin resolves its tab at load (tab 1 below) —
+        // which populated `tab_id_cache` with exactly the value the OLD code
+        // baked into the cached sender — then caches its request sender.
+        // Frames sent through that cached line must carry `tab_id: None` so
+        // the host's nested-serve guard serves them on the tab it is
+        // actually dispatching to (guard law proven in `process/v4.rs`:
+        // `v4_connection_handles_nested_plugin_request` serves a None frame
+        // mid-dispatch; `v4_connection_rejects_foreign_tab_nested_request_
+        // during_call` refuses a baked foreign-tab frame). The old baking
+        // made every frame after the switch refused: "nested plugin request
+        // for tab 1 cannot be served inline while the host dispatches to
+        // tab 2".
+        let (host_stream, mut runner_stream) = connect_pair();
+        let client = V4Client::from_stream_for_test(host_stream);
+
+        let runner = thread::spawn(move || {
+            // Load phase: the plugin asks for its tab; the host answers with
+            // the tab it is dispatching on, tab 1.
+            match recv::<PluginToHostV4>(&mut runner_stream).unwrap() {
+                PluginToHostV4::Request {
+                    id,
+                    tab_id,
+                    payload: PluginRequest::GetTabId,
+                } => {
+                    assert_eq!(tab_id, None, "GetTabId rides an unresolved tab");
+                    send(
+                        &mut runner_stream,
+                        &HostToPluginV4::Response {
+                            id,
+                            payload: PluginResponse::TabId(1),
+                        },
+                    )
+                    .unwrap();
+                }
+                other => panic!("unexpected: {other:?}"),
+            }
+            // The host now dispatches on tab 2. Nothing changes on the
+            // plugin's cached line: the law says the frames stay
+            // tab-agnostic (`tab_id: None`) — the old code emitted
+            // `Some(1)` here, stranding the plugin's data plane.
+            for msg in ["frame under tab 1", "frame under tab 2"] {
+                match recv::<PluginToHostV4>(&mut runner_stream).unwrap() {
+                    PluginToHostV4::Request {
+                        id,
+                        tab_id,
+                        payload: PluginRequest::PushInfo(sent),
+                    } => {
+                        assert_eq!(sent, msg);
+                        assert_eq!(
+                            tab_id, None,
+                            "a cached request line must not bake the load tab (SCN-050b)"
+                        );
+                        // Served like the guard serves a None frame: inline.
+                        send(
+                            &mut runner_stream,
+                            &HostToPluginV4::Response {
+                                id,
+                                payload: PluginResponse::Ok,
+                            },
+                        )
+                        .unwrap();
+                    }
+                    other => panic!("unexpected: {other:?}"),
+                }
+            }
+        });
+
+        let api = client.plugin_host_api(0, Rc::new(RefCell::new(HashMap::new())));
+        assert_eq!(api.tab_id(), 1, "the load tab resolves through the host");
+        // The cache holds Some(1) from here on — the stale value the OLD
+        // sender construction baked in. The cached line must NOT pick it up.
+        let sender: Arc<dyn PluginRequestSender> =
+            api.plugin_request_sender().expect("v4 has a sender").into();
+
+        let worker_frames = ["frame under tab 1", "frame under tab 2"]
+            .into_iter()
+            .map(|msg| {
+                let sender = Arc::clone(&sender);
+                // Worker-thread usage, matching the `on_load` pattern the
+                // HostApi contract blesses: the cached line crosses threads
+                // and outlives the per-dispatch proxy.
+                thread::spawn(move || sender.request(PluginRequest::PushInfo(msg.to_string())))
+            })
+            .map(|h| h.join().unwrap())
+            .collect::<Vec<_>>();
+
+        for (frame, phase) in worker_frames.iter().zip(["tab 1", "tab 2"]) {
+            assert!(
+                matches!(frame, Ok(PluginResponse::Ok)),
+                "the frame dispatched under {phase} must be SERVED, got {frame:?} \
+                 (SCN-050b: a baked foreign-tab frame was refused)"
+            );
+        }
         runner.join().unwrap();
     }
 

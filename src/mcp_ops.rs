@@ -405,6 +405,41 @@ pub static PANEL_ACTION: OpDef = OpDef {
     example: r#"{"op":"panel_action","panel_id":"epl_panel","control_id":"epl_button_ping","action":"click"}"#,
 };
 
+pub static PANEL_WIDGET_INVOKE: OpDef = OpDef {
+    name: "panel_widget_invoke",
+    doc: "Invoke ONE semantic command on a plugin panel's attached widget surface (icon button or menu item) by stable address. Rides the SAME machine dispatch the GUI mount runs: a disabled or hidden command refuses (un-invocable from MCP), a confirm-policy command arms the host's own confirmation prompt (the user still answers it), and exactly one command event emits per invocation. Targets default to the surface's current selection; explicit targets arm that selection first through the same machine.",
+    batchable: false,
+    params: &[
+        req(
+            "panel_id",
+            Ty::Str,
+            "Registered plugin panel id with an attached widget surface.",
+        ),
+        opt(
+            "button_id",
+            Ty::Int,
+            "Icon button widget id to invoke. Mutually exclusive with command_id.",
+        ),
+        opt(
+            "menu_id",
+            Ty::Int,
+            "Owning menu widget id of the item (required with command_id; the submenu's own id for nested items).",
+        ),
+        opt(
+            "command_id",
+            Ty::Str,
+            "Menu item command id. Mutually exclusive with button_id.",
+        ),
+        opt(
+            "targets",
+            Ty::Raw(r#"{"type":"array","minItems":1,"maxItems":16,"items":{"type":"integer","minimum":0}}"#),
+            "Optional explicit target row/item ids (at most 16, the event vocabulary's cap). Omitted: the surface's current selection is the click's targets, exactly as the GUI routes it.",
+        ),
+    ],
+    rules: &[Rule::ExactlyOneOf(&["button_id", "command_id"])],
+    example: r#"{"op":"panel_widget_invoke","panel_id":"sample.palette","button_id":42}"#,
+};
+
 pub static ACTION: OpDef = OpDef {
     name: "action",
     doc: "Trigger a named GUI action or dialog command.",
@@ -1325,6 +1360,7 @@ pub static OPS: &[&OpDef] = &[
     &PANEL_INPUT,
     &PANEL_BUTTON,
     &PANEL_ACTION,
+    &PANEL_WIDGET_INVOKE,
     &ACTION,
     &EMBED_IMAGE,
     &DGN_IMPORT,

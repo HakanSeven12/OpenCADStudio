@@ -186,6 +186,12 @@ pub(crate) mod style_import;
 pub(in crate::app) mod util;
 mod viewport;
 pub(in crate::app) mod viewport_snap;
+// SWG-005 (the ONE-path rule): the control-side semantic invoke reaches the
+// bridge core (`route_mount_msg_owned`) through this module — the same core
+// the `Message::WidgetMountMsg` arm calls, no second routing body.
+pub(in crate::app) mod widget_mount;
+mod widget_prompt;
+pub(crate) mod widget_drag;
 #[cfg(test)]
 mod xref_manager_preview_tests;
 
@@ -1139,6 +1145,15 @@ impl OpenCADStudio {
             self.graphic_attributes.retain_selection(&selected);
         }
         self.show_next_startup_modal();
+        // SCN-025 (the ADR-009 follow-up): the WIDGET prompt modal queue
+        // reveals at EVERY message boundary too — the one-line neighbor of
+        // the startup modals' reveal (the NO-PREEMPT rule is inside the
+        // check: a queue never replaces an active modal; the front's desc
+        // must still stand). This closes the recorded gap where a prompt
+        // queued behind a THIRD-party modal only revealed at an OWNED
+        // boundary (the prompt machinery's own close chain); the generic
+        // boundary now carries the reveal.
+        self.show_next_widget_prompt_modal();
         // A Restore-all batch finished settling on this message: now that
         // the last restored open has inserted its tab, focus the tab the
         // remembered session had active (web session memory).
@@ -4229,6 +4244,13 @@ impl OpenCADStudio {
             // latency.
             #[cfg(not(target_arch = "wasm32"))]
             Message::PluginGripPump => self.pump_plugin_grips(),
+            // The widget-mount bridge (SCN-014): route the mount's message
+            // into its registered surface's machines (forward → settle).
+            Message::WidgetMountMsg(msg) => self.on_widget_mount_msg(msg),
+            // The prompt-dialog lifecycle (SCN-015): route an armed
+            // confirmation's dialog decision onto its dispatcher (confirm
+            // → forward + settle; dismiss → no event).
+            Message::WidgetPromptMsg(msg) => self.on_widget_prompt_msg(msg),
 
             Message::TabClose(tab_id) => {
                 if self
@@ -6840,7 +6862,12 @@ impl OpenCADStudio {
             }
 
             Message::HoverDwellTick => self.on_hover_dwell_tick(),
-            Message::MoveCoalesceTick => self.on_move_coalesce_tick(),
+            Message::MoveCoalesceTick => Task::batch([
+                self.on_move_coalesce_tick(),
+                // SCN-020: the mount's latest-wins coalescer answers on the
+                // SAME tick channel (≤1 mount call per surface per tick).
+                self.on_mount_move_coalesce_tick(),
+            ]),
             Message::BoxPreviewTick => self.on_box_preview_tick(),
             Message::PropertiesRefreshTick => self.on_properties_refresh_tick(),
 

@@ -736,6 +736,11 @@ impl OpenCADStudio {
                 | "cad_get_blocks"
                 | "cad_extract_block_instances"
                 | "keytips"
+                // SWG-005: the semantic plugin-panel reads (bounded,
+                // summaries-first — see `mcp_panel_semantics.rs`).
+                | "panel_semantics"
+                | "panel_page"
+                // SCN-039 (upstream merge): the AI-tools bridge reads.
                 | "plugins"
         );
         if !query && !self.control.enabled {
@@ -1105,6 +1110,11 @@ impl OpenCADStudio {
                 "history" => {
                     json!({"ok":true,"entries":self.command_line.history.iter().map(|e|json!({"kind":format!("{:?}",e.kind),"text":e.text})).collect::<Vec<_>>()})
                 }
+                // SWG-005: the semantic plugin-panel reads.
+                #[cfg(not(target_arch = "wasm32"))]
+                "panel_semantics" => self.mcp_panel_semantics(&req),
+                #[cfg(not(target_arch = "wasm32"))]
+                "panel_page" => self.mcp_panel_page(&req),
                 _ => self.automation_op_inner(&req.to_string()),
             };
             return (response, Task::none());
@@ -1463,6 +1473,14 @@ impl OpenCADStudio {
             "panel_input" => self.control_panel_input(req)?,
             "panel_button" => self.control_panel_button(req)?,
             "panel_action" => self.control_panel_action(req)?,
+            // SWG-005: the ONE semantic mutation path (the GUI mount arm's
+            // own machine dispatch — see `mcp_panel_semantics.rs`).
+            #[cfg(not(target_arch = "wasm32"))]
+            "panel_widget_invoke" => {
+                let result = self.mcp_panel_widget_invoke(req)?;
+                self.set_control_result(result);
+                Task::none()
+            }
             #[cfg(not(target_arch = "wasm32"))]
             "embed_image" => self.control_embed_image(req)?,
             "dgn_import" => self.control_dgn_import(req)?,
@@ -2338,6 +2356,11 @@ pub(crate) use sheets::{layout_listing, page_setup_read};
 pub(crate) mod block_ops;
 pub(crate) mod spellcheck;
 pub(crate) mod text_ops;
+
+// SWG-005: the semantic plugin-panel MCP ops' host half (reads + the ONE
+// machine-path invoke) — desktop-only, like the v26 store it reads.
+#[cfg(not(target_arch = "wasm32"))]
+mod mcp_panel_semantics;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod embed_image_tests;

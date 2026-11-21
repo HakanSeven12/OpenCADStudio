@@ -649,6 +649,137 @@ pub(crate) fn main_window_event(
     }
 }
 
+/// The widget-surface prompt modal's Escape mapper (SCN-016): the ONLY key
+/// it hands forward is Escape, as the mount bridge's `KeyPressed` variant
+/// — the arm runs [`OpenCADStudio::on_mount_key`], whose Escape resolution
+/// is the armed prompt's machine-direct cancel (the same Dismissed edge as
+/// the modal's Cancel button and its ✕, exactly once). Every other key is
+/// void here — while the prompt modal shows, keystroke-derived messages are
+/// not supposed to reach the drawing (the shared modal keyboard gate's
+/// semantics, taken over at the event level for this kind).
+pub(crate) fn widget_prompt_escape_event(
+    event: iced::Event,
+    _status: iced::event::Status,
+    win_id: window::Id,
+) -> Option<Message> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if !crate::app::tool_windows::is_main_window(win_id) {
+        return None;
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = win_id;
+    if let iced::Event::Keyboard(keyboard::Event::KeyPressed {
+        key, modifiers, ..
+    }) = &event
+    {
+        if matches!(key, keyboard::Key::Named(keyboard::key::Named::Escape)) {
+            return Some(Message::WidgetMountMsg(
+                crate::ui::window::plugin_widget_mount::WidgetMountMsg::KeyPressed {
+                    key: key.clone(),
+                    modifiers: *modifiers,
+                },
+            ));
+        }
+    }
+    None
+}
+
+/// The mount's keyboard mapper (SCN-016's recorded one-line join):
+/// main-window keys the mount's keyboard layer can ROUTE ride the bridge as
+/// [`WidgetMountMsg::KeyPressed`], whose arm runs the complete
+/// [`OpenCADStudio::on_mount_key`] route (resolve the target surface →
+/// [`key_route`] → apply). The routed set (SCN-030):
+/// - the bare NAMED NAVIGATION keys — arrows, Tab (with Shift for its
+///   reverse), Enter and Escape — exactly the set `key_route` translates
+///   (plus Escape's machine-direct cancel);
+/// - the DRAFT'S VALUE keys — characters, Backspace and Space (SCN-030:
+///   the typed-table draft editor is reachable in production) — which
+///   route ONLY when `Status::Ignored`: nothing captured the key, so a
+///   focused app text input keeps its keys and a mount-held keyboard only
+///   takes the typing its own route can use. The navigation keys keep the
+///   pre-existing routing regardless of status.
+/// Chords never route either way (the mount's own chord rule). Everything
+/// else DELEGATES to [`main_window_event`] unchanged: chords keep owning
+/// the app's accelerator space, and the modifiers' changes flow as before.
+/// The reachable-only-with-a-registered-mount gate is the subscription
+/// chooser's (a zero-registry app — the shipping default — takes the
+/// ordinary [`main_window_event`] listener and nothing else changes);
+/// typing reaches the mount only while a mount owns the keyboard, never
+/// instead of a focused widget that captured the key.
+pub(crate) fn mount_key_event(
+    event: iced::Event,
+    status: iced::event::Status,
+    win_id: window::Id,
+) -> Option<Message> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if !crate::app::tool_windows::is_main_window(win_id) {
+        return main_window_event(event, status, win_id);
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = win_id;
+    if let iced::Event::Keyboard(keyboard::Event::KeyPressed {
+        key, modifiers, ..
+    }) = &event
+    {
+        // A mount key = the named navigation set the route translates, or
+        // (SCN-030) a draft VALUE key (character / Backspace / Space) that
+        // nothing else captured (`Status::Ignored` — an app text input with
+        // focus reports Captured and keeps its keys).
+        let navigation_key = matches!(
+            key,
+            keyboard::Key::Named(keyboard::key::Named::ArrowUp)
+                | keyboard::Key::Named(keyboard::key::Named::ArrowDown)
+                | keyboard::Key::Named(keyboard::key::Named::ArrowLeft)
+                | keyboard::Key::Named(keyboard::key::Named::ArrowRight)
+                | keyboard::Key::Named(keyboard::key::Named::Tab)
+                | keyboard::Key::Named(keyboard::key::Named::Enter)
+                | keyboard::Key::Named(keyboard::key::Named::Escape)
+        );
+        let value_key = matches!(
+            key,
+            keyboard::Key::Character(_)
+                | keyboard::Key::Named(keyboard::key::Named::Backspace)
+                | keyboard::Key::Named(keyboard::key::Named::Space)
+        );
+        let no_chord = !modifiers.control() && !modifiers.alt() && !modifiers.logo();
+        let mount_key = if navigation_key {
+            no_chord
+        } else {
+            value_key && no_chord && status == iced::event::Status::Ignored
+        };
+        if mount_key {
+            return Some(Message::WidgetMountMsg(
+                crate::ui::window::plugin_widget_mount::WidgetMountMsg::KeyPressed {
+                    key: key.clone(),
+                    modifiers: *modifiers,
+                },
+            ));
+        }
+    }
+    main_window_event(event, status, win_id)
+}
+
+/// The mount's window-level release catcher (SCN-016): a release landing
+/// OUTSIDE every panel's mouse_area completes the armed capture(s). The
+/// subscription's chooser gates this listener on an armed capture, so with
+/// none the app subscribes to nothing extra.
+pub(crate) fn mount_release_event(
+    event: iced::Event,
+    _status: iced::event::Status,
+    win_id: window::Id,
+) -> Option<Message> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if !crate::app::tool_windows::is_main_window(win_id) {
+        return None;
+    }
+    if let iced::Event::Mouse(iced::mouse::Event::ButtonReleased(_)) = event {
+        return Some(Message::WidgetMountMsg(
+            crate::ui::window::plugin_widget_mount::WidgetMountMsg::PointerReleasedAnywhere,
+        ));
+    }
+    None
+}
+
 fn hatch_pattern_key_event(
     event: iced::Event,
     status: iced::event::Status,
@@ -3917,11 +4048,12 @@ bg={bg_ms:.1}ms n={view_count}"
                 } else {
                     crate::ui::modal::ModalOptions::STANDARD
                 };
+                let close_msg = self.modal_close_msg();
                 crate::ui::modal::modal(
                     modal_underlay,
                     self.modal_title(),
                     content,
-                    Message::CloseModal,
+                    close_msg,
                     self.modal_offset,
                     modal_options,
                 )
@@ -3984,6 +4116,29 @@ bg={bg_ms:.1}ms n={view_count}"
         let size = self.modal_content_size?;
         // Frame padding is 10 px per side; title + body spacing is 30 px.
         Some((size.width + 20.0, size.height + 50.0))
+    }
+
+    /// The shared modal overlay's ✕ message (SCN-016): the ordinary kinds
+    /// compose the literal [`Message::CloseModal`]; the widget-surface
+    /// prompt modal's ✕ is its CANCEL decision — the SAME
+    /// [`WidgetPromptMsg::Dismissed`] edge the body's Cancel button routes
+    /// — composed from the shown desc (the decision path closes the modal;
+    /// the edge runs exactly once). A shown state whose desc already left
+    /// falls back to the literal close.
+    pub(crate) fn modal_close_msg(&self) -> Message {
+        if self.active_modal == Some(super::ModalKind::WidgetPrompt) {
+            if let Some(surface_id) = self.widget_prompt_modal {
+                if let Some(desc) = self.mount_registry.borrow().prompt_dialog_owned(surface_id) {
+                    return crate::ui::window::plugin_widget_mount::prompt_app_message(
+                        crate::ui::window::plugin_widget_mount::WidgetPromptMsg::Dismissed {
+                            surface_id: desc.surface_id,
+                            key: desc.key,
+                        },
+                    );
+                }
+            }
+        }
+        Message::CloseModal
     }
 }
 
@@ -4053,8 +4208,23 @@ impl OpenCADStudio {
         };
         // A withheld move may be the last one: the pointer can stop, and then
         // no further move arrives to answer it. Drive frames until it is.
-        let move_coalesce = if self.move_owed.is_some() {
+        // SCN-016: the mount's coalescer owes answers on the same channel —
+        // a mount move owed (its slot filled, unanswered) keeps the pump
+        // alive too.
+        let move_coalesce =
+            if self.move_owed.is_some() || self.mount_registry.borrow().any_move_owed()
+        {
             crate::app::tool_windows::main_window_frames().map(|_| Message::MoveCoalesceTick)
+        } else {
+            Subscription::none()
+        };
+        // While a mount surface's pointer capture is armed, releases that
+        // land OUTSIDE any panel's mouse_area still complete it (the mount
+        // contract: release anywhere completes capture — SCN-016's
+        // window-level catcher; inside-the-area releases ride the panel's
+        // own wrapper).
+        let mount_release = if self.mount_registry.borrow().any_capture_active() {
+            event::listen_with(mount_release_event)
         } else {
             Subscription::none()
         };
@@ -4244,6 +4414,25 @@ impl OpenCADStudio {
         // key so captured shortcuts do not run in the drawing.
         let keyboard_events = if self.shortcut_capture_row.is_some() {
             event::listen_with(shortcut_capture_key_event)
+        } else if self.active_modal == Some(super::ModalKind::WidgetPrompt) {
+            // The widget-surface prompt modal (SCN-016) owns the keyboard
+            // like every in-canvas modal, EXCEPT that Escape runs the ARMED
+            // interaction's machine-direct cancel (the mount's own
+            // dismissal route — the same Dismissed edge as the Cancel
+            // button and the ✕, exactly once); every other key is void
+            // here, which is exactly the shared modal keyboard gate's
+            // swallow.
+            event::listen_with(widget_prompt_escape_event)
+        } else if self.mount_registry.borrow().mount_key_surface_owned().is_some() {
+            // The mount's keyboard (SCN-020's route — SCN-016 landed the
+            // join): while a mount surface holds the keyboard (a
+            // press-keyed panel, or the sole registered mount's
+            // keyboard-only path), its navigation keys AND its draft's
+            // value keys (SCN-030 — characters/Backspace/Space, only when
+            // `Status::Ignored`) route to the complete `on_mount_key`
+            // handler; everything else (chords, captured keys, other named
+            // keys) stays in the ordinary app flow via `main_window_event`.
+            event::listen_with(mount_key_event)
         } else {
             event::listen_with(window_event)
         };
@@ -4302,6 +4491,7 @@ impl OpenCADStudio {
             quick_calc_flash,
             assistant_poll,
             ribbon_minimize,
+            mount_release,
             plugin_spinner,
             ole_edits,
             web_fonts,
@@ -6291,6 +6481,91 @@ mod tests {
             super::super::StartSection::default(),
             None,
         );
+    }
+
+    // -- the mount keyboard mapper (SCN-016 join; SCN-030 value keys) --------
+
+    /// A real KeyPressed event (the mapper's input shape), as the live
+    /// update arm's test builds them.
+    fn key_pressed_event(key: iced::keyboard::Key) -> iced::Event {
+        iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+            key: key.clone(),
+            modified_key: key,
+            physical_key: iced::keyboard::key::Physical::Unidentified(
+                iced::keyboard::key::NativeCode::Unidentified,
+            ),
+            location: iced::keyboard::Location::Standard,
+            modifiers: iced::keyboard::Modifiers::NONE,
+            text: None,
+            repeat: false,
+        })
+    }
+
+    /// (SCN-030) The mapper routes the draft's VALUE keys to the mount —
+    /// but ONLY when nothing captured the key: a Character with
+    /// `Status::Ignored` rides `WidgetMountMsg::KeyPressed`; the SAME event
+    /// with `Status::Captured` (a focused app text input owns it)
+    /// DELEGATES — no mount message exists for it. A named navigation key
+    /// keeps the pre-existing routing regardless of status.
+    #[test]
+    fn mount_mapper_value_keys_need_ignored_status_named_keys_do_not() {
+        use crate::ui::window::plugin_widget_mount::WidgetMountMsg;
+        use iced::keyboard::key::Named;
+
+        let character = || iced::keyboard::Key::Character("x".into());
+        let ignored = iced::event::Status::Ignored;
+        let captured = iced::event::Status::Captured;
+        let win = iced::window::Id::unique();
+        let is_mount_key = |msg: Option<crate::app::Message>| {
+            matches!(
+                msg,
+                Some(crate::app::Message::WidgetMountMsg(WidgetMountMsg::KeyPressed { .. }))
+            )
+        };
+
+        // Character + Ignored: the mount route.
+        let msg = super::mount_key_event(key_pressed_event(character()), ignored, win)
+            .expect("a value key nothing captured routes to the mount");
+        let crate::app::Message::WidgetMountMsg(WidgetMountMsg::KeyPressed { key, .. }) = msg
+        else {
+            panic!("the join rides Message::WidgetMountMsg");
+        };
+        assert_eq!(key, character());
+
+        // Character + Captured: DELEGATES (a focused app text input owns
+        // the key — no mount message).
+        assert!(!is_mount_key(super::mount_key_event(
+            key_pressed_event(character()),
+            captured,
+            win
+        )));
+
+        // Backspace + Ignored: the mount route; + Captured: delegates.
+        let backspace = || iced::keyboard::Key::Named(Named::Backspace);
+        assert!(is_mount_key(super::mount_key_event(
+            key_pressed_event(backspace()),
+            ignored,
+            win
+        )));
+        assert!(!is_mount_key(super::mount_key_event(
+            key_pressed_event(backspace()),
+            captured,
+            win
+        )));
+
+        // A NAMED navigation key keeps the pre-existing routing regardless
+        // of status (the pinned navigation behavior, byte-unchanged).
+        let arrow = || iced::keyboard::Key::Named(Named::ArrowDown);
+        assert!(is_mount_key(super::mount_key_event(
+            key_pressed_event(arrow()),
+            ignored,
+            win
+        )));
+        assert!(is_mount_key(super::mount_key_event(
+            key_pressed_event(arrow()),
+            captured,
+            win
+        )));
     }
 }
 

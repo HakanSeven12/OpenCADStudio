@@ -560,4 +560,174 @@ impl HostApi for HostSession<'_> {
     ) -> Result<(), String> {
         self.validate_parametric_chain(chain, tolerance)
     }
+
+    // ── V26 panel-surface attach (SCN-025 — the mount/publisher goes live) ──
+    //
+    // The real attach. ACCESS PATH (inspected + recorded): `HostSession`
+    // reaches ALL app state through `self.app` (private-field access, this
+    // file); the surface store lives IN the app's mount registry
+    // (`OpenCADStudio::mount_registry` — the same app-`Rc` domain; see the
+    // `PanelSurfaceStore` docs for the placement decision), so the attach
+    // needs NO new plumbing into other files. The demand leg rides the
+    // reentrant `with_manager` (the established pattern: update/mod.rs's
+    // drains and v4_support both nest it during inline plugin-request
+    // serving). The wire acks/rejections are the store's semantic outcomes
+    // mapped 1:1 — zero logic of their own.
+    //
+    // The out-of-crate contract is untouched: a host without these
+    // overrides keeps the trait's DEFAULT stub semantics (the trait's own
+    // doc pins the shapes); the unattachable-identity early exits below
+    // answer the SAME stub shapes (the small local shims mirror the default
+    // bodies — the server's delegation test pins those defaults verbatim).
+
+    fn panel_scene_publish(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        surface: SceneOrWidgetSurface,
+        events: Vec<WidgetEvent>,
+    ) -> PluginResponse {
+        // An unowned transport (the legacy dialog-only caller shape) or a
+        // whitespace panel id cannot attach: the trait default's honest
+        // stub answers (validate → InvalidOp, else PublisherUnattached).
+        if plugin_id.is_empty() || panel_id.trim().is_empty() {
+            return default_publish_response(&surface);
+        }
+        // The events leg is the plugin's merge ACKNOWLEDGMENT of events the
+        // host itself observed and forwarded — absorbed here, NEVER
+        // re-forwarded (rebroadcasting would double the event stream; the
+        // exactly-once law). `events`' arrival is the publish's piggyback.
+        let _ = events;
+
+        // Store (the store re-runs the same structural gate itself, so the
+        // wire/attach paths cannot drift), then the mount leg.
+        let outcome = {
+            let mut registry = self.app.mount_registry.borrow_mut();
+            registry.panel_surface_store_mut().publish(plugin_id, panel_id, surface)
+        };
+        match outcome {
+            Ok(record) => {
+                // The mount gate goes LIVE (the first production
+                // registrations): preserve-on-identical owns the outcome
+                // (an identical resurface preserves the running machines;
+                // anything else replaces them).
+                if let Some((surface_id, surface)) = record.widget_mount {
+                    self.app
+                        .mount_registry
+                        .borrow_mut()
+                        .register_surface_owned(
+                            panel_id,
+                            crate::ui::window::plugin_widget_mount::SurfaceMountHandle::from_surface(
+                                surface_id, surface,
+                            ),
+                        );
+                }
+                PluginResponse::PatchApplied(record.report)
+            }
+            Err((code, report)) => PluginResponse::PatchRejected { code, report },
+        }
+    }
+
+    fn panel_scene_patch(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        patch: SceneOrWidgetPatch,
+    ) -> PluginResponse {
+        let outcome = {
+            let mut registry = self.app.mount_registry.borrow_mut();
+            registry.panel_surface_store_mut().patch(plugin_id, panel_id, patch)
+        };
+        match outcome {
+            Ok(record) => {
+                // The mount follows the revision: the changed widget leg
+                // re-registers (the preserve-on-identical rule owns the
+                // preserve/replace outcome; a patch necessarily moves the
+                // revision, so it resolves as the REPLACE flow — the
+                // document rule for patch plumbing).
+                if let Some((surface_id, surface)) = record.widget_mount {
+                    self.app
+                        .mount_registry
+                        .borrow_mut()
+                        .register_surface_owned(
+                            panel_id,
+                            crate::ui::window::plugin_widget_mount::SurfaceMountHandle::from_surface(
+                                surface_id, surface,
+                            ),
+                        );
+                }
+                PluginResponse::PatchApplied(record.report)
+            }
+            Err((code, report)) => PluginResponse::PatchRejected { code, report },
+        }
+    }
+
+    fn panel_store_read(
+        &mut self,
+        _plugin_id: &str,
+        panel_id: &str,
+        kind: PanelStoreKind,
+        parent_id: Option<StableId>,
+        range: WidgetRange,
+    ) -> PluginResponse {
+        // Checked page resolution against the store; a page miss (a lazy
+        // branch's children, a beyond-the-held window, an unpublished
+        // store) raises ONE demand to the owning plugin (decoupled — this
+        // frame's answer stays the checked page).
+        let StoreReadOutcome {
+            surface_id,
+            rows,
+            total_hint,
+            demand,
+        } = {
+            let registry = self.app.mount_registry.borrow();
+            registry.panel_surface_store().store_page(panel_id, kind, parent_id, range)
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some((parent_id, demand_range)) = demand {
+            self.app
+                .mount_registry
+                .borrow_mut()
+                .record_store_demand_forwarded_owned();
+            let surface_id = surface_id.expect("a demand names an attached widget store");
+            crate::plugin::external::with_manager(|manager| {
+                manager.broadcast_panel_store_demand(panel_id, surface_id, parent_id, demand_range);
+            });
+        }
+        PluginResponse::StorePage { rows, total_hint }
+    }
+
+    fn panel_scene_snapshot2(&mut self, _plugin_id: &str, panel_id: &str) -> PluginResponse {
+        let (rows, total_hint) = {
+            let registry = self.app.mount_registry.borrow();
+            registry.panel_surface_store().snapshot_page(panel_id)
+        };
+        PluginResponse::StorePage { rows, total_hint }
+    }
+}
+
+/// The unattachable-identity publish's shape — the trait DEFAULT's exact
+/// body (the honest stub: structural garbage refuses `InvalidOp`, valid
+/// publish refuses `PublisherUnattached` with zero mutation). The attach's
+/// early exits answer this (a Rust trait cannot call its own default from
+/// an override), and the server's delegation test pins the default bodies
+/// verbatim — the two cannot drift silently.
+fn default_publish_response(surface: &SceneOrWidgetSurface) -> PluginResponse {
+    let structural = match surface {
+        SceneOrWidgetSurface::Scene(scene) => scene.validate().is_ok(),
+        SceneOrWidgetSurface::Widgets(widgets) => widgets.validate().is_ok(),
+    };
+    PluginResponse::PatchRejected {
+        code: if structural {
+            use ocs_plugin_api::ipc::protocol::PatchRejectCode::PublisherUnattached;
+            PublisherUnattached
+        } else {
+            use ocs_plugin_api::ipc::protocol::PatchRejectCode::InvalidOp;
+            InvalidOp
+        },
+        report: ocs_plugin_api::ipc::protocol::PatchRejectReport {
+            current_revision: None,
+            failed_op: None,
+        },
+    }
 }

@@ -345,6 +345,7 @@ modal =
     .find-replace = Tìm và Thay thế
     .plugin-manager = Trình quản lý Plugin
     .update-available = Có bản cập nhật
+    .widget-confirmation = Widget Confirmation
     .layer-manager = Trình quản lý Lớp
     .layer-state-manager = Trình quản lý Trạng thái Lớp
     .edit-layer-state = Chỉnh sửa Trạng thái Lớp

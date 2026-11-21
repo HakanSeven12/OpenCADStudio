@@ -333,7 +333,7 @@ impl OpenCADStudio {
         self.on_layout_switch(layout)
     }
 
-    pub(super) fn handle_vp_layer_update(
+    pub(crate) fn handle_vp_layer_update(
         &mut self,
         vp_handle: Handle,
         freeze: Vec<String>,
@@ -411,6 +411,8 @@ impl OpenCADStudio {
         if frozen_count > 0 || thawed_count > 0 {
             self.push_undo_snapshot(i, "VPLAYER");
             self.tabs[i].dirty = true;
+            // Per-viewport visibility lives in the resident assembly.
+            self.tabs[i].scene.bump_geometry_no_blocks();
             if frozen_count > 0 {
                 self.command_line.push_info(
                     crate::tf!("VPLAYER: {frozen_count} layer(s) frozen in viewport.").as_ref(),

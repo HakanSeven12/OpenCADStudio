@@ -142,6 +142,16 @@ impl OpenCADStudio {
                         .into_iter()
                         .map(|(_, e)| e.common().layer.clone())
                         .collect();
+                    // Inside a layout viewport the pick freezes the layer in
+                    // that viewport only, the way VPLAYER Freeze does. (#3401)
+                    let scene = &self.tabs[i].scene;
+                    if scene.current_layout != "Model" {
+                        if let Some(vp) = scene.active_viewport {
+                            self.handle_vp_layer_update(vp, layers.into_iter().collect(), vec![]);
+                            self.tabs[i].scene.deselect_all();
+                            return Some(Task::none());
+                        }
+                    }
                     let current = self.tabs[i]
                         .scene
                         .document

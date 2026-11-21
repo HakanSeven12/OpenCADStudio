@@ -1122,6 +1122,10 @@ const CACHE_CATEGORY_INTERACTION: u16 = 1 << 5;
 const CACHE_CATEGORY_TEXT: u16 = 1 << 6;
 const CACHE_CATEGORY_INSERT_HATCH: u16 = 1 << 7;
 
+/// Snap points of the solids inside each block definition, by entity.
+type BlockSolidSnaps =
+    HashMap<Handle, Vec<(glam::DVec3, crate::scene::model::wire_model::SnapHint)>>;
+
 /// Mutable assembly metadata for one resident wire set. Keeping entity ranges
 /// beside the flat render Vec lets a one-entity edit splice that run directly;
 /// rebuilding this directory by grouping every WireModel was the dominant
@@ -2993,6 +2997,8 @@ pub struct Scene {
     /// constants. `[depth, half]` retains a fixed child sub-range for block
     /// composition. Full sort/layout/block changes rebuild the labels.
     draw_depth_cache: RefCell<Option<DrawDepthCache>>,
+    /// [`Scene::block_solid_snaps`] for one geometry epoch.
+    block_solid_snaps_cache: RefCell<Option<(u64, Arc<BlockSolidSnaps>)>>,
     /// Bumped when a full draw-order rebuild can move existing depths.
     /// Cached uploads compare it before reusing baked depth values.
     draw_depth_generation: std::cell::Cell<u64>,
@@ -3798,6 +3804,7 @@ impl Scene {
             interaction_handle_index_cache: RefCell::new(None),
             sort_cache: RefCell::new(None),
             draw_depth_cache: RefCell::new(None),
+            block_solid_snaps_cache: RefCell::new(None),
             draw_depth_generation: std::cell::Cell::new(0),
             no_draw_depths: Arc::new(HashMap::default()),
             hatch_cache: RefCell::new(HashMap::default()),
@@ -4134,12 +4141,7 @@ impl Scene {
         {
             if epoch == *from && *to == self.block_epoch {
                 let started = crate::perf::enabled().then(iced::time::Instant::now);
-                let solid_snaps: HashMap<Handle, _> = self
-                    .block_meshes
-                    .keys()
-                    .map(|handle| (*handle, self.solid_snap_points(*handle)))
-                    .filter(|(_, points)| !points.is_empty())
-                    .collect();
+                let solid_snaps = self.block_solid_snaps();
                 let mut built = old.with_rebuilt_blocks(
                     &self.document,
                     names,
@@ -4172,12 +4174,7 @@ impl Scene {
         // 1.0). An annotative block scales as ONE unit at the INSERT level, so
         // its internal geometry / text / attributes must NOT be scaled
         // individually because that would apply the same scale twice.
-        let solid_snaps: HashMap<Handle, _> = self
-            .block_meshes
-            .keys()
-            .map(|handle| (*handle, self.solid_snap_points(*handle)))
-            .filter(|(_, points)| !points.is_empty())
-            .collect();
+        let solid_snaps = self.block_solid_snaps();
         let mut built = cache::block_cache::BlockCache::build_with_solid_snaps(
             &self.document,
             1.0,
@@ -4197,6 +4194,28 @@ impl Scene {
         self.bound_block_defn_cache(&mut cache);
         cache.insert(key, (self.block_epoch, Arc::clone(&arc)));
         arc
+    }
+
+    /// Snap points of the solids inside block definitions. Parsing their
+    /// bodies for face centres took over half a second on a drawing with many
+    /// block solids, and every viewport's block cache asked again (#2861), so
+    /// the map is kept until the geometry changes.
+    fn block_solid_snaps(&self) -> Arc<BlockSolidSnaps> {
+        if let Some((epoch, snaps)) = self.block_solid_snaps_cache.borrow().as_ref() {
+            if *epoch == self.geometry_epoch {
+                return Arc::clone(snaps);
+            }
+        }
+        let snaps: Arc<BlockSolidSnaps> = Arc::new(
+            self.block_meshes
+                .keys()
+                .map(|handle| (*handle, self.solid_snap_points(*handle)))
+                .filter(|(_, points)| !points.is_empty())
+                .collect(),
+        );
+        *self.block_solid_snaps_cache.borrow_mut() =
+            Some((self.geometry_epoch, Arc::clone(&snaps)));
+        snaps
     }
 
     /// Each entry holds every block definition built for one viewport, and

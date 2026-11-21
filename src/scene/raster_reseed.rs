@@ -344,6 +344,91 @@ mod tests {
         assert_eq!(entities.len(), handles.len(), "each entity is gathered once");
     }
 
+    /// A raster of a zoomed-in region holds the whole page and the region,
+    /// each drawn by its own triangles: the cached gathered list takes the
+    /// triangles with the pixels.
+    #[test]
+    fn a_reseed_gives_the_cached_list_the_triangles_of_a_zoomed_in_region() {
+        let (mut scene, handles) = model_with_underlays("region-triangles");
+        // Warm the gather cache the way a rendered frame does.
+        let whole = scene.images_arc();
+        assert_eq!(whole[0].verts.len(), 6, "the page alone is two triangles");
+        rest_at(&mut scene, 0.4, 0.4, 0.6, 0.6);
+        let done = scene.take_reseed_job().expect("a job").render();
+        scene.apply_reseed(done);
+
+        let fresh = scene.images[&handles[0]].clone();
+        assert!(
+            fresh.verts.len() > 6,
+            "the region is cut out of the page: {} corners",
+            fresh.verts.len()
+        );
+        let shown = scene.images_arc();
+        let cached = shown
+            .iter()
+            .find(|model| model.entity == Some(handles[0]))
+            .expect("the underlay is in the list");
+        assert!(
+            std::sync::Arc::ptr_eq(&cached.pixels, &fresh.pixels),
+            "the list has the new raster"
+        );
+        let corners = |model: &ImageModel| -> Vec<([f32; 3], [f32; 2])> {
+            model.verts.iter().map(|v| (v.pos, v.uv)).collect()
+        };
+        assert_eq!(
+            corners(cached),
+            corners(&fresh),
+            "and draws it with the raster's own triangles"
+        );
+    }
+
+    /// The frame of the scene as it is now, on a canvas of the size the
+    /// views of these tests rest at, and the signature of each viewport.
+    fn frame(scene: &Scene) -> (crate::scene::view::render::Primitive, Vec<u64>) {
+        let canvas = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1000.0,
+            height: 1000.0,
+        };
+        let primitive = scene.build_viewports(
+            canvas,
+            document::entities::ViewportRenderMode::Wireframe2D,
+            None,
+            false,
+            false,
+            [1.0; 4],
+        );
+        let signatures = primitive.frame_signatures(canvas);
+        (primitive, signatures)
+    }
+
+    /// A frame with the same signature as the one before it is not drawn
+    /// again, and its rasters are not uploaded: the frame after a reseed
+    /// has another signature, though the view and the geometry are the same.
+    #[test]
+    fn the_frame_after_a_reseed_is_another_frame() {
+        let (mut scene, handles) = model_with_underlays("another-frame");
+        rest_at(&mut scene, 0.0, 0.0, 8.0, 8.0);
+        // The frame on screen while the worker draws. The renderer keeps the
+        // lists of the frame it drew, as `shown` does here.
+        let (shown, before) = frame(&scene);
+        let (_, again) = frame(&scene);
+        assert_eq!(before, again, "the view at rest is one frame");
+
+        let done = scene
+            .take_reseed_job()
+            .expect("a job for the worker")
+            .render();
+        assert_eq!(scene.apply_reseed(done), handles.len());
+        let (drawn, after) = frame(&scene);
+        assert_ne!(before, after, "the new rasters make another frame");
+        assert!(
+            !std::sync::Arc::ptr_eq(&shown.viewports[0].images, &drawn.viewports[0].images),
+            "with another list than the one the renderer has, so they are uploaded"
+        );
+    }
+
     /// A result for an older zoom step is dropped; the newer one is taken.
     #[test]
     fn a_result_for_an_older_step_is_dropped() {

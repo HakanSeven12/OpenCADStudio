@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 ocs_geom = { path = "../ocs_geom" }
-document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "fe037ee0fc86f1a753a1cc540b8b43b484fa7f36" }
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "663bc3a1a2075f939eadafd7fb16683de39a473f" }
 solidcore = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
 solidcore-convert = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }
 solidcore-ops = { git = "https://github.com/tangency-labs/solidcore.git", rev = "e261b7d" }

@@ -1545,8 +1545,10 @@ mod ocs {
     }
 
     /// Layout change through the host. `op` is `create`, `rename` (`to`),
-    /// `delete`, `set_current` or `set_page` (`paper_size`: (width, height) mm,
-    /// `rotation`: 0/90/180/270, `scale`: (numerator, denominator)).
+    /// `delete`, `set_current`, `set_page` (`paper_size`: (width, height) mm,
+    /// `rotation`: 0/90/180/270, `scale`: (numerator, denominator)) or
+    /// `set_tab_order` (`names`: every paper-space layout once, in the new
+    /// order; `name` is not used).
     #[cfg(feature = "experimental-host-model")]
     #[pyfunction]
     fn layout_operation(op: String, name: String, options: PyObjectRef, vm: &VirtualMachine) -> PyResult<u64> {
@@ -1570,6 +1572,25 @@ mod ocs {
                     .ok_or_else(|| vm.new_value_error("ocs: rename needs the new name".to_owned()))?
                     .try_into_value::<String>(vm)?;
                 TableOperation::LayoutRename { from: name, to }
+            }
+            "set_tab_order" => {
+                ensure_known_entity_keys(&options, "layout tab order", &["names"], vm)?;
+                let names = options.get_item_opt("names", vm)?.ok_or_else(|| {
+                    vm.new_value_error("ocs: set_tab_order needs the layout names".to_owned())
+                })?;
+                let names: Vec<PyObjectRef> =
+                    rustpython_vm::convert::TryFromObject::try_from_object(vm, names).map_err(
+                        |_| {
+                            vm.new_type_error(
+                                "ocs: the layout names must be a list of strings".to_owned(),
+                            )
+                        },
+                    )?;
+                let names = names
+                    .into_iter()
+                    .map(|name| name.try_into_value::<String>(vm))
+                    .collect::<PyResult<Vec<_>>>()?;
+                TableOperation::LayoutSetTabOrder { names }
             }
             "set_page" => {
                 ensure_known_entity_keys(&options, "layout page", &["paper_size", "rotation", "scale"], vm)?;

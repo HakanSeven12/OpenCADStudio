@@ -205,6 +205,10 @@ class DocumentModelTests(unittest.TestCase):
         ly.set_page("Sheet1", paper_size=(420, 297), rotation=0, scale=(1, 50))
         self.assertEqual(self.calls[-1], ("layout", "set_page", "Sheet1",
             {"paper_size": [420.0, 297.0], "rotation": 0, "scale": [1.0, 50.0]}))
+        self.assertEqual(ly.set_tab_order(("Sheet1",)), ["Model", "Sheet1"])
+        self.assertEqual(self.calls[-1], ("layout", "set_tab_order", "", {"names": ["Sheet1"]}))
+        with self.assertRaises(TypeError):
+            ly.set_tab_order("Sheet1")
         ly.current = "Sheet1"
         self.assertEqual(self.calls[-1], ("layout", "set_current", "Sheet1", None))
         ly.delete("Sheet1")

@@ -3015,6 +3015,94 @@ mod tests {
     }
 
     #[test]
+    fn the_plot_stamp_is_written_on_a_page_that_asks_for_it() {
+        let mut stamped = page(PlotContent::default(), 297.0, 210.0);
+        stamped.options.stamp = true;
+
+        let sheet = read(&stamped);
+
+        assert_eq!(sheet.texts.len(), 1, "{:?}", sheet.texts);
+        let stamp = &sheet.texts[0];
+        assert!(
+            stamp.text.starts_with("Open CAD Studio | "),
+            "{}",
+            stamp.text
+        );
+        // 4 mm in and 3 mm up, six points to the em, a dark grey.
+        assert!(
+            near(stamp.origin, [4.0, 3.0], UNIT_MM),
+            "{:?}",
+            stamp.origin
+        );
+        let em = 6.0 * 25.4 / 72.0;
+        assert!(
+            (stamp.height - em * CAP_PER_EM).abs() < 0.02,
+            "{}",
+            stamp.height
+        );
+        assert_eq!(stamp.color, [64, 64, 64]);
+        // And none on a page that does not ask.
+        let plain = read(&page(PlotContent::default(), 297.0, 210.0));
+        assert!(plain.texts.is_empty(), "{:?}", plain.texts);
+    }
+
+    #[test]
+    fn the_stamp_stays_on_the_paper_whatever_the_plot_scale_turn_and_window() {
+        let mut stamped = page(PlotContent::default(), 297.0, 210.0);
+        stamped.options.stamp = true;
+        stamped.scale = 0.5;
+        stamped.rotation_deg = 90;
+        // A plot window far from the stamp's corner.
+        stamped.clip = Some((200.0, 200.0, 100.0, 100.0));
+
+        let sheet = read(&stamped);
+
+        // The sheet reads back in drawing units, two to the millimetre.
+        assert_eq!(sheet.texts.len(), 1, "{:?}", sheet.texts);
+        let stamp = &sheet.texts[0];
+        assert!(
+            near(stamp.origin, [8.0, 6.0], 2.0 * UNIT_MM),
+            "{:?}",
+            stamp.origin
+        );
+        assert!(stamp.rotation.abs() < 1e-6, "{}", stamp.rotation);
+        let em = 6.0 * 25.4 / 72.0 * 2.0;
+        assert!(
+            (stamp.height - em * CAP_PER_EM).abs() < 0.04,
+            "{}",
+            stamp.height
+        );
+    }
+
+    #[test]
+    fn with_outlines_the_stamp_is_drawn_and_not_written() {
+        let mut stamped = page(PlotContent::default(), 297.0, 210.0);
+        stamped.options.stamp = true;
+        stamped.options.text_as_outlines = true;
+
+        let sheet = read(&stamped);
+
+        assert!(sheet.texts.is_empty(), "{:?}", sheet.texts);
+        assert!(!sheet.paths.is_empty(), "the stamp's glyphs");
+        // Along the bottom of the paper from 4 mm in, no taller than its line.
+        let points: Vec<[f64; 2]> = sheet
+            .paths
+            .iter()
+            .flat_map(|path| &path.subpaths)
+            .flat_map(|subpath| &subpath.segments)
+            .map(|segment| match segment {
+                Segment::Line(a, _) | Segment::Cubic(a, _, _, _) => *a,
+            })
+            .collect();
+        for [x, y] in points {
+            assert!(
+                (3.5..120.0).contains(&x) && (2.0..6.5).contains(&y),
+                "({x}, {y}) is off the stamp's line"
+            );
+        }
+    }
+
+    #[test]
     fn several_sheets_keep_their_names_and_order() {
         let first = page(
             wires(vec![wire(

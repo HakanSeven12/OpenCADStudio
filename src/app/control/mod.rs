@@ -715,6 +715,8 @@ impl OpenCADStudio {
                 | "snap"
                 | "grips"
                 | "query"
+                | "civil_station_offset"
+                | "civil_surface_stats"
                 | "records"
                 | "record_schema"
                 | "capabilities"

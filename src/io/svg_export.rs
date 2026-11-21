@@ -1358,7 +1358,7 @@ fn svg_opacity(alpha: f32, transparency: bool) -> String {
     }
 }
 
-fn plot_stamp_label() -> String {
+pub(super) fn plot_stamp_label() -> String {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -1387,7 +1387,7 @@ fn stamp_glyph_quads(
     .0
 }
 
-fn stamp_wire_from_atlas(
+pub(super) fn stamp_wire_from_atlas(
     atlas: &mut crate::scene::text::sdf_atlas::GlyphAtlas,
     label: &str,
 ) -> Option<WireModel> {

@@ -6,9 +6,8 @@
 //
 // Scope of this first version:
 // - Wires (curves flattened, dashes cut as on screen), lineweights, colours
-//   through the plot style, solid fills, hatches, wipeouts, text and raster
-//   images.
-// - The plot stamp is left out.
+//   through the plot style, solid fills, hatches, wipeouts, text, raster
+//   images and the plot stamp.
 // - Graphics units are 1/1200 inch on paper, y up, origin at the sheet's
 //   lower left. The stream's `Units` carry the plot scale, so a reader maps
 //   the sheet back to the units it was plotted from.
@@ -23,12 +22,12 @@ use sha2::{Digest, Sha256};
 use crate::io::pdf_export::{adapt_to_paper, dash_ranges, MIN_PLOT_PATTERN_MM};
 use crate::io::plot::{PlotImage, PlotOptions, PlotPage, PlotQuality, PlotWire};
 use crate::io::plot_style::PlotStyleTable;
-use crate::io::svg_export::plotted_color;
+use crate::io::svg_export::{plot_stamp_label, plotted_color, stamp_wire_from_atlas};
 use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
 use crate::scene::model::underlay_vector::CAP_PER_EM;
 use crate::scene::model::wire_model::SearchableTextRun;
 use crate::scene::text::glyph_to_world::{self, GlyphSnapshot, QuadBasis};
-use crate::scene::text::sdf_atlas::GlyphExport;
+use crate::scene::text::sdf_atlas::{self, GlyphExport};
 use crate::scene::WireModel;
 
 /// Graphics units to a millimetre of paper: each is 1/1200 inch.
@@ -56,27 +55,54 @@ pub struct DwfSheet<'a> {
     pub page: &'a PlotPage,
 }
 
+/// The plot stamp of a package: its label and, for the pages that ask for
+/// text as outlines, the label laid out as glyph quads.
+struct Stamp {
+    label: String,
+    outline: Option<WireModel>,
+}
+
 /// The bytes of a DWF 6 package with one section per sheet, in order.
 pub fn build_dwf(
     sheets: &[DwfSheet<'_>],
     fallback_plot_style: Option<&PlotStyleTable>,
 ) -> Result<Vec<u8>, String> {
-    // The atlas as it stands, once for the package, when a page has text
-    // laid out on it.
-    let glyphs = sheets
+    let stamped = |sheet: &DwfSheet<'_>| sheet.page.options.stamp;
+    let label = sheets.iter().any(stamped).then(plot_stamp_label);
+    let outlined = sheets
+        .iter()
+        .any(|sheet| stamped(sheet) && sheet.page.options.text_as_outlines);
+    let laid_out = sheets
         .iter()
         .flat_map(|sheet| sheet.page.content.wires.iter())
-        .any(|wire| !wire.wire.text_verts.is_empty())
-        .then(GlyphSnapshot::snapshot)
-        .flatten();
-    build_dwf_with_glyphs(sheets, fallback_plot_style, glyphs.as_ref())
+        .any(|wire| !wire.wire.text_verts.is_empty());
+    // The atlas as it stands, once for the package, when a page has text
+    // laid out on it. A stamp to be drawn is laid out on it first, under
+    // the same lock, so that the one snapshot knows the stamp's glyphs too.
+    let (outline, glyphs) = match (outlined || laid_out)
+        .then(|| sdf_atlas::text_atlas().lock().ok())
+        .flatten()
+    {
+        Some(mut atlas) => {
+            let outline = label
+                .as_deref()
+                .filter(|_| outlined)
+                .and_then(|label| stamp_wire_from_atlas(&mut atlas, label));
+            (outline, Some(GlyphSnapshot::from_atlas(&atlas)))
+        }
+        None => (None, None),
+    };
+    let stamp = label.map(|label| Stamp { label, outline });
+    build_dwf_with_glyphs(sheets, fallback_plot_style, glyphs.as_ref(), stamp.as_ref())
 }
 
-/// [`build_dwf`] with the glyphs of the atlas the pages' text was laid out on.
+/// [`build_dwf`] with the glyphs of the atlas the pages' text was laid out
+/// on, and the stamp of the pages that ask for one.
 fn build_dwf_with_glyphs(
     sheets: &[DwfSheet<'_>],
     fallback_plot_style: Option<&PlotStyleTable>,
     glyphs: Option<&GlyphSnapshot>,
+    stamp: Option<&Stamp>,
 ) -> Result<Vec<u8>, String> {
     if sheets.is_empty() {
         return Err("Nothing to export: no sheet was given.".to_string());
@@ -86,7 +112,7 @@ fn build_dwf_with_glyphs(
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
     for (index, sheet) in sheets.iter().enumerate() {
         let page = sheet.page;
-        let stream = page_stream(page, fallback_plot_style, glyphs)?;
+        let stream = page_stream(page, fallback_plot_style, glyphs, stamp)?;
         let section_id = object_id(&stream, index, 0);
         let stream_id = object_id(&stream, index, 1);
         let section = format!("{EPLOT_SECTION}_{section_id}");
@@ -285,6 +311,7 @@ fn page_stream(
     page: &PlotPage,
     fallback_plot_style: Option<&PlotStyleTable>,
     glyphs: Option<&GlyphSnapshot>,
+    stamp: Option<&Stamp>,
 ) -> Result<Vec<u8>, String> {
     let paper_w = page.paper_w.max(1.0);
     let paper_h = page.paper_h.max(1.0);
@@ -307,6 +334,7 @@ fn page_stream(
         paper_w * UNITS_PER_MM + 0.49,
         paper_h * UNITS_PER_MM + 0.49,
     ];
+    let sheet = bounds;
     if let Some((cx, cy, cw, ch)) = page.clip {
         let corners = [
             map.apply(cx as f64, cy as f64),
@@ -360,6 +388,25 @@ fn page_stream(
     ));
     if bounds[0] < bounds[2] && bounds[1] < bounds[3] {
         emit_page_content(&mut stream, page, plot_style, glyphs, &map, bounds)?;
+    }
+    if let Some(stamp) = stamp.filter(|_| page.options.stamp) {
+        // The stamp lies on the paper, outside the plot's scale, turn and
+        // window.
+        let paper = PageMap {
+            paper_w,
+            paper_h,
+            scale: 1.0,
+            rotation_deg: 0,
+        };
+        let context = Context {
+            offset: (0.0, 0.0),
+            plot_style: None,
+            glyphs,
+            options: page.options,
+            map: &paper,
+            bounds: sheet,
+        };
+        emit_stamp(&mut stream, stamp, &context);
     }
     stream.extended("EndOfDWF");
     Ok(stream.out)
@@ -817,6 +864,33 @@ fn fill_polygon(stream: &mut Stream, color: [u8; 3], polygon: &[[f64; 2]], bound
         stream.color(color);
         stream.triangles(&triangle);
     }
+}
+
+/// The plot stamp: 4 mm in from the paper's left edge and 3 mm up, six
+/// points to the em, a dark grey, as the PDF backend writes it. It is text
+/// in a plain sans-serif font, or its glyphs drawn when the page asks for
+/// text as outlines and they could be laid out.
+fn emit_stamp(stream: &mut Stream, stamp: &Stamp, context: &Context) {
+    if let Some(wire) = stamp.outline.as_ref().filter(|wire| {
+        context.options.text_as_outlines
+            && context
+                .glyphs
+                .and_then(|glyphs| placed_quads(wire, glyphs))
+                .is_some_and(|quads| !quads.is_empty())
+    }) {
+        emit_text(stream, wire, context);
+        return;
+    }
+    let em = (6.0 * PT_TO_MM * UNITS_PER_MM).round() as i32;
+    stream.color([64, 64, 64]);
+    stream.font("Arial", em, 0);
+    stream.text(
+        [
+            (4.0 * UNITS_PER_MM).round() as i32,
+            (3.0 * UNITS_PER_MM).round() as i32,
+        ],
+        &stamp.label,
+    );
 }
 
 // ── Raster images ───────────────────────────────────────────────────────────
@@ -1808,6 +1882,7 @@ mod tests {
             }],
             None,
             Some(glyphs),
+            None,
         )
         .expect("builds");
         reader::sheet(&bytes, "Model").expect("the reader opens the sheet")

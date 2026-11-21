@@ -1370,8 +1370,9 @@ impl Stream {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::plot::{PlotContent, PlotOptions, PlotWire};
+    use crate::io::plot::{PlotContent, PlotImage, PlotOptions, PlotQuality, PlotWire};
     use crate::scene::model::hatch_model::{HatchModel, HatchPattern, PatFamily};
+    use crate::scene::model::image_model::{ImageModel, ImageQuadVertex};
     use crate::scene::model::underlay_vector::dwf as reader;
     use crate::scene::model::underlay_vector::{Segment, Sheet};
     use crate::scene::WireModel;
@@ -1591,6 +1592,203 @@ mod tests {
                     / 2.0
             })
             .sum()
+    }
+
+    const RED: [u8; 4] = [255, 0, 0, 255];
+    const GREEN: [u8; 4] = [0, 255, 0, 255];
+    const BLUE: [u8; 4] = [0, 0, 255, 255];
+    const WHITE: [u8; 4] = [255, 255, 255, 255];
+    /// A quad 40 by 20 standing upright with its lower left corner at (20, 30).
+    const QUAD: [[f32; 2]; 4] = [[20.0, 30.0], [60.0, 30.0], [60.0, 50.0], [20.0, 50.0]];
+
+    /// A pixel as the stream holds it: blue, green, red, alpha.
+    fn bgra([r, g, b, a]: [u8; 4]) -> [u8; 4] {
+        [b, g, r, a]
+    }
+
+    /// A picture `width` pixels wide on the quad `corners` (lower left, lower
+    /// right, upper right, upper left), whole and opaque, its pixels given
+    /// from the top row.
+    fn picture(pixels: &[[u8; 4]], width: u32, corners: [[f32; 2]; 4]) -> PlotImage {
+        let corners = corners.map(|[x, y]| [x, y, 0.0]);
+        let vertex = |corner: usize, uv: [f32; 2]| ImageQuadVertex {
+            pos: corners[corner],
+            uv,
+            pos_low: [0.0; 3],
+        };
+        PlotImage {
+            image: ImageModel {
+                render_instance: None,
+                entity: None,
+                file_path: String::new(),
+                pixels: std::sync::Arc::new(pixels.concat()),
+                width,
+                height: pixels.len() as u32 / width,
+                opacity: 1.0,
+                corners,
+                corners_low: [[0.0; 3]; 4],
+                draw_depth: 0.4,
+                verts: vec![
+                    vertex(0, [0.0, 1.0]),
+                    vertex(1, [1.0, 1.0]),
+                    vertex(2, [1.0, 0.0]),
+                    vertex(0, [0.0, 1.0]),
+                    vertex(2, [1.0, 0.0]),
+                    vertex(3, [0.0, 0.0]),
+                ],
+                pixelated: true,
+                use_alpha: true,
+            },
+            clips: Vec::new(),
+        }
+    }
+
+    fn pictures(list: Vec<PlotImage>) -> PlotContent {
+        PlotContent {
+            images: list,
+            ..Default::default()
+        }
+    }
+
+    /// A raster image of a sheet's stream.
+    struct StreamImage {
+        cols: usize,
+        rows: usize,
+        /// Its lower left and upper right corners on the sheet, millimetres.
+        low: [f64; 2],
+        high: [f64; 2],
+        /// Four bytes a pixel (blue, green, red, alpha), rows from the top.
+        pixels: Vec<u8>,
+    }
+
+    impl StreamImage {
+        /// The pixel that covers a point of the sheet.
+        fn at(&self, mm: [f64; 2]) -> [u8; 4] {
+            let across = (mm[0] - self.low[0]) / (self.high[0] - self.low[0]);
+            let down = (self.high[1] - mm[1]) / (self.high[1] - self.low[1]);
+            let col = ((across * self.cols as f64) as usize).min(self.cols - 1);
+            let row = ((down * self.rows as f64) as usize).min(self.rows - 1);
+            let k = (row * self.cols + col) * 4;
+            [
+                self.pixels[k],
+                self.pixels[k + 1],
+                self.pixels[k + 2],
+                self.pixels[k + 3],
+            ]
+        }
+    }
+
+    /// The raster images of the page's stream. The stream is walked opcode
+    /// by opcode, since an image's corners are given from the current point
+    /// like every other coordinate.
+    fn stream_images(page: &PlotPage) -> Vec<StreamImage> {
+        let bytes = build_dwf(
+            &[DwfSheet {
+                name: "Model",
+                page,
+            }],
+            None,
+        )
+        .expect("builds");
+        let files = unzip(&bytes);
+        let stream = files
+            .iter()
+            .find(|(name, _)| name.ends_with(".w2d"))
+            .map(|(_, data)| data.as_slice())
+            .expect("a graphics stream");
+        let short = |i: usize| i16::from_le_bytes([stream[i], stream[i + 1]]) as i64;
+        let long = |i: usize| i32::from_le_bytes(stream[i..i + 4].try_into().unwrap()) as i64;
+        let word = |i: usize| u16::from_le_bytes([stream[i], stream[i + 1]]) as usize;
+        let mut at = [0i64; 2];
+        let mut images = Vec::new();
+        let mut i = 0;
+        while i < stream.len() {
+            match stream[i] {
+                b' ' | b'\t' | b'\r' | b'\n' | b'V' | b'v' => i += 1,
+                b'(' => {
+                    // To the bracket that closes it, quoted text aside.
+                    let (mut depth, mut quoted) = (0, false);
+                    loop {
+                        let c = stream[i];
+                        i += 1;
+                        match c {
+                            b'\'' => quoted = !quoted,
+                            b'(' if !quoted => depth += 1,
+                            b')' if !quoted => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                0x03 | 0x17 => i += 5,
+                b'O' => {
+                    at = [long(i + 1), long(i + 5)];
+                    i += 9;
+                }
+                op @ (0x10 | 0x14 | b'p' | b't') => {
+                    i += 1;
+                    let mut count = stream[i] as usize;
+                    i += 1;
+                    if count == 0 {
+                        count = 256 + word(i);
+                        i += 2;
+                    }
+                    for _ in 0..count {
+                        if matches!(op, b'p' | b't') {
+                            at = [at[0] + long(i), at[1] + long(i + 4)];
+                            i += 8;
+                        } else {
+                            at = [at[0] + short(i), at[1] + short(i + 2)];
+                            i += 4;
+                        }
+                    }
+                }
+                // The writer's font: a mask and its four fields.
+                0x06 => i += 11,
+                b'x' => {
+                    at = [at[0] + long(i + 1), at[1] + long(i + 5)];
+                    i += 9;
+                    if stream[i] == b'{' {
+                        i += 5 + 2 * long(i + 1) as usize + 1;
+                    } else {
+                        i += 1;
+                        while stream[i] != b'\'' {
+                            i += 1;
+                        }
+                        i += 1;
+                    }
+                }
+                b'{' => {
+                    let size = long(i + 1) as usize;
+                    let body = i + 5;
+                    if word(body) == 0x0007 {
+                        let (cols, rows) = (word(body + 2), word(body + 4));
+                        let low = [at[0] + long(body + 6), at[1] + long(body + 10)];
+                        let high = [low[0] + long(body + 14), low[1] + long(body + 18)];
+                        let length = long(body + 26) as usize;
+                        assert_eq!(length, cols * rows * 4, "four bytes a pixel");
+                        assert_eq!(size, 2 + 28 + length + 1, "the size of the block");
+                        assert_eq!(stream[body + 30 + length], b'}', "the block closes");
+                        images.push(StreamImage {
+                            cols,
+                            rows,
+                            low: low.map(|v| v as f64 / UNITS_PER_MM),
+                            high: high.map(|v| v as f64 / UNITS_PER_MM),
+                            pixels: stream[body + 30..body + 30 + length].to_vec(),
+                        });
+                        // The current point ends on the image's far corner.
+                        at = high;
+                    }
+                    i += 5 + size;
+                }
+                other => panic!("an opcode the walk does not know: {other:#04x} at {i}"),
+            }
+        }
+        images
     }
 
     fn near(a: [f64; 2], b: [f64; 2], tolerance: f64) -> bool {
@@ -2281,6 +2479,217 @@ mod tests {
 
         assert!(sheet.texts.is_empty(), "{:?}", sheet.texts);
         assert!(filled_area(&sheet) > 1.0, "nothing is drawn");
+    }
+
+    #[test]
+    fn an_upright_image_goes_out_as_its_own_pixels_between_its_corners() {
+        let content = pictures(vec![picture(&[RED, GREEN, BLUE, WHITE], 2, QUAD)]);
+
+        let images = stream_images(&page(content, 297.0, 210.0));
+
+        assert_eq!(images.len(), 1);
+        let image = &images[0];
+        assert_eq!((image.cols, image.rows), (2, 2));
+        assert!(
+            near(image.low, [20.0, 30.0], UNIT_MM) && near(image.high, [60.0, 50.0], UNIT_MM),
+            "{:?} {:?}",
+            image.low,
+            image.high
+        );
+        assert_eq!(image.pixels, [RED, GREEN, BLUE, WHITE].map(bgra).concat());
+    }
+
+    #[test]
+    fn a_turned_image_keeps_each_pixel_where_its_quad_puts_it() {
+        // Turned a quarter: the picture's left side lies along the bottom,
+        // its top along the left.
+        let turned = [[60.0, 30.0], [60.0, 70.0], [20.0, 70.0], [20.0, 30.0]];
+        let content = pictures(vec![picture(&[RED, GREEN, BLUE, WHITE], 2, turned)]);
+
+        let images = stream_images(&page(content, 297.0, 210.0));
+
+        assert_eq!(images.len(), 1);
+        let image = &images[0];
+        assert!(
+            near(image.low, [20.0, 30.0], 0.2) && near(image.high, [60.0, 70.0], 0.2),
+            "{:?} {:?}",
+            image.low,
+            image.high
+        );
+        assert_eq!(image.at([30.0, 40.0]), bgra(RED));
+        assert_eq!(image.at([30.0, 60.0]), bgra(GREEN));
+        assert_eq!(image.at([50.0, 40.0]), bgra(BLUE));
+        assert_eq!(image.at([50.0, 60.0]), bgra(WHITE));
+    }
+
+    #[test]
+    fn an_image_on_its_corner_is_clear_around_its_quad() {
+        // A square of 40 across its diagonals, about (100, 100).
+        let diamond = [[100.0, 80.0], [120.0, 100.0], [100.0, 120.0], [80.0, 100.0]];
+        let content = pictures(vec![picture(&[RED; 4], 2, diamond)]);
+
+        let images = stream_images(&page(content, 297.0, 210.0));
+
+        assert_eq!(images.len(), 1);
+        let image = &images[0];
+        assert!(
+            near(image.low, [80.0, 80.0], 0.2) && near(image.high, [120.0, 120.0], 0.2),
+            "{:?} {:?}",
+            image.low,
+            image.high
+        );
+        assert_eq!(image.at([100.0, 100.0]), bgra(RED));
+        assert_eq!(image.at([100.0, 84.0]), bgra(RED));
+        for outside in [[82.0, 82.0], [118.0, 82.0], [82.0, 118.0], [118.0, 118.0]] {
+            assert_eq!(image.at(outside)[3], 0, "{outside:?}");
+        }
+    }
+
+    #[test]
+    fn an_image_is_cut_to_the_sheet() {
+        let over_the_corner = [[-20.0, -10.0], [40.0, -10.0], [40.0, 30.0], [-20.0, 30.0]];
+        let off_the_sheet = [[400.0, 10.0], [420.0, 10.0], [420.0, 30.0], [400.0, 30.0]];
+        let content = pictures(vec![
+            picture(&[RED; 4], 2, over_the_corner),
+            picture(&[GREEN; 4], 2, off_the_sheet),
+        ]);
+
+        let images = stream_images(&page(content, 297.0, 210.0));
+
+        assert_eq!(images.len(), 1, "what is off the sheet is not written");
+        let image = &images[0];
+        assert!(
+            image.low[0] > -UNIT_MM && image.low[1] > -UNIT_MM,
+            "{:?}",
+            image.low
+        );
+        assert!(
+            near(image.low, [0.0, 0.0], 0.2) && near(image.high, [40.0, 30.0], 0.2),
+            "{:?} {:?}",
+            image.low,
+            image.high
+        );
+        assert_eq!(image.at([10.0, 10.0]), bgra(RED));
+    }
+
+    #[test]
+    fn a_clipped_image_shows_only_inside_its_clips() {
+        // The first shows its lower right half; the second lies under a clip
+        // over its left half.
+        let mut halved = picture(&[RED; 4], 2, QUAD);
+        halved.image.verts.truncate(3);
+        let mut ringed = picture(&[GREEN; 4], 2, QUAD.map(|[x, y]| [x + 100.0, y]));
+        ringed.clips = vec![vec![
+            [120.0, 30.0],
+            [140.0, 30.0],
+            [140.0, 50.0],
+            [120.0, 50.0],
+        ]];
+        let content = pictures(vec![halved, ringed]);
+
+        let images = stream_images(&page(content, 297.0, 210.0));
+
+        assert_eq!(images.len(), 2);
+        assert_eq!(images[0].at([55.0, 33.0]), bgra(RED));
+        assert_eq!(images[0].at([25.0, 47.0])[3], 0);
+        assert_eq!(images[1].at([125.0, 40.0]), bgra(GREEN));
+        assert_eq!(images[1].at([155.0, 40.0])[3], 0);
+    }
+
+    #[test]
+    fn an_image_carries_its_opacity_and_its_own_alpha() {
+        let mut faded = picture(&[RED; 4], 2, QUAD);
+        faded.image.opacity = 0.5;
+        let glass = picture(&[[0, 0, 255, 0]; 4], 2, QUAD);
+        let mut solid = glass.clone();
+        solid.image.use_alpha = false;
+
+        let mut see_through = page(pictures(vec![faded.clone()]), 297.0, 210.0);
+        see_through.options.transparency = true;
+        let alpha = stream_images(&see_through)[0].pixels[3];
+        assert!((127..=128).contains(&alpha), "{alpha}");
+        // Without plotted transparency the image is as solid as its pixels.
+        let opaque = stream_images(&page(pictures(vec![faded]), 297.0, 210.0));
+        assert_eq!(opaque[0].pixels[3], 255);
+
+        // Pixels that are all clear draw nothing; with the image's alpha
+        // off they are as solid as their colour.
+        assert!(stream_images(&page(pictures(vec![glass]), 297.0, 210.0)).is_empty());
+        let solid = stream_images(&page(pictures(vec![solid]), 297.0, 210.0));
+        assert_eq!(solid[0].at([40.0, 40.0]), bgra(BLUE));
+    }
+
+    #[test]
+    fn a_fine_image_is_written_as_fine_as_the_plot_quality_allows() {
+        // 400 pixels across 10 mm: over a thousand to the inch.
+        let fine = picture(
+            &vec![RED; 400 * 400],
+            400,
+            [[20.0, 20.0], [30.0, 20.0], [30.0, 30.0], [20.0, 30.0]],
+        );
+        let mut written = page(pictures(vec![fine]), 297.0, 210.0);
+        // 150, 300 and 600 pixels to the inch over 10 mm.
+        for (quality, columns) in [
+            (PlotQuality::Low, 57..=61),
+            (PlotQuality::Normal, 115..=121),
+            (PlotQuality::High, 233..=239),
+        ] {
+            written.options.quality = quality;
+
+            let images = stream_images(&written);
+
+            assert!(
+                columns.contains(&images[0].cols) && images[0].rows == images[0].cols,
+                "{quality:?}: {} by {}",
+                images[0].cols,
+                images[0].rows
+            );
+            assert_eq!(images[0].at([25.0, 25.0]), bgra(RED));
+        }
+    }
+
+    #[test]
+    fn an_image_whose_pixels_do_not_fill_its_size_fails_the_export() {
+        let mut broken = picture(&[RED; 4], 2, QUAD);
+        broken.image.width = 3;
+        let written = page(pictures(vec![broken]), 297.0, 210.0);
+
+        let result = build_dwf(
+            &[DwfSheet {
+                name: "Model",
+                page: &written,
+            }],
+            None,
+        );
+
+        assert!(
+            result.as_ref().is_err_and(|error| error.contains("bitmap")),
+            "{:?}",
+            result.map(|bytes| bytes.len())
+        );
+    }
+
+    #[test]
+    fn what_follows_an_image_reads_back_where_it_was_drawn() {
+        // A reader that skips the image has not followed the current point
+        // through its corners: the stream gives the point again after it.
+        let mut content = pictures(vec![picture(&[RED; 4], 2, QUAD)]);
+        content.wires = std::sync::Arc::new(vec![PlotWire {
+            wire: wire(
+                vec![[100.0, 100.0, 0.0], [150.0, 120.0, 0.0]],
+                [0.0, 0.0, 0.0, 1.0],
+            ),
+            draw_depth: 0.5,
+        }]);
+
+        let sheet = read(&page(content, 297.0, 210.0));
+
+        let lines = strokes(&sheet);
+        assert!(
+            near(lines[0][0], [100.0, 100.0], UNIT_MM)
+                && near(lines[0][1], [150.0, 120.0], UNIT_MM),
+            "{lines:?}"
+        );
     }
 
     #[test]

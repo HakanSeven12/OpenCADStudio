@@ -1,0 +1,74 @@
+# Direct file reads that tests/direct_file_reads.rs allows in src/.
+#
+# Each line: the number of direct read calls (std::fs::read, read_to_string,
+# File::open, image::open, ImageReader::open, Mmap::map) that a source file
+# can have outside its test code. A file that is not here can have none.
+#
+# The numbers are the reads that were in src/ on 2026-11-19. They do not say
+# that each of these reads is on the correct thread: some run on a worker,
+# some read a small file of the app (a setting, a lock, a cache), and some
+# read a user's file on the UI thread and are to move to a worker.
+#
+# To add a read of a user's file: run it through `background_task`
+# (src/app/update/file.rs). If the new read already runs on a worker, or it
+# reads a small file of the app itself, raise the file's number and give the
+# reason after a `#` on its line.
+#
+# A number that is too high does not fail. To find them:
+#   cargo test --test integration direct_file_reads -- --ignored
+
+2 src/app/alias.rs
+1 src/app/annotation_data.rs
+3 src/app/automation.rs
+1 src/app/civil_packages.rs
+1 src/app/commands/blocks.rs
+1 src/app/commands/center_vars.rs
+2 src/app/commands/display.rs
+1 src/app/commands/fileops.rs
+1 src/app/commands/layer_file_reads.rs
+1 src/app/commands/pdf_dialogs.rs
+3 src/app/commands/sheet_set.rs
+1 src/app/commands/spell.rs
+1 src/app/commands/view.rs
+1 src/app/config.rs
+1 src/app/control/node_graph.rs
+1 src/app/control/spellcheck.rs
+1 src/app/filter_dialog.rs
+1 src/app/mtext_editor/tool_dialogs.rs
+2 src/app/node_graph/files.rs
+1 src/app/node_graph/ops.rs
+3 src/app/update/file.rs
+3 src/app/update/mod.rs
+1 src/config.rs
+1 src/discussions.rs
+4 src/gpu_backend.rs
+3 src/io/edit_lock.rs
+7 src/io/file_association.rs
+2 src/io/georef.rs
+1 src/io/linetypes/writer.rs
+7 src/io/mod.rs
+3 src/io/ole_embed.rs
+1 src/io/patterns.rs
+4 src/io/plot_style.rs
+1 src/io/recovery.rs
+1 src/io/single_instance.rs
+2 src/io/transmit.rs
+1 src/io/xref.rs
+1 src/main.rs
+5 src/mcp.rs
+1 src/modules/draw/layers/laytrans.rs
+1 src/modules/insert/pdf_import.rs
+2 src/plugin/external.rs
+1 src/scene/model/image_model.rs
+1 src/scene/model/material_model.rs
+1 src/scene/model/pdf_raster.rs
+2 src/scene/model/point_cloud/mod.rs
+1 src/scene/text/shx.rs
+1 src/scene/view/render.rs
+1 src/sys.rs
+2 src/sys/ui_font/linux.rs
+3 src/sysinfo.rs
+1 src/ui/color_select/book.rs
+1 src/ui/window/pdf_dialogs.rs
+1 src/ui/window/xref_manager.rs
+3 src/videos.rs

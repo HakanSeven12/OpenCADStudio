@@ -982,6 +982,16 @@ class _Document:
     def poll_input(self, token):
         return ocs.poll_input(token)
 
+    def request_drag(self, prompts, wires=(), preview="line", state="", resume=True):
+        if isinstance(prompts, str):
+            raise TypeError("prompts must be a list of strings, one per point")
+        wires = [[[float(value) for value in point] for point in wire] for wire in wires]
+        return ocs.request_drag([str(prompt) for prompt in prompts], wires, str(preview), str(state), bool(resume))
+
+    def resume(self):
+        token = ocs.resume_token()
+        return None if token is None else ocs.poll_input(token)
+
     @property
     def selection(self):
         return [self.entities[handle] for handle in ocs.selection()]

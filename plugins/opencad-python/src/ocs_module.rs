@@ -164,6 +164,84 @@ mod ocs {
         .ok_or_else(|| vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()))
     }
 
+    /// Start a pick of `len(prompts)` points with a live preview: `wires`
+    /// (lists of `[x, y, z]`) drawn as `preview` says ("line", "move" or
+    /// "array") while the cursor moves. With `resume` the running `PY_RUN`
+    /// file is run again after the last point; `resume_token()` then gives
+    /// that run the token. `state` comes back unchanged with the result.
+    #[cfg(feature = "experimental-host-model")]
+    #[pyfunction]
+    fn request_drag(
+        prompts: Vec<String>,
+        wires: Vec<Vec<Vec<f64>>>,
+        preview: String,
+        state: String,
+        resume: bool,
+        vm: &VirtualMachine,
+    ) -> PyResult<u64> {
+        use crate::input_cache as cache;
+        let bad = |text: &str| vm.new_value_error(text.to_owned());
+        if prompts.is_empty() || prompts.len() > cache::MAX_DRAG_PROMPTS {
+            return Err(bad("request_drag: 1 to 8 prompts, one per point"));
+        }
+        if prompts.iter().any(|prompt| prompt.trim().is_empty()) {
+            return Err(bad("request_drag: a prompt must not be empty"));
+        }
+        let preview = cache::DragPreview::parse(&preview)
+            .ok_or_else(|| bad("request_drag: preview is 'line', 'move' or 'array'"))?;
+        if preview == cache::DragPreview::Array && prompts.len() != 3 {
+            return Err(bad(
+                "request_drag: an array takes 3 prompts (base point, vector, end point)",
+            ));
+        }
+        if preview == cache::DragPreview::Move && prompts.len() < 2 {
+            return Err(bad("request_drag: a move takes at least 2 prompts"));
+        }
+        if state.len() > cache::MAX_DRAG_STATE_BYTES {
+            return Err(bad("request_drag: state is longer than 64 KiB"));
+        }
+        if wires.iter().map(Vec::len).sum::<usize>() > cache::MAX_DRAG_WIRE_POINTS {
+            return Err(bad("request_drag: more than 40000 preview points"));
+        }
+        let mut lines = Vec::with_capacity(wires.len());
+        for wire in wires {
+            let mut line = Vec::with_capacity(wire.len());
+            for point in wire {
+                match point.as_slice() {
+                    [x, y] if x.is_finite() && y.is_finite() => line.push([*x, *y, 0.0]),
+                    [x, y, z] if x.is_finite() && y.is_finite() && z.is_finite() => {
+                        line.push([*x, *y, *z])
+                    }
+                    _ => return Err(bad("request_drag: a wire point is 2 or 3 finite numbers")),
+                }
+            }
+            if line.len() >= 2 {
+                lines.push(line);
+            }
+        }
+        let path = if resume {
+            Some(host_ctx::script_path().ok_or_else(|| {
+                vm.new_runtime_error("request_drag: resume needs a PY_RUN script file".to_owned())
+            })?)
+        } else {
+            None
+        };
+        host_ctx::with_host(|host| {
+            let (token, command) =
+                cache::begin_drag(host.tab_id(), prompts, lines, preview, state, path.as_deref());
+            host.start_interactive(Box::new(command));
+            token
+        })
+        .ok_or_else(|| vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned()))
+    }
+
+    /// The token of the drag whose last point started this run, else `None`.
+    #[cfg(feature = "experimental-host-model")]
+    #[pyfunction]
+    fn resume_token() -> Option<u64> {
+        host_ctx::resume_token()
+    }
+
     #[cfg(feature = "experimental-host-model")]
     #[pyfunction]
     fn poll_input(token: u64, vm: &VirtualMachine) -> PyResult<PyObjectRef> {
@@ -187,6 +265,24 @@ mod ocs {
                         .into(),
                     vm,
                 )?;
+            }
+            PickResult::Drag {
+                points,
+                count,
+                state,
+            } => {
+                row.set_item("status", vm.new_pyobj("drag"), vm)?;
+                let points = points
+                    .into_iter()
+                    .map(|point| {
+                        vm.ctx
+                            .new_list(point.into_iter().map(|v| vm.new_pyobj(v)).collect())
+                            .into()
+                    })
+                    .collect();
+                row.set_item("points", vm.ctx.new_list(points).into(), vm)?;
+                row.set_item("count", vm.new_pyobj(count), vm)?;
+                row.set_item("state", vm.new_pyobj(state), vm)?;
             }
             PickResult::Entity { handle, point } => {
                 row.set_item("status", vm.new_pyobj("entity"), vm)?;
@@ -6482,7 +6578,7 @@ mod tests {
     #[test]
     fn entity_snapshot_uses_catalog_variant_name() {
         use ocs_plugin_api::host::document;
-        let hatch = document::EntityType::Hatch(document::entities::Hatch::default());
+        let hatch = document::EntityType::Hatch(Box::new(document::entities::Hatch::default()));
         let value = serde_json::to_value(hatch).unwrap();
         let kind = value.as_object().unwrap().keys().next().unwrap();
         assert_eq!(kind, "Hatch");

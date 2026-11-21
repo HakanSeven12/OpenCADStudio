@@ -57,6 +57,7 @@ be security theater, not a real control.
 |---------|-------------|
 | `PY_EVAL <expr>` | Evaluate one Python expression and print the result (or error) to the command line. Example: `PY_EVAL 1 + 1`. |
 | `PY_RUN <path.py>` | Run a `.py` file as a script (statements, not just one expression). Reports an error the same way as `PY_EVAL` (missing file, syntax error, exception) — never a silent no-op. |
+| `PY_RESUME <token> <path.py>` | Run the file again after a `request_drag` it started has its points. The plugin issues this itself; `doc.resume()` then returns the result. |
 
 ## The `ocs` module
 

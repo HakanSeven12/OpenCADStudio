@@ -9,7 +9,7 @@
 //! `void *ctx`): stash a pointer for the duration of one interpreter run, and
 //! clear it before the run's borrow of `host` ends.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use ocs_plugin_api::host::HostApi;
 
@@ -17,6 +17,36 @@ thread_local! {
     static CURRENT_HOST: Cell<Option<*mut dyn HostApi>> = const { Cell::new(None) };
     static UNDO_LABEL: Cell<&'static str> = const { Cell::new("") };
     static UNDO_STARTED: Cell<bool> = const { Cell::new(false) };
+    static SCRIPT: RefCell<Option<(String, Option<u64>)>> = const { RefCell::new(None) };
+}
+
+/// Names the `PY_RUN` file being run, and the drag token it is resumed
+/// with, for the lifetime of the guard.
+pub(crate) struct ScriptGuard;
+
+impl ScriptGuard {
+    pub(crate) fn set(path: &str, resume: Option<u64>) -> Self {
+        SCRIPT.with(|slot| *slot.borrow_mut() = Some((path.to_owned(), resume)));
+        ScriptGuard
+    }
+}
+
+impl Drop for ScriptGuard {
+    fn drop(&mut self) {
+        SCRIPT.with(|slot| *slot.borrow_mut() = None);
+    }
+}
+
+/// Path of the running `PY_RUN` file; `None` for `PY_EVAL` and quad code.
+#[cfg(feature = "experimental-host-model")]
+pub(crate) fn script_path() -> Option<String> {
+    SCRIPT.with(|slot| slot.borrow().as_ref().map(|(path, _)| path.clone()))
+}
+
+/// Token of the drag this run continues, if a drag started it.
+#[cfg(feature = "experimental-host-model")]
+pub(crate) fn resume_token() -> Option<u64> {
+    SCRIPT.with(|slot| slot.borrow().as_ref().and_then(|(_, token)| *token))
 }
 
 /// Holds the thread-local host pointer for its lifetime; clears it on drop.

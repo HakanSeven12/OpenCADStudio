@@ -4092,12 +4092,14 @@ fn inactive_flip_with_retained_action_targets_does_not_block_other_parameters() 
         drive(&mut doc, def, parameter, member),
         (DVec3::new(28., 6., 0.), 4.)
     );
+    // Another action carries no frame: an active Flip keeps the link and
+    // flips its member.
     let mut active = baseline.clone();
+    assert!(evaluate_value(&mut active, &baseline, def, flip, Value::Flip(true)).unwrap());
     assert_eq!(
-        evaluate_value(&mut active, &baseline, def, flip, Value::Flip(true)).unwrap_err(),
-        "This action targets another parameter or an unsupported native object."
+        action_object_mut(&mut active, flip_action).dependencies,
+        action_object_mut(&mut baseline.clone(), flip_action).dependencies
     );
-    assert_eq!(active, baseline);
 }
 
 #[test]

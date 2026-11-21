@@ -484,7 +484,7 @@ fn wipeout_plane(wipeout: &Wipeout) -> ocs_geom::space::Plane {
     )
 }
 
-fn wipeout_boundary(wipeout: &Wipeout) -> Vec<[f64; 3]> {
+pub(crate) fn wipeout_boundary(wipeout: &Wipeout) -> Vec<[f64; 3]> {
     if wipeout_is_polygonal(wipeout) {
         wipeout
             .world_boundary_vertices()

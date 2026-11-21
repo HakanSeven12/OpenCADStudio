@@ -71,11 +71,28 @@ fn box_preview_rect(a: Point, b: Point, bounds: iced::Rectangle) -> Option<[f32;
     (rect[0] < rect[2] && rect[1] < rect[3]).then_some(rect)
 }
 
-// A few logical pixels of travel filter mouse jitter while the button is down.
-fn selection_drag_should_start(press: Point, cursor: Point) -> bool {
+/// Decide whether a selection press has become a drag. Without a click
+/// alternative a few logical pixels of travel filter jitter. When a click can
+/// also arm a click-click window, the hand may still be moving as the button
+/// goes down: a drag then needs the button held, or for a rectangle a long
+/// fast stroke. A fast movement alone never starts a lasso.
+fn selection_drag_should_start(
+    press: Point,
+    cursor: Point,
+    held_ms: u128,
+    click_window: bool,
+    lasso: bool,
+) -> bool {
+    const JITTER_DIST2: f32 = 5.0 * 5.0;
+    const CLICK_DIST2: f32 = 12.0 * 12.0;
+    const RECT_FAST_DIST2: f32 = 24.0 * 24.0;
     let dx = cursor.x - press.x;
     let dy = cursor.y - press.y;
-    dx * dx + dy * dy >= 25.0
+    let dist2 = dx * dx + dy * dy;
+    if !click_window {
+        return dist2 >= JITTER_DIST2;
+    }
+    dist2 > CLICK_DIST2 && (held_ms >= POLY_START_DELAY_MS || (!lasso && dist2 > RECT_FAST_DIST2))
 }
 
 /// For a short selection click, use the actual mouse-down position even if
@@ -101,11 +118,27 @@ mod selection_gesture_priority_tests {
     #[test]
     fn selection_drag_filters_pointer_jitter() {
         let start = Point::new(100.0, 100.0);
-        assert!(!selection_drag_should_start(
+        let jitter = Point::new(103.0, 102.0);
+        let moved = Point::new(106.0, 100.0);
+        assert!(!selection_drag_should_start(start, jitter, 0, false, false));
+        assert!(selection_drag_should_start(start, moved, 0, false, false));
+    }
+
+    #[test]
+    fn a_quick_moving_click_stays_a_click_when_it_can_arm_a_window() {
+        let start = Point::new(100.0, 100.0);
+        let wobble = Point::new(110.0, 107.0);
+        let far = Point::new(130.0, 100.0);
+        assert!(!selection_drag_should_start(start, wobble, 0, true, false));
+        assert!(!selection_drag_should_start(start, far, 0, true, true));
+        assert!(selection_drag_should_start(start, far, 0, true, false));
+        assert!(selection_drag_should_start(
             start,
-            Point::new(103.0, 102.0)
+            wobble,
+            POLY_START_DELAY_MS,
+            true,
+            true
         ));
-        assert!(selection_drag_should_start(start, Point::new(106.0, 100.0)));
     }
 
     #[test]
@@ -2585,13 +2618,19 @@ impl OpenCADStudio {
         else {
             return;
         };
-        if !selection_drag_should_start(press, cursor) {
+        let held_ms = state
+            .input
+            .left_press_time
+            .map_or(u128::MAX, |time| time.elapsed().as_millis());
+        let lasso = self.pick_auto & 4 != 0;
+        // A click may also arm a click-click window (PICKDRAG 0 or 2).
+        let click_window = self.pick_auto & 1 != 0 && self.pick_drag_mode != 1;
+        if !selection_drag_should_start(press, cursor, held_ms, click_window, lasso) {
             return;
         }
         let active_cmd = tab.active_cmd.as_ref();
         let idle = active_cmd.is_none();
         let over_object = idle && self.pick_auto & 2 != 0;
-        let lasso = self.pick_auto & 4 != 0;
         let implied_window = self.pick_auto & 1 != 0;
         let command_drag = active_cmd.is_some_and(|cmd| cmd.accepts_drag_selection());
         let enabled = if idle {
@@ -11288,6 +11327,9 @@ properties={:.1}ms picked={}",
 
 #[cfg(test)]
 mod table_grip_picture_tests;
+
+#[cfg(test)]
+mod selection_click_wobble_tests;
 
 #[cfg(test)]
 mod hatch_double_click_tests {

@@ -768,7 +768,10 @@ mod w2d {
         Some((paths, view, texts))
     }
 
-    /// A W2D string: quoted ASCII, or a count followed by UTF-16 units.
+    /// A W2D string: quoted ASCII; between braces, a 32-bit count of
+    /// characters and their UTF-16 units, which is how a binary stream
+    /// writes a string that is not plain ASCII; or a short count followed by
+    /// UTF-16 units.
     fn read_string(r: &mut Reader) -> Option<String> {
         if r.b.get(r.i) == Some(&b'\'') {
             r.i += 1;
@@ -778,6 +781,8 @@ mod w2d {
             }
             r.i += 1;
             Some(String::from_utf8_lossy(&r.b[start..r.i - 1]).to_string())
+        } else if let Some(text) = braced_string(r) {
+            Some(text)
         } else {
             let n = r.count()?;
             let units: Vec<u16> =
@@ -788,6 +793,33 @@ mod w2d {
             r.i += n * 2;
             Some(String::from_utf16_lossy(&units))
         }
+    }
+
+    /// "{" count units "}": the string, with the reader past it. `None`
+    /// leaves the reader where it was: the bytes are not that form unless
+    /// the closing brace stands where the count says.
+    fn braced_string(r: &mut Reader) -> Option<String> {
+        let start = r.i;
+        let text = (|| {
+            if r.u8()? != b'{' {
+                return None;
+            }
+            let count = usize::try_from(r.i32()?).ok()?;
+            let end = r.i.checked_add(count.checked_mul(2)?)?;
+            if r.b.get(end) != Some(&b'}') {
+                return None;
+            }
+            let units: Vec<u16> = r.b[r.i..end]
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
+            r.i = end + 1;
+            Some(String::from_utf16_lossy(&units))
+        })();
+        if text.is_none() {
+            r.i = start;
+        }
+        text
     }
 }
 
@@ -1437,5 +1469,81 @@ mod xps_depth_tests {
         let mut files = std::collections::HashMap::new();
         files.insert("3D/descriptor.xml".to_string(), deep.into_bytes());
         assert!(super::sheets(&files).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod w2d_string_tests {
+    use super::w2d;
+
+    /// A stream with texts from (100, 200) on, each 50 above the one before:
+    /// a font height, then a text opcode for each of `strings`, given as the
+    /// bytes of its string operand.
+    fn text_stream(strings: &[Vec<u8>]) -> Vec<u8> {
+        let mut stream = b"(W2D V06.00)V".to_vec();
+        stream.extend_from_slice(&[0x06, 0x20, 0x00]);
+        stream.extend_from_slice(&500i32.to_le_bytes());
+        for (index, string) in strings.iter().enumerate() {
+            let (dx, dy) = if index == 0 { (100, 200) } else { (0, 50) };
+            stream.push(b'x');
+            stream.extend_from_slice(&i32::to_le_bytes(dx));
+            stream.extend_from_slice(&i32::to_le_bytes(dy));
+            stream.extend_from_slice(string);
+        }
+        stream.extend_from_slice(b"(EndOfDWF)");
+        stream
+    }
+
+    /// A string as a binary stream writes one that is not plain ASCII: a
+    /// brace, a 32-bit count of characters, their UTF-16 units and a brace.
+    fn braced(text: &str) -> Vec<u8> {
+        let units: Vec<u16> = text.encode_utf16().collect();
+        let mut string = vec![b'{'];
+        string.extend_from_slice(&(units.len() as i32).to_le_bytes());
+        for unit in units {
+            string.extend_from_slice(&unit.to_le_bytes());
+        }
+        string.push(b'}');
+        string
+    }
+
+    #[test]
+    fn a_string_between_braces_is_its_utf16_units() {
+        let text = "\u{d1}and\u{fa} \u{f8} 25 \u{2014} \u{ab}sala\u{bb}";
+
+        let (_, _, texts) = w2d::read(&text_stream(&[braced(text)])).expect("the stream reads");
+
+        assert_eq!(texts.len(), 1);
+        assert_eq!(texts[0].text, text);
+        assert_eq!(texts[0].origin, [100.0, 200.0]);
+    }
+
+    #[test]
+    fn what_follows_a_braced_string_is_still_read() {
+        let stream = text_stream(&[braced("caf\u{e9}"), b"'ROOM 12'".to_vec()]);
+
+        let (_, _, texts) = w2d::read(&stream).expect("the stream reads");
+
+        let read: Vec<&str> = texts.iter().map(|text| text.text.as_str()).collect();
+        assert_eq!(read, vec!["caf\u{e9}", "ROOM 12"]);
+        assert_eq!(texts[1].origin, [100.0, 250.0]);
+    }
+
+    #[test]
+    fn quoted_and_counted_strings_read_as_before() {
+        let counted = {
+            let units: Vec<u16> = "na\u{ef}ve".encode_utf16().collect();
+            let mut string = vec![units.len() as u8];
+            for unit in units {
+                string.extend_from_slice(&unit.to_le_bytes());
+            }
+            string
+        };
+        let stream = text_stream(&[b"'ROOM 12'".to_vec(), counted]);
+
+        let (_, _, texts) = w2d::read(&stream).expect("the stream reads");
+
+        let read: Vec<&str> = texts.iter().map(|text| text.text.as_str()).collect();
+        assert_eq!(read, vec!["ROOM 12", "na\u{ef}ve"]);
     }
 }

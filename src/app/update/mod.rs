@@ -15057,14 +15057,21 @@ impl OpenCADStudio {
                         return Task::done(Message::PrintAllPdfPath(None));
                     };
                     iced::window::run(window_id, move |parent| {
-                        crate::io::pdf_export::pick_plot_path_owned(stem, parent, false)
+                        crate::io::pdf_export::pick_plot_path_owned(
+                            stem,
+                            parent,
+                            crate::io::pdf_export::PlotFileKind::Pdf,
+                        )
                     })
                     .map(Message::PrintAllPdfPath)
                 }
                 #[cfg(target_os = "windows")]
                 {
                     Task::perform(
-                        crate::io::pdf_export::pick_plot_path_async(stem, false),
+                        crate::io::pdf_export::pick_plot_path_async(
+                            stem,
+                            crate::io::pdf_export::PlotFileKind::Pdf,
+                        ),
                         Message::PrintAllPdfPath,
                     )
                 }
@@ -15117,15 +15124,35 @@ impl OpenCADStudio {
             }
 
             // ── Plot / Export ─────────────────────────────────────────────
-            Message::PlotExport => {
+            export @ (Message::PlotExport | Message::PlotExportDwf) => {
+                let dwf = matches!(export, Message::PlotExportDwf);
+                #[cfg(target_arch = "wasm32")]
+                if dwf {
+                    self.command_line.push_error(
+                        crate::t!("DWF export is not available in the web version.").as_ref(),
+                    );
+                    return Task::none();
+                }
                 let (stem, preset) = self.plot_output_target();
                 if let Some(path) = preset {
+                    let path = if dwf {
+                        path.with_extension("dwf")
+                    } else {
+                        path
+                    };
                     return Task::done(Message::PlotExportPath(Some(path)));
                 }
                 // The save dialog follows the dialog's file device, so the
-                // SVG choice proposes `stem.svg` up front.
+                // SVG choice proposes `stem.svg` up front; EXPORTDWF
+                // proposes `stem.dwf`.
                 #[cfg(not(target_arch = "wasm32"))]
-                let svg = self.plot_dialog.file_svg;
+                let svg = if dwf {
+                    crate::io::pdf_export::PlotFileKind::Dwf
+                } else if self.plot_dialog.file_svg {
+                    crate::io::pdf_export::PlotFileKind::Svg
+                } else {
+                    crate::io::pdf_export::PlotFileKind::Pdf
+                };
                 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
                 {
                     let Some(window_id) = self.main_window else {
@@ -15160,7 +15187,11 @@ impl OpenCADStudio {
                     return Task::done(Message::PlotWindowExportPath(Some(path)));
                 }
                 #[cfg(not(target_arch = "wasm32"))]
-                let svg = self.plot_dialog.file_svg;
+                let svg = if self.plot_dialog.file_svg {
+                    crate::io::pdf_export::PlotFileKind::Svg
+                } else {
+                    crate::io::pdf_export::PlotFileKind::Pdf
+                };
                 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
                 {
                     let Some(window_id) = self.main_window else {

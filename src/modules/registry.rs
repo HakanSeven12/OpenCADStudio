@@ -334,6 +334,7 @@ const COMMAND_ICON_ALIASES: &[(&str, &str)] = &[
     ("STLOUT", "EXPORT"),
     ("FBXEXPORT", "EXPORT"),
     ("EXPORTSVG", "EXPORT"),
+    ("EXPORTDWF", "EXPORT"),
     ("PNGOUT", "EXPORT"),
     ("JPGOUT", "EXPORT"),
     ("BMPOUT", "EXPORT"),

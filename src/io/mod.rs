@@ -12,6 +12,7 @@ pub(crate) mod connection_workers;
 // inside is wasm-only.
 pub mod brep_build;
 pub mod crs;
+pub mod dwf_export;
 pub mod fbx;
 pub mod file_association;
 pub mod font_repo;

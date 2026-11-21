@@ -1301,7 +1301,12 @@ fn emit_image(
 // ── Colour / dash / formatting helpers ─────────────────────────────────────
 
 /// Screening/alpha blend towards white, mirroring `plotted_color` in PDF export.
-fn plotted_color(rgb: [f32; 3], alpha: f32, screening: f32, options: PlotOptions) -> [f32; 3] {
+pub(super) fn plotted_color(
+    rgb: [f32; 3],
+    alpha: f32,
+    screening: f32,
+    options: PlotOptions,
+) -> [f32; 3] {
     let amount = screening.clamp(0.0, 1.0)
         * if options.transparency {
             alpha.clamp(0.0, 1.0)
@@ -1353,7 +1358,7 @@ fn svg_opacity(alpha: f32, transparency: bool) -> String {
     }
 }
 
-fn plot_stamp_label() -> String {
+pub(super) fn plot_stamp_label() -> String {
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -1382,7 +1387,7 @@ fn stamp_glyph_quads(
     .0
 }
 
-fn stamp_wire_from_atlas(
+pub(super) fn stamp_wire_from_atlas(
     atlas: &mut crate::scene::text::sdf_atlas::GlyphAtlas,
     label: &str,
 ) -> Option<WireModel> {

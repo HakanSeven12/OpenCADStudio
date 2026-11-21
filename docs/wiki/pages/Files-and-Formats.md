@@ -65,6 +65,7 @@ If a drawing cannot be read cleanly, the program offers to open it in **recovery
 | DXF | Open | Save |
 | PDF | `PDFIMPORT` (as objects), `PDFATTACH` (as underlay) | `PLOT`, `EXPORTPDF` |
 | SVG, SVGZ | `SVGIN` or `IMPORT` (as a block) | `EXPORTSVG` |
+| DWF, DWFx | `DWFATTACH` (as underlay) | `EXPORTDWF` (DWF) |
 | OBJ | `IMPORTOBJ` (meshes) | |
 | 3D Studio (3DS) | `IMPORT` | |
 | SAT | `ACISIN` (solids) | |

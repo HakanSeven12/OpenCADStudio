@@ -6003,6 +6003,8 @@ pub enum Message {
     // ── Plot / Export ─────────────────────────────────────────────────────
     /// Show the SVG save-file dialog and trigger export.
     PlotExport,
+    /// The same export with the save dialog proposing a DWF file.
+    PlotExportDwf,
     /// Callback after the user picks (or cancels) the export path.
     PlotExportPath(Option<std::path::PathBuf>),
     /// Export the pending model-space plot window (from PLOTWINDOW) to PDF.

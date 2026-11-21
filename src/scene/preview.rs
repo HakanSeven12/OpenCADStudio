@@ -395,6 +395,7 @@ impl Scene {
     }
 
     pub fn wire_models_for(&self, handles: &[document::Handle]) -> Vec<WireModel> {
+        let context = std::cell::OnceCell::new();
         let wires = handles
             .iter()
             .flat_map(|h| {
@@ -405,7 +406,7 @@ impl Scene {
                     // from the current HatchModel — `apply_grip` keeps it in
                     // step, so the preview tracks a dragged grip in real time.
                     Some(EntityType::Hatch(_)) => self.hatch_outline_wire(*h).into_iter().collect(),
-                    Some(e) => self.tessellate_one(e),
+                    Some(e) => self.tessellate_one_in(&context, e),
                     None => Vec::new(),
                 }
             })
@@ -439,12 +440,13 @@ impl Scene {
     ) -> (Vec<WireModel>, Vec<(WireModel, glam::DVec3)>) {
         let mut plain: Vec<WireModel> = Vec::new();
         let mut texts: Vec<(WireModel, glam::DVec3)> = Vec::new();
+        let context = std::cell::OnceCell::new();
         for h in handles {
             let Some(e) = self.document.get_entity(*h) else {
                 continue;
             };
             if matches!(e, EntityType::Text(_)) {
-                let wires = self.tessellate_one(e);
+                let wires = self.tessellate_one_in(&context, e);
                 let mut lo = [f64::INFINITY; 2];
                 let mut hi = [f64::NEG_INFINITY; 2];
                 for w in &wires {
@@ -471,7 +473,7 @@ impl Scene {
                     texts.push((w, center));
                 }
             } else {
-                plain.extend(self.tessellate_one(e));
+                plain.extend(self.tessellate_one_in(&context, e));
             }
         }
         (transform_preview_wires(plain), texts)
@@ -625,9 +627,10 @@ impl Scene {
     /// Resolve cached block copies before consumers transform or count their
     /// points, just like the handle-based edit preview snapshots.
     pub fn wires_for_entities(&self, entities: &[document::EntityType]) -> Vec<WireModel> {
+        let context = std::cell::OnceCell::new();
         let wires = entities
             .iter()
-            .flat_map(|e| self.tessellate_one(e))
+            .flat_map(|e| self.tessellate_one_in(&context, e))
             .collect();
         transform_preview_wires(wires)
     }
@@ -648,6 +651,7 @@ impl Scene {
             return vec![];
         };
         let mut out = Vec::new();
+        let context = std::cell::OnceCell::new();
         for &eh in &br.entity_handles {
             let Some(e) = self.document.get_entity(eh) else {
                 continue;
@@ -655,7 +659,7 @@ impl Scene {
             if matches!(e, EntityType::Block(_) | EntityType::BlockEnd(_)) || e.common().invisible {
                 continue;
             }
-            out.extend(self.tessellate_one(e));
+            out.extend(self.tessellate_one_in(&context, e));
         }
         transform_preview_wires(out)
     }

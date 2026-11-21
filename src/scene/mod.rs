@@ -5761,6 +5761,24 @@ impl Scene {
 
 mod resident_wires;
 
+/// What [`Scene::tessellation_context`] resolves: the background colour, the
+/// annotation scale and its handle, the block cache, and whether the layout
+/// is a paper layout.
+type TessellationContext = (
+    [f32; 4],
+    f32,
+    Option<Handle>,
+    Arc<cache::block_cache::BlockCache>,
+    bool,
+);
+
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread resolved a tessellation context.
+    pub(crate) static TESSELLATION_CONTEXTS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
 impl Scene {
     /// Cached tessellation of the current layout block's paper-space entities,
     /// shared by `entity_wires_arc()` and the GPU sheet viewport. A thin
@@ -13048,15 +13066,13 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
     }
 
     /// Resolve the active layout and annotation context for tessellation.
-    fn tessellation_context(
-        &self,
-    ) -> (
-        [f32; 4],
-        f32,
-        Option<Handle>,
-        Arc<cache::block_cache::BlockCache>,
-        bool,
-    ) {
+    ///
+    /// This scans the drawing's objects for the annotation scale and for the
+    /// current layout. A pass over many entities takes it one time, at its
+    /// first entity, and gives it to [`Self::tessellate_one_in`].
+    fn tessellation_context(&self) -> TessellationContext {
+        #[cfg(test)]
+        TESSELLATION_CONTEXTS.with(|count| count.set(count.get() + 1));
         let is_model = self.current_layout == "Model";
         let bg = if is_model {
             self.bg_color
@@ -13089,7 +13105,22 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
     }
 
     fn tessellate_one(&self, e: &EntityType) -> Vec<WireModel> {
-        let (bg, anno, annotation_scale_handle, blk_cache, paper) = self.tessellation_context();
+        self.tessellate_one_in(&std::cell::OnceCell::new(), e)
+    }
+
+    /// [`Self::tessellate_one`] for a pass over many entities: the first call
+    /// resolves the context into `context` and the later calls use it. The
+    /// scene cannot change during the pass, so the context stays correct. A
+    /// pass that tessellates nothing resolves nothing, as before.
+    fn tessellate_one_in(
+        &self,
+        context: &std::cell::OnceCell<TessellationContext>,
+        e: &EntityType,
+    ) -> Vec<WireModel> {
+        let (bg, anno, annotation_scale_handle, blk_cache, paper) =
+            context.get_or_init(|| self.tessellation_context());
+        let (bg, anno, annotation_scale_handle, paper) =
+            (*bg, *anno, *annotation_scale_handle, *paper);
         // tessellate_one is used for one-off lookups (hit test, properties).
         // Skip culling here so the caller always gets the full geometry.
         let mut wires = tessellate_entity(
@@ -13100,7 +13131,7 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
             anno,
             annotation_scale_handle,
             e,
-            Some(&blk_cache),
+            Some(blk_cache),
             None,
             None,
             paper.then_some(1.0),

@@ -154,7 +154,7 @@ pub fn sheet_without(
         // A V7 model's extent includes its text: each text's box runs its
         // length along the baseline and its height above it (as the
         // reference measures a model). A V8 model has its stored element
-        // ranges; a DWF sheet keeps its plotted view.
+        // ranges; a DWF sheet keeps its view and its viewports.
         if kind == UnderlayType::Dgn && dgn7::is_v7(&bytes) {
             let mut r = sheet.rect;
             for t in &sheet.texts {

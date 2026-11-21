@@ -462,7 +462,21 @@ mod w2d {
         (r[0] < r[2] && r[1] < r[3]).then_some(r)
     }
 
-    /// The stream's geometry and text in model units, and its plotted view.
+    /// The rectangle that holds both.
+    fn union(a: Option<[f64; 4]>, b: Option<[f64; 4]>) -> Option<[f64; 4]> {
+        match (a, b) {
+            (Some(a), Some(b)) => Some([
+                a[0].min(b[0]),
+                a[1].min(b[1]),
+                a[2].max(b[2]),
+                a[3].max(b[3]),
+            ]),
+            (a, b) => a.or(b),
+        }
+    }
+
+    /// The stream's geometry and text in model units, and the rectangle of
+    /// its sheet: its view together with the contours of its viewports.
     pub fn read(b: &[u8]) -> Option<(Vec<Path>, Option<[f64; 4]>, Vec<Text>)> {
         let mut r = Reader { b, i: 0 };
         // The current font: family, em height (graphics units), rotation
@@ -471,6 +485,9 @@ mod w2d {
         let mut texts: Vec<(String, [f64; 2], (String, f64, f64, f64), [u8; 3])> = Vec::new();
         let mut units = Units::identity();
         let mut view: Option<[f64; 4]> = None;
+        // The contours of the viewports: where the sheet's geometry is drawn.
+        // The view is only the rectangle to show first, and may hold less.
+        let mut drawn: Option<[f64; 4]> = None;
         let mut color = [0u8, 0, 0];
         let mut weight = 0.0f64;
         let mut visible = true;
@@ -490,11 +507,15 @@ mod w2d {
                     match name.as_str() {
                         "Units" => units = units_of(body).unwrap_or(units),
                         "View" => view = rect_of(&points_of(body)).or(view),
-                        "Viewport" if view.is_none() => {
-                            view = rect_of(&points_of(body));
-                            if let Some(u) = units_of(body) {
-                                units = u;
+                        "Viewport" => {
+                            let contour = rect_of(&points_of(body));
+                            if view.is_none() {
+                                view = contour;
+                                if let Some(u) = units_of(body) {
+                                    units = u;
+                                }
                             }
+                            drawn = union(drawn, contour);
                         }
                         "Color" => {
                             let v = super::numbers(&String::from_utf8_lossy(body));
@@ -722,7 +743,7 @@ mod w2d {
                 }
             })
             .collect();
-        let view = view.map(|v| {
+        let view = union(view, drawn).map(|v| {
             let a = units.model([v[0], v[1]]);
             let b = units.model([v[2], v[3]]);
             [
@@ -1214,6 +1235,77 @@ mod xps {
             last[3] = p1;
         }
         pieces
+    }
+}
+
+#[cfg(test)]
+mod w2d_sheet_rect_tests {
+    use super::w2d;
+
+    /// Two graphics units to the model unit, the model's origin 100 of them
+    /// along x.
+    const UNITS: &str = "((2 0 0 0)(0 2 0 0)(0 0 1 0)(100 0 0 1))";
+    /// A viewport 1000 by 1000 model units from the origin, and one beside it.
+    const VIEWPORT: &str = "2100,0 2100,2000 100,2000 100,0";
+    const SECOND_VIEWPORT: &str = "4100,0 4100,2000 2100,2000 2100,0";
+
+    /// The sheet rectangle of a stream with the given view and viewport
+    /// contours.
+    fn sheet_rect(view: Option<&str>, contours: &[&str]) -> Option<[f64; 4]> {
+        let mut stream = format!("(W2D V06.00)(Units '' {UNITS})");
+        if let Some(view) = view {
+            stream.push_str(&format!("(View {view})"));
+        }
+        for contour in contours {
+            stream.push_str(&format!(
+                "(Viewport '' (Contour 1 4 {contour}) (Units '' {UNITS}))"
+            ));
+        }
+        stream.push_str("(EndOfDWF)");
+        w2d::read(stream.as_bytes()).expect("the stream reads").1
+    }
+
+    #[test]
+    fn a_view_narrower_than_its_viewport_does_not_narrow_the_sheet() {
+        // The view shows the viewport's whole width and the middle of its
+        // height: what the viewport draws above and below it is on the sheet.
+        let sheet = sheet_rect(Some("100,200 2100,1800"), &[VIEWPORT]);
+
+        assert_eq!(sheet, Some([0.0, 0.0, 1000.0, 1000.0]));
+    }
+
+    #[test]
+    fn the_sheet_holds_every_viewport() {
+        // The view shows the first of two viewports side by side.
+        let sheet = sheet_rect(Some("100,0 2100,2000"), &[VIEWPORT, SECOND_VIEWPORT]);
+
+        assert_eq!(sheet, Some([0.0, 0.0, 2000.0, 1000.0]));
+    }
+
+    #[test]
+    fn a_stream_without_a_view_is_as_large_as_its_viewports() {
+        assert_eq!(
+            sheet_rect(None, &[VIEWPORT]),
+            Some([0.0, 0.0, 1000.0, 1000.0])
+        );
+        assert_eq!(
+            sheet_rect(None, &[VIEWPORT, SECOND_VIEWPORT]),
+            Some([0.0, 0.0, 2000.0, 1000.0])
+        );
+    }
+
+    #[test]
+    fn a_view_wider_than_its_viewport_stays_the_sheet() {
+        let sheet = sheet_rect(Some("100,0 4100,3000"), &[VIEWPORT]);
+
+        assert_eq!(sheet, Some([0.0, 0.0, 2000.0, 1500.0]));
+    }
+
+    #[test]
+    fn a_view_alone_is_the_sheet() {
+        let sheet = sheet_rect(Some("100,200 2100,1800"), &[]);
+
+        assert_eq!(sheet, Some([0.0, 100.0, 1000.0, 900.0]));
     }
 }
 

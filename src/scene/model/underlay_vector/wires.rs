@@ -9,10 +9,10 @@ use document::entities::{Underlay, UnderlayDefinition, UnderlayDisplayFlags, Und
 use super::{model, sheet_without, Backdrop, Segment, Sheet};
 use crate::scene::model::wire_model::WireModel;
 
-/// Wires for the underlay's content, one per colour and kind (lines, fills),
-/// named after the underlay so they draw in its place. They are drawn and
-/// plotted but never picked or snapped (the frame selects the underlay; the
-/// underlay's own snap geometry serves object snaps).
+/// Wires for the underlay's content, named after the underlay so they draw
+/// in its place, in the order the sheet draws them ([`content_wires`]). They
+/// are drawn and plotted but never picked or snapped (the frame selects the
+/// underlay; the underlay's own snap geometry serves object snaps).
 pub(crate) fn display_wires(
     u: &Underlay,
     def: &UnderlayDefinition,
@@ -92,9 +92,88 @@ pub(crate) fn display_wires(
     wires
 }
 
+/// A side of the grid a sheet is cut into to tell where its content lies.
+const GRID: usize = 64;
+
+/// The most wires a sheet's content is drawn with. Past it a piece joins the
+/// latest wire of its kind, whatever was drawn since.
+const MAX_BATCHES: usize = 256;
+
+/// The cells of a [`GRID`] by `GRID` grid over the sheet that some content
+/// touches.
+#[derive(Clone)]
+struct Cover([u64; GRID * GRID / 64]);
+
+impl Cover {
+    fn new() -> Self {
+        Self([0; GRID * GRID / 64])
+    }
+
+    /// The column and row of the cell a point of the sheet falls in; a
+    /// point off the sheet counts for the nearest cell.
+    fn cell(rect: [f64; 4], p: [f64; 2]) -> [usize; 2] {
+        let along = |v: f64, low: f64, high: f64| {
+            let share = (v - low) / (high - low).max(f64::MIN_POSITIVE);
+            ((share * GRID as f64).max(0.0) as usize).min(GRID - 1)
+        };
+        [along(p[0], rect[0], rect[2]), along(p[1], rect[1], rect[3])]
+    }
+
+    /// Marks every cell of the box from `low` to `high`.
+    fn mark_box(&mut self, rect: [f64; 4], low: [f64; 2], high: [f64; 2]) {
+        let ([c0, r0], [c1, r1]) = (Self::cell(rect, low), Self::cell(rect, high));
+        for row in r0..=r1 {
+            for col in c0..=c1 {
+                self.0[(row * GRID + col) / 64] |= 1 << ((row * GRID + col) % 64);
+            }
+        }
+    }
+
+    /// Marks the cells the segment from `a` to `b` runs through.
+    fn mark_segment(&mut self, rect: [f64; 4], a: [f64; 2], b: [f64; 2]) {
+        let ([c0, r0], [c1, r1]) = (Self::cell(rect, a), Self::cell(rect, b));
+        // Two samples to the cell along the longer side keep the run whole.
+        let steps = 2 * c0.abs_diff(c1).max(r0.abs_diff(r1)) + 1;
+        for step in 0..=steps {
+            let s = step as f64 / steps as f64;
+            let at = [a[0] + (b[0] - a[0]) * s, a[1] + (b[1] - a[1]) * s];
+            self.mark_box(rect, at, at);
+        }
+    }
+
+    fn meets(&self, other: &Self) -> bool {
+        self.0.iter().zip(&other.0).any(|(a, b)| a & b != 0)
+    }
+
+    fn add(&mut self, other: &Self) {
+        for (mine, theirs) in self.0.iter_mut().zip(&other.0) {
+            *mine |= theirs;
+        }
+    }
+}
+
+/// Content drawn in one go: fills of one colour, or lines of one colour and
+/// width.
+struct Batch {
+    color: [f32; 4],
+    /// The lines' width; `None` for fills.
+    width: Option<f64>,
+    /// The corners of the fill triangles, or the lines' points with a NaN
+    /// between two runs.
+    points: Vec<[f64; 3]>,
+    cover: Cover,
+}
+
 /// The sheet's fills and lines as wires named `name`: `shown` gives a colour
 /// of the sheet as it is drawn, `world` places a point of the sheet and
 /// `scale` is what a width of the sheet measures there.
+///
+/// A sheet is drawn in order, each fill and line over what came before it.
+/// The wires keep that order: a piece joins the latest wire of its kind and
+/// colour unless something drawn since lies where the piece does, and then
+/// it starts a wire of its own. Each wire takes its place in the underlay's
+/// own depth range, as a block's members take theirs, so a fill covers the
+/// lines drawn before it and carries what is drawn after it.
 fn content_wires(
     sheet: &Sheet,
     name: &str,
@@ -103,16 +182,33 @@ fn content_wires(
     scale: f64,
 ) -> Vec<WireModel> {
     let tolerance = curve_tolerance(sheet);
-
-    // Lines per (colour, width), fills per colour, each in first-drawn order.
-    let key = |c: [f32; 4]| c.map(f32::to_bits);
-    let mut lines: Vec<([f32; 4], f64, Vec<[f64; 3]>)> = Vec::new();
-    let mut line_at: HashMap<([u32; 4], u64), usize> = HashMap::new();
-    let mut fills: Vec<([f32; 4], Vec<[f64; 3]>)> = Vec::new();
-    let mut fill_at: HashMap<[u32; 4], usize> = HashMap::new();
+    type Kind = ([u32; 4], Option<u64>);
+    let mut batches: Vec<Batch> = Vec::new();
+    let mut latest: HashMap<Kind, usize> = HashMap::new();
+    // The batch a piece of this colour and width that touches `cover` goes to.
+    let mut place =
+        |batches: &mut Vec<Batch>, color: [f32; 4], width: Option<f64>, cover: Cover| {
+            let kind: Kind = (color.map(f32::to_bits), width.map(f64::to_bits));
+            if let Some(&at) = latest.get(&kind) {
+                let clear = batches[at + 1..]
+                    .iter()
+                    .all(|later| !later.cover.meets(&cover));
+                if clear || batches.len() >= MAX_BATCHES {
+                    batches[at].cover.add(&cover);
+                    return at;
+                }
+            }
+            batches.push(Batch {
+                color,
+                width,
+                points: Vec::new(),
+                cover,
+            });
+            latest.insert(kind, batches.len() - 1);
+            batches.len() - 1
+        };
     for path in &sheet.paths {
         if let Some(c) = path.fill {
-            let color = shown(c);
             let rings: Vec<Vec<[f64; 2]>> = path
                 .subpaths
                 .iter()
@@ -120,68 +216,99 @@ fn content_wires(
                 .filter(|r| r.len() >= 3)
                 .collect();
             if !rings.is_empty() {
+                let mut cover = Cover::new();
+                for ring in &rings {
+                    let reach = |axis: usize, most: bool| {
+                        let values = ring.iter().map(|p| p[axis]);
+                        if most {
+                            values.fold(f64::NEG_INFINITY, f64::max)
+                        } else {
+                            values.fold(f64::INFINITY, f64::min)
+                        }
+                    };
+                    cover.mark_box(
+                        sheet.rect,
+                        [reach(0, false), reach(1, false)],
+                        [reach(0, true), reach(1, true)],
+                    );
+                }
+                let at = place(&mut batches, shown(c), None, cover);
                 let (points, triangles) = ocs_geom::geom2d::triangulate_rings(&rings);
-                let at = *fill_at.entry(key(color)).or_insert_with(|| {
-                    fills.push((color, Vec::new()));
-                    fills.len() - 1
-                });
                 for triangle in triangles {
                     for index in triangle {
                         if let Some(&p) = points.get(index) {
-                            fills[at].1.push(world(p));
+                            batches[at].points.push(world(p));
                         }
                     }
                 }
             }
         }
         if let Some((c, width)) = path.stroke {
-            let color = shown(c);
-            let at = *line_at
-                .entry((key(color), width.to_bits()))
-                .or_insert_with(|| {
-                    lines.push((color, width, Vec::new()));
-                    lines.len() - 1
-                });
-            for sp in &path.subpaths {
-                let mut pts = polyline(&sp.segments, tolerance);
-                if sp.closed && pts.len() >= 2 && pts.first() != pts.last() {
-                    pts.push(pts[0]);
+            let runs: Vec<Vec<[f64; 2]>> = path
+                .subpaths
+                .iter()
+                .filter_map(|sp| {
+                    let mut pts = polyline(&sp.segments, tolerance);
+                    if sp.closed && pts.len() >= 2 && pts.first() != pts.last() {
+                        pts.push(pts[0]);
+                    }
+                    (pts.len() >= 2).then_some(pts)
+                })
+                .collect();
+            if !runs.is_empty() {
+                let mut cover = Cover::new();
+                for run in &runs {
+                    for pair in run.windows(2) {
+                        cover.mark_segment(sheet.rect, pair[0], pair[1]);
+                    }
                 }
-                if pts.len() < 2 {
-                    continue;
+                let at = place(&mut batches, shown(c), Some(width), cover);
+                for run in runs {
+                    let points = &mut batches[at].points;
+                    if !points.is_empty() {
+                        points.push([f64::NAN; 3]);
+                    }
+                    points.extend(run.into_iter().map(world));
                 }
-                let run = &mut lines[at].2;
-                if !run.is_empty() {
-                    run.push([f64::NAN; 3]);
-                }
-                run.extend(pts.into_iter().map(world));
             }
         }
     }
 
-    let mut wires = Vec::new();
-    for (color, tris) in fills {
-        let (fp, fp_low) = crate::scene::convert::tessellate::points_to_ds(tris);
-        let mut wire = content_wire(name, Vec::new(), color);
-        wire.fill_tris = fp;
-        wire.fill_tris_low = fp_low;
-        wires.push(wire);
-    }
-    for (color, width, points) in lines {
-        let (lp, lp_low) = crate::scene::convert::tessellate::points_to_ds(points);
-        let mut wire = content_wire(name, lp, color);
-        wire.points_low = lp_low.into();
-        if width < 0.0 {
-            // A width in pixels (DGN line weights are not shown).
-            wire.set_fixed_screen_width((-width) as f32);
-        } else if width > 0.0 {
-            wire.world_width = (width * scale) as f32;
-        } else {
-            wire.set_fixed_screen_width(1.0);
-        }
-        wires.push(wire);
-    }
-    wires
+    let count = batches.len();
+    batches
+        .into_iter()
+        .enumerate()
+        .map(|(index, batch)| {
+            let (high, low) = crate::scene::convert::tessellate::points_to_ds(batch.points);
+            let mut wire = match batch.width {
+                None => {
+                    let mut wire = content_wire(name, Vec::new(), batch.color);
+                    wire.fill_tris = high;
+                    wire.fill_tris_low = low;
+                    wire
+                }
+                Some(width) => {
+                    let mut wire = content_wire(name, high, batch.color);
+                    wire.points_low = low.into();
+                    if width < 0.0 {
+                        // A width in pixels (DGN line weights are not shown).
+                        wire.set_fixed_screen_width((-width) as f32);
+                    } else if width > 0.0 {
+                        wire.world_width = (width * scale) as f32;
+                    } else {
+                        wire.set_fixed_screen_width(1.0);
+                    }
+                    wire
+                }
+            };
+            // The first wire lowest and the last highest in the underlay's
+            // depth range; a lone wire stays at the underlay's own depth.
+            if count > 1 {
+                wire.depth_override = Some(-0.9 + 1.8 * index as f32 / (count - 1) as f32);
+            }
+            wire
+        })
+        .collect()
 }
 
 fn content_wire(name: &str, points: Vec<[f32; 3]>, color: [f32; 4]) -> WireModel {

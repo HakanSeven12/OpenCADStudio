@@ -1,7 +1,8 @@
 //! DWF (6.x, a zip after a "(DWF V06.00)" tag, sheets as W2D streams) and
 //! DWFx (an XPS package, sheets as fixed pages) underlays: sheet names, and
 //! each sheet's plotted geometry mapped back to the model units it was
-//! plotted from, which is how an underlay places it.
+//! plotted from, which is how an underlay places it. A W2D sheet's raster
+//! images are read with it.
 
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
@@ -478,6 +479,106 @@ mod w2d {
         }
     }
 
+    /// The most pixels an image of a sheet may have.
+    const MAX_IMAGE_PIXELS: usize = 1 << 26;
+
+    /// A raster image of the stream: what follows the size of its block.
+    ///
+    /// The block is "{", the size of what follows, a format, the columns
+    /// and rows of the pixel array, the lower-left corner, the upper-right
+    /// corner, an identifier, and then the pixels as the format has them,
+    /// before the closing "}".
+    struct ImageBlock<'a> {
+        format: u16,
+        columns: usize,
+        rows: usize,
+        /// The lower-left corner, from the point before the image.
+        low: [f64; 2],
+        /// The upper-right corner, from the lower-left one.
+        high: [f64; 2],
+        /// What follows the identifier.
+        rest: &'a [u8],
+    }
+
+    impl<'a> ImageBlock<'a> {
+        const RGB: u16 = 0x0006;
+        const RGBA: u16 = 0x0007;
+        const JPEG: u16 = 0x0008;
+        const PNG: u16 = 0x000C;
+
+        /// The image of a block; `None` for a block of another kind.
+        fn of(body: &'a [u8]) -> Option<Self> {
+            let mut r = Reader { b: body, i: 0 };
+            let format = r.u16()?;
+            // The formats that start alike: mapped, indexed and Group 3
+            // (0x0002 to 0x0005), which are not drawn, and the four above.
+            if !matches!(format, 0x0002..=0x0008 | Self::PNG) {
+                return None;
+            }
+            let (columns, rows) = (r.u16()? as usize, r.u16()? as usize);
+            let low = [r.i32()? as f64, r.i32()? as f64];
+            let high = [r.i32()? as f64, r.i32()? as f64];
+            // The identifier other opcodes may name the image by.
+            r.i32()?;
+            Some(Self {
+                format,
+                columns,
+                rows,
+                low,
+                high,
+                rest: &body[r.i..],
+            })
+        }
+
+        /// The image's size and its pixels as RGBA, rows from the top;
+        /// `None` when the format is not drawn or the pixels are not all
+        /// there.
+        fn pixels(&self) -> Option<(u32, u32, Vec<u8>)> {
+            let mut r = Reader { b: self.rest, i: 0 };
+            let size = usize::try_from(r.i32()?).ok()?;
+            let data = self.rest.get(r.i..r.i.checked_add(size)?)?;
+            let count = self.columns.checked_mul(self.rows)?;
+            if count == 0 || count > MAX_IMAGE_PIXELS {
+                return None;
+            }
+            let size = (self.columns as u32, self.rows as u32);
+            match self.format {
+                Self::RGB => {
+                    let data = data.get(..count * 3)?;
+                    let pixels = data
+                        .chunks_exact(3)
+                        .flat_map(|p| [p[0], p[1], p[2], 255])
+                        .collect();
+                    Some((size.0, size.1, pixels))
+                }
+                // Blue first, as the files plotted with it have it.
+                Self::RGBA => {
+                    let data = data.get(..count * 4)?;
+                    let pixels = data
+                        .chunks_exact(4)
+                        .flat_map(|p| [p[2], p[1], p[0], p[3]])
+                        .collect();
+                    Some((size.0, size.1, pixels))
+                }
+                Self::JPEG => decoded(data, image::ImageFormat::Jpeg),
+                Self::PNG => decoded(data, image::ImageFormat::Png),
+                _ => None,
+            }
+        }
+    }
+
+    /// A picture file's size and pixels as RGBA, rows from the top.
+    fn decoded(data: &[u8], format: image::ImageFormat) -> Option<(u32, u32, Vec<u8>)> {
+        let reader = || image::ImageReader::with_format(std::io::Cursor::new(data), format);
+        let (width, height) = reader().into_dimensions().ok()?;
+        let count = (width as usize).checked_mul(height as usize)?;
+        if count == 0 || count > MAX_IMAGE_PIXELS {
+            return None;
+        }
+        let picture = reader().decode().ok()?.into_rgba8();
+        Some((width, height, picture.into_raw()))
+    }
+
     /// What a stream draws, in model units: its geometry, the rectangle of
     /// its sheet (its view together with the contours of its viewports), its
     /// text and its raster images.
@@ -499,6 +600,9 @@ mod w2d {
         let mut visible = true;
         let mut at = [0f64; 2];
         let mut raw: Vec<(Vec<SubPath>, [u8; 3], f64, bool)> = Vec::new();
+        // The images: how many paths the stream held before each, its
+        // corners, its size and its pixels.
+        let mut pictures: Vec<(usize, [[f64; 2]; 2], (u32, u32, Vec<u8>))> = Vec::new();
         let rel = |at: &mut [f64; 2], dx: f64, dy: f64| {
             at[0] += dx;
             at[1] += dy;
@@ -542,7 +646,17 @@ mod w2d {
                 b'{' => {
                     r.i += 1;
                     let size = r.i32()?;
-                    r.i = r.i.checked_add(size.max(0) as usize)?;
+                    let end = r.i.checked_add(size.max(0) as usize)?;
+                    if let Some(block) = b.get(r.i..end).and_then(ImageBlock::of) {
+                        // The corners are relative like every other point,
+                        // and what follows goes on from the second one.
+                        let low = rel(&mut at, block.low[0], block.low[1]);
+                        let high = rel(&mut at, block.high[0], block.high[1]);
+                        if let Some(pixels) = block.pixels().filter(|_| visible) {
+                            pictures.push((raw.len(), [low, high], pixels));
+                        }
+                    }
+                    r.i = end;
                 }
                 b'O' => {
                     // Set origin: the absolute point later relative
@@ -726,6 +840,26 @@ mod w2d {
                 _ => break,
             }
         }
+        let images = pictures
+            .into_iter()
+            .filter_map(|(before, [low, high], (width, height, pixels))| {
+                let (a, b) = (units.model(low), units.model(high));
+                let rect = [
+                    a[0].min(b[0]),
+                    a[1].min(b[1]),
+                    a[0].max(b[0]),
+                    a[1].max(b[1]),
+                ];
+                (rect[0] < rect[2] && rect[1] < rect[3]).then(|| SheetImage {
+                    rect,
+                    width,
+                    height,
+                    pixels: std::sync::Arc::new(pixels),
+                    // Paths drawn while nothing shows are not kept.
+                    after: raw[..before].iter().filter(|path| path.3).count(),
+                })
+            })
+            .collect();
         let paths = raw
             .into_iter()
             .filter(|(_, _, _, visible)| *visible)
@@ -771,7 +905,7 @@ mod w2d {
                 font: family,
             })
             .collect();
-        Some((paths, view, texts, Vec::new()))
+        Some((paths, view, texts, images))
     }
 
     /// A W2D string: quoted ASCII; between braces, a 32-bit count of

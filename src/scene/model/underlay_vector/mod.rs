@@ -16,6 +16,7 @@ mod wires;
 
 #[cfg(test)]
 pub(crate) use dwf::samples as dwf_samples;
+pub(crate) use images::{draw_images, images_box, images_density, PRINTED_IMAGE_PIXELS};
 pub(crate) use model::CAP_PER_EM;
 pub(crate) use wires::display_wires;
 
@@ -91,6 +92,33 @@ fn layered_item(item: &str, hidden: &[String]) -> String {
 fn raster_cache() -> &'static Mutex<HashMap<Key, Option<Arc<PdfPage>>>> {
     static CACHE: OnceLock<Mutex<HashMap<Key, Option<Arc<PdfPage>>>>> = OnceLock::new();
     CACHE.get_or_init(Default::default)
+}
+
+/// The images of a DWF sheet drawn whole, `width` by `height` pixels over
+/// the box they lie in ([`draw_images`]), memoised per size.
+pub fn images_raster(path: &str, item: &str, width: u32, height: u32) -> Option<Arc<PdfPage>> {
+    let key = (path.to_string(), format!("{item}#images@{width}x{height}"));
+    if let Some(hit) = raster_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+    {
+        return hit.clone();
+    }
+    let value = sheet(UnderlayType::Dwf, path, item).and_then(|sheet| {
+        let region = images_box(&sheet)?;
+        Some(Arc::new(PdfPage {
+            pixels: draw_images(&sheet, region, width, height),
+            width,
+            height,
+            dpi: 0.0,
+        }))
+    });
+    raster_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key, value.clone());
+    value
 }
 
 /// Forget what was read from `path` (its bytes changed).

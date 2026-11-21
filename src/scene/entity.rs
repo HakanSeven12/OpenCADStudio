@@ -3686,9 +3686,9 @@ impl Scene {
         }
     }
 
-    /// A PDF underlay's image for a plot, drawn at print resolution, and an
-    /// OLE picture's at its own size, not the view's; `None` for anything
-    /// else, which plots as it is shown.
+    /// A PDF underlay's image for a plot, drawn at print resolution, a DWF
+    /// underlay's whole, and an OLE picture's at its own size, not the
+    /// view's; `None` for anything else, which plots as it is shown.
     pub(super) fn print_underlay_image(
         &self,
         entity: &document::entities::EntityType,
@@ -3720,7 +3720,7 @@ impl Scene {
         else {
             return None;
         };
-        if def.underlay_type != document::entities::UnderlayType::Pdf {
+        if def.underlay_type == document::entities::UnderlayType::Dgn {
             return None;
         }
         let owner = u.common.owner_handle;

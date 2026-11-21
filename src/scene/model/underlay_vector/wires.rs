@@ -174,6 +174,11 @@ struct Batch {
 /// it starts a wire of its own. Each wire takes its place in the underlay's
 /// own depth range, as a block's members take theirs, so a fill covers the
 /// lines drawn before it and carries what is drawn after it.
+///
+/// The sheet's raster images are one picture, drawn at the underlay's own
+/// depth (`ImageModel::from_underlay`), and they take their place in the
+/// order as one: from the first image on, what lies on an image is drawn
+/// over the picture, and the rest stays under it with what came before.
 fn content_wires(
     sheet: &Sheet,
     name: &str,
@@ -185,29 +190,49 @@ fn content_wires(
     type Kind = ([u32; 4], Option<u64>);
     let mut batches: Vec<Batch> = Vec::new();
     let mut latest: HashMap<Kind, usize> = HashMap::new();
+    // The sheet's picture: how many batches lie under it and where its
+    // images lie.
+    let mut picture: Option<(usize, Cover)> = None;
     // The batch a piece of this colour and width that touches `cover` goes to.
-    let mut place =
-        |batches: &mut Vec<Batch>, color: [f32; 4], width: Option<f64>, cover: Cover| {
-            let kind: Kind = (color.map(f32::to_bits), width.map(f64::to_bits));
-            if let Some(&at) = latest.get(&kind) {
-                let clear = batches[at + 1..]
-                    .iter()
-                    .all(|later| !later.cover.meets(&cover));
-                if clear || batches.len() >= MAX_BATCHES {
-                    batches[at].cover.add(&cover);
-                    return at;
-                }
+    let mut place = |batches: &mut Vec<Batch>,
+                     picture: &Option<(usize, Cover)>,
+                     color: [f32; 4],
+                     width: Option<f64>,
+                     cover: Cover| {
+        let kind: Kind = (color.map(f32::to_bits), width.map(f64::to_bits));
+        if let Some(&at) = latest.get(&kind) {
+            let clear = batches[at + 1..]
+                .iter()
+                .all(|later| !later.cover.meets(&cover))
+                && !picture
+                    .as_ref()
+                    .is_some_and(|(under, images)| *under > at && images.meets(&cover));
+            if clear || batches.len() >= MAX_BATCHES {
+                batches[at].cover.add(&cover);
+                return at;
             }
-            batches.push(Batch {
-                color,
-                width,
-                points: Vec::new(),
-                cover,
-            });
-            latest.insert(kind, batches.len() - 1);
-            batches.len() - 1
-        };
-    for path in &sheet.paths {
+        }
+        batches.push(Batch {
+            color,
+            width,
+            points: Vec::new(),
+            cover,
+        });
+        latest.insert(kind, batches.len() - 1);
+        batches.len() - 1
+    };
+    // An image joins the picture, which lies over the batches there are
+    // when its first image comes.
+    let join = |picture: &mut Option<(usize, Cover)>, under: usize, image: &model::SheetImage| {
+        let [x0, y0, x1, y1] = image.rect;
+        let (_, images) = picture.get_or_insert_with(|| (under, Cover::new()));
+        images.mark_box(sheet.rect, [x0, y0], [x1, y1]);
+    };
+    let mut images = sheet.images.iter().peekable();
+    for (index, path) in sheet.paths.iter().enumerate() {
+        while let Some(image) = images.next_if(|image| image.after <= index) {
+            join(&mut picture, batches.len(), image);
+        }
         if let Some(c) = path.fill {
             let rings: Vec<Vec<[f64; 2]>> = path
                 .subpaths
@@ -232,7 +257,7 @@ fn content_wires(
                         [reach(0, true), reach(1, true)],
                     );
                 }
-                let at = place(&mut batches, shown(c), None, cover);
+                let at = place(&mut batches, &picture, shown(c), None, cover);
                 let (points, triangles) = ocs_geom::geom2d::triangulate_rings(&rings);
                 for triangle in triangles {
                     for index in triangle {
@@ -262,7 +287,7 @@ fn content_wires(
                         cover.mark_segment(sheet.rect, pair[0], pair[1]);
                     }
                 }
-                let at = place(&mut batches, shown(c), Some(width), cover);
+                let at = place(&mut batches, &picture, shown(c), Some(width), cover);
                 for run in runs {
                     let points = &mut batches[at].points;
                     if !points.is_empty() {
@@ -274,7 +299,12 @@ fn content_wires(
         }
     }
 
+    for image in images {
+        join(&mut picture, batches.len(), image);
+    }
+
     let count = batches.len();
+    let under = picture.map(|(under, _)| under);
     batches
         .into_iter()
         .enumerate()
@@ -303,9 +333,14 @@ fn content_wires(
             };
             // The first wire lowest and the last highest in the underlay's
             // depth range; a lone wire stays at the underlay's own depth.
-            if count > 1 {
-                wire.depth_override = Some(-0.9 + 1.8 * index as f32 / (count - 1) as f32);
-            }
+            // The sheet's picture is drawn at that depth, so with one the
+            // wires under it take the lower half and the others the upper.
+            wire.depth_override = match under {
+                Some(under) if index < under => Some(-0.9 * (under - index) as f32 / under as f32),
+                Some(under) => Some(0.9 * (index + 1 - under) as f32 / (count - under) as f32),
+                None if count > 1 => Some(-0.9 + 1.8 * index as f32 / (count - 1) as f32),
+                None => None,
+            };
             wire
         })
         .collect()

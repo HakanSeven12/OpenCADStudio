@@ -293,8 +293,13 @@ impl ImageModel {
     /// page inch) times the entity scale, placed at the insertion with the
     /// entity rotation. A clip boundary (on, 2+ vertices, in underlay units)
     /// limits the drawn area to its inside, or to the page outside it when
-    /// inverted. `None` when the underlay is off, non-PDF, or the page can't
-    /// be rendered (caller keeps the outline placeholder).
+    /// inverted. `None` when the underlay is off or the page can't be
+    /// rendered (caller keeps the outline placeholder).
+    ///
+    /// A DWF sheet is drawn as vector wires; its raster is the images of the
+    /// sheet, one picture over the box they lie in ([`Self::sheet_images`]),
+    /// with their own pixels, and `None` for a sheet without images, as for
+    /// a DGN model.
     /// `world_per_pixel` is the view's scale: the page is rasterised near
     /// the size it shows on screen (full size when `None` or when larger),
     /// so thin lines stay one crisp pixel wide when zoomed out.
@@ -347,6 +352,9 @@ impl ImageModel {
         if def.unloaded {
             return None;
         }
+        if def.underlay_type == UnderlayType::Dwf {
+            return Self::sheet_images(u, def, world_per_pixel, view, print);
+        }
         let page = crate::entities::underlay::page_of(def);
         let rect = crate::entities::underlay::definition_rect(def)?;
         // The page's longest side on screen, pixels (the view scale is taken
@@ -380,8 +388,9 @@ impl ImageModel {
                 };
                 (source, raster)
             }
-            // DWF sheets and DGN models are drawn as vector wires
-            // (`underlay_vector::display_wires`).
+            // A DGN model is drawn as vector wires
+            // (`underlay_vector::display_wires`), and so is a DWF sheet, whose
+            // images were taken above.
             _ => return None,
         };
         let adjust = underlay_adjust(u, def, background);
@@ -420,6 +429,103 @@ impl ImageModel {
             (pixels, raster.width, raster.height),
             region,
             1.0 - u.fade.min(100) as f32 / 100.0,
+        )
+    }
+
+    /// The raster images of a DWF underlay's sheet as one picture over the
+    /// box they lie in, clear between them; the sheet's lines and fills are
+    /// wires (`underlay_vector::display_wires`), ranked under and over it.
+    ///
+    /// The images keep their own pixels: the underlay's fade, contrast,
+    /// monochrome and background settings are for the sheet's lines, fills
+    /// and text.
+    ///
+    /// The picture has each image's own pixels where that is at most
+    /// `underlay_vector::RASTER_SIDE` along its longer side, and fewer
+    /// otherwise; then a view zoomed in past it has its part drawn again
+    /// from the images' pixels, as a PDF page's is. A plot takes the picture
+    /// whole, at the images' own pixels up to
+    /// `underlay_vector::PRINTED_IMAGE_PIXELS`.
+    fn sheet_images(
+        u: &document::entities::Underlay,
+        def: &document::entities::UnderlayDefinition,
+        world_per_pixel: Option<f64>,
+        view: Option<[f64; 4]>,
+        print: bool,
+    ) -> Option<(Self, bool)> {
+        use super::{pdf_raster, underlay_vector};
+        let page = crate::entities::underlay::page_of(def);
+        let sheet = underlay_vector::sheet(def.underlay_type, &def.file_path, page)?;
+        let rect = underlay_vector::images_box(&sheet)?;
+        let (wide, tall) = (rect[2] - rect[0], rect[3] - rect[1]);
+        // The pixels of the finest image to the sheet unit, along x and y.
+        let fine = underlay_vector::images_density(&sheet);
+        if !(wide > 0.0 && tall > 0.0 && fine[0] > 0.0 && fine[1] > 0.0) {
+            return None;
+        }
+        // What shows of the sheet, as far as it lies on the box.
+        let tris_uv = if crate::entities::underlay::is_clipped(u) {
+            triangles_on_box(&underlay_visible_uv(u, sheet.rect), sheet.rect, rect)
+        } else {
+            underlay_visible_uv(u, rect)
+        };
+        if tris_uv.is_empty() {
+            return None;
+        }
+
+        // The share of the images' own pixels the whole picture is drawn
+        // with, along each axis.
+        let (full_w, full_h) = (wide * fine[0], tall * fine[1]);
+        let share = if print {
+            (underlay_vector::PRINTED_IMAGE_PIXELS / (full_w * full_h)).sqrt()
+        } else {
+            underlay_vector::RASTER_SIDE / full_w.max(full_h)
+        }
+        .min(1.0);
+        let pixels_of = |pixels: f64| pixels.round().clamp(1.0, 65_535.0) as u32;
+        let (width, height) = (pixels_of(full_w * share), pixels_of(full_h * share));
+        let whole = underlay_vector::images_raster(&def.file_path, page, width, height)?;
+
+        // Zoomed in past a reduced picture: the part in view again, as fine
+        // as the screen shows it and no finer than the images are.
+        let region = match (view, world_per_pixel.filter(|wpp| *wpp > 0.0)) {
+            (Some(view), Some(wpp)) if !print && share < 1.0 => {
+                let side = (wide * u.x_scale.abs()).max(tall * u.y_scale.abs()) / wpp;
+                let screen = side / wide.max(tall);
+                underlay_view_uv(u, rect, view).and_then(|uv| {
+                    let part = [(uv[2] - uv[0]) * wide, (uv[3] - uv[1]) * tall];
+                    let wanted = [fine[0].min(screen), fine[1].min(screen)];
+                    let fits = (pdf_raster::REGION_SIDE
+                        / (part[0] * wanted[0]).max(part[1] * wanted[1]))
+                    .min(1.0);
+                    let density = [wanted[0] * fits, wanted[1] * fits];
+                    let finer = (0..2).any(|axis| density[axis] > fine[axis] * share * 1.2);
+                    finer.then(|| {
+                        let (width, height) = (
+                            pixels_of(part[0] * density[0]),
+                            pixels_of(part[1] * density[1]),
+                        );
+                        let region = [
+                            rect[0] + uv[0] * wide,
+                            rect[1] + uv[1] * tall,
+                            rect[0] + uv[2] * wide,
+                            rect[1] + uv[3] * tall,
+                        ];
+                        let sharp = underlay_vector::draw_images(&sheet, region, width, height);
+                        (uv, (sharp, width, height))
+                    })
+                })
+            }
+            _ => None,
+        };
+        Self::placed_underlay(
+            u,
+            def,
+            rect,
+            &tris_uv,
+            (whole.pixels.clone(), width, height),
+            region,
+            1.0,
         )
     }
 
@@ -515,6 +621,63 @@ impl ImageModel {
             use_alpha: true,
         }, sharpened))
     }
+}
+
+/// The parts of the triangles `tris` (flat, groups of three, in the UV of
+/// the rectangle `outer`) that lie on the rectangle `inner`, as triangles in
+/// the UV of `inner`.
+fn triangles_on_box(tris: &[[f64; 2]], outer: [f64; 4], inner: [f64; 4]) -> Vec<[f64; 2]> {
+    let size = |r: [f64; 4]| [r[2] - r[0], r[3] - r[1]];
+    let (outer_size, inner_size) = (size(outer), size(inner));
+    let to_inner = |p: [f64; 2]| {
+        [0, 1]
+            .map(|axis| (outer[axis] + p[axis] * outer_size[axis] - inner[axis]) / inner_size[axis])
+    };
+    let mut out = Vec::new();
+    for triangle in tris.chunks_exact(3) {
+        let mut ring: Vec<[f64; 2]> = triangle.iter().map(|&p| to_inner(p)).collect();
+        // Cut by each side of the unit square in turn.
+        for (axis, bound, below) in [
+            (0, 0.0, false),
+            (0, 1.0, true),
+            (1, 0.0, false),
+            (1, 1.0, true),
+        ] {
+            let kept = |p: &[f64; 2]| {
+                if below {
+                    p[axis] <= bound
+                } else {
+                    p[axis] >= bound
+                }
+            };
+            let mut cut = Vec::with_capacity(ring.len() + 1);
+            for (i, a) in ring.iter().enumerate() {
+                let b = &ring[(i + 1) % ring.len()];
+                if kept(a) {
+                    cut.push(*a);
+                }
+                if kept(a) != kept(b) {
+                    let t = (bound - a[axis]) / (b[axis] - a[axis]);
+                    let mut p = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+                    p[axis] = bound;
+                    cut.push(p);
+                }
+            }
+            ring = cut;
+            if ring.len() < 3 {
+                break;
+            }
+        }
+        // A fan over what is left, without the slivers of no area.
+        for k in 1..ring.len().saturating_sub(1) {
+            let (a, b, c) = (ring[0], ring[k], ring[k + 1]);
+            let area = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]);
+            if area.abs() > 1e-12 {
+                out.extend([a, b, c]);
+            }
+        }
+    }
+    out
 }
 
 /// The part of an underlay's page inside the world rectangle `view`, as page

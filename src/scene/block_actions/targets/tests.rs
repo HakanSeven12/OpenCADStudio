@@ -343,6 +343,24 @@ fn block_action_foreign_or_malformed_native_dependencies_fail_atomically() {
             .dependencies
             .push(target);
         let baseline = f.doc.clone();
+        if invalid == 1 {
+            // Another Linear parameter's grip: the Move carries that end only.
+            let p = all_parameters(&f.doc, f.definition)
+                .into_iter()
+                .find(|p| p.handle == owned)
+                .unwrap();
+            let before = value(&f.doc, &p).unwrap();
+            assert!(evaluate_value(
+                &mut f.doc,
+                &baseline,
+                f.definition,
+                f.parameter.handle,
+                f.input
+            )
+            .unwrap());
+            assert_ne!(value(&f.doc, &p).unwrap(), before);
+            continue;
+        }
         assert!(evaluate_value(
             &mut f.doc,
             &baseline,

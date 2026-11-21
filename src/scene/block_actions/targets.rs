@@ -21,7 +21,9 @@ pub(super) fn geometry(
         if !doc.objects.contains_key(handle) {
             return Err("An action target is unavailable.");
         }
-        if kind == Kind::Stretch
+        // The base point parameter only places the insertion grip; the
+        // geometry an action moves does not depend on it.
+        if matches!(kind, Kind::Stretch | Kind::Move)
             && super::super::block_basepoint::parameter(doc, definition)
                 .is_some_and(|(basepoint, _)| basepoint == *handle)
         {
@@ -57,6 +59,8 @@ pub(super) fn geometry(
                     o.data,
                     DynamicBlockData::VisibilityGrip(_)
                         | DynamicBlockData::LookupGrip(_)
+                        | DynamicBlockData::LookupParameter(_)
+                        | DynamicBlockData::LookupAction(_)
                         | DynamicBlockData::AlignmentGrip(_)
                         | DynamicBlockData::AlignmentParameter(_)
                         | DynamicBlockData::MoveAction(_)
@@ -80,9 +84,8 @@ pub(super) fn geometry(
         }
         let all_params = all_parameters(doc, definition);
         let is_block_param_or_grip = all_params.iter().any(|p| {
-            // Linear grip aliases are not yet transport targets. The driving
-            // parameter's own grips and supported whole-parameter links were
-            // handled above; accepting another Linear grip would drop its move.
+            // Move links to Linear parameters and their grips were taken as
+            // frame transport above; anything else Linear would drop a move.
             !(kind == Kind::Move && p.linear)
                 && (p.handle == *handle
                     || p.grip == *handle

@@ -150,13 +150,13 @@ pub(crate) fn point_at_distance(
     None
 }
 
-/// `{"op":"civil_station_offset","handle":"…","station":…,"offset":…}` — the
+/// `{"op":"civil_station_offset","handle":"…","station":…,"offset_distance":…}` — the
 /// point at a station of an alignment, offset perpendicular to it.
 ///
 /// The station is the one Civil 3D shows (past a station equation it runs on
-/// from the station ahead); the offset is signed across the alignment,
-/// positive to the right of the direction of travel. Pure read: nothing in
-/// the document changes.
+/// from the station ahead); the `offset_distance` is signed across the
+/// alignment, positive to the right of the direction of travel. Pure read:
+/// nothing in the document changes.
 pub(crate) fn civil_station_offset(document: &document::Document, req: &Value) -> Value {
     let Some(handle) = super::automation::request_handle(&req["handle"]) else {
         return err("civil_station_offset: missing or invalid \"handle\"");
@@ -170,7 +170,7 @@ pub(crate) fn civil_station_offset(document: &document::Document, req: &Value) -
     let Some(station) = req["station"].as_f64() else {
         return err("civil_station_offset: missing \"station\"");
     };
-    let offset = req["offset"].as_f64().unwrap_or(0.0);
+    let offset = req["offset_distance"].as_f64().unwrap_or(0.0);
     let start = data.alignment_start_station().unwrap_or(0.0);
     let pieces = data.alignment_pieces_with_curvature();
     let length: f64 = pieces.iter().map(piece_length).sum();

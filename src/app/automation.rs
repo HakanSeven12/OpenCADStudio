@@ -14,7 +14,8 @@
 //! - `{"op":"save","path":"out.dwg"}`        — write the document (path optional
 //!                                             once opened/saved)
 //! - `{"op":"civil_station_offset",...}`     — the point at an alignment's
-//!                                             station, offset across it (read)
+//!                                             station, offset_distance across
+//!                                             it (read)
 //! - `{"op":"civil_surface_stats",...}`      — a TIN surface's elevation
 //!                                             bounds and counts (read)
 

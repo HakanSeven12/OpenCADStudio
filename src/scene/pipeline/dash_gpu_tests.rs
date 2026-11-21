@@ -489,3 +489,68 @@ fn the_screen_draws_the_dashes_the_plot_cuts() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// Lit pixels in column `x` within `rows`.
+fn lit_rows(bytes: &[u8], x: usize, rows: std::ops::Range<usize>) -> usize {
+    rows.filter(|&r| {
+        let pixel = &bytes[(r * SIZE as usize + x) * 4..][..3];
+        pixel.iter().any(|&channel| channel > 60)
+    })
+    .count()
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn arcs_are_as_wide_as_lines_on_a_scaled_screen() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&Default::default())).expect("GPU adapter");
+    let (device, queue) =
+        block_on(adapter.request_device(&Default::default())).expect("GPU device");
+    let mut pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm);
+    let mut block_geometry = wire_gpu::BlockGeometryCache::default();
+    // One physical pixel per logical pixel, then two (a 200 % display): the
+    // uniforms carry logical sizes, the target is physical.
+    for scale in [1u32, 2] {
+        let mut line = dashed(300, 0.5, &[-0.8, 0.8], 0.0, [0.0; 8]);
+        line.line_weight_px = 6.0;
+        let mut circle = WireModel::default();
+        circle.name = "301".into();
+        circle
+            .tangent_geoms
+            .push(crate::scene::model::wire_model::TangentGeom::Circle {
+                center: [0.0, -0.4, 0.5],
+                radius: 0.3,
+            });
+        circle.line_weight_px = 6.0;
+        circle.color = [1.0; 4];
+        let logical = (SIZE / scale) as f32;
+        let bounds = Rectangle::with_size(Size::new(logical, logical));
+        let mut uniforms = Uniforms::new(&Camera::default(), bounds, true);
+        uniforms.view_rot = glam::Mat4::IDENTITY;
+        uniforms.eye_high = [0.0; 3];
+        uniforms.eye_low = [0.0; 3];
+        uniforms.world_per_pixel = 2.0 / logical;
+        let bytes = render(
+            &device,
+            &queue,
+            &mut pipeline,
+            &mut block_geometry,
+            &uniforms,
+            &[line, circle],
+        );
+        let column = (SIZE / 2) as usize;
+        let half = SIZE as usize / 2;
+        // The line sits at NDC 0.5, the circle's top at NDC -0.1.
+        let line_px = lit_rows(&bytes, column, half / 2 - 20..half / 2 + 20);
+        let top = ((1.0 + 0.1) * 0.5 * SIZE as f32) as usize;
+        let arc_px = lit_rows(&bytes, column, top - 20..top + 20);
+        assert!(
+            line_px >= 6 * scale as usize - 1,
+            "scale {scale}: line {line_px} px"
+        );
+        assert!(
+            arc_px.abs_diff(line_px) <= 1,
+            "scale {scale}: arc {arc_px} px, line {line_px} px"
+        );
+    }
+}

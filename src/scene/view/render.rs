@@ -1744,6 +1744,13 @@ fn render_signature(
         std::sync::Arc::as_ptr(&vp.point_clouds)
     }
     .hash(&mut h);
+    // The rasters drawn in the view. A zoom step has one drawn again with
+    // no change of geometry (`Scene::apply_reseed`), so the epoch below
+    // does not tell it: each raster is told by its pixel buffer.
+    vp.images.len().hash(&mut h);
+    for image in vp.images.iter() {
+        (std::sync::Arc::as_ptr(&image.pixels) as usize).hash(&mut h);
+    }
     vp.point_cloud_light.map(f32::to_bits).hash(&mut h);
     for plane in &vp.point_cloud_clip {
         plane.map(f64::to_bits).hash(&mut h);

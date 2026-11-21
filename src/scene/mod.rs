@@ -6642,13 +6642,16 @@ impl Scene {
     /// Splice a re-delivered raster's fresh model into every cached gathered
     /// image list. The reseed takes no geometry bump — the entity, its draw
     /// order and every wire are untouched — so the lists stay valid and only
-    /// their pixels are refreshed; without this the gather would re-walk the
+    /// their rasters are refreshed; without this the gather would re-walk the
     /// whole drawing on the UI thread right after the view settled (#3339).
-    /// A raster replacement changes only pixels and size — the gathered
-    /// placement, clip and draw depth stay valid — so lists that are current
-    /// are patched in place; lists already stale for other reasons, and lists
-    /// holding an instanced clone (an image inside a block reference), are
-    /// evicted so the next gather rebuilds them.
+    /// A raster replacement changes pixels, size and the triangles the
+    /// raster is drawn with (one with a zoomed-in region has the whole
+    /// picture and the region in one texture) — the gathered placement, clip
+    /// and draw depth stay valid — so lists that are current are patched in
+    /// place; lists already stale for other reasons, and lists holding an
+    /// instanced clone (an image inside a block reference), are evicted so
+    /// the next gather rebuilds them. The sheet of a layout keeps a list of
+    /// its own pictures, patched the same way.
     pub(crate) fn patch_image_caches(&self, prev_epoch: u64, handles: &[Handle]) {
         if handles.is_empty() {
             return;
@@ -6657,7 +6660,8 @@ impl Scene {
         let started = perf.then(iced::time::Instant::now);
         let a = self.patch_image_cache_entries(&self.image_cache, prev_epoch, handles);
         let b = self.patch_image_cache_entries(&self.frozen_image_cache, prev_epoch, handles);
-        let counts = (a.0 + b.0, a.1 + b.1, a.2 + b.2);
+        let c = self.patch_paper_sheet_images(prev_epoch, handles);
+        let counts = (a.0 + b.0 + c.0, a.1 + b.1 + c.1, a.2 + b.2 + c.2);
         if perf {
             crate::perf_record!(
                 "[perf] image-patch   {:>7.2}ms entries={} lists_patched={} evicted={}",
@@ -6686,50 +6690,101 @@ impl Scene {
             // changes, or holds an instanced clone whose transform the gather
             // owns — is evicted: the reseed records no geometry change, so the
             // journal replay would otherwise revalidate it with the old pixels.
-            if *entry_epoch != prev_epoch
-                || arc.iter().any(|model| {
-                    model.render_instance.is_some()
-                        && model.entity.is_some_and(|entity| handles.contains(&entity))
-                })
-            {
+            if *entry_epoch != prev_epoch || Self::holds_instanced_image(arc, handles) {
                 stale += 1;
                 return false;
             }
-            let list = Arc::make_mut(arc);
-            let mut touched = false;
-            list.retain_mut(|model| {
-                let Some(entity) = model.entity else {
-                    return true;
-                };
-                if !handles.contains(&entity) {
-                    return true;
-                }
-                match self.images.get(&entity) {
-                    Some(fresh) => {
-                        if !Arc::ptr_eq(&model.pixels, &fresh.pixels) {
-                            model.file_path = fresh.file_path.clone();
-                            model.pixels = Arc::clone(&fresh.pixels);
-                            model.width = fresh.width;
-                            model.height = fresh.height;
-                        }
-                        touched = true;
-                        true
-                    }
-                    None => {
-                        // The raster did not come back; the cached list drops
-                        // the entry the rebuild would not gather either.
-                        touched = true;
-                        false
-                    }
-                }
-            });
-            if touched {
+            if self.splice_fresh_images(arc, handles) {
                 *entry_epoch = epoch;
                 patched += 1;
             }
             true
         });
         (seen, patched, stale)
+    }
+
+    /// The same for the list the sheet of each layout keeps of its own
+    /// pictures (`paper_sheet_render_models_for_view`). A sheet whose list
+    /// holds none of `handles` is left as it is, whatever its epoch: the
+    /// reseed has nothing for it.
+    fn patch_paper_sheet_images(
+        &self,
+        prev_epoch: u64,
+        handles: &[Handle],
+    ) -> (usize, usize, usize) {
+        let epoch = self.geometry_epoch;
+        let mut seen = 0usize;
+        let mut patched = 0usize;
+        let mut stale = 0usize;
+        self.paper_sheet_render_cache
+            .borrow_mut()
+            .retain(|_, sheet| {
+                seen += 1;
+                let holds = sheet
+                    .images
+                    .iter()
+                    .any(|model| model.entity.is_some_and(|entity| handles.contains(&entity)));
+                if !holds {
+                    return true;
+                }
+                if sheet.epoch != prev_epoch || Self::holds_instanced_image(&sheet.images, handles)
+                {
+                    stale += 1;
+                    return false;
+                }
+                if self.splice_fresh_images(&mut sheet.images, handles) {
+                    sheet.epoch = epoch;
+                    patched += 1;
+                }
+                true
+            });
+        (seen, patched, stale)
+    }
+
+    /// `list` holds one of `handles` as an instanced clone (an image inside
+    /// a block reference), whose transform the gather owns.
+    fn holds_instanced_image(list: &[ImageModel], handles: &[Handle]) -> bool {
+        list.iter().any(|model| {
+            model.render_instance.is_some()
+                && model.entity.is_some_and(|entity| handles.contains(&entity))
+        })
+    }
+
+    /// Gives the entries of `list` that serve `handles` the rasters the scene
+    /// has for them now, and drops those whose raster did not come back.
+    /// Returns whether the list held any.
+    fn splice_fresh_images(&self, list: &mut Arc<Vec<ImageModel>>, handles: &[Handle]) -> bool {
+        let mut touched = false;
+        Arc::make_mut(list).retain_mut(|model| {
+            let Some(entity) = model.entity else {
+                return true;
+            };
+            if !handles.contains(&entity) {
+                return true;
+            }
+            match self.images.get(&entity) {
+                Some(fresh) => {
+                    if !Arc::ptr_eq(&model.pixels, &fresh.pixels) {
+                        model.file_path = fresh.file_path.clone();
+                        model.pixels = Arc::clone(&fresh.pixels);
+                        model.width = fresh.width;
+                        model.height = fresh.height;
+                        // The triangles go with the texture: they say
+                        // which part of it each one draws.
+                        model.verts.clone_from(&fresh.verts);
+                    }
+                    touched = true;
+                    true
+                }
+                None => {
+                    // The raster did not come back; the cached list drops
+                    // the entry the rebuild would not gather either.
+                    touched = true;
+                    false
+                }
+            }
+        });
+        touched
     }
 
     /// Image / OLE-frame models owned by `target_block`, optionally dropping

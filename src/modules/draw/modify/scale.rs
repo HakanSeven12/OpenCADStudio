@@ -3,8 +3,10 @@
 // Command:  SCALE (SC)
 //   Requires at least one entity selected.
 //   Step 1: pick base (scale center)
-//   Step 2: specify scale factor — drag for a live preview (factor = cursor
-//           distance from base) or type a factor. A live ghost of the
+//   Step 2: specify scale factor — drag for a live preview or type a factor.
+//           A picked point gives cursor distance from base divided by half
+//           the larger side of the selection's extents, so the selection
+//           keeps its size half its size away from the base. A live ghost of the
 //           selection tracks the cursor from the first move onward.
 //
 //   Reference scaling: type `R` at step 2 to define the factor as
@@ -33,7 +35,8 @@ pub fn tool() -> ToolDef {
 
 enum Step {
     Base,
-    /// Default flow: factor is the cursor distance from `base`.
+    /// Default flow: factor is the cursor distance from `base` over
+    /// [`ScaleCommand::unit`].
     Factor {
         base: DVec3,
     },
@@ -59,19 +62,29 @@ pub struct ScaleCommand {
     wire_models: Vec<WireModel>,
     step: Step,
     default_factor: f64,
+    /// Cursor distance from the base that means factor 1: half the larger
+    /// side of the selection's extents (1 when it has no extent).
+    unit: f64,
     /// The Copy option: transform a duplicate and leave the source in place.
     copy: bool,
 }
 
 impl ScaleCommand {
     pub fn new(handles: Vec<Handle>, wire_models: Vec<WireModel>) -> Self {
+        let unit = drag_unit(&wire_models);
         Self {
             handles,
             wire_models,
+            unit,
             step: Step::Base,
             default_factor: defaults::get_scale_factor(),
             copy: false,
         }
+    }
+
+    /// The factor a point at `pt` gives in the default flow.
+    fn drag_factor(&self, base: DVec3, pt: DVec3) -> f64 {
+        base.distance(pt) / self.unit
     }
 
     /// Commit a uniform scale about `base` and end the command.
@@ -150,7 +163,7 @@ impl CadCommand for ScaleCommand {
             }
             Step::Factor { base } => {
                 let base = *base;
-                let factor = base.distance(pt);
+                let factor = self.drag_factor(base, pt);
                 if factor <= f64::EPSILON {
                     return CmdResult::NeedPoint;
                 }
@@ -235,8 +248,8 @@ impl CadCommand for ScaleCommand {
 
     fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
         let (base, factor): (DVec3, f64) = match &self.step {
-            // Default flow: scale live by cursor distance from the base.
-            Step::Factor { base } => (*base, base.distance(pt)),
+            // Default flow: scale live by the same factor a click gives.
+            Step::Factor { base } => (*base, self.drag_factor(*base, pt)),
             // Reference flow, new-length step: factor = cursor_dist / ref_dist.
             Step::RefNew { base, ref_dist } => (*base, base.distance(pt) / ref_dist),
             // The reference length is measured between two points independent
@@ -307,9 +320,32 @@ impl CadCommand for ScaleCommand {
 
     fn dyn_live_value(&self, cursor: DVec3) -> Option<f64> {
         match self.step {
-            Step::Factor { base } | Step::RefNew { base, .. } => Some(base.distance(cursor)),
+            Step::Factor { base } => Some(self.drag_factor(base, cursor)),
+            Step::RefNew { base, .. } => Some(base.distance(cursor)),
             _ => None,
         }
+    }
+}
+
+/// Half the larger side of the extents of `wires`: the cursor distance from
+/// the base that drags a factor of 1. 1 when there is no extent.
+fn drag_unit(wires: &[WireModel]) -> f64 {
+    let mut lo = DVec3::splat(f64::INFINITY);
+    let mut hi = DVec3::splat(f64::NEG_INFINITY);
+    for wire in wires {
+        for index in 0..wire.points.len() {
+            let point = wire.point_world(index, 1.0);
+            if point.is_finite() {
+                lo = lo.min(point);
+                hi = hi.max(point);
+            }
+        }
+    }
+    let half = (hi - lo).max_element() / 2.0;
+    if half.is_finite() && half > f64::EPSILON {
+        half
+    } else {
+        1.0
     }
 }
 

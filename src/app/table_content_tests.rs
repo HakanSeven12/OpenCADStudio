@@ -200,8 +200,10 @@ fn table_scaling_command_grip_and_affine_rebuild_picture_and_content() {
                 app.tabs[i].active_grip = Some(GripEdit::single(h, 0, false, DVec3::ZERO));
                 let _ = app.on_grip_context_pick(GripMenuCmd::Scale);
             }
+            // A picked factor point counts in half the table's larger side
+            // (80 wide x 30 high), so 40 units from the base is factor 1.
             let input = if path == 1 {
-                StepInput::Point(DVec3::X * factor)
+                StepInput::Point(DVec3::X * factor * 40.0)
             } else {
                 StepInput::Text(factor.to_string())
             };

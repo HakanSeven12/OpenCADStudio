@@ -679,6 +679,10 @@ impl Scene {
         if name != "Model" {
             Self::place_centred_window_sheet(layout);
         }
+        // The sheet bounds derive from the paper size, scale and units just
+        // written; drop the layout's cached copy so the next draw or plot
+        // reads the new sheet instead of the one from before this change.
+        self.paper_viewport_cache.borrow_mut().remove(name);
         self.display_plot_style_cache
             .borrow_mut()
             .retain(|(layout_name, _), _| layout_name != name);

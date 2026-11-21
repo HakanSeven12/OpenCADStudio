@@ -1868,4 +1868,3 @@ fn direct_model_preview_keeps_an_explicit_non_fit_extents_scale() {
     assert!(!app.plot_dialog.center);
     assert_eq!(app.plot_dialog.offset_x, "12.0");
 }
-}

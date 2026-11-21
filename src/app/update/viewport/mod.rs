@@ -434,7 +434,27 @@ fn over_ucs_icon(p: Point, h: &crate::ui::overlay::UcsIconHit) -> bool {
     h.tips.iter().any(|t| pt_seg_d2(p, h.origin, *t) <= arm2)
 }
 
+mod pick;
+mod interaction;
+mod pointer_move;
+mod preview;
+mod navigation;
+mod panes;
+mod buttons;
+mod double_click;
+mod input;
+mod layout;
 
+pub(crate) use self::pick::*;
+pub(crate) use self::interaction::*;
+pub(crate) use self::pointer_move::*;
+pub(crate) use self::preview::*;
+pub(crate) use self::navigation::*;
+pub(crate) use self::panes::*;
+pub(crate) use self::buttons::*;
+pub(crate) use self::double_click::*;
+pub(crate) use self::input::*;
+pub(crate) use self::layout::*;
 
 #[cfg(test)]
 mod table_grip_picture_tests;

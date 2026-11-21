@@ -632,7 +632,7 @@ impl<T: Copy + Ord + Sync> SpatialSet<T> {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn prepare_screen(&self) {
+    pub fn prepare_screen(&self) {
         self.xyz.get_or_init(|| SpatialBvh3::build(&self.entries));
     }
 
@@ -1159,7 +1159,7 @@ impl InteractionIndex {
 
     /// Prewarm the projected broad phases when entering a 3D view.
     #[cfg(not(target_arch = "wasm32"))]
-    fn prepare_screen(&self) {
+    pub fn prepare_screen(&self) {
         crate::par::join(
             || {
                 crate::par::join(

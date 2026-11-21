@@ -1276,7 +1276,15 @@ impl OpenCADStudio {
         if !self.suppress_plugin_dispatch && crate::plugin::try_dispatch(self, i, cmd) {
             self.tabs[i].last_cmd = Some(cmd.to_string());
             self.command_line.record_recent(cmd);
-            if cmd.trim().starts_with('(') {
+            // The plugin read the whole line, so its words were that command's
+            // arguments. A prompt the command opened is waiting for the user:
+            // feeding it those words and the line's Enter would answer or
+            // cancel it before it is shown.
+            let plugin_prompt_open = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.name() == "PLUGIN");
+            if cmd.trim().starts_with('(') || plugin_prompt_open {
                 return self.finish_dispatch(cmd);
             }
             let toks: Vec<String> = tokens.iter().map(|s| s.to_string()).collect();

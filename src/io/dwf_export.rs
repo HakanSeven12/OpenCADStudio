@@ -6,8 +6,9 @@
 //
 // Scope of this first version:
 // - Wires (curves flattened, dashes cut as on screen), lineweights, colours
-//   through the plot style, solid fills, hatches, wipeouts and text runs.
-// - Raster images and the plot stamp are left out.
+//   through the plot style, solid fills, hatches, wipeouts, text and raster
+//   images.
+// - The plot stamp is left out.
 // - Graphics units are 1/1200 inch on paper, y up, origin at the sheet's
 //   lower left. The stream's `Units` carry the plot scale, so a reader maps
 //   the sheet back to the units it was plotted from.
@@ -20,7 +21,7 @@ use std::path::Path;
 use sha2::{Digest, Sha256};
 
 use crate::io::pdf_export::{adapt_to_paper, dash_ranges, MIN_PLOT_PATTERN_MM};
-use crate::io::plot::{PlotOptions, PlotPage, PlotWire};
+use crate::io::plot::{PlotImage, PlotOptions, PlotPage, PlotQuality, PlotWire};
 use crate::io::plot_style::PlotStyleTable;
 use crate::io::svg_export::plotted_color;
 use crate::scene::model::hatch_model::{HatchModel, HatchPattern};
@@ -85,7 +86,7 @@ fn build_dwf_with_glyphs(
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
     for (index, sheet) in sheets.iter().enumerate() {
         let page = sheet.page;
-        let stream = page_stream(page, fallback_plot_style, glyphs);
+        let stream = page_stream(page, fallback_plot_style, glyphs)?;
         let section_id = object_id(&stream, index, 0);
         let stream_id = object_id(&stream, index, 1);
         let section = format!("{EPLOT_SECTION}_{section_id}");
@@ -284,7 +285,7 @@ fn page_stream(
     page: &PlotPage,
     fallback_plot_style: Option<&PlotStyleTable>,
     glyphs: Option<&GlyphSnapshot>,
-) -> Vec<u8> {
+) -> Result<Vec<u8>, String> {
     let paper_w = page.paper_w.max(1.0);
     let paper_h = page.paper_h.max(1.0);
     let map = PageMap {
@@ -358,15 +359,16 @@ fn page_stream(
         "Viewport '' (Contour 1 4 {w},0 {w},{h} 0,{h} 0,0) (Units '' {units})"
     ));
     if bounds[0] < bounds[2] && bounds[1] < bounds[3] {
-        emit_page_content(&mut stream, page, plot_style, glyphs, &map, bounds);
+        emit_page_content(&mut stream, page, plot_style, glyphs, &map, bounds)?;
     }
     stream.extended("EndOfDWF");
-    stream.out
+    Ok(stream.out)
 }
 
 enum DrawItem<'a> {
     WireFill(&'a PlotWire),
     Hatch(&'a HatchModel),
+    Image(&'a PlotImage),
     Wire(&'a PlotWire),
     Text(&'a PlotWire),
 }
@@ -380,7 +382,7 @@ fn emit_page_content(
     glyphs: Option<&GlyphSnapshot>,
     map: &PageMap,
     bounds: [f64; 4],
-) {
+) -> Result<(), String> {
     let content = &page.content;
     let offset = (page.offset_x, page.offset_y);
     let options = page.options;
@@ -393,11 +395,15 @@ fn emit_page_content(
     let (first_wipeouts, second_wipeouts) = content
         .wipeouts
         .split_at(content.group_splits.wipeouts.min(content.wipeouts.len()));
-    for (wires, hatches, wipeouts) in [
-        (first_wires, first_hatches, first_wipeouts),
-        (second_wires, second_hatches, second_wipeouts),
+    let (first_images, second_images) = content
+        .images
+        .split_at(content.group_splits.images.min(content.images.len()));
+    for (wires, hatches, wipeouts, images) in [
+        (first_wires, first_hatches, first_wipeouts, first_images),
+        (second_wires, second_hatches, second_wipeouts, second_images),
     ] {
-        let mut items = Vec::with_capacity(wires.len() * 2 + hatches.len() + wipeouts.len());
+        let mut items =
+            Vec::with_capacity(wires.len() * 2 + hatches.len() + wipeouts.len() + images.len());
         let mut sequence = 0usize;
         for wire in wires {
             if !wire.wire.fill_tris.is_empty() {
@@ -413,6 +419,11 @@ fn emit_page_content(
         }
         for hatch in wipeouts.iter().chain(hatches.iter()) {
             items.push((hatch.draw_depth, 1u8, sequence, DrawItem::Hatch(hatch)));
+            sequence += 1;
+        }
+        for image in images {
+            let depth = image.image.draw_depth;
+            items.push((depth, 1u8, sequence, DrawItem::Image(image)));
             sequence += 1;
         }
         items.sort_by(|a, b| {
@@ -432,11 +443,13 @@ fn emit_page_content(
             match item {
                 DrawItem::WireFill(wire) => emit_wire_fills(stream, &wire.wire, &context),
                 DrawItem::Hatch(hatch) => emit_hatch(stream, hatch, &context),
+                DrawItem::Image(image) => emit_image(stream, image, &context)?,
                 DrawItem::Wire(wire) => emit_wire(stream, &wire.wire, &context),
                 DrawItem::Text(wire) => emit_text(stream, &wire.wire, &context),
             }
         }
     }
+    Ok(())
 }
 
 struct Context<'a> {
@@ -804,6 +817,277 @@ fn fill_polygon(stream: &mut Stream, color: [u8; 3], polygon: &[[f64; 2]], bound
         stream.color(color);
         stream.triangles(&triangle);
     }
+}
+
+// ── Raster images ───────────────────────────────────────────────────────────
+
+/// The most pixels one image is written with.
+const MAX_IMAGE_PIXELS: usize = 1 << 23;
+
+/// The coarsest an image that has to be drawn again is drawn: 8 graphics
+/// units a pixel, 150 to the inch, so that its edges stay clean.
+const COARSEST_PIXEL: f64 = 8.0;
+
+/// The size of the finest pixel a plot quality writes, in graphics units:
+/// 150, 300 and 600 pixels to the inch.
+fn finest_pixel(quality: PlotQuality) -> f64 {
+    match quality {
+        PlotQuality::Low => 8.0,
+        PlotQuality::Normal => 4.0,
+        PlotQuality::High => 2.0,
+    }
+}
+
+/// Whether `p` lies in the triangle `a`, `b`, `c`, its edges included.
+fn in_triangle(p: [f64; 2], a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> bool {
+    let side =
+        |u: [f64; 2], v: [f64; 2]| (v[0] - u[0]) * (p[1] - u[1]) - (v[1] - u[1]) * (p[0] - u[0]);
+    let (ab, bc, ca) = (side(a, b), side(b, c), side(c, a));
+    (ab >= 0.0 && bc >= 0.0 && ca >= 0.0) || (ab <= 0.0 && bc <= 0.0 && ca <= 0.0)
+}
+
+/// Whether `p` lies inside the closed `ring`.
+fn in_ring(p: [f64; 2], ring: &[[f64; 2]]) -> bool {
+    let mut inside = false;
+    for (k, a) in ring.iter().enumerate() {
+        let b = ring[(k + 1) % ring.len()];
+        if (a[1] > p[1]) != (b[1] > p[1])
+            && p[0] < a[0] + (p[1] - a[1]) / (b[1] - a[1]) * (b[0] - a[0])
+        {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
+/// A raster image. The stream places an image upright between two corners.
+/// One that stands so on the sheet, whole and no finer than the plot quality
+/// asks, goes out as its own pixels. Any other (turned, sheared by a view,
+/// clipped, cut by the sheet or too fine) is drawn again into the box that
+/// holds it, clear where the image does not reach.
+fn emit_image(stream: &mut Stream, plot: &PlotImage, context: &Context) -> Result<(), String> {
+    let image = &plot.image;
+    let (width, height) = (image.width as usize, image.height as usize);
+    let expected = width.checked_mul(height).and_then(|n| n.checked_mul(4));
+    if width == 0 || height == 0 || expected != Some(image.pixels.len()) {
+        return Err("Cannot plot bitmap: dimensions do not match its RGBA pixels.".into());
+    }
+    if image.verts.len() < 3 || !image.verts.len().is_multiple_of(3) {
+        return Err("Cannot plot bitmap: incomplete triangle geometry.".into());
+    }
+    let place = |high: [f32; 3], low: [f32; 3]| {
+        context.place(
+            high[0] as f64 + low[0] as f64,
+            high[1] as f64 + low[1] as f64,
+        )
+    };
+    let corners: [[f64; 2]; 4] =
+        std::array::from_fn(|k| place(image.corners[k], image.corners_low[k]));
+    let region: Vec<[f64; 2]> = image
+        .verts
+        .iter()
+        .map(|v| place(v.pos, v.pos_low))
+        .collect();
+    let clips: Vec<Vec<[f64; 2]>> = plot
+        .clips
+        .iter()
+        .map(|ring| ring.iter().map(|p| context.place(p[0], p[1])).collect())
+        .collect();
+    if !image.opacity.is_finite()
+        || clips.iter().any(|ring| ring.len() < 3)
+        || corners
+            .iter()
+            .chain(&region)
+            .chain(clips.iter().flatten())
+            .flatten()
+            .any(|v| !v.is_finite())
+    {
+        return Err("Cannot plot bitmap: invalid coordinates, clip boundary, or opacity.".into());
+    }
+    let opacity = if context.options.transparency {
+        image.opacity.clamp(0.0, 1.0) as f64
+    } else {
+        1.0
+    };
+    if opacity <= 0.0 {
+        return Ok(());
+    }
+    // A source pixel as red, green, blue and alpha.
+    let source = |col: usize, row: usize| -> [f64; 4] {
+        let k = (row * width + col) * 4;
+        let alpha = if image.use_alpha {
+            image.pixels[k + 3]
+        } else {
+            255
+        };
+        [
+            image.pixels[k] as f64,
+            image.pixels[k + 1] as f64,
+            image.pixels[k + 2] as f64,
+            alpha as f64,
+        ]
+    };
+    // What the stream holds for a pixel: blue, green, red and alpha.
+    let stored = |[r, g, b, a]: [f64; 4]| {
+        [
+            b.round() as u8,
+            g.round() as u8,
+            r.round() as u8,
+            (a * opacity).round() as u8,
+        ]
+    };
+
+    // The picture's axes on the sheet: along its rows and up its columns.
+    let along = [corners[1][0] - corners[0][0], corners[1][1] - corners[0][1]];
+    let up = [corners[3][0] - corners[0][0], corners[3][1] - corners[0][1]];
+    let area = along[0] * up[1] - along[1] * up[0];
+    if area.abs() < 1e-9 {
+        // Seen edge on, it covers nothing.
+        return Ok(());
+    }
+    let shown: f64 = region
+        .chunks_exact(3)
+        .map(|t| {
+            ((t[1][0] - t[0][0]) * (t[2][1] - t[0][1]) - (t[1][1] - t[0][1]) * (t[2][0] - t[0][0]))
+                .abs()
+                / 2.0
+        })
+        .sum();
+    let finest = finest_pixel(context.options.quality);
+    let b = context.bounds;
+    let upright = along[1].abs() <= 0.5 && up[0].abs() <= 0.5 && along[0] > 0.0 && up[1] > 0.0;
+    let whole = clips.is_empty()
+        && shown >= area.abs() * 0.999
+        && corners[0][0] >= b[0]
+        && corners[0][1] >= b[1]
+        && corners[2][0] <= b[2]
+        && corners[2][1] <= b[3];
+    let coarse_enough = along[0] / width as f64 >= finest * 0.999
+        && up[1] / height as f64 >= finest * 0.999
+        && width <= u16::MAX as usize
+        && height <= u16::MAX as usize
+        && width * height <= MAX_IMAGE_PIXELS;
+    if upright && whole && coarse_enough {
+        let mut pixels = Vec::with_capacity(width * height * 4);
+        for row in 0..height {
+            for col in 0..width {
+                pixels.extend_from_slice(&stored(source(col, row)));
+            }
+        }
+        if pixels.chunks_exact(4).all(|pixel| pixel[3] == 0) {
+            return Ok(());
+        }
+        let low = [corners[0][0].round() as i32, corners[0][1].round() as i32];
+        let high = [corners[2][0].round() as i32, corners[2][1].round() as i32];
+        if high[0] > low[0] && high[1] > low[1] {
+            stream.image(low, high, width as u16, height as u16, &pixels);
+        }
+        return Ok(());
+    }
+
+    // The box of what shows, on whole graphics units inside the sheet.
+    let reach = |axis: usize, most: bool| {
+        region.iter().map(|p| p[axis]).fold(
+            if most {
+                f64::NEG_INFINITY
+            } else {
+                f64::INFINITY
+            },
+            if most { f64::max } else { f64::min },
+        )
+    };
+    let x0 = reach(0, false).floor().max(b[0].ceil());
+    let y0 = reach(1, false).floor().max(b[1].ceil());
+    let x1 = reach(0, true).ceil().min(b[2].floor());
+    let y1 = reach(1, true).ceil().min(b[3].floor());
+    if !(x1 > x0 && y1 > y0) {
+        return Ok(());
+    }
+    // A pixel as fine as the image's own, between what the plot quality
+    // asks and what keeps an edge clean, and no finer than fits the limits.
+    let own = (along[0].hypot(along[1]) / width as f64).min(up[0].hypot(up[1]) / height as f64);
+    let mut pixel = own.floor().clamp(finest, COARSEST_PIXEL.max(finest));
+    let count = |pixel: f64| {
+        (
+            ((x1 - x0) / pixel).ceil() as usize,
+            ((y1 - y0) / pixel).ceil() as usize,
+        )
+    };
+    loop {
+        let (cols, rows) = count(pixel);
+        if cols <= u16::MAX as usize && rows <= u16::MAX as usize && cols * rows <= MAX_IMAGE_PIXELS
+        {
+            break;
+        }
+        pixel += 1.0;
+    }
+    let (cols, rows) = count(pixel);
+    // The grid fills the box from edge to edge, so its pixels are a hair
+    // off square.
+    let (wide, tall) = ((x1 - x0) / cols as f64, (y1 - y0) / rows as f64);
+    let mut pixels = vec![0u8; cols * rows * 4];
+    let mut any = false;
+    for row in 0..rows {
+        let y = y1 - (row as f64 + 0.5) * tall;
+        for col in 0..cols {
+            let at = [x0 + (col as f64 + 0.5) * wide, y];
+            if !region
+                .chunks_exact(3)
+                .any(|t| in_triangle(at, t[0], t[1], t[2]))
+                || !clips.iter().all(|ring| in_ring(at, ring))
+            {
+                continue;
+            }
+            // Where the point lies in the picture: across it and down it.
+            let d = [at[0] - corners[0][0], at[1] - corners[0][1]];
+            let across = (d[0] * up[1] - d[1] * up[0]) / area * width as f64;
+            let down = (1.0 - (along[0] * d[1] - along[1] * d[0]) / area) * height as f64;
+            let value = if image.pixelated {
+                source(
+                    (across.max(0.0) as usize).min(width - 1),
+                    (down.max(0.0) as usize).min(height - 1),
+                )
+            } else {
+                // Between the four pixels around it, each by its alpha.
+                let (fx, fy) = (across - 0.5, down - 0.5);
+                let (left, top) = (fx.floor(), fy.floor());
+                let (wx, wy) = (fx - left, fy - top);
+                let mut sum = [0.0f64; 4];
+                for (dx, dy, weight) in [
+                    (0.0, 0.0, (1.0 - wx) * (1.0 - wy)),
+                    (1.0, 0.0, wx * (1.0 - wy)),
+                    (0.0, 1.0, (1.0 - wx) * wy),
+                    (1.0, 1.0, wx * wy),
+                ] {
+                    let tap = source(
+                        ((left + dx).max(0.0) as usize).min(width - 1),
+                        ((top + dy).max(0.0) as usize).min(height - 1),
+                    );
+                    let share = weight * tap[3];
+                    sum = [
+                        sum[0] + tap[0] * share,
+                        sum[1] + tap[1] * share,
+                        sum[2] + tap[2] * share,
+                        sum[3] + share,
+                    ];
+                }
+                if sum[3] > 0.0 {
+                    [sum[0] / sum[3], sum[1] / sum[3], sum[2] / sum[3], sum[3]]
+                } else {
+                    [0.0; 4]
+                }
+            };
+            let value = stored(value);
+            any |= value[3] != 0;
+            let k = (row * cols + col) * 4;
+            pixels[k..k + 4].copy_from_slice(&value);
+        }
+    }
+    if any {
+        let (low, high) = ([x0 as i32, y0 as i32], [x1 as i32, y1 as i32]);
+        stream.image(low, high, cols as u16, rows as u16, &pixels);
+    }
+    Ok(())
 }
 
 // ── Text ────────────────────────────────────────────────────────────────────
@@ -1220,6 +1504,8 @@ struct Stream {
     weight: Option<i32>,
     font_name: Option<String>,
     font: Option<(i32, u16)>,
+    /// How many images the stream holds: each is numbered.
+    images: i32,
 }
 
 impl Stream {
@@ -1231,6 +1517,7 @@ impl Stream {
             weight: None,
             font_name: None,
             font: None,
+            images: 0,
         }
     }
 
@@ -1314,6 +1601,41 @@ impl Stream {
         if (3..=MAX_COUNT).contains(&points.len()) {
             self.run(0x14, b't', points);
         }
+    }
+
+    /// A raster image upright between its lower left and upper right
+    /// corners: `cols` by `rows` pixels of four bytes each (blue, green, red,
+    /// alpha), rows from the top. Its corners are given like every point,
+    /// each from the one before, and leave the current point on the upper
+    /// right one. The point is then set outright, for a reader that passes
+    /// the image over and has not followed its corners.
+    fn image(&mut self, low: [i32; 2], high: [i32; 2], cols: u16, rows: u16, pixels: &[u8]) {
+        self.images += 1;
+        // The opcode, the grid, the corners, the number and the data's size.
+        let header = 2 + 2 + 2 + 16 + 4 + 4;
+        self.out.push(b'{');
+        self.out
+            .extend_from_slice(&((header + pixels.len() + 1) as i32).to_le_bytes());
+        self.out.extend_from_slice(&0x0007u16.to_le_bytes());
+        self.out.extend_from_slice(&cols.to_le_bytes());
+        self.out.extend_from_slice(&rows.to_le_bytes());
+        for step in [
+            low[0].wrapping_sub(self.at[0]),
+            low[1].wrapping_sub(self.at[1]),
+            high[0].wrapping_sub(low[0]),
+            high[1].wrapping_sub(low[1]),
+        ] {
+            self.out.extend_from_slice(&step.to_le_bytes());
+        }
+        self.out.extend_from_slice(&self.images.to_le_bytes());
+        self.out
+            .extend_from_slice(&(pixels.len() as i32).to_le_bytes());
+        self.out.extend_from_slice(pixels);
+        self.out.push(b'}');
+        self.at = high;
+        self.out.push(b'O');
+        self.out.extend_from_slice(&high[0].to_le_bytes());
+        self.out.extend_from_slice(&high[1].to_le_bytes());
     }
 
     /// The font of the text that follows: its family, em height in graphics

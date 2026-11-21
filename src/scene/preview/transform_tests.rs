@@ -93,6 +93,9 @@ fn repeated_block_edit_previews_follow_every_command_after_cache_warmup() {
                         .collect::<Vec<_>>()
                 };
                 let wires = scene.wire_models_for(selection);
+                // A picked scale point counts in half the selection's larger
+                // side, so a point one full width away doubles it.
+                let width = selected_starts[selected_starts.len() - 1] + 10.0 - selected_starts[0];
                 let mut commands: Vec<(Box<dyn CadCommand>, DVec3, Vec<[f64; 3]>)> = vec![
                     (
                         Box::new(MoveCommand::new(selection.to_vec(), wires.clone())),
@@ -111,7 +114,7 @@ fn repeated_block_edit_previews_follow_every_command_after_cache_warmup() {
                     ),
                     (
                         Box::new(ScaleCommand::new(selection.to_vec(), wires)),
-                        DVec3::new(2.0, 0.0, 0.0),
+                        DVec3::new(width, 0.0, 0.0),
                         expected(|x, y| [2.0 * x, 2.0 * y, 0.0]),
                     ),
                 ];

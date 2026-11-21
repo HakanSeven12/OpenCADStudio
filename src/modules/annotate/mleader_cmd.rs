@@ -373,17 +373,17 @@ impl MLeaderCommand {
                 document::entities::mtext::AttachmentPoint::TopCenter
                 | document::entities::mtext::AttachmentPoint::MiddleCenter
                 | document::entities::mtext::AttachmentPoint::BottomCenter => (
-                    document::entities::multileader::TextAttachmentPointType::Center,
+                    document::entities::multileader::TextAttachmentPointType::TopCenter,
                     document::entities::TextAlignmentType::Center,
                 ),
                 document::entities::mtext::AttachmentPoint::TopRight
                 | document::entities::mtext::AttachmentPoint::MiddleRight
                 | document::entities::mtext::AttachmentPoint::BottomRight => (
-                    document::entities::multileader::TextAttachmentPointType::Right,
+                    document::entities::multileader::TextAttachmentPointType::TopRight,
                     document::entities::TextAlignmentType::Right,
                 ),
                 _ => (
-                    document::entities::multileader::TextAttachmentPointType::Left,
+                    document::entities::multileader::TextAttachmentPointType::TopLeft,
                     document::entities::TextAlignmentType::Left,
                 ),
             };

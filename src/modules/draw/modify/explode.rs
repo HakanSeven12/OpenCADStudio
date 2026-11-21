@@ -610,11 +610,7 @@ fn explode_multileader(
                 _ => 3,
             }
         };
-        let col = match ctx.text_attachment_point {
-            TextAttachmentPointType::Left => 0,
-            TextAttachmentPointType::Center => 1,
-            TextAttachmentPointType::Right => 2,
-        };
+        let col = crate::entities::multileader::attachment_column(ctx.text_attachment_point);
         text.attachment_point = [
             AttachmentPoint::TopLeft,
             AttachmentPoint::TopCenter,
@@ -3938,7 +3934,7 @@ mod tests {
         ml.common.line_weight = document::types::LineWeight::from_value(35);
         ml.context.text_height = 2.0;
         ml.context.text_width = 20.0;
-        ml.context.text_attachment_point = TextAttachmentPointType::Left;
+        ml.context.text_attachment_point = TextAttachmentPointType::TopLeft;
         ml.context.arrowhead_size = 2.0;
         let root = &mut ml.context.leader_roots[0];
         root.connection_point = Vector3::new(10.0, 5.0, 0.0);

@@ -274,11 +274,7 @@ fn to_render(ml: &MultiLeader, document: &document::Document) -> Option<RenderEn
                 style: &resolved,
                 // Side-anchored on the leader-facing edge so the text reads
                 // outward; flips live with the leader/text side.
-                attach_h_anchor: match ctx.text_attachment_point {
-                    document::entities::multileader::TextAttachmentPointType::Left => 0.0,
-                    document::entities::multileader::TextAttachmentPointType::Center => 0.5,
-                    document::entities::multileader::TextAttachmentPointType::Right => 1.0,
-                },
+                attach_h_anchor: attachment_column(ctx.text_attachment_point) as f32 * 0.5,
                 v_anchor: mleader_v_anchor(if text_sign >= 0.0 {
                     ctx.text_left_attachment
                 } else {
@@ -503,11 +499,7 @@ fn text_box_geom(ml: &MultiLeader) -> ([f64; 2], [f64; 3]) {
         ctx.text_flow_direction,
         document::entities::multileader::FlowDirectionType::Vertical
     );
-    let h_anchor: f32 = match ctx.text_attachment_point {
-        document::entities::multileader::TextAttachmentPointType::Left => 0.0,
-        document::entities::multileader::TextAttachmentPointType::Center => 0.5,
-        document::entities::multileader::TextAttachmentPointType::Right => 1.0,
-    };
+    let h_anchor: f32 = attachment_column(ctx.text_attachment_point) as f32 * 0.5;
     let (dir_v, k) = crate::entities::text_support::flow_grip_axis(
         rot,
         vertical,
@@ -1835,6 +1827,14 @@ fn apply_transform(ml: &mut MultiLeader, t: &EntityTransform) {
     });
 }
 
+/// Column (0 left, 1 center, 2 right) of a text attachment point; the
+/// point holds the nine MTEXT positions, numbered row by row.
+pub(crate) fn attachment_column(
+    point: document::entities::multileader::TextAttachmentPointType,
+) -> usize {
+    (point as usize - 1) % 3
+}
+
 /// MIRROR of the content, as AutoCAD does it. MTEXT stays readable whatever
 /// MIRRTEXT says: its direction and rotation are kept and the text moves to
 /// the other side of its location. Block content becomes a true mirror
@@ -1843,12 +1843,15 @@ fn mirror_content_orientation(ml: &mut MultiLeader, p1: DVec3, p2: DVec3) {
     use document::entities::multileader::TextAttachmentPointType;
     // AutoCAD changes only the drawn (context) content; the entity-level
     // values are style overrides and keep their values.
-    let (attachment, alignment) = match ml.context.text_attachment_point {
-        TextAttachmentPointType::Left => (TextAttachmentPointType::Right, TextAlignmentType::Right),
-        TextAttachmentPointType::Right => (TextAttachmentPointType::Left, TextAlignmentType::Left),
-        TextAttachmentPointType::Center => {
-            (TextAttachmentPointType::Center, ml.context.text_alignment)
-        }
+    // The point's row stays, its column swaps sides.
+    let point = ml.context.text_attachment_point;
+    let col = attachment_column(point);
+    let attachment =
+        TextAttachmentPointType::from(((point as i16 - 1) / 3) * 3 + (2 - col as i16) + 1);
+    let alignment = match col {
+        0 => TextAlignmentType::Right,
+        2 => TextAlignmentType::Left,
+        _ => ml.context.text_alignment,
     };
     ml.context.text_attachment_point = attachment;
     if ml.context.text_alignment != TextAlignmentType::Center {
@@ -2777,11 +2780,7 @@ impl MultiLeaderFrameTess for MultiLeader {
             use document::entities::multileader::TextAttachmentDirectionType;
             // The context's attachment point exists in every DWG version;
             // the entity-level copy only exists from R2010 on.
-            let h_anchor: f32 = match ctx.text_attachment_point {
-                document::entities::multileader::TextAttachmentPointType::Left => 0.0,
-                document::entities::multileader::TextAttachmentPointType::Center => 0.5,
-                document::entities::multileader::TextAttachmentPointType::Right => 1.0,
-            };
+            let h_anchor: f32 = attachment_column(ctx.text_attachment_point) as f32 * 0.5;
             // Pick the vertical-anchor attachment based on text_attachment_direction:
             //   Horizontal — leader attaches left/right; use ml.text_left_attachment
             //                (matches the file's stored ctx.text_left_attachment).
@@ -3637,7 +3636,7 @@ mod tests {
         ctx.text_height = 1.0;
         ctx.landing_gap = 0.5;
         ctx.text_location = Vector3::new(7.5, 5.0, 0.0);
-        ctx.text_attachment_point = document::entities::multileader::TextAttachmentPointType::Right;
+        ctx.text_attachment_point = document::entities::multileader::TextAttachmentPointType::TopRight;
         ctx.text_left_attachment = TextAttachmentType::BottomOfTopLineUnderlineBottomLine;
         ctx.text_right_attachment = TextAttachmentType::BottomLine;
         let root = ctx.add_leader_root();
@@ -3705,7 +3704,7 @@ mod tests {
         ml.context.text_string = text.to_string();
         ml.context.text_height = H;
         ml.context.landing_gap = GAP;
-        ml.context.text_attachment_point = TextAttachmentPointType::Left;
+        ml.context.text_attachment_point = TextAttachmentPointType::TopLeft;
         ml.context.text_left_attachment = attach;
         ml.context.text_location = Vector3::new(DOGLEG + GAP, 1.2 * H, 0.0);
         let mut line = LeaderLine::default();
@@ -3924,7 +3923,7 @@ mod tests {
             ctx.landing_gap = 0.5;
             ctx.text_rotation = 0.0; // direction vector governs below
             ctx.text_direction = Vector3::new(tx, ty, 0.0);
-            ctx.text_attachment_point = TextAttachmentPointType::Center;
+            ctx.text_attachment_point = TextAttachmentPointType::TopCenter;
             ctx.text_left_attachment = TextAttachmentType::BottomLine;
             ctx.text_right_attachment = TextAttachmentType::BottomLine;
             // The connection the leader lands on; the writer left the anchor
@@ -4049,7 +4048,7 @@ mod tests {
         ctx.text_string = "SS100-pilíř\\P (štxhv 400x240x510)".to_string();
         ctx.text_height = 1.0;
         ctx.landing_gap = 0.5;
-        ctx.text_attachment_point = TextAttachmentPointType::Center;
+        ctx.text_attachment_point = TextAttachmentPointType::TopCenter;
         ctx.text_left_attachment = TextAttachmentType::BottomLine;
         ctx.text_right_attachment = TextAttachmentType::BottomLine;
         ctx.text_direction = Vector3::new(1.0, 0.0, 0.0);
@@ -4192,9 +4191,9 @@ mod tests {
         ml.context.text_location = Vector3::new(60.0, 81.18, 0.0);
         ml.context.text_direction = Vector3::new(1.0, 0.0, 0.0);
         ml.context.base_direction = Vector3::new(1.0, 0.0, 0.0);
-        ml.context.text_attachment_point = TextAttachmentPointType::Left;
+        ml.context.text_attachment_point = TextAttachmentPointType::TopLeft;
         ml.context.text_alignment = TextAlignmentType::Left;
-        ml.text_attachment_point = TextAttachmentPointType::Left;
+        ml.text_attachment_point = TextAttachmentPointType::TopLeft;
         ml.context.content_base_point = Vector3::new(65.0, 41.0, 0.0);
         ml.context.block_content_location = Vector3::new(60.0, 40.0, 0.0);
         let mirror = EntityTransform::Mirror {
@@ -4211,7 +4210,7 @@ mod tests {
             "text stays readable"
         );
         assert_eq!(ctx.base_direction, Vector3::new(1.0, 0.0, 0.0));
-        assert_eq!(ctx.text_attachment_point, TextAttachmentPointType::Right);
+        assert_eq!(ctx.text_attachment_point, TextAttachmentPointType::TopRight);
         assert_eq!(ctx.text_alignment, TextAlignmentType::Right);
         assert!(ml
             .property_override_flags
@@ -4233,7 +4232,7 @@ mod tests {
         // AutoCAD keeps the entity-level overrides.
         assert_eq!(ml.block_scale.x, 1.0);
         assert_eq!(ml.block_rotation, 0.0);
-        assert_eq!(ml.text_attachment_point, TextAttachmentPointType::Left);
+        assert_eq!(ml.text_attachment_point, TextAttachmentPointType::TopLeft);
     }
 
     #[test]
@@ -4292,9 +4291,9 @@ pub(crate) fn text_top_offset(ml: &MultiLeader) -> f64 {
 pub(crate) fn set_mleader_text_side(ml: &mut MultiLeader, to_right: bool) {
     use document::entities::multileader::TextAttachmentPointType;
     let (attachment, alignment) = if to_right {
-        (TextAttachmentPointType::Left, TextAlignmentType::Left)
+        (TextAttachmentPointType::TopLeft, TextAlignmentType::Left)
     } else {
-        (TextAttachmentPointType::Right, TextAlignmentType::Right)
+        (TextAttachmentPointType::TopRight, TextAlignmentType::Right)
     };
     ml.text_attachment_point = attachment;
     ml.context.text_attachment_point = attachment;

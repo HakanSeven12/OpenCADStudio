@@ -56,8 +56,53 @@ pub(crate) fn display_wires(
         [rgb[0], rgb[1], rgb[2], alpha]
     };
     let world = |p: [f64; 2]| crate::entities::underlay::local_to_world(u, p);
-    let tolerance = curve_tolerance(&sheet);
     let scale = u.x_scale.abs().max(u.y_scale.abs());
+    let mut wires = content_wires(&sheet, name, &shown, &world, scale);
+    if crate::entities::underlay::is_clipped(u) {
+        let clip: Vec<[f64; 2]> = crate::entities::underlay::clip_polygon_local(u)
+            .into_iter()
+            .map(|p| {
+                let w = world(p);
+                [w[0], w[1]]
+            })
+            .collect();
+        let ring = if u.clip_inverted {
+            let [x0, y0, x1, y1] = sheet.rect;
+            let corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(|p| {
+                let w = world(p);
+                [w[0], w[1]]
+            });
+            let lo = [
+                corners.iter().map(|p| p[0]).fold(f64::MAX, f64::min),
+                corners.iter().map(|p| p[1]).fold(f64::MAX, f64::min),
+            ];
+            let hi = [
+                corners.iter().map(|p| p[0]).fold(f64::MIN, f64::max),
+                corners.iter().map(|p| p[1]).fold(f64::MIN, f64::max),
+            ];
+            crate::scene::pick::xclip::inverted_ring(&clip, (lo, hi))
+        } else {
+            clip
+        };
+        crate::scene::pick::xclip::clip_wires(&mut wires, &ring);
+    }
+    for wire in &mut wires {
+        crate::scene::convert::tess::set_wire_aabb(wire, WireModel::UNBOUNDED_AABB);
+    }
+    wires
+}
+
+/// The sheet's fills and lines as wires named `name`: `shown` gives a colour
+/// of the sheet as it is drawn, `world` places a point of the sheet and
+/// `scale` is what a width of the sheet measures there.
+fn content_wires(
+    sheet: &Sheet,
+    name: &str,
+    shown: &dyn Fn([u8; 3]) -> [f32; 4],
+    world: &dyn Fn([f64; 2]) -> [f64; 3],
+    scale: f64,
+) -> Vec<WireModel> {
+    let tolerance = curve_tolerance(sheet);
 
     // Lines per (colour, width), fills per colour, each in first-drawn order.
     let key = |c: [f32; 4]| c.map(f32::to_bits);
@@ -136,37 +181,6 @@ pub(crate) fn display_wires(
         }
         wires.push(wire);
     }
-    if crate::entities::underlay::is_clipped(u) {
-        let clip: Vec<[f64; 2]> = crate::entities::underlay::clip_polygon_local(u)
-            .into_iter()
-            .map(|p| {
-                let w = world(p);
-                [w[0], w[1]]
-            })
-            .collect();
-        let ring = if u.clip_inverted {
-            let [x0, y0, x1, y1] = sheet.rect;
-            let corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(|p| {
-                let w = world(p);
-                [w[0], w[1]]
-            });
-            let lo = [
-                corners.iter().map(|p| p[0]).fold(f64::MAX, f64::min),
-                corners.iter().map(|p| p[1]).fold(f64::MAX, f64::min),
-            ];
-            let hi = [
-                corners.iter().map(|p| p[0]).fold(f64::MIN, f64::max),
-                corners.iter().map(|p| p[1]).fold(f64::MIN, f64::max),
-            ];
-            crate::scene::pick::xclip::inverted_ring(&clip, (lo, hi))
-        } else {
-            clip
-        };
-        crate::scene::pick::xclip::clip_wires(&mut wires, &ring);
-    }
-    for wire in &mut wires {
-        crate::scene::convert::tess::set_wire_aabb(wire, WireModel::UNBOUNDED_AABB);
-    }
     wires
 }
 
@@ -220,4 +234,157 @@ fn polyline(segments: &[Segment], tolerance: f64) -> Vec<[f64; 2]> {
 
 fn dist(a: [f64; 2], b: [f64; 2]) -> f64 {
     (b[0] - a[0]).hypot(b[1] - a[1])
+}
+
+#[cfg(test)]
+mod draw_order_tests {
+    use super::super::model::{Path, SubPath};
+    use super::*;
+
+    const RED: [u8; 3] = [220, 0, 0];
+    const YELLOW: [u8; 3] = [255, 220, 0];
+    const BLUE: [u8; 3] = [0, 90, 255];
+
+    /// A filled box from `low` to `high`.
+    fn fill(color: [u8; 3], low: [f64; 2], high: [f64; 2]) -> Path {
+        let corners = [low, [high[0], low[1]], high, [low[0], high[1]]];
+        Path {
+            subpaths: vec![SubPath {
+                segments: (0..4)
+                    .map(|k| Segment::Line(corners[k], corners[(k + 1) % 4]))
+                    .collect(),
+                closed: true,
+            }],
+            stroke: None,
+            fill: Some(color),
+        }
+    }
+
+    /// A line from `a` to `b`, one pixel wide.
+    fn line(color: [u8; 3], a: [f64; 2], b: [f64; 2]) -> Path {
+        Path {
+            subpaths: vec![SubPath {
+                segments: vec![Segment::Line(a, b)],
+                closed: false,
+            }],
+            stroke: Some((color, 0.0)),
+            fill: None,
+        }
+    }
+
+    /// The wires of a sheet 300 by 200 that draws `paths` in that order.
+    fn wires_of(paths: Vec<Path>) -> Vec<WireModel> {
+        let sheet = Sheet {
+            rect: [0.0, 0.0, 300.0, 200.0],
+            paths,
+            ..Default::default()
+        };
+        let shown = |c: [u8; 3]| {
+            [
+                c[0] as f32 / 255.0,
+                c[1] as f32 / 255.0,
+                c[2] as f32 / 255.0,
+                1.0,
+            ]
+        };
+        let world = |p: [f64; 2]| [p[0], p[1], 0.0];
+        content_wires(&sheet, "1A", &shown, &world, 1.0)
+    }
+
+    /// Whether a wire is of `color`.
+    fn is(wire: &WireModel, color: [u8; 3]) -> bool {
+        (0..3).all(|k| (wire.color[k] - color[k] as f32 / 255.0).abs() < 1e-6)
+    }
+
+    /// The wire that draws something at `at`: a corner of one of its fill
+    /// triangles or a point of one of its lines.
+    fn wire_at(wires: &[WireModel], at: [f64; 2]) -> &WireModel {
+        let on =
+            |p: &[f32; 3]| (p[0] as f64 - at[0]).abs() < 1e-3 && (p[1] as f64 - at[1]).abs() < 1e-3;
+        wires
+            .iter()
+            .find(|wire| wire.fill_tris.iter().any(on) || wire.points.iter().any(on))
+            .unwrap_or_else(|| panic!("nothing is drawn at {at:?}"))
+    }
+
+    /// Where a wire stands in the underlay's own draw order.
+    fn rank(wire: &WireModel) -> f32 {
+        wire.depth_override.unwrap_or(0.0)
+    }
+
+    #[test]
+    fn a_fill_drawn_over_one_of_another_colour_stays_over_it() {
+        // Red is in use before the yellow box is drawn; the red block is
+        // drawn after the box, on it.
+        let wires = wires_of(vec![
+            fill(RED, [20.0, 150.0], [50.0, 180.0]),
+            fill(YELLOW, [100.0, 80.0], [200.0, 120.0]),
+            fill(RED, [120.0, 92.0], [180.0, 108.0]),
+        ]);
+
+        let square = wire_at(&wires, [20.0, 150.0]);
+        let boxed = wire_at(&wires, [100.0, 80.0]);
+        let block = wire_at(&wires, [120.0, 92.0]);
+        assert!(is(block, RED) && is(boxed, YELLOW));
+        assert!(
+            rank(block) > rank(boxed),
+            "the block at {} is not over the box at {}",
+            rank(block),
+            rank(boxed)
+        );
+        assert!(rank(square) <= rank(boxed));
+    }
+
+    #[test]
+    fn a_fill_drawn_after_lines_lies_over_them_and_under_later_ones() {
+        let wires = wires_of(vec![
+            line(BLUE, [60.0, 60.0], [100.0, 140.0]),
+            fill(YELLOW, [70.0, 80.0], [200.0, 120.0]),
+            line(BLUE, [80.0, 86.0], [190.0, 114.0]),
+        ]);
+
+        let under = wire_at(&wires, [60.0, 60.0]);
+        let boxed = wire_at(&wires, [70.0, 80.0]);
+        let over = wire_at(&wires, [80.0, 86.0]);
+        assert!(
+            rank(under) < rank(boxed) && rank(boxed) < rank(over),
+            "{} {} {}",
+            rank(under),
+            rank(boxed),
+            rank(over)
+        );
+    }
+
+    #[test]
+    fn what_lies_apart_shares_a_wire_with_its_like() {
+        // The second red box is nowhere near the yellow one drawn before it.
+        let wires = wires_of(vec![
+            fill(RED, [20.0, 150.0], [50.0, 180.0]),
+            fill(YELLOW, [100.0, 80.0], [200.0, 120.0]),
+            fill(RED, [240.0, 20.0], [280.0, 40.0]),
+            line(BLUE, [10.0, 10.0], [60.0, 10.0]),
+            line(BLUE, [10.0, 190.0], [60.0, 190.0]),
+        ]);
+
+        assert_eq!(wires.len(), 3, "red fills, the yellow one and blue lines");
+        assert!(std::ptr::eq(
+            wire_at(&wires, [20.0, 150.0]),
+            wire_at(&wires, [240.0, 20.0])
+        ));
+        assert!(std::ptr::eq(
+            wire_at(&wires, [10.0, 10.0]),
+            wire_at(&wires, [10.0, 190.0])
+        ));
+    }
+
+    #[test]
+    fn a_sheet_of_one_colour_and_kind_is_one_wire_at_the_underlays_depth() {
+        let wires = wires_of(vec![
+            fill(RED, [20.0, 150.0], [50.0, 180.0]),
+            fill(RED, [30.0, 160.0], [90.0, 170.0]),
+        ]);
+
+        assert_eq!(wires.len(), 1);
+        assert_eq!(wires[0].depth_override, None);
+    }
 }

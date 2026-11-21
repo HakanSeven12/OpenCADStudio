@@ -10,9 +10,12 @@
 mod dgn7;
 mod dgn8;
 pub(crate) mod dwf;
+mod images;
 mod model;
 mod wires;
 
+#[cfg(test)]
+pub(crate) use dwf::samples as dwf_samples;
 pub(crate) use model::CAP_PER_EM;
 pub(crate) use wires::display_wires;
 

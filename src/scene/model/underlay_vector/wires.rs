@@ -365,7 +365,7 @@ fn dist(a: [f64; 2], b: [f64; 2]) -> f64 {
 
 #[cfg(test)]
 mod draw_order_tests {
-    use super::super::model::{Path, SubPath};
+    use super::super::model::{Path, SheetImage, SubPath};
     use super::*;
 
     const RED: [u8; 3] = [220, 0, 0];
@@ -401,9 +401,28 @@ mod draw_order_tests {
 
     /// The wires of a sheet 300 by 200 that draws `paths` in that order.
     fn wires_of(paths: Vec<Path>) -> Vec<WireModel> {
+        wires_with(paths, Vec::new())
+    }
+
+    /// An image over the box from `low` to `high`, drawn after the first
+    /// `after` paths of its sheet.
+    fn picture(low: [f64; 2], high: [f64; 2], after: usize) -> SheetImage {
+        SheetImage {
+            rect: [low[0], low[1], high[0], high[1]],
+            width: 1,
+            height: 1,
+            pixels: std::sync::Arc::new(vec![255; 4]),
+            after,
+        }
+    }
+
+    /// The wires of a sheet 300 by 200 that draws `paths` in that order and
+    /// `images` among them.
+    fn wires_with(paths: Vec<Path>, images: Vec<SheetImage>) -> Vec<WireModel> {
         let sheet = Sheet {
             rect: [0.0, 0.0, 300.0, 200.0],
             paths,
+            images,
             ..Default::default()
         };
         let shown = |c: [u8; 3]| {
@@ -513,5 +532,85 @@ mod draw_order_tests {
 
         assert_eq!(wires.len(), 1);
         assert_eq!(wires[0].depth_override, None);
+    }
+
+    // The images of a sheet are drawn as one picture at the underlay's own
+    // depth, rank 0: the wires take the ranks under it and over it.
+
+    #[test]
+    fn what_is_drawn_before_an_image_ranks_under_it_and_what_comes_after_over_it() {
+        let wires = wires_with(
+            vec![
+                fill(YELLOW, [0.0, 0.0], [300.0, 200.0]),
+                line(BLUE, [10.0, 10.0], [290.0, 190.0]),
+                line(RED, [60.0, 60.0], [100.0, 140.0]),
+            ],
+            vec![picture([50.0, 50.0], [250.0, 150.0], 2)],
+        );
+
+        let paper = wire_at(&wires, [0.0, 0.0]);
+        let under = wire_at(&wires, [10.0, 10.0]);
+        let over = wire_at(&wires, [60.0, 60.0]);
+        assert!(
+            rank(paper) < rank(under) && rank(under) < 0.0 && 0.0 < rank(over),
+            "{} {} {}",
+            rank(paper),
+            rank(under),
+            rank(over)
+        );
+    }
+
+    #[test]
+    fn a_lone_wire_takes_its_side_of_an_image() {
+        let over = wires_with(
+            vec![line(BLUE, [60.0, 60.0], [100.0, 140.0])],
+            vec![picture([50.0, 50.0], [250.0, 150.0], 0)],
+        );
+        let under = wires_with(
+            vec![line(BLUE, [60.0, 60.0], [100.0, 140.0])],
+            vec![picture([50.0, 50.0], [250.0, 150.0], 1)],
+        );
+
+        assert_eq!((over.len(), under.len()), (1, 1));
+        assert!(over[0].depth_override.is_some_and(|rank| rank > 0.0));
+        assert!(under[0].depth_override.is_some_and(|rank| rank < 0.0));
+    }
+
+    #[test]
+    fn what_is_drawn_after_an_image_away_from_it_joins_its_like_under_it() {
+        let wires = wires_with(
+            vec![
+                line(BLUE, [10.0, 10.0], [40.0, 10.0]),
+                line(BLUE, [10.0, 190.0], [40.0, 190.0]),
+            ],
+            vec![picture([100.0, 50.0], [250.0, 150.0], 1)],
+        );
+
+        assert_eq!(wires.len(), 1);
+        assert!(rank(&wires[0]) < 0.0);
+    }
+
+    #[test]
+    fn a_second_image_is_drawn_with_the_first() {
+        // A fill where the second image will lie, the first image, a line on
+        // it, the second image, a line on that one.
+        let wires = wires_with(
+            vec![
+                fill(YELLOW, [160.0, 20.0], [280.0, 180.0]),
+                line(RED, [30.0, 30.0], [110.0, 170.0]),
+                line(BLUE, [170.0, 30.0], [270.0, 170.0]),
+            ],
+            vec![
+                picture([20.0, 20.0], [120.0, 180.0], 1),
+                picture([160.0, 20.0], [280.0, 180.0], 2),
+            ],
+        );
+
+        assert!(
+            rank(wire_at(&wires, [160.0, 20.0])) < 0.0,
+            "the fill is under"
+        );
+        assert!(rank(wire_at(&wires, [30.0, 30.0])) > 0.0);
+        assert!(rank(wire_at(&wires, [170.0, 30.0])) > 0.0);
     }
 }

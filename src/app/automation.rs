@@ -5706,6 +5706,15 @@ DEAD
                 path[0].0, path[0].1,
             )));
             let _ = app.update(Message::ViewportLeftPress);
+            // An intentional hold-to-lasso: a fast click and move alone must
+            // not start a lasso while a click can also arm a window.
+            let held_since = iced::time::Instant::now() - std::time::Duration::from_millis(260);
+            app.tabs[i]
+                .scene
+                .selection
+                .borrow_mut()
+                .input
+                .left_press_time = Some(held_since);
             for &(x, y) in &path {
                 let _ = app.update(Message::ViewportMove(iced::Point::new(x, y)));
             }

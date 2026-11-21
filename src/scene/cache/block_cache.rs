@@ -1450,8 +1450,13 @@ fn mark_stroke_runs(
     // `+ 0.0` folds a negative zero into the positive one.
     let rank_of = |member: &Handle| depth_map.get(&member.value()).map_or(0.0, |d| d[0]) + 0.0;
     // Every rank something of this block may be drawn at. A member without a
-    // rank of its own is drawn at 0, and so are an insert's attributes.
-    let mut taken: Vec<f32> = members.iter().map(rank_of).chain([0.0]).collect();
+    // rank of its own is drawn at 0; an insert's attributes are drawn at their
+    // own rank, over every member.
+    let mut taken: Vec<f32> = members
+        .iter()
+        .map(rank_of)
+        .chain([crate::scene::INSERT_ATTRIBUTE_RANK])
+        .collect();
     taken.sort_unstable_by(f32::total_cmp);
     // Where a rank sits among the taken ones, when one member alone holds it.
     let alone = |rank: f32| -> Option<usize> {
@@ -5955,19 +5960,20 @@ mod stroke_run_tests {
     }
 
     #[test]
-    fn a_run_stops_at_the_depth_of_members_without_a_rank() {
-        // An insert's attributes are drawn at 0: a line below it may not be
-        // moved above it, nor one above it below.
+    fn a_run_stops_at_the_depth_of_the_inserts_attributes() {
+        // An insert's attributes are drawn at their own rank: a line below it
+        // may not be moved above it, nor one above it below.
+        let at = crate::scene::INSERT_ATTRIBUTE_RANK;
         let straddling = |members: &[Handle]| {
-            let around_zero = [-0.2f32, -0.1, 0.1, 0.2];
+            let around = [at - 0.05, at - 0.01, at + 0.01, at + 0.05];
             members
                 .iter()
-                .zip(around_zero)
+                .zip(around)
                 .map(|(member, rank)| (member.value(), [rank, 0.01]))
                 .collect()
         };
         let strokes = expand((0..4).map(|y| line(y, RED)).collect(), straddling);
-        assert_eq!(strokes, vec![(2, -0.2), (2, 0.1)]);
+        assert_eq!(strokes, vec![(2, at - 0.05), (2, at + 0.01)]);
     }
 
     #[test]

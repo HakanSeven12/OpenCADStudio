@@ -57,6 +57,8 @@ pub enum BlockScalePolicy {
 #[cfg(test)]
 mod annotation_visibility_tests;
 #[cfg(test)]
+mod attribute_over_wipeout_tests;
+#[cfg(test)]
 mod block_base_point_tests;
 #[cfg(test)]
 mod block_definition_handles_tests;
@@ -1504,6 +1506,13 @@ const DRAW_DEPTH_LABEL_SCALE: f32 = 1.0 / 1_073_741_824.0;
 // at the default draw-order scale), and narrow enough to leave room for
 // thousands of Adds before a full rebuild.
 const DRAW_DEPTH_EMPTY_BLOCK_STRIDE: i32 = 1 << 18;
+
+/// The rank an insert's attributes are drawn at: `insert depth + rank * half`.
+/// Block members draw at their own ranks, all inside (0, 2) of the insert's
+/// half gap, so this one is above every member (an attribute is drawn after the
+/// block's contents, over its wipeout) and still under the next sibling, which
+/// starts two half gaps further on.
+pub(crate) const INSERT_ATTRIBUTE_RANK: f32 = 1.95;
 
 /// Labels map into (0, 2): draw order only ever moves 2D geometry towards
 /// the camera. A negative bias pushed lines lying on a solid's face behind

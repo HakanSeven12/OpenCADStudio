@@ -498,6 +498,8 @@ pub(crate) fn append_insert_attribute_wires(
                 w.aci = sub_aci;
                 w.aabb = sub_aabb;
                 w.plot_visible &= attr_plottable;
+                // Over every member of the block, its wipeouts included.
+                w.depth_override = Some(crate::scene::INSERT_ATTRIBUTE_RANK);
             }
             wires.extend(attr_wires);
         }

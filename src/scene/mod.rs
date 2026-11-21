@@ -3228,9 +3228,11 @@ pub struct Scene {
     hidden_dynamic_dimensions: HashSet<Handle>,
     /// The camera generation the dynamic dimensions were last scaled for.
     dynamic_dimension_camera_gen: Option<u64>,
-    /// The view scale the underlay rasters are made for (model space).
+    /// The view scale the rasters of the underlays of model space are made
+    /// for.
     underlay_scale: raster_scale::RasterScale,
-    /// The view scale the OLE pictures of the current layout are made for.
+    /// The view scale of the current layout, which its OLE pictures and the
+    /// underlays on its sheet are made for.
     ole_scale: raster_scale::RasterScale,
     /// The rasters a zoom step asks a worker to draw (`raster_reseed`).
     pending_reseed: Option<raster_reseed::ReseedJob>,
@@ -3818,7 +3820,8 @@ impl Scene {
     /// Paper-space callers use their own scale instead.
     /// Rasterise the underlays again when the view's scale has moved to
     /// another quarter-octave step and stayed there briefly (not on every
-    /// frame of a zoom), and likewise the OLE pictures of the current layout.
+    /// frame of a zoom), and likewise the OLE pictures of the current layout
+    /// and the underlays on its sheet.
     pub fn refresh_underlay_resolution(&mut self, now: iced::time::Instant) {
         let generation = self.camera_generation;
         if let Some(wpp) = self.world_per_pixel() {
@@ -3840,11 +3843,30 @@ impl Scene {
         if let Some(wpp) = self.layout_world_per_pixel() {
             let view = self.layout_plan_view_rect();
             let layout = self.current_layout.clone();
-            if self.ole_scale.settle(wpp, view, &layout, generation, now) && self.has_ole_frames() {
+            let sheet_underlays = self.sheet_may_hold_underlays();
+            if self.ole_scale.settle(wpp, view, &layout, generation, now)
+                && (self.has_ole_frames() || sheet_underlays)
+            {
                 #[cfg(not(target_arch = "wasm32"))]
-                self.queue_reseed(|e| matches!(e, EntityType::Ole2Frame(_)));
+                {
+                    let sheet = self.current_layout_block_handle();
+                    self.queue_reseed(|e| match e {
+                        EntityType::Ole2Frame(_) => true,
+                        EntityType::Underlay(u) => {
+                            sheet_underlays && u.common.owner_handle == sheet
+                        }
+                        _ => false,
+                    });
+                }
                 #[cfg(target_arch = "wasm32")]
-                self.reseed_ole_frames();
+                {
+                    if self.has_ole_frames() {
+                        self.reseed_ole_frames();
+                    }
+                    if sheet_underlays {
+                        self.reseed_underlays();
+                    }
+                }
             }
         }
     }
@@ -3859,11 +3881,17 @@ impl Scene {
                     .stale(wpp, self.plan_view_rect(), "Model")
             });
         underlays
-            || (self.has_ole_frames()
+            || ((self.has_ole_frames() || self.sheet_may_hold_underlays())
                 && self.layout_world_per_pixel().is_some_and(|wpp| {
                     self.ole_scale
                         .stale(wpp, self.layout_plan_view_rect(), &self.current_layout)
                 }))
+    }
+
+    /// A paper layout is in view and the drawing has underlays: some may lie
+    /// on its sheet, where they follow the sheet's view.
+    fn sheet_may_hold_underlays(&self) -> bool {
+        self.current_layout != "Model" && self.has_underlays()
     }
 
     /// World units per screen pixel of the current layout's view: the model

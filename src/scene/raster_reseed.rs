@@ -119,25 +119,66 @@ impl Scene {
             EntityType::Underlay(u) => match self.document.objects.get(&u.definition_handle) {
                 Some(document::objects::ObjectType::UnderlayDefinition(def)) => {
                     // A paper-space underlay adjusts to the sheet, not the canvas.
-                    let owner = u.common.owner_handle;
+                    let owner = self.underlay_owner(u);
                     let background = if owner.is_null() || owner == self.model_space_block_handle()
                     {
                         self.bg_color
                     } else {
                         self.paper_bg_color
                     };
+                    // On a sheet it follows the view of that sheet while it
+                    // is the layout in view, and on another sheet keeps the
+                    // size used when the view is unknown. Anywhere else it
+                    // follows the model view.
+                    let scale = match self.underlay_sheet(u) {
+                        None => Some(&self.underlay_scale),
+                        Some(sheet) if sheet == self.current_layout_block_handle() => {
+                            Some(&self.ole_scale)
+                        }
+                        Some(_) => None,
+                    };
+                    let (world_per_pixel, view) =
+                        scale.map_or((None, None), |scale| (scale.world_per_pixel, scale.view));
                     Some(RasterInput::Underlay {
                         underlay: Box::new(u.clone()),
                         definition: Box::new(def.clone()),
                         background,
-                        world_per_pixel: self.underlay_scale.world_per_pixel,
-                        view: self.underlay_scale.view,
+                        world_per_pixel,
+                        view,
                     })
                 }
                 _ => None,
             },
             _ => None,
         }
+    }
+
+    /// The block `underlay` lies in. One that is not in the drawing yet is on
+    /// its way to the space of the current layout.
+    fn underlay_owner(&self, underlay: &document::entities::Underlay) -> Handle {
+        let owner = underlay.common.owner_handle;
+        if owner.is_null() {
+            self.current_layout_block_handle()
+        } else {
+            owner
+        }
+    }
+
+    /// The sheet `underlay` lies on, the block of a paper layout; `None` in
+    /// model space and in a block definition, where it follows the model
+    /// view.
+    fn underlay_sheet(&self, underlay: &document::entities::Underlay) -> Option<Handle> {
+        let owner = self.underlay_owner(underlay);
+        if owner.is_null() || owner == self.model_space_block_handle() {
+            return None;
+        }
+        let layout_blocks = self.layout_block_handles();
+        self.document
+            .block_records
+            .iter()
+            .find(|record| record.handle == owner)
+            .is_some_and(|record| !Self::is_block_definition_record(record, &layout_blocks))
+            .then_some(owner)
     }
 
     /// Draws `input` on this thread, as the raster of an object of this
@@ -153,6 +194,9 @@ impl Scene {
     fn mark_region_used(&self, input: &RasterInput) {
         match input {
             RasterInput::Ole { .. } => self.ole_scale.region_used.set(true),
+            RasterInput::Underlay { underlay, .. } if self.underlay_sheet(underlay).is_some() => {
+                self.ole_scale.region_used.set(true)
+            }
             RasterInput::Underlay { .. } => self.underlay_scale.region_used.set(true),
         }
     }

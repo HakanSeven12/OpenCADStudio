@@ -44,6 +44,7 @@ pub const COMMANDS: &[&str] = &[
     "CREATESAMPLELINES",
     "CREATESECTIONVIEWS",
     "CREATEINTERSECTION",
+    "CREATECURBRETURN",
     "CREATEASSEMBLY",
     "CREATEPIPENETWORK",
     "CREATEPRESSURENETWORK",
@@ -55,6 +56,24 @@ const VIEW_OPTIONS: &[Opt] = &[
     Opt { label: "Minimum elevation", keyword: "MI", key: "elevation_min", prompt: "Minimum elevation of the view", kind: OptKind::Number },
     Opt { label: "Maximum elevation", keyword: "MA", key: "elevation_max", prompt: "Maximum elevation of the view", kind: OptKind::Number },
     Opt { label: "Vertical exaggeration", keyword: "V", key: "exaggeration", prompt: "Vertical exaggeration of the view", kind: OptKind::Number },
+    Opt { label: "Bands", keyword: "B", key: "bands", prompt: "Bands below the view (? to list)", kind: OptKind::Choice(view_bands) },
+];
+
+/// The band sets CREATEPROFILEVIEW writes below a view.
+pub const VIEW_BANDS: [&str; 5] = ["None", "Profile data", "Vertical geometry", "Horizontal geometry", "All"];
+
+fn view_bands() -> Vec<&'static str> {
+    VIEW_BANDS.to_vec()
+}
+
+const INTERSECTION_OPTIONS: &[Opt] = &[
+    Opt { label: "Offset width", keyword: "O", key: "offset_width", prompt: "Width of the offset alignments on each side of both roads (0 for none)", kind: OptKind::Number },
+];
+
+const CURB_RETURN_OPTIONS: &[Opt] = &[
+    Opt { label: "Radius", keyword: "R", key: "radius", prompt: "Curb return radius", kind: OptKind::Number },
+    Opt { label: "Offset", keyword: "O", key: "offset", prompt: "Offset of the curb lines from both roads", kind: OptKind::Number },
+    Opt { label: "Overlap", keyword: "V", key: "overlap", prompt: "Straight length kept along each road before and after the arc", kind: OptKind::Number },
 ];
 
 const ASSEMBLY_OPTIONS: &[Opt] = &[
@@ -264,7 +283,7 @@ pub fn steps(name: &str) -> Option<Vec<Step>> {
             Step::Objects { prompt: "Select an alignment for the profile view:", filter: Alignments, slot: 0 },
             Step::Point { prompt: "Specify lower left corner of the profile view:" },
             Step::Accept {
-                prompt: "Press Enter to create the view or [Start station/End station/Minimum elevation/Maximum elevation/Vertical exaggeration]:",
+                prompt: "Press Enter to create the view or [Start station/End station/Minimum elevation/Maximum elevation/Vertical exaggeration/Bands]:",
                 options: VIEW_OPTIONS,
             },
         ],
@@ -286,6 +305,13 @@ pub fn steps(name: &str) -> Option<Vec<Step>> {
         "CREATEINTERSECTION" => vec![
             Step::Objects { prompt: "Select the main road alignment:", filter: Alignments, slot: 0 },
             Step::Objects { prompt: "Select the crossing road alignment:", filter: Alignments, slot: 1 },
+            Step::Accept { prompt: "Press Enter to create the intersection or [Offset width]:", options: INTERSECTION_OPTIONS },
+        ],
+        "CREATECURBRETURN" => vec![
+            Step::Objects { prompt: "Select the first road alignment:", filter: Alignments, slot: 0 },
+            Step::Objects { prompt: "Select the second road alignment:", filter: Alignments, slot: 1 },
+            Step::Point { prompt: "Specify a point in the corner to round:" },
+            Step::Accept { prompt: "Press Enter to create the curb return or [Radius/Offset/Overlap]:", options: CURB_RETURN_OPTIONS },
         ],
         "CREATEPARCEL" => vec![Step::Objects { prompt: "Select lines or polylines to make lot lines of:", filter: Paths, slot: 0 }],
         "CREATEASSEMBLY" => vec![
@@ -350,6 +376,7 @@ impl CadModule for CivilModule {
                         tool("CREATESAMPLELINES", "Create Sample Lines", icon!("samplelines")),
                         tool("CREATESECTIONVIEWS", "Create Section Views", icon!("sectionviews")),
                         tool("CREATEINTERSECTION", "Create Intersection", icon!("intersection")),
+                        tool("CREATECURBRETURN", "Create Curb Return", icon!("curbreturn")),
                     ],
                 },
                 RibbonGroup {

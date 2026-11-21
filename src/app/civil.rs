@@ -166,6 +166,13 @@ fn fixed_profile(pvis: &[Vector2], length: impl Fn(f64) -> f64) -> Result<Vec<c3
     Ok(out)
 }
 
+/// Distance from `p` to the segment `(a, b)`.
+fn segment_distance(p: Vector2, (a, b): (Vector2, Vector2)) -> f64 {
+    let d = b - a;
+    let t = ((p - a).dot(&d) / d.dot(&d)).clamp(0.0, 1.0);
+    p.distance(&(a + d * t))
+}
+
 /// The curve elements of `alignment` in station order: id, start and end station, and
 /// whether the curve turns left.
 fn alignment_curves(a: &document::classes::arch::ArchEntityData) -> Option<Vec<(i16, f64, f64, bool)>> {
@@ -574,8 +581,22 @@ impl OpenCADStudio {
                         }
                     }
                 };
-                c3d::add_profile_view_with_style(doc, alignment, &view, Vector2::new(corner.x, corner.y), style, stations, elevations, layer)
-                    .map_err(refused)?;
+                let kinds: &[c3d::BandKind] = match req.text("bands") {
+                    Some("Profile data") => &[c3d::BandKind::ProfileData],
+                    Some("Vertical geometry") => &[c3d::BandKind::VerticalGeometry],
+                    Some("Horizontal geometry") => &[c3d::BandKind::HorizontalGeometry],
+                    Some("All") => &[c3d::BandKind::ProfileData, c3d::BandKind::VerticalGeometry, c3d::BandKind::HorizontalGeometry],
+                    _ => &[],
+                };
+                let origin = Vector2::new(corner.x, corner.y);
+                if kinds.is_empty() {
+                    c3d::add_profile_view_with_style(doc, alignment, &view, origin, style, stations, elevations, layer).map_err(refused)?;
+                } else if stations.is_some() || elevations.is_some() {
+                    return Err(crate::t!("A view with bands takes the automatic range.").into_owned());
+                } else {
+                    let bands: Vec<c3d::ProfileViewBand> = kinds.iter().map(|k| c3d::ProfileViewBand::new(*k)).collect();
+                    c3d::add_profile_view_with_bands(doc, alignment, &view, origin, style, &bands, layer).map_err(refused)?;
+                }
                 // The view brings its label groups: redraw everything.
                 crate::tf!("Profile view {} created.", view).into_owned()
             }
@@ -894,19 +915,66 @@ impl OpenCADStudio {
                 let main = *req.objects[0].first().ok_or("no alignment")?;
                 // The second step's selection keeps the main road picked before it.
                 let other = *req.objects[1].iter().find(|h| **h != main).ok_or("no alignment")?;
-                let profiles = newest_profile(doc, main).zip(newest_profile(doc, other));
+                // The roads' newest profiles when both have one, else none.
+                let (main_profile, other_profile) = newest_profile(doc, main).zip(newest_profile(doc, other)).unwrap_or((Handle::NULL, Handle::NULL));
+                let width = req.value("offset_width", 0.0);
+                if !(width >= 0.0) {
+                    return Err(crate::t!("The offset width must be zero or more.").into_owned());
+                }
+                // With a width, the offset alignments of both roads, the actions that keep them
+                // and the intersection's location label.
+                let offsets = (width > 0.0).then_some(c3d::IntersectionOffsets { main_left: width, main_right: width, other_left: width, other_right: width });
                 let intersection = next_name(doc, "AECC_INTERSECTION", "Intersection");
                 self.push_undo_snapshot(i, name);
                 let doc = &mut self.tabs[i].scene.document;
-                // A crossing takes the roads' profiles; a tee junction (one road ending on the
-                // other) is written without them.
-                let add = |doc: &mut document::Document, (a, b): (Handle, Handle)| c3d::add_intersection(doc, &intersection, main, a, other, b, ["", ""], layer);
-                let h = match profiles.map(|p| add(doc, p)) {
-                    Some(Ok(h)) => h,
-                    _ => add(doc, (Handle::NULL, Handle::NULL)).map_err(refused)?,
-                };
-                changes.push((h, ChangeKind::Added));
+                c3d::add_intersection_with(doc, &intersection, main, main_profile, other, other_profile, ["", ""], offsets, layer).map_err(refused)?;
                 crate::tf!("Intersection {} created.", intersection).into_owned()
+            }
+            "CREATECURBRETURN" => {
+                let doc = &self.tabs[i].scene.document;
+                let first = *req.objects[0].first().ok_or("no alignment")?;
+                // The second step's selection keeps the first road picked before it.
+                let second = *req.objects[1].iter().find(|h| **h != first).ok_or("no alignment")?;
+                let p = req.points.first().map(|p| Vector2::new(p.x, p.y)).ok_or("no point")?;
+                let (radius, width, overlap) = (req.value("radius", 10.0), req.value("offset", 6.0), req.value("overlap", 5.0));
+                // Each road's segment nearest the point: where it runs and which side the
+                // point lies on.
+                let nearest = |h: Handle| -> Option<(Vector2, Vector2)> {
+                    arch(doc, h)?
+                        .alignment_pieces()
+                        .iter()
+                        .flat_map(|(_, pts)| pts.windows(2).map(|w| (w[0], w[1])).collect::<Vec<_>>())
+                        .filter(|(a, b)| a.distance(b) > 0.0)
+                        .min_by(|x, y| segment_distance(p, *x).total_cmp(&segment_distance(p, *y)))
+                        .map(|(a, b)| (a, (b - a) * (1.0 / a.distance(&b))))
+                };
+                let not_found = || crate::t!("The roads cannot be solved.").into_owned();
+                let ((a1, d1), (a2, d2)) = (nearest(first).ok_or_else(not_found)?, nearest(second).ok_or_else(not_found)?);
+                let cross = |u: Vector2, v: Vector2| u.x * v.y - u.y * v.x;
+                let den = cross(d1, d2);
+                if den.abs() < 1e-12 {
+                    return Err(crate::t!("The roads are parallel where the point lies.").into_owned());
+                }
+                // Where the two roads' lines meet.
+                let junction = a1 + d1 * (cross(a2 - a1, d2) / den);
+                let (along1, along2) = ((p - junction).dot(&d1), (p - junction).dot(&d2));
+                // The curb return runs along its incoming road's stationing: the road whose
+                // arm behind the junction bounds the corner.
+                let (incoming, d_in, outgoing, d_out, forward) = if along1 < 0.0 {
+                    (first, d1, second, d2, along2 > 0.0)
+                } else if along2 < 0.0 {
+                    (second, d2, first, d1, along1 > 0.0)
+                } else {
+                    return Err(crate::t!("The corner lies ahead of both roads; pick a corner behind one of them.").into_owned());
+                };
+                // Offsets are negative to the left of each road.
+                let side = |d: Vector2| if cross(d, p - junction) > 0.0 { -width } else { width };
+                let curb = next_name(doc, "AECC_ALIGNMENT", "Curb Return");
+                self.push_undo_snapshot(i, name);
+                let doc = &mut self.tabs[i].scene.document;
+                let h = c3d::add_curb_return(doc, &curb, incoming, side(d_in), outgoing, side(d_out), forward, radius, (overlap, overlap), layer).map_err(refused)?;
+                changes.push((h, ChangeKind::Added));
+                crate::tf!("Curb return {} created.", curb).into_owned()
             }
             "CREATEPIPENETWORK" => {
                 if req.points.is_empty() {

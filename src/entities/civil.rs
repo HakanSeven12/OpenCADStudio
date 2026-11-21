@@ -698,7 +698,7 @@ pub(crate) fn properties(entity: &EntityType, document: &document::Document) -> 
     use crate::entities::common::ro_prop;
     let EntityType::Extended(e) = entity else { return Vec::new() };
     let ExtendedEntityData::Arch(data) = &e.data else { return Vec::new() };
-    let Some(point) = cogo_point_of(data, document) else { return Vec::new() };
+    let Some(point) = cogo_point_of(data, document) else { return other_properties(data, document) };
     vec![crate::scene::model::object::PropSection {
         title: crate::t!("Class").into_owned(),
         props: vec![
@@ -714,6 +714,57 @@ pub(crate) fn properties(entity: &EntityType, document: &document::Document) -> 
             ro_prop(crate::t!("Elevation").as_ref(), "ext_civil_elevation", format!("{:.4}", point.position.z)),
         ],
     }]
+}
+
+/// Read-only rows of the civil records the codec names: sample lines, view frames, match
+/// lines, survey figures and networks, superelevation views.
+fn other_properties(data: &ArchEntityData, document: &document::Document) -> Vec<crate::scene::model::object::PropSection> {
+    use crate::entities::common::ro_prop;
+    // The name of the civil record `h` (its third text, an alignment's fourth).
+    let name_of = |h: u64| match document.get_entity(Handle::new(h)) {
+        Some(EntityType::Extended(x)) => match &x.data {
+            ExtendedEntityData::Arch(a) => a.alignment_name().or_else(|| a.decode().strings.get(2).cloned()).unwrap_or_default(),
+            _ => String::new(),
+        },
+        _ => String::new(),
+    };
+    let row = |label: &str, field: &'static str, value: String| ro_prop(crate::t!(label).as_ref(), field, value);
+    let rows = match data.dxf_name.as_str() {
+        "AECC_SAMPLE_LINE" => vec![
+            row("Name", "ext_civil_name", data.decode().strings.get(2).cloned().unwrap_or_default()),
+            row("Station", "ext_civil_station", data.sample_line_station().map(|s| format!("{s:.3}")).unwrap_or_default()),
+        ],
+        "AECC_VIEWFRAME" => match data.view_frame() {
+            Some(f) => vec![
+                row("Name", "ext_civil_name", f.name),
+                row("Match line before", "ext_civil_before", name_of(f.match_line_before)),
+                row("Match line after", "ext_civil_after", name_of(f.match_line_after)),
+            ],
+            None => Vec::new(),
+        },
+        "AECC_MATCHLINE" => match data.match_line() {
+            Some(m) => vec![
+                row("Name", "ext_civil_name", m.name),
+                row("View frame before", "ext_civil_before", name_of(m.view_frame_before)),
+                row("View frame after", "ext_civil_after", name_of(m.view_frame_after)),
+            ],
+            None => Vec::new(),
+        },
+        "AECC_SVFIGURE" => match data.survey_figure() {
+            Some(f) => vec![row("Name", "ext_civil_name", f.name), row("Site", "ext_civil_site", f.site)],
+            None => Vec::new(),
+        },
+        "AECC_SVNETWORK" => data.survey_network_name().map(|n| vec![row("Name", "ext_civil_name", n)]).unwrap_or_default(),
+        "AECC_SUPERELEVATION_DIAGRAM_VIEW" => match data.superelevation_view() {
+            Some(v) => vec![row("Name", "ext_civil_name", v.name), row("Alignment", "ext_civil_alignment", name_of(v.alignment))],
+            None => Vec::new(),
+        },
+        _ => Vec::new(),
+    };
+    if rows.is_empty() {
+        return Vec::new();
+    }
+    vec![crate::scene::model::object::PropSection { title: crate::t!("Class").into_owned(), props: rows }]
 }
 
 fn shown_stations(alignment: Option<&ArchEntityData>) -> impl Fn(f64) -> f64 {

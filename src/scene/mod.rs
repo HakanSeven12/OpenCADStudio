@@ -13791,6 +13791,18 @@ impl Scene {
         arc
     }
 
+    /// True when `handle`'s entity is a Civil / AEC object
+    /// (`ExtendedEntityData::Arch`). The codec cannot rewrite its class data
+    /// yet, so a move would shift only its cached picture and leave the
+    /// object where it was (#3394); transform paths skip it.
+    pub fn is_fixed_in_place(&self, handle: Handle) -> bool {
+        matches!(
+            self.document.get_entity(handle),
+            Some(EntityType::Extended(x))
+                if matches!(x.data, document::entities::ExtendedEntityData::Arch(_))
+        )
+    }
+
     /// True when `handle`'s entity sits on a locked layer, or is a point cloud
     /// locked on its own. Locked objects stay visible, snappable and
     /// selectable, but mutation paths must skip them.

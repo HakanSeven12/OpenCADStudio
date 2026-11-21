@@ -634,6 +634,23 @@ impl OpenCADStudio {
             })
         };
 
+        // Report what the transform paths leave alone instead of counting
+        // it as affected.
+        let scene = &self.tabs[i].scene;
+        let skipped: Vec<Value> = handles
+            .iter()
+            .filter_map(|&h| {
+                let reason = if scene.is_layer_locked(h) {
+                    "locked"
+                } else if scene.is_fixed_in_place(h) {
+                    "civil_object_not_transformable"
+                } else {
+                    return None;
+                };
+                Some(json!({ "handle": format!("{:X}", h.value()), "reason": reason }))
+            })
+            .collect();
+        let movable = handles.len() - skipped.len();
         self.push_undo_snapshot(i, "ENTITIESTRANSFORM");
         let scene = &mut self.tabs[i].scene;
         let mut created: Vec<String> = Vec::new();
@@ -642,7 +659,7 @@ impl OpenCADStudio {
             "move" | "rotate" | "scale" => {
                 let t = transform(req)?;
                 scene.transform_entities(&handles, &t);
-                affected = handles.len();
+                affected = movable;
             }
             "mirror" => {
                 let t = transform(req)?;
@@ -655,7 +672,7 @@ impl OpenCADStudio {
                 } else {
                     scene.transform_entities(&handles, &t);
                 }
-                affected = handles.len();
+                affected = movable;
             }
             "copy" => {
                 let t = transform(req)?;
@@ -664,7 +681,7 @@ impl OpenCADStudio {
                     .into_iter()
                     .map(|h| format!("{:X}", h.value()))
                     .collect();
-                affected = handles.len();
+                affected = movable;
             }
             "array" => {
                 let rows = req["rows"].as_u64().unwrap_or(1).clamp(1, 100) as i32;
@@ -689,7 +706,7 @@ impl OpenCADStudio {
                         );
                     }
                 }
-                affected = handles.len();
+                affected = movable;
             }
             other => {
                 return Err(failure(
@@ -704,6 +721,7 @@ impl OpenCADStudio {
         self.set_control_result(json!({
             "affected": affected,
             "created": created,
+            "skipped": skipped,
         }));
         Ok(Task::none())
     }

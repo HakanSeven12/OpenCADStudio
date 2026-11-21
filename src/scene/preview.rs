@@ -693,6 +693,118 @@ mod tests {
         let s = Scene::new();
         assert!(s.block_preview_wires("Nope").is_empty());
     }
+
+    fn line(x: f64) -> EntityType {
+        let mut line = Line::new();
+        line.start = Vector3::new(x, 0.0, 0.0);
+        line.end = Vector3::new(x + 10.0, 5.0, 0.0);
+        EntityType::Line(line)
+    }
+
+    /// How many times `pass` resolved the tessellation context. Each one
+    /// scans the drawing's objects, so a pass over many entities takes one.
+    fn contexts_resolved(pass: impl FnOnce()) -> usize {
+        let before = crate::scene::TESSELLATION_CONTEXTS.with(|count| count.get());
+        pass();
+        crate::scene::TESSELLATION_CONTEXTS.with(|count| count.get()) - before
+    }
+
+    #[test]
+    fn an_edit_preview_resolves_the_context_one_time_for_all_its_entities() {
+        let mut s = Scene::new();
+        let handles: Vec<_> = (0..25).map(|i| s.add_entity(line(i as f64))).collect();
+        let mut wires = Vec::new();
+        let resolved = contexts_resolved(|| wires = s.wire_models_for(&handles));
+        assert_eq!(wires.len(), 25, "one wire for each line");
+        assert_eq!(resolved, 1, "not one for each of the 25 entities");
+    }
+
+    #[test]
+    fn an_edit_preview_of_many_entities_equals_the_previews_of_each_one() {
+        let mut s = Scene::new();
+        let handles: Vec<_> = (0..5).map(|i| s.add_entity(line(i as f64))).collect();
+        let together = s.wire_models_for(&handles);
+        let one_by_one: Vec<_> = handles
+            .iter()
+            .flat_map(|handle| s.wire_models_for(std::slice::from_ref(handle)))
+            .collect();
+        assert_eq!(format!("{together:?}"), format!("{one_by_one:?}"));
+    }
+
+    #[test]
+    fn a_mirror_preview_resolves_the_context_one_time_for_text_and_other_entities() {
+        let mut s = Scene::new();
+        let mut handles: Vec<_> = (0..6).map(|i| s.add_entity(line(i as f64))).collect();
+        for i in 0..4 {
+            let mut text = document::entities::Text::new();
+            text.value = format!("T{i}");
+            text.height = 2.5;
+            handles.push(s.add_entity(EntityType::Text(text)));
+        }
+        let mut parts = (Vec::new(), Vec::new());
+        let resolved = contexts_resolved(|| parts = s.mirror_preview_parts(&handles));
+        assert_eq!(parts.0.len(), 6, "the lines are the plain part");
+        assert!(!parts.1.is_empty(), "the text entities are the text part");
+        assert_eq!(resolved, 1, "not one for each of the 10 entities");
+    }
+
+    #[test]
+    fn a_preview_of_loose_entities_resolves_the_context_one_time() {
+        let s = Scene::new();
+        let entities: Vec<_> = (0..12).map(|i| line(i as f64)).collect();
+        let mut wires = Vec::new();
+        let resolved = contexts_resolved(|| wires = s.wires_for_entities(&entities));
+        assert_eq!(wires.len(), 12);
+        assert_eq!(resolved, 1, "not one for each of the 12 entities");
+    }
+
+    #[test]
+    fn a_block_thumbnail_resolves_the_context_one_time_for_all_its_entities() {
+        let mut s = Scene::new();
+        s.define_block_from_owned_entities(
+            (0..8).map(|i| line(i as f64)).collect(),
+            "Widget",
+            glam::DVec3::ZERO,
+        )
+        .unwrap();
+        let mut wires = Vec::new();
+        let resolved = contexts_resolved(|| wires = s.block_preview_wires("Widget"));
+        assert_eq!(wires.len(), 8);
+        assert_eq!(resolved, 1, "not one for each of the 8 entities");
+    }
+
+    #[test]
+    fn a_pass_that_tessellates_nothing_resolves_no_context() {
+        let mut s = Scene::new();
+        s.define_block_from_owned_entities(vec![], "Empty", glam::DVec3::ZERO)
+            .ok();
+        let resolved = contexts_resolved(|| {
+            assert!(s.wire_models_for(&[]).is_empty());
+            assert!(s
+                .wire_models_for(&[document::Handle::new(0xFFFF_FFFF)])
+                .is_empty());
+            assert!(s.mirror_preview_parts(&[]).0.is_empty());
+            assert!(s.wires_for_entities(&[]).is_empty());
+            assert!(s.block_preview_wires("Empty").is_empty());
+            assert!(s.block_preview_wires("Nope").is_empty());
+        });
+        assert_eq!(resolved, 0, "no entity, no scan of the drawing's objects");
+    }
+
+    #[test]
+    fn a_single_entity_still_resolves_its_own_context() {
+        let mut s = Scene::new();
+        let entity = line(0.0);
+        s.add_entity(entity.clone());
+        let resolved = contexts_resolved(|| {
+            s.tessellate_one(&entity);
+            s.tessellate_one(&entity);
+        });
+        assert_eq!(
+            resolved, 2,
+            "a call outside a pass takes the current context"
+        );
+    }
 }
 
 /// Label band colours of a table whose cells are picked (grey band, the

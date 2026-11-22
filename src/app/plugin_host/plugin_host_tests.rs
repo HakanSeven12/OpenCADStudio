@@ -8524,6 +8524,62 @@ check('ly_badscale', lambda: LY.set_page('Sheet1', scale=(0, 1)))
 
     run(
         &mut host,
+        "order",
+        r#"
+LY.create('Sheet3')
+order = LY.set_tab_order(['Sheet3', 'details', 'layout1', ' Sheet1 '])
+if order != ['Model', 'Sheet3', 'Details', 'Layout1', 'Sheet1']:
+    accepted.append('BADORDER_' + '_'.join(order))
+check('to_missing', lambda: LY.set_tab_order(['Sheet3', 'Details', 'Layout1']))
+check('to_unknown', lambda: LY.set_tab_order(['Sheet3', 'Details', 'Layout1', 'Sheet1', 'Nope']))
+check('to_twice', lambda: LY.set_tab_order(['Sheet3', 'Details', 'Layout1', 'Sheet1', 'sheet1']))
+check('to_model', lambda: LY.set_tab_order(['Model', 'Sheet3', 'Details', 'Layout1', 'Sheet1']))
+check('to_string', lambda: LY.set_tab_order('Sheet1'))
+check('to_nonames', lambda: ocs.layout_operation('set_tab_order', '', None))
+check('to_badkey', lambda: ocs.layout_operation('set_tab_order', '', {'names': ['Sheet3', 'Details', 'Layout1', 'Sheet1'], 'x': 1}))
+check('to_notlist', lambda: ocs.layout_operation('set_tab_order', '', {'names': 5}))
+"#,
+    );
+    let (refused, accepted) = report(host.document());
+    assert!(
+        accepted.is_empty(),
+        "accepted invalid requests: {accepted:?}"
+    );
+    assert_eq!(refused, 8);
+    let paper = |names: Vec<String>| -> Vec<String> {
+        names.into_iter().filter(|n| n != "Model").collect()
+    };
+    assert_eq!(
+        paper(host.app.tabs[0].scene.layout_names()),
+        ["Sheet3", "Details", "Layout1", "Sheet1"],
+        "the tabs follow the script's order"
+    );
+    let dwg = crate::io::load_bytes(
+        "order.dwg",
+        document::DwgWriter::write_to_vec(host.document()).unwrap(),
+    )
+    .unwrap();
+    let mut saved: Vec<(i16, String)> = dwg
+        .objects
+        .values()
+        .filter_map(|o| match o {
+            document::objects::ObjectType::Layout(l)
+                if l.name != "Model" && !l.block_record.is_null() =>
+            {
+                Some((l.tab_order, l.name.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    saved.sort();
+    assert_eq!(
+        saved.into_iter().map(|(_, n)| n).collect::<Vec<_>>(),
+        ["Sheet3", "Details", "Layout1", "Sheet1"],
+        "the saved DWG keeps the order"
+    );
+
+    run(
+        &mut host,
         "destroy",
         r#"
 LY.set_current('Details')

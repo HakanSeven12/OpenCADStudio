@@ -250,6 +250,7 @@ LY.set_page("Sheet1", paper_size=(420, 297), rotation=0, scale=(1, 50))
 LY.current = "Sheet1"                                     # create_entity now draws on the sheet
 doc.create_entity("Circle", center={"x": 50, "y": 50, "z": 0}, radius=5)
 LY.current = "Model"
+LY.create("Sheet2"); LY.set_tab_order(["Sheet2", "Sheet1"])  # every paper-space layout once
 LY.rename("Sheet1", "Plan"); LY.delete("Plan")            # deletes the sheet's entities too
 LY.names(), LY.current["name"], LY["Plan"]["paper_size"]
 ```
@@ -265,9 +266,12 @@ style or the current setting is never deleted. Layouts: `Model` cannot be create
 renamed or deleted; deleting the current layout falls back to `Model`; a
 case-only rename is refused. `set_page` takes the sheet in millimetres, a rotation
 of 0/90/180/270 and a custom scale `(numerator, denominator)`, and updates the
-layout limits. Layout operations act on the active document. Records list
+layout limits. `set_tab_order` lists every paper-space layout exactly once
+(matched ignoring case; `Model` stays first and is not listed), reorders the tabs
+in one undo step and returns the new `names()`; an unknown, missing or repeated
+name is refused. Layout operations act on the active document. Records list
 `current`, `tab_order`, `entity_count`, `viewport_count`, `paper_size`, `rotation`
-and `scale`. Reordering layouts and plot devices or styles are not available yet.
+and `scale`. Plot devices and plot styles are not available yet.
 
 ### Running OCS commands: `doc.command`, `doc.start_command`, `doc.modify`
 

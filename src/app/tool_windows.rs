@@ -1883,6 +1883,42 @@ mod tests {
     }
 
     #[test]
+    fn plot_commit_from_its_window_closes_the_plot_tool() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.update_root(Message::PlotDialogOpen);
+        assert!(app.tool_open(ModalKind::Plot));
+        app.plot_dialog.to_file = true;
+        app.plot_dialog.file_svg = false;
+        app.plot_dialog.area = "Layout".into();
+        app.plot_dialog.style_missing = false;
+        press_in_tools(&mut app, "Export PDF");
+        assert!(!app.tool_open(ModalKind::Plot), "Export PDF reached the dialog");
+    }
+
+    #[test]
+    fn plot_blocked_by_a_missing_style_table_says_so_in_the_dialog() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.update_root(Message::PlotDialogOpen);
+        app.plot_dialog.to_file = true;
+        app.plot_dialog.file_svg = false;
+        app.plot_dialog.style_name = "missing.ctb".into();
+        app.plot_dialog.style_missing = true;
+        app.plot_dialog.apply_plot_styles = true;
+        app.plot_dialog.style_error = None;
+        press_in_tools(&mut app, "Export PDF");
+        assert!(app.tool_open(ModalKind::Plot));
+        assert!(
+            app.plot_dialog
+                .style_error
+                .as_deref()
+                .is_some_and(|e| e.contains("missing.ctb")),
+            "the dialog shows why nothing was exported"
+        );
+    }
+
+    #[test]
     fn plot_stays_open_beside_the_drawing() {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);

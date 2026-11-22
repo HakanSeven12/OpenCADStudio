@@ -3401,9 +3401,13 @@ impl OpenCADStudio {
         #[cfg(not(target_arch = "wasm32"))]
         let to_file = d.to_file;
         if d.style_missing && d.apply_plot_styles {
-            self.command_line.push_error(
-                crate::tf!("Plot style table '{}' is not loaded.", d.style_name).as_ref(),
-            );
+            let error = crate::tf!("Plot style table '{}' is not loaded.", d.style_name);
+            self.command_line.push_error(error.as_ref());
+            // The dialog may be in a window of its own, away from the command
+            // line: say there why Export/Preview did nothing.
+            self.plot_dialog
+                .style_error
+                .get_or_insert_with(|| error.into_owned());
             return Task::none();
         }
         if d.geopdf

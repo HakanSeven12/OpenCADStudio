@@ -1582,6 +1582,13 @@ impl OpenCADStudio {
                 // for the final state. Unlike the old path, decoded images stay
                 // cached instead of being immediately cleared.
                 scene.rebuild_derived_caches();
+                // A whole-document state restore cannot be described
+                // incrementally, and this branch journals no per-handle
+                // changes: mark the journal explicitly so every journal
+                // consumer — the plugin delta publisher (API v27) included —
+                // falls back to a full rebuild instead of presenting a
+                // partial set as complete.
+                scene.bump_history_epoch();
             } else if !net_changes.is_empty() || !touched_visibility_blocks.is_empty() {
                 for &(handle, _) in &net_changes {
                     scene.reseed_derived_caches(handle);

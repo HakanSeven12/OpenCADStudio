@@ -519,10 +519,84 @@ pub enum HostNotification {
         revision: u64,
         count: u64,
     },
+    /// V27 exact, categorized document-change delta — the incremental
+    /// successor of [`HostNotification::DocumentChangedRegions`]. Sent INSTEAD
+    /// OF the v13 Regions notification, at the same boundaries, to plugins
+    /// whose exported `ocs_plugin_api_version` reports 27 or newer (the host
+    /// routes per plugin, so no endpoint receives a duplicate Regions+delta
+    /// stream); older plugins keep the exact legacy Regions streams.
+    ///
+    /// `added` / `modified` / `deleted` classify the entity handles of the
+    /// change boundary by net effect against the previous published boundary:
+    ///
+    /// * `added`: absent before the boundary, present after it.
+    /// * `modified`: present on both sides whose relevant data changed.
+    /// * `deleted`: present before, absent after. A deleted handle STAYS in
+    ///   the list even though lookup now fails — the deletion itself is the
+    ///   information.
+    /// * A same-handle replacement (erase + recreate reusing the handle) is
+    ///   `modified`; a replacement through a new handle is
+    ///   `deleted(old) + added(new)`.
+    /// * Repeated changes to one handle within ONE boundary fold into the net
+    ///   classification above (first-event start presence vs last-event end
+    ///   presence); e.g. created-then-erased within one boundary nets to
+    ///   nothing, erased-then-recreated nets to `modified`.
+    ///
+    /// The lists are deterministic (ascending handle order) and deduplicated.
+    ///
+    /// `records` carries the same (entity, app-name) XDATA/XRecord touch pairs
+    /// the v13 Regions notification would have carried.
+    ///
+    /// `snapshot` correlates the boundary with the V4 snapshot store:
+    /// `Some` when a snapshot was actually published for this boundary (the
+    /// plugin can match the pair against the mapping it holds), `None` when
+    /// no V4 store was open for the tab (the legitimate no-consumer case —
+    /// NOT a failure). See [`DocumentDeltaSnapshot`] for the
+    /// generation/version matching rule.
+    ///
+    /// `full_refresh_required` is the honesty flag: `true` means the host
+    /// cannot prove the incremental sets are complete (journal gap, overflow,
+    /// or a whole-document mutation it cannot attribute) and the consumer
+    /// MUST resynchronize the whole document instead of applying the lists.
+    /// `false` with all lists empty is an EXACT statement — nothing relevant
+    /// changed — and must not be confused with the legacy empty-set
+    /// "unknown, walk everything" behavior of `DocumentChangedRegions`.
+    /// Discriminant 15.
+    DocumentChangedDelta {
+        tab_id: u64,
+        version: u64,
+        added: Vec<Handle>,
+        modified: Vec<Handle>,
+        deleted: Vec<Handle>,
+        records: Vec<(Handle, String)>,
+        snapshot: Option<DocumentDeltaSnapshot>,
+        full_refresh_required: bool,
+    },
     /// Fallback for notification variants added in future minor revisions.
     /// Carries the raw bincode payload so an older peer can ignore it without
     /// failing deserialization.
     Unknown(Vec<u8>),
+}
+
+/// Snapshot correlation payload of
+/// [`HostNotification::DocumentChangedDelta`]: identifies the exact V4
+/// snapshot-store publication that reflects the same document state the
+/// delta was computed from.
+///
+/// `version` is the store's per-publication counter (the same value the
+/// `DocumentChangedV4` notification carries for the boundary) and
+/// `generation` increments every time the store mapping itself is replaced
+/// (a resize retires the old file and opens a new one). Versions are only
+/// comparable within one generation: a plugin whose loaded mapping reports a
+/// different generation must re-fetch the store path and re-open — never
+/// compare versions across mappings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentDeltaSnapshot {
+    /// V4 snapshot-store version published for this boundary.
+    pub version: u64,
+    /// Store-mapping generation; increments when the backing file is
+    /// replaced (resize/reopen).
+    pub generation: u64,
 }
 
 impl Serialize for HostNotification {
@@ -622,6 +696,27 @@ impl Serialize for HostNotification {
                 bincode::serialize_into(&mut bytes, revision)
                     .map_err(serde::ser::Error::custom)?;
                 bincode::serialize_into(&mut bytes, count).map_err(serde::ser::Error::custom)?;
+            }
+            HostNotification::DocumentChangedDelta {
+                tab_id,
+                version,
+                added,
+                modified,
+                deleted,
+                records,
+                snapshot,
+                full_refresh_required,
+            } => {
+                bytes.push(15);
+                bincode::serialize_into(&mut bytes, tab_id).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, version).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, added).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, modified).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, deleted).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, records).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, snapshot).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, full_refresh_required)
+                    .map_err(serde::ser::Error::custom)?;
             }
             HostNotification::Unknown(raw) => bytes.extend_from_slice(raw),
         }
@@ -724,6 +819,31 @@ impl<'de> Deserialize<'de> for HostNotification {
                 .map(|(tab_id, revision, count)| {
                     HostNotification::SelectionChangedDigest { tab_id, revision, count }
                 })
+                .map_err(serde::de::Error::custom),
+            15 => bincode::deserialize(rest)
+                .map(
+                    |(
+                        tab_id,
+                        version,
+                        added,
+                        modified,
+                        deleted,
+                        records,
+                        snapshot,
+                        full_refresh_required,
+                    )| {
+                        HostNotification::DocumentChangedDelta {
+                            tab_id,
+                            version,
+                            added,
+                            modified,
+                            deleted,
+                            records,
+                            snapshot,
+                            full_refresh_required,
+                        }
+                    },
+                )
                 .map_err(serde::de::Error::custom),
             _ => Ok(HostNotification::Unknown(bytes)),
         }
@@ -2923,3 +3043,291 @@ mod repl {
 
 #[cfg(feature = "host")]
 pub use repl::{execute_code_guard, CommandSource, ExecutionResult};
+
+#[cfg(all(test, feature = "host"))]
+mod tests {
+    use super::*;
+
+    /// Wire round-trip helper (host.rs test convention): bincode-serialize a
+    /// notification, deserialize it back, and assert the decoded value equals
+    /// the original. Returns the decoded value for field-level assertions.
+    fn assert_serde_roundtrip(notification: HostNotification) -> HostNotification {
+        let bytes = bincode::serialize(&notification).expect("serialize HostNotification");
+        let got: HostNotification =
+            bincode::deserialize(&bytes).expect("deserialize HostNotification");
+        assert_eq!(
+            got, notification,
+            "the serialized notification must decode back to itself"
+        );
+        got
+    }
+
+    /// A populated [`HostNotification::DocumentChangedDelta`] (API v27),
+    /// matching what a boundary publishes: categorized handle lists, the
+    /// v13 record pairs, the snapshot correlation and the honesty flag.
+    #[test]
+    fn document_changed_delta_roundtrips_all_field_shapes() {
+        // Snapshot published, incremental bound proven.
+        let notified = assert_serde_roundtrip(HostNotification::DocumentChangedDelta {
+            tab_id: 5,
+            version: 41,
+            added: vec![Handle::from(0x2A)],
+            modified: vec![Handle::from(0x8A)],
+            deleted: vec![Handle::from(0x15)],
+            records: vec![(Handle::from(0x8A), "CVIFC".to_owned())],
+            snapshot: Some(DocumentDeltaSnapshot {
+                version: 41,
+                generation: 2,
+            }),
+            full_refresh_required: false,
+        });
+        match notified {
+            HostNotification::DocumentChangedDelta {
+                added,
+                modified,
+                deleted,
+                ..
+            } => {
+                assert_eq!(added.len() + modified.len() + deleted.len(), 3);
+            }
+            other => panic!("expected DocumentChangedDelta, got {other:?}"),
+        }
+        // Snapshot published, later in the store, still no refresh needed.
+        assert_serde_roundtrip(HostNotification::DocumentChangedDelta {
+            tab_id: 5,
+            version: 41,
+            added: vec![Handle::from(0x2A)],
+            modified: vec![],
+            deleted: vec![],
+            records: vec![],
+            snapshot: Some(DocumentDeltaSnapshot {
+                version: 42,
+                generation: 3,
+            }),
+            full_refresh_required: true,
+        });
+        // No V4 store open for the tab (the legitimate no-consumer case).
+        assert_serde_roundtrip(HostNotification::DocumentChangedDelta {
+            tab_id: 5,
+            version: 41,
+            added: vec![Handle::from(0x2A)],
+            modified: vec![],
+            deleted: vec![],
+            records: vec![],
+            snapshot: None,
+            full_refresh_required: false,
+        });
+        // Provably-incomplete boundary (journal gap): lists full of real
+        // handles AND the full-refresh flag set.
+        assert_serde_roundtrip(HostNotification::DocumentChangedDelta {
+            tab_id: 5,
+            version: 41,
+            added: vec![Handle::from(0x2A)],
+            modified: vec![Handle::from(0x8A)],
+            deleted: vec![Handle::from(0x15)],
+            records: vec![],
+            snapshot: None,
+            full_refresh_required: true,
+        });
+    }
+
+    /// A deleted handle STAYS in the delta even though it references no live
+    /// entity anymore (the deletion itself is the information — API v27):
+    /// deserialization must not drop, zero-fix or re-resolve it.
+    #[test]
+    fn document_changed_delta_deleted_handles_survive_the_wire() {
+        let notification = HostNotification::DocumentChangedDelta {
+            tab_id: 2,
+            version: 9,
+            added: vec![Handle::from(0x2A)],
+            modified: vec![Handle::from(0x8A)],
+            deleted: vec![Handle::from(0xDEAD), Handle::from(0xBEEF)],
+            records: vec![],
+            snapshot: Some(DocumentDeltaSnapshot {
+                version: 9,
+                generation: 1,
+            }),
+            full_refresh_required: false,
+        };
+        let decoded = assert_serde_roundtrip(notification);
+        match decoded {
+            HostNotification::DocumentChangedDelta { deleted, .. } => {
+                // Handles no live entity answers for still arrive verbatim.
+                assert_eq!(
+                    deleted,
+                    vec![Handle::from(0xDEAD), Handle::from(0xBEEF)],
+                    "deleted handles must survive serialization untouched"
+                );
+                // The transparent u64 encoding pins the exact wire value.
+                let bytes = bincode::serialize(&Handle::from(0xDEAD)).expect("handle bytes");
+                assert_eq!(bytes, 0xDEAD_u64.to_le_bytes());
+            }
+            other => panic!("expected DocumentChangedDelta, got {other:?}"),
+        }
+    }
+
+    /// API v27 pins the delta at discriminant 15 — the first tagged byte of a
+    /// serialized `DocumentChangedDelta` is 15 (the notification serializes as
+    /// a bincode `Vec<u8>` wrapper: a u64 LE length prefix, then the tag byte,
+    /// then the field-wise bincode payload).
+    #[test]
+    fn document_changed_delta_tag_byte_is_fifteen() {
+        let delta = HostNotification::DocumentChangedDelta {
+            tab_id: 1,
+            version: 2,
+            added: vec![Handle::from(5)],
+            modified: vec![],
+            deleted: vec![],
+            records: vec![],
+            snapshot: None,
+            full_refresh_required: false,
+        };
+        let bytes = bincode::serialize(&delta).expect("serialize delta");
+        assert!(
+            bytes.len() > 8,
+            "the tagged payload is wrapped in a u64 length prefix"
+        );
+        assert_eq!(
+            u64::from_le_bytes(bytes[..8].try_into().expect("length prefix")) as usize,
+            bytes.len() - 8,
+            "the wrapper length covers exactly the tagged payload"
+        );
+        assert_eq!(bytes[8], 15, "DocumentChangedDelta is discriminant 15");
+    }
+
+    /// API v27 may not disturb the legacy `DocumentChangedRegions` (v13)
+    /// payload: pin its EXACT serialized byte sequence — a future serializer
+    /// change shifts one of these bytes and fails here.
+    #[test]
+    fn document_changed_regions_bytes_stay_stable() {
+        #[rustfmt::skip]
+        const DOCUMENT_CHANGED_REGIONS_V13_BYTES: [u8; 70] = [
+            // bincode wrapper: u64 LE length (62) of the tagged payload below.
+            0x3e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            // Tag 11 = DocumentChangedRegions.
+            0x0b,
+            // tab_id (u64 LE) = 3
+            0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            // version (u64 LE) = 9
+            0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            // entities: len 1, handle 0x2A.
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x2a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            // records: len 1, (handle 0x8A, app name len 5, "CVIFC").
+            0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x8a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x43, 0x56, 0x49, 0x46, 0x43,
+        ];
+        let regions = HostNotification::DocumentChangedRegions {
+            tab_id: 3,
+            version: 9,
+            entities: vec![Handle::from(0x2A)],
+            records: vec![(Handle::from(0x8A), "CVIFC".to_owned())],
+        };
+        let bytes = bincode::serialize(&regions).expect("serialize regions");
+        assert_eq!(
+            bytes, DOCUMENT_CHANGED_REGIONS_V13_BYTES,
+            "the legacy v13 Regions payload must stay byte-compatible"
+        );
+        // And the pinned bytes decode back to the exact same value.
+        let decoded: HostNotification = bincode::deserialize(&bytes).expect("pinned bytes decode");
+        assert_eq!(decoded, regions);
+    }
+
+    /// Exact-empty ("nothing relevant changed" — API v27) and
+    /// full-refresh-required ("the lists cannot be trusted — resync") are
+    /// DIFFERENT statements on the same wire shape: each round-trips to
+    /// itself and never to the other.
+    #[test]
+    fn document_changed_delta_empty_exact_differs_from_full_refresh() {
+        let exact_empty = HostNotification::DocumentChangedDelta {
+            tab_id: 7,
+            version: 12,
+            added: vec![],
+            modified: vec![],
+            deleted: vec![],
+            records: vec![],
+            snapshot: Some(DocumentDeltaSnapshot {
+                version: 12,
+                generation: 1,
+            }),
+            full_refresh_required: false,
+        };
+        let full_refresh = HostNotification::DocumentChangedDelta {
+            tab_id: 7,
+            version: 12,
+            added: vec![],
+            modified: vec![],
+            deleted: vec![],
+            records: vec![],
+            snapshot: Some(DocumentDeltaSnapshot {
+                version: 12,
+                generation: 1,
+            }),
+            full_refresh_required: true,
+        };
+        assert_ne!(exact_empty, full_refresh);
+
+        let empty_bytes = bincode::serialize(&exact_empty).expect("serialize exact-empty");
+        let refresh_bytes = bincode::serialize(&full_refresh).expect("serialize full-refresh");
+        assert_ne!(empty_bytes, refresh_bytes, "the flag must change the wire");
+
+        let decoded_empty: HostNotification =
+            bincode::deserialize(&empty_bytes).expect("decode exact-empty");
+        let decoded_refresh: HostNotification =
+            bincode::deserialize(&refresh_bytes).expect("decode full-refresh");
+        match (decoded_empty, decoded_refresh) {
+            (
+                HostNotification::DocumentChangedDelta {
+                    full_refresh_required: empty_flag,
+                    ..
+                },
+                HostNotification::DocumentChangedDelta {
+                    full_refresh_required: refresh_flag,
+                    ..
+                },
+            ) => {
+                assert!(!empty_flag, "the exact-empty delta decodes with flag unset");
+                assert!(refresh_flag, "the full-refresh delta decodes with flag set");
+            }
+            other => panic!("expected a delta pair, got {other:?}"),
+        }
+        // Each also survives a plain assertion-backed round-trip.
+        assert_serde_roundtrip(exact_empty);
+        assert_serde_roundtrip(full_refresh);
+    }
+
+    /// Decoder policy for truncated delta payloads: every proper byte-prefix
+    /// of a serialized `DocumentChangedDelta` fails to deserialize — never a
+    /// panic, never a cargo-culted wrong variant. (Unknown passthrough is for
+    /// FORWARD tags only: tag 15 truncates, it does not degrade.)
+    #[test]
+    fn document_changed_delta_truncated_payloads_are_decode_errors() {
+        let delta = HostNotification::DocumentChangedDelta {
+            tab_id: 4,
+            version: 33,
+            added: vec![Handle::from(5), Handle::from(6)],
+            modified: vec![Handle::from(7)],
+            deleted: vec![Handle::from(0xDEAD)],
+            records: vec![(Handle::from(7), "CVIFC".to_owned())],
+            snapshot: Some(DocumentDeltaSnapshot {
+                version: 33,
+                generation: 2,
+            }),
+            full_refresh_required: false,
+        };
+        let bytes = bincode::serialize(&delta).expect("serialize delta");
+        assert!(
+            bincode::deserialize::<HostNotification>(&bytes).is_ok(),
+            "the untruncated payload decodes"
+        );
+        for cut in 0..bytes.len() {
+            assert!(
+                bincode::deserialize::<HostNotification>(&bytes[..cut]).is_err(),
+                "a payload truncated to {cut} of {} bytes must be a decode error",
+                bytes.len()
+            );
+        }
+    }
+}

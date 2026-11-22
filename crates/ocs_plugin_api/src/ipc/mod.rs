@@ -519,4 +519,191 @@ mod tests {
             other => panic!("unexpected: {other:?}"),
         }
     }
+
+    #[test]
+    fn host_notification_tags_preserve_legacy_discriminants() {
+        // Twin of `v4_additions_preserve_legacy_discriminants` for the
+        // host→plugin notification enum: `HostNotification` serializes as a
+        // bincode `Vec<u8>` wrapper (a u64 LE length prefix, then the tag
+        // byte, then the field-wise payload), so its tag reads at byte 8 of a
+        // full serialization. Every variant 0..=14 stays on its exact tag
+        // byte, and the v27 `DocumentChangedDelta` took the NEXT free tag
+        // byte (15) without shifting one of them.
+        fn tag(notification: &crate::host::HostNotification) -> u8 {
+            let bytes = bincode::serialize(notification).unwrap();
+            bytes[8]
+        }
+
+        // Legacy discriminants 0..=14 — every one still serializes to its
+        // exact tag byte.
+        assert_eq!(
+            tag(&crate::host::HostNotification::InputLine {
+                line: "LINE".to_owned()
+            }),
+            0
+        );
+        assert_eq!(tag(&crate::host::HostNotification::Cancel), 1);
+        assert_eq!(
+            tag(&crate::host::HostNotification::DocumentChanged { version: 1 }),
+            2
+        );
+        assert_eq!(
+            tag(&crate::host::HostNotification::SelectionChanged {
+                handles: vec![document::Handle::from(0x2A)]
+            }),
+            3
+        );
+        assert_eq!(tag(&crate::host::HostNotification::Raw(vec![1, 2, 3])), 4);
+        assert_eq!(
+            tag(&crate::host::HostNotification::DocumentChangedV4 {
+                tab_id: 1,
+                version: 2
+            }),
+            5
+        );
+        assert_eq!(
+            tag(&crate::host::HostNotification::DocumentTabClosed { tab_id: 1 }),
+            6
+        );
+        assert_eq!(
+            tag(&crate::host::HostNotification::SelectionChangedV4 {
+                tab_id: 1,
+                handles: vec![document::Handle::from(0x2A)]
+            }),
+            7
+        );
+        assert_eq!(
+            tag(&crate::host::HostNotification::CommandStateChanged {
+                tab_id: 1,
+                command: None
+            }),
+            8
+        );
+        assert_eq!(
+            tag(&crate::host::HostNotification::DrawingChanged {
+                tab_id: 1,
+                epoch: 2
+            }),
+            9
+        );
+        assert_eq!(
+            tag(&crate::host::HostNotification::DocumentOpened { tab_id: 1 }),
+            10
+        );
+        assert_eq!(
+            tag(&crate::host::HostNotification::DocumentChangedRegions {
+                tab_id: 1,
+                version: 2,
+                entities: vec![document::Handle::from(0x2A)],
+                records: vec![(document::Handle::from(0x8A), "CVIFC".to_owned())]
+            }),
+            11
+        );
+        assert_eq!(
+            tag(&crate::host::HostNotification::PanelAction {
+                panel_id: "p".to_owned(),
+                control_id: "c".to_owned(),
+                action: "click".to_owned(),
+                value: None
+            }),
+            12
+        );
+        assert_eq!(
+            tag(&crate::host::HostNotification::QuadAction {
+                panel_id: "p".to_owned(),
+                control_id: "c".to_owned(),
+                handles: vec![document::Handle::from(0x2A)],
+                type_keys: vec!["LWPOLYLINE".to_owned()],
+                pick_point: [0.0; 3]
+            }),
+            13
+        );
+        assert_eq!(
+            tag(&crate::host::HostNotification::SelectionChangedDigest {
+                tab_id: 1,
+                revision: 2,
+                count: 3
+            }),
+            14
+        );
+        // API v27: the delta sits at the next free tag byte and the legacy
+        // Regions stream (tag 11) stays exactly where it was.
+        assert_eq!(
+            tag(&crate::host::HostNotification::DocumentChangedDelta {
+                tab_id: 1,
+                version: 2,
+                added: vec![document::Handle::from(0x2A)],
+                modified: vec![],
+                deleted: vec![],
+                records: vec![],
+                snapshot: None,
+                full_refresh_required: false
+            }),
+            15
+        );
+        assert_eq!(
+            bincode::serialize(&crate::host::HostNotification::DocumentChangedRegions {
+                tab_id: 1,
+                version: 2,
+                entities: vec![],
+                records: vec![]
+            })
+            .unwrap()[8],
+            11
+        );
+    }
+
+    #[test]
+    fn v27_document_changed_delta_roundtrips_like_the_regions_precedent() {
+        use crate::host::HostNotification;
+        // Twin of the DocumentChangedRegions round-trip above (a host→plugin
+        // notification): the categorized v27 delta survives one bincode hop
+        // with every list, the snapshot correlation and the honesty flag
+        // intact.
+        let delta = HostNotification::DocumentChangedDelta {
+            tab_id: 12,
+            version: 93,
+            added: vec![document::Handle::from(0x2A)],
+            modified: vec![document::Handle::from(0x2B)],
+            deleted: vec![document::Handle::from(0x15)],
+            records: vec![(document::Handle::from(0x8A), "CVIFC".to_string())],
+            snapshot: Some(crate::host::DocumentDeltaSnapshot {
+                version: 93,
+                generation: 2,
+            }),
+            full_refresh_required: true,
+        };
+        let bytes = bincode::serialize(&delta).unwrap();
+        let got: HostNotification = bincode::deserialize(&bytes).unwrap();
+        match got {
+            HostNotification::DocumentChangedDelta {
+                tab_id,
+                version,
+                added,
+                modified,
+                deleted,
+                records,
+                snapshot,
+                full_refresh_required,
+            } => {
+                assert_eq!((tab_id, version), (12, 93));
+                assert_eq!(added, vec![document::Handle::from(0x2A)]);
+                assert_eq!(modified, vec![document::Handle::from(0x2B)]);
+                assert_eq!(deleted, vec![document::Handle::from(0x15)]);
+                assert_eq!(
+                    records,
+                    vec![(document::Handle::from(0x8A), "CVIFC".to_string())]
+                );
+                assert_eq!(
+                    snapshot,
+                    Some(crate::host::DocumentDeltaSnapshot {
+                        version: 93,
+                        generation: 2
+                    })
+                );
+                assert!(full_refresh_required);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
 }

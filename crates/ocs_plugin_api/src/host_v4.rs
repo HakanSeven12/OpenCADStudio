@@ -26,6 +26,14 @@ fn global_manager() -> &'static Mutex<HostV4SnapshotManager> {
 /// Per-tab V4 shared-memory snapshot manager.
 pub struct HostV4SnapshotManager {
     stores: HashMap<u64, DocumentSnapshotStore<DocumentViewDataV4>>,
+    /// Store-mapping generation per tab: bumped every time a NEW backing file
+    /// is created for a tab (first open, or a resize that replaces the
+    /// mapping). A snapshot `version` is a per-store counter that restarts at
+    /// every new mapping, so versions are only comparable within one
+    /// generation — delta consumers match the (generation, version) PAIR and
+    /// re-fetch the store path when the generation moves. See
+    /// [`DocumentDeltaSnapshot`](crate::host::DocumentDeltaSnapshot).
+    generations: HashMap<u64, u64>,
     /// Stores replaced by a larger mapping (see `publish_document`). Their
     /// mappings stay readable until the process exits so readers of the old
     /// path are never pinned to a frozen, deleted file.
@@ -38,9 +46,17 @@ impl HostV4SnapshotManager {
     pub fn new() -> Self {
         Self {
             stores: HashMap::new(),
+            generations: HashMap::new(),
             retired: Vec::new(),
             segment_size: default_segment_size(),
         }
+    }
+
+    /// The store-mapping generation currently backing `tab_id`: bumped once
+    /// per new backing file (first open, resize replacement). `None` while no
+    /// store exists for the tab.
+    fn generation(&self, tab_id: u64) -> Option<u64> {
+        self.generations.get(&tab_id).copied()
     }
 
     /// Open (or refresh) the V4 snapshot for `tab_id`. Creates the store when
@@ -63,6 +79,39 @@ impl HostV4SnapshotManager {
         doc: &Document,
     ) -> Result<Option<DocumentViewInfo>, String> {
         self.publish_document(tab_id, doc, false)
+    }
+
+    /// Publish the latest document state for `tab_id` and return the exact
+    /// snapshot correlation of what THIS call published — the
+    /// (version, generation) pair a delta consumer matches against the
+    /// mapping it holds. Atomic: publication, version read and generation
+    /// read share one lock acquisition, so a delta can never cite a snapshot
+    /// that was not (or is no longer) the live one.
+    ///
+    /// `Ok(None)`: no V4 store is open for the tab (no consumer) — nothing
+    /// was published and there is nothing to correlate; NOT a failure.
+    pub fn publish_correlated(
+        &mut self,
+        tab_id: u64,
+        doc: &Document,
+    ) -> Result<Option<crate::host::DocumentDeltaSnapshot>, String> {
+        match self.publish_document(tab_id, doc, false)? {
+            Some(info) => Ok(Some(crate::host::DocumentDeltaSnapshot {
+                version: info.version,
+                generation: self.generation(tab_id).unwrap_or(0),
+            })),
+            None => Ok(None),
+        }
+    }
+
+    /// The current snapshot correlation for `tab_id` (version + generation of
+    /// the live store), or `None` when no store is open.
+    pub fn snapshot_correlation(&self, tab_id: u64) -> Option<crate::host::DocumentDeltaSnapshot> {
+        let store = self.stores.get(&tab_id)?;
+        Some(crate::host::DocumentDeltaSnapshot {
+            version: store.version(),
+            generation: self.generation(tab_id).unwrap_or(0),
+        })
     }
 
     /// A drawing that outgrows its mapping moves to a new one at a new path,
@@ -121,6 +170,14 @@ impl HostV4SnapshotManager {
                     if let Some(old) = self.stores.insert(tab_id, store) {
                         self.retired.push(old);
                     }
+                    // A new backing file now serves this tab (first open or a
+                    // resize replacement): the mapping changed, so the
+                    // snapshot generation moves with it. Versions from
+                    // different generations are never comparable — delta
+                    // consumers match the (generation, version) pair and
+                    // re-fetch the path when the generation moves.
+                    let generation = self.generations.entry(tab_id).or_insert(0);
+                    *generation += 1;
                     return Ok(Some(info));
                 }
                 Err(e) => {

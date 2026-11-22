@@ -887,4 +887,209 @@ mod tests {
             "a dead plugin process must contribute no declarations"
         );
     }
+
+    fn owned_manifest_with_api(
+        id: &str,
+        api_version: u32,
+    ) -> crate::ribbon::owned::OwnedPluginManifest {
+        crate::ribbon::owned::OwnedPluginManifest {
+            id: id.to_string(),
+            name: format!("{id} name"),
+            version: "0.1.0".to_string(),
+            description: "test".to_string(),
+            api_version,
+            ribbon_order: 0,
+            xdata_apps: vec![],
+            command_prefixes: vec![],
+            entity_classes: None,
+        }
+    }
+
+    /// A V4-connected fake like [`crate::process::PluginProcess::fake`], but
+    /// with a real `V4Connection` over a local socket pair (no subprocess, no
+    /// cdylib): the sibling of the plain fake that `broadcast_for_api` can
+    /// fan out to. Returns the runner-side peer stream the test reads the
+    /// delivered frames from.
+    fn v4_connected_process(
+        manifest: crate::ribbon::owned::OwnedPluginManifest,
+    ) -> (PluginProcess, interprocess::local_socket::Stream) {
+        use interprocess::local_socket::{
+            traits::{Listener, Stream as StreamTrait},
+            GenericNamespaced, ListenerOptions, ToNsName,
+        };
+
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let name = format!(
+            "ocs_manager_v4_test_{}_{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
+        let name_ref = name
+            .clone()
+            .to_ns_name::<GenericNamespaced>()
+            .expect("valid name");
+        let listener = ListenerOptions::new()
+            .name(name_ref)
+            .create_sync()
+            .expect("listener");
+        let client_name = name.clone();
+        let client = std::thread::spawn(move || {
+            StreamTrait::connect(client_name.to_ns_name::<GenericNamespaced>().unwrap())
+                .expect("connect")
+        });
+        let host_stream = listener.accept().expect("accept");
+        let runner_stream = client.join().expect("client thread");
+
+        // No runner child to watch (the test peer keeps the socket open), and
+        // the V3 stream cell stays empty: the V4 path moved the stream into
+        // the connection, exactly like `PluginProcess::spawn` does.
+        let v4_connection = crate::process::v4::V4Connection::new(
+            host_stream,
+            Arc::new(|_: Option<u64>, _: PluginNotification| {}),
+            None,
+        )
+        .expect("V4 connection over the socket pair");
+        let process = PluginProcess {
+            stream: Arc::new(std::sync::Mutex::new(None)),
+            v4: Some(v4_connection),
+            child: Arc::new(std::sync::Mutex::new(None)),
+            id: manifest.id.clone(),
+            manifest,
+            ribbon: vec![],
+            io_lines: std::sync::Mutex::new(None),
+        };
+        (process, runner_stream)
+    }
+
+    /// Read the host→plugin frames the way a REAL runner would: notifications
+    /// are collected, and the graceful `HostRequest::Shutdown` directive ends
+    /// the connection (the peer closing its own socket is what unblocks the
+    /// host's reader, so EOF-awaiting would deadlock the harness).
+    fn collect_delivered_notifications(
+        mut socket: interprocess::local_socket::Stream,
+    ) -> Vec<HostNotification> {
+        use crate::ipc::protocol::HostRequest;
+        use crate::ipc::transport::recv;
+        use crate::ipc::v4::protocol::{HostToPluginV4, NotificationEnvelope};
+
+        let mut notifications = Vec::new();
+        loop {
+            match recv::<HostToPluginV4>(&mut socket) {
+                Ok(HostToPluginV4::Notification(NotificationEnvelope {
+                    command_id: _,
+                    payload,
+                })) => notifications.push(payload),
+                Ok(HostToPluginV4::Request {
+                    payload: HostRequest::Shutdown,
+                    ..
+                }) => return notifications,
+                Ok(_) => continue,
+                Err(_) => return notifications,
+            }
+        }
+    }
+
+    /// The per-endpoint routing of one document boundary ([`LoadedPlugin`]
+    /// manifest api majors: 26 keeps the exact legacy v13 Regions stream, 27
+    /// receives the categorized `DocumentChangedDelta` instead — and neither
+    /// endpoint ever receives both).
+    #[test]
+    fn document_delta_broadcast_routes_per_endpoint_api_version() {
+        let mut manager = PluginManager::new();
+        let (pre27_process, pre27_peer) =
+            v4_connected_process(owned_manifest_with_api("test.delta.pre27", 26));
+        let (v27_process, v27_peer) =
+            v4_connected_process(owned_manifest_with_api("test.delta.v27", 27));
+        manager.plugins.push(LoadedPlugin {
+            process: Arc::new(pre27_process),
+            module: to_shared_module("test.delta.pre27".into(), "Pre27".into(), vec![]),
+            attach: std::sync::Mutex::new(NotificationAttach {
+                attached: true,
+                ..Default::default()
+            }),
+        });
+        manager.plugins.push(LoadedPlugin {
+            process: Arc::new(v27_process),
+            module: to_shared_module("test.delta.v27".into(), "V27".into(), vec![]),
+            attach: std::sync::Mutex::new(NotificationAttach {
+                attached: true,
+                ..Default::default()
+            }),
+        });
+        let handle_pre27 = std::thread::spawn(move || collect_delivered_notifications(pre27_peer));
+        let handle_v27 = std::thread::spawn(move || collect_delivered_notifications(v27_peer));
+
+        // One boundary, both representations — the exact pair
+        // `publish_document_delta` offers to `broadcast_for_api`.
+        let regions = HostNotification::DocumentChangedRegions {
+            tab_id: 7,
+            version: 41,
+            entities: vec![document::Handle::from(0x2A)],
+            records: vec![(document::Handle::from(0x8A), "CVIFC".to_owned())],
+        };
+        let delta = HostNotification::DocumentChangedDelta {
+            tab_id: 7,
+            version: 41,
+            added: vec![document::Handle::from(5)],
+            modified: vec![document::Handle::from(9)],
+            deleted: vec![document::Handle::from(11)],
+            records: Vec::new(),
+            snapshot: Some(crate::host::DocumentDeltaSnapshot {
+                version: 41,
+                generation: 2,
+            }),
+            full_refresh_required: false,
+        };
+        manager.broadcast_for_api(None, &|api: u32| {
+            if api >= 27 {
+                Some(delta.clone())
+            } else {
+                Some(regions.clone())
+            }
+        });
+
+        // Dropping the manager requests the graceful shutdown (a
+        // `HostRequest::Shutdown` frame per endpoint); the peer collectors end
+        // on it — mirroring a real runner — and return what they gathered.
+        // Every frame written above is still readable (the socket buffers
+        // hold it), so nothing is lost to the teardown.
+        drop(manager);
+        let pre27 = handle_pre27.join().expect("pre-27 collector thread");
+        let v27 = handle_v27.join().expect("v27 collector thread");
+
+        // A pre-27 endpoint receives EXACTLY the legacy v13 Regions stream —
+        // never the new variant.
+        assert_eq!(
+            pre27.len(),
+            1,
+            "a pre-27 endpoint receives exactly one notification: {pre27:?}"
+        );
+        assert!(
+            matches!(pre27[0], HostNotification::DocumentChangedRegions { .. }),
+            "a pre-27 endpoint keeps the v13 Regions stream: {pre27:?}"
+        );
+        assert!(
+            !pre27
+                .iter()
+                .any(|n| matches!(n, HostNotification::DocumentChangedDelta { .. })),
+            "a pre-27 endpoint must never receive the delta: {pre27:?}"
+        );
+
+        // A v27 endpoint receives EXACTLY the categorized delta — the
+        // Regions stream is replaced, never duplicated.
+        assert_eq!(
+            v27.len(),
+            1,
+            "a v27 endpoint receives exactly one notification: {v27:?}"
+        );
+        assert!(
+            matches!(v27[0], HostNotification::DocumentChangedDelta { .. }),
+            "a v27 endpoint receives the categorized delta: {v27:?}"
+        );
+        assert!(
+            !v27.iter()
+                .any(|n| matches!(n, HostNotification::DocumentChangedRegions { .. })),
+            "a v27 endpoint must never receive the legacy Regions stream: {v27:?}"
+        );
+    }
 }

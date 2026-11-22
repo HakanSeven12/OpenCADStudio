@@ -15,7 +15,7 @@ pub fn edit_tool() -> ToolDef {
 }
 
 /// Group selection on and off (PICKSTYLE), lit while picks take whole
-/// groups; the same switch as Ctrl+Shift+A.
+/// groups; the same switch as Ctrl+Shift+A and Ctrl+H.
 pub fn selection_tool() -> ToolDef {
     ToolDef {
         id: "TOGGLEGROUPS",

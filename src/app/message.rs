@@ -93,7 +93,7 @@ pub enum Message {
     /// Ctrl/Cmd+A — select all layer rows when the Layer Manager is open, or all
     /// drawing objects otherwise (#236).
     SelectAllShortcut,
-    /// Open the shared Find and Replace dialog (Ctrl/Cmd+F or Ctrl/Cmd+H).
+    /// Open the shared Find and Replace dialog (Ctrl/Cmd+F).
     FindReplaceOpen,
     Find(crate::ui::window::find_replace::FindMsg),
     OverkillSettingsChanged(crate::modules::draw::modify::overkill::Settings),

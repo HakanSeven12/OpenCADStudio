@@ -929,6 +929,7 @@ const SYSTEM_VARIABLES: &[&str] = &[
     "PICKBOX",
     "PICKDRAG",
     "PICKFIRST",
+    "PICKLOCKED",
     "PICKSTYLE",
     "PLIMCHECK",
     "PLINEGEN",

@@ -207,6 +207,7 @@ impl OpenCADStudio {
             ucs_ortho: crate::modules::view::view_cmd::ucs_ortho(),
             ucs_view: crate::modules::view::view_cmd::ucs_view(),
             layout_create_viewport: crate::scene::layout_create_viewport(),
+            pick_locked: crate::scene::pick_locked(),
             pdf_shx_text: crate::modules::insert::pdf_shx_text::settings(),
             dgn_import: crate::modules::insert::dgn_import::settings(),
             ncopy_bind: self.ncopy_bind,
@@ -444,6 +445,7 @@ impl OpenCADStudio {
         crate::modules::view::view_cmd::set_ucs_ortho(s.ucs_ortho);
         crate::modules::view::view_cmd::set_ucs_view(s.ucs_view);
         crate::scene::set_layout_create_viewport(s.layout_create_viewport);
+        crate::scene::set_pick_locked(s.pick_locked);
         crate::modules::insert::pdf_shx_text::set_settings(s.pdf_shx_text.clone());
         crate::modules::insert::dgn_import::set_settings(s.dgn_import);
         self.ncopy_bind = s.ncopy_bind;

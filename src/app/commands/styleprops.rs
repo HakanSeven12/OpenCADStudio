@@ -1025,6 +1025,7 @@ impl OpenCADStudio {
                     | "UCSORTHO"
                     | "UCSVIEW"
                     | "LAYOUTCREATEVIEWPORT"
+                    | "PICKLOCKED"
                     | "PDFIMPORTMODE"
                     | "PDFIMPORTFILTER"
                     | "PDFIMPORTLAYERS"
@@ -1421,9 +1422,15 @@ impl OpenCADStudio {
                         }
                         return Some(self.finish_dispatch(cmd));
                     }
-                    if name == "LAYOUTCREATEVIEWPORT" {
+                    if matches!(name.as_str(), "LAYOUTCREATEVIEWPORT" | "PICKLOCKED") {
                         // A profile switch shown and taken as ON / OFF or 1 / 0.
-                        let current = if crate::scene::layout_create_viewport() {
+                        let pick_locked = name == "PICKLOCKED";
+                        let is_on = if pick_locked {
+                            crate::scene::pick_locked()
+                        } else {
+                            crate::scene::layout_create_viewport()
+                        };
+                        let current = if is_on {
                             "ON"
                         } else {
                             "OFF"
@@ -1442,8 +1449,26 @@ impl OpenCADStudio {
                         });
                         match parsed {
                             Some(Some(on)) => {
-                                if crate::scene::layout_create_viewport() != on {
-                                    crate::scene::set_layout_create_viewport(on);
+                                if is_on != on {
+                                    if pick_locked {
+                                        crate::scene::set_pick_locked(on);
+                                        // What is already selected on a locked
+                                        // layer leaves the selection with it.
+                                        if !on {
+                                            for tab in &mut self.tabs {
+                                                let locked: Vec<_> = tab
+                                                    .scene
+                                                    .selected_entities()
+                                                    .into_iter()
+                                                    .map(|(handle, _)| handle)
+                                                    .filter(|&h| tab.scene.is_layer_locked(h))
+                                                    .collect();
+                                                tab.scene.deselect_entities(&locked);
+                                            }
+                                        }
+                                    } else {
+                                        crate::scene::set_layout_create_viewport(on);
+                                    }
                                     self.save_config();
                                 }
                             }

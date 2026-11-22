@@ -1355,6 +1355,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "SURFACEASSOCIATIVITY",
         "DGNIMPORTMODE",
         "LAYOUTCREATEVIEWPORT",
+        "PICKLOCKED",
         "TXT2MTXTCOMBINEMTEXT",
         "TXT2MTXTTEXTORDER",
         "TXT2MTXTWORDWRAP",

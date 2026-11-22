@@ -2296,6 +2296,67 @@ mod bedit_characterization_tests {
         );
     }
 
+    /// PICKLOCKED 0 takes objects on a locked layer out of selection, and
+    /// what was selected there leaves the selection; 1 (default) keeps the
+    /// earlier behaviour.
+    #[test]
+    fn picklocked_off_makes_locked_layer_objects_unselectable() {
+        struct Restore(bool);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                crate::scene::set_pick_locked(self.0);
+            }
+        }
+        let _restore = Restore(crate::scene::pick_locked());
+
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let tab = app.active_tab;
+        let free = app.tabs[tab]
+            .scene
+            .add_entity(document::EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            )));
+        let mut line =
+            Line::from_points(Vector3::new(0.0, 10.0, 0.0), Vector3::new(10.0, 10.0, 0.0));
+        line.common.layer = "BASE".to_string();
+        let locked = app.tabs[tab]
+            .scene
+            .add_entity(document::EntityType::Line(line));
+        app.tabs[tab]
+            .scene
+            .document
+            .layers
+            .get_mut("BASE")
+            .expect("the layer of the line exists")
+            .flags
+            .locked = true;
+
+        let _ = app.run_command_line("SETVAR PICKLOCKED 1");
+        assert!(app.tabs[tab].scene.passes_selection_filter(locked));
+        app.tabs[tab].scene.select_entity(locked, false);
+        app.tabs[tab].scene.select_entity(free, false);
+
+        let _ = app.run_command_line("SETVAR PICKLOCKED 0");
+        assert!(!crate::scene::pick_locked());
+        let scene = &mut app.tabs[tab].scene;
+        assert!(scene.passes_selection_filter(free));
+        assert!(!scene.passes_selection_filter(locked));
+        let selected: Vec<_> = scene
+            .selected_entities()
+            .into_iter()
+            .map(|(h, _)| h)
+            .collect();
+        assert_eq!(selected, vec![free], "the locked line left the selection");
+        scene.deselect_all();
+        assert_eq!(
+            scene.select_all_visible(),
+            1,
+            "select-all takes the free line only"
+        );
+    }
+
     #[test]
     fn test_locked_layer_selection_rejection() {
         use crate::command::{CadCommand, CmdResult};

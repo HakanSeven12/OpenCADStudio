@@ -5,6 +5,7 @@
 // paper layout" bugs.
 
 use OpenCADStudio::scene::Scene;
+use rstest::rstest;
 
 #[test]
 fn switching_to_paper_records_tilemode_and_ctab() {
@@ -80,41 +81,41 @@ fn ctab_is_created_when_absent_then_updated_in_place() {
 
 /// A layout saved with a model viewport entered reopens inside it; saved
 /// from paper space it reopens on the sheet (#1670).
-#[test]
-fn entered_viewport_survives_a_save_and_reload() {
+#[rstest]
+#[case("dxf")]
+#[case("dwg")]
+fn entered_viewport_survives_a_save_and_reload(#[case] format: &str) {
     use document::{entities::Viewport, EntityType};
-    for format in ["dxf", "dwg"] {
-        let mut scene = Scene::new();
-        scene.set_current_layout("Layout1".to_string());
-        let mut sheet = Viewport::new();
-        sheet.id = 1;
-        sheet.width = 420.0;
-        sheet.height = 297.0;
-        let sheet = scene.add_entity(EntityType::Viewport(Box::new(sheet)));
-        let mut model = Viewport::new();
-        model.id = 2;
-        model.width = 100.0;
-        model.height = 80.0;
-        model.view_height = 80.0;
-        let model = scene.add_entity(EntityType::Viewport(Box::new(model)));
-        assert_ne!(sheet, model);
+    let mut scene = Scene::new();
+    scene.set_current_layout("Layout1".to_string());
+    let mut sheet = Viewport::new();
+    sheet.id = 1;
+    sheet.width = 420.0;
+    sheet.height = 297.0;
+    let sheet = scene.add_entity(EntityType::Viewport(Box::new(sheet)));
+    let mut model = Viewport::new();
+    model.id = 2;
+    model.width = 100.0;
+    model.height = 80.0;
+    model.view_height = 80.0;
+    let model = scene.add_entity(EntityType::Viewport(Box::new(model)));
+    assert_ne!(sheet, model);
 
-        for entered in [Some(model), None] {
-            scene.active_viewport = entered;
-            scene.sync_active_viewport_to_document();
-            let bytes =
-                OpenCADStudio::io::save_to_bytes(&scene.document, format, scene.document.version)
-                    .expect("save");
-            let doc = OpenCADStudio::io::load_bytes(&format!("roundtrip.{format}"), bytes)
-                .expect("reload");
-            let mut reopened = Scene::new();
-            reopened.document = doc;
-            reopened.current_layout = "Layout1".to_string();
-            assert_eq!(
-                reopened.saved_entered_viewport().is_some(),
-                entered.is_some(),
-                "{format}: entered {entered:?}"
-            );
-        }
+    for entered in [Some(model), None] {
+        scene.active_viewport = entered;
+        scene.sync_active_viewport_to_document();
+        let bytes =
+            OpenCADStudio::io::save_to_bytes(&scene.document, format, scene.document.version)
+                .expect("save");
+        let doc = OpenCADStudio::io::load_bytes(&format!("roundtrip.{format}"), bytes)
+            .expect("reload");
+        let mut reopened = Scene::new();
+        reopened.document = doc;
+        reopened.current_layout = "Layout1".to_string();
+        assert_eq!(
+            reopened.saved_entered_viewport().is_some(),
+            entered.is_some(),
+            "{format}: entered {entered:?}"
+        );
     }
 }

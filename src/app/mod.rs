@@ -85,6 +85,7 @@ mod measurement;
 mod model_ops;
 mod civil;
 mod civil_packages;
+mod civil_query;
 mod surfacing;
 mod solid_edit_ops;
 mod mtext_editor;

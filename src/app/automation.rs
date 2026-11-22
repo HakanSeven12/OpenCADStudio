@@ -13,6 +13,11 @@
 //! - `{"op":"entities"}`                     — summary count by entity type
 //! - `{"op":"save","path":"out.dwg"}`        — write the document (path optional
 //!                                             once opened/saved)
+//! - `{"op":"civil_station_offset",...}`     — the point at an alignment's
+//!                                             station, offset_distance across
+//!                                             it (read)
+//! - `{"op":"civil_surface_stats",...}`      — a TIN surface's elevation
+//!                                             bounds and counts (read)
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::io::line_read::{lines_capped, MAX_LINE_BYTES};
@@ -583,7 +588,7 @@ fn request_point(req: &Value, key: &str) -> Option<[f64; 2]> {
     (x.is_finite() && y.is_finite()).then_some([x, y])
 }
 
-fn request_handle(value: &Value) -> Option<document::Handle> {
+pub(super) fn request_handle(value: &Value) -> Option<document::Handle> {
     value
         .as_str()
         .and_then(|value| {
@@ -1127,6 +1132,18 @@ impl OpenCADStudio {
             "entities" => self.entity_summary(),
             "audit" => self.document_audit(&req),
             "query" => self.entity_query(self.active_tab, &req),
+            "civil_station_offset" => {
+                crate::app::civil_query::civil_station_offset(
+                    &self.tabs[self.active_tab].scene.document,
+                    &req,
+                )
+            }
+            "civil_surface_stats" => {
+                crate::app::civil_query::civil_surface_stats(
+                    &self.tabs[self.active_tab].scene.document,
+                    &req,
+                )
+            }
             "text_search" => self.automation_text_search(&req),
             "text_audit" => self.automation_text_audit(&req),
             "text_replace" => self.automation_text_replace(&req),

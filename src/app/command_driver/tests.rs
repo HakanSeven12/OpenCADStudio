@@ -4684,12 +4684,10 @@ mod mission_m062_tests {
     use document::entities::Line;
     use document::types::Vector3;
 
-    fn temp_pdf(tag: &str) -> std::path::PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("ocs_m062_{tag}_{unique}.pdf"))
+    fn temp_pdf(tag: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join(format!("ocs_m062_{tag}.pdf"));
+        (dir, path)
     }
 
     #[test]
@@ -4703,7 +4701,7 @@ mod mission_m062_tests {
                 Vector3::ZERO,
                 Vector3::new(100.0, 100.0, 0.0),
             )));
-        let path = temp_pdf("current");
+        let (_path_guard, path) = temp_pdf("current");
 
         let _ = app.run_command_line(&format!("EXPORTPDF {}", path.display()));
 
@@ -4739,7 +4737,7 @@ mod mission_m062_tests {
             .into_iter()
             .filter(|name| name != "Model")
             .count();
-        let path = temp_pdf("all");
+        let (_path_guard, path) = temp_pdf("all");
 
         let _ = app.run_command_line(&format!("EXPORTPDF {} ALL", path.display()));
 
@@ -4761,8 +4759,9 @@ mod mission_m062_tests {
         assert!(all_output(&app).contains("Usage: EXPORTPDF"));
     }
 
-    fn temp_dwf(tag: &str) -> std::path::PathBuf {
-        temp_pdf(tag).with_extension("dwf")
+    fn temp_dwf(tag: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let (dir, path) = temp_pdf(tag);
+        (dir, path.with_extension("dwf"))
     }
 
     #[test]
@@ -4778,7 +4777,7 @@ mod mission_m062_tests {
                 Vector3::new(100.0, 100.0, 0.0),
             )));
         let layout = app.tabs[i].scene.current_layout.clone();
-        let path = temp_dwf("current");
+        let (_path_guard, path) = temp_dwf("current");
 
         let _ = app.run_command_line(&format!("EXPORTDWF {}", path.display()));
 
@@ -4818,7 +4817,7 @@ mod mission_m062_tests {
             .into_iter()
             .filter(|name| name != "Model")
             .collect();
-        let path = temp_dwf("all");
+        let (_path_guard, path) = temp_dwf("all");
 
         let _ = app.run_command_line(&format!("EXPORTDWF {} ALL", path.display()));
 
@@ -4846,12 +4845,10 @@ mod mission_m060_tests {
     use super::super::*;
     use super::all_output;
 
-    fn temp_pdf(tag: &str) -> std::path::PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("ocs_m060_{tag}_{unique}.pdf"))
+    fn temp_pdf(tag: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join(format!("ocs_m060_{tag}.pdf"));
+        (dir, path)
     }
 
     fn paper_layouts(app: &mut OpenCADStudio) -> Vec<String> {
@@ -4877,7 +4874,7 @@ mod mission_m060_tests {
         app.tabs[i].scene.add_layout("Sheet2").unwrap();
         let names = paper_layouts(&mut app);
         assert_eq!(names.len(), 3, "expected three paper layouts: {names:?}");
-        let path = temp_pdf("three");
+        let (_path_guard, path) = temp_pdf("three");
 
         let _ = app.run_command_line(&format!("PUBLISH {}", path.display()));
 
@@ -4904,7 +4901,7 @@ mod mission_m060_tests {
         app.tabs[i].scene.add_layout("Sheet3").unwrap();
         let names = paper_layouts(&mut app);
         let chosen = [names[0].clone(), names[1].clone()];
-        let path = temp_pdf("two");
+        let (_path_guard, path) = temp_pdf("two");
 
         let _ = app.run_command_line(&format!(
             "PUBLISH {} {},{}",
@@ -4927,7 +4924,7 @@ mod mission_m060_tests {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         paper_layouts(&mut app);
-        let path = temp_pdf("unknown");
+        let (_path_guard, path) = temp_pdf("unknown");
 
         let _ = app.run_command_line(&format!("PUBLISH {} MISSING-SHEET", path.display()));
 
@@ -5414,12 +5411,10 @@ mod mission_m061_tests {
     use document::entities::Line;
     use document::types::Vector3;
 
-    fn temp_svg(tag: &str) -> std::path::PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("ocs_m061_{tag}_{unique}.svg"))
+    fn temp_svg(tag: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join(format!("ocs_m061_{tag}.svg"));
+        (dir, path)
     }
 
     fn add_diagonal(app: &mut OpenCADStudio) {
@@ -5449,7 +5444,7 @@ mod mission_m061_tests {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         add_diagonal(&mut app);
-        let path = temp_svg("model");
+        let (_path_guard, path) = temp_svg("model");
 
         let _ = app.run_command_line(&format!("PREVIEW {}", path.display()));
 
@@ -5481,7 +5476,7 @@ mod mission_m061_tests {
         ps.paper_height = 420.0;
         ps.rotation = document::objects::PlotRotation::Degrees90;
         app.tabs[i].scene.set_layout_plot_settings(&layout, &ps);
-        let path = temp_svg("a3");
+        let (_path_guard, path) = temp_svg("a3");
 
         let _ = app.run_command_line(&format!("PREVIEW {}", path.display()));
 
@@ -5500,7 +5495,7 @@ mod mission_m061_tests {
     fn a_preview_of_empty_space_is_refused() {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
-        let path = temp_svg("empty");
+        let (_path_guard, path) = temp_svg("empty");
 
         let _ = app.run_command_line(&format!("PREVIEW {}", path.display()));
 
@@ -5514,14 +5509,11 @@ mod mission_m070_tests {
     use super::super::*;
     use super::all_output;
 
-    fn fixture_dir(tag: &str) -> std::path::PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("ocs_m070_{tag}_{unique}"));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    fn fixture_dir(tag: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join(format!("ocs_m070_{tag}"));
+        std::fs::create_dir_all(&path).expect("the temporary directory");
+        (dir, path)
     }
 
     fn write_source(dir: &std::path::Path) {
@@ -5575,7 +5567,7 @@ mod mission_m070_tests {
     fn a_layer_and_a_block_can_be_bound_from_the_command_line() {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
-        let dir = fixture_dir("cmd");
+        let (_dir_guard, dir) = fixture_dir("cmd");
         write_source(&dir);
         let _ = attach(&mut app, &dir);
         let i = app.active_tab;
@@ -5645,7 +5637,7 @@ mod mission_m070_tests {
     fn an_unknown_reference_is_refused_and_nothing_is_copied() {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
-        let dir = fixture_dir("missingref");
+        let (_dir_guard, dir) = fixture_dir("missingref");
         write_source(&dir);
         let _ = attach(&mut app, &dir);
         let i = app.active_tab;
@@ -5721,12 +5713,10 @@ mod mission_m076_tests {
             .color
     }
 
-    fn temp_las(tag: &str) -> std::path::PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("ocs_m076_{tag}_{unique}.las"))
+    fn temp_las(tag: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join(format!("ocs_m076_{tag}.las"));
+        (dir, path)
     }
 
     #[test]
@@ -5786,7 +5776,7 @@ mod mission_m076_tests {
         add_layer(&mut app, "WALLS");
         set_off(&mut app, "WALLS", true);
         let _ = app.run_command_line("-LAYERSTATE SAVE OLD-NAME");
-        let path = temp_las("roundtrip");
+        let (_path_guard, path) = temp_las("roundtrip");
 
         let _ = app.run_command_line(&format!("-LAYERSTATE EXPORT OLD-NAME {}", path.display()));
         assert!(path.exists(), "{}", all_output(&app));
@@ -5833,14 +5823,11 @@ mod mission_m078_tests {
     use super::super::*;
     use super::all_output;
 
-    fn temp_dir(tag: &str) -> std::path::PathBuf {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("ocs_m078_{tag}_{unique}"));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    fn temp_dir(tag: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join(format!("ocs_m078_{tag}"));
+        std::fs::create_dir_all(&path).expect("the temporary directory");
+        (dir, path)
     }
 
     /// A layer a translation can act on needs a real handle.
@@ -5891,7 +5878,7 @@ mod mission_m078_tests {
     fn a_mapping_moves_objects_and_purges_the_source() {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{ "op": "new" }"#);
-        let dir = temp_dir("apply");
+        let (_dir_guard, dir) = temp_dir("apply");
         let standards = write_standards(&dir, &["WALLS"]);
         let i = app.active_tab;
         add_layer(&mut app, "A-WALL");
@@ -5930,7 +5917,7 @@ mod mission_m078_tests {
     fn a_saved_mapping_list_can_be_reused_on_another_drawing() {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{ "op": "new" }"#);
-        let dir = temp_dir("reuse");
+        let (_dir_guard, dir) = temp_dir("reuse");
         let standards = write_standards(&dir, &["WALLS", "DOORS"]);
         let map_file = dir.join("office.map");
 
@@ -5977,7 +5964,7 @@ mod mission_m078_tests {
     fn a_target_the_standards_do_not_define_is_reported_and_nothing_moves() {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{ "op": "new" }"#);
-        let dir = temp_dir("missing");
+        let (_dir_guard, dir) = temp_dir("missing");
         let standards = write_standards(&dir, &["WALLS"]);
         add_layer(&mut app, "A-WALL");
         add_line(&mut app, "A-WALL");

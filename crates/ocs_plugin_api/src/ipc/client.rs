@@ -151,6 +151,58 @@ impl PluginHostApi {
     }
 }
 
+impl PluginHostApi {
+    /// Bring the cached snapshot up to date after this plugin's own edit
+    /// (see [`snapshot_patch`](crate::ipc::snapshot_patch)): re-read the
+    /// `refreshed` entities from the host and drop the `removed` ones. Without
+    /// a usable cache there is nothing to patch; any failure drops the cache
+    /// so the next read fetches the host's truth.
+    fn patch_cache(&mut self, refreshed: &[Handle], removed: &[Handle]) {
+        if self.document_cache.get().is_none() || self.document_fetch_failed.get() {
+            self.document_cache = OnceCell::new();
+            return;
+        }
+        let fresh = if refreshed.is_empty() {
+            Some(Vec::new())
+        } else {
+            match self.client.request(PluginRequest::GetEntitiesBatch {
+                handles: refreshed.to_vec(),
+            }) {
+                Ok(PluginResponse::GetEntitiesBatchResult(Ok(list))) => Some(list),
+                _ => None,
+            }
+        };
+        let patched = match (fresh, self.document_cache.get_mut()) {
+            (Some(fresh), Some(doc)) => {
+                crate::ipc::snapshot_patch::apply_refreshed(doc, refreshed, fresh, removed)
+            }
+            _ => false,
+        };
+        if !patched {
+            self.document_cache = OnceCell::new();
+        }
+    }
+
+    /// Mirror a successful record write/removal in the cached snapshot.
+    fn patch_cached_record(
+        &mut self,
+        handle: Handle,
+        app_name: &str,
+        record: Option<ExtendedDataRecord>,
+    ) {
+        if self.document_fetch_failed.get() {
+            self.document_cache = OnceCell::new();
+            return;
+        }
+        let Some(doc) = self.document_cache.get_mut() else {
+            return;
+        };
+        if !crate::ipc::snapshot_patch::mirror_record(doc, handle, app_name, record) {
+            self.document_cache = OnceCell::new();
+        }
+    }
+}
+
 impl HostApi for PluginHostApi {
     fn tab_index(&self) -> usize {
         self.tab_index
@@ -235,9 +287,12 @@ impl HostApi for PluginHostApi {
     fn add_entity(&mut self, entity: EntityType) -> Handle {
         match self.client.request(PluginRequest::AddEntity(entity)) {
             Ok(PluginResponse::Handle(h)) => {
-                // The cached snapshot is now stale; drop it so a later
-                // document() re-fetches the host's post-edit truth.
-                self.document_cache = OnceCell::new();
+                // Patch the cached snapshot with the host's post-edit copy.
+                if h.is_null() {
+                    self.document_cache = OnceCell::new();
+                } else {
+                    self.patch_cache(&[h], &[]);
+                }
                 h
             }
             Ok(other) => {
@@ -254,9 +309,9 @@ impl HostApi for PluginHostApi {
     fn add_entities(&mut self, entities: Vec<EntityType>) -> Vec<Handle> {
         match self.client.request(PluginRequest::AddEntities(entities)) {
             Ok(PluginResponse::Handles(handles)) => {
-                // The cached snapshot is now stale; drop it so a later
-                // document() re-fetches the host's post-edit truth.
-                self.document_cache = OnceCell::new();
+                // Patch the cached snapshot with the host's post-edit copies.
+                let added: Vec<Handle> = handles.iter().copied().filter(|h| !h.is_null()).collect();
+                self.patch_cache(&added, &[]);
                 handles
             }
             Ok(other) => {
@@ -271,12 +326,17 @@ impl HostApi for PluginHostApi {
     }
 
     fn update_entity(&mut self, entity: EntityType) -> bool {
+        let handle = entity.common().handle;
+        let full_refresh = crate::ipc::snapshot_patch::edit_needs_full_refresh(&entity);
         match self.client.request(PluginRequest::UpdateEntity(entity)) {
             Ok(PluginResponse::Bool(b)) => {
                 if b {
-                    // The cached snapshot is now stale; drop it so a later
-                    // document() re-fetches the host's post-edit truth.
-                    self.document_cache = OnceCell::new();
+                    // Patch the cached snapshot with the host's post-edit copy.
+                    if full_refresh {
+                        self.document_cache = OnceCell::new();
+                    } else {
+                        self.patch_cache(&[handle], &[]);
+                    }
                 }
                 b
             }
@@ -295,7 +355,7 @@ impl HostApi for PluginHostApi {
         match self.client.request(PluginRequest::RemoveEntity { handle }) {
             Ok(PluginResponse::Bool(b)) => {
                 if b {
-                    self.document_cache = OnceCell::new();
+                    self.patch_cache(&[], &[handle]);
                 }
                 b
             }
@@ -315,6 +375,19 @@ impl HostApi for PluginHostApi {
     }
 
     fn read_record(&self, handle: Handle, app_name: &str) -> Option<&ExtendedDataRecord> {
+        // The host answers `ReadRecord` from the entity's own XDATA, which the
+        // cached snapshot carries (kept current after this plugin's edits):
+        // answer from it when the entity is there. A scan over a large drawing
+        // otherwise costs one round trip per entity.
+        if !self.document_fetch_failed.get() {
+            if let Some(entity) = self
+                .document_cache
+                .get()
+                .and_then(|doc| doc.get_entity(handle))
+            {
+                return entity.common().extended_data.get_record(app_name);
+            }
+        }
         let key = (handle, app_name.to_string());
         {
             let cache = self.record_cache.borrow();
@@ -346,13 +419,17 @@ impl HostApi for PluginHostApi {
 
     fn write_record(&mut self, handle: Handle, record: ExtendedDataRecord) -> bool {
         let app = record.application_name.clone();
+        let mirrored = record.clone();
         match self
             .client
             .request(PluginRequest::WriteRecord { handle, record })
         {
             Ok(PluginResponse::Bool(b)) => {
                 if b {
-                    self.record_cache.borrow_mut().remove(&(handle, app));
+                    self.record_cache
+                        .borrow_mut()
+                        .remove(&(handle, app.clone()));
+                    self.patch_cached_record(handle, &app, Some(mirrored));
                 }
                 b
             }
@@ -377,6 +454,7 @@ impl HostApi for PluginHostApi {
                     self.record_cache
                         .borrow_mut()
                         .remove(&(handle, app_name.to_string()));
+                    self.patch_cached_record(handle, app_name, None);
                 }
                 b
             }
@@ -580,6 +658,10 @@ impl HostApi for PluginHostApi {
         label: &str,
         entities: Vec<EntityType>,
     ) -> Result<(), String> {
+        let handles: Vec<Handle> = entities.iter().map(|e| e.common().handle).collect();
+        let full_refresh = entities
+            .iter()
+            .any(crate::ipc::snapshot_patch::edit_needs_full_refresh);
         match self
             .client
             .request(PluginRequest::UpdateEntitiesTransaction {
@@ -588,7 +670,11 @@ impl HostApi for PluginHostApi {
             }) {
             Ok(PluginResponse::EntityTransactionResult(result)) => {
                 if result.is_ok() {
-                    self.document_cache = OnceCell::new();
+                    if full_refresh {
+                        self.document_cache = OnceCell::new();
+                    } else {
+                        self.patch_cache(&handles, &[]);
+                    }
                 }
                 result
             }
@@ -1197,6 +1283,133 @@ mod tests {
             Err("hard-corner seam".to_owned())
         );
         peer_handle.join().unwrap();
+    }
+
+    /// A scripted host: answers each request with `answer` and returns the
+    /// request names in order once `count` requests were served.
+    fn serve(
+        mut peer: Stream,
+        count: usize,
+        answer: impl Fn(&PluginRequest) -> PluginResponse + Send + 'static,
+    ) -> thread::JoinHandle<Vec<String>> {
+        thread::spawn(move || {
+            let mut seen = Vec::new();
+            for _ in 0..count {
+                let PluginToHost::Request(req) = recv::<PluginToHost>(&mut peer).unwrap() else {
+                    panic!("expected a request");
+                };
+                let name = format!("{req:?}");
+                seen.push(name.split([' ', '(', '{']).next().unwrap_or("").to_string());
+                send(&mut peer, &HostToPlugin::Response(Box::new(answer(&req)))).unwrap();
+            }
+            seen
+        })
+    }
+
+    fn snapshot_with_point() -> (document::Document, Handle) {
+        let mut doc = document::Document::new();
+        let _ = doc.app_ids.add(document::tables::AppId::new("CACHE_TEST"));
+        let handle = doc
+            .add_entity(EntityType::Point(Point::from_coords(1.0, 2.0, 3.0)))
+            .unwrap();
+        (doc, handle)
+    }
+
+    #[test]
+    fn an_update_patches_the_cached_snapshot_instead_of_refetching_it() {
+        let (api_doc, handle) = snapshot_with_point();
+        let mut moved = api_doc.get_entity(handle).unwrap().clone();
+        if let EntityType::Point(point) = &mut moved {
+            point.location.x = 9.0;
+        }
+        let host_copy = moved.clone();
+        let (mut api, peer) = make_client();
+        let peer = serve(peer, 3, move |req| match req {
+            PluginRequest::DocumentSnapshot => PluginResponse::Document(Box::new(api_doc.clone())),
+            PluginRequest::UpdateEntity(_) => PluginResponse::Bool(true),
+            PluginRequest::GetEntitiesBatch { handles } => {
+                assert_eq!(handles, &vec![handle]);
+                PluginResponse::GetEntitiesBatchResult(Ok(vec![Some(host_copy.clone())]))
+            }
+            other => panic!("unexpected: {other:?}"),
+        });
+        assert!(api.document().get_entity(handle).is_some());
+        assert!(api.update_entity(moved));
+        // Served from the patched snapshot: no second DocumentSnapshot.
+        let EntityType::Point(point) = api.document().get_entity(handle).unwrap().clone() else {
+            panic!("point");
+        };
+        assert_eq!(point.location.x, 9.0);
+        assert_eq!(
+            peer.join().unwrap(),
+            ["DocumentSnapshot", "UpdateEntity", "GetEntitiesBatch"]
+        );
+    }
+
+    #[test]
+    fn records_are_read_from_and_mirrored_into_the_cached_snapshot() {
+        let (api_doc, handle) = snapshot_with_point();
+        let (mut api, peer) = make_client();
+        let peer = serve(peer, 2, move |req| match req {
+            PluginRequest::DocumentSnapshot => PluginResponse::Document(Box::new(api_doc.clone())),
+            PluginRequest::WriteRecord { .. } => PluginResponse::Bool(true),
+            other => panic!("unexpected: {other:?}"),
+        });
+        let _ = api.document();
+        // No record yet: answered from the snapshot, no ReadRecord round trip.
+        assert!(api.read_record(handle, "CACHE_TEST").is_none());
+        let mut record = document::xdata::ExtendedDataRecord::new("CACHE_TEST");
+        record.add_value(document::xdata::XDataValue::String("stamp".into()));
+        assert!(api.write_record(handle, record.clone()));
+        assert_eq!(api.read_record(handle, "CACHE_TEST"), Some(&record));
+        assert_eq!(peer.join().unwrap(), ["DocumentSnapshot", "WriteRecord"]);
+    }
+
+    #[test]
+    fn a_record_of_a_new_application_refetches_the_snapshot() {
+        // The host registers an unknown application id, so the cached APPID
+        // table would be stale: the cache is dropped instead of patched.
+        let (api_doc, handle) = snapshot_with_point();
+        let (mut api, peer) = make_client();
+        let peer = serve(peer, 3, move |req| match req {
+            PluginRequest::DocumentSnapshot => PluginResponse::Document(Box::new(api_doc.clone())),
+            PluginRequest::WriteRecord { .. } => PluginResponse::Bool(true),
+            other => panic!("unexpected: {other:?}"),
+        });
+        let _ = api.document();
+        assert!(api.write_record(handle, document::xdata::ExtendedDataRecord::new("OTHER_APP")));
+        let _ = api.document();
+        assert_eq!(
+            peer.join().unwrap(),
+            ["DocumentSnapshot", "WriteRecord", "DocumentSnapshot"]
+        );
+    }
+
+    #[test]
+    fn a_failed_batch_read_refetches_the_snapshot() {
+        let (api_doc, handle) = snapshot_with_point();
+        let entity = api_doc.get_entity(handle).unwrap().clone();
+        let (mut api, peer) = make_client();
+        let peer = serve(peer, 4, move |req| match req {
+            PluginRequest::DocumentSnapshot => PluginResponse::Document(Box::new(api_doc.clone())),
+            PluginRequest::UpdateEntity(_) => PluginResponse::Bool(true),
+            PluginRequest::GetEntitiesBatch { .. } => {
+                PluginResponse::GetEntitiesBatchResult(Err("busy".to_string()))
+            }
+            other => panic!("unexpected: {other:?}"),
+        });
+        let _ = api.document();
+        assert!(api.update_entity(entity));
+        let _ = api.document();
+        assert_eq!(
+            peer.join().unwrap(),
+            [
+                "DocumentSnapshot",
+                "UpdateEntity",
+                "GetEntitiesBatch",
+                "DocumentSnapshot"
+            ]
+        );
     }
 
     #[test]

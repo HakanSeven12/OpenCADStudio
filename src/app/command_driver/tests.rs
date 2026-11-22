@@ -4437,6 +4437,29 @@ mod mission_m029_tests {
         assert!(output.contains("(current)"), "{output}");
     }
 
+    /// `SCALELISTEDIT ADD <name> <ratio>` adds a scale under its own name;
+    /// the ratio alone still names the scale after itself.
+    #[test]
+    fn scale_list_add_takes_a_name_before_the_ratio() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("SCALELISTEDIT ADD Site_plan 1:500");
+        let _ = app.run_command_line("SCALELISTEDIT ADD 1:75");
+        let scales = app.tabs[app.active_tab].scene.scale_list();
+        let names: Vec<&str> = scales.iter().map(|(name, ..)| name.as_str()).collect();
+        assert!(names.contains(&"Site_plan"), "{names:?}");
+        assert!(names.contains(&"1:75"), "{names:?}");
+        let _ = app.run_command_line("CANNOSCALE Site_plan");
+        let _ = app.run_command_line("SCALELISTEDIT LIST");
+        let output = all_output(&app);
+        assert!(
+            output.contains("Site_plan  factor=0.002000  in use: 0  (current)"),
+            "{output}"
+        );
+        let _ = app.run_command_line("SCALELISTEDIT ADD Site_plan 1:500");
+        assert!(all_output(&app).contains("Scale Site_plan already exists."));
+    }
+
     #[test]
     fn deleting_the_current_scale_is_refused() {
         let mut app = OpenCADStudio::new_for_test();

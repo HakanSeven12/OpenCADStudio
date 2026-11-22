@@ -170,3 +170,58 @@ fn entities_added_in_several_rounds_are_patched_each_time() {
     }
     assert_eq!(drawn(&scene), drawn(&reference));
 }
+
+/// Erasing most of a drawing has the set built again without the erased
+/// entities, so undoing the erase brings them back as new ones, between the
+/// entities that stayed. New runs only go in at the tail, and the patch
+/// declines. It has to tell before it tessellates them all, which the full
+/// build then does again: undoing an erase of 100,000 objects spent half a
+/// second on that.
+#[test]
+fn a_patch_that_cannot_place_its_new_entities_declines_before_tessellating_them() {
+    let mut scene = Scene::new();
+    let handles: Vec<Handle> = (0..400).map(|i| scene.add_entity(line(i))).collect();
+    let whole = drawn(&scene);
+    assert_eq!(whole.len(), 400);
+
+    // All but every tenth entity go: more than half the set, so it is built
+    // again with the forty that stay.
+    let erased: Vec<Handle> = handles
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| index % 10 != 0)
+        .map(|(_, handle)| *handle)
+        .collect();
+    let images: Vec<_> = erased
+        .iter()
+        .map(|handle| scene.document.get_entity_arc(*handle).unwrap())
+        .collect();
+    scene.erase_entities(&erased);
+    assert_eq!(drawn(&scene).len(), 40);
+
+    assert_eq!(scene.restore_erased_entities(images).len(), 360);
+    let hits = scene.resident_patch_hits.get();
+    let tessellated = scene.resident_patch_tessellated.get();
+    let restored = drawn(&scene);
+    assert_eq!(
+        scene.resident_patch_hits.get(),
+        hits,
+        "entities that come back between the ones that stayed are not patched in"
+    );
+    let cost = scene.resident_patch_tessellated.get() - tessellated;
+    assert!(
+        cost <= 4,
+        "the declined patch tessellated {cost} of the 360 entities before the full build"
+    );
+    // By content: a newly built set lists the entities in the drawing's
+    // storage order, which the erase and its undo changed.
+    let sorted = |mut set: Vec<(String, usize, usize)>| {
+        set.sort();
+        set
+    };
+    assert_eq!(
+        sorted(restored),
+        sorted(whole),
+        "the set draws the whole drawing again"
+    );
+}

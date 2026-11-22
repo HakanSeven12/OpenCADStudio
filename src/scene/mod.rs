@@ -3446,6 +3446,10 @@ pub struct Scene {
     /// a full re-tessellation. Diagnostics + a hook for the oracle test to prove
     /// the fast path is actually exercised (not silently always falling back).
     resident_patch_hits: std::cell::Cell<u64>,
+    /// Count of entities the incremental patch has tessellated, whether it
+    /// then went in or declined: what a declined patch cost before the full
+    /// build did the work again.
+    resident_patch_tessellated: std::cell::Cell<u64>,
     /// Handoff for the GPU wire arena (`OCS_WIRE_GPU_PATCH`): when the MODEL
     /// resident set was brought up to date by an incremental patch, this records
     /// `(prev_gen, new_gen, changed handles)` so the render layer can patch just
@@ -3805,6 +3809,7 @@ impl Scene {
             pending_removed_categories: RefCell::new(HashMap::default()),
             geometry_journal_floor: std::cell::Cell::new(0),
             resident_patch_hits: std::cell::Cell::new(0),
+            resident_patch_tessellated: std::cell::Cell::new(0),
             model_wire_gpu_patch: RefCell::new(HashMap::default()),
             undo_recording: None,
         }

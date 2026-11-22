@@ -818,6 +818,8 @@ impl Scene {
             new_runs.insert(h, faded);
         }
         let tessellated = memo_updates.len();
+        self.resident_patch_tessellated
+            .set(self.resident_patch_tessellated.get() + tessellated as u64);
         {
             let mut memo = self.resident_tess_memo.borrow_mut();
             for (h, run) in memo_updates {

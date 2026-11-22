@@ -3700,7 +3700,7 @@ impl Scene {
         // read as "not editable" (they stay visible and snappable).
         let adapted = adapt_to_bg(color, bg);
         let final_color = if layer_locked(&self.document, e) {
-            crate::scene::cache::block_cache::fade_toward_bg(adapted, bg)
+            crate::scene::cache::block_cache::layer_lock_fade(adapted, bg)
         } else {
             adapted
         };

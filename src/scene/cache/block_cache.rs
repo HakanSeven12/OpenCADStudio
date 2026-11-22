@@ -2780,6 +2780,30 @@ pub(crate) fn fade_toward_bg(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
     ]
 }
 
+/// LAYLOCKFADECTL: how far objects on a locked layer fade toward the
+/// background, in percent (-90..=90, default 50); zero or negative shows them
+/// unfaded and keeps the amount for when it is turned on again.
+static LAYER_LOCK_FADE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(50);
+
+pub fn layer_lock_fade_ctl() -> i32 {
+    LAYER_LOCK_FADE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_layer_lock_fade_ctl(value: i32) {
+    LAYER_LOCK_FADE.store(value.clamp(-90, 90), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// A colour of an object on a locked layer, faded by LAYLOCKFADECTL.
+pub(crate) fn layer_lock_fade(color: [f32; 4], bg: [f32; 4]) -> [f32; 4] {
+    let t = layer_lock_fade_ctl().clamp(0, 90) as f32 / 100.0;
+    [
+        color[0] * (1.0 - t) + bg[0] * t,
+        color[1] * (1.0 - t) + bg[1] * t,
+        color[2] * (1.0 - t) + bg[2] * t,
+        color[3],
+    ]
+}
+
 /// XFADECTL: how far objects outside the REFEDIT working set fade toward the
 /// background, in percent (0–90, default 70).
 static REFEDIT_FADE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(70);

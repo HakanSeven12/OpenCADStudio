@@ -960,6 +960,9 @@ pub struct UserSettings {
     pub hyperlink_options: bool,
     /// XDWGFADECTL: how much referenced drawings fade (-90..=90; negative is off).
     pub xref_fade: i32,
+    /// LAYLOCKFADECTL: how much objects on locked layers fade (-90..=90;
+    /// negative is off).
+    pub layer_lock_fade: i32,
     /// FILEDIA: file dialogs of commands that have a command-line form.
     pub file_dia: bool,
     /// OLEHIDE: which OLE objects show (0 all, 1 paper space, 2 model space, 3 none).
@@ -1573,6 +1576,7 @@ impl Default for UserSettings {
             annotation_scale_prompt: true,
             hyperlink_options: true,
             xref_fade: 50,
+            layer_lock_fade: 50,
             file_dia: true,
             ole_hide: 0,
             ole_quality: 3,

@@ -12,7 +12,7 @@ fn fade_if_locked(
     bg: [f32; 4],
 ) -> [f32; 4] {
     if view::render::layer_locked(document, e) {
-        crate::scene::cache::block_cache::fade_toward_bg(color, bg)
+        crate::scene::cache::block_cache::layer_lock_fade(color, bg)
     } else {
         color
     }

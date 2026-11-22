@@ -1034,6 +1034,7 @@ impl OpenCADStudio {
                     | "PDFSHXBESTFONT"
                     | "PDFSHXTEXTSETTINGS"
                     | "XDWGFADECTL"
+                    | "LAYLOCKFADECTL"
                     | "POINTCLOUDCLIPFRAME"
                     | "POINTCLOUDDENSITY"
                     | "POINTCLOUDPOINTSIZE"
@@ -1232,30 +1233,31 @@ impl OpenCADStudio {
                         }
                         return Some(self.finish_dispatch(cmd));
                     }
-                    if name == "XDWGFADECTL" {
-                        let current = crate::scene::cache::block_cache::xref_fade_ctl();
+                    if name == "XDWGFADECTL" || name == "LAYLOCKFADECTL" {
+                        let locked = name == "LAYLOCKFADECTL";
+                        let current = if locked {
+                            crate::scene::cache::block_cache::layer_lock_fade_ctl()
+                        } else {
+                            crate::scene::cache::block_cache::xref_fade_ctl()
+                        };
                         if let Some(value) = &value {
                             match value.parse::<i32>().ok().filter(|v| (-90..=90).contains(v)) {
+                                Some(fade) if locked => self.set_layer_lock_fade(fade),
                                 Some(fade) => self.set_xref_fade(fade),
                                 // Refused: say why and ask again.
                                 None => {
                                     self.command_line
                                         .push_rejection("Requires an integer between -90 and 90.");
                                     self.command_line.push_output(
-                                        &crate::ui::command_line::value_prompt(
-                                            "XDWGFADECTL",
-                                            &current,
-                                        ),
+                                        &crate::ui::command_line::value_prompt(&name, &current),
                                     );
                                     self.pending_setvar = Some(name.clone());
                                 }
                             }
                         } else {
-                            self.command_line
-                                .push_output(&crate::ui::command_line::value_prompt(
-                                    "XDWGFADECTL",
-                                    &current,
-                                ));
+                            self.command_line.push_output(
+                                &crate::ui::command_line::value_prompt(&name, &current),
+                            );
                             self.pending_setvar = Some(name.clone());
                         }
                         return Some(self.finish_dispatch(cmd));
@@ -5583,6 +5585,18 @@ impl OpenCADStudio {
             )
             .as_ref(),
         );
+    }
+
+    /// LAYLOCKFADECTL: store it in the profile and redraw every tab.
+    pub(in crate::app) fn set_layer_lock_fade(&mut self, fade: i32) {
+        crate::scene::cache::block_cache::set_layer_lock_fade_ctl(fade);
+        self.save_config();
+        for tab in &mut self.tabs {
+            if !tab.is_start {
+                tab.scene.recolor_meshes();
+                tab.scene.bump_geometry();
+            }
+        }
     }
 
     /// XDWGFADECTL: store it in the profile, show it on the ribbon and redraw

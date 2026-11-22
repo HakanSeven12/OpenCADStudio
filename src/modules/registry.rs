@@ -1041,6 +1041,7 @@ const SYSTEM_VARIABLES: &[&str] = &[
     "WORLDVIEW",
     "XCLIPFRAME",
     "XDWGFADECTL",
+    "LAYLOCKFADECTL",
     "XEDIT",
     "XFADECTL",
     "XREFLAYER",

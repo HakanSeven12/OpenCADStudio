@@ -1370,6 +1370,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "PDFSHXBESTFONT",
         "PDFSHXTEXTSETTINGS",
         "XDWGFADECTL",
+        "LAYLOCKFADECTL",
         "POINTCLOUDCLIPFRAME",
         "POINTCLOUDDENSITY",
         "POINTCLOUDPOINTSIZE",

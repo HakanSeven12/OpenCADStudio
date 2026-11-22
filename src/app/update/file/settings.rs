@@ -174,6 +174,7 @@ impl OpenCADStudio {
             annotation_scale_prompt: crate::app::commands::annotation_scale_prompt(),
             hyperlink_options: crate::app::commands::hyperlink_options(),
             xref_fade: crate::scene::cache::block_cache::xref_fade_ctl(),
+            layer_lock_fade: crate::scene::cache::block_cache::layer_lock_fade_ctl(),
             file_dia: crate::sys::file_dia(),
             ole_hide: crate::entities::ole2frame::hide_mode(),
             ole_quality: crate::app::commands::ole_quality(),
@@ -410,6 +411,7 @@ impl OpenCADStudio {
         crate::app::commands::set_annotation_scale_prompt(s.annotation_scale_prompt);
         crate::app::commands::set_hyperlink_options(s.hyperlink_options);
         crate::scene::cache::block_cache::set_xref_fade_ctl(s.xref_fade);
+        crate::scene::cache::block_cache::set_layer_lock_fade_ctl(s.layer_lock_fade);
         self.ribbon.xref_fade = crate::scene::cache::block_cache::xref_fade_ctl();
         crate::sys::set_file_dia(s.file_dia);
         crate::entities::ole2frame::set_hide_mode(s.ole_hide);

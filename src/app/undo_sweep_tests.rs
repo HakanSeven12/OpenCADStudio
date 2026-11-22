@@ -162,6 +162,9 @@ fn commands(d: &Drawing) -> Vec<String> {
         format!("EXPLODE {} ENTER", h(d.polyline)),
         format!("EXPLODE {} ENTER", h(d.insert)),
         format!("PEDIT {} C X", h(d.polyline)),
+        // Two picks: the line on `Walls` and the upright line at its end.
+        "JOIN 2,0 10,5 ENTER".to_string(),
+        format!("-BLOCK Fitting 0,0 {} {} ENTER", h(d.circle), h(d.arc)),
         // The layer table.
         "-LAYER NEW Doors".to_string(),
         "-LAYER OFF Walls ".to_string(),
@@ -192,6 +195,10 @@ enum Step {
     Send(Box<Message>),
     /// Work with the pointer in the viewport (a grip drag, for example).
     Pointer(Box<dyn Fn(&mut OpenCADStudio)>),
+    /// One input to the command in progress, as a pick in the viewport or a
+    /// word on the command line gives it. `StepInput` has no `Clone`, so the
+    /// step makes it when it runs.
+    Feed(Box<dyn Fn() -> crate::command::StepInput>),
 }
 
 /// A case of more than one action: its name for the report, and its steps.
@@ -316,6 +323,62 @@ fn place_cases() -> Vec<(Vec<Step>, Case)> {
     ]
 }
 
+/// Commands that take a pick of an object, or work on the selection.
+fn pick_cases(d: &Drawing) -> Vec<Case> {
+    use crate::command::StepInput;
+    let run = |command: &str| Step::Run(command.to_string());
+    let open = |command: &str| Step::Open(command.to_string(), "command");
+    let feed = |input: fn(&Drawing) -> StepInput| {
+        let d = Drawing { ..*d };
+        Step::Feed(Box::new(move || input(&d)))
+    };
+    let word = |text: &'static str| Step::Feed(Box::new(move || StepInput::Text(text.to_string())));
+    let select = |object: u64| {
+        Step::Op(serde_json::json!({
+            "op": "select", "clear": true, "handles": [format!("{object:X}")]
+        }))
+    };
+    vec![
+        Case {
+            name: "LENGTHEN by a delta".to_string(),
+            steps: vec![
+                open("LENGTHEN"),
+                word("DE"),
+                word("2"),
+                feed(|d| {
+                    StepInput::EntityPick(
+                        document::Handle::new(d.line),
+                        glam::DVec3::new(9.0, 0.0, 0.0),
+                    )
+                }),
+                feed(|_| StepInput::Enter),
+            ],
+        },
+        Case {
+            name: "MATCHPROP from the line to the circle".to_string(),
+            steps: vec![
+                open("MATCHPROP"),
+                feed(|d| {
+                    StepInput::EntityPick(
+                        document::Handle::new(d.line),
+                        glam::DVec3::new(2.0, 0.0, 0.0),
+                    )
+                }),
+                feed(|d| StepInput::SelectionComplete(vec![document::Handle::new(d.circle)])),
+                feed(|_| StepInput::Enter),
+            ],
+        },
+        Case {
+            name: "DRAWORDER to the back".to_string(),
+            steps: vec![select(d.line), run("DRAWORDER BACK")],
+        },
+        Case {
+            name: "DRAWORDER to the front".to_string(),
+            steps: vec![select(d.line), run("DRAWORDER FRONT")],
+        },
+    ]
+}
+
 /// A drag of each grip of each object of the drawing: the grip is taken, the
 /// pointer moves two times, and the button is released.
 fn grip_cases(app: &OpenCADStudio, d: &Drawing) -> Vec<Case> {
@@ -396,7 +459,16 @@ fn run_steps(app: &mut OpenCADStudio, name: &str, steps: &[Step]) -> Result<(), 
             Step::Send(message) => {
                 let _ = app.update(Message::clone(message));
             }
-            Step::Pointer(action) => action(app),
+            Step::Pointer(action) => {
+                action(app);
+                app.finish_all_pending_history();
+            }
+            Step::Feed(input) => {
+                let _ = app.feed_command(input());
+                // The app closes an undo record at the end of each message;
+                // a direct call does not go through there.
+                app.finish_all_pending_history();
+            }
         }
     }
     Ok(())
@@ -498,6 +570,17 @@ fn every_command_in_another_place_is_undone_and_redone_exactly() {
     let failures: Vec<String> = place_cases()
         .iter()
         .flat_map(|(setup, case)| check_after(&case.name, setup, &case.steps))
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The same for a command that takes a pick or works on the selection.
+#[test]
+fn every_command_with_a_pick_is_undone_and_redone_exactly() {
+    let (_, d) = drawing();
+    let failures: Vec<String> = pick_cases(&d)
+        .iter()
+        .flat_map(|case| check_steps(&case.name, &case.steps))
         .collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

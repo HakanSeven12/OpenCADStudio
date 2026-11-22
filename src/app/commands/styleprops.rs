@@ -1430,11 +1430,7 @@ impl OpenCADStudio {
                         } else {
                             crate::scene::layout_create_viewport()
                         };
-                        let current = if is_on {
-                            "ON"
-                        } else {
-                            "OFF"
-                        };
+                        let current = if is_on { "ON" } else { "OFF" };
                         let parsed = value.as_deref().map(|v| {
                             match v
                                 .trim()

@@ -31,7 +31,7 @@ serde_json = "1"
 # Offline validation of the same contracts published to automation clients.
 jsonschema = { version = "0.49", default-features = false }
 serde = { version = "1", features = ["derive"] }
-calamine = "0.36.1"
+calamine = "0.38.0"
 base64 = "0.22"
 semver = "1"
 url = "2"

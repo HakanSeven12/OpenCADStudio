@@ -121,7 +121,7 @@ fn transforms() -> Vec<(&'static str, EntityTransform)> {
     ]
 }
 
-fn entities() -> Vec<(&'static str, EntityType)> {
+pub(super) fn entities() -> Vec<(&'static str, EntityType)> {
     let mut ellipse = Ellipse::from_center_axes(v3(6.0, -2.0, 0.0), v3(4.0, 1.0, 0.0), 0.4);
     ellipse.start_parameter = 0.5;
     ellipse.end_parameter = 4.0;
@@ -483,7 +483,7 @@ fn pts(list: &[Vector3]) -> String {
 }
 
 /// The geometric fields of an entity, one per line.
-fn describe(entity: &EntityType) -> String {
+pub(super) fn describe(entity: &EntityType) -> String {
     let mut s = String::new();
     let mut field = |name: &str, value: String| {
         let _ = writeln!(s, "  {name}: {value}");
@@ -907,7 +907,7 @@ fn split_numbers(line: &str) -> (String, Vec<f64>) {
 /// The first line where `actual` differs from `expected`, ignoring number
 /// differences small enough to be platform rounding. The golden prints nine
 /// decimals, so a last-bit difference can move a printed value by 1e-9.
-fn first_difference(expected: &str, actual: &str) -> Option<String> {
+pub(super) fn first_difference(expected: &str, actual: &str) -> Option<String> {
     const TOLERANCE: f64 = 2e-9;
     let (expected_lines, actual_lines): (Vec<_>, Vec<_>) =
         (expected.lines().collect(), actual.lines().collect());

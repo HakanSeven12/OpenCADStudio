@@ -4717,7 +4717,6 @@ mod mission_m062_tests {
             bytes.starts_with(b"%PDF"),
             "the file must carry a PDF header"
         );
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -4752,7 +4751,6 @@ mod mission_m062_tests {
         );
         let bytes = std::fs::read(&path).expect("the command must create the file");
         assert!(bytes.starts_with(b"%PDF"));
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -11149,6 +11147,7 @@ mod wblock_normalized_export_tests {
 
     #[test]
     fn a_normalized_wblock_export_moves_the_selection_to_the_origin() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let _ = app.automation_op(r#"{"op":"run","cmd":"LINE 10,10 20,20"}"#);
@@ -11161,7 +11160,7 @@ mod wblock_normalized_export_tests {
             .as_u64()
             .unwrap();
 
-        let path = std::env::temp_dir().join(format!("ocs_wblock_norm_{}.dxf", std::process::id()));
+        let path = dir.path().join("ocs_wblock_norm.dxf");
         let _ = std::fs::remove_file(&path);
         let escaped = path.to_string_lossy().replace('\\', "\\\\");
         let result = app.automation_op(&format!(
@@ -11185,12 +11184,6 @@ mod wblock_normalized_export_tests {
             "the exported line's bounds minimum is now the origin: {line}"
         );
         drop(app);
-        let sidecar = path.with_file_name(format!(
-            ".{}.ocs.lock",
-            path.file_name().unwrap().to_string_lossy()
-        ));
-        let _ = std::fs::remove_file(sidecar);
-        let _ = std::fs::remove_file(&path);
     }
 }
 
@@ -11749,11 +11742,12 @@ mod datalink_csv_command_tests {
 
     #[test]
     fn datalink_reads_a_csv_and_registers_a_linked_table() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
 
-        let path = std::env::temp_dir().join(format!("ocs_datalink_{}.csv", std::process::id()));
+        let path = dir.path().join("ocs_datalink.csv");
         std::fs::write(&path, "NAME,QTY\nBolt,12\nNut,30\n").unwrap();
         let escaped = path.to_string_lossy().replace('\\', "/");
         let task = app.run_command_line(&format!("DATALINK {escaped}"));
@@ -12229,11 +12223,11 @@ mod xref_pathtype_control_tests {
 
     #[test]
     fn xref_set_path_converts_between_none_and_full_paths() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let host = std::env::temp_dir().join(format!("ocs_xref_host_{}.dwg", std::process::id()));
-        let _ = std::fs::remove_file(&host);
+        let host = dir.path().join("ocs_xref_host.dwg");
         assert_eq!(
             app.automation_op(&format!(
                 r#"{{"op":"save","path":"{}"}}"#,
@@ -12279,12 +12273,6 @@ mod xref_pathtype_control_tests {
                 && (stored.starts_with("C:") || stored.starts_with('/')),
             "full mode stores an absolute path: {stored}"
         );
-        let sidecar = host.with_file_name(format!(
-            ".{}.ocs.lock",
-            host.file_name().unwrap().to_string_lossy()
-        ));
-        let _ = std::fs::remove_file(sidecar);
-        let _ = std::fs::remove_file(&host);
     }
 }
 

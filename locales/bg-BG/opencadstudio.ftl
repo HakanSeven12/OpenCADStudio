@@ -2830,6 +2830,7 @@ command =
     .layer-tree-used = Използвани слоеве
     .layer-tree-unused = Неизползвани слоеве
     .layer-tree-selected = Слоеве на избраните обекти
+    .layer-tree-local = Слоеве на този чертеж
     .layer-tree-vp-overrides = Замествания в изгледи
     .layer-tree-invert = Обърни филтъра
     .layer-tree-shown = Показани __ocs_fmt_0__ от __ocs_fmt_1__ слоя

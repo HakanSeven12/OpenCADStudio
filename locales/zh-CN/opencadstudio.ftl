@@ -2818,6 +2818,7 @@ command =
     .layer-tree-used = 使用中的图层
     .layer-tree-unused = 未使用的图层
     .layer-tree-selected = 所选对象的图层
+    .layer-tree-local = 本图形的图层
     .layer-tree-vp-overrides = 视口替代
     .layer-tree-invert = 反转过滤器
     .layer-tree-shown = 显示 __ocs_fmt_1__ 个图层中的 __ocs_fmt_0__ 个

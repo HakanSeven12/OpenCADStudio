@@ -2831,6 +2831,7 @@ command =
     .layer-tree-used = Gebruikte lagen
     .layer-tree-unused = Ongebruikte lagen
     .layer-tree-selected = Lagen van geselecteerde objecten
+    .layer-tree-local = Lagen van deze tekening
     .layer-tree-vp-overrides = Viewport-overschrijvingen
     .layer-tree-invert = Filter omkeren
     .layer-tree-shown = __ocs_fmt_0__ van __ocs_fmt_1__ lagen getoond

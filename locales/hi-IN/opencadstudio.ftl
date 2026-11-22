@@ -2819,6 +2819,7 @@ command =
     .layer-tree-used = उपयोग की गई लेयर
     .layer-tree-unused = अप्रयुक्त लेयर
     .layer-tree-selected = चुने गए ऑब्जेक्ट की लेयर
+    .layer-tree-local = इस ड्रॉइंग की लेयर
     .layer-tree-vp-overrides = व्यूपोर्ट ओवरराइड
     .layer-tree-invert = फ़िल्टर उलटें
     .layer-tree-shown = __ocs_fmt_1__ में से __ocs_fmt_0__ लेयर दिखाई गईं

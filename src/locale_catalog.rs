@@ -445,6 +445,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Used layers" => Some(("command", "layer-tree-used")),
         "Unused layers" => Some(("command", "layer-tree-unused")),
         "Layers of selected objects" => Some(("command", "layer-tree-selected")),
+        "Layers of this drawing" => Some(("command", "layer-tree-local")),
         "Viewport overrides" => Some(("command", "layer-tree-vp-overrides")),
         "Invert filter" => Some(("command", "layer-tree-invert")),
         "{} of {} layers shown" => Some(("command", "layer-tree-shown")),

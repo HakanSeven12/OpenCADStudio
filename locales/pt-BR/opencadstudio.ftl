@@ -2831,6 +2831,7 @@ command =
     .layer-tree-used = Camadas usadas
     .layer-tree-unused = Camadas não usadas
     .layer-tree-selected = Camadas dos objetos selecionados
+    .layer-tree-local = Camadas deste desenho
     .layer-tree-vp-overrides = Substituições de janela de exibição
     .layer-tree-invert = Inverter filtro
     .layer-tree-shown = __ocs_fmt_0__ de __ocs_fmt_1__ camadas exibidas

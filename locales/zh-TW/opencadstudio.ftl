@@ -2830,6 +2830,7 @@ command =
     .layer-tree-used = 使用中的圖層
     .layer-tree-unused = 未使用的圖層
     .layer-tree-selected = 所選物件的圖層
+    .layer-tree-local = 本圖面的圖層
     .layer-tree-vp-overrides = 視埠取代
     .layer-tree-invert = 反轉篩選器
     .layer-tree-shown = 顯示 __ocs_fmt_1__ 個圖層中的 __ocs_fmt_0__ 個

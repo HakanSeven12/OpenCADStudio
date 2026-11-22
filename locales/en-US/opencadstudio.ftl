@@ -2831,6 +2831,7 @@ command =
     .layer-tree-used = Used layers
     .layer-tree-unused = Unused layers
     .layer-tree-selected = Layers of selected objects
+    .layer-tree-local = Layers of this drawing
     .layer-tree-vp-overrides = Viewport overrides
     .layer-tree-invert = Invert filter
     .layer-tree-shown = __ocs_fmt_0__ of __ocs_fmt_1__ layers shown

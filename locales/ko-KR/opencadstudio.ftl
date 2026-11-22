@@ -2830,6 +2830,7 @@ command =
     .layer-tree-used = 사용 중인 레이어
     .layer-tree-unused = 사용하지 않는 레이어
     .layer-tree-selected = 선택한 객체의 레이어
+    .layer-tree-local = 이 도면의 레이어
     .layer-tree-vp-overrides = 뷰포트 재지정
     .layer-tree-invert = 필터 반전
     .layer-tree-shown = 레이어 __ocs_fmt_1__개 중 __ocs_fmt_0__개 표시

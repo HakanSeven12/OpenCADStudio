@@ -2831,6 +2831,7 @@ command =
     .layer-tree-used = Calques utilisés
     .layer-tree-unused = Calques inutilisés
     .layer-tree-selected = Calques des objets sélectionnés
+    .layer-tree-local = Calques de ce dessin
     .layer-tree-vp-overrides = Remplacements de fenêtre
     .layer-tree-invert = Inverser le filtre
     .layer-tree-shown = __ocs_fmt_0__ calques sur __ocs_fmt_1__ affichés

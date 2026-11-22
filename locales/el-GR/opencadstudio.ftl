@@ -2830,6 +2830,7 @@ command =
     .layer-tree-used = Επίπεδα σε χρήση
     .layer-tree-unused = Αχρησιμοποίητα επίπεδα
     .layer-tree-selected = Επίπεδα επιλεγμένων αντικειμένων
+    .layer-tree-local = Επίπεδα αυτού του σχεδίου
     .layer-tree-vp-overrides = Παρακάμψεις παραθύρων προβολής
     .layer-tree-invert = Αντιστροφή φίλτρου
     .layer-tree-shown = Εμφανίζονται __ocs_fmt_0__ από __ocs_fmt_1__ επίπεδα

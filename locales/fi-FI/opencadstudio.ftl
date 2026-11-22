@@ -2830,6 +2830,7 @@ command =
     .layer-tree-used = Käytetyt tasot
     .layer-tree-unused = Käyttämättömät tasot
     .layer-tree-selected = Valittujen objektien tasot
+    .layer-tree-local = Tämän piirustuksen tasot
     .layer-tree-vp-overrides = Näkymäikkunoiden ohitukset
     .layer-tree-invert = Käänteinen suodatin
     .layer-tree-shown = __ocs_fmt_0__/__ocs_fmt_1__ tasoa näkyvissä

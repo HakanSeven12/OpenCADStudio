@@ -2843,6 +2843,7 @@ command =
     .layer-tree-used = الطبقات المستخدمة
     .layer-tree-unused = الطبقات غير المستخدمة
     .layer-tree-selected = طبقات الكائنات المحددة
+    .layer-tree-local = طبقات هذا الرسم
     .layer-tree-vp-overrides = تجاوزات منافذ العرض
     .layer-tree-invert = عكس المرشح
     .layer-tree-shown = عرض __ocs_fmt_0__ من __ocs_fmt_1__ طبقة

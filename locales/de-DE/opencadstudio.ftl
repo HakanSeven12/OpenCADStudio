@@ -2831,6 +2831,7 @@ command =
     .layer-tree-used = Verwendete Layer
     .layer-tree-unused = Unbenutzte Layer
     .layer-tree-selected = Layer der gewählten Objekte
+    .layer-tree-local = Layer dieser Zeichnung
     .layer-tree-vp-overrides = Ansichtsfenster-Überschreibungen
     .layer-tree-invert = Filter umkehren
     .layer-tree-shown = __ocs_fmt_0__ von __ocs_fmt_1__ Layern angezeigt

@@ -2835,6 +2835,7 @@ command =
     .layer-tree-used = Lớp đang dùng
     .layer-tree-unused = Lớp không dùng
     .layer-tree-selected = Lớp của đối tượng đã chọn
+    .layer-tree-local = Lớp của bản vẽ này
     .layer-tree-vp-overrides = Ghi đè khung nhìn
     .layer-tree-invert = Đảo bộ lọc
     .layer-tree-shown = Hiển thị __ocs_fmt_0__ trên __ocs_fmt_1__ lớp

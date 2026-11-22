@@ -2821,6 +2821,7 @@ command =
     .layer-tree-used = 使用中のレイヤー
     .layer-tree-unused = 未使用のレイヤー
     .layer-tree-selected = 選択したオブジェクトのレイヤー
+    .layer-tree-local = この図面のレイヤー
     .layer-tree-vp-overrides = ビューポートの優先設定
     .layer-tree-invert = フィルタを反転
     .layer-tree-shown = __ocs_fmt_1__ 個中 __ocs_fmt_0__ 個のレイヤーを表示

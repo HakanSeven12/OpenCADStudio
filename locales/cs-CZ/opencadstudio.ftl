@@ -2835,6 +2835,7 @@ command =
     .layer-tree-used = Použité hladiny
     .layer-tree-unused = Nepoužité hladiny
     .layer-tree-selected = Hladiny vybraných objektů
+    .layer-tree-local = Hladiny tohoto výkresu
     .layer-tree-vp-overrides = Přepsání ve výřezech
     .layer-tree-invert = Obrátit filtr
     .layer-tree-shown = Zobrazeno __ocs_fmt_0__ z __ocs_fmt_1__ hladin

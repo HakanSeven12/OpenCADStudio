@@ -2830,6 +2830,7 @@ command =
     .layer-tree-used = Używane warstwy
     .layer-tree-unused = Nieużywane warstwy
     .layer-tree-selected = Warstwy wybranych obiektów
+    .layer-tree-local = Warstwy tego rysunku
     .layer-tree-vp-overrides = Nadpisania w rzutniach
     .layer-tree-invert = Odwróć filtr
     .layer-tree-shown = Widoczne __ocs_fmt_0__ z __ocs_fmt_1__ warstw

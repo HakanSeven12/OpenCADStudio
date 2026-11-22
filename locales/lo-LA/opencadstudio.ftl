@@ -2831,6 +2831,7 @@ command =
     .layer-tree-used = ຊັ້ນງານທີ່ໃຊ້
     .layer-tree-unused = ຊັ້ນງານທີ່ບໍ່ໄດ້ໃຊ້
     .layer-tree-selected = ຊັ້ນງານຂອງວັດຖຸທີ່ເລືອກ
+    .layer-tree-local = ຊັ້ນງານຂອງແບບແຕ້ມນີ້
     .layer-tree-vp-overrides = ການແທນທີ່ໃນວິວພອດ
     .layer-tree-invert = ກັບຕົວກອງ
     .layer-tree-shown = ສະແດງ __ocs_fmt_0__ ຈາກ __ocs_fmt_1__ ຊັ້ນງານ

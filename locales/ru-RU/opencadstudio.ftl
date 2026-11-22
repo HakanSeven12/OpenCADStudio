@@ -2834,6 +2834,7 @@ command =
     .layer-tree-used = Используемые слои
     .layer-tree-unused = Неиспользуемые слои
     .layer-tree-selected = Слои выбранных объектов
+    .layer-tree-local = Слои этого чертежа
     .layer-tree-vp-overrides = Переопределения видовых экранов
     .layer-tree-invert = Обратить фильтр
     .layer-tree-shown = Показано слоёв: __ocs_fmt_0__ из __ocs_fmt_1__

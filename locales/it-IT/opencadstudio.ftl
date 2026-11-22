@@ -2830,6 +2830,7 @@ command =
     .layer-tree-used = Layer usati
     .layer-tree-unused = Layer non usati
     .layer-tree-selected = Layer degli oggetti selezionati
+    .layer-tree-local = Layer di questo disegno
     .layer-tree-vp-overrides = Modifiche nelle finestre
     .layer-tree-invert = Inverti filtro
     .layer-tree-shown = __ocs_fmt_0__ di __ocs_fmt_1__ layer visualizzati

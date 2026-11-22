@@ -2831,6 +2831,7 @@ command =
     .layer-tree-used = Capas usadas
     .layer-tree-unused = Capas sin usar
     .layer-tree-selected = Capas de los objetos seleccionados
+    .layer-tree-local = Capas de este dibujo
     .layer-tree-vp-overrides = Modificaciones en ventanas gráficas
     .layer-tree-invert = Invertir filtro
     .layer-tree-shown = Se muestran __ocs_fmt_0__ de __ocs_fmt_1__ capas

@@ -2815,6 +2815,7 @@ command =
     .layer-tree-used = Kullanılan katmanlar
     .layer-tree-unused = Kullanılmayan katmanlar
     .layer-tree-selected = Seçili nesnelerin katmanları
+    .layer-tree-local = Bu çizimin katmanları
     .layer-tree-vp-overrides = Görünüm penceresi geçersiz kılmaları
     .layer-tree-invert = Filtreyi tersine çevir
     .layer-tree-shown = __ocs_fmt_1__ katmandan __ocs_fmt_0__ tanesi gösteriliyor

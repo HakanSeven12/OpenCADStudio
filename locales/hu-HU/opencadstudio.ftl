@@ -2824,6 +2824,7 @@ command =
     .layer-tree-used = Használt fóliák
     .layer-tree-unused = Nem használt fóliák
     .layer-tree-selected = Kijelölt objektumok fóliái
+    .layer-tree-local = A rajz saját fóliái
     .layer-tree-vp-overrides = Nézetablak-felülírások
     .layer-tree-invert = Szűrő megfordítása
     .layer-tree-shown = __ocs_fmt_1__ fóliából __ocs_fmt_0__ látszik

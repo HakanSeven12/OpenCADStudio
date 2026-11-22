@@ -3252,6 +3252,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     /// A pump with no reader: waits behave exactly as before (quiet
     /// immediately), so tests that never cancel need no other changes.
@@ -4021,6 +4022,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn schema_sync_respects_opt_out() {
         std::env::set_var("OCS_SKIP_SCHEMA_SYNC", "1");
         assert!(!schema_sync_enabled());

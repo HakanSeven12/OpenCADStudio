@@ -142,28 +142,30 @@ block2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString", "NSObject", "NSNotification", "NSThread", "NSEnumerator"] }
 
 [patch.crates-io]
-iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
 
 # The pinned iced revision plus upstream 478c363df: a mesh clipped out of its
 # layer did not advance the index offset, so every later mesh in that layer
 # was drawn with the wrong indices (stale glyph outlines left across the top
-# of the window by rotated canvas text, #3063). Drop when iced is bumped past it.
+# of the window by rotated canvas text, #3063), and upstream b54f2c59: the
+# event loop no longer spins on a stale redraw deadline (#3418). Drop when iced
+# is bumped past both.
 [patch."https://github.com/iced-rs/iced.git"]
-iced = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_debug = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_futures = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_graphics = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_program = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_renderer = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_runtime = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_selector = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_test = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_tiny_skia = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_debug = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_futures = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_graphics = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_program = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_renderer = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_runtime = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_selector = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_test = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_tiny_skia = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 mimalloc = { version = "0.1", default-features = false }

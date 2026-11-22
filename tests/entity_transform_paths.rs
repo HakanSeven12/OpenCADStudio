@@ -8,8 +8,20 @@
 // (`codec_transform`), and compares each described field. The fields that
 // differ today are in `KNOWN_DIFFERENCES`. A new difference fails the test,
 // and so does a line of the list that no longer differs.
+//
+// When this test fails after a change to a transform:
+//
+// - The failure shows the value of each path. A difference that your change
+//   made is a fault in the path that you changed, until evidence shows that
+//   the other path was wrong. Repair it.
+// - Add a line to `KNOWN_DIFFERENCES` only with evidence of which value is
+//   correct: the reference application, or the DXF or DWG format. Write the
+//   evidence in the comment of the line. A line that is there only to make
+//   the test pass hides a fault.
+// - A group that is marked "Not examined" records what the code does. It
+//   does not say that the difference is correct.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use document::EntityType;
 use OpenCADStudio::entities::transform::EntityTransform;
@@ -19,10 +31,13 @@ use OpenCADStudio::scene::view::transform::codec_transform;
 use super::entity_transform_regression::{describe, entities, first_difference, transforms};
 
 /// (entity, transform, field): the typed transform and its matrix give a
-/// different value.
+/// different value. Each group has its class: "By design", "Two forms of one
+/// value", or "Not examined".
 const KNOWN_DIFFERENCES: &[(&str, &str, &str)] = &[
-    // A dimension's insertion point is (0, 0, 0) in the fixtures. The typed
-    // translate keeps it there; the matrix moves it by the offset.
+    // Not examined: no reason is known for this difference, and one of the
+    // two paths can be wrong. A dimension's insertion point is (0, 0, 0) in
+    // the fixtures. The typed translate keeps it there; the matrix moves it
+    // by the offset.
     ("dim_aligned", "translate", "base.insertion_point"),
     ("dim_angular2ln", "translate", "base.insertion_point"),
     ("dim_angular3pt", "translate", "base.insertion_point"),
@@ -32,13 +47,14 @@ const KNOWN_DIFFERENCES: &[(&str, &str, &str)] = &[
     ("dim_linear", "translate", "base.insertion_point"),
     ("dim_ordinate", "translate", "base.insertion_point"),
     ("dim_radius", "translate", "base.insertion_point"),
-    // The fixture has no stored direction. The typed translate and the typed
-    // mirror keep it empty; the matrix writes the direction of the rotation.
+    // Two forms of one value. The fixture has no stored direction, which
+    // means the direction of the rotation. The typed translate and the typed
+    // mirror keep it empty; the matrix writes that direction.
     ("mtext", "translate", "dwg_x_direction"),
     ("mtext", "mirror", "dwg_x_direction"),
     ("mtext", "mirror_offset", "dwg_x_direction"),
-    // The typed mirror in the world XY plane has its own rule for text and
-    // for a shape (#3054): the oblique angle changes its sign, and a shape
+    // By design. The typed mirror in the world XY plane has its own rule for
+    // text and for a shape (#3054): the oblique angle changes its sign, and a shape
     // also changes its size, rotation and X scale. The matrix changes only
     // the rotation.
     ("text", "mirror", "oblique_angle"),
@@ -53,12 +69,14 @@ const KNOWN_DIFFERENCES: &[(&str, &str, &str)] = &[
     ("shape", "mirror_offset", "rotation"),
     ("shape", "mirror_offset", "relative_x_scale"),
     ("shape", "mirror_offset", "oblique_angle"),
-    // The typed mirror keeps the angle of a point's X axis; the matrix
-    // reflects it.
+    // Not examined: no reason is known for this difference, and one of the
+    // two paths can be wrong. The typed mirror keeps the angle of a point's
+    // X axis; the matrix reflects it.
     ("point", "mirror", "x_axis_angle"),
     ("point", "mirror_offset", "x_axis_angle"),
-    // Two forms of the mirrored ellipse: the typed mirror keeps the +Z normal
-    // and changes the parameters; the matrix turns the normal to -Z.
+    // By design, two forms of one curve. The typed mirror keeps the +Z normal
+    // and changes the parameters (the comment in `src/entities/ellipse.rs`
+    // gives the reason); the matrix turns the normal to -Z.
     ("ellipse", "mirror", "start_parameter"),
     ("ellipse", "mirror", "end_parameter"),
     ("ellipse", "mirror", "normal"),
@@ -78,9 +96,12 @@ fn field_name(line: &str) -> &str {
     line.trim_start().split(':').next().unwrap_or(line)
 }
 
-/// Each (entity, transform, field) where the two paths differ.
-fn differences() -> BTreeSet<(String, String, String)> {
-    let mut found = BTreeSet::new();
+type Key = (String, String, String);
+
+/// Each (entity, transform, field) where the two paths differ, with the
+/// described line of the typed path and of the matrix path.
+fn differences() -> BTreeMap<Key, (String, String)> {
+    let mut found = BTreeMap::new();
     for (entity_name, entity) in entities() {
         for (transform_name, transform) in transforms() {
             if matches!(transform, EntityTransform::Affine(_)) {
@@ -98,11 +119,17 @@ fn differences() -> BTreeSet<(String, String, String)> {
             );
             for (typed_line, affine_line) in typed_lines.iter().zip(&affine_lines) {
                 if first_difference(typed_line, affine_line).is_some() {
-                    found.insert((
-                        entity_name.to_string(),
-                        transform_name.to_string(),
-                        field_name(typed_line).to_string(),
-                    ));
+                    found.insert(
+                        (
+                            entity_name.to_string(),
+                            transform_name.to_string(),
+                            field_name(typed_line).to_string(),
+                        ),
+                        (
+                            typed_line.trim().to_string(),
+                            affine_line.trim().to_string(),
+                        ),
+                    );
                 }
             }
         }
@@ -113,7 +140,7 @@ fn differences() -> BTreeSet<(String, String, String)> {
 #[test]
 fn typed_and_matrix_transforms_agree_except_for_the_known_differences() {
     let found = differences();
-    let known: BTreeSet<(String, String, String)> = KNOWN_DIFFERENCES
+    let known: BTreeSet<Key> = KNOWN_DIFFERENCES
         .iter()
         .map(|&(entity, transform, field)| {
             (entity.to_string(), transform.to_string(), field.to_string())
@@ -125,27 +152,51 @@ fn typed_and_matrix_transforms_agree_except_for_the_known_differences() {
         "KNOWN_DIFFERENCES has a line two times"
     );
 
-    let new: Vec<_> = found.difference(&known).collect();
-    let gone: Vec<_> = known.difference(&found).collect();
+    let new: String = found
+        .iter()
+        .filter(|(key, _)| !known.contains(*key))
+        .map(|((entity, transform, field), (typed, matrix))| {
+            format!(
+                "  {entity} / {transform} / {field}\n    typed:  {typed}\n    matrix: {matrix}\n"
+            )
+        })
+        .collect();
     assert!(
         new.is_empty(),
-        "a typed transform and its matrix give a different value, and the difference is not in \
-         KNOWN_DIFFERENCES. Repair the path that is wrong, or add the line with its reason:\n{new:#?}"
+        "A typed transform and its matrix move an entity differently, and KNOWN_DIFFERENCES \
+         does not have the difference:\n{new}\
+         If your change made this difference, it is a fault in the path that you changed: \
+         repair it. Add a line to KNOWN_DIFFERENCES only with evidence of which value is correct \
+         (the reference application, or the file format), and write the evidence in the comment \
+         of the line. Do not add a line only to make this test pass."
     );
+
+    let gone: String = known
+        .iter()
+        .filter(|key| !found.contains_key(*key))
+        .map(|(entity, transform, field)| format!("  {entity} / {transform} / {field}\n"))
+        .collect();
     assert!(
         gone.is_empty(),
-        "these lines of KNOWN_DIFFERENCES no longer differ. Remove them:\n{gone:#?}"
+        "These lines of KNOWN_DIFFERENCES no longer differ: the two paths agree there now.\n{gone}\
+         If your change is meant to do that, remove the lines. If you did not mean to change a \
+         transform, find which path changed before you remove a line."
     );
 }
 
-/// The comparison is real: rotate and scale have no line in the list, so the
-/// two paths agree there for each fixture entity, and the list is not empty.
+/// Rotate, scale and the mirror in a tilted UCS have no line in the list: the
+/// two paths agree there for each fixture entity. A line for one of them is
+/// refused, so such a difference cannot become a known one. The list is not
+/// empty, so the comparison is real.
 #[test]
 fn the_known_differences_are_only_for_translate_and_mirror() {
     for &(entity, transform, field) in KNOWN_DIFFERENCES {
         assert!(
             matches!(transform, "translate" | "mirror" | "mirror_offset"),
-            "{entity} / {transform} / {field}"
+            "KNOWN_DIFFERENCES has a line for `{transform}` ({entity} / {transform} / {field}). \
+             The typed transform and its matrix agree for `{transform}` on each fixture entity, \
+             so a difference there is a fault in a transform, not a known difference. Repair \
+             the transform and remove the line."
         );
     }
     assert!(!KNOWN_DIFFERENCES.is_empty());

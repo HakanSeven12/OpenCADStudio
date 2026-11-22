@@ -9469,6 +9469,59 @@ fn staged_python_point_pick_and_cancel_over_real_ipc() {
         .contains("cancelled"));
 }
 
+/// A script started from a typed line (`PY_RUN <file>`) asks for a point. The
+/// file name was the plugin's argument, so it is not an answer to the prompt
+/// the script opened, and the line's closing Enter does not cancel it.
+#[test]
+fn staged_python_typed_line_leaves_the_requested_point_prompt_open() {
+    let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {
+        return;
+    };
+    let runner_path = std::env::var_os("OCS_PLUGIN_RUNNER_EXE")
+        .expect("set OCS_PLUGIN_RUNNER_EXE to the built OpenCADStudio executable");
+    assert!(std::path::Path::new(&runner_path).is_file());
+    let _serial = crate::plugin::external::PROCESS_TESTS_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let script = std::env::temp_dir().join(format!("ocs_py_typed_{}.py", std::process::id()));
+    std::fs::write(
+        &script,
+        "ocs.active_document.request_point(\"Pick the corner\")\n",
+    )
+    .unwrap();
+    let script_path = script.to_string_lossy().replace('\\', "/");
+    let mut app = OpenCADStudio::new_for_test();
+    app.tabs[0].is_start = false;
+    let id = {
+        let mut host = HostSession::new(&mut app, 0);
+        crate::plugin::external::spawn_into_manager_for_tests(
+            std::path::Path::new(&plugin_path),
+            &mut host,
+            crate::plugin::v4_support::notification_handler(),
+        )
+        .expect("spawn staged Python plugin")
+        .0
+    };
+    let _ = app.run_command_line(&format!("PY_RUN {script_path}"));
+    let prompt = app.tabs[0].active_cmd.as_ref().map(|command| command.prompt());
+    if let Some(command) = app.tabs[0].active_cmd.as_mut() {
+        let _ = command.on_enter();
+    }
+    app.tabs[0].active_cmd = None;
+    crate::plugin::external::remove_plugin_for_tests(&id);
+    let _ = std::fs::remove_file(&script);
+    assert_eq!(
+        prompt.as_deref(),
+        Some("Pick the corner"),
+        "history: {:?}",
+        app.command_line
+            .history
+            .iter()
+            .map(|line| line.text.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn staged_python_tabs_isolate_tokens_and_notifications() {
     let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {

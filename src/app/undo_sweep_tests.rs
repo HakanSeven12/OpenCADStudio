@@ -5,6 +5,7 @@
 //! a table, a block or an object.
 
 use super::*;
+use crate::scene::pick::grip::GripEdit;
 use document::entities::{Arc, Circle, Insert, Line, LwPolyline, Text};
 use document::types::{Vector2, Vector3};
 use document::EntityType;
@@ -179,6 +180,8 @@ enum Step {
     Op(serde_json::Value),
     /// A message, as a palette, a dialog or an editor sends it.
     Send(Box<Message>),
+    /// Work with the pointer in the viewport (a grip drag, for example).
+    Pointer(Box<dyn Fn(&mut OpenCADStudio)>),
 }
 
 /// A case of more than one action: its name for the report, and its steps.
@@ -220,6 +223,49 @@ fn palette_cases(d: &Drawing) -> Vec<Case> {
     ]
 }
 
+/// A drag of each grip of each object of the drawing: the grip is taken, the
+/// pointer moves two times, and the button is released.
+fn grip_cases(app: &OpenCADStudio, d: &Drawing) -> Vec<Case> {
+    let objects = [
+        ("line", d.line),
+        ("upright line", d.upright),
+        ("crossing line", d.crossing),
+        ("circle", d.circle),
+        ("arc", d.arc),
+        ("polyline", d.polyline),
+        ("text", d.text),
+        ("insert", d.insert),
+    ];
+    let document = &app.tabs[app.active_tab].scene.document;
+    let mut cases = Vec::new();
+    for (name, value) in objects {
+        let handle = document::Handle::new(value);
+        let entity = document.get_entity(handle).expect("the object");
+        for grip in crate::scene::view::dispatch::grips(entity) {
+            let (id, is_midpoint, world) = (grip.id, grip.is_midpoint, grip.world);
+            cases.push(Case {
+                name: format!("Grip {id} of the {name}"),
+                steps: vec![Step::Pointer(Box::new(move |app: &mut OpenCADStudio| {
+                    let tab = app.active_tab;
+                    app.snapper.snap_enabled = false;
+                    app.snapper.grid_snap_on = false;
+                    app.snapper.otrack_enabled = false;
+                    app.ortho_mode = false;
+                    app.polar_mode = false;
+                    app.tabs[tab].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+                    app.tabs[tab].active_grip =
+                        Some(GripEdit::single(handle, id, is_midpoint, world));
+                    for cursor in [Point::new(520.0, 220.0), Point::new(490.0, 180.0)] {
+                        let _ = app.on_viewport_move(cursor);
+                    }
+                    let _ = app.on_viewport_left_release();
+                }))],
+            });
+        }
+    }
+    cases
+}
+
 /// What is wrong with `command` on the drawing, if anything: it must
 /// complete, change the document, add one undo step, and be taken back by
 /// UNDO and put back by REDO exactly.
@@ -255,6 +301,7 @@ fn check_steps(name: &str, steps: &[Step]) -> Vec<String> {
             Step::Send(message) => {
                 let _ = app.update(Message::clone(message));
             }
+            Step::Pointer(action) => action(&mut app),
         }
     }
     let after = snapshot(&app);
@@ -299,6 +346,20 @@ fn every_command_is_undone_and_redone_exactly() {
 fn every_palette_change_is_undone_and_redone_exactly() {
     let (_, d) = drawing();
     let failures: Vec<String> = palette_cases(&d)
+        .iter()
+        .flat_map(|case| check_steps(&case.name, &case.steps))
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The same for a drag of each grip of each object.
+#[test]
+fn every_grip_drag_is_undone_and_redone_exactly() {
+    let (app, d) = drawing();
+    let cases = grip_cases(&app, &d);
+    // A sweep with no case would pass: the drawing has 25 grips now.
+    assert!(cases.len() >= 25, "{} grips", cases.len());
+    let failures: Vec<String> = cases
         .iter()
         .flat_map(|case| check_steps(&case.name, &case.steps))
         .collect();

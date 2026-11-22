@@ -13703,3 +13703,12 @@ mod wipeout_viewport_cache_tests;
 
 #[cfg(test)]
 mod block_incremental_invalidation;
+
+// A test sets this to make the next `add_entity` panic when the entity is
+// in the document and has no undo record and no display model yet: a stop
+// in the middle of a change.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static TEST_PANIC_AFTER_DOCUMENT_ADD: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}

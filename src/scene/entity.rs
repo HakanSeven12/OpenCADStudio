@@ -586,6 +586,10 @@ impl Scene {
         } else {
             self.document.add_entity(entity).unwrap_or(Handle::NULL)
         };
+        #[cfg(test)]
+        if super::TEST_PANIC_AFTER_DOCUMENT_ADD.with(|point| point.replace(false)) {
+            panic!("test panic after the document add");
+        }
 
         if !handle.is_null() {
             Self::adopt_attributes(&mut self.document, handle);

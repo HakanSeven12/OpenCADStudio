@@ -422,9 +422,52 @@ pub(crate) fn parse_external_table(
             "Plot style table {name:?} is incompatible with the drawing mode."
         ));
     }
-    let table = PlotStyleTable::from_bytes(name, bytes)
+    let table = parse_table(name, bytes)
         .map_err(|error| format!("Invalid plot style table {name:?}: {error}"))?;
     Ok(table)
+}
+
+/// Parse the bytes of a CTB or STB file that the user or a drawing gives.
+/// A panic in the parser comes back as the read's error: several callers
+/// are in the draw step, where a panic stops the app.
+fn parse_table(name: &str, bytes: &[u8]) -> Result<PlotStyleTable, String> {
+    #[cfg(test)]
+    if TEST_PARSER_PANICS.with(std::cell::Cell::get) {
+        return parse_table_with(name, bytes, |_, _| -> Result<PlotStyleTable, String> {
+            panic!("test parser panic")
+        });
+    }
+    parse_table_with(name, bytes, |name, bytes| {
+        PlotStyleTable::from_bytes(name, bytes)
+    })
+}
+
+/// `parse_table` with the parser as an argument, so a test can give one that
+/// panics. `catch_unwind` does not stop a stack overflow or an allocation
+/// failure; and a wasm build aborts on a panic, so it calls the parser as it is.
+fn parse_table_with<E: std::fmt::Display>(
+    name: &str,
+    bytes: &[u8],
+    parser: impl FnOnce(&str, &[u8]) -> Result<PlotStyleTable, E>,
+) -> Result<PlotStyleTable, String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| parser(name, bytes))) {
+            Ok(parsed) => parsed.map_err(|error| error.to_string()),
+            Err(payload) => Err(format!(
+                "the plot style reader stopped: {}",
+                super::panic_message(payload.as_ref())
+            )),
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    parser(name, bytes).map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+thread_local! {
+    /// A test sets this to make `parse_table` use a parser that panics.
+    static TEST_PARSER_PANICS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Where Open CAD Studio finds plot style tables: on disk, in this session's
@@ -456,7 +499,7 @@ impl PlotStyleTableExt for PlotStyleTable {
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned();
-        Self::from_bytes(name, &raw).map_err(|e| e.to_string())
+        parse_table(&name, &raw)
     }
 
     fn builtin(name: &str) -> Result<Self, String> {
@@ -525,7 +568,7 @@ impl PlotStyleTableExt for PlotStyleTable {
         }
 
         if let Some(bytes) = session_table(name) {
-            return Self::from_bytes(name, &bytes).map_err(|e| e.to_string());
+            return parse_table(name, &bytes);
         }
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -560,7 +603,7 @@ impl PlotStyleTableExt for PlotStyleTable {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(path) = drawing_table_path(name, base) {
             let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
-            return Self::from_bytes(name, &bytes).map_err(|error| error.to_string());
+            return parse_table(name, &bytes);
         }
         #[cfg(target_arch = "wasm32")]
         let _ = base;

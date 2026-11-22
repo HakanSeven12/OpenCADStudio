@@ -172,6 +172,10 @@ fn commands(d: &Drawing) -> Vec<String> {
         "LAYER COLOR 1 Walls".to_string(),
         "LAYER FREEZE Walls".to_string(),
         "LAYER LOCK Walls".to_string(),
+        // The layout table.
+        "-LAYOUT NEW Sheet".to_string(),
+        "-LAYOUT RENAME Layout1 Plan".to_string(),
+        "-LAYOUT COPY Layout1 Copy".to_string(),
     ]
 }
 
@@ -285,6 +289,33 @@ fn window_cases(d: &Drawing) -> Vec<Case> {
     ]
 }
 
+/// Commands in paper space and in the block editor: the setup steps go
+/// there (and can draw something first), then one command draws.
+fn place_cases() -> Vec<(Vec<Step>, Case)> {
+    let run = |command: &str| Step::Run(command.to_string());
+    let case = |place: &str, setup: &[&str], command: &str| {
+        (
+            setup.iter().map(|step| run(step)).collect(),
+            Case {
+                name: format!("{place}: {command}"),
+                steps: vec![run(command)],
+            },
+        )
+    };
+    vec![
+        case("Paper space", &["TILEMODE 0"], "LINE 1,1 5,5 "),
+        case("Paper space", &["TILEMODE 0"], "CIRCLE 3,3 1"),
+        case("Paper space", &["TILEMODE 0"], "MVIEW 1,1 8,6"),
+        case("Block editor", &["-BEDIT BLK"], "LINE 0,1 4,1 "),
+        // The setup adds an undo step of its own, which is not counted.
+        case(
+            "Block editor after a line",
+            &["-BEDIT BLK", "LINE 0,1 4,1 "],
+            "CIRCLE 1,1 1",
+        ),
+    ]
+}
+
 /// A drag of each grip of each object of the drawing: the grip is taken, the
 /// pointer moves two times, and the button is released.
 fn grip_cases(app: &OpenCADStudio, d: &Drawing) -> Vec<Case> {
@@ -335,33 +366,28 @@ fn check(command: &str) -> Vec<String> {
     check_steps(command, &[Step::Run(command.to_string())])
 }
 
-/// `check` for a case of several steps. A step that selects or opens
-/// something must not change the document by itself: the steps together
-/// must change it, and add one undo step.
-fn check_steps(name: &str, steps: &[Step]) -> Vec<String> {
-    let (mut app, _) = drawing();
-    let tab = app.active_tab;
-    let before = snapshot(&app);
+/// Does the steps in order; the reason, if one of them cannot be done.
+fn run_steps(app: &mut OpenCADStudio, name: &str, steps: &[Step]) -> Result<(), String> {
     for step in steps {
         match step {
             Step::Run(command) => {
                 let result = app
                     .automation_op(&serde_json::json!({"op": "run", "cmd": command}).to_string());
                 if result["status"] != "completed" {
-                    return vec![format!("{name}: did not complete: {result}")];
+                    return Err(format!("{name}: did not complete: {result}"));
                 }
             }
             Step::Open(command, editor) => {
                 let result = app
                     .automation_op(&serde_json::json!({"op": "run", "cmd": command}).to_string());
                 if result["status"] != "waiting_input" || result["blocked_by"] != *editor {
-                    return vec![format!("{name}: did not open the {editor}: {result}")];
+                    return Err(format!("{name}: did not open the {editor}: {result}"));
                 }
             }
             Step::Op(request) => {
                 let result = app.automation_op(&request.to_string());
                 if result["ok"] == false {
-                    return vec![format!("{name}: {request} failed: {result}")];
+                    return Err(format!("{name}: {request} failed: {result}"));
                 }
                 // The app builds the palette again after each change of the
                 // selection; the automation request does not.
@@ -370,15 +396,39 @@ fn check_steps(name: &str, steps: &[Step]) -> Vec<String> {
             Step::Send(message) => {
                 let _ = app.update(Message::clone(message));
             }
-            Step::Pointer(action) => action(&mut app),
+            Step::Pointer(action) => action(app),
         }
+    }
+    Ok(())
+}
+
+/// `check` for a case of several steps. A step that selects or opens
+/// something must not change the document by itself: the steps together
+/// must change it, and add one undo step.
+fn check_steps(name: &str, steps: &[Step]) -> Vec<String> {
+    check_after(name, &[], steps)
+}
+
+/// `check_steps` in a place that the `setup` steps go to first (a layout,
+/// the block editor). The drawing after the setup is the one that UNDO must
+/// give back, and the setup's own undo steps are not counted.
+fn check_after(name: &str, setup: &[Step], steps: &[Step]) -> Vec<String> {
+    let (mut app, _) = drawing();
+    let tab = app.active_tab;
+    if let Err(failure) = run_steps(&mut app, name, setup) {
+        return vec![failure];
+    }
+    let steps_before = app.tabs[tab].history.undo_stack.len();
+    let before = snapshot(&app);
+    if let Err(failure) = run_steps(&mut app, name, steps) {
+        return vec![failure];
     }
     let after = snapshot(&app);
     if after == before {
         return vec![format!("{name}: changed nothing")];
     }
     let mut failures = Vec::new();
-    let steps = app.tabs[tab].history.undo_stack.len();
+    let steps = app.tabs[tab].history.undo_stack.len() - steps_before;
     if steps != 1 {
         failures.push(format!("{name}: {steps} undo steps"));
     }
@@ -438,6 +488,16 @@ fn every_window_change_is_undone_and_redone_exactly() {
     let failures: Vec<String> = window_cases(&d)
         .iter()
         .flat_map(|case| check_steps(&case.name, &case.steps))
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The same for a command in paper space or in the block editor.
+#[test]
+fn every_command_in_another_place_is_undone_and_redone_exactly() {
+    let failures: Vec<String> = place_cases()
+        .iter()
+        .flat_map(|(setup, case)| check_after(&case.name, setup, &case.steps))
         .collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

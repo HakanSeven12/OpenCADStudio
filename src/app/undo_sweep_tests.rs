@@ -171,31 +171,106 @@ fn commands(d: &Drawing) -> Vec<String> {
     ]
 }
 
+/// One action of a case: what the user does through one of the app's doors.
+enum Step {
+    /// A command line, as typed. It must complete.
+    Run(String),
+    /// An automation request other than `run` (a selection, for example).
+    Op(serde_json::Value),
+    /// A message, as a palette, a dialog or an editor sends it.
+    Send(Box<Message>),
+}
+
+/// A case of more than one action: its name for the report, and its steps.
+struct Case {
+    name: String,
+    steps: Vec<Step>,
+}
+
+/// Changes made through the Properties palette: the object is selected, then
+/// the palette sends its message.
+fn palette_cases(d: &Drawing) -> Vec<Case> {
+    use document::types::{Color, LineWeight};
+    let case = |name: &str, handle: u64, message: Message| Case {
+        name: format!("Properties palette: {name}"),
+        steps: vec![
+            Step::Op(serde_json::json!({
+                "op": "select", "clear": true, "handles": [format!("{handle:X}")]
+            })),
+            Step::Send(Box::new(message)),
+        ],
+    };
+    vec![
+        case(
+            "layer",
+            d.circle,
+            Message::PropLayerChanged("Walls".to_string()),
+        ),
+        case("color", d.line, Message::PropColorChanged(Color::Index(1))),
+        case(
+            "lineweight",
+            d.arc,
+            Message::PropLwChanged(LineWeight::W0_50),
+        ),
+        case(
+            "linetype",
+            d.polyline,
+            Message::PropLinetypeChanged("Continuous".to_string()),
+        ),
+    ]
+}
+
 /// What is wrong with `command` on the drawing, if anything: it must
 /// complete, change the document, add one undo step, and be taken back by
 /// UNDO and put back by REDO exactly.
 fn check(command: &str) -> Vec<String> {
+    check_steps(command, &[Step::Run(command.to_string())])
+}
+
+/// `check` for a case of several steps. A step that selects or opens
+/// something must not change the document by itself: the steps together
+/// must change it, and add one undo step.
+fn check_steps(name: &str, steps: &[Step]) -> Vec<String> {
     let (mut app, _) = drawing();
     let tab = app.active_tab;
     let before = snapshot(&app);
-    let result = app.automation_op(&serde_json::json!({"op": "run", "cmd": command}).to_string());
-    if result["status"] != "completed" {
-        return vec![format!("{command}: did not complete: {result}")];
+    for step in steps {
+        match step {
+            Step::Run(command) => {
+                let result = app
+                    .automation_op(&serde_json::json!({"op": "run", "cmd": command}).to_string());
+                if result["status"] != "completed" {
+                    return vec![format!("{name}: did not complete: {result}")];
+                }
+            }
+            Step::Op(request) => {
+                let result = app.automation_op(&request.to_string());
+                if result["ok"] == false {
+                    return vec![format!("{name}: {request} failed: {result}")];
+                }
+                // The app builds the palette again after each change of the
+                // selection; the automation request does not.
+                app.refresh_properties();
+            }
+            Step::Send(message) => {
+                let _ = app.update(Message::clone(message));
+            }
+        }
     }
     let after = snapshot(&app);
     if after == before {
-        return vec![format!("{command}: changed nothing")];
+        return vec![format!("{name}: changed nothing")];
     }
     let mut failures = Vec::new();
     let steps = app.tabs[tab].history.undo_stack.len();
     if steps != 1 {
-        failures.push(format!("{command}: {steps} undo steps"));
+        failures.push(format!("{name}: {steps} undo steps"));
     }
     app.undo_active_tab();
     let undone = snapshot(&app);
     if undone != before {
         failures.push(format!(
-            "{command}: UNDO: {}",
+            "{name}: UNDO: {}",
             first_differences(&before, &undone)
         ));
     }
@@ -203,7 +278,7 @@ fn check(command: &str) -> Vec<String> {
     let redone = snapshot(&app);
     if redone != after {
         failures.push(format!(
-            "{command}: REDO: {}",
+            "{name}: REDO: {}",
             first_differences(&after, &redone)
         ));
     }
@@ -216,6 +291,17 @@ fn check(command: &str) -> Vec<String> {
 fn every_command_is_undone_and_redone_exactly() {
     let (_, d) = drawing();
     let failures: Vec<String> = commands(&d).iter().flat_map(|c| check(c)).collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The same for a change that the Properties palette makes to the selection.
+#[test]
+fn every_palette_change_is_undone_and_redone_exactly() {
+    let (_, d) = drawing();
+    let failures: Vec<String> = palette_cases(&d)
+        .iter()
+        .flat_map(|case| check_steps(&case.name, &case.steps))
+        .collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 

@@ -8020,8 +8020,7 @@ mod batch7_tests {
             request(app, json!({"op":"action","name":"sheet_set","value":value}))
         };
 
-        let dir = std::env::temp_dir().join(format!("ocs-ss-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
+        let dir = tempfile::tempdir().expect("a temporary directory for the sheet set");
 
         let mut app = new_app();
 
@@ -8029,7 +8028,7 @@ mod batch7_tests {
         let _ = sheet(&mut app, "new");
         let _ = sheet(&mut app, "existing=0");
         let _ = sheet(&mut app, "name=PROJECTSET");
-        let _ = sheet(&mut app, &format!("folder={}", dir.display()));
+        let _ = sheet(&mut app, &format!("folder={}", dir.path().display()));
         let _ = sheet(&mut app, "ok");
 
         // Two subsets.
@@ -8049,7 +8048,7 @@ mod batch7_tests {
             let _ = sheet(&mut app, &format!("menu=new_sheet:{subset}"));
             let _ = sheet(&mut app, &format!("number={number}"));
             let _ = sheet(&mut app, &format!("title={title}"));
-            let _ = sheet(&mut app, &format!("folder={}", dir.display()));
+            let _ = sheet(&mut app, &format!("folder={}", dir.path().display()));
             let _ = sheet(&mut app, "ok");
         }
 
@@ -8064,7 +8063,7 @@ mod batch7_tests {
 
         // The set round-trips from disk with both subsets, the three sheets
         // and the custom property.
-        let dst = dir.join("PROJECTSET.dst");
+        let dst = dir.path().join("PROJECTSET.dst");
         assert!(dst.is_file(), "the wizard wrote {}", dst.display());
         let db = crate::app::commands::sheet_set::read_set(&dst.to_string_lossy())
             .expect("the set round-trips from disk");
@@ -8098,7 +8097,7 @@ mod batch7_tests {
         );
 
         // A field on the first sheet's layout reads the custom property.
-        let sheet_path = dir.join("A-101 Plans.dwg");
+        let sheet_path = dir.path().join("A-101 Plans.dwg");
         assert!(sheet_path.is_file());
         let mut doc = crate::io::load_file(&sheet_path).expect("the sheet drawing loads");
         let host = doc
@@ -8168,7 +8167,6 @@ mod batch7_tests {
             "the sheet field reads the sheet number"
         );
 
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn add_line(app: &mut OpenCADStudio, x1: f64, y1: f64, x2: f64, y2: f64) -> document::Handle {

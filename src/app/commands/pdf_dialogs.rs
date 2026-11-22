@@ -1702,24 +1702,30 @@ fn page_size_mm(path: &str, page: &str) -> String {
 }
 
 #[cfg(test)]
-mod import_window_tests {
+mod test_support {
     use super::*;
-    use crate::app::ModalKind;
-    use std::sync::Arc;
 
-    fn new_app() -> OpenCADStudio {
+    pub(super) fn new_app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app
     }
 
-    fn last_line(app: &OpenCADStudio) -> String {
+    pub(super) fn last_line(app: &OpenCADStudio) -> String {
         app.command_line
             .history
             .last()
             .map(|entry| entry.text.clone())
             .unwrap_or_default()
     }
+}
+
+#[cfg(test)]
+mod import_window_tests {
+    use super::*;
+    use super::test_support::{last_line, new_app};
+    use crate::app::ModalKind;
+    use std::sync::Arc;
 
     /// A PDF with a 10 × 5 inch page and a 2 × 1 inch page, registered as
     /// a file picked this session under `name`.
@@ -1893,22 +1899,9 @@ mod import_window_tests {
 #[cfg(test)]
 mod point_cloud_attach_read_tests {
     use super::*;
+    use super::test_support::{last_line, new_app};
     use crate::app::ModalKind;
     use crate::scene::model::point_cloud::test_scan_file;
-
-    fn new_app() -> OpenCADStudio {
-        let mut app = OpenCADStudio::new_for_test();
-        app.automation_op(r#"{"op":"new"}"#);
-        app
-    }
-
-    fn last_line(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .last()
-            .map(|entry| entry.text.clone())
-            .unwrap_or_default()
-    }
 
     /// The window opens only when the read ends, after a `Reading` line,
     /// with what the read found.
@@ -2080,23 +2073,10 @@ mod point_cloud_attach_read_tests {
 #[cfg(test)]
 mod underlay_attach_read_tests {
     use super::*;
+    use super::test_support::{last_line, new_app};
     use crate::app::ModalKind;
     use document::entities::UnderlayType;
     use std::sync::Arc;
-
-    fn new_app() -> OpenCADStudio {
-        let mut app = OpenCADStudio::new_for_test();
-        app.automation_op(r#"{"op":"new"}"#);
-        app
-    }
-
-    fn last_line(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .last()
-            .map(|entry| entry.text.clone())
-            .unwrap_or_default()
-    }
 
     /// A PDF with a 10 × 5 inch page and a 2 × 1 inch page.
     fn two_pages() -> Vec<u8> {

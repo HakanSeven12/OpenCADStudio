@@ -1511,6 +1511,24 @@ fn inserted_draw_depth_label(order: &[DrawDepthEntry], position: usize) -> Optio
     }
 }
 
+/// The entry of `handle` at its own place in a block's order.
+///
+/// The order is sorted by effective key, then by handle, and an entity's key
+/// is its own handle unless the block's sort table files it under another. So
+/// the entry of an entity the table left alone is where a search for the
+/// handle as both key and handle ends, with no walk through the order.
+fn draw_depth_entry_at_own_key(order: &[DrawDepthEntry], handle: u64) -> Option<&DrawDepthEntry> {
+    let _ = (order, handle);
+    None
+}
+
+/// The entry of `handle` in a block's order: at its own place, or, for an
+/// entity the sort table moved, wherever in the order that put it.
+fn draw_depth_entry(order: &[DrawDepthEntry], handle: u64) -> Option<&DrawDepthEntry> {
+    draw_depth_entry_at_own_key(order, handle)
+        .or_else(|| order.iter().find(|entry| entry.handle == handle))
+}
+
 #[derive(Clone)]
 pub(crate) struct DrawDepthCache {
     epoch: u64,
@@ -6101,9 +6119,10 @@ impl Scene {
                                     incremental_ok = false;
                                     break;
                                 }
-                                let restored = cache.blocks.get(&block).and_then(|order| {
-                                    order.iter().find(|entry| entry.handle == value)
-                                });
+                                let restored = cache
+                                    .blocks
+                                    .get(&block)
+                                    .and_then(|order| draw_depth_entry(order, value));
                                 let Some(entry) = restored else {
                                     incremental_ok = false;
                                     break;

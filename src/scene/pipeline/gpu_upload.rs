@@ -89,10 +89,10 @@ pub fn alloc_with_prefix<T: bytemuck::Pod>(
 /// Writes into one buffer, held back so that pieces lying side by side reach
 /// the queue as one write.
 ///
-/// The queue stages every `write_buffer` call on its own, which costs far more
-/// than the bytes of one object carry: an edit of 100,000 objects spent over a
-/// second in those calls, where building the whole buffer again takes a tenth
-/// of one.
+/// The queue makes a staging buffer for every `write_buffer` call, which
+/// costs far more than the bytes of one object carry: an edit of 100,000
+/// objects spent a second in those calls on Direct3D 12, where building the
+/// whole buffer again takes a tenth of one.
 #[derive(Default)]
 pub(crate) struct WriteBatch {
     bytes: Vec<u8>,
@@ -109,19 +109,53 @@ impl WriteBatch {
         self.bytes.extend_from_slice(data);
     }
 
-    /// The writes that leave the buffer as the pieces would one by one.
+    /// The writes that leave the buffer as the pieces would one by one: in
+    /// buffer order, each run of pieces that touch joined into one.
     pub(crate) fn writes(&self) -> Vec<(u64, Vec<u8>)> {
-        self.pieces
-            .iter()
-            .map(|&(offset, start, len)| (offset, self.bytes[start..start + len].to_vec()))
-            .collect()
+        let bytes = |start: usize, len: usize| &self.bytes[start..start + len];
+        let mut order: Vec<usize> = (0..self.pieces.len()).collect();
+        order.sort_by_key(|&piece| self.pieces[piece].0);
+        let overlap = order.windows(2).any(|pair| {
+            let (offset, _, len) = self.pieces[pair[0]];
+            offset + len as u64 > self.pieces[pair[1]].0
+        });
+        if overlap {
+            // Joined in buffer order, the later of two pieces over the same
+            // bytes could end up under the earlier one.
+            return self
+                .pieces
+                .iter()
+                .map(|&(offset, start, len)| (offset, bytes(start, len).to_vec()))
+                .collect();
+        }
+        let mut writes: Vec<(u64, Vec<u8>)> = Vec::new();
+        for piece in order {
+            let (offset, start, len) = self.pieces[piece];
+            match writes.last_mut() {
+                Some((first, run)) if *first + run.len() as u64 == offset => {
+                    run.extend_from_slice(bytes(start, len));
+                }
+                _ => writes.push((offset, bytes(start, len).to_vec())),
+            }
+        }
+        writes
     }
 }
 
 /// Whether `writes` separate writes cost more than building a buffer of
 /// `elements` again.
-pub(crate) fn rebuild_is_cheaper(_writes: usize, _elements: u64) -> bool {
-    false
+///
+/// A write takes about 11 µs on Direct3D 12 and 1.5 µs on Vulkan, whatever
+/// its size, and about as long again when the queue frees its staging
+/// buffer. Building the wire buffers again takes 0.2 to 0.7 µs an instance.
+/// So a write is worth some thirty instances on Direct3D 12 and five on
+/// Vulkan. Thirty-two is used: where that makes Vulkan rebuild sooner than
+/// it had to, the two ways cost about the same. A few hundred writes take
+/// milliseconds and are never worth a rebuild.
+pub(crate) fn rebuild_is_cheaper(writes: usize, elements: u64) -> bool {
+    const FEW: usize = 256;
+    const INSTANCES_A_WRITE: u64 = 32;
+    writes > FEW && writes as u64 * INSTANCES_A_WRITE > elements
 }
 
 /// Send `writes` to `buffer`.

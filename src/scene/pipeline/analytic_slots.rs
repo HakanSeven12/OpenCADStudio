@@ -144,7 +144,7 @@ pub(crate) enum Edit {
         index: u32,
         value: EllipseInstance,
     },
-    /// Only the depth field: enough to hide an instance.
+    /// An instance with a depth no entity has, which draws nothing.
     HideCircle {
         index: u32,
     },
@@ -193,6 +193,18 @@ fn hidden_block() -> BlockWireInstance {
         translation_low: [0.0; 3],
         depth: [HIDDEN_DEPTH, 0.0],
     }
+}
+
+fn hidden_circle() -> CircleInstance {
+    let mut hidden = <CircleInstance as bytemuck::Zeroable>::zeroed();
+    hidden.params[2] = HIDDEN_DEPTH;
+    hidden
+}
+
+fn hidden_ellipse() -> EllipseInstance {
+    let mut hidden = <EllipseInstance as bytemuck::Zeroable>::zeroed();
+    hidden.params[2] = HIDDEN_DEPTH;
+    hidden
 }
 
 /// Whether two block-local point lists are the same shape, allowing for the
@@ -360,7 +372,7 @@ pub(crate) struct PlannedWrites {
 /// Sort the edits into the buffers they write, `chunks` block arenas among
 /// them.
 pub(crate) fn plan_writes(edits: &[Edit], chunks: usize) -> PlannedWrites {
-    use std::mem::{offset_of, size_of};
+    use std::mem::size_of;
     let mut planned = PlannedWrites::default();
     planned.blocks.resize_with(chunks, WriteBatch::default);
     for edit in edits {
@@ -385,17 +397,16 @@ pub(crate) fn plan_writes(edits: &[Edit], chunks: usize) -> PlannedWrites {
                 *index as u64 * size_of::<EllipseInstance>() as u64,
                 bytemuck::bytes_of(value),
             ),
+            // A hidden instance is written whole, like a shown one, so that a
+            // run of them is one write. Only its depth is read while it is
+            // hidden, and showing it again writes every field.
             Edit::HideCircle { index } => planned.circles.push(
-                *index as u64 * size_of::<CircleInstance>() as u64
-                    + offset_of!(CircleInstance, params) as u64
-                    + 2 * size_of::<f32>() as u64,
-                bytemuck::bytes_of(&HIDDEN_DEPTH),
+                *index as u64 * size_of::<CircleInstance>() as u64,
+                bytemuck::bytes_of(&hidden_circle()),
             ),
             Edit::HideEllipse { index } => planned.ellipses.push(
-                *index as u64 * size_of::<EllipseInstance>() as u64
-                    + offset_of!(EllipseInstance, params) as u64
-                    + 2 * size_of::<f32>() as u64,
-                bytemuck::bytes_of(&HIDDEN_DEPTH),
+                *index as u64 * size_of::<EllipseInstance>() as u64,
+                bytemuck::bytes_of(&hidden_ellipse()),
             ),
         }
     }

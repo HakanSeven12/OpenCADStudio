@@ -2,6 +2,20 @@
 #[path = "trim_hatch_tests.rs"]
 mod trim_hatch_tests;
 
+use super::*;
+
+/// All command-line history text joined by newlines. Kept at module scope so
+/// the behaviour suites below do not each carry a copy.
+fn all_output(app: &OpenCADStudio) -> String {
+    app.command_line
+        .history
+        .iter()
+        .map(|e| e.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+
 #[cfg(test)]
 mod command_replacement_tests {
     use super::super::*;
@@ -4337,15 +4351,7 @@ mod dim_update_regen_tests {
 #[cfg(test)]
 mod mission_m025_tests {
     use super::super::*;
-
-    fn all_output(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
+    use super::all_output;
 
     #[test]
     fn annotation_and_hatch_variables_read_and_write_through_setvar() {
@@ -4397,17 +4403,9 @@ mod mission_m025_tests {
 #[cfg(test)]
 mod mission_m027_tests {
     use super::super::*;
+    use super::all_output;
     use document::entities::Line;
     use document::types::Vector3;
-
-    fn all_output(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
 
     #[test]
     fn annoupdate_gathers_a_selection_instead_of_refusing() {
@@ -4475,15 +4473,7 @@ mod mission_m027_tests {
 #[cfg(test)]
 mod mission_m029_tests {
     use super::super::*;
-
-    fn all_output(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
+    use super::all_output;
 
     #[test]
     fn scale_list_reports_ratio_and_in_use_count() {
@@ -4556,17 +4546,9 @@ mod mission_m029_tests {
 #[cfg(test)]
 mod mission_m051_tests {
     use super::super::*;
+    use super::all_output;
     use document::entities::{Line, Text};
     use document::types::Vector3;
-
-    fn all_output(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
 
     fn add_note(app: &mut OpenCADStudio) -> (document::Handle, document::Handle) {
         let i = app.active_tab;
@@ -4698,17 +4680,9 @@ mod mission_m051_tests {
 #[cfg(test)]
 mod mission_m062_tests {
     use super::super::*;
+    use super::all_output;
     use document::entities::Line;
     use document::types::Vector3;
-
-    fn all_output(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
 
     fn temp_pdf(tag: &str) -> std::path::PathBuf {
         let unique = std::time::SystemTime::now()
@@ -4872,15 +4846,7 @@ mod mission_m062_tests {
 #[cfg(test)]
 mod mission_m060_tests {
     use super::super::*;
-
-    fn all_output(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
+    use super::all_output;
 
     fn temp_pdf(tag: &str) -> std::path::PathBuf {
         let unique = std::time::SystemTime::now()
@@ -4982,17 +4948,9 @@ mod mission_m060_tests {
 #[cfg(test)]
 mod mission_m042_tests {
     use super::super::*;
+    use super::all_output;
     use document::entities::Text;
     use document::types::Vector3;
-
-    fn all_output(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
 
     fn add_text(app: &mut OpenCADStudio) -> document::Handle {
         let i = app.active_tab;
@@ -5081,15 +5039,7 @@ mod mission_m042_tests {
 #[cfg(test)]
 mod mission_m055_tests {
     use super::super::*;
-
-    fn all_output(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
+    use super::all_output;
 
     fn enter_layout(app: &mut OpenCADStudio) {
         let i = app.active_tab;
@@ -5217,15 +5167,7 @@ mod mission_m055_tests {
 #[cfg(test)]
 mod mission_m058_tests {
     use super::super::*;
-
-    fn all_output(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
+    use super::all_output;
 
     fn enter_layout(app: &mut OpenCADStudio) {
         let i = app.active_tab;
@@ -5358,15 +5300,7 @@ mod mission_m058_tests {
 #[cfg(test)]
 mod mission_m059_tests {
     use super::super::*;
-
-    fn all_output(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
+    use super::all_output;
 
     fn open_layout(app: &mut OpenCADStudio, name: &str) {
         let i = app.active_tab;
@@ -5478,17 +5412,9 @@ mod mission_m059_tests {
 #[cfg(test)]
 mod mission_m061_tests {
     use super::super::*;
+    use super::all_output;
     use document::entities::Line;
     use document::types::Vector3;
-
-    fn all_output(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
 
     fn temp_svg(tag: &str) -> std::path::PathBuf {
         let unique = std::time::SystemTime::now()
@@ -5588,15 +5514,7 @@ mod mission_m061_tests {
 #[cfg(test)]
 mod mission_m070_tests {
     use super::super::*;
-
-    fn all_output(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
+    use super::all_output;
 
     fn fixture_dir(tag: &str) -> std::path::PathBuf {
         let unique = std::time::SystemTime::now()
@@ -5750,15 +5668,7 @@ mod mission_m070_tests {
 #[cfg(test)]
 mod mission_m076_tests {
     use super::super::*;
-
-    fn all_output(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
+    use super::all_output;
 
     /// A layer state keys each row by layer handle, so a test layer needs a
     /// real one — exactly what the LAYER command does when it creates a row.
@@ -5923,15 +5833,7 @@ mod mission_m076_tests {
 #[cfg(test)]
 mod mission_m078_tests {
     use super::super::*;
-
-    fn all_output(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
+    use super::all_output;
 
     fn temp_dir(tag: &str) -> std::path::PathBuf {
         let unique = std::time::SystemTime::now()
@@ -6104,15 +6006,7 @@ mod mission_m078_tests {
 #[cfg(test)]
 mod mission_m100_tests {
     use super::super::*;
-
-    fn all_output(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
+    use super::all_output;
 
     fn add_mleader(app: &mut OpenCADStudio) -> document::Handle {
         let i = app.active_tab;

@@ -862,6 +862,60 @@ mod tests {
         }
     }
 
+    /// The messages of the DWF export are in every catalog: the dialog's
+    /// title and the web notice name the format, the usage line keeps the
+    /// command's own words, and the result line takes its five values.
+    #[test]
+    fn the_dwf_export_messages_are_in_every_catalog() {
+        let result = "Exported: {}  {sheets} sheet(s), {bytes} bytes, {width:.1}×{height:.1} mm";
+        let messages = [
+            ("Export as DWF", ("common", "export-as-dwf")),
+            (
+                "DWF export is not available in the web version.",
+                ("common", "dwf-export-is-not-available-in-the-web-version"),
+            ),
+            (
+                "Usage: EXPORTDWF <file.dwf> [ALL]",
+                ("plot", "usage-exportdwf-file-dwf-all"),
+            ),
+            (result, ("plot", "exported-sheets-bytes-size")),
+        ];
+        let values = format_values(
+            result,
+            "Exported: out/plan.dwf  3 sheet(s), 20480 bytes, 297.0×210.0 mm",
+        )
+        .expect("the result line gives its values back");
+        assert_eq!(values, ["out/plan.dwf", "3", "20480", "297.0", "210.0"]);
+        for language in Language::ALL
+            .into_iter()
+            .filter(|language| *language != Language::System)
+        {
+            let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+            load_language(&loader, language).expect("Fluent resources must parse");
+            for (source, ids) in messages {
+                assert_eq!(catalog_ids(source), Some(ids), "{source}");
+            }
+            let title = loader.get_attr("common", "export-as-dwf");
+            assert!(title.contains("DWF"), "{language:?}: {title}");
+            let notice =
+                loader.get_attr("common", "dwf-export-is-not-available-in-the-web-version");
+            assert!(notice.contains("DWF"), "{language:?}: {notice}");
+            let usage = loader.get_attr("plot", "usage-exportdwf-file-dwf-all");
+            assert!(
+                usage.contains("EXPORTDWF <") && usage.contains(".dwf> [ALL]"),
+                "{language:?}: {usage}"
+            );
+            let mut line = loader.get_attr("plot", "exported-sheets-bytes-size");
+            for (index, value) in values.iter().enumerate() {
+                let marker = format!("__ocs_fmt_{index}__");
+                assert!(line.contains(&marker), "{language:?}: {line}");
+                line = line.replace(&marker, value);
+            }
+            assert!(line.contains("out/plan.dwf"), "{language:?}: {line}");
+            assert!(line.contains("297.0×210.0 mm"), "{language:?}: {line}");
+        }
+    }
+
     #[test]
     fn block_grip_messages_render_in_every_locale_without_translating_authored_data() {
         let expected = BTreeSet::from(

@@ -2,6 +2,11 @@
 //!
 //! Gathers and executes all integration test suites as submodules within a
 //! single test binary.
+//!
+//! Shared support lives in `common/mod.rs` (a directory, so Cargo does not try
+//! to build it as its own test target). Suites reach it as `crate::common::…`.
+
+mod common;
 
 #[path = "active_space_roundtrip.rs"]
 mod active_space_roundtrip;

@@ -6,13 +6,20 @@
 // `context_scales`. This certifies that passthrough is intact at the current
 // document HEAD before any encoder work touches the save path.
 //
-// Uses the golden reference `~/Downloads/0718-mbmdmc.dwg` (AC1032/R2018). The
-// test skips (does not fail) when that file is absent so it never breaks CI.
+// Uses the optional golden reference `0718-mbmdmc.dwg` (AC1032/R2018), selected
+// with `OCS_GOLDEN_DWG=/path/to/0718-mbmdmc.dwg`. The tests skip with a reason
+// when that file is absent so they never break CI.
 
+use crate::common::read_optional_env_fixture;
 use document::objects::ObjectType;
 use OpenCADStudio::io;
 
-const GOLDEN: &str = "/home/hakanseven/Downloads/0718-mbmdmc.dwg";
+const GOLDEN_ENV: &str = "OCS_GOLDEN_DWG";
+const GOLDEN_WHAT: &str = "the annotative DWG golden (0718-mbmdmc.dwg)";
+
+fn golden_bytes() -> Option<Vec<u8>> {
+    read_optional_env_fixture(GOLDEN_ENV, GOLDEN_WHAT)
+}
 
 /// Raw bytes of every annotation-context leaf, sorted so the comparison is
 /// independent of handle ordering/renumbering across the round-trip.
@@ -34,8 +41,7 @@ fn leaf_blobs(doc: &document::Document) -> Vec<Vec<u8>> {
 
 #[test]
 fn annotative_leaf_contexts_survive_dwg_roundtrip() {
-    let Ok(bytes) = std::fs::read(GOLDEN) else {
-        eprintln!("SKIP: golden file {GOLDEN} not present");
+    let Some(bytes) = golden_bytes() else {
         return;
     };
 
@@ -83,8 +89,7 @@ fn annotative_leaf_contexts_survive_dwg_roundtrip() {
 /// we know which leaf type to encode + byte-diff first (4c-1). Not an assertion.
 #[test]
 fn annotative_leaf_type_breakdown() {
-    let Ok(bytes) = std::fs::read(GOLDEN) else {
-        eprintln!("SKIP: golden file {GOLDEN} not present");
+    let Some(bytes) = golden_bytes() else {
         return;
     };
     let doc = io::load_bytes("0718-mbmdmc.dwg", bytes).expect("load golden");
@@ -127,8 +132,7 @@ fn annotative_leaf_type_breakdown() {
 /// and its 340 scale target — to reverse the exact bit layout for the encoder.
 #[test]
 fn dump_one_blkref_leaf() {
-    let Ok(bytes) = std::fs::read(GOLDEN) else {
-        eprintln!("SKIP: golden file {GOLDEN} not present");
+    let Some(bytes) = golden_bytes() else {
         return;
     };
     let doc = io::load_bytes("0718-mbmdmc.dwg", bytes).expect("load golden");

@@ -413,18 +413,53 @@ pub(crate) fn patch_handle_index(
     }
 }
 
+/// How many keys the top of the handle range keeps for runs of wires with no
+/// entity handle (`is_fixed_run_key`).
+const FIXED_RUN_KEYS: u64 = 1 << 32;
+
+/// Whether `key` stands for a run of wires with no entity handle: the scene's
+/// nonprint markers (`geomarker-…`, `camera-…`). No change list names such a
+/// key, so a patch never touches its slab; a full build makes it again.
+fn is_fixed_run_key(key: Handle) -> bool {
+    key.value() > u64::MAX - FIXED_RUN_KEYS
+}
+
 /// Group `wires` (draw-order sorted, entity-contiguous) into per-handle ranges.
+///
+/// A run of wires with no entity handle in their name gets a key of its own
+/// from the top of the handle range, so one marker wire does not keep the
+/// whole set off the arena. `None` only when an entity handle is in that key
+/// range too (the caller keeps the batched path).
 fn handle_ranges(wires: &[&WireModel]) -> Option<Vec<(Handle, usize, usize)>> {
     let mut out: Vec<(Handle, usize, usize)> = Vec::new();
+    let mut fixed_runs = 0u64;
+    let mut handle_in_key_range = false;
     let mut i = 0;
     while i < wires.len() {
-        let h = handle_of(wires[i])?;
+        let handle = handle_of(wires[i]);
         let mut j = i + 1;
-        while j < wires.len() && handle_of(wires[j]) == Some(h) {
+        while j < wires.len() && handle_of(wires[j]) == handle {
             j += 1;
         }
-        out.push((h, i, j));
+        let key = match handle {
+            Some(handle) => {
+                handle_in_key_range |= is_fixed_run_key(handle);
+                handle
+            }
+            None => {
+                if fixed_runs >= FIXED_RUN_KEYS {
+                    return None;
+                }
+                let key = Handle::new(u64::MAX - fixed_runs);
+                fixed_runs += 1;
+                key
+            }
+        };
+        out.push((key, i, j));
         i = j;
+    }
+    if fixed_runs > 0 && handle_in_key_range {
+        return None;
     }
     Some(out)
 }
@@ -598,8 +633,8 @@ fn blank_instance() -> WireInstance {
 
 impl WireArena {
     /// Build a fresh arena from the full resident set, or `None` if it isn't a
-    /// single scissor-free batch or a wire is unnamed (caller keeps the batched
-    /// path).
+    /// single scissor-free batch (caller keeps the batched path). Wires with
+    /// no entity handle get fixed slabs of their own (`handle_ranges`).
     pub fn build(
         device: &wgpu::Device,
         queue: &wgpu::Queue,

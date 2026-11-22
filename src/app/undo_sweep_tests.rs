@@ -141,6 +141,8 @@ fn commands(d: &Drawing) -> Vec<String> {
         "DIMLINEAR 0,0 10,0 5,-3".to_string(),
         "-INSERT BLK 50,50 1 1 0".to_string(),
         "TEXT 0,60 2 0 Hello".to_string(),
+        // A pick point inside the circle.
+        "HATCH 20,5".to_string(),
         // Modifying.
         format!("MOVE {} ENTER 0,0 5,5", h(d.line)),
         format!("COPY {} ENTER 20,5 25,5 ENTER", h(d.circle)),
@@ -245,6 +247,39 @@ fn editor_cases() -> Vec<Case> {
                 Step::Open("TEXT 0,60 2 0".to_string(), "text_editor"),
                 Step::Send(Box::new(Message::TextInlineInput("Hello".to_string()))),
                 Step::Send(Box::new(Message::TextInlineOk)),
+            ],
+        },
+    ]
+}
+
+/// Changes made in the layer palette and in the Block Definition window.
+fn window_cases(d: &Drawing) -> Vec<Case> {
+    let layer = |name: &str, message: Message| Case {
+        name: format!("Layer palette: {name}"),
+        steps: vec![
+            // LAYER with no arguments opens the palette and changes nothing.
+            Step::Run("LAYER".to_string()),
+            Step::Send(Box::new(message)),
+        ],
+    };
+    let walls = || "Walls".to_string();
+    vec![
+        layer("visible", Message::LayerToggleVisible(walls())),
+        layer("lock", Message::LayerToggleLock(walls())),
+        layer("freeze", Message::LayerToggleFreeze(walls())),
+        layer("plot", Message::LayerTogglePlot(walls())),
+        layer("new layer", Message::LayerNew),
+        Case {
+            name: "Block Definition window".to_string(),
+            steps: vec![
+                Step::Op(serde_json::json!({
+                    "op": "select",
+                    "clear": true,
+                    "handles": [format!("{:X}", d.circle), format!("{:X}", d.arc)]
+                })),
+                Step::Open("BLOCK".to_string(), "modal:BlockDefinition"),
+                Step::Send(Box::new(Message::BlockDefName("Fitting".to_string()))),
+                Step::Send(Box::new(Message::BlockDefApply)),
             ],
         },
     ]
@@ -390,6 +425,17 @@ fn every_palette_change_is_undone_and_redone_exactly() {
 #[test]
 fn every_editor_commit_is_undone_and_redone_exactly() {
     let failures: Vec<String> = editor_cases()
+        .iter()
+        .flat_map(|case| check_steps(&case.name, &case.steps))
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The same for a change in the layer palette or the Block Definition window.
+#[test]
+fn every_window_change_is_undone_and_redone_exactly() {
+    let (_, d) = drawing();
+    let failures: Vec<String> = window_cases(&d)
         .iter()
         .flat_map(|case| check_steps(&case.name, &case.steps))
         .collect();

@@ -37,6 +37,7 @@ pub mod entity_coverage;
 pub mod entity_coverage_types;
 pub mod manifest;
 pub mod ribbon;
+pub mod scene;
 pub mod type_registry;
 pub mod type_registry_types;
 pub mod version_info;
@@ -77,11 +78,18 @@ pub use manifest::{
     API_VERSION, API_VERSION_MIN_SUPPORTED, MAX_API_VERSION_ENV,
 };
 pub use ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, StyleKey, ToolDef};
+pub use scene::{
+    PanelScene, Rect2D, Rgba8, SceneBuilder, SceneColor, SceneElement, SceneError, SceneRevision,
+    StableId, Stroke, ThemeColor, Vec2,
+};
 pub use type_registry::{
     get_embedded_type_registry_json, EnumVariantInfo, FieldInfo, MethodInfo, ParameterInfo, TypeId,
     TypeInfo, TypeKind, TypeRegistry,
 };
 pub use version_info::get_embedded_version_info_json;
+
+#[cfg(feature = "host")]
+pub use process::{DispatchResult, PluginError, PluginManager, PluginProcess};
 
 #[cfg(test)]
 pub(crate) mod test_lock {
@@ -92,6 +100,3 @@ pub(crate) mod test_lock {
     //! so tests in other modules do not observe half-written state.
     pub static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 }
-
-#[cfg(feature = "host")]
-pub use process::{DispatchResult, PluginError, PluginManager, PluginProcess};

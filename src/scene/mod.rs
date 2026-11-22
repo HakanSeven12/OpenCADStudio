@@ -77,6 +77,8 @@ mod ole_resolution_tests;
 #[cfg(test)]
 mod reference_only_tests;
 #[cfg(test)]
+mod resident_patch_adds_tests;
+#[cfg(test)]
 mod resident_patch_shorter_runs_tests;
 #[cfg(test)]
 mod solid_box_select_tests;

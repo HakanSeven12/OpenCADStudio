@@ -890,19 +890,28 @@ impl Scene {
                 "every run in the resident set is listed in its order"
             );
             let listed = |handle: &Handle| has_run(handle) || ordered.contains(handle);
-            for &(handle, kind) in &deltas {
-                if matches!(kind, ChangeKind::Removed) {
-                    // Keep the order entry as a tombstone. Undo/Redo can then
-                    // restore the exact physical slot and submission position.
-                    continue;
-                }
-                if visible_changed.contains(&handle) && !listed(&handle) {
-                    let key = effective(handle);
-                    let position = layout
-                        .order
-                        .partition_point(|&existing| effective(existing) <= key);
-                    layout.order.insert(position, handle);
-                }
+            // A removed entity keeps its order entry as a tombstone. Undo/Redo
+            // can then restore the exact physical slot and submission position.
+            //
+            // The journal gives the changes in no order. Lowest key first, each
+            // new entity goes in behind the ones before it: at the end of the
+            // list for the usual add, with nothing to move. In the journal's
+            // order a copy of many entities moved the others for each one.
+            let mut unlisted: Vec<(u64, Handle)> = deltas
+                .iter()
+                .filter(|&&(handle, kind)| {
+                    !matches!(kind, ChangeKind::Removed)
+                        && visible_changed.contains(&handle)
+                        && !listed(&handle)
+                })
+                .map(|&(handle, _)| (effective(handle), handle))
+                .collect();
+            unlisted.sort_unstable_by_key(|&(key, handle)| (key, handle.value()));
+            for (key, handle) in unlisted {
+                let position = layout
+                    .order
+                    .partition_point(|&existing| effective(existing) <= key);
+                layout.order.insert(position, handle);
             }
         }
 
@@ -921,7 +930,66 @@ impl Scene {
         };
         let mut gpu_runs: HashMap<Handle, Arc<Vec<WireModel>>> = HashMap::default();
         let mut index_edits = Vec::new();
-        for &(handle, kind) in &deltas {
+        // A new run can only go in at the tail, so the new entities are placed
+        // last and in the order of the list: each one then goes in behind the
+        // one before it. In the journal's order, which is no order, the second
+        // of two new entities could come first, leave the other with a run
+        // after its place, and send the whole set to a full build.
+        let is_new = |handle: &Handle, kind: ChangeKind| {
+            !matches!(kind, ChangeKind::Removed)
+                && !layout.ranges.contains_key(handle)
+                && !layout.vacant.contains_key(handle)
+        };
+        let new_handles: HashSet<Handle> = deltas
+            .iter()
+            .filter(|&&(handle, kind)| is_new(&handle, kind))
+            .map(|&(handle, _)| handle)
+            .collect();
+        let mut placement: Vec<(Handle, ChangeKind)> = deltas
+            .iter()
+            .copied()
+            .filter(|(handle, _)| !new_handles.contains(handle))
+            .collect();
+        let known = placement.len();
+        {
+            let mut new_in_order: Vec<(usize, Handle, ChangeKind)> = Vec::new();
+            if !new_handles.is_empty() {
+                let kinds: HashMap<Handle, ChangeKind> = deltas.iter().copied().collect();
+                for (index, handle) in layout.order.iter().enumerate() {
+                    if new_handles.contains(handle) {
+                        new_in_order.push((index, *handle, kinds[handle]));
+                    }
+                }
+            }
+            // One that the list does not hold is placed with the known ones,
+            // where it declines the patch as it did.
+            let found: HashSet<Handle> =
+                new_in_order.iter().map(|&(_, handle, _)| handle).collect();
+            let missing: Vec<(Handle, ChangeKind)> = deltas
+                .iter()
+                .copied()
+                .filter(|(handle, _)| new_handles.contains(handle) && !found.contains(handle))
+                .collect();
+            placement.extend(missing);
+            placement.extend(new_in_order.iter().map(|&(_, handle, kind)| (handle, kind)));
+        }
+        // For each new entity, where the next run after its place starts, or
+        // `None` at the tail. Read when the first new entity is placed: the
+        // known entities are all placed by then.
+        let mut next_run_start: Option<HashMap<Handle, Option<usize>>> = None;
+        for (placed, &(handle, kind)) in placement.iter().enumerate() {
+            if placed >= known && next_run_start.is_none() {
+                let mut after = None;
+                let mut starts = HashMap::default();
+                for listed in layout.order.iter().rev() {
+                    if new_handles.contains(listed) {
+                        starts.insert(*listed, after);
+                    } else if let Some(range) = layout.ranges.get(listed) {
+                        after = Some(range.0);
+                    }
+                }
+                next_run_start = Some(starts);
+            }
             let new_run = if matches!(kind, ChangeKind::Removed) {
                 Vec::new()
             } else {
@@ -1056,10 +1124,9 @@ impl Scene {
             // A genuinely new handle must append after all live entity runs.
             // Monotonic document handles make this the ordinary Add path. A
             // middle insertion (custom sort key) falls back to a full rebuild.
-            let order_index = layout.order.iter().position(|&h| h == handle)?;
-            let insertion = layout.order[order_index + 1..]
-                .iter()
-                .find_map(|next| layout.ranges.get(next).map(|range| range.0))
+            let insertion = next_run_start
+                .as_ref()
+                .and_then(|starts| starts.get(&handle))?
                 .unwrap_or(layout.marker_start);
             if insertion != layout.marker_start {
                 return declined("new-run-not-at-the-tail");

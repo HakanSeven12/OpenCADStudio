@@ -2047,6 +2047,11 @@ pub(super) struct OpenCADStudio {
     desk_bg_input: String,
     pub(crate) saved_custom_palette: Option<config::UiThemePalette>,
 
+    /// Panics that `update_guarded` caught in this session
+    /// (`update/panic_guard.rs`).
+    #[cfg(not(target_arch = "wasm32"))]
+    caught_panics: u32,
+
     // ── Keyboard Shortcut Editor ──────────────────────────────────────────
     /// Complete editable key → command/action table.
     shortcut_bindings: rustc_hash::FxHashMap<String, String>,
@@ -3405,6 +3410,8 @@ impl OpenCADStudio {
             paper_bg_input: String::new(),
             desk_bg_input: String::new(),
             saved_custom_palette: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            caught_panics: 0,
             // Keyboard shortcuts
             shortcut_bindings: rustc_hash::FxHashMap::default(),
             shortcut_editor_rows: Vec::new(),

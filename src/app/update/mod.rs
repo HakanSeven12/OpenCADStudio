@@ -173,6 +173,10 @@ pub(in crate::app) use file::native_paths_match;
 pub(in crate::app) use file::panic_detail;
 mod page_setup_import;
 #[cfg(not(target_arch = "wasm32"))]
+pub(in crate::app) mod panic_guard;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod panic_guard_tests;
+#[cfg(not(target_arch = "wasm32"))]
 mod plugin_grips;
 mod prop_commit;
 #[cfg(not(target_arch = "wasm32"))]

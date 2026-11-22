@@ -70,21 +70,21 @@ pub mod runner;
 
 pub use dialog::*;
 pub use entity_coverage::{
-    get_embedded_entity_coverage_json, EntityCoverageCatalog, EntityKindCoverage, EntityScope,
-    ModelAccess, PropertyCoverage,
+    EntityCoverageCatalog, EntityKindCoverage, EntityScope, ModelAccess, PropertyCoverage,
+    get_embedded_entity_coverage_json,
 };
 pub use manifest::{
-    effective_max_api_version, host_accepts_plugin_version, ApiVersion, PluginManifest,
-    API_VERSION, API_VERSION_MIN_SUPPORTED, MAX_API_VERSION_ENV,
+    API_VERSION, API_VERSION_MIN_SUPPORTED, ApiVersion, MAX_API_VERSION_ENV, PluginManifest,
+    effective_max_api_version, host_accepts_plugin_version,
 };
 pub use ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, StyleKey, ToolDef};
 pub use scene::{
-    PanelScene, Rect2D, Rgba8, SceneBuilder, SceneColor, SceneElement, SceneError, SceneRevision,
-    StableId, Stroke, ThemeColor, Vec2,
+    PanelScene, PanelSurface, Rect2D, Rgba8, SceneBuilder, SceneColor, SceneElement, SceneError,
+    SceneRevision, StableId, Stroke, SurfaceReject, SurfaceRejectCode, ThemeColor, Vec2,
 };
 pub use type_registry::{
-    get_embedded_type_registry_json, EnumVariantInfo, FieldInfo, MethodInfo, ParameterInfo, TypeId,
-    TypeInfo, TypeKind, TypeRegistry,
+    EnumVariantInfo, FieldInfo, MethodInfo, ParameterInfo, TypeId, TypeInfo, TypeKind,
+    TypeRegistry, get_embedded_type_registry_json,
 };
 pub use version_info::get_embedded_version_info_json;
 

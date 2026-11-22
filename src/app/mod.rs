@@ -107,6 +107,11 @@ mod options_session;
 mod paste_special_tests;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin_host;
+/// Pure panel surface store (api v29): publish/ownership/revision
+/// semantics for plugin-declared scene surfaces. Compiles for wasm too —
+/// the web runtime has no plugin host, so the store stays empty there and
+/// panels render exactly their legacy bodies.
+pub mod panel_surfaces;
 mod presspull_ops;
 pub(crate) mod properties;
 mod purge_dialog;
@@ -1622,6 +1627,11 @@ pub(super) struct OpenCADStudio {
     /// Persistent dockable side panels registered by plugins.
     pub(crate) plugin_panels:
         std::collections::BTreeMap<String, crate::ui::window::plugin_panel::PluginPanelState>,
+    /// Declarative scene surfaces published by plugins (api v29), keyed by
+    /// panel id and owned by the authenticated plugin; a pure store — the
+    /// UI projects from it, nothing here draws.
+    pub(crate) panel_surfaces:
+        crate::app::panel_surfaces::PanelSurfaceStore,
     /// Numeric mapping for PanelId::Plugin(u32).
     pub(crate) plugin_panel_ids: std::collections::HashMap<String, u32>,
     pub(crate) plugin_panel_by_num: std::collections::HashMap<u32, String>,
@@ -3224,6 +3234,8 @@ impl OpenCADStudio {
             active_modal: None,
             plugin_dialog_state: None,
             plugin_panels: std::collections::BTreeMap::new(),
+            panel_surfaces:
+                crate::app::panel_surfaces::PanelSurfaceStore::default(),
             plugin_panel_ids: std::collections::HashMap::new(),
             plugin_panel_by_num: std::collections::HashMap::new(),
             hyperlink_editor_handles: Vec::new(),

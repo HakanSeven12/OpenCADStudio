@@ -34,6 +34,7 @@ pub use document::xdata::{ExtendedDataRecord, XDataValue};
 pub use document::{Document, EntityType, Handle};
 
 use crate::ipc::protocol::{PluginRequest, PluginResponse};
+use crate::scene::{PanelSurface, SceneRevision, SurfaceReject, SurfaceRejectCode};
 
 /// Thread-safe handle that can issue host requests from plugin worker threads.
 /// Out-of-process V4 plugins implement this; in-process hosts may return `None`.
@@ -690,11 +691,14 @@ impl Serialize for HostNotification {
                 bincode::serialize_into(&mut bytes, pick_point)
                     .map_err(serde::ser::Error::custom)?;
             }
-            HostNotification::SelectionChangedDigest { tab_id, revision, count } => {
+            HostNotification::SelectionChangedDigest {
+                tab_id,
+                revision,
+                count,
+            } => {
                 bytes.push(14);
                 bincode::serialize_into(&mut bytes, tab_id).map_err(serde::ser::Error::custom)?;
-                bincode::serialize_into(&mut bytes, revision)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, revision).map_err(serde::ser::Error::custom)?;
                 bincode::serialize_into(&mut bytes, count).map_err(serde::ser::Error::custom)?;
             }
             HostNotification::DocumentChangedDelta {
@@ -816,9 +820,13 @@ impl<'de> Deserialize<'de> for HostNotification {
                 })
             }
             14 => bincode::deserialize(rest)
-                .map(|(tab_id, revision, count)| {
-                    HostNotification::SelectionChangedDigest { tab_id, revision, count }
-                })
+                .map(
+                    |(tab_id, revision, count)| HostNotification::SelectionChangedDigest {
+                        tab_id,
+                        revision,
+                        count,
+                    },
+                )
                 .map_err(serde::de::Error::custom),
             15 => bincode::deserialize(rest)
                 .map(
@@ -1569,8 +1577,8 @@ macro_rules! export_plugin {
         }
 
         #[no_mangle]
-        pub extern "C" fn ocs_plugin_register(
-        ) -> *mut ::std::boxed::Box<dyn $crate::host::BuiltinPlugin> {
+        pub extern "C" fn ocs_plugin_register()
+        -> *mut ::std::boxed::Box<dyn $crate::host::BuiltinPlugin> {
             // The constructor runs across a C ABI boundary; a panic unwinding
             // past it is undefined behavior. Contain it and report failure as a
             // null pointer, which the host loader treats as "registration
@@ -2389,6 +2397,58 @@ pub trait HostApi {
     fn remove_geo_location(&mut self) -> Result<bool, String> {
         Err("Geographic location writes are not supported by this host".to_owned())
     }
+
+    /// Publish (or replace) a panel's declarative scene snapshot (API v29,
+    /// additive): the bounded `PanelScene` the host stores under the
+    /// authenticated caller's ownership and renders natively. The first
+    /// publish mounts the panel's scene; a later publish replaces it
+    /// wholesale exactly when its revision strictly advances over the
+    /// stored head (an identical resurface at the head is an idempotent
+    /// no-op). The default is the transport-era stub: a host without
+    /// surface support answers structurally invalid scenes with
+    /// [`SurfaceRejectCode::InvalidSurface`] and everything else with
+    /// [`SurfaceRejectCode::Unattached`], and no state anywhere changes.
+    /// Surface-aware hosts override
+    /// [`HostApi::panel_surface_publish_for_plugin`].
+    fn panel_surface_publish(
+        &mut self,
+        _panel_id: &str,
+        surface: PanelSurface,
+    ) -> Result<SceneRevision, SurfaceReject> {
+        Err(surface_reject_default(&surface))
+    }
+
+    /// Publish a surface from the host's authenticated transport identity
+    /// (`plugin_id` is the serving manifest's id, never a wire field).
+    /// The default keeps the direct-host behavior; surface-aware hosts
+    /// override it.
+    fn panel_surface_publish_for_plugin(
+        &mut self,
+        _plugin_id: &str,
+        panel_id: &str,
+        surface: PanelSurface,
+    ) -> Result<SceneRevision, SurfaceReject> {
+        self.panel_surface_publish(panel_id, surface)
+    }
+}
+
+/// The transport-era default publish answer: structural refusal for
+/// invalid payloads, `Unattached` for everything else (nothing is
+/// attached in a host build without surface support). Mirrors the intended
+/// wire behavior of an unattached host so defaults cannot drift from the
+/// documented crossing.
+pub(crate) fn surface_reject_default(surface: &PanelSurface) -> SurfaceReject {
+    let structural = match surface {
+        PanelSurface::Scene(scene) => scene.validate().is_ok(),
+    };
+    SurfaceReject {
+        code: if structural {
+            SurfaceRejectCode::Unattached
+        } else {
+            SurfaceRejectCode::InvalidSurface
+        },
+        current_revision: None,
+    }
 }
 
 /// **Parametric-chain staging types (api 14, the v2 generic shapes).**
@@ -3067,7 +3127,7 @@ mod repl {
 }
 
 #[cfg(feature = "host")]
-pub use repl::{execute_code_guard, CommandSource, ExecutionResult};
+pub use repl::{CommandSource, ExecutionResult, execute_code_guard};
 
 #[cfg(all(test, feature = "host"))]
 mod tests {

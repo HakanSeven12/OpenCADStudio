@@ -772,6 +772,56 @@ impl SceneBuilder {
     }
 }
 
+/// Which surface kind a panel publish frame carries — the minimal common
+/// surface envelope shared by scene and (later) widget surfaces: identity is
+/// the transport-authenticated plugin plus the panel id, each surface kind
+/// carries its own independent revision, and the wire never carries native
+/// widget objects or callbacks. One frame publishes one surface.
+///
+/// Lives beside the scene tree (not in `ipc`) so the pure app-side store —
+/// which compiles without the `host` feature — shares the exact vocabulary
+/// the wire carries.
+///
+/// Compatibility rule: variants append at the END (the widget-surface
+/// stage appends its kind); the scene leg's discriminant (0) is pinned from
+/// creation and never renumbers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum PanelSurface {
+    /// The panel's declarative scene snapshot (bounded, validated).
+    Scene(PanelScene),
+}
+
+/// Why a panel surface publish refused. Codes append at the end; the
+/// refusal never mutates host state (no partial writes, ever).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SurfaceRejectCode {
+    /// Nothing is attached for this panel: the receiving host has no
+    /// surface-supporting attach, or the addressed panel is not a panel
+    /// the authenticated plugin registered.
+    Unattached,
+    /// The panel's surface is owned by a different verified plugin.
+    OwnedByOther,
+    /// The surface is structurally invalid (failed its validation
+    /// budgets); refused without any state change.
+    InvalidSurface,
+    /// The published revision is not a strict advance over the stored
+    /// head and is not an identical idempotent resurface at that head.
+    NonMonotonicRevision,
+}
+
+/// Typed rejection of a panel surface publish (or, later, patch): the
+/// machine-readable code plus the stored head when the refusal is
+/// revision-related, so the publisher can resynchronize.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct SurfaceReject {
+    pub code: SurfaceRejectCode,
+    /// The stored head when the refusal is revision-related; `None`
+    /// otherwise.
+    pub current_revision: Option<SceneRevision>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

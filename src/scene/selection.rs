@@ -724,6 +724,9 @@ impl Scene {
     /// True when `handle`'s entity type is allowed by the selection filter.
     /// The filter stores excluded type names; empty = everything allowed.
     pub fn passes_selection_filter(&self, handle: Handle) -> bool {
+        if !crate::scene::pick_locked() && self.is_layer_locked(handle) {
+            return false;
+        }
         if self.selection_filter.is_empty() {
             return true;
         }

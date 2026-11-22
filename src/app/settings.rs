@@ -1018,6 +1018,8 @@ pub struct UserSettings {
     /// LAYOUTCREATEVIEWPORT: a layout opened for the first time gets a
     /// viewport.
     pub layout_create_viewport: bool,
+    /// PICKLOCKED: objects on a locked layer can be selected.
+    pub pick_locked: bool,
     /// PDFSHXTEXT's recognition settings (fonts, threshold, PDFSHXLAYER,
     /// PDFSHXBESTFONT, PDFSHXTEXTSETTINGS).
     pub pdf_shx_text: crate::modules::insert::pdf_shx_text::ShxTextSettings,
@@ -1597,6 +1599,7 @@ impl Default for UserSettings {
             ucs_ortho: true,
             ucs_view: true,
             layout_create_viewport: true,
+            pick_locked: true,
             pdf_shx_text: Default::default(),
             dgn_import: Default::default(),
             ncopy_bind: false,

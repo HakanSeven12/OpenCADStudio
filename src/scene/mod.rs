@@ -8313,8 +8313,8 @@ impl Scene {
     }
 
     /// True when `handle`'s entity sits on a locked layer, or is a point cloud
-    /// locked on its own. Locked objects stay visible, snappable and
-    /// selectable, but mutation paths must skip them.
+    /// locked on its own. Locked objects stay visible and snappable, and
+    /// selectable unless PICKLOCKED is off; mutation paths must skip them.
     pub fn is_layer_locked(&self, handle: Handle) -> bool {
         let Some(entity) = self.document.get_entity(handle) else {
             return false;
@@ -13464,6 +13464,19 @@ static LAYOUT_CREATE_VIEWPORT: std::sync::atomic::AtomicBool =
 /// crossing too, as in the reference.
 pub fn selection_box_crossing(anchor: iced::Point, current: iced::Point) -> bool {
     current.x < anchor.x + 0.5
+}
+
+/// PICKLOCKED: objects on a locked layer can be selected (they are never
+/// editable). Off takes them out of every selection; they stay visible and
+/// snappable.
+static PICK_LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn pick_locked() -> bool {
+    PICK_LOCKED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_pick_locked(on: bool) {
+    PICK_LOCKED.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
 pub fn layout_create_viewport() -> bool {

@@ -472,6 +472,7 @@ fn handle_host_request(
                     }
                     InteractiveEvent::Cancel => CommandStep::Cancel,
                     InteractiveEvent::DialogResponse(res) => cmd_ref.on_dialog_response(res),
+                    InteractiveEvent::TextInput(_) => CommandStep::NeedPoint,
                 }));
                 match res {
                     Ok(s) => {
@@ -613,6 +614,9 @@ fn handle_host_request(
         HostRequest::CallTool { .. } => {
             HostResponse::Error("AI tools require the V4 protocol".to_string())
         }
+        HostRequest::GetInputKind { .. } => {
+            HostResponse::InputKind(crate::host::InteractiveInputKind::Point)
+        }
         HostRequest::ExecuteCode { .. } => {
             HostResponse::Error("ExecuteCode requires V4 protocol".to_string())
         }
@@ -716,6 +720,13 @@ fn handle_host_request_v4(
                     }
                     InteractiveEvent::Cancel => CommandStep::Cancel,
                     InteractiveEvent::DialogResponse(res) => cmd_ref.on_dialog_response(res),
+                    InteractiveEvent::TextInput(text) => {
+                        if api_version >= 28 {
+                            cmd_ref.on_text_input(&text)
+                        } else {
+                            CommandStep::NeedPoint
+                        }
+                    }
                 }));
                 match res {
                     Ok(s) => {
@@ -899,6 +910,26 @@ fn handle_host_request_v4(
             Some(HostResponse::ToolResult(result.unwrap_or_else(|_| {
                 Err(format!("plugin tool '{name}' panicked"))
             })))
+        }
+        HostRequest::GetInputKind { command_id } => {
+            if api_version < 28 {
+                return Some(HostResponse::InputKind(
+                    crate::host::InteractiveInputKind::Point,
+                ));
+            }
+            let result = {
+                let registry = interactive.borrow();
+                registry.get(&command_id).map(|cmd| {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cmd.input_kind()))
+                })
+            };
+            match result {
+                Some(Ok(kind)) => Some(HostResponse::InputKind(kind)),
+                Some(Err(_)) => Some(HostResponse::Error("input_kind() panicked".to_string())),
+                None => Some(HostResponse::Error(format!(
+                    "unknown interactive command {command_id}"
+                ))),
+            }
         }
         HostRequest::ExecuteCode {
             command_id,
@@ -1652,5 +1683,95 @@ mod tests {
             2,
             "both boundary notifications arrive once each: {from_v27:?}"
         );
+    }
+
+    #[test]
+    fn text_input_and_input_kind_are_gated_by_api_version() {
+        struct TextPromptCommand {
+            seen: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        }
+        impl InteractiveCommand for TextPromptCommand {
+            fn prompt(&self) -> String {
+                "Enter label:".into()
+            }
+            fn on_point(&mut self, _pt: [f64; 3]) -> CommandStep {
+                CommandStep::NeedPoint
+            }
+            fn input_kind(&self) -> crate::host::InteractiveInputKind {
+                crate::host::InteractiveInputKind::FreeText
+            }
+            fn on_text_input(&mut self, text: &str) -> CommandStep {
+                self.seen.lock().expect("seen").push(text.to_string());
+                CommandStep::Done
+            }
+        }
+
+        let (host_stream, runner_stream) = connect_pair();
+        let client = V4Client::from_stream_for_test(runner_stream);
+        let interactive: InteractiveRegistry = Rc::new(RefCell::new(HashMap::new()));
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        interactive.borrow_mut().insert(
+            9,
+            Box::new(TextPromptCommand { seen: seen.clone() }) as Box<dyn InteractiveCommand>,
+        );
+        let mut plugin = UnsupportedReplPlugin;
+
+        assert!(matches!(
+            handle_host_request_v4(
+                &mut plugin,
+                &interactive,
+                &client,
+                1,
+                27,
+                HostRequest::GetInputKind { command_id: 9 },
+            ),
+            Some(HostResponse::InputKind(
+                crate::host::InteractiveInputKind::Point
+            ))
+        ));
+        assert!(matches!(
+            handle_host_request_v4(
+                &mut plugin,
+                &interactive,
+                &client,
+                2,
+                27,
+                HostRequest::InteractiveEvent {
+                    command_id: 9,
+                    event: InteractiveEvent::TextInput("ignored".into()),
+                },
+            ),
+            Some(HostResponse::CommandStep(step)) if matches!(*step, CommandStep::NeedPoint)
+        ));
+
+        assert!(matches!(
+            handle_host_request_v4(
+                &mut plugin,
+                &interactive,
+                &client,
+                3,
+                28,
+                HostRequest::GetInputKind { command_id: 9 },
+            ),
+            Some(HostResponse::InputKind(
+                crate::host::InteractiveInputKind::FreeText
+            ))
+        ));
+        assert!(matches!(
+            handle_host_request_v4(
+                &mut plugin,
+                &interactive,
+                &client,
+                4,
+                28,
+                HostRequest::InteractiveEvent {
+                    command_id: 9,
+                    event: InteractiveEvent::TextInput("Hello World".into()),
+                },
+            ),
+            Some(HostResponse::CommandStep(step)) if matches!(*step, CommandStep::Done)
+        ));
+        assert_eq!(*seen.lock().expect("seen"), ["Hello World"]);
+        drop(host_stream);
     }
 }

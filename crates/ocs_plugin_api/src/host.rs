@@ -1120,6 +1120,21 @@ pub struct PluginTool {
     pub input_schema: String,
 }
 
+/// What kind of command-line input the active [`InteractiveCommand`] step awaits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "host", derive(serde::Serialize, serde::Deserialize))]
+pub enum InteractiveInputKind {
+    /// Normal viewport point, object pick, or selection step.
+    #[default]
+    Point,
+    /// Single-token command-line input (numbers, keywords): hides coordinate
+    /// dynamic-input boxes and submits on Space or Enter.
+    SingleToken,
+    /// Free-form command-line text: preserves letter case, bypasses math
+    /// evaluation, and keeps Space literal until Enter submits.
+    FreeText,
+}
+
 /// A point-driven interactive command a plugin starts via
 /// [`HostApi::start_interactive`]. The host shows the prompt, collects points —
 /// clicked in the viewport, or fed as coordinates over the `--serve` automation
@@ -1223,6 +1238,16 @@ pub trait InteractiveCommand: Send {
     /// answers with a step.
     fn on_undo_step(&mut self) -> Option<CommandStep> {
         None
+    }
+
+    /// What kind of command-line input the current step expects (API v27).
+    fn input_kind(&self) -> InteractiveInputKind {
+        InteractiveInputKind::Point
+    }
+
+    /// Command-line text submitted while [`Self::input_kind`] awaits text (API v27).
+    fn on_text_input(&mut self, _text: &str) -> CommandStep {
+        CommandStep::NeedPoint
     }
 }
 

@@ -186,7 +186,7 @@ const HELD_MESSAGE_LIMIT: usize = 2000;
 /// (e.g., interactive events). Nested plugin requests receive safe defaults,
 /// except command-line messages, which are kept for the caller to hold.
 #[derive(Default)]
-struct NullHost {
+pub(crate) struct NullHost {
     scratch_doc: Option<Document>,
     messages: Vec<HeldMessage>,
 }
@@ -403,6 +403,7 @@ fn ui_blocking_cap(kind: &'static str) -> Option<Duration> {
         "CursorMove" | "CustomGripMove" => Some(Duration::from_secs(2)),
         "InteractiveEvent"
         | "GetPrompt"
+        | "GetInputKind"
         | "NeedsEntityPick"
         | "IsSelectionGathering"
         | "AcceptsDragSelection"
@@ -443,6 +444,7 @@ pub(crate) fn request_kind(req: &HostRequest) -> &'static str {
         HostRequest::UndoStep { .. } => "UndoStep",
         HostRequest::ListTools => "ListTools",
         HostRequest::CallTool { .. } => "CallTool",
+        HostRequest::GetInputKind { .. } => "GetInputKind",
         HostRequest::Shutdown => "Shutdown",
     }
 }
@@ -1031,6 +1033,34 @@ impl PluginProcess {
                 "get_prompt",
                 |resp| match resp {
                     HostResponse::Text(s) => Ok(s),
+                    other => Err(Box::new(other)),
+                },
+            )
+        }
+    }
+
+    /// Ask the plugin process what command-line input mode an interactive command awaits.
+    pub fn get_input_kind(
+        &self,
+        command_id: u64,
+    ) -> Result<crate::host::InteractiveInputKind, PluginError> {
+        if self.manifest.api_version < 28 {
+            return Ok(crate::host::InteractiveInputKind::Point);
+        }
+        if let Some(v4) = &self.v4 {
+            let resp =
+                self.call_unhosted(v4, HostRequest::GetInputKind { command_id }, &mut |_| {})?;
+            match resp {
+                HostResponse::InputKind(kind) => Ok(kind),
+                other => Err(PluginError::UnexpectedResponse(Box::new(other))),
+            }
+        } else {
+            self.call_simple(
+                HostRequest::GetInputKind { command_id },
+                "GetInputKind",
+                "get_input_kind",
+                |resp| match resp {
+                    HostResponse::InputKind(kind) => Ok(kind),
                     other => Err(Box::new(other)),
                 },
             )

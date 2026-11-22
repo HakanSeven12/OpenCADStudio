@@ -203,7 +203,12 @@
 /// v26 or older keep their exact legacy Regions streams. A v26 runner cannot
 /// decode tag 15, so the host never sends the variant to it — the
 /// `notification_api_version` gate drops it.
-pub const API_VERSION: u32 = 27;
+/// v28 appends `InteractiveCommand::input_kind` and
+/// `InteractiveCommand::on_text_input` (with `InteractiveInputKind`,
+/// `HostRequest::GetInputKind`, `HostResponse::InputKind`, and
+/// `InteractiveEvent::TextInput`) for command-line text prompts; plugins on
+/// v3–v27 remain supported unchanged.
+pub const API_VERSION: u32 = 28;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

@@ -4786,7 +4786,6 @@ mod mission_m062_tests {
         assert!(output.contains("1 sheet(s)"), "{output}");
         assert!(output.contains("mm"), "{output}");
         let bytes = std::fs::read(&path).expect("the command must create the file");
-        let _ = std::fs::remove_file(&path);
         assert!(bytes.starts_with(b"(DWF V06.00)"), "the package tag");
         assert_eq!(reader::sheet_names(&bytes), Some(vec![layout.clone()]));
         let sheet = reader::sheet(&bytes, &layout).expect("the sheet opens");
@@ -9307,12 +9306,8 @@ mod data_extraction_tests {
         line.common.layer = "WALLS".to_string();
         app.tabs[i].scene.add_entity(document::EntityType::Line(line));
 
-        let folder = std::env::temp_dir().join(format!(
-            "ocs-extraction-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&folder).expect("the folder");
+        let dir = tempfile::tempdir().expect("a temporary extraction directory");
+        let folder = dir.path().to_path_buf();
         let ext = folder.join("lines.csv");
         let settings_path = folder.join("lines.dxex");
         let settings = serde_json::json!({
@@ -9361,7 +9356,6 @@ mod data_extraction_tests {
             tables[0].cell_text(0, 0).map(|text| text.to_string()).as_deref(),
             Some("LINES"),
         );
-        let _ = std::fs::remove_dir_all(&folder);
     }
 }
 
@@ -9596,12 +9590,10 @@ mod group_roundtrip_tests {
     use document::entities::Line;
     use document::types::Vector3;
 
-    fn scratch_path(tag: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "ocs-groups-{}-{}.dwg",
-            std::process::id(),
-            tag
-        ))
+    fn scratch_path(tag: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join(format!("ocs-groups-{tag}.dwg"));
+        (dir, path)
     }
 
     /// Groups are document objects with real records: they must survive the
@@ -9625,7 +9617,7 @@ mod group_roundtrip_tests {
         );
         let i = app.active_tab;
         app.tabs[i].scene.create_group("FRAME".to_string(), vec![a, b]);
-        let path = scratch_path("roundtrip");
+        let (_scratch_dir, path) = scratch_path("roundtrip");
         let saved = app.automation_op(&format!(r#"{{"op":"save","path":"{}"}}"#, path.display().to_string().replace('\\', "/")));
         assert_eq!(saved["ok"], true, "the save reported success: {saved}");
         let opened = app.automation_op(&format!(r#"{{"op":"open","path":"{}"}}"#, path.display().to_string().replace('\\', "/")));

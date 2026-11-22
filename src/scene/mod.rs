@@ -1518,8 +1518,10 @@ fn inserted_draw_depth_label(order: &[DrawDepthEntry], position: usize) -> Optio
 /// the entry of an entity the table left alone is where a search for the
 /// handle as both key and handle ends, with no walk through the order.
 fn draw_depth_entry_at_own_key(order: &[DrawDepthEntry], handle: u64) -> Option<&DrawDepthEntry> {
-    let _ = (order, handle);
-    None
+    order
+        .binary_search_by_key(&(handle, handle), |entry| (entry.effective, entry.handle))
+        .ok()
+        .map(|index| &order[index])
 }
 
 /// The entry of `handle` in a block's order: at its own place, or, for an

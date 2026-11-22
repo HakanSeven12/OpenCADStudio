@@ -856,3 +856,7 @@ mod lenient_loading_tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "plot_style_parser_panic_tests.rs"]
+mod parser_panic_tests;

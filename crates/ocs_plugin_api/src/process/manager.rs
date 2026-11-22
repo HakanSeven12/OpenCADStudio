@@ -965,6 +965,7 @@ mod tests {
             manifest,
             ribbon: vec![],
             io_lines: std::sync::Mutex::new(None),
+            held_messages: std::sync::Mutex::new(Vec::new()),
         };
         (process, runner_stream)
     }

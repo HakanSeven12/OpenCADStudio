@@ -436,7 +436,30 @@ impl OpenCADStudio {
         self.finish_pending_history(i);
     }
 
+    /// Takes back what a failed command recorded: its open undo record is
+    /// completed, each record above `depth` on the active tab is undone
+    /// with no notice, and the redo entries that this makes are dropped, so
+    /// REDO cannot bring the failed command back. Returns the number of
+    /// records taken back.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn roll_back_to_undo_depth(&mut self, depth: usize) -> usize {
+        let i = self.active_tab;
+        self.finish_all_pending_history();
+        let steps = self.tabs[i].history.undo_stack.len().saturating_sub(depth);
+        if steps == 0 {
+            return 0;
+        }
+        self.undo_steps_reported(steps, false);
+        let redo = self.tabs[i].history.take_redo();
+        defer_history_drop(redo);
+        steps
+    }
+
     pub(super) fn finish_all_pending_history(&mut self) {
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        super::update::panic_guard::test_panic_point(
+            super::update::panic_guard::TestPanicAt::BeforeMessageEnd,
+        );
         // A graph evaluation drives nested updates (an object node writes
         // through the Properties path); its step closes after it, as one.
         if self.graph_undo_open {

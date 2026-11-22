@@ -287,6 +287,10 @@ impl OpenCADStudio {
     /// The update iced runs: one message, then open tools parked again.
     pub fn update_root(&mut self, msg: Message) -> Task<Message> {
         let msg = self.route_tool_keyboard(msg);
+        // A wasm build aborts on a panic, so there is nothing to catch.
+        #[cfg(not(target_arch = "wasm32"))]
+        let task = self.update_guarded(msg);
+        #[cfg(target_arch = "wasm32")]
         let task = self.update(msg);
         let settled = self.settle_tool_windows();
         Task::batch([task, settled])

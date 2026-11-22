@@ -402,6 +402,53 @@ mod tests {
         );
     }
 
+    /// A DWF underlay of a sheet 300 by 200 with one picture, 4000 pixels by
+    /// 2 over the box 0,100 to 300,101: more pixels than it is shown with
+    /// whole.
+    fn model_with_sheet_picture(name: &str) -> (Scene, Handle) {
+        use crate::scene::model::underlay_vector::dwf_samples;
+        let picture = dwf_samples::image(0x0006, [4000, 2], [0, 100], [300, 1], &[90; 24_000]);
+        let path = format!("memory://reseed-sheet-{name}.dwf");
+        crate::scene::model::pdf_raster::register_source(
+            &path,
+            std::sync::Arc::new(dwf_samples::package(&[&picture])),
+        );
+        let mut scene = Scene::new();
+        let definition = scene.document.allocate_handle();
+        scene.document.objects.insert(
+            definition,
+            document::objects::ObjectType::UnderlayDefinition(
+                document::objects::UnderlayDefinition::dwf(&path, "Sheet"),
+            ),
+        );
+        let mut underlay = document::entities::Underlay::new(document::entities::UnderlayType::Dwf);
+        underlay.definition_handle = definition;
+        let handle = scene.add_entity(EntityType::Underlay(underlay));
+        (scene, handle)
+    }
+
+    /// Zoomed in on the picture of a DWF underlay's sheet, the worker draws
+    /// the part in view again from the picture's pixels.
+    #[test]
+    fn a_zoom_step_draws_the_view_of_a_sheets_picture_again() {
+        let (mut scene, handle) = model_with_sheet_picture("zoom");
+        let whole = scene.images[&handle].clone();
+        assert_eq!(whole.width, 3072, "the picture is shown reduced");
+
+        rest_at(&mut scene, 10.0, 99.0, 14.0, 103.0);
+        let done = scene.take_reseed_job().expect("a job").render();
+        assert_eq!(scene.apply_reseed(done), 1);
+
+        let model = &scene.images[&handle];
+        assert!(
+            model.height > whole.height && model.verts.len() > whole.verts.len(),
+            "the view's part is in the raster: {} rows, {} corners",
+            model.height,
+            model.verts.len()
+        );
+        assert_eq!(model.corners, whole.corners, "at the same place");
+    }
+
     /// Two zoom steps before the worker starts make one job, with the
     /// newer input of each object.
     #[test]

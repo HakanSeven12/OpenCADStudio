@@ -293,8 +293,13 @@ impl ImageModel {
     /// page inch) times the entity scale, placed at the insertion with the
     /// entity rotation. A clip boundary (on, 2+ vertices, in underlay units)
     /// limits the drawn area to its inside, or to the page outside it when
-    /// inverted. `None` when the underlay is off, non-PDF, or the page can't
-    /// be rendered (caller keeps the outline placeholder).
+    /// inverted. `None` when the underlay is off or the page can't be
+    /// rendered (caller keeps the outline placeholder).
+    ///
+    /// A DWF sheet is drawn as vector wires; its raster is the images of the
+    /// sheet, one picture over the box they lie in ([`Self::sheet_images`]),
+    /// with their own pixels, and `None` for a sheet without images, as for
+    /// a DGN model.
     /// `world_per_pixel` is the view's scale: the page is rasterised near
     /// the size it shows on screen (full size when `None` or when larger),
     /// so thin lines stay one crisp pixel wide when zoomed out.
@@ -347,6 +352,9 @@ impl ImageModel {
         if def.unloaded {
             return None;
         }
+        if def.underlay_type == UnderlayType::Dwf {
+            return Self::sheet_images(u, def, world_per_pixel, view, print);
+        }
         let page = crate::entities::underlay::page_of(def);
         let rect = crate::entities::underlay::definition_rect(def)?;
         // The page's longest side on screen, pixels (the view scale is taken
@@ -380,8 +388,9 @@ impl ImageModel {
                 };
                 (source, raster)
             }
-            // DWF sheets and DGN models are drawn as vector wires
-            // (`underlay_vector::display_wires`).
+            // A DGN model is drawn as vector wires
+            // (`underlay_vector::display_wires`), and so is a DWF sheet, whose
+            // images were taken above.
             _ => return None,
         };
         let adjust = underlay_adjust(u, def, background);
@@ -408,7 +417,135 @@ impl ImageModel {
             _ => None,
         };
 
-        // The page rectangle in drawing units (1 unit per PDF inch, or per
+        let region = region.map(|(uv, sharp)| {
+            let sharp_pixels = pdf_raster::adjusted_pixels_uncached(&sharp, adjust);
+            (uv, (sharp_pixels, sharp.width, sharp.height))
+        });
+        Self::placed_underlay(
+            u,
+            def,
+            rect,
+            &underlay_visible_uv(u, rect),
+            (pixels, raster.width, raster.height),
+            region,
+            1.0 - u.fade.min(100) as f32 / 100.0,
+        )
+    }
+
+    /// The raster images of a DWF underlay's sheet as one picture over the
+    /// box they lie in, clear between them; the sheet's lines and fills are
+    /// wires (`underlay_vector::display_wires`), ranked under and over it.
+    ///
+    /// The images keep their own pixels: the underlay's fade, contrast,
+    /// monochrome and background settings are for the sheet's lines, fills
+    /// and text.
+    ///
+    /// The picture has each image's own pixels where that is at most
+    /// `underlay_vector::RASTER_SIDE` along its longer side, and fewer
+    /// otherwise; then a view zoomed in past it has its part drawn again
+    /// from the images' pixels, as a PDF page's is. A plot takes the picture
+    /// whole, at the images' own pixels up to
+    /// `underlay_vector::PRINTED_IMAGE_PIXELS`.
+    fn sheet_images(
+        u: &document::entities::Underlay,
+        def: &document::entities::UnderlayDefinition,
+        world_per_pixel: Option<f64>,
+        view: Option<[f64; 4]>,
+        print: bool,
+    ) -> Option<(Self, bool)> {
+        use super::{pdf_raster, underlay_vector};
+        let page = crate::entities::underlay::page_of(def);
+        let sheet = underlay_vector::sheet(def.underlay_type, &def.file_path, page)?;
+        let rect = underlay_vector::images_box(&sheet)?;
+        let (wide, tall) = (rect[2] - rect[0], rect[3] - rect[1]);
+        // The pixels of the finest image to the sheet unit, along x and y.
+        let fine = underlay_vector::images_density(&sheet);
+        if !(wide > 0.0 && tall > 0.0 && fine[0] > 0.0 && fine[1] > 0.0) {
+            return None;
+        }
+        // What shows of the sheet, as far as it lies on the box.
+        let tris_uv = if crate::entities::underlay::is_clipped(u) {
+            triangles_on_box(&underlay_visible_uv(u, sheet.rect), sheet.rect, rect)
+        } else {
+            underlay_visible_uv(u, rect)
+        };
+        if tris_uv.is_empty() {
+            return None;
+        }
+
+        // The share of the images' own pixels the whole picture is drawn
+        // with, along each axis.
+        let (full_w, full_h) = (wide * fine[0], tall * fine[1]);
+        let share = if print {
+            (underlay_vector::PRINTED_IMAGE_PIXELS / (full_w * full_h)).sqrt()
+        } else {
+            underlay_vector::RASTER_SIDE / full_w.max(full_h)
+        }
+        .min(1.0);
+        let pixels_of = |pixels: f64| pixels.round().clamp(1.0, 65_535.0) as u32;
+        let (width, height) = (pixels_of(full_w * share), pixels_of(full_h * share));
+        let whole = underlay_vector::images_raster(&def.file_path, page, width, height)?;
+
+        // Zoomed in past a reduced picture: the part in view again, as fine
+        // as the screen shows it and no finer than the images are.
+        let region = match (view, world_per_pixel.filter(|wpp| *wpp > 0.0)) {
+            (Some(view), Some(wpp)) if !print && share < 1.0 => {
+                let side = (wide * u.x_scale.abs()).max(tall * u.y_scale.abs()) / wpp;
+                let screen = side / wide.max(tall);
+                underlay_view_uv(u, rect, view).and_then(|uv| {
+                    let part = [(uv[2] - uv[0]) * wide, (uv[3] - uv[1]) * tall];
+                    let wanted = [fine[0].min(screen), fine[1].min(screen)];
+                    let fits = (pdf_raster::REGION_SIDE
+                        / (part[0] * wanted[0]).max(part[1] * wanted[1]))
+                    .min(1.0);
+                    let density = [wanted[0] * fits, wanted[1] * fits];
+                    let finer = (0..2).any(|axis| density[axis] > fine[axis] * share * 1.2);
+                    finer.then(|| {
+                        let (width, height) = (
+                            pixels_of(part[0] * density[0]),
+                            pixels_of(part[1] * density[1]),
+                        );
+                        let region = [
+                            rect[0] + uv[0] * wide,
+                            rect[1] + uv[1] * tall,
+                            rect[0] + uv[2] * wide,
+                            rect[1] + uv[3] * tall,
+                        ];
+                        let sharp = underlay_vector::draw_images(&sheet, region, width, height);
+                        (uv, (sharp, width, height))
+                    })
+                })
+            }
+            _ => None,
+        };
+        Self::placed_underlay(
+            u,
+            def,
+            rect,
+            &tris_uv,
+            (whole.pixels.clone(), width, height),
+            region,
+            1.0,
+        )
+    }
+
+    /// A raster of an underlay where the underlay lies: `whole`, its pixels
+    /// and their size, over the rectangle `rect` of the underlay's units,
+    /// shown inside the triangles `tris_uv` (UV of `rect`, y up) with the
+    /// opacity `opacity`. `region` is a part of it drawn again finer: its
+    /// UV in `rect`, its pixels and their size. The flag tells whether
+    /// there is one.
+    fn placed_underlay(
+        u: &document::entities::Underlay,
+        def: &document::entities::UnderlayDefinition,
+        rect: [f64; 4],
+        tris_uv: &[[f64; 2]],
+        whole: (Arc<Vec<u8>>, u32, u32),
+        region: Option<([f64; 4], (Arc<Vec<u8>>, u32, u32))>,
+        opacity: f32,
+    ) -> Option<(Self, bool)> {
+        let (pixels, whole_width, whole_height) = whole;
+        // The rectangle in drawing units (1 unit per PDF inch, or per
         // DWF/DGN sheet unit), entity scale applied, from its lower-left
         // corner.
         let (page_w, page_h) = (rect[2] - rect[0], rect[3] - rect[1]);
@@ -438,7 +575,6 @@ impl ImageModel {
         ];
         let corners_low = [[oxl, oyl, ozl]; 4];
 
-        let tris_uv = underlay_visible_uv(u, rect);
         let vertex = |[fu, fv]: [f64; 2], tex: [f32; 2]| {
             let (fu, fv) = (fu as f32, fv as f32);
             ImageQuadVertex {
@@ -453,24 +589,21 @@ impl ImageModel {
                     .iter()
                     .map(|&p| vertex(p, [p[0] as f32, 1.0 - p[1] as f32]))
                     .collect();
-                (pixels, raster.width, raster.height, verts)
+                (pixels, whole_width, whole_height, verts)
             }
-            Some((r, sharp)) => {
-                let sharp_pixels = pdf_raster::adjusted_pixels_uncached(&sharp, adjust);
-                atlas_with_region(
-                    (&pixels[..], raster.width as usize, raster.height as usize),
-                    (
-                        &sharp_pixels[..],
-                        sharp.width as usize,
-                        sharp.height as usize,
-                    ),
-                    r,
-                    &tris_uv,
-                    &vertex,
-                )
-            }
+            Some((r, (sharp_pixels, sharp_width, sharp_height))) => atlas_with_region(
+                (&pixels[..], whole_width as usize, whole_height as usize),
+                (
+                    &sharp_pixels[..],
+                    sharp_width as usize,
+                    sharp_height as usize,
+                ),
+                r,
+                tris_uv,
+                &vertex,
+            ),
         };
-        let sharpened = width != raster.width || height != raster.height;
+        let sharpened = width != whole_width || height != whole_height;
 
         Some((Self {
             render_instance: None,
@@ -479,7 +612,7 @@ impl ImageModel {
             pixels,
             width,
             height,
-            opacity: 1.0 - u.fade.min(100) as f32 / 100.0,
+            opacity,
             corners,
             corners_low,
             draw_depth: 0.0,
@@ -488,6 +621,63 @@ impl ImageModel {
             use_alpha: true,
         }, sharpened))
     }
+}
+
+/// The parts of the triangles `tris` (flat, groups of three, in the UV of
+/// the rectangle `outer`) that lie on the rectangle `inner`, as triangles in
+/// the UV of `inner`.
+fn triangles_on_box(tris: &[[f64; 2]], outer: [f64; 4], inner: [f64; 4]) -> Vec<[f64; 2]> {
+    let size = |r: [f64; 4]| [r[2] - r[0], r[3] - r[1]];
+    let (outer_size, inner_size) = (size(outer), size(inner));
+    let to_inner = |p: [f64; 2]| {
+        [0, 1]
+            .map(|axis| (outer[axis] + p[axis] * outer_size[axis] - inner[axis]) / inner_size[axis])
+    };
+    let mut out = Vec::new();
+    for triangle in tris.chunks_exact(3) {
+        let mut ring: Vec<[f64; 2]> = triangle.iter().map(|&p| to_inner(p)).collect();
+        // Cut by each side of the unit square in turn.
+        for (axis, bound, below) in [
+            (0, 0.0, false),
+            (0, 1.0, true),
+            (1, 0.0, false),
+            (1, 1.0, true),
+        ] {
+            let kept = |p: &[f64; 2]| {
+                if below {
+                    p[axis] <= bound
+                } else {
+                    p[axis] >= bound
+                }
+            };
+            let mut cut = Vec::with_capacity(ring.len() + 1);
+            for (i, a) in ring.iter().enumerate() {
+                let b = &ring[(i + 1) % ring.len()];
+                if kept(a) {
+                    cut.push(*a);
+                }
+                if kept(a) != kept(b) {
+                    let t = (bound - a[axis]) / (b[axis] - a[axis]);
+                    let mut p = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+                    p[axis] = bound;
+                    cut.push(p);
+                }
+            }
+            ring = cut;
+            if ring.len() < 3 {
+                break;
+            }
+        }
+        // A fan over what is left, without the slivers of no area.
+        for k in 1..ring.len().saturating_sub(1) {
+            let (a, b, c) = (ring[0], ring[k], ring[k + 1]);
+            let area = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]);
+            if area.abs() > 1e-12 {
+                out.extend([a, b, c]);
+            }
+        }
+    }
+    out
 }
 
 /// The part of an underlay's page inside the world rectangle `view`, as page
@@ -2462,5 +2652,211 @@ mod tests {
         .unwrap();
         assert_eq!((model.width, model.height), (30, 20));
         assert!(!sharp);
+    }
+
+    /// Two by two pixels of a W2D image, four bytes each in the order blue,
+    /// green, red, alpha, rows from the top.
+    const SHEET_PIXELS: [u8; 16] = [
+        10, 20, 30, 255, 40, 50, 60, 255, //
+        70, 80, 90, 255, 100, 110, 120, 255,
+    ];
+
+    /// A DWF underlay of a sheet 300 by 200 whose stream draws `parts`,
+    /// placed at 1000,500 at twice its size.
+    fn dwf_underlay(
+        name: &str,
+        parts: &[&[u8]],
+    ) -> (
+        document::entities::Underlay,
+        document::objects::UnderlayDefinition,
+    ) {
+        let path = format!("memory://sheet-images-{name}.dwf");
+        let package = super::super::underlay_vector::dwf_samples::package(parts);
+        super::super::pdf_raster::register_source(&path, std::sync::Arc::new(package));
+        let def = document::objects::UnderlayDefinition::dwf(&path, "Sheet");
+        let mut underlay = document::entities::Underlay::new(document::entities::UnderlayType::Dwf);
+        underlay.insertion_point = document::types::Vector3::new(1000.0, 500.0, 0.0);
+        underlay.x_scale = 2.0;
+        underlay.y_scale = 2.0;
+        (underlay, def)
+    }
+
+    /// The image block of `SHEET_PIXELS` over the box 100,50 to 200,150 of
+    /// the sheet.
+    fn sheet_picture() -> Vec<u8> {
+        super::super::underlay_vector::dwf_samples::image(
+            0x0007,
+            [2, 2],
+            [100, 50],
+            [100, 100],
+            &SHEET_PIXELS,
+        )
+    }
+
+    #[test]
+    fn a_dwf_underlay_shows_the_images_of_its_sheet() {
+        let (underlay, def) = dwf_underlay("shown", &[&sheet_picture()]);
+
+        let model =
+            ImageModel::from_underlay(&underlay, &def, [1.0; 4], None).expect("the sheet's image");
+
+        assert_eq!((model.width, model.height), (2, 2));
+        assert_eq!(
+            model.pixels.as_slice(),
+            [
+                30, 20, 10, 255, 60, 50, 40, 255, //
+                90, 80, 70, 255, 120, 110, 100, 255,
+            ]
+        );
+        assert_eq!(model.corners[0], [1200.0, 600.0, 0.0]);
+        assert_eq!(model.corners[2], [1400.0, 800.0, 0.0]);
+        assert_eq!(model.verts.len(), 6, "the whole picture");
+        assert_eq!(model.opacity, 1.0);
+    }
+
+    #[test]
+    fn a_dwf_underlay_without_images_has_no_raster() {
+        let line = super::super::underlay_vector::dwf_samples::line([10, 10], [50, 0]);
+        let (underlay, def) = dwf_underlay("none", &[&line]);
+
+        assert!(ImageModel::from_underlay(&underlay, &def, [1.0; 4], None).is_none());
+    }
+
+    #[test]
+    fn a_sheets_images_keep_their_pixels_whatever_the_underlays_settings() {
+        // Fade, contrast, monochrome and the background adjustment are for
+        // the sheet's lines, fills and text.
+        let (mut underlay, def) = dwf_underlay("settings", &[&sheet_picture()]);
+        let plain = ImageModel::from_underlay(&underlay, &def, [0.0, 0.0, 0.0, 1.0], None)
+            .expect("the sheet's image");
+        underlay.fade = 40;
+        underlay.contrast = 30;
+        underlay.flags |= document::entities::UnderlayDisplayFlags::MONOCHROME
+            | document::entities::UnderlayDisplayFlags::ADJUST_FOR_BACKGROUND;
+
+        let model = ImageModel::from_underlay(&underlay, &def, [0.0, 0.0, 0.0, 1.0], None)
+            .expect("the sheet's image");
+
+        assert_eq!(model.pixels, plain.pixels);
+        assert_eq!(model.opacity, 1.0);
+    }
+
+    #[test]
+    fn a_sheets_images_stay_inside_the_underlays_clip() {
+        // The clip ends halfway across the image, at 150 of the sheet.
+        let (mut underlay, def) = dwf_underlay("clip", &[&sheet_picture()]);
+        underlay.flags |= document::entities::UnderlayDisplayFlags::CLIPPING;
+        underlay.clip_boundary_vertices = vec![
+            document::types::Vector2::new(0.0, 0.0),
+            document::types::Vector2::new(150.0, 200.0),
+        ];
+
+        let model =
+            ImageModel::from_underlay(&underlay, &def, [1.0; 4], None).expect("the sheet's image");
+
+        assert!(!model.verts.is_empty());
+        for vertex in &model.verts {
+            assert!(
+                (1200.0..=1300.0).contains(&vertex.pos[0])
+                    && (600.0..=800.0).contains(&vertex.pos[1]),
+                "{:?}",
+                vertex.pos
+            );
+            assert!((0.0..=0.5).contains(&vertex.uv[0]), "{:?}", vertex.uv);
+        }
+        let right = model.verts.iter().map(|v| v.pos[0]).fold(0.0, f32::max);
+        assert_eq!(right, 1300.0, "the picture reaches the clip");
+    }
+
+    #[test]
+    fn a_clip_away_from_the_images_leaves_no_raster() {
+        let (mut underlay, def) = dwf_underlay("clip-away", &[&sheet_picture()]);
+        underlay.flags |= document::entities::UnderlayDisplayFlags::CLIPPING;
+        underlay.clip_boundary_vertices = vec![
+            document::types::Vector2::new(0.0, 0.0),
+            document::types::Vector2::new(50.0, 40.0),
+        ];
+
+        assert!(ImageModel::from_underlay(&underlay, &def, [1.0; 4], None).is_none());
+    }
+
+    #[test]
+    fn images_apart_are_one_raster_over_the_box_that_holds_them() {
+        // Two pictures of ten units to the pixel, 60 units apart.
+        let image = super::super::underlay_vector::dwf_samples::image;
+        let (underlay, def) = dwf_underlay(
+            "apart",
+            &[
+                &image(0x0007, [2, 2], [20, 20], [20, 20], &SHEET_PIXELS),
+                &image(0x0007, [2, 2], [60, -20], [20, 20], &SHEET_PIXELS),
+            ],
+        );
+
+        let model =
+            ImageModel::from_underlay(&underlay, &def, [1.0; 4], None).expect("the sheet's images");
+
+        assert_eq!((model.width, model.height), (10, 2));
+        assert_eq!(model.corners[0], [1040.0, 540.0, 0.0]);
+        assert_eq!(model.corners[2], [1240.0, 580.0, 0.0]);
+        let top: Vec<u8> = model.pixels[..40].chunks_exact(4).map(|p| p[3]).collect();
+        assert_eq!(
+            top,
+            [255, 255, 0, 0, 0, 0, 0, 0, 255, 255],
+            "clear between the two"
+        );
+        assert_eq!(model.pixels[..4], [30, 20, 10, 255]);
+        assert_eq!(model.pixels[32..36], [30, 20, 10, 255]);
+    }
+
+    /// A picture 4000 pixels by 2 over the box 0,100 to 300,101: more pixels
+    /// along its side than a raster is shown with.
+    fn long_picture() -> Vec<u8> {
+        super::super::underlay_vector::dwf_samples::image(
+            0x0006,
+            [4000, 2],
+            [0, 100],
+            [300, 1],
+            &[90; 4000 * 2 * 3],
+        )
+    }
+
+    #[test]
+    fn an_image_with_more_pixels_than_are_shown_is_reduced() {
+        let (underlay, def) = dwf_underlay("reduced", &[&long_picture()]);
+
+        let model =
+            ImageModel::from_underlay(&underlay, &def, [1.0; 4], None).expect("the sheet's image");
+
+        assert_eq!(
+            model.width as f64,
+            crate::scene::model::underlay_vector::RASTER_SIDE
+        );
+    }
+
+    #[test]
+    fn zoomed_in_on_a_reduced_image_the_view_is_drawn_again_from_its_pixels() {
+        let (underlay, def) = dwf_underlay("zoomed", &[&long_picture()]);
+        // A view of a sixth of the picture, 2000 pixels across.
+        let view = [1000.0, 690.0, 1100.0, 710.0];
+
+        let (model, sharp) =
+            ImageModel::from_underlay_in_view(&underlay, &def, [1.0; 4], Some(0.05), Some(view))
+                .expect("the sheet's image");
+
+        assert!(sharp, "the part in view is drawn again");
+        let whole = ImageModel::from_underlay(&underlay, &def, [1.0; 4], None).unwrap();
+        assert!(model.height > whole.height, "the two share one texture");
+        assert_eq!(model.corners, whole.corners, "at the same place");
+    }
+
+    #[test]
+    fn a_plot_takes_an_image_whole_at_its_own_size() {
+        let (underlay, def) = dwf_underlay("printed", &[&long_picture()]);
+
+        let model = ImageModel::from_underlay_for_print(&underlay, &def, [1.0; 4])
+            .expect("the sheet's image");
+
+        assert_eq!((model.width, model.height), (4000, 2));
+        assert_eq!(model.verts.len(), 6, "one picture, whole");
     }
 }

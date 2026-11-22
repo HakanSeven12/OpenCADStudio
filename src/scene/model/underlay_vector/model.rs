@@ -30,6 +30,19 @@ pub struct Path {
     pub fill: Option<[u8; 3]>,
 }
 
+/// A raster image a sheet draws.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SheetImage {
+    /// min x, min y, max x, max y in sheet units.
+    pub rect: [f64; 4],
+    pub width: u32,
+    pub height: u32,
+    /// RGBA with straight alpha, rows from the top.
+    pub pixels: std::sync::Arc<Vec<u8>>,
+    /// How many of the sheet's paths are drawn before it.
+    pub after: usize,
+}
+
 /// A sheet (DWF) or model (DGN): its extent and what it draws.
 #[derive(Clone, Debug, Default)]
 pub struct Sheet {
@@ -37,6 +50,8 @@ pub struct Sheet {
     pub rect: [f64; 4],
     pub paths: Vec<Path>,
     pub texts: Vec<Text>,
+    /// The raster images among the paths, in the order they are drawn.
+    pub images: Vec<SheetImage>,
     /// DGN: sub units per master unit (the scale a Sub conversion offers).
     pub sub_per_master: f64,
     /// DGN: the colours come from the file's own colour table, which the

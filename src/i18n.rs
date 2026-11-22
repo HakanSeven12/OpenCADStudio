@@ -729,39 +729,47 @@ mod tests {
         }
     }
 
-    #[test]
-    fn formatted_history_preserves_authored_values_in_every_locale() {
+    #[rstest]
+    #[case("action")]
+    #[case("parameter")]
+    #[case("edit-block")]
+    #[case("save-block")]
+    #[case("delete-block")]
+    fn formatted_history_preserves_authored_values_in_every_locale(#[case] attribute: &str) {
         for language in Language::ALL
             .into_iter()
             .filter(|language| *language != Language::System)
         {
             let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
             load_language(&loader, language).unwrap();
-            for attribute in [
-                "action",
-                "parameter",
-                "edit-block",
-                "save-block",
-                "delete-block",
+            for authored in [
+                "Revert",
+                "  Door { $label } \\ literal __ocs_fmt_0__ \n",
+                "??? - ?",
             ] {
-                for authored in [
-                    "Revert",
-                    "  Door { $label } \\ literal __ocs_fmt_0__ \n",
-                    "باب — 扉",
-                ] {
-                    let rendered = format_attribute_with(
-                        &loader,
-                        "block-formatted-history",
-                        attribute,
-                        &[("label", authored)],
-                    )
-                    .expect("history template must format without errors");
-                    assert!(
-                        rendered.contains(authored),
-                        "{language:?}/{attribute}: {rendered:?}"
-                    );
-                }
+                let rendered = format_attribute_with(
+                    &loader,
+                    "block-formatted-history",
+                    attribute,
+                    &[("label", authored)],
+                )
+                .expect("history template must format without errors");
+                assert!(
+                    rendered.contains(authored),
+                    "{language:?}/{attribute}: {rendered:?}"
+                );
             }
+        }
+    }
+
+    #[test]
+    fn formatted_history_catalog_ids_exist_in_every_locale() {
+        for language in Language::ALL
+            .into_iter()
+            .filter(|language| *language != Language::System)
+        {
+            let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+            load_language(&loader, language).unwrap();
             for source in [
                 "Move",
                 "Scale",

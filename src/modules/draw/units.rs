@@ -153,3 +153,7 @@ pub fn model_space_handles(scene: &crate::scene::Scene) -> Vec<document::Handle>
         .map(|entity| entity.common().handle)
         .collect()
 }
+
+#[cfg(test)]
+#[path = "units_tests.rs"]
+mod tests;

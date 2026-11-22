@@ -6537,6 +6537,74 @@ mod batch4_tests {
         );
     }
 
+    /// A drawing in a unit that the units picker does not offer has a size
+    /// too: its sheet scales use it. US survey feet go with inches of paper,
+    /// decimeters with millimetres.
+    #[test]
+    fn vpscale_is_a_sheet_scale_in_a_unit_the_picker_does_not_offer() {
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        enter_layout(&mut app);
+        let _ = app.run_command_line("VPORTS SINGLE");
+        let _ = app.feed_active_cmd("F");
+        let handles = layout_viewport_handles(&app);
+        assert_eq!(handles.len(), 1, "{}", out(&app));
+        let i = app.active_tab;
+
+        let survey_foot_in_inches = 1_200_000.0 / 3_937.0 / 25.4;
+        for (code, unit_name, expected_unit) in [
+            (21, "US survey feet", survey_foot_in_inches),
+            (14, "decimeters", 100.0),
+        ] {
+            app.tabs[i].scene.document.header.insertion_units = code;
+            let unit = app.tabs[i].scene.default_scale_unit_factor();
+            assert!(
+                (unit - expected_unit).abs() < 1e-9 * expected_unit,
+                "{unit_name}: one drawing unit is {unit} paper units, expected {expected_unit}"
+            );
+
+            let _ = app.run_command_line("VPSCALE 1:50");
+            assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+            let eff = effective_scale(&app, handles[0]);
+            let expected = expected_unit / 50.0;
+            assert!(
+                (eff - expected).abs() < 1e-9 * expected,
+                "{unit_name}: VPSCALE 1:50 gives {eff}, a sheet scale of 1:50 is {expected}"
+            );
+        }
+    }
+
+    /// DWGUNITS converts from a unit that the picker does not offer: a line
+    /// of 10 US survey feet is 3.048006 m long, and the drawing says metres.
+    #[test]
+    fn dwgunits_converts_a_drawing_in_us_survey_feet() {
+        let mut app = new_app();
+        let i = app.active_tab;
+        app.tabs[i].scene.document.header.insertion_units = 21;
+        let _ = app.run_command_line("LINE 0,0 10,0 ");
+        assert_eq!(
+            lines(&mut app),
+            vec![(0.0, 0.0, 10.0, 0.0)],
+            "{}",
+            out(&app)
+        );
+
+        let _ = app.run_command_line("DWGUNITS m");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+
+        assert_eq!(app.tabs[i].scene.document.header.insertion_units, 6);
+        let converted = lines(&mut app);
+        let expected = 10.0 * 1_200.0 / 3_937.0;
+        assert!(
+            (converted[0].2 - expected).abs() < 1e-9,
+            "the line ends at x = {}, expected {expected}\n{}",
+            converted[0].2,
+            out(&app)
+        );
+        let text = out(&app);
+        assert!(text.contains("US Survey Feet"), "{text}");
+    }
+
     #[test]
     fn vp_lock_toggles_the_viewport_display_lock() {
         let mut app = new_app();

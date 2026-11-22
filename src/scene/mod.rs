@@ -71,6 +71,8 @@ mod dwg_edit_after_open_tests;
 #[cfg(test)]
 mod layer_visibility_block_cache_tests;
 #[cfg(test)]
+mod layout_plot_settings_cache_tests;
+#[cfg(test)]
 mod ole_resolution_tests;
 #[cfg(test)]
 mod reference_only_tests;

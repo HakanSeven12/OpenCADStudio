@@ -605,37 +605,65 @@ fn workbook_metadata(path: &Path) -> Result<(Vec<String>, Vec<String>), String> 
         );
     }
     use calamine::{open_workbook_auto, Reader};
-    let workbook = open_workbook_auto(path).map_err(|error| error.to_string())?;
-    let sheets = workbook.sheet_names();
-    let names = workbook
-        .defined_names()
-        .iter()
-        .map(|(name, _)| name.clone())
-        .collect();
-    Ok((sheets, names))
+    workbook_read(|| {
+        let workbook = open_workbook_auto(path).map_err(|error| error.to_string())?;
+        let sheets = workbook.sheet_names();
+        let names = workbook
+            .defined_names()
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
+        Ok((sheets, names))
+    })
+}
+
+/// Run a read of a spreadsheet file. The file comes from the user, and the
+/// spreadsheet reader can panic on a damaged one (an `.xls` file whose
+/// sector table is too short, for example): the panic comes back as the
+/// read's error. A wasm build aborts on a panic, so there this only calls
+/// `read`.
+fn workbook_read<T>(read: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(read)).unwrap_or_else(|payload| {
+            let message = payload
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| payload.downcast_ref::<&str>().copied())
+                .unwrap_or("unknown panic payload");
+            let message: String = message.chars().take(500).collect();
+            Err(format!("the spreadsheet reader stopped: {message}"))
+        })
+    }
+    #[cfg(target_arch = "wasm32")]
+    read()
 }
 
 /// Sheet and defined-name catalog read straight from bytes (a picked file on
 /// the web, where no path exists to reopen).
 fn workbook_metadata_bytes(bytes: &[u8]) -> Result<(Vec<String>, Vec<String>), String> {
     use calamine::{open_workbook_auto_from_rs, Reader};
-    let workbook =
-        open_workbook_auto_from_rs(Cursor::new(bytes)).map_err(|error| error.to_string())?;
-    let sheets = workbook.sheet_names();
-    let names = workbook
-        .defined_names()
-        .iter()
-        .map(|(name, _)| name.clone())
-        .collect();
-    Ok((sheets, names))
+    workbook_read(|| {
+        let workbook =
+            open_workbook_auto_from_rs(Cursor::new(bytes)).map_err(|error| error.to_string())?;
+        let sheets = workbook.sheet_names();
+        let names = workbook
+            .defined_names()
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
+        Ok((sheets, names))
+    })
 }
 
 /// Rows of the first sheet of a workbook held in memory (no path to reopen).
 pub(crate) fn workbook_first_sheet_rows(bytes: &[u8]) -> Result<Vec<Vec<String>>, String> {
     use calamine::open_workbook_auto_from_rs;
-    let mut workbook =
-        open_workbook_auto_from_rs(Cursor::new(bytes)).map_err(|error| error.to_string())?;
-    workbook_rows(&mut workbook, None, LinkRange::EntireSheet, None).map(|(rows, _)| rows)
+    workbook_read(|| {
+        let mut workbook =
+            open_workbook_auto_from_rs(Cursor::new(bytes)).map_err(|error| error.to_string())?;
+        workbook_rows(&mut workbook, None, LinkRange::EntireSheet, None).map(|(rows, _)| rows)
+    })
 }
 
 fn named_range_target(formula: &str) -> Option<(String, String)> {
@@ -740,17 +768,21 @@ pub(crate) fn read_tabular_file(
         )
     } else if let Some(bytes) = picked_source_bytes(&path.to_string_lossy()) {
         use calamine::open_workbook_auto_from_rs;
-        let mut workbook = open_workbook_auto_from_rs(Cursor::new(bytes.as_slice()))
-            .map_err(|error| error.to_string())?;
-        workbook_rows(&mut workbook, sheet, range_kind, range_value)?
+        workbook_read(|| {
+            let mut workbook = open_workbook_auto_from_rs(Cursor::new(bytes.as_slice()))
+                .map_err(|error| error.to_string())?;
+            workbook_rows(&mut workbook, sheet, range_kind, range_value)
+        })?
     } else if cfg!(target_arch = "wasm32") {
         return Err(
             crate::t!("Pick the file again to load its contents in the browser.").into_owned(),
         );
     } else {
         use calamine::open_workbook_auto;
-        let mut workbook = open_workbook_auto(path).map_err(|error| error.to_string())?;
-        workbook_rows(&mut workbook, sheet, range_kind, range_value)?
+        workbook_read(|| {
+            let mut workbook = open_workbook_auto(path).map_err(|error| error.to_string())?;
+            workbook_rows(&mut workbook, sheet, range_kind, range_value)
+        })?
     };
     let rows = match cell_range
         .as_deref()

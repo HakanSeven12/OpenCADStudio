@@ -1018,20 +1018,22 @@ mod tests {
         // API v15: quad registration frames survive one bincode hop intact;
         // the icon rides the OwnedIconKind encoding (ribbon precedent) and
         // the response keeps one outcome per panel.
-        let panels = vec![crate::dialog::QuadPanelDef::new("align_tools", "Align")
-            .with_applies_to(vec!["LWPOLYLINE".to_owned()])
-            .with_item(crate::dialog::QuadItemDef {
-                control_id: "flip".to_owned(),
-                label: "Flip".to_owned(),
-                icon: crate::ribbon::owned::OwnedIconKind::Svg("<svg/>".into()),
-                action: crate::dialog::QuadActionDef::Command("FLIPALIGNED".to_owned()),
-            })
-            .with_item(crate::dialog::QuadItemDef {
-                control_id: "report".to_owned(),
-                label: "Report".to_owned(),
-                icon: crate::ribbon::owned::OwnedIconKind::Glyph("\u{1F4CA}".to_owned()),
-                action: crate::dialog::QuadActionDef::Callback,
-            })];
+        let panels = vec![
+            crate::dialog::QuadPanelDef::new("align_tools", "Align")
+                .with_applies_to(vec!["LWPOLYLINE".to_owned()])
+                .with_item(crate::dialog::QuadItemDef {
+                    control_id: "flip".to_owned(),
+                    label: "Flip".to_owned(),
+                    icon: crate::ribbon::owned::OwnedIconKind::Svg("<svg/>".into()),
+                    action: crate::dialog::QuadActionDef::Command("FLIPALIGNED".to_owned()),
+                })
+                .with_item(crate::dialog::QuadItemDef {
+                    control_id: "report".to_owned(),
+                    label: "Report".to_owned(),
+                    icon: crate::ribbon::owned::OwnedIconKind::Glyph("\u{1F4CA}".to_owned()),
+                    action: crate::dialog::QuadActionDef::Callback,
+                }),
+        ];
         let bytes = bincode::serialize(&PluginRequest::RegisterQuadPanels {
             panels: panels.clone(),
         })

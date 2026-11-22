@@ -6,14 +6,14 @@ use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use document::xdata::ExtendedDataRecord;
 use document::{Document, EntityType, Handle};
+use interprocess::TryClone;
 use interprocess::local_socket::traits::Stream as StreamTrait;
 use interprocess::local_socket::{GenericNamespaced, Stream, ToNsName};
-use interprocess::TryClone;
 
 use crate::host::{
     DocumentReader, ExecutionResult, HostApi, HostNotification, HostSettingValue,
@@ -22,7 +22,7 @@ use crate::host::{
 use crate::ipc::protocol::{
     HostRequest, HostResponse, PluginRequest, PluginResponse, RunnerHandshake,
 };
-use crate::ipc::transport::{recv, send, TransportError};
+use crate::ipc::transport::{TransportError, recv, send};
 use crate::ipc::v4::protocol::{
     HostToPluginV4, NotificationEnvelope, PluginToHostV4, V4_PROTOCOL_VERSION,
 };
@@ -106,8 +106,9 @@ impl V4Client {
         });
 
         let shared_for_reader = Arc::clone(&shared);
-        let notifications =
-            Arc::new(Mutex::new(VecDeque::<(Option<u64>, HostNotification)>::new()));
+        let notifications = Arc::new(Mutex::new(
+            VecDeque::<(Option<u64>, HostNotification)>::new(),
+        ));
         let notifications_for_loop = Arc::clone(&notifications);
         std::thread::spawn(move || {
             reader_thread(reader, shared_for_reader, runner_tx, notifications)
@@ -229,7 +230,10 @@ fn reader_thread(
                     }
                 }
                 Ok(HostToPluginV4::Notification(envelope)) => {
-                    let is_sel4 = matches!(&envelope.payload, HostNotification::SelectionChangedV4 { .. });
+                    let is_sel4 = matches!(
+                        &envelope.payload,
+                        HostNotification::SelectionChangedV4 { .. }
+                    );
                     let mut queue = notifications.lock().unwrap_or_else(|e| e.into_inner());
                     if is_sel4 {
                         // Latest-wins, head-priority: a selection change is
@@ -1560,8 +1564,9 @@ impl V4Client {
             in_flight: Mutex::new(HashMap::new()),
         });
         let shared_for_reader = Arc::clone(&shared);
-        let notifications =
-            Arc::new(Mutex::new(VecDeque::<(Option<u64>, HostNotification)>::new()));
+        let notifications = Arc::new(Mutex::new(
+            VecDeque::<(Option<u64>, HostNotification)>::new(),
+        ));
         let notifications_for_loop = Arc::clone(&notifications);
         std::thread::spawn(move || {
             reader_thread(reader, shared_for_reader, runner_tx, notifications)
@@ -1595,8 +1600,8 @@ mod tests {
     use std::thread;
 
     use interprocess::local_socket::{
-        traits::{Listener, Stream as StreamTrait},
         GenericNamespaced, ListenerOptions, Stream, ToNsName,
+        traits::{Listener, Stream as StreamTrait},
     };
 
     use super::*;

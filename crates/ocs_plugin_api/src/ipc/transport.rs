@@ -12,7 +12,7 @@
 use std::io::{Read, Write};
 
 use interprocess::local_socket::Stream;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 /// Maximum serialized message size accepted over the wire (1 GiB). Prevents
 /// a malicious or buggy peer from exhausting host/runner memory, while a full

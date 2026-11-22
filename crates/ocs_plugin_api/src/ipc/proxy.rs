@@ -164,7 +164,7 @@ fn read_with_poll<R: Read>(
                 return Err(PollError::Io(ProxyError::Io(std::io::Error::new(
                     std::io::ErrorKind::UnexpectedEof,
                     "proxy disconnected",
-                ))))
+                ))));
             }
             Ok(n) => off += n,
             Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {

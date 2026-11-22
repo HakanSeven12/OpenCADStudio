@@ -140,6 +140,7 @@ fn commands(d: &Drawing) -> Vec<String> {
         "SPLINE 0,140 5,145 10,140 ENTER".to_string(),
         "DIMLINEAR 0,0 10,0 5,-3".to_string(),
         "-INSERT BLK 50,50 1 1 0".to_string(),
+        "TEXT 0,60 2 0 Hello".to_string(),
         // Modifying.
         format!("MOVE {} ENTER 0,0 5,5", h(d.line)),
         format!("COPY {} ENTER 20,5 25,5 ENTER", h(d.circle)),
@@ -176,6 +177,9 @@ fn commands(d: &Drawing) -> Vec<String> {
 enum Step {
     /// A command line, as typed. It must complete.
     Run(String),
+    /// A command line that must stop with the named editor open (the
+    /// `blocked_by` of the automation reply).
+    Open(String, &'static str),
     /// An automation request other than `run` (a selection, for example).
     Op(serde_json::Value),
     /// A message, as a palette, a dialog or an editor sends it.
@@ -220,6 +224,29 @@ fn palette_cases(d: &Drawing) -> Vec<Case> {
             d.polyline,
             Message::PropLinetypeChanged("Continuous".to_string()),
         ),
+    ]
+}
+
+/// Text made in an editor: the command stops with the editor open, the text
+/// goes in, and the editor's OK commits it.
+fn editor_cases() -> Vec<Case> {
+    vec![
+        Case {
+            name: "MTEXT in the editor".to_string(),
+            steps: vec![
+                Step::Open("MTEXT 0,50 20,40".to_string(), "mtext_editor"),
+                Step::Send(Box::new(Message::MTextInsert("Notes".to_string()))),
+                Step::Send(Box::new(Message::MTextOk)),
+            ],
+        },
+        Case {
+            name: "TEXT in the in-place editor".to_string(),
+            steps: vec![
+                Step::Open("TEXT 0,60 2 0".to_string(), "text_editor"),
+                Step::Send(Box::new(Message::TextInlineInput("Hello".to_string()))),
+                Step::Send(Box::new(Message::TextInlineOk)),
+            ],
+        },
     ]
 }
 
@@ -289,6 +316,13 @@ fn check_steps(name: &str, steps: &[Step]) -> Vec<String> {
                     return vec![format!("{name}: did not complete: {result}")];
                 }
             }
+            Step::Open(command, editor) => {
+                let result = app
+                    .automation_op(&serde_json::json!({"op": "run", "cmd": command}).to_string());
+                if result["status"] != "waiting_input" || result["blocked_by"] != *editor {
+                    return vec![format!("{name}: did not open the {editor}: {result}")];
+                }
+            }
             Step::Op(request) => {
                 let result = app.automation_op(&request.to_string());
                 if result["ok"] == false {
@@ -346,6 +380,16 @@ fn every_command_is_undone_and_redone_exactly() {
 fn every_palette_change_is_undone_and_redone_exactly() {
     let (_, d) = drawing();
     let failures: Vec<String> = palette_cases(&d)
+        .iter()
+        .flat_map(|case| check_steps(&case.name, &case.steps))
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The same for text that an editor makes.
+#[test]
+fn every_editor_commit_is_undone_and_redone_exactly() {
+    let failures: Vec<String> = editor_cases()
         .iter()
         .flat_map(|case| check_steps(&case.name, &case.steps))
         .collect();

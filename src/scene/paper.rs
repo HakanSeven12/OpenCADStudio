@@ -756,6 +756,118 @@ impl Scene {
         Some(camera)
     }
 
+    /// How the model is seen through the viewports of the sheet in view: the
+    /// scale of the one that shows it largest (model units per pixel) and
+    /// the plan rectangle of the model that those in sight show, each for
+    /// the part of it that is in sight. No rectangle when one of them does
+    /// not look straight down; `None` when none is in sight.
+    ///
+    /// A raster has one part drawn again at the scale of the view, of
+    /// `REGION_SIDE` pixels at most. When what the viewports show together
+    /// is longer than that at the scale of the one that shows the model
+    /// largest, say a whole plan beside a detail of it, the rectangle is that
+    /// one's alone: the detail is drawn at its scale, and the plan is left
+    /// to the whole raster.
+    pub(super) fn sheet_model_view(&self) -> Option<(f32, Option<[f64; 4]>)> {
+        let sheet_per_pixel = f64::from(self.layout_world_per_pixel()?);
+        let in_sight = self.layout_plan_view_rect();
+        let mut finest: Option<f64> = None;
+        let mut finest_shows: Option<[f64; 4]> = None;
+        let mut shown: Option<[f64; 4]> = None;
+        let mut all_plan = true;
+        for &handle in self.layout_content_viewports().iter() {
+            let Some(EntityType::Viewport(vp)) = self.document.get_entity(handle) else {
+                continue;
+            };
+            if !vp.is_on() || vp.width <= 0.0 || vp.height <= 0.0 {
+                continue;
+            }
+            // The viewport on the sheet, and the part of it in sight.
+            let frame = [
+                vp.center.x - vp.width * 0.5,
+                vp.center.y - vp.height * 0.5,
+                vp.center.x + vp.width * 0.5,
+                vp.center.y + vp.height * 0.5,
+            ];
+            let part = match in_sight {
+                Some(view) => [
+                    frame[0].max(view[0]),
+                    frame[1].max(view[1]),
+                    frame[2].min(view[2]),
+                    frame[3].min(view[3]),
+                ],
+                None => frame,
+            };
+            if part[0] >= part[2] || part[1] >= part[3] {
+                continue;
+            }
+            let Some(camera) = self.viewport_view_camera(handle) else {
+                continue;
+            };
+            if !matches!(camera.projection, view::camera::Projection::Orthographic) {
+                continue;
+            }
+            let model_per_sheet = 2.0 * f64::from(camera.ortho_size()) / vp.height;
+            if !(model_per_sheet.is_finite() && model_per_sheet > 0.0) {
+                continue;
+            }
+            let per_pixel = sheet_per_pixel * model_per_sheet;
+            let leads = finest.is_none_or(|finest| per_pixel < finest);
+            if leads {
+                finest = Some(per_pixel);
+                finest_shows = None;
+            }
+            let Some(model) = Self::plan_rect_of(&camera, vp.width / vp.height) else {
+                all_plan = false;
+                continue;
+            };
+            // A view that is not turned shows the model in step with the
+            // sheet, so the part in sight is the same part of its rectangle;
+            // a turned one is taken whole.
+            let straight = (camera.rotation * glam::Vec3::X).x > 0.9999;
+            let model = if straight {
+                let along = |at: f64, from: f64, to: f64, low: f64, high: f64| {
+                    low + (at - from) / (to - from) * (high - low)
+                };
+                [
+                    along(part[0], frame[0], frame[2], model[0], model[2]),
+                    along(part[1], frame[1], frame[3], model[1], model[3]),
+                    along(part[2], frame[0], frame[2], model[0], model[2]),
+                    along(part[3], frame[1], frame[3], model[1], model[3]),
+                ]
+            } else {
+                model
+            };
+            if leads {
+                finest_shows = Some(model);
+            }
+            shown = Some(match shown {
+                Some(have) => [
+                    have[0].min(model[0]),
+                    have[1].min(model[1]),
+                    have[2].max(model[2]),
+                    have[3].max(model[3]),
+                ],
+                None => model,
+            });
+        }
+        let finest = finest?;
+        if !(finest.is_finite() && finest > 0.0) {
+            return None;
+        }
+        let together = shown.filter(|_| all_plan);
+        let too_long = together.is_some_and(|all| {
+            (all[2] - all[0]).max(all[3] - all[1]) / finest
+                > crate::scene::model::pdf_raster::REGION_SIDE
+        });
+        let rect = if too_long {
+            finest_shows.or(together)
+        } else {
+            together
+        };
+        Some((finest as f32, rect))
+    }
+
     /// The camera a floating viewport's view (or its auto-fit) aims, before
     /// its depth range is sized to the model.
     fn viewport_view_camera(&self, vp_handle: Handle) -> Option<view::camera::Camera> {

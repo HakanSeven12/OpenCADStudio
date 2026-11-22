@@ -118,10 +118,14 @@ impl Scene {
             }
             EntityType::Underlay(u) => match self.document.objects.get(&u.definition_handle) {
                 Some(document::objects::ObjectType::UnderlayDefinition(def)) => {
-                    // A paper-space underlay adjusts to the sheet, not the canvas.
+                    // A paper-space underlay adjusts to the sheet, not the
+                    // canvas, and so does one of model space while a sheet is
+                    // in view: it shows through the sheet's viewports, on
+                    // the paper.
                     let owner = self.underlay_owner(u);
-                    let background = if owner.is_null() || owner == self.model_space_block_handle()
-                    {
+                    let on_canvas = (owner.is_null() || owner == self.model_space_block_handle())
+                        && self.current_layout == "Model";
+                    let background = if on_canvas {
                         self.bg_color
                     } else {
                         self.paper_bg_color
@@ -129,7 +133,7 @@ impl Scene {
                     // On a sheet it follows the view of that sheet while it
                     // is the layout in view, and on another sheet keeps the
                     // size used when the view is unknown. Anywhere else it
-                    // follows the model view.
+                    // follows the view the model is seen in.
                     let scale = match self.underlay_sheet(u) {
                         None => Some(&self.underlay_scale),
                         Some(sheet) if sheet == self.current_layout_block_handle() => {

@@ -3231,7 +3231,8 @@ pub struct Scene {
     /// The camera generation the dynamic dimensions were last scaled for.
     dynamic_dimension_camera_gen: Option<u64>,
     /// The view scale the rasters of the underlays of model space are made
-    /// for.
+    /// for: the model view's, or with a sheet in view that of its viewports
+    /// (`sheet_model_view`).
     underlay_scale: raster_scale::RasterScale,
     /// The view scale of the current layout, which its OLE pictures and the
     /// underlays on its sheet are made for.
@@ -3826,18 +3827,30 @@ impl Scene {
     /// and the underlays on its sheet.
     pub fn refresh_underlay_resolution(&mut self, now: iced::time::Instant) {
         let generation = self.camera_generation;
-        if let Some(wpp) = self.world_per_pixel() {
-            let view = self.plan_view_rect();
+        if let Some((wpp, view)) = self.model_view_scale() {
+            let layout = self.current_layout.clone();
             if self
                 .underlay_scale
-                .settle(wpp, view, "Model", generation, now)
+                .settle(wpp, view, &layout, generation, now)
                 && self
                     .document
                     .entities()
                     .any(|e| matches!(e, EntityType::Underlay(_)))
             {
                 #[cfg(not(target_arch = "wasm32"))]
-                self.queue_reseed(|e| matches!(e, EntityType::Underlay(_)));
+                {
+                    // With a sheet in view, the pages of the model alone: one
+                    // on a sheet follows that sheet's view (below).
+                    let mut sheets = HashSet::default();
+                    if layout != "Model" {
+                        sheets = self.layout_block_handles();
+                        sheets.remove(&self.model_space_block_handle());
+                    }
+                    self.queue_reseed(|e| {
+                        matches!(e, EntityType::Underlay(u)
+                            if !sheets.contains(&u.common.owner_handle))
+                    });
+                }
                 #[cfg(target_arch = "wasm32")]
                 self.reseed_underlays();
             }
@@ -3878,9 +3891,8 @@ impl Scene {
     /// requested until they are made again).
     pub fn underlay_resolution_stale(&self) -> bool {
         let underlays = self.has_underlays()
-            && self.world_per_pixel().is_some_and(|wpp| {
-                self.underlay_scale
-                    .stale(wpp, self.plan_view_rect(), "Model")
+            && self.model_view_scale().is_some_and(|(wpp, view)| {
+                self.underlay_scale.stale(wpp, view, &self.current_layout)
             });
         underlays
             || ((self.has_ole_frames() || self.sheet_may_hold_underlays())
@@ -3888,6 +3900,17 @@ impl Scene {
                     self.ole_scale
                         .stale(wpp, self.layout_plan_view_rect(), &self.current_layout)
                 }))
+    }
+
+    /// The scale the model is seen at now (model units per pixel) and the
+    /// plan rectangle of it in sight: those of the model view, or with a
+    /// sheet in view those of its viewports. `None` when the model is not in
+    /// sight, or before a frame has told the size of the view.
+    fn model_view_scale(&self) -> Option<(f32, Option<[f64; 4]>)> {
+        match self.world_per_pixel() {
+            Some(wpp) => Some((wpp, self.plan_view_rect())),
+            None => self.sheet_model_view(),
+        }
     }
 
     /// A paper layout is in view and the drawing has underlays: some may lie
@@ -3917,7 +3940,13 @@ impl Scene {
     /// down (orthographic plan view) — model space in Model, the sheet in a
     /// paper layout; `None` otherwise.
     fn layout_plan_view_rect(&self) -> Option<[f64; 4]> {
-        let cam = self.camera.borrow();
+        Self::plan_rect_of(&self.camera.borrow(), self.view_aspect())
+    }
+
+    /// World XY rectangle a camera shows in a view `aspect` wide for its
+    /// height, when it looks straight down (orthographic plan view); `None`
+    /// otherwise.
+    pub(super) fn plan_rect_of(cam: &view::camera::Camera, aspect: f64) -> Option<[f64; 4]> {
         if !matches!(cam.projection, view::camera::Projection::Orthographic) {
             return None;
         }
@@ -3925,7 +3954,7 @@ impl Scene {
             return None;
         }
         let h = f64::from(cam.ortho_size());
-        let w = h * self.view_aspect();
+        let w = h * aspect;
         let right = (cam.rotation * glam::Vec3::X).as_dvec3();
         let up = (cam.rotation * glam::Vec3::Y).as_dvec3();
         let (hx, hy) = (

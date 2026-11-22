@@ -3840,7 +3840,7 @@ impl Scene {
                     wire.fill_tris_low.clear();
                 }
                 if let Some(mm) = style.resolve_lineweight(wire.aci) {
-                    wire.line_weight_px = (mm * MM_TO_PX).max(1.0);
+                    wire.line_weight_px = mm * MM_TO_PX;
                 }
                 let aci = wire.aci;
                 for vertex in &mut wire.text_verts {
@@ -3898,7 +3898,7 @@ impl Scene {
                     }
                 }
                 if let Some(mm) = style.resolve_lineweight(hatch.aci) {
-                    hatch.line_weight_px = (mm * MM_TO_PX).max(1.0);
+                    hatch.line_weight_px = mm * MM_TO_PX;
                 }
                 if let crate::scene::model::hatch_model::HatchPattern::Gradient { color2, .. } =
                     &mut hatch.pattern
@@ -3962,7 +3962,7 @@ impl Scene {
             self.apply_display_plot_style(&mut color, wire.aci, &style);
             let line_weight_px = style
                 .resolve_lineweight(wire.aci)
-                .map(|mm| (mm * MM_TO_PX).max(1.0))
+                .map(|mm| mm * MM_TO_PX)
                 .unwrap_or(wire.line_weight_px);
             for (triangle_index, triangle) in wire.fill_tris.chunks_exact(3).enumerate() {
                 let mut boundary = Vec::with_capacity(4);

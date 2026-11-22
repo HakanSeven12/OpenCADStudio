@@ -1996,6 +1996,91 @@ mod tests {
     use super::*;
     use crate::scene::view::camera::{Camera, Projection};
 
+    fn named(name: &str) -> WireModel {
+        WireModel::solid_f64(
+            name.to_string(),
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            [1.0; 4],
+            false,
+        )
+    }
+
+    fn ranges_of(names: &[&str]) -> Option<Vec<(Handle, usize, usize)>> {
+        let wires: Vec<WireModel> = names.iter().map(|name| named(name)).collect();
+        let refs: Vec<&WireModel> = wires.iter().collect();
+        handle_ranges(&refs)
+    }
+
+    /// A drawing with a geographic location has one marker wire with no
+    /// entity handle in its name. It must not stop the ranges of the others.
+    #[test]
+    fn a_marker_wire_gets_a_range_of_its_own() {
+        let ranges = ranges_of(&["10", "10", "11", "geomarker-77"]).expect("ranges");
+        assert_eq!(ranges.len(), 3);
+        assert_eq!(ranges[0], (Handle::new(10), 0, 2));
+        assert_eq!(ranges[1], (Handle::new(11), 2, 3));
+        let (key, start, end) = ranges[2];
+        assert_eq!((start, end), (3, 4));
+        assert!(is_fixed_run_key(key), "the marker's key is not a handle");
+        assert!(!is_fixed_run_key(Handle::new(10)));
+        assert!(!is_fixed_run_key(Handle::new(77)));
+    }
+
+    /// Wires with no handle that follow each other are one run; runs that
+    /// an entity separates have different keys, so no slab replaces another.
+    #[test]
+    fn marker_runs_have_different_keys() {
+        let ranges =
+            ranges_of(&["geomarker-5", "camera-6", "camera-6", "20", "camera-7"]).expect("ranges");
+        assert_eq!(ranges.len(), 3);
+        assert_eq!((ranges[0].1, ranges[0].2), (0, 3));
+        assert_eq!(ranges[1], (Handle::new(20), 3, 4));
+        assert_eq!((ranges[2].1, ranges[2].2), (4, 5));
+        assert_eq!(ranges[0].0, Handle::new(u64::MAX));
+        assert_eq!(ranges[2].0, Handle::new(u64::MAX - 1));
+    }
+
+    /// The fixed-run keys are the top `FIXED_RUN_KEYS` values and no others.
+    #[test]
+    fn the_fixed_run_keys_are_only_the_top_of_the_range() {
+        assert!(is_fixed_run_key(Handle::new(u64::MAX)));
+        assert!(is_fixed_run_key(Handle::new(u64::MAX - FIXED_RUN_KEYS + 1)));
+        assert!(!is_fixed_run_key(Handle::new(u64::MAX - FIXED_RUN_KEYS)));
+        assert!(!is_fixed_run_key(Handle::new(1 << 40)));
+        assert!(!is_fixed_run_key(Handle::new(0)));
+    }
+
+    #[test]
+    fn a_set_of_markers_only_and_an_empty_set_have_ranges() {
+        assert_eq!(ranges_of(&[]).expect("ranges").len(), 0);
+        let ranges = ranges_of(&["geomarker-1"]).expect("ranges");
+        assert_eq!(ranges.len(), 1);
+        assert_eq!((ranges[0].1, ranges[0].2), (0, 1));
+    }
+
+    /// The ranges of a set with no marker wire are as before.
+    #[test]
+    fn entity_wires_keep_their_handles_as_keys() {
+        let ranges = ranges_of(&["3", "3", "4", "5", "5", "5"]).expect("ranges");
+        assert_eq!(
+            ranges,
+            vec![
+                (Handle::new(3), 0, 2),
+                (Handle::new(4), 2, 3),
+                (Handle::new(5), 3, 6)
+            ]
+        );
+    }
+
+    /// A handle in the range of the fixed-run keys could take a marker's
+    /// slab; such a set keeps the batched path, as an unnamed wire did before.
+    #[test]
+    fn a_handle_in_the_range_of_the_fixed_keys_gives_no_ranges() {
+        let high = u64::MAX.to_string();
+        assert!(ranges_of(&["10", "geomarker-1", &high]).is_none());
+        assert!(ranges_of(&["10", &high]).is_some());
+    }
+
     #[test]
     fn wire_partition_excludes_blocks_and_preserves_mixed_run_edges() {
         let line = WireModel {

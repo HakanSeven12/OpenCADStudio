@@ -6217,6 +6217,56 @@ mod layer0_inherit_tests {
         assert_eq!(styled[0].color[..3], [0.0; 3]);
     }
 
+    /// A displayed plot style's lineweights under a screen pixel stay apart:
+    /// the layout scales them by its pixels per millimetre, so 0.05 mm must
+    /// not leave here as wide as 0.25 mm. (#3470)
+    #[test]
+    fn display_plot_style_keeps_lineweights_under_a_pixel() {
+        use crate::io::plot_style::{register_session_table, PlotStyleTable, LW_TABLE};
+        let index = |mm: f32| {
+            LW_TABLE
+                .iter()
+                .position(|weight| (weight - mm).abs() < 1e-6)
+                .expect("standard lineweight") as u8
+        };
+        let mut table = PlotStyleTable::builtin(crate::io::plot_style::MONOCHROME_PLOT_STYLE)
+            .expect("built-in table");
+        table.name = "issue-3470-lineweights.ctb".into();
+        table.lineweights = LW_TABLE.to_vec();
+        for (aci, mm) in [(1usize, 0.05), (2, 0.15), (3, 0.25)] {
+            table.aci_entries[aci].lineweight = index(mm);
+        }
+        register_session_table(
+            "issue-3470-lineweights.ctb",
+            Arc::new(table.to_bytes().expect("encode the table")),
+        );
+
+        let mut scene = Scene::new();
+        scene.set_current_layout("Layout1".into());
+        let mut settings = scene.effective_plot_settings().expect("layout settings");
+        settings.current_style_sheet = "issue-3470-lineweights.ctb".into();
+        settings.flags.show_plot_styles = true;
+        assert!(scene.set_layout_plot_settings("Layout1", &settings));
+        let wires: Vec<WireModel> = (1..=3)
+            .map(|aci| {
+                let points = vec![[0.0, aci as f32, 0.0], [10.0, aci as f32, 0.0]];
+                let mut wire = WireModel::solid(aci.to_string(), points, [1.0; 4], false);
+                wire.aci = aci;
+                wire
+            })
+            .collect();
+        let (styled, _) = scene.display_styled_wires(Arc::new(wires), 1);
+        let widths: Vec<f32> = styled.iter().map(|wire| wire.line_weight_px).collect();
+        let expected: Vec<f32> = [0.05f32, 0.15, 0.25].iter().map(|mm| mm * MM_TO_PX).collect();
+        for (width, want) in widths.iter().zip(&expected) {
+            assert!(
+                (width - want).abs() < 1e-4,
+                "plot style lineweights 0.05 / 0.15 / 0.25 mm display as {widths:?} px, \
+                 expected {expected:?} px"
+            );
+        }
+    }
+
     #[test]
     fn render_environment_caching_and_face3d_fast_path() {
         let mut scene = Scene::new();

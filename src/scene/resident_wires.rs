@@ -1,5 +1,9 @@
 use super::*;
 
+/// How many new entities a patch looks at to tell whether it has to decline,
+/// before it stops asking and goes on.
+const DECLINE_PROBES: usize = 4;
+
 impl Scene {
     /// Unified static-hold wire builder — the ONE tessellation path every
     /// space renders through (Model tiles, BEDIT, the paper sheet block, and
@@ -689,6 +693,103 @@ impl Scene {
             == tess_memo_guard(None, anno, annotation_scale_handle, all_visible, bg, avp)
             && self.resident_tess_atlas.get() == crate::scene::text::sdf_atlas::generation()
             && self.resident_tess_complex_lt.get() == self.viewport_complex_lt_guard();
+        let tessellate = {
+            let document = &self.document;
+            let selection = &empty_sel;
+            let block_cache: &cache::block_cache::BlockCache = &blk;
+            let viewport_lt = self.viewport_lt_for(anno_scale_override);
+            let reference_only = self.reference_only.handles();
+            move |e: &EntityType| {
+                tessellate_entity(
+                    document,
+                    selection,
+                    avp,
+                    bg,
+                    anno,
+                    annotation_scale_handle,
+                    e,
+                    Some(block_cache),
+                    None,
+                    None,
+                    viewport_lt,
+                    reference_only,
+                )
+            }
+        };
+        // A new run can only go in at the tail (see the placement below). A
+        // new entity that the order update below will list before a run this
+        // patch leaves alone therefore declines the patch, unless it is
+        // hidden or draws nothing. One such entity is enough to tell, before
+        // every changed entity is looked up and tessellated for a patch that
+        // will not go in: undoing an erase the set had since been built again
+        // without spent 0.6 s on 100,000 of them, and the full build then
+        // tessellated them again.
+        {
+            let has_run = |handle: &Handle| {
+                layout.ranges.contains_key(handle) || layout.vacant.contains_key(handle)
+            };
+            let is_new = |&(handle, kind): &(Handle, ChangeKind)| {
+                !matches!(kind, ChangeKind::Removed) && !has_run(&handle)
+            };
+            if deltas.iter().any(is_new) {
+                let changed: HashSet<Handle> = deltas.iter().map(|&(handle, _)| handle).collect();
+                let cache = self.sort_cache.borrow();
+                let sort_map = cache.as_ref().and_then(|(_, index)| index.get(&block));
+                let effective = |handle: Handle| {
+                    sort_map
+                        .and_then(|map| map.get(&handle.value()))
+                        .copied()
+                        .unwrap_or(handle.value())
+                };
+                // The last run in the order that the patch leaves alone.
+                let kept = layout.order.iter().rposition(|handle| {
+                    !changed.contains(handle) && layout.ranges.contains_key(handle)
+                });
+                if let Some(kept) = kept {
+                    let kept_key = effective(layout.order[kept]);
+                    let mut probes = 0;
+                    for &(handle, _) in deltas.iter().filter(|delta| is_new(delta)) {
+                        // The usual add: a key after every listed one.
+                        let key = effective(handle);
+                        if key >= kept_key {
+                            continue;
+                        }
+                        let place = layout
+                            .order
+                            .partition_point(|&existing| effective(existing) <= key);
+                        if place > kept {
+                            continue;
+                        }
+                        if probes == DECLINE_PROBES {
+                            break;
+                        }
+                        probes += 1;
+                        // One the order already lists stands where it is, and
+                        // is left to the placement.
+                        if layout.order.contains(&handle) {
+                            continue;
+                        }
+                        let Some(entity) = self.document.get_entity(handle) else {
+                            continue;
+                        };
+                        if !self.resident_entity_visible(
+                            entity,
+                            block,
+                            frozen_layers,
+                            annotation_scale_handle,
+                            all_visible,
+                        ) {
+                            continue;
+                        }
+                        self.resident_patch_tessellated
+                            .set(self.resident_patch_tessellated.get() + 1);
+                        if !tessellate(entity).is_empty() {
+                            return declined("new-run-not-at-the-tail");
+                        }
+                    }
+                }
+            }
+        }
         // References to a block re-expanded after its definition changed
         // share one prototype: the first one comes back with the full run
         // and the others as a stub of it. Longest runs first gives the full
@@ -767,32 +868,10 @@ impl Scene {
         // references at once: tessellate on all cores, as the full build does.
         let tessellated: Vec<(Handle, Vec<WireModel>)> = {
             use crate::par::prelude::*;
-            let document = &self.document;
-            let selection = &empty_sel;
-            let block_cache: &cache::block_cache::BlockCache = &blk;
-            let viewport_lt = self.viewport_lt_for(anno_scale_override);
-            let reference_only = self.reference_only.handles();
+            let tessellate = &tessellate;
             groups
                 .par_iter()
-                .flat_map_iter(move |group| {
-                    group.iter().map(move |&(h, e)| {
-                        let wires = tessellate_entity(
-                            document,
-                            selection,
-                            avp,
-                            bg,
-                            anno,
-                            annotation_scale_handle,
-                            e,
-                            Some(block_cache),
-                            None,
-                            None,
-                            viewport_lt,
-                            reference_only,
-                        );
-                        (h, wires)
-                    })
-                })
+                .flat_map_iter(move |group| group.iter().map(move |&(h, e)| (h, tessellate(e))))
                 .collect()
         };
         for (h, mut raw) in tessellated {

@@ -672,7 +672,7 @@ impl Pipeline {
                 analytic_slots::Outcome::Rebuild(reason) => return Err(reason),
             }
         }
-        slots.apply(queue, &edits);
+        slots.apply(queue, &edits)?;
         Ok(edits.len())
     }
 

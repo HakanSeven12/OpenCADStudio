@@ -34,6 +34,7 @@
 // draw-order-preserving multi-batch split) and no per-wire scissor (paper content
 // viewports). Mixed 2D/3D or scissored sets fall back to the batched path.
 
+use super::gpu_upload::{rebuild_is_cheaper, write_all, WriteBatch};
 use super::wire_gpu::{
     emit_wire_native, emit_wire_packed, wire_draw_depth, PackedWireInstance, WireConst, WireGpu,
     WireInstance,
@@ -831,12 +832,11 @@ impl WireArena {
         })
     }
 
-    fn write_insts(&self, queue: &wgpu::Queue, off: u32, data: &[WireInstance]) {
-        if data.is_empty() {
-            return;
-        }
+    /// Hold back the instances written at `off`: they reach the buffer at the
+    /// end of the patch, joined with the ones beside them.
+    fn write_insts(writes: &mut WriteBatch, off: u32, data: &[WireInstance]) {
         let sz = std::mem::size_of::<WireInstance>() as u64;
-        queue.write_buffer(&self.inst_buf, off as u64 * sz, bytemuck::cast_slice(data));
+        writes.push(off as u64 * sz, bytemuck::cast_slice(data));
     }
 
     /// Apply the changed handles in place; returns false (⇒ full rebuild) when the
@@ -924,6 +924,8 @@ impl WireArena {
         // merged spans: a layer toggle touches ~10^5 slabs, and a write per
         // slab cost more than the change itself.
         let mut dirty_consts: Vec<(u32, u32)> = Vec::new();
+        // So are the instances, which a move of that many objects rewrites.
+        let mut inst_writes = WriteBatch::default();
         for &(h, kind) in changes {
             let run = runs.get(&h).map(Vec::as_slice).unwrap_or(&[]);
 
@@ -988,7 +990,7 @@ impl WireArena {
                     for w in insts.iter_mut() {
                         w.wire_id += const_off;
                     }
-                    self.write_insts(queue, inst_off, &insts);
+                    Self::write_insts(&mut inst_writes, inst_off, &insts);
                 }
                 for (k, c) in csts.iter().enumerate() {
                     self.consts_cpu[const_off as usize + k] = *c;
@@ -1028,15 +1030,10 @@ impl WireArena {
                 for instance in &mut insts {
                     instance.wire_id += const_off;
                 }
-                self.write_insts(queue, inst_off, &insts);
+                Self::write_insts(&mut inst_writes, inst_off, &insts);
                 self.consts_cpu.truncate(const_off as usize);
                 self.consts_cpu.extend(csts.iter().copied());
-                let csz = std::mem::size_of::<WireConst>() as u64;
-                queue.write_buffer(
-                    &self.const_buf,
-                    const_off as u64 * csz,
-                    bytemuck::cast_slice(&csts),
-                );
+                dirty_consts.push((const_off, const_off + const_len));
                 self.inst_tail = inst_off + inst_len;
                 self.const_tail = const_off + const_len;
                 let slab = self.slabs.get_mut(&h).unwrap();
@@ -1069,7 +1066,7 @@ impl WireArena {
             self.vacant.remove(&h);
             if let Some(s) = self.slabs.remove(&h) {
                 let blanks = vec![blank_instance(); s.inst_len as usize];
-                self.write_insts(queue, s.inst_off, &blanks);
+                Self::write_insts(&mut inst_writes, s.inst_off, &blanks);
                 self.tombstoned += s.inst_len;
             }
             let inst_off = self.inst_tail;
@@ -1077,20 +1074,13 @@ impl WireArena {
             for w in insts.iter_mut() {
                 w.wire_id += const_off;
             }
-            self.write_insts(queue, inst_off, &insts);
+            Self::write_insts(&mut inst_writes, inst_off, &insts);
             for c in &csts {
                 self.consts_cpu.push(*c);
             }
             // Appended instances immediately reference these constant slots.
             // Keep the GPU buffer in sync without relying on a full-scene upload.
-            if !csts.is_empty() {
-                let const_size = std::mem::size_of::<WireConst>() as u64;
-                queue.write_buffer(
-                    &self.const_buf,
-                    const_off as u64 * const_size,
-                    bytemuck::cast_slice(&csts),
-                );
-            }
+            dirty_consts.push((const_off, const_off + const_len));
             self.inst_tail += inst_len;
             self.const_tail += const_len;
             self.slabs.insert(
@@ -1108,6 +1098,11 @@ impl WireArena {
             self.order_sensitive |= run_order_sensitive;
         }
 
+        let inst_writes = inst_writes.writes();
+        if rebuild_is_cheaper(inst_writes.len(), self.inst_tail as u64) {
+            return false;
+        }
+        write_all(queue, &self.inst_buf, &inst_writes);
         for (start, end) in merge_const_ranges(dirty_consts) {
             let size = std::mem::size_of::<WireConst>() as u64;
             queue.write_buffer(
@@ -1431,16 +1426,10 @@ impl PackedWireArena {
         })
     }
 
-    fn write_insts(&self, queue: &wgpu::Queue, off: u32, data: &[PackedWireInstance]) {
-        if data.is_empty() {
-            return;
-        }
+    /// Hold back the instances written at `off`, as [`WireArena::write_insts`].
+    fn write_insts(writes: &mut WriteBatch, off: u32, data: &[PackedWireInstance]) {
         let size = std::mem::size_of::<PackedWireInstance>() as u64;
-        queue.write_buffer(
-            &self.inst_buf,
-            off as u64 * size,
-            bytemuck::cast_slice(data),
-        );
+        writes.push(off as u64 * size, bytemuck::cast_slice(data));
     }
 
     fn patch(
@@ -1498,12 +1487,13 @@ impl PackedWireArena {
             );
         }
 
+        let mut inst_writes = WriteBatch::default();
         for &(handle, kind) in changes {
             let run = runs.get(&handle).map(Vec::as_slice).unwrap_or(&[]);
             if matches!(kind, ChangeKind::Removed) || run.is_empty() {
                 if let Some(slab) = self.slabs.remove(&handle) {
                     let blanks = vec![blank_packed_instance(); slab.inst_len as usize];
-                    self.write_insts(queue, slab.inst_off, &blanks);
+                    Self::write_insts(&mut inst_writes, slab.inst_off, &blanks);
                     self.tombstoned += slab.inst_len;
                     if matches!(kind, ChangeKind::Modified) {
                         self.vacant.insert(handle, slab);
@@ -1542,7 +1532,7 @@ impl PackedWireArena {
                 .is_some_and(|slab| slab.inst_len == inst_len)
             {
                 let inst_off = self.slabs[&handle].inst_off;
-                self.write_insts(queue, inst_off, &insts);
+                Self::write_insts(&mut inst_writes, inst_off, &insts);
                 let slab = self.slabs.get_mut(&handle).unwrap();
                 slab.base_depth = base_depth;
                 slab.bounds = bounds;
@@ -1560,7 +1550,7 @@ impl PackedWireArena {
             });
             if can_resize_tail {
                 let inst_off = self.slabs[&handle].inst_off;
-                self.write_insts(queue, inst_off, &insts);
+                Self::write_insts(&mut inst_writes, inst_off, &insts);
                 self.inst_tail = inst_off + inst_len;
                 let slab = self.slabs.get_mut(&handle).unwrap();
                 slab.inst_len = inst_len;
@@ -1583,11 +1573,11 @@ impl PackedWireArena {
             self.vacant.remove(&handle);
             if let Some(slab) = self.slabs.remove(&handle) {
                 let blanks = vec![blank_packed_instance(); slab.inst_len as usize];
-                self.write_insts(queue, slab.inst_off, &blanks);
+                Self::write_insts(&mut inst_writes, slab.inst_off, &blanks);
                 self.tombstoned += slab.inst_len;
             }
             let inst_off = self.inst_tail;
-            self.write_insts(queue, inst_off, &insts);
+            Self::write_insts(&mut inst_writes, inst_off, &insts);
             self.inst_tail += inst_len;
             self.slabs.insert(
                 handle,
@@ -1604,6 +1594,11 @@ impl PackedWireArena {
             self.order_sensitive |= run_order_sensitive;
         }
 
+        let inst_writes = inst_writes.writes();
+        if rebuild_is_cheaper(inst_writes.len(), self.inst_tail as u64) {
+            return false;
+        }
+        write_all(queue, &self.inst_buf, &inst_writes);
         self.tombstoned <= self.inst_tail / 2
     }
 

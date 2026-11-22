@@ -12,6 +12,7 @@
 
 use super::circle_gpu::CircleInstance;
 use super::ellipse_gpu::EllipseInstance;
+use super::gpu_upload::{rebuild_is_cheaper, write_all, WriteBatch};
 use super::wire_gpu::BlockWireInstance;
 use document::Handle;
 use iced::wgpu;
@@ -347,67 +348,91 @@ look_equal={} kind_equal={} first_difference={:?} recorded_point={:?} now_point=
     Outcome::Edits(edits)
 }
 
-impl AnalyticSlots {
-    /// Write the edits into the buffers the slots describe.
-    pub(crate) fn apply(&self, queue: &wgpu::Queue, edits: &[Edit]) {
-        use std::mem::{offset_of, size_of};
-        for edit in edits {
-            match edit {
-                Edit::Block {
-                    chunk,
-                    index,
-                    value,
-                } => {
-                    if let Some(buffer) = self.block_buffers.get(*chunk as usize) {
-                        queue.write_buffer(
-                            buffer,
-                            *index as u64 * size_of::<BlockWireInstance>() as u64,
-                            bytemuck::bytes_of(value),
-                        );
-                    }
-                }
-                Edit::Circle { index, value } => {
-                    if let Some(buffer) = &self.circle_buffer {
-                        queue.write_buffer(
-                            buffer,
-                            *index as u64 * size_of::<CircleInstance>() as u64,
-                            bytemuck::bytes_of(value),
-                        );
-                    }
-                }
-                Edit::Ellipse { index, value } => {
-                    if let Some(buffer) = &self.ellipse_buffer {
-                        queue.write_buffer(
-                            buffer,
-                            *index as u64 * size_of::<EllipseInstance>() as u64,
-                            bytemuck::bytes_of(value),
-                        );
-                    }
-                }
-                Edit::HideCircle { index } => {
-                    if let Some(buffer) = &self.circle_buffer {
-                        queue.write_buffer(
-                            buffer,
-                            *index as u64 * size_of::<CircleInstance>() as u64
-                                + offset_of!(CircleInstance, params) as u64
-                                + 2 * size_of::<f32>() as u64,
-                            bytemuck::bytes_of(&HIDDEN_DEPTH),
-                        );
-                    }
-                }
-                Edit::HideEllipse { index } => {
-                    if let Some(buffer) = &self.ellipse_buffer {
-                        queue.write_buffer(
-                            buffer,
-                            *index as u64 * size_of::<EllipseInstance>() as u64
-                                + offset_of!(EllipseInstance, params) as u64
-                                + 2 * size_of::<f32>() as u64,
-                            bytemuck::bytes_of(&HIDDEN_DEPTH),
-                        );
-                    }
+/// The writes of a patch, buffer by buffer.
+#[derive(Default)]
+pub(crate) struct PlannedWrites {
+    /// One per block arena, in the order the uploaded batches name them.
+    pub blocks: Vec<WriteBatch>,
+    pub circles: WriteBatch,
+    pub ellipses: WriteBatch,
+}
+
+/// Sort the edits into the buffers they write, `chunks` block arenas among
+/// them.
+pub(crate) fn plan_writes(edits: &[Edit], chunks: usize) -> PlannedWrites {
+    use std::mem::{offset_of, size_of};
+    let mut planned = PlannedWrites::default();
+    planned.blocks.resize_with(chunks, WriteBatch::default);
+    for edit in edits {
+        match edit {
+            Edit::Block {
+                chunk,
+                index,
+                value,
+            } => {
+                if let Some(blocks) = planned.blocks.get_mut(*chunk as usize) {
+                    blocks.push(
+                        *index as u64 * size_of::<BlockWireInstance>() as u64,
+                        bytemuck::bytes_of(value),
+                    );
                 }
             }
+            Edit::Circle { index, value } => planned.circles.push(
+                *index as u64 * size_of::<CircleInstance>() as u64,
+                bytemuck::bytes_of(value),
+            ),
+            Edit::Ellipse { index, value } => planned.ellipses.push(
+                *index as u64 * size_of::<EllipseInstance>() as u64,
+                bytemuck::bytes_of(value),
+            ),
+            Edit::HideCircle { index } => planned.circles.push(
+                *index as u64 * size_of::<CircleInstance>() as u64
+                    + offset_of!(CircleInstance, params) as u64
+                    + 2 * size_of::<f32>() as u64,
+                bytemuck::bytes_of(&HIDDEN_DEPTH),
+            ),
+            Edit::HideEllipse { index } => planned.ellipses.push(
+                *index as u64 * size_of::<EllipseInstance>() as u64
+                    + offset_of!(EllipseInstance, params) as u64
+                    + 2 * size_of::<f32>() as u64,
+                bytemuck::bytes_of(&HIDDEN_DEPTH),
+            ),
         }
+    }
+    planned
+}
+
+impl AnalyticSlots {
+    /// Write the edits into the buffers the slots describe. `Err` names why
+    /// the full rebuild is the better way, and nothing was written.
+    pub(crate) fn apply(&self, queue: &wgpu::Queue, edits: &[Edit]) -> Result<(), &'static str> {
+        use std::mem::size_of;
+        let planned = plan_writes(edits, self.block_buffers.len());
+        let block = size_of::<BlockWireInstance>();
+        let mut targets: Vec<(&wgpu::Buffer, &WriteBatch, usize)> = self
+            .block_buffers
+            .iter()
+            .zip(&planned.blocks)
+            .map(|(buffer, batch)| (buffer, batch, block))
+            .collect();
+        if let Some(buffer) = &self.circle_buffer {
+            targets.push((buffer, &planned.circles, size_of::<CircleInstance>()));
+        }
+        if let Some(buffer) = &self.ellipse_buffer {
+            targets.push((buffer, &planned.ellipses, size_of::<EllipseInstance>()));
+        }
+        let mut writes = Vec::with_capacity(targets.len());
+        for (buffer, batch, element) in targets {
+            let pieces = batch.writes();
+            if rebuild_is_cheaper(pieces.len(), buffer.size() / element as u64) {
+                return Err("more separate writes than the rebuild costs");
+            }
+            writes.push((buffer, pieces));
+        }
+        for (buffer, pieces) in &writes {
+            write_all(queue, buffer, pieces);
+        }
+        Ok(())
     }
 }
 
@@ -729,6 +754,104 @@ mod tests {
         assert!(same_shape(&with_separator, &with_separator.clone(), 100.0));
         let separator_elsewhere = vec![[0.0, 0.0, 0.0], [1.0, 0.5, 0.0], [f32::NAN; 3]];
         assert!(!same_shape(&with_separator, &separator_elsewhere, 100.0));
+    }
+
+    fn spans(writes: &[(u64, Vec<u8>)], element: usize) -> Vec<(u64, usize)> {
+        writes
+            .iter()
+            .map(|(offset, bytes)| (*offset / element as u64, bytes.len() / element))
+            .collect()
+    }
+
+    /// Moving every circle of a drawing rewrites its whole buffer, in the
+    /// order the edit names them.
+    #[test]
+    fn curves_side_by_side_are_one_write() {
+        let circle_at = |index| Edit::Circle {
+            index,
+            value: circle(0.5),
+        };
+        let ellipse_at = |index| Edit::Ellipse {
+            index,
+            value: bytemuck::Zeroable::zeroed(),
+        };
+        let edits = [
+            circle_at(6),
+            ellipse_at(2),
+            circle_at(5),
+            circle_at(7),
+            ellipse_at(1),
+            circle_at(20),
+        ];
+        let planned = plan_writes(&edits, 0);
+        assert_eq!(
+            spans(
+                &planned.circles.writes(),
+                std::mem::size_of::<CircleInstance>()
+            ),
+            vec![(5, 3), (20, 1)]
+        );
+        assert_eq!(
+            spans(
+                &planned.ellipses.writes(),
+                std::mem::size_of::<EllipseInstance>()
+            ),
+            vec![(1, 2)]
+        );
+    }
+
+    /// Erasing or freezing objects hides their curves. A hidden one is written
+    /// whole, so a run of them is one write too.
+    #[test]
+    fn hidden_curves_side_by_side_are_one_write() {
+        let edits = [
+            Edit::HideCircle { index: 4 },
+            Edit::HideEllipse { index: 9 },
+            Edit::HideCircle { index: 3 },
+            Edit::HideEllipse { index: 8 },
+            Edit::HideCircle { index: 5 },
+        ];
+        let planned = plan_writes(&edits, 0);
+        let circles = planned.circles.writes();
+        assert_eq!(
+            spans(&circles, std::mem::size_of::<CircleInstance>()),
+            vec![(3, 3)]
+        );
+        let hidden: Vec<CircleInstance> = bytemuck::pod_collect_to_vec(&circles[0].1);
+        assert!(hidden.iter().all(|circle| circle.params[2] == HIDDEN_DEPTH));
+        let ellipses = planned.ellipses.writes();
+        assert_eq!(
+            spans(&ellipses, std::mem::size_of::<EllipseInstance>()),
+            vec![(8, 2)]
+        );
+        let hidden: Vec<EllipseInstance> = bytemuck::pod_collect_to_vec(&ellipses[0].1);
+        assert!(hidden
+            .iter()
+            .all(|ellipse| ellipse.params[2] == HIDDEN_DEPTH));
+    }
+
+    #[test]
+    fn block_placements_are_joined_within_their_own_arena() {
+        let block_at = |chunk, index| Edit::Block {
+            chunk,
+            index,
+            value: block_instance_at([1.0, 2.0, 0.0], [0.0; 3], 0.5),
+        };
+        let edits = [
+            block_at(1, 11),
+            block_at(0, 10),
+            block_at(1, 10),
+            block_at(0, 12),
+            // An arena the slots do not hold is skipped, as before.
+            block_at(7, 0),
+        ];
+        let planned = plan_writes(&edits, 2);
+        let size = std::mem::size_of::<BlockWireInstance>();
+        assert_eq!(
+            spans(&planned.blocks[0].writes(), size),
+            vec![(10, 1), (12, 1)]
+        );
+        assert_eq!(spans(&planned.blocks[1].writes(), size), vec![(10, 2)]);
     }
 
     #[test]

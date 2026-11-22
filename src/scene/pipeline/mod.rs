@@ -1775,7 +1775,11 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                     ],
                 }
             };
-            let mut verts: Vec<SilhouetteVertex> = Vec::with_capacity(max_vertices);
+            // Sized to this group's points, not to a whole GPU chunk: a full
+            // chunk (32 MB) per group per frame made a drawing with hundreds
+            // of 3-D bodies allocate gigabytes per second.
+            let mut verts: Vec<SilhouetteVertex> =
+                Vec::with_capacity(points.len().min(max_vertices));
             let push_chunk = |verts: &[SilhouetteVertex], chunks: &mut Vec<SilhouetteChunk>| {
                 let vertex_count = verts.len() / 2 * 2;
                 if vertex_count == 0 {

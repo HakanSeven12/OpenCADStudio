@@ -8266,10 +8266,12 @@ mod batch7_tests {
         }
     }
 
-    fn temp_named(stem: &str, extension: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("ocs-{stem}-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        dir.join(format!("{stem}.{extension}"))
+    /// A path inside a fresh temporary directory. The returned `TempDir`
+    /// keeps the directory alive for the whole test and removes it on drop.
+    fn temp_named(stem: &str, extension: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join(format!("{stem}.{extension}"));
+        (dir, path)
     }
 
     /// A fresh tab as a host drawing referencing `source`; returns the tab
@@ -8317,7 +8319,7 @@ mod batch7_tests {
 
     #[test]
     fn saving_the_source_reloads_the_host_reference() {
-        let source = temp_named("m071-src", "dwg");
+        let (_source_dir, source) = temp_named("m071-src", "dwg");
         let mut app = new_app();
 
         // Backslashes would escape out of the JSON string; the resolver
@@ -8350,7 +8352,7 @@ mod batch7_tests {
 
     #[test]
     fn xopen_asks_to_pick_a_reference_and_resolves_it_under_the_point() {
-        let source = temp_named("m071-pick", "dwg");
+        let (_source_dir, source) = temp_named("m071-pick", "dwg");
         let mut app = new_app();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let source_fwd = source.display().to_string().replace('\\', "/");
@@ -8375,7 +8377,7 @@ mod batch7_tests {
 
     #[test]
     fn xopen_reports_a_missing_source_and_leaves_the_host_alone() {
-        let source = temp_named("m071-missing", "dwg");
+        let (_source_dir, source) = temp_named("m071-missing", "dwg");
         let mut app = new_app();
 
         let _ = app.automation_op(r#"{"op":"new"}"#);
@@ -8530,12 +8532,13 @@ mod batch7_tests {
         stem: &str,
     ) -> (
         OpenCADStudio,
+        tempfile::TempDir,
         std::path::PathBuf,
         usize,
         document::Handle,
         String,
     ) {
-        let source = temp_named(stem, "dwg");
+        let (source_dir, source) = temp_named(stem, "dwg");
         let mut app = new_app();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let source_fwd = source.display().to_string().replace('\\', "/");
@@ -8549,14 +8552,14 @@ mod batch7_tests {
         let host_fwd = host_path.display().to_string().replace('\\', "/");
         app.active_tab = host;
         let _ = app.automation_op(&format!(r#"{{"op":"save","path":"{host_fwd}"}}"#));
-        (app, source, host, record, name)
+        (app, source_dir, source, host, record, name)
     }
 
     /// M074: unloading a reference reports the unloaded status and hides its
     /// merged geometry.
     #[test]
     fn xref_unload_reports_status_and_hides_geometry() {
-        let (mut app, _source, host, record, name) = m074_host("m074-unload");
+        let (mut app, _source_dir, _source, host, record, name) = m074_host("m074-unload");
         assert_eq!(referenced_entity_count(&app, host, record), 1);
         assert_eq!(xref_status(&app, &name), "loaded");
 
@@ -8574,7 +8577,7 @@ mod batch7_tests {
     /// M074: reloading clears the unloaded status and restores the geometry.
     #[test]
     fn xref_reload_reports_status_and_restores_geometry() {
-        let (mut app, _source, host, record, name) = m074_host("m074-reload");
+        let (mut app, _source_dir, _source, host, record, name) = m074_host("m074-reload");
         let _ = app.run_command_line(&format!("XREF Unload {name}"));
         assert_eq!(xref_status(&app, &name), "unloaded");
 
@@ -8592,7 +8595,7 @@ mod batch7_tests {
     /// M074: a source that disappears is reported not-found, on demand.
     #[test]
     fn xref_status_reports_a_missing_source() {
-        let (mut app, source, _host, _record, name) = m074_host("m074-missing");
+        let (mut app, _source_dir, source, _host, _record, name) = m074_host("m074-missing");
         assert_eq!(xref_status(&app, &name), "loaded");
 
         std::fs::remove_file(&source).expect("the source file is removed");
@@ -8681,7 +8684,7 @@ mod batch7_tests {
         assert_eq!(field_text_value(&app, text), "ONE.dwg");
 
         // The save path is allowed and the value follows the written file.
-        let path = temp_named("m043-save", "dwg");
+        let (_path_dir, path) = temp_named("m043-save", "dwg");
         let forward = path.display().to_string().replace('\\', "/");
         let saved = app.automation_op(&format!(r#"{{"op":"save","path":"{forward}"}}"#));
         assert_eq!(saved["ok"], true, "{saved}");
@@ -8709,7 +8712,7 @@ mod batch7_tests {
     fn imageattach_takes_a_path_from_the_command_line() {
         use base64::Engine as _;
         let mut app = new_app();
-        let path = temp_named("m072-pic", "png");
+        let (_path_dir, path) = temp_named("m072-pic", "png");
         let png = base64::engine::general_purpose::STANDARD
             .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
             .expect("the fixture is valid base64");

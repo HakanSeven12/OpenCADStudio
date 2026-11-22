@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::host::{
     CommandSource, CommandStep, CustomGripEvent, CustomGripResponse, GripInfo, HostSettingValue,
-    PluginConstraint, PluginGrip, XRecordEntry, XRecordRead, XRecordUpdate,
+    InteractiveInputKind, PluginConstraint, PluginGrip, XRecordEntry, XRecordRead, XRecordUpdate,
 };
 use crate::manifest::ApiVersion;
 use crate::ribbon::owned::{OwnedEntityClasses, OwnedPluginManifest, OwnedRibbonGroup};
@@ -43,6 +43,8 @@ pub enum InteractiveEvent {
     SelectionComplete(Vec<Handle>),
     /// V7 (additive): modal dialog submitted or cancelled.
     DialogResponse(crate::dialog::DialogResponse),
+    /// V27 (additive): command-line text submitted for the interactive step.
+    TextInput(String),
 }
 
 /// Initial handshake sent by the plugin runner immediately after connecting.
@@ -151,6 +153,10 @@ pub enum HostRequest {
         name: String,
         arguments: String,
     },
+    /// V27 (additive): query the command-line input mode of an interactive step.
+    GetInputKind {
+        command_id: u64,
+    },
 }
 
 /// Responses the plugin runner sends back for `HostRequest`.
@@ -178,6 +184,8 @@ pub enum HostResponse {
     /// V25 (additive): answer to [`HostRequest::CallTool`]: the result as
     /// JSON text, or the plugin's error message.
     ToolResult(Result<String, String>),
+    /// V27 (additive): answer to [`HostRequest::GetInputKind`].
+    InputKind(InteractiveInputKind),
 }
 
 /// Requests the plugin runner sends to the host.
@@ -659,6 +667,20 @@ mod tests {
             16
         );
         assert_eq!(discriminant(&HostResponse::UndoStep(None)), 11);
+        assert_eq!(
+            discriminant_of(&HostRequest::GetInputKind { command_id: 1 }),
+            19
+        );
+        assert_eq!(
+            discriminant_of(&HostResponse::InputKind(
+                InteractiveInputKind::SingleToken
+            )),
+            14
+        );
+        assert_eq!(
+            discriminant_of(&InteractiveEvent::TextInput(String::new())),
+            6
+        );
     }
 
     fn discriminant<T: serde::Serialize>(value: &T) -> u32 {

@@ -170,11 +170,21 @@ impl std::fmt::Display for IoStream {
     }
 }
 
+/// Host-bound text notifications buffered during a `NullHost` V4 RPC
+/// (e.g., interactive events) and flushed on the next real-host drain.
+pub(crate) enum DeferredHostMessage {
+    Info(String),
+    Output(String),
+    Error(String),
+}
+
 /// A dummy `HostApi` used for V4 paths that do not supply a real host surface
-/// (e.g., interactive events). Nested plugin requests receive safe defaults.
+/// (e.g., interactive events). Nested plugin requests receive safe defaults,
+/// while output messages are captured for delivery on the next drain.
 #[derive(Default)]
-struct NullHost {
+pub(crate) struct NullHost {
     scratch_doc: Option<Document>,
+    pub(crate) messages: Vec<DeferredHostMessage>,
 }
 
 impl HostApi for NullHost {
@@ -218,9 +228,15 @@ impl HostApi for NullHost {
     }
     fn push_undo(&mut self, _label: &str) {}
     fn set_dirty(&mut self) {}
-    fn push_info(&mut self, _msg: &str) {}
-    fn push_output(&mut self, _msg: &str) {}
-    fn push_error(&mut self, _msg: &str) {}
+    fn push_info(&mut self, msg: &str) {
+        self.messages.push(DeferredHostMessage::Info(msg.to_string()));
+    }
+    fn push_output(&mut self, msg: &str) {
+        self.messages.push(DeferredHostMessage::Output(msg.to_string()));
+    }
+    fn push_error(&mut self, msg: &str) {
+        self.messages.push(DeferredHostMessage::Error(msg.to_string()));
+    }
     fn start_interactive(&mut self, _command: Box<dyn crate::host::InteractiveCommand>) {}
     fn plugin_state_any(&self, _plugin_id: &str) -> Option<&(dyn std::any::Any + Send + Sync)> {
         None
@@ -383,6 +399,7 @@ fn ui_blocking_cap(kind: &'static str) -> Option<Duration> {
         "CursorMove" | "CustomGripMove" => Some(Duration::from_secs(2)),
         "InteractiveEvent"
         | "GetPrompt"
+        | "GetInputKind"
         | "NeedsEntityPick"
         | "IsSelectionGathering"
         | "AcceptsDragSelection"
@@ -423,6 +440,7 @@ pub(crate) fn request_kind(req: &HostRequest) -> &'static str {
         HostRequest::UndoStep { .. } => "UndoStep",
         HostRequest::ListTools => "ListTools",
         HostRequest::CallTool { .. } => "CallTool",
+        HostRequest::GetInputKind { .. } => "GetInputKind",
         HostRequest::Shutdown => "Shutdown",
     }
 }
@@ -923,11 +941,7 @@ impl PluginProcess {
         event: InteractiveEvent,
     ) -> Result<CommandStep, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
-                HostRequest::InteractiveEvent { command_id, event },
-                &mut |_| {},
-            )?;
+            let resp = v4.call_null_host(HostRequest::InteractiveEvent { command_id, event })?;
             match resp {
                 HostResponse::CommandStep(s) => Ok(*s),
                 other => Err(PluginError::UnexpectedResponse(Box::new(other))),
@@ -950,11 +964,7 @@ impl PluginProcess {
         let Some(v4) = &self.v4 else {
             return Ok(());
         };
-        match v4.call(
-            &mut NullHost::default(),
-            HostRequest::DropInteractive { command_id },
-            &mut |_| {},
-        )? {
+        match v4.call_null_host(HostRequest::DropInteractive { command_id })? {
             HostResponse::Bool(true) => Ok(()),
             other => Err(PluginError::UnexpectedResponse(Box::new(other))),
         }
@@ -963,11 +973,7 @@ impl PluginProcess {
     /// Ask the plugin process for the current prompt of an interactive command.
     pub fn get_prompt(&self, command_id: u64) -> Result<String, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
-                HostRequest::GetPrompt { command_id },
-                &mut |_| {},
-            )?;
+            let resp = v4.call_null_host(HostRequest::GetPrompt { command_id })?;
             match resp {
                 HostResponse::Text(s) => Ok(s),
                 other => Err(PluginError::UnexpectedResponse(Box::new(other))),
@@ -985,14 +991,37 @@ impl PluginProcess {
         }
     }
 
+    /// Ask the plugin process what command-line input mode an interactive command awaits.
+    pub fn get_input_kind(
+        &self,
+        command_id: u64,
+    ) -> Result<crate::host::InteractiveInputKind, PluginError> {
+        if self.manifest.api_version < 27 {
+            return Ok(crate::host::InteractiveInputKind::Point);
+        }
+        if let Some(v4) = &self.v4 {
+            let resp = v4.call_null_host(HostRequest::GetInputKind { command_id })?;
+            match resp {
+                HostResponse::InputKind(kind) => Ok(kind),
+                other => Err(PluginError::UnexpectedResponse(Box::new(other))),
+            }
+        } else {
+            self.call_simple(
+                HostRequest::GetInputKind { command_id },
+                "GetInputKind",
+                "get_input_kind",
+                |resp| match resp {
+                    HostResponse::InputKind(kind) => Ok(kind),
+                    other => Err(Box::new(other)),
+                },
+            )
+        }
+    }
+
     /// Ask the plugin process whether an interactive command wants object picks.
     pub fn needs_entity_pick(&self, command_id: u64) -> Result<bool, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
-                HostRequest::NeedsEntityPick { command_id },
-                &mut |_| {},
-            )?;
+            let resp = v4.call_null_host(HostRequest::NeedsEntityPick { command_id })?;
             match resp {
                 HostResponse::Bool(b) => Ok(b),
                 other => Err(PluginError::UnexpectedResponse(Box::new(other))),
@@ -1013,11 +1042,7 @@ impl PluginProcess {
     /// Ask the plugin process whether an interactive command is in selection-gathering mode.
     pub fn is_selection_gathering(&self, command_id: u64) -> Result<bool, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
-                HostRequest::IsSelectionGathering { command_id },
-                &mut |_| {},
-            )?;
+            let resp = v4.call_null_host(HostRequest::IsSelectionGathering { command_id })?;
             match resp {
                 HostResponse::Bool(b) => Ok(b),
                 other => Err(PluginError::UnexpectedResponse(Box::new(other))),
@@ -1038,11 +1063,7 @@ impl PluginProcess {
     /// Ask the plugin process whether an interactive command accepts drag selections.
     pub fn accepts_drag_selection(&self, command_id: u64) -> Result<bool, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
-                HostRequest::AcceptsDragSelection { command_id },
-                &mut |_| {},
-            )?;
+            let resp = v4.call_null_host(HostRequest::AcceptsDragSelection { command_id })?;
             match resp {
                 HostResponse::Bool(b) => Ok(b),
                 other => Err(PluginError::UnexpectedResponse(Box::new(other))),
@@ -1063,11 +1084,8 @@ impl PluginProcess {
     /// Ask the plugin process whether an interactive command rejects locked layers during selection.
     pub fn selection_rejects_locked_layers(&self, command_id: u64) -> Result<bool, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
-                HostRequest::SelectionRejectsLockedLayers { command_id },
-                &mut |_| {},
-            )?;
+            let resp =
+                v4.call_null_host(HostRequest::SelectionRejectsLockedLayers { command_id })?;
             match resp {
                 HostResponse::Bool(b) => Ok(b),
                 other => Err(PluginError::UnexpectedResponse(Box::new(other))),
@@ -1092,11 +1110,7 @@ impl PluginProcess {
         pt: [f64; 3],
     ) -> Result<Vec<crate::host::PreviewWire>, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
-                HostRequest::CursorMove { command_id, pt },
-                &mut |_| {},
-            )?;
+            let resp = v4.call_null_host(HostRequest::CursorMove { command_id, pt })?;
             match resp {
                 HostResponse::PreviewWires(w) => Ok(w),
                 other => Err(PluginError::UnexpectedResponse(Box::new(other))),
@@ -1120,11 +1134,7 @@ impl PluginProcess {
         command_id: u64,
     ) -> Result<Option<crate::dialog::DialogDef>, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
-                HostRequest::GetModalDialog { command_id },
-                &mut |_| {},
-            )?;
+            let resp = v4.call_null_host(HostRequest::GetModalDialog { command_id })?;
             match resp {
                 HostResponse::ModalDialog(d) => Ok(d),
                 other => Err(PluginError::UnexpectedResponse(Box::new(other))),
@@ -1150,11 +1160,7 @@ impl PluginProcess {
         event: crate::dialog::DialogEvent,
     ) -> Result<crate::dialog::DialogActionResponse, PluginError> {
         if let Some(v4) = &self.v4 {
-            let resp = v4.call(
-                &mut NullHost::default(),
-                HostRequest::DialogAction { command_id, event },
-                &mut |_| {},
-            )?;
+            let resp = v4.call_null_host(HostRequest::DialogAction { command_id, event })?;
             match resp {
                 HostResponse::DialogAction(answer) => Ok(answer),
                 other => Err(PluginError::UnexpectedResponse(Box::new(other))),

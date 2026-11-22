@@ -3875,6 +3875,19 @@ impl OpenCADStudio {
         }
     }
 
+    /// Immediately drain queued plugin-to-host requests (including output captured during
+    /// `InteractiveEvent`) for `tab`.
+    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
+    pub(crate) fn drain_plugin_requests_for_tab(&mut self, tab: usize) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if tab < self.tabs.len() {
+            let mut host = crate::app::plugin_host::HostSession::new(self, tab);
+            crate::plugin::external::with_manager(|mgr| {
+                mgr.drain_requests(&mut host, &mut |_| {});
+            });
+        }
+    }
+
     /// Install `cmd` as the active interactive command for tab `tab`.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(crate) fn set_active_command(

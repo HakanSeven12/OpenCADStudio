@@ -192,7 +192,12 @@
 /// v26 appends `TableOperation::CustomPropertiesSet`: a plugin sets the
 /// drawing's custom properties (DWGPROPS Custom) in one undo step. A v25 host
 /// cannot decode it, so a plugin that sends it declares v26.
-pub const API_VERSION: u32 = 26;
+/// v27 appends `InteractiveCommand::input_kind` and
+/// `InteractiveCommand::on_text_input` (with `InteractiveInputKind`,
+/// `HostRequest::GetInputKind`, `HostResponse::InputKind`, and
+/// `InteractiveEvent::TextInput`) for command-line text prompts; plugins on
+/// v3–v26 remain supported unchanged.
+pub const API_VERSION: u32 = 27;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

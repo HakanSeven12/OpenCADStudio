@@ -12796,3 +12796,73 @@ mod dimensional_constraint_properties_tests {
     }
 }
 
+#[test]
+fn plugin_command_text_input_routes_single_token_free_text_and_enter() {
+    use ocs_plugin_api::host::{CommandStep, HostApi, InteractiveCommand, InteractiveInputKind};
+    use std::sync::{Arc, Mutex};
+
+    struct MockTextCmd {
+        step: u8,
+        seen: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl InteractiveCommand for MockTextCmd {
+        fn prompt(&self) -> String {
+            match self.step {
+                0 => "Enter count:".into(),
+                _ => "Enter label:".into(),
+            }
+        }
+        fn on_point(&mut self, _pt: [f64; 3]) -> CommandStep {
+            CommandStep::NeedPoint
+        }
+        fn input_kind(&self) -> InteractiveInputKind {
+            match self.step {
+                0 => InteractiveInputKind::SingleToken,
+                _ => InteractiveInputKind::FreeText,
+            }
+        }
+        fn on_text_input(&mut self, text: &str) -> CommandStep {
+            self.seen.lock().unwrap().push(format!("text:{text}"));
+            self.step += 1;
+            CommandStep::NeedPoint
+        }
+        fn on_enter(&mut self) -> CommandStep {
+            self.seen.lock().unwrap().push("enter".into());
+            CommandStep::Done
+        }
+    }
+
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut app = crate::app::OpenCADStudio::new_for_test();
+    let _ = app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    {
+        let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+        host.start_interactive(Box::new(MockTextCmd {
+            step: 0,
+            seen: Arc::clone(&seen),
+        }));
+    }
+    app.sync_dyn_fields();
+    assert!(app.plugin_dialog_state.is_none());
+    assert!(app.tabs[i].dyn_fields.is_empty());
+
+    let _ = app.update(crate::app::Message::CommandInput("42".into()));
+    let _ = app.update(crate::app::Message::CommandSubmit);
+    assert!(app.tabs[i].active_cmd.is_some());
+    assert!(app.plugin_dialog_state.is_none());
+
+    let _ = app.update(crate::app::Message::CommandInput("Hello World".into()));
+    assert_eq!(app.command_line.input, "Hello World");
+    let _ = app.update(crate::app::Message::CommandSubmit);
+    assert!(app.tabs[i].active_cmd.is_some());
+    assert!(app.plugin_dialog_state.is_none());
+
+    let _ = app.update(crate::app::Message::CommandSubmit);
+    assert!(app.tabs[i].active_cmd.is_none());
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec!["text:42", "text:Hello World", "enter"]
+    );
+}

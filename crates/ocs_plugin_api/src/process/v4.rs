@@ -52,6 +52,9 @@ const MAX_REQUESTS_PER_DRAIN: usize = 256;
 /// Maximum parked "late" responses (answered grip moves / stray frames).
 const MAX_DEFERRED_RESPONSES: usize = 256;
 
+/// Maximum buffered text notifications captured during `NullHost` V4 RPCs.
+const MAX_DEFERRED_MESSAGES: usize = 1024;
+
 /// Absolute per-call wall-time budget, capping deadline renewal (P1-1). The
 /// default is 10× the per-kind timeout so every per-kind floor and override
 /// still applies under it. `OCS_PLUGIN_CALL_MAX_SECONDS` overrides the budget;
@@ -86,6 +89,9 @@ pub(crate) struct V4Connection {
     /// answered between polls, or a late frame while another call runs).
     /// Consumed first by the next [`V4Connection::call`], so no frame is lost.
     deferred_responses: Mutex<VecDeque<(u64, HostResponse)>>,
+    /// Text notifications captured by `NullHost` during interactive RPCs until
+    /// `drain_requests` runs with a real `HostApi`.
+    deferred_messages: Mutex<VecDeque<super::DeferredHostMessage>>,
     /// The runner child cell: killed (tree) whenever this connection is marked
     /// dead, so a hung runner cannot linger half-alive holding handles.
     terminator: Option<crate::process::SharedRunnerChild>,
@@ -139,6 +145,7 @@ impl V4Connection {
             plugin_id: Mutex::new(String::new()),
             grip_moves_in_flight: std::sync::Mutex::new(std::collections::HashSet::new()),
             deferred_responses: Mutex::new(VecDeque::new()),
+            deferred_messages: Mutex::new(VecDeque::new()),
             terminator,
         })
     }
@@ -184,6 +191,24 @@ impl V4Connection {
         })?;
         send(stream, &HostToPluginV4::Notification(envelope))?;
         Ok(())
+    }
+
+    /// Send a V4 request that lacks a live `HostApi` surface, capturing any
+    /// `PushInfo` / `PushOutput` / `PushError` messages sent during the call
+    /// so [`Self::drain_requests`] delivers them to the real host.
+    #[allow(clippy::result_large_err)]
+    pub(crate) fn call_null_host(&self, req: HostRequest) -> Result<HostResponse, PluginError> {
+        let mut host = super::NullHost::default();
+        let res = self.call(&mut host, req, &mut |_| {});
+        for msg in host.messages {
+            park_bounded(
+                &self.deferred_messages,
+                MAX_DEFERRED_MESSAGES,
+                "host message",
+                msg,
+            );
+        }
+        res
     }
 
     /// Send a V4 request and block on the matching response, handling any
@@ -371,6 +396,19 @@ impl V4Connection {
             Err(TryLockError::Poisoned(error)) => error.into_inner(),
             Err(TryLockError::WouldBlock) => return Ok(()),
         };
+        let pending_messages: Vec<_> = self
+            .deferred_messages
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain(..)
+            .collect();
+        for msg in pending_messages {
+            match msg {
+                super::DeferredHostMessage::Info(text) => host.push_info(&text),
+                super::DeferredHostMessage::Output(text) => host.push_output(&text),
+                super::DeferredHostMessage::Error(text) => host.push_error(&text),
+            }
+        }
         let current_tab_id = host.tab_id();
         let mut ready = VecDeque::new();
         {
@@ -1463,6 +1501,7 @@ mod tests {
     #[derive(Default)]
     struct RecordingHost {
         calls: StdMutex<Vec<&'static str>>,
+        messages: StdMutex<Vec<(&'static str, String)>>,
     }
     impl HostApi for RecordingHost {
         fn tab_index(&self) -> usize {
@@ -1503,9 +1542,15 @@ mod tests {
             self.calls.lock().unwrap().push("push_undo");
         }
         fn set_dirty(&mut self) {}
-        fn push_info(&mut self, _msg: &str) {}
-        fn push_output(&mut self, _msg: &str) {}
-        fn push_error(&mut self, _msg: &str) {}
+        fn push_info(&mut self, msg: &str) {
+            self.messages.lock().unwrap().push(("info", msg.to_string()));
+        }
+        fn push_output(&mut self, msg: &str) {
+            self.messages.lock().unwrap().push(("output", msg.to_string()));
+        }
+        fn push_error(&mut self, msg: &str) {
+            self.messages.lock().unwrap().push(("error", msg.to_string()));
+        }
         fn start_interactive(&mut self, _command: Box<dyn crate::host::InteractiveCommand>) {}
         fn plugin_state_any(&self, _plugin_id: &str) -> Option<&(dyn std::any::Any + Send + Sync)> {
             None
@@ -1783,6 +1828,81 @@ mod tests {
         let _ = done_tx.send(());
         runner.join().expect("runner thread finished");
         std::env::remove_var("OCS_PLUGIN_CALL_TIMEOUT_SECS");
+        restore_test_env();
+    }
+
+    #[test]
+    fn null_host_call_preserves_push_output_for_next_drain() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        set_test_env();
+
+        let (runner_end, host_end) = connect_pair();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let runner = thread::spawn(move || {
+            let mut stream = runner_end;
+            let frame = recv::<HostToPluginV4>(&mut stream).expect("interactive frame");
+            let HostToPluginV4::Request { id, .. } = frame else {
+                panic!("unexpected frame: {frame:?}");
+            };
+            for (rid, payload) in [
+                (9101, PluginRequest::PushInfo("step info".into())),
+                (9102, PluginRequest::PushOutput("step output".into())),
+                (9103, PluginRequest::PushError("step error".into())),
+            ] {
+                send(
+                    &mut stream,
+                    &PluginToHostV4::Request {
+                        id: rid,
+                        tab_id: Some(1),
+                        payload,
+                    },
+                )
+                .expect("plugin message");
+                match recv::<HostToPluginV4>(&mut stream).expect("plugin message reply") {
+                    HostToPluginV4::Response {
+                        payload: PluginResponse::Ok,
+                        ..
+                    } => {}
+                    other => panic!("unexpected reply: {other:?}"),
+                }
+            }
+            send(
+                &mut stream,
+                &PluginToHostV4::Response {
+                    id,
+                    payload: HostResponse::CommandStep(Box::new(crate::host::CommandStep::Done)),
+                },
+            )
+            .expect("interactive response");
+            let _ = done_rx.recv_timeout(Duration::from_secs(5));
+        });
+
+        let conn = V4Connection::new(host_end, Arc::new(|_, _| {}), None).expect("connection");
+        let resp = conn
+            .call_null_host(HostRequest::InteractiveEvent {
+                command_id: 7,
+                event: crate::ipc::protocol::InteractiveEvent::Enter,
+            })
+            .expect("call_null_host succeeds");
+        assert!(matches!(
+            resp,
+            HostResponse::CommandStep(step) if matches!(*step, crate::host::CommandStep::Done)
+        ));
+
+        let mut host = RecordingHost::default();
+        conn.drain_requests(&mut host, &mut |_| {})
+            .expect("drain_requests succeeds");
+        let recorded = host.messages.lock().unwrap().clone();
+        assert_eq!(
+            recorded,
+            vec![
+                ("info", "step info".to_string()),
+                ("output", "step output".to_string()),
+                ("error", "step error".to_string()),
+            ]
+        );
+        let _ = done_tx.send(());
+        runner.join().expect("runner thread finished");
         restore_test_env();
     }
 }

@@ -579,6 +579,13 @@ impl OpenCADStudio {
 
     fn apply_cmd_result_inner(&mut self, result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
+        if self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|command| command.name() == "PLUGIN")
+        {
+            self.drain_plugin_requests_for_tab(i);
+        }
         if let Some(bind) = self.tabs[i]
             .active_cmd
             .as_ref()

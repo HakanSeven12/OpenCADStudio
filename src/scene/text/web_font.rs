@@ -192,9 +192,14 @@ pub fn requires_shaping(text: &str) -> bool {
                 | 0x0600..=0x06FF
                 | 0x0750..=0x077F
                 | 0x08A0..=0x08FF
-                | 0x0900..=0x097F
+                // Indic (Devanagari through Sinhala): reordered vowel signs
+                // and conjuncts.
+                | 0x0900..=0x0DFF
                 | 0x0E00..=0x0E7F
                 | 0x0E80..=0x0EFF
+                | 0x0F00..=0x0FFF
+                | 0x1000..=0x109F
+                | 0x1780..=0x17FF
                 | 0xA8E0..=0xA8FF
                 | 0xFB1D..=0xFB4F
                 | 0xFB50..=0xFDFF
@@ -401,3 +406,24 @@ pub use imp::{fetch, insert, loaded, take_pending};
 // `request` only has a caller in the wasm font-fallback path.
 #[cfg(target_arch = "wasm32")]
 pub use imp::request;
+
+#[cfg(test)]
+mod tests {
+    use super::requires_shaping;
+
+    #[test]
+    fn complex_scripts_require_shaping() {
+        // Bengali (#3439), Tamil, Devanagari, Tibetan, Myanmar, Khmer.
+        for text in [
+            "\u{0995}\u{09CD}\u{09B7}\u{09BF}",
+            "\u{0BA4}\u{0BBF}",
+            "\u{0915}\u{093F}",
+            "\u{0F40}",
+            "\u{1000}",
+            "\u{1780}",
+        ] {
+            assert!(requires_shaping(text), "{text:?}");
+        }
+        assert!(!requires_shaping("Plain text 123"));
+    }
+}

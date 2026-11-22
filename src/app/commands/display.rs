@@ -2224,6 +2224,7 @@ impl OpenCADStudio {
             //   SCALELISTEDIT              prompt (Add / Delete)
             //   SCALELISTEDIT LIST         every scale with ratio and in-use count
             //   SCALELISTEDIT ADD 1:50     add (name is a paper:drawing ratio)
+            //   SCALELISTEDIT ADD Site 1:50  add under a name of its own
             //   SCALELISTEDIT DELETE 1:50  remove (not current and not in use)
             //   SCALELISTEDIT DELETE FORCE 1:50  remove and drop its contexts
             "SCALELISTEDIT" | "-SCALELISTEDIT" => {
@@ -2257,29 +2258,41 @@ impl OpenCADStudio {
                 let sub = parts.next().unwrap_or("").to_uppercase();
                 let arg = parts.next().unwrap_or("").trim();
                 match sub.as_str() {
-                    "ADD" => match arg.split_once(':') {
-                        Some((p, d)) => match (p.trim().parse::<f64>(), d.trim().parse::<f64>()) {
-                            (Ok(paper), Ok(drawing)) if paper > 0.0 && drawing > 0.0 => {
-                                self.push_undo_snapshot(i, "SCALELISTEDIT");
-                                if self.tabs[i].scene.add_scale(arg, paper, drawing) {
-                                    self.tabs[i].dirty = true;
-                                    self.command_line.push_output(
-                                        crate::tf!("Added annotation scale {arg}.").as_ref(),
-                                    );
-                                } else {
-                                    self.command_line.push_info(
-                                        crate::tf!("Scale {arg} already exists.").as_ref(),
-                                    );
+                    "ADD" => {
+                        // The ratio is the last word; words before it name
+                        // the scale. A ratio alone names the scale itself.
+                        let (arg, ratio) = match arg.rsplit_once(char::is_whitespace) {
+                            Some((name, ratio)) => (name.trim(), ratio),
+                            None => (arg, arg),
+                        };
+                        match ratio.split_once(':') {
+                            Some((p, d)) => {
+                                match (p.trim().parse::<f64>(), d.trim().parse::<f64>()) {
+                                    (Ok(paper), Ok(drawing)) if paper > 0.0 && drawing > 0.0 => {
+                                        self.push_undo_snapshot(i, "SCALELISTEDIT");
+                                        if self.tabs[i].scene.add_scale(arg, paper, drawing) {
+                                            self.tabs[i].dirty = true;
+                                            self.command_line.push_output(
+                                                crate::tf!("Added annotation scale {arg}.")
+                                                    .as_ref(),
+                                            );
+                                        } else {
+                                            self.command_line.push_info(
+                                                crate::tf!("Scale {arg} already exists.").as_ref(),
+                                            );
+                                        }
+                                    }
+                                    _ => self.command_line.push_error(
+                                        crate::t!("SCALELISTEDIT ADD: use a ratio like 1:50.")
+                                            .as_ref(),
+                                    ),
                                 }
                             }
-                            _ => self.command_line.push_error(
+                            None => self.command_line.push_error(
                                 crate::t!("SCALELISTEDIT ADD: use a ratio like 1:50.").as_ref(),
                             ),
-                        },
-                        None => self.command_line.push_error(
-                            crate::t!("SCALELISTEDIT ADD: use a ratio like 1:50.").as_ref(),
-                        ),
-                    },
+                        }
+                    }
                     "DELETE" | "REMOVE" => {
                         let current = self.tabs[i]
                             .scene

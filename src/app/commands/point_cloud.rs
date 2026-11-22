@@ -406,17 +406,23 @@ impl OpenCADStudio {
 }
 
 #[cfg(test)]
-mod attach_read_tests {
+mod test_support {
     use super::*;
-    use crate::modules::insert::pc_attach::AttachOptions;
-    use crate::scene::model::point_cloud::test_scan_file;
-    use glam::DVec3;
 
-    fn new_app() -> OpenCADStudio {
+    pub(super) fn new_app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app
     }
+}
+
+#[cfg(test)]
+mod attach_read_tests {
+    use super::*;
+    use super::test_support::new_app;
+    use crate::modules::insert::pc_attach::AttachOptions;
+    use crate::scene::model::point_cloud::test_scan_file;
+    use glam::DVec3;
 
     fn placement(path: &std::path::Path) -> PointCloudPlacement {
         PointCloudPlacement {
@@ -576,14 +582,9 @@ mod attach_read_tests {
 #[cfg(test)]
 mod prompt_read_tests {
     use super::*;
+    use super::test_support::new_app;
     use crate::command::StepInput;
     use crate::scene::model::point_cloud::test_scan_file;
-
-    fn new_app() -> OpenCADStudio {
-        let mut app = OpenCADStudio::new_for_test();
-        app.automation_op(r#"{"op":"new"}"#);
-        app
-    }
 
     fn history(app: &OpenCADStudio) -> String {
         app.command_line
@@ -772,17 +773,12 @@ mod prompt_read_tests {
 #[cfg(test)]
 mod display_read_tests {
     use super::*;
+    use super::test_support::new_app;
     use crate::modules::insert::pc_attach::AttachOptions;
     use crate::scene::model::point_cloud::{
         test_held_lock, test_is_held, test_scan_file, test_wait_for_read,
     };
     use glam::DVec3;
-
-    fn new_app() -> OpenCADStudio {
-        let mut app = OpenCADStudio::new_for_test();
-        app.automation_op(r#"{"op":"new"}"#);
-        app
-    }
 
     /// A drawing with an attached cloud of a new scan file of `points`
     /// points, and that file.

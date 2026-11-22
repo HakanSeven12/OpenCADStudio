@@ -25,9 +25,14 @@ on:
           - all
           - snap
           - macos
+          - windows
       # Rebuild an already-published release from the commit its tag points at.
       tag:
         description: Existing release tag to rebuild (optional)
+        default: ''
+        type: string
+      commit:
+        description: Commit on top of the tag to build instead of the tag (optional)
         default: ''
         type: string
 
@@ -39,8 +44,8 @@ env:
 
 jobs:
   build-appimage:
-    # `macos` rebuilds only the dmg of an existing release.
-    if: inputs.target != 'macos'
+    # `macos` and `windows` rebuild only that platform of an existing release.
+    if: inputs.target != 'macos' && inputs.target != 'windows'
     # x86_64 and ARM64 each build natively; the x86_64 payload also feeds
     # the snap.
     strategy:
@@ -441,7 +446,7 @@ jobs:
             --clobber --repo ${{ github.repository }}
 
   build-macos:
-    if: github.event_name == 'release' || inputs.tag != '' || inputs.target == 'all' || inputs.target == 'macos'
+    if: (github.event_name == 'release' || inputs.tag != '' || inputs.target == 'all' || inputs.target == 'macos') && inputs.target != 'windows'
     # Both builds run on the Apple Silicon runner; Intel is cross-built and
     # checked under Rosetta.
     strategy:
@@ -678,7 +683,9 @@ jobs:
 
   verify:
     needs: [build-appimage, build-snap, build-windows, build-macos]
-    if: github.event_name == 'release' || inputs.tag != ''
+    # A single-platform rebuild skips the other jobs; the check still covers
+    # every asset of the release.
+    if: ${{ !cancelled() && !failure() && (github.event_name == 'release' || inputs.tag != '') }}
     runs-on: ubuntu-22.04
     permissions:
       contents: read

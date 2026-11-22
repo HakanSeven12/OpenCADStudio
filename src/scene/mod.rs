@@ -117,6 +117,8 @@ mod limits;
 mod modify;
 #[cfg(test)]
 mod selection_preview_tests;
+#[cfg(test)]
+mod sheet_underlay_tests;
 pub(crate) mod table_content;
 pub(crate) mod table_fields;
 pub(crate) use modify::inverse_affine;
@@ -147,6 +149,8 @@ pub mod viewport_dimension_pick;
 #[cfg(test)]
 mod viewport_freeze_block_member_tests;
 pub mod viewport_ref;
+#[cfg(test)]
+mod viewport_underlay_tests;
 pub(crate) use selection::pe_url_of;
 pub mod parametric_constraints;
 mod parametric_solve;
@@ -3230,9 +3234,12 @@ pub struct Scene {
     hidden_dynamic_dimensions: HashSet<Handle>,
     /// The camera generation the dynamic dimensions were last scaled for.
     dynamic_dimension_camera_gen: Option<u64>,
-    /// The view scale the underlay rasters are made for (model space).
+    /// The view scale the rasters of the underlays of model space are made
+    /// for: the model view's, or with a sheet in view that of its viewports
+    /// (`sheet_model_view`).
     underlay_scale: raster_scale::RasterScale,
-    /// The view scale the OLE pictures of the current layout are made for.
+    /// The view scale of the current layout, which its OLE pictures and the
+    /// underlays on its sheet are made for.
     ole_scale: raster_scale::RasterScale,
     /// The rasters a zoom step asks a worker to draw (`raster_reseed`).
     pending_reseed: Option<raster_reseed::ReseedJob>,
@@ -3820,21 +3827,34 @@ impl Scene {
     /// Paper-space callers use their own scale instead.
     /// Rasterise the underlays again when the view's scale has moved to
     /// another quarter-octave step and stayed there briefly (not on every
-    /// frame of a zoom), and likewise the OLE pictures of the current layout.
+    /// frame of a zoom), and likewise the OLE pictures of the current layout
+    /// and the underlays on its sheet.
     pub fn refresh_underlay_resolution(&mut self, now: iced::time::Instant) {
         let generation = self.camera_generation;
-        if let Some(wpp) = self.world_per_pixel() {
-            let view = self.plan_view_rect();
+        if let Some((wpp, view)) = self.model_view_scale() {
+            let layout = self.current_layout.clone();
             if self
                 .underlay_scale
-                .settle(wpp, view, "Model", generation, now)
+                .settle(wpp, view, &layout, generation, now)
                 && self
                     .document
                     .entities()
                     .any(|e| matches!(e, EntityType::Underlay(_)))
             {
                 #[cfg(not(target_arch = "wasm32"))]
-                self.queue_reseed(|e| matches!(e, EntityType::Underlay(_)));
+                {
+                    // With a sheet in view, the pages of the model alone: one
+                    // on a sheet follows that sheet's view (below).
+                    let mut sheets = HashSet::default();
+                    if layout != "Model" {
+                        sheets = self.layout_block_handles();
+                        sheets.remove(&self.model_space_block_handle());
+                    }
+                    self.queue_reseed(|e| {
+                        matches!(e, EntityType::Underlay(u)
+                            if !sheets.contains(&u.common.owner_handle))
+                    });
+                }
                 #[cfg(target_arch = "wasm32")]
                 self.reseed_underlays();
             }
@@ -3842,11 +3862,30 @@ impl Scene {
         if let Some(wpp) = self.layout_world_per_pixel() {
             let view = self.layout_plan_view_rect();
             let layout = self.current_layout.clone();
-            if self.ole_scale.settle(wpp, view, &layout, generation, now) && self.has_ole_frames() {
+            let sheet_underlays = self.sheet_may_hold_underlays();
+            if self.ole_scale.settle(wpp, view, &layout, generation, now)
+                && (self.has_ole_frames() || sheet_underlays)
+            {
                 #[cfg(not(target_arch = "wasm32"))]
-                self.queue_reseed(|e| matches!(e, EntityType::Ole2Frame(_)));
+                {
+                    let sheet = self.current_layout_block_handle();
+                    self.queue_reseed(|e| match e {
+                        EntityType::Ole2Frame(_) => true,
+                        EntityType::Underlay(u) => {
+                            sheet_underlays && u.common.owner_handle == sheet
+                        }
+                        _ => false,
+                    });
+                }
                 #[cfg(target_arch = "wasm32")]
-                self.reseed_ole_frames();
+                {
+                    if self.has_ole_frames() {
+                        self.reseed_ole_frames();
+                    }
+                    if sheet_underlays {
+                        self.reseed_underlays();
+                    }
+                }
             }
         }
     }
@@ -3856,16 +3895,32 @@ impl Scene {
     /// requested until they are made again).
     pub fn underlay_resolution_stale(&self) -> bool {
         let underlays = self.has_underlays()
-            && self.world_per_pixel().is_some_and(|wpp| {
-                self.underlay_scale
-                    .stale(wpp, self.plan_view_rect(), "Model")
+            && self.model_view_scale().is_some_and(|(wpp, view)| {
+                self.underlay_scale.stale(wpp, view, &self.current_layout)
             });
         underlays
-            || (self.has_ole_frames()
+            || ((self.has_ole_frames() || self.sheet_may_hold_underlays())
                 && self.layout_world_per_pixel().is_some_and(|wpp| {
                     self.ole_scale
                         .stale(wpp, self.layout_plan_view_rect(), &self.current_layout)
                 }))
+    }
+
+    /// The scale the model is seen at now (model units per pixel) and the
+    /// plan rectangle of it in sight: those of the model view, or with a
+    /// sheet in view those of its viewports. `None` when the model is not in
+    /// sight, or before a frame has told the size of the view.
+    fn model_view_scale(&self) -> Option<(f32, Option<[f64; 4]>)> {
+        match self.world_per_pixel() {
+            Some(wpp) => Some((wpp, self.plan_view_rect())),
+            None => self.sheet_model_view(),
+        }
+    }
+
+    /// A paper layout is in view and the drawing has underlays: some may lie
+    /// on its sheet, where they follow the sheet's view.
+    fn sheet_may_hold_underlays(&self) -> bool {
+        self.current_layout != "Model" && self.has_underlays()
     }
 
     /// World units per screen pixel of the current layout's view: the model
@@ -3889,7 +3944,13 @@ impl Scene {
     /// down (orthographic plan view) — model space in Model, the sheet in a
     /// paper layout; `None` otherwise.
     fn layout_plan_view_rect(&self) -> Option<[f64; 4]> {
-        let cam = self.camera.borrow();
+        Self::plan_rect_of(&self.camera.borrow(), self.view_aspect())
+    }
+
+    /// World XY rectangle a camera shows in a view `aspect` wide for its
+    /// height, when it looks straight down (orthographic plan view); `None`
+    /// otherwise.
+    pub(super) fn plan_rect_of(cam: &view::camera::Camera, aspect: f64) -> Option<[f64; 4]> {
         if !matches!(cam.projection, view::camera::Projection::Orthographic) {
             return None;
         }
@@ -3897,7 +3958,7 @@ impl Scene {
             return None;
         }
         let h = f64::from(cam.ortho_size());
-        let w = h * self.view_aspect();
+        let w = h * aspect;
         let right = (cam.rotation * glam::Vec3::X).as_dvec3();
         let up = (cam.rotation * glam::Vec3::Y).as_dvec3();
         let (hx, hy) = (
@@ -6664,13 +6725,16 @@ impl Scene {
     /// Splice a re-delivered raster's fresh model into every cached gathered
     /// image list. The reseed takes no geometry bump — the entity, its draw
     /// order and every wire are untouched — so the lists stay valid and only
-    /// their pixels are refreshed; without this the gather would re-walk the
+    /// their rasters are refreshed; without this the gather would re-walk the
     /// whole drawing on the UI thread right after the view settled (#3339).
-    /// A raster replacement changes only pixels and size — the gathered
-    /// placement, clip and draw depth stay valid — so lists that are current
-    /// are patched in place; lists already stale for other reasons, and lists
-    /// holding an instanced clone (an image inside a block reference), are
-    /// evicted so the next gather rebuilds them.
+    /// A raster replacement changes pixels, size and the triangles the
+    /// raster is drawn with (one with a zoomed-in region has the whole
+    /// picture and the region in one texture) — the gathered placement, clip
+    /// and draw depth stay valid — so lists that are current are patched in
+    /// place; lists already stale for other reasons, and lists holding an
+    /// instanced clone (an image inside a block reference), are evicted so
+    /// the next gather rebuilds them. The sheet of a layout keeps a list of
+    /// its own pictures, patched the same way.
     pub(crate) fn patch_image_caches(&self, prev_epoch: u64, handles: &[Handle]) {
         if handles.is_empty() {
             return;
@@ -6679,7 +6743,8 @@ impl Scene {
         let started = perf.then(iced::time::Instant::now);
         let a = self.patch_image_cache_entries(&self.image_cache, prev_epoch, handles);
         let b = self.patch_image_cache_entries(&self.frozen_image_cache, prev_epoch, handles);
-        let counts = (a.0 + b.0, a.1 + b.1, a.2 + b.2);
+        let c = self.patch_paper_sheet_images(prev_epoch, handles);
+        let counts = (a.0 + b.0 + c.0, a.1 + b.1 + c.1, a.2 + b.2 + c.2);
         if perf {
             crate::perf_record!(
                 "[perf] image-patch   {:>7.2}ms entries={} lists_patched={} evicted={}",
@@ -6708,50 +6773,101 @@ impl Scene {
             // changes, or holds an instanced clone whose transform the gather
             // owns — is evicted: the reseed records no geometry change, so the
             // journal replay would otherwise revalidate it with the old pixels.
-            if *entry_epoch != prev_epoch
-                || arc.iter().any(|model| {
-                    model.render_instance.is_some()
-                        && model.entity.is_some_and(|entity| handles.contains(&entity))
-                })
-            {
+            if *entry_epoch != prev_epoch || Self::holds_instanced_image(arc, handles) {
                 stale += 1;
                 return false;
             }
-            let list = Arc::make_mut(arc);
-            let mut touched = false;
-            list.retain_mut(|model| {
-                let Some(entity) = model.entity else {
-                    return true;
-                };
-                if !handles.contains(&entity) {
-                    return true;
-                }
-                match self.images.get(&entity) {
-                    Some(fresh) => {
-                        if !Arc::ptr_eq(&model.pixels, &fresh.pixels) {
-                            model.file_path = fresh.file_path.clone();
-                            model.pixels = Arc::clone(&fresh.pixels);
-                            model.width = fresh.width;
-                            model.height = fresh.height;
-                        }
-                        touched = true;
-                        true
-                    }
-                    None => {
-                        // The raster did not come back; the cached list drops
-                        // the entry the rebuild would not gather either.
-                        touched = true;
-                        false
-                    }
-                }
-            });
-            if touched {
+            if self.splice_fresh_images(arc, handles) {
                 *entry_epoch = epoch;
                 patched += 1;
             }
             true
         });
         (seen, patched, stale)
+    }
+
+    /// The same for the list the sheet of each layout keeps of its own
+    /// pictures (`paper_sheet_render_models_for_view`). A sheet whose list
+    /// holds none of `handles` is left as it is, whatever its epoch: the
+    /// reseed has nothing for it.
+    fn patch_paper_sheet_images(
+        &self,
+        prev_epoch: u64,
+        handles: &[Handle],
+    ) -> (usize, usize, usize) {
+        let epoch = self.geometry_epoch;
+        let mut seen = 0usize;
+        let mut patched = 0usize;
+        let mut stale = 0usize;
+        self.paper_sheet_render_cache
+            .borrow_mut()
+            .retain(|_, sheet| {
+                seen += 1;
+                let holds = sheet
+                    .images
+                    .iter()
+                    .any(|model| model.entity.is_some_and(|entity| handles.contains(&entity)));
+                if !holds {
+                    return true;
+                }
+                if sheet.epoch != prev_epoch || Self::holds_instanced_image(&sheet.images, handles)
+                {
+                    stale += 1;
+                    return false;
+                }
+                if self.splice_fresh_images(&mut sheet.images, handles) {
+                    sheet.epoch = epoch;
+                    patched += 1;
+                }
+                true
+            });
+        (seen, patched, stale)
+    }
+
+    /// `list` holds one of `handles` as an instanced clone (an image inside
+    /// a block reference), whose transform the gather owns.
+    fn holds_instanced_image(list: &[ImageModel], handles: &[Handle]) -> bool {
+        list.iter().any(|model| {
+            model.render_instance.is_some()
+                && model.entity.is_some_and(|entity| handles.contains(&entity))
+        })
+    }
+
+    /// Gives the entries of `list` that serve `handles` the rasters the scene
+    /// has for them now, and drops those whose raster did not come back.
+    /// Returns whether the list held any.
+    fn splice_fresh_images(&self, list: &mut Arc<Vec<ImageModel>>, handles: &[Handle]) -> bool {
+        let mut touched = false;
+        Arc::make_mut(list).retain_mut(|model| {
+            let Some(entity) = model.entity else {
+                return true;
+            };
+            if !handles.contains(&entity) {
+                return true;
+            }
+            match self.images.get(&entity) {
+                Some(fresh) => {
+                    if !Arc::ptr_eq(&model.pixels, &fresh.pixels) {
+                        model.file_path = fresh.file_path.clone();
+                        model.pixels = Arc::clone(&fresh.pixels);
+                        model.width = fresh.width;
+                        model.height = fresh.height;
+                        // The triangles go with the texture: they say
+                        // which part of it each one draws.
+                        model.verts.clone_from(&fresh.verts);
+                    }
+                    touched = true;
+                    true
+                }
+                None => {
+                    // The raster did not come back; the cached list drops
+                    // the entry the rebuild would not gather either.
+                    touched = true;
+                    false
+                }
+            }
+        });
+        touched
     }
 
     /// Image / OLE-frame models owned by `target_block`, optionally dropping

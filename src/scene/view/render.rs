@@ -1744,6 +1744,13 @@ fn render_signature(
         std::sync::Arc::as_ptr(&vp.point_clouds)
     }
     .hash(&mut h);
+    // The rasters drawn in the view. A zoom step has one drawn again with
+    // no change of geometry (`Scene::apply_reseed`), so the epoch below
+    // does not tell it: each raster is told by its pixel buffer.
+    vp.images.len().hash(&mut h);
+    for image in vp.images.iter() {
+        (std::sync::Arc::as_ptr(&image.pixels) as usize).hash(&mut h);
+    }
     vp.point_cloud_light.map(f32::to_bits).hash(&mut h);
     for plane in &vp.point_cloud_clip {
         plane.map(f64::to_bits).hash(&mut h);
@@ -2046,6 +2053,31 @@ fn physical_viewport(rect: Rectangle, window: Size<u32>) -> PhysicalViewport {
         },
         uv_offset: [(left - x) / width, (top - y) / height],
         uv_scale: [visible_w / width, visible_h / height],
+    }
+}
+
+#[cfg(test)]
+impl Primitive {
+    /// The signature `prepare` takes of each viewport's frame when the
+    /// canvas is `bounds` in a window of its own size at scale 1, with no
+    /// preview drawn over the scene and nothing hovered.
+    pub(in crate::scene) fn frame_signatures(&self, bounds: Rectangle) -> Vec<u64> {
+        let window = Size::new(bounds.width.ceil() as u32, bounds.height.ceil() as u32);
+        self.viewports
+            .iter()
+            .map(|vp| {
+                let placement = physical_viewport(
+                    Rectangle {
+                        x: bounds.x + vp.screen_rect.x * bounds.width,
+                        y: bounds.y + vp.screen_rect.y * bounds.height,
+                        width: vp.screen_rect.width * bounds.width,
+                        height: vp.screen_rect.height * bounds.height,
+                    },
+                    window,
+                );
+                render_signature(vp, &placement, false, !vp.separate_wire_highlights)
+            })
+            .collect()
     }
 }
 

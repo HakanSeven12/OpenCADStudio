@@ -3694,4 +3694,103 @@ mod tests {
     fn workbook_metadata_bytes_rejects_non_workbooks() {
         assert!(workbook_metadata_bytes(b"not a workbook").is_err());
     }
+
+    /// The header of an `.xls` file (a compound file): the signature, 512-byte
+    /// sectors, 64-byte mini sectors, no sector table and no table of tables.
+    /// `dir_start` is the sector where the directory starts.
+    fn xls_header(dir_start: u32) -> Vec<u8> {
+        const END_OF_CHAIN: [u8; 4] = [0xFE, 0xFF, 0xFF, 0xFF];
+        let mut header = vec![0u8; 512];
+        header[..8].copy_from_slice(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1");
+        header[26..28].copy_from_slice(&3u16.to_le_bytes());
+        header[30..32].copy_from_slice(&9u16.to_le_bytes());
+        header[32..34].copy_from_slice(&6u16.to_le_bytes());
+        header[48..52].copy_from_slice(&dir_start.to_le_bytes());
+        header[60..64].copy_from_slice(&END_OF_CHAIN);
+        header[68..72].copy_from_slice(&END_OF_CHAIN);
+        header[76..].fill(0xFF);
+        header
+    }
+
+    /// A damaged `.xls` file: its directory starts in a sector that the
+    /// (empty) sector table does not have. calamine 0.36.1 and 0.38.0 panic
+    /// there (an index out of bounds in `Sectors::get_chain`).
+    fn damaged_xls() -> Vec<u8> {
+        let mut bytes = xls_header(0);
+        bytes.extend_from_slice(&[0u8; 512]);
+        bytes
+    }
+
+    fn assert_reader_stopped<T: std::fmt::Debug>(result: Result<T, String>, place: &str) {
+        let error = result.expect_err(place);
+        assert!(
+            error.starts_with("the spreadsheet reader stopped: "),
+            "{place}: {error}"
+        );
+    }
+
+    /// A damaged `.xls` file in memory (a picked file, a paste) is an error
+    /// for the data link, not a panic.
+    #[test]
+    fn a_damaged_xls_file_in_memory_is_an_error() {
+        let bytes = damaged_xls();
+        assert_reader_stopped(workbook_metadata_bytes(&bytes), "metadata");
+        assert_reader_stopped(workbook_first_sheet_rows(&bytes), "first sheet");
+        // The header with nothing after it stops the reader the same way.
+        assert_reader_stopped(workbook_metadata_bytes(&xls_header(0)), "header only");
+    }
+
+    /// A file that stops in the middle of the header is not a workbook.
+    #[test]
+    fn a_cut_xls_header_is_an_error() {
+        let header = xls_header(0);
+        assert!(workbook_metadata_bytes(&header[..300]).is_err());
+        assert!(workbook_first_sheet_rows(&header[..8]).is_err());
+    }
+
+    /// The same damaged file on disk: the sheet list and the rows of a data
+    /// link are errors.
+    #[test]
+    fn a_damaged_xls_file_on_disk_is_an_error() {
+        let dir = std::env::temp_dir().join(format!(
+            "ocs-damaged-xls-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("damaged.xls");
+        std::fs::write(&path, damaged_xls()).unwrap();
+
+        assert_reader_stopped(workbook_metadata(&path), "metadata");
+        assert_reader_stopped(
+            read_tabular_file(&path, None, LinkRange::EntireSheet, None),
+            "rows",
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A damaged file that the user picked (its bytes are registered under
+    /// its name, with no file on disk).
+    #[test]
+    fn a_damaged_picked_xls_file_is_an_error() {
+        let name = "ocs-damaged-picked.xls";
+        register_picked_source(name, Arc::new(damaged_xls()));
+        assert_reader_stopped(
+            read_tabular_file(Path::new(name), None, LinkRange::EntireSheet, None),
+            "rows",
+        );
+    }
+
+    /// A read that does not panic gives its own result.
+    #[test]
+    fn a_workbook_read_passes_its_result_through() {
+        assert_eq!(workbook_read(|| Ok(7)), Ok(7));
+        assert_eq!(
+            workbook_read(|| Err::<(), _>("no sheet".to_string())),
+            Err("no sheet".to_string())
+        );
+    }
 }

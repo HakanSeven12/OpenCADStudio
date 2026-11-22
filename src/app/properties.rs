@@ -6621,10 +6621,11 @@ mod chprop_integration_tests {
     /// Converting the site to `apply_property_op` moved the snapshot
     /// to *before* the mutation. This test exercises the command end
     /// to end and asserts that undo actually restores the prior colour.
-    #[ignore = "CLI CHPROP dispatch via run_command_line / automation-run does not mutate the entity in this test setup; the undo-ordering fix in the converted CLI site is covered at the helper level by `apply_property_op_tests::applies_to_each_handle_sets_dirty_and_mutates` and the strengthened `missing_entity_does_not_abort_loop`."]
     #[test]
     fn cli_chprop_undo_restores_previous_state() {
         let mut app = OpenCADStudio::new_for_test();
+        // The command line refuses a command while no drawing is open.
+        let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
         let h = line_handle(&mut app);
         let original = app.tabs[i]

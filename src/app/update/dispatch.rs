@@ -10569,6 +10569,7 @@ impl OpenCADStudio {
                 async {
                     let handle = rfd::AsyncFileDialog::new()
                         .add_filter(crate::t!("Command aliases (*.pgp)").as_ref(), &["pgp"])
+                        .add_filter("Excel (*.xlsx)", &["xlsx"])
                         .pick_file()
                         .await?;
                     #[cfg(not(target_arch = "wasm32"))]

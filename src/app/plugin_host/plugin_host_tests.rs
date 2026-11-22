@@ -9525,6 +9525,116 @@ fn staged_python_point_pick_and_cancel_over_real_ipc() {
         .contains("cancelled"));
 }
 
+/// A script asks for an array drag: the plugin previews the copies while the
+/// cursor moves, and the last point runs the script again with the result.
+#[test]
+fn staged_python_drag_previews_and_resumes_the_script_over_real_ipc() {
+    let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {
+        return;
+    };
+    let runner_path = std::env::var_os("OCS_PLUGIN_RUNNER_EXE")
+        .expect("set OCS_PLUGIN_RUNNER_EXE to the built OpenCADStudio executable");
+    assert!(std::path::Path::new(&runner_path).is_file());
+    let script = std::env::temp_dir().join(format!("ocs_py_drag_{}.py", std::process::id()));
+    std::fs::write(
+        &script,
+        r#"doc = ocs.active_document
+result = doc.resume()
+if result is None:
+    try:
+        doc.request_drag(["Base", "Vector"], [], "array")
+    except ValueError as error:
+        print("refused:", error)
+    doc.request_drag(["Base", "Vector", "End"], [[(0, 0), (1, 0), (1, 1)]], "array", "seven")
+else:
+    print("resumed", result["status"], result["count"], result["state"], result["points"][2])
+"#,
+    )
+    .unwrap();
+    let script_path = script.to_string_lossy().replace('\\', "/");
+    let mut app = OpenCADStudio::new_for_test();
+    app.tabs[0].is_start = false;
+    let process = {
+        let mut host = HostSession::new(&mut app, 0);
+        std::sync::Arc::new(
+            ocs_plugin_api::process::PluginProcess::spawn(
+                std::path::Path::new(&plugin_path),
+                &mut host,
+                crate::plugin::v4_support::notification_handler(),
+                None,
+            )
+            .expect("spawn staged Python plugin"),
+        )
+    };
+    let history = |app: &OpenCADStudio| {
+        app.command_line
+            .history
+            .iter()
+            .map(|line| line.text.clone())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let mut started = None;
+    {
+        let mut host = HostSession::new(&mut app, 0);
+        assert!(process
+            .dispatch(&mut host, &format!("PY_RUN {script_path}"), &mut |id| {
+                started = Some(id)
+            })
+            .unwrap());
+    }
+    let text = history(&app);
+    assert!(text.contains("refused: request_drag: an array takes 3 prompts"), "{text}");
+    let id = started.unwrap_or_else(|| panic!("no drag started: {text}"));
+    app.set_active_command(
+        0,
+        Box::new(PluginProcessInteractiveAdapter::new(
+            std::sync::Arc::clone(&process),
+            id,
+        )),
+    );
+    let command = app.tabs[0].active_cmd.as_mut().unwrap();
+    assert_eq!(command.prompt(), "Base");
+    assert!(command
+        .on_preview_wires(glam::DVec3::new(9.0, 9.0, 0.0))
+        .is_empty());
+    for point in [glam::DVec3::new(10.0, 0.0, 0.0), glam::DVec3::new(12.0, 0.0, 0.0)] {
+        assert!(matches!(
+            command.on_point(point),
+            crate::command::CmdResult::NeedPoint
+        ));
+    }
+    assert_eq!(command.prompt(), "End");
+    // 6.5 units along a 2-unit vector: the rubber line and three copies
+    assert_eq!(
+        command
+            .on_preview_wires(glam::DVec3::new(16.5, 3.0, 0.0))
+            .len(),
+        4
+    );
+    let result = command.on_point(glam::DVec3::new(16.5, 3.0, 0.0));
+    let crate::command::CmdResult::Script(line) = result else {
+        panic!("the last point runs the script again");
+    };
+    assert!(line.starts_with("PY_RESUME "), "{line}");
+    assert!(line.ends_with(&script_path), "{line}");
+    {
+        let mut host = HostSession::new(&mut app, 0);
+        assert!(process.dispatch(&mut host, &line, &mut |_| {}).unwrap());
+    }
+    let text = history(&app);
+    assert!(text.contains("resumed drag 3 seven [16.5, 3.0, 0.0]"), "{text}");
+    // the result is read once: the same line again is a first run
+    {
+        let mut host = HostSession::new(&mut app, 0);
+        assert!(process.dispatch(&mut host, &line, &mut |_| {}).unwrap());
+    }
+    let text = history(&app);
+    assert_eq!(text.matches("refused: request_drag").count(), 2, "{text}");
+    app.tabs[0].active_cmd = None;
+    let _ = std::fs::remove_file(&script);
+}
+
 /// A script started from a typed line (`PY_RUN <file>`) asks for a point. The
 /// file name was the plugin's argument, so it is not an answer to the prompt
 /// the script opened, and the line's closing Enter does not cancel it.

@@ -117,6 +117,35 @@ and active-command state changes. Each tab retains up to 256 events; an
 `{"type": "overflow", "dropped": n}` event means older events were lost, so
 refresh the document and selection before acting on cached state.
 
+### Dragging with a live preview
+
+`doc.request_drag(prompts, wires, preview, state)` asks for one point per
+prompt and draws `wires` (lists of points, in drawing coordinates) under the
+cursor while the user moves it. `preview` is `"line"` (a rubber line from the
+last point), `"move"` (the wires follow the cursor from the first point), or
+`"array"` (three prompts: base point, vector, end point; one copy of the wires
+per whole vector between the base and the cursor, in either direction).
+
+A script cannot wait for the clicks, so the file is run a second time when the
+last point is picked. `doc.resume()` is `None` on the first run and the result
+on the second: `{"status": "drag", "points": [...], "count": n, "state": s}`,
+where `state` is the string the first run passed in (handles, settings) and
+`count` is the signed number of array copies. Escape or Enter ends the drag
+without a second run. Pass `resume=False` to read the result later with
+`poll_input` instead.
+
+```python
+doc = ocs.active_document
+done = doc.resume()
+if done is None:
+    line = doc.selection[0]
+    doc.request_drag(["Base point", "Vector", "End point"],
+                     [[line.start, line.end]], "array", str(line.handle))
+elif done["status"] == "drag":
+    base, vector_end, _ = done["points"]
+    print(done["count"], "copies of", done["state"])
+```
+
 ## Test locally as a bundled plugin
 
 ```sh

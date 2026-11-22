@@ -14,6 +14,7 @@ class DocumentModelTests(unittest.TestCase):
             2: {"handle": 2, "kind": "Hatch", "layer": "0", "_editable": False},
         }
         self.calls = []
+        self.resume_token = None
         self.ocs = types.SimpleNamespace(
             entity_descriptor=lambda handle: self.records.get(handle),
             entity_coverage=lambda kind: {"kind": kind, "scope": "canvas",
@@ -34,6 +35,8 @@ class DocumentModelTests(unittest.TestCase):
             tab_id=lambda: 7,
             request_input=lambda prompt, entity: (prompt, entity),
             poll_input=lambda token: {"status": "point", "point": [1, 2, 3]},
+            request_drag=lambda *args: self.calls.append(("drag", args)) or 5,
+            resume_token=lambda: self.resume_token,
             layer_records=lambda: [{"name": "0", "current": True}, {"name": "Walls", "current": False}],
             layer_operation=lambda op, name, options: self.calls.append((op, name, options)) or 9,
             text_style_records=lambda: [{"name": n, "current": n == "Standard"} for n in ("Standard", "Title", "Notes")],
@@ -310,6 +313,17 @@ class DocumentModelTests(unittest.TestCase):
         self.assertEqual(self.doc.poll_events(), [{"type": "drawing", "tab_id": 7}])
         self.assertEqual(self.doc.request_entity("Pick"), ("Pick", True))
         self.assertEqual(self.doc.poll_input(10)["status"], "point")
+
+    def test_drag_request_and_resume(self):
+        self.resume_token = None
+        self.assertIsNone(self.doc.resume())
+        token = self.doc.request_drag(["Base", "Vector", "End"], [[(0, 0), (1, 2)]], "array", "7")
+        self.assertEqual(token, 5)
+        self.assertEqual(self.calls[-1], ("drag", (["Base", "Vector", "End"], [[[0.0, 0.0], [1.0, 2.0]]], "array", "7", True)))
+        with self.assertRaises(TypeError):
+            self.doc.request_drag("Base")
+        self.resume_token = 5
+        self.assertEqual(self.doc.resume()["status"], "point")
 
 
 if __name__ == "__main__":

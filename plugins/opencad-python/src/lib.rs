@@ -98,7 +98,18 @@ impl BuiltinPlugin for PythonPlugin {
             if path.is_empty() {
                 host.push_error("PY_RUN: expected a file path, e.g. PY_RUN script.py");
             } else {
-                run_file(host, path);
+                run_file(host, path, None);
+            }
+            return true;
+        }
+        // The last click of a `request_drag(..., resume=True)` runs its
+        // script again: `PY_RESUME <token> <path>`.
+        if let Some(rest) = cmd.strip_prefix("PY_RESUME") {
+            let rest = rest.trim();
+            let (token, path) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+            match (token.parse::<u64>(), path.trim()) {
+                (Ok(token), path) if !path.is_empty() => run_file(host, path, Some(token)),
+                _ => host.push_error("PY_RESUME: expected a drag token and a file path"),
             }
             return true;
         }
@@ -213,7 +224,7 @@ fn run_eval(host: &mut dyn HostApi, source: &str) {
 /// hold a whole script. Reports errors the same way as `PY_EVAL`; on success
 /// reports that the script ran rather than a value (`Mode::Exec` doesn't
 /// produce one).
-fn run_file(host: &mut dyn HostApi, path: &str) {
+fn run_file(host: &mut dyn HostApi, path: &str, resume: Option<u64>) {
     let source = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) => {
@@ -222,6 +233,7 @@ fn run_file(host: &mut dyn HostApi, path: &str) {
         }
     };
 
+    let _script = host_ctx::ScriptGuard::set(path, resume);
     if run_code(host, "PY_RUN", path, &source, |_, _| Ok(())) {
         host.push_output(&format!("PY_RUN: {path} completed"));
     }

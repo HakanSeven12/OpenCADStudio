@@ -3755,6 +3755,13 @@ pub(super) fn remap_copied_xdict_cross_refs(
                     entry.handle = rewrite(entry.handle);
                 }
             }
+            // A field naming an object copied with it follows the copy, so a
+            // copied line and its length field stay linked (#3435).
+            document::objects::ObjectType::Field(f) => {
+                for r in &mut f.referenced_objects {
+                    *r = rewrite(*r);
+                }
+            }
             _ => {}
         }
     }

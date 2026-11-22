@@ -3891,7 +3891,7 @@ mod tests {
     }
 
     #[test]
-    fn test_split_mixed_polyline_straight_lines_have_taper_widths() {
+    fn split_mixed_polyline_straight_lines_have_taper_widths() {
         let tg_line = TangentGeom::Line {
             p1: [0.0, 0.0, 0.0],
             p2: [10.0, 0.0, 0.0],
@@ -4010,7 +4010,7 @@ mod tests {
     }
 
     #[test]
-    fn test_split_mixed_polyline_zero_width_segments_after_tapered_segment() {
+    fn split_mixed_polyline_zero_width_segments_after_tapered_segment() {
         let tg_line = TangentGeom::Line {
             p1: [0.0, 0.0, 0.0],
             p2: [10.0, 0.0, 0.0],
@@ -4082,7 +4082,7 @@ mod tests {
     }
 
     #[test]
-    fn test_split_mixed_polyline_reversed_arc_aligns_endpoints() {
+    fn split_mixed_polyline_reversed_arc_aligns_endpoints() {
         // Clockwise arc from (10.0, 0.0) to (15.0, 5.0).
         // bulge_arc_to_tangent inverts angles so start_angle is at (15.0, 5.0) and end_angle at (10.0, 0.0).
         let tg_arc_reversed = TangentGeom::Arc {

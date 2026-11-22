@@ -3337,7 +3337,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_type_ahead_prefix_matching() {
+    fn type_ahead_prefix_matching() {
         let mut ta = TypeAhead::new();
         let items = vec![
             "0",
@@ -3361,7 +3361,7 @@ mod tests {
     }
 
     #[test]
-    fn test_type_ahead_repeated_char_cycling() {
+    fn type_ahead_repeated_char_cycling() {
         let mut ta = TypeAhead::new();
         let items = vec!["Layer 1", "Layer 2", "Lines", "Roof", "Walls"];
         let now = Instant::now();
@@ -3384,7 +3384,7 @@ mod tests {
     }
 
     #[test]
-    fn test_type_ahead_substring_fallback() {
+    fn type_ahead_substring_fallback() {
         let mut ta = TypeAhead::new();
         let items = vec!["A-WALL-EXTR", "E-LITE-SWCH", "M-HVAC-DUCT"];
         let now = Instant::now();
@@ -3398,7 +3398,7 @@ mod tests {
     }
 
     #[test]
-    fn test_type_ahead_backspace() {
+    fn type_ahead_backspace() {
         let mut ta = TypeAhead::new();
         let items = vec!["Door 1", "Door 2", "Dimension", "Wall"];
         let now = Instant::now();
@@ -3419,7 +3419,7 @@ mod tests {
     }
 
     #[test]
-    fn test_type_ahead_timeout_reset() {
+    fn type_ahead_timeout_reset() {
         let mut ta = TypeAhead::new();
         let items = vec!["Doors", "Walls", "Windows"];
         let now = Instant::now();
@@ -3435,7 +3435,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dropdown_capture_flags() {
+    fn dropdown_capture_flags() {
         assert!(!take_dropdown_arrow_captured());
         mark_dropdown_arrow_captured();
         assert!(take_dropdown_arrow_captured());
@@ -3448,7 +3448,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dropdown_list_sync_state_with_query() {
+    fn dropdown_list_sync_state_with_query() {
         use iced::widget::text;
 
         let el = |s: &'static str| -> Element<'static, i32> { text(s).into() };
@@ -3472,7 +3472,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dropdown_list_arrow_navigation_step() {
+    fn dropdown_list_arrow_navigation_step() {
         use iced::widget::text;
 
         let el = |s: &'static str| -> Element<'static, i32> { text(s).into() };

@@ -4374,7 +4374,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pyramid_tiling_protocol_and_resources() {
+    fn pyramid_tiling_protocol_and_resources() {
         let mut clients = HashMap::new();
         let mut tasks = TaskStore::default();
         let mut resources = ResourceStore::default();

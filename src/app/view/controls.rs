@@ -534,7 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn test_viewport_controls_construction() {
+    fn viewport_controls_construction() {
         for style in crate::modules::view::visual_style::VISUAL_STYLES {
             let _el = viewport_controls(
                 style.mode,
@@ -564,7 +564,7 @@ mod tests {
     use crate::ui::style::common::wcag_contrast;
 
     #[test]
-    fn test_visual_style_dropdown_contrast_across_all_themes() {
+    fn visual_style_dropdown_contrast_across_all_themes() {
         use crate::ui::style::chrome;
         for theme in iced::Theme::ALL {
             // The flyout sits on the panel; the highlighted row on the
@@ -589,7 +589,7 @@ mod tests {
     }
 
     #[test]
-    fn test_visual_style_dropdown_width_accommodates_all_items() {
+    fn visual_style_dropdown_width_accommodates_all_items() {
         let max_label_len = crate::modules::view::visual_style::VISUAL_STYLES
             .iter()
             .map(|c| c.label.chars().count())

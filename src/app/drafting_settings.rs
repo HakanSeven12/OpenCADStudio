@@ -181,7 +181,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_drafting_settings_tab_switching_not_dirty() {
+    fn drafting_settings_tab_switching_not_dirty() {
         let state1 = DraftingSettingsState {
             active_tab: DraftingSettingsTab::SnapAndGrid,
             snap_on: false,
@@ -232,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn test_drafting_settings_dirty_toggles() {
+    fn drafting_settings_dirty_toggles() {
         let base = DraftingSettingsState {
             active_tab: DraftingSettingsTab::SnapAndGrid,
             snap_on: false,
@@ -365,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_snap_spacing() {
+    fn parse_snap_spacing() {
         use crate::ui::window::drafting_settings::{
             format_snap_spacing, parse_grid_major, parse_snap_spacing,
         };

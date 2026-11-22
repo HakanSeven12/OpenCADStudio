@@ -256,7 +256,7 @@ mod tests {
     use document::types::Vector3;
 
     #[test]
-    fn test_extract_entities_with_base_point_and_units() {
+    fn extract_entities_with_base_point_and_units() {
         let mut doc = Document::new();
         let mut line = Line::new();
         line.start = Vector3::new(10.0, 20.0, 0.0);

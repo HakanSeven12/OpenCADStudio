@@ -138,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_block_retain_mode() {
+    fn create_block_retain_mode() {
         let (mut scene, line_h) = make_test_scene();
         let options = CreateBlockOptions {
             name: "BLK_RETAIN".to_string(),
@@ -169,7 +169,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_block_convert_mode() {
+    fn create_block_convert_mode() {
         let (mut scene, line_h) = make_test_scene();
         let options = CreateBlockOptions {
             name: "BLK_CONVERT".to_string(),
@@ -314,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_block_delete_mode() {
+    fn create_block_delete_mode() {
         let (mut scene, line_h) = make_test_scene();
         let options = CreateBlockOptions {
             name: "BLK_DELETE".to_string(),
@@ -345,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_block_redefinition() {
+    fn create_block_redefinition() {
         let (mut scene, line1_h) = make_test_scene();
         let options1 = CreateBlockOptions {
             name: "REDEF_BLOCK".to_string(),
@@ -409,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_block_validation() {
+    fn create_block_validation() {
         let (mut scene, line_h) = make_test_scene();
 
         // Empty name
@@ -475,7 +475,7 @@ mod tests {
     }
 
     #[test]
-    fn test_block_on_screen_command_ordering() {
+    fn block_on_screen_command_ordering() {
         let dummy_options = CreateBlockOptions {
             name: "ON_SCREEN_TEST".to_string(),
             handles: vec![],
@@ -530,7 +530,7 @@ mod tests {
     }
 
     #[test]
-    fn test_block_on_screen_base_point_sets_correct_transforms() {
+    fn block_on_screen_base_point_sets_correct_transforms() {
         let (mut scene, line_h) = make_test_scene();
         let initial_options = CreateBlockOptions {
             name: "ON_SCREEN_BASE_TEST".to_string(),
@@ -615,7 +615,7 @@ mod tests {
     }
 
     #[test]
-    fn test_explodable_flag_prevents_explode() {
+    fn explodable_flag_prevents_explode() {
         let (mut scene, line_h) = make_test_scene();
         let options = CreateBlockOptions {
             name: "BLK_NO_EXPLODE".to_string(),
@@ -641,7 +641,7 @@ mod tests {
     }
 
     #[test]
-    fn test_explodable_flag_allows_explode() {
+    fn explodable_flag_allows_explode() {
         let (mut scene, line_h) = make_test_scene();
         let options = CreateBlockOptions {
             name: "BLK_CAN_EXPLODE".to_string(),

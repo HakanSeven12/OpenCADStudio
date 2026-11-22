@@ -6349,7 +6349,7 @@ DEAD
     }
 
     #[test]
-    fn test_mtp_in_line_command() {
+    fn mtp_in_line_command() {
         use crate::app::Message;
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -6425,7 +6425,7 @@ DEAD
     }
 
     #[test]
-    fn test_mtp_escape_restores_parent() {
+    fn mtp_escape_restores_parent() {
         use crate::app::Message;
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -6461,7 +6461,7 @@ DEAD
     }
 
     #[test]
-    fn test_mtp_typing_routing_with_dyn_input() {
+    fn mtp_typing_routing_with_dyn_input() {
         use crate::app::Message;
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -6636,7 +6636,7 @@ DEAD
     }
 
     #[test]
-    fn test_snap_override_typed_in_line_command() {
+    fn snap_override_typed_in_line_command() {
         use crate::app::Message;
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -6697,7 +6697,7 @@ DEAD
     }
 
     #[test]
-    fn test_snap_override_feed_token() {
+    fn snap_override_feed_token() {
         use crate::app::Message;
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);

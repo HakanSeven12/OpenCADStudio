@@ -713,7 +713,7 @@ mod tests {
     }
 
     #[test]
-    fn test_model_space_defaults() {
+    fn model_space_defaults() {
         let cfg = ModelSpaceThemeConfig::default();
         assert_eq!(cfg.mode, ModelSpaceMode::MatchTheme);
         assert_eq!(cfg.custom_bg, None);
@@ -729,7 +729,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_model_bg_match_theme() {
+    fn resolve_model_bg_match_theme() {
         let cfg = ModelSpaceThemeConfig {
             mode: ModelSpaceMode::MatchTheme,
             ..Default::default()
@@ -747,7 +747,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_model_bg_classic_dark() {
+    fn resolve_model_bg_classic_dark() {
         let cfg = ModelSpaceThemeConfig {
             mode: ModelSpaceMode::ClassicDark,
             ..Default::default()
@@ -761,7 +761,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_model_bg_custom() {
+    fn resolve_model_bg_custom() {
         let cfg = ModelSpaceThemeConfig {
             mode: ModelSpaceMode::Custom,
             custom_bg: Some([10, 20, 30]),
@@ -774,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn test_model_space_config_serde_roundtrip() {
+    fn model_space_config_serde_roundtrip() {
         let mut original = AppConfig::default();
         original.model_space.mode = ModelSpaceMode::Custom;
         original.model_space.custom_bg = Some([12, 34, 56]);
@@ -1011,7 +1011,7 @@ mod tests {
     /// `byte index 2 is not a char boundary; it is inside 'é'`. Pasting it
     /// into any Options colour field killed the process on the keystroke.
     #[test]
-    fn test_parse_hex_rejects_multibyte_input_without_panicking() {
+    fn parse_hex_rejects_multibyte_input_without_panicking() {
         for value in ["aébé", "#aébé", "éééééé", "#ébé#"] {
             assert_eq!(parse_hex(value), None, "{value} should not parse");
         }

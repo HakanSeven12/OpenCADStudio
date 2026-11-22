@@ -2075,7 +2075,7 @@ mod tests {
     }
 
     #[test]
-    fn test_interactive_dialog_action_pick_updates_table() {
+    fn interactive_dialog_action_pick_updates_table() {
         use ocs_plugin_api::dialog::{DialogActionResponse, DialogControl, DialogDef, DialogEvent, DialogValue};
         use crate::command::{CadCommand, CmdResult};
         use std::collections::HashMap;
@@ -2166,7 +2166,7 @@ mod tests {
     }
 
     #[test]
-    fn test_interactive_dialog_choice_static_and_dynamic_text_and_tab_routing() {
+    fn interactive_dialog_choice_static_and_dynamic_text_and_tab_routing() {
         use ocs_plugin_api::dialog::{DialogActionResponse, DialogControl, DialogDef, DialogEvent, DialogValue};
         use crate::command::{CadCommand, CmdResult};
         use std::collections::HashMap;
@@ -2283,7 +2283,7 @@ mod tests {
     }
 
     #[test]
-    fn test_interactive_dialog_button_fallback_when_command_returns_none() {
+    fn interactive_dialog_button_fallback_when_command_returns_none() {
         use ocs_plugin_api::dialog::{DialogControl, DialogDef};
 
         let mut app = fresh();
@@ -2342,7 +2342,7 @@ mod tests {
     }
 
     #[test]
-    fn test_interactive_dialog_autolisp_exact_flow() {
+    fn interactive_dialog_autolisp_exact_flow() {
         use ocs_plugin_api::dialog::*;
         use crate::command::CadCommand;
 

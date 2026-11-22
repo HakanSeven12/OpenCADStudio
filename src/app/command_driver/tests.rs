@@ -1759,7 +1759,7 @@ mod dispatched_command_task_tests {
     }
 
     #[test]
-    fn test_dispatch_move_with_handle_enter_and_points() {
+    fn dispatch_move_with_handle_enter_and_points() {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
@@ -1805,7 +1805,7 @@ mod dispatched_command_task_tests {
     }
 
     #[test]
-    fn test_preselection_move_with_base_and_dest_points() {
+    fn preselection_move_with_base_and_dest_points() {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
@@ -2358,7 +2358,7 @@ mod bedit_characterization_tests {
     }
 
     #[test]
-    fn test_locked_layer_selection_rejection() {
+    fn locked_layer_selection_rejection() {
         use crate::command::{CadCommand, CmdResult};
 
         let mut app = OpenCADStudio::new_for_test();

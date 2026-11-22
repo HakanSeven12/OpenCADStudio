@@ -2070,7 +2070,7 @@ mod transparent_tests {
     }
 
     #[test]
-    fn test_direct_distance_entry_dyn_off() {
+    fn direct_distance_entry_dyn_off() {
         with_stack(|| {
             let mut app = line_app();
             app.dyn_input = false;

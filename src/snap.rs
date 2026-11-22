@@ -5914,7 +5914,7 @@ mod ext_tests {
     }
 
     #[test]
-    fn test_unindexed_snap_endpoint_and_midpoint_accuracy() {
+    fn unindexed_snap_endpoint_and_midpoint_accuracy() {
         let mut snapper = Snapper::default();
         snapper.snap_enabled = true;
         snapper.enabled = [SnapType::Endpoint, SnapType::Midpoint]
@@ -6042,7 +6042,7 @@ mod ext_tests {
     }
 
     #[test]
-    fn test_unindexed_snap_empty_space_early_out() {
+    fn unindexed_snap_empty_space_early_out() {
         let mut snapper = Snapper::default();
         snapper.snap_enabled = true;
         snapper.enable_all();
@@ -6085,7 +6085,7 @@ mod ext_tests {
     }
 
     #[test]
-    fn test_unindexed_snap_intersection_pair() {
+    fn unindexed_snap_intersection_pair() {
         let mut snapper = Snapper::default();
         snapper.snap_enabled = true;
         snapper.enabled = [SnapType::Intersection].into_iter().collect();
@@ -6140,7 +6140,7 @@ mod ext_tests {
     }
 
     #[test]
-    fn test_unindexed_snap_dense_cluster_fallback() {
+    fn unindexed_snap_dense_cluster_fallback() {
         let mut snapper = Snapper::default();
         snapper.snap_enabled = true;
         snapper.enabled = [SnapType::Endpoint].into_iter().collect();
@@ -6704,7 +6704,7 @@ mod ext_tests {
     }
 
     #[test]
-    fn test_ellipse_arc_tangent_snap_ignores_break() {
+    fn ellipse_arc_tangent_snap_ignores_break() {
         use std::f64::consts::PI;
         let mut snapper = Snapper::default();
         snapper.snap_enabled = true;

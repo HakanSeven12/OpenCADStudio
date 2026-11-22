@@ -3381,7 +3381,7 @@ mod tests {
     use document::Document;
 
     #[test]
-    fn test_mleader_arabic_text_tessellation() {
+    fn mleader_arabic_text_tessellation() {
         let doc = Document::default();
         let mut ml = MultiLeader::default();
         ml.content_type = LeaderContentType::MText;
@@ -3424,7 +3424,7 @@ mod tests {
     }
 
     #[test]
-    fn test_background_mask_switch_masks_with_background() {
+    fn background_mask_switch_masks_with_background() {
         // Switching "Background mask" on in Properties must mask with the
         // drawing background, not fill with the inherited text colour and
         // hide the text (#2131).
@@ -3531,7 +3531,7 @@ mod tests {
     }
 
     #[test]
-    fn test_attachment_labels_follow_autocad() {
+    fn attachment_labels_follow_autocad() {
         // A drawing made in AutoCAD 2025, one MLEADER per option picked by
         // name in its Properties palette, stores these values.
         use document::entities::multileader::TextAttachmentType as TA;
@@ -3555,7 +3555,7 @@ mod tests {
     }
 
     #[test]
-    fn test_annotative_mleader_ignores_overall_scale() {
+    fn annotative_mleader_ignores_overall_scale() {
         // AutoCAD greys out the overall scale of an annotative MLEADER and
         // draws it at its context height. A file with overall scale 50 at a
         // 1:50 annotation scale rendered its text 50× too large.
@@ -3598,7 +3598,7 @@ mod tests {
     }
 
     #[test]
-    fn test_added_leader_line_takes_lowest_free_index() {
+    fn added_leader_line_takes_lowest_free_index() {
         // Remove the first leader, then add one: the new line must not repeat
         // the index of the line that is left (it takes the free 0).
         let mut ml = MultiLeader::default();
@@ -3618,7 +3618,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mleader_right_underline_attachment_meets_landing() {
+    fn mleader_right_underline_attachment_meets_landing() {
         // Text left of its leader attaches with its RIGHT attachment
         // ("underline bottom line" here, while the left one is "underline top
         // line"): the underline must lie on the landing and run on to it, and
@@ -3812,7 +3812,7 @@ mod tests {
     }
 
     #[test]
-    fn test_underline_attachment_runs_from_landing_end() {
+    fn underline_attachment_runs_from_landing_end() {
         // Measured on AutoCAD 2025 by exploding an MLEADER with "underline"
         // attachment: the underline is the landing continued under the text,
         // from the dogleg's end to the far end of the text, and the text's
@@ -3849,7 +3849,7 @@ mod tests {
     }
 
     #[test]
-    fn test_underline_attachment_values_match_autocad() {
+    fn underline_attachment_values_match_autocad() {
         // AutoCAD 2025, three-line text, one MLEADER per attachment value
         // (see `underlined_line`): 5 underlines the bottom line, 6 and 8 the
         // top line, 7 draws no underline. The underlined line meets the

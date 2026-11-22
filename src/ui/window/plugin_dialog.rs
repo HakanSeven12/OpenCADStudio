@@ -1582,7 +1582,7 @@ mod tests {
     use ocs_plugin_api::dialog::{DialogControl, DialogDef, DialogValue};
 
     #[test]
-    fn test_dialog_state_update_values_inplace() {
+    fn dialog_state_update_values_inplace() {
         let def = DialogDef::new("Test Dialog")
             .with_control(DialogControl::Text {
                 id: "status".to_string(),
@@ -1678,7 +1678,7 @@ mod tests {
     }
 
     #[test]
-    fn test_panel_state_shares_update_values_and_choice_lookup() {
+    fn panel_state_shares_update_values_and_choice_lookup() {
         use crate::ui::window::plugin_panel::PluginPanelState;
         use ocs_plugin_api::dialog::PanelDef;
 

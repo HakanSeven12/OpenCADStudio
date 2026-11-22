@@ -612,7 +612,7 @@ fn late_device_errors_invalidate_uploaded_content_and_targets() {
 
 #[test]
 #[ignore = "requires a GPU adapter"]
-fn test_selected_circle_arc_ellipse_highlight_overlay() {
+fn selected_circle_arc_ellipse_highlight_overlay() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
         .expect("GPU adapter");
@@ -737,7 +737,7 @@ fn test_selected_circle_arc_ellipse_highlight_overlay() {
 
 #[test]
 #[ignore = "requires a GPU adapter"]
-fn test_thick_and_tapered_arc_gpu_rendering() {
+fn thick_and_tapered_arc_gpu_rendering() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
         .expect("GPU adapter");
@@ -840,7 +840,7 @@ fn test_thick_and_tapered_arc_gpu_rendering() {
 
 #[test]
 #[ignore = "requires a GPU adapter"]
-fn test_tilted_3d_donut_and_thick_arc_gpu_rendering() {
+fn tilted_3d_donut_and_thick_arc_gpu_rendering() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
         .expect("GPU adapter");
@@ -960,7 +960,7 @@ fn test_tilted_3d_donut_and_thick_arc_gpu_rendering() {
 
 #[test]
 #[ignore = "requires a GPU adapter"]
-fn test_selected_ellipse_overlay() {
+fn selected_ellipse_overlay() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
         .expect("GPU adapter");
@@ -1088,7 +1088,7 @@ fn test_selected_ellipse_overlay() {
 
 #[test]
 #[ignore = "requires a GPU adapter"]
-fn test_pline_arc_switch_preview_and_render() {
+fn pline_arc_switch_preview_and_render() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
         .expect("GPU adapter");

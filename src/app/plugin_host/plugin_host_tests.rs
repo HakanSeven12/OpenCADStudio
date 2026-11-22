@@ -11152,7 +11152,7 @@ fn shared_document_view_read_then_write_xdata_roundtrip() {
 }
 
 #[test]
-fn test_plugin_add_layer_with_defaults_and_modify() {
+fn plugin_add_layer_with_defaults_and_modify() {
     use ocs_plugin_api::host::LayerConfig;
 
     let mut app = OpenCADStudio::new_for_test();
@@ -11355,7 +11355,7 @@ fn a_plugin_layer_is_refused_a_linetype_nobody_defines() {
 }
 
 #[test]
-fn test_entity_creation_with_novel_layer_refreshes_gui() {
+fn entity_creation_with_novel_layer_refreshes_gui() {
     let mut app = OpenCADStudio::new_for_test();
     app.tabs[0].is_start = false;
 
@@ -11431,7 +11431,7 @@ fn test_entity_creation_with_novel_layer_refreshes_gui() {
 }
 
 #[test]
-fn test_plugin_execute_command() {
+fn plugin_execute_command() {
     let mut app = OpenCADStudio::new_for_test();
     app.tabs[0].is_start = false;
     let mut host = HostSession::new(&mut app, 0);

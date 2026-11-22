@@ -24,7 +24,7 @@ fn synthetic_fixture() -> (Document, Handle, Vec<Handle>) {
 }
 
 #[test]
-fn test_synthetic_dependent_scale_preserves_geometry_refresh_and_roundtrip() {
+fn synthetic_dependent_scale_preserves_geometry_refresh_and_roundtrip() {
     let (mut doc, def, targets) = synthetic_fixture();
     let p = crate::scene::block_distance_parameter::create(
         &mut doc,

@@ -5447,7 +5447,7 @@ mod compact_nested_tests {
     }
 
     #[test]
-    fn test_transform_tangent_ellipse_arc_negative_scale_and_rotation() {
+    fn transform_tangent_ellipse_arc_negative_scale_and_rotation() {
         let ellipse_geom = TangentGeom::PlanarEllipse {
             center: [10.0, 20.0, 0.0],
             major_axis: [100.0, 0.0, 0.0],

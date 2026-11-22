@@ -6259,7 +6259,7 @@ mod tests {
     }
 
     #[test]
-    fn test_crosshair_background_paper_space() {
+    fn crosshair_background_paper_space() {
         let tab = crate::app::tab_document::DocumentTab::new_drawing(1);
         let bg = crosshair_background(&tab, true);
         assert_eq!(bg, tab.scene.paper_bg_color);

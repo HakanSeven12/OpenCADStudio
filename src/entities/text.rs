@@ -713,7 +713,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_arabic_text_placement() {
+    fn arabic_text_placement() {
         let mut t = Text::default();
         t.value = "بسم الله".to_string();
         t.height = 2.5;

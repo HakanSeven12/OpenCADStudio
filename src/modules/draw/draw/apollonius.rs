@@ -283,7 +283,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ccp_two_equal_circles() {
+    fn ccp_two_equal_circles() {
         // Two circles of radius 10 at (-20, 0) and (20, 0).
         // Middle point P at (0, 10).
         // A circle through (0, 10) tangent to both circles at their top (+Y).
@@ -312,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ppc_circle_and_two_points() {
+    fn ppc_circle_and_two_points() {
         // Circle of radius 10 at (0, 0).
         // Points at (0, 20) and (20, 20).
         let c = Circle2D {

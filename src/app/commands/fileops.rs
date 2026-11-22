@@ -1418,7 +1418,7 @@ mod tests {
     }
 
     #[test]
-    fn test_script_scr_draws_all_entities() {
+    fn script_scr_draws_all_entities() {
         let mut app = fresh_app();
         let i = app.active_tab;
         const SCRIPT: &str = r#"

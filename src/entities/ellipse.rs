@@ -501,7 +501,7 @@ mod grip_tests {
     }
 
     #[test]
-    fn test_apply_transform_negative_scale_and_rotation() {
+    fn apply_transform_negative_scale_and_rotation() {
         let mut e = ell(10.0, 0.5);
         e.start_parameter = 0.0;
         e.end_parameter = std::f64::consts::FRAC_PI_2;
@@ -527,7 +527,7 @@ mod grip_tests {
     }
 
     #[test]
-    fn test_apply_transform_mirror() {
+    fn apply_transform_mirror() {
         let mut e = ell(10.0, 0.5);
         e.start_parameter = 0.1;
         e.end_parameter = 1.5;

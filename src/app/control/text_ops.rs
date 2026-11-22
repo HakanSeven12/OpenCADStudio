@@ -1656,7 +1656,7 @@ mod tests {
     }
 
     #[test]
-    fn test_text_matcher_case_and_word_boundaries() {
+    fn text_matcher_case_and_word_boundaries() {
         let tm_ci = TextMatcher::new("bar".into(), false, false, false);
         assert!(tm_ci.matches("BAROMETRE"));
         assert!(tm_ci.matches("bar"));
@@ -1679,7 +1679,7 @@ mod tests {
     }
 
     #[test]
-    fn test_text_matcher_accent_insensitive() {
+    fn text_matcher_accent_insensitive() {
         let tm_acc = TextMatcher::new("reservoir".into(), false, false, true);
         assert!(tm_acc.matches("RÉSERVOIR"));
         assert!(tm_acc.matches("Réservoir"));
@@ -1696,7 +1696,7 @@ mod tests {
     }
 
     #[test]
-    fn test_replace_mtext_safe_preserves_formatting() {
+    fn replace_mtext_safe_preserves_formatting() {
         let raw = "{\\fCentury Gothic|b0|i0|c0|p34;V15-CUVE EAU NON TRAITE}";
         let matcher = TextMatcher::new("NON TRAITE".into(), false, false, false);
         let (replaced, count) = replace_mtext_safe(raw, &matcher, "NON TRAITÉE", true);
@@ -1707,7 +1707,7 @@ mod tests {
     }
 
     #[test]
-    fn test_replace_mtext_multiline() {
+    fn replace_mtext_multiline() {
         // Test 1: Plain LF query matching raw \P
         let raw1 = "Loge \\Pgardien";
         let matcher1 = TextMatcher::new("Loge \ngardien".into(), false, false, true);

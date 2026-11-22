@@ -5172,7 +5172,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cad_selection_and_model_space_sysvars() {
+    fn cad_selection_and_model_space_sysvars() {
         let mut app = fresh_app();
 
         // SELECTIONAREA toggle
@@ -5227,7 +5227,7 @@ mod tests {
     }
 
     #[test]
-    fn test_background_command_modes() {
+    fn background_command_modes() {
         let mut app = fresh_app();
         let i = app.active_tab;
 
@@ -5269,7 +5269,7 @@ mod tests {
     }
 
     #[test]
-    fn test_reviewer_feedback_fixes() {
+    fn reviewer_feedback_fixes() {
         let mut app = fresh_app();
 
         // An empty background restores MatchTheme.
@@ -5302,7 +5302,7 @@ mod tests {
     }
 
     #[test]
-    fn test_grip_and_desk_surround_sysvars() {
+    fn grip_and_desk_surround_sysvars() {
         let mut app = fresh_app();
 
         // 1. Desk surround background message

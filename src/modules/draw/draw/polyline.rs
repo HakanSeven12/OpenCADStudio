@@ -1768,7 +1768,7 @@ mod tests {
     }
 
     #[test]
-    fn test_draw_line_then_arc() {
+    fn draw_line_then_arc() {
         let mut cmd = PlineCommand::new();
         cmd.on_point(DVec3::new(0.0, 0.0, 0.0));
         let res = cmd.on_point(DVec3::new(10.0, 0.0, 0.0));

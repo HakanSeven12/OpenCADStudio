@@ -691,11 +691,14 @@ impl Serialize for HostNotification {
                 bincode::serialize_into(&mut bytes, pick_point)
                     .map_err(serde::ser::Error::custom)?;
             }
-            HostNotification::SelectionChangedDigest { tab_id, revision, count } => {
+            HostNotification::SelectionChangedDigest {
+                tab_id,
+                revision,
+                count,
+            } => {
                 bytes.push(14);
                 bincode::serialize_into(&mut bytes, tab_id).map_err(serde::ser::Error::custom)?;
-                bincode::serialize_into(&mut bytes, revision)
-                    .map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, revision).map_err(serde::ser::Error::custom)?;
                 bincode::serialize_into(&mut bytes, count).map_err(serde::ser::Error::custom)?;
             }
             HostNotification::DocumentChangedDelta {
@@ -817,9 +820,13 @@ impl<'de> Deserialize<'de> for HostNotification {
                 })
             }
             14 => bincode::deserialize(rest)
-                .map(|(tab_id, revision, count)| {
-                    HostNotification::SelectionChangedDigest { tab_id, revision, count }
-                })
+                .map(
+                    |(tab_id, revision, count)| HostNotification::SelectionChangedDigest {
+                        tab_id,
+                        revision,
+                        count,
+                    },
+                )
                 .map_err(serde::de::Error::custom),
             15 => bincode::deserialize(rest)
                 .map(
@@ -1570,8 +1577,8 @@ macro_rules! export_plugin {
         }
 
         #[no_mangle]
-        pub extern "C" fn ocs_plugin_register(
-        ) -> *mut ::std::boxed::Box<dyn $crate::host::BuiltinPlugin> {
+        pub extern "C" fn ocs_plugin_register()
+        -> *mut ::std::boxed::Box<dyn $crate::host::BuiltinPlugin> {
             // The constructor runs across a C ABI boundary; a panic unwinding
             // past it is undefined behavior. Contain it and report failure as a
             // null pointer, which the host loader treats as "registration
@@ -2412,6 +2419,36 @@ pub trait HostApi {
     ) -> Result<SceneRevision, SurfaceReject> {
         self.panel_surface_publish(panel_id, surface)
     }
+
+    /// Patch a panel's stored scene atomically (API v29, additive): the
+    /// bounded, revision-checked op list applies all-or-nothing against
+    /// the stored head; a stale base or any op failure refuses with the
+    /// typed rejection and zero mutation. The default is the
+    /// transport-era stub (same as publishing): `Unattached` for
+    /// structurally sound frames, nothing stored. Surface-aware hosts
+    /// override [`HostApi::panel_surface_patch_for_plugin`].
+    fn panel_surface_patch(
+        &mut self,
+        _panel_id: &str,
+        _patch: crate::scene::ScenePatch,
+    ) -> Result<SceneRevision, SurfaceReject> {
+        Err(SurfaceReject {
+            code: SurfaceRejectCode::Unattached,
+            current_revision: None,
+        })
+    }
+
+    /// Patch from the host's authenticated transport identity. The
+    /// default keeps the direct-host behavior; surface-aware hosts
+    /// override it.
+    fn panel_surface_patch_for_plugin(
+        &mut self,
+        _plugin_id: &str,
+        panel_id: &str,
+        patch: crate::scene::ScenePatch,
+    ) -> Result<SceneRevision, SurfaceReject> {
+        self.panel_surface_patch(panel_id, patch)
+    }
 }
 
 /// The answer of a host without surface support: `InvalidSurface` for an
@@ -3106,7 +3143,7 @@ mod repl {
 }
 
 #[cfg(feature = "host")]
-pub use repl::{execute_code_guard, CommandSource, ExecutionResult};
+pub use repl::{CommandSource, ExecutionResult, execute_code_guard};
 
 #[cfg(all(test, feature = "host"))]
 mod tests {

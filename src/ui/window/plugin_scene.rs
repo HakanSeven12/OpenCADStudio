@@ -5,8 +5,59 @@
 
 use crate::app::Message;
 use iced::widget::canvas;
-use iced::{mouse, Color, Element, Length, Point, Rectangle, Size, Theme};
+use iced::{Color, Element, Length, Point, Rectangle, Size, Theme, mouse};
 use ocs_plugin_api::scene::{PanelScene, SceneColor, SceneElement, ThemeColor};
+use std::cell::RefCell;
+use std::sync::Arc;
+
+thread_local! {
+    /// Retained projection cache (api v29, S03): the projected prim list
+    /// for the LAST rendered (owner, panel, scene revision). Keyed by the
+    /// actual render inputs — a revision identifies scene content (the
+    /// store only advances revisions through validated publishes/patches),
+    /// and the theme applies at paint time so it never invalidates the
+    /// cache. Bounded by design: one entry per thread; a newer revision of
+    /// any panel replaces it (patched-away revisions are dead state), so
+    /// the cache never grows with panel count or history.
+    static PROJECTION_CACHE: RefCell<Option<((String, String, u64), Arc<Vec<ScenePrim>>)>> =
+        const { RefCell::new(None) };
+}
+
+/// Number of times the cache re-projected a scene (test hook: proves
+/// repaints are free and a patch costs exactly one re-projection).
+#[cfg(test)]
+thread_local! {
+    static PROJECT_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Drop the retained projection: lifecycle callers (panel
+/// re-registration, the dead-plugin reap) keep a dead scene's prims from
+/// ever serving a re-registered panel that reuses the revision. The
+/// cache is one bounded entry, so clearing is O(1) and correct.
+pub(crate) fn forget_all_projections() {
+    PROJECTION_CACHE.with(|cache| {
+        *cache.borrow_mut() = None;
+    });
+}
+
+fn cached_prims(owner: &str, panel: &str, scene: &PanelScene) -> Arc<Vec<ScenePrim>> {
+    PROJECTION_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some((key, prims)) = cache.as_ref() {
+            if key.0 == owner && key.1 == panel && key.2 == scene.revision.0 {
+                return Arc::clone(prims);
+            }
+        }
+        #[cfg(test)]
+        PROJECT_COUNT.with(|count| count.set(count.get() + 1));
+        let prims = Arc::new(project_scene(scene));
+        *cache = Some((
+            (owner.to_owned(), panel.to_owned(), scene.revision.0),
+            Arc::clone(&prims),
+        ));
+        prims
+    })
+}
 
 /// One flattened paint primitive, semantic colors unresolved. Paint order
 /// is the projection order; groups flatten depth-first.
@@ -116,7 +167,7 @@ pub(crate) fn scene_color(theme: &Theme, color: SceneColor) -> Color {
 /// the flat prim list each invocation; no cache (S03 adds the retained
 /// projection keyed by render inputs).
 pub(crate) struct SceneCanvas {
-    pub prims: Vec<ScenePrim>,
+    pub prims: Arc<Vec<ScenePrim>>,
 }
 
 impl canvas::Program<Message> for SceneCanvas {
@@ -131,7 +182,7 @@ impl canvas::Program<Message> for SceneCanvas {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
-        for prim in &self.prims {
+        for prim in self.prims.iter() {
             paint_prim(&mut frame, theme, prim);
         }
         vec![frame.into_geometry()]
@@ -210,9 +261,10 @@ fn paint_prim(frame: &mut canvas::Frame, theme: &Theme, prim: &ScenePrim) {
     }
 }
 
-/// The panel body seam: one canvas element sized to the panel body.
-pub(crate) fn scene_view<'a>(scene: &PanelScene) -> Element<'a, Message> {
-    let prims = project_scene(scene);
+/// The panel body seam: one canvas element sized to the panel body,
+/// painting the retained projection for (owner, panel, revision).
+pub(crate) fn scene_view<'a>(owner: &str, panel: &str, scene: &PanelScene) -> Element<'a, Message> {
+    let prims = cached_prims(owner, panel, scene);
     iced::widget::canvas(SceneCanvas { prims })
         .width(Length::Fill)
         .height(Length::Fill)
@@ -322,5 +374,51 @@ mod tests {
             );
             assert_eq!(scene_color(&theme, rgba), Color::from_rgb8(255, 0, 0));
         }
+    }
+
+    /// S03 retained-cache proof: repaints of an unchanged scene are FREE
+    /// (zero re-projections), and a patch — even one touching a single
+    /// subtree — costs exactly ONE re-projection at the new revision,
+    /// never one per frame. The single bounded entry is replaced by the
+    /// next panel that renders (patched-away revisions are dead state).
+    #[test]
+    fn retained_cache_reprojects_once_per_revision_not_per_frame() {
+        let small = PanelScene {
+            revision: ocs_plugin_api::scene::SceneRevision(1),
+            elements: vec![rect(1, 0.0, 0.0, 10.0, 10.0, None)],
+        };
+        let patched = PanelScene {
+            revision: ocs_plugin_api::scene::SceneRevision(2),
+            elements: vec![
+                rect(1, 0.0, 0.0, 10.0, 10.0, None),
+                rect(
+                    2,
+                    20.0,
+                    0.0,
+                    5.0,
+                    5.0,
+                    Some(SceneColor::Theme(ThemeColor::Accent)),
+                ),
+            ],
+        };
+        PROJECT_COUNT.with(|count| count.set(0));
+
+        let _ = cached_prims("acme", "acme:graph", &small);
+        for _ in 0..5 {
+            let _ = cached_prims("acme", "acme:graph", &small);
+        }
+        PROJECT_COUNT.with(|count| assert_eq!(count.get(), 1, "repaints must be cache hits"));
+
+        let _ = cached_prims("acme", "acme:graph", &patched);
+        for _ in 0..5 {
+            let _ = cached_prims("acme", "acme:graph", &patched);
+        }
+        PROJECT_COUNT
+            .with(|count| assert_eq!(count.get(), 2, "a patch costs exactly one re-projection"));
+
+        let _ = cached_prims("other", "other:map", &small);
+        PROJECT_COUNT.with(|count| assert_eq!(count.get(), 3, "panel switch replaces the entry"));
+        let _ = cached_prims("acme", "acme:graph", &patched);
+        PROJECT_COUNT.with(|count| assert_eq!(count.get(), 4, "evicted entry re-projects once"));
     }
 }

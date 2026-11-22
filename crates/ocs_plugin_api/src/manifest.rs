@@ -192,7 +192,18 @@
 /// v26 appends `TableOperation::CustomPropertiesSet`: a plugin sets the
 /// drawing's custom properties (DWGPROPS Custom) in one undo step. A v25 host
 /// cannot decode it, so a plugin that sends it declares v26.
-pub const API_VERSION: u32 = 26;
+/// v27 adds `HostNotification::DocumentChangedDelta` (wire tag 15): the
+/// categorized, exact successor of the v13 `DocumentChangedRegions` boundary
+/// notification — `added` / `modified` / `deleted` entity handle lists plus
+/// the same record tuples, an optional V4 snapshot correlation, and an
+/// explicit `full_refresh_required` flag for boundaries whose incremental
+/// sets the host cannot prove complete. The host routes per endpoint: plugins
+/// reporting v27+ receive the delta INSTEAD OF the Regions notification at
+/// every document boundary (no duplicate stream), while plugins reporting
+/// v26 or older keep their exact legacy Regions streams. A v26 runner cannot
+/// decode tag 15, so the host never sends the variant to it — the
+/// `notification_api_version` gate drops it.
+pub const API_VERSION: u32 = 27;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

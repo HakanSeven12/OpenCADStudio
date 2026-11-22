@@ -241,15 +241,19 @@ impl<'a> HostSession<'a> {
             // API v13/P1-18: the snapshot publication is fallible. A failed
             // publication must NOT broadcast dirty regions or record the key
             // as settled — that would claim a boundary the plugins cannot
-            // observe. The failure is logged; the next publish retries.
+            // observe. The failure is logged; the next publish retries (the
+            // dirty anchors are not consumed on failure, so the retry stays
+            // complete).
             match v4_support::publish_document_view_v4(self.tab_id(), doc) {
-                Ok(()) => {
+                Ok(snapshot) => {
                     if key_changed {
-                        // API v13 dirty regions: the plugin-write boundary
-                        // carries the touched identity set, so consumers
-                        // visit only what changed (empty sets mean "walk
-                        // everything").
-                        self.publish_plugin_dirty_regions();
+                        // API v13 dirty regions + API v27 exact delta: the
+                        // plugin-write boundary carries the touched identity
+                        // set (legacy) and the categorized delta (v27+),
+                        // routed per endpoint — the snapshot correlation
+                        // covers exactly the publication this boundary just
+                        // made.
+                        self.publish_plugin_dirty_regions(snapshot);
                     }
                     self.app.last_plugin_document =
                         Some((self.tab_id(), self.app.tabs[self.tab].scene.geometry_epoch));
@@ -264,19 +268,23 @@ impl<'a> HostSession<'a> {
         }
     }
 
-    /// Take this tab's accumulated dirty-region set and broadcast it as
-    /// `DocumentChangedRegions` (API v13). The plugin-write path's twin of
+    /// Take this tab's accumulated dirty state and broadcast ONE boundary
+    /// notification per endpoint: the drained region set as
+    /// `DocumentChangedRegions` (API v13, byte-identical stream for pre-27
+    /// plugins) and the journal-derived exact delta as
+    /// `DocumentChangedDelta` (API v27+). The plugin-write path's twin of
     /// the message-boundary publisher in `update::mod`.
     #[cfg(not(target_arch = "wasm32"))]
-    fn publish_plugin_dirty_regions(&mut self) {
+    fn publish_plugin_dirty_regions(
+        &mut self,
+        snapshot: Option<ocs_plugin_api::host::DocumentDeltaSnapshot>,
+    ) {
         let tab = &mut self.app.tabs[self.tab];
-        let (entities, records) = tab.take_plugin_dirty();
-        v4_support::publish_document_changed_regions(
-            tab.id,
-            tab.scene.geometry_epoch,
-            entities,
-            records,
-        );
+        // The snapshot publication succeeded above (the caller is in the
+        // `Ok` arm), so no snapshot failure can force the flag here.
+        let snapshot_failed = false;
+        let fresh = tab.take_document_boundary(snapshot, snapshot_failed);
+        v4_support::publish_document_delta(tab.id, tab.scene.geometry_epoch, fresh);
     }
 
     fn geometry_epoch(&self) -> u64 {

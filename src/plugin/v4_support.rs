@@ -29,21 +29,27 @@ pub fn close_document_view_v4(tab_id: u64) {
 /// Publish the latest document to the V4 shared view for `tab_id` and broadcast
 /// a change notification when successful.
 ///
-/// `Ok(())` covers BOTH a real publication and the legitimate no-op (no V4
-/// consumer has opened a snapshot for this tab — nothing to publish, no
-/// notification to send, and the mutation boundary still settles).
-/// `Err` is a real failure the caller must report instead of claiming a
-/// boundary that plugins cannot observe.
-pub fn publish_document_view_v4(tab_id: u64, doc: &document::Document) -> Result<(), String> {
-    match mgr().publish(tab_id, doc) {
-        Ok(Some(info)) => {
+/// Returns the snapshot correlation of what THIS call published — the
+/// `(version, generation)` pair the boundary's `DocumentChangedDelta`
+/// carries, read atomically with the publication. `Ok(None)` covers BOTH a
+/// real publication and the legitimate no-op (no V4 consumer has opened a
+/// snapshot for this tab — nothing to publish, no notification to send, and
+/// the mutation boundary still settles) plus the no-store case where there
+/// is nothing to correlate. `Err` is a real failure the caller must report
+/// instead of claiming a boundary that plugins cannot observe.
+pub fn publish_document_view_v4(
+    tab_id: u64,
+    doc: &document::Document,
+) -> Result<Option<ocs_plugin_api::host::DocumentDeltaSnapshot>, String> {
+    match mgr().publish_correlated(tab_id, doc) {
+        Ok(Some(correlation)) => {
             broadcast(HostNotification::DocumentChangedV4 {
                 tab_id,
-                version: info.version,
+                version: correlation.version,
             });
-            Ok(())
+            Ok(Some(correlation))
         }
-        Ok(None) => Ok(()),
+        Ok(None) => Ok(None),
         Err(e) => Err(e),
     }
 }
@@ -105,6 +111,90 @@ pub fn publish_selection_changed(handles: Vec<document::Handle>) {
 /// message boundary (`OpenCADStudio::notify_plugins_document_changed`).
 pub fn publish_document_changed(version: u64) {
     broadcast(HostNotification::DocumentChanged { version });
+}
+
+/// Exact, categorized change payload of one document boundary (API v27),
+/// classified from the scene journal between the last published boundary and
+/// now: `added` handles were absent before and present after, `modified`
+/// handles existed on both sides with changed data, and `deleted` handles
+/// existed before and are absent after — deleted handles STAY in the list
+/// even though lookup now fails (the deletion itself is the information).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DocumentBoundary {
+    pub added: Vec<document::Handle>,
+    pub modified: Vec<document::Handle>,
+    pub deleted: Vec<document::Handle>,
+    pub records: Vec<(document::Handle, String)>,
+    /// The drained legacy dirty set (identity of what the pre-27 v13 Regions
+    /// notification would carry): empty at built-in boundaries = the
+    /// documented "walk everything" degradation — never a wrong claim.
+    pub legacy_entities: Vec<document::Handle>,
+    /// V4 snapshot-store correlation published for this same boundary: the
+    /// exact (version, generation) a plugin can match against its loaded
+    /// mapping. `None` when no snapshot was published for the boundary (no
+    /// V4 store was open, its publication failed, or the boundary could not
+    /// be proven exact — see `full_refresh_required`).
+    pub snapshot: Option<ocs_plugin_api::host::DocumentDeltaSnapshot>,
+    /// True when the journal cannot prove the entity sets complete: a journal
+    /// gap ( eviction past the cap, whole-snapshot restore) or a failed
+    /// snapshot publication. Consumers must resynchronize the whole document
+    /// and never trust the lists in this case.
+    pub full_refresh_required: bool,
+}
+
+/// Publish the exact categorized boundary delta, routed per endpoint
+/// (the [`HostNotification::SelectionChangedDigest`] discipline): API v27+
+/// endpoints receive `DocumentChangedDelta` INSTEAD OF the legacy Regions
+/// notification — one notification per boundary, never a duplicate Regions +
+/// delta stream — while pre-27 endpoints keep their exact legacy
+/// `DocumentChangedRegions` stream (whose empty set keeps its documented
+/// "unknown, walk everything" meaning).
+pub fn publish_document_delta(tab_id: u64, version: u64, boundary: DocumentBoundary) {
+    let DocumentBoundary {
+        added,
+        modified,
+        deleted,
+        records,
+        legacy_entities,
+        snapshot,
+        full_refresh_required,
+    } = boundary;
+    // Legacy v13 payload: the drained region sets, exactly as the v13
+    // boundary always published them (empty at built-in boundaries = the
+    // documented "walk everything" degradation — never a wrong claim).
+    let legacy = HostNotification::DocumentChangedRegions {
+        tab_id,
+        version,
+        entities: legacy_entities,
+        records: records.clone(),
+    };
+    // Exact categorized delta for API v27+ endpoints: the classified
+    // added/modified/deleted sets with the snapshot correlation of the
+    // state the classification was computed from.
+    let delta_notification = HostNotification::DocumentChangedDelta {
+        tab_id,
+        version,
+        added,
+        modified,
+        deleted,
+        records: records.clone(),
+        snapshot,
+        full_refresh_required,
+    };
+    #[cfg(test)]
+    {
+        record_test_dispatch(&legacy);
+        record_test_dispatch(&delta_notification);
+    }
+    crate::plugin::external::with_manager(|mgr| {
+        mgr.broadcast_for_api(None, &|api: u32| {
+            if api >= 27 {
+                Some(delta_notification.clone())
+            } else {
+                Some(legacy.clone())
+            }
+        });
+    });
 }
 
 /// Broadcast the DIRTY REGION payload (API v13): the identity set of what
@@ -382,6 +472,25 @@ fn record_test_dispatch(notification: &HostNotification) {
         } => format!(
             "QuadAction({panel_id}.{control_id}, {} handles)",
             handles.len()
+        ),
+        HostNotification::DocumentChangedDelta {
+            added,
+            modified,
+            deleted,
+            records,
+            full_refresh_required,
+            ..
+        } => format!(
+            "DocumentChangedDelta(+{}, ~{}, -{}, {} records{})",
+            added.len(),
+            modified.len(),
+            deleted.len(),
+            records.len(),
+            if *full_refresh_required {
+                ", FULL REFRESH REQUIRED"
+            } else {
+                ""
+            }
         ),
         _ => "Other".to_string(),
     };

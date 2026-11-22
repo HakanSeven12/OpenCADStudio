@@ -182,6 +182,8 @@ mod prop_commit;
 #[cfg(not(target_arch = "wasm32"))]
 pub(in crate::app) use plugin_grips::SETTLE_WATCHDOG;
 #[cfg(all(test, not(target_arch = "wasm32")))]
+mod document_delta_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod plugin_grips_tests;
 mod qselect;
 mod style;
@@ -569,30 +571,33 @@ impl OpenCADStudio {
         }
         self.last_plugin_document = Some(key);
         crate::plugin::v4_support::publish_drawing_changed(tab.id, tab.scene.geometry_epoch);
-        if let Err(e) =
-            crate::plugin::v4_support::publish_document_view_v4(tab.id, &tab.scene.document)
-        {
-            // P1-18: a failed publication is logged, not ignored — the epoch
-            // still reaches native plugins, but the snapshot side named its
-            // failure on stderr instead of silently going stale.
-            eprintln!("[host] V4 document view failed to publish: {e}");
-        }
+        // Publish/correlate the shared snapshot FIRST: the delta below cites
+        // exactly the (version, generation) this call published, so a plugin
+        // can never be told a snapshot state that was not (or is no longer)
+        // the live one. A failed publication is logged, not ignored (P1-18) —
+        // the delta then claims NO snapshot and sets `full_refresh_required`.
+        let snapshot_result =
+            crate::plugin::v4_support::publish_document_view_v4(tab.id, &tab.scene.document);
+        let (snapshot, snapshot_failed) = match &snapshot_result {
+            Ok(snapshot) => (snapshot.clone(), false),
+            Err(e) => {
+                eprintln!("[host] V4 document view failed to publish: {e}");
+                (None, true)
+            }
+        };
         // Same guarded boundary, second surface (API v9): the plain
         // `DocumentChanged` carries the settled geometry epoch to every
         // loaded native plugin through `BuiltinPlugin::on_notification`.
         crate::plugin::v4_support::publish_document_changed(tab.scene.geometry_epoch);
-        // API v13 dirty regions: plugin writes publish their sets at their own
-        // boundary, so an epoch change reaching this one came from elsewhere
-        // and the sets say "walk everything" (empty).
+        // API v27 exact delta + legacy v13 dirty regions, one publication
+        // per endpoint: pre-27 plugins keep the byte-identical Regions
+        // stream (the sets deliberately degrade to empty at this built-in
+        // boundary — "walk everything"), v27+ plugins receive the exact
+        // categorized delta instead.
         let tab = &mut self.tabs[self.active_tab];
         tab.plugin_dirty_overflow = true;
-        let (entities, records) = tab.take_plugin_dirty();
-        crate::plugin::v4_support::publish_document_changed_regions(
-            tab.id,
-            tab.scene.geometry_epoch,
-            entities,
-            records,
-        );
+        let fresh = tab.take_document_boundary(snapshot, snapshot_failed);
+        crate::plugin::v4_support::publish_document_delta(tab.id, tab.scene.geometry_epoch, fresh);
     }
 
     /// Announce that a whole document became resident in the active tab —

@@ -5,7 +5,12 @@ impl Scene {
     /// raising the floor so a consumer that fell behind falls back to a full
     /// rebuild. Every `geometry_epoch` bump must call this exactly once so the
     /// journal never has a gap (a gap would let a consumer serve stale geometry).
-    pub(crate) fn push_geometry_delta(&self, epoch: u64, changes: Vec<(Handle, ChangeKind)>, full: bool) {
+    pub(crate) fn push_geometry_delta(
+        &self,
+        epoch: u64,
+        changes: Vec<(Handle, ChangeKind)>,
+        full: bool,
+    ) {
         let pending_categories = std::mem::take(&mut *self.pending_removed_categories.borrow_mut());
         let removed_categories = if full {
             HashMap::default()
@@ -786,7 +791,10 @@ impl Scene {
     /// Mark a set of block definition names dirty so the next `BlockCache`
     /// rebuild refreshes only those definitions (and drops removed ones)
     /// while keeping all unrelated cached blocks warm.
-    pub(crate) fn mark_block_definitions_dirty<I: IntoIterator<Item = String>>(&mut self, names: I) {
+    pub(crate) fn mark_block_definitions_dirty<I: IntoIterator<Item = String>>(
+        &mut self,
+        names: I,
+    ) {
         let touched: HashSet<String> = names.into_iter().filter(|n| !n.is_empty()).collect();
         if touched.is_empty() {
             return;
@@ -1676,6 +1684,19 @@ impl Scene {
         *self.resident_memo_backing.borrow_mut() = MemoBacking::default();
         self.invalidate_dependency_index();
         // Can't name the changed handles → force every journal consumer to rebuild.
+        self.push_geometry_delta(epoch, Vec::new(), true);
+    }
+
+    /// A whole-document state change that no incremental diff can describe
+    /// (a whole-snapshot history restore): journal an explicit full-walk
+    /// marker so every journal consumer — the plugin delta publisher (API
+    /// v27) included — falls back to a full rebuild instead of presenting a
+    /// partial set as complete. Unlike [`Self::bump_geometry`] this bumps
+    /// only the geometry epoch and the journal: the caller has already
+    /// rebuilt whatever derived caches it owns.
+    pub fn bump_history_epoch(&mut self) {
+        let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
+        self.geometry_epoch = epoch;
         self.push_geometry_delta(epoch, Vec::new(), true);
     }
 

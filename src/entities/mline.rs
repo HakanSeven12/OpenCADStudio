@@ -1732,4 +1732,49 @@ mod tests {
             );
         }
     }
+
+    /// MIRROR in the world XY plane: the lines that are drawn after it are
+    /// the mirror image of the lines that were drawn before it. The typed
+    /// mirror reflected the positions and left the direction and the miter
+    /// of each vertex, so the elements were drawn at the wrong place.
+    #[test]
+    fn a_mirrored_multiline_draws_the_mirror_image_of_its_lines() {
+        use crate::entities::transform::EntityTransform;
+        let (p1, p2) = (
+            glam::DVec3::new(3.0, -2.0, 0.0),
+            glam::DVec3::new(6.0, 9.0, 0.0),
+        );
+        let axis = (p2 - p1).normalize();
+        let mirror_image = |p: [f64; 3]| {
+            let d = glam::DVec3::new(p[0], p[1], p[2]) - p1;
+            let r = p1 + 2.0 * d.dot(axis) * axis - d;
+            [r.x, r.y, p[2]]
+        };
+        let mut compared = 0;
+        for case in cases() {
+            for (form, original) in [("bare", &case.bare), ("stored", &case.stored)] {
+                let before = mline_lines_resolved(original, case.style.as_ref());
+                let mut mirrored = original.clone();
+                Transformable::apply_transform(
+                    &mut mirrored,
+                    &EntityTransform::Mirror {
+                        p1,
+                        p2,
+                        working_normal: glam::DVec3::Z,
+                    },
+                );
+                let after = mline_lines_resolved(&mirrored, case.style.as_ref());
+                let name = format!("{} ({form})", case.name);
+                assert_eq!(before.len(), after.len(), "{name}: line count");
+                for (index, (b, a)) in before.iter().zip(&after).enumerate() {
+                    let expected: Vec<[f64; 3]> =
+                        b.points.iter().copied().map(mirror_image).collect();
+                    assert_same_points(&name, &format!("line {index}"), &expected, &a.points);
+                    compared += expected.len();
+                }
+            }
+        }
+        // Guards against a list of cases that draws nothing.
+        assert!(compared > 2000, "only {compared} points were compared");
+    }
 }

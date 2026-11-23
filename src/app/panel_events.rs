@@ -259,6 +259,25 @@ impl PanelEventRouter {
         }
     }
 
+    /// Automation-triggered activation of a SCENE element (api v29, S08):
+    /// the agent's `plugin_panel_action` routes here, mirroring
+    /// `on_node_activated`. The explicit identity is the per-surface
+    /// sequence, as everywhere; `pos` is pointer-derived payload, NOT
+    /// identity — the automation path anchors it at the element's stored
+    /// origin (no pointer exists), so equivalence with a GUI click is
+    /// asserted on (panel, sequence, kind, element), never on pos.
+    pub fn on_element_clicked(&mut self, panel_id: &str, element: StableId) -> RoutedEvent {
+        let sequence = self.next_sequence(panel_id);
+        RoutedEvent {
+            panel_id: panel_id.to_owned(),
+            sequence,
+            event: SurfaceEvent::ElementClicked {
+                element,
+                pos: ocs_plugin_api::scene::Vec2([0.0, 0.0]),
+            },
+        }
+    }
+
     /// Settle the active drag (whatever panel owns it): a `DragSettled`
     /// at the latest known position when started, or a silent drop when
     /// the drag never began. The single-pointer law: a new press steals

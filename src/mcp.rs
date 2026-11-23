@@ -111,6 +111,7 @@ const READ_OPS: &[&str] = &[
     "keytips",
     "plugins",
     "capture",
+    "plugin_panels",
 ];
 const EXECUTE_OPS: &[&str] = &[
     "new",
@@ -132,6 +133,7 @@ const EXECUTE_OPS: &[&str] = &[
     "panel_input",
     "panel_button",
     "panel_action",
+    "plugin_panel_action",
     "action",
     "embed_image",
     "dgn_import",

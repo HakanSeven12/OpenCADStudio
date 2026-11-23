@@ -392,6 +392,94 @@ impl PanelSurfaceStore {
             .filter(|record| record.owner_plugin_id == plugin_id)
             .map(|record| &record.surface)
     }
+
+    /// Owner-agnostic store read for the host's OWN automation interface
+    /// (api v29, S08: the MCP facade reads what the operator's app owns —
+    /// plugin-to-plugin isolation is untouched: `scene`/`widget`/`table`
+    /// keep their owner checks). One bounded summary line per surface.
+    pub fn surface_summaries(&self) -> Vec<SurfaceSummary> {
+        let mut out = Vec::new();
+        for (panel_id, record) in &self.scenes {
+            out.push(SurfaceSummary {
+                panel_id: panel_id.clone(),
+                owner: record.owner_plugin_id.clone(),
+                scene: Some((record.scene.revision.0, record.scene.elements.len())),
+                widgets: None,
+                tables: None,
+            });
+        }
+        for (panel_id, record) in &self.widgets {
+            match out.iter_mut().find(|s| &s.panel_id == panel_id) {
+                Some(entry) => {
+                    entry.widgets = Some((record.surface.revision.0, record.surface.rows.len()))
+                }
+                None => out.push(SurfaceSummary {
+                    panel_id: panel_id.clone(),
+                    owner: record.owner_plugin_id.clone(),
+                    scene: None,
+                    widgets: Some((record.surface.revision.0, record.surface.rows.len())),
+                    tables: None,
+                }),
+            }
+        }
+        for (panel_id, record) in &self.tables {
+            match out.iter_mut().find(|s| &s.panel_id == panel_id) {
+                Some(entry) => {
+                    entry.tables = Some((
+                        record.surface.revision.0,
+                        record.surface.rows.len(),
+                        record.surface.columns.len(),
+                    ))
+                }
+                None => out.push(SurfaceSummary {
+                    panel_id: panel_id.clone(),
+                    owner: record.owner_plugin_id.clone(),
+                    scene: None,
+                    widgets: None,
+                    tables: Some((
+                        record.surface.revision.0,
+                        record.surface.rows.len(),
+                        record.surface.columns.len(),
+                    )),
+                }),
+            }
+        }
+        out
+    }
+
+    /// Owner-agnostic tier read for the automation facade (same law as
+    /// `surface_summaries`).
+    pub fn scene_any_owner(&self, panel_id: &str) -> Option<&PanelScene> {
+        self.scenes.get(panel_id).map(|record| &record.scene)
+    }
+
+    /// Owner-agnostic widget-tier read (see `scene_any_owner`).
+    pub fn widget_any_owner(
+        &self,
+        panel_id: &str,
+    ) -> Option<&ocs_plugin_api::widget::WidgetSurface> {
+        self.widgets.get(panel_id).map(|record| &record.surface)
+    }
+
+    /// Owner-agnostic table-tier read (see `scene_any_owner`).
+    pub fn table_any_owner(
+        &self,
+        panel_id: &str,
+    ) -> Option<&ocs_plugin_api::tables::TableSurface> {
+        self.tables.get(panel_id).map(|record| &record.surface)
+    }
+}
+
+/// One panel's surface inventory for the automation facade (S08): owner,
+/// plus per-tier `(revision, count)` presence. Counts are bounded by the
+/// tier budgets; nothing here materializes rows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SurfaceSummary {
+    pub panel_id: String,
+    pub owner: String,
+    pub scene: Option<(u64, usize)>,
+    pub widgets: Option<(u64, usize)>,
+    pub tables: Option<(u64, usize, usize)>,
 }
 
 #[cfg(test)]

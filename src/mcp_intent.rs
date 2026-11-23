@@ -64,6 +64,7 @@ pub static DESCRIPTORS: &[IntentDescriptor] = &[
     read("ocs_audit", "Audit OCS document", &mcp_ops::AUDIT),
     read("ocs_commands", "List OCS commands", &mcp_ops::COMMANDS),
     read("ocs_measure", "Measure OCS entities", &mcp_ops::MEASURE),
+    read("ocs_panels", "Inspect OCS plugin panels", &mcp_ops::PLUGIN_PANELS),
     IntentDescriptor {
         name: "ocs_render",
         title: "Render OCS viewport",
@@ -93,6 +94,13 @@ pub static DESCRIPTORS: &[IntentDescriptor] = &[
         "ocs_select",
         "Select OCS entities",
         &mcp_ops::SELECT,
+        &[],
+        false,
+    ),
+    execute(
+        "ocs_panel_action",
+        "Activate OCS panel element",
+        &mcp_ops::PLUGIN_PANEL_ACTION,
         &[],
         false,
     ),
@@ -317,6 +325,7 @@ mod tests {
         "ocs_audit",
         "ocs_commands",
         "ocs_measure",
+        "ocs_panels",
         "ocs_render",
         "ocs_run",
         "ocs_new",
@@ -324,6 +333,7 @@ mod tests {
         "ocs_save",
         "ocs_save_verified",
         "ocs_select",
+        "ocs_panel_action",
         "ocs_cancel",
         "ocs_undo",
         "ocs_redo",
@@ -487,7 +497,7 @@ mod tests {
             .map(|descriptor| descriptor.name)
             .collect();
         assert_eq!(names, NAMES);
-        assert_eq!(names.iter().copied().collect::<HashSet<_>>().len(), 16);
+        assert_eq!(names.iter().copied().collect::<HashSet<_>>().len(), 18);
         for name in NAMES {
             let descriptor = find_descriptor(name).expect("descriptor lookup succeeds");
             assert_eq!(descriptor.name, *name);

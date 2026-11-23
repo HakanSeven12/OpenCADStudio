@@ -361,6 +361,57 @@ pub static SET_PROPERTIES: OpDef = OpDef {
     example: r#"{"op":"set_properties","collection":"layers","name":"Walls","updates":[{"path":"/color","value":3}]}"#,
 };
 
+pub static PLUGIN_PANELS: OpDef = OpDef {
+    name: "plugin_panels",
+    doc: "Inspect the plugin panel SURFACES (api v29): the declarative scene, native widget tree/list, and typed-table tiers the host renders. Without panel_id: a bounded overview (per panel: owner and per-tier revision + element/row counts). With panel_id: one tier's detail — scene tier returns counts only; widget rows and table rows return as keyed pages (after-cursor + next continuation), never materializing more than the page.",
+    batchable: false,
+    params: &[
+        opt(
+            "panel_id",
+            Ty::Str,
+            "One panel's surface detail instead of the overview.",
+        ),
+        opt(
+            "tier",
+            Ty::EnumCi(&["scene", "widgets", "tables"]),
+            "Which surface tier to read for panel_id (defaults to the panel's first published tier).",
+        ),
+        opt(
+            "rows",
+            Ty::Int,
+            "Page size for widget/table row pages (default 50, capped at 200).",
+        ),
+        opt(
+            "after",
+            Ty::Int,
+            "Keyed-page cursor: the last row id of the previous page; the next page starts strictly after it.",
+        ),
+    ],
+    rules: &[],
+    example: r#"{"op":"plugin_panels"}"#,
+};
+
+pub static PLUGIN_PANEL_ACTION: OpDef = OpDef {
+    name: "plugin_panel_action",
+    doc: "Activate one element of a plugin panel SURFACE (api v29) — the semantic action an agent can drive exactly like the user's gesture: `node_activated` for a widget row (a button row carries its action name to the plugin), `element_clicked` for a scene element. Delivers the owner-targeted, sequence-identified surface event the GUI path delivers; records, geometry and undo stay untouched.",
+    batchable: false,
+    params: &[
+        req("panel_id", Ty::Str, "Panel id the surface is published under."),
+        req(
+            "element",
+            Ty::Int,
+            "The element's stable id (StableId) as shown by the plugin_panels read.",
+        ),
+        opt(
+            "kind",
+            Ty::EnumCi(&["node_activated", "element_clicked"]),
+            "Defaults to node_activated when the panel has a widget surface, element_clicked otherwise.",
+        ),
+    ],
+    rules: &[],
+    example: r#"{"op":"plugin_panel_action","panel_id":"acme:tree","element":7,"kind":"node_activated"}"#,
+};
+
 pub static PANEL_INPUT: OpDef = OpDef {
     name: "panel_input",
     doc: "Edit one native dock-panel field. Changes only the UI draft; records and geometry are not written.",
@@ -1329,6 +1380,8 @@ pub static OPS: &[&OpDef] = &[
     &PANEL_INPUT,
     &PANEL_BUTTON,
     &PANEL_ACTION,
+    &PLUGIN_PANELS,
+    &PLUGIN_PANEL_ACTION,
     &ACTION,
     &EMBED_IMAGE,
     &DGN_IMPORT,

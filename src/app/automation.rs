@@ -281,6 +281,16 @@ fn err(msg: impl std::fmt::Display) -> Value {
     json!({ "ok": false, "error": msg.to_string() })
 }
 
+/// One typed table cell, as the automation facade's `plugin_panels` read
+/// exposes it (api v29, S08): the scalar itself, typed by JSON kind.
+fn cell_value_json(value: &ocs_plugin_api::tables::CellValue) -> Value {
+    match value {
+        ocs_plugin_api::tables::CellValue::Text(text) => json!(text),
+        ocs_plugin_api::tables::CellValue::Number(number) => json!(number),
+        ocs_plugin_api::tables::CellValue::Bool(flag) => json!(flag),
+    }
+}
+
 /// The constraints that reference `entity`, as the entity read exposes them:
 /// the kind, every distinct participating handle, and whether the solver is
 /// still honouring it. Built from the live constraint sets — the structure a
@@ -1442,9 +1452,335 @@ impl OpenCADStudio {
                     Err(e) => err(format!("save: {e}")),
                 }
             }
+            "plugin_panels" => self.plugin_panels_read(req),
+            "plugin_panel_action" => self.plugin_panel_action(req),
             "" => err("missing \"op\""),
             other => err(format!("unknown op: {other}")),
         }
+    }
+
+    /// Bounded reads of the plugin panel surfaces (api v29, S08): the
+    /// automation facade's `plugin_panels`. Without panel_id: one summary
+    /// line per surface (owner + per-tier revision and counts). With
+    /// panel_id: one tier's detail — scene counts only, widget/table rows
+    /// as keyed pages (`after` cursor + `next` continuation) that never
+    /// materialize more than the page.
+    pub(super) fn plugin_panels_read(&self, req: &Value) -> Value {
+        let Some(panel_id) = req["panel_id"].as_str() else {
+            let panels: Vec<Value> = self
+                .panel_surfaces
+                .surface_summaries()
+                .into_iter()
+                .map(|s| {
+                    let mut entry = json!({
+                        "panel_id": s.panel_id,
+                        "owner": s.owner,
+                    });
+                    if let Some((revision, elements)) = s.scene {
+                        entry["tiers"]["scene"] =
+                            json!({"revision": revision, "elements": elements});
+                    }
+                    if let Some((revision, rows)) = s.widgets {
+                        entry["tiers"]["widgets"] = json!({"revision": revision, "rows": rows});
+                    }
+                    if let Some((revision, rows, columns)) = s.tables {
+                        entry["tiers"]["tables"] =
+                            json!({"revision": revision, "rows": rows, "columns": columns});
+                    }
+                    entry
+                })
+                .collect();
+            return json!({
+                "ok": true,
+                "panels": panels,
+                "next": "Pass panel_id for one surface's bounded detail; plugin_panel_action activates an element.",
+            });
+        };
+        self.plugin_panels_detail(panel_id, req)
+    }
+
+    /// One panel's tier detail (see `plugin_panels_read`).
+    fn plugin_panels_detail(&self, panel_id: &str, req: &Value) -> Value {
+        let tier = req["tier"]
+            .as_str()
+            .map(|tier| tier.to_ascii_lowercase());
+        let tier = tier.as_deref().or({
+            // Default to the panel's first published tier.
+            if self.panel_surfaces.scene_any_owner(panel_id).is_some() {
+                Some("scene")
+            } else if self.panel_surfaces.widget_any_owner(panel_id).is_some() {
+                Some("widgets")
+            } else if self.panel_surfaces.table_any_owner(panel_id).is_some() {
+                Some("tables")
+            } else {
+                None
+            }
+        });
+        let Some(tier) = tier else {
+            return err(format!("plugin_panels: no surface for panel {panel_id}"));
+        };
+        let rows_limit = req["rows"].as_u64().unwrap_or(50).min(200) as usize;
+        let after = req["after"].as_u64().map(ocs_plugin_api::scene::StableId);
+        match tier {
+            "scene" => {
+                let Some(scene) = self.panel_surfaces.scene_any_owner(panel_id) else {
+                    return err(format!(
+                        "plugin_panels: panel {panel_id} has no scene surface"
+                    ));
+                };
+                let mut by_type = json!({"group": 0, "rect": 0, "path": 0, "text": 0});
+                fn count(element: &ocs_plugin_api::scene::SceneElement, by_type: &mut Value) {
+                    match element {
+                        ocs_plugin_api::scene::SceneElement::Group { children, .. } => {
+                            by_type["group"] = json!(by_type["group"].as_u64().unwrap_or(0) + 1);
+                            for child in children {
+                                count(child, by_type);
+                            }
+                        }
+                        ocs_plugin_api::scene::SceneElement::Rect { .. } => {
+                            by_type["rect"] = json!(by_type["rect"].as_u64().unwrap_or(0) + 1);
+                        }
+                        ocs_plugin_api::scene::SceneElement::Path { .. } => {
+                            by_type["path"] = json!(by_type["path"].as_u64().unwrap_or(0) + 1);
+                        }
+                        ocs_plugin_api::scene::SceneElement::Text { .. } => {
+                            by_type["text"] = json!(by_type["text"].as_u64().unwrap_or(0) + 1);
+                        }
+                    }
+                }
+                for element in &scene.elements {
+                    count(element, &mut by_type);
+                }
+                json!({
+                    "ok": true,
+                    "panel_id": panel_id,
+                    "tier": "scene",
+                    "revision": scene.revision.0,
+                    "elements": scene.elements.len(),
+                    "by_type": by_type,
+                    "note": "Scene surfaces expose counts; activate an element with plugin_panel_action.",
+                })
+            }
+            "widgets" => {
+                let Some(surface) = self.panel_surfaces.widget_any_owner(panel_id) else {
+                    return err(format!(
+                        "plugin_panels: panel {panel_id} has no widget surface"
+                    ));
+                };
+                // Keyed page over the row map in StableId order (the same
+                // order the keyed page installs read back in): never more
+                // than the page, cursor-continuable.
+                let start: std::ops::Bound<
+                    ocs_plugin_api::scene::StableId,
+                > = match after {
+                    Some(id) => std::ops::Bound::Excluded(id),
+                    None => std::ops::Bound::Unbounded,
+                };
+                let mut rows_json = Vec::with_capacity(rows_limit.min(surface.rows.len()));
+                let mut last: Option<ocs_plugin_api::scene::StableId> = None;
+                let mut more = false;
+                for (id, row) in surface
+                    .rows
+                    .range::<ocs_plugin_api::scene::StableId, _>((start, std::ops::Bound::Unbounded))
+                {
+                    if rows_json.len() >= rows_limit {
+                        more = true;
+                        break;
+                    }
+                    let children = match &row.children {
+                        ocs_plugin_api::widget::WidgetChildren::Leaf => json!("leaf"),
+                        ocs_plugin_api::widget::WidgetChildren::Unloaded => json!("unloaded"),
+                        ocs_plugin_api::widget::WidgetChildren::Loaded(children) => {
+                            json!(children.iter().map(|c| c.0).collect::<Vec<u64>>())
+                        }
+                    };
+                    rows_json.push(json!({
+                        "id": id.0,
+                        "label": row.label,
+                        "children": children,
+                        "action": row.action,
+                    }));
+                    last = Some(*id);
+                }
+                json!({
+                    "ok": true,
+                    "panel_id": panel_id,
+                    "tier": "widgets",
+                    "revision": surface.revision.0,
+                    "total_rows": surface.rows.len(),
+                    "rows": rows_json,
+                    "next": last.filter(|_| more).map(|id| json!({
+                        "after": id.0,
+                        "note": "Pass as `after` with the same rows page size."
+                    })).unwrap_or(json!(null)),
+                })
+            }
+            "tables" => {
+                let Some(surface) = self.panel_surfaces.table_any_owner(panel_id) else {
+                    return err(format!(
+                        "plugin_panels: panel {panel_id} has no table surface"
+                    ));
+                };
+                let columns: Vec<Value> = surface
+                    .columns
+                    .iter()
+                    .map(|column| {
+                        json!({"id": column.id.0, "label": column.label})
+                    })
+                    .collect();
+                // Paged rows in the surface's own `order` (positioned
+                // semantics), cursor = the last returned row id.
+                let start_index = match after {
+                    Some(id) => surface
+                        .order
+                        .iter()
+                        .position(|row_id| *row_id == id)
+                        .map_or(surface.order.len(), |index| index + 1),
+                    None => 0,
+                };
+                let page: Vec<&ocs_plugin_api::scene::StableId> = surface
+                    .order
+                    .get(start_index..)
+                    .unwrap_or(&[])
+                    .iter()
+                    .take(rows_limit)
+                    .collect();
+                let mut rows_json = Vec::with_capacity(page.len());
+                for row_id in &page {
+                    let cells = surface
+                        .rows
+                        .get(*row_id)
+                        .map(|cells| {
+                            cells.iter().map(cell_value_json).collect::<Vec<Value>>()
+                        })
+                        .unwrap_or_default();
+                    rows_json.push(json!({"id": row_id.0, "cells": cells}));
+                }
+                let remaining = surface.order.len().saturating_sub(start_index);
+                let more = remaining > page.len();
+                let next = page.last().filter(|_| more).map(|id| json!({
+                    "after": id.0,
+                    "note": "Pass as `after` with the same rows page size."
+                }));
+                json!({
+                    "ok": true,
+                    "panel_id": panel_id,
+                    "tier": "tables",
+                    "revision": surface.revision.0,
+                    "total_rows": surface.rows.len(),
+                    "columns": columns,
+                    "rows": rows_json,
+                    "next": next.unwrap_or(json!(null)),
+                })
+            }
+            other => err(format!(
+                "plugin_panels: unknown tier {other} (scene | widgets | tables)"
+            )),
+        }
+    }
+
+    /// Activate one element of a plugin panel surface (api v29, S08): the
+    /// automation facade's `plugin_panel_action`. Routes through the SAME
+    /// [`PanelEventRouter`](crate::app::panel_events::PanelEventRouter)
+    /// constructors the GUI gestures use, then delivers owner-targeted via
+    /// the same `publish_surface_event_to_plugin` — so an MCP-triggered
+    /// activation is the GUI-triggered event, by construction (and by the
+    /// recorded-dispatch equivalence test).
+    pub(super) fn plugin_panel_action(&mut self, req: &Value) -> Value {
+        let Some(panel_id) = req["panel_id"].as_str() else {
+            return err("plugin_panel_action: missing panel_id");
+        };
+        let Some(raw_element) = req["element"].as_u64() else {
+            return err("plugin_panel_action: missing element (stable id)");
+        };
+        let element = ocs_plugin_api::scene::StableId(raw_element);
+        let Some(registered) = self.plugin_panels.get(panel_id) else {
+            return err(format!(
+                "plugin_panel_action: unknown panel {panel_id} (not registered)"
+            ));
+        };
+        let Some(owner) = registered.owner_plugin_id.as_deref() else {
+            return err(format!(
+                "plugin_panel_action: panel {panel_id} has no owning plugin"
+            ));
+        };
+        // The element must exist in the surface the kind addresses, so a
+        // typo activates nothing (and no sequence number burns).
+        let in_widgets = self
+            .panel_surfaces
+            .widget_any_owner(panel_id)
+            .is_some_and(|surface| surface.rows.contains_key(&element));
+        let in_scene = self
+            .panel_surfaces
+            .scene_any_owner(panel_id)
+            .is_some_and(|scene| {
+                scene
+                    .elements
+                    .iter()
+                    .any(|node| node.stable_id() == element)
+            });
+        let requested = req["kind"]
+            .as_str()
+            .map(|kind| kind.to_ascii_lowercase());
+        let requested = requested.as_deref();
+        let kind = match requested {
+            Some("node_activated") => {
+                if !in_widgets {
+                    return err(format!(
+                        "plugin_panel_action: panel {panel_id} has no widget row {raw_element}"
+                    ));
+                }
+                "node_activated"
+            }
+            Some("element_clicked") => {
+                if !in_scene {
+                    return err(format!(
+                        "plugin_panel_action: panel {panel_id} has no scene element {raw_element}"
+                    ));
+                }
+                "element_clicked"
+            }
+            Some(other) => {
+                return err(format!(
+                    "plugin_panel_action: unknown kind {other} (node_activated | element_clicked)"
+                ))
+            }
+            None => {
+                if in_widgets {
+                    "node_activated"
+                } else if in_scene {
+                    "element_clicked"
+                } else {
+                    return err(format!(
+                        "plugin_panel_action: panel {panel_id} has no surface element {raw_element}"
+                    ));
+                }
+            }
+        };
+        let routed = if kind == "node_activated" {
+            self.panel_event_router.on_node_activated(panel_id, element)
+        } else {
+            self.panel_event_router
+                .on_element_clicked(panel_id, element)
+        };
+        let sequence = routed.sequence;
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::plugin::v4_support::publish_surface_event_to_plugin(
+            owner,
+            routed.panel_id,
+            routed.sequence,
+            routed.event,
+        );
+        #[cfg(target_arch = "wasm32")]
+        let _ = (owner, routed);
+        json!({
+            "ok": true,
+            "panel_id": panel_id,
+            "element": raw_element,
+            "kind": kind,
+            "sequence": sequence,
+            "delivery": "best_effort_owner_targeted",
+        })
     }
 
     /// Run a command line headlessly. Thin wrapper over the shared

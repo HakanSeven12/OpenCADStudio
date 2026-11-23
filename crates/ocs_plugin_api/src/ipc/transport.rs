@@ -13,9 +13,10 @@ use std::io::{Read, Write};
 use interprocess::local_socket::Stream;
 use serde::{de::DeserializeOwned, Serialize};
 
-/// Maximum serialized message size accepted over the wire (64 MiB). Prevents
-/// a malicious or buggy peer from exhausting host/runner memory.
-const MAX_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
+/// Maximum serialized message size accepted over the wire (1 GiB). Prevents
+/// a malicious or buggy peer from exhausting host/runner memory, while a full
+/// document snapshot of a large drawing (about 90 MB) still fits.
+const MAX_MESSAGE_SIZE: usize = 1024 * 1024 * 1024;
 
 /// Errors that can occur during transport.
 #[derive(Debug, thiserror::Error)]

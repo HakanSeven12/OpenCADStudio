@@ -464,10 +464,12 @@ mod tests {
 
     #[test]
     fn transport_rejects_oversized_message() {
-        let (mut a, _b) = connect_pair();
-        // A Vec<u8> larger than MAX_MESSAGE_SIZE should be rejected on send.
-        let huge = vec![0u8; 65 * 1024 * 1024];
-        let err = send(&mut a, &huge).unwrap_err();
+        let (mut a, mut b) = connect_pair();
+        // A frame header announcing more than MAX_MESSAGE_SIZE is refused
+        // before anything is allocated (no 1 GiB buffer in the test).
+        let len: u64 = 1025 * 1024 * 1024;
+        std::io::Write::write_all(&mut a, &len.to_le_bytes()).expect("write header");
+        let err = recv::<Vec<u8>>(&mut b).unwrap_err();
         assert!(format!("{err}").contains("too large"));
     }
 

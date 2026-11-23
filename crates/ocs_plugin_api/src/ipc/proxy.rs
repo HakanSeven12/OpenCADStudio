@@ -19,7 +19,8 @@ use std::time::{Duration, Instant};
 use crate::host::{PluginRequestError, PluginRequestSender};
 use crate::ipc::protocol::{PluginRequest, PluginResponse};
 
-const MAX_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
+// Same limit as `transport`: a full document snapshot of a large drawing (about 90 MB) must fit.
+const MAX_MESSAGE_SIZE: usize = 1024 * 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The proxy per-direction read/write deadline (review finding 13):

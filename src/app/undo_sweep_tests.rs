@@ -240,6 +240,39 @@ fn palette_cases(d: &Drawing) -> Vec<Case> {
     ]
 }
 
+/// Changes of the current layer, colour, lineweight and linetype: nothing is
+/// selected, and the Properties palette or the ribbon sends its message.
+fn current_value_cases() -> Vec<Case> {
+    use document::types::{Color, LineWeight};
+    let case = |name: &str, message: Message| Case {
+        name: format!("Nothing selected: {name}"),
+        steps: vec![
+            Step::Op(serde_json::json!({"op": "select", "clear": true, "handles": []})),
+            Step::Send(Box::new(message)),
+        ],
+    };
+    let (layer, linetype) = ("Walls".to_string(), "Continuous".to_string());
+    vec![
+        case("palette layer", Message::PropLayerChanged(layer.clone())),
+        case("palette color", Message::PropColorChanged(Color::Index(1))),
+        case(
+            "palette lineweight",
+            Message::PropLwChanged(LineWeight::W0_50),
+        ),
+        case(
+            "palette linetype",
+            Message::PropLinetypeChanged(linetype.clone()),
+        ),
+        case("ribbon layer", Message::RibbonLayerChanged(layer)),
+        case("ribbon color", Message::RibbonColorChanged(Color::Index(1))),
+        case(
+            "ribbon lineweight",
+            Message::RibbonLineweightChanged(LineWeight::W0_50),
+        ),
+        case("ribbon linetype", Message::RibbonLinetypeChanged(linetype)),
+    ]
+}
+
 /// Text made in an editor: the command stops with the editor open, the text
 /// goes in, and the editor's OK commits it.
 fn editor_cases() -> Vec<Case> {
@@ -544,6 +577,15 @@ fn every_palette_change_is_undone_and_redone_exactly() {
 }
 
 /// The same for text that an editor makes.
+#[test]
+fn every_change_of_a_current_value_is_undone_and_redone_exactly() {
+    let failures: Vec<String> = current_value_cases()
+        .iter()
+        .flat_map(|case| check_steps(&case.name, &case.steps))
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 #[test]
 fn every_editor_commit_is_undone_and_redone_exactly() {
     let failures: Vec<String> = editor_cases()

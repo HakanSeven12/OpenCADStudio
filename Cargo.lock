@@ -100,6 +100,7 @@ dependencies = [
  "web-sys",
  "windows-sys 0.61.2",
  "winresource",
+ "x11rb",
  "zip 8.6.0",
 ]
 

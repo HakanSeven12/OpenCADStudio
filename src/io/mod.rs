@@ -2303,6 +2303,98 @@ mod save_failure_tests {
         let _ = std::fs::remove_file(path);
     }
 
+    /// A save with backup into `folder`, which holds the drawing `name`.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn save_over(
+        folder: &std::path::Path,
+        name: &str,
+        expected: Option<super::edit_lock::FileFingerprint>,
+    ) -> Result<(), super::SaveFailure> {
+        super::save_owned_as_version_atomic(
+            document::Document::new(),
+            &folder.join(name),
+            document::DxfVersion::AC1032,
+            true,
+            expected,
+            None,
+            false,
+            false,
+            None,
+            None,
+        )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn names_in(folder: &std::path::Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// The check before the replace fails: the drawing stays as it was, and
+    /// the folder has no temporary file and no backup.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_save_refused_before_the_replace_leaves_only_the_drawing() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("plan.dwg");
+        std::fs::write(&path, b"old").unwrap();
+        let expected = super::edit_lock::FileFingerprint::capture(&path).unwrap();
+        std::fs::write(&path, b"changed by another program").unwrap();
+
+        let error = save_over(folder.path(), "plan.dwg", Some(expected)).unwrap_err();
+
+        assert!(error.externally_modified);
+        assert_eq!(std::fs::read(&path).unwrap(), b"changed by another program");
+        assert_eq!(names_in(folder.path()), ["plan.dwg"]);
+    }
+
+    /// The replace fails, because the name of the drawing is a folder with a
+    /// file in it: the folder stays as it was, and no temporary file stays.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_save_whose_replace_fails_leaves_no_temporary_file() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("plan.dwg");
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("kept.txt"), b"kept").unwrap();
+
+        let error = save_over(folder.path(), "plan.dwg", None).unwrap_err();
+
+        assert!(!error.externally_modified);
+        assert!(error.message.starts_with("replace "), "{}", error.message);
+        assert_eq!(std::fs::read(path.join("kept.txt")).unwrap(), b"kept");
+        assert_eq!(names_in(folder.path()), ["plan.dwg"]);
+    }
+
+    /// The write fails, because the folder refuses a new file: the drawing
+    /// stays as it was.
+    #[cfg(unix)]
+    #[test]
+    fn a_save_whose_write_fails_leaves_the_drawing() {
+        use std::os::unix::fs::PermissionsExt;
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("plan.dwg");
+        std::fs::write(&path, b"old").unwrap();
+        let read_only = std::fs::Permissions::from_mode(0o555);
+        std::fs::set_permissions(folder.path(), read_only).unwrap();
+        if std::fs::write(folder.path().join("probe"), b"").is_ok() {
+            // This user (root) can write to a read-only folder.
+            let _ = std::fs::remove_file(folder.path().join("probe"));
+            return;
+        }
+
+        let result = save_over(folder.path(), "plan.dwg", None);
+
+        std::fs::set_permissions(folder.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"old");
+        assert_eq!(names_in(folder.path()), ["plan.dwg"]);
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn external_path_replacement_prevents_atomic_replace() {

@@ -58,6 +58,8 @@ pub mod plot;
 pub mod plugin_dialog;
 pub mod plugin_manager;
 pub mod plugin_panel;
+/// Native scene-surface projection for plugin panels (api v29).
+pub mod plugin_scene;
 pub mod print_all;
 pub mod purge;
 pub mod quick_calc;

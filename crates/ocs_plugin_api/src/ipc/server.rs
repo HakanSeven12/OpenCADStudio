@@ -165,7 +165,11 @@ pub fn handle_plugin_request(
         }
         UpdateEntitiesTransaction { label, entities } => {
             if entities.len() > MAX_BATCH_ENTITIES {
-                batch_budget_error("update_entities_transaction", entities.len(), MAX_BATCH_ENTITIES)
+                batch_budget_error(
+                    "update_entities_transaction",
+                    entities.len(),
+                    MAX_BATCH_ENTITIES,
+                )
             } else {
                 PluginResponse::EntityTransactionResult(
                     host.update_entities_transaction(&label, entities),
@@ -179,7 +183,8 @@ pub fn handle_plugin_request(
             } else {
                 PluginResponse::SelectionResult(host.set_selection(&handles))
             }
-        }        SolidOperation { operation } => {
+        }
+        SolidOperation { operation } => {
             PluginResponse::SolidResult(host.solid_operation(operation))
         }
         TableOperation { operation } => {
@@ -339,11 +344,7 @@ pub fn handle_plugin_request(
         }),
         RegisterQuadPanels { panels } => {
             if panels.len() > MAX_QUAD_PANELS {
-                return batch_budget_error(
-                    "register_quad_panels",
-                    panels.len(),
-                    MAX_QUAD_PANELS,
-                );
+                return batch_budget_error("register_quad_panels", panels.len(), MAX_QUAD_PANELS);
             }
             // API v15: the owning plugin's id is transport identity (see
             // handle_plugin_request's doc), so one plugin's registration can
@@ -393,6 +394,9 @@ pub fn handle_plugin_request(
         PanelSnapshot { panel_id } => {
             PluginResponse::PanelSnapshot(host.panel_snapshot_for_plugin(plugin_id, &panel_id))
         }
+        PanelSurfacePublish { panel_id, surface } => PluginResponse::PanelSurfacePublished(
+            host.panel_surface_publish_for_plugin(plugin_id, &panel_id, surface),
+        ),
         SetGeoLocation { location } => {
             PluginResponse::GeoLocationSet(host.set_geo_location(&location))
         }

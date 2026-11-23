@@ -463,6 +463,50 @@ impl HostApi for HostSession<'_> {
         }
     }
 
+    /// V29 (additive): publish (or replace) the panel's declarative scene
+    /// surface from the authenticated transport owner. Attachment and
+    /// ownership resolve here (registered alias-aware, transport-checked);
+    /// structural and revision semantics live in the pure store, which
+    /// re-checks ownership so no path can bypass it.
+    fn panel_surface_publish_for_plugin(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        surface: ocs_plugin_api::scene::PanelSurface,
+    ) -> Result<ocs_plugin_api::scene::SceneRevision, ocs_plugin_api::scene::SurfaceReject> {
+        use ocs_plugin_api::scene::SurfaceRejectCode;
+        if plugin_id.is_empty() || panel_id.trim().is_empty() {
+            return Err(ocs_plugin_api::scene::SurfaceReject {
+                code: SurfaceRejectCode::Unattached,
+                current_revision: None,
+            });
+        }
+        // Alias-resolve, then enforce F5's honest distinctions: a panel this
+        // plugin never registered is `Unattached`; one registered by a
+        // different plugin is `OwnedByOther`.
+        let Some(resolved) = resolve_toggle_panel_id(self.app, panel_id) else {
+            return Err(ocs_plugin_api::scene::SurfaceReject {
+                code: SurfaceRejectCode::Unattached,
+                current_revision: None,
+            });
+        };
+        let Some(registered) = self.app.plugin_panels.get(&resolved) else {
+            return Err(ocs_plugin_api::scene::SurfaceReject {
+                code: SurfaceRejectCode::Unattached,
+                current_revision: None,
+            });
+        };
+        if registered.owner_plugin_id.as_deref() != Some(plugin_id) {
+            return Err(ocs_plugin_api::scene::SurfaceReject {
+                code: SurfaceRejectCode::OwnedByOther,
+                current_revision: None,
+            });
+        }
+        self.app
+            .panel_surfaces
+            .publish(plugin_id, &resolved, surface)
+    }
+
     fn update_panel_for_plugin(
         &mut self,
         plugin_id: &str,

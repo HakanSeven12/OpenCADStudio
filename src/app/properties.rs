@@ -5958,7 +5958,7 @@ fn dim_lineweight_label(dimlwd: i16) -> String {
 }
 
 /// Human-readable INSUNITS name (DXF group 70 unit codes).
-pub(in crate::app) fn insunits_name(code: i16) -> &'static str {
+pub(crate) fn insunits_name(code: i16) -> &'static str {
     match code {
         1 => "Inches",
         2 => "Feet",

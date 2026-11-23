@@ -3392,3 +3392,56 @@ mod tests {
         );
     }
 }
+
+/// Ctrl+C puts the selection on the system clipboard as SVG for other
+/// programs (#2018). On Windows they look for it under the registered
+/// `image/svg+xml` format; text alone is pasted as text or not at all.
+#[cfg(all(test, target_os = "windows"))]
+mod svg_clipboard_format_tests {
+    use crate::app::OpenCADStudio;
+    use document::entities::Line;
+    use document::EntityType;
+
+    /// The clipboard writes a task leaves to the GUI toolkit, which writes
+    /// text only.
+    fn toolkit_clipboard_writes(task: iced::Task<crate::app::Message>) -> Vec<String> {
+        use iced::futures::StreamExt;
+        let mut writes = Vec::new();
+        let Some(mut stream) = iced_runtime::task::into_stream(task) else {
+            return writes;
+        };
+        while let Some(action) = iced::futures::executor::block_on(stream.next()) {
+            if let iced_runtime::Action::Clipboard(iced_runtime::clipboard::Action::Write {
+                content,
+                ..
+            }) = action
+            {
+                writes.push(format!("{content:?}"));
+            }
+        }
+        writes
+    }
+
+    #[test]
+    fn copyclip_does_not_leave_the_svg_to_a_text_only_write() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let line = app.tabs[i]
+            .scene
+            .add_entity(EntityType::Line(Line::from_coords(
+                0.0, 0.0, 0.0, 40.0, 20.0, 0.0,
+            )));
+        app.tabs[i].scene.select_entity(line, true);
+        let task = app.dispatch_command("COPYCLIP");
+        let writes = toolkit_clipboard_writes(task);
+        assert!(
+            writes.is_empty(),
+            "the SVG went to the clipboard as text only: {:?}",
+            writes
+                .iter()
+                .map(|write| write.chars().take(60).collect::<String>())
+                .collect::<Vec<_>>()
+        );
+    }
+}

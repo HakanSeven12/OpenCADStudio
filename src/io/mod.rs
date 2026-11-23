@@ -2135,6 +2135,8 @@ pub fn mtext_losses_on_save(
 
 #[cfg(test)]
 mod mtext_save_loss_tests;
+#[cfg(test)]
+mod open_phase_tests;
 
 mod backup;
 pub use backup::write_backup;

@@ -63,3 +63,55 @@ pub(crate) fn insunits_to_mm(code: i16) -> Option<f64> {
         _ => return None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{insunits_name, insunits_to_mm};
+
+    #[test]
+    fn each_code_has_its_name() {
+        let names = [
+            "Unitless",
+            "Inches",
+            "Feet",
+            "Miles",
+            "Millimeters",
+            "Centimeters",
+            "Meters",
+            "Kilometers",
+            "Microinches",
+            "Mils",
+            "Yards",
+            "Angstroms",
+            "Nanometers",
+            "Microns",
+            "Decimeters",
+            "Decameters",
+            "Hectometers",
+            "Gigameters",
+            "Astronomical Units",
+            "Light Years",
+            "Parsecs",
+            "US Survey Feet",
+            "US Survey Inches",
+            "US Survey Yards",
+            "US Survey Miles",
+        ];
+        for (code, name) in names.iter().enumerate() {
+            assert_eq!(insunits_name(code as i16), *name, "INSUNITS {code}");
+        }
+        assert_eq!(insunits_name(25), "Unknown");
+        assert_eq!(insunits_name(-1), "Unknown");
+    }
+
+    #[test]
+    fn only_the_codes_1_to_24_have_a_size() {
+        for code in -1..=25 {
+            assert_eq!(
+                insunits_to_mm(code).is_some(),
+                (1..=24).contains(&code),
+                "INSUNITS {code}"
+            );
+        }
+    }
+}

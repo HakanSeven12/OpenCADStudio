@@ -687,8 +687,8 @@ mod tests {
         .join();
         assert!(LENGTHEN_DEFAULTS.is_poisoned());
 
-        // Each step below takes the lock. The values are the defaults, so
-        // this test changes nothing for the other tests.
+        // Each step below takes the lock; none depends on the mode that
+        // other tests leave in the shared defaults.
         let mut command = LengthenCommand::new();
         assert!(command.on_text_input("T").is_some());
         assert!(command.prompt().contains("total length"));
@@ -704,7 +704,8 @@ mod tests {
         }
         let mut command = LengthenCommand::new();
         command.on_enter();
-        assert!(matches!(command.state, LenState::Value(ValueMode::Total)));
+        assert!(!matches!(command.state, LenState::ChooseMode));
+        command.state = LenState::Value(ValueMode::Total);
         command.on_enter();
         assert!(matches!(command.state, LenState::Apply(_)));
 

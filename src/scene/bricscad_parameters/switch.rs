@@ -708,6 +708,10 @@ fn evaluate(expression: &str, columns: &FxHashMap<String, f64>) -> Option<f64> {
     table.resolve(RESULT).ok().filter(|value| value.is_finite())
 }
 
+/// Set an associative variable and every read of it: BricsCAD keeps each
+/// value dependency at the value of the variable it reads, and takes a
+/// variable whose new value its reads already hold for unchanged, leaving
+/// what depends on it unevaluated.
 fn set_variable(
     document: &mut Document,
     variable: Handle,
@@ -715,16 +719,28 @@ fn set_variable(
     value: AssocEvalVariant,
 ) -> Result<()> {
     let Some(ObjectType::Associative(AssociativeObject {
-        data: AssociativeData::Variable(variable),
+        data: AssociativeData::Variable(object),
+        reactors,
         ..
     })) = document.objects.get_mut(&variable)
     else {
         return Err(UNSUPPORTED);
     };
     if let Some(expression) = expression {
-        variable.expression = expression;
+        object.expression = expression;
     }
-    variable.value = value;
+    object.value = value.clone();
+    for reactor in reactors.clone() {
+        if let Some(ObjectType::Associative(AssociativeObject {
+            data: AssociativeData::ValueDependency(read),
+            ..
+        })) = document.objects.get_mut(&reactor)
+        {
+            if read.dependency.dependent_on == variable {
+                read.value = value.clone();
+            }
+        }
+    }
     Ok(())
 }
 

@@ -456,3 +456,52 @@ fn an_unknown_parameter_or_state_is_refused_and_a_shown_state_changes_nothing() 
     );
     assert!(scene.document == before);
 }
+
+/// BricsCAD keeps each read of a variable at the variable's value, and takes a
+/// variable whose reads already hold its new value for unchanged: a stale
+/// read would keep it from evaluating what depends on the variable.
+#[test]
+fn each_read_of_a_variable_holds_the_variable_s_value_after_a_switch() {
+    use document::objects::{AssociativeData, AssociativeObject};
+    let mut scene = opened();
+    assert!(scene
+        .set_bricscad_visibility(reference(0xEE), "LABEL", "Hidden")
+        .unwrap());
+    let document = &scene.document;
+    let copy = document
+        .block_records
+        .get(&block_of(document, 0xEE))
+        .unwrap()
+        .handle;
+    // The copy's network sits in its extension dictionary, behind a
+    // dictionary of the same name.
+    let entry = |dictionary: Handle| match document.objects.get(&dictionary) {
+        Some(ObjectType::Dictionary(dictionary)) => dictionary.get("ACAD_ASSOCNETWORK"),
+        _ => None,
+    };
+    let mut network = entry(document.extension_dictionary_handle(copy).unwrap()).unwrap();
+    while let Some(inner) = entry(network) {
+        network = inner;
+    }
+    let mut reads = 0;
+    for object in document.objects.values() {
+        let ObjectType::Associative(AssociativeObject {
+            data: AssociativeData::ValueDependency(read),
+            ..
+        }) = object
+        else {
+            continue;
+        };
+        let Some(ObjectType::Associative(AssociativeObject {
+            data: AssociativeData::Variable(variable),
+            owner,
+            ..
+        })) = document.objects.get(&read.dependency.dependent_on)
+        else {
+            panic!("a read of something other than a variable");
+        };
+        assert_eq!(read.value, variable.value, "{}", variable.name);
+        reads += usize::from(*owner == network);
+    }
+    assert!(reads > 0, "the copy's variables are read");
+}

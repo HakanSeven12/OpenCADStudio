@@ -10,6 +10,8 @@
 // with `OCS_GOLDEN_DWG=/path/to/0718-mbmdmc.dwg`. The tests skip with a reason
 // when that file is absent so they never break CI.
 
+mod common;
+
 use crate::common::read_optional_env_fixture;
 use document::objects::ObjectType;
 use OpenCADStudio::io;

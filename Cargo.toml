@@ -497,6 +497,123 @@ name = "polygon_overlay_and_clip"
 harness = false
 
 [[test]]
-name = "integration"
-path = "tests/integration.rs"
+name = "active_space_roundtrip"
+path = "tests/active_space_roundtrip.rs"
+
+[[test]]
+name = "annotative_context_roundtrip"
+path = "tests/annotative_context_roundtrip.rs"
+
+[[test]]
+name = "annotative_context_synthesis"
+path = "tests/annotative_context_synthesis.rs"
+
+[[test]]
+name = "annotative_dim_picture"
+path = "tests/annotative_dim_picture.rs"
+
+[[test]]
+name = "block_hatch_export"
+path = "tests/block_hatch_export.rs"
+
+[[test]]
+name = "block_text_draw_depth"
+path = "tests/block_text_draw_depth.rs"
+
+[[test]]
+name = "dim_copy_check"
+path = "tests/dim_copy_check.rs"
+
+[[test]]
+name = "dim_leader_render_check"
+path = "tests/dim_leader_render_check.rs"
+
+[[test]]
+name = "dim_line_color_roundtrip"
+path = "tests/dim_line_color_roundtrip.rs"
+
+[[test]]
+name = "explode_regression"
+path = "tests/explode_regression.rs"
+
+[[test]]
+name = "flatten_regression"
+path = "tests/flatten_regression.rs"
+
+[[test]]
+name = "geodata_roundtrip"
+path = "tests/geodata_roundtrip.rs"
+
+[[test]]
+name = "hatch_shader_lod"
+path = "tests/hatch_shader_lod.rs"
+
+[[test]]
+name = "mesh_shader_limits"
+path = "tests/mesh_shader_limits.rs"
+
+[[test]]
+name = "page_setup_root_repair"
+path = "tests/page_setup_root_repair.rs"
+
+[[test]]
+name = "parametric_constraints_solve"
+path = "tests/parametric_constraints_solve.rs"
+
+[[test]]
+name = "pdf_export_images_check"
+path = "tests/pdf_export_images_check.rs"
+
+[[test]]
+name = "pdf_export_text_check"
+path = "tests/pdf_export_text_check.rs"
+
+[[test]]
+name = "pdf_page_tree_cycle"
+path = "tests/pdf_page_tree_cycle.rs"
+
+[[test]]
+name = "presspull_curved_boundary"
+path = "tests/presspull_curved_boundary.rs"
+
+[[test]]
+name = "scale_list_nan"
+path = "tests/scale_list_nan.rs"
+
+[[test]]
+name = "section_plane_roundtrip"
+path = "tests/section_plane_roundtrip.rs"
+
+[[test]]
+name = "text_font_rendering"
+path = "tests/text_font_rendering.rs"
+
+[[test]]
+name = "text_shader_minification"
+path = "tests/text_shader_minification.rs"
+
+[[test]]
+name = "ucs_face_plane"
+path = "tests/ucs_face_plane.rs"
+
+[[test]]
+name = "viewport_wide_polyline_plot_width"
+path = "tests/viewport_wide_polyline_plot_width.rs"
+
+[[test]]
+name = "xclip_plot_test"
+path = "tests/xclip_plot_test.rs"
+
+[[test]]
+name = "zoom_extents_coverage"
+path = "tests/zoom_extents_coverage.rs"
+
+[[test]]
+name = "zoom_extents_xline"
+path = "tests/zoom_extents_xline.rs"
+
+# These two suites share helpers, so they stay in one binary.
+[[test]]
+name = "entity_roundtrip"
+path = "tests/entity_roundtrip.rs"
 

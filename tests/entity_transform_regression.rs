@@ -7,7 +7,7 @@
 // unchanged. A change that is meant to alter transform behaviour regenerates
 // it with
 //
-//     OCS_UPDATE_GOLDEN=1 cargo test --locked --test integration entity_transform_regression
+//     OCS_UPDATE_GOLDEN=1 cargo test --locked --test entity_roundtrip entity_transform_regression
 //
 // and the diff of the golden file shows exactly what changed. Numbers are
 // compared with a small tolerance, so last-bit differences between the

@@ -1039,17 +1039,39 @@ pub mod crash_log {
     /// Process ids are reused, so only a report written at or after
     /// `not_before` (Unix seconds — when that run started) counts: an old
     /// report from an unrelated run that once had the same id does not.
+    ///
+    /// A panic during the unwind of another one writes a report too, so a run
+    /// can leave more than one. The first one names the cause.
     pub fn report_for_pid(pid: u32, not_before: u64) -> Option<String> {
-        let directory = directory()?;
-        let suffix = format!("-{pid}.log");
-        let entry = std::fs::read_dir(directory).ok()?.flatten().find(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            name.strip_prefix("crash-")
-                .and_then(|rest| rest.strip_suffix(suffix.as_str()))
-                .and_then(|when| when.parse::<u64>().ok())
-                .is_some_and(|when| when >= not_before)
-        })?;
-        std::fs::read_to_string(entry.path()).ok()
+        report_for_pid_in(&directory()?, pid, not_before)
+    }
+
+    fn report_for_pid_in(directory: &std::path::Path, pid: u32, not_before: u64) -> Option<String> {
+        let first = std::fs::read_dir(directory)
+            .ok()?
+            .flatten()
+            .filter_map(|entry| {
+                let order = report_order(&entry.file_name().to_string_lossy(), pid)?;
+                (order.0 >= not_before).then_some((order, entry.path()))
+            })
+            .min_by_key(|(order, _)| *order)?;
+        std::fs::read_to_string(first.1).ok()
+    }
+
+    /// The (Unix seconds, number in that second) of a report of `pid`, from
+    /// its name: `crash-<seconds>-<pid>.log`, then `crash-<seconds>-<pid>-2.log`.
+    fn report_order(name: &str, pid: u32) -> Option<(u64, u32)> {
+        let rest = name.strip_prefix("crash-")?.strip_suffix(".log")?;
+        let mut parts = rest.split('-');
+        let when = parts.next()?.parse::<u64>().ok()?;
+        if parts.next()?.parse::<u32>().ok()? != pid {
+            return None;
+        }
+        let number = match parts.next() {
+            Some(number) => number.parse::<u32>().ok()?,
+            None => 1,
+        };
+        parts.next().is_none().then_some((when, number))
     }
 
     /// Whether a report describes the graphics device giving up.
@@ -1162,20 +1184,36 @@ pub mod crash_log {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let name = format!("crash-{when}-{}.log", std::process::id());
-        let path = directory.join(name);
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        if let Ok(mut file) = options.open(&path) {
-            use std::io::Write;
-            let _ = file.write_all(report(info, when).as_bytes());
-        }
+        write_new(&directory, when, std::process::id(), &report(info, when));
         prune(&directory);
+    }
+
+    /// Writes a report to a file of its own. A panic during the unwind of
+    /// another one comes in the same second, so a second report of that
+    /// second gets `-2` and does not replace the first, which names the cause.
+    fn write_new(directory: &std::path::Path, when: u64, pid: u32, text: &str) {
+        for number in 1..=99u32 {
+            let name = match number {
+                1 => format!("crash-{when}-{pid}.log"),
+                _ => format!("crash-{when}-{pid}-{number}.log"),
+            };
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            match options.open(directory.join(name)) {
+                Ok(mut file) => {
+                    use std::io::Write;
+                    let _ = file.write_all(text.as_bytes());
+                    return;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(_) => return,
+            }
+        }
     }
 
     /// Keep the newest [`KEEP`] reports.

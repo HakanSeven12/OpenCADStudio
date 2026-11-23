@@ -208,3 +208,68 @@ fn a_panic_in_the_middle_of_a_change_is_taken_back() {
     assert_eq!(undo_depth(&app), 2);
     assert_eq!(wires(&app), 2);
 }
+
+/// A change that has no undo record at all: the document has an entity that
+/// the display does not know. The guard cannot take it back. It builds the
+/// display again, so what a save writes is on the screen.
+#[test]
+fn a_change_with_no_undo_record_is_on_the_display_after_a_caught_panic() {
+    let mut app = app_with_a_circle();
+    assert_eq!(wires(&app), 1, "the circle's wire");
+    let line = document::entities::Line::from_points(
+        document::types::Vector3::ZERO,
+        document::types::Vector3::new(10.0, 0.0, 0.0),
+    );
+    // Into the document only, as a handler that stopped before the display.
+    let i = app.active_tab;
+    app.tabs[i]
+        .scene
+        .document
+        .add_entity(document::EntityType::Line(line))
+        .expect("the line is added");
+    TEST_PANIC.with(|point| point.set(Some(TestPanicAt::BeforeHandler)));
+
+    let _ = app.update_root(Message::ScriptLine("REGENAUTO ".to_string()));
+
+    assert!(last_error(&app).contains("Internal error"));
+    assert_eq!(entities(&app), 2, "the line stays in the document");
+    assert_eq!(undo_depth(&app), 1, "it has no undo record");
+    assert_eq!(wires(&app), 2, "so the display must show it");
+}
+
+/// Only a recording that holds a change, and that an entity delta can
+/// restore, is closed into an undo record.
+#[test]
+fn only_a_plain_delta_recording_is_closed_into_an_undo_record() {
+    let mut app = app_with_a_circle();
+    let i = app.active_tab;
+    let circle = document::Handle::new(handles(&app)[0]);
+    let scene = &mut app.tabs[i].scene;
+    assert!(
+        !scene.open_undo_recording_is_a_plain_delta(),
+        "no recording"
+    );
+
+    scene.begin_undo_recording();
+    assert!(!scene.open_undo_recording_is_a_plain_delta(), "empty");
+
+    scene.record_undo_before(circle, None);
+    assert!(scene.open_undo_recording_is_a_plain_delta(), "one change");
+
+    scene.poison_undo_recording();
+    assert!(!scene.open_undo_recording_is_a_plain_delta(), "poisoned");
+    let _ = scene.take_undo_recording();
+
+    // An empty recording and a poisoned one are dropped, with no undo record.
+    for poisoned in [false, true] {
+        let scene = &mut app.tabs[i].scene;
+        scene.begin_undo_recording();
+        if poisoned {
+            scene.record_undo_before(circle, None);
+            scene.poison_undo_recording();
+        }
+        app.close_abandoned_undo_recording(i);
+        assert!(!app.tabs[i].scene.is_recording_undo());
+        assert_eq!(undo_depth(&app), 1, "no new undo record");
+    }
+}

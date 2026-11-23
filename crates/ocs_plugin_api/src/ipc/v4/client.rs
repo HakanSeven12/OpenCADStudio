@@ -329,6 +329,51 @@ impl V4PluginHostApi {
         send_plugin_request(&self.shared, self.tab_id_cache.get(), req)
     }
 
+    /// Bring the cached snapshot up to date after this plugin's own edit
+    /// (see [`snapshot_patch`](crate::ipc::snapshot_patch)): re-read the
+    /// `refreshed` entities from the host and drop the `removed` ones. Without
+    /// a cache there is nothing to patch; any failure drops the cache so the
+    /// next read fetches the host's truth.
+    fn patch_cache(&mut self, refreshed: &[Handle], removed: &[Handle]) {
+        if self.document_cache.get().is_none() {
+            return;
+        }
+        let fresh = if refreshed.is_empty() {
+            Some(Vec::new())
+        } else {
+            match self.request(PluginRequest::GetEntitiesBatch {
+                handles: refreshed.to_vec(),
+            }) {
+                Ok(PluginResponse::GetEntitiesBatchResult(Ok(list))) => Some(list),
+                _ => None,
+            }
+        };
+        let patched = match (fresh, self.document_cache.get_mut()) {
+            (Some(fresh), Some(doc)) => {
+                crate::ipc::snapshot_patch::apply_refreshed(doc, refreshed, fresh, removed)
+            }
+            _ => false,
+        };
+        if !patched {
+            self.document_cache = OnceCell::new();
+        }
+    }
+
+    /// Mirror a successful record write/removal in the cached snapshot.
+    fn patch_cached_record(
+        &mut self,
+        handle: Handle,
+        app_name: &str,
+        record: Option<ExtendedDataRecord>,
+    ) {
+        let Some(doc) = self.document_cache.get_mut() else {
+            return;
+        };
+        if !crate::ipc::snapshot_patch::mirror_record(doc, handle, app_name, record) {
+            self.document_cache = OnceCell::new();
+        }
+    }
+
     fn fetch_document(&self) -> Document {
         match self.request(PluginRequest::DocumentSnapshot) {
             Ok(PluginResponse::Document(doc)) => *doc,
@@ -423,7 +468,12 @@ impl HostApi for V4PluginHostApi {
     fn add_entity(&mut self, entity: EntityType) -> Handle {
         match self.request(PluginRequest::AddEntity(entity)) {
             Ok(PluginResponse::Handle(h)) => {
-                self.document_cache = OnceCell::new();
+                // Patch the cached snapshot with the host's post-edit copy.
+                if h.is_null() {
+                    self.document_cache = OnceCell::new();
+                } else {
+                    self.patch_cache(&[h], &[]);
+                }
                 h
             }
             Ok(other) => {
@@ -440,7 +490,9 @@ impl HostApi for V4PluginHostApi {
     fn add_entities(&mut self, entities: Vec<EntityType>) -> Vec<Handle> {
         match self.request(PluginRequest::AddEntities(entities)) {
             Ok(PluginResponse::Handles(handles)) => {
-                self.document_cache = OnceCell::new();
+                // Patch the cached snapshot with the host's post-edit copies.
+                let added: Vec<Handle> = handles.iter().copied().filter(|h| !h.is_null()).collect();
+                self.patch_cache(&added, &[]);
                 handles
             }
             Ok(other) => {
@@ -455,10 +507,17 @@ impl HostApi for V4PluginHostApi {
     }
 
     fn update_entity(&mut self, entity: EntityType) -> bool {
+        let handle = entity.common().handle;
+        let full_refresh = crate::ipc::snapshot_patch::edit_needs_full_refresh(&entity);
         match self.request(PluginRequest::UpdateEntity(entity)) {
             Ok(PluginResponse::Bool(b)) => {
                 if b {
-                    self.document_cache = OnceCell::new();
+                    // Patch the cached snapshot with the host's post-edit copy.
+                    if full_refresh {
+                        self.document_cache = OnceCell::new();
+                    } else {
+                        self.patch_cache(&[handle], &[]);
+                    }
                 }
                 b
             }
@@ -477,7 +536,7 @@ impl HostApi for V4PluginHostApi {
         match self.request(PluginRequest::RemoveEntity { handle }) {
             Ok(PluginResponse::Bool(b)) => {
                 if b {
-                    self.document_cache = OnceCell::new();
+                    self.patch_cache(&[], &[handle]);
                 }
                 b
             }
@@ -497,6 +556,17 @@ impl HostApi for V4PluginHostApi {
     }
 
     fn read_record(&self, handle: Handle, app_name: &str) -> Option<&ExtendedDataRecord> {
+        // The host answers `ReadRecord` from the entity's own XDATA, which the
+        // cached snapshot carries (kept current after this plugin's edits):
+        // answer from it when the entity is there. A scan over a large drawing
+        // otherwise costs one round trip per entity.
+        if let Some(entity) = self
+            .document_cache
+            .get()
+            .and_then(|doc| doc.get_entity(handle))
+        {
+            return entity.common().extended_data.get_record(app_name);
+        }
         let key = (handle, app_name.to_string());
         {
             let cache = self.record_cache.borrow();
@@ -526,10 +596,14 @@ impl HostApi for V4PluginHostApi {
 
     fn write_record(&mut self, handle: Handle, record: ExtendedDataRecord) -> bool {
         let app = record.application_name.clone();
+        let mirrored = record.clone();
         match self.request(PluginRequest::WriteRecord { handle, record }) {
             Ok(PluginResponse::Bool(b)) => {
                 if b {
-                    self.record_cache.borrow_mut().remove(&(handle, app));
+                    self.record_cache
+                        .borrow_mut()
+                        .remove(&(handle, app.clone()));
+                    self.patch_cached_record(handle, &app, Some(mirrored));
                 }
                 b
             }
@@ -554,6 +628,7 @@ impl HostApi for V4PluginHostApi {
                     self.record_cache
                         .borrow_mut()
                         .remove(&(handle, app_name.to_string()));
+                    self.patch_cached_record(handle, app_name, None);
                 }
                 b
             }
@@ -813,13 +888,21 @@ impl HostApi for V4PluginHostApi {
         label: &str,
         entities: Vec<EntityType>,
     ) -> Result<(), String> {
+        let handles: Vec<Handle> = entities.iter().map(|e| e.common().handle).collect();
+        let full_refresh = entities
+            .iter()
+            .any(crate::ipc::snapshot_patch::edit_needs_full_refresh);
         match self.request(PluginRequest::UpdateEntitiesTransaction {
             label: label.to_owned(),
             entities,
         }) {
             Ok(PluginResponse::EntityTransactionResult(result)) => {
                 if result.is_ok() {
-                    self.document_cache = OnceCell::new();
+                    if full_refresh {
+                        self.document_cache = OnceCell::new();
+                    } else {
+                        self.patch_cache(&handles, &[]);
+                    }
                 }
                 result
             }

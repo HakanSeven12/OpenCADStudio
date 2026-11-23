@@ -13,6 +13,8 @@
 //!   proxy.
 //! - [`server`](crate::ipc::server) — host-side handler that applies a
 //!   `PluginRequest` to a `HostApi` implementation.
+//! - `snapshot_patch` — keeps a client's cached document snapshot current
+//!   after the plugin's own edits instead of refetching it.
 //! - [`v4`](crate::ipc::v4) — multiplexed V4 frames, notifications, and
 //!   correlation ids.
 //! - [`proxy`](crate::ipc::proxy) — optional TCP proxy so plugin child
@@ -26,6 +28,8 @@ pub mod protocol;
 pub mod proxy;
 #[cfg(feature = "host")]
 pub mod server;
+#[cfg(feature = "host")]
+mod snapshot_patch;
 #[cfg(feature = "host")]
 pub mod transport;
 #[cfg(feature = "host")]

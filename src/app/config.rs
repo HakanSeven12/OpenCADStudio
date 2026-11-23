@@ -705,6 +705,7 @@ fn config_path() -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
     #[test]
     fn system_scheme_resolves_to_a_concrete_theme_and_keeps_its_name() {
@@ -1023,18 +1024,19 @@ mod tests {
     /// the guard and then split a character:
     /// `byte index 2 is not a char boundary; it is inside 'é'`. Pasting it
     /// into any Options colour field killed the process on the keystroke.
-    #[test]
-    fn parse_hex_rejects_multibyte_input_without_panicking() {
-        for value in ["aébé", "#aébé", "éééééé", "#ébé#"] {
-            assert_eq!(parse_hex(value), None, "{value} should not parse");
-        }
-        // Non-hex garbage and wrong lengths stay None.
-        for value in ["gggggg", "a1b2c", "a1b2c34", "#GGHHII"] {
-            assert_eq!(parse_hex(value), None, "{value} should not parse");
-        }
-        // Valid input keeps working, with and without '#', with whitespace.
-        assert_eq!(parse_hex("a1b2c3"), Some([0xa1, 0xb2, 0xc3]));
-        assert_eq!(parse_hex("#A1B2C3"), Some([0xa1, 0xb2, 0xc3]));
-        assert_eq!(parse_hex("  000000  "), Some([0, 0, 0]));
+    #[rstest]
+    #[case("aébé", None)]
+    #[case("#aébé", None)]
+    #[case("éééééé", None)]
+    #[case("#ébé#", None)]
+    #[case("gggggg", None)]
+    #[case("a1b2c", None)]
+    #[case("a1b2c34", None)]
+    #[case("#GGHHII", None)]
+    #[case("a1b2c3", Some([0xa1, 0xb2, 0xc3]))]
+    #[case("#A1B2C3", Some([0xa1, 0xb2, 0xc3]))]
+    #[case("  000000  ", Some([0, 0, 0]))]
+    fn parse_hex_handles_text_and_whitespace(#[case] value: &str, #[case] expected: Option<[u8; 3]>) {
+        assert_eq!(parse_hex(value), expected, "{value}");
     }
 }

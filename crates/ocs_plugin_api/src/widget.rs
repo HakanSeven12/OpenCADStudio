@@ -55,6 +55,13 @@ pub enum WidgetChildren {
 pub struct WidgetRow {
     pub label: String,
     pub children: WidgetChildren,
+    /// When set, the row is a BUTTON: activating it carries this action
+    /// name to the plugin through `SurfaceEvent::NodeActivated` (the
+    /// host's activation gesture; the plugin binds the semantics).
+    /// Buttons are leaf rows — an `action` together with children is
+    /// refused by validation. Bounded by the text budget.
+    #[serde(default)]
+    pub action: Option<String>,
 }
 
 /// A keyed page of rows (finding F4): installs under `parent`
@@ -98,6 +105,11 @@ pub enum WidgetError {
     DuplicateRow,
     /// A row's label exceeds the text budget.
     LabelTooLong,
+    /// A button row's action name exceeds the text budget.
+    ActionTooLong,
+    /// A button row (an `action` is set) also declared children — buttons
+    /// are leaf rows.
+    ActionWithChildren,
     /// The resulting surface would hold rows unreachable from the roots.
     OrphanRows,
 }
@@ -116,6 +128,10 @@ impl core::fmt::Display for WidgetError {
             }
             WidgetError::DuplicateRow => write!(f, "page row id collides with an existing row"),
             WidgetError::LabelTooLong => write!(f, "row label exceeds the text budget"),
+            WidgetError::ActionTooLong => write!(f, "button action name exceeds the text budget"),
+            WidgetError::ActionWithChildren => {
+                write!(f, "button rows cannot also declare children")
+            }
             WidgetError::OrphanRows => write!(f, "page would orphan rows from the roots"),
         }
     }
@@ -150,6 +166,14 @@ impl WidgetSurface {
         for row in self.rows.values() {
             if row.label.len() > crate::scene::MAX_TEXT_BYTES {
                 return Err(WidgetError::LabelTooLong);
+            }
+            if let Some(action) = &row.action {
+                if action.len() > crate::scene::MAX_TEXT_BYTES {
+                    return Err(WidgetError::ActionTooLong);
+                }
+                if !matches!(row.children, WidgetChildren::Leaf) {
+                    return Err(WidgetError::ActionWithChildren);
+                }
             }
         }
         let mut seen = HashSet::new();
@@ -296,7 +320,45 @@ mod tests {
         WidgetRow {
             label: label.to_owned(),
             children,
+            action: None,
         }
+    }
+
+    #[test]
+    fn button_rows_are_leaf_only_and_bounded() {
+        let mut surface = WidgetSurface::new(WidgetRevision(1));
+        surface.rows.insert(
+            StableId(1),
+            WidgetRow {
+                label: "Run".to_owned(),
+                children: WidgetChildren::Leaf,
+                action: Some("run".to_owned()),
+            },
+        );
+        surface.roots = vec![StableId(1)];
+        assert_eq!(surface.validate(), Ok(()));
+
+        // A button WITH children is refused.
+        surface.rows.insert(
+            StableId(1),
+            WidgetRow {
+                label: "Run".to_owned(),
+                children: WidgetChildren::Unloaded,
+                action: Some("run".to_owned()),
+            },
+        );
+        assert_eq!(surface.validate(), Err(WidgetError::ActionWithChildren));
+
+        // An over-budget action name is refused.
+        surface.rows.insert(
+            StableId(1),
+            WidgetRow {
+                label: "Run".to_owned(),
+                children: WidgetChildren::Leaf,
+                action: Some("x".repeat(crate::scene::MAX_TEXT_BYTES + 1)),
+            },
+        );
+        assert_eq!(surface.validate(), Err(WidgetError::ActionTooLong));
     }
 
     fn surface_with_parent() -> WidgetSurface {

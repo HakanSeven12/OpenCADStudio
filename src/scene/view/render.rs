@@ -898,6 +898,25 @@ impl shader::Primitive for Primitive {
                     // Snapshot before any arena allocation, so a rejected
                     // upload cannot claim this content id below.
                     let arena_errors_before = crate::scene::pipeline::gpu_errors_seen();
+                    // The retained ranges belong to this exact patch base and camera.
+                    // Limit validation to small edits so bulk changes take one scan.
+                    let mut reuse_cull = vp.wire_patch.as_ref().and_then(|(base, patch)| {
+                        if !base_ok
+                            || patch.changes.len() > 64
+                            || inner.wire_cull_key
+                                != (*base, vp.camera_generation, clip_size.width, clip_size.height)
+                        {
+                            return None;
+                        }
+                        // Refitting projection depth can leave the camera generation unchanged.
+                        let view = wire_arena::WireCullView::new(
+                            vp.uniforms.view_rot,
+                            eye,
+                            clip_size.width,
+                            clip_size.height,
+                        );
+                        (inner.wire_cull_view == Some(view)).then_some(view)
+                    });
                     let reg_ok = base_ok
                         && if let Some(arena) = inner.wire_arena.as_mut() {
                             let patch = patch.unwrap();
@@ -907,6 +926,7 @@ impl shader::Primitive for Primitive {
                                 &regular_changed,
                                 patch.new_handles_are_suffix,
                                 &draw_depths,
+                                &mut reuse_cull,
                             )
                         } else {
                             inner.wire_arena_fallback_kind == Some(false)
@@ -921,6 +941,7 @@ impl shader::Primitive for Primitive {
                                 &mesh_changed,
                                 patch.new_handles_are_suffix,
                                 &draw_depths,
+                                &mut reuse_cull,
                             )
                         } else {
                             inner.wire_arena_fallback_kind == Some(true) && !fallback_touched(true)
@@ -1006,21 +1027,31 @@ impl shader::Primitive for Primitive {
                         && mesh_ready
                         && (inner.wire_arena.is_some() || inner.wire_arena_mesh.is_some())
                     {
-                        let mut gpus = if inner.wire_arena_fallback_kind == Some(false) {
-                            inner.wire_arena_fallback.as_ref().clone()
+                        if _patched
+                            && reuse_cull.is_some()
+                            && crate::scene::pipeline::gpu_errors_seen() == arena_errors_before
+                        {
+                            inner.wire_cull_key.0 = vp.wire_content_id;
+                            if _perf {
+                                crate::perf_record!("[perf] wire-cull reused after patch");
+                            }
                         } else {
-                            inner
-                                .wire_arena
-                                .as_ref()
-                                .map(WireArena::wire_gpus)
-                                .unwrap_or_default()
-                        };
-                        if inner.wire_arena_fallback_kind == Some(true) {
-                            gpus.extend(inner.wire_arena_fallback.iter().cloned());
-                        } else if let Some(arena) = inner.wire_arena_mesh.as_ref() {
-                            gpus.extend(arena.wire_gpus());
+                            let mut gpus = if inner.wire_arena_fallback_kind == Some(false) {
+                                inner.wire_arena_fallback.as_ref().clone()
+                            } else {
+                                inner
+                                    .wire_arena
+                                    .as_ref()
+                                    .map(WireArena::wire_gpus)
+                                    .unwrap_or_default()
+                            };
+                            if inner.wire_arena_fallback_kind == Some(true) {
+                                gpus.extend(inner.wire_arena_fallback.iter().cloned());
+                            } else if let Some(arena) = inner.wire_arena_mesh.as_ref() {
+                                gpus.extend(arena.wire_gpus());
+                            }
+                            inner.gpu_wires = std::sync::Arc::new(gpus);
                         }
-                        inner.gpu_wires = std::sync::Arc::new(gpus);
                         // Retain analytical uploads when a patch changes neither
                         // their contributors nor their baked draw depths.
                         let analytical_untouched = _patched
@@ -1454,6 +1485,12 @@ retained_contributors={}",
                 }
                 inner.gpu_wires = std::sync::Arc::new(visible);
                 inner.wire_cull_key = cull_key;
+                inner.wire_cull_view = Some(crate::scene::pipeline::wire_arena::WireCullView::new(
+                    view_rot,
+                    eye,
+                    clip_size.width,
+                    clip_size.height,
+                ));
             }
             if vp.show_viewcube {
                 inner.viewcube.upload(

@@ -474,6 +474,49 @@ struct RunBounds {
     z: [f32; 2],
 }
 
+/// The projection used for both full scans and visibility checks on edited slabs.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct WireCullView {
+    projection: glam::Mat4,
+    eye: glam::DVec3,
+    width: u32,
+    height: u32,
+    ignores_depth: bool,
+}
+
+impl WireCullView {
+    pub(crate) fn new(projection: glam::Mat4, eye: glam::DVec3, width: u32, height: u32) -> Self {
+        Self {
+            projection,
+            eye,
+            width,
+            height,
+            ignores_depth: super::parallel_view_ignores_depth(projection),
+        }
+    }
+
+    fn offscreen(&self, bounds: RunBounds) -> bool {
+        let [x0, y0, x1, y1] = bounds.aabb.map(f64::from);
+        let [z0, z1] = bounds.z.map(f64::from);
+        super::box_offscreen(
+            [x0, y0, z0, x1, y1, z1],
+            self.ignores_depth,
+            self.projection,
+            self.eye,
+            self.width,
+            self.height,
+        )
+    }
+
+    fn check_patch(reuse: &mut Option<Self>, slab: &Slab, bounds: RunBounds) {
+        if slab.inst_len != 0
+            && reuse.is_some_and(|view| view.offscreen(slab.bounds) != view.offscreen(bounds))
+        {
+            *reuse = None;
+        }
+    }
+}
+
 /// Bench hook: the bounds the arena stores with each entity's slab.
 #[doc(hidden)]
 pub fn wire_run_bounds(wires: &[&WireModel]) -> ([f32; 4], [f32; 2]) {
@@ -842,13 +885,14 @@ impl WireArena {
     /// Apply the changed handles in place; returns false (⇒ full rebuild) when the
     /// arena can't absorb the change: not eligible, a transparent append, a
     /// capacity overflow, or too much tombstone waste.
-    pub fn patch(
+    pub(crate) fn patch(
         &mut self,
         queue: &wgpu::Queue,
         changes: &[(Handle, ChangeKind)],
         runs: &FxHashMap<Handle, Vec<&WireModel>>,
         new_handles_are_suffix: bool,
         depth_map: &FxHashMap<u64, [f32; 2]>,
+        reuse_cull: &mut Option<WireCullView>,
     ) -> bool {
         // Prepare and validate every visible run before mutating either GPU
         // buffer. Growing/shrinking a Modified slab used to tombstone the old
@@ -935,6 +979,7 @@ impl WireArena {
             // isn't in its slabs, so this is a no-op for it.
             if matches!(kind, ChangeKind::Removed) || run.is_empty() {
                 if let Some(slab) = self.slabs.remove(&h) {
+                    *reuse_cull = None;
                     let start = slab.const_off as usize;
                     let end = start + slab.const_len as usize;
                     for cst in &mut self.consts_cpu[start..end] {
@@ -971,6 +1016,7 @@ impl WireArena {
                     .get(&h)
                     .is_some_and(|s| s.inst_len == inst_len && s.const_len == const_len)
             {
+                *reuse_cull = None;
                 let slab = self.vacant.remove(&h).unwrap();
                 self.tombstoned = self.tombstoned.saturating_sub(slab.inst_len);
                 self.slabs.insert(h, slab);
@@ -1000,6 +1046,7 @@ impl WireArena {
                 // or a re-show would never reach the shader.
                 dirty_consts.push((const_off, const_off + const_len));
                 let slab = self.slabs.get_mut(&h).unwrap();
+                WireCullView::check_patch(reuse_cull, slab, bounds);
                 slab.base_depth = base_depth;
                 slab.bounds = bounds;
                 slab.content = content;
@@ -1010,6 +1057,7 @@ impl WireArena {
             // the terminal slab. Resize that slab at the same offsets instead
             // of tombstoning it and rebuilding the whole arena as its segment
             // count grows on every click.
+            *reuse_cull = None;
             let can_resize_tail = self.slabs.get(&h).is_some_and(|slab| {
                 can_resize_terminal_slab(
                     slab,
@@ -1279,25 +1327,14 @@ pub fn visible_wire_ranges(
     clip_w: u32,
     clip_h: u32,
 ) -> Vec<(u32, u32)> {
-    let depth_ignored = super::parallel_view_ignores_depth(view_rot);
+    let view = WireCullView::new(view_rot, eye, clip_w, clip_h);
     let mut ranges: Vec<(u32, u32)> = slabs
         .filter(|slab| {
             slab.inst_len > 0
-                && !super::box_offscreen(
-                    [
-                        slab.aabb[0] as f64,
-                        slab.aabb[1] as f64,
-                        slab.z[0] as f64,
-                        slab.aabb[2] as f64,
-                        slab.aabb[3] as f64,
-                        slab.z[1] as f64,
-                    ],
-                    depth_ignored,
-                    view_rot,
-                    eye,
-                    clip_w,
-                    clip_h,
-                )
+                && !view.offscreen(RunBounds {
+                    aabb: slab.aabb,
+                    z: slab.z,
+                })
         })
         .map(|slab| (slab.inst_off, slab.inst_off + slab.inst_len))
         .collect();
@@ -1439,6 +1476,7 @@ impl PackedWireArena {
         runs: &FxHashMap<Handle, Vec<&WireModel>>,
         new_handles_are_suffix: bool,
         depth_map: &FxHashMap<u64, [f32; 2]>,
+        reuse_cull: &mut Option<WireCullView>,
     ) -> bool {
         let mut prepared: FxHashMap<Handle, PreparedPackedPatchRun> = FxHashMap::default();
         for &(handle, kind) in changes {
@@ -1492,6 +1530,7 @@ impl PackedWireArena {
             let run = runs.get(&handle).map(Vec::as_slice).unwrap_or(&[]);
             if matches!(kind, ChangeKind::Removed) || run.is_empty() {
                 if let Some(slab) = self.slabs.remove(&handle) {
+                    *reuse_cull = None;
                     let blanks = vec![blank_packed_instance(); slab.inst_len as usize];
                     Self::write_insts(&mut inst_writes, slab.inst_off, &blanks);
                     self.tombstoned += slab.inst_len;
@@ -1521,6 +1560,7 @@ impl PackedWireArena {
                     .get(&handle)
                     .is_some_and(|slab| slab.inst_len == inst_len)
             {
+                *reuse_cull = None;
                 let slab = self.vacant.remove(&handle).unwrap();
                 self.tombstoned = self.tombstoned.saturating_sub(slab.inst_len);
                 self.slabs.insert(handle, slab);
@@ -1534,11 +1574,13 @@ impl PackedWireArena {
                 let inst_off = self.slabs[&handle].inst_off;
                 Self::write_insts(&mut inst_writes, inst_off, &insts);
                 let slab = self.slabs.get_mut(&handle).unwrap();
+                WireCullView::check_patch(reuse_cull, slab, bounds);
                 slab.base_depth = base_depth;
                 slab.bounds = bounds;
                 continue;
             }
 
+            *reuse_cull = None;
             let can_resize_tail = self.slabs.get(&handle).is_some_and(|slab| {
                 can_resize_packed_terminal_slab(
                     slab,
@@ -1727,18 +1769,26 @@ impl PersistentWireArena {
         Some(Self { inner })
     }
 
-    pub fn patch(
+    pub(crate) fn patch(
         &mut self,
         queue: &wgpu::Queue,
         changes: &[(Handle, ChangeKind)],
         runs: &FxHashMap<Handle, Vec<&WireModel>>,
         new_handles_are_suffix: bool,
         depth_map: &FxHashMap<u64, [f32; 2]>,
+        reuse_cull: &mut Option<WireCullView>,
     ) -> bool {
         match &mut self.inner {
             PersistentWireArenaKind::Indexed(arenas) => {
                 if let [arena] = arenas.as_mut_slice() {
-                    return arena.patch(queue, changes, runs, new_handles_are_suffix, depth_map);
+                    return arena.patch(
+                        queue,
+                        changes,
+                        runs,
+                        new_handles_are_suffix,
+                        depth_map,
+                        reuse_cull,
+                    );
                 }
                 let last = arenas.len() - 1;
                 let mut by_arena = vec![Vec::new(); arenas.len()];
@@ -1761,11 +1811,18 @@ impl PersistentWireArena {
                 }
                 arenas.iter_mut().zip(by_arena).all(|(arena, changes)| {
                     changes.is_empty()
-                        || arena.patch(queue, &changes, runs, new_handles_are_suffix, depth_map)
+                        || arena.patch(
+                            queue,
+                            &changes,
+                            runs,
+                            new_handles_are_suffix,
+                            depth_map,
+                            reuse_cull,
+                        )
                 })
             }
             PersistentWireArenaKind::Packed(arena) => {
-                arena.patch(queue, changes, runs, new_handles_are_suffix, depth_map)
+                arena.patch(queue, changes, runs, new_handles_are_suffix, depth_map, reuse_cull)
             }
         }
     }

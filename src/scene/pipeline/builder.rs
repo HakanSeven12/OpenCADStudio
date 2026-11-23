@@ -2061,6 +2061,7 @@ impl Pipeline {
             analytic_slots: None,
             partition_depth_generation: u64::MAX,
             wire_cull_key: (u64::MAX, u64::MAX, 0, 0),
+            wire_cull_view: None,
             hatch_lod_key: (usize::MAX, u64::MAX, 0, 0, false),
             wipeout_lod_key: (usize::MAX, u64::MAX, 0, 0, false),
             silhouette_key: (usize::MAX, u64::MAX, [u32::MAX; 3], false),

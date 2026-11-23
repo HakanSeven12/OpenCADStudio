@@ -386,6 +386,7 @@ pub struct Pipeline {
     /// Last content/camera/viewport tuple used to derive visible instance
     /// ranges from the resident arena.
     pub(crate) wire_cull_key: (u64, u64, u32, u32),
+    pub(crate) wire_cull_view: Option<wire_arena::WireCullView>,
     /// View/source keys for CPU visibility passes.
     pub(crate) hatch_lod_key: (usize, u64, u32, u32, bool),
     pub(crate) wipeout_lod_key: (usize, u64, u32, u32, bool),
@@ -4141,6 +4142,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.cached_face3d_source = None;
         self.cached_face3d_depth_source = None;
         self.wire_cull_key = (u64::MAX, u64::MAX, 0, 0);
+        self.wire_cull_view = None;
         self.hatch_lod_key = (usize::MAX, u64::MAX, 0, 0, false);
         self.wipeout_lod_key = (usize::MAX, u64::MAX, 0, 0, false);
         self.silhouette_key = (usize::MAX, u64::MAX, [u32::MAX; 3], false);

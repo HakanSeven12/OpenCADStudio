@@ -122,6 +122,7 @@ fn block_edits_preserve_cache_coordinates_and_arena_partition() {
 
     let line = WireModel {
         render_instance: None,
+        aabb: [10.0, 0.0, 11.0, 0.0],
         ..first.clone()
     };
     let changed = [second];
@@ -142,7 +143,8 @@ fn block_edits_preserve_cache_coordinates_and_arena_partition() {
             &[(Handle::new(2), crate::scene::ChangeKind::Added)],
             &runs,
             true,
-            &depth
+            &depth,
+            &mut None,
         ));
         assert_eq!(
             arena
@@ -153,6 +155,41 @@ fn block_edits_preserve_cache_coordinates_and_arena_partition() {
             1,
             "the block must not also enter the regular arena"
         );
+
+        let projection = glam::Mat4::orthographic_rh(-50.0, 50.0, -50.0, 50.0, 0.1, 1000.0);
+        let eye = glam::DVec3::new(0.0, 0.0, 100.0);
+        let view = wire_arena::WireCullView::new(projection, eye, 800, 800);
+        assert_eq!(arena.wire_gpus_visible(projection, eye, 800, 800).len(), 1);
+        for (x, reuse_expected, visible) in [
+            (12.0, true, true),
+            (1000.0, false, false),
+            (1001.0, true, false),
+            (10.0, false, true),
+        ] {
+            let moved = WireModel {
+                aabb: [x, 0.0, x + 1.0, 0.0],
+                geom: std::sync::Arc::new(crate::scene::WireGeom {
+                    points: vec![[x, 0.0, 0.0], [x + 1.0, 0.0, 0.0]],
+                    ..crate::scene::WireGeom::default()
+                }),
+                ..line.clone()
+            };
+            let runs = rustc_hash::FxHashMap::from_iter([(Handle::new(1), vec![&moved])]);
+            let mut reuse = Some(view);
+            assert!(arena.patch(
+                &queue,
+                &[(Handle::new(1), crate::scene::ChangeKind::Modified)],
+                &runs,
+                true,
+                &depth,
+                &mut reuse,
+            ));
+            assert_eq!(reuse.is_some(), reuse_expected);
+            assert_eq!(
+                arena.wire_gpus_visible(projection, eye, 800, 800).len(),
+                usize::from(visible),
+            );
+        }
     }
     queue.submit([]);
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
@@ -211,7 +248,7 @@ fn a_wire_patch_of_many_scattered_objects_asks_for_the_rebuild() {
                 .iter()
                 .map(|(handle, _)| (*handle, vec![&moved[handle.value() as usize - 1]]))
                 .collect();
-            arena.patch(&queue, &changes, &runs, true, &depth)
+            arena.patch(&queue, &changes, &runs, true, &depth, &mut None)
         };
         assert!(patch(1), "every slab, side by side, is one write");
         assert!(patch(64), "64 writes are not worth a rebuild");

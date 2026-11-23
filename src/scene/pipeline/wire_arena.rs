@@ -34,6 +34,7 @@
 // draw-order-preserving multi-batch split) and no per-wire scissor (paper content
 // viewports). Mixed 2D/3D or scissored sets fall back to the batched path.
 
+use super::gpu_upload::{rebuild_is_cheaper, write_all, WriteBatch};
 use super::wire_gpu::{
     emit_wire_native, emit_wire_packed, wire_draw_depth, PackedWireInstance, WireConst, WireGpu,
     WireInstance,
@@ -413,18 +414,53 @@ pub(crate) fn patch_handle_index(
     }
 }
 
+/// How many keys the top of the handle range keeps for runs of wires with no
+/// entity handle (`is_fixed_run_key`).
+const FIXED_RUN_KEYS: u64 = 1 << 32;
+
+/// Whether `key` stands for a run of wires with no entity handle: the scene's
+/// nonprint markers (`geomarker-…`, `camera-…`). No change list names such a
+/// key, so a patch never touches its slab; a full build makes it again.
+fn is_fixed_run_key(key: Handle) -> bool {
+    key.value() > u64::MAX - FIXED_RUN_KEYS
+}
+
 /// Group `wires` (draw-order sorted, entity-contiguous) into per-handle ranges.
+///
+/// A run of wires with no entity handle in their name gets a key of its own
+/// from the top of the handle range, so one marker wire does not keep the
+/// whole set off the arena. `None` only when an entity handle is in that key
+/// range too (the caller keeps the batched path).
 fn handle_ranges(wires: &[&WireModel]) -> Option<Vec<(Handle, usize, usize)>> {
     let mut out: Vec<(Handle, usize, usize)> = Vec::new();
+    let mut fixed_runs = 0u64;
+    let mut handle_in_key_range = false;
     let mut i = 0;
     while i < wires.len() {
-        let h = handle_of(wires[i])?;
+        let handle = handle_of(wires[i]);
         let mut j = i + 1;
-        while j < wires.len() && handle_of(wires[j]) == Some(h) {
+        while j < wires.len() && handle_of(wires[j]) == handle {
             j += 1;
         }
-        out.push((h, i, j));
+        let key = match handle {
+            Some(handle) => {
+                handle_in_key_range |= is_fixed_run_key(handle);
+                handle
+            }
+            None => {
+                if fixed_runs >= FIXED_RUN_KEYS {
+                    return None;
+                }
+                let key = Handle::new(u64::MAX - fixed_runs);
+                fixed_runs += 1;
+                key
+            }
+        };
+        out.push((key, i, j));
         i = j;
+    }
+    if fixed_runs > 0 && handle_in_key_range {
+        return None;
     }
     Some(out)
 }
@@ -525,22 +561,6 @@ fn make_const_bg(
     }))
 }
 
-fn alloc_inst_initialized(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    cap: u64,
-    data: &[WireInstance],
-) -> wgpu::Buffer {
-    super::gpu_upload::alloc_with_prefix(
-        device,
-        queue,
-        "wire_arena.ibuf",
-        cap * std::mem::size_of::<WireInstance>() as u64,
-        data,
-        wgpu::BufferUsages::VERTEX,
-    )
-}
-
 fn alloc_const_initialized(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -614,8 +634,8 @@ fn blank_instance() -> WireInstance {
 
 impl WireArena {
     /// Build a fresh arena from the full resident set, or `None` if it isn't a
-    /// single scissor-free batch or a wire is unnamed (caller keeps the batched
-    /// path).
+    /// single scissor-free batch (caller keeps the batched path). Wires with
+    /// no entity handle get fixed slabs of their own (`handle_ranges`).
     pub fn build(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -722,17 +742,45 @@ impl WireArena {
             return None;
         }
 
+        let inst_tail = inst_count as u32;
+        let const_tail = const_count as u32;
+        let inst_size = std::mem::size_of::<WireInstance>() as u64;
+        let inst_cap = ((inst_tail as u64 * HEADROOM_NUM / HEADROOM_DEN)
+            .max(MIN_INST_CAP)
+            .min(instance_limit)) as u32;
+        let const_cap = ((const_tail as u64 * HEADROOM_NUM / HEADROOM_DEN)
+            .max(MIN_CONST_CAP)
+            .min(constant_limit)) as u32;
+        let upload_started = iced::time::Instant::now();
+        let inst_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wire_arena.ibuf"),
+            size: u64::from(inst_cap) * inst_size,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        // Copy each packed slab straight to staging, avoiding another complete
+        // copy of the CPU instance array before the queue can consume it.
+        let mut staging = match wgpu::BufferSize::new(u64::from(inst_tail) * inst_size) {
+            Some(size) => Some(queue.write_buffer_with(&inst_buf, 0, size)?),
+            None => None,
+        };
+
         // const slot 0 = blank tombstone target.
-        let mut instances: Vec<WireInstance> = Vec::with_capacity(inst_count);
         let mut consts_cpu: Vec<WireConst> = Vec::with_capacity(const_count);
         consts_cpu.push(blank_const());
         let mut slabs: FxHashMap<Handle, Slab> =
             FxHashMap::with_capacity_and_hasher(packed.len(), Default::default());
+        let mut inst_off = 0u32;
         for mut packed_slab in packed {
-            let inst_off = instances.len() as u32;
             let inst_len = packed_slab.instances.len() as u32;
             let const_len = packed_slab.consts.len() as u32;
-            instances.append(&mut packed_slab.instances);
+            if let Some(staging) = staging.as_mut() {
+                let start = (u64::from(inst_off) * inst_size) as usize;
+                let bytes = bytemuck::cast_slice(&packed_slab.instances);
+                staging
+                    .slice(start..start + bytes.len())
+                    .copy_from_slice(bytes);
+            }
             consts_cpu.append(&mut packed_slab.consts);
             slabs.insert(
                 packed_slab.handle,
@@ -746,23 +794,10 @@ impl WireArena {
                     content: packed_slab.content,
                 },
             );
+            inst_off += inst_len;
         }
-
-        let inst_tail = instances.len() as u32;
-        let const_tail = consts_cpu.len() as u32;
-        // A batch bigger than one buffer can't be an arena — let the caller chunk
-        // it via the batched path.
-        if inst_tail as u64 > instance_limit || const_tail as u64 > constant_limit {
-            return None;
-        }
-        let inst_cap = ((inst_tail as u64 * HEADROOM_NUM / HEADROOM_DEN)
-            .max(MIN_INST_CAP)
-            .min(instance_limit)) as u32;
-        let const_cap = ((const_tail as u64 * HEADROOM_NUM / HEADROOM_DEN)
-            .max(MIN_CONST_CAP)
-            .min(constant_limit)) as u32;
-        let upload_started = iced::time::Instant::now();
-        let inst_buf = alloc_inst_initialized(device, queue, inst_cap as u64, &instances);
+        drop(staging);
+        debug_assert_eq!(inst_off, inst_tail);
         let const_buf = alloc_const_initialized(device, queue, const_cap as u64, &consts_cpu);
         let upload_ms = upload_started.elapsed().as_secs_f64() * 1000.0;
         let const_bind_group = make_const_bg(device, const_bgl, &const_buf);
@@ -797,12 +832,11 @@ impl WireArena {
         })
     }
 
-    fn write_insts(&self, queue: &wgpu::Queue, off: u32, data: &[WireInstance]) {
-        if data.is_empty() {
-            return;
-        }
+    /// Hold back the instances written at `off`: they reach the buffer at the
+    /// end of the patch, joined with the ones beside them.
+    fn write_insts(writes: &mut WriteBatch, off: u32, data: &[WireInstance]) {
         let sz = std::mem::size_of::<WireInstance>() as u64;
-        queue.write_buffer(&self.inst_buf, off as u64 * sz, bytemuck::cast_slice(data));
+        writes.push(off as u64 * sz, bytemuck::cast_slice(data));
     }
 
     /// Apply the changed handles in place; returns false (⇒ full rebuild) when the
@@ -890,6 +924,8 @@ impl WireArena {
         // merged spans: a layer toggle touches ~10^5 slabs, and a write per
         // slab cost more than the change itself.
         let mut dirty_consts: Vec<(u32, u32)> = Vec::new();
+        // So are the instances, which a move of that many objects rewrites.
+        let mut inst_writes = WriteBatch::default();
         for &(h, kind) in changes {
             let run = runs.get(&h).map(Vec::as_slice).unwrap_or(&[]);
 
@@ -954,7 +990,7 @@ impl WireArena {
                     for w in insts.iter_mut() {
                         w.wire_id += const_off;
                     }
-                    self.write_insts(queue, inst_off, &insts);
+                    Self::write_insts(&mut inst_writes, inst_off, &insts);
                 }
                 for (k, c) in csts.iter().enumerate() {
                     self.consts_cpu[const_off as usize + k] = *c;
@@ -994,15 +1030,10 @@ impl WireArena {
                 for instance in &mut insts {
                     instance.wire_id += const_off;
                 }
-                self.write_insts(queue, inst_off, &insts);
+                Self::write_insts(&mut inst_writes, inst_off, &insts);
                 self.consts_cpu.truncate(const_off as usize);
                 self.consts_cpu.extend(csts.iter().copied());
-                let csz = std::mem::size_of::<WireConst>() as u64;
-                queue.write_buffer(
-                    &self.const_buf,
-                    const_off as u64 * csz,
-                    bytemuck::cast_slice(&csts),
-                );
+                dirty_consts.push((const_off, const_off + const_len));
                 self.inst_tail = inst_off + inst_len;
                 self.const_tail = const_off + const_len;
                 let slab = self.slabs.get_mut(&h).unwrap();
@@ -1035,7 +1066,7 @@ impl WireArena {
             self.vacant.remove(&h);
             if let Some(s) = self.slabs.remove(&h) {
                 let blanks = vec![blank_instance(); s.inst_len as usize];
-                self.write_insts(queue, s.inst_off, &blanks);
+                Self::write_insts(&mut inst_writes, s.inst_off, &blanks);
                 self.tombstoned += s.inst_len;
             }
             let inst_off = self.inst_tail;
@@ -1043,20 +1074,13 @@ impl WireArena {
             for w in insts.iter_mut() {
                 w.wire_id += const_off;
             }
-            self.write_insts(queue, inst_off, &insts);
+            Self::write_insts(&mut inst_writes, inst_off, &insts);
             for c in &csts {
                 self.consts_cpu.push(*c);
             }
             // Appended instances immediately reference these constant slots.
             // Keep the GPU buffer in sync without relying on a full-scene upload.
-            if !csts.is_empty() {
-                let const_size = std::mem::size_of::<WireConst>() as u64;
-                queue.write_buffer(
-                    &self.const_buf,
-                    const_off as u64 * const_size,
-                    bytemuck::cast_slice(&csts),
-                );
-            }
+            dirty_consts.push((const_off, const_off + const_len));
             self.inst_tail += inst_len;
             self.const_tail += const_len;
             self.slabs.insert(
@@ -1074,6 +1098,11 @@ impl WireArena {
             self.order_sensitive |= run_order_sensitive;
         }
 
+        let inst_writes = inst_writes.writes();
+        if rebuild_is_cheaper(inst_writes.len(), self.inst_tail as u64) {
+            return false;
+        }
+        write_all(queue, &self.inst_buf, &inst_writes);
         for (start, end) in merge_const_ranges(dirty_consts) {
             let size = std::mem::size_of::<WireConst>() as u64;
             queue.write_buffer(
@@ -1397,16 +1426,10 @@ impl PackedWireArena {
         })
     }
 
-    fn write_insts(&self, queue: &wgpu::Queue, off: u32, data: &[PackedWireInstance]) {
-        if data.is_empty() {
-            return;
-        }
+    /// Hold back the instances written at `off`, as [`WireArena::write_insts`].
+    fn write_insts(writes: &mut WriteBatch, off: u32, data: &[PackedWireInstance]) {
         let size = std::mem::size_of::<PackedWireInstance>() as u64;
-        queue.write_buffer(
-            &self.inst_buf,
-            off as u64 * size,
-            bytemuck::cast_slice(data),
-        );
+        writes.push(off as u64 * size, bytemuck::cast_slice(data));
     }
 
     fn patch(
@@ -1464,12 +1487,13 @@ impl PackedWireArena {
             );
         }
 
+        let mut inst_writes = WriteBatch::default();
         for &(handle, kind) in changes {
             let run = runs.get(&handle).map(Vec::as_slice).unwrap_or(&[]);
             if matches!(kind, ChangeKind::Removed) || run.is_empty() {
                 if let Some(slab) = self.slabs.remove(&handle) {
                     let blanks = vec![blank_packed_instance(); slab.inst_len as usize];
-                    self.write_insts(queue, slab.inst_off, &blanks);
+                    Self::write_insts(&mut inst_writes, slab.inst_off, &blanks);
                     self.tombstoned += slab.inst_len;
                     if matches!(kind, ChangeKind::Modified) {
                         self.vacant.insert(handle, slab);
@@ -1508,7 +1532,7 @@ impl PackedWireArena {
                 .is_some_and(|slab| slab.inst_len == inst_len)
             {
                 let inst_off = self.slabs[&handle].inst_off;
-                self.write_insts(queue, inst_off, &insts);
+                Self::write_insts(&mut inst_writes, inst_off, &insts);
                 let slab = self.slabs.get_mut(&handle).unwrap();
                 slab.base_depth = base_depth;
                 slab.bounds = bounds;
@@ -1526,7 +1550,7 @@ impl PackedWireArena {
             });
             if can_resize_tail {
                 let inst_off = self.slabs[&handle].inst_off;
-                self.write_insts(queue, inst_off, &insts);
+                Self::write_insts(&mut inst_writes, inst_off, &insts);
                 self.inst_tail = inst_off + inst_len;
                 let slab = self.slabs.get_mut(&handle).unwrap();
                 slab.inst_len = inst_len;
@@ -1549,11 +1573,11 @@ impl PackedWireArena {
             self.vacant.remove(&handle);
             if let Some(slab) = self.slabs.remove(&handle) {
                 let blanks = vec![blank_packed_instance(); slab.inst_len as usize];
-                self.write_insts(queue, slab.inst_off, &blanks);
+                Self::write_insts(&mut inst_writes, slab.inst_off, &blanks);
                 self.tombstoned += slab.inst_len;
             }
             let inst_off = self.inst_tail;
-            self.write_insts(queue, inst_off, &insts);
+            Self::write_insts(&mut inst_writes, inst_off, &insts);
             self.inst_tail += inst_len;
             self.slabs.insert(
                 handle,
@@ -1570,6 +1594,11 @@ impl PackedWireArena {
             self.order_sensitive |= run_order_sensitive;
         }
 
+        let inst_writes = inst_writes.writes();
+        if rebuild_is_cheaper(inst_writes.len(), self.inst_tail as u64) {
+            return false;
+        }
+        write_all(queue, &self.inst_buf, &inst_writes);
         self.tombstoned <= self.inst_tail / 2
     }
 
@@ -1961,6 +1990,91 @@ impl PersistentWireArena {
 mod tests {
     use super::*;
     use crate::scene::view::camera::{Camera, Projection};
+
+    fn named(name: &str) -> WireModel {
+        WireModel::solid_f64(
+            name.to_string(),
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            [1.0; 4],
+            false,
+        )
+    }
+
+    fn ranges_of(names: &[&str]) -> Option<Vec<(Handle, usize, usize)>> {
+        let wires: Vec<WireModel> = names.iter().map(|name| named(name)).collect();
+        let refs: Vec<&WireModel> = wires.iter().collect();
+        handle_ranges(&refs)
+    }
+
+    /// A drawing with a geographic location has one marker wire with no
+    /// entity handle in its name. It must not stop the ranges of the others.
+    #[test]
+    fn a_marker_wire_gets_a_range_of_its_own() {
+        let ranges = ranges_of(&["10", "10", "11", "geomarker-77"]).expect("ranges");
+        assert_eq!(ranges.len(), 3);
+        assert_eq!(ranges[0], (Handle::new(10), 0, 2));
+        assert_eq!(ranges[1], (Handle::new(11), 2, 3));
+        let (key, start, end) = ranges[2];
+        assert_eq!((start, end), (3, 4));
+        assert!(is_fixed_run_key(key), "the marker's key is not a handle");
+        assert!(!is_fixed_run_key(Handle::new(10)));
+        assert!(!is_fixed_run_key(Handle::new(77)));
+    }
+
+    /// Wires with no handle that follow each other are one run; runs that
+    /// an entity separates have different keys, so no slab replaces another.
+    #[test]
+    fn marker_runs_have_different_keys() {
+        let ranges =
+            ranges_of(&["geomarker-5", "camera-6", "camera-6", "20", "camera-7"]).expect("ranges");
+        assert_eq!(ranges.len(), 3);
+        assert_eq!((ranges[0].1, ranges[0].2), (0, 3));
+        assert_eq!(ranges[1], (Handle::new(20), 3, 4));
+        assert_eq!((ranges[2].1, ranges[2].2), (4, 5));
+        assert_eq!(ranges[0].0, Handle::new(u64::MAX));
+        assert_eq!(ranges[2].0, Handle::new(u64::MAX - 1));
+    }
+
+    /// The fixed-run keys are the top `FIXED_RUN_KEYS` values and no others.
+    #[test]
+    fn the_fixed_run_keys_are_only_the_top_of_the_range() {
+        assert!(is_fixed_run_key(Handle::new(u64::MAX)));
+        assert!(is_fixed_run_key(Handle::new(u64::MAX - FIXED_RUN_KEYS + 1)));
+        assert!(!is_fixed_run_key(Handle::new(u64::MAX - FIXED_RUN_KEYS)));
+        assert!(!is_fixed_run_key(Handle::new(1 << 40)));
+        assert!(!is_fixed_run_key(Handle::new(0)));
+    }
+
+    #[test]
+    fn a_set_of_markers_only_and_an_empty_set_have_ranges() {
+        assert_eq!(ranges_of(&[]).expect("ranges").len(), 0);
+        let ranges = ranges_of(&["geomarker-1"]).expect("ranges");
+        assert_eq!(ranges.len(), 1);
+        assert_eq!((ranges[0].1, ranges[0].2), (0, 1));
+    }
+
+    /// The ranges of a set with no marker wire are as before.
+    #[test]
+    fn entity_wires_keep_their_handles_as_keys() {
+        let ranges = ranges_of(&["3", "3", "4", "5", "5", "5"]).expect("ranges");
+        assert_eq!(
+            ranges,
+            vec![
+                (Handle::new(3), 0, 2),
+                (Handle::new(4), 2, 3),
+                (Handle::new(5), 3, 6)
+            ]
+        );
+    }
+
+    /// A handle in the range of the fixed-run keys could take a marker's
+    /// slab; such a set keeps the batched path, as an unnamed wire did before.
+    #[test]
+    fn a_handle_in_the_range_of_the_fixed_keys_gives_no_ranges() {
+        let high = u64::MAX.to_string();
+        assert!(ranges_of(&["10", "geomarker-1", &high]).is_none());
+        assert!(ranges_of(&["10", &high]).is_some());
+    }
 
     #[test]
     fn wire_partition_excludes_blocks_and_preserves_mixed_run_edges() {

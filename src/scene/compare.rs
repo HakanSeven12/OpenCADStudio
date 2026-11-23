@@ -112,7 +112,7 @@ fn wires_by_entity(scene: &Scene) -> FxHashMap<Handle, Vec<WireModel>> {
 
 fn point(wire: &WireModel, index: usize) -> DVec3 {
     let high = wire.points[index];
-    let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+    let low = wire.points_low.get(index).unwrap_or([0.0; 3]);
     DVec3::new(
         f64::from(high[0]) + f64::from(low[0]),
         f64::from(high[1]) + f64::from(low[1]),

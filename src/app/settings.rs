@@ -960,6 +960,9 @@ pub struct UserSettings {
     pub hyperlink_options: bool,
     /// XDWGFADECTL: how much referenced drawings fade (-90..=90; negative is off).
     pub xref_fade: i32,
+    /// LAYLOCKFADECTL: how much objects on locked layers fade (-90..=90;
+    /// negative is off).
+    pub layer_lock_fade: i32,
     /// FILEDIA: file dialogs of commands that have a command-line form.
     pub file_dia: bool,
     /// OLEHIDE: which OLE objects show (0 all, 1 paper space, 2 model space, 3 none).
@@ -1018,6 +1021,8 @@ pub struct UserSettings {
     /// LAYOUTCREATEVIEWPORT: a layout opened for the first time gets a
     /// viewport.
     pub layout_create_viewport: bool,
+    /// PICKLOCKED: objects on a locked layer can be selected.
+    pub pick_locked: bool,
     /// PDFSHXTEXT's recognition settings (fonts, threshold, PDFSHXLAYER,
     /// PDFSHXBESTFONT, PDFSHXTEXTSETTINGS).
     pub pdf_shx_text: crate::modules::insert::pdf_shx_text::ShxTextSettings,
@@ -1045,6 +1050,7 @@ pub struct UserSettings {
     pub ucs_icon_at_origin: bool,
     /// Selection cycling: a click where objects overlap opens a picker.
     pub selection_cycling: bool,
+    pub selection_cycling_mode: Option<i16>,
     /// OSNAPZ: object snaps take the current elevation instead of the
     /// snapped object's Z.
     pub osnap_z: bool,
@@ -1187,9 +1193,12 @@ pub struct UserSettings {
     /// (Shift removes); `false` = OS-style — a click REPLACES the selection
     /// and Shift+click toggles membership.
     pub pick_add: bool,
-    /// PICKDRAG (#226): `false` (default) = press-drag draws the freeform
-    /// lasso; `true` = press-drag draws a rectangle marquee instead.
+    pub pick_add_retains: bool,
+    /// Legacy rectangle flag, read when an older profile has no PICKDRAG mode.
     pub pick_drag_rect: bool,
+    pub pick_drag_mode: Option<u8>,
+    pub pick_auto: u8,
+    pub pick_first: bool,
     /// Show the floating Quick Properties panel when objects are selected.
     pub quick_properties: bool,
     /// QPLOCATION 1: the Quick Properties panel floats where it was last
@@ -1535,6 +1544,7 @@ impl Default for UserSettings {
             show_viewport_controls: true,
             ucs_icon_at_origin: true,
             selection_cycling: false,
+            selection_cycling_mode: None,
             osnap_z: false,
             select_similar_mode: crate::scene::SELECT_SIMILAR_DEFAULT,
             double_click_block_refedit: false,
@@ -1566,6 +1576,7 @@ impl Default for UserSettings {
             annotation_scale_prompt: true,
             hyperlink_options: true,
             xref_fade: 50,
+            layer_lock_fade: 50,
             file_dia: true,
             ole_hide: 0,
             ole_quality: 3,
@@ -1592,6 +1603,7 @@ impl Default for UserSettings {
             ucs_ortho: true,
             ucs_view: true,
             layout_create_viewport: true,
+            pick_locked: true,
             pdf_shx_text: Default::default(),
             dgn_import: Default::default(),
             ncopy_bind: false,
@@ -1641,7 +1653,11 @@ impl Default for UserSettings {
             script_commands: true,
             default_save_format: crate::io::DEFAULT_SAVE_FORMAT.to_string(),
             pick_add: true,
+            pick_add_retains: true,
             pick_drag_rect: false,
+            pick_drag_mode: None,
+            pick_auto: 5,
+            pick_first: true,
             quick_properties: false,
             quick_properties_float: false,
             quick_properties_pos: [40.0, 40.0],

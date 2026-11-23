@@ -195,7 +195,12 @@ impl OpenCADStudio {
                 let describe = |c: &Color| match c {
                     Color::ByLayer => "ByLayer".to_string(),
                     Color::ByBlock => "ByBlock".to_string(),
-                    Color::Index(n) => crate::tf!("index {n}").into_owned(),
+                    // 1-7 by their (translated) names, the rest by number.
+                    Color::Index(n @ 1..=7) => crate::t!(
+                        crate::ui::window::attman_dialog::COLORS[*n as usize + 1]
+                    )
+                    .into_owned(),
+                    Color::Index(n) => n.to_string(),
                     _ => "(custom)".to_string(),
                 };
                 let arg = if cmd == "BYLAYER" {
@@ -884,79 +889,6 @@ impl OpenCADStudio {
                     );
                 }
             }
-            // ── PICKADD / PICKDRAG — selection UX (#226, app settings) ───
-            // Bare form reports; `<name> 0|1` sets and persists. Defaults keep
-            // today's behaviour (PICKADD 1, PICKDRAG 0).
-            "PICKADD" | "PICKDRAG" => {
-                use crate::command::ValuePromptCommand;
-                let (name, prompt) = if cmd == "PICKADD" {
-                    ("PICKADD", "PICKADD  1 = click adds to selection (default), 0 = click replaces  <Enter reports>:")
-                } else {
-                    ("PICKDRAG", "PICKDRAG  0 = press-drag lassoes (default), 1 = press-drag draws a rectangle  <Enter reports>:")
-                };
-                let c = ValuePromptCommand::new(name, prompt);
-                self.command_line.push_info(&c.prompt());
-                self.tabs[i].active_cmd = Some(Box::new(c));
-            }
-            cmd if cmd.starts_with("PICKADD ") || cmd.starts_with("PICKDRAG ") => {
-                let is_add = cmd.starts_with("PICKADD");
-                let arg = cmd.split_once(' ').map(|x| x.1).unwrap_or("").trim();
-                if arg.is_empty() {
-                    let v = if is_add {
-                        u8::from(self.pick_add)
-                    } else {
-                        u8::from(self.pick_drag_rect)
-                    };
-                    self.command_line.push_output(
-                        crate::tf!("{} = {v}", if is_add { "PICKADD" } else { "PICKDRAG" })
-                            .as_ref(),
-                    );
-                } else {
-                    match arg {
-                        "0" | "1" => {
-                            let on = arg == "1";
-                            if is_add {
-                                self.pick_add = on;
-                                self.command_line.push_output(
-                                    crate::tf!(
-                                        "PICKADD = {} ({})",
-                                        arg,
-                                        if on {
-                                            "click adds to selection"
-                                        } else {
-                                            "click replaces selection, Shift toggles"
-                                        }
-                                    )
-                                    .as_ref(),
-                                );
-                            } else {
-                                self.pick_drag_rect = on;
-                                self.command_line.push_output(
-                                    crate::tf!(
-                                        "PICKDRAG = {} ({})",
-                                        arg,
-                                        if on {
-                                            "press-drag draws a rectangle"
-                                        } else {
-                                            "press-drag lassoes"
-                                        }
-                                    )
-                                    .as_ref(),
-                                );
-                            }
-                            self.persist_settings_if_changed();
-                        }
-                        _ => self.command_line.push_error(
-                            crate::tf!(
-                                "{}: expected 0 or 1.",
-                                if is_add { "PICKADD" } else { "PICKDRAG" }
-                            )
-                            .as_ref(),
-                        ),
-                    }
-                }
-            }
-
             // ── COMMANDLINEFADETIME — command-line history fade time ───
             // How long history lines stay visible above the command window,
             // in ms (0–60000, default 3000). Bare form prompts for a value
@@ -991,7 +923,11 @@ impl OpenCADStudio {
                     | "QUADWIDTH"
                     | "QUADCOMMANDLAUNCH"
                     | "CURSORSIZE"
+                    | "PICKADD"
+                    | "PICKAUTO"
                     | "PICKBOX"
+                    | "PICKDRAG"
+                    | "PICKFIRST"
                     | "APERTURE"
                     | "HPASSOC"
                     | "HPGAPTOL"
@@ -1089,6 +1025,7 @@ impl OpenCADStudio {
                     | "UCSORTHO"
                     | "UCSVIEW"
                     | "LAYOUTCREATEVIEWPORT"
+                    | "PICKLOCKED"
                     | "PDFIMPORTMODE"
                     | "PDFIMPORTFILTER"
                     | "PDFIMPORTLAYERS"
@@ -1097,6 +1034,7 @@ impl OpenCADStudio {
                     | "PDFSHXBESTFONT"
                     | "PDFSHXTEXTSETTINGS"
                     | "XDWGFADECTL"
+                    | "LAYLOCKFADECTL"
                     | "POINTCLOUDCLIPFRAME"
                     | "POINTCLOUDDENSITY"
                     | "POINTCLOUDPOINTSIZE"
@@ -1199,6 +1137,9 @@ impl OpenCADStudio {
                     self.command_line
                         .push_info(&super::plotvars::setvar_listing());
                     self.command_line.push_info("SETVAR (view): UCSFOLLOW");
+                    self.command_line.push_info(
+                        "SETVAR (selection): PICKADD PICKAUTO PICKDRAG PICKFIRST SELECTIONCYCLING",
+                    );
                     self.command_line
                         .push_info(&super::blockvars::setvar_listing());
                     self.command_line
@@ -1292,30 +1233,31 @@ impl OpenCADStudio {
                         }
                         return Some(self.finish_dispatch(cmd));
                     }
-                    if name == "XDWGFADECTL" {
-                        let current = crate::scene::cache::block_cache::xref_fade_ctl();
+                    if name == "XDWGFADECTL" || name == "LAYLOCKFADECTL" {
+                        let locked = name == "LAYLOCKFADECTL";
+                        let current = if locked {
+                            crate::scene::cache::block_cache::layer_lock_fade_ctl()
+                        } else {
+                            crate::scene::cache::block_cache::xref_fade_ctl()
+                        };
                         if let Some(value) = &value {
                             match value.parse::<i32>().ok().filter(|v| (-90..=90).contains(v)) {
+                                Some(fade) if locked => self.set_layer_lock_fade(fade),
                                 Some(fade) => self.set_xref_fade(fade),
                                 // Refused: say why and ask again.
                                 None => {
                                     self.command_line
                                         .push_rejection("Requires an integer between -90 and 90.");
                                     self.command_line.push_output(
-                                        &crate::ui::command_line::value_prompt(
-                                            "XDWGFADECTL",
-                                            &current,
-                                        ),
+                                        &crate::ui::command_line::value_prompt(&name, &current),
                                     );
                                     self.pending_setvar = Some(name.clone());
                                 }
                             }
                         } else {
-                            self.command_line
-                                .push_output(&crate::ui::command_line::value_prompt(
-                                    "XDWGFADECTL",
-                                    &current,
-                                ));
+                            self.command_line.push_output(
+                                &crate::ui::command_line::value_prompt(&name, &current),
+                            );
                             self.pending_setvar = Some(name.clone());
                         }
                         return Some(self.finish_dispatch(cmd));
@@ -1482,13 +1424,15 @@ impl OpenCADStudio {
                         }
                         return Some(self.finish_dispatch(cmd));
                     }
-                    if name == "LAYOUTCREATEVIEWPORT" {
+                    if matches!(name.as_str(), "LAYOUTCREATEVIEWPORT" | "PICKLOCKED") {
                         // A profile switch shown and taken as ON / OFF or 1 / 0.
-                        let current = if crate::scene::layout_create_viewport() {
-                            "ON"
+                        let pick_locked = name == "PICKLOCKED";
+                        let is_on = if pick_locked {
+                            crate::scene::pick_locked()
                         } else {
-                            "OFF"
+                            crate::scene::layout_create_viewport()
                         };
+                        let current = if is_on { "ON" } else { "OFF" };
                         let parsed = value.as_deref().map(|v| {
                             match v
                                 .trim()
@@ -1503,8 +1447,26 @@ impl OpenCADStudio {
                         });
                         match parsed {
                             Some(Some(on)) => {
-                                if crate::scene::layout_create_viewport() != on {
-                                    crate::scene::set_layout_create_viewport(on);
+                                if is_on != on {
+                                    if pick_locked {
+                                        crate::scene::set_pick_locked(on);
+                                        // What is already selected on a locked
+                                        // layer leaves the selection with it.
+                                        if !on {
+                                            for tab in &mut self.tabs {
+                                                let locked: Vec<_> = tab
+                                                    .scene
+                                                    .selected_entities()
+                                                    .into_iter()
+                                                    .map(|(handle, _)| handle)
+                                                    .filter(|&h| tab.scene.is_layer_locked(h))
+                                                    .collect();
+                                                tab.scene.deselect_entities(&locked);
+                                            }
+                                        }
+                                    } else {
+                                        crate::scene::set_layout_create_viewport(on);
+                                    }
                                     self.save_config();
                                 }
                             }
@@ -1884,24 +1846,21 @@ impl OpenCADStudio {
                         return Some(self.finish_dispatch(cmd));
                     }
                     if name == "SELECTIONCYCLING" {
-                        // 1 and 2 both turn cycling on; the candidate list
-                        // always shows.
-                        let current = if self.selection_cycling { 2 } else { 0 };
+                        let current = self.selection_cycling;
                         let prompt =
                             crate::ui::command_line::value_prompt("SELECTIONCYCLING", &current);
                         match value
                             .as_deref()
-                            .map(|v| v.trim().parse::<i16>().ok().filter(|v| (0..=2).contains(v)))
+                            .map(|v| v.trim().parse::<i16>().ok().filter(|v| (-2..=2).contains(v)))
                         {
                             Some(Some(mode)) => {
-                                if self.selection_cycling != (mode != 0) {
-                                    self.selection_cycling = mode != 0;
-                                    self.cycle_candidates = None;
+                                if self.selection_cycling != mode {
+                                    self.set_selection_cycling(mode);
                                     self.persist_settings_if_changed();
                                 }
                             }
                             Some(None) => {
-                                let (min, max) = (0, 2);
+                                let (min, max) = (-2, 2);
                                 self.command_line.push_rejection(&crate::tf!(
                                     "Requires an integer between {min} and {max}."
                                 ));
@@ -2330,6 +2289,7 @@ impl OpenCADStudio {
                         .then(|| value.as_deref()?.parse::<i16>().ok())
                         .flatten()
                         .filter(|value| (0..=3).contains(value));
+                    let units_before = self.tabs[i].scene.document.header.insertion_units;
                     let outcome: Result<(String, bool), String> = {
                         let h = &mut self.tabs[i].scene.document.header;
                         match name.as_str() {
@@ -2613,6 +2573,41 @@ impl OpenCADStudio {
                                 },
                                 None => Ok((format!("CURSORSIZE = {}", self.cursor_size), false)),
                             },
+                            "PICKADD" | "PICKAUTO" | "PICKDRAG" | "PICKFIRST" => {
+                                let (current, max) = match name.as_str() {
+                                    "PICKADD" => (
+                                        if self.pick_add {
+                                            1 + u8::from(self.pick_add_retains)
+                                        } else {
+                                            0
+                                        },
+                                        2,
+                                    ),
+                                    "PICKAUTO" => (self.pick_auto, 7),
+                                    "PICKDRAG" => (self.pick_drag_mode, 2),
+                                    _ => (u8::from(self.pick_first), 1),
+                                };
+                                match &value {
+                                    None => Ok((format!("{name} = {current}"), false)),
+                                    Some(value) => match value.parse::<u8>() {
+                                        Ok(value) if value <= max => {
+                                            match name.as_str() {
+                                                "PICKADD" => {
+                                                    self.pick_add = value != 0;
+                                                    self.pick_add_retains = value == 2;
+                                                }
+                                                "PICKAUTO" => self.pick_auto = value,
+                                                "PICKDRAG" => self.pick_drag_mode = value,
+                                                _ => self.set_pick_first(value != 0),
+                                            }
+                                            Ok((format!("{name} = {value}"), true))
+                                        }
+                                        _ => Err(format!(
+                                            "{name}: integer from 0 to {max} required."
+                                        )),
+                                    },
+                                }
+                            }
                             "PICKBOX" => match &value {
                                 Some(v) => match v.parse::<i32>() {
                                     Ok(size) if (0..=50).contains(&size) => {
@@ -3843,8 +3838,7 @@ impl OpenCADStudio {
                                         self.tabs[i].scene.document.header.pick_style & 1 != 0;
                                 }
                                 if name == "INSUNITS" {
-                                    self.tabs[i].scene.sync_annotation_scale_from_header();
-                                    self.tabs[i].scene.invalidate_annotation_dependencies();
+                                    self.tabs[i].scene.insertion_units_changed(units_before);
                                 }
                                 if matches!(
                                     name.as_str(),
@@ -3856,7 +3850,11 @@ impl OpenCADStudio {
                                         | "QUADWIDTH"
                                         | "QUADCOMMANDLAUNCH"
                                         | "CURSORSIZE"
+                                        | "PICKADD"
+                                        | "PICKAUTO"
                                         | "PICKBOX"
+                                        | "PICKDRAG"
+                                        | "PICKFIRST"
                                         | "APERTURE"
                                         | "HPASSOC"
                                         | "HPGAPTOL"
@@ -4953,7 +4951,13 @@ fn command_color(arg: &str) -> Option<document::types::Color> {
         "BLUE" => Some(Color::Index(5)),
         "MAGENTA" => Some(Color::Index(6)),
         "WHITE" => Some(Color::Index(7)),
-        index => index.parse::<i16>().ok().map(Color::from_index),
+        index => index.parse::<i16>().ok().map(Color::from_index).or_else(|| {
+            // The colour names as the prompt shows them in the UI language.
+            let colors = &crate::ui::window::attman_dialog::COLORS;
+            (2..colors.len())
+                .find(|&n| crate::t!(colors[n]).to_uppercase() == index.to_uppercase())
+                .map(|n| Color::Index(n as u8 - 1))
+        }),
     }
 }
 
@@ -5168,7 +5172,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cad_selection_and_model_space_sysvars() {
+    fn cad_selection_and_model_space_sysvars() {
         let mut app = fresh_app();
 
         // SELECTIONAREA toggle
@@ -5223,7 +5227,7 @@ mod tests {
     }
 
     #[test]
-    fn test_background_command_modes() {
+    fn background_command_modes() {
         let mut app = fresh_app();
         let i = app.active_tab;
 
@@ -5265,7 +5269,7 @@ mod tests {
     }
 
     #[test]
-    fn test_reviewer_feedback_fixes() {
+    fn reviewer_feedback_fixes() {
         let mut app = fresh_app();
 
         // An empty background restores MatchTheme.
@@ -5298,7 +5302,7 @@ mod tests {
     }
 
     #[test]
-    fn test_grip_and_desk_surround_sysvars() {
+    fn grip_and_desk_surround_sysvars() {
         let mut app = fresh_app();
 
         // 1. Desk surround background message
@@ -5581,6 +5585,18 @@ impl OpenCADStudio {
             )
             .as_ref(),
         );
+    }
+
+    /// LAYLOCKFADECTL: store it in the profile and redraw every tab.
+    pub(in crate::app) fn set_layer_lock_fade(&mut self, fade: i32) {
+        crate::scene::cache::block_cache::set_layer_lock_fade_ctl(fade);
+        self.save_config();
+        for tab in &mut self.tabs {
+            if !tab.is_start {
+                tab.scene.recolor_meshes();
+                tab.scene.bump_geometry();
+            }
+        }
     }
 
     /// XDWGFADECTL: store it in the profile, show it on the ribbon and redraw

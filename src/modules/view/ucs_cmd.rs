@@ -141,7 +141,7 @@ impl CadCommand for UcsCommand {
         let corner = [origin + x, origin, origin + y].map(|p| p.to_array());
         let (points, points_low) = crate::scene::convert::tessellate::points_to_ds(corner);
         let mut wire = WireModel::solid("ucs_preview".into(), points, WireModel::CYAN, false);
-        wire.points_low = points_low;
+        wire.points_low = points_low.into();
         Some(wire)
     }
 

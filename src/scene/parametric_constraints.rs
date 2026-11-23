@@ -4158,7 +4158,7 @@ mod tests {
         let points: Vec<_> = wire
             .points
             .iter()
-            .zip(&wire.points_low)
+            .zip(wire.points_low.iter())
             .map(|(high, low)| {
                 [
                     high[0] as f64 + low[0] as f64,

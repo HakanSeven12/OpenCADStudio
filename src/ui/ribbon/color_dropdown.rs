@@ -340,7 +340,7 @@ mod tests {
     }
 
     #[test]
-    fn test_quick_pick_grid_dimensions() {
+    fn quick_pick_grid_dimensions() {
         assert_eq!(QUICK_PICK_GRID.len(), 5);
         for row in &QUICK_PICK_GRID {
             assert_eq!(row.len(), 9);
@@ -363,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn test_panel_geometry() {
+    fn panel_geometry() {
         assert_eq!(PANEL_W, 202.0);
         let grid_width = 9.0 * SWATCH_SIZE + 8.0 * SWATCH_GAP;
         assert_eq!(grid_width, 178.0);

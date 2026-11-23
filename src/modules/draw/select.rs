@@ -515,7 +515,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_select_objects_command_entity_pick_and_relaunch() {
+    fn select_objects_command_entity_pick_and_relaunch() {
         let mut cmd = SelectObjectsCommand::new("MOVE");
         assert!(cmd.is_selection_gathering());
         assert_eq!(cmd.prompt(), "MOVE  Select objects:");
@@ -550,7 +550,7 @@ mod tests {
     }
 
     #[test]
-    fn test_select_objects_command_single_pick_variant() {
+    fn select_objects_command_single_pick_variant() {
         let mut cmd = SelectObjectsCommand::instant("CHAMFER");
         let h = Handle::new(99);
 

@@ -6,16 +6,21 @@
 //!
 //! [`send`] and [`recv`] are synchronous and block until the full frame is read
 //! or the peer disconnects. `Disconnected` is returned on clean EOF; `TooLarge`
-//! rejects messages that exceed 64 MiB to protect host/runner memory.
+//! rejects messages that exceed [`MAX_MESSAGE_SIZE`]. The payload buffer grows
+//! with the bytes that arrive, so a header alone allocates little.
 
 use std::io::{Read, Write};
 
 use interprocess::local_socket::Stream;
 use serde::{de::DeserializeOwned, Serialize};
 
-/// Maximum serialized message size accepted over the wire (64 MiB). Prevents
-/// a malicious or buggy peer from exhausting host/runner memory.
-const MAX_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
+/// Maximum serialized message size accepted over the wire (1 GiB). Prevents
+/// a malicious or buggy peer from exhausting host/runner memory, while a full
+/// document snapshot of a large drawing (about 90 MB) still fits.
+const MAX_MESSAGE_SIZE: usize = 1024 * 1024 * 1024;
+
+/// The payload buffer grows by at most this much ahead of the bytes read.
+const READ_CHUNK: usize = 16 * 1024 * 1024;
 
 /// Errors that can occur during transport.
 #[derive(Debug, thiserror::Error)]
@@ -62,13 +67,11 @@ pub fn recv<T: DeserializeOwned>(stream: &mut Stream) -> Result<T, TransportErro
     if len > MAX_MESSAGE_SIZE {
         return Err(TransportError::TooLarge(len));
     }
-    let mut buf = vec![0u8; len];
-    if let Err(e) = stream.read_exact(&mut buf) {
-        return if e.kind() == std::io::ErrorKind::UnexpectedEof {
-            Err(TransportError::Disconnected)
-        } else {
-            Err(TransportError::Io(e))
-        };
+    let mut buf = Vec::with_capacity(len.min(READ_CHUNK));
+    match (&mut *stream).take(len as u64).read_to_end(&mut buf) {
+        Ok(n) if n < len => return Err(TransportError::Disconnected),
+        Ok(_) => {}
+        Err(e) => return Err(TransportError::Io(e)),
     }
     // Recursive dialog payloads are bounded during decode (see
     // `crate::dialog`): reset the per-frame budget, then let the decoders

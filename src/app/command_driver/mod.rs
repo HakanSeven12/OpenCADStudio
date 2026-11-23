@@ -125,6 +125,13 @@ impl OpenCADStudio {
 
     fn apply_cmd_result_outer(&mut self, mut result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
+        // Text a plugin command printed while the host served its step comes
+        // before whatever the step's result adds to the command line.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut host = crate::app::plugin_host::HostSession::new(self, i);
+            crate::plugin::external::with_manager(|mgr| mgr.replay_held_messages(&mut host));
+        }
         // A constraint addition records the geometry its solve moved outside
         // the command's own list. Only the outermost result owns the record:
         // a handler that applies a follow-up result must not wipe it.
@@ -2253,7 +2260,7 @@ impl OpenCADStudio {
         self.tabs[i].scene.clear_preview_wire();
         self.restore_pre_cmd_tangent();
 
-        if handle == document::Handle::NULL && self.selection_cycling {
+        if handle == document::Handle::NULL && self.selection_cycling == 2 {
             let mut candidates = Vec::new();
             for entity in self.tabs[i].scene.document.entities() {
                 if let document::EntityType::Table(table) = entity {
@@ -2275,7 +2282,12 @@ impl OpenCADStudio {
                 }
             }
             if candidates.len() >= 2 {
-                self.cycle_candidates = Some((self.quick_properties_anchor, candidates));
+                self.cycle_candidates = Some(crate::app::SelectionCycle {
+                    tab_id: self.tabs[i].id,
+                    point: self.quick_properties_anchor,
+                    handles: candidates,
+                    modifiers: None,
+                });
                 return Some(Task::none());
             }
         }

@@ -401,6 +401,20 @@ pub(crate) fn main_window_event(
     status: iced::event::Status,
     win_id: window::Id,
 ) -> Option<Message> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let is_main = crate::app::tool_windows::is_main_window(win_id);
+    #[cfg(target_arch = "wasm32")]
+    let is_main = true;
+    window_event_with_context(ev, status, win_id, is_main)
+}
+
+/// Classify an event using the window identity resolved by the caller.
+pub(crate) fn window_event_with_context(
+    ev: iced::Event,
+    status: iced::event::Status,
+    win_id: window::Id,
+    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))] is_main: bool,
+) -> Option<Message> {
     use iced::event::Status;
     match ev {
         iced::Event::Mouse(iced::mouse::Event::ButtonPressed(_))
@@ -426,24 +440,39 @@ pub(crate) fn main_window_event(
         }
         iced::Event::Window(window::Event::Closed) => Some(Message::OsWindowClosed(win_id)),
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Window(window::Event::Resized(sz))
-            if !crate::app::tool_windows::is_main_window(win_id) =>
-        {
+        iced::Event::Window(window::Event::Resized(sz)) if !is_main => {
             Some(Message::OsWindowResized(win_id, sz.width, sz.height))
         }
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Window(window::Event::Moved(at))
-            if !crate::app::tool_windows::is_main_window(win_id) =>
-        {
+        iced::Event::Window(window::Event::Moved(at)) if !is_main => {
             Some(Message::OsWindowMoved(win_id, at))
         }
         // Keys typed in a window of its own stay with its widgets; only Esc,
         // an unclaimed Enter and the list's Up and Down reach its dialog.
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Keyboard(keyboard::Event::KeyPressed { key, .. })
-            if !crate::app::tool_windows::is_main_window(win_id) =>
-        {
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            modifiers,
+            text,
+            repeat,
+            ..
+        }) if !is_main => {
             let name = match key {
+                keyboard::Key::Character(ref value)
+                    if status == Status::Ignored
+                        && !repeat
+                        && !modifiers.control()
+                        && !modifiers.alt()
+                        && !modifiers.logo()
+                        && text
+                            .as_deref()
+                            .is_some_and(|s| s.eq_ignore_ascii_case(value.as_str()))
+                        && ["s", "n", "c"]
+                            .iter()
+                            .any(|s| value.eq_ignore_ascii_case(s)) =>
+                {
+                    return Some(Message::OsWindowKey(win_id, value.to_ascii_uppercase()));
+                }
                 keyboard::Key::Named(keyboard::key::Named::Escape) => "ESCAPE",
                 keyboard::Key::Named(keyboard::key::Named::Enter) if status == Status::Ignored => {
                     "ENTER"
@@ -463,24 +492,16 @@ pub(crate) fn main_window_event(
             Some(Message::OsWindowKey(win_id, name.to_string()))
         }
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Keyboard(keyboard::Event::KeyReleased { .. })
-            if !crate::app::tool_windows::is_main_window(win_id) =>
-        {
-            None
-        }
+        iced::Event::Keyboard(keyboard::Event::KeyReleased { .. }) if !is_main => None,
         iced::Event::Window(window::Event::Resized(sz)) => {
             Some(Message::WindowResized(sz.width, sz.height))
         }
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Window(window::Event::Opened { scale_factor, .. })
-            if !crate::app::tool_windows::is_main_window(win_id) =>
-        {
+        iced::Event::Window(window::Event::Opened { scale_factor, .. }) if !is_main => {
             Some(Message::OsWindowScale(win_id, scale_factor))
         }
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Window(window::Event::Rescaled(scale_factor))
-            if !crate::app::tool_windows::is_main_window(win_id) =>
-        {
+        iced::Event::Window(window::Event::Rescaled(scale_factor)) if !is_main => {
             Some(Message::OsWindowScale(win_id, scale_factor))
         }
         // The ribbon's arrows sit on whole physical pixels.
@@ -913,7 +934,7 @@ impl OpenCADStudio {
             })
             .into()
         } else if tab.is_start {
-            start_page_view(
+            let page = start_page_view(
                 &self.patrons,
                 &self.videos,
                 self.videos_loading,
@@ -928,7 +949,18 @@ impl OpenCADStudio {
                 self.start_action_w.clone(),
                 self.start_section,
                 self.start_templates.as_deref(),
-            )
+            );
+            if crate::scene::pipeline::viewport_pipeline_initialized() {
+                stack![
+                    page,
+                    shader(crate::scene::view::viewport_pane::ReleaseClosedViewports)
+                        .width(1)
+                        .height(1),
+                ]
+                .into()
+            } else {
+                page
+            }
         } else if is_paper {
             shader(ViewportPane::model(
                 &tab.scene,
@@ -3162,10 +3194,28 @@ bg={bg_ms:.1}ms n={view_count}"
                 ));
             }
 
+            if self.selection_cycling > 0 && self.cycle_candidates.is_none() {
+                if let Some((_, point)) = self.cycle_badge.filter(|&(id, point)| {
+                    id == tab.id
+                        && tab.scene.selection.borrow().input.last_move_pos == Some(point)
+                        && !tab.scene.selection.borrow().input.pointer_away
+                }) {
+                    let icon = iced::widget::svg::<Theme>(iced::widget::svg::Handle::from_memory(
+                        include_bytes!("../../../assets/icons/status/selcycle.svg").as_slice(),
+                    ))
+                    .width(14)
+                    .height(14);
+                    let badge: Element<'_, Message> = iced::widget::pin(icon)
+                        .position(iced::Point::new(point.x + 13.0, point.y + 13.0))
+                        .into();
+                    viewport_stack = viewport_stack.push(badge);
+                }
+            }
             // Selection-cycling list box: pick among overlapping objects.
-            if let Some((pt, cands)) = &self.cycle_candidates {
-                if !tab.is_start {
-                    let items: Vec<crate::ui::popup::cycle_popup::CycleCandidate> = cands
+            if let Some(cycle) = &self.cycle_candidates {
+                if !tab.is_start && cycle.tab_id == tab.id {
+                    let items: Vec<crate::ui::popup::cycle_popup::CycleCandidate> = cycle
+                        .handles
                         .iter()
                         .filter_map(|&h| {
                             tab.scene.document.get_entity(h).map(|e| {
@@ -3186,7 +3236,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         .collect();
                     if !items.is_empty() {
                         viewport_stack = viewport_stack.push(
-                            crate::ui::popup::cycle_popup::cycle_popup_overlay(*pt, items),
+                            crate::ui::popup::cycle_popup::cycle_popup_overlay(cycle.point, items),
                         );
                     }
                 }
@@ -3466,21 +3516,22 @@ bg={bg_ms:.1}ms n={view_count}"
         // a tall one (Layer Manager with many layers) are not hidden by it.
         let center_stack = self.dock_overlay(center_stack, tab);
 
-        let center_stack: Element<'_, Message> = if self.command_line_moving {
-            mouse_area(center_stack)
+        // The wrapper stays in the tree while nothing is dragged: adding it on
+        // the first press rebuilt the grip's state and lost its double click
+        // (#3491).
+        let mut center_area = mouse_area(center_stack);
+        if self.command_line_moving {
+            center_area = center_area
                 .on_move(Message::CommandLineMoveMove)
                 .on_release(Message::CommandLineMoveRelease)
-                .interaction(iced::mouse::Interaction::Grabbing)
-                .into()
+                .interaction(iced::mouse::Interaction::Grabbing);
         } else if self.command_history_resizing {
-            mouse_area(center_stack)
+            center_area = center_area
                 .on_move(Message::CommandHistoryResizeMove)
                 .on_release(Message::CommandHistoryResizeRelease)
-                .interaction(iced::mouse::Interaction::ResizingVertically)
-                .into()
-        } else {
-            center_stack
-        };
+                .interaction(iced::mouse::Interaction::ResizingVertically);
+        }
+        let center_stack: Element<'_, Message> = center_area.into();
 
         let main_ui = container({
             // Clean-screen mode drops the ribbon for a full-canvas view; the
@@ -3638,7 +3689,7 @@ bg={bg_ms:.1}ms n={view_count}"
                             transparency_display: tab.scene.transparency_display,
                             quick_properties: self.quick_properties,
                             selection_filter_active: tab.scene.selection_filter_active(),
-                            selection_cycling: self.selection_cycling,
+                            selection_cycling: self.selection_cycling > 0,
                         },
                         crate::ui::statusbar::StatusBarReadout {
                             cursor_world: cursor_coord,
@@ -6230,7 +6281,7 @@ mod tests {
     }
 
     #[test]
-    fn test_crosshair_background_paper_space() {
+    fn crosshair_background_paper_space() {
         let tab = crate::app::tab_document::DocumentTab::new_drawing(1);
         let bg = crosshair_background(&tab, true);
         assert_eq!(bg, tab.scene.paper_bg_color);

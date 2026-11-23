@@ -142,6 +142,16 @@ impl OpenCADStudio {
                         .into_iter()
                         .map(|(_, e)| e.common().layer.clone())
                         .collect();
+                    // Inside a layout viewport the pick freezes the layer in
+                    // that viewport only, the way VPLAYER Freeze does. (#3401)
+                    let scene = &self.tabs[i].scene;
+                    if scene.current_layout != "Model" {
+                        if let Some(vp) = scene.active_viewport {
+                            self.handle_vp_layer_update(vp, layers.into_iter().collect(), vec![]);
+                            self.tabs[i].scene.deselect_all();
+                            return Some(Task::none());
+                        }
+                    }
                     let current = self.tabs[i]
                         .scene
                         .document
@@ -1774,7 +1784,7 @@ impl OpenCADStudio {
 
         self.push_undo_snapshot(i, "DWGUNITS");
         self.tabs[i].scene.document.header.insertion_units = to;
-        self.tabs[i].scene.sync_annotation_scale_from_header();
+        self.tabs[i].scene.insertion_units_changed(from);
 
         let factor = units::conversion_factor(from, to).filter(|f| (f - 1.0).abs() > 1e-12);
         let (from_label, to_label) = (units::label(from), units::label(to));

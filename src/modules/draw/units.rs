@@ -75,33 +75,35 @@ pub fn angular_formats() -> impl Iterator<Item = (i16, &'static str, &'static st
 
 // ── INSUNITS — what one unit measures ──────────────────────────────────────
 
-/// INSUNITS code, the name it is offered under, and how many metres one unit
-/// measures. `None` for unitless, which measures nothing and so converts to
-/// nothing.
-const UNITS: &[(i16, &str, &str, Option<f64>)] = &[
-    (0, "Unitless", "Unitless", None),
-    (4, "Millimeters", "mm", Some(0.001)),
-    (5, "Centimeters", "cm", Some(0.01)),
-    (6, "Meters", "m", Some(1.0)),
-    (7, "Kilometers", "km", Some(1000.0)),
-    (1, "Inches", "in", Some(0.0254)),
-    (2, "Feet", "ft", Some(0.3048)),
-    (3, "Miles", "mi", Some(1609.344)),
-    (10, "Yards", "yd", Some(0.9144)),
+/// INSUNITS code and the names it is offered under: the units of the picker
+/// and of DWGUNITS. What one unit measures is not here: it comes from
+/// `insunits_to_mm`, the one table of all INSUNITS codes, so a drawing in a
+/// unit that the picker does not offer (decimeters, US survey feet) converts
+/// too.
+const UNITS: &[(i16, &str, &str)] = &[
+    (0, "Unitless", "Unitless"),
+    (4, "Millimeters", "mm"),
+    (5, "Centimeters", "cm"),
+    (6, "Meters", "m"),
+    (7, "Kilometers", "km"),
+    (1, "Inches", "in"),
+    (2, "Feet", "ft"),
+    (3, "Miles", "mi"),
+    (10, "Yards", "yd"),
 ];
 
 /// Every unit on offer, in picker order: code and label.
 pub fn all() -> impl Iterator<Item = (i16, &'static str)> {
-    UNITS.iter().map(|&(code, label, _, _)| (code, label))
+    UNITS.iter().map(|&(code, label, _)| (code, label))
 }
 
-/// The full name of a unit code.
+/// The full name of a unit code, also of one that the picker does not offer.
 pub fn label(code: i16) -> &'static str {
     UNITS
         .iter()
         .find(|&&(candidate, ..)| candidate == code)
-        .map(|&(_, label, _, _)| label)
-        .unwrap_or("Unit")
+        .map(|&(_, label, _)| label)
+        .unwrap_or_else(|| crate::app::properties::insunits_name(code))
 }
 
 /// The short form shown on the status-bar pill.
@@ -109,7 +111,7 @@ pub fn short(code: i16) -> &'static str {
     UNITS
         .iter()
         .find(|&&(candidate, ..)| candidate == code)
-        .map(|&(_, _, short, _)| short)
+        .map(|&(_, _, short)| short)
         .unwrap_or("Unit")
 }
 
@@ -118,7 +120,7 @@ pub fn code_for_keyword(name: &str) -> Option<i16> {
     let name = name.trim();
     UNITS
         .iter()
-        .find(|&&(_, label, short, _)| {
+        .find(|&&(_, label, short)| {
             label.eq_ignore_ascii_case(name) || short.eq_ignore_ascii_case(name)
         })
         .map(|&(code, ..)| code)
@@ -130,14 +132,8 @@ pub fn code_for_keyword(name: &str) -> Option<i16> {
 /// `None` when either side is unitless: a drawing that does not say what its
 /// numbers count cannot be converted, only relabelled.
 pub fn conversion_factor(from: i16, to: i16) -> Option<f64> {
-    let metres = |code: i16| {
-        UNITS
-            .iter()
-            .find(|&&(candidate, ..)| candidate == code)
-            .and_then(|&(_, _, _, metres)| metres)
-    };
-    let (from, to) = (metres(from)?, metres(to)?);
-    (to > 0.0).then(|| from / to)
+    let millimetres = crate::app::properties::insunits_to_mm;
+    Some(millimetres(from)? / millimetres(to)?)
 }
 
 /// Handles of everything that lives in model space.
@@ -157,3 +153,7 @@ pub fn model_space_handles(scene: &crate::scene::Scene) -> Vec<document::Handle>
         .map(|entity| entity.common().handle)
         .collect()
 }
+
+#[cfg(test)]
+#[path = "units_tests.rs"]
+mod tests;

@@ -23,4 +23,5 @@ mod sweep_command_model;
 pub mod sweep_model;
 pub mod underlay_vector;
 pub mod visual_style_model;
+pub mod point_residuals;
 pub mod wire_model;

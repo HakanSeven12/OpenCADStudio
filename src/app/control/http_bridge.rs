@@ -152,7 +152,7 @@ fn forward(
             fields,
             created,
         } => {
-            let cached = *document_cache.lock().unwrap();
+            let cached = *document_cache.lock().unwrap_or_else(|e| e.into_inner());
             let mut response = transact(sender, mutate_request(&op, &fields, cached), wait, stream);
             let code = response["code"].as_str().unwrap_or("");
             if response["ok"] == false && RETRYABLE.contains(&code) {
@@ -160,7 +160,7 @@ fn forward(
                 // and retry once, exactly like the headless server.
                 let state = transact(sender, json!({"protocol":1,"op":"state"}), wait, stream);
                 harvest(document_cache, &state);
-                let cached = *document_cache.lock().unwrap();
+                let cached = *document_cache.lock().unwrap_or_else(|e| e.into_inner());
                 response = transact(sender, mutate_request(&op, &fields, cached), wait, stream);
             }
             harvest(document_cache, &response);
@@ -336,7 +336,7 @@ fn harvest(document_cache: &Mutex<Option<u64>>, response: &Value) {
         .and_then(Value::as_u64)
         .or_else(|| response["state"]["document_id"].as_u64());
     if let Some(id) = id {
-        *document_cache.lock().unwrap() = Some(id);
+        *document_cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(id);
     }
 }
 
@@ -805,5 +805,21 @@ mod tests {
         drain(&mut app, &mut receiver, 1);
         let (status, body) = read_response(&mut select_conn);
         assert_eq!(status, 200, "{body}");
+    }
+
+    #[test]
+    fn harvest_records_the_document_through_a_poisoned_cache() {
+        let cache = Arc::new(Mutex::new(Some(1_u64)));
+        let held = Arc::clone(&cache);
+        let _ = std::thread::spawn(move || {
+            let _guard = held.lock();
+            panic!("poison the document cache");
+        })
+        .join();
+        assert!(cache.is_poisoned());
+
+        harvest(&cache, &json!({"document_id": 7}));
+
+        assert_eq!(*cache.lock().unwrap_or_else(|e| e.into_inner()), Some(7));
     }
 }

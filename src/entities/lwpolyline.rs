@@ -1829,7 +1829,7 @@ mod tests {
     }
 
     #[test]
-    fn test_lwpolyline_uniform_width_shows_global_width() {
+    fn lwpolyline_uniform_width_shows_global_width() {
         let pl = make_test_lwpolyline(3, 5.0);
         assert_eq!(lwpolyline_global_width(&pl), Some(5.0));
 
@@ -1846,7 +1846,7 @@ mod tests {
     }
 
     #[test]
-    fn test_lwpolyline_varying_vertex_width_shows_varies() {
+    fn lwpolyline_varying_vertex_width_shows_varies() {
         let mut pl = make_test_lwpolyline(3, 5.0);
         pl.vertices[0].start_width = 2.0;
         pl.vertices[0].end_width = 3.0;
@@ -1866,7 +1866,7 @@ mod tests {
     }
 
     #[test]
-    fn test_lwpolyline_modifying_global_width_sets_all_vertex_widths() {
+    fn lwpolyline_modifying_global_width_sets_all_vertex_widths() {
         let mut pl = make_test_lwpolyline(3, 5.0);
         pl.vertices[0].start_width = 2.0;
         pl.vertices[0].end_width = 3.0;
@@ -1882,7 +1882,7 @@ mod tests {
     }
 
     #[test]
-    fn test_lwpolyline_modifying_segment_width_materializes_constant_width() {
+    fn lwpolyline_modifying_segment_width_materializes_constant_width() {
         let mut pl = make_test_lwpolyline(3, 5.0);
         // Initially constant_width is 5.0, vertices start/end are 0.0
         assert_eq!(pl.vertices[0].start_width, 0.0);

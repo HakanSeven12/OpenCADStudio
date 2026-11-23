@@ -1113,7 +1113,6 @@ mod tests {
     /// (as HATCHEDIT does): a click inside a hatch picks it.
     #[test]
     fn select_object_picks_a_hatch_by_a_click_inside_it() {
-        use crate::command::CadCommand;
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;

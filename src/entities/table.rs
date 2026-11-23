@@ -2872,21 +2872,22 @@ pub fn tessellate_table(
                 geom: std::sync::Arc::new(crate::scene::WireGeom {
                     taper_widths: Vec::new(),
                     pattern_stations: Vec::new(),
-                    pick_tris: Vec::new(),
-                    pick_tris_low: Vec::new(),
                     text_verts: Vec::new(),
                     points,
-                    points_low: Vec::new(),
+                    points_low: Default::default(),
                     snap_pts: vec![],
                     tangent_geoms: vec![],
                     key_vertices: vec![],
-                    fill_tris,
                     // fill_tris_low intentionally empty: this fill renders on the
                     // top-level path, where consumers (face3d_gpu, xclip) treat a
                     // short low half as all-zero, so it draws at f32 precision
                     // (sub-metre error at UTM scale) — not a crash. Follow-up:
                     // double-single-split via points_to_ds to match emit_wire.
-                    fill_tris_low: Vec::new(),
+                    surfaces: crate::scene::model::wire_model::WireSurfaces {
+                        fill_tris,
+                        ..Default::default()
+                    }
+                    .into_optional(),
                     ..crate::scene::WireGeom::default()
                 }),
                 ..Default::default()

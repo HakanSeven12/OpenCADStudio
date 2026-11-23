@@ -2372,6 +2372,67 @@ mod tests {
         assert!(out.contains("Enter block name or [?]:"), "{out}");
     }
 
+    /// A drawing named at -INSERT's block prompt comes in at the scale its
+    /// INSUNITS asks for against the host's, as an XREF of it does: a 10 m
+    /// line in a millimetre drawing is 10,000 mm long. (#3474)
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn insert_of_a_drawing_file_converts_its_units() {
+        const MILLIMETERS: i16 = 4;
+        let cases = [
+            ("metres", 6, 1000.0),
+            ("feet", 2, 304.8),
+            ("inches", 1, 25.4),
+            ("millimetres", MILLIMETERS, 1.0),
+            ("unitless", 0, 1.0),
+        ];
+        let mut scales = Vec::new();
+        for (name, units, _) in cases {
+            let mut source = fresh_app();
+            let s = source.active_tab;
+            let mut line = document::entities::Line::new();
+            line.end = document::types::Vector3::new(10.0, 0.0, 0.0);
+            source.tabs[s]
+                .scene
+                .add_entity(document::EntityType::Line(line));
+            source.tabs[s].scene.document.header.insertion_units = units;
+            let dir = tempfile::tempdir().expect("a temporary directory");
+            let path = dir.path().join(format!("{name}.dwg"));
+            crate::io::save(&source.tabs[s].scene.document, &path).expect("write the source drawing");
+
+            let mut app = fresh_app();
+            let i = app.active_tab;
+            app.tabs[i].scene.document.header.insertion_units = MILLIMETERS;
+            let _ = app.run_command_line(&format!("-INSERT {} 0,0 1 1 0", path.display()));
+            let transcript = app
+                .command_line
+                .history
+                .iter()
+                .map(|e| e.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" | ");
+            let scale = app.tabs[i]
+                .scene
+                .document
+                .entities()
+                .find_map(|entity| match entity {
+                    document::EntityType::Insert(insert) => Some(insert.x_scale()),
+                    _ => None,
+                });
+            scales.push((name, scale, transcript));
+        }
+        for ((name, _, expected), (_, scale, transcript)) in cases.iter().zip(&scales) {
+            let scale =
+                scale.unwrap_or_else(|| panic!("{name}: no block reference was inserted: {transcript}"));
+            assert!(
+                (scale - expected).abs() < 1e-9,
+                "{name} drawing inserted into a millimetre drawing at scale {scale}, expected \
+                 {expected}; all scales: {:?}",
+                scales.iter().map(|(n, s, _)| (n, s)).collect::<Vec<_>>()
+            );
+        }
+    }
+
     // ATTMAN and BATTMAN open the Block Attribute Manager. A drawing without
     // attributed blocks has nothing to manage, which both report instead of
     // opening it.

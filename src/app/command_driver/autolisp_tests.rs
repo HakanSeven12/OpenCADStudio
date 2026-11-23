@@ -115,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    fn test_all_cad_commands_and_options() {
+    fn all_cad_commands_and_options() {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let mut records = Vec::new();

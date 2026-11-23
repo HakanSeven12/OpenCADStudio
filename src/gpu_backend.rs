@@ -1420,10 +1420,9 @@ mod tests {
     #[test]
     fn sentinel_round_trip_records_backends() {
         let _guard = SENTINEL_TESTS.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = std::env::temp_dir().join(format!("ocs-gpu-test-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
+        let dir = tempfile::tempdir().expect("a temporary sentinel directory");
         // SAFETY: single-threaded test mutating a process-local test hook.
-        unsafe { std::env::set_var(SENTINEL_DIR_ENV, &dir) };
+        unsafe { std::env::set_var(SENTINEL_DIR_ENV, dir.path()) };
         assert!(!previous_run_crashed());
         arm_sentinel("dx12");
         assert!(previous_run_crashed());
@@ -1432,7 +1431,6 @@ mod tests {
         assert!(!previous_run_crashed());
         assert!(crashed_backends().is_empty());
         unsafe { std::env::remove_var(SENTINEL_DIR_ENV) };
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A run that drew long enough to prove the backend leaves a sentinel
@@ -1442,10 +1440,9 @@ mod tests {
     #[test]
     fn a_backend_that_survived_is_not_blamed_for_a_later_kill() {
         let _guard = SENTINEL_TESTS.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = std::env::temp_dir().join(format!("ocs-gpu-survived-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
+        let dir = tempfile::tempdir().expect("a temporary sentinel directory");
         // SAFETY: single-threaded test mutating a process-local test hook.
-        unsafe { std::env::set_var(SENTINEL_DIR_ENV, &dir) };
+        unsafe { std::env::set_var(SENTINEL_DIR_ENV, dir.path()) };
 
         arm_sentinel("dx12");
         assert_eq!(
@@ -1470,7 +1467,6 @@ mod tests {
 
         disarm_sentinel();
         unsafe { std::env::remove_var(SENTINEL_DIR_ENV) };
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Surviving the proof delay excuses a kill, but not a crash the
@@ -1480,10 +1476,9 @@ mod tests {
     #[test]
     fn a_device_crash_still_blames_the_backend_however_late_it_came() {
         let _guard = SENTINEL_TESTS.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = std::env::temp_dir().join(format!("ocs-gpu-late-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
+        let dir = tempfile::tempdir().expect("a temporary sentinel directory");
         // SAFETY: single-threaded test mutating a process-local test hook.
-        unsafe { std::env::set_var(SENTINEL_DIR_ENV, &dir) };
+        unsafe { std::env::set_var(SENTINEL_DIR_ENV, dir.path()) };
 
         let reports = crate::sys::crash_log::directory().expect("a config directory");
         let _ = std::fs::create_dir_all(&reports);
@@ -1548,7 +1543,6 @@ mod tests {
         let _ = std::fs::remove_file(&report);
         disarm_sentinel();
         unsafe { std::env::remove_var(SENTINEL_DIR_ENV) };
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1662,10 +1656,9 @@ mod tests {
     #[test]
     fn graphics_prefs_persist_and_default_when_missing() {
         let _guard = SENTINEL_TESTS.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = std::env::temp_dir().join(format!("ocs-gpu-prefs-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = tempfile::tempdir().expect("a temporary sentinel directory");
         // SAFETY: serialized by SENTINEL_TESTS; process-local test hook.
-        unsafe { std::env::set_var(SENTINEL_DIR_ENV, &dir) };
+        unsafe { std::env::set_var(SENTINEL_DIR_ENV, dir.path()) };
         assert_eq!(load_prefs(), GraphicsPrefs::default());
         let p = GraphicsPrefs {
             backend: BackendChoice::Vulkan,
@@ -1675,6 +1668,5 @@ mod tests {
         save_prefs(p);
         assert_eq!(load_prefs(), p);
         unsafe { std::env::remove_var(SENTINEL_DIR_ENV) };
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

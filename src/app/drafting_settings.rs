@@ -48,7 +48,7 @@ impl DraftingSettingsState {
             },
             quick_props_on: app.quick_properties,
             quick_props_float: app.quick_properties_float,
-            selection_cycling_on: app.selection_cycling,
+            selection_cycling_on: app.selection_cycling > 0,
         }
     }
 }
@@ -170,7 +170,7 @@ impl OpenCADStudio {
         }
         self.quick_properties = state.quick_props_on;
         self.quick_properties_float = state.quick_props_float;
-        self.selection_cycling = state.selection_cycling_on;
+        self.toggle_selection_cycling(state.selection_cycling_on);
         self.sync_vport_display(self.active_tab);
         true
     }
@@ -181,7 +181,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_drafting_settings_tab_switching_not_dirty() {
+    fn drafting_settings_tab_switching_not_dirty() {
         let state1 = DraftingSettingsState {
             active_tab: DraftingSettingsTab::SnapAndGrid,
             snap_on: false,
@@ -232,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn test_drafting_settings_dirty_toggles() {
+    fn drafting_settings_dirty_toggles() {
         let base = DraftingSettingsState {
             active_tab: DraftingSettingsTab::SnapAndGrid,
             snap_on: false,
@@ -365,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_snap_spacing() {
+    fn parse_snap_spacing() {
         use crate::ui::window::drafting_settings::{
             format_snap_spacing, parse_grid_major, parse_snap_spacing,
         };

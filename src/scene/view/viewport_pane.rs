@@ -137,3 +137,25 @@ impl<'a, Msg: std::fmt::Debug + Clone> shader::Program<Msg> for ViewportPane<'a>
         }
     }
 }
+
+/// A Start-tab primitive lets the existing renderer reclaim the closed
+/// document's GPU slots even when there is no drawing viewport to prepare.
+pub(crate) struct ReleaseClosedViewports;
+
+impl<Msg> shader::Program<Msg> for ReleaseClosedViewports {
+    type State = ();
+    type Primitive = Primitive;
+
+    fn draw(&self, _: &(), _: mouse::Cursor, _: Rectangle) -> Primitive {
+        Primitive {
+            scene_owner: std::sync::Weak::new(),
+            viewports: Vec::new(),
+            bg_color: [0.0; 4],
+            viewcube_text_color: [0.0; 4],
+            selection_color: [0.0; 4],
+            selection_effect: false,
+            selection_widen: 0.0,
+            nav_perf: None,
+        }
+    }
+}

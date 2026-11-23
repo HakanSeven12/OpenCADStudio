@@ -764,7 +764,18 @@ impl OpenCADStudio {
             crate::ui::dock::PanelId::Plugin(num) => {
                 if let Some(panel_id) = self.plugin_panel_by_num.get(&num) {
                     if let Some(state) = self.plugin_panels.get(panel_id) {
-                        state.view(num, width, chrome)
+                        // A published scene surface (api v29) replaces the
+                        // panel body with the host's native canvas; panels
+                        // without a scene keep their exact legacy tree.
+                        if let Some(scene) = state
+                            .owner_plugin_id
+                            .as_deref()
+                            .and_then(|owner| self.panel_surfaces.scene(owner, panel_id))
+                        {
+                            crate::ui::window::plugin_scene::scene_view(scene)
+                        } else {
+                            state.view(num, width, chrome)
+                        }
                     } else {
                         Space::new().into()
                     }

@@ -13,6 +13,11 @@
 //! - `{"op":"entities"}`                     — summary count by entity type
 //! - `{"op":"save","path":"out.dwg"}`        — write the document (path optional
 //!                                             once opened/saved)
+//! - `{"op":"civil_station_offset",...}`     — the point at an alignment's
+//!                                             station, offset_distance across
+//!                                             it (read)
+//! - `{"op":"civil_surface_stats",...}`      — a TIN surface's elevation
+//!                                             bounds and counts (read)
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::io::line_read::{lines_capped, MAX_LINE_BYTES};
@@ -333,6 +338,15 @@ pub(crate) fn entity_type_matches(entity: &document::EntityType, requested: &str
     if record_name != "ENTITY" && record_name.eq_ignore_ascii_case(requested) {
         return true;
     }
+    // A civil / AEC Extended entity's identity is its class record's dxf_name
+    // ("AECC_ALIGNMENT", "AECC_COGO_POINT"), which `dxf_name()` hides behind
+    // the "ENTITY" blacklisted above. Compare the class name too, so scripts
+    // can query these by class instead of only via `where /data/Arch/...`.
+    if let document::EntityType::Extended(extended) = entity {
+        if extended.class_name().eq_ignore_ascii_case(requested) {
+            return true;
+        }
+    }
     // The node library's object names ("Construction Line", "2D Solid").
     use crate::ui::node_graph::{ObjectKind, OBJECTS};
     OBJECTS.iter().any(|kind| {
@@ -574,7 +588,7 @@ fn request_point(req: &Value, key: &str) -> Option<[f64; 2]> {
     (x.is_finite() && y.is_finite()).then_some([x, y])
 }
 
-fn request_handle(value: &Value) -> Option<document::Handle> {
+pub(super) fn request_handle(value: &Value) -> Option<document::Handle> {
     value
         .as_str()
         .and_then(|value| {
@@ -1118,6 +1132,18 @@ impl OpenCADStudio {
             "entities" => self.entity_summary(),
             "audit" => self.document_audit(&req),
             "query" => self.entity_query(self.active_tab, &req),
+            "civil_station_offset" => {
+                crate::app::civil_query::civil_station_offset(
+                    &self.tabs[self.active_tab].scene.document,
+                    &req,
+                )
+            }
+            "civil_surface_stats" => {
+                crate::app::civil_query::civil_surface_stats(
+                    &self.tabs[self.active_tab].scene.document,
+                    &req,
+                )
+            }
             "text_search" => self.automation_text_search(&req),
             "text_audit" => self.automation_text_audit(&req),
             "text_replace" => self.automation_text_replace(&req),
@@ -5646,20 +5672,16 @@ DEAD
         }
     }
 
-    /// PICKADD / PICKDRAG (#226): the command flips the live flag both via the
-    /// inline form and the two-step ValuePrompt flow.
     #[test]
     fn lasso_press_drag_selects() {
-        // Press-drag lasso must select crossed entities — regression probe
-        // for the #226 PICKDRAG work (both PICKDRAG modes complete through
-        // the poly path).
         use crate::app::Message;
         for (add, rect) in [(true, false), (true, true), (false, false), (false, true)] {
             let mut app = OpenCADStudio::new_for_test();
             app.automation_op(r#"{"op":"new"}"#);
             let i = app.active_tab;
             app.pick_add = add;
-            app.pick_drag_rect = rect;
+            app.pick_drag_mode = if rect { 1 } else { 2 };
+            app.pick_auto = if rect { 1 } else { 5 };
             let _ = app.run_command_line("LINE 0,0 10,10");
             app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
             let _ = app.run_command_line("ZOOM EXTENTS");
@@ -5701,9 +5723,8 @@ DEAD
                 path[0].0, path[0].1,
             )));
             let _ = app.update(Message::ViewportLeftPress);
-            // Deterministically simulate an intentional hold-to-lasso.
-            // A fast click+move must no longer activate a lasso just
-            // because the cursor crossed the old 24 px shortcut.
+            // An intentional hold-to-lasso: a fast click and move alone must
+            // not start a lasso while a click can also arm a window.
             let held_since = iced::time::Instant::now() - std::time::Duration::from_millis(260);
             app.tabs[i]
                 .scene
@@ -5745,13 +5766,13 @@ DEAD
     }
 
     #[test]
-    fn fast_click_move_release_arms_a_box_at_the_actual_press_location() {
+    fn click_only_mode_arms_a_box_at_the_actual_press_location() {
         use crate::app::Message;
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        app.pick_drag_rect = false;
+        app.pick_drag_mode = 0;
         app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
 
         let pressed = iced::Point::new(100.0, 180.0);
@@ -5763,7 +5784,7 @@ DEAD
             let sel = app.tabs[i].scene.selection.borrow();
             assert!(
                 !sel.input.left_dragging,
-                "fast first click must win over lasso"
+                "the click-only mode keeps the press classified as a click"
             );
             assert!(!sel.gesture.poly_active, "the lasso must not arm");
         }
@@ -5780,20 +5801,16 @@ DEAD
         app.automation_op(r#"{"op":"new"}"#);
         // The boot path may have restored a persisted value — normalize.
         app.pick_add = true;
-        app.pick_drag_rect = false;
+        app.pick_drag_mode = 0;
         let _ = app.run_command_line("PICKADD 0");
         assert!(!app.pick_add, "PICKADD 0 must switch to replace mode");
         let _ = app.run_command_line("PICKADD 1");
         assert!(app.pick_add);
-        // Two-step: bare command then the value, like typing 1 + Enter
-        // (feed_active_cmd is the same path the GUI submit offers first).
         let _ = app.run_command_line("PICKDRAG");
-        assert!(
-            app.tabs[app.active_tab].active_cmd.is_some(),
-            "prompt must open"
-        );
-        let _ = app.feed_active_cmd("1");
-        assert!(app.pick_drag_rect, "PICKDRAG 1 via the prompt must switch");
+        assert_eq!(app.pending_setvar.as_deref(), Some("PICKDRAG"));
+        app.command_line.input = "1".into();
+        let _ = app.update(crate::app::Message::CommandSubmit);
+        assert_eq!(app.pick_drag_mode, 1);
     }
 
     #[test]
@@ -6332,7 +6349,7 @@ DEAD
     }
 
     #[test]
-    fn test_mtp_in_line_command() {
+    fn mtp_in_line_command() {
         use crate::app::Message;
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -6408,7 +6425,7 @@ DEAD
     }
 
     #[test]
-    fn test_mtp_escape_restores_parent() {
+    fn mtp_escape_restores_parent() {
         use crate::app::Message;
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -6444,7 +6461,7 @@ DEAD
     }
 
     #[test]
-    fn test_mtp_typing_routing_with_dyn_input() {
+    fn mtp_typing_routing_with_dyn_input() {
         use crate::app::Message;
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -6619,7 +6636,7 @@ DEAD
     }
 
     #[test]
-    fn test_snap_override_typed_in_line_command() {
+    fn snap_override_typed_in_line_command() {
         use crate::app::Message;
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -6680,7 +6697,7 @@ DEAD
     }
 
     #[test]
-    fn test_snap_override_feed_token() {
+    fn snap_override_feed_token() {
         use crate::app::Message;
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -7077,5 +7094,43 @@ mod type_name_tests {
         assert!(super::entity_type_matches(&xline, "XLine"));
         assert!(!super::entity_type_matches(&xline, "Line"));
         assert!(!super::entity_type_matches(&xline, "Object"));
+    }
+
+    fn civil_entity(dxf_name: &str) -> document::EntityType {
+        document::EntityType::Extended(Box::new(document::entities::ExtendedEntity {
+            common: document::entities::EntityCommon::new(),
+            data: document::entities::ExtendedEntityData::Arch(
+                document::classes::arch::ArchEntityData::from_parts(dxf_name, "", None),
+            ),
+        }))
+    }
+
+    /// R3.2: a civil entity is findable by its class name, not only as
+    /// "Extended Entity" or through `where /data/Arch/dxf_name`.
+    #[test]
+    fn civil_class_names_find_extended_entities() {
+        let alignment = civil_entity("AECC_ALIGNMENT");
+        assert!(super::entity_type_matches(&alignment, "AECC_ALIGNMENT"));
+        // Case-insensitive, like every other name comparison here.
+        assert!(super::entity_type_matches(&alignment, "aecc_alignment"));
+        // The registered-class arm reports its dxf_name through `class_name`
+        // too; a class the query did not ask for still does not match.
+        let point = civil_entity("AECC_COGO_POINT");
+        assert!(super::entity_type_matches(&point, "AECC_COGO_POINT"));
+        assert!(!super::entity_type_matches(&point, "AECC_ALIGNMENT"));
+        assert!(!super::entity_type_matches(&alignment, "AECC_COGO_POINT"));
+    }
+
+    /// Existing behavior is untouched: the UI name still matches, and the
+    /// "ENTITY" placeholder stays blacklisted.
+    #[test]
+    fn extended_entities_keep_their_ui_name_and_entity_blacklist() {
+        let point = civil_entity("AECC_COGO_POINT");
+        assert!(super::entity_type_matches(&point, "Extended Entity"));
+        assert!(!super::entity_type_matches(&point, "ENTITY"));
+        // A native entity does not start matching civil class names.
+        let line = document::EntityType::Line(Default::default());
+        assert!(super::entity_type_matches(&line, "Line"));
+        assert!(!super::entity_type_matches(&line, "AECC_ALIGNMENT"));
     }
 }

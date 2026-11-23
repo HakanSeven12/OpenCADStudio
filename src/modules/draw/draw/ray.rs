@@ -130,16 +130,12 @@ impl CadCommand for RayCommand {
             geom: std::sync::Arc::new(crate::scene::WireGeom {
                 taper_widths: Vec::new(),
                 pattern_stations: Vec::new(),
-                pick_tris: Vec::new(),
-                pick_tris_low: Vec::new(),
                 text_verts: Vec::new(),
                 points: vec![[base.x, base.y, base.z], [far.x, far.y, far.z]],
-                points_low: Vec::new(),
+                points_low: Default::default(),
                 snap_pts: vec![],
                 tangent_geoms: vec![],
                 key_vertices: vec![],
-                fill_tris: vec![],
-                fill_tris_low: Vec::new(),
                 ..crate::scene::WireGeom::default()
             }),
             ..Default::default()
@@ -493,19 +489,15 @@ impl CadCommand for XLineCommand {
             geom: std::sync::Arc::new(crate::scene::WireGeom {
                 taper_widths: Vec::new(),
                 pattern_stations: Vec::new(),
-                pick_tris: Vec::new(),
-                pick_tris_low: Vec::new(),
                 text_verts: Vec::new(),
                 points: vec![
                     [far_neg.x, far_neg.y, far_neg.z],
                     [far_pos.x, far_pos.y, far_pos.z],
                 ],
-                points_low: Vec::new(),
+                points_low: Default::default(),
                 snap_pts: vec![],
                 tangent_geoms: vec![],
                 key_vertices: vec![],
-                fill_tris: vec![],
-                fill_tris_low: Vec::new(),
                 ..crate::scene::WireGeom::default()
             }),
             ..Default::default()

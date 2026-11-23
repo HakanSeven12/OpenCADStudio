@@ -1375,6 +1375,43 @@ impl OpenCADStudio {
                 self.plot_dialog.file_svg = false;
                 return Some(Task::done(Message::PlotExport));
             }
+            // EXPORTDWF <file.dwf> [ALL] — the direct form of EXPORTPDF,
+            // writing a DWF with one sheet for each page.
+            cmd if cmd.starts_with("EXPORTDWF ") => {
+                let rest = cmd
+                    .split_once(' ')
+                    .map(|(_, rest)| rest.trim())
+                    .unwrap_or("");
+                let (path_text, all_layouts) = match rest.rsplit_once(char::is_whitespace) {
+                    Some((head, tail)) if tail.eq_ignore_ascii_case("ALL") => (head.trim(), true),
+                    _ => (rest, false),
+                };
+                let path_text = path_text.trim().trim_matches('"');
+                if path_text.is_empty() {
+                    self.command_line
+                        .push_info(crate::t!("Usage: EXPORTDWF <file.dwf> [ALL]").as_ref());
+                    return Some(Task::none());
+                }
+                let path = std::path::PathBuf::from(path_text);
+                match self.export_dwf_direct(&path, all_layouts) {
+                    Ok((sheets, bytes, (width, height))) => {
+                        self.command_line.push_output(&crate::tf!(
+                            "Exported: {}  {sheets} sheet(s), {bytes} bytes, {width:.1}×{height:.1} mm",
+                            path.display()
+                        ));
+                    }
+                    Err(error) => {
+                        self.command_line.push_error(&error);
+                    }
+                }
+                return Some(Task::none());
+            }
+            // EXPORTDWF — the same direct export, with the save dialog
+            // proposing `stem.dwf`.
+            "EXPORTDWF" => {
+                self.plot_dialog.to_file = true;
+                return Some(Task::done(Message::PlotExportDwf));
+            }
             // EXPORTSVG — the same direct export, but the save dialog
             // proposes the SVG device's defaults (`stem.svg`).
             "EXPORTSVG" => {
@@ -2187,6 +2224,7 @@ impl OpenCADStudio {
             //   SCALELISTEDIT              prompt (Add / Delete)
             //   SCALELISTEDIT LIST         every scale with ratio and in-use count
             //   SCALELISTEDIT ADD 1:50     add (name is a paper:drawing ratio)
+            //   SCALELISTEDIT ADD Site 1:50  add under a name of its own
             //   SCALELISTEDIT DELETE 1:50  remove (not current and not in use)
             //   SCALELISTEDIT DELETE FORCE 1:50  remove and drop its contexts
             "SCALELISTEDIT" | "-SCALELISTEDIT" => {
@@ -2220,29 +2258,41 @@ impl OpenCADStudio {
                 let sub = parts.next().unwrap_or("").to_uppercase();
                 let arg = parts.next().unwrap_or("").trim();
                 match sub.as_str() {
-                    "ADD" => match arg.split_once(':') {
-                        Some((p, d)) => match (p.trim().parse::<f64>(), d.trim().parse::<f64>()) {
-                            (Ok(paper), Ok(drawing)) if paper > 0.0 && drawing > 0.0 => {
-                                self.push_undo_snapshot(i, "SCALELISTEDIT");
-                                if self.tabs[i].scene.add_scale(arg, paper, drawing) {
-                                    self.tabs[i].dirty = true;
-                                    self.command_line.push_output(
-                                        crate::tf!("Added annotation scale {arg}.").as_ref(),
-                                    );
-                                } else {
-                                    self.command_line.push_info(
-                                        crate::tf!("Scale {arg} already exists.").as_ref(),
-                                    );
+                    "ADD" => {
+                        // The ratio is the last word; words before it name
+                        // the scale. A ratio alone names the scale itself.
+                        let (arg, ratio) = match arg.rsplit_once(char::is_whitespace) {
+                            Some((name, ratio)) => (name.trim(), ratio),
+                            None => (arg, arg),
+                        };
+                        match ratio.split_once(':') {
+                            Some((p, d)) => {
+                                match (p.trim().parse::<f64>(), d.trim().parse::<f64>()) {
+                                    (Ok(paper), Ok(drawing)) if paper > 0.0 && drawing > 0.0 => {
+                                        self.push_undo_snapshot(i, "SCALELISTEDIT");
+                                        if self.tabs[i].scene.add_scale(arg, paper, drawing) {
+                                            self.tabs[i].dirty = true;
+                                            self.command_line.push_output(
+                                                crate::tf!("Added annotation scale {arg}.")
+                                                    .as_ref(),
+                                            );
+                                        } else {
+                                            self.command_line.push_info(
+                                                crate::tf!("Scale {arg} already exists.").as_ref(),
+                                            );
+                                        }
+                                    }
+                                    _ => self.command_line.push_error(
+                                        crate::t!("SCALELISTEDIT ADD: use a ratio like 1:50.")
+                                            .as_ref(),
+                                    ),
                                 }
                             }
-                            _ => self.command_line.push_error(
+                            None => self.command_line.push_error(
                                 crate::t!("SCALELISTEDIT ADD: use a ratio like 1:50.").as_ref(),
                             ),
-                        },
-                        None => self.command_line.push_error(
-                            crate::t!("SCALELISTEDIT ADD: use a ratio like 1:50.").as_ref(),
-                        ),
-                    },
+                        }
+                    }
                     "DELETE" | "REMOVE" => {
                         let current = self.tabs[i]
                             .scene

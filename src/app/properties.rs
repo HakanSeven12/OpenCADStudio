@@ -5958,7 +5958,7 @@ fn dim_lineweight_label(dimlwd: i16) -> String {
 }
 
 /// Human-readable INSUNITS name (DXF group 70 unit codes).
-pub(in crate::app) fn insunits_name(code: i16) -> &'static str {
+pub(crate) fn insunits_name(code: i16) -> &'static str {
     match code {
         1 => "Inches",
         2 => "Feet",
@@ -5990,7 +5990,7 @@ pub(in crate::app) fn insunits_name(code: i16) -> &'static str {
 }
 
 /// Unit-conversion scale for a new INSERT.
-pub(in crate::app) fn insert_unit_scale(host_units: i16, src_units: i16) -> Option<f64> {
+pub(crate) fn insert_unit_scale(host_units: i16, src_units: i16) -> Option<f64> {
     let host_mm = insunits_to_mm(host_units)?;
     let src_mm = insunits_to_mm(src_units)?;
     let ratio = src_mm / host_mm;
@@ -6621,10 +6621,11 @@ mod chprop_integration_tests {
     /// Converting the site to `apply_property_op` moved the snapshot
     /// to *before* the mutation. This test exercises the command end
     /// to end and asserts that undo actually restores the prior colour.
-    #[ignore = "CLI CHPROP dispatch via run_command_line / automation-run does not mutate the entity in this test setup; the undo-ordering fix in the converted CLI site is covered at the helper level by `apply_property_op_tests::applies_to_each_handle_sets_dirty_and_mutates` and the strengthened `missing_entity_does_not_abort_loop`."]
     #[test]
     fn cli_chprop_undo_restores_previous_state() {
         let mut app = OpenCADStudio::new_for_test();
+        // The command line refuses a command while no drawing is open.
+        let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
         let h = line_handle(&mut app);
         let original = app.tabs[i]
@@ -6918,7 +6919,7 @@ mod grip_limit_tests {
         app.show_viewcube = false;
         app.show_ucs_icon = false;
         app.ucs_icon_at_origin = false;
-        app.selection_cycling = true;
+        app.selection_cycling = 2;
 
         let saved = app.current_settings();
         let mut restored = OpenCADStudio::new_for_test();
@@ -6927,7 +6928,7 @@ mod grip_limit_tests {
         assert!(!restored.show_viewcube, "the ViewCube must stay off");
         assert!(!restored.show_ucs_icon);
         assert!(!restored.ucs_icon_at_origin);
-        assert!(restored.selection_cycling);
+        assert_eq!(restored.selection_cycling, 2);
     }
 
     /// The Options card writes these four straight onto the app and relies on
@@ -6938,7 +6939,8 @@ mod grip_limit_tests {
     fn the_selection_settings_survive_a_save_and_load() {
         let mut app = OpenCADStudio::new_for_test();
         app.pick_add = false;
-        app.pick_drag_rect = true;
+        app.pick_drag_mode = 1;
+        app.pick_auto = 1;
         app.pick_box = 11;
         app.grip_object_limit = 0;
 
@@ -6947,7 +6949,8 @@ mod grip_limit_tests {
         restored.apply_settings(&saved);
 
         assert!(!restored.pick_add);
-        assert!(restored.pick_drag_rect);
+        assert_eq!(restored.pick_drag_mode, 1);
+        assert_eq!(restored.pick_auto, 1);
         assert_eq!(restored.pick_box, 11);
         assert_eq!(
             restored.grip_object_limit, 0,

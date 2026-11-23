@@ -5,6 +5,7 @@
 //! a table, a block or an object.
 
 use super::*;
+use crate::scene::pick::grip::GripEdit;
 use document::entities::{Arc, Circle, Insert, Line, LwPolyline, Text};
 use document::types::{Vector2, Vector3};
 use document::EntityType;
@@ -139,6 +140,9 @@ fn commands(d: &Drawing) -> Vec<String> {
         "SPLINE 0,140 5,145 10,140 ENTER".to_string(),
         "DIMLINEAR 0,0 10,0 5,-3".to_string(),
         "-INSERT BLK 50,50 1 1 0".to_string(),
+        "TEXT 0,60 2 0 Hello".to_string(),
+        // A pick point inside the circle.
+        "HATCH 20,5".to_string(),
         // Modifying.
         format!("MOVE {} ENTER 0,0 5,5", h(d.line)),
         format!("COPY {} ENTER 20,5 25,5 ENTER", h(d.circle)),
@@ -158,6 +162,9 @@ fn commands(d: &Drawing) -> Vec<String> {
         format!("EXPLODE {} ENTER", h(d.polyline)),
         format!("EXPLODE {} ENTER", h(d.insert)),
         format!("PEDIT {} C X", h(d.polyline)),
+        // Two picks: the line on `Walls` and the upright line at its end.
+        "JOIN 2,0 10,5 ENTER".to_string(),
+        format!("-BLOCK Fitting 0,0 {} {} ENTER", h(d.circle), h(d.arc)),
         // The layer table.
         "-LAYER NEW Doors".to_string(),
         "-LAYER OFF Walls ".to_string(),
@@ -168,34 +175,340 @@ fn commands(d: &Drawing) -> Vec<String> {
         "LAYER COLOR 1 Walls".to_string(),
         "LAYER FREEZE Walls".to_string(),
         "LAYER LOCK Walls".to_string(),
+        // The layout table.
+        "-LAYOUT NEW Sheet".to_string(),
+        "-LAYOUT RENAME Layout1 Plan".to_string(),
+        "-LAYOUT COPY Layout1 Copy".to_string(),
     ]
+}
+
+/// One action of a case: what the user does through one of the app's doors.
+enum Step {
+    /// A command line, as typed. It must complete.
+    Run(String),
+    /// A command line that must stop with the named editor open (the
+    /// `blocked_by` of the automation reply).
+    Open(String, &'static str),
+    /// An automation request other than `run` (a selection, for example).
+    Op(serde_json::Value),
+    /// A message, as a palette, a dialog or an editor sends it.
+    Send(Box<Message>),
+    /// Work with the pointer in the viewport (a grip drag, for example).
+    Pointer(Box<dyn Fn(&mut OpenCADStudio)>),
+    /// One input to the command in progress, as a pick in the viewport or a
+    /// word on the command line gives it. `StepInput` has no `Clone`, so the
+    /// step makes it when it runs.
+    Feed(Box<dyn Fn() -> crate::command::StepInput>),
+}
+
+/// A case of more than one action: its name for the report, and its steps.
+struct Case {
+    name: String,
+    steps: Vec<Step>,
+}
+
+/// Changes made through the Properties palette: the object is selected, then
+/// the palette sends its message.
+fn palette_cases(d: &Drawing) -> Vec<Case> {
+    use document::types::{Color, LineWeight};
+    let case = |name: &str, handle: u64, message: Message| Case {
+        name: format!("Properties palette: {name}"),
+        steps: vec![
+            Step::Op(serde_json::json!({
+                "op": "select", "clear": true, "handles": [format!("{handle:X}")]
+            })),
+            Step::Send(Box::new(message)),
+        ],
+    };
+    vec![
+        case(
+            "layer",
+            d.circle,
+            Message::PropLayerChanged("Walls".to_string()),
+        ),
+        case("color", d.line, Message::PropColorChanged(Color::Index(1))),
+        case(
+            "lineweight",
+            d.arc,
+            Message::PropLwChanged(LineWeight::W0_50),
+        ),
+        case(
+            "linetype",
+            d.polyline,
+            Message::PropLinetypeChanged("Continuous".to_string()),
+        ),
+    ]
+}
+
+/// Text made in an editor: the command stops with the editor open, the text
+/// goes in, and the editor's OK commits it.
+fn editor_cases() -> Vec<Case> {
+    vec![
+        Case {
+            name: "MTEXT in the editor".to_string(),
+            steps: vec![
+                Step::Open("MTEXT 0,50 20,40".to_string(), "mtext_editor"),
+                Step::Send(Box::new(Message::MTextInsert("Notes".to_string()))),
+                Step::Send(Box::new(Message::MTextOk)),
+            ],
+        },
+        Case {
+            name: "TEXT in the in-place editor".to_string(),
+            steps: vec![
+                Step::Open("TEXT 0,60 2 0".to_string(), "text_editor"),
+                Step::Send(Box::new(Message::TextInlineInput("Hello".to_string()))),
+                Step::Send(Box::new(Message::TextInlineOk)),
+            ],
+        },
+    ]
+}
+
+/// Changes made in the layer palette and in the Block Definition window.
+fn window_cases(d: &Drawing) -> Vec<Case> {
+    let layer = |name: &str, message: Message| Case {
+        name: format!("Layer palette: {name}"),
+        steps: vec![
+            // LAYER with no arguments opens the palette and changes nothing.
+            Step::Run("LAYER".to_string()),
+            Step::Send(Box::new(message)),
+        ],
+    };
+    let walls = || "Walls".to_string();
+    vec![
+        layer("visible", Message::LayerToggleVisible(walls())),
+        layer("lock", Message::LayerToggleLock(walls())),
+        layer("freeze", Message::LayerToggleFreeze(walls())),
+        layer("plot", Message::LayerTogglePlot(walls())),
+        layer("new layer", Message::LayerNew),
+        Case {
+            name: "Block Definition window".to_string(),
+            steps: vec![
+                Step::Op(serde_json::json!({
+                    "op": "select",
+                    "clear": true,
+                    "handles": [format!("{:X}", d.circle), format!("{:X}", d.arc)]
+                })),
+                Step::Open("BLOCK".to_string(), "modal:BlockDefinition"),
+                Step::Send(Box::new(Message::BlockDefName("Fitting".to_string()))),
+                Step::Send(Box::new(Message::BlockDefApply)),
+            ],
+        },
+    ]
+}
+
+/// Commands in paper space and in the block editor: the setup steps go
+/// there (and can draw something first), then one command draws.
+fn place_cases() -> Vec<(Vec<Step>, Case)> {
+    let run = |command: &str| Step::Run(command.to_string());
+    let case = |place: &str, setup: &[&str], command: &str| {
+        (
+            setup.iter().map(|step| run(step)).collect(),
+            Case {
+                name: format!("{place}: {command}"),
+                steps: vec![run(command)],
+            },
+        )
+    };
+    vec![
+        case("Paper space", &["TILEMODE 0"], "LINE 1,1 5,5 "),
+        case("Paper space", &["TILEMODE 0"], "CIRCLE 3,3 1"),
+        case("Paper space", &["TILEMODE 0"], "MVIEW 1,1 8,6"),
+        case("Block editor", &["-BEDIT BLK"], "LINE 0,1 4,1 "),
+        // The setup adds an undo step of its own, which is not counted.
+        case(
+            "Block editor after a line",
+            &["-BEDIT BLK", "LINE 0,1 4,1 "],
+            "CIRCLE 1,1 1",
+        ),
+    ]
+}
+
+/// Commands that take a pick of an object, or work on the selection.
+fn pick_cases(d: &Drawing) -> Vec<Case> {
+    use crate::command::StepInput;
+    let run = |command: &str| Step::Run(command.to_string());
+    let open = |command: &str| Step::Open(command.to_string(), "command");
+    let feed = |input: fn(&Drawing) -> StepInput| {
+        let d = Drawing { ..*d };
+        Step::Feed(Box::new(move || input(&d)))
+    };
+    let word = |text: &'static str| Step::Feed(Box::new(move || StepInput::Text(text.to_string())));
+    let select = |object: u64| {
+        Step::Op(serde_json::json!({
+            "op": "select", "clear": true, "handles": [format!("{object:X}")]
+        }))
+    };
+    vec![
+        Case {
+            name: "LENGTHEN by a delta".to_string(),
+            steps: vec![
+                open("LENGTHEN"),
+                word("DE"),
+                word("2"),
+                feed(|d| {
+                    StepInput::EntityPick(
+                        document::Handle::new(d.line),
+                        glam::DVec3::new(9.0, 0.0, 0.0),
+                    )
+                }),
+                feed(|_| StepInput::Enter),
+            ],
+        },
+        Case {
+            name: "MATCHPROP from the line to the circle".to_string(),
+            steps: vec![
+                open("MATCHPROP"),
+                feed(|d| {
+                    StepInput::EntityPick(
+                        document::Handle::new(d.line),
+                        glam::DVec3::new(2.0, 0.0, 0.0),
+                    )
+                }),
+                feed(|d| StepInput::SelectionComplete(vec![document::Handle::new(d.circle)])),
+                feed(|_| StepInput::Enter),
+            ],
+        },
+        Case {
+            name: "DRAWORDER to the back".to_string(),
+            steps: vec![select(d.line), run("DRAWORDER BACK")],
+        },
+        Case {
+            name: "DRAWORDER to the front".to_string(),
+            steps: vec![select(d.line), run("DRAWORDER FRONT")],
+        },
+    ]
+}
+
+/// A drag of each grip of each object of the drawing: the grip is taken, the
+/// pointer moves two times, and the button is released.
+fn grip_cases(app: &OpenCADStudio, d: &Drawing) -> Vec<Case> {
+    let objects = [
+        ("line", d.line),
+        ("upright line", d.upright),
+        ("crossing line", d.crossing),
+        ("circle", d.circle),
+        ("arc", d.arc),
+        ("polyline", d.polyline),
+        ("text", d.text),
+        ("insert", d.insert),
+    ];
+    let document = &app.tabs[app.active_tab].scene.document;
+    let mut cases = Vec::new();
+    for (name, value) in objects {
+        let handle = document::Handle::new(value);
+        let entity = document.get_entity(handle).expect("the object");
+        for grip in crate::scene::view::dispatch::grips(entity) {
+            let (id, is_midpoint, world) = (grip.id, grip.is_midpoint, grip.world);
+            cases.push(Case {
+                name: format!("Grip {id} of the {name}"),
+                steps: vec![Step::Pointer(Box::new(move |app: &mut OpenCADStudio| {
+                    let tab = app.active_tab;
+                    app.snapper.snap_enabled = false;
+                    app.snapper.grid_snap_on = false;
+                    app.snapper.otrack_enabled = false;
+                    app.ortho_mode = false;
+                    app.polar_mode = false;
+                    app.tabs[tab].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+                    app.tabs[tab].active_grip =
+                        Some(GripEdit::single(handle, id, is_midpoint, world));
+                    for cursor in [Point::new(520.0, 220.0), Point::new(490.0, 180.0)] {
+                        let _ = app.on_viewport_move(cursor);
+                    }
+                    let _ = app.on_viewport_left_release();
+                }))],
+            });
+        }
+    }
+    cases
 }
 
 /// What is wrong with `command` on the drawing, if anything: it must
 /// complete, change the document, add one undo step, and be taken back by
 /// UNDO and put back by REDO exactly.
 fn check(command: &str) -> Vec<String> {
+    check_steps(command, &[Step::Run(command.to_string())])
+}
+
+/// Does the steps in order; the reason, if one of them cannot be done.
+fn run_steps(app: &mut OpenCADStudio, name: &str, steps: &[Step]) -> Result<(), String> {
+    for step in steps {
+        match step {
+            Step::Run(command) => {
+                let result = app
+                    .automation_op(&serde_json::json!({"op": "run", "cmd": command}).to_string());
+                if result["status"] != "completed" {
+                    return Err(format!("{name}: did not complete: {result}"));
+                }
+            }
+            Step::Open(command, editor) => {
+                let result = app
+                    .automation_op(&serde_json::json!({"op": "run", "cmd": command}).to_string());
+                if result["status"] != "waiting_input" || result["blocked_by"] != *editor {
+                    return Err(format!("{name}: did not open the {editor}: {result}"));
+                }
+            }
+            Step::Op(request) => {
+                let result = app.automation_op(&request.to_string());
+                if result["ok"] == false {
+                    return Err(format!("{name}: {request} failed: {result}"));
+                }
+                // The app builds the palette again after each change of the
+                // selection; the automation request does not.
+                app.refresh_properties();
+            }
+            Step::Send(message) => {
+                let _ = app.update(Message::clone(message));
+            }
+            Step::Pointer(action) => {
+                action(app);
+                app.finish_all_pending_history();
+            }
+            Step::Feed(input) => {
+                let _ = app.feed_command(input());
+                // The app closes an undo record at the end of each message;
+                // a direct call does not go through there.
+                app.finish_all_pending_history();
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `check` for a case of several steps. A step that selects or opens
+/// something must not change the document by itself: the steps together
+/// must change it, and add one undo step.
+fn check_steps(name: &str, steps: &[Step]) -> Vec<String> {
+    check_after(name, &[], steps)
+}
+
+/// `check_steps` in a place that the `setup` steps go to first (a layout,
+/// the block editor). The drawing after the setup is the one that UNDO must
+/// give back, and the setup's own undo steps are not counted.
+fn check_after(name: &str, setup: &[Step], steps: &[Step]) -> Vec<String> {
     let (mut app, _) = drawing();
     let tab = app.active_tab;
+    if let Err(failure) = run_steps(&mut app, name, setup) {
+        return vec![failure];
+    }
+    let steps_before = app.tabs[tab].history.undo_stack.len();
     let before = snapshot(&app);
-    let result = app.automation_op(&serde_json::json!({"op": "run", "cmd": command}).to_string());
-    if result["status"] != "completed" {
-        return vec![format!("{command}: did not complete: {result}")];
+    if let Err(failure) = run_steps(&mut app, name, steps) {
+        return vec![failure];
     }
     let after = snapshot(&app);
     if after == before {
-        return vec![format!("{command}: changed nothing")];
+        return vec![format!("{name}: changed nothing")];
     }
     let mut failures = Vec::new();
-    let steps = app.tabs[tab].history.undo_stack.len();
+    let steps = app.tabs[tab].history.undo_stack.len() - steps_before;
     if steps != 1 {
-        failures.push(format!("{command}: {steps} undo steps"));
+        failures.push(format!("{name}: {steps} undo steps"));
     }
     app.undo_active_tab();
     let undone = snapshot(&app);
     if undone != before {
         failures.push(format!(
-            "{command}: UNDO: {}",
+            "{name}: UNDO: {}",
             first_differences(&before, &undone)
         ));
     }
@@ -203,7 +516,7 @@ fn check(command: &str) -> Vec<String> {
     let redone = snapshot(&app);
     if redone != after {
         failures.push(format!(
-            "{command}: REDO: {}",
+            "{name}: REDO: {}",
             first_differences(&after, &redone)
         ));
     }
@@ -216,6 +529,73 @@ fn check(command: &str) -> Vec<String> {
 fn every_command_is_undone_and_redone_exactly() {
     let (_, d) = drawing();
     let failures: Vec<String> = commands(&d).iter().flat_map(|c| check(c)).collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The same for a change that the Properties palette makes to the selection.
+#[test]
+fn every_palette_change_is_undone_and_redone_exactly() {
+    let (_, d) = drawing();
+    let failures: Vec<String> = palette_cases(&d)
+        .iter()
+        .flat_map(|case| check_steps(&case.name, &case.steps))
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The same for text that an editor makes.
+#[test]
+fn every_editor_commit_is_undone_and_redone_exactly() {
+    let failures: Vec<String> = editor_cases()
+        .iter()
+        .flat_map(|case| check_steps(&case.name, &case.steps))
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The same for a change in the layer palette or the Block Definition window.
+#[test]
+fn every_window_change_is_undone_and_redone_exactly() {
+    let (_, d) = drawing();
+    let failures: Vec<String> = window_cases(&d)
+        .iter()
+        .flat_map(|case| check_steps(&case.name, &case.steps))
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The same for a command in paper space or in the block editor.
+#[test]
+fn every_command_in_another_place_is_undone_and_redone_exactly() {
+    let failures: Vec<String> = place_cases()
+        .iter()
+        .flat_map(|(setup, case)| check_after(&case.name, setup, &case.steps))
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The same for a command that takes a pick or works on the selection.
+#[test]
+fn every_command_with_a_pick_is_undone_and_redone_exactly() {
+    let (_, d) = drawing();
+    let failures: Vec<String> = pick_cases(&d)
+        .iter()
+        .flat_map(|case| check_steps(&case.name, &case.steps))
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The same for a drag of each grip of each object.
+#[test]
+fn every_grip_drag_is_undone_and_redone_exactly() {
+    let (app, d) = drawing();
+    let cases = grip_cases(&app, &d);
+    // A sweep with no case would pass: the drawing has 25 grips now.
+    assert!(cases.len() >= 25, "{} grips", cases.len());
+    let failures: Vec<String> = cases
+        .iter()
+        .flat_map(|case| check_steps(&case.name, &case.steps))
+        .collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 

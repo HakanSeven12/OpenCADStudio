@@ -440,7 +440,7 @@ impl Scene {
         let handles: Vec<Handle> = self
             .without_sheet_viewports(handles)
             .into_iter()
-            .filter(|&h| !self.is_layer_locked(h))
+            .filter(|&h| !self.is_layer_locked(h) && !self.is_fixed_in_place(h))
             .collect();
         let handles = &handles[..];
         let selection: rustc_hash::FxHashSet<Handle> = handles.iter().copied().collect();
@@ -1562,7 +1562,7 @@ impl Scene {
         // Objects on a locked layer can be selected but not copied.
         let clones: Vec<(Handle, EntityType, Vec<Handle>, Option<Handle>)> = copy_handles
             .iter()
-            .filter(|&&h| !self.is_layer_locked(h))
+            .filter(|&&h| !self.is_layer_locked(h) && !self.is_fixed_in_place(h))
             .filter_map(|&h| {
                 let entity = self.document.get_entity(h)?.clone();
 
@@ -3753,6 +3753,13 @@ pub(super) fn remap_copied_xdict_cross_refs(
                 }
                 for entry in &mut x.object_references {
                     entry.handle = rewrite(entry.handle);
+                }
+            }
+            // A field naming an object copied with it follows the copy, so a
+            // copied line and its length field stay linked (#3435).
+            document::objects::ObjectType::Field(f) => {
+                for r in &mut f.referenced_objects {
+                    *r = rewrite(*r);
                 }
             }
             _ => {}

@@ -327,10 +327,40 @@ pub(super) fn save_map(map: &FxHashMap<String, String>) -> std::io::Result<()> {
     }
 }
 
+/// Workbook rows (alias, command) as PGP lines; Export's header row is left out.
+fn alias_rows_as_pgp(rows: &[Vec<String>]) -> String {
+    let header = |cell: &str, english: &str, local: &str| {
+        cell.eq_ignore_ascii_case(english) || cell == local
+    };
+    let (alias, command) = (crate::t!("Alias"), crate::t!("Command"));
+    let mut text = String::new();
+    for (i, row) in rows.iter().enumerate() {
+        let cell = |k: usize| row.get(k).map_or("", |c| c.trim());
+        if i == 0 && header(cell(0), "Alias", &alias) && header(cell(1), "Command", &command) {
+            continue;
+        }
+        text.push_str(&format!("{},*{}\n", cell(0), cell(1)));
+    }
+    text
+}
+
 impl OpenCADStudio {
     /// Merge into the working buffer only. Apply persists; closing can discard.
     pub(super) fn import_alias_pgp(&mut self, bytes: &[u8]) {
-        let parsed = pgp::parse(&pgp::decode(bytes));
+        // A workbook is the two columns Export writes (#3444): read its rows
+        // as PGP lines so they pass the same checks.
+        let text = if bytes.starts_with(b"PK\x03\x04") {
+            match crate::app::annotation_data::workbook_first_sheet_rows(bytes) {
+                Ok(rows) => alias_rows_as_pgp(&rows),
+                Err(error) => {
+                    self.command_line.push_error(&format!("PGP: {error}"));
+                    return;
+                }
+            }
+        } else {
+            pgp::decode(bytes)
+        };
+        let parsed = pgp::parse(&text);
         let known = crate::command::all_registered_command_names();
         let mut rows: FxHashMap<String, String> = self
             .alias_editor_rows

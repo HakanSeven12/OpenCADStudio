@@ -1087,6 +1087,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "BMAKE",
         "EXPORTPDF",
         "EXPORTSVG",
+        "EXPORTDWF",
         "PRINTALL",
         "PUBLISH",
         "DDIM",
@@ -1111,7 +1112,9 @@ inventory::submit!(crate::command::CommandRegistration {
         "MULTIPLE",
         // Plan (top) view.
         "PICKADD",
+        "PICKAUTO",
         "PICKDRAG",
+        "PICKFIRST",
         "PLAN",
         // Current object colour (CECOLOR).
         "COLOR",
@@ -1352,6 +1355,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "SURFACEASSOCIATIVITY",
         "DGNIMPORTMODE",
         "LAYOUTCREATEVIEWPORT",
+        "PICKLOCKED",
         "TXT2MTXTCOMBINEMTEXT",
         "TXT2MTXTTEXTORDER",
         "TXT2MTXTWORDWRAP",
@@ -1366,6 +1370,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "PDFSHXBESTFONT",
         "PDFSHXTEXTSETTINGS",
         "XDWGFADECTL",
+        "LAYLOCKFADECTL",
         "POINTCLOUDCLIPFRAME",
         "POINTCLOUDDENSITY",
         "POINTCLOUDPOINTSIZE",

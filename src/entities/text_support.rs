@@ -4426,7 +4426,7 @@ mod v_anchor_tests {
     }
 
     #[test]
-    fn test_mtext_arabic_bidi_layout() {
+    fn mtext_arabic_bidi_layout() {
         use crate::entities::text_support::{
             layout_mtext, MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,
         };

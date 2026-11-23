@@ -595,8 +595,8 @@ pub(crate) fn wire_distances(wire: &WireModel) -> WireDashes {
                 }
                 dists[i] = acc as f32;
             } else {
-                let pl = wire.points_low.get(i - 1).copied().unwrap_or([0.0; 3]);
-                let ql = wire.points_low.get(i).copied().unwrap_or([0.0; 3]);
+                let pl = wire.points_low.get(i - 1).unwrap_or([0.0; 3]);
+                let ql = wire.points_low.get(i).unwrap_or([0.0; 3]);
                 let dx = (q[0] as f64 - p[0] as f64) + (ql[0] as f64 - pl[0] as f64);
                 let dy = (q[1] as f64 - p[1] as f64) + (ql[1] as f64 - pl[1] as f64);
                 let dz = (q[2] as f64 - p[2] as f64) + (ql[2] as f64 - pl[2] as f64);
@@ -818,7 +818,7 @@ fn band_miters(wire: &WireModel, normal: [f32; 4]) -> Vec<[f32; 2]> {
     }
     let at = |i: usize| -> Option<glam::DVec3> {
         let h = wire.points[i];
-        let l = wire.points_low.get(i).copied().unwrap_or([0.0; 3]);
+        let l = wire.points_low.get(i).unwrap_or([0.0; 3]);
         finite3(h).then(|| {
             glam::DVec3::new(
                 h[0] as f64 + l[0] as f64,
@@ -922,7 +922,10 @@ pub(crate) fn emit_wire_packed(
         wire.pattern[6],
         wire.pattern[7],
     ];
-    let half_width = wire.line_weight_px.max(1.0) * 0.5;
+    // The lineweight's own half-width, even under half a pixel: the shaders
+    // keep every line at least half a pixel wide after the layout's scale,
+    // and a floor here made every weight up to 0.26 mm one on paper (#3470).
+    let half_width = wire.line_weight_px.max(0.0) * 0.5;
     let n = wire.points.len();
     let seg_count = n.saturating_sub(1);
     if seg_count == 0 {
@@ -936,7 +939,7 @@ pub(crate) fn emit_wire_packed(
     };
     let (marker_origin_high, marker_origin_low, marker_normal_scale) = marker_metadata(wire);
     let miters = band_miters(wire, marker_normal_scale);
-    let low = |i: usize| -> [f32; 3] { wire.points_low.get(i).copied().unwrap_or([0.0; 3]) };
+    let low = |i: usize| -> [f32; 3] { wire.points_low.get(i).unwrap_or([0.0; 3]) };
     let is_tapered = !wire.taper_widths.is_empty();
     let tw = |i: usize| -> f32 {
         if is_tapered {
@@ -1024,7 +1027,8 @@ pub(crate) fn emit_wire_native(
             wire.pattern[6],
             wire.pattern[7],
         ],
-        half_width: wire.line_weight_px.max(1.0) * 0.5,
+        // Under half a pixel too, as in `emit_wire_packed` (#3470).
+        half_width: wire.line_weight_px.max(0.0) * 0.5,
         pattern_length: wire.pattern_length,
         draw_depth,
         _reserved: 0.0,
@@ -1040,7 +1044,7 @@ pub(crate) fn emit_wire_native(
     if seg_count == 0 {
         return (Vec::new(), cst);
     }
-    let low = |i: usize| -> [f32; 3] { wire.points_low.get(i).copied().unwrap_or([0.0; 3]) };
+    let low = |i: usize| -> [f32; 3] { wire.points_low.get(i).unwrap_or([0.0; 3]) };
     let snorm = |v: f32| -> i16 { (v.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16 };
     let taper_ratio = |i: usize| -> i16 {
         if !is_tapered || wire.world_width <= 0.0 {
@@ -1812,7 +1816,7 @@ pub(crate) fn relative_points(wire: &WireModel) -> (Vec<[f32; 3]>, f32) {
         .iter()
         .enumerate()
         .map(|(index, point)| {
-            let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+            let low = wire.points_low.get(index).unwrap_or([0.0; 3]);
             let mut relative = [0.0f32; 3];
             for axis in 0..3 {
                 let absolute = point[axis] as f64 + low[axis] as f64;

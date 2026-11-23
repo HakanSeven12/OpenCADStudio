@@ -344,4 +344,148 @@ mod tests {
             assert_eq!(index(c), want, "{c:?}");
         }
     }
+
+    /// SAT text of several bodies, written by the app's own writer.
+    fn sat_fixtures() -> Vec<String> {
+        use ocs_solid::model::{
+            boolean, make_box, make_cone, make_cylinder, make_sphere, make_torus,
+        };
+        let cut = boolean(
+            &make_box([0.0, 0.0, 0.0], [10.0, 10.0, 10.0]).unwrap(),
+            &make_cylinder([5.0, 5.0, -1.0], 2.0, 12.0).unwrap(),
+            ocs_solid::model::BooleanOp::Subtract,
+        )
+        .unwrap()
+        .expect("a box with a hole");
+        [
+            make_box([0.0, 0.0, 0.0], [10.0, 20.0, 30.0]).unwrap(),
+            make_cylinder([0.0, 0.0, 0.0], 5.0, 10.0).unwrap(),
+            make_sphere([0.0, 0.0, 0.0], 5.0).unwrap(),
+            make_cone([0.0, 0.0, 0.0], 5.0, 2.0, 10.0).unwrap(),
+            make_torus([0.0, 0.0, 0.0], 10.0, 2.0).unwrap(),
+            cut,
+        ]
+        .iter()
+        .map(|body| {
+            crate::scene::convert::acis_export::solid_to_sat(body)
+                .expect("the body writes")
+                .to_sat_string()
+        })
+        .collect()
+    }
+
+    /// Draws `entities` in a new drawing, as the app does after an import.
+    fn draw(entities: Vec<EntityType>) {
+        let mut scene = crate::scene::Scene::new();
+        for entity in entities {
+            scene.add_entity(entity);
+        }
+        let camera = crate::scene::view::camera::Camera::default();
+        let _ = scene.model_tile_wires_arc(0, &camera, 1.0, 1.0);
+        scene.fit_all();
+    }
+
+    /// Runs `work` on its own thread and fails if it does not end in
+    /// `seconds`: a loop that never ends fails the test and does not hang
+    /// the test run.
+    fn ends_in(seconds: u64, what: &str, work: impl FnOnce() + Send + 'static) {
+        let (done, wait) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            work();
+            let _ = done.send(());
+        });
+        match wait.recv_timeout(std::time::Duration::from_secs(seconds)) {
+            Ok(()) => worker.join().expect("the work ended"),
+            // The work panicked: show its panic.
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                if let Err(panic) = worker.join() {
+                    std::panic::resume_unwind(panic);
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                panic!("{what} did not end in {seconds} s")
+            }
+        }
+    }
+
+    /// A SAT file can read correctly and still stop the app later: the
+    /// solid kernel reads the records again when the body is drawn. An edge
+    /// on a circle with a stored parameter of 1e308 made that step add
+    /// turns to the angle without end.
+    #[test]
+    fn a_sat_edge_with_a_huge_parameter_does_not_hang_the_draw() {
+        let cylinder = sat_fixtures().swap_remove(1);
+        let edge = "edge $-1 -1 $-1 $3 0 $3 6.283185307179586 ";
+        assert!(cylinder.contains(edge), "the rim edge of the cylinder");
+        for (start, end) in [("1e308", "1e308"), ("-1e308", "-1e308"), ("inf", "inf")] {
+            let damaged = cylinder.replace(edge, &format!("edge $-1 -1 $-1 $3 {start} $3 {end} "));
+            // The kernel says that it lost the curve of that edge, and keeps
+            // the face that does not use it.
+            let parsed = document::entities::acis::SatDocument::parse(&damaged)
+                .expect("the damaged file is still SAT text");
+            let (bodies, loss) = ocs_solid::lift(&parsed);
+            assert_eq!(loss.curves.len(), 1, "the curve of the edge: {loss:?}");
+            assert!(loss.refusals.is_empty(), "no later refusal: {loss:?}");
+            assert_eq!(bodies.len(), 1);
+            assert_eq!(bodies[0].face_records.len(), 1, "one face of the three");
+            ends_in(20, "the draw of the damaged cylinder", move || {
+                if let Some(imported) = read(ModelFormat::Sat, damaged.as_bytes(), None, "x") {
+                    draw(imported.entities);
+                }
+            });
+        }
+    }
+
+    /// Damaged copies of each fixture: cut at each line and at each seventh
+    /// byte, each line left out, and each number and record pointer
+    /// replaced by a value that a damaged file can hold. None can panic
+    /// when it is read, and each eighth one that still reads is drawn.
+    #[test]
+    fn damaged_sat_files_never_panic() {
+        const VALUES: [&str; 9] = [
+            "0", "-1", "1e308", "-1e308", "1e-308", "99999999", "nan", "$-1", "$99999",
+        ];
+        ends_in(120, "the read and the draw of the damaged files", || {
+            let mut cases = 0;
+            let mut drawn = 0;
+            let mut value = 0;
+            for text in sat_fixtures() {
+                let lines: Vec<&str> = text.lines().collect();
+                let mut check = |damaged: String| {
+                    cases += 1;
+                    let imported = read(ModelFormat::Sat, damaged.as_bytes(), None, "x");
+                    if let Some(imported) = imported.filter(|_| cases % 8 == 0) {
+                        drawn += 1;
+                        draw(imported.entities);
+                    }
+                };
+                for n in 0..lines.len() {
+                    check(lines[..n].join("\n"));
+                    check([&lines[..n], &lines[n + 1..]].concat().join("\n"));
+                }
+                for cut in (0..text.len()).step_by(7) {
+                    check(text[..cut].to_string());
+                }
+                for (n, line) in lines.iter().enumerate() {
+                    let tokens: Vec<&str> = line.split(' ').collect();
+                    for k in 0..tokens.len() {
+                        if !tokens[k].starts_with('$') && tokens[k].parse::<f64>().is_err() {
+                            continue;
+                        }
+                        for _ in 0..2 {
+                            let mut replaced = tokens.clone();
+                            replaced[k] = VALUES[value % VALUES.len()];
+                            value += 1;
+                            let replaced = replaced.join(" ");
+                            let mut damaged = lines.clone();
+                            damaged[n] = &replaced;
+                            check(damaged.join("\n"));
+                        }
+                    }
+                }
+            }
+            assert!(cases > 7000, "{cases} damaged files");
+            assert!(drawn > 500, "{drawn} damaged files drawn");
+        });
+    }
 }

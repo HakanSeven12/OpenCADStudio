@@ -1340,7 +1340,7 @@ fn highlight(
         FIND_FRAME,
         WireGeom {
             points,
-            points_low,
+            points_low: points_low.into(),
             ..WireGeom::default()
         },
     );

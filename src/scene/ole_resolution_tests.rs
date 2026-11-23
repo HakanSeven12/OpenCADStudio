@@ -86,6 +86,85 @@ fn an_ole_picture_on_a_sheet_follows_the_sheet_zoom() {
     assert_eq!((printed.width, printed.height), (1600, 1600));
 }
 
+// ── The sheet shows the raster a zoom step draws again ──
+
+/// The frame of the sheet as the scene is now, on a 1000-pixel square
+/// canvas, and the signature of each of its viewports.
+fn sheet_frame(scene: &Scene) -> (crate::scene::view::render::Primitive, Vec<u64>) {
+    let canvas = iced::Rectangle {
+        x: 0.0,
+        y: 0.0,
+        width: 1000.0,
+        height: 1000.0,
+    };
+    let primitive = scene.build_viewports(
+        canvas,
+        document::entities::ViewportRenderMode::Wireframe2D,
+        None,
+        false,
+        false,
+        [1.0; 4],
+    );
+    let signatures = primitive.frame_signatures(canvas);
+    (primitive, signatures)
+}
+
+/// The sheet gathers its own pictures into a list of its own, kept from
+/// frame to frame. A zoom step's new raster of a picture goes into that
+/// list, with the triangles it is drawn with, and makes another frame.
+#[test]
+fn the_sheet_shows_the_raster_a_zoom_step_draws_again() {
+    let (mut scene, handle) = sheet_with_ole();
+    look_at(&mut scene, 0.0, 0.0, 100.0, 100.0);
+
+    // Zoomed in on a tenth of the picture, the view rests: a job waits.
+    scene.zoom_to_window(
+        glam::Vec3::new(40.0, 40.0, 0.0),
+        glam::Vec3::new(50.0, 50.0, 0.0),
+    );
+    scene.set_render_pixel_scale(1000.0, 1000.0);
+    let start = iced::time::Instant::now();
+    scene.refresh_underlay_resolution(start);
+    scene.refresh_underlay_resolution(start + Duration::from_millis(200));
+    // The frame on screen while the worker draws. The renderer keeps the
+    // lists of the frame it drew, as `shown` does here.
+    let (shown, before) = sheet_frame(&scene);
+    let old = std::sync::Arc::clone(&scene.images[&handle].pixels);
+
+    let job = scene.take_reseed_job().expect("a job for the worker");
+    assert_eq!(scene.apply_reseed(job.render()), 1);
+    let fresh = scene.images[&handle].clone();
+    assert!(
+        !std::sync::Arc::ptr_eq(&old, &fresh.pixels),
+        "the zoom step drew the picture again"
+    );
+
+    let (_, _, listed) = scene.paper_sheet_render_models();
+    let picture = listed
+        .iter()
+        .find(|model| model.entity == Some(handle))
+        .expect("the picture is on the sheet");
+    assert!(
+        std::sync::Arc::ptr_eq(&picture.pixels, &fresh.pixels),
+        "the sheet's list has the new raster"
+    );
+    let corners =
+        |model: &crate::scene::model::image_model::ImageModel| -> Vec<([f32; 3], [f32; 2])> {
+            model.verts.iter().map(|v| (v.pos, v.uv)).collect()
+        };
+    assert_eq!(
+        corners(picture),
+        corners(&fresh),
+        "and draws it with the raster's own triangles"
+    );
+    let (drawn, after) = sheet_frame(&scene);
+    assert_ne!(before, after, "the new raster makes another frame");
+    assert!(
+        !std::sync::Arc::ptr_eq(&shown.viewports[0].images, &drawn.viewports[0].images),
+        "with another list than the one the renderer has, so it is uploaded"
+    );
+}
+
 // ── One render of each picture at a zoom step (#3292) ──
 
 fn seeds() -> usize {

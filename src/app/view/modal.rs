@@ -275,9 +275,11 @@ impl OpenCADStudio {
                             pick_box: self.pick_box,
                             aperture: self.snapper.osnap_radius_px.round() as i32,
                             pick_add: self.pick_add,
-                            pick_drag_rect: self.pick_drag_rect,
+                            pick_drag_mode: self.pick_drag_mode,
+                            pick_auto: self.pick_auto,
+                            pick_first: self.pick_first,
                             grip_object_limit: self.grip_object_limit,
-                            selection_cycling: self.selection_cycling,
+                            selection_cycling: self.selection_cycling > 0,
                         },
                         crate::ui::window::options::AppPrefs {
                             savetime_min: self.savetime_min,
@@ -400,6 +402,9 @@ impl OpenCADStudio {
                         self.command_text_color,
                         &self.command_text_color_input,
                         self.lineweight_display_scale,
+                        self.tabs
+                            .get(self.active_tab)
+                            .is_some_and(|t| t.scene.document.header.lineweight_display),
                         &self.model_space,
                         &self.model_bg_input,
                         &self.paper_bg_input,
@@ -2236,7 +2241,7 @@ fn unsaved_changes_dialog_window(
                     if block_edit {
                         t!("Save the changes")
                     } else {
-                        t!("Save")
+                        format!("{} (S)", t!("Save")).into()
                     },
                     if block_edit {
                         Message::BlockEditChangesSave
@@ -2250,7 +2255,7 @@ fn unsaved_changes_dialog_window(
                     if block_edit {
                         t!("Discard the changes")
                     } else {
-                        t!("Don't Save")
+                        format!("{} (N)", t!("Don't Save")).into()
                     },
                     if block_edit {
                         Message::BlockEditChangesDiscard
@@ -2261,7 +2266,11 @@ fn unsaved_changes_dialog_window(
                 ),
                 iced::widget::Space::new().width(8),
                 dialog_button(
-                    t!("Cancel"),
+                    if block_edit {
+                        t!("Cancel")
+                    } else {
+                        format!("{} (C)", t!("Cancel")).into()
+                    },
                     if block_edit {
                         Message::BlockEditChangesCancel
                     } else {

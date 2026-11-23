@@ -239,7 +239,11 @@ impl OpenCADStudio {
                         )
                     })?;
                 } else {
+                    let units_before = self.tabs[i].scene.document.header.insertion_units;
                     set_sysvar(&mut self.tabs[i].scene.document, name, value)?;
+                    if name.eq_ignore_ascii_case("insunits") {
+                        self.tabs[i].scene.insertion_units_changed(units_before);
+                    }
                 }
                 // System variables are persisted drawing state, not merely a
                 // UI preference. CLAYER is already marked dirty by the unified

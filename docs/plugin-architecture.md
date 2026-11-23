@@ -531,6 +531,50 @@ hard-constrained drag direction), and `shape`. The declaration lifecycle:
   store walk into one frame per pass — the record-carrier twin of
   `entities_batch`. With dirty regions, a boundary pass is 2–3 frames
   instead of dozens.
+- **Categorized document delta (v27).** `DocumentChangedDelta`
+  (discriminant 15) is the exact categorized successor of
+  `DocumentChangedRegions`: the host routes it INSTEAD OF the Regions
+  notification, per plugin, to every endpoint whose manifest API is 27 or
+  newer — no endpoint receives a duplicate Regions + delta stream, and
+  legacy APIs keep the byte-identical Regions stream:
+  - `added` handles are absent before the boundary and present after;
+    `modified` handles are present on both sides whose relevant data
+    changed; `deleted` handles are present before, absent after — a deleted
+    handle STAYS in the list even though lookup now fails (the deletion
+    itself is the information).
+  - A same-handle replacement (erase + recreate reusing the handle) is
+    `modified`; a replacement through a new handle is
+    `deleted(old) + added(new)`.
+  - Repeated changes to one handle within ONE boundary fold into the net
+    classification via first-event start presence vs last-event end
+    presence: created-then-erased nets to nothing, erased-then-recreated
+    nets to `modified`. The lists are ascending and deduplicated.
+  - `records` preserves the v13 behavior: the same (entity, app-name)
+    XDATA/XRecord touch pairs the Regions notification carried.
+  - `full_refresh_required` is the honesty flag: `true` means the host
+    cannot prove the incremental sets are complete (journal gap, overflow,
+    or an unattributable whole-document mutation) and the plugin MUST
+    resynchronize the whole document; `false` with all lists empty is an
+    EXACT "nothing relevant changed" — distinct from the legacy
+    empty-set-unknown of `DocumentChangedRegions`.
+  - `snapshot` (`DocumentDeltaSnapshot { version, generation }`) correlates
+    the boundary with the tab's V4 snapshot store: `version` matches the
+    `DocumentChangedV4` notification's version for the same boundary;
+    `generation` increments when the backing file mapping is replaced
+    (resize/reopen) — versions from different generations are never
+    comparable, so a plugin seeing a foreign generation re-fetches the
+    store path and re-opens. `snapshot: None` = no V4 store open for the
+    tab (legitimate, not a failure).
+  - Coverage is central-journal based, so every boundary is captured the
+    same way: built-in commands, direct editing and grips, multi-entity
+    operations, undo/redo (resulting-state semantics — the folded lists
+    reflect the state after the whole boundary), and plugin HostApi
+    operations.
+  - Multi-document: per-tab state is keyed by stable tab ids (never UI
+    array indices). Every delta carries the `tab_id`; a wholesale document
+    replacement rides `DocumentOpened` plus a full-refresh delta
+    (`full_refresh_required=true`); `DocumentTabClosed` is the final
+    notification for a tab — deltas queued for a closing tab die with it.
 
 **MCP parity.** Plugin-declared grips appear in the automation `grips` read
 (each entry marked with its owning `plugin`), and `grip_drag` takes a `plugin`
@@ -837,7 +881,7 @@ Which surface carries what:
 | Entity XDATA | `xdata_get` / `xdata_set` | `read_record` / `write_record` / `remove_record` |
 | NOD XRecords | — | `create/read/update/delete/list_xrecord` + the v13 batches |
 | Bulk data | `batch` (batched **ops**) | `entities_batch`, record batches (batched **data**) |
-| Notifications | `events` (the session journal) | `on_notification` (`DocumentChanged`, `DocumentChangedRegions`, …) |
+| Notifications | `events` (the session journal) | `on_notification` (`DocumentChanged`, `DocumentChangedRegions`, v27 upgrades it to `DocumentChangedDelta`, …) |
 | Viewport automation | `click`, `pointer`, `getpoint`, `user_select`, `view_focus`, `capture` | — (a plugin's grip events are its gestures) |
 | Reference-only designation | — | `set_reference_only` |
 | Parametric chain staging / sampling (v14) | — (`query` reads the staged entities) | `stage_parametric_chain` / `sample_parametric` |

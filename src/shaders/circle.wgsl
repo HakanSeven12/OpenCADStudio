@@ -54,6 +54,7 @@ struct VertexOut {
     @location(8) @interpolate(flat) start_angle:    f32,
     @location(9) @interpolate(flat) end_angle:      f32,
     @location(10) @interpolate(flat) is_world:     f32,
+    @location(11) @interpolate(linear) ndc:        vec2<f32>,
 }
 
 // The selection pass widens highlighted lines by `highlight_widen` pixels;
@@ -125,6 +126,7 @@ fn resolve_px_hw_base(px_hw: f32) -> f32 {
 
     var out: VertexOut;
     out.clip_pos = clip_pos;
+    out.ndc = clip_pos.xy / clip_pos.w;
     out.local_pos = vec2<f32>(u_val * ext, v_val * ext);
     out.radius = radius;
     out.hw_ends = vec2<f32>(hw_a, hw_b);
@@ -184,8 +186,18 @@ fn in_dash(dist: f32, pat_len: f32, p0: vec4<f32>, p1: vec4<f32>) -> bool {
     return false;
 }
 
+// Physical pixels per logical pixel at this fragment. Lineweights are in
+// logical pixels (`u.viewport_size`, as the wire shader extrudes lines), but
+// the coverage below measures distance in framebuffer pixels; on a scaled
+// display (200 %) an arc would otherwise come out half as wide as a line.
+fn physical_per_logical(ndc: vec2<f32>) -> f32 {
+    let step = abs(dpdx(ndc.x)) * u.viewport_size.x;
+    return select(1.0, 2.0 / step, step > 1e-6);
+}
+
 @fragment fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let r = length(in.local_pos);
+    let px_scale = physical_per_logical(in.ndc);
 
     // Screen-space derivative anti-aliasing:
     // Use the gradient of the monotonic radial distance `r` instead of `abs(r - radius)`.
@@ -258,7 +270,7 @@ fn in_dash(dist: f32, pat_len: f32, p0: vec4<f32>, p1: vec4<f32>) -> bool {
         // Lineweight stroke (screen-pixel width)
         if is_full_or_in_sweep {
             let t = select(0.0, clamp(d_theta / sweep, 0.0, 1.0), sweep > 1e-5);
-            let cur_hw = mix(in.hw_ends.x, in.hw_ends.y, t);
+            let cur_hw = mix(in.hw_ends.x, in.hw_ends.y, t) * px_scale;
             let d_world = abs(r - in.radius);
             let d_px = d_world / fw;
             alpha_cov = clamp(0.5 + cur_hw - d_px, 0.0, 1.0);
@@ -268,8 +280,8 @@ fn in_dash(dist: f32, pat_len: f32, p0: vec4<f32>, p1: vec4<f32>) -> bool {
             let p_end = in.radius * vec2<f32>(cos(ea), sin(ea));
             let d_start_px = length(in.local_pos - p_start) / fw;
             let d_end_px = length(in.local_pos - p_end) / fw;
-            let cov_start = clamp(0.5 + in.hw_ends.x - d_start_px, 0.0, 1.0);
-            let cov_end = clamp(0.5 + in.hw_ends.y - d_end_px, 0.0, 1.0);
+            let cov_start = clamp(0.5 + in.hw_ends.x * px_scale - d_start_px, 0.0, 1.0);
+            let cov_end = clamp(0.5 + in.hw_ends.y * px_scale - d_end_px, 0.0, 1.0);
             alpha_cov = max(cov_start, cov_end);
             arc_dist = select(in.radius * sweep, 0.0, cov_start >= cov_end);
         }

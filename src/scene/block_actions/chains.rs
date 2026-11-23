@@ -6,30 +6,76 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) const CYCLE_ERROR: &str = "The block action chain contains a cycle.";
 
+/// Which points of a target parameter a Move action carries: the whole
+/// parameter, or one end of a Linear parameter whose grip it selects.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Part {
+    base: bool,
+    end: bool,
+}
+
+const WHOLE: Part = Part {
+    base: true,
+    end: true,
+};
+
+impl Part {
+    fn union(self, other: Part) -> Part {
+        Part {
+            base: self.base || other.base,
+            end: self.end || other.end,
+        }
+    }
+}
+
+/// Per-end displacement received from incoming Move actions.
+#[derive(Clone, Copy, Default)]
+struct Offset {
+    base: DVec3,
+    end: DVec3,
+}
+
 fn frame_index(
     doc: &Document,
     definition: Handle,
     parameters: &[Parameter],
-) -> Result<BTreeMap<Handle, (Handle, i32)>, &'static str> {
+) -> Result<BTreeMap<Handle, (Handle, i32, Part)>, &'static str> {
     let owner = authoring::graph(doc, definition).ok().flatten();
     let mut index = BTreeMap::new();
     for p in parameters.iter().filter(|p| p.is_move_target()) {
-        for h in [
-            p.handle,
-            if p.point || p.flip {
-                p.grip
-            } else {
-                Handle::NULL
-            },
-        ] {
+        let mut members = vec![(p.handle, WHOLE)];
+        if p.point || p.flip {
+            members.push((p.grip, WHOLE));
+        } else if p.linear {
+            // A Linear grip in a Move selection carries that end only.
+            for grip in super::super::block_grips::config::locations(doc, definition, p.handle)
+                .unwrap_or_default()
+            {
+                let part = match grip.role {
+                    0 => Part {
+                        base: true,
+                        end: false,
+                    },
+                    1 => Part {
+                        base: false,
+                        end: true,
+                    },
+                    _ => continue,
+                };
+                members.push((grip.handle, part));
+            }
+        }
+        for (h, part) in members {
             if h != Handle::NULL && doc.object_owner(h) == owner {
                 if index
                     .get(&h)
-                    .is_some_and(|previous| *previous != (p.handle, p.id))
+                    .is_some_and(|previous: &(Handle, i32, Part)| {
+                        (previous.0, previous.1) != (p.handle, p.id)
+                    })
                 {
                     return Err("An action has an unsupported parameter binding.");
                 }
-                index.insert(h, (p.handle, p.id));
+                index.insert(h, (p.handle, p.id, part));
             }
         }
     }
@@ -44,21 +90,26 @@ pub(super) fn frame_target(
 ) -> Option<Handle> {
     let parameters = all_parameters(doc, definition);
     let index = frame_index(doc, definition, &parameters).ok()?;
-    index.get(&handle).and_then(|(parameter, id)| {
+    index.get(&handle).and_then(|(parameter, id, _)| {
         (*id != source_id || *parameter == handle).then_some(*parameter)
     })
 }
 
 /// Points have one movable coordinate; two-point parameters transport both.
-fn translated(p: &Parameter, frame: ParameterFrame, delta: DVec3) -> ParameterFrame {
+fn translated(p: &Parameter, frame: ParameterFrame, offset: Offset, sign: f64) -> ParameterFrame {
     ParameterFrame {
-        base: if p.point { p.base } else { frame.base + delta },
-        end: frame.end + delta,
+        base: if p.point {
+            p.base
+        } else {
+            frame.base + offset.base * sign
+        },
+        end: frame.end + offset.end * sign,
     }
 }
 
 struct Link<'a> {
     target: Handle,
+    part: Part,
     action: &'a BlockMoveAction,
 }
 struct Node<'a> {
@@ -85,15 +136,15 @@ impl<'a> Graph<'a> {
             if kind != Kind::Move {
                 continue;
             }
-            let targets = action
-                .dependencies
-                .iter()
-                .filter_map(|handle| {
-                    index.get(handle).and_then(|(parameter, id)| {
-                        (*id != source_id || *parameter == *handle).then_some(*parameter)
-                    })
-                })
-                .collect::<BTreeSet<_>>();
+            let mut targets = BTreeMap::<Handle, Part>::new();
+            for handle in &action.dependencies {
+                if let Some((parameter, id, part)) = index.get(handle) {
+                    if *id != source_id || *parameter == *handle {
+                        let entry = targets.entry(*parameter).or_insert(*part);
+                        *entry = entry.union(*part);
+                    }
+                }
+            }
             if targets.is_empty() {
                 continue;
             }
@@ -109,7 +160,7 @@ impl<'a> Graph<'a> {
             };
             for p in std::iter::once(source).chain(
                 targets
-                    .iter()
+                    .keys()
                     .map(|target| parameters.iter().find(|p| p.handle == *target).unwrap()),
             ) {
                 let chained = match &doc.objects[&p.handle] {
@@ -127,14 +178,18 @@ impl<'a> Graph<'a> {
                     links: Vec::new(),
                 });
             }
-            for target in targets {
+            for (target, part) in targets {
                 edges.insert((source.handle, target));
                 graph
                     .nodes
                     .get_mut(&source.handle)
                     .unwrap()
                     .links
-                    .push(Link { target, action });
+                    .push(Link {
+                        target,
+                        part,
+                        action,
+                    });
             }
         }
         let mut indegree = graph
@@ -183,7 +238,7 @@ impl<'a> Graph<'a> {
         values: Option<&BTreeMap<Handle, DVec3>>,
         previous_bases: Option<&BTreeMap<Handle, DVec3>>,
     ) -> Result<BTreeMap<Handle, ParameterFrame>, &'static str> {
-        let mut incoming = BTreeMap::<Handle, DVec3>::new();
+        let mut incoming = BTreeMap::<Handle, Offset>::new();
         let mut autonomous = BTreeMap::new();
         for handle in &self.order {
             let node = &self.nodes[handle];
@@ -201,7 +256,8 @@ impl<'a> Graph<'a> {
             let raw = translated(
                 p,
                 effective,
-                -incoming.get(handle).copied().unwrap_or(DVec3::ZERO),
+                incoming.get(handle).copied().unwrap_or_default(),
+                -1.0,
             );
             autonomous.insert(*handle, raw);
             let active = if p.is_move_target() && !node.chained {
@@ -250,12 +306,12 @@ impl<'a> Graph<'a> {
         bases: Option<&BTreeMap<Handle, DVec3>>,
         active_frames: &mut BTreeMap<Handle, ParameterFrame>,
     ) -> Result<BTreeMap<Handle, ParameterFrame>, &'static str> {
-        let mut incoming = BTreeMap::<Handle, DVec3>::new();
+        let mut incoming = BTreeMap::<Handle, Offset>::new();
         let mut final_frames = BTreeMap::new();
         for handle in &self.order {
             let node = &self.nodes[handle];
             let p = &node.parameter;
-            let offset = incoming.get(handle).copied().unwrap_or(DVec3::ZERO);
+            let offset = incoming.get(handle).copied().unwrap_or_default();
             let mut raw = if selected.contains(handle) && !p.flip {
                 translated(
                     p,
@@ -263,7 +319,8 @@ impl<'a> Graph<'a> {
                         base: bases.and_then(|b| b.get(handle)).copied().unwrap_or(p.base),
                         end: current(staged, p),
                     },
-                    -offset,
+                    offset,
+                    -1.0,
                 )
             } else {
                 autonomous
@@ -283,7 +340,7 @@ impl<'a> Graph<'a> {
             if !p.point && !incoming.contains_key(handle) {
                 raw.base = bases.and_then(|b| b.get(handle)).copied().unwrap_or(p.base);
             }
-            let effective = translated(p, raw, offset);
+            let effective = translated(p, raw, offset, 1.0);
             let active = if p.is_move_target() && !node.chained {
                 raw
             } else {
@@ -311,14 +368,20 @@ impl<'a> Graph<'a> {
     fn propagate(
         node: &Node<'_>,
         frame: ParameterFrame,
-        incoming: &mut BTreeMap<Handle, DVec3>,
+        incoming: &mut BTreeMap<Handle, Offset>,
     ) -> Result<(), &'static str> {
         let p = &node.parameter;
         for link in &node.links {
             let delta = action_move_delta(p, frame.base, frame.end, &link.action.connections)
                 .ok_or("This Move action uses unsupported parameter connections.")?;
             let delta = options::displacement(&link.action.offsets, delta)?;
-            *incoming.entry(link.target).or_default() += delta;
+            let offset = incoming.entry(link.target).or_default();
+            if link.part.base {
+                offset.base += delta;
+            }
+            if link.part.end {
+                offset.end += delta;
+            }
         }
         Ok(())
     }

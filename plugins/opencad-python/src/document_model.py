@@ -580,6 +580,14 @@ class _Layouts(_Named):
         ocs.layout_operation("set_page", str(name), options)
         return self[name]
 
+    def set_tab_order(self, names):
+        """Put the paper-space layout tabs in this order: `names` lists every
+        paper-space layout once (`Model` stays first and is not listed)."""
+        if isinstance(names, str):
+            raise TypeError("set_tab_order takes a list of layout names")
+        ocs.layout_operation("set_tab_order", "", {"names": [str(n) for n in names]})
+        return self.names()
+
 
 def _pt(value):
     """A point as [x, y, z] from a tuple, list or {"x", "y", "z"} dict."""
@@ -981,6 +989,16 @@ class _Document:
 
     def poll_input(self, token):
         return ocs.poll_input(token)
+
+    def request_drag(self, prompts, wires=(), preview="line", state="", resume=True):
+        if isinstance(prompts, str):
+            raise TypeError("prompts must be a list of strings, one per point")
+        wires = [[[float(value) for value in point] for point in wire] for wire in wires]
+        return ocs.request_drag([str(prompt) for prompt in prompts], wires, str(preview), str(state), bool(resume))
+
+    def resume(self):
+        token = ocs.resume_token()
+        return None if token is None else ocs.poll_input(token)
 
     @property
     def selection(self):

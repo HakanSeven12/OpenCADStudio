@@ -632,6 +632,7 @@ macro_rules! tf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
     use std::collections::BTreeSet;
 
     #[test]
@@ -728,39 +729,47 @@ mod tests {
         }
     }
 
-    #[test]
-    fn formatted_history_preserves_authored_values_in_every_locale() {
+    #[rstest]
+    #[case("action")]
+    #[case("parameter")]
+    #[case("edit-block")]
+    #[case("save-block")]
+    #[case("delete-block")]
+    fn formatted_history_preserves_authored_values_in_every_locale(#[case] attribute: &str) {
         for language in Language::ALL
             .into_iter()
             .filter(|language| *language != Language::System)
         {
             let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
             load_language(&loader, language).unwrap();
-            for attribute in [
-                "action",
-                "parameter",
-                "edit-block",
-                "save-block",
-                "delete-block",
+            for authored in [
+                "Revert",
+                "  Door { $label } \\ literal __ocs_fmt_0__ \n",
+                "??? - ?",
             ] {
-                for authored in [
-                    "Revert",
-                    "  Door { $label } \\ literal __ocs_fmt_0__ \n",
-                    "باب — 扉",
-                ] {
-                    let rendered = format_attribute_with(
-                        &loader,
-                        "block-formatted-history",
-                        attribute,
-                        &[("label", authored)],
-                    )
-                    .expect("history template must format without errors");
-                    assert!(
-                        rendered.contains(authored),
-                        "{language:?}/{attribute}: {rendered:?}"
-                    );
-                }
+                let rendered = format_attribute_with(
+                    &loader,
+                    "block-formatted-history",
+                    attribute,
+                    &[("label", authored)],
+                )
+                .expect("history template must format without errors");
+                assert!(
+                    rendered.contains(authored),
+                    "{language:?}/{attribute}: {rendered:?}"
+                );
             }
+        }
+    }
+
+    #[test]
+    fn formatted_history_catalog_ids_exist_in_every_locale() {
+        for language in Language::ALL
+            .into_iter()
+            .filter(|language| *language != Language::System)
+        {
+            let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+            load_language(&loader, language).unwrap();
             for source in [
                 "Move",
                 "Scale",
@@ -783,29 +792,26 @@ mod tests {
         }
     }
 
-    #[test]
-    fn construction_prompts_preserve_operation_keywords_in_every_locale() {
+    #[rstest]
+    #[case("prompt-selection", &["[Convert/Revert/Show/Hide]"][..])]
+    #[case("prompt-operation", &["[Convert/Revert]", "<Convert>"][..])]
+    #[case("choose-operation", &["Convert", "Revert", "Show", "Hide"][..])]
+    fn construction_prompts_preserve_operation_keywords_in_every_locale(
+        #[case] attribute: &str,
+        #[case] tokens: &[&str],
+    ) {
         for language in Language::ALL
             .into_iter()
             .filter(|language| *language != Language::System)
         {
             let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
             load_language(&loader, language).expect("Fluent resources must parse");
-            for (attribute, tokens) in [
-                ("prompt-selection", &["[Convert/Revert/Show/Hide]"][..]),
-                ("prompt-operation", &["[Convert/Revert]", "<Convert>"][..]),
-                (
-                    "choose-operation",
-                    &["Convert", "Revert", "Show", "Hide"][..],
-                ),
-            ] {
-                let translated = loader.get_attr("block-construction", attribute);
-                for token in tokens {
-                    assert!(translated.contains(token), "{language:?}/{attribute}");
-                }
-                if attribute.starts_with("prompt-") {
-                    assert!(translated.starts_with("BCONSTRUCTION  "), "{language:?}");
-                }
+            let translated = loader.get_attr("block-construction", attribute);
+            for token in tokens {
+                assert!(translated.contains(token), "{language:?}/{attribute}");
+            }
+            if attribute.starts_with("prompt-") {
+                assert!(translated.starts_with("BCONSTRUCTION  "), "{language:?}");
             }
             if language != Language::EnUs {
                 assert_ne!(loader.get_attr("block-construction", "revert"), "Revert");
@@ -859,6 +865,60 @@ mod tests {
                     assert!(translated.contains(keyword), "{language:?}/{attribute}");
                 }
             }
+        }
+    }
+
+    /// The messages of the DWF export are in every catalog: the dialog's
+    /// title and the web notice name the format, the usage line keeps the
+    /// command's own words, and the result line takes its five values.
+    #[test]
+    fn the_dwf_export_messages_are_in_every_catalog() {
+        let result = "Exported: {}  {sheets} sheet(s), {bytes} bytes, {width:.1}×{height:.1} mm";
+        let messages = [
+            ("Export as DWF", ("common", "export-as-dwf")),
+            (
+                "DWF export is not available in the web version.",
+                ("common", "dwf-export-is-not-available-in-the-web-version"),
+            ),
+            (
+                "Usage: EXPORTDWF <file.dwf> [ALL]",
+                ("plot", "usage-exportdwf-file-dwf-all"),
+            ),
+            (result, ("plot", "exported-sheets-bytes-size")),
+        ];
+        let values = format_values(
+            result,
+            "Exported: out/plan.dwf  3 sheet(s), 20480 bytes, 297.0×210.0 mm",
+        )
+        .expect("the result line gives its values back");
+        assert_eq!(values, ["out/plan.dwf", "3", "20480", "297.0", "210.0"]);
+        for language in Language::ALL
+            .into_iter()
+            .filter(|language| *language != Language::System)
+        {
+            let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+            load_language(&loader, language).expect("Fluent resources must parse");
+            for (source, ids) in messages {
+                assert_eq!(catalog_ids(source), Some(ids), "{source}");
+            }
+            let title = loader.get_attr("common", "export-as-dwf");
+            assert!(title.contains("DWF"), "{language:?}: {title}");
+            let notice =
+                loader.get_attr("common", "dwf-export-is-not-available-in-the-web-version");
+            assert!(notice.contains("DWF"), "{language:?}: {notice}");
+            let usage = loader.get_attr("plot", "usage-exportdwf-file-dwf-all");
+            assert!(
+                usage.contains("EXPORTDWF <") && usage.contains(".dwf> [ALL]"),
+                "{language:?}: {usage}"
+            );
+            let mut line = loader.get_attr("plot", "exported-sheets-bytes-size");
+            for (index, value) in values.iter().enumerate() {
+                let marker = format!("__ocs_fmt_{index}__");
+                assert!(line.contains(&marker), "{language:?}: {line}");
+                line = line.replace(&marker, value);
+            }
+            assert!(line.contains("out/plan.dwf"), "{language:?}: {line}");
+            assert!(line.contains("297.0×210.0 mm"), "{language:?}: {line}");
         }
     }
 

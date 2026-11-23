@@ -287,6 +287,10 @@ impl OpenCADStudio {
     /// The update iced runs: one message, then open tools parked again.
     pub fn update_root(&mut self, msg: Message) -> Task<Message> {
         let msg = self.route_tool_keyboard(msg);
+        // A wasm build aborts on a panic, so there is nothing to catch.
+        #[cfg(not(target_arch = "wasm32"))]
+        let task = self.update_guarded(msg);
+        #[cfg(target_arch = "wasm32")]
         let task = self.update(msg);
         let settled = self.settle_tool_windows();
         Task::batch([task, settled])
@@ -1049,11 +1053,14 @@ impl OpenCADStudio {
                 // A remembered size never makes the dialog smaller than its
                 // content needs: one saved before the dialog grew would hide
                 // what the dialog has added since (its buttons, a full page).
-                // The text editor's windows share one key, so its remembered
-                // size belongs to whichever of them was last open: they keep
-                // only its place.
+                // The text editor's windows share one key, and so do all plugin
+                // dialogs, so a remembered size belongs to whichever of them was
+                // last open (a small dialog opened at a large one's size): they
+                // keep only its place.
                 .map(|placement| {
-                    let shared = kind == ModalKind::MTextDialog || kind.fixed_size();
+                    let shared = kind == ModalKind::MTextDialog
+                        || kind == ModalKind::PluginDialog
+                        || kind.fixed_size();
                     WindowPlacement {
                         w: if shared { natural_w } else { placement.w.max(natural_w) },
                         h: if shared { natural_h } else { placement.h.max(natural_h) },
@@ -1431,6 +1438,118 @@ mod tests {
         assert!(app.tool_open(ModalKind::BlockDefinition));
         key(&mut app, Key::Named(Named::Escape), "");
         assert!(!app.tool_open(ModalKind::BlockDefinition));
+    }
+
+    /// Real events traverse the listener and both kinds of tool window.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn unsaved_shortcuts_follow_keyboard_focus_and_preserve_close_actions() {
+        use iced::event::Status;
+        use iced::keyboard::{key::NativeCode, key::Physical, Event, Key, Location, Modifiers};
+
+        fn send(
+            app: &mut OpenCADStudio,
+            id: iced::window::Id,
+            main: iced::window::Id,
+            ch: &str,
+            modifiers: Modifiers,
+            status: Status,
+        ) {
+            let key = Key::Character(ch.into());
+            let event = iced::Event::Keyboard(Event::KeyPressed {
+                key: key.clone(),
+                modified_key: key,
+                physical_key: Physical::Unidentified(NativeCode::Unidentified),
+                location: Location::Standard,
+                modifiers,
+                text: Some(ch.into()),
+                repeat: false,
+            });
+            if let Some(message) =
+                crate::app::view::window_event_with_context(event, status, id, id == main)
+            {
+                let _ = app.update_root(message);
+            }
+        }
+        for native in [false, true] {
+            for letter in ["c", "N", "s"] {
+                let mut app = OpenCADStudio::new_for_test();
+                let id = app.push_test_document();
+                let index = app.tabs.len() - 1;
+                app.active_tab = index;
+                app.tabs[index].dirty = true;
+                let main = iced::window::Id::unique();
+                if native {
+                    app.main_window = Some(main);
+                }
+                let _ = app.update_root(Message::TabClose(id));
+                assert!(app.tool_open(ModalKind::Unsaved));
+                let target = if native {
+                    dialog_window(&mut app, ModalKind::Unsaved).id
+                } else {
+                    main
+                };
+                send(
+                    &mut app,
+                    target,
+                    main,
+                    "n",
+                    Modifiers::empty(),
+                    Status::Captured,
+                );
+                send(
+                    &mut app,
+                    target,
+                    main,
+                    "n",
+                    Modifiers::CTRL,
+                    Status::Ignored,
+                );
+                assert!(app.tool_open(ModalKind::Unsaved));
+                assert!(app.tabs.iter().any(|tab| tab.id == id));
+                // The drawing, not the question, owns these keys until the
+                // frame is raised again. A separate window is isolated by id.
+                if !native {
+                    let _ = app.update_root(Message::ViewportLeftPress);
+                }
+                send(
+                    &mut app,
+                    main,
+                    main,
+                    "n",
+                    Modifiers::empty(),
+                    Status::Ignored,
+                );
+                assert!(app.tabs.iter().any(|tab| tab.id == id));
+                assert!(app.tool_open(ModalKind::Unsaved));
+                if !native {
+                    let _ = app.update_root(Message::ToolWindowRaise(ModalKind::Unsaved));
+                }
+                send(
+                    &mut app,
+                    target,
+                    main,
+                    letter,
+                    Modifiers::empty(),
+                    Status::Ignored,
+                );
+                match letter {
+                    "c" => {
+                        assert!(app.pending_close.is_none());
+                        assert!(app.tabs.iter().any(|tab| tab.id == id && tab.dirty));
+                    }
+                    "N" => assert!(!app.tabs.iter().any(|tab| tab.id == id)),
+                    "s" => {
+                        assert!(app.tabs.iter().any(|tab| tab.id == id));
+                        assert!(
+                            app.save_dialog_for_unsaved,
+                            "save starts the existing save flow"
+                        );
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1880,6 +1999,42 @@ mod tests {
         assert!(app.os_windows.is_empty());
         assert!(!app.dock.is_separate(PanelId::QuickCalc));
         assert!(app.dock.float_rect(PanelId::QuickCalc).is_some());
+    }
+
+    #[test]
+    fn plot_commit_from_its_window_closes_the_plot_tool() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.update_root(Message::PlotDialogOpen);
+        assert!(app.tool_open(ModalKind::Plot));
+        app.plot_dialog.to_file = true;
+        app.plot_dialog.file_svg = false;
+        app.plot_dialog.area = "Layout".into();
+        app.plot_dialog.style_missing = false;
+        press_in_tools(&mut app, "Export PDF");
+        assert!(!app.tool_open(ModalKind::Plot), "Export PDF reached the dialog");
+    }
+
+    #[test]
+    fn plot_blocked_by_a_missing_style_table_says_so_in_the_dialog() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.update_root(Message::PlotDialogOpen);
+        app.plot_dialog.to_file = true;
+        app.plot_dialog.file_svg = false;
+        app.plot_dialog.style_name = "missing.ctb".into();
+        app.plot_dialog.style_missing = true;
+        app.plot_dialog.apply_plot_styles = true;
+        app.plot_dialog.style_error = None;
+        press_in_tools(&mut app, "Export PDF");
+        assert!(app.tool_open(ModalKind::Plot));
+        assert!(
+            app.plot_dialog
+                .style_error
+                .as_deref()
+                .is_some_and(|e| e.contains("missing.ctb")),
+            "the dialog shows why nothing was exported"
+        );
     }
 
     #[test]

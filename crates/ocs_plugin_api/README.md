@@ -132,7 +132,9 @@ The frame format supports:
 
 Because the socket is full-duplex, the host can push
 `HostNotification::DocumentChangedV4`, `SelectionChangedV4`, or
-`DocumentTabClosed` to a plugin at any time, and the plugin can stream
+`DocumentTabClosed` to a plugin at any time (API 27+ plugins receive
+`DocumentChangedDelta` instead of the legacy `DocumentChangedRegions`
+boundary notification), and the plugin can stream
 `PluginNotification::Output`/`Progress`/`Log` back while a long command is still
 running.
 

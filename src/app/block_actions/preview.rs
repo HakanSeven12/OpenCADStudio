@@ -55,8 +55,9 @@ impl OpenCADStudio {
         } else {
             tab.block_test.as_ref()?.baseline.as_ref()
         };
-        if tab.selected_handle != Some(handle)
-            || !tab.scene.selected.contains(&handle)
+        // `selected_handle` names only a single selected object; a grip of
+        // any selected reference previews (#3506).
+        if !tab.scene.selected.contains(&handle)
             || tab.scene.is_layer_locked(handle)
             || !actions::has_action(source, definition, parameter)
             || grip.is_some_and(|id| {

@@ -140,7 +140,7 @@ fn heap_breakdown(wires: &[WireModel]) -> Vec<(&'static str, usize)> {
     for wire in wires {
         let elem = |n: usize, bytes: usize| n * bytes;
         points += elem(wire.points.capacity(), v3);
-        points_low += elem(wire.points_low.capacity(), v3);
+        points_low += wire.points_low.allocated_bytes();
         tris += elem(
             wire.fill_tris.capacity() + wire.fill_tris_low.capacity(),
             v3,

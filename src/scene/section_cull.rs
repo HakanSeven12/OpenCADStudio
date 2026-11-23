@@ -122,7 +122,7 @@ impl Scene {
             };
             let entry = points.entry(handle).or_default();
             for (index, &[x, y, z]) in wire.points.iter().enumerate() {
-                let [lx, ly, lz] = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+                let [lx, ly, lz] = wire.points_low.get(index).unwrap_or([0.0; 3]);
                 let point = DVec3::new(
                     f64::from(x) + f64::from(lx),
                     f64::from(y) + f64::from(ly),

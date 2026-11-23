@@ -92,7 +92,7 @@ impl PasteCommand {
         let mut any = false;
         for w in wires {
             for (i, p) in w.points.iter().enumerate() {
-                let lo = w.points_low.get(i).copied().unwrap_or([0.0; 3]);
+                let lo = w.points_low.get(i).unwrap_or([0.0; 3]);
                 for k in 0..3 {
                     let v = p[k] as f64 + lo[k] as f64;
                     min[k] = min[k].min(v);

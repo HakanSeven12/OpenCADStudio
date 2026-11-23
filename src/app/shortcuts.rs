@@ -71,7 +71,6 @@ pub(super) fn default_bindings() -> BTreeMap<String, String> {
         (format!("{ACCEL}+SHIFT+Z"), "REDO"),
         (format!("{ACCEL}+Y"), "REDO"),
         (format!("{ACCEL}+F"), "FIND"),
-        (format!("{ACCEL}+H"), "FIND"),
         (format!("{ACCEL}+A"), "SELECTALL"),
         (format!("{ACCEL}+C"), "COPYCLIP"),
         (format!("{ACCEL}+SHIFT+C"), "COPYBASE"),
@@ -80,6 +79,7 @@ pub(super) fn default_bindings() -> BTreeMap<String, String> {
         (format!("{ACCEL}+SHIFT+V"), "PASTEBLOCK"),
         // Group selection on and off (PICKSTYLE bit 1), as in AutoCAD.
         (format!("{ACCEL}+SHIFT+A"), "TOGGLEGROUPS"),
+        (format!("{ACCEL}+H"), "TOGGLEGROUPS"),
         ("ENTER".to_string(), "FINALIZE"),
         ("SPACE".to_string(), "COMMANDSPACE"),
         ("ESCAPE".to_string(), "CANCEL"),
@@ -621,6 +621,8 @@ impl OpenCADStudio {
             // status-bar field): the pure on/off flip, quad panel updates
             // included, lives in the quad router (docs/quad-menu.md §3.6).
             "QUADTOGGLE" => Message::Quad(crate::ui::popup::quad_menu::QuadMsg::Toggle),
+            // Ctrl+R opens the text editor's Find and Replace.
+            "NEXTVIEWPORT" if self.mtext_editor.is_some() => Message::Command("_MTED FIND".into()),
             "NEXTVIEWPORT" => return self.next_viewport(),
             // Ctrl+Tab / Ctrl+Shift+Tab: the next / previous open drawing.
             "NEXTDRAWING" | "PREVDRAWING" => {
@@ -643,8 +645,6 @@ impl OpenCADStudio {
             "REDO" if self.mtext_editor.is_some() => Message::MTextRedo,
             // In the text editor Ctrl+F inserts a field instead of finding.
             "FIND" if self.mtext_editor.is_some() => Message::MTextInsertField,
-            // Ctrl+R opens the text editor's Find and Replace.
-            "NEXTVIEWPORT" if self.mtext_editor.is_some() => Message::Command("_MTED FIND".into()),
             // Ctrl+X cuts the editor's selected text, not drawing objects.
             "CUTCLIP" if self.mtext_editor.is_some() => Message::Command("_MTED CUT".into()),
 
@@ -1157,5 +1157,66 @@ mod tests {
         let _ = app.dispatch_command("TOGGLEGROUPS");
         assert_eq!(style(&app), before ^ 1);
         assert_eq!(app.ribbon.group_selection, before & 1 == 0);
+    }
+
+    /// #3428: in a new configuration Ctrl+H turns group selection on and
+    /// off; it does not open Find and Replace. Ctrl+F still does.
+    #[test]
+    fn ctrl_h_toggles_group_selection_in_a_new_configuration() {
+        let defaults = default_bindings();
+        assert_eq!(defaults[&format!("{ACCEL}+H")], "TOGGLEGROUPS");
+        assert_eq!(defaults[&format!("{ACCEL}+F")], "FIND");
+
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.apply_config(crate::app::config::AppConfig::default());
+        let i = app.active_tab;
+        let style = |app: &OpenCADStudio| app.tabs[i].scene.document.header.pick_style;
+        let before = style(&app);
+        let key = format!("{ACCEL}+H");
+        let _ = app.update(Message::ShortcutPressed(key.clone()));
+        assert_eq!(style(&app), before ^ 1);
+        let _ = app.update(Message::ShortcutPressed(key));
+        assert_eq!(style(&app), before);
+    }
+
+    /// A configuration saved with Ctrl+H on Find and Replace keeps it: the
+    /// saved table is the user's, and a changed default does not replace it.
+    #[test]
+    fn a_saved_ctrl_h_binding_is_kept() {
+        let mut app = OpenCADStudio::new_for_test();
+        let key = format!("{ACCEL}+H");
+        let mut cfg = crate::app::config::AppConfig::default();
+        cfg.shortcuts
+            .bindings
+            .insert(key.clone(), "FIND".to_string());
+        app.apply_config(cfg);
+        assert_eq!(app.shortcut_bindings[&key], "FIND");
+    }
+
+    /// Ctrl+R opens the editor's Find and Replace while the multiline text
+    /// editor is open, instead of cycling the drawing's viewports.
+    #[test]
+    fn ctrl_r_opens_find_and_replace_in_the_text_editor() {
+        use crate::ui::window::mtext_dialogs::MTextDialog;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.open_mtext_editor(glam::DVec3::ZERO, None, "hello", 2.5, None);
+        let _ = app.run_action("NEXTVIEWPORT");
+        assert!(
+            matches!(app.mtext_dialog, Some(MTextDialog::Find(_))),
+            "the Find and Replace dialog opens"
+        );
+        assert!(app.mtext_editor.is_some(), "the editor stays open");
+    }
+
+    /// Without the editor, Ctrl+R keeps its viewport meaning: no Find and
+    /// Replace opens.
+    #[test]
+    fn ctrl_r_outside_the_editor_opens_no_find_and_replace() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_action("NEXTVIEWPORT");
+        assert!(app.mtext_dialog.is_none());
     }
 }

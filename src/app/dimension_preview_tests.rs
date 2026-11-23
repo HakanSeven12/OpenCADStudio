@@ -692,3 +692,23 @@ fn region_radial_dimensions_large_translated_coordinates_certified() {
     let dim_d = commit_and_compare(&mut app, i, place_pt);
     assert_eq!(text(&app, &dim_d), "∅50");
 }
+
+#[test]
+fn annotative_dimension_follows_the_scale_after_metres_become_millimetres() {
+    // #1939: a new drawing is in metres, so its 1:50 is stored as 1 = 0.05.
+    // Switched to millimetres, 1:50 kept that ratio and drew 2.5 text 0.125
+    // high on a 5000 mm square.
+    let (mut app, i) = app();
+    let _ = app.dispatch_command("INSUNITS 4");
+    app.tabs[i].scene.document.header.current_dimstyle_name = "Annotative".into();
+    app.dimstyle_selected = "Annotative".into();
+    let _ = app.dispatch_command("CANNOSCALE 1:50");
+    let dimension = place_linear(
+        &mut app,
+        DVec3::ZERO,
+        DVec3::new(5000.0, 0.0, 0.0),
+        DVec3::new(2500.0, 400.0, 0.0),
+    );
+    let height = rendered_text_height(&app, dimension);
+    assert!(height > 100.0 && height < 200.0, "text {height} high at 1:50");
+}

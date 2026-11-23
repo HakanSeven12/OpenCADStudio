@@ -2,11 +2,11 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Mutex, TryLockError};
+use std::sync::{Arc, Mutex, TryLockError, mpsc};
 use std::time::{Duration, Instant};
 
-use interprocess::local_socket::Stream;
 use interprocess::TryClone;
+use interprocess::local_socket::Stream;
 
 use crate::host::{CommandSource, ExecutionResult, HostApi, HostNotification, PluginNotification};
 use crate::ipc::protocol::{HostRequest, HostResponse, PluginRequest, PluginResponse};
@@ -14,9 +14,9 @@ use crate::ipc::server::handle_plugin_request;
 use crate::ipc::transport::send;
 use crate::ipc::v4::protocol::{HostToPluginV4, NotificationEnvelope};
 use crate::ipc::v4::server::{
-    default_notify_rate_limit, run_host_reader_thread, HostIncoming, RateLimiter, V4HostShared,
+    HostIncoming, RateLimiter, V4HostShared, default_notify_rate_limit, run_host_reader_thread,
 };
-use crate::process::{request_kind, request_timeout, PluginError};
+use crate::process::{PluginError, request_kind, request_timeout};
 
 type DeferredRequest = (u64, Option<u64>, Box<PluginRequest>);
 
@@ -33,9 +33,7 @@ fn park_bounded<T>(queue: &Mutex<VecDeque<T>>, cap: usize, what: &str, item: T) 
     let mut queue = queue.lock().unwrap_or_else(|e| e.into_inner());
     if queue.len() >= cap {
         queue.pop_front();
-        eprintln!(
-            "[plugin] dropped the oldest parked V4 {what}: the queue exceeded {cap}"
-        );
+        eprintln!("[plugin] dropped the oldest parked V4 {what}: the queue exceeded {cap}");
     }
     queue.push_back(item);
 }
@@ -234,8 +232,8 @@ impl V4Connection {
         let incoming = self.incoming.lock().unwrap_or_else(|e| e.into_inner());
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
-            let hard_remaining = hard_deadline
-                .and_then(|end| end.checked_duration_since(Instant::now()));
+            let hard_remaining =
+                hard_deadline.and_then(|end| end.checked_duration_since(Instant::now()));
             if hard_remaining.map(|r| r.is_zero()).unwrap_or(false) {
                 // Always logged: the process may still run after the
                 // connection is marked dead, and this is the only record.
@@ -776,8 +774,8 @@ mod tests {
     use crate::ipc::v4::protocol::{HostToPluginV4, PluginToHostV4};
     use document::{Document, Handle};
     use interprocess::local_socket::{
-        traits::{Listener, Stream as StreamTrait},
         GenericNamespaced, ListenerOptions, ToNsName,
+        traits::{Listener, Stream as StreamTrait},
     };
 
     fn unique_socket_name() -> String {

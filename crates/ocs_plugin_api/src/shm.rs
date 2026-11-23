@@ -27,11 +27,11 @@
 use std::fs::OpenOptions;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use document::{Document, EntityType, Handle};
 use memmap2::{Mmap, MmapMut, MmapOptions};
-use rkyv::{check_archived_root, to_bytes, Archive, Deserialize, Serialize};
+use rkyv::{Archive, Deserialize, Serialize, check_archived_root, to_bytes};
 
 use crate::host::{DocumentReader, ReaderEntity, ReaderEntityKind, ReaderPoint};
 

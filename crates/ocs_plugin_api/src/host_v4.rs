@@ -133,9 +133,7 @@ impl HostV4SnapshotManager {
         let bytes = match data.to_rkyv_bytes() {
             Ok(bytes) => bytes,
             Err(e) => {
-                let msg = format!(
-                    "failed to serialize V4 document view for tab {tab_id}: {e}"
-                );
+                let msg = format!("failed to serialize V4 document view for tab {tab_id}: {e}");
                 eprintln!("[host] {msg}");
                 return Err(msg);
             }
@@ -157,9 +155,8 @@ impl HostV4SnapshotManager {
                     // then retire the old store (keep its file alive) instead
                     // of deleting it out from under existing readers.
                     if let Err(e) = store.publish_bytes(&bytes) {
-                        let msg = format!(
-                            "failed to publish V4 document view for tab {tab_id}: {e}"
-                        );
+                        let msg =
+                            format!("failed to publish V4 document view for tab {tab_id}: {e}");
                         eprintln!("[host] {msg}");
                         return Err(msg);
                     }

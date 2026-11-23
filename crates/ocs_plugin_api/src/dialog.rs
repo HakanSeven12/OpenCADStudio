@@ -158,12 +158,10 @@ fn dialog_decode_add_nodes(count: usize) -> Result<(), String> {
 fn budgeted_controls<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Vec<DialogControl>, D::Error> {
-    dialog_decode_enter()
-        .map_err(<D::Error as serde::de::Error>::custom)?;
+    dialog_decode_enter().map_err(<D::Error as serde::de::Error>::custom)?;
     let _guard = DialogDecodeGuard;
     let controls = Vec::<DialogControl>::deserialize(deserializer)?;
-    dialog_decode_add_nodes(controls.len())
-        .map_err(<D::Error as serde::de::Error>::custom)?;
+    dialog_decode_add_nodes(controls.len()).map_err(<D::Error as serde::de::Error>::custom)?;
     Ok(controls)
 }
 
@@ -171,12 +169,10 @@ fn budgeted_controls<'de, D: serde::Deserializer<'de>>(
 fn budgeted_dialog_value_map<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<HashMap<String, DialogValue>, D::Error> {
-    dialog_decode_enter()
-        .map_err(<D::Error as serde::de::Error>::custom)?;
+    dialog_decode_enter().map_err(<D::Error as serde::de::Error>::custom)?;
     let _guard = DialogDecodeGuard;
     let map = HashMap::<String, DialogValue>::deserialize(deserializer)?;
-    dialog_decode_add_nodes(map.len())
-        .map_err(<D::Error as serde::de::Error>::custom)?;
+    dialog_decode_add_nodes(map.len()).map_err(<D::Error as serde::de::Error>::custom)?;
     Ok(map)
 }
 
@@ -622,7 +618,10 @@ pub enum DialogValue {
     Text(String),
     Number(f64),
     Bool(bool),
-    Choice { index: usize, text: String },
+    Choice {
+        index: usize,
+        text: String,
+    },
     Color([u8; 3]),
     FilePath(String),
     Fields(#[serde(deserialize_with = "budgeted_dialog_value_map")] HashMap<String, DialogValue>),
@@ -1012,7 +1011,8 @@ mod tests {
         };
 
         let evt_bytes = bincode::serialize(&event).expect("serialize event");
-        let restored_evt: DialogEvent = bincode::deserialize(&evt_bytes).expect("deserialize event");
+        let restored_evt: DialogEvent =
+            bincode::deserialize(&evt_bytes).expect("deserialize event");
         assert_eq!(event, restored_evt);
 
         let mut update_values = HashMap::new();
@@ -1020,7 +1020,10 @@ mod tests {
             "startup_scripts".to_string(),
             DialogValue::Table(vec![vec!["C:/scripts/test.lsp".to_string()]]),
         );
-        update_values.insert("status_label".to_string(), DialogValue::Text("Script added".to_string()));
+        update_values.insert(
+            "status_label".to_string(),
+            DialogValue::Text("Script added".to_string()),
+        );
 
         let action_resp = DialogActionResponse::UpdateValues(update_values);
         let resp_bytes = bincode::serialize(&action_resp).expect("serialize action response");
@@ -1069,8 +1072,7 @@ mod tests {
         // Old plugin's InfoText layout: discriminant 0u32 + String + Option<HorizontalAlign>
         let mut legacy_info_bytes = Vec::new();
         legacy_info_bytes.extend_from_slice(&0u32.to_le_bytes());
-        legacy_info_bytes
-            .extend_from_slice(&bincode::serialize(&"Hello".to_string()).unwrap());
+        legacy_info_bytes.extend_from_slice(&bincode::serialize(&"Hello".to_string()).unwrap());
         legacy_info_bytes
             .extend_from_slice(&bincode::serialize(&Some(HorizontalAlign::Center)).unwrap());
 
@@ -1185,4 +1187,3 @@ mod tests {
         assert_eq!(parsed_default.style, PanelStyle::Palette);
     }
 }
-

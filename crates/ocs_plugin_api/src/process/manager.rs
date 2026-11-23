@@ -16,13 +16,13 @@
 //! and must not block. For heavy work, forward the notification to a channel.
 
 use std::path::Path;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::host::{HostApi, HostNotification, PluginNotification};
 use crate::process::{PluginError, PluginProcess};
-use crate::ribbon::owned::{to_shared_module, OwnedEntityClasses, SharedCadModule};
+use crate::ribbon::owned::{OwnedEntityClasses, SharedCadModule, to_shared_module};
 
 /// Maximum notifications parked in the boot-window `attach.pending` queue
 /// (review finding 6): a plugin that never acks its ChannelReady cannot grow
@@ -556,10 +556,7 @@ impl PluginManager {
     /// confirm the id before the load returns). This is the declaration law's
     /// gate ONLY — grip event routing keeps the stricter live-channel check.
     pub fn declaration_endpoint_alive(&self, id: &str) -> bool {
-        if self
-            .grip_endpoint(id)
-            .is_some_and(|(_, _, alive)| alive)
-        {
+        if self.grip_endpoint(id).is_some_and(|(_, _, alive)| alive) {
             return true;
         }
         self.booting
@@ -922,8 +919,8 @@ mod tests {
         manifest: crate::ribbon::owned::OwnedPluginManifest,
     ) -> (PluginProcess, interprocess::local_socket::Stream) {
         use interprocess::local_socket::{
-            traits::{Listener, Stream as StreamTrait},
             GenericNamespaced, ListenerOptions, ToNsName,
+            traits::{Listener, Stream as StreamTrait},
         };
 
         static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

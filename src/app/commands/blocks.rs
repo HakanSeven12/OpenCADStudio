@@ -3401,9 +3401,10 @@ mod tests {
 }
 
 /// Ctrl+C puts the selection on the system clipboard as SVG for other
-/// programs (#2018). On Windows they look for it under the registered
-/// `image/svg+xml` format; text alone is pasted as text or not at all.
-#[cfg(all(test, target_os = "windows"))]
+/// programs (#2018). They look for it under the `image/svg+xml` format (a
+/// registered clipboard format on Windows, a selection target on X11);
+/// text alone is pasted as text or not at all.
+#[cfg(all(test, any(target_os = "windows", target_os = "linux")))]
 mod svg_clipboard_format_tests {
     use crate::app::OpenCADStudio;
     use document::entities::Line;
@@ -3444,9 +3445,23 @@ mod svg_clipboard_format_tests {
         let writes = toolkit_clipboard_writes(task);
         let written = crate::sys::clipboard_svg::test_record::take();
         assert_eq!(written.len(), 1, "one write of the system clipboard");
-        let formats: Vec<&str> = written[0].iter().map(|(f, _)| f.as_str()).collect();
-        assert_eq!(formats, ["CF_UNICODETEXT", "image/svg+xml"]);
-        let svg = std::str::from_utf8(&written[0][1].1).expect("UTF-8 markup");
+        let formats: Vec<&str> = written[0]
+            .iter()
+            .map(|(format, _)| format.as_ref())
+            .collect();
+        if cfg!(target_os = "windows") {
+            assert_eq!(formats, ["CF_UNICODETEXT", "image/svg+xml"]);
+        } else {
+            assert_eq!(
+                formats,
+                ["UTF8_STRING", "text/plain;charset=utf-8", "image/svg+xml"]
+            );
+        }
+        let (_, svg) = written[0]
+            .iter()
+            .find(|(format, _)| *format == "image/svg+xml")
+            .expect("the SVG format");
+        let svg = std::str::from_utf8(svg).expect("UTF-8 markup");
         assert!(
             svg.starts_with("<?xml") && svg.contains("<svg"),
             "{svg:.60}"

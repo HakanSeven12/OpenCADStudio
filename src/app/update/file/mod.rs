@@ -369,6 +369,9 @@ mod external_change_reload_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod minimized_save_tests;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod save_failure_session_tests;
+
 /// Folder of the session locks, one per running editor.
 #[cfg(not(target_arch = "wasm32"))]
 fn autosave_session_dir() -> Option<std::path::PathBuf> {

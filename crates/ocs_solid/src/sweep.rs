@@ -6,9 +6,7 @@
 //! spline, and a mitre at each corner of a path with corners (each piece swept, cut at the
 //! corner's bisecting plane and the pieces united).
 
-use std::f64::consts::{PI, TAU};
-#[cfg(test)]
-use std::f64::consts::FRAC_PI_2;
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use ocs_geom::geom2d::{Arc, Curve, NurbsCurve};
 use ocs_geom::rational::RationalCurve2;
@@ -872,6 +870,9 @@ fn stations(profile: &[sweep::Curve], pieces: &[Piece], frame: [Vec3; 4], tangen
 /// transported to its start (lengthened past each corner by a straight run), cut by the plane
 /// bisecting each corner, and the pieces united.
 fn mitred(profile: &[sweep::Curve], pieces: &[Piece], frame: [Vec3; 4], closed: bool, cap: bool) -> Result<Brep, Error> {
+    if !closed && pieces.iter().all(|piece| matches!(piece, Piece::Line(..))) {
+        return mitred_lines(profile, pieces, frame[3], cap);
+    }
     if pieces.iter().any(|piece| matches!(piece, Piece::Spline(..))) {
         let (body, _, _) = sweep::sweep_placed(profile, &path_curves(pieces), sweep::SweepFrame::Follow, cap)?;
         return model::record(&body);
@@ -962,6 +963,124 @@ fn mitred(profile: &[sweep::Curve], pieces: &[Piece], frame: [Vec3; 4], closed: 
     result.ok_or(Error::Empty)
 }
 
+/// A sweep along an open path of lines with corners: along each line the section runs as a
+/// prism, and two prisms meet in the plane bisecting their corner, where both cut the same
+/// section (a prism is its own mirror image across a plane square to it, and the turn between
+/// the lines is that mirror followed by the mirror across the bisector). So the sections are
+/// the start section carried along each line onto the next bisector, and onto the plane square
+/// to the transported section normal at the end; the solid is the ruled skin through them.
+/// Exact, and with no boolean between pieces that share a face.
+fn mitred_lines(profile: &[sweep::Curve], pieces: &[Piece], normal: Vec3, cap: bool) -> Result<Brep, Error> {
+    let lines: Vec<(Vec3, Vec3)> = pieces
+        .iter()
+        .map(|piece| match piece {
+            Piece::Line(a, b) => Some((*a, *b)),
+            _ => None,
+        })
+        .collect::<Option<_>>()
+        .ok_or(Error::Argument)?;
+    let directions: Vec<Vec3> = lines.iter().map(|(a, b)| (*b - *a).normalize()).collect::<Option<_>>().ok_or(Error::Argument)?;
+    // An arc projected obliquely is an ellipse: carry every curve as a (rational) spline.
+    let mut section: Vec<sweep::Curve> = profile.iter().map(as_spline).collect::<Option<_>>().ok_or(Error::Argument)?;
+    let mut sections = vec![section.clone()];
+    let mut n = normal;
+    for k in 0..lines.len() {
+        let d = directions[k];
+        let (point, plane_normal) = match directions.get(k + 1) {
+            Some(next) => {
+                n = transport(n, d, *next).ok_or(Error::Argument)?;
+                (lines[k].1, (d + *next).normalize().ok_or(Error::Argument)?)
+            }
+            None => (lines[k].1, n),
+        };
+        section = section.iter().map(|c| project_along(c, d, point, plane_normal)).collect::<Option<_>>().ok_or(Error::Argument)?;
+        sections.push(section.clone());
+    }
+    // Skinned about the path's start and moved back: far from the origin (a national grid)
+    // the kernel's tolerances on the absolute coordinates make the skin crawl.
+    let shift = lines[0].0;
+    let local: Vec<Vec<sweep::Curve>> = sections.iter().map(|s| s.iter().map(|c| translated(c, -shift)).collect()).collect();
+    let body = sweep::loft(&local, 1, cap)?;
+    body.transform(&model::affine([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], shift.to_array()))?;
+    model::record(&body)
+}
+
+/// `curve` moved by `by`.
+fn translated(curve: &sweep::Curve, by: Vec3) -> sweep::Curve {
+    let at = |p: [f64; 3]| (Vec3::from(p) + by).to_array();
+    match curve {
+        sweep::Curve::Line { start, end } => sweep::Curve::Line { start: at(*start), end: at(*end) },
+        sweep::Curve::Arc { center, axis, reference, radius, start, end } => {
+            sweep::Curve::Arc { center: at(*center), axis: *axis, reference: *reference, radius: *radius, start: *start, end: *end }
+        }
+        sweep::Curve::Nurbs { degree, points, knots } => sweep::Curve::Nurbs {
+            degree: *degree,
+            points: points
+                .iter()
+                .map(|p| {
+                    let q = at([p[0], p[1], p[2]]);
+                    [q[0], q[1], q[2], p[3]]
+                })
+                .collect(),
+            knots: knots.clone(),
+        },
+    }
+}
+
+/// A sweep curve as a clamped (rational) spline: an arc as quadratic spans of at most 90°.
+fn as_spline(curve: &sweep::Curve) -> Option<sweep::Curve> {
+    match curve {
+        sweep::Curve::Arc { center, axis, reference, radius, start, end } => {
+            let (c, u) = (Vec3::from(*center), Vec3::from(*reference).normalize()?);
+            let v = Vec3::from(*axis).normalize()?.cross(u);
+            let sweep_angle = end - start;
+            (sweep_angle > 0.0 && sweep_angle <= TAU + 1e-12).then_some(())?;
+            let spans = (sweep_angle / FRAC_PI_2).ceil().max(1.0) as usize;
+            let step = sweep_angle / spans as f64;
+            let at = |angle: f64, scale: f64| c + (u * angle.cos() + v * angle.sin()) * (radius * scale);
+            let mut points = vec![at(*start, 1.0).to_array()];
+            let mut weights = vec![1.0];
+            let mut knots = vec![0.0; 3];
+            for i in 0..spans {
+                let a0 = start + step * i as f64;
+                points.push(at(a0 + step * 0.5, 1.0 / (step * 0.5).cos()).to_array());
+                weights.push((step * 0.5).cos());
+                points.push(at(a0 + step, 1.0).to_array());
+                weights.push(1.0);
+                let k = (i + 1) as f64 / spans as f64;
+                knots.extend(if i + 1 == spans { vec![1.0; 3] } else { vec![k; 2] });
+            }
+            Some(nurbs(2, &points, &weights, &knots))
+        }
+        other => Some(other.clone()),
+    }
+}
+
+/// `curve` carried along `direction` onto the plane through `point` square to `normal`.
+fn project_along(curve: &sweep::Curve, direction: Vec3, point: Vec3, normal: Vec3) -> Option<sweep::Curve> {
+    let along = direction.dot(normal);
+    (along.abs() > 1e-12).then_some(())?;
+    let map = |p: [f64; 3]| -> [f64; 3] {
+        let p = Vec3::from(p);
+        (p + direction * ((point - p).dot(normal) / along)).to_array()
+    };
+    Some(match curve {
+        sweep::Curve::Line { start, end } => sweep::Curve::Line { start: map(*start), end: map(*end) },
+        sweep::Curve::Nurbs { degree, points, knots } => sweep::Curve::Nurbs {
+            degree: *degree,
+            points: points
+                .iter()
+                .map(|p| {
+                    let q = map([p[0], p[1], p[2]]);
+                    [q[0], q[1], q[2], p[3]]
+                })
+                .collect(),
+            knots: knots.clone(),
+        },
+        sweep::Curve::Arc { .. } => return None,
+    })
+}
+
 /// A spatial (non-planar) polyline profile swept along a path, a sheet: placed as a planar
 /// profile is, at its anchor.
 pub fn sweep_spatial_polyline(points: &[[f64; 3]], closed: bool, path: SweepPath<'_>, options: SweepOptions) -> Result<Brep, Error> {
@@ -1006,6 +1125,31 @@ mod tests {
         // A mitre keeps the section's area times the path's length.
         let expected = PI * 20.0;
         assert!((volume - expected).abs() < 1e-3 * expected, "{volume} vs {expected}");
+    }
+
+    /// #3536: a circle swept along a 3D polyline with one corner or a bend of short chords,
+    /// near the origin and far from it, is a solid of the section's area times the path's
+    /// length (a mitre keeps it).
+    #[test]
+    fn a_circle_swept_along_cornered_polylines_anywhere() {
+        let path_length = |points: &[[f64; 3]]| -> f64 { points.windows(2).map(|w| Vec3::from(w[0]).distance(Vec3::from(w[1]))).sum() };
+        let bend = [[0.0, 0.0, 10.0], [9.76, 0.0, 10.0], [9.88, 0.0321539, 10.0], [9.9678461, 0.12, 10.0], [10.0, 0.24, 10.0], [10.0, 10.0, 10.0]];
+        let corner = [[0.0, 0.0, 10.0], [10.0, 0.0, 10.0], [10.0, 10.0, 10.0]];
+        for (shape, radius) in [(&bend[..], 0.01), (&corner[..], 0.055), (&corner[..], 0.01)] {
+            for origin in [[0.0, 0.0], [1000.0, 1000.0], [100000.0, 100000.0], [540000.0, 6580000.0]] {
+                let points: Vec<[f64; 3]> = shape.iter().map(|p| [p[0] + origin[0], p[1] + origin[1], p[2]]).collect();
+                // The profile square to the first line, at the path's start.
+                let plane = Plane::from_axes(points[0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+                let body = sweep_path(plane, &circle(radius), SweepPath::Polyline3d { points: &points, closed: false }, SweepOptions::default())
+                    .unwrap_or_else(|e| panic!("{origin:?} r={radius} {} points: {e:?}", points.len()));
+                let volume = model::volume(&body).unwrap();
+                let expected = PI * radius * radius * path_length(&points);
+                assert!((volume - expected).abs() < 1e-3 * expected, "{origin:?} r={radius}: {volume} vs {expected}");
+                // In place: the tube starts at the path's start.
+                let (low, high) = model::bounds(&body).unwrap();
+                assert!((low[0] - origin[0]).abs() < 1e-6 && (high[1] - origin[1] - 10.0).abs() < 1e-6, "{origin:?}: {low:?} {high:?}");
+            }
+        }
     }
 
     #[test]

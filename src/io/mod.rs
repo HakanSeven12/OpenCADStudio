@@ -2236,6 +2236,51 @@ fn windows_replace_error_is_file_in_use(raw_os_error: Option<i32>) -> bool {
 mod save_failure_tests {
     use super::{save_as_version, windows_replace_error_is_file_in_use};
 
+    /// A recovery copy (`.sv$`) and a backup (`.bak`) with a cut end or a
+    /// changed byte give a drawing or an error, not a panic.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn damaged_recovery_copies_open_without_a_panic() {
+        let folder = std::env::temp_dir().join(format!("ocs-damaged-copy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut doc = document::Document::new();
+        let _ = doc.add_entity(document::EntityType::Line(
+            document::entities::Line::from_points(
+                document::types::Vector3::new(0.0, 0.0, 0.0),
+                document::types::Vector3::new(10.0, 5.0, 0.0),
+            ),
+        ));
+        let mut cases = 0;
+        for (drawing, copy) in [("plan.dxf", "plan.sv$"), ("plan.dwg", "plan.bak")] {
+            let drawing = folder.join(drawing);
+            save_as_version(&doc, &drawing, document::DxfVersion::AC1032).unwrap();
+            let bytes = std::fs::read(&drawing).unwrap();
+            let copy = folder.join(copy);
+            std::fs::write(&copy, &bytes).unwrap();
+            assert!(super::load_file(&copy).is_ok(), "the whole copy opens");
+            let mut check = |damaged: &[u8]| {
+                cases += 1;
+                std::fs::write(&copy, damaged).unwrap();
+                let _ = super::load_file(&copy);
+            };
+            let step = bytes.len() / 150;
+            for end in (0..bytes.len()).step_by(step) {
+                check(&bytes[..end]);
+            }
+            let mut damaged = bytes.clone();
+            for at in (0..bytes.len()).step_by(step) {
+                for value in [0x00, 0xFF, bytes[at] ^ 0x80] {
+                    damaged[at] = value;
+                    check(&damaged);
+                }
+                damaged[at] = bytes[at];
+            }
+        }
+        assert!(cases > 1_000, "{cases} damaged copies");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
     #[test]
     fn issue_498_recognizes_windows_file_sharing_errors() {
         assert!(windows_replace_error_is_file_in_use(Some(32)));

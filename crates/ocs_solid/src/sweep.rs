@@ -764,7 +764,7 @@ pub fn sweep_path(profile_plane: Plane, wires: &[Vec<Curve>], path: SweepPath<'_
     let x = Vec3::from(placed_plane.x_axis).normalize().ok_or(Error::Argument)?;
     let frame = [start, x, normal.cross(x), normal];
     // Made about the world's origin and moved to where the path lies: at survey coordinates
-    // Solidcore sweeps a thin section slowly, or not at all, and its booleans refuse it.
+    // the sweep of a thin section is slow, or comes back as no solid.
     let Some(near) = pieces.iter().map(|piece| piece.moved(-start)).collect::<Option<Vec<Piece>>>() else {
         return swept_loops(&loops, &pieces, frame, tangent, options, cap);
     };

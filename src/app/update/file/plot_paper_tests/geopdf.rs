@@ -354,4 +354,3 @@ fn svg_only_plot_preferences_are_stored_but_ignored_by_pdf() {
     assert!(app.plot_dialog.non_scaling_stroke);
     assert!(app.plot_dialog.text_as_outlines);
 }
-

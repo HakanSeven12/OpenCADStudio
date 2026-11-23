@@ -10,7 +10,7 @@ const HASH_MARKER: &str = "\nreport-source-sha256:";
 /// Version of the shared worker wire format (`ocs_save`); the `?v=` on the
 /// worker URL cache-busts to match. v5 adds the `serialize` action.
 const PROTOCOL_VERSION: u16 = ocs_save::PROTOCOL_VERSION;
-const WORKER_URL: &str = "ocs-parse-worker.js?v=6";
+const WORKER_URL: &str = "ocs-parse-worker.js?v=7";
 
 pub(super) async fn parse_document(
     name: &str,

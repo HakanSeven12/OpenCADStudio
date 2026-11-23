@@ -1,5 +1,5 @@
-use super::*;
 use super::super::util::*;
+use super::*;
 
 impl OpenCADStudio {
     pub(in crate::app) fn on_open_file(&mut self) -> Task<Message> {
@@ -290,10 +290,12 @@ impl OpenCADStudio {
                 .as_deref()
                 .and_then(|p| p.parent().map(|p| p.to_path_buf()))
                 .unwrap_or_else(|| std::path::PathBuf::from("."));
-            let infos = crate::io::xref::resolve_xrefs_for_keys(
+            let xref_session = self.tabs[j].ifccad_session.clone();
+            let infos = crate::io::xref::resolve_xrefs_for_keys_in_session(
                 &mut self.tabs[j].scene.document,
                 &base_dir,
                 &keys,
+                xref_session.as_ref(),
             );
             if infos.is_empty() {
                 continue;
@@ -450,7 +452,11 @@ impl OpenCADStudio {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub(in crate::app) fn retry_native_edit_guard(&mut self, i: usize, path: &std::path::Path) -> Result<(), String> {
+    pub(in crate::app) fn retry_native_edit_guard(
+        &mut self,
+        i: usize,
+        path: &std::path::Path,
+    ) -> Result<(), String> {
         if let Some(lease) = self.tabs[i].edit_lease.as_mut() {
             match lease.refresh_drawing_lock(path) {
                 Ok(()) => {
@@ -998,5 +1004,4 @@ impl OpenCADStudio {
             enter_viewport_task,
         ])
     }
-
 }

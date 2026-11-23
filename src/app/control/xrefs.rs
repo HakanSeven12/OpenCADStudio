@@ -243,7 +243,7 @@ impl OpenCADStudio {
             .as_deref()
             .and_then(Path::parent)
             .unwrap_or_else(|| Path::new("."));
-        let entry = crate::io::xref::collect_direct_entry_with_prev(
+        let mut entry = crate::io::xref::collect_direct_entry_with_prev(
             &self.tabs[i].scene.document,
             base_dir,
             self.tabs[i].xref_unloaded.as_set(),
@@ -256,6 +256,10 @@ impl OpenCADStudio {
                 "The reference disappeared during the operation",
             )
         })?;
+        crate::io::xref::apply_native_source_status(
+            std::slice::from_mut(&mut entry),
+            self.tabs[i].ifccad_session.as_ref(),
+        );
         Ok(reference_json(&self.tabs[i].scene.document, &entry))
     }
 
@@ -295,6 +299,81 @@ impl OpenCADStudio {
         json!({"ok":true, "count":xrefs.len(), "xrefs":xrefs})
     }
 
+    /// Bind explicitly selected DWG bytes to one source in the active native tab.
+    pub(super) fn control_xref_source_register(
+        &mut self,
+        req: &Value,
+    ) -> Result<Task<Message>, Value> {
+        use base64::Engine;
+        validate_fields(req, &["source_id", "file_name", "data_base64"])?;
+        let id = req["source_id"]
+            .as_str()
+            .and_then(|s| s.parse::<u64>().ok().filter(|id| id.to_string() == s))
+            .ok_or_else(|| {
+                failure(
+                    "invalid_source",
+                    "source_id must be an exact decimal string",
+                )
+            })?;
+        let file_name = req["file_name"]
+            .as_str()
+            .filter(|s| {
+                !s.is_empty()
+                    && !s.contains(['/', '\\', '\0', ':'])
+                    && s.to_ascii_lowercase().ends_with(".dwg")
+            })
+            .ok_or_else(|| failure("invalid_source", "Choose a DWG filename"))?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(req["data_base64"].as_str().unwrap_or_default())
+            .map_err(|e| failure("invalid_source", e))?;
+        if bytes.is_empty() {
+            return Err(failure("invalid_source", "The DWG is empty"));
+        }
+        let i = self.active_tab;
+        let session = self.tabs[i]
+            .ifccad_session
+            .clone()
+            .ok_or_else(|| failure("invalid_source", "This tab has no native source context"))?;
+        let (handle, name, path) = self.tabs[i]
+            .scene
+            .document
+            .block_records
+            .iter()
+            .find_map(|r| {
+                session
+                    .external_source(r.handle)
+                    .filter(|s| s.id.0 == id)
+                    .map(|_| (r.handle, r.name.clone(), r.xref_path.clone()))
+            })
+            .ok_or_else(|| failure("invalid_source", "Source does not belong to this drawing"))?;
+        let read = crate::io::xref::read_source_bytes(file_name, &bytes);
+        let mut infos = Vec::new();
+        crate::io::xref::merge_xref_reads_in_session(
+            &mut self.tabs[i].scene.document,
+            vec![(name, path.clone(), handle, read)],
+            &mut infos,
+            None,
+            Some(&session),
+        );
+        let info = infos
+            .pop()
+            .ok_or_else(|| failure("xref_load_failed", "No source result"))?;
+        if info.status != crate::io::xref::XrefStatus::Loaded {
+            return Err(load_failed(&info));
+        }
+        session
+            .bind_external_source_bytes(
+                handle,
+                &path,
+                file_name.to_owned(),
+                std::sync::Arc::new(bytes),
+            )
+            .map_err(|e| failure("invalid_source", e))?;
+        self.post_ref_op(i);
+        self.set_control_result(json!({"source_id":id.to_string(),"source_status":"loaded","found_at":file_name,"other_drawing":info.other_drawing,"diagnostics":info.diagnostics}));
+        Ok(Task::none())
+    }
+
     pub(super) fn control_xref_reload(&mut self, req: &Value) -> Result<Task<Message>, Value> {
         validate_fields(req, &["id"])?;
         let target = self.direct_reference(req)?;
@@ -303,18 +382,33 @@ impl OpenCADStudio {
         if target.kind == RefKind::Image {
             return Err(kind_unsupported("xref_reload", &target));
         }
-        let base_dir = self.saved_host_dir(i)?;
-        if target.found_at.is_none() {
+        let selected_bytes = self.tabs[i]
+            .ifccad_session
+            .as_ref()
+            .and_then(|s| s.external_source_bytes(Handle::new(id), &target.saved_path));
+        let base_dir = if selected_bytes.is_some() {
+            self.tabs[i]
+                .current_path
+                .as_deref()
+                .and_then(Path::parent)
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf()
+        } else {
+            self.saved_host_dir(i)?
+        };
+        if target.found_at.is_none() && selected_bytes.is_none() {
             return Err(source_missing(target.saved_path, Vec::new()));
         }
         match target.kind {
             RefKind::DwgXref => {
                 self.push_undo_snapshot(i, "XREF-RELOAD");
                 let handles = [Handle::new(id)].into_iter().collect();
-                let infos = crate::io::xref::resolve_xrefs_for_keys(
+                let xref_session = self.tabs[i].ifccad_session.clone();
+                let infos = crate::io::xref::resolve_xrefs_for_keys_in_session(
                     &mut self.tabs[i].scene.document,
                     &base_dir,
                     &handles,
+                    xref_session.as_ref(),
                 );
                 let Some(info) = infos
                     .iter()

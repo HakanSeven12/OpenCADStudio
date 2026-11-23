@@ -1466,7 +1466,7 @@ const ASSOC_CLASSES: &[(&str, &str, i32)] = &[
     ),
 ];
 
-fn ensure_associative_classes_registered(document: &mut Document) {
+pub(super) fn ensure_associative_classes_registered(document: &mut Document) {
     for (dxf_name, cpp_class_name, maintenance_version) in ASSOC_CLASSES {
         if document.classes.get_by_name(dxf_name).is_some() {
             continue;

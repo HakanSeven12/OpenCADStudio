@@ -40,7 +40,7 @@ use super::{
 use crate::scene::Scene;
 
 /// The layer BricsCAD moves the members a state hides to.
-const SUPPRESS_LAYER: &str = "*SUPPRESS";
+pub(super) const SUPPRESS_LAYER: &str = "*SUPPRESS";
 
 const UNSUPPORTED: &str = "This BricsCAD parametric block cannot be switched here.";
 const NOT_IN_MODEL_SPACE: &str = "Only a BricsCAD block reference in model space can be switched.";
@@ -477,7 +477,7 @@ fn remap_associative(
 /// parameter in `listed`, the marks BricsCAD sets on an instance's own
 /// parameter; for each suppression its value, status and the layers of the
 /// members it moved to `*SUPPRESS`.
-fn apply_states(
+pub(super) fn apply_states(
     document: &mut Document,
     copy: Handle,
     members: &[Handle],
@@ -712,7 +712,7 @@ fn evaluate(expression: &str, columns: &FxHashMap<String, f64>) -> Option<f64> {
 /// value dependency at the value of the variable it reads, and takes a
 /// variable whose new value its reads already hold for unchanged, leaving
 /// what depends on it unevaluated.
-fn set_variable(
+pub(super) fn set_variable(
     document: &mut Document,
     variable: Handle,
     expression: Option<String>,
@@ -1279,7 +1279,7 @@ fn next_anonymous_name(document: &Document) -> String {
 }
 
 /// The raw object for `record`.
-fn unknown(class: &str, record: &Record) -> ObjectType {
+pub(super) fn unknown(class: &str, record: &Record) -> ObjectType {
     let (data, handle_bits) = record::encode(record);
     ObjectType::Unknown {
         type_name: class.to_string(),
@@ -1293,7 +1293,7 @@ fn unknown(class: &str, record: &Record) -> ObjectType {
 }
 
 /// Store a changed record over the object it was read from.
-fn store(document: &mut Document, record: &Record) {
+pub(super) fn store(document: &mut Document, record: &Record) {
     let class = match document.objects.get(&record.handle) {
         Some(ObjectType::Unknown { type_name, .. }) => type_name.clone(),
         _ => return,

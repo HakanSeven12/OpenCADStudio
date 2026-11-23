@@ -1538,6 +1538,9 @@ pub(super) struct PendingHistorySnapshot {
     /// removes a constraint a plugin created inside its scope.
     pub(super) parametric_constraints_before:
         Vec<crate::scene::parametric_constraints::ParametricConstraintSet>,
+    /// The drawing-wide parameter table when the scope opened. A step that
+    /// changes it (BricsCAD's visibility columns are parameters) puts it back.
+    pub(super) named_parameters_before: crate::scene::named_parameters::ParameterTable,
     /// Opened by a plugin's `push_undo`: while a plugin request runs, the
     /// commands it drives join this scope instead of closing it.
     pub(super) plugin_owned: bool,

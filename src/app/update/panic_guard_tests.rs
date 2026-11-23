@@ -165,3 +165,33 @@ fn after_the_limit_a_panic_is_not_caught() {
         "the drawing is still there for the crash path"
     );
 }
+
+/// The wires of the display of the active drawing.
+fn wires(app: &OpenCADStudio) -> usize {
+    app.tabs[app.active_tab].scene.entity_wires().len()
+}
+
+/// A panic in the middle of a change: the new line is in the document, and
+/// it has no undo record and no wire yet. The guard cannot take such a
+/// change back. It builds the display again, so the line that a save writes
+/// is on the screen, and the user can erase it with an undo record.
+#[test]
+fn a_panic_in_the_middle_of_a_change_leaves_a_display_that_shows_the_document() {
+    let mut app = app_with_a_circle();
+    assert_eq!(wires(&app), 1, "the circle's wire");
+    crate::scene::TEST_PANIC_AFTER_DOCUMENT_ADD.with(|point| point.set(true));
+
+    let _ = app.update_root(Message::ScriptLine("LINE 0,0 10,0 ".to_string()));
+
+    assert!(last_error(&app).contains("test panic after the document add"));
+    assert!(app.tabs[app.active_tab].active_cmd.is_none(), "LINE ended");
+    assert_eq!(entities(&app), 2, "the line stays in the document");
+    assert_eq!(undo_depth(&app), 1, "and it has no undo record");
+    assert_eq!(wires(&app), 2, "so the display must show it");
+
+    // The session goes on, and the user can remove the line.
+    let _ = app.update_root(Message::ScriptLine("ERASE ALL ".to_string()));
+    assert_eq!(entities(&app), 0);
+    assert_eq!(undo_depth(&app), 2, "the erase has its undo record");
+    assert_eq!(wires(&app), 0);
+}

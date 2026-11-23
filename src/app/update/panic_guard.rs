@@ -4,9 +4,14 @@
 //! taken back through the undo history, and the command line says so. The
 //! crash report of the panic hook is still written.
 //!
-//! The guard cannot make the state after a panic correct in every case: it
-//! restores the drawing, not each cache or window. So it gives up after a
-//! few panics, and the next one ends the app as before.
+//! A handler can stop between a change of the document and the update of the
+//! display, so the guard then builds the display of the active drawing again
+//! from its document: the user sees what a save writes.
+//!
+//! The guard cannot make the state after a panic correct in every case: a
+//! change that has no undo record yet stays in the drawing, and a window or
+//! a lock can be wrong. So it gives up after a few panics, and the next one
+//! ends the app as before.
 
 use iced::Task;
 
@@ -79,6 +84,11 @@ impl OpenCADStudio {
         let undone = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.take_back_failed_command(before)
         }));
+        // Also under a guard of its own: a panic here must not hide the result
+        // of the undo above.
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.rebuild_display_after_failed_command()
+        }));
         let text = panic_text(payload.as_ref());
         let notice = match undone {
             Ok(0) => crate::tf!(
@@ -96,6 +106,17 @@ impl OpenCADStudio {
         };
         self.command_line.push_error(notice.as_ref());
         Task::none()
+    }
+
+    /// Builds the display of the active drawing again from its document. The
+    /// failed handler can have changed the document and not the display (an
+    /// entity that is in the document, with no wire), and the undo above
+    /// repairs only what has an undo record.
+    fn rebuild_display_after_failed_command(&mut self) {
+        let i = self.active_tab;
+        if let Some(tab) = self.tabs.get_mut(i) {
+            tab.scene.populate_meshes_from_document();
+        }
     }
 
     /// Cancels the command in progress and takes back what was recorded

@@ -26,11 +26,8 @@ use document::entities::{
     DimensionDiameter, DimensionLargeRadial, DimensionLinear, DimensionOrdinate, DimensionRadius,
     Ellipse, Face3D, Hatch, HatchPatternLine, Helix, Insert, Leader, Light, Line, LineEdge,
     LwPolyline, LwVertex, MText, Mesh, Point, PolyfaceMesh, PolygonMeshEntity, PolygonMeshVertex,
-    Polyline2D, Polyline3D, PolylineEdge, Ray, Shape, Solid, Spline, Text, Tolerance, Vertex2D,
-    XLine,
-};
-use document::entities::{
-    Polyline, RasterImage, Underlay, UnderlayType, Vertex3D, Viewport, Wipeout,
+    Polyline, Polyline2D, Polyline3D, PolylineEdge, RasterImage, Ray, Shape, Solid, Spline, Text,
+    Tolerance, Underlay, UnderlayType, Vertex2D, Vertex3D, Viewport, Wipeout, XLine,
 };
 use document::types::{Vector2, Vector3};
 use document::EntityType;

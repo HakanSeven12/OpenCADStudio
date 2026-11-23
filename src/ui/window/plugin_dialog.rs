@@ -1427,6 +1427,8 @@ impl<'a> FormControlView<'a> {
                     }
                 }
 
+                // Bounded like the dock panel tables: a full-height table of
+                // thousands of rows exhausts memory on every repaint.
                 let long_table =
                     self.table_values.get(id).map_or(0, |rows| rows.len()) > TABLE_SHRINK_ROWS;
                 let scrollable_rows = scrollable(rows_list)
@@ -1440,8 +1442,6 @@ impl<'a> FormControlView<'a> {
                     })
                     .width(Fill);
 
-                // Bounded like the dock panel tables: a full-height table of
-                // thousands of rows exhausts memory on every repaint.
                 grid_col = grid_col.push(scrollable_rows);
 
                 let grid_container = container(grid_col)

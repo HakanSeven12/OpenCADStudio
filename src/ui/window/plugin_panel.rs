@@ -4,11 +4,6 @@
 //! widget trees with title bar, collapse pins, inputs, buttons, collapsible sections,
 //! and data tables, integrated with OpenCADStudio's docking system.
 
-/// Height cap of a table's scroll box in a dock panel.
-const TABLE_MAX_HEIGHT_PX: f32 = 360.0;
-/// Tables up to this many rows take their natural height.
-const TABLE_SHRINK_ROWS: usize = 12;
-
 use iced::widget::{
     button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space,
 };
@@ -27,6 +22,11 @@ use crate::ui::window::plugin_dialog::{
     apply_control_value_updates, collect_svg_handles, find_choice_option_in_controls, styled_text,
     svg_image, ChoiceOption, FormControlView,
 };
+
+/// Height cap of a table's scroll box in a dock panel.
+const TABLE_MAX_HEIGHT_PX: f32 = 360.0;
+/// Tables up to this many rows take their natural height.
+const TABLE_SHRINK_ROWS: usize = 12;
 
 /// Per-snapshot construction budget (P1-21): a panel snapshot was a complete,
 /// unrestricted clone of every typed value, raw text and full table, and a

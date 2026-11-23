@@ -211,7 +211,7 @@ pub(crate) fn resolve_dim_lineweight_px(code: i16, fallback_px: f32) -> f32 {
     }
     // i16 value 0..=211 represents 1/100 mm.
     let mm = code as f32 / 100.0;
-    (mm * MM_TO_PX).max(1.0)
+    mm * MM_TO_PX
 }
 
 /// Look up a linetype in the document's line_types table by handle and

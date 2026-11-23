@@ -4,8 +4,9 @@
 //! limit, and give the reason on that line.
 
 use crate::app::{Message, OpenCADStudio};
+use crate::scene::annotative::INSERT_FLAG_LOOKUPS;
 use crate::scene::view::camera::Camera;
-use document::entities::Line;
+use document::entities::{Insert, Line};
 use document::types::Vector3;
 use document::{EntityType, Handle};
 
@@ -262,6 +263,48 @@ fn a_new_layer_and_a_zoom_do_no_work() {
     within_limit(&mut app, "zoom to the extents", |app| {
         script(app, "ZOOM E ");
     });
+}
+
+/// The end of a selection asks each entity for its scale representation.
+/// For a block reference with none, that must not search for its
+/// definition (#3467).
+#[test]
+fn the_end_of_a_selection_does_not_search_for_the_definition_of_each_reference() {
+    const REFERENCES: usize = 1_000;
+    let mut app = large_drawing();
+    let tab = app.active_tab;
+    let scene = &mut app.tabs[tab].scene;
+    scene.define_block_raw(
+        "PART",
+        Vector3::ZERO,
+        vec![EntityType::Line(Line::from_points(
+            Vector3::ZERO,
+            Vector3::new(4.0, 0.0, 0.0),
+        ))],
+    );
+    for i in 0..REFERENCES {
+        let at = Vector3::new(
+            (i % 100) as f64 * 10.0,
+            -10.0 - (i / 100) as f64 * 10.0,
+            0.0,
+        );
+        scene.add_entity(EntityType::Insert(Insert::new("PART", at)));
+    }
+    draw(&app);
+
+    INSERT_FLAG_LOOKUPS.with(|count| count.set(0));
+    script(&mut app, "MOVE ALL  ");
+    assert!(
+        prompt(&app).contains("base point"),
+        "MOVE has its selection and asks for the base point: {}",
+        prompt(&app)
+    );
+    let lookups = INSERT_FLAG_LOOKUPS.with(|count| count.get());
+    assert_eq!(
+        lookups, 0,
+        "the selection searched for a block definition {lookups} times, on a drawing of \
+         {REFERENCES} block references"
+    );
 }
 
 #[test]

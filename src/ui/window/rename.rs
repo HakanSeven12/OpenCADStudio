@@ -3,7 +3,7 @@
 
 use crate::app::Message;
 use crate::ui::style::form::hdivider;
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Element, Fill, Length, Theme};
 
 /// The kinds of named object, as the rename service names them.

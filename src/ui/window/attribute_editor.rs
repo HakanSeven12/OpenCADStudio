@@ -21,12 +21,12 @@ use crate::app::Message;
 use crate::t;
 use document::entities::{HorizontalAlignment, VerticalAlignment};
 use document::types::{Color as AcadColor, LineWeight};
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Background, Border, Element, Fill, Length, Theme};
 use std::borrow::Cow;
 use std::fmt;
 
-use crate::ui::properties::{lw_options, LwItem};
+use crate::ui::properties::{LwItem, lw_options};
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{button_style, dialog_button, dialog_button_styled_opt, field_style};
 use crate::ui::window::pdf_dialogs::{accent_text, card, card_style, chip, well_style};
@@ -116,31 +116,85 @@ pub fn one_line(value: &str) -> String {
 /// standard text-justification list. The stored labels are the English source
 /// texts; `justify_label` / `justify_from_label` translate both directions.
 pub const JUSTIFY: &[(&str, HorizontalAlignment, VerticalAlignment)] = &[
-    ("Left", HorizontalAlignment::Left, VerticalAlignment::Baseline),
-    ("Aligned", HorizontalAlignment::Aligned, VerticalAlignment::Baseline),
+    (
+        "Left",
+        HorizontalAlignment::Left,
+        VerticalAlignment::Baseline,
+    ),
+    (
+        "Aligned",
+        HorizontalAlignment::Aligned,
+        VerticalAlignment::Baseline,
+    ),
     ("Fit", HorizontalAlignment::Fit, VerticalAlignment::Baseline),
-    ("Center", HorizontalAlignment::Center, VerticalAlignment::Baseline),
-    ("Middle", HorizontalAlignment::Middle, VerticalAlignment::Baseline),
-    ("Right", HorizontalAlignment::Right, VerticalAlignment::Baseline),
-    ("Top Left", HorizontalAlignment::Left, VerticalAlignment::Top),
-    ("Top Center", HorizontalAlignment::Center, VerticalAlignment::Top),
-    ("Top Right", HorizontalAlignment::Right, VerticalAlignment::Top),
-    ("Middle Left", HorizontalAlignment::Left, VerticalAlignment::Middle),
-    ("Middle Center", HorizontalAlignment::Center, VerticalAlignment::Middle),
-    ("Middle Right", HorizontalAlignment::Right, VerticalAlignment::Middle),
-    ("Bottom Left", HorizontalAlignment::Left, VerticalAlignment::Bottom),
-    ("Bottom Center", HorizontalAlignment::Center, VerticalAlignment::Bottom),
-    ("Bottom Right", HorizontalAlignment::Right, VerticalAlignment::Bottom),
+    (
+        "Center",
+        HorizontalAlignment::Center,
+        VerticalAlignment::Baseline,
+    ),
+    (
+        "Middle",
+        HorizontalAlignment::Middle,
+        VerticalAlignment::Baseline,
+    ),
+    (
+        "Right",
+        HorizontalAlignment::Right,
+        VerticalAlignment::Baseline,
+    ),
+    (
+        "Top Left",
+        HorizontalAlignment::Left,
+        VerticalAlignment::Top,
+    ),
+    (
+        "Top Center",
+        HorizontalAlignment::Center,
+        VerticalAlignment::Top,
+    ),
+    (
+        "Top Right",
+        HorizontalAlignment::Right,
+        VerticalAlignment::Top,
+    ),
+    (
+        "Middle Left",
+        HorizontalAlignment::Left,
+        VerticalAlignment::Middle,
+    ),
+    (
+        "Middle Center",
+        HorizontalAlignment::Center,
+        VerticalAlignment::Middle,
+    ),
+    (
+        "Middle Right",
+        HorizontalAlignment::Right,
+        VerticalAlignment::Middle,
+    ),
+    (
+        "Bottom Left",
+        HorizontalAlignment::Left,
+        VerticalAlignment::Bottom,
+    ),
+    (
+        "Bottom Center",
+        HorizontalAlignment::Center,
+        VerticalAlignment::Bottom,
+    ),
+    (
+        "Bottom Right",
+        HorizontalAlignment::Right,
+        VerticalAlignment::Bottom,
+    ),
 ];
 
 /// A multi-line attribute is placed by one of the nine corners and sides of
 /// its text box: the last nine entries of [`JUSTIFY`].
-pub fn justify_options(multiline: bool) -> &'static [(&'static str, HorizontalAlignment, VerticalAlignment)] {
-    if multiline {
-        &JUSTIFY[6..]
-    } else {
-        JUSTIFY
-    }
+pub fn justify_options(
+    multiline: bool,
+) -> &'static [(&'static str, HorizontalAlignment, VerticalAlignment)] {
+    if multiline { &JUSTIFY[6..] } else { JUSTIFY }
 }
 
 /// The justification label for an (h, v) pair (defaults to "Left"). Kept in
@@ -199,7 +253,6 @@ pub fn color_from_label(label: &str) -> Option<AcadColor> {
         _ => return None,
     })
 }
-
 
 /// A Text Options field that is checked as the cursor leaves it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -284,9 +337,7 @@ fn edit_field<'a>(
         .width(Fill)
         .style(field_style);
     if enabled {
-        input = input
-            .on_input(on_input)
-            .on_submit(Message::AttrEditorApply);
+        input = input.on_input(on_input).on_submit(Message::AttrEditorApply);
     }
     row![label(name, enabled), input]
         .spacing(6)
@@ -569,7 +620,13 @@ fn text_options_tab<'a>(view: &AttrEditorView<'a>) -> Element<'a, Message> {
             true,
             Message::AttrEditorJustify
         ),
-        edit_field(t!("Height"), AttrField::Height, &r.height, true, Message::AttrEditorHeight),
+        edit_field(
+            t!("Height"),
+            AttrField::Height,
+            &r.height,
+            true,
+            Message::AttrEditorHeight
+        ),
         edit_field(
             t!("Rotation"),
             AttrField::Rotation,
@@ -663,7 +720,13 @@ fn properties_tab<'a>(view: &AttrEditorView<'a>) -> Element<'a, Message> {
             Message::AttrEditorLinetype
         ),
         row![
-            pick_field(t!("Color"), colors, Some(current), true, Message::AttrEditorColor),
+            pick_field(
+                t!("Color"),
+                colors,
+                Some(current),
+                true,
+                Message::AttrEditorColor
+            ),
             row![label(t!("Lineweight"), true), lw]
                 .spacing(6)
                 .align_y(iced::Center),

@@ -6,8 +6,8 @@
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use crate::app::settings::{BlockInsertOptions, PaletteBlockRef};
 use crate::app::Message;
+use crate::app::settings::{BlockInsertOptions, PaletteBlockRef};
 use crate::modules::IconKind;
 use crate::scene::model::wire_model::WireModel;
 use crate::ui::dock::PanelId;
@@ -17,8 +17,8 @@ use crate::ui::style::{chrome, kit_metrics as km};
 use crate::ui::window::pdf_dialogs::accent_text;
 use iced::widget::canvas::{Frame, Path, Program, Stroke};
 use iced::widget::{
-    button, canvas, checkbox, column, container, image, mouse_area, pick_list, row, scrollable,
-    text, text_input, Space,
+    Space, button, canvas, checkbox, column, container, image, mouse_area, pick_list, row,
+    scrollable, text, text_input,
 };
 use iced::{Background, Border, Color, Element, Fill, Length, Theme};
 
@@ -1528,9 +1528,9 @@ mod tests {
     /// Centre of text `label` in `element` laid out very tall: where it is
     /// in view (`visible`), or wherever it is laid out.
     fn locate(element: Element<'_, Message>, label: &str, visible: bool) -> Option<iced::Point> {
+        use iced_test::Selector;
         use iced_test::core::widget;
         use iced_test::runtime::user_interface::{Cache, UserInterface};
-        use iced_test::Selector;
         let _one = crate::headless_ui_lock();
         let mut renderer = iced_test::futures::futures::executor::block_on(
             <iced::Renderer as iced_test::core::renderer::Headless>::new(

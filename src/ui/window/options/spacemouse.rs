@@ -1,6 +1,6 @@
 use crate::app::Message;
 use crate::input::spacemouse::{NavigationMode, Preferences, Status};
-use iced::widget::{button, checkbox, column, container, pick_list, row, slider, text, Space};
+use iced::widget::{Space, button, checkbox, column, container, pick_list, row, slider, text};
 use iced::{Element, Fill};
 
 pub(crate) const ICON: &[u8] = include_bytes!("../../../../assets/icons/ui/spacemouse.svg");

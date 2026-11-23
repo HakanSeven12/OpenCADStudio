@@ -2,7 +2,7 @@
 //! the frame shape shown as three live samples, and the label and inspection
 //! rate switches with their values.
 
-use iced::widget::{button, column, container, row, text, text_input, Space};
+use iced::widget::{Space, button, column, container, row, text, text_input};
 use iced::{Element, Fill, Length, Theme};
 
 use crate::app::Message;

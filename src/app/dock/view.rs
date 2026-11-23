@@ -758,14 +758,28 @@ impl OpenCADStudio {
             crate::ui::dock::PanelId::Plugin(num) => {
                 if let Some(panel_id) = self.plugin_panel_by_num.get(&num) {
                     if let Some(state) = self.plugin_panels.get(panel_id) {
-                        // A published scene surface (api v29) replaces the
-                        // panel body with the host's native canvas; panels
-                        // without a scene keep their exact legacy tree.
-                        if let Some(scene) = state.owner_plugin_id.as_deref().and_then(|owner| {
-                            self.panel_surfaces
-                                .scene(owner, panel_id)
-                                .map(|scene| (owner.to_owned(), scene))
-                        }) {
+                        // A panel may own a scene AND a widget surface side
+                        // by side (finding F1): the widget view wins the
+                        // body when present, then the scene canvas, then
+                        // the exact legacy tree.
+                        let widget_ui = self.panel_widget_ui.get(panel_id);
+                        if let (Some(owner), Some(surface)) = (
+                            state.owner_plugin_id.as_deref(),
+                            state
+                                .owner_plugin_id
+                                .as_deref()
+                                .and_then(|owner| self.panel_surfaces.widget(owner, panel_id)),
+                        ) {
+                            crate::ui::window::plugin_widgets::widget_view(
+                                owner, panel_id, surface, widget_ui,
+                            )
+                        } else if let Some(scene) =
+                            state.owner_plugin_id.as_deref().and_then(|owner| {
+                                self.panel_surfaces
+                                    .scene(owner, panel_id)
+                                    .map(|scene| (owner.to_owned(), scene))
+                            })
+                        {
                             let (owner, scene) = scene;
                             let preview = self.panel_event_router.drag_preview(panel_id);
                             crate::ui::window::plugin_scene::scene_view(

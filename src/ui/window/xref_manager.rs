@@ -8,7 +8,7 @@
 use crate::app::Message;
 use crate::io::xref::collect_entries_with_prev;
 use crate::io::xref_model::{
-    normalize_lexical, Pathtype, RefKind, RefStatus, RefType, ReferenceEntry,
+    Pathtype, RefKind, RefStatus, RefType, ReferenceEntry, normalize_lexical,
 };
 use crate::ui::kit;
 use crate::ui::kit::menu::{self, Item};
@@ -16,8 +16,8 @@ use crate::ui::style::common::muted_style;
 use crate::ui::style::text as ui_text;
 use crate::ui::style::{chrome, kit_metrics as km};
 use document::Document;
-use iced::widget::{button, column, container, mouse_area, row, scrollable, text};
 use iced::Padding;
+use iced::widget::{button, column, container, mouse_area, row, scrollable, text};
 use iced::{Background, Element, Fill, Length, Theme};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -2021,7 +2021,7 @@ mod tests {
 
     #[test]
     fn status_icons_are_unique_per_status() {
-        use super::{status_icon_key, RefStatus};
+        use super::{RefStatus, status_icon_key};
         let all = [
             RefStatus::Loaded,
             RefStatus::Unloaded,

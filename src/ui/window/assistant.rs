@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use iced::widget::{
-    column, container, image, markdown, mouse_area, row, scrollable, text, text_input, Space,
+    Space, column, container, image, markdown, mouse_area, row, scrollable, text, text_input,
 };
 use iced::{Background, Border, Element, Fill, Font, Length, Padding, Task, Theme};
 
@@ -283,11 +283,7 @@ impl AssistantPalette {
                 self.send(serde_json::json!({"type": "refresh"}));
             }
         }
-        if grew {
-            scroll_to_end()
-        } else {
-            Task::none()
-        }
+        if grew { scroll_to_end() } else { Task::none() }
     }
 
     fn apply(&mut self, ev: serde_json::Value) {
@@ -926,9 +922,11 @@ fn card_view<'a>(i: usize, card: &'a Card) -> Element<'a, Message> {
     ]
     .spacing(km::TOOL_GAP)
     .align_y(iced::Center);
-    let mut col = column![mouse_area(summary)
-        .on_press(m(AssistantMsg::ToggleCard(i)))
-        .interaction(iced::mouse::Interaction::Pointer)]
+    let mut col = column![
+        mouse_area(summary)
+            .on_press(m(AssistantMsg::ToggleCard(i)))
+            .interaction(iced::mouse::Interaction::Pointer)
+    ]
     .spacing(km::TOOL_GAP);
     if card.open {
         let mono = |s: &'a str| {

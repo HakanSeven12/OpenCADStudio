@@ -5,8 +5,8 @@ use std::fmt;
 
 use document::Handle;
 use iced::widget::{
-    button, checkbox, column, combo_box, container, mouse_area, pick_list, row, stack, text,
-    text_editor, text_input, Space,
+    Space, button, checkbox, column, combo_box, container, mouse_area, pick_list, row, stack, text,
+    text_editor, text_input,
 };
 use iced::{Background, Border, Element, Fill, Length, Theme};
 
@@ -477,11 +477,13 @@ pub fn view_window<'a>(
         .align_y(iced::Center)
         .into()
     } else {
-        row![text(crate::tf!("{count} objects selected"))
-            .size(10)
-            .style(|theme: &Theme| text::Style {
-                color: Some(theme.palette().primary.base.color),
-            }),]
+        row![
+            text(crate::tf!("{count} objects selected"))
+                .size(10)
+                .style(|theme: &Theme| text::Style {
+                    color: Some(theme.palette().primary.base.color),
+                }),
+        ]
         .spacing(5)
         .align_y(iced::Center)
         .into()

@@ -3,16 +3,16 @@
 
 use iced::widget::text::{Ellipsis, Span, Wrapping};
 use iced::widget::{
-    button, column, container, rich_text, row, scrollable, svg, text, text_input, tooltip, Space,
+    Space, button, column, container, rich_text, row, scrollable, svg, text, text_input, tooltip,
 };
 use iced::{Background, Border, Color, Element, Fill, Font, Length, Theme};
 
 use super::{
-    continues_ans, has_length_suffix, KeypadMode, Preview, QuickCalcMsg, QuickCalcPalette, Section,
-    UnitCat, INPUT_ID,
+    INPUT_ID, KeypadMode, Preview, QuickCalcMsg, QuickCalcPalette, Section, UnitCat, continues_ans,
+    has_length_suffix,
 };
-use crate::app::calc::{AngleMode, Value};
 use crate::app::Message;
+use crate::app::calc::{AngleMode, Value};
 use crate::modules::draw::inquiry::calc_pick::PickKind;
 use crate::ui::dock::{Chrome, PanelId};
 use crate::ui::icons::SWAP;

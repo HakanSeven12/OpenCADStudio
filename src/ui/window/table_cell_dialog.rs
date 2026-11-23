@@ -4,7 +4,7 @@
 //! content of the picked cells) and Cell Data Format (how their values
 //! read).
 
-use iced::widget::{button, column, container, pick_list, row, text, text_input, Space};
+use iced::widget::{Space, button, column, container, pick_list, row, text, text_input};
 use iced::{Element, Fill, Length};
 
 use crate::app::Message;
@@ -935,7 +935,10 @@ pub fn view_format<'a>(
     let mut settings = column![].spacing(8);
     let units = state.units();
     if !units.is_empty() {
-        let labels: Vec<String> = units.iter().map(|name| crate::t!(*name).to_string()).collect();
+        let labels: Vec<String> = units
+            .iter()
+            .map(|name| crate::t!(*name).to_string())
+            .collect();
         let selected = labels.get(state.unit).cloned();
         let options = labels.clone();
         settings = settings.push(labelled(
@@ -943,7 +946,10 @@ pub fn view_format<'a>(
             pick_list(selected, labels, |value: &String| value.clone())
                 .on_select(move |value: String| {
                     msg(M::FormatUnit(
-                        options.iter().position(|label| *label == value).unwrap_or(0),
+                        options
+                            .iter()
+                            .position(|label| *label == value)
+                            .unwrap_or(0),
                     ))
                 })
                 .text_size(11)
@@ -1146,9 +1152,8 @@ pub fn view_format<'a>(
             button(
                 row![
                     text(crate::t!(*name).to_string()).size(11).width(Fill),
-                    container(text(badge).size(10))
-                        .padding([1, 7])
-                        .style(move |theme: &iced::Theme| container::Style {
+                    container(text(badge).size(10)).padding([1, 7]).style(
+                        move |theme: &iced::Theme| container::Style {
                             background: Some(iced::Background::Color(if on {
                                 iced::Color::BLACK.scale_alpha(0.18)
                             } else {
@@ -1159,7 +1164,8 @@ pub fn view_format<'a>(
                                 ..Default::default()
                             },
                             ..Default::default()
-                        }),
+                        }
+                    ),
                 ]
                 .spacing(8)
                 .align_y(iced::Center),
@@ -1187,7 +1193,7 @@ pub fn view_format<'a>(
                     .spacing(10)
                     .width(Fill),
             )
-                .padding(iced::Padding::ZERO.right(10)),
+            .padding(iced::Padding::ZERO.right(10)),
         )
         .width(Fill)
         .height(Fill),

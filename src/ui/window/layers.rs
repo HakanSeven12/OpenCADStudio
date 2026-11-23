@@ -4,18 +4,18 @@ use crate::app::Message;
 use crate::t;
 use crate::ui::kit;
 use crate::ui::kit::menu::{self, Item, Mark};
-use crate::ui::properties::{lw_options, LinetypeItem, LwItem};
+use crate::ui::properties::{LinetypeItem, LwItem, lw_options};
 use crate::ui::style::common::muted_style;
 use crate::ui::style::text as ui_text;
 use crate::ui::style::{chrome, kit_metrics as km};
-use document::tables::layer::Layer as DocLayer;
-use document::tables::Table;
-use document::types::{Color as AcadColor, LineWeight};
 use document::Handle;
+use document::tables::Table;
+use document::tables::layer::Layer as DocLayer;
+use document::types::{Color as AcadColor, LineWeight};
+use iced::Padding;
 use iced::widget::{
     button, checkbox, column, combo_box, container, mouse_area, row, scrollable, text, text_input,
 };
-use iced::Padding;
 use iced::{Background, Border, Color, Element, Fill, Length, Theme};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -1894,10 +1894,12 @@ fn sortable_header<'a>(
     active: Option<LayerSortCol>,
     asc: bool,
 ) -> Element<'a, Message> {
-    let mut content = row![kit::one_line(text(label))
-        .size(ui_text::UI)
-        .line_height(ui_line())
-        .font(kit::SEMIBOLD)]
+    let mut content = row![
+        kit::one_line(text(label))
+            .size(ui_text::UI)
+            .line_height(ui_line())
+            .font(kit::SEMIBOLD)
+    ]
     .spacing(km::TOOL_GAP)
     .align_y(iced::Center);
     if active == Some(col) {

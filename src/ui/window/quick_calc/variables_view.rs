@@ -3,15 +3,15 @@
 
 use std::collections::HashMap;
 
-use iced::widget::{button, column, container, mouse_area, row, text, text_input, tooltip, Space};
-use iced::{font, Background, Border, Color, Element, Fill, Font, Theme};
+use iced::widget::{Space, button, column, container, mouse_area, row, text, text_input, tooltip};
+use iced::{Background, Border, Color, Element, Fill, Font, Theme, font};
 
 use super::view::{
-    field_style, icon, m, mix, muted, segment, segmented, strong, text_button, tokens, STRONG,
+    STRONG, field_style, icon, m, mix, muted, segment, segmented, strong, text_button, tokens,
 };
 use super::{FormMsg, QuickCalcMsg, QuickCalcPalette, VarForm, VarKind, VarMsg, Variable};
-use crate::app::calc::{CalcContext, CalcError, Value};
 use crate::app::Message;
+use crate::app::calc::{CalcContext, CalcError, Value};
 use crate::ui::icons::{TRI_DOWN, TRI_RIGHT};
 
 const NEW: &[u8] = include_bytes!("../../../../assets/icons/quickcalc/var_new.svg");

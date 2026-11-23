@@ -537,6 +537,20 @@ pub enum Message {
         element: Option<ocs_plugin_api::scene::StableId>,
         pos: ocs_plugin_api::scene::Vec2,
     },
+    /// A widget row was ACTIVATED on a plugin widget surface (api v29).
+    PanelWidgetNodeActivated {
+        owner: String,
+        panel: String,
+        node: ocs_plugin_api::scene::StableId,
+    },
+    /// An expand affordance was toggled on a plugin widget surface; the
+    /// dispatch decides host-local toggle vs `NodeExpanded` notification
+    /// (only expanding an `Unloaded` row needs the plugin).
+    PanelWidgetExpandToggled {
+        owner: String,
+        panel: String,
+        node: ocs_plugin_api::scene::StableId,
+    },
     /// Checkbox toggle in a plugin modal dialog control.
     PluginDialogBoolToggle(String, bool),
     /// Dropdown choice selection in a plugin modal dialog control.

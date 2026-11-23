@@ -5,14 +5,14 @@
 
 use crate::t;
 use iced::time::Instant;
-use iced::widget::{button, column, container, row, stack, text, Space};
+use iced::widget::{Space, button, column, container, row, stack, text};
 use iced::{Background, Border, Element, Fill, Length, Theme};
 use std::borrow::Cow;
 use std::sync::atomic::Ordering;
 
 use crate::app::{
-    Message, OpenProgress, OPEN_PHASE_CACHING, OPEN_PHASE_FINALIZING, OPEN_PHASE_PARSING,
-    OPEN_PHASE_READING, OPEN_PHASE_XREF,
+    Message, OPEN_PHASE_CACHING, OPEN_PHASE_FINALIZING, OPEN_PHASE_PARSING, OPEN_PHASE_READING,
+    OPEN_PHASE_XREF, OpenProgress,
 };
 
 const CARD_WIDTH: f32 = 420.0;

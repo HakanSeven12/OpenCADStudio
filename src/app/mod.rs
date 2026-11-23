@@ -1646,6 +1646,13 @@ pub(super) struct OpenCADStudio {
     /// drag, move coalescing, settle/cancel; per-surface event identity.
     pub(crate) panel_event_router:
         crate::app::panel_events::PanelEventRouter,
+    /// Host-local widget view state per panel id (api v29): expansion and
+    /// selection stay host-local (finding F2's host-local law) — nothing
+    /// here is authoritative about the data.
+    pub(crate) panel_widget_ui: std::collections::BTreeMap<
+        String,
+        crate::ui::window::plugin_widgets::WidgetUiState,
+    >,
     /// Numeric mapping for PanelId::Plugin(u32).
     pub(crate) plugin_panel_ids: std::collections::HashMap<String, u32>,
     pub(crate) plugin_panel_by_num: std::collections::HashMap<u32, String>,
@@ -3253,6 +3260,7 @@ impl OpenCADStudio {
                 crate::app::panel_surfaces::PanelSurfaceStore::default(),
             panel_event_router:
                 crate::app::panel_events::PanelEventRouter::new(),
+            panel_widget_ui: std::collections::BTreeMap::new(),
             plugin_panel_ids: std::collections::HashMap::new(),
             plugin_panel_by_num: std::collections::HashMap::new(),
             hyperlink_editor_handles: Vec::new(),

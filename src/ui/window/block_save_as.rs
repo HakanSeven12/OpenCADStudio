@@ -1,6 +1,6 @@
 use crate::app::Message;
 use crate::scene::WireModel;
-use iced::widget::{button, column, container, pick_list, row, text, text_input, Space};
+use iced::widget::{Space, button, column, container, pick_list, row, text, text_input};
 use iced::{Element, Fill};
 
 pub(crate) struct State {

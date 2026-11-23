@@ -2,7 +2,7 @@ use crate::app::Message;
 use crate::t;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::dialog_button;
-use iced::widget::{column, container, row, svg, text, Space};
+use iced::widget::{Space, column, container, row, svg, text};
 use iced::{Background, Border, Element, Fill, Length, Shrink, Theme};
 
 fn primary_style(theme: &Theme) -> iced::widget::text::Style {

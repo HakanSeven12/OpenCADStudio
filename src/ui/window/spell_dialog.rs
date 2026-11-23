@@ -3,7 +3,7 @@
 //! the word, the main dictionary, and the checking options with the words
 //! added to the user's dictionary.
 
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Element, Fill, Length};
 
 use crate::app::Message;

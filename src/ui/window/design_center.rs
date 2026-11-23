@@ -3,7 +3,7 @@
 
 use crate::app::Message;
 use crate::ui::style::form::hdivider;
-use iced::widget::{button, column, container, row, scrollable, text, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Element, Fill, Length, Theme};
 
 /// The kinds of named content, as the Rename service names them.
@@ -73,14 +73,15 @@ fn list<'a>(rows: Vec<Element<'a, Message>>) -> Element<'a, Message> {
 }
 
 pub(crate) fn view(state: &State, sizing: crate::ui::modal::ModalSizing) -> Element<'_, Message> {
-    let row_button = |label: String, selected: bool, msg: DesignCenterMsg| -> Element<'_, Message> {
-        button(text(label).size(12))
-            .on_press(Message::DesignCenter(msg))
-            .style(list_item_style(selected))
-            .padding([4, 8])
-            .width(Fill)
-            .into()
-    };
+    let row_button =
+        |label: String, selected: bool, msg: DesignCenterMsg| -> Element<'_, Message> {
+            button(text(label).size(12))
+                .on_press(Message::DesignCenter(msg))
+                .style(list_item_style(selected))
+                .padding([4, 8])
+                .width(Fill)
+                .into()
+        };
     let sources = state
         .sources
         .iter()
@@ -140,11 +141,9 @@ pub(crate) fn view(state: &State, sizing: crate::ui::modal::ModalSizing) -> Elem
 
     let send = |msg| Message::DesignCenter(msg);
     let buttons = row![
-        button(text(crate::tr!("design-center", "browse")))
-            .on_press(send(DesignCenterMsg::Browse)),
-        button(text(crate::tr!("design-center", "select-all"))).on_press_maybe(
-            (!state.items.is_empty()).then_some(send(DesignCenterMsg::SelectAll))
-        ),
+        button(text(crate::tr!("design-center", "browse"))).on_press(send(DesignCenterMsg::Browse)),
+        button(text(crate::tr!("design-center", "select-all")))
+            .on_press_maybe((!state.items.is_empty()).then_some(send(DesignCenterMsg::SelectAll))),
         Space::new().width(Fill),
         button(text(crate::tr!("design-center", "add")))
             .on_press_maybe((!state.picked.is_empty()).then_some(send(DesignCenterMsg::Add)))

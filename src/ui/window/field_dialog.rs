@@ -3,7 +3,7 @@
 //! format on the right, a live preview and the field expression below.
 
 use iced::widget::{
-    button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space,
+    Space, button, checkbox, column, container, pick_list, row, scrollable, text, text_input,
 };
 use iced::{Element, Fill, Length};
 
@@ -140,7 +140,7 @@ pub fn nav_nodes(
     db: &document::sheet_set::SheetSetDatabase,
     views: bool,
 ) -> Vec<(u16, String, String, bool)> {
-    use document::sheet_set::{number_and_title, ComponentKind, Element as SsElement};
+    use document::sheet_set::{ComponentKind, Element as SsElement, number_and_title};
     let set = db.sheet_set();
     let mut out = vec![(0, set.id().to_string(), db.name().to_string(), false)];
     if views {
@@ -203,7 +203,7 @@ pub fn nav_props(
     id: &str,
 ) -> Vec<(String, String, &'static str)> {
     use document::sheet_set::{
-        custom_properties, ComponentKind, CUSTOM_SHEET_PROP, CUSTOM_SHEET_SET_PROP,
+        CUSTOM_SHEET_PROP, CUSTOM_SHEET_SET_PROP, ComponentKind, custom_properties,
     };
     let Some(el) = db.find(id) else {
         return Vec::new();
@@ -1457,9 +1457,11 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
         .spacing(8)
         .into(),
         FieldKind::BlockPlaceholder => match &state.placeholder_block {
-            None => column![text(t!("Only accessible in the block editor"))
-                .size(12)
-                .style(muted_style)]
+            None => column![
+                text(t!("Only accessible in the block editor"))
+                    .size(12)
+                    .style(muted_style)
+            ]
             .into(),
             Some(block) => {
                 let (_, _, format) =

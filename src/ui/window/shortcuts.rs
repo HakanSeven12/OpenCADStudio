@@ -3,8 +3,8 @@
 use crate::app::Message;
 use crate::t;
 use crate::ui::style::common::muted_style;
-use crate::ui::style::editor_table::{danger_input_style, danger_text_style, EDITOR_TABLE_GUTTER};
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use crate::ui::style::editor_table::{EDITOR_TABLE_GUTTER, danger_input_style, danger_text_style};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Background, Element, Length, Theme};
 
 #[derive(Clone, Copy, Debug)]
@@ -215,13 +215,15 @@ pub fn view_window<'a>(
             .spacing(4)
             .align_y(iced::Center)
         } else {
-            row![button(crate::ui::icons::themed_danger_text(
-                crate::ui::icons::TRASH,
-                12.0,
-            ))
-            .on_press(Message::ShortcutEditorRemove(idx))
-            .padding([2, 6])
-            .style(button::danger)]
+            row![
+                button(crate::ui::icons::themed_danger_text(
+                    crate::ui::icons::TRASH,
+                    12.0,
+                ))
+                .on_press(Message::ShortcutEditorRemove(idx))
+                .padding([2, 6])
+                .style(button::danger)
+            ]
             .align_y(iced::Center)
         };
         list = list.push(
@@ -340,7 +342,11 @@ pub fn view_window<'a>(
         column![
             title,
             hint,
-            crate::ui::kit::search_field(t!("Search…").as_ref(), filter, Message::ShortcutEditorFilter),
+            crate::ui::kit::search_field(
+                t!("Search…").as_ref(),
+                filter,
+                Message::ShortcutEditorFilter
+            ),
             Space::new().height(6),
             head,
             scrollable(container(list).padding(gutter)).height(sizing.height),

@@ -1,7 +1,7 @@
 use crate::app::Message;
 use crate::t;
 use crate::ui::style::common::muted_style as muted;
-use iced::widget::{button, checkbox, column, container, row, scrollable, text, Space};
+use iced::widget::{Space, button, checkbox, column, container, row, scrollable, text};
 use iced::{Background, Border, Element, Length, Theme};
 
 pub fn view_window<'a>(

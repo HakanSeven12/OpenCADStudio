@@ -1,12 +1,12 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod graphics;
 pub(crate) mod spacemouse;
+use crate::app::Message;
 use crate::app::config::UiThemeConfig;
 use crate::app::settings;
 use crate::app::settings::{CursorType, RightClickMode};
-use crate::app::Message;
 use crate::ui::style::form::{dialog_button, dialog_button_styled_opt};
-use iced::widget::{button, column, container, row, scrollable, slider, text, text_input, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, slider, text, text_input};
 use iced::{Background, Border, Element, Fill, Theme};
 use std::fmt;
 

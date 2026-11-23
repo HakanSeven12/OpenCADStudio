@@ -4,7 +4,7 @@ use crate::app::Message;
 use crate::t;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{hdivider, vsep};
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Background, Element, Theme};
 
 fn primary_style(theme: &Theme) -> iced::widget::text::Style {

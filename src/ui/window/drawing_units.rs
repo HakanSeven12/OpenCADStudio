@@ -12,7 +12,7 @@
 
 use std::fmt;
 
-use iced::widget::{checkbox, column, container, row, text, text_input, Space};
+use iced::widget::{Space, checkbox, column, container, row, text, text_input};
 use iced::{Border, Element, Fill, Length, Theme};
 
 use crate::app::Message;
@@ -301,7 +301,7 @@ fn sample_angle(state: &State) -> String {
 /// of the frame is drawing with. Without the restore the sample would leak its
 /// settings into every widget drawn after it.
 fn with_context(state: &State, body: impl FnOnce() -> String) -> String {
-    use crate::entities::common::{set_unit_context, unit_context, UnitContext};
+    use crate::entities::common::{UnitContext, set_unit_context, unit_context};
     let previous = unit_context();
     set_unit_context(UnitContext {
         lunits: state.linear_format,

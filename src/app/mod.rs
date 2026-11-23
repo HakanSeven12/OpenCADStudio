@@ -109,6 +109,10 @@ pub(crate) mod node_graph;
 #[cfg(test)]
 mod object_isolation_tests;
 mod options_session;
+/// Pure panel-surface event routing (api v29): pointer semantics, drag
+/// state machine, per-surface event identity. Host-owned input; no
+/// renderer or wire coupling.
+pub mod panel_events;
 #[cfg(test)]
 mod paste_special_tests;
 #[cfg(not(target_arch = "wasm32"))]
@@ -1638,6 +1642,10 @@ pub(super) struct OpenCADStudio {
     /// UI projects from it, nothing here draws.
     pub(crate) panel_surfaces:
         crate::app::panel_surfaces::PanelSurfaceStore,
+    /// Pointer semantics for panel scene surfaces (api v29): click vs
+    /// drag, move coalescing, settle/cancel; per-surface event identity.
+    pub(crate) panel_event_router:
+        crate::app::panel_events::PanelEventRouter,
     /// Numeric mapping for PanelId::Plugin(u32).
     pub(crate) plugin_panel_ids: std::collections::HashMap<String, u32>,
     pub(crate) plugin_panel_by_num: std::collections::HashMap<u32, String>,
@@ -3243,6 +3251,8 @@ impl OpenCADStudio {
             plugin_panels: std::collections::BTreeMap::new(),
             panel_surfaces:
                 crate::app::panel_surfaces::PanelSurfaceStore::default(),
+            panel_event_router:
+                crate::app::panel_events::PanelEventRouter::new(),
             plugin_panel_ids: std::collections::HashMap::new(),
             plugin_panel_by_num: std::collections::HashMap::new(),
             hyperlink_editor_handles: Vec::new(),

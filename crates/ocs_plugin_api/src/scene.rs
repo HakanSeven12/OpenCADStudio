@@ -837,6 +837,33 @@ pub struct SurfaceReject {
     pub current_revision: Option<SceneRevision>,
 }
 
+/// One semantic event from a panel surface (api v29, S04): what the user
+/// did to WHICH element, carrying absolute scene-space positions. Events
+/// are best-effort notifications — never acked by re-publishing values
+/// (identical-looking activations are DISTINCT events; equality is not
+/// event identity). Drag moves may be coalesced by the host (absolute
+/// positions carry all the information); `DragSettled` and
+/// `DragCancelled` are authoritative and never dropped.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum SurfaceEvent {
+    /// A click (press + release without drag) on an element. The plugin
+    /// binds its own semantics to the element id — the host does not
+    /// interpret scene vocabulary.
+    ElementClicked { element: StableId, pos: Vec2 },
+    /// A drag began on an element; `origin` is the scene-space point the
+    /// element occupied when the drag started.
+    DragStarted { element: StableId, origin: Vec2 },
+    /// A coalesced drag move; `pos` is the element's CURRENT scene-space
+    /// origin (absolute — dropped intermediate moves lose nothing).
+    DragMoved { element: StableId, pos: Vec2 },
+    /// THE authoritative settle: the final origin after the drop.
+    /// Exactly one per drag; never coalesced away.
+    DragSettled { element: StableId, pos: Vec2 },
+    /// The drag was cancelled (escape, focus loss, teardown). `origin` is
+    /// the PRE-DRAG origin, so the plugin can restore losslessly.
+    DragCancelled { element: StableId, origin: Vec2 },
+}
+
 /// Maximum patch ops accepted in one patch frame, bounding allocation and
 /// CPU magnification per frame (mirrors [`MAX_SCENE_NODES`]'s spirit: the
 /// cap is well above any authored update and far below a denial budget).

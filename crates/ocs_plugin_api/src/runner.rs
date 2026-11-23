@@ -25,7 +25,7 @@ use std::rc::Rc;
 use crate::host::{BuiltinPlugin, CommandStep, HostNotification, InteractiveCommand};
 use crate::ipc::client::{InteractiveRegistry, IpcClient, PluginHostApi};
 use crate::ipc::protocol::{
-    HostRequest, HostResponse, HostToPlugin, InteractiveEvent, PluginToHost, PLUGIN_TOKEN_ENV,
+    HostRequest, HostResponse, HostToPlugin, InteractiveEvent, PLUGIN_TOKEN_ENV, PluginToHost,
 };
 use crate::ipc::transport::{recv, send};
 use crate::ipc::v4::client::{RunnerFrame, V4Client};
@@ -71,7 +71,7 @@ pub fn run_with_plugin(
     version: u32,
     mut plugin: Box<dyn BuiltinPlugin>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::version_info::{wire_schema, SELF_HOSTED_API_VERSION, WIRE_SCHEMA_ENV};
+    use crate::version_info::{SELF_HOSTED_API_VERSION, WIRE_SCHEMA_ENV, wire_schema};
     if version >= SELF_HOSTED_API_VERSION {
         if let Ok(host) = std::env::var(WIRE_SCHEMA_ENV) {
             if host != wire_schema() {
@@ -354,6 +354,7 @@ fn notification_api_version(notification: &crate::host::HostNotification) -> u32
         N::SelectionChangedDigest { .. } => 22,
         N::DocumentChangedRegions { .. } => 13,
         N::DocumentChangedDelta { .. } => 27,
+        N::PanelSurfaceEvent { .. } => 29,
         N::DocumentOpened { .. } => 9,
         N::CommandStateChanged { .. } | N::DrawingChanged { .. } => 7,
         N::DocumentChangedV4 { .. }
@@ -663,7 +664,7 @@ fn handle_host_request_v4(
                             Err(_) => {
                                 return Some(HostResponse::Error(
                                     "plugin entity_classes() panicked".to_string(),
-                                ))
+                                ));
                             }
                         };
                     }
@@ -1066,8 +1067,8 @@ mod tests {
     use std::thread;
 
     use interprocess::local_socket::{
-        traits::{Listener, Stream as StreamTrait},
         GenericNamespaced, ListenerOptions, Stream, ToNsName,
+        traits::{Listener, Stream as StreamTrait},
     };
 
     use super::*;

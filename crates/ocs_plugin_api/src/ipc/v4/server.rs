@@ -1,13 +1,13 @@
 //! Host-side V4 IPC reader and dispatcher helpers.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use interprocess::local_socket::Stream;
 
 use crate::host::PluginNotification;
-use crate::ipc::transport::{recv, TransportError};
+use crate::ipc::transport::{TransportError, recv};
 use crate::ipc::v4::protocol::PluginToHostV4;
 
 /// Default plugin→host notification rate limit (notifications per second).

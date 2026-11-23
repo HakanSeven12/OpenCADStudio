@@ -573,6 +573,21 @@ pub enum HostNotification {
         snapshot: Option<DocumentDeltaSnapshot>,
         full_refresh_required: bool,
     },
+    /// A semantic panel-surface event (api v29): what the user did to
+    /// which element of `panel_id`, with the surface's monotonic event
+    /// `sequence` as the explicit event identity — identical-looking
+    /// activations are DISTINCT events, and equality is not identity.
+    /// Best-effort by contract: never acknowledged by re-publishing
+    /// values; drag moves may be coalesced (positions are absolute), but
+    /// `DragSettled` and `DragCancelled` are authoritative and never
+    /// dropped. Only routed to plugins whose manifest declares v29 — a
+    /// v28 runner cannot decode tag 16
+    /// (`notification_api_version` gate). Discriminant 16.
+    PanelSurfaceEvent {
+        panel_id: String,
+        sequence: u64,
+        event: crate::scene::SurfaceEvent,
+    },
     /// Fallback for notification variants added in future minor revisions.
     /// Carries the raw bincode payload so an older peer can ignore it without
     /// failing deserialization.
@@ -722,6 +737,16 @@ impl Serialize for HostNotification {
                 bincode::serialize_into(&mut bytes, full_refresh_required)
                     .map_err(serde::ser::Error::custom)?;
             }
+            HostNotification::PanelSurfaceEvent {
+                panel_id,
+                sequence,
+                event,
+            } => {
+                bytes.push(16);
+                bincode::serialize_into(&mut bytes, panel_id).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, sequence).map_err(serde::ser::Error::custom)?;
+                bincode::serialize_into(&mut bytes, event).map_err(serde::ser::Error::custom)?;
+            }
             HostNotification::Unknown(raw) => bytes.extend_from_slice(raw),
         }
         bytes.serialize(serializer)
@@ -850,6 +875,15 @@ impl<'de> Deserialize<'de> for HostNotification {
                             snapshot,
                             full_refresh_required,
                         }
+                    },
+                )
+                .map_err(serde::de::Error::custom),
+            16 => bincode::deserialize(rest)
+                .map(
+                    |(panel_id, sequence, event)| HostNotification::PanelSurfaceEvent {
+                        panel_id,
+                        sequence,
+                        event,
                     },
                 )
                 .map_err(serde::de::Error::custom),

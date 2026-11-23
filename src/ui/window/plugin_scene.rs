@@ -60,10 +60,12 @@ fn cached_prims(owner: &str, panel: &str, scene: &PanelScene) -> Arc<Vec<ScenePr
 }
 
 /// One flattened paint primitive, semantic colors unresolved. Paint order
-/// is the projection order; groups flatten depth-first.
+/// is the projection order; groups flatten depth-first. `element` is the
+/// owning element's StableId — the pointer seam hit-tests against it.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ScenePrim {
     Rect {
+        element: ocs_plugin_api::scene::StableId,
         x: f32,
         y: f32,
         w: f32,
@@ -72,11 +74,13 @@ pub(crate) enum ScenePrim {
         stroke: Option<(SceneColor, f32)>,
     },
     Polyline {
+        element: ocs_plugin_api::scene::StableId,
         points: Vec<(f32, f32)>,
         closed: bool,
         stroke: Option<(SceneColor, f32)>,
     },
     Label {
+        element: ocs_plugin_api::scene::StableId,
         x: f32,
         y: f32,
         size: f32,
@@ -94,17 +98,30 @@ pub(crate) fn project_scene(scene: &PanelScene) -> Vec<ScenePrim> {
     prims
 }
 
+impl ScenePrim {
+    /// The prim's owning element (hit-testing and the drag preview).
+    fn element(&self) -> Option<ocs_plugin_api::scene::StableId> {
+        match self {
+            ScenePrim::Rect { element, .. }
+            | ScenePrim::Polyline { element, .. }
+            | ScenePrim::Label { element, .. } => Some(*element),
+        }
+    }
+}
+
 fn project_elements(elements: &[SceneElement], prims: &mut Vec<ScenePrim>) {
     for element in elements {
         match element {
             SceneElement::Group { children, .. } => project_elements(children, prims),
             SceneElement::Rect {
+                id,
                 pos,
                 size,
                 fill,
                 stroke,
                 ..
             } => prims.push(ScenePrim::Rect {
+                element: *id,
                 x: pos.0[0] as f32,
                 y: pos.0[1] as f32,
                 w: size.0[0] as f32,
@@ -113,11 +130,13 @@ fn project_elements(elements: &[SceneElement], prims: &mut Vec<ScenePrim>) {
                 stroke: stroke.as_ref().map(|s| (s.color, s.width)),
             }),
             SceneElement::Path {
+                id,
                 points,
                 closed,
                 stroke,
                 ..
             } => prims.push(ScenePrim::Polyline {
+                element: *id,
                 points: points
                     .iter()
                     .map(|p| (p.0[0] as f32, p.0[1] as f32))
@@ -126,12 +145,14 @@ fn project_elements(elements: &[SceneElement], prims: &mut Vec<ScenePrim>) {
                 stroke: stroke.as_ref().map(|s| (s.color, s.width)),
             }),
             SceneElement::Text {
+                id,
                 pos,
                 content,
                 size,
                 color,
                 ..
             } => prims.push(ScenePrim::Label {
+                element: *id,
                 x: pos.0[0] as f32,
                 y: pos.0[1] as f32,
                 size: *size,
@@ -140,6 +161,56 @@ fn project_elements(elements: &[SceneElement], prims: &mut Vec<ScenePrim>) {
             }),
         }
     }
+}
+
+/// Hit-test: the LAST (topmost in paint order) prim whose geometry
+/// contains `point`. Coarse and deliberately so — rectangles and labels
+/// hit their bounding boxes, polylines hit their bounding box; the
+/// plugin owns any finer semantics.
+pub(crate) fn hit_test(
+    prims: &[ScenePrim],
+    point: (f32, f32),
+) -> Option<ocs_plugin_api::scene::StableId> {
+    let (px, py) = point;
+    prims
+        .iter()
+        .rev()
+        .find(|prim| match prim {
+            ScenePrim::Rect { x, y, w, h, .. } => {
+                px >= *x && px <= x + w && py >= *y && py <= y + h
+            }
+            ScenePrim::Polyline { points, .. } => {
+                let (mut min_x, mut min_y, mut max_x, mut max_y) = (
+                    f32::INFINITY,
+                    f32::INFINITY,
+                    f32::NEG_INFINITY,
+                    f32::NEG_INFINITY,
+                );
+                for (x, y) in points {
+                    min_x = min_x.min(*x);
+                    min_y = min_y.min(*y);
+                    max_x = max_x.max(*x);
+                    max_y = max_y.max(*y);
+                }
+                px >= min_x && px <= max_x && py >= min_y && py <= max_y
+            }
+            ScenePrim::Label {
+                x,
+                y,
+                size,
+                content,
+                ..
+            } => {
+                let w = size * 0.6 * content.chars().count() as f32;
+                let h = size * 1.4;
+                px >= *x && px <= x + w && py >= *y && py <= y + h
+            }
+        })
+        .map(|prim| match prim {
+            ScenePrim::Rect { element, .. }
+            | ScenePrim::Polyline { element, .. }
+            | ScenePrim::Label { element, .. } => *element,
+        })
 }
 
 /// Semantic color -> host theme slot. Deterministic and pinned by tests so
@@ -167,7 +238,18 @@ pub(crate) fn scene_color(theme: &Theme, color: SceneColor) -> Color {
 /// the flat prim list each invocation; no cache (S03 adds the retained
 /// projection keyed by render inputs).
 pub(crate) struct SceneCanvas {
+    pub owner: String,
+    pub panel: String,
     pub prims: Arc<Vec<ScenePrim>>,
+    /// Host-local drag preview (api v29 S04): the dragged element, its
+    /// pre-drag origin and the current preview position. Paint-time only —
+    /// the retained prims stay valid, the dragged element's prims shift by
+    /// (pos − origin) at draw time; nothing here mutates the stored scene.
+    pub preview: Option<(
+        ocs_plugin_api::scene::StableId,
+        ocs_plugin_api::scene::Vec2,
+        ocs_plugin_api::scene::Vec2,
+    )>,
 }
 
 impl canvas::Program<Message> for SceneCanvas {
@@ -182,14 +264,73 @@ impl canvas::Program<Message> for SceneCanvas {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let preview = self.preview.map(|(element, origin, pos)| {
+            (
+                element,
+                (pos.0[0] - origin.0[0]) as f32,
+                (pos.0[1] - origin.0[1]) as f32,
+            )
+        });
         for prim in self.prims.iter() {
-            paint_prim(&mut frame, theme, prim);
+            paint_prim(&mut frame, theme, prim, preview);
         }
         vec![frame.into_geometry()]
     }
+
+    /// Pointer seam (api v29 S04): translate raw canvas events into
+    /// panel-surface pointer messages. Scene space equals canvas-local
+    /// space in this projection (no transforms — S01 invariant), so the
+    /// hit-test runs the cached prims directly. The ROUTER owns the
+    /// semantics; the canvas only resolves geometry.
+    fn update(
+        &self,
+        _state: &mut Self::State,
+        event: &iced::Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> Option<iced::widget::Action<Message>> {
+        use crate::app::panel_events::Pointer;
+        let Some(point) = cursor.position_in(bounds) else {
+            return None;
+        };
+        let message_for = |pointer: Pointer| {
+            Some(iced::widget::Action::publish(
+                Message::PanelSurfacePointer {
+                    owner: self.owner.clone(),
+                    panel: self.panel.clone(),
+                    pointer,
+                    element: hit_test(self.prims.as_slice(), (point.x, point.y)),
+                    pos: ocs_plugin_api::scene::Vec2([point.x as f64, point.y as f64]),
+                },
+            ))
+        };
+        match event {
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                message_for(Pointer::Press)
+            }
+            iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                message_for(Pointer::Release)
+            }
+            iced::Event::Mouse(mouse::Event::CursorMoved { .. }) => message_for(Pointer::Move),
+            _ => None,
+        }
+    }
 }
 
-fn paint_prim(frame: &mut canvas::Frame, theme: &Theme, prim: &ScenePrim) {
+fn paint_prim(
+    frame: &mut canvas::Frame,
+    theme: &Theme,
+    prim: &ScenePrim,
+    preview: Option<(ocs_plugin_api::scene::StableId, f32, f32)>,
+) {
+    // Host-local drag preview: the dragged element's prims shift by the
+    // preview delta at PAINT time — the stored scene and the cache are
+    // untouched until the plugin settles with its own patch.
+    let shift = match (preview, prim.element()) {
+        (Some((element, dx, dy)), Some(prim_element)) if prim_element == element => (dx, dy),
+        _ => (0.0, 0.0),
+    };
+    let shifted = |x: f32, y: f32| Point::new(x + shift.0, y + shift.1);
     match prim {
         ScenePrim::Rect {
             x,
@@ -198,8 +339,9 @@ fn paint_prim(frame: &mut canvas::Frame, theme: &Theme, prim: &ScenePrim) {
             h,
             fill,
             stroke,
+            ..
         } => {
-            let origin = Point::new(*x, *y);
+            let origin = shifted(*x, *y);
             let size = Size::new(*w, *h);
             if let Some(color) = fill {
                 frame.fill_rectangle(origin, size, scene_color(theme, *color));
@@ -218,6 +360,7 @@ fn paint_prim(frame: &mut canvas::Frame, theme: &Theme, prim: &ScenePrim) {
             points,
             closed,
             stroke,
+            ..
         } => {
             if points.len() < 2 {
                 return;
@@ -226,10 +369,10 @@ fn paint_prim(frame: &mut canvas::Frame, theme: &Theme, prim: &ScenePrim) {
                 let path = canvas::Path::new(|builder| {
                     let mut pts = points.iter();
                     if let Some((x, y)) = pts.next() {
-                        builder.move_to(Point::new(*x, *y));
+                        builder.move_to(shifted(*x, *y));
                     }
                     for (x, y) in pts {
-                        builder.line_to(Point::new(*x, *y));
+                        builder.line_to(shifted(*x, *y));
                     }
                     if *closed {
                         builder.close();
@@ -249,10 +392,11 @@ fn paint_prim(frame: &mut canvas::Frame, theme: &Theme, prim: &ScenePrim) {
             size,
             content,
             color,
+            ..
         } => {
             frame.fill_text(canvas::Text {
                 content: content.clone().into(),
-                position: Point::new(*x, *y),
+                position: shifted(*x, *y),
                 color: scene_color(theme, *color),
                 size: (*size).into(),
                 ..canvas::Text::default()
@@ -263,12 +407,26 @@ fn paint_prim(frame: &mut canvas::Frame, theme: &Theme, prim: &ScenePrim) {
 
 /// The panel body seam: one canvas element sized to the panel body,
 /// painting the retained projection for (owner, panel, revision).
-pub(crate) fn scene_view<'a>(owner: &str, panel: &str, scene: &PanelScene) -> Element<'a, Message> {
+pub(crate) fn scene_view<'a>(
+    owner: &str,
+    panel: &str,
+    scene: &PanelScene,
+    preview: Option<(
+        ocs_plugin_api::scene::StableId,
+        ocs_plugin_api::scene::Vec2,
+        ocs_plugin_api::scene::Vec2,
+    )>,
+) -> Element<'a, Message> {
     let prims = cached_prims(owner, panel, scene);
-    iced::widget::canvas(SceneCanvas { prims })
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+    iced::widget::canvas(SceneCanvas {
+        owner: owner.to_owned(),
+        panel: panel.to_owned(),
+        prims,
+        preview,
+    })
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
 }
 
 #[cfg(test)]

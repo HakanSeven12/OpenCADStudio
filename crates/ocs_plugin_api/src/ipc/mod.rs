@@ -41,8 +41,8 @@ mod tests {
     use std::thread;
 
     use interprocess::local_socket::{
-        traits::{Listener, Stream as StreamTrait},
         GenericNamespaced, ListenerOptions, Stream, ToNsName,
+        traits::{Listener, Stream as StreamTrait},
     };
 
     use crate::ipc::protocol::{HostRequest, HostResponse, HostToPlugin, PluginToHost};
@@ -708,6 +708,48 @@ mod tests {
                     })
                 );
                 assert!(full_refresh_required);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    /// The v29 panel-surface event notification is pinned at tag 16
+    /// (appended after the v27 delta's 15) and round-trips with its
+    /// sequence (the explicit event identity) and typed event payload.
+    #[test]
+    fn panel_surface_event_notification_tag_is_sixteen() {
+        let notification = crate::host::HostNotification::PanelSurfaceEvent {
+            panel_id: "acme:graph".to_owned(),
+            sequence: 42,
+            event: crate::scene::SurfaceEvent::DragSettled {
+                element: crate::scene::StableId(3),
+                pos: crate::scene::Vec2([7.0, 9.0]),
+            },
+        };
+        fn tag(notification: &crate::host::HostNotification) -> u8 {
+            // The wire frame is [u64 length][tag byte][fields] — the tag
+            // sits after the bincode length prefix (the v27 comment above
+            // explains the append-only tag story).
+            let bytes = bincode::serialize(notification).unwrap();
+            bytes[8]
+        }
+        assert_eq!(tag(&notification), 16);
+        let bytes = bincode::serialize(&notification).expect("serialize notification");
+        match bincode::deserialize::<crate::host::HostNotification>(&bytes)
+            .expect("deserialize notification")
+        {
+            crate::host::HostNotification::PanelSurfaceEvent {
+                panel_id,
+                sequence,
+                event,
+            } => {
+                assert_eq!(panel_id, "acme:graph");
+                assert_eq!(sequence, 42);
+                assert!(matches!(
+                    event,
+                    crate::scene::SurfaceEvent::DragSettled { element, pos }
+                        if element == crate::scene::StableId(3) && pos == crate::scene::Vec2([7.0, 9.0])
+                ));
             }
             other => panic!("unexpected: {other:?}"),
         }

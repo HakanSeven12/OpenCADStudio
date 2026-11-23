@@ -2091,6 +2091,33 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::PanelSurfacePointer {
+                owner,
+                panel,
+                pointer,
+                element,
+                pos,
+            } => {
+                // The router owns the semantics (click vs drag, coalescing,
+                // settle/cancel). Delivery is owner-targeted and
+                // best-effort — the same law as every v4 notification.
+                // Desktop-only: the web runtime has no plugin host, so its
+                // routed events simply die here (honest no-op — the paired
+                // stub convention; no scene surface can exist on web).
+                let routed =
+                    self.panel_event_router
+                        .on_pointer(&panel, pointer, element, pos);
+                #[cfg(not(target_arch = "wasm32"))]
+                for ev in routed {
+                    crate::plugin::v4_support::publish_surface_event_to_plugin(
+                        &owner, ev.panel_id, ev.sequence, ev.event,
+                    );
+                }
+                #[cfg(target_arch = "wasm32")]
+                let _ = (owner, routed);
+                Task::none()
+            }
+
             Message::PluginDialogTextChange(id, val) => {
                 if let Some(state) = &mut self.plugin_dialog_state {
                     state.text_values.insert(id, val);

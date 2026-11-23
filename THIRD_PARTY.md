@@ -23,3 +23,10 @@ CORPORATION & AFFILIATES, Apache-2.0).
   `crates/solidcore-step/tests/fixtures/`, unchanged.
 - `examples/step_eval.rs` writes the `eval FILE --json-out OUT` form that
   Solidcore's `bench/step/run.py` reads; no Solidcore code is copied.
+
+## Open BIM Suite (LGPL-3.0-or-later)
+
+[Open BIM Suite](https://github.com/OpenAEC-Foundation/open-bim-suite)
+v2026.46.5, `src/drawing.rs`: the floor-plan sectioning in
+`src/ifc_plan/section.rs` is adapted from it and distributed under GPL-3.0
+(LGPL-3.0 section 2(b)).

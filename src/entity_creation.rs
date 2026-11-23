@@ -1032,12 +1032,31 @@ pub(crate) fn build_entity(
             if spec["solid"].as_bool().unwrap_or(false) {
                 hatch.is_solid = true;
             } else {
-                hatch.is_solid = false;
-                hatch.pattern = HatchPattern::new(
-                    spec["pattern"].as_str().unwrap_or("ANSI31"),
-                );
+                use crate::scene::model::hatch_patterns;
+                let name = spec["pattern"].as_str().unwrap_or("ANSI31");
+                let entry = hatch_patterns::find(name).ok_or_else(|| {
+                    failure_at(
+                        "invalid_pattern",
+                        "/pattern",
+                        format!("unknown hatch pattern '{name}'; use a catalog pattern name"),
+                    )
+                })?;
                 hatch.pattern_scale = spec["pattern_scale"].as_f64().unwrap_or(1.0).abs().max(1e-6);
                 hatch.pattern_angle = deg_field(spec, "pattern_angle_deg");
+                // A drawing stores the pattern as its lines, already scaled
+                // and turned; readers draw from them, not from the name. Build
+                // them the way the Properties palette does when a pattern is
+                // chosen there.
+                let mut pattern = hatch_patterns::build_dxf_pattern(entry);
+                crate::entities::hatch::scale_pattern_geometry(&mut pattern, hatch.pattern_scale);
+                crate::entities::hatch::rotate_pattern_geometry(&mut pattern, hatch.pattern_angle);
+                let origin = hatch.pattern_origin();
+                crate::entities::hatch::translate_pattern_geometry(&mut pattern, origin.x, origin.y);
+                hatch.pattern = pattern;
+                hatch.is_solid = matches!(
+                    entry.gpu,
+                    crate::scene::model::hatch_model::HatchPattern::Solid
+                );
             }
             let mut path = BoundaryPath::external();
             path.add_edge(BoundaryEdge::Polyline(PolylineEdge::new(vertices, true)));

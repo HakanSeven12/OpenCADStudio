@@ -1,20 +1,7 @@
-//! Work counts: a user step on a large drawing must not do work for each
-//! entity of the drawing, and an event that changes no setting must not
-//! write the settings file.
-//!
-//! A slower release was found by users three times (#2756, #3339, #3392),
-//! because no test fails when a step does more work and gives the same
-//! result. Times on a CI runner are not stable, so these tests count work:
-//! each one does a step on a drawing of [`LINES`] lines and compares the
-//! counters of the app with the limit of the step in [`LIMITS`].
-//!
-//! If a test here fails after your change, the step now does more work on
-//! a large drawing. Find why, before you change a limit: a full build of
-//! the wire set, or a tessellation context for each entity, is a stop that
-//! the user sees on a drawing of 400,000 entities; a write of the settings
-//! file for each pointer event made the app unusable (#3392). Raise a limit
-//! only when
-//! the new work is necessary, and say why in a comment on its line.
+//! Work counts: each step runs on a drawing of [`LINES`] lines and must stay
+//! within its line in [`LIMITS`]. Counts, not times, keep the check stable on
+//! CI. When a test fails, find why the step does more work before raising a
+//! limit, and give the reason on that line.
 
 use crate::app::{Message, OpenCADStudio};
 use crate::scene::view::camera::Camera;
@@ -185,10 +172,7 @@ fn within_limit(app: &mut OpenCADStudio, name: &str, step: impl FnOnce(&mut Open
             && did.settings_writes <= limit.settings_writes,
         "The step \"{name}\" did more work than its limit, on a drawing of {LINES} lines:\n  \
          did:   {did:?}\n  limit: {limit:?}\n\
-         A step must not do work for each entity of the drawing, and an event that changes \
-         no setting must not write the settings file. If your change caused this, find why \
-         the step now does more work. Raise the limit in LIMITS only \
-         when the new work is necessary, with the reason in a comment on its line.",
+         Find why before raising its line in LIMITS.",
     );
 }
 

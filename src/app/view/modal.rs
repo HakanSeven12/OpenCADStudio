@@ -2241,7 +2241,7 @@ fn unsaved_changes_dialog_window(
                     if block_edit {
                         t!("Save the changes")
                     } else {
-                        t!("Save")
+                        format!("{} (S)", t!("Save")).into()
                     },
                     if block_edit {
                         Message::BlockEditChangesSave
@@ -2255,7 +2255,7 @@ fn unsaved_changes_dialog_window(
                     if block_edit {
                         t!("Discard the changes")
                     } else {
-                        t!("Don't Save")
+                        format!("{} (N)", t!("Don't Save")).into()
                     },
                     if block_edit {
                         Message::BlockEditChangesDiscard
@@ -2266,7 +2266,11 @@ fn unsaved_changes_dialog_window(
                 ),
                 iced::widget::Space::new().width(8),
                 dialog_button(
-                    t!("Cancel"),
+                    if block_edit {
+                        t!("Cancel")
+                    } else {
+                        format!("{} (C)", t!("Cancel")).into()
+                    },
                     if block_edit {
                         Message::BlockEditChangesCancel
                     } else {

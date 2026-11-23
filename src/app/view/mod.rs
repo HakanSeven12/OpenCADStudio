@@ -401,6 +401,20 @@ pub(crate) fn main_window_event(
     status: iced::event::Status,
     win_id: window::Id,
 ) -> Option<Message> {
+    #[cfg(not(target_arch = "wasm32"))]
+    let is_main = crate::app::tool_windows::is_main_window(win_id);
+    #[cfg(target_arch = "wasm32")]
+    let is_main = true;
+    window_event_with_context(ev, status, win_id, is_main)
+}
+
+/// Classify an event using the window identity resolved by the caller.
+pub(crate) fn window_event_with_context(
+    ev: iced::Event,
+    status: iced::event::Status,
+    win_id: window::Id,
+    _is_main: bool,
+) -> Option<Message> {
     use iced::event::Status;
     match ev {
         iced::Event::Mouse(iced::mouse::Event::ButtonPressed(_))
@@ -426,24 +440,39 @@ pub(crate) fn main_window_event(
         }
         iced::Event::Window(window::Event::Closed) => Some(Message::OsWindowClosed(win_id)),
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Window(window::Event::Resized(sz))
-            if !crate::app::tool_windows::is_main_window(win_id) =>
-        {
+        iced::Event::Window(window::Event::Resized(sz)) if !_is_main => {
             Some(Message::OsWindowResized(win_id, sz.width, sz.height))
         }
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Window(window::Event::Moved(at))
-            if !crate::app::tool_windows::is_main_window(win_id) =>
-        {
+        iced::Event::Window(window::Event::Moved(at)) if !_is_main => {
             Some(Message::OsWindowMoved(win_id, at))
         }
         // Keys typed in a window of its own stay with its widgets; only Esc,
         // an unclaimed Enter and the list's Up and Down reach its dialog.
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Keyboard(keyboard::Event::KeyPressed { key, .. })
-            if !crate::app::tool_windows::is_main_window(win_id) =>
-        {
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            modifiers,
+            text,
+            repeat,
+            ..
+        }) if !_is_main => {
             let name = match key {
+                keyboard::Key::Character(ref value)
+                    if status == Status::Ignored
+                        && !repeat
+                        && !modifiers.control()
+                        && !modifiers.alt()
+                        && !modifiers.logo()
+                        && text
+                            .as_deref()
+                            .is_some_and(|s| s.eq_ignore_ascii_case(value.as_str()))
+                        && ["s", "n", "c"]
+                            .iter()
+                            .any(|s| value.eq_ignore_ascii_case(s)) =>
+                {
+                    return Some(Message::OsWindowKey(win_id, value.to_ascii_uppercase()));
+                }
                 keyboard::Key::Named(keyboard::key::Named::Escape) => "ESCAPE",
                 keyboard::Key::Named(keyboard::key::Named::Enter) if status == Status::Ignored => {
                     "ENTER"
@@ -463,24 +492,16 @@ pub(crate) fn main_window_event(
             Some(Message::OsWindowKey(win_id, name.to_string()))
         }
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Keyboard(keyboard::Event::KeyReleased { .. })
-            if !crate::app::tool_windows::is_main_window(win_id) =>
-        {
-            None
-        }
+        iced::Event::Keyboard(keyboard::Event::KeyReleased { .. }) if !_is_main => None,
         iced::Event::Window(window::Event::Resized(sz)) => {
             Some(Message::WindowResized(sz.width, sz.height))
         }
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Window(window::Event::Opened { scale_factor, .. })
-            if !crate::app::tool_windows::is_main_window(win_id) =>
-        {
+        iced::Event::Window(window::Event::Opened { scale_factor, .. }) if !_is_main => {
             Some(Message::OsWindowScale(win_id, scale_factor))
         }
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Window(window::Event::Rescaled(scale_factor))
-            if !crate::app::tool_windows::is_main_window(win_id) =>
-        {
+        iced::Event::Window(window::Event::Rescaled(scale_factor)) if !_is_main => {
             Some(Message::OsWindowScale(win_id, scale_factor))
         }
         // The ribbon's arrows sit on whole physical pixels.
@@ -565,6 +586,15 @@ pub(crate) fn main_window_event(
             if !shortcut_modifier && status == Status::Ignored {
                 if let Some(t) = text.as_deref() {
                     if !t.is_empty() && t.chars().all(|c| !c.is_control() && !c.is_whitespace()) {
+                        if !repeat
+                            && !modifiers.control()
+                            && !modifiers.alt()
+                            && !modifiers.logo()
+                            && t.len() == 1
+                            && matches!(t.to_ascii_lowercase().as_str(), "s" | "n" | "c")
+                        {
+                            return Some(Message::UnsavedShortcut(t.chars().next()?));
+                        }
                         return Some(Message::CommandAppendChar(t.to_string()));
                     }
                 }

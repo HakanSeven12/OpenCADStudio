@@ -97,7 +97,7 @@ impl OpenCADStudio {
         // `gain_focus` alone is ignored by most Linux WMs (focus-stealing
         // prevention), so pair it with an urgency hint so the window is at
         // least flagged for attention when the compositor blocks the raise.
-        match self.main_window {
+        let focus = match self.main_window {
             Some(id) => Task::batch([
                 iced::window::gain_focus(id),
                 iced::window::request_user_attention(
@@ -106,7 +106,9 @@ impl OpenCADStudio {
                 ),
             ]),
             None => Task::none(),
-        }
+        };
+        // A previously focused command input must not capture the answer.
+        Task::batch([focus, self.unfocus_widgets()])
     }
 
     pub(in crate::app) fn close_unsaved_dialog_window(&mut self) -> Task<Message> {

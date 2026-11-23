@@ -18,6 +18,7 @@ pub(crate) fn is_modal_blocked_key_msg(msg: &Message) -> bool {
         Message::CommandInput(_)
             | Message::CommandPasteMarkup
             | Message::CommandAppendChar(_)
+            | Message::UnsavedShortcut(_)
             | Message::CommandSpace
             | Message::CommandFinalize
             | Message::CommandBackspace
@@ -861,6 +862,16 @@ impl OpenCADStudio {
     }
 
     fn update_message(&mut self, msg: Message) -> Task<Message> {
+        // Outside this question, preserve ordinary typing through every
+        // context-menu, snap override and in-place editor interceptor.
+        let msg = match msg {
+            Message::UnsavedShortcut(ch)
+                if self.active_modal != Some(super::ModalKind::Unsaved) =>
+            {
+                Message::CommandAppendChar(ch.to_string())
+            }
+            other => other,
+        };
         if let Some(tab) = self.tabs.get(self.active_tab) {
             crate::entities::common::set_unit_context(
                 crate::entities::common::UnitContext::from_header(&tab.scene.document.header),
@@ -939,6 +950,22 @@ impl OpenCADStudio {
             }
         }
         if self.active_modal.is_some() {
+            if self.active_modal == Some(super::ModalKind::Unsaved) {
+                let letter = match &msg {
+                    Message::UnsavedShortcut(ch) => Some(ch.to_ascii_uppercase()),
+                    Message::ShortcutPressed(key) if key.len() == 1 => key.chars().next(),
+                    _ => None,
+                };
+                let answer = match letter {
+                    Some('S') => Some(Message::UnsavedDialogSave),
+                    Some('N') => Some(Message::UnsavedDialogDiscard),
+                    Some('C') => Some(Message::UnsavedDialogCancel),
+                    _ => None,
+                };
+                if let Some(answer) = answer {
+                    return self.update(answer);
+                }
+            }
             if matches!(msg, Message::CommandEscape)
                 || matches!(&msg, Message::ShortcutPressed(key) if key.rsplit('+').next() == Some("ESCAPE"))
             {

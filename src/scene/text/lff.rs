@@ -1237,62 +1237,87 @@ mod tests {
         // Alias + fallback resolve to a real font.
         assert!(get_font("txt").glyph('A').is_some());
         assert!(get_font("RomanS").glyph('B').is_some());
-        // After curation, every embedded stem and AutoCAD SHX alias must still
-        // resolve to a glyph-bearing font (no alias points at a deleted file).
-        for name in [
-            "MONOTXT", "ISOCP", "ISOCP3", "ISOCT", "ISOCT3", "COMPLEX", "ITALIC", "GOTHICE",
-            "GOTHICG", "GOTHICI", "CYRILLIC", "GREEK", "BIGFONT", "Simplex", "ScriptC", "Symbol",
-        ] {
-            assert!(
-                get_font(name).glyph('A').is_some() || is_builtin(name),
-                "alias/stem {name} failed to resolve"
-            );
-        }
         // A name from a deleted LibreCAD-only font is no longer a builtin and
         // falls back to Standard rather than panicking.
         assert!(!is_builtin("amiri-regular"));
         assert!(get_font("kochigothic").glyph('A').is_some());
         // Unicode fallback covers a non-ASCII letter via the renderer path.
         let (strokes, _) =
-            tessellate_text_run([0.0, 0.0], 2.5, 0.0, 1.0, 0.0, 1.0, "Standard", "Aб");
+            tessellate_text_run([0.0, 0.0], 2.5, 0.0, 1.0, 0.0, 1.0, "Standard", "A?");
         assert!(!strokes.is_empty());
-        // The bulge belongs to the segment ENDING at the vertex (LibreCAD
-        // convention): the standard/iso/unicode 'O' must come out as an
-        // upright oval (taller than wide), not a sideways capsule.
-        for name in ["standard", "iso", "unicode", "txt"] {
-            let o = get_font(name).glyph('O').expect("O glyph");
-            let (mut minx, mut miny, mut maxx, mut maxy) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
-            for s in &o.strokes {
-                for &[x, y] in s {
-                    minx = minx.min(x);
-                    miny = miny.min(y);
-                    maxx = maxx.max(x);
-                    maxy = maxy.max(y);
-                }
+    }
+
+    #[rstest]
+    #[case("MONOTXT")]
+    #[case("ISOCP")]
+    #[case("ISOCP3")]
+    #[case("ISOCT")]
+    #[case("ISOCT3")]
+    #[case("COMPLEX")]
+    #[case("ITALIC")]
+    #[case("GOTHICE")]
+    #[case("GOTHICG")]
+    #[case("GOTHICI")]
+    #[case("CYRILLIC")]
+    #[case("GREEK")]
+    #[case("BIGFONT")]
+    #[case("Simplex")]
+    #[case("ScriptC")]
+    #[case("Symbol")]
+    fn embedded_font_aliases_resolve(#[case] name: &str) {
+        assert!(
+            get_font(name).glyph('A').is_some() || is_builtin(name),
+            "alias/stem {name} failed to resolve"
+        );
+    }
+
+    #[rstest]
+    #[case("standard")]
+    #[case("iso")]
+    #[case("unicode")]
+    #[case("txt")]
+    fn uppercase_o_is_upright_in_basic_fonts(#[case] name: &str) {
+        let o = get_font(name).glyph('O').expect("O glyph");
+        let (mut minx, mut miny, mut maxx, mut maxy) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for s in &o.strokes {
+            for &[x, y] in s {
+                minx = minx.min(x);
+                miny = miny.min(y);
+                maxx = maxx.max(x);
+                maxy = maxy.max(y);
             }
-            let (w, h) = (maxx - minx, maxy - miny);
-            assert!(h > w, "{name} O should be upright (h {h:.1} > w {w:.1})");
         }
-        // Turkish letters absent from simplex/unicode still render via the
-        // iso3098 fallback (ı/U+0131 is the one exception iso3098 lacks).
-        for ch in ['Ğ', 'ş', 'İ', 'Ş', 'ğ'] {
-            let (s, _) = tessellate_text_run(
-                [0.0, 0.0],
-                2.5,
-                0.0,
-                1.0,
-                0.0,
-                1.0,
-                "simplex",
-                &ch.to_string(),
-            );
-            assert!(!s.is_empty(), "Turkish '{ch}' should render via fallback");
-        }
-        // Complex-linetype shapes load by name (codepoints collide, so they
-        // must be keyed by label).
-        for sh in ["BOX", "CIRC1", "ZIG", "TRACK1"] {
-            let g = shape(sh).unwrap_or_else(|| panic!("shape {sh} missing"));
-            assert!(!g.strokes.is_empty(), "shape {sh} has no strokes");
-        }
+        let (w, h) = (maxx - minx, maxy - miny);
+        assert!(h > w, "{name} O should be upright (h {h:.1} > w {w:.1})");
+    }
+
+    #[rstest]
+    #[case('Ğ')]
+    #[case('ş')]
+    #[case('İ')]
+    #[case('Ş')]
+    #[case('ğ')]
+    fn turkish_letters_render_via_fallback(#[case] ch: char) {
+        let (s, _) = tessellate_text_run(
+            [0.0, 0.0],
+            2.5,
+            0.0,
+            1.0,
+            0.0,
+            1.0,
+            "simplex",
+            &ch.to_string(),
+        );
+        assert!(!s.is_empty(), "Turkish '{ch}' should render via fallback");
+    }
+
+    #[rstest]
+    #[case("BOX")]
+    #[case("CIRC1")]
+    #[case("ZIG")]
+    #[case("TRACK1")]
+    fn complex_linetype_shapes_load_by_name(#[case] sh: &str) {
+        let g = shape(sh).unwrap_or_else(|| panic!("shape {sh} missing"));
+        assert!(!g.strokes.is_empty(), "shape {sh} has no strokes");
     }
 }

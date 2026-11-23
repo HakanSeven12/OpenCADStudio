@@ -876,6 +876,10 @@ impl Scene {
         // written; drop the layout's cached copy so the next draw or plot
         // reads the new sheet instead of the one from before this change.
         self.paper_viewport_cache.borrow_mut().remove(name);
+        // The white sheet is cached per layout too, and only a geometry bump
+        // would drop it; a page setup that does not bump (a plugin's) would
+        // keep drawing the old sheet.
+        self.paper_sheet_render_cache.borrow_mut().remove(name);
         self.display_plot_style_cache
             .borrow_mut()
             .retain(|(layout_name, _), _| layout_name != name);

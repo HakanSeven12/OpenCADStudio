@@ -56,7 +56,7 @@ fn tilted_plane() -> WorkingPlane {
     )
 }
 
-fn transforms() -> Vec<(&'static str, EntityTransform)> {
+pub(super) fn transforms() -> Vec<(&'static str, EntityTransform)> {
     vec![
         (
             "translate",

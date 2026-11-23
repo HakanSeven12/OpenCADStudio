@@ -6,8 +6,8 @@
 use std::fmt;
 
 use iced::widget::{
-    button, checkbox, column, combo_box, container, image, pick_list, row, scrollable, text,
-    text_input, Space,
+    Space, button, checkbox, column, combo_box, container, image, pick_list, row, scrollable, text,
+    text_input,
 };
 use iced::{Background, Border, Element, Fill, Length, Theme};
 
@@ -522,10 +522,12 @@ fn footer<'a>(
     action: std::borrow::Cow<'static, str>,
     ok: PdfDialogMsg,
 ) -> Element<'a, Message> {
-    let mut left = row![button(text("?").size(12))
-        .on_press(msg(PdfDialogMsg::Help(help)))
-        .style(button_style(false))
-        .padding([5, 11])]
+    let mut left = row![
+        button(text("?").size(12))
+            .on_press(msg(PdfDialogMsg::Help(help)))
+            .style(button_style(false))
+            .padding([5, 11])
+    ]
     .spacing(6)
     .align_y(iced::Center);
     if let Some(extra) = extra {
@@ -2443,10 +2445,12 @@ pub fn view_point_cloud_color_map<'a>(
     ]
     .spacing(10);
 
-    let mut left = row![button(text("?").size(12))
-        .on_press(msg(PdfDialogMsg::Help("pointcloudcolormap")))
-        .style(button_style(false))
-        .padding([5, 11])]
+    let mut left = row![
+        button(text("?").size(12))
+            .on_press(msg(PdfDialogMsg::Help("pointcloudcolormap")))
+            .style(button_style(false))
+            .padding([5, 11])
+    ]
     .spacing(8)
     .align_y(iced::Center);
     if has_cloud {

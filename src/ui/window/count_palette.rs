@@ -11,7 +11,7 @@ use crate::ui::style::form::button_style;
 use crate::ui::style::kit_metrics as km;
 use document::count::{BlockInstance, CountKey};
 use document::{Document, Handle};
-use iced::widget::{button, checkbox, column, container, row, text, tooltip, Space};
+use iced::widget::{Space, button, checkbox, column, container, row, text, tooltip};
 use iced::{Background, Border, Element, Fill, Length, Padding, Theme};
 
 const BLOCK_ICON: &[u8] = include_bytes!("../../../assets/icons/blocks/block.svg");

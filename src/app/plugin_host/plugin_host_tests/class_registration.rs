@@ -25,9 +25,10 @@ fn boot_time_declaration_is_attributed_to_the_declared_package_id() {
 
         // The declared package id in its boot window passes the law.
         crate::plugin::external::with_manager(|m| m.begin_boot("opencad.example"));
-        assert!(host
-            .register_plugin_class("opencad.example", &traverse_class())
-            .is_ok());
+        assert!(
+            host.register_plugin_class("opencad.example", &traverse_class())
+                .is_ok()
+        );
 
         // After the boot window closes (and without a registry entry at
         // that id) the law refuses again: a different class key under the
@@ -65,12 +66,14 @@ fn plugin_class_registration_is_owned_idempotent_and_refusing() {
     );
     install_class_owner();
     // Register, then re-register identical: idempotent, still one entry.
-    assert!(host
-        .register_plugin_class("PLUGIN", &traverse_class())
-        .is_ok());
-    assert!(host
-        .register_plugin_class("PLUGIN", &traverse_class())
-        .is_ok());
+    assert!(
+        host.register_plugin_class("PLUGIN", &traverse_class())
+            .is_ok()
+    );
+    assert!(
+        host.register_plugin_class("PLUGIN", &traverse_class())
+            .is_ok()
+    );
     assert_eq!(host.app.tabs[0].plugin_classes.total(), 1);
     // A different schema refuses without touching the live class.
     let mut bumped = traverse_class();
@@ -114,9 +117,10 @@ fn plugin_class_registry_survives_across_request_sessions() {
     install_class_owner();
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(host
-            .register_plugin_class("PLUGIN", &traverse_class())
-            .is_ok());
+        assert!(
+            host.register_plugin_class("PLUGIN", &traverse_class())
+                .is_ok()
+        );
     }
     // Session B: a DIFFERENT HostSession over the same tab (the IPC
     // server's per-request reality) stages the instance.
@@ -139,9 +143,10 @@ fn selectable_custom_instances_are_selectable_but_native_edit_disabled() {
     app.tabs[0].is_start = false;
     install_class_owner();
     let mut host = HostSession::new(&mut app, 0);
-    assert!(host
-        .register_plugin_class("PLUGIN", &traverse_class())
-        .is_ok());
+    assert!(
+        host.register_plugin_class("PLUGIN", &traverse_class())
+            .is_ok()
+    );
     let mut instance = traverse_instance();
     instance.selectable_custom = true;
     instance.design_record.clear();
@@ -191,9 +196,10 @@ fn plugin_class_instances_refuse_foreign_owners() {
     app.tabs[0].is_start = false;
     install_class_owner();
     let mut host = HostSession::new(&mut app, 0);
-    assert!(host
-        .register_plugin_class("PLUGIN", &traverse_class())
-        .is_ok());
+    assert!(
+        host.register_plugin_class("PLUGIN", &traverse_class())
+            .is_ok()
+    );
     // Another alive plugin sees the class but cannot stage it.
     crate::plugin::grip_points::install_in_process_sink("PLUGIN_RIVAL", |_host, _event| {
         ocs_plugin_api::host::CustomGripResponse::default()
@@ -215,9 +221,10 @@ fn plugin_class_instance_stages_reference_only_with_identity_stamp() {
     let handles;
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(host
-            .register_plugin_class("PLUGIN", &traverse_class())
-            .is_ok());
+        assert!(
+            host.register_plugin_class("PLUGIN", &traverse_class())
+                .is_ok()
+        );
         handles = host
             .stage_plugin_class_instance("PLUGIN", &instance)
             .expect("the class instance stages");
@@ -273,9 +280,10 @@ fn class_stamp_and_display_set_survive_dxf_and_dwg_round_trips() {
     let handles;
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(host
-            .register_plugin_class("PLUGIN", &traverse_class())
-            .is_ok());
+        assert!(
+            host.register_plugin_class("PLUGIN", &traverse_class())
+                .is_ok()
+        );
         let mut instance = traverse_instance();
         instance.selectable_custom = true;
         handles = host
@@ -348,9 +356,10 @@ fn plugin_class_instance_refusals_change_nothing_and_record_no_steps() {
     app.tabs[0].is_start = false;
     install_class_owner();
     let mut host = HostSession::new(&mut app, 0);
-    assert!(host
-        .register_plugin_class("PLUGIN", &traverse_class())
-        .is_ok());
+    assert!(
+        host.register_plugin_class("PLUGIN", &traverse_class())
+            .is_ok()
+    );
     let epoch_before = host.app.tabs[0].scene.geometry_epoch;
     // Unregistered class.
     let mut ghost = traverse_instance();
@@ -359,9 +368,10 @@ fn plugin_class_instance_refusals_change_nothing_and_record_no_steps() {
     // Schema version mismatch.
     let mut mismatch = traverse_instance();
     mismatch.schema_version = 5;
-    assert!(host
-        .stage_plugin_class_instance("PLUGIN", &mismatch)
-        .is_err());
+    assert!(
+        host.stage_plugin_class_instance("PLUGIN", &mismatch)
+            .is_err()
+    );
     // Broken design parameter (the chain audit refuses at the contract).
     let mut broken = traverse_instance();
     let ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(chain) = &mut broken.design;
@@ -369,9 +379,10 @@ fn plugin_class_instance_refusals_change_nothing_and_record_no_steps() {
     broken.tolerance = 1e-3;
     assert!(host.stage_plugin_class_instance("PLUGIN", &broken).is_err());
     // Broken tolerance.
-    assert!(host
-        .stage_plugin_class_instance("PLUGIN", &traverse_instance_for(0.0))
-        .is_err());
+    assert!(
+        host.stage_plugin_class_instance("PLUGIN", &traverse_instance_for(0.0))
+            .is_err()
+    );
     assert_eq!(host.document().entities().count(), 0);
     assert_eq!(host.app.tabs[0].scene.geometry_epoch, epoch_before);
 }

@@ -14,10 +14,10 @@ use crate::ui::style::form::{button_style, dialog_button, field_style};
 use crate::ui::style::{chrome, kit_metrics as km, text as text_size};
 use crate::ui::window::pdf_dialogs::{accent_text, card_style};
 use document::sheet_set::{self as ss, ComponentKind, Element as SsElement, SheetSetDatabase};
-use iced::widget::{
-    button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space,
-};
 use iced::Padding;
+use iced::widget::{
+    Space, button, checkbox, column, container, pick_list, row, scrollable, text, text_input,
+};
 use iced::{Background, Border, Element, Fill, Length, Theme};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -1276,10 +1276,12 @@ fn footer<'a>(
     left: Vec<Element<'a, Message>>,
     right: Vec<Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    let mut r = row![button(text("?").size(crate::ui::style::text::UI_LARGE))
-        .on_press(msg(SheetSetMsg::Help))
-        .style(button_style(false))
-        .padding([5, 11])]
+    let mut r = row![
+        button(text("?").size(crate::ui::style::text::UI_LARGE))
+            .on_press(msg(SheetSetMsg::Help))
+            .style(button_style(false))
+            .padding([5, 11])
+    ]
     .spacing(6)
     .align_y(iced::Center);
     for e in left {

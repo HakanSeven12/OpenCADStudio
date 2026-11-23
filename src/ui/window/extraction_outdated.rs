@@ -2,7 +2,7 @@
 //! an extraction table no longer shows the drawing's data: update it, all of
 //! them, or leave it / all of them as they are.
 
-use iced::widget::{button, column, container, row, text, Space};
+use iced::widget::{Space, button, column, container, row, text};
 use iced::{Background, Border, Element, Fill, Theme};
 
 use crate::app::Message;

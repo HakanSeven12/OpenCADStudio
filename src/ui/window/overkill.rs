@@ -2,7 +2,7 @@ use crate::app::Message;
 use crate::modules::draw::modify::overkill::Settings;
 use crate::t;
 use crate::ui::style::form::{dialog_button, dialog_button_styled_opt};
-use iced::widget::{button, checkbox, column, row, text, text_input, Space};
+use iced::widget::{Space, button, checkbox, column, row, text, text_input};
 use iced::{Element, Fill, Length, Shrink};
 
 /// Properties that can be left out of the comparison, by ignore bit.

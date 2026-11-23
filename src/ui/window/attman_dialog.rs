@@ -7,10 +7,10 @@
 //! edited in a card below (Attribute / Text / Properties) and the settings
 //! are switches in the footer.
 
-use document::entities::AttributeDefinition;
 use document::Handle;
+use document::entities::AttributeDefinition;
 use iced::widget::{
-    button, column, container, pick_list, row, scrollable, text, text_input, toggler, Space,
+    Space, button, column, container, pick_list, row, scrollable, text, text_input, toggler,
 };
 use iced::{Background, Border, Color, Element, Fill, Length, Theme};
 
@@ -1102,9 +1102,9 @@ mod tests {
 
     /// Whether `label` is laid out and in view in the dialog.
     fn shows(state: &AttManState, label: &str) -> bool {
+        use iced_test::Selector;
         use iced_test::core::widget;
         use iced_test::runtime::user_interface::{Cache, UserInterface};
-        use iced_test::Selector;
         let _one = crate::headless_ui_lock();
         let mut renderer = iced_test::futures::futures::executor::block_on(
             <iced::Renderer as iced_test::core::renderer::Headless>::new(

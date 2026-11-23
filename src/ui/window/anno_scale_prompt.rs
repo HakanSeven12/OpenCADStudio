@@ -2,7 +2,7 @@
 //! a session: the scale the annotation is meant to show at, and whether to
 //! ask again.
 
-use iced::widget::{checkbox, column, pick_list, row, text, Space};
+use iced::widget::{Space, checkbox, column, pick_list, row, text};
 use iced::{Element, Fill};
 
 use crate::app::Message;
@@ -55,9 +55,11 @@ pub fn view<'a>(
         .spacing(12),
         row![
             text(crate::tr!("anno-scale-prompt", "scale")).size(12),
-            pick_list(Some(state.picked.clone()), state.scales.clone(), |scale| scale.clone())
-                .on_select(|scale| msg(AnnoScaleMsg::Pick(scale)))
-                .text_size(12)
+            pick_list(Some(state.picked.clone()), state.scales.clone(), |scale| {
+                scale.clone()
+            })
+            .on_select(|scale| msg(AnnoScaleMsg::Pick(scale)))
+            .text_size(12)
             .width(Fill),
         ]
         .spacing(10)

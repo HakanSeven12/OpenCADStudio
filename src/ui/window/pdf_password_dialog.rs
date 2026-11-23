@@ -3,7 +3,7 @@
 //! step bar, a wrong-password band inside the window and a session switch
 //! that offers the password to the other PDFs opened later.
 
-use iced::widget::{button, column, container, row, text, text_input, Space};
+use iced::widget::{Space, button, column, container, row, text, text_input};
 use iced::{Element, Fill, Length, Theme};
 
 use crate::app::Message;
@@ -242,16 +242,18 @@ pub fn view<'a>(
     .on_press(msg(PdfPasswordMsg::Show(!state.show)))
     .style(button_style(false))
     .padding([4, 6]);
-    let mut body = column![row![
-        text(crate::tr!("pdf-password", "password"))
-            .size(11)
-            .style(muted_style)
-            .width(Length::Fixed(70.0)),
-        input,
-        eye
+    let mut body = column![
+        row![
+            text(crate::tr!("pdf-password", "password"))
+                .size(11)
+                .style(muted_style)
+                .width(Length::Fixed(70.0)),
+            input,
+            eye
+        ]
+        .spacing(6)
+        .align_y(iced::Center)
     ]
-    .spacing(6)
-    .align_y(iced::Center)]
     .spacing(8);
     if state.wrong {
         body = body.push(wrong_band());

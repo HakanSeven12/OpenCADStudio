@@ -62,7 +62,9 @@ pub(crate) fn apply_refreshed(
 /// Remove `handle` the way the host does: the document keeps a block record's
 /// member list apart from the entity store, so the handle leaves that too.
 fn remove_cached(doc: &mut Document, handle: Handle) {
-    let owner = doc.get_entity(handle).map(|entity| entity.common().owner_handle);
+    let owner = doc
+        .get_entity(handle)
+        .map(|entity| entity.common().owner_handle);
     doc.remove_entity(handle);
     if let Some(owner) = owner {
         if let Some(record) = doc.block_records.iter_mut().find(|r| r.handle == owner) {
@@ -171,10 +173,11 @@ mod tests {
             record.entity_handles.push(handle);
         }
         assert!(apply_refreshed(&mut doc, &[], Vec::new(), &[handle]));
-        assert!(!doc
-            .block_records
-            .iter()
-            .any(|record| record.entity_handles.contains(&handle)));
+        assert!(
+            !doc.block_records
+                .iter()
+                .any(|record| record.entity_handles.contains(&handle))
+        );
     }
 
     #[test]
@@ -185,7 +188,12 @@ mod tests {
             document::types::Vector3::ZERO,
         ));
         insert.common_mut().handle = handle;
-        assert!(!apply_refreshed(&mut doc, &[handle], vec![Some(insert)], &[]));
+        assert!(!apply_refreshed(
+            &mut doc,
+            &[handle],
+            vec![Some(insert)],
+            &[]
+        ));
     }
 
     #[test]

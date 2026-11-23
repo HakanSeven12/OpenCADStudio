@@ -109,10 +109,14 @@ fn validate_hatch_paths(
                 }
                 BoundaryEdge::CircularArc(arc) => {
                     if !arc.center.x.is_finite() || !arc.center.y.is_finite() {
-                        return Err(format!("Hatch boundary path {pi} edge {ei} arc center has non-finite coordinates"));
+                        return Err(format!(
+                            "Hatch boundary path {pi} edge {ei} arc center has non-finite coordinates"
+                        ));
                     }
                     if !arc.radius.is_finite() || arc.radius <= 0.0 {
-                        return Err(format!("Hatch boundary path {pi} edge {ei} arc radius must be finite and positive"));
+                        return Err(format!(
+                            "Hatch boundary path {pi} edge {ei} arc radius must be finite and positive"
+                        ));
                     }
                     if !arc.start_angle.is_finite() || !arc.end_angle.is_finite() {
                         return Err(format!(
@@ -134,12 +138,16 @@ fn validate_hatch_paths(
                 }
                 BoundaryEdge::EllipticArc(arc) => {
                     if !arc.center.x.is_finite() || !arc.center.y.is_finite() {
-                        return Err(format!("Hatch boundary path {pi} edge {ei} ellipse center has non-finite coordinates"));
+                        return Err(format!(
+                            "Hatch boundary path {pi} edge {ei} ellipse center has non-finite coordinates"
+                        ));
                     }
                     if !arc.major_axis_endpoint.x.is_finite()
                         || !arc.major_axis_endpoint.y.is_finite()
                     {
-                        return Err(format!("Hatch boundary path {pi} edge {ei} ellipse major axis has non-finite coordinates"));
+                        return Err(format!(
+                            "Hatch boundary path {pi} edge {ei} ellipse major axis has non-finite coordinates"
+                        ));
                     }
                     if arc.major_axis_endpoint.x.hypot(arc.major_axis_endpoint.y) < 1e-12 {
                         return Err(format!(
@@ -150,7 +158,9 @@ fn validate_hatch_paths(
                         || !(0.0..=1.0).contains(&arc.minor_axis_ratio)
                         || arc.minor_axis_ratio == 0.0
                     {
-                        return Err(format!("Hatch boundary path {pi} edge {ei} ellipse ratio must be within (0, 1]"));
+                        return Err(format!(
+                            "Hatch boundary path {pi} edge {ei} ellipse ratio must be within (0, 1]"
+                        ));
                     }
                     if !arc.start_angle.is_finite() || !arc.end_angle.is_finite() {
                         return Err(format!(
@@ -177,11 +187,15 @@ fn validate_hatch_paths(
                 }
                 BoundaryEdge::Polyline(poly) => {
                     if poly.vertices.len() < 3 {
-                        return Err(format!("Hatch boundary path {pi} edge {ei} polyline must have at least 3 vertices"));
+                        return Err(format!(
+                            "Hatch boundary path {pi} edge {ei} polyline must have at least 3 vertices"
+                        ));
                     }
                     for (vi, v) in poly.vertices.iter().enumerate() {
                         if !v.x.is_finite() || !v.y.is_finite() || !v.z.is_finite() {
-                            return Err(format!("Hatch boundary path {pi} edge {ei} vertex {vi} has non-finite coordinates"));
+                            return Err(format!(
+                                "Hatch boundary path {pi} edge {ei} vertex {vi} has non-finite coordinates"
+                            ));
                         }
                     }
                     if !poly.is_closed {
@@ -202,28 +216,38 @@ fn validate_hatch_paths(
                         ));
                     }
                     if spline.control_points.len() < spline.degree as usize + 1 {
-                        return Err(format!("Hatch boundary path {pi} edge {ei} spline has too few control points for its degree"));
+                        return Err(format!(
+                            "Hatch boundary path {pi} edge {ei} spline has too few control points for its degree"
+                        ));
                     }
                     if spline.knots.iter().any(|knot| !knot.is_finite())
                         || spline.knots.windows(2).any(|pair| pair[0] > pair[1])
                     {
-                        return Err(format!("Hatch boundary path {pi} edge {ei} spline knots must be finite and nondecreasing"));
+                        return Err(format!(
+                            "Hatch boundary path {pi} edge {ei} spline knots must be finite and nondecreasing"
+                        ));
                     }
                     for (ci, cp) in spline.control_points.iter().enumerate() {
                         if !cp.x.is_finite() || !cp.y.is_finite() || !cp.z.is_finite() {
-                            return Err(format!("Hatch boundary path {pi} edge {ei} control point {ci} has non-finite coordinates"));
+                            return Err(format!(
+                                "Hatch boundary path {pi} edge {ei} control point {ci} has non-finite coordinates"
+                            ));
                         }
                     }
                     for (fi, fp) in spline.fit_points.iter().enumerate() {
                         if !fp.x.is_finite() || !fp.y.is_finite() {
-                            return Err(format!("Hatch boundary path {pi} edge {ei} fit point {fi} has non-finite coordinates"));
+                            return Err(format!(
+                                "Hatch boundary path {pi} edge {ei} fit point {fi} has non-finite coordinates"
+                            ));
                         }
                     }
                     for (name, tangent) in
                         [("start", spline.start_tangent), ("end", spline.end_tangent)]
                     {
                         if !tangent.x.is_finite() || !tangent.y.is_finite() {
-                            return Err(format!("Hatch boundary path {pi} edge {ei} spline {name} tangent is non-finite"));
+                            return Err(format!(
+                                "Hatch boundary path {pi} edge {ei} spline {name} tangent is non-finite"
+                            ));
                         }
                     }
                     let points = if spline.fit_points.len() >= 2 {
@@ -2521,7 +2545,9 @@ pub fn validate_canvas_entity_references(
                             .iter()
                             .any(|style| style.handle == handle)
                         {
-                            return Err(format!("Table.rows[{ri}].cells[{ci}] text style handle {handle:?} does not exist"));
+                            return Err(format!(
+                                "Table.rows[{ri}].cells[{ci}] text style handle {handle:?} does not exist"
+                            ));
                         }
                     }
                     if let Some(handle) = content.block_handle.filter(|handle| !handle.is_null()) {
@@ -2530,7 +2556,9 @@ pub fn validate_canvas_entity_references(
                             .iter()
                             .any(|record| record.handle == handle)
                         {
-                            return Err(format!("Table.rows[{ri}].cells[{ci}] block handle {handle:?} does not exist"));
+                            return Err(format!(
+                                "Table.rows[{ri}].cells[{ci}] block handle {handle:?} does not exist"
+                            ));
                         }
                     }
                 }
@@ -2866,7 +2894,7 @@ pub fn patch_canvas_layer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{get_embedded_type_registry_json, TypeId, TypeRegistry};
+    use crate::{TypeId, TypeRegistry, get_embedded_type_registry_json};
 
     #[test]
     fn every_entity_variant_has_exactly_one_classification() {
@@ -2880,18 +2908,24 @@ mod tests {
         for entry in &catalog.entity_kinds {
             assert!(names.insert(&entry.kind), "duplicate kind {}", entry.kind);
             assert!(variants.iter().any(|v| v.name == entry.kind));
-            assert!(entry
-                .properties
-                .iter()
-                .any(|p| p.name == "handle" && p.model_access == ModelAccess::ReadOnly));
-            assert!(entry
-                .properties
-                .iter()
-                .any(|p| p.name == "kind" && p.model_access == ModelAccess::ReadOnly));
-            assert!(entry
-                .properties
-                .iter()
-                .any(|p| p.name == "owner_handle" && p.model_access == ModelAccess::ReadOnly));
+            assert!(
+                entry
+                    .properties
+                    .iter()
+                    .any(|p| p.name == "handle" && p.model_access == ModelAccess::ReadOnly)
+            );
+            assert!(
+                entry
+                    .properties
+                    .iter()
+                    .any(|p| p.name == "kind" && p.model_access == ModelAccess::ReadOnly)
+            );
+            assert!(
+                entry
+                    .properties
+                    .iter()
+                    .any(|p| p.name == "owner_handle" && p.model_access == ModelAccess::ReadOnly)
+            );
             let mut source_paths = std::collections::HashSet::new();
             for property in &entry.properties {
                 assert!(
@@ -3364,12 +3398,14 @@ mod tests {
         );
         tolerance.direction = Vector3::UNIT_X;
         tolerance.dimension_style_name = "Missing".into();
-        assert!(validate_canvas_entity_references(
-            &document,
-            &document::EntityType::Tolerance(tolerance)
-        )
-        .unwrap_err()
-        .contains("does not exist"));
+        assert!(
+            validate_canvas_entity_references(
+                &document,
+                &document::EntityType::Tolerance(tolerance)
+            )
+            .unwrap_err()
+            .contains("does not exist")
+        );
     }
 
     #[cfg(feature = "host")]
@@ -3394,20 +3430,18 @@ mod tests {
 
         let mut wrong_kind = leader.clone();
         wrong_kind.creation_type = LeaderCreationType::WithTolerance;
-        assert!(validate_canvas_entity_references(
-            &document,
-            &document::EntityType::Leader(wrong_kind)
-        )
-        .unwrap_err()
-        .contains("does not match"));
+        assert!(
+            validate_canvas_entity_references(&document, &document::EntityType::Leader(wrong_kind))
+                .unwrap_err()
+                .contains("does not match")
+        );
         let mut missing = leader.clone();
         missing.annotation_handle = document::Handle::new(0xdead);
-        assert!(validate_canvas_entity_references(
-            &document,
-            &document::EntityType::Leader(missing)
-        )
-        .unwrap_err()
-        .contains("does not exist"));
+        assert!(
+            validate_canvas_entity_references(&document, &document::EntityType::Leader(missing))
+                .unwrap_err()
+                .contains("does not exist")
+        );
         let mut none_with_handle = leader.clone();
         none_with_handle.creation_type = LeaderCreationType::NoAnnotation;
         assert!(
@@ -3424,21 +3458,22 @@ mod tests {
         );
         let mut bad_style = leader.clone();
         bad_style.dimension_style = "Missing".into();
-        assert!(validate_canvas_entity_references(
-            &document,
-            &document::EntityType::Leader(bad_style)
-        )
-        .unwrap_err()
-        .contains("dimension style"));
+        assert!(
+            validate_canvas_entity_references(&document, &document::EntityType::Leader(bad_style))
+                .unwrap_err()
+                .contains("dimension style")
+        );
 
         let mut edited = leader.clone();
         edited.vertices[1] = Vector3::new(f64::NAN, 0.0, 0.0);
-        assert!(validate_entity_mutation(
-            &document::EntityType::Leader(leader.clone()),
-            &document::EntityType::Leader(edited)
-        )
-        .unwrap_err()
-        .contains("finite"));
+        assert!(
+            validate_entity_mutation(
+                &document::EntityType::Leader(leader.clone()),
+                &document::EntityType::Leader(edited)
+            )
+            .unwrap_err()
+            .contains("finite")
+        );
     }
 
     #[cfg(feature = "host")]
@@ -3461,20 +3496,21 @@ mod tests {
 
         let mut missing = mline.clone();
         missing.style_name = "Missing".into();
-        assert!(bind_canvas_entity_references(
-            &document,
-            &mut document::EntityType::MLine(missing)
-        )
-        .unwrap_err()
-        .contains("does not exist"));
+        assert!(
+            bind_canvas_entity_references(&document, &mut document::EntityType::MLine(missing))
+                .unwrap_err()
+                .contains("does not exist")
+        );
         let mut wrong_segments = mline.clone();
         wrong_segments.vertices[0].init_segments(3);
-        assert!(bind_canvas_entity_references(
-            &document,
-            &mut document::EntityType::MLine(wrong_segments)
-        )
-        .unwrap_err()
-        .contains("segments but style"));
+        assert!(
+            bind_canvas_entity_references(
+                &document,
+                &mut document::EntityType::MLine(wrong_segments)
+            )
+            .unwrap_err()
+            .contains("segments but style")
+        );
         let mut one = mline.clone();
         one.vertices.truncate(1);
         assert!(
@@ -3620,19 +3656,23 @@ mod tests {
         before.radius = f64::NAN;
         let mut layer_only = before.clone();
         layer_only.common.layer = "OTHER".into();
-        assert!(validate_entity_mutation(
-            &document::EntityType::Circle(before.clone()),
-            &document::EntityType::Circle(layer_only),
-        )
-        .is_ok());
+        assert!(
+            validate_entity_mutation(
+                &document::EntityType::Circle(before.clone()),
+                &document::EntityType::Circle(layer_only),
+            )
+            .is_ok()
+        );
         let mut bad_radius = before.clone();
         bad_radius.radius = -1.0;
-        assert!(validate_entity_mutation(
-            &document::EntityType::Circle(before),
-            &document::EntityType::Circle(bad_radius),
-        )
-        .unwrap_err()
-        .contains("Circle.radius"));
+        assert!(
+            validate_entity_mutation(
+                &document::EntityType::Circle(before),
+                &document::EntityType::Circle(bad_radius),
+            )
+            .unwrap_err()
+            .contains("Circle.radius")
+        );
     }
 
     #[cfg(feature = "host")]
@@ -3668,12 +3708,14 @@ mod tests {
         );
         let mut changed = solid.clone();
         changed.thickness = f64::INFINITY;
-        assert!(validate_entity_mutation(
-            &document::EntityType::Solid(solid),
-            &document::EntityType::Solid(changed)
-        )
-        .unwrap_err()
-        .contains("Solid.thickness"));
+        assert!(
+            validate_entity_mutation(
+                &document::EntityType::Solid(solid),
+                &document::EntityType::Solid(changed)
+            )
+            .unwrap_err()
+            .contains("Solid.thickness")
+        );
 
         let face = document::entities::Face3D::new(
             Vector3::ZERO,
@@ -3683,12 +3725,14 @@ mod tests {
         );
         let mut changed = face.clone();
         changed.invisible_edges = document::entities::InvisibleEdgeFlags::from_bits(0x10);
-        assert!(validate_entity_mutation(
-            &document::EntityType::Face3D(face),
-            &document::EntityType::Face3D(changed)
-        )
-        .unwrap_err()
-        .contains("Face3D.invisible_edges"));
+        assert!(
+            validate_entity_mutation(
+                &document::EntityType::Face3D(face),
+                &document::EntityType::Face3D(changed)
+            )
+            .unwrap_err()
+            .contains("Face3D.invisible_edges")
+        );
     }
 
     #[cfg(feature = "host")]
@@ -3699,35 +3743,43 @@ mod tests {
         let mut moved = before.clone();
         moved.insert_point = Vector3::new(5.0, 6.0, 0.0);
         moved.set_x_scale(2.0);
-        assert!(validate_entity_mutation(
-            &document::EntityType::Insert(before.clone()),
-            &document::EntityType::Insert(moved)
-        )
-        .is_ok());
+        assert!(
+            validate_entity_mutation(
+                &document::EntityType::Insert(before.clone()),
+                &document::EntityType::Insert(moved)
+            )
+            .is_ok()
+        );
         let mut bad = before.clone();
         bad.set_y_scale(f64::NAN);
-        assert!(validate_entity_mutation(
-            &document::EntityType::Insert(before.clone()),
-            &document::EntityType::Insert(bad)
-        )
-        .unwrap_err()
-        .contains("Insert.y_scale"));
+        assert!(
+            validate_entity_mutation(
+                &document::EntityType::Insert(before.clone()),
+                &document::EntityType::Insert(bad)
+            )
+            .unwrap_err()
+            .contains("Insert.y_scale")
+        );
         let mut bad = before.clone();
         bad.column_count = 0;
-        assert!(validate_entity_mutation(
-            &document::EntityType::Insert(before.clone()),
-            &document::EntityType::Insert(bad)
-        )
-        .unwrap_err()
-        .contains("array counts"));
+        assert!(
+            validate_entity_mutation(
+                &document::EntityType::Insert(before.clone()),
+                &document::EntityType::Insert(bad)
+            )
+            .unwrap_err()
+            .contains("array counts")
+        );
         let mut bad = before.clone();
         bad.block_name = "OTHER".into();
-        assert!(validate_entity_mutation(
-            &document::EntityType::Insert(before),
-            &document::EntityType::Insert(bad)
-        )
-        .unwrap_err()
-        .contains("block identity"));
+        assert!(
+            validate_entity_mutation(
+                &document::EntityType::Insert(before),
+                &document::EntityType::Insert(bad)
+            )
+            .unwrap_err()
+            .contains("block identity")
+        );
     }
 
     #[cfg(feature = "host")]
@@ -3787,20 +3839,24 @@ mod tests {
         validate_canvas_entity_references(&document, &entity).unwrap();
 
         definition.common.owner_handle = Handle::NULL;
-        assert!(validate_canvas_entity_references(
-            &document,
-            &document::EntityType::AttributeDefinition(definition.clone())
-        )
-        .unwrap_err()
-        .contains("block-record owner"));
+        assert!(
+            validate_canvas_entity_references(
+                &document,
+                &document::EntityType::AttributeDefinition(definition.clone())
+            )
+            .unwrap_err()
+            .contains("block-record owner")
+        );
         definition.common.owner_handle = record_handle;
         definition.text_style = "Missing".into();
-        assert!(validate_canvas_entity_references(
-            &document,
-            &document::EntityType::AttributeDefinition(definition.clone())
-        )
-        .unwrap_err()
-        .contains("does not exist"));
+        assert!(
+            validate_canvas_entity_references(
+                &document,
+                &document::EntityType::AttributeDefinition(definition.clone())
+            )
+            .unwrap_err()
+            .contains("does not exist")
+        );
         definition.text_style = "Standard".into();
         definition.tag = "BAD TAG".into();
         assert!(
@@ -3877,12 +3933,14 @@ mod tests {
         bound.attdef_handle = definition_handle;
         let mut moved = bound.clone();
         moved.attdef_handle = insert_handle;
-        assert!(validate_entity_mutation(
-            &document::EntityType::AttributeEntity(bound),
-            &document::EntityType::AttributeEntity(moved)
-        )
-        .unwrap_err()
-        .contains("read-only"));
+        assert!(
+            validate_entity_mutation(
+                &document::EntityType::AttributeEntity(bound),
+                &document::EntityType::AttributeEntity(moved)
+            )
+            .unwrap_err()
+            .contains("read-only")
+        );
     }
     #[cfg(feature = "host")]
     #[test]
@@ -3943,11 +4001,13 @@ mod tests {
         )
         .unwrap();
         associative.paths[0].boundary_handles[0] = document::Handle::new(u64::MAX);
-        assert!(validate_canvas_entity_references(
-            &document,
-            &document::EntityType::Hatch(Box::new(associative)),
-        )
-        .unwrap_err()
-        .contains("does not exist"));
+        assert!(
+            validate_canvas_entity_references(
+                &document,
+                &document::EntityType::Hatch(Box::new(associative)),
+            )
+            .unwrap_err()
+            .contains("does not exist")
+        );
     }
 }

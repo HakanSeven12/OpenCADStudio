@@ -9,8 +9,8 @@
 use crate::app::Message;
 use crate::t;
 use crate::ui::style::common::muted_style;
-use crate::ui::style::editor_table::{danger_input_style, danger_text_style, EDITOR_TABLE_GUTTER};
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use crate::ui::style::editor_table::{EDITOR_TABLE_GUTTER, danger_input_style, danger_text_style};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Background, Element, Length, Theme};
 
 /// Which column of an alias row a text edit targets.
@@ -118,13 +118,15 @@ pub fn view_window<'a>(
             .spacing(4)
             .align_y(iced::Center)
         } else {
-            row![button(crate::ui::icons::themed_danger_text(
-                crate::ui::icons::TRASH,
-                12.0,
-            ))
-            .on_press(Message::AliasEditorRemove(idx))
-            .padding([2, 6])
-            .style(button::danger)]
+            row![
+                button(crate::ui::icons::themed_danger_text(
+                    crate::ui::icons::TRASH,
+                    12.0,
+                ))
+                .on_press(Message::AliasEditorRemove(idx))
+                .padding([2, 6])
+                .style(button::danger)
+            ]
             .align_y(iced::Center)
         };
         list = list.push(
@@ -152,9 +154,11 @@ pub fn view_window<'a>(
     let stats = if reset_confirm {
         row![Space::new().width(Length::Fixed(0.0))]
     } else {
-        row![text(format!("{}: {}", t!("Number of aliases"), rows.len()))
-            .size(12)
-            .style(muted_style)]
+        row![
+            text(format!("{}: {}", t!("Number of aliases"), rows.len()))
+                .size(12)
+                .style(muted_style)
+        ]
     };
     // Reset asks for confirmation in place: the add/reset buttons are
     // replaced by the question with Yes / No.

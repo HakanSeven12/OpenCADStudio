@@ -6,8 +6,8 @@
 use crate::app::Message;
 use crate::modules::draw::draw::hatch::{HatchFill, HatchSettings};
 use crate::scene::model::hatch_model::GradientKind;
-use crate::ui::style::form::{self, dialog_button, form_radio, LABEL_WIDTH};
-use crate::ui::window::attman_dialog::{color_label, COLORS};
+use crate::ui::style::form::{self, LABEL_WIDTH, dialog_button, form_radio};
+use crate::ui::window::attman_dialog::{COLORS, color_label};
 use document::entities::HatchStyleType;
 use iced::widget::{checkbox, column, container, row, text, text_input};
 use iced::{Background, Border, Element, Length, Theme};

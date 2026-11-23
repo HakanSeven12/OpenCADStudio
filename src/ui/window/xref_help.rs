@@ -7,7 +7,7 @@
 use crate::app::Message;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::dialog_button;
-use iced::widget::{column, container, row, text, Space};
+use iced::widget::{Space, column, container, row, text};
 use iced::{Background, Element, Fill, Length, Theme};
 
 /// GitHub issues page linked from the help window, so web users can report

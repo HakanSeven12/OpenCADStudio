@@ -805,6 +805,11 @@ impl SceneBuilder {
 pub enum PanelSurface {
     /// The panel's declarative scene snapshot (bounded, validated).
     Scene(PanelScene),
+    /// The panel's semantic tree/list surface (api v29, S05): bounded rows
+    /// the host renders with NATIVE widgets; expansion/selection stay
+    /// host-local, and children a plugin has not pushed yet page in via
+    /// `WidgetPage` installs.
+    Widgets(crate::widget::WidgetSurface),
 }
 
 /// Why a panel surface publish was refused; a refusal changes nothing.
@@ -862,6 +867,17 @@ pub enum SurfaceEvent {
     /// The drag was cancelled (escape, focus loss, teardown). `origin` is
     /// the PRE-DRAG origin, so the plugin can restore losslessly.
     DragCancelled { element: StableId, origin: Vec2 },
+    /// A widget row was ACTIVATED (the host's activation gesture — enter
+    /// or the platform double-click) on a widget surface (api v29, S05).
+    /// Best-effort like every surface event; expansion/selection stay
+    /// host-local and are NOT notified — except `NodeExpanded` below,
+    /// which the plugin needs to page children in.
+    NodeActivated { node: StableId },
+    /// The user expanded an `Unloaded` row on a widget surface: the
+    /// plugin should push a `WidgetPage` for that node's children (the
+    /// one expansion case that is NOT host-local — the plugin is the
+    /// data source).
+    NodeExpanded { node: StableId },
 }
 
 /// Maximum patch ops accepted in one patch frame, bounding allocation and

@@ -2,10 +2,10 @@
 
 use crate::app::{LayerStateLayerFlag, LayerStateProperty, Message};
 use crate::t;
-use crate::ui::properties::{lw_options, LwItem};
-use crate::ui::style::form::{hdivider, LABEL_WIDTH};
+use crate::ui::properties::{LwItem, lw_options};
+use crate::ui::style::form::{LABEL_WIDTH, hdivider};
 use document::{LayerState, LayerStateMask};
-use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{Space, button, checkbox, column, container, row, scrollable, text, text_input};
 use iced::{Background, Border, Element, Fill, Length, Theme};
 use std::borrow::Cow;
 use std::fmt;

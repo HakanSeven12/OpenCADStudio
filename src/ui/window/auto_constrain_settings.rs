@@ -1,7 +1,7 @@
-use crate::app::settings::AutoConstrainSettings;
 use crate::app::Message;
+use crate::app::settings::AutoConstrainSettings;
 use crate::ui::style::form::dialog_button;
-use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{Space, button, checkbox, column, container, row, scrollable, text, text_input};
 use iced::{Element, Fill};
 
 pub fn view_window<'a>(

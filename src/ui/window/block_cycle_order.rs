@@ -1,8 +1,8 @@
 use crate::app::Message;
 use document::{Document, Handle};
 use iced::{
-    widget::{button, checkbox, column, container, row, scrollable, text, Space},
     Element, Fill,
+    widget::{Space, button, checkbox, column, container, row, scrollable, text},
 };
 
 pub(crate) struct Row {

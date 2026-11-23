@@ -5,8 +5,8 @@ use crate::app::Message;
 use crate::modules::view::visual_style::VISUAL_STYLES;
 use document::entities::ViewportRenderMode;
 use iced::{
-    widget::{button, checkbox, column, container, row, text, text_input, Space},
     Element, Fill,
+    widget::{Space, button, checkbox, column, container, row, text, text_input},
 };
 
 /// What the window shows: the active viewport's style and the live edge
@@ -34,7 +34,9 @@ pub(crate) fn view_window(v: View<'_>) -> Element<'_, Message> {
     let edges = column![
         text(crate::t!("Edge Settings")).size(13),
         row![
-            text(crate::t!("Crease angle (VSEDGESMOOTH)")).size(12).width(220),
+            text(crate::t!("Crease angle (VSEDGESMOOTH)"))
+                .size(12)
+                .width(220),
             text_input("1", v.crease)
                 .on_input(Message::VisualStylesCreaseInput)
                 .on_submit(Message::VisualStylesCreaseApply)
@@ -48,7 +50,9 @@ pub(crate) fn view_window(v: View<'_>) -> Element<'_, Message> {
         ))
         .size(11),
         checkbox(v.occluded)
-            .label(crate::t!("Show occluded edges dashed in Hidden Line (VSOCCLUDEDEDGES)"))
+            .label(crate::t!(
+                "Show occluded edges dashed in Hidden Line (VSOCCLUDEDEDGES)"
+            ))
             .text_size(12)
             .on_toggle(Message::VisualStylesOccludedEdges),
         checkbox(v.silhouette)

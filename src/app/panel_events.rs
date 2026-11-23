@@ -218,6 +218,29 @@ impl PanelEventRouter {
         )
     }
 
+    /// Widget-tier notifications reuse the per-surface sequence for their
+    /// explicit identity: activation gestures and lazy-expansion requests
+    /// (expanding an `Unloaded` row asks the plugin for a page).
+    pub fn on_node_activated(&mut self, panel_id: &str, node: StableId) -> RoutedEvent {
+        let sequence = self.next_sequence(panel_id);
+        RoutedEvent {
+            panel_id: panel_id.to_owned(),
+            sequence,
+            event: SurfaceEvent::NodeActivated { node },
+        }
+    }
+
+    /// The one expansion case that is not host-local: expanding an
+    /// `Unloaded` row asks the plugin (the data source) for a page.
+    pub fn on_node_expanded(&mut self, panel_id: &str, node: StableId) -> RoutedEvent {
+        let sequence = self.next_sequence(panel_id);
+        RoutedEvent {
+            panel_id: panel_id.to_owned(),
+            sequence,
+            event: SurfaceEvent::NodeExpanded { node },
+        }
+    }
+
     /// Settle the active drag (whatever panel owns it): a `DragSettled`
     /// at the latest known position when started, or a silent drop when
     /// the drag never began. The single-pointer law: a new press steals

@@ -26,12 +26,14 @@ fn linetype_operations_follow_the_shared_rules() {
     app.tabs[0].is_start = false;
     let mut host = HostSession::new(&mut app, 0);
 
-    assert!(host
-        .linetype_operation(create("Gap First", &[-1.0, 1.0]))
-        .is_err());
-    assert!(host
-        .linetype_operation(create("Comma,Name", &[1.0, -1.0]))
-        .is_err());
+    assert!(
+        host.linetype_operation(create("Gap First", &[-1.0, 1.0]))
+            .is_err()
+    );
+    assert!(
+        host.linetype_operation(create("Comma,Name", &[1.0, -1.0]))
+            .is_err()
+    );
     assert!(
         host.linetype_operation(create("dashed", &[1.0, -1.0]))
             .is_err(),
@@ -344,10 +346,11 @@ fn nested_insert_attribute_crud_uses_parent_storage_and_undo() {
         assert!(matches!(host.host_model_entity(attribute_handle),
                 Some(EntityType::AttributeEntity(value)) if value.value == "PN-101"));
         let view = ocs_plugin_api::shm::DocumentViewDataV4::from(host.document());
-        assert!(view
-            .entities
-            .iter()
-            .any(|entity| entity.handle == attribute_handle.value()));
+        assert!(
+            view.entities
+                .iter()
+                .any(|entity| entity.handle == attribute_handle.value())
+        );
 
         let mut changed = host.host_model_entity(attribute_handle).unwrap();
         let EntityType::AttributeEntity(value) = &mut changed else {
@@ -426,17 +429,19 @@ fn entity_transaction_validates_before_mutation_and_undoes_as_one_step() {
         }
         let mut invalid = b.clone();
         invalid.common_mut().owner_handle = Handle::new(99999);
-        assert!(host
-            .update_entities_transaction("Move points", vec![a.clone(), invalid])
-            .is_err());
+        assert!(
+            host.update_entities_transaction("Move points", vec![a.clone(), invalid])
+                .is_err()
+        );
         let mut invalid_geometry = b.clone();
         if let EntityType::Point(p) = &mut invalid_geometry {
             p.location.x = f64::NAN;
         }
-        assert!(host
-            .update_entities_transaction("Move points", vec![a.clone(), invalid_geometry])
-            .unwrap_err()
-            .contains("Point.location"));
+        assert!(
+            host.update_entities_transaction("Move points", vec![a.clone(), invalid_geometry])
+                .unwrap_err()
+                .contains("Point.location")
+        );
         assert_eq!(host.app.tabs[0].history.undo_stack.len(), 0);
         assert!(
             matches!(host.document().get_entity(first), Some(EntityType::Point(p)) if p.location.x == 1.0)
@@ -508,9 +513,11 @@ fn run_mesh_lifecycle(case: &MeshCase) {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let last_output =
         |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
@@ -715,9 +722,13 @@ fn run_mesh_lifecycle(case: &MeshCase) {
         );
     }
     let (first_patch, _) = case.rejects[0];
-    dispatch(&mut host, &format!(
+    dispatch(
+        &mut host,
+        &format!(
             "PY_EVAL ocs.update_many('Atomic', [{{'handle':{h}, 'layer':'Other'}}, {{'handle':{h}, {first_patch}}}])",
-            h = handle.value()));
+            h = handle.value()
+        ),
+    );
     assert_eq!(host.document().get_entity(handle), Some(&expected));
 
     let dwg = crate::io::load_bytes(
@@ -801,10 +812,12 @@ fn run_mesh_lifecycle(case: &MeshCase) {
                 .unwrap(),
         ),
     ] {
-        assert!(crate::io::load_bytes(name, bytes)
-            .unwrap()
-            .get_entity(handle)
-            .is_none());
+        assert!(
+            crate::io::load_bytes(name, bytes)
+                .unwrap()
+                .get_entity(handle)
+                .is_none()
+        );
     }
     drop(process);
     drop(host);
@@ -834,88 +847,124 @@ fn run_mesh_lifecycle(case: &MeshCase) {
 #[test]
 fn staged_python_polygon_mesh_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: concat!(
-                "verts = [{'location': P(i, j, 0.0)} for i in range(3) for j in range(3)]\n",
-                "doc.create_entity('PolygonMesh', m_vertex_count=3, n_vertex_count=3, vertices=verts)\n"),
-            edit: concat!(
-                "mesh = doc.entities[HANDLE]\n",
-                "verts = mesh.vertices\n",
-                "verts[4]['location'] = P(1.0, 1.0, 2.5)\n",
-                "with doc.transaction('Edit mesh'):\n",
-                "    mesh.vertices = verts\n",
-                "    mesh.m_smooth_density = 6\n",
-                "    mesh.n_smooth_density = 6\n",
-                "    mesh.smooth_type = 'Cubic'\n",
-                "doc.selection = [mesh]\n"),
-            rejects: &[
-                ("'m_vertex_count':4", "requires 12"),
-                ("'n_vertex_count':1", "at least 2"),
-                ("'m_smooth_density':-1", "non-negative"),
-                ("'elevation':float('nan')", "finite"),
-                ("'normal':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
-                ("'vertices':[{'location':{'x':float('nan'),'y':0.0,'z':0.0}}]*9", "finite"),
-                ("'smooth_type':'Spline'", "unsupported"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::PolygonMesh(_)),
-            digest: |entity| match entity {
-                EntityType::PolygonMesh(m) => format!("{}x{} v{} z{} d{}/{} {:?}", m.m_vertex_count, m.n_vertex_count,
-                    m.vertices.len(), m.vertices[4].location.z, m.m_smooth_density, m.n_smooth_density, m.smooth_type),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::PolygonMesh(m) = entity { m.vertices[0].location.z = 1.0; },
-            expect_created: "3x3 v9 z0 d0/0 NoSmooth",
-            expect_edited: "3x3 v9 z2.5 d6/6 Cubic",
-            expect_reedited: "3x3 v9 z2.5 d6/6 Cubic",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: concat!(
+            "verts = [{'location': P(i, j, 0.0)} for i in range(3) for j in range(3)]\n",
+            "doc.create_entity('PolygonMesh', m_vertex_count=3, n_vertex_count=3, vertices=verts)\n"
+        ),
+        edit: concat!(
+            "mesh = doc.entities[HANDLE]\n",
+            "verts = mesh.vertices\n",
+            "verts[4]['location'] = P(1.0, 1.0, 2.5)\n",
+            "with doc.transaction('Edit mesh'):\n",
+            "    mesh.vertices = verts\n",
+            "    mesh.m_smooth_density = 6\n",
+            "    mesh.n_smooth_density = 6\n",
+            "    mesh.smooth_type = 'Cubic'\n",
+            "doc.selection = [mesh]\n"
+        ),
+        rejects: &[
+            ("'m_vertex_count':4", "requires 12"),
+            ("'n_vertex_count':1", "at least 2"),
+            ("'m_smooth_density':-1", "non-negative"),
+            ("'elevation':float('nan')", "finite"),
+            ("'normal':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
+            (
+                "'vertices':[{'location':{'x':float('nan'),'y':0.0,'z':0.0}}]*9",
+                "finite",
+            ),
+            ("'smooth_type':'Spline'", "unsupported"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::PolygonMesh(_)),
+        digest: |entity| match entity {
+            EntityType::PolygonMesh(m) => format!(
+                "{}x{} v{} z{} d{}/{} {:?}",
+                m.m_vertex_count,
+                m.n_vertex_count,
+                m.vertices.len(),
+                m.vertices[4].location.z,
+                m.m_smooth_density,
+                m.n_smooth_density,
+                m.smooth_type
+            ),
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::PolygonMesh(m) = entity {
+                m.vertices[0].location.z = 1.0;
+            }
+        },
+        expect_created: "3x3 v9 z0 d0/0 NoSmooth",
+        expect_edited: "3x3 v9 z2.5 d6/6 Cubic",
+        expect_reedited: "3x3 v9 z2.5 d6/6 Cubic",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
 fn staged_python_polyface_mesh_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: concat!(
-                "verts = [{'location': P(0.0, 0.0, 0.0)}, {'location': P(4.0, 0.0, 0.0)},\n",
-                "         {'location': P(4.0, 4.0, 0.0)}, {'location': P(0.0, 4.0, 0.0)}]\n",
-                "faces = [{'index1': 1, 'index2': 2, 'index3': 3}, {'index1': 1, 'index2': 3, 'index3': 4}]\n",
-                "doc.create_entity('PolyfaceMesh', vertices=verts, faces=faces)\n"),
-            edit: concat!(
-                "mesh = doc.entities[HANDLE]\n",
-                "verts = mesh.vertices\n",
-                "verts[2]['location'] = P(4.0, 4.0, 3.0)\n",
-                "verts.append({'location': P(2.0, 6.0, 0.0)})\n",
-                "faces = mesh.faces\n",
-                "faces.append({'index1': 3, 'index2': -4, 'index3': 5})\n",
-                "with doc.transaction('Edit mesh'):\n",
-                "    mesh.vertices = verts\n",
-                "    mesh.faces = faces\n",
-                "doc.selection = [mesh]\n"),
-            rejects: &[
-                ("'faces':[{'index1':1,'index2':2,'index3':9}]", "references vertex 9"),
-                ("'faces':[{'index1':1,'index2':2}]", "at least 3 vertex indices"),
-                ("'faces':[]", "at least 1 face"),
-                ("'vertices':[{'location':{'x':0.0,'y':0.0,'z':0.0}}]", "at least 3"),
-                ("'thickness':float('inf')", "finite"),
-                ("'seqend_handle':5", "read-only"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::PolyfaceMesh(_)),
-            digest: |entity| match entity {
-                EntityType::PolyfaceMesh(m) => format!("v{} f{} z{} last {:?}", m.vertices.len(), m.faces.len(),
-                    m.vertices[2].location.z,
-                    m.faces.last().map(|f| (f.index1, f.index2, f.index3))),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::PolyfaceMesh(m) = entity { m.vertices[0].location.z = 1.0; },
-            expect_created: "v4 f2 z0 last Some((1, 3, 4))",
-            expect_edited: "v5 f3 z3 last Some((3, -4, 5))",
-            expect_reedited: "v5 f3 z3 last Some((3, -4, 5))",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: concat!(
+            "verts = [{'location': P(0.0, 0.0, 0.0)}, {'location': P(4.0, 0.0, 0.0)},\n",
+            "         {'location': P(4.0, 4.0, 0.0)}, {'location': P(0.0, 4.0, 0.0)}]\n",
+            "faces = [{'index1': 1, 'index2': 2, 'index3': 3}, {'index1': 1, 'index2': 3, 'index3': 4}]\n",
+            "doc.create_entity('PolyfaceMesh', vertices=verts, faces=faces)\n"
+        ),
+        edit: concat!(
+            "mesh = doc.entities[HANDLE]\n",
+            "verts = mesh.vertices\n",
+            "verts[2]['location'] = P(4.0, 4.0, 3.0)\n",
+            "verts.append({'location': P(2.0, 6.0, 0.0)})\n",
+            "faces = mesh.faces\n",
+            "faces.append({'index1': 3, 'index2': -4, 'index3': 5})\n",
+            "with doc.transaction('Edit mesh'):\n",
+            "    mesh.vertices = verts\n",
+            "    mesh.faces = faces\n",
+            "doc.selection = [mesh]\n"
+        ),
+        rejects: &[
+            (
+                "'faces':[{'index1':1,'index2':2,'index3':9}]",
+                "references vertex 9",
+            ),
+            (
+                "'faces':[{'index1':1,'index2':2}]",
+                "at least 3 vertex indices",
+            ),
+            ("'faces':[]", "at least 1 face"),
+            (
+                "'vertices':[{'location':{'x':0.0,'y':0.0,'z':0.0}}]",
+                "at least 3",
+            ),
+            ("'thickness':float('inf')", "finite"),
+            ("'seqend_handle':5", "read-only"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::PolyfaceMesh(_)),
+        digest: |entity| match entity {
+            EntityType::PolyfaceMesh(m) => format!(
+                "v{} f{} z{} last {:?}",
+                m.vertices.len(),
+                m.faces.len(),
+                m.vertices[2].location.z,
+                m.faces.last().map(|f| (f.index1, f.index2, f.index3))
+            ),
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::PolyfaceMesh(m) = entity {
+                m.vertices[0].location.z = 1.0;
+            }
+        },
+        expect_created: "v4 f2 z0 last Some((1, 3, 4))",
+        expect_edited: "v5 f3 z3 last Some((3, -4, 5))",
+        expect_reedited: "v5 f3 z3 last Some((3, -4, 5))",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
@@ -980,40 +1029,52 @@ fn staged_python_mesh_lifecycle_over_real_ipc() {
 #[test]
 fn staged_python_helix_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: concat!(
-                "doc.create_entity('Helix', axis_base_point=P(0.0, 0.0, 0.0), axis_vector=P(0.0, 0.0, 1.0),\n",
-                "    start_point=P(5.0, 0.0, 0.0), radius=5.0, turns=3.0, turn_height=2.0)\n"),
-            edit: concat!(
-                "helix = doc.entities[HANDLE]\n",
-                "with doc.transaction('Edit helix'):\n",
-                "    helix.turns = 5.0\n",
-                "    helix.handedness = False\n",
-                "doc.selection = [helix]\n"),
-            rejects: &[
-                ("'radius':0.0", "greater than zero"),
-                ("'turns':-1.0", "greater than zero"),
-                ("'turn_height':float('nan')", "greater than zero"),
-                ("'axis_vector':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
-                ("'start_point':{'x':0.0,'y':0.0,'z':3.0}", "on the axis"),
-                ("'spline':{}", "read-only"),
-                ("'major_version':1", "read-only"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::Helix(_)),
-            digest: |entity| match entity {
-                EntityType::Helix(h) => format!("r{} t{} h{} endz{:.1} ccw{} cp{}", h.radius, h.turns, h.turn_height,
-                    h.spline.control_points.last().map_or(f64::NAN, |p| p.z), h.handedness,
-                    !h.spline.control_points.is_empty()),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::Helix(h) = entity { h.turns = 6.0; },
-            expect_created: "r5 t3 h2 endz6.0 ccwtrue cptrue",
-            expect_edited: "r5 t5 h2 endz10.0 ccwfalse cptrue",
-            expect_reedited: "r5 t6 h2 endz10.0 ccwfalse cptrue",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: concat!(
+            "doc.create_entity('Helix', axis_base_point=P(0.0, 0.0, 0.0), axis_vector=P(0.0, 0.0, 1.0),\n",
+            "    start_point=P(5.0, 0.0, 0.0), radius=5.0, turns=3.0, turn_height=2.0)\n"
+        ),
+        edit: concat!(
+            "helix = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit helix'):\n",
+            "    helix.turns = 5.0\n",
+            "    helix.handedness = False\n",
+            "doc.selection = [helix]\n"
+        ),
+        rejects: &[
+            ("'radius':0.0", "greater than zero"),
+            ("'turns':-1.0", "greater than zero"),
+            ("'turn_height':float('nan')", "greater than zero"),
+            ("'axis_vector':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
+            ("'start_point':{'x':0.0,'y':0.0,'z':3.0}", "on the axis"),
+            ("'spline':{}", "read-only"),
+            ("'major_version':1", "read-only"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::Helix(_)),
+        digest: |entity| match entity {
+            EntityType::Helix(h) => format!(
+                "r{} t{} h{} endz{:.1} ccw{} cp{}",
+                h.radius,
+                h.turns,
+                h.turn_height,
+                h.spline.control_points.last().map_or(f64::NAN, |p| p.z),
+                h.handedness,
+                !h.spline.control_points.is_empty()
+            ),
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::Helix(h) = entity {
+                h.turns = 6.0;
+            }
+        },
+        expect_created: "r5 t3 h2 endz6.0 ccwtrue cptrue",
+        expect_edited: "r5 t5 h2 endz10.0 ccwfalse cptrue",
+        expect_reedited: "r5 t6 h2 endz10.0 ccwfalse cptrue",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
@@ -1022,92 +1083,129 @@ fn staged_python_raster_image_lifecycle_over_real_ipc() {
         .save(std::env::temp_dir().join("ocs_raster_test.png"))
         .unwrap();
     run_mesh_lifecycle(&MeshCase {
-            create: concat!(
-                "doc.create_entity('RasterImage', file_path='TMPDIR/ocs_raster_test.png',\n",
-                "    insertion_point=P(10.0, 20.0, 0.0), u_vector=P(0.5, 0.0, 0.0), v_vector=P(0.0, 0.5, 0.0))\n"),
-            edit: concat!(
-                "img = doc.entities[HANDLE]\n",
-                "cb = img.clip_boundary\n",
-                "cb['vertices'] = [{'x': 1.0, 'y': 1.0}, {'x': 7.0, 'y': 3.0}]\n",
-                "with doc.transaction('Edit image'):\n",
-                "    img.insertion_point = (12.0, 22.0, 0.0)\n",
-                "    img.u_vector = (1.0, 0.0, 0.0)\n",
-                "    img.brightness = 70\n",
-                "    img.contrast = 40\n",
-                "    img.fade = 10\n",
-                "    img.clip_boundary = cb\n",
-                "    img.clipping_enabled = True\n",
-                "doc.selection = [img]\n"),
-            rejects: &[
-                ("'file_path':'other.png'", "fixed at creation"),
-                ("'brightness':101", "within 0..=100"),
-                ("'u_vector':{'x':0.0,'y':0.0,'z':0.0}", "not parallel"),
-                ("'v_vector':{'x':2.0,'y':0.0,'z':0.0}", "not parallel"),
-                ("'size':{'x':5.0,'y':5.0}", "read-only"),
-                ("'definition_handle':5", "read-only"),
-                ("'flags':64", "unknown or out-of-range bits"),
-                ("'clip_boundary':{'vertices':[]}", "at least 2"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::RasterImage(_)),
-            digest: |entity| match entity {
-                EntityType::RasterImage(i) => format!("{} {:.1},{:.1} u{:.1} b{} c{} f{} clip{} n{} {}x{} def{}",
-                    std::path::Path::new(&i.file_path).file_name().unwrap().to_string_lossy(),
-                    i.insertion_point.x, i.insertion_point.y, i.u_vector.x, i.brightness, i.contrast, i.fade,
-                    i.clipping_enabled, i.clip_boundary.vertices.len(), i.size.x, i.size.y, i.definition_handle.is_some()),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::RasterImage(i) = entity { i.brightness = 80; },
-            expect_created: "ocs_raster_test.png 10.0,20.0 u0.5 b50 c50 f0 clipfalse n2 8x4 deftrue",
-            expect_edited: "ocs_raster_test.png 12.0,22.0 u1.0 b70 c40 f10 cliptrue n2 8x4 deftrue",
-            expect_reedited: "ocs_raster_test.png 12.0,22.0 u1.0 b80 c40 f10 cliptrue n2 8x4 deftrue",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: concat!(
+            "doc.create_entity('RasterImage', file_path='TMPDIR/ocs_raster_test.png',\n",
+            "    insertion_point=P(10.0, 20.0, 0.0), u_vector=P(0.5, 0.0, 0.0), v_vector=P(0.0, 0.5, 0.0))\n"
+        ),
+        edit: concat!(
+            "img = doc.entities[HANDLE]\n",
+            "cb = img.clip_boundary\n",
+            "cb['vertices'] = [{'x': 1.0, 'y': 1.0}, {'x': 7.0, 'y': 3.0}]\n",
+            "with doc.transaction('Edit image'):\n",
+            "    img.insertion_point = (12.0, 22.0, 0.0)\n",
+            "    img.u_vector = (1.0, 0.0, 0.0)\n",
+            "    img.brightness = 70\n",
+            "    img.contrast = 40\n",
+            "    img.fade = 10\n",
+            "    img.clip_boundary = cb\n",
+            "    img.clipping_enabled = True\n",
+            "doc.selection = [img]\n"
+        ),
+        rejects: &[
+            ("'file_path':'other.png'", "fixed at creation"),
+            ("'brightness':101", "within 0..=100"),
+            ("'u_vector':{'x':0.0,'y':0.0,'z':0.0}", "not parallel"),
+            ("'v_vector':{'x':2.0,'y':0.0,'z':0.0}", "not parallel"),
+            ("'size':{'x':5.0,'y':5.0}", "read-only"),
+            ("'definition_handle':5", "read-only"),
+            ("'flags':64", "unknown or out-of-range bits"),
+            ("'clip_boundary':{'vertices':[]}", "at least 2"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::RasterImage(_)),
+        digest: |entity| match entity {
+            EntityType::RasterImage(i) => format!(
+                "{} {:.1},{:.1} u{:.1} b{} c{} f{} clip{} n{} {}x{} def{}",
+                std::path::Path::new(&i.file_path)
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy(),
+                i.insertion_point.x,
+                i.insertion_point.y,
+                i.u_vector.x,
+                i.brightness,
+                i.contrast,
+                i.fade,
+                i.clipping_enabled,
+                i.clip_boundary.vertices.len(),
+                i.size.x,
+                i.size.y,
+                i.definition_handle.is_some()
+            ),
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::RasterImage(i) = entity {
+                i.brightness = 80;
+            }
+        },
+        expect_created: "ocs_raster_test.png 10.0,20.0 u0.5 b50 c50 f0 clipfalse n2 8x4 deftrue",
+        expect_edited: "ocs_raster_test.png 12.0,22.0 u1.0 b70 c40 f10 cliptrue n2 8x4 deftrue",
+        expect_reedited: "ocs_raster_test.png 12.0,22.0 u1.0 b80 c40 f10 cliptrue n2 8x4 deftrue",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
 fn staged_python_wipeout_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: concat!(
-                "doc.create_entity('Wipeout', insertion_point=P(0.0, 0.0, 0.0),\n",
-                "    u_vector=P(10.0, 0.0, 0.0), v_vector=P(0.0, 6.0, 0.0))\n"),
-            edit: concat!(
-                "w = doc.entities[HANDLE]\n",
-                "with doc.transaction('Edit wipeout'):\n",
-                "    w.clip_type = 'Polygonal'\n",
-                "    w.clip_boundary_vertices = [{'x': -0.5, 'y': -0.5}, {'x': 0.5, 'y': -0.5}, {'x': 0.0, 'y': 0.5}]\n",
-                "    w.insertion_point = (2.0, 3.0, 0.0)\n",
-                "    w.clip_mode = 'Inside'\n",
-                "doc.selection = [w]\n"),
-            rejects: &[
-                ("'clip_boundary_vertices':[{'x':0.0,'y':0.0}]", "at least 3"),
-                ("'clip_type':'Rectangular'", "exactly 2"),
-                ("'u_vector':{'x':0.0,'y':0.0,'z':0.0}", "not parallel"),
-                ("'brightness':200", "within 0..=100"),
-                ("'size':{'x':0.0,'y':1.0}", "greater than zero"),
-                ("'insertion_point':{'x':float('nan'),'y':0.0,'z':0.0}", "finite"),
-                ("'definition_handle':5", "read-only"),
-                ("'clip_type':'Circle'", "unsupported"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::Wipeout(_)),
-            digest: |entity| match entity {
-                EntityType::Wipeout(w) => format!("{:?} {:?} n{} at{:.1},{:.1} u{:.1} v{:.1}", w.clip_type, w.clip_mode,
-                    w.clip_boundary_vertices.len(), w.insertion_point.x, w.insertion_point.y, w.u_vector.x, w.v_vector.y),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::Wipeout(w) = entity { w.u_vector.x = 12.0; },
-            expect_created: "Rectangular Outside n2 at0.0,0.0 u10.0 v6.0",
-            expect_edited: "Polygonal Inside n3 at2.0,3.0 u10.0 v6.0",
-            expect_reedited: "Polygonal Inside n3 at2.0,3.0 u12.0 v6.0",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            // DXF writes a polygonal boundary closed (the first vertex
-            // again at the end), and reads it back that way.
-            expect_edited_dxf: "Polygonal Inside n4 at2.0,3.0 u10.0 v6.0",
-            expect_reedited_dxf: "Polygonal Inside n4 at2.0,3.0 u12.0 v6.0",
-        });
+        create: concat!(
+            "doc.create_entity('Wipeout', insertion_point=P(0.0, 0.0, 0.0),\n",
+            "    u_vector=P(10.0, 0.0, 0.0), v_vector=P(0.0, 6.0, 0.0))\n"
+        ),
+        edit: concat!(
+            "w = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit wipeout'):\n",
+            "    w.clip_type = 'Polygonal'\n",
+            "    w.clip_boundary_vertices = [{'x': -0.5, 'y': -0.5}, {'x': 0.5, 'y': -0.5}, {'x': 0.0, 'y': 0.5}]\n",
+            "    w.insertion_point = (2.0, 3.0, 0.0)\n",
+            "    w.clip_mode = 'Inside'\n",
+            "doc.selection = [w]\n"
+        ),
+        rejects: &[
+            ("'clip_boundary_vertices':[{'x':0.0,'y':0.0}]", "at least 3"),
+            ("'clip_type':'Rectangular'", "exactly 2"),
+            ("'u_vector':{'x':0.0,'y':0.0,'z':0.0}", "not parallel"),
+            ("'brightness':200", "within 0..=100"),
+            ("'size':{'x':0.0,'y':1.0}", "greater than zero"),
+            (
+                "'insertion_point':{'x':float('nan'),'y':0.0,'z':0.0}",
+                "finite",
+            ),
+            ("'definition_handle':5", "read-only"),
+            ("'clip_type':'Circle'", "unsupported"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::Wipeout(_)),
+        digest: |entity| match entity {
+            EntityType::Wipeout(w) => format!(
+                "{:?} {:?} n{} at{:.1},{:.1} u{:.1} v{:.1}",
+                w.clip_type,
+                w.clip_mode,
+                w.clip_boundary_vertices.len(),
+                w.insertion_point.x,
+                w.insertion_point.y,
+                w.u_vector.x,
+                w.v_vector.y
+            ),
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::Wipeout(w) = entity {
+                w.u_vector.x = 12.0;
+            }
+        },
+        expect_created: "Rectangular Outside n2 at0.0,0.0 u10.0 v6.0",
+        expect_edited: "Polygonal Inside n3 at2.0,3.0 u10.0 v6.0",
+        expect_reedited: "Polygonal Inside n3 at2.0,3.0 u12.0 v6.0",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        // DXF writes a polygonal boundary closed (the first vertex
+        // again at the end), and reads it back that way.
+        expect_edited_dxf: "Polygonal Inside n4 at2.0,3.0 u10.0 v6.0",
+        expect_reedited_dxf: "Polygonal Inside n4 at2.0,3.0 u12.0 v6.0",
+    });
 }
 
 #[test]
@@ -1227,41 +1325,49 @@ fn staged_python_viewport_lifecycle_over_real_ipc() {
 #[test]
 fn staged_python_view_border_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: concat!(
-                "doc.create_entity('ViewBorder', min=[0.0, 0.0], max=[40.0, 30.0], center=[20.0, 15.0], scale=1.0,\n",
-                "    active_viewport=VIEWPORTHANDLE, scale_handle=SCALEHANDLE)\n"),
-            edit: concat!(
-                "vb = doc.entities[HANDLE]\n",
-                "with doc.transaction('Edit view border'):\n",
-                "    vb.max = [60.0, 45.0]\n",
-                "    vb.center = [30.0, 22.5]\n",
-                "    vb.scale = 2.0\n",
-                "    vb.rotation_angle = 0.3\n",
-                "doc.selection = [vb]\n"),
-            rejects: &[
-                ("'max':[-1.0, 5.0]", "below max"),
-                ("'scale':0.0", "greater than zero"),
-                ("'rotation_angle':float('nan')", "finite"),
-                ("'center':[float('inf'), 0.0]", "finite"),
-                ("'active_viewport':999999", "does not exist"),
-                ("'scale_handle':999999", "does not exist"),
-                ("'version':3", "read-only"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::ViewBorder(_)),
-            digest: |entity| match entity {
-                EntityType::ViewBorder(v) => format!("max{:.1},{:.1} c{:.1},{:.1} s{:.1} r{:.1}", v.max[0], v.max[1],
-                    v.center[0], v.center[1], v.scale, v.rotation_angle),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::ViewBorder(v) = entity { v.scale = 3.0; },
-            expect_created: "max40.0,30.0 c20.0,15.0 s1.0 r0.0",
-            expect_edited: "max60.0,45.0 c30.0,22.5 s2.0 r0.3",
-            expect_reedited: "max60.0,45.0 c30.0,22.5 s3.0 r0.3",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: concat!(
+            "doc.create_entity('ViewBorder', min=[0.0, 0.0], max=[40.0, 30.0], center=[20.0, 15.0], scale=1.0,\n",
+            "    active_viewport=VIEWPORTHANDLE, scale_handle=SCALEHANDLE)\n"
+        ),
+        edit: concat!(
+            "vb = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit view border'):\n",
+            "    vb.max = [60.0, 45.0]\n",
+            "    vb.center = [30.0, 22.5]\n",
+            "    vb.scale = 2.0\n",
+            "    vb.rotation_angle = 0.3\n",
+            "doc.selection = [vb]\n"
+        ),
+        rejects: &[
+            ("'max':[-1.0, 5.0]", "below max"),
+            ("'scale':0.0", "greater than zero"),
+            ("'rotation_angle':float('nan')", "finite"),
+            ("'center':[float('inf'), 0.0]", "finite"),
+            ("'active_viewport':999999", "does not exist"),
+            ("'scale_handle':999999", "does not exist"),
+            ("'version':3", "read-only"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::ViewBorder(_)),
+        digest: |entity| match entity {
+            EntityType::ViewBorder(v) => format!(
+                "max{:.1},{:.1} c{:.1},{:.1} s{:.1} r{:.1}",
+                v.max[0], v.max[1], v.center[0], v.center[1], v.scale, v.rotation_angle
+            ),
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::ViewBorder(v) = entity {
+                v.scale = 3.0;
+            }
+        },
+        expect_created: "max40.0,30.0 c20.0,15.0 s1.0 r0.0",
+        expect_edited: "max60.0,45.0 c30.0,22.5 s2.0 r0.3",
+        expect_reedited: "max60.0,45.0 c30.0,22.5 s3.0 r0.3",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
@@ -1356,9 +1462,11 @@ fn audit_python_ole2frame_creation_rules_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let last = |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
     let frames = |host: &HostSession<'_>| {
@@ -1384,7 +1492,9 @@ fn audit_python_ole2frame_creation_rules_over_real_ipc() {
     };
     let embed = |file: &std::path::Path, extra: &str| {
         format!(
-            "PY_EVAL ocs.active_document.embed_picture({:?}, origin=(1, 2, 3), width=16{extra}).handle", file.display().to_string())
+            "PY_EVAL ocs.active_document.embed_picture({:?}, origin=(1, 2, 3), width=16{extra}).handle",
+            file.display().to_string()
+        )
     };
 
     // C: PNG and JPEG are stored as read, a TIFF is re-encoded as PNG, and
@@ -1497,9 +1607,11 @@ fn audit_python_viewport_ids_and_scale_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let last = |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
     let viewports = |host: &HostSession<'_>| {
@@ -1516,7 +1628,9 @@ fn audit_python_viewport_ids_and_scale_over_real_ipc() {
     };
     let create = |width: f64, height: f64, view_height: f64| {
         format!(
-            "PY_EVAL ocs.active_document.create_entity('Viewport', owner_handle={}, center=(50, 50, 0), width={width}, height={height}, view_height={view_height}).handle", paper.value())
+            "PY_EVAL ocs.active_document.create_entity('Viewport', owner_handle={}, center=(50, 50, 0), width={width}, height={height}, view_height={view_height}).handle",
+            paper.value()
+        )
     };
     dispatch(&mut host, &create(80.0, 60.0, 50.0));
     dispatch(&mut host, &create(40.0, 30.0, 10.0));
@@ -1668,10 +1782,17 @@ fn spike_raster_image_definition_persistence() {
                 .count();
             let dicts = document.objects.values().filter(|o| matches!(o, document::objects::ObjectType::Dictionary(d) if d.entries.iter().any(|(k, _)| k.contains("IMAGE")))).count();
             match entity {
-                    Some(EntityType::RasterImage(i)) => eprintln!("SPIKE linked={linked} {label}: file_path_ok={} definition={:?} reactor={:?} defs={defs} reactors={reactors} image_dicts={dicts}",
-                        i.file_path == path, i.definition_handle.map(|h| h.value()), i.definition_reactor_handle.map(|h| h.value())),
-                    other => eprintln!("SPIKE linked={linked} {label}: came back as {:?}", other.map(|e| format!("{e:?}").chars().take(24).collect::<String>())),
-                }
+                Some(EntityType::RasterImage(i)) => eprintln!(
+                    "SPIKE linked={linked} {label}: file_path_ok={} definition={:?} reactor={:?} defs={defs} reactors={reactors} image_dicts={dicts}",
+                    i.file_path == path,
+                    i.definition_handle.map(|h| h.value()),
+                    i.definition_reactor_handle.map(|h| h.value())
+                ),
+                other => eprintln!(
+                    "SPIKE linked={linked} {label}: came back as {:?}",
+                    other.map(|e| format!("{e:?}").chars().take(24).collect::<String>())
+                ),
+            }
         }
     }
 }
@@ -1725,9 +1846,11 @@ fn modify_wrappers_audit_body() {
                 "{body}\n",
                 "L.create(('REPORT ' + str(len(refused)) + ' ~ ' + ' '.join(failed))[:250])\n",
             ), body = body)).unwrap();
-        assert!(process
-            .dispatch(host, &format!("PY_RUN {}", script.display()), &mut |_| {})
-            .unwrap());
+        assert!(
+            process
+                .dispatch(host, &format!("PY_RUN {}", script.display()), &mut |_| {})
+                .unwrap()
+        );
         let _ = std::fs::remove_file(&script);
     };
     let report = |document: &Document| -> (usize, Vec<String>) {
@@ -2140,13 +2263,15 @@ fn audit_python_nested_input_is_validated_over_real_ipc() {
             "good2 = doc.create_entity('Polyline2D', vertices=[{'location': P(0, 0)}, {'location': P(5, 5)}])\n",
             "L.create('REPORT ' + str(len(refused)) + ' ~ ' + ' '.join(problems))\n",
         )).unwrap();
-    assert!(process
-        .dispatch(
-            &mut host,
-            &format!("PY_RUN {}", script.display()),
-            &mut |_| {}
-        )
-        .unwrap());
+    assert!(
+        process
+            .dispatch(
+                &mut host,
+                &format!("PY_RUN {}", script.display()),
+                &mut |_| {}
+            )
+            .unwrap()
+    );
     let _ = std::fs::remove_file(&script);
     let name = host
         .document()
@@ -2178,9 +2303,11 @@ fn audit_python_nested_input_is_validated_over_real_ipc() {
             .count(),
         1
     );
-    assert!(!document
-        .entities()
-        .any(|e| matches!(e, EntityType::PolygonMesh(_))));
+    assert!(
+        !document
+            .entities()
+            .any(|e| matches!(e, EntityType::PolygonMesh(_)))
+    );
     drop(process);
 }
 
@@ -2327,13 +2454,15 @@ fn audit_python_raster_image_definition_linkage_over_real_ipc() {
         ),
     )
     .unwrap();
-    assert!(process
-        .dispatch(
-            &mut host,
-            &format!("PY_RUN {}", script.display()),
-            &mut |_| {}
-        )
-        .unwrap());
+    assert!(
+        process
+            .dispatch(
+                &mut host,
+                &format!("PY_RUN {}", script.display()),
+                &mut |_| {}
+            )
+            .unwrap()
+    );
     let _ = std::fs::remove_file(&script);
 
     // The structure: one definition per file, registered and owned by ACAD_IMAGE_DICT.
@@ -2467,9 +2596,11 @@ fn staged_python_point_pick_and_cancel_over_real_ipc() {
                 "request_point"
             };
             let cmd = format!("PY_EVAL ocs.active_document.{method}('{prompt}')");
-            assert!(process
-                .dispatch(&mut host, &cmd, &mut |id| started = Some(id))
-                .unwrap());
+            assert!(
+                process
+                    .dispatch(&mut host, &cmd, &mut |id| started = Some(id))
+                    .unwrap()
+            );
         }
         let output = app.command_line.history.last().unwrap().text.clone();
         let token = output
@@ -2497,21 +2628,24 @@ fn staged_python_point_pick_and_cancel_over_real_ipc() {
     assert!(app.tabs[0].active_cmd.is_none());
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(process
-            .dispatch(
-                &mut host,
-                &format!("PY_EVAL ocs.active_document.poll_input({picked_token})"),
-                &mut |_| {}
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    &format!("PY_EVAL ocs.active_document.poll_input({picked_token})"),
+                    &mut |_| {}
+                )
+                .unwrap()
+        );
     }
-    assert!(app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("point"));
+    assert!(
+        app.command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("point")
+    );
 
     let target = {
         let mut host = HostSession::new(&mut app, 0);
@@ -2530,49 +2664,56 @@ fn staged_python_point_pick_and_cancel_over_real_ipc() {
     let _ = app.apply_cmd_result(result);
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(process
-            .dispatch(
-                &mut host,
-                &format!("PY_EVAL ocs.active_document.poll_input({entity_token})"),
-                &mut |_| {}
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    &format!("PY_EVAL ocs.active_document.poll_input({entity_token})"),
+                    &mut |_| {}
+                )
+                .unwrap()
+        );
     }
-    assert!(app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("entity"));
-    assert!(app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains(&target.value().to_string()));
+    assert!(
+        app.command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("entity")
+    );
+    assert!(
+        app.command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains(&target.value().to_string())
+    );
 
     let cancelled_token = request(&mut app, "Cancel a point", false);
     let result = app.tabs[0].active_cmd.as_mut().unwrap().on_enter();
     let _ = app.apply_cmd_result(result);
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(process
-            .dispatch(
-                &mut host,
-                &format!("PY_EVAL ocs.active_document.poll_input({cancelled_token})"),
-                &mut |_| {}
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    &format!("PY_EVAL ocs.active_document.poll_input({cancelled_token})"),
+                    &mut |_| {}
+                )
+                .unwrap()
+        );
     }
-    assert!(app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("cancelled"));
+    assert!(
+        app.command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("cancelled")
+    );
 }
 
 /// A script asks for an array drag: the plugin previews the copies while the
@@ -2627,14 +2768,19 @@ else:
     let mut started = None;
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(process
-            .dispatch(&mut host, &format!("PY_RUN {script_path}"), &mut |id| {
-                started = Some(id)
-            })
-            .unwrap());
+        assert!(
+            process
+                .dispatch(&mut host, &format!("PY_RUN {script_path}"), &mut |id| {
+                    started = Some(id)
+                })
+                .unwrap()
+        );
     }
     let text = history(&app);
-    assert!(text.contains("refused: request_drag: an array takes 3 prompts"), "{text}");
+    assert!(
+        text.contains("refused: request_drag: an array takes 3 prompts"),
+        "{text}"
+    );
     let id = started.unwrap_or_else(|| panic!("no drag started: {text}"));
     app.set_active_command(
         0,
@@ -2645,10 +2791,15 @@ else:
     );
     let command = app.tabs[0].active_cmd.as_mut().unwrap();
     assert_eq!(command.prompt(), "Base");
-    assert!(command
-        .on_preview_wires(glam::DVec3::new(9.0, 9.0, 0.0))
-        .is_empty());
-    for point in [glam::DVec3::new(10.0, 0.0, 0.0), glam::DVec3::new(12.0, 0.0, 0.0)] {
+    assert!(
+        command
+            .on_preview_wires(glam::DVec3::new(9.0, 9.0, 0.0))
+            .is_empty()
+    );
+    for point in [
+        glam::DVec3::new(10.0, 0.0, 0.0),
+        glam::DVec3::new(12.0, 0.0, 0.0),
+    ] {
         assert!(matches!(
             command.on_point(point),
             crate::command::CmdResult::NeedPoint
@@ -2673,7 +2824,10 @@ else:
         assert!(process.dispatch(&mut host, &line, &mut |_| {}).unwrap());
     }
     let text = history(&app);
-    assert!(text.contains("resumed drag 3 seven [16.5, 3.0, 0.0]"), "{text}");
+    assert!(
+        text.contains("resumed drag 3 seven [16.5, 3.0, 0.0]"),
+        "{text}"
+    );
     // the result is read once: the same line again is a first run
     {
         let mut host = HostSession::new(&mut app, 0);
@@ -2719,7 +2873,10 @@ fn staged_python_typed_line_leaves_the_requested_point_prompt_open() {
         .0
     };
     let _ = app.run_command_line(&format!("PY_RUN {script_path}"));
-    let prompt = app.tabs[0].active_cmd.as_ref().map(|command| command.prompt());
+    let prompt = app.tabs[0]
+        .active_cmd
+        .as_ref()
+        .map(|command| command.prompt());
     if let Some(command) = app.tabs[0].active_cmd.as_mut() {
         let _ = command.on_enter();
     }
@@ -2769,13 +2926,15 @@ fn staged_python_tabs_isolate_tokens_and_notifications() {
     let mut started = None;
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(process
-            .dispatch(
-                &mut host,
-                "PY_EVAL ocs.active_document.request_point('Tab zero')",
-                &mut |id| started = Some(id)
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    "PY_EVAL ocs.active_document.request_point('Tab zero')",
+                    &mut |id| started = Some(id)
+                )
+                .unwrap()
+        );
     }
     let token = app
         .command_line
@@ -2795,13 +2954,15 @@ fn staged_python_tabs_isolate_tokens_and_notifications() {
     );
     {
         let mut host = HostSession::new(&mut app, 1);
-        assert!(process
-            .dispatch(
-                &mut host,
-                &format!("PY_EVAL ocs.active_document.poll_input({token})"),
-                &mut |_| {}
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    &format!("PY_EVAL ocs.active_document.poll_input({token})"),
+                    &mut |_| {}
+                )
+                .unwrap()
+        );
     }
     assert!(
         app.command_line
@@ -2820,38 +2981,44 @@ fn staged_python_tabs_isolate_tokens_and_notifications() {
     let _ = app.apply_cmd_result(result);
     {
         let mut host = HostSession::new(&mut app, 1);
-        assert!(process
-            .dispatch(
-                &mut host,
-                &format!("PY_EVAL ocs.active_document.poll_input({token})"),
-                &mut |_| {}
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    &format!("PY_EVAL ocs.active_document.poll_input({token})"),
+                    &mut |_| {}
+                )
+                .unwrap()
+        );
     }
-    assert!(app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("None"));
+    assert!(
+        app.command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("None")
+    );
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(process
-            .dispatch(
-                &mut host,
-                &format!("PY_EVAL ocs.active_document.poll_input({token})"),
-                &mut |_| {}
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    &format!("PY_EVAL ocs.active_document.poll_input({token})"),
+                    &mut |_| {}
+                )
+                .unwrap()
+        );
     }
-    assert!(app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("point"));
+    assert!(
+        app.command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("point")
+    );
 
     use ocs_plugin_api::host::HostNotification;
     process
@@ -2880,13 +3047,15 @@ fn staged_python_tabs_isolate_tokens_and_notifications() {
         for _ in 0..10 {
             {
                 let mut host = HostSession::new(app, tab);
-                assert!(process
-                    .dispatch(
-                        &mut host,
-                        "PY_EVAL ocs.active_document.poll_events()",
-                        &mut |_| {}
-                    )
-                    .unwrap());
+                assert!(
+                    process
+                        .dispatch(
+                            &mut host,
+                            "PY_EVAL ocs.active_document.poll_events()",
+                            &mut |_| {}
+                        )
+                        .unwrap()
+                );
             }
             output = app.command_line.history.last().unwrap().text.clone();
             if output.contains(epoch) {
@@ -2921,13 +3090,15 @@ fn staged_python_tabs_isolate_tokens_and_notifications() {
     std::thread::sleep(std::time::Duration::from_millis(100));
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(process
-            .dispatch(
-                &mut host,
-                "PY_EVAL ocs.active_document.poll_events()",
-                &mut |_| {}
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    "PY_EVAL ocs.active_document.poll_events()",
+                    &mut |_| {}
+                )
+                .unwrap()
+        );
     }
     let overflow = &app.command_line.history.last().unwrap().text;
     assert!(
@@ -2950,13 +3121,15 @@ fn staged_python_tabs_isolate_tokens_and_notifications() {
     std::thread::sleep(std::time::Duration::from_millis(50));
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(process
-            .dispatch(
-                &mut host,
-                "PY_EVAL ocs.active_document.poll_events()",
-                &mut |_| {}
-            )
-            .unwrap());
+        assert!(
+            process
+                .dispatch(
+                    &mut host,
+                    "PY_EVAL ocs.active_document.poll_events()",
+                    &mut |_| {}
+                )
+                .unwrap()
+        );
     }
     assert!(
         app.command_line.history.last().unwrap().text.contains("[]"),
@@ -3041,9 +3214,10 @@ fn system_variables_change_without_command_reentry() {
         host.system_variable("SNAPANG"),
         Some(HostSettingValue::Number(0.0))
     );
-    assert!(host
-        .set_system_variable("CLAYER", HostSettingValue::Text("Missing".into()))
-        .is_err());
+    assert!(
+        host.set_system_variable("CLAYER", HostSettingValue::Text("Missing".into()))
+            .is_err()
+    );
     assert_eq!(
         host.system_variable("CLAYER"),
         Some(HostSettingValue::Text("0".into()))
@@ -3073,12 +3247,14 @@ fn system_variables_change_without_command_reentry() {
         host.system_variable("SNAPANG"),
         Some(HostSettingValue::Number(90.0))
     );
-    assert!(host
-        .set_system_variable("SNAPANG", HostSettingValue::Number(f64::INFINITY))
-        .is_err());
-    assert!(host
-        .set_system_variable("SNAPANG", HostSettingValue::Number(f64::MAX))
-        .is_err());
+    assert!(
+        host.set_system_variable("SNAPANG", HostSettingValue::Number(f64::INFINITY))
+            .is_err()
+    );
+    assert!(
+        host.set_system_variable("SNAPANG", HostSettingValue::Number(f64::MAX))
+            .is_err()
+    );
     assert_eq!(
         host.system_variable("SNAPANG"),
         Some(HostSettingValue::Number(90.0))
@@ -3806,16 +3982,19 @@ fn entity_creation_with_novel_layer_refreshes_gui() {
     app.tabs[0].is_start = false;
 
     // Verify DYNAMIC_PLUGIN_LINES does not exist initially
-    assert!(!app.tabs[0]
-        .scene
-        .document
-        .layers
-        .contains("DYNAMIC_PLUGIN_LINES"));
-    assert!(!app
-        .ribbon
-        .layer_infos
-        .iter()
-        .any(|l| l.name == "DYNAMIC_PLUGIN_LINES"));
+    assert!(
+        !app.tabs[0]
+            .scene
+            .document
+            .layers
+            .contains("DYNAMIC_PLUGIN_LINES")
+    );
+    assert!(
+        !app.ribbon
+            .layer_infos
+            .iter()
+            .any(|l| l.name == "DYNAMIC_PLUGIN_LINES")
+    );
 
     // 1. Add entity via HostSession (simulating plugin add_entity / add_line)
     {
@@ -3827,11 +4006,13 @@ fn entity_creation_with_novel_layer_refreshes_gui() {
     }
 
     // Verify layer is created in document AND refreshed in ribbon + layer panel
-    assert!(app.tabs[0]
-        .scene
-        .document
-        .layers
-        .contains("DYNAMIC_PLUGIN_LINES"));
+    assert!(
+        app.tabs[0]
+            .scene
+            .document
+            .layers
+            .contains("DYNAMIC_PLUGIN_LINES")
+    );
     assert!(
         app.ribbon
             .layer_infos
@@ -3854,11 +4035,13 @@ fn entity_creation_with_novel_layer_refreshes_gui() {
     let _ = app.commit_entity_handle_preserve_layer(document::EntityType::Line(line2));
 
     // Verify SURVEY_TRAVERSE layer is created and refreshed in ribbon + layer panel
-    assert!(app.tabs[0]
-        .scene
-        .document
-        .layers
-        .contains("SURVEY_TRAVERSE"));
+    assert!(
+        app.tabs[0]
+            .scene
+            .document
+            .layers
+            .contains("SURVEY_TRAVERSE")
+    );
     assert!(
         app.ribbon
             .layer_infos
@@ -4187,9 +4370,11 @@ fn parametric_validation_is_pure_and_rejects_a_hard_corner() {
         segments: Vec::new(),
         ..chain.clone()
     };
-    assert!(HostApi::validate_parametric_chain(&host, &empty, 1e-3)
-        .unwrap_err()
-        .contains("at least one segment"));
+    assert!(
+        HostApi::validate_parametric_chain(&host, &empty, 1e-3)
+            .unwrap_err()
+            .contains("at least one segment")
+    );
 
     assert_eq!(host.app.tabs[0].scene.geometry_epoch, epoch_before);
     assert_eq!(host.document(), &document_before);
@@ -4290,9 +4475,10 @@ fn grip_edit_restage_updates_the_display_set_in_place() {
     let handles;
     {
         let mut host = HostSession::new(&mut app, 0);
-        assert!(host
-            .register_plugin_class("PLUGIN", &traverse_class())
-            .is_ok());
+        assert!(
+            host.register_plugin_class("PLUGIN", &traverse_class())
+                .is_ok()
+        );
         let mut instance = traverse_instance();
         instance.design =
             ocs_plugin_api::host::PluginDisplayDescriptor::ParametricChain(crest_profile_chain());

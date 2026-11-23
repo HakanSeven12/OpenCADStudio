@@ -5,7 +5,7 @@
 
 use crate::app::Message;
 use crate::ui::style::form::dialog_button_styled_opt;
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Element, Fill, Length, Shrink, Theme};
 
 fn muted_style(theme: &Theme) -> text::Style {

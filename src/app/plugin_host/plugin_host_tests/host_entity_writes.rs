@@ -177,14 +177,15 @@ fn reference_only_designation_is_not_written_to_dwg_or_dxf() {
     // The host writes nothing of its own into the document: no APPID
     // registration, no marker XDATA on the designated entity.
     assert!(host.document().app_ids.get("OCS").is_none());
-    assert!(host
-        .document()
-        .get_entity(handle)
-        .expect("designated entity")
-        .common()
-        .extended_data
-        .get_record("OCS")
-        .is_none());
+    assert!(
+        host.document()
+            .get_entity(handle)
+            .expect("designated entity")
+            .common()
+            .extended_data
+            .get_record("OCS")
+            .is_none()
+    );
 
     let contains_marker =
         |bytes: &[u8]| bytes.windows(15).any(|window| window == b"REFERENCE_ONLY");
@@ -198,13 +199,15 @@ fn reference_only_designation_is_not_written_to_dwg_or_dxf() {
     );
     let reloaded = crate::io::load_bytes("reference-only.dwg", dwg).unwrap();
     assert!(reloaded.app_ids.get("OCS").is_none());
-    assert!(reloaded
-        .get_entity(handle)
-        .expect("the line survives the round trip")
-        .common()
-        .extended_data
-        .get_record("OCS")
-        .is_none());
+    assert!(
+        reloaded
+            .get_entity(handle)
+            .expect("the line survives the round trip")
+            .common()
+            .extended_data
+            .get_record("OCS")
+            .is_none()
+    );
     assert!(
         !contains_marker(&document::DwgWriter::write_to_vec(&reloaded).unwrap()),
         "a re-save of the reopened file stays marker-free"
@@ -220,13 +223,15 @@ fn reference_only_designation_is_not_written_to_dwg_or_dxf() {
     );
     let reloaded = crate::io::load_bytes("reference-only.dxf", dxf).unwrap();
     assert!(reloaded.app_ids.get("OCS").is_none());
-    assert!(reloaded
-        .get_entity(handle)
-        .expect("the line survives the round trip")
-        .common()
-        .extended_data
-        .get_record("OCS")
-        .is_none());
+    assert!(
+        reloaded
+            .get_entity(handle)
+            .expect("the line survives the round trip")
+            .common()
+            .extended_data
+            .get_record("OCS")
+            .is_none()
+    );
 }
 
 #[test]
@@ -285,9 +290,11 @@ fn user_paths_refuse_and_plugin_paths_write_reference_only_entities() {
 
     // The user in-place update refuses; the user batch skips only the
     // reference-only member; the plugin-owned variants write through.
-    assert!(!host.app.tabs[0]
-        .scene
-        .update_entity(reference_test_line(20.0, 0.0, handle)));
+    assert!(
+        !host.app.tabs[0]
+            .scene
+            .update_entity(reference_test_line(20.0, 0.0, handle))
+    );
     let applied = host.app.tabs[0].scene.update_entities(vec![
         reference_test_line(20.0, 0.0, handle),
         reference_test_line(20.0, 5.0, plain),

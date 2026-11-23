@@ -1,14 +1,14 @@
 use crate::app::Message;
 use crate::scene::block_lookup::{self, Property};
 use document::{
-    objects::{BlockLookupAction, BlockLookupParameter},
     Handle,
+    objects::{BlockLookupAction, BlockLookupParameter},
 };
 use iced::{
-    widget::{
-        button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space,
-    },
     Element, Fill,
+    widget::{
+        Space, button, checkbox, column, container, pick_list, row, scrollable, text, text_input,
+    },
 };
 
 #[derive(Debug, Clone)]

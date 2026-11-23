@@ -2,7 +2,7 @@
 
 use crate::app::Message;
 use crate::ui::style::form::{dialog_button, field_style};
-use iced::widget::{column, container, row, text, text_input, Space};
+use iced::widget::{Space, column, container, row, text, text_input};
 use iced::{Element, Fill};
 
 #[derive(Debug, Clone)]

@@ -2118,6 +2118,52 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::PanelWidgetNodeActivated {
+                owner,
+                panel,
+                node,
+            } => {
+                // Activation is the one widget gesture the plugin needs:
+                // best-effort, owner-targeted, sequence-identified.
+                let routed = self.panel_event_router.on_node_activated(&panel, node);
+                #[cfg(not(target_arch = "wasm32"))]
+                crate::plugin::v4_support::publish_surface_event_to_plugin(
+                    &owner, routed.panel_id, routed.sequence, routed.event,
+                );
+                #[cfg(target_arch = "wasm32")]
+                let _ = (owner, routed);
+                Task::none()
+            }
+            Message::PanelWidgetExpandToggled {
+                owner,
+                panel,
+                node,
+            } => {
+                // Host-local toggle; ONLY expanding an `Unloaded` row
+                // notifies the plugin — it is the data source for those
+                // children (lazy expansion, finding F4).
+                let children = self
+                    .panel_surfaces
+                    .widget(&owner, &panel)
+                    .and_then(|surface| surface.rows.get(&node))
+                    .map(|row| row.children.clone());
+                let ui = self.panel_widget_ui.entry(panel.clone()).or_default();
+                let notify = match children.as_ref() {
+                    Some(children) => ui.toggle_expanded(node, children),
+                    None => false,
+                };
+                if notify {
+                    let routed = self.panel_event_router.on_node_expanded(&panel, node);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    crate::plugin::v4_support::publish_surface_event_to_plugin(
+                        &owner, routed.panel_id, routed.sequence, routed.event,
+                    );
+                    #[cfg(target_arch = "wasm32")]
+                    let _ = routed;
+                }
+                Task::none()
+            }
+
             Message::PluginDialogTextChange(id, val) => {
                 if let Some(state) = &mut self.plugin_dialog_state {
                     state.text_values.insert(id, val);

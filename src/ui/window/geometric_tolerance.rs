@@ -8,7 +8,7 @@
 use std::fmt;
 
 use document::Handle;
-use iced::widget::{button, checkbox, column, container, row, text, text_input, Space};
+use iced::widget::{Space, button, checkbox, column, container, row, text, text_input};
 use iced::{Border, Element, Fill, Length, Theme};
 
 use crate::app::Message;

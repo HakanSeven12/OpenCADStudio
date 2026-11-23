@@ -4,7 +4,7 @@ use crate::scene::block_parameters_manager::{self as manager, Group, Row};
 use crate::ui::dock::{self, Chrome, PanelId};
 use crate::ui::kit;
 use crate::ui::style::{chrome, kit_metrics as km};
-use iced::widget::{button, canvas, column, container, mouse_area, row, text, text_input, Space};
+use iced::widget::{Space, button, canvas, column, container, mouse_area, row, text, text_input};
 use iced::{Element, Fill, Length, Point, Rectangle, Size};
 
 /// Every column stays visible in the panel's default width, so the fixed cells
@@ -1084,9 +1084,9 @@ mod tests {
     /// Where `label` is drawn in the pane built from `panel`, if anywhere.
     /// The pane is laid out very tall so no row is scrolled out of view.
     fn locate(panel: &Panel, label: &str) -> Option<iced::Point> {
+        use iced_test::Selector;
         use iced_test::core::widget;
         use iced_test::runtime::user_interface::{Cache, UserInterface};
-        use iced_test::Selector;
         let _one = crate::headless_ui_lock();
         let mut renderer = iced_test::futures::futures::executor::block_on(
             <iced::Renderer as iced_test::core::renderer::Headless>::new(

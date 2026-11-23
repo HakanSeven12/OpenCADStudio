@@ -5,7 +5,7 @@
 //! recognition threshold and "use best matching font".
 
 use iced::widget::{
-    button, column, container, mouse_area, row, scrollable, text, text_input, toggler, Space,
+    Space, button, column, container, mouse_area, row, scrollable, text, text_input, toggler,
 };
 use iced::{Background, Border, Element, Fill, Length, Theme};
 

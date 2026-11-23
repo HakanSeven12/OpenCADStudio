@@ -3,7 +3,7 @@
 //! spelling settings, the selection highlight colour, and the stack and
 //! AutoStack properties. Drafts as in `mtext_dialogs`; OK writes them.
 
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Element, Fill, Length};
 
 use crate::app::Message;
@@ -201,9 +201,11 @@ pub fn view_charset<'a>(d: &'a CharsetDraft) -> Element<'a, Message> {
         card(
             t("Character Set"),
             column![
-                text(t("The code page the selected TrueType text is written with."))
-                    .size(11)
-                    .style(muted_style),
+                text(t(
+                    "The code page the selected TrueType text is written with."
+                ))
+                .size(11)
+                .style(muted_style),
                 choice_list(items, d.charset, M::Charset, 280.0),
             ]
             .spacing(6),
@@ -311,9 +313,13 @@ pub fn view_dictionaries<'a>(d: &'a DictionariesDraft) -> Element<'a, Message> {
             .text_size(11)
             .width(Fill),
     );
-    let mut sources: Vec<(Option<usize>, String)> =
-        vec![(None, t("Profile word list"))];
-    sources.extend(d.files.iter().enumerate().map(|(n, path)| (Some(n), file_name(path))));
+    let mut sources: Vec<(Option<usize>, String)> = vec![(None, t("Profile word list"))];
+    sources.extend(
+        d.files
+            .iter()
+            .enumerate()
+            .map(|(n, path)| (Some(n), file_name(path))),
+    );
     let mut source_row = row![].spacing(4);
     for (index, name) in sources {
         source_row = source_row.push(
@@ -338,7 +344,9 @@ pub fn view_dictionaries<'a>(d: &'a DictionariesDraft) -> Element<'a, Message> {
         t("Custom dictionary"),
         column![
             scrollable(source_row).direction(iced::widget::scrollable::Direction::Horizontal(
-                iced::widget::scrollable::Scrollbar::new().width(3).scroller_width(3)
+                iced::widget::scrollable::Scrollbar::new()
+                    .width(3)
+                    .scroller_width(3)
             )),
             row![
                 text_input(&t("Add word here"), &d.word)
@@ -392,7 +400,10 @@ pub fn view_dictionaries<'a>(d: &'a DictionariesDraft) -> Element<'a, Message> {
                     .width(Fill),
                 text(path).size(10).style(muted_style),
                 row![
-                    small_button(crate::tr!("text-editor-menu", "new-dictionary"), Some(msg(M::DictNewFile))),
+                    small_button(
+                        crate::tr!("text-editor-menu", "new-dictionary"),
+                        Some(msg(M::DictNewFile))
+                    ),
                     small_button(t("Add..."), Some(msg(M::DictAddFile))),
                     small_button(
                         t("Remove"),
@@ -409,7 +420,11 @@ pub fn view_dictionaries<'a>(d: &'a DictionariesDraft) -> Element<'a, Message> {
         row![
             small_button(t("Help"), Some(msg(M::DictHelp))),
             Space::new().width(Fill),
-            dialog_button_styled_opt(crate::t!("Close"), Some(Message::CloseModal), button::primary),
+            dialog_button_styled_opt(
+                crate::t!("Close"),
+                Some(Message::CloseModal),
+                button::primary
+            ),
         ]
         .spacing(6),
     ]
@@ -430,10 +445,26 @@ pub fn view_spell_settings<'a>(d: &'a SpellSettingsDraft) -> Element<'a, Message
         card(
             t("Options"),
             column![
-                option("Ignore capitalized words", o.ignore_capitalized, SpellSetting::IgnoreCapitalized),
-                option("Ignore words with mixed cases", o.ignore_mixed, SpellSetting::IgnoreMixed),
-                option("Ignore words in uppercase", o.ignore_upper, SpellSetting::IgnoreUpper),
-                option("Ignore words with numbers", o.ignore_numbers, SpellSetting::IgnoreNumbers),
+                option(
+                    "Ignore capitalized words",
+                    o.ignore_capitalized,
+                    SpellSetting::IgnoreCapitalized
+                ),
+                option(
+                    "Ignore words with mixed cases",
+                    o.ignore_mixed,
+                    SpellSetting::IgnoreMixed
+                ),
+                option(
+                    "Ignore words in uppercase",
+                    o.ignore_upper,
+                    SpellSetting::IgnoreUpper
+                ),
+                option(
+                    "Ignore words with numbers",
+                    o.ignore_numbers,
+                    SpellSetting::IgnoreNumbers
+                ),
                 option(
                     "Ignore words containing punctuation",
                     o.ignore_punctuation,
@@ -442,9 +473,11 @@ pub fn view_spell_settings<'a>(d: &'a SpellSettingsDraft) -> Element<'a, Message
             ]
             .spacing(4),
         ),
-        text(t("Dimension text, block attributes and external references are checked by SPELL."))
-            .size(10)
-            .style(muted_style),
+        text(t(
+            "Dimension text, block attributes and external references are checked by SPELL."
+        ))
+        .size(10)
+        .style(muted_style),
         footer(msg(M::Ok), Message::CloseModal),
     ]
     .spacing(10)
@@ -535,13 +568,15 @@ pub fn view_stack<'a>(d: &'a StackDraft) -> Element<'a, Message> {
             .width(Length::Fixed(70.0))
             .style(field_style)
             .on_input(|v| msg(M::StackSize(v))),
-        row(["100%", "90%", "80%", "75%", "70%", "66%", "50%"].into_iter().map(|s| {
-            button(text(s).size(10))
-                .on_press(msg(M::StackSize(s.to_string())))
-                .style(button_style(d.size.trim() == s))
-                .padding([2, 5])
-                .into()
-        }))
+        row(["100%", "90%", "80%", "75%", "70%", "66%", "50%"]
+            .into_iter()
+            .map(|s| {
+                button(text(s).size(10))
+                    .on_press(msg(M::StackSize(s.to_string())))
+                    .style(button_style(d.size.trim() == s))
+                    .padding([2, 5])
+                    .into()
+            }))
         .spacing(2),
     ]
     .spacing(6)
@@ -587,13 +622,20 @@ pub fn view_stack<'a>(d: &'a StackDraft) -> Element<'a, Message> {
 
 /// AutoStack: whether and how numbers typed around `/`, `#` and `^` stack.
 pub fn view_autostack<'a>(d: &'a AutoStackDraft) -> Element<'a, Message> {
-    let fraction = vec![(false, t("Horizontal fraction")), (true, t("Diagonal fraction"))];
+    let fraction = vec![
+        (false, t("Horizontal fraction")),
+        (true, t("Diagonal fraction")),
+    ];
     column![
         card(
             t("AutoStack"),
             column![
                 text(t("Stack fractions automatically as you type")).size(12),
-                chip(t("Enable AutoStacking"), d.enabled, msg(M::AutoEnabled(!d.enabled))),
+                chip(
+                    t("Enable AutoStacking"),
+                    d.enabled,
+                    msg(M::AutoEnabled(!d.enabled))
+                ),
                 row![
                     text(t("x/y becomes")).size(11).width(Length::Fixed(100.0)),
                     segmented(fraction, d.diagonal, M::AutoDiagonal),

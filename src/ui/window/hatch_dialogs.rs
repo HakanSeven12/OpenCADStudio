@@ -1,6 +1,6 @@
 //! The boundary warning an empty HATCH / GRADIENT pick shows.
 
-use iced::widget::{button, column, container, row, text, Space};
+use iced::widget::{Space, button, column, container, row, text};
 use iced::{Element, Fill};
 
 use crate::app::Message;

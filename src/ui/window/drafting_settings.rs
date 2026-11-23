@@ -1,8 +1,8 @@
-use crate::app::settings::IsoPlane;
 use crate::app::Message;
-use crate::snap::{SnapType, ALL_3D_SNAP_MODES, ALL_SNAP_MODES};
+use crate::app::settings::IsoPlane;
+use crate::snap::{ALL_3D_SNAP_MODES, ALL_SNAP_MODES, SnapType};
 use crate::ui::style::form::{dialog_button, dialog_button_styled_opt};
-use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{Space, button, checkbox, column, container, row, scrollable, text, text_input};
 use iced::{Background, Border, Element, Fill, Theme};
 use std::borrow::Cow;
 
@@ -690,15 +690,17 @@ pub fn view_window<'a>(
 
         let prompt_group = group(
             crate::t!("Dynamic Prompts"),
-            column![row![
-                checkbox(true).size(14),
-                text(crate::t!(
-                    "Show command prompting and command input near crosshairs"
-                ))
-                .size(11),
+            column![
+                row![
+                    checkbox(true).size(14),
+                    text(crate::t!(
+                        "Show command prompting and command input near crosshairs"
+                    ))
+                    .size(11),
+                ]
+                .spacing(7)
+                .align_y(iced::Center),
             ]
-            .spacing(7)
-            .align_y(iced::Center),]
             .spacing(6),
         );
 

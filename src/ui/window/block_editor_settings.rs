@@ -1,10 +1,10 @@
 use crate::app::{
-    settings::{BlockEditorPreferences, BLOCK_DISPLAY_VARIABLES},
     Message,
+    settings::{BLOCK_DISPLAY_VARIABLES, BlockEditorPreferences},
 };
 use iced::{
-    widget::{button, checkbox, column, container, row, scrollable, text, text_input, Space},
     Element, Fill,
+    widget::{Space, button, checkbox, column, container, row, scrollable, text, text_input},
 };
 
 #[derive(Clone, Debug)]

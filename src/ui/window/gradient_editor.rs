@@ -7,7 +7,7 @@ use crate::ui::style::{chrome, kit_metrics as km, text as ui_text};
 use crate::ui::window::graphic_attributes::GraphicAttributesMsg;
 use document::types::Color as AcadColor;
 use iced::widget::{
-    button, checkbox, column, container, image, mouse_area, row, slider, text, text_input, Space,
+    Space, button, checkbox, column, container, image, mouse_area, row, slider, text, text_input,
 };
 use iced::{Background, Color, Element, Fill, Length, Theme};
 

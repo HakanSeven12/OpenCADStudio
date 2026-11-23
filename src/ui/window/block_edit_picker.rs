@@ -2,7 +2,7 @@ use crate::app::Message;
 use crate::scene::WireModel;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{hdivider, vsep};
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{Space, button, column, container, row, scrollable, text, text_input};
 use iced::{Element, Fill, Length, Theme};
 
 pub(crate) struct State {

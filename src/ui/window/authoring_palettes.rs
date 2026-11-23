@@ -1,12 +1,12 @@
 //! The Block Editor's authoring catalogs, using the shared dock chrome.
 
 use crate::app::Message;
-use crate::modules::{parametric, IconKind, ToolDef};
+use crate::modules::{IconKind, ToolDef, parametric};
 use crate::ui::dock::{self, Chrome, PanelId};
 use crate::ui::icons;
 use crate::ui::kit;
 use crate::ui::style::kit_metrics as km;
-use iced::widget::{button, column, container, row, stack, text, Space};
+use iced::widget::{Space, button, column, container, row, stack, text};
 use iced::{Element, Fill};
 
 /// Size of a tool's icon in the catalog, and the height of its row.

@@ -1,7 +1,7 @@
 //! Select Similar settings: which properties besides the type must match.
 
 use crate::app::Message;
-use iced::widget::{button, checkbox, column, container, row, text, Space};
+use iced::widget::{Space, button, checkbox, column, container, row, text};
 use iced::{Element, Fill};
 
 pub(crate) fn view_window(mode: u16) -> Element<'static, Message> {

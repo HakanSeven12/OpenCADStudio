@@ -10,9 +10,7 @@ fn plugin_input_kind_to_host(
         ocs_plugin_api::host::InteractiveInputKind::SingleToken => {
             crate::command::InputKind::SingleToken
         }
-        ocs_plugin_api::host::InteractiveInputKind::FreeText => {
-            crate::command::InputKind::FreeText
-        }
+        ocs_plugin_api::host::InteractiveInputKind::FreeText => crate::command::InputKind::FreeText,
     }
 }
 
@@ -209,7 +207,10 @@ impl PluginProcessInteractiveAdapter {
 
     fn refresh(&mut self) {
         self.prompt = self.process.get_prompt(self.command_id).ok();
-        self.input_kind = self.process.get_input_kind(self.command_id).unwrap_or_default();
+        self.input_kind = self
+            .process
+            .get_input_kind(self.command_id)
+            .unwrap_or_default();
         self.needs_entity_pick = self.process.needs_entity_pick(self.command_id).ok();
         self.is_selection_gathering = self.process.is_selection_gathering(self.command_id).ok();
         self.accepts_drag_selection = self.process.accepts_drag_selection(self.command_id).ok();
@@ -446,7 +447,10 @@ impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
         use ocs_plugin_api::ipc::protocol::InteractiveEvent;
         let result = self
             .process
-            .interactive_event(self.command_id, InteractiveEvent::TextInput(text.to_string()))
+            .interactive_event(
+                self.command_id,
+                InteractiveEvent::TextInput(text.to_string()),
+            )
             .map(plugin_step_to_result)
             .unwrap_or(crate::command::CmdResult::Cancel);
         if matches!(

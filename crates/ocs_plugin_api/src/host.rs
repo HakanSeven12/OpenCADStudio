@@ -34,7 +34,7 @@ pub use document::xdata::{ExtendedDataRecord, XDataValue};
 pub use document::{Document, EntityType, Handle};
 
 use crate::ipc::protocol::{PluginRequest, PluginResponse};
-use crate::scene::{PanelSurface, SceneRevision, SurfaceReject, SurfaceRejectCode};
+use crate::scene::{PanelScene, PanelSurface, SceneRevision, SurfaceReject, SurfaceRejectCode};
 
 /// Thread-safe handle that can issue host requests from plugin worker threads.
 /// Out-of-process V4 plugins implement this; in-process hosts may return `None`.
@@ -2438,9 +2438,9 @@ pub trait HostApi {
     fn panel_surface_publish(
         &mut self,
         _panel_id: &str,
-        surface: PanelSurface,
+        scene: PanelScene,
     ) -> Result<SceneRevision, SurfaceReject> {
-        Err(surface_reject_default(&surface))
+        Err(surface_reject_default_scene(&scene))
     }
 
     /// [`Self::panel_surface_publish`] for the transport's authenticated
@@ -2449,9 +2449,36 @@ pub trait HostApi {
         &mut self,
         _plugin_id: &str,
         panel_id: &str,
-        surface: PanelSurface,
+        scene: PanelScene,
     ) -> Result<SceneRevision, SurfaceReject> {
-        self.panel_surface_publish(panel_id, surface)
+        self.panel_surface_publish(panel_id, scene)
+    }
+
+    /// Publish (or replace) a panel's WIDGET surface (API v29, additive):
+    /// the semantic tree/list the host renders with native widgets.
+    /// Independent revision space (finding F1). The default is the
+    /// transport-era stub (Unattached; nothing stored); surface-aware
+    /// hosts override [`HostApi::panel_widget_publish_for_plugin`].
+    fn panel_widget_publish(
+        &mut self,
+        _panel_id: &str,
+        _surface: crate::widget::WidgetSurface,
+    ) -> Result<crate::widget::WidgetRevision, crate::widget::WidgetReject> {
+        Err(crate::widget::WidgetReject {
+            code: crate::widget::WidgetRejectCode::Unattached,
+            current_revision: None,
+        })
+    }
+
+    /// [`Self::panel_widget_publish`] for the transport's authenticated
+    /// `plugin_id`.
+    fn panel_widget_publish_for_plugin(
+        &mut self,
+        _plugin_id: &str,
+        panel_id: &str,
+        surface: crate::widget::WidgetSurface,
+    ) -> Result<crate::widget::WidgetRevision, crate::widget::WidgetReject> {
+        self.panel_widget_publish(panel_id, surface)
     }
 
     /// Patch a panel's stored scene atomically (API v29, additive): the
@@ -2483,14 +2510,40 @@ pub trait HostApi {
     ) -> Result<SceneRevision, SurfaceReject> {
         self.panel_surface_patch(panel_id, patch)
     }
+
+    /// Install a bounded widget page into the panel's widget surface
+    /// (API v29, additive): the lazy-expansion/paging primitive. The
+    /// default is the transport-era stub (Unattached; nothing stored).
+    /// Surface-aware hosts override
+    /// [`HostApi::panel_surface_page_for_plugin`].
+    fn panel_surface_page(
+        &mut self,
+        _panel_id: &str,
+        _page: crate::widget::WidgetPage,
+    ) -> Result<crate::widget::WidgetRevision, crate::widget::WidgetReject> {
+        Err(crate::widget::WidgetReject {
+            code: crate::widget::WidgetRejectCode::Unattached,
+            current_revision: None,
+        })
+    }
+
+    /// Install from the host's authenticated transport identity. The
+    /// default keeps the direct-host behavior; surface-aware hosts
+    /// override it.
+    fn panel_surface_page_for_plugin(
+        &mut self,
+        _plugin_id: &str,
+        panel_id: &str,
+        page: crate::widget::WidgetPage,
+    ) -> Result<crate::widget::WidgetRevision, crate::widget::WidgetReject> {
+        self.panel_surface_page(panel_id, page)
+    }
 }
 
 /// The answer of a host without surface support: `InvalidSurface` for an
 /// invalid scene, otherwise `Unattached`.
-pub(crate) fn surface_reject_default(surface: &PanelSurface) -> SurfaceReject {
-    let structural = match surface {
-        PanelSurface::Scene(scene) => scene.validate().is_ok(),
-    };
+pub(crate) fn surface_reject_default_scene(scene: &PanelScene) -> SurfaceReject {
+    let structural = scene.validate().is_ok();
     SurfaceReject {
         code: if structural {
             SurfaceRejectCode::Unattached

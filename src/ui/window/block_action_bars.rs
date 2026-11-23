@@ -4,8 +4,8 @@ use crate::{
 };
 use document::Handle;
 use iced::{
-    widget::{button, canvas, column, container, row, text, tooltip, Space},
     Color, Element, Fill, Point, Rectangle, Vector,
+    widget::{Space, button, canvas, column, container, row, text, tooltip},
 };
 
 #[derive(Default)]

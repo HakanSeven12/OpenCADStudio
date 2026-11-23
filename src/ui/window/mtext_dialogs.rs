@@ -3,7 +3,7 @@
 //! column settings, the background mask and find and replace. Each holds a
 //! draft; OK writes it to the editor in one step, Cancel drops it.
 
-use iced::widget::{button, column, container, pick_list, row, text, text_input, Space};
+use iced::widget::{Space, button, column, container, pick_list, row, text, text_input};
 use iced::{Element, Fill, Length};
 
 use crate::app::Message;
@@ -259,7 +259,11 @@ fn segmented<'a, T: Copy + PartialEq + 'a>(
 fn footer<'a>(ok: bool) -> Element<'a, Message> {
     row![
         Space::new().width(Fill),
-        dialog_button_styled_opt(crate::t!("Cancel"), Some(Message::CloseModal), button::secondary),
+        dialog_button_styled_opt(
+            crate::t!("Cancel"),
+            Some(Message::CloseModal),
+            button::secondary
+        ),
         dialog_button_styled_opt(
             crate::t!("OK"),
             ok.then(|| msg(MTextDialogMsg::Ok)),
@@ -342,7 +346,12 @@ pub fn view_paragraph<'a>(
             container(tab_list).height(Length::Fixed(72.0)).width(Fill),
             labelled(
                 t("Decimal style"),
-                segmented(separators, d.decimal, d.tab_kind == TabKind::Decimal, M::Decimal)
+                segmented(
+                    separators,
+                    d.decimal,
+                    d.tab_kind == TabKind::Decimal,
+                    M::Decimal
+                )
             ),
         ]
         .spacing(8),
@@ -366,7 +375,11 @@ pub fn view_paragraph<'a>(
     let alignment = card(
         t("Paragraph alignment"),
         column![
-            chip(t("Set the alignment"), d.align_on, msg(M::AlignOn(!d.align_on))),
+            chip(
+                t("Set the alignment"),
+                d.align_on,
+                msg(M::AlignOn(!d.align_on))
+            ),
             segmented(aligns, d.align, d.align_on, M::Align),
         ]
         .spacing(6),
@@ -377,8 +390,15 @@ pub fn view_paragraph<'a>(
     let spacing = card(
         t("Paragraph spacing"),
         column![
-            chip(t("Set the spacing"), d.spacing_on, msg(M::SpacingOn(!d.spacing_on))),
-            labelled(t("Before"), spacing_input(&d.before, M::Before, d.spacing_on)),
+            chip(
+                t("Set the spacing"),
+                d.spacing_on,
+                msg(M::SpacingOn(!d.spacing_on))
+            ),
+            labelled(
+                t("Before"),
+                spacing_input(&d.before, M::Before, d.spacing_on)
+            ),
             labelled(t("After"), spacing_input(&d.after, M::After, d.spacing_on)),
         ]
         .spacing(6),
@@ -391,7 +411,11 @@ pub fn view_paragraph<'a>(
     let line = card(
         t("Paragraph line spacing"),
         column![
-            chip(t("Set the line spacing"), d.line_on, msg(M::LineOn(!d.line_on))),
+            chip(
+                t("Set the line spacing"),
+                d.line_on,
+                msg(M::LineOn(!d.line_on))
+            ),
             segmented(modes, d.line_mode, d.line_on, M::LineMode),
             labelled(t("At"), spacing_input(&d.line_at, M::LineAt, d.line_on)),
         ]
@@ -438,10 +462,34 @@ pub fn view_columns<'a>(
     let size = card(
         t("Size"),
         column![
-            labelled(t("Columns"), input(&d.number, number.then_some(M::ColumnNumber as fn(String) -> MTextDialogMsg))),
-            labelled(t("Height"), input(&d.height, height.then_some(M::ColumnHeight as fn(String) -> MTextDialogMsg))),
-            labelled(t("Column width"), input(&d.width, columns.then_some(M::ColumnWidth as fn(String) -> MTextDialogMsg))),
-            labelled(t("Gutter"), input(&d.gutter, columns.then_some(M::ColumnGutter as fn(String) -> MTextDialogMsg))),
+            labelled(
+                t("Columns"),
+                input(
+                    &d.number,
+                    number.then_some(M::ColumnNumber as fn(String) -> MTextDialogMsg)
+                )
+            ),
+            labelled(
+                t("Height"),
+                input(
+                    &d.height,
+                    height.then_some(M::ColumnHeight as fn(String) -> MTextDialogMsg)
+                )
+            ),
+            labelled(
+                t("Column width"),
+                input(
+                    &d.width,
+                    columns.then_some(M::ColumnWidth as fn(String) -> MTextDialogMsg)
+                )
+            ),
+            labelled(
+                t("Gutter"),
+                input(
+                    &d.gutter,
+                    columns.then_some(M::ColumnGutter as fn(String) -> MTextDialogMsg)
+                )
+            ),
             labelled(
                 t("Total width"),
                 text(if columns { d.total() } else { String::new() })
@@ -481,7 +529,11 @@ pub fn view_mask<'a>(
         .iter()
         .find(|(color, _)| *color == d.color)
         .map(|(_, name)| name.clone())
-        .unwrap_or_else(|| crate::ui::properties::acad_color_display(d.color).1.to_string());
+        .unwrap_or_else(|| {
+            crate::ui::properties::acad_color_display(d.color)
+                .1
+                .to_string()
+        });
     let fill_on = d.on && !d.background;
     let color_list = pick_list(Some(current), names, |name| name.clone())
         .on_select(move |name| {
@@ -498,10 +550,14 @@ pub fn view_mask<'a>(
     let color: Element<'a, Message> = if fill_on {
         color_list.into()
     } else {
-        text(crate::ui::properties::acad_color_display(d.color).1.to_string())
-            .size(11)
-            .style(muted_style)
-            .into()
+        text(
+            crate::ui::properties::acad_color_display(d.color)
+                .1
+                .to_string(),
+        )
+        .size(11)
+        .style(muted_style)
+        .into()
     };
     let mask = card(
         t("Background mask"),
@@ -509,7 +565,10 @@ pub fn view_mask<'a>(
             chip(t("Use background mask"), d.on, msg(M::MaskOn(!d.on))),
             labelled(
                 t("Border offset factor"),
-                input(&d.factor, d.on.then_some(M::MaskFactor as fn(String) -> MTextDialogMsg))
+                input(
+                    &d.factor,
+                    d.on.then_some(M::MaskFactor as fn(String) -> MTextDialogMsg)
+                )
             ),
         ]
         .spacing(6),
@@ -579,10 +638,26 @@ pub fn view_find<'a>(
     let options = card(
         t("Options"),
         column![
-            chip(t("Match case"), d.match_case, msg(M::MatchCase(!d.match_case))),
-            chip(t("Find whole words only"), d.whole_words, msg(M::WholeWords(!d.whole_words))),
-            chip(t("Use wildcards"), d.wildcards, msg(M::Wildcards(!d.wildcards))),
-            chip(t("Match diacritics"), d.diacritics, msg(M::Diacritics(!d.diacritics))),
+            chip(
+                t("Match case"),
+                d.match_case,
+                msg(M::MatchCase(!d.match_case))
+            ),
+            chip(
+                t("Find whole words only"),
+                d.whole_words,
+                msg(M::WholeWords(!d.whole_words))
+            ),
+            chip(
+                t("Use wildcards"),
+                d.wildcards,
+                msg(M::Wildcards(!d.wildcards))
+            ),
+            chip(
+                t("Match diacritics"),
+                d.diacritics,
+                msg(M::Diacritics(!d.diacritics))
+            ),
             chip(
                 t("Match half/full width forms (East Asian languages)"),
                 d.half_full,
@@ -630,7 +705,11 @@ pub fn view_find<'a>(
             action(t("Find Next"), M::FindNext),
             action(t("Replace"), M::ReplaceOne),
             action(t("Replace All"), M::ReplaceAll),
-            dialog_button_styled_opt(crate::t!("Close"), Some(Message::CloseModal), button::secondary),
+            dialog_button_styled_opt(
+                crate::t!("Close"),
+                Some(Message::CloseModal),
+                button::secondary
+            ),
         ]
         .spacing(6)
         .align_y(iced::Center),

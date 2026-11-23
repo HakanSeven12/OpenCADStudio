@@ -221,6 +221,8 @@ impl Scene {
         self.last_tess_ms
             .set(t_tess.elapsed().as_secs_f32() * 1000.0);
         self.last_tess_wires.set(wires.len());
+        self.resident_full_builds
+            .set(self.resident_full_builds.get() + 1);
         let arc = Arc::new(wires);
         // The memo keeps one copy of what this set holds; read before the
         // previous set is evicted below, which may hold runs it still needs.
@@ -1270,5 +1272,30 @@ impl Scene {
             );
         }
         Some(arc)
+    }
+}
+
+/// The work that the display did, for the work count tests.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct DisplayWork {
+    /// Resident sets assembled whole.
+    pub full_builds: u64,
+    /// Resident sets brought up to date by a patch.
+    pub patches: u64,
+    /// Tessellation contexts resolved on this thread (a scan of the
+    /// drawing's objects each).
+    pub contexts: u64,
+}
+
+#[cfg(test)]
+impl Scene {
+    /// The counters now. Subtract two readings for the work of a step.
+    pub(crate) fn display_work(&self) -> DisplayWork {
+        DisplayWork {
+            full_builds: self.resident_full_builds.get(),
+            patches: self.resident_patch_hits.get(),
+            contexts: TESSELLATION_CONTEXTS.with(|count| count.get()) as u64,
+        }
     }
 }

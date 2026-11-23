@@ -631,6 +631,14 @@ pub struct RibbonConfig {
     pub layout: RibbonLayout,
 }
 
+// How many times this thread asked for the config to be written. A test
+// build writes nothing (see `save`), so a test reads this to see that a step
+// would write the settings file.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static SAVES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl AppConfig {
     /// Read the saved config, or all-defaults when the file is missing or
     /// unreadable. Unknown or missing fields fall back to their section defaults
@@ -656,6 +664,8 @@ impl AppConfig {
     /// preferences on them — without this, running `cargo test` rewrites the
     /// settings of whoever ran it.
     pub fn save(&self) {
+        #[cfg(test)]
+        SAVES.with(|count| count.set(count.get() + 1));
         if cfg!(test) {
             return;
         }

@@ -1198,29 +1198,30 @@ fn bulge_to_points(p0: [f32; 2], p1: [f32; 2], bulge: f32) -> Vec<[f32; 2]> {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
     /// Locks the LFF `tessellate_text_run` output (segment count, vertex count,
     /// coordinate checksum) so the shared-tokenizer refactor that adds the TTF
     /// shaping path cannot silently change stroke-font rendering.
-    #[test]
-    fn lff_tessellation_golden() {
-        let cases: &[(&str, usize, usize, f64)] = &[
-            // "txt" keeps the advances of the font it stands in for.
-            ("ABC 123", 8, 80, 3189.9030),
-            ("A\\LB\\lC", 6, 43, 842.2172),
-            ("10%%d Ö", 6, 60, 1627.2223),
-            ("Hello, World!", 15, 113, 6029.0805),
-        ];
-        for &(t, segs, verts, sum_ref) in cases {
-            let (st, _) = tessellate_text_ex([0.0, 0.0], 10.0, 0.0, 1.0, 0.0, "txt", t);
-            let nv: usize = st.iter().map(|s| s.len()).sum();
-            let sum: f64 = st.iter().flatten().map(|p| p[0] as f64 + p[1] as f64).sum();
-            assert_eq!(st.len(), segs, "segment count drift for {t:?}");
-            assert_eq!(nv, verts, "vertex count drift for {t:?}");
-            assert!(
-                (sum - sum_ref).abs() < 0.01,
-                "coordinate checksum drift for {t:?}: {sum:.4} vs {sum_ref:.4}"
-            );
-        }
+    #[rstest]
+    #[case("ABC 123", 8, 80, 3189.9030)]
+    #[case("A\\LB\\lC", 6, 43, 842.2172)]
+    #[case("10%%d Ö", 6, 60, 1627.2223)]
+    #[case("Hello, World!", 15, 113, 6029.0805)]
+    fn lff_tessellation_golden(
+        #[case] t: &str,
+        #[case] segs: usize,
+        #[case] verts: usize,
+        #[case] sum_ref: f64,
+    ) {
+        let (st, _) = tessellate_text_ex([0.0, 0.0], 10.0, 0.0, 1.0, 0.0, "txt", t);
+        let nv: usize = st.iter().map(|s| s.len()).sum();
+        let sum: f64 = st.iter().flatten().map(|p| p[0] as f64 + p[1] as f64).sum();
+        assert_eq!(st.len(), segs, "segment count drift for {t:?}");
+        assert_eq!(nv, verts, "vertex count drift for {t:?}");
+        assert!(
+            (sum - sum_ref).abs() < 0.01,
+            "coordinate checksum drift for {t:?}: {sum:.4} vs {sum_ref:.4}"
+        );
     }
 
     use super::*;

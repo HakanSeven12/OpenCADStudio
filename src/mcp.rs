@@ -65,7 +65,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// Find and Replace is driveable from a script: `find_replace_dialog`.
 /// `save` describes its `target_version` as the DWG version.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "849f9f47d34f5aa257361135967914deb9b890da9d083c22de780fe1466c66fa";
+const TOOL_SCHEMA_DIGEST: &str = "595860464ba36279bcbcf5522d67b70806d605e8702bbea4b86ac497281726ea";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

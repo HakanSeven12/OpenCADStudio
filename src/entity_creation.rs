@@ -133,6 +133,64 @@ mod tests {
             "invalid_text_style"
         );
     }
+
+    fn built_hatch(spec: Value) -> document::entities::Hatch {
+        match build_entity(&spec, Some(&document::Document::new())) {
+            Ok(document::EntityType::Hatch(hatch)) => *hatch,
+            other => panic!("expected a hatch, built {other:?}"),
+        }
+    }
+
+    /// A pattern hatch carries its pattern lines, the definition a drawing
+    /// stores and other readers draw from: scaled and turned the way the
+    /// Properties palette does it when the pattern is chosen there.
+    #[test]
+    fn a_created_pattern_hatch_stores_its_pattern_lines() {
+        let hatch = built_hatch(json!({
+            "type": "Hatch",
+            "boundary": [[0, 0], [10, 0], [10, 10], [0, 10]],
+            "pattern": "ANSI31",
+            "pattern_scale": 2,
+            "pattern_angle_deg": 30,
+        }));
+        let entry = crate::scene::model::hatch_patterns::find("ANSI31").unwrap();
+        let mut expected = crate::scene::model::hatch_patterns::build_dxf_pattern(entry);
+        crate::entities::hatch::scale_pattern_geometry(&mut expected, 2.0);
+        crate::entities::hatch::rotate_pattern_geometry(&mut expected, 30f64.to_radians());
+        assert!(!hatch.is_solid);
+        assert_eq!(hatch.pattern.name, "ANSI31");
+        assert!(
+            !hatch.pattern.lines.is_empty(),
+            "the ANSI31 hatch has no pattern lines"
+        );
+        assert_eq!(hatch.pattern.lines, expected.lines);
+        assert_eq!(hatch.pattern_scale, 2.0);
+        assert!((hatch.pattern_angle - 30f64.to_radians()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_created_hatch_named_solid_is_a_solid_fill() {
+        let hatch = built_hatch(json!({
+            "type": "Hatch",
+            "boundary": [[0, 0], [10, 0], [10, 10]],
+            "pattern": "solid",
+        }));
+        assert!(hatch.is_solid, "pattern SOLID built a pattern hatch");
+        assert!(hatch.pattern.lines.is_empty());
+    }
+
+    #[test]
+    fn a_created_hatch_refuses_a_pattern_outside_the_catalog() {
+        let spec = json!({
+            "type": "Hatch",
+            "boundary": [[0, 0], [10, 0], [10, 10]],
+            "pattern": "NO_SUCH_PATTERN",
+        });
+        assert_eq!(
+            build_entity(&spec, Some(&document::Document::new())).unwrap_err()["code"],
+            "invalid_pattern"
+        );
+    }
 }
 
 pub const TYPES: &[&str] = &[
@@ -974,12 +1032,31 @@ pub(crate) fn build_entity(
             if spec["solid"].as_bool().unwrap_or(false) {
                 hatch.is_solid = true;
             } else {
-                hatch.is_solid = false;
-                hatch.pattern = HatchPattern::new(
-                    spec["pattern"].as_str().unwrap_or("ANSI31"),
-                );
+                use crate::scene::model::hatch_patterns;
+                let name = spec["pattern"].as_str().unwrap_or("ANSI31");
+                let entry = hatch_patterns::find(name).ok_or_else(|| {
+                    failure_at(
+                        "invalid_pattern",
+                        "/pattern",
+                        format!("unknown hatch pattern '{name}'; use a catalog pattern name"),
+                    )
+                })?;
                 hatch.pattern_scale = spec["pattern_scale"].as_f64().unwrap_or(1.0).abs().max(1e-6);
                 hatch.pattern_angle = deg_field(spec, "pattern_angle_deg");
+                // A drawing stores the pattern as its lines, already scaled
+                // and turned; readers draw from them, not from the name. Build
+                // them the way the Properties palette does when a pattern is
+                // chosen there.
+                let mut pattern = hatch_patterns::build_dxf_pattern(entry);
+                crate::entities::hatch::scale_pattern_geometry(&mut pattern, hatch.pattern_scale);
+                crate::entities::hatch::rotate_pattern_geometry(&mut pattern, hatch.pattern_angle);
+                let origin = hatch.pattern_origin();
+                crate::entities::hatch::translate_pattern_geometry(&mut pattern, origin.x, origin.y);
+                hatch.pattern = pattern;
+                hatch.is_solid = matches!(
+                    entry.gpu,
+                    crate::scene::model::hatch_model::HatchPattern::Solid
+                );
             }
             let mut path = BoundaryPath::external();
             path.add_edge(BoundaryEdge::Polyline(PolylineEdge::new(vertices, true)));

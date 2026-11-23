@@ -16,8 +16,9 @@ use crate::ipc::protocol::{
     HostResponse, HostToPlugin, PluginRequest, PluginResponse, PluginToHost, RunnerHandshake,
 };
 use crate::ipc::transport::{recv, send};
-use crate::scene::{PanelSurface, SceneRevision, SurfaceReject, SurfaceRejectCode};
+use crate::scene::{PanelScene, PanelSurface, SceneRevision, SurfaceReject, SurfaceRejectCode};
 use crate::shm::{DocumentViewData, DocumentViewInfo, SharedDocumentReader};
+use crate::widget::{WidgetRevision, WidgetSurface};
 
 /// Shared registry of active interactive commands, keyed by host-assigned id.
 pub type InteractiveRegistry = Rc<RefCell<HashMap<u64, Box<dyn InteractiveCommand>>>>;
@@ -1131,11 +1132,11 @@ impl HostApi for PluginHostApi {
     fn panel_surface_publish(
         &mut self,
         panel_id: &str,
-        surface: PanelSurface,
+        scene: PanelScene,
     ) -> Result<SceneRevision, SurfaceReject> {
         match self.client.request(PluginRequest::PanelSurfacePublish {
             panel_id: panel_id.to_string(),
-            surface,
+            surface: PanelSurface::Scene(scene),
         }) {
             Ok(PluginResponse::PanelSurfacePublished(result)) => result,
             Ok(other) => {
@@ -1147,6 +1148,33 @@ impl HostApi for PluginHostApi {
             }
             Err(e) => {
                 eprintln!("[plugin] PanelSurfacePublish request failed: {e}");
+                Err(SurfaceReject {
+                    code: SurfaceRejectCode::Unattached,
+                    current_revision: None,
+                })
+            }
+        }
+    }
+
+    fn panel_widget_publish(
+        &mut self,
+        panel_id: &str,
+        surface: WidgetSurface,
+    ) -> Result<WidgetRevision, SurfaceReject> {
+        match self.client.request(PluginRequest::PanelSurfacePublish {
+            panel_id: panel_id.to_string(),
+            surface: PanelSurface::Widgets(surface),
+        }) {
+            Ok(PluginResponse::PanelWidgetPublished(result)) => result,
+            Ok(other) => {
+                eprintln!("[plugin] unexpected widget publish response: {other:?}");
+                Err(SurfaceReject {
+                    code: SurfaceRejectCode::Unattached,
+                    current_revision: None,
+                })
+            }
+            Err(e) => {
+                eprintln!("[plugin] widget publish request failed: {e}");
                 Err(SurfaceReject {
                     code: SurfaceRejectCode::Unattached,
                     current_revision: None,
@@ -1174,6 +1202,33 @@ impl HostApi for PluginHostApi {
             }
             Err(e) => {
                 eprintln!("[plugin] PanelSurfacePatch request failed: {e}");
+                Err(SurfaceReject {
+                    code: SurfaceRejectCode::Unattached,
+                    current_revision: None,
+                })
+            }
+        }
+    }
+
+    fn panel_surface_page(
+        &mut self,
+        panel_id: &str,
+        page: crate::widget::WidgetPage,
+    ) -> Result<crate::widget::WidgetRevision, SurfaceReject> {
+        match self.client.request(PluginRequest::PanelSurfacePage {
+            panel_id: panel_id.to_string(),
+            page,
+        }) {
+            Ok(PluginResponse::PanelSurfacePageResult(result)) => result,
+            Ok(other) => {
+                eprintln!("[plugin] unexpected PanelSurfacePage response: {other:?}");
+                Err(SurfaceReject {
+                    code: SurfaceRejectCode::Unattached,
+                    current_revision: None,
+                })
+            }
+            Err(e) => {
+                eprintln!("[plugin] PanelSurfacePage request failed: {e}");
                 Err(SurfaceReject {
                     code: SurfaceRejectCode::Unattached,
                     current_revision: None,

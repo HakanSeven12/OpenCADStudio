@@ -2723,20 +2723,23 @@ mod table_scroll_tests {
         )
     }
 
-    /// Columns past the pallet's edge scroll into view sideways: the table had
-    /// measured as wide as the pallet, so they were cut off with no scroll bar.
+    /// Columns past the pallet's edge are laid out there and the table
+    /// scrolls sideways to them. The table had measured as wide as the
+    /// pallet, so there was nothing to scroll and they stayed cut off.
     #[test]
-    fn columns_past_the_pallet_edge_scroll_into_view() {
+    fn columns_past_the_pallet_edge_scroll_sideways() {
         set_column_layout_names(&[]);
         let mut widths = HashMap::new();
         widths.insert(LayerSortCol::Description, 600.0);
         let mut ui = ui_at(500.0, &widths);
-        let label = LayerSortCol::Description.label().into_owned();
-        let before = ui
-            .find(label.clone())
-            .expect("the Description header is laid out")
-            .visible_bounds();
-        assert!(before.is_none(), "it starts past the edge: {before:?}");
+        let description = ui
+            .find(LayerSortCol::Description.label().into_owned())
+            .expect("the Description header is laid out");
+        assert!(
+            description.bounds().x > 500.0 && description.visible_bounds().is_none(),
+            "it lies past the pallet's edge: {:?}",
+            description.bounds()
+        );
         // Over the header, which only the sideways scrollable takes.
         let name = ui
             .find(LayerSortCol::Name.label().into_owned())
@@ -2745,13 +2748,16 @@ mod table_scroll_tests {
             .expect("Name is in view");
         ui.point_at(name.center());
         ui.simulate([iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
-            delta: iced::mouse::ScrollDelta::Pixels { x: -2000.0, y: 0.0 },
+            delta: iced::mouse::ScrollDelta::Pixels { x: -200.0, y: 0.0 },
         })]);
-        let after = ui
-            .find(label)
-            .expect("the Description header is laid out")
+        let name_after = ui
+            .find(LayerSortCol::Name.label().into_owned())
+            .expect("the Name header")
             .visible_bounds();
-        assert!(after.is_some(), "scrolled sideways it comes into view");
+        assert!(
+            name_after.is_none(),
+            "the table scrolls sideways, taking Name out at the left"
+        );
     }
 
     /// The worked-out width covers every cell of a row.

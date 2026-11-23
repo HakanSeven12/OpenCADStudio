@@ -5990,7 +5990,7 @@ pub(in crate::app) fn insunits_name(code: i16) -> &'static str {
 }
 
 /// Unit-conversion scale for a new INSERT.
-pub(in crate::app) fn insert_unit_scale(host_units: i16, src_units: i16) -> Option<f64> {
+pub(crate) fn insert_unit_scale(host_units: i16, src_units: i16) -> Option<f64> {
     let host_mm = insunits_to_mm(host_units)?;
     let src_mm = insunits_to_mm(src_units)?;
     let ratio = src_mm / host_mm;

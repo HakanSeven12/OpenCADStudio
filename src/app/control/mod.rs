@@ -131,6 +131,8 @@ pub(super) struct State {
     /// screenshotting in the same batch as the state change used to return the
     /// previous frame (C11). Cleared by `on_control_capture_frame`.
     pub(super) capture_frame_pending: bool,
+    /// Shared cancellation token for an in-flight off-screen `capture` worker.
+    pub(super) capture_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// Whether the parked capture actually waited for a redraw (vs. the
     /// anti-hang timer). Reported in the capture result as `waited_for_frame`.
     pub(super) capture_after_redraw: bool,
@@ -589,6 +591,14 @@ impl OpenCADStudio {
     /// dialog, a popup, typed text) or step a command back a level, and the
     /// client has no other way to finish the job. (#1930)
     fn control_cancel(&mut self) -> Task<Message> {
+        self.control.capture_frame_pending = false;
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.control.capture_deadline = None;
+        }
+        if let Some(cancel) = self.control.capture_cancel.take() {
+            cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
         let mut tasks = vec![self.update(Message::CommandEscape)];
         // ponytail: fixed Esc budget; covers every overlay + step-back chain
         // in the escape path today, raise it if a deeper chain appears.
@@ -992,7 +1002,10 @@ impl OpenCADStudio {
                     "activate" | "switch_document" | "close" | "entities_copy_to"
                 )
             {
-                if req["active_only"].as_bool() == Some(true) || !query && !background_mutation(op)
+                let background_capture =
+                    op == "capture" && offscreen_capture::is_offscreen_capture(&req);
+                if req["active_only"].as_bool() == Some(true)
+                    || !query && !background_mutation(op) && !background_capture
                 {
                     return (
                         failure(
@@ -1136,7 +1149,10 @@ impl OpenCADStudio {
                 .owner
                 .as_ref()
                 .is_some_and(|(owner_tab, owner)| *owner_tab == tab.id && *owner != client);
+        let offscreen_capture_req =
+            op == "capture" && offscreen_capture::is_offscreen_capture(&req);
         if tab.active_cmd.is_some()
+            && !offscreen_capture_req
             && (cancels_foreign_command
                 || (self.control.owner.as_ref() != Some(&(tab.id, client.clone()))
                     || matches!(
@@ -1159,7 +1175,7 @@ impl OpenCADStudio {
                 .map(|(_, owner)| owner.clone()));
             return (busy, Task::none());
         }
-        if matches!(op, "run" | "start" | "input") && tab.is_start {
+        if (matches!(op, "run" | "start" | "input") || offscreen_capture_req) && tab.is_start {
             return (
                 failure("no_document", "Create or open a drawing first"),
                 Task::none(),
@@ -1217,7 +1233,7 @@ impl OpenCADStudio {
                 return (error, Task::none());
             }
         };
-        if self.tabs[self.active_tab].active_cmd.is_some() {
+        if !offscreen_capture_req && self.tabs[self.active_tab].active_cmd.is_some() {
             self.control.owner = Some((self.tabs[self.active_tab].id, client));
         }
         if matches!(op, "new" | "activate" | "switch_document" | "dgn_import")
@@ -1238,10 +1254,10 @@ impl OpenCADStudio {
             // counter stays at one so settle keeps returning `running` until
             // the person at the screen answers and the resolver zeroes it.
             // `capture` is parked the same way until the next drawn frame.
-            if !matches!(
-                p.request["op"].as_str(),
-                Some("user_select" | "getpoint" | "capture")
-            ) {
+            let parked = matches!(p.request["op"].as_str(), Some("user_select" | "getpoint"))
+                || (p.request["op"].as_str() == Some("capture")
+                    && self.control.capture_frame_pending);
+            if !parked {
                 p.pending -= 1;
             }
         }
@@ -1675,6 +1691,9 @@ impl OpenCADStudio {
                         "view region needs bounds [min_x, min_y, max_x, max_y]",
                     ));
                 }
+                if offscreen_capture::is_offscreen_capture(req) {
+                    return self.control_capture_offscreen(req);
+                }
                 self.main_window
                     .ok_or_else(|| failure("gui_required", "Capture requires a GUI window"))?;
                 string(req, "path")?;
@@ -1892,19 +1911,21 @@ impl OpenCADStudio {
         {
             self.active_tab = index;
         }
+        let is_offscreen_capture =
+            p.request["op"] == "capture" && offscreen_capture::is_offscreen_capture(&p.request);
         let failed = p.failure.is_some() || self.command_line.error_revision != p.error_revision;
         let waiting = self.tabs[self.active_tab].active_cmd.is_some()
             || self.active_modal.is_some()
             || self.mtext_editor.is_some()
             || self.text_inline.is_some();
-        if !waiting {
+        if !is_offscreen_capture && !waiting {
             self.control.owner = None;
         }
         let status = if failed {
             "failed"
         } else if p.cancelled || p.request["op"] == "cancel" {
             "cancelled"
-        } else if waiting {
+        } else if waiting && !is_offscreen_capture {
             "waiting_input"
         } else {
             "completed"
@@ -2144,48 +2165,12 @@ impl OpenCADStudio {
 
             // Optional Set-of-Marks visual overlay badges
             if annotate {
-                for ent_val in &grounding.visible_entities {
-                    if let (Some(tag), Some(px_arr), Some(selected)) = (
-                        ent_val["tag"].as_u64(),
-                        ent_val["screen_pixel"].as_array(),
-                        ent_val["selected"].as_bool(),
-                    ) {
-                        if px_arr.len() == 2 {
-                            if let (Some(x), Some(y)) = (px_arr[0].as_i64(), px_arr[1].as_i64()) {
-                                vision::draw_som_badge(
-                                    &mut image,
-                                    x as i32,
-                                    y as i32,
-                                    tag as usize,
-                                    selected,
-                                );
-                            }
-                        }
-                    }
-                }
+                offscreen_capture::draw_som_annotations(&mut image, &grounding.visible_entities);
             }
 
-            #[cfg(not(target_arch = "wasm32"))]
-            image
-                .save_with_format(&path, image::ImageFormat::Png)
-                .map_err(|e| e.to_string())?;
-            // No filesystem behind a web "path": encode the PNG in memory and
-            // hand it to the browser as a download named after the request's
-            // file name — the delivery every other web output uses.
-            #[cfg(target_arch = "wasm32")]
-            {
-                let mut png = Vec::new();
-                image
-                    .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-                    .map_err(|e| e.to_string())?;
-                let download = path
-                    .rsplit(['/', '\\'])
-                    .next()
-                    .filter(|name| !name.is_empty())
-                    .unwrap_or("capture.png")
-                    .to_string();
-                crate::sys::download_bytes(&download, &png);
-            }
+            // On native, save PNG directly; on web (no filesystem), hand the
+            // encoded PNG to the browser as a download named after the path.
+            offscreen_capture::save_capture_png(&image, &path)?;
 
             let doc_unit = crate::app::properties::insunits_name(
                 self.tabs[self.active_tab]
@@ -2195,21 +2180,14 @@ impl OpenCADStudio {
                     .insertion_units,
             );
 
-            let spatial_obj = json!({
-                "crs": "CAD_WCS",
-                "unit": doc_unit,
-                "pixel_resolution": [image.width(), image.height()],
-                "world_bounds": grounding.viewport_world_bounds,
-                "pixel_to_world_matrix": grounding.pixel_to_world_matrix,
-                "world_to_pixel_matrix": grounding.world_to_pixel_matrix,
-                "camera": grounding.camera,
-                "target_plane": grounding.target_plane,
-                "annotations": grounding.visible_entities.clone(),
-            });
+            let spatial_obj =
+                offscreen_capture::spatial_metadata_json(doc_unit, &image, &grounding);
 
             Ok(json!({
                 "path": path,
                 "scope": actual_scope,
+                "layout": self.tabs[self.active_tab].scene.current_layout,
+                "offscreen": false,
                 "width": image.width(),
                 "height": image.height(),
                 "scale_factor": s.scale_factor,
@@ -2333,6 +2311,9 @@ mod entities;
 pub(crate) mod http_bridge;
 mod interactive;
 mod node_graph;
+mod offscreen_capture;
+#[cfg(not(target_arch = "wasm32"))]
+mod offscreen_gpu;
 mod plugins;
 mod sheets;
 mod xrefs;

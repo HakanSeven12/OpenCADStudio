@@ -23,6 +23,8 @@ pub enum Message {
     ControlStep(String, Box<Message>),
     ControlTaskDone(String),
     ControlScreenshot(String, Option<iced::window::Screenshot>),
+    /// Completion result from an off-UI-thread `capture` worker (`renderer: "gpu"` / `"cpu"`).
+    ControlOffscreenCaptureDone(Result<serde_json::Value, serde_json::Value>),
     /// A frame has been drawn (or the anti-hang timer expired) for a parked
     /// `capture` request: take the screenshot now, so it shows the latest
     /// state instead of the previous frame (C11).

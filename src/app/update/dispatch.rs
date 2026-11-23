@@ -210,6 +210,10 @@ impl OpenCADStudio {
                 self.control_screenshot(path, screenshot);
                 Task::none()
             }
+            Message::ControlOffscreenCaptureDone(result) => {
+                self.control_offscreen_capture_done(result);
+                Task::none()
+            }
             Message::ControlCaptureFrame { redrew } => self.on_control_capture_frame(redrew),
             Message::Graph(message) => self.on_graph(message),
             Message::GraphFileRead(read) => self.finish_graph_file_read(*read),

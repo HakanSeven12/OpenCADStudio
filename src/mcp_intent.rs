@@ -254,10 +254,11 @@ fn render_schema() -> Value {
     let root = schema.as_object_mut().expect("capture schema object");
     root.remove("required");
     root.insert("additionalProperties".to_string(), json!(false));
-    schema["properties"]
+    let props = schema["properties"]
         .as_object_mut()
-        .expect("capture properties")
-        .remove("request_id");
+        .expect("capture properties");
+    props.remove("request_id");
+    props.remove("document_id");
     schema["properties"]["view"]["default"] = json!("extents");
     schema
 }
@@ -432,6 +433,51 @@ mod tests {
         let (_, explicit_view) =
             facade_arguments(descriptor, &json!({"view":"current"}), "session-1", None);
         assert_eq!(explicit_view["view"], "current");
+    }
+
+    #[test]
+    fn render_adapter_forwards_layout_and_aspect_fit() {
+        let descriptor = find_descriptor("ocs_render").unwrap();
+        let (facade, arguments) = facade_arguments(
+            descriptor,
+            &json!({"ocs_session_id":"ignored","layout":"Sheet1","aspect_fit":true,"renderer":"gpu"}),
+            "session-1",
+            None,
+        );
+        assert_eq!(facade, "ocs_capture");
+        assert_eq!(
+            arguments,
+            json!({
+                "ocs_session_id":"session-1",
+                "layout":"Sheet1",
+                "aspect_fit":true,
+                "renderer":"gpu",
+                "view":"extents"
+            })
+        );
+
+        let schema = &generated("ocs_render")["inputSchema"];
+        assert!(crate::schema_validation::validate_shape(
+            schema,
+            &json!({"layout":"Sheet1","aspect_fit":true,"renderer":"gpu"}),
+            ""
+        )
+        .is_ok());
+        assert!(
+            crate::schema_validation::validate_shape(schema, &json!({"layout":42}), "").is_err()
+        );
+        assert!(
+            crate::schema_validation::validate_shape(schema, &json!({"aspect_fit":"yes"}), "")
+                .is_err()
+        );
+        assert!(
+            crate::schema_validation::validate_shape(schema, &json!({"renderer":"vulkan"}), "")
+                .is_err()
+        );
+        assert!(
+            crate::schema_validation::validate_shape(schema, &json!({"document_id":1}), "")
+                .is_err()
+        );
     }
 
     #[test]
@@ -737,19 +783,24 @@ mod tests {
         let schema = &render["inputSchema"];
         let facade_properties = facade["properties"].as_object().unwrap();
         let render_properties = schema["properties"].as_object().unwrap();
-        assert_eq!(render_properties.len(), facade_properties.len() - 1);
+        assert_eq!(render_properties.len(), facade_properties.len() - 2);
         assert!(!render_properties.contains_key("request_id"));
+        assert!(!render_properties.contains_key("document_id"));
         for name in facade_properties
             .keys()
-            .filter(|name| *name != "request_id")
+            .filter(|name| !matches!(name.as_str(), "request_id" | "document_id"))
         {
             assert!(render_properties.contains_key(name), "render lacks {name}");
         }
+        assert!(render_properties.contains_key("layout"));
+        assert_eq!(schema["properties"]["layout"], facade["properties"]["layout"]);
         for (name, default) in [
             ("scope", json!("viewport")),
             ("max_dimension", json!(1600)),
             ("delivery", json!("inline")),
             ("annotate", json!(false)),
+            ("aspect_fit", json!(false)),
+            ("renderer", json!("auto")),
             ("pyramid_manifest", json!(false)),
         ] {
             assert_eq!(schema["properties"][name]["default"], default, "{name}");

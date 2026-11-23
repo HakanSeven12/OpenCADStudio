@@ -94,10 +94,9 @@ lopdf = { version = "0.39.0", default-features = false }
 # libz-sys C dependency. Pure Rust, so the web build embeds
 # the same subsets.
 allsorts = { version = "0.16", default-features = false, features = ["flate2_rust"] }
-# Rasterises assets/logo.svg into the window icon at startup, so the taskbar
-# icon comes from the same file every other build target does. Already in the
-# tree behind iced's svg feature; named here only to use it directly.
-resvg = { version = "0.45", default-features = false }
+# Rasterises SVG assets and off-screen captures via tiny-skia, including embedded
+# raster images (`gif`, `image-webp`, `zune-jpeg`, and PNG via `tiny-skia`).
+resvg = { version = "0.45", default-features = false, features = ["raster-images"] }
 i18n-embed = { version = "0.16", features = ["fluent-system"] }
 i18n-embed-fl = "0.10"
 rust-embed = "8"

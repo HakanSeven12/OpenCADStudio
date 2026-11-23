@@ -5297,6 +5297,32 @@ pub(crate) fn gpu_status_if_changed(seen: &mut u64) -> Option<GpuStatus> {
 #[cfg(test)]
 mod gpu_status_tests;
 
+impl MultiPipeline {
+    /// Construct a headless off-screen pipeline without mutating global GUI
+    /// adapter status or installing a process-wide GPU error counter handler.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn new_headless(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> Self {
+        Self {
+            block_geometry: Default::default(),
+            inners: vec![Pipeline::new(device, queue, format)],
+            format,
+            slot_by_instance: rustc_hash::FxHashMap::default(),
+            slot_last_used: vec![0],
+            slot_clock: 0,
+            frame_rendered: std::sync::atomic::AtomicBool::new(false),
+            gpu_error_epoch: 0,
+            gpu_error_streak: 0,
+            gpu_clean_frames: 0,
+            mesh_batch_cache: Default::default(),
+            wire_buffer_cache: rustc_hash::FxHashMap::default(),
+        }
+    }
+}
+
 impl iced::widget::shader::Pipeline for MultiPipeline {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         install_gpu_error_handler(device);

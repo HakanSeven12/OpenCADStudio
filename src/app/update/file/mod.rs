@@ -60,16 +60,20 @@ fn write_export(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
     }
 }
 
-/// `page` rendered `width` × `height` pixels on white, encoded as `format`.
-pub(in crate::app) fn raster_page(
+/// `page` rendered `width` × `height` pixels on white as an RGBA image.
+pub(in crate::app) fn raster_page_rgba(
     page: &PdfPageInput,
     width: u32,
     height: u32,
-    format: image::ImageFormat,
-) -> Result<Vec<u8>, String> {
+) -> Result<image::RgbaImage, String> {
     let svg = crate::io::svg_export::build_svg(page, None)?;
-    let tree = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default())
-        .map_err(|e| e.to_string())?;
+    #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
+    let mut options = resvg::usvg::Options::default();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        options.fontdb = crate::scene::text::sysfont::fontdb_snapshot();
+    }
+    let tree = resvg::usvg::Tree::from_str(&svg, &options).map_err(|e| e.to_string())?;
     let mut pixmap =
         resvg::tiny_skia::Pixmap::new(width, height).ok_or("image size out of range")?;
     pixmap.fill(resvg::tiny_skia::Color::WHITE);
@@ -83,8 +87,18 @@ pub(in crate::app) fn raster_page(
         &mut pixmap.as_mut(),
     );
     // Opaque, so the premultiplied pixels are the plain ones.
-    let rgba = image::RgbaImage::from_raw(width, height, pixmap.take())
-        .ok_or("image size out of range")?;
+    image::RgbaImage::from_raw(width, height, pixmap.take())
+        .ok_or_else(|| "image size out of range".to_string())
+}
+
+/// `page` rendered `width` × `height` pixels on white, encoded as `format`.
+pub(in crate::app) fn raster_page(
+    page: &PdfPageInput,
+    width: u32,
+    height: u32,
+    format: image::ImageFormat,
+) -> Result<Vec<u8>, String> {
+    let rgba = raster_page_rgba(page, width, height)?;
     let picture = match format {
         image::ImageFormat::Jpeg | image::ImageFormat::Bmp => {
             image::DynamicImage::ImageRgb8(image::DynamicImage::ImageRgba8(rgba).to_rgb8())
@@ -165,7 +179,7 @@ mod settings;
 mod open;
 mod save;
 mod autosave;
-mod plot;
+pub(in crate::app) mod plot;
 
 pub(crate) use self::settings::*;
 pub(crate) use self::open::*;

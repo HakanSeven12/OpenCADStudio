@@ -265,7 +265,8 @@ impl Scene {
             0
         } else {
             self.paper_viewport_handles().2.len()
-        };
+        }
+        .max(self.transient_prune_floor.get());
         let cur_epoch = self.geometry_epoch;
         let mut sets = self.resident_wire_sets.borrow_mut();
         let evicted = sets.insert(
@@ -1320,7 +1321,8 @@ impl Scene {
             0
         } else {
             self.paper_viewport_handles().2.len()
-        };
+        }
+        .max(self.transient_prune_floor.get());
         let mut sets = self.resident_wire_sets.borrow_mut();
         sets.insert(
             key,

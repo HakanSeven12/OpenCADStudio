@@ -26,7 +26,7 @@ fn validated_layout_name(raw: &str) -> Result<String, Value> {
     Ok(name.to_owned())
 }
 
-fn canonical_layout_name(scene: &crate::scene::Scene, name: &str) -> Result<String, Value> {
+pub(super) fn canonical_layout_name(scene: &crate::scene::Scene, name: &str) -> Result<String, Value> {
     let name = name.trim();
     if name.is_empty() {
         return Err(failure("name_required", "Supply a layout name"));

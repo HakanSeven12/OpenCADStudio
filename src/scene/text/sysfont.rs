@@ -36,6 +36,10 @@ struct SysFonts {
     /// same-named fonts in different folders from replacing one another.
     #[cfg(not(target_arch = "wasm32"))]
     by_path: Mutex<HashMap<std::path::PathBuf, FileFace>>,
+    /// Lazily cloned snapshot shared with `usvg::Options::fontdb`, cleared
+    /// whenever new fonts are loaded into `db`.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    snapshot: Mutex<Option<std::sync::Arc<fontdb::Database>>>,
 }
 
 static FONTS: OnceLock<SysFonts> = OnceLock::new();
@@ -87,8 +91,32 @@ fn fonts() -> &'static SysFonts {
             by_file: Mutex::new(by_file),
             #[cfg(not(target_arch = "wasm32"))]
             by_path: Mutex::new(HashMap::new()),
+            snapshot: Mutex::new(None),
         }
     })
+}
+
+fn invalidate_fontdb_snapshot(sys: &SysFonts) {
+    *sys.snapshot.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+/// Returns a lazily cloned `Arc<fontdb::Database>` snapshot containing system,
+/// drawing, and runtime-registered fonts for consumers like `usvg`.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn fontdb_snapshot() -> std::sync::Arc<fontdb::Database> {
+    let sys = fonts();
+    if let Some(existing) = sys
+        .snapshot
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .cloned()
+    {
+        return existing;
+    }
+    let cloned = std::sync::Arc::new(sys.db.lock().unwrap_or_else(|e| e.into_inner()).clone());
+    *sys.snapshot.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::sync::Arc::clone(&cloned));
+    cloned
 }
 
 /// `family` naming `face` itself: with the [`STYLE_SEP`] style of a bold or
@@ -652,6 +680,7 @@ pub fn register_web_font(bytes: &[u8]) {
         // path takes them in the opposite order.
     };
     *sys.families.lock().unwrap_or_else(|e| e.into_inner()) = names;
+    invalidate_fontdb_snapshot(sys);
     canonical_cache()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -698,6 +727,7 @@ pub fn register_font_file(file_name: &str, bytes: &[u8]) -> Option<(String, usiz
             },
         );
     *sys.families.lock().unwrap_or_else(|e| e.into_inner()) = names;
+    invalidate_fontdb_snapshot(sys);
     canonical_cache()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -803,6 +833,7 @@ pub(crate) fn load_drawing_fonts(base: Option<&std::path::Path>, doc: &document:
         }
         *sys.families.lock().unwrap_or_else(|e| e.into_inner()) = names;
     }
+    invalidate_fontdb_snapshot(sys);
     canonical_cache()
         .lock()
         .unwrap_or_else(|e| e.into_inner())

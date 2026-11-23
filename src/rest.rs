@@ -84,6 +84,7 @@ const ENVELOPE_OPS: &[&str] = &[
     "view_focus",
     "wblock",
     "plot",
+    "capture",
     "embed_image",
     "dgn_import",
     "set_properties",

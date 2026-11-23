@@ -3347,6 +3347,9 @@ pub struct Scene {
     /// (re)built, otherwise the held value. `build_primitive` reads it right
     /// after the call to gate GPU wire re-upload. 0 = none yet.
     pub(crate) last_model_wire_gen: std::cell::Cell<u64>,
+    /// Minimum protected resident-wire count during transient off-screen layout
+    /// switches so capturing another layout cannot evict live viewports.
+    pub(super) transient_prune_floor: std::cell::Cell<usize>,
     /// SDF glyph-atlas generation this scene's caches were built against.
     /// When the atlas grows or re-bakes, every cached glyph quad (resident
     /// sets, block caches, projected viewport copies) addresses the wrong
@@ -3809,6 +3812,7 @@ impl Scene {
             last_tess_ms: std::cell::Cell::new(0.0),
             last_tess_wires: std::cell::Cell::new(0),
             last_model_wire_gen: std::cell::Cell::new(0),
+            transient_prune_floor: std::cell::Cell::new(0),
             last_atlas_generation: std::cell::Cell::new(crate::scene::text::sdf_atlas::generation()),
             nav_last_gen: std::cell::Cell::new(0),
             nav_changed_at: std::cell::Cell::new(None),
@@ -4724,13 +4728,7 @@ impl Scene {
         }
     }
 
-    pub fn load_current_layout_state(&mut self) {
-        self.display_plot_style_cache
-            .borrow_mut()
-            .retain(|(layout, _), _| layout != &self.current_layout);
-        self.styled_wire_cache.borrow_mut().clear();
-        self.styled_hatch_cache.borrow_mut().clear();
-        self.styled_wire_fill_cache.borrow_mut().clear();
+    pub(super) fn load_layout_header_fields(&mut self) {
         if self.current_layout == "Model" {
             return;
         }
@@ -4762,6 +4760,16 @@ impl Scene {
             self.document.header.paper_space_limits_max =
                 document::types::Vector2::new(max_limits.0, max_limits.1);
         }
+    }
+
+    pub fn load_current_layout_state(&mut self) {
+        self.display_plot_style_cache
+            .borrow_mut()
+            .retain(|(layout, _), _| layout != &self.current_layout);
+        self.styled_wire_cache.borrow_mut().clear();
+        self.styled_hatch_cache.borrow_mut().clear();
+        self.styled_wire_fill_cache.borrow_mut().clear();
+        self.load_layout_header_fields();
     }
 
     pub fn persist_current_layout_state(&mut self) {
@@ -4863,7 +4871,7 @@ mod scale_list;
 impl Scene {
     /// True when a top-level entity must be omitted for a session-only object
     /// visibility command or an interactive replacement preview.
-    fn entity_temporarily_hidden(&self, handle: Handle) -> bool {
+    pub(crate) fn entity_temporarily_hidden(&self, handle: Handle) -> bool {
         self.object_isolation.hides(handle)
             || self.preview_hidden.contains(&handle)
             || self.command_preview_hidden.contains(&handle)
@@ -5408,7 +5416,7 @@ impl Scene {
             })
     }
 
-    fn viewport_scale_handle(&self, viewport: Handle) -> Option<Handle> {
+    pub(crate) fn viewport_scale_handle(&self, viewport: Handle) -> Option<Handle> {
         if let Some(handle) = self.document.viewport_annotation_scale(viewport) {
             if matches!(
                 self.document.objects.get(&handle),
@@ -7407,7 +7415,7 @@ impl Scene {
     /// the sheet / tiles directly). Only the current interaction space
     /// carries a walk: a graph that serves a foreign viewport or an export
     /// pass must keep drawing the un-walked content.
-    fn render_space_layer_walk(
+    pub(crate) fn render_space_layer_walk(
         &self,
         block: Handle,
         viewport: Option<Handle>,
@@ -8016,7 +8024,7 @@ impl Scene {
     /// views overlap in model space; each is drawn only in its own viewport).
     /// Entity and layer handles never collide, so both ride the same set and
     /// its cache signature.
-    pub(super) fn viewport_hidden_handles(&self, vp: Handle) -> HashSet<Handle> {
+    pub(crate) fn viewport_hidden_handles(&self, vp: Handle) -> HashSet<Handle> {
         let mut hidden: HashSet<Handle> = match self.document.get_entity(vp) {
             Some(EntityType::Viewport(v)) => v.frozen_layers.iter().copied().collect(),
             _ => HashSet::default(),

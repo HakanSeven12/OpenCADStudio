@@ -338,6 +338,199 @@ impl Scene {
         (max_id + 1).max(2)
     }
 
+    /// True when an entity belongs directly to `block_handle`, matching the
+    /// ownership fallback rules used by rendering and hit-testing.
+    pub(crate) fn entity_belongs_to_block(
+        &self,
+        entity_handle: Handle,
+        owner_handle: Handle,
+        block_handle: Handle,
+    ) -> bool {
+        self.belongs_to_visible_block(entity_handle, owner_handle, block_handle)
+    }
+
+    /// Returns `true` when `entity` is visible and eligible for off-screen
+    /// rendering & grounding under `require_plottable` (CPU plot mode vs. GPU
+    /// WYSIWYG canvas), `scale_handle`, optional active `layer_walk`, and
+    /// optional per-viewport frozen layer set `vp_hidden`.
+    pub(crate) fn entity_visible_for_offscreen(
+        &self,
+        entity: &EntityType,
+        require_plottable: bool,
+        scale_handle: Option<Handle>,
+        layer_walk: Option<&HashSet<Handle>>,
+        vp_hidden: Option<&HashSet<Handle>>,
+    ) -> bool {
+        if matches!(entity, EntityType::Block(_) | EntityType::BlockEnd(_)) {
+            return false;
+        }
+        let common = entity.common();
+        if self.display_entity_invisible(common) || self.entity_temporarily_hidden(common.handle) {
+            return false;
+        }
+        let layer = self.document.layers.get(&common.layer);
+        if layer.is_some_and(|l| l.flags.off || l.flags.frozen) {
+            return false;
+        }
+        if require_plottable && layer.is_some_and(|l| !l.is_plottable) {
+            return false;
+        }
+        if layer_walk.is_some_and(|walk| layer.is_some_and(|l| !walk.contains(&l.handle))) {
+            return false;
+        }
+        if vp_hidden.is_some_and(|hid| layer.is_some_and(|l| hid.contains(&l.handle))) {
+            return false;
+        }
+        !super::annotative::annotative_offscale_for(
+            &self.document,
+            common,
+            scale_handle,
+            self.annotation_all_visible(),
+        )
+    }
+
+    /// Temporarily switch the scene's active layout context to `layout` (with
+    /// active viewport and BEDIT block-edit mode disengaged for the duration of
+    /// `f`), then restore the prior layout, camera, paper-space header fields,
+    /// mesh background colors, and wire/resident caches even on unwind without
+    /// thrashing live display-style caches.
+    pub(crate) fn with_transient_layout<T>(
+        &mut self,
+        layout: &str,
+        f: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        struct RestoreGuard<'a> {
+            scene: &'a mut Scene,
+            restore_wire_cache: bool,
+            crossing_space: bool,
+            original_layout: String,
+            original_viewport: Option<Handle>,
+            original_block_edit: Option<Handle>,
+            original_camera: Camera,
+            original_camera_generation: u64,
+            original_wire_cache: Option<((u64, u64), u64, Arc<Vec<WireModel>>)>,
+            original_last_model_wire_gen: u64,
+            original_prune_floor: usize,
+            original_ps_linetype_scaling: bool,
+            original_ps_limit_check: bool,
+            original_ps_insertion_base: document::types::Vector3,
+            original_ps_extents_min: document::types::Vector3,
+            original_ps_extents_max: document::types::Vector3,
+            original_ps_limits_min: document::types::Vector2,
+            original_ps_limits_max: document::types::Vector2,
+        }
+
+        impl Drop for RestoreGuard<'_> {
+            fn drop(&mut self) {
+                let header = &mut self.scene.document.header;
+                header.paper_space_linetype_scaling = self.original_ps_linetype_scaling;
+                header.paper_space_limit_check = self.original_ps_limit_check;
+                header.paper_space_insertion_base = self.original_ps_insertion_base;
+                header.paper_space_extents_min = self.original_ps_extents_min;
+                header.paper_space_extents_max = self.original_ps_extents_max;
+                header.paper_space_limits_min = self.original_ps_limits_min;
+                header.paper_space_limits_max = self.original_ps_limits_max;
+
+                self.scene.current_layout = std::mem::take(&mut self.original_layout);
+                self.scene.active_viewport = self.original_viewport;
+                self.scene.block_edit_block = self.original_block_edit;
+                *self.scene.camera.borrow_mut() = self.original_camera.clone();
+                self.scene.camera_generation = self.original_camera_generation;
+                self.scene
+                    .last_model_wire_gen
+                    .set(self.original_last_model_wire_gen);
+                self.scene
+                    .transient_prune_floor
+                    .set(self.original_prune_floor);
+
+                if self.restore_wire_cache {
+                    *self.scene.wire_cache.borrow_mut() = self.original_wire_cache.take();
+                }
+                if self.crossing_space {
+                    self.scene.recolor_meshes();
+                }
+            }
+        }
+
+        let original_layout = self.current_layout.clone();
+        let original_viewport = self.active_viewport;
+        let original_block_edit = self.block_edit_block;
+        let layout_changed = original_layout != layout;
+        let mode_disengaged = original_viewport.is_some() || original_block_edit.is_some();
+        let restore_wire_cache = layout_changed || mode_disengaged;
+        let crossing_space = (original_layout == "Model") != (layout == "Model")
+            && (!self.meshes.is_empty() || !self.block_meshes.is_empty());
+
+        let original_camera = self.camera.borrow().clone();
+        let original_camera_generation = self.camera_generation;
+        let original_wire_cache = if restore_wire_cache {
+            self.wire_cache.borrow_mut().take()
+        } else {
+            None
+        };
+        let original_last_model_wire_gen = self.last_model_wire_gen.get();
+        let original_prune_floor = self.transient_prune_floor.get();
+        let protected_resident_len = self.resident_wire_sets.borrow().len();
+        let (
+            original_ps_linetype_scaling,
+            original_ps_limit_check,
+            original_ps_insertion_base,
+            original_ps_extents_min,
+            original_ps_extents_max,
+            original_ps_limits_min,
+            original_ps_limits_max,
+        ) = {
+            let header = &self.document.header;
+            (
+                header.paper_space_linetype_scaling,
+                header.paper_space_limit_check,
+                header.paper_space_insertion_base,
+                header.paper_space_extents_min,
+                header.paper_space_extents_max,
+                header.paper_space_limits_min,
+                header.paper_space_limits_max,
+            )
+        };
+
+        let guard = RestoreGuard {
+            scene: self,
+            restore_wire_cache,
+            crossing_space,
+            original_layout,
+            original_viewport,
+            original_block_edit,
+            original_camera,
+            original_camera_generation,
+            original_wire_cache,
+            original_last_model_wire_gen,
+            original_prune_floor,
+            original_ps_linetype_scaling,
+            original_ps_limit_check,
+            original_ps_insertion_base,
+            original_ps_extents_min,
+            original_ps_extents_max,
+            original_ps_limits_min,
+            original_ps_limits_max,
+        };
+
+        guard.scene.transient_prune_floor.set(protected_resident_len);
+        if layout_changed {
+            guard.scene.current_layout = layout.to_string();
+            guard.scene.load_layout_header_fields();
+        }
+        if mode_disengaged {
+            guard.scene.active_viewport = None;
+            guard.scene.block_edit_block = None;
+        }
+        if crossing_space {
+            guard.scene.recolor_meshes();
+        }
+
+        let out = f(guard.scene);
+        drop(guard);
+        out
+    }
+
     /// True when an entity belongs to the active layout, including imported
     /// DXF entities whose owner handle is NULL but whose BlockRecord still
     /// lists the entity. Keep command validation aligned with the same

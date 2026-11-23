@@ -136,22 +136,124 @@ pub(crate) struct VisionGrounding {
     pub visible_entities: Vec<Value>,
 }
 
-pub(crate) fn compute_grounding(
-    app: &OpenCADStudio,
-    vp_logical_width: f32,
-    vp_logical_height: f32,
+struct GroundingCandidate {
+    handle: document::Handle,
+    entity_type: &'static str,
+    layer: String,
+    owner: document::Handle,
+    space: Option<String>,
+    viewport: Option<document::Handle>,
+    screen_pixel: [i32; 2],
+    screen_bounds: [i32; 4],
+    world_center: [f64; 3],
+    selected: bool,
+    area: f32,
+}
+
+fn build_space_names(scene: &crate::scene::Scene) -> rustc_hash::FxHashMap<document::Handle, String> {
+    scene
+        .document
+        .block_records
+        .iter()
+        .map(|record| (record.handle, record.name.clone()))
+        .collect()
+}
+
+fn candidate_area(s_min_x: i32, s_min_y: i32, s_max_x: i32, s_max_y: i32) -> f32 {
+    // An unbounded entity (XLINE, RAY) projects to saturated i32
+    // corners, whose difference overflows i32.
+    let width = (f64::from(s_max_x) - f64::from(s_min_x)).abs();
+    let height = (f64::from(s_max_y) - f64::from(s_min_y)).abs();
+    (width * height) as f32
+}
+
+fn make_candidate(
+    entity: &document::EntityType,
+    space_names: &rustc_hash::FxHashMap<document::Handle, String>,
+    viewport: Option<document::Handle>,
+    screen_pixel: [i32; 2],
+    screen_bounds: [i32; 4],
+    world_center: [f64; 3],
+    selected: bool,
+) -> GroundingCandidate {
+    let common = entity.common();
+    let owner = common.owner_handle;
+    GroundingCandidate {
+        handle: common.handle,
+        entity_type: crate::entities::names::ui_name(entity),
+        layer: common.layer.clone(),
+        owner,
+        space: space_names.get(&owner).cloned(),
+        viewport,
+        screen_pixel,
+        screen_bounds,
+        world_center,
+        selected,
+        area: candidate_area(
+            screen_bounds[0],
+            screen_bounds[1],
+            screen_bounds[2],
+            screen_bounds[3],
+        ),
+    }
+}
+
+fn finalize_candidates(
+    scene: &crate::scene::Scene,
+    mut candidates: Vec<GroundingCandidate>,
+) -> Vec<Value> {
+    // Selected entities first, direct layout-space entities ahead of viewport-
+    // projected ones, then larger visual area first.
+    candidates.sort_by(|a, b| {
+        b.selected
+            .cmp(&a.selected)
+            .then_with(|| b.viewport.is_none().cmp(&a.viewport.is_none()))
+            .then_with(|| b.area.total_cmp(&a.area))
+    });
+
+    candidates.truncate(64);
+
+    candidates
+        .into_iter()
+        .enumerate()
+        .map(|(idx, cand)| {
+            let mut obj = json!({
+                "tag": idx + 1,
+                "handle": format!("{:X}", cand.handle.value()),
+                "type": cand.entity_type,
+                "layer": cand.layer,
+                "owner": format!("{:X}", cand.owner.value()),
+                "space": cand.space,
+                "constraints": crate::app::automation::constraint_records_json(
+                    scene, cand.handle,
+                ),
+                "screen_pixel": cand.screen_pixel,
+                "screen_bounds": cand.screen_bounds,
+                "world_center": cand.world_center,
+                "selected": cand.selected
+            });
+            if let Some(vp) = cand.viewport {
+                obj["viewport"] = json!(format!("{:X}", vp.value()));
+            }
+            obj
+        })
+        .collect()
+}
+
+struct CameraFrameInfo {
+    viewport_world_bounds: Value,
+    camera: Value,
+    target_plane: Value,
+    pixel_to_world_matrix: [f64; 6],
+    world_to_pixel_matrix: [f64; 6],
+}
+
+fn camera_frame_info(
+    c: &crate::scene::view::camera::Camera,
+    vp_rect: iced::Rectangle,
     image_width: u32,
     image_height: u32,
-) -> VisionGrounding {
-    let tab = &app.tabs[app.active_tab];
-    let c = tab.scene.camera.borrow();
-    let vp_rect = iced::Rectangle {
-        x: 0.0,
-        y: 0.0,
-        width: vp_logical_width.max(1.0),
-        height: vp_logical_height.max(1.0),
-    };
-
+) -> CameraFrameInfo {
     let p_tl = c.pick_on_target_plane(iced::Point::new(0.0, 0.0), vp_rect);
     let p_tr = c.pick_on_target_plane(iced::Point::new(vp_rect.width, 0.0), vp_rect);
     let p_bl = c.pick_on_target_plane(iced::Point::new(0.0, vp_rect.height), vp_rect);
@@ -169,7 +271,6 @@ pub(crate) fn compute_grounding(
 
     let eye = c.eye();
     let target = c.target;
-
     let normal = (c.rotation * glam::Vec3::NEG_Z).normalize_or(glam::Vec3::Z);
     let target_plane = json!({
         "normal": [normal.x, normal.y, normal.z],
@@ -180,7 +281,7 @@ pub(crate) fn compute_grounding(
         crate::scene::view::camera::Projection::Orthographic => "Orthographic",
         crate::scene::view::camera::Projection::Perspective => "Perspective",
     };
-    let camera_info = json!({
+    let camera = json!({
         "eye": [eye.x, eye.y, eye.z],
         "target": [target.x, target.y, target.z],
         "distance": c.distance,
@@ -189,19 +290,15 @@ pub(crate) fn compute_grounding(
         "fov_y": c.fov_y,
     });
 
-    let p_origin = p_tl;
-    let p_right = p_tr;
-    let p_bottom = p_bl;
-
-    let d_x = (p_right - p_origin) / (image_width as f64).max(1.0);
-    let d_y = (p_bottom - p_origin) / (image_height as f64).max(1.0);
+    let d_x = (p_tr - p_tl) / (image_width as f64).max(1.0);
+    let d_y = (p_bl - p_tl) / (image_height as f64).max(1.0);
 
     let m00 = d_x.x;
     let m01 = d_y.x;
-    let tx = p_origin.x;
+    let tx = p_tl.x;
     let m10 = d_x.y;
     let m11 = d_y.y;
-    let ty = p_origin.y;
+    let ty = p_tl.y;
 
     let det = m00 * m11 - m01 * m10;
     let (inv_m00, inv_m01, inv_m10, inv_m11, inv_tx, inv_ty) = if det.abs() > 1e-12 {
@@ -216,34 +313,83 @@ pub(crate) fn compute_grounding(
         (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     };
 
-    let pixel_to_world_matrix = [m00, m01, m10, m11, tx, ty];
-    let world_to_pixel_matrix = [inv_m00, inv_m01, inv_m10, inv_m11, inv_tx, inv_ty];
+    CameraFrameInfo {
+        viewport_world_bounds,
+        camera,
+        target_plane,
+        pixel_to_world_matrix: [m00, m01, m10, m11, tx, ty],
+        world_to_pixel_matrix: [inv_m00, inv_m01, inv_m10, inv_m11, inv_tx, inv_ty],
+    }
+}
+
+fn clamp_screen_i32(v: f64) -> i32 {
+    v.round().clamp(i32::MIN as f64, i32::MAX as f64) as i32
+}
+
+fn point_in_ring(x: f64, y: f64, ring: &[[f64; 2]]) -> bool {
+    let mut inside = false;
+    let mut j = ring.len().saturating_sub(1);
+    for (i, &[xi, yi]) in ring.iter().enumerate() {
+        let [xj, yj] = ring[j];
+        let crosses = (yi > y) != (yj > y);
+        if crosses {
+            let denom = yj - yi;
+            if denom.abs() > 1e-12 && x < (xj - xi) * (y - yi) / denom + xi {
+                inside = !inside;
+            }
+        }
+        j = i;
+    }
+    inside
+}
+
+/// Compute pixel dimensions `(width, height)` fitting a `world_w × world_h` box
+/// within `max_dimension` (clamped to `256..=4096`), preserving aspect ratio
+/// while clamping the minor axis to at least `16` pixels.
+pub(crate) fn compute_aspect_fit_dimensions(
+    world_w: f64,
+    world_h: f64,
+    max_dimension: u32,
+) -> (u32, u32) {
+    let max_dim = max_dimension.clamp(256, 4096);
+    let w = world_w.abs().max(1e-9);
+    let h = world_h.abs().max(1e-9);
+    if w >= h {
+        (
+            max_dim,
+            ((max_dim as f64 * (h / w)).round() as u32).clamp(16, max_dim),
+        )
+    } else {
+        (
+            ((max_dim as f64 * (w / h)).round() as u32).clamp(16, max_dim),
+            max_dim,
+        )
+    }
+}
+
+pub(crate) fn compute_grounding(
+    app: &OpenCADStudio,
+    vp_logical_width: f32,
+    vp_logical_height: f32,
+    image_width: u32,
+    image_height: u32,
+) -> VisionGrounding {
+    let tab = &app.tabs[app.active_tab];
+    let c = tab.scene.camera.borrow();
+    let vp_rect = iced::Rectangle {
+        x: 0.0,
+        y: 0.0,
+        width: vp_logical_width.max(1.0),
+        height: vp_logical_height.max(1.0),
+    };
+    let frame = camera_frame_info(&c, vp_rect, image_width, image_height);
 
     let img_w = image_width as f32;
     let img_h = image_height as f32;
 
-    struct Candidate {
-        handle: document::Handle,
-        entity_type: &'static str,
-        layer: String,
-        owner: document::Handle,
-        space: Option<String>,
-        screen_pixel: [i32; 2],
-        screen_bounds: [i32; 4],
-        world_center: [f64; 3],
-        selected: bool,
-        area: f32,
-    }
-
     let selected_set: std::collections::HashSet<document::Handle> =
         tab.scene.selected_handles_in_order().into_iter().collect();
-    let space_names: rustc_hash::FxHashMap<document::Handle, String> = tab
-        .scene
-        .document
-        .block_records
-        .iter()
-        .map(|record| (record.handle, record.name.clone()))
-        .collect();
+    let space_names = build_space_names(&tab.scene);
 
     let mut candidates = Vec::new();
 
@@ -284,67 +430,408 @@ pub(crate) fn compute_grounding(
                     s_max_y = y0.max(y1);
                 }
 
-                // An unbounded entity (XLINE, RAY) projects to saturated i32
-                // corners, whose difference overflows i32.
-                let width = (f64::from(s_max_x) - f64::from(s_min_x)).abs();
-                let area = (width * (f64::from(s_max_y) - f64::from(s_min_y)).abs()) as f32;
-                let selected = selected_set.contains(&handle);
-                let layer = entity.common().layer.clone();
-                let owner = entity.common().owner_handle;
-
-                candidates.push(Candidate {
-                    handle,
-                    entity_type: crate::entities::names::ui_name(entity),
-                    layer,
-                    owner,
-                    space: space_names.get(&owner).cloned(),
-                    screen_pixel: [px, py],
-                    screen_bounds: [s_min_x, s_min_y, s_max_x, s_max_y],
-                    world_center: [center.x, center.y, center.z],
-                    selected,
-                    area,
-                });
+                candidates.push(make_candidate(
+                    entity,
+                    &space_names,
+                    None,
+                    [px, py],
+                    [s_min_x, s_min_y, s_max_x, s_max_y],
+                    [center.x, center.y, center.z],
+                    selected_set.contains(&handle),
+                ));
             }
         }
     }
 
-    // Selected entities prioritized, then larger visual area first
-    candidates.sort_by(|a, b| {
-        b.selected
-            .cmp(&a.selected)
-            .then_with(|| b.area.total_cmp(&a.area))
-    });
-
-    candidates.truncate(64);
-
-    let visible_entities = candidates
-        .into_iter()
-        .enumerate()
-        .map(|(idx, cand)| {
-            json!({
-                "tag": idx + 1,
-                "handle": format!("{:X}", cand.handle.value()),
-                "type": cand.entity_type,
-                "layer": cand.layer,
-                "owner": format!("{:X}", cand.owner.value()),
-                "space": cand.space,
-                "constraints": crate::app::automation::constraint_records_json(
-                    &tab.scene, cand.handle,
-                ),
-                "screen_pixel": cand.screen_pixel,
-                "screen_bounds": cand.screen_bounds,
-                "world_center": cand.world_center,
-                "selected": cand.selected
-            })
-        })
-        .collect();
+    let visible_entities = finalize_candidates(&tab.scene, candidates);
 
     VisionGrounding {
-        viewport_world_bounds,
-        camera: camera_info,
-        target_plane,
-        pixel_to_world_matrix,
-        world_to_pixel_matrix,
+        viewport_world_bounds: frame.viewport_world_bounds,
+        camera: frame.camera,
+        target_plane: frame.target_plane,
+        pixel_to_world_matrix: frame.pixel_to_world_matrix,
+        world_to_pixel_matrix: frame.world_to_pixel_matrix,
+        visible_entities,
+    }
+}
+
+/// Compute [`VisionGrounding`] for an offscreen render covering `vis_bounds`
+/// (or an arbitrary 3D/twisted `camera_override`) on `layout_block`, gating
+/// entities on visibility/plottability and projecting Model Space entities
+/// visible through active Paper Space content viewports.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn compute_offscreen_grounding(
+    scene: &crate::scene::Scene,
+    layout_block: document::Handle,
+    vis_bounds: [f64; 4],
+    image_width: u32,
+    image_height: u32,
+    highlight_handles: Option<&rustc_hash::FxHashSet<document::Handle>>,
+    require_plottable: bool,
+    camera_override: Option<&crate::scene::view::camera::Camera>,
+) -> VisionGrounding {
+    let img_w = (image_width as f64).max(1.0);
+    let img_h = (image_height as f64).max(1.0);
+
+    let frame = if let Some(cam) = camera_override {
+        let vp_rect = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: img_w as f32,
+            height: img_h as f32,
+        };
+        camera_frame_info(cam, vp_rect, image_width, image_height)
+    } else {
+        let [vis_min_x, vis_min_y, vis_max_x, vis_max_y] = vis_bounds;
+        let m00 = (vis_max_x - vis_min_x) / img_w;
+        let m11 = -(vis_max_y - vis_min_y) / img_h;
+        let pixel_to_world_matrix = [m00, 0.0, 0.0, m11, vis_min_x, vis_max_y];
+
+        let inv_m00 = if m00.abs() > 1e-18 { 1.0 / m00 } else { 0.0 };
+        let inv_m11 = if m11.abs() > 1e-18 { 1.0 / m11 } else { 0.0 };
+        let inv_tx = -vis_min_x * inv_m00;
+        let inv_ty = -vis_max_y * inv_m11;
+        let world_to_pixel_matrix = [inv_m00, 0.0, 0.0, inv_m11, inv_tx, inv_ty];
+
+        let cx = (vis_min_x + vis_max_x) * 0.5;
+        let cy = (vis_min_y + vis_max_y) * 0.5;
+        let ortho_size = (vis_max_y - vis_min_y).abs();
+        let distance = ortho_size.max(1.0);
+        CameraFrameInfo {
+            viewport_world_bounds: json!({
+                "min": [vis_min_x, vis_min_y],
+                "max": [vis_max_x, vis_max_y]
+            }),
+            camera: json!({
+                "eye": [cx, cy, distance],
+                "target": [cx, cy, 0.0],
+                "distance": distance,
+                "ortho_size": ortho_size,
+                "projection": "Orthographic",
+                "fov_y": 0.0
+            }),
+            target_plane: json!({
+                "normal": [0.0, 0.0, 1.0],
+                "origin": [cx, cy, 0.0]
+            }),
+            pixel_to_world_matrix,
+            world_to_pixel_matrix,
+        }
+    };
+
+    let fallback_selected: rustc_hash::FxHashSet<document::Handle>;
+    let selected_set: &rustc_hash::FxHashSet<document::Handle> = match highlight_handles {
+        Some(set) if !set.is_empty() => set,
+        _ => {
+            fallback_selected = scene.selected_handles_in_order().into_iter().collect();
+            &fallback_selected
+        }
+    };
+    let space_names = build_space_names(scene);
+    let model_block = scene.model_space_block_handle();
+    let is_model = layout_block == model_block;
+    let direct_scale = if is_model {
+        scene.displayed_annotation_scale_handle()
+    } else {
+        None
+    };
+    let layer_walk = scene.render_space_layer_walk(layout_block, None);
+
+    let [w00, _, _, w11, wtx, wty] = frame.world_to_pixel_matrix;
+    let project_ortho_px = |wx: f64, wy: f64| -> (f64, f64) { (w00 * wx + wtx, w11 * wy + wty) };
+
+    let mut candidates = Vec::new();
+    for entity in scene.document.entities() {
+        let handle = entity.common().handle;
+        if !scene.entity_belongs_to_block(handle, entity.common().owner_handle, layout_block) {
+            continue;
+        }
+        if matches!(
+            entity,
+            document::EntityType::Viewport(vp)
+                if crate::scene::Scene::is_sheet_viewport(&scene.document, vp)
+        ) {
+            continue;
+        }
+        if !scene.entity_visible_for_offscreen(
+            entity,
+            require_plottable,
+            direct_scale,
+            layer_walk,
+            None,
+        ) {
+            continue;
+        }
+
+        let (b_min, b_max) = crate::scene::convert::tess::entity_bounds_in(&scene.document, entity);
+        let min_dvec = glam::DVec3::from(b_min);
+        let max_dvec = glam::DVec3::from(b_max);
+        if !min_dvec.is_finite() || !max_dvec.is_finite() {
+            continue;
+        }
+
+        let center = (min_dvec + max_dvec) * 0.5;
+        if let Some(cam) = camera_override {
+            let vp_rect = iced::Rectangle {
+                x: 0.0,
+                y: 0.0,
+                width: img_w as f32,
+                height: img_h as f32,
+            };
+            let Some(screen_pt) = cam.project(center, vp_rect) else {
+                continue;
+            };
+            if !(0.0..=img_w as f32).contains(&screen_pt.x)
+                || !(0.0..=img_h as f32).contains(&screen_pt.y)
+            {
+                continue;
+            }
+            let px = screen_pt.x.round() as i32;
+            let py = screen_pt.y.round() as i32;
+            let (mut s_min_x, mut s_max_x, mut s_min_y, mut s_max_y) = (px, px, py, py);
+            if let (Some(p0), Some(p1)) = (cam.project(min_dvec, vp_rect), cam.project(max_dvec, vp_rect)) {
+                let x0 = p0.x.round() as i32;
+                let y0 = p0.y.round() as i32;
+                let x1 = p1.x.round() as i32;
+                let y1 = p1.y.round() as i32;
+                s_min_x = x0.min(x1);
+                s_max_x = x0.max(x1);
+                s_min_y = y0.min(y1);
+                s_max_y = y0.max(y1);
+            }
+            candidates.push(make_candidate(
+                entity,
+                &space_names,
+                None,
+                [px, py],
+                [s_min_x, s_min_y, s_max_x, s_max_y],
+                [center.x, center.y, center.z],
+                selected_set.contains(&handle),
+            ));
+        } else {
+            let (px_f, py_f) = project_ortho_px(center.x, center.y);
+            if !px_f.is_finite()
+                || !py_f.is_finite()
+                || !(0.0..=img_w).contains(&px_f)
+                || !(0.0..=img_h).contains(&py_f)
+            {
+                continue;
+            }
+            let px = clamp_screen_i32(px_f);
+            let py = clamp_screen_i32(py_f);
+
+            let (x0_f, y0_f) = project_ortho_px(min_dvec.x, min_dvec.y);
+            let (x1_f, y1_f) = project_ortho_px(max_dvec.x, max_dvec.y);
+            let (s_min_x, s_max_x, s_min_y, s_max_y) =
+                if x0_f.is_finite() && y0_f.is_finite() && x1_f.is_finite() && y1_f.is_finite() {
+                    let x0 = clamp_screen_i32(x0_f);
+                    let y0 = clamp_screen_i32(y0_f);
+                    let x1 = clamp_screen_i32(x1_f);
+                    let y1 = clamp_screen_i32(y1_f);
+                    (x0.min(x1), x0.max(x1), y0.min(y1), y0.max(y1))
+                } else {
+                    (px, px, py, py)
+                };
+
+            candidates.push(make_candidate(
+                entity,
+                &space_names,
+                None,
+                [px, py],
+                [s_min_x, s_min_y, s_max_x, s_max_y],
+                [center.x, center.y, center.z],
+                selected_set.contains(&handle),
+            ));
+        }
+    }
+
+    // In Paper Space, also project visible Model Space entities through each
+    // active content viewport into paper-space pixel coordinates.
+    if !is_model && camera_override.is_none() {
+        let (_, _, vp_handles) = scene.paper_viewport_handles();
+        for &vp_handle in vp_handles.iter() {
+            let Some(document::EntityType::Viewport(vp)) = scene.document.get_entity(vp_handle)
+            else {
+                continue;
+            };
+            if vp.common.owner_handle != layout_block || !vp.is_on() {
+                continue;
+            }
+            let Some(cam_frame) = scene.camera_for_viewport(vp_handle) else {
+                continue;
+            };
+            let view_height_eff = (cam_frame.ortho_size() * 2.0) as f64;
+            let vp_scale_factor = if view_height_eff > 1e-9 {
+                vp.height / view_height_eff
+            } else {
+                1.0
+            };
+            let view_right = (cam_frame.rotation * glam::Vec3::X).as_dvec3();
+            let view_up = (cam_frame.rotation * glam::Vec3::Y).as_dvec3();
+            let view_fwd = (cam_frame.rotation * glam::Vec3::Z).as_dvec3();
+            let use_persp = vp.status.perspective && vp.lens_length > 1.0;
+            let cam_dist = (vp.view_height * vp.lens_length / 24.0).max(0.001);
+
+            let (vp_x0, vp_x1) = (vp.center.x - vp.width * 0.5, vp.center.x + vp.width * 0.5);
+            let (vp_y0, vp_y1) = (vp.center.y - vp.height * 0.5, vp.center.y + vp.height * 0.5);
+            let (sx0, sy0) = project_ortho_px(vp_x0, vp_y1);
+            let (sx1, sy1) = project_ortho_px(vp_x1, vp_y0);
+            let vp_smin_x = clamp_screen_i32(sx0.min(sx1));
+            let vp_smax_x = clamp_screen_i32(sx0.max(sx1));
+            let vp_smin_y = clamp_screen_i32(sy0.min(sy1));
+            let vp_smax_y = clamp_screen_i32(sy0.max(sy1));
+
+            let clip_ring: Option<Vec<[f64; 2]>> = crate::entities::viewport::is_clipped(vp)
+                .then(|| {
+                    scene
+                        .clip_boundary_polygon(vp.clip_boundary_handle, vp.center.z as f32)
+                        .into_iter()
+                        .map(|[x, y, _]| [f64::from(x), f64::from(y)])
+                        .collect::<Vec<_>>()
+                })
+                .filter(|ring| ring.len() >= 3);
+            let front = vp.status.front_clipping && vp.status.front_clip_not_at_eye;
+            let depth_range = (front || vp.status.back_clipping).then(|| {
+                (
+                    if vp.status.back_clipping {
+                        vp.back_clip_z
+                    } else {
+                        f64::NEG_INFINITY
+                    },
+                    if front { vp.front_clip_z } else { f64::INFINITY },
+                )
+            });
+
+            let vp_hidden = scene.viewport_hidden_handles(vp_handle);
+            let vp_scale = scene.viewport_scale_handle(vp_handle);
+
+            let project_wcs_to_paper = |p: glam::DVec3| -> Option<(f64, f64)> {
+                let d = p - cam_frame.target;
+                if let Some((back, front_z)) = depth_range {
+                    let z = d.dot(view_fwd);
+                    if z < back || z > front_z {
+                        return None;
+                    }
+                }
+                let u = d.dot(view_right);
+                let v = d.dot(view_up);
+                let factor = if use_persp {
+                    let fwd = cam_dist - d.dot(view_fwd);
+                    if fwd <= 0.001 {
+                        return None;
+                    }
+                    cam_dist / fwd
+                } else {
+                    1.0
+                };
+                Some((
+                    vp.center.x + u * factor * vp_scale_factor,
+                    vp.center.y + v * factor * vp_scale_factor,
+                ))
+            };
+
+            for entity in scene.document.entities() {
+                let handle = entity.common().handle;
+                if !scene.entity_belongs_to_block(handle, entity.common().owner_handle, model_block)
+                {
+                    continue;
+                }
+                if !scene.entity_visible_for_offscreen(
+                    entity,
+                    require_plottable,
+                    vp_scale,
+                    None,
+                    Some(&vp_hidden),
+                ) {
+                    continue;
+                }
+                let (b_min, b_max) =
+                    crate::scene::convert::tess::entity_bounds_in(&scene.document, entity);
+                let min_dvec = glam::DVec3::from(b_min);
+                let max_dvec = glam::DVec3::from(b_max);
+                if !min_dvec.is_finite() || !max_dvec.is_finite() {
+                    continue;
+                }
+                let center = (min_dvec + max_dvec) * 0.5;
+                let Some((paper_x, paper_y)) = project_wcs_to_paper(center) else {
+                    continue;
+                };
+                if !paper_x.is_finite()
+                    || !paper_y.is_finite()
+                    || paper_x < vp_x0
+                    || paper_x > vp_x1
+                    || paper_y < vp_y0
+                    || paper_y > vp_y1
+                {
+                    continue;
+                }
+                if let Some(ring) = &clip_ring {
+                    if !point_in_ring(paper_x, paper_y, ring) {
+                        continue;
+                    }
+                }
+                let (px_f, py_f) = project_ortho_px(paper_x, paper_y);
+                if !px_f.is_finite()
+                    || !py_f.is_finite()
+                    || !(0.0..=img_w).contains(&px_f)
+                    || !(0.0..=img_h).contains(&py_f)
+                {
+                    continue;
+                }
+                let px = clamp_screen_i32(px_f);
+                let py = clamp_screen_i32(py_f);
+
+                let (mut s_min_x, mut s_max_x, mut s_min_y, mut s_max_y) =
+                    (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
+                let mut any_corner = false;
+                for &cx in &[min_dvec.x, max_dvec.x] {
+                    for &cy in &[min_dvec.y, max_dvec.y] {
+                        for &cz in &[min_dvec.z, max_dvec.z] {
+                            if let Some((qx, qy)) = project_wcs_to_paper(glam::DVec3::new(cx, cy, cz)) {
+                                let (sx, sy) = project_ortho_px(qx, qy);
+                                if sx.is_finite() && sy.is_finite() {
+                                    let ix = clamp_screen_i32(sx);
+                                    let iy = clamp_screen_i32(sy);
+                                    s_min_x = s_min_x.min(ix);
+                                    s_max_x = s_max_x.max(ix);
+                                    s_min_y = s_min_y.min(iy);
+                                    s_max_y = s_max_y.max(iy);
+                                    any_corner = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                if !any_corner {
+                    (s_min_x, s_max_x, s_min_y, s_max_y) = (px, px, py, py);
+                } else {
+                    s_min_x = s_min_x.max(vp_smin_x).min(vp_smax_x);
+                    s_max_x = s_max_x.max(vp_smin_x).min(vp_smax_x);
+                    s_min_y = s_min_y.max(vp_smin_y).min(vp_smax_y);
+                    s_max_y = s_max_y.max(vp_smin_y).min(vp_smax_y);
+                }
+
+                candidates.push(make_candidate(
+                    entity,
+                    &space_names,
+                    Some(vp_handle),
+                    [px, py],
+                    [s_min_x, s_min_y, s_max_x, s_max_y],
+                    [center.x, center.y, center.z],
+                    selected_set.contains(&handle),
+                ));
+            }
+        }
+    }
+
+    let visible_entities = finalize_candidates(scene, candidates);
+
+    VisionGrounding {
+        viewport_world_bounds: frame.viewport_world_bounds,
+        camera: frame.camera,
+        target_plane: frame.target_plane,
+        pixel_to_world_matrix: frame.pixel_to_world_matrix,
+        world_to_pixel_matrix: frame.world_to_pixel_matrix,
         visible_entities,
     }
 }
@@ -785,5 +1272,169 @@ mod tests {
             "a reference with painted extent is annotated as a box, \
              not a pixel: {annotated}"
         );
+    }
+
+    #[test]
+    fn compute_aspect_fit_dimensions_clamps_and_preserves_aspect() {
+        // Square
+        assert_eq!(compute_aspect_fit_dimensions(100.0, 100.0, 1024), (1024, 1024));
+        // Wide 10:1
+        assert_eq!(compute_aspect_fit_dimensions(100.0, 10.0, 1000), (1000, 100));
+        // Tall 1:10
+        assert_eq!(compute_aspect_fit_dimensions(10.0, 100.0, 1000), (100, 1000));
+        // Extreme aspect ratio clamps minor axis to 16
+        assert_eq!(compute_aspect_fit_dimensions(1000.0, 1.0, 1000), (1000, 16));
+        assert_eq!(compute_aspect_fit_dimensions(1.0, 1000.0, 1000), (16, 1000));
+        // max_dimension clamped to 256..=4096
+        assert_eq!(compute_aspect_fit_dimensions(100.0, 100.0, 64), (256, 256));
+        assert_eq!(compute_aspect_fit_dimensions(100.0, 100.0, 8192), (4096, 4096));
+    }
+
+    #[test]
+    fn compute_offscreen_grounding_roundtrip_and_layout_block_filtering() {
+        use document::entities::{EntityType, Line};
+        use document::types::Vector3;
+
+        let mut scene = crate::scene::Scene::new();
+        let model_block = scene.model_space_block_handle();
+        let model_line = scene.add_entity(EntityType::Line(Line::from_points(
+            Vector3::new(10.0, 10.0, 0.0),
+            Vector3::new(50.0, 30.0, 0.0),
+        )));
+
+        scene.document.add_layout("Sheet").expect("unique layout");
+        scene.set_current_layout("Sheet".to_string());
+        let sheet_block = scene.current_layout_block_handle_pub();
+        let sheet_vp = scene.current_layout_sheet_viewport_handle();
+        let sheet_line = scene.add_entity(EntityType::Line(Line::from_points(
+            Vector3::new(20.0, 20.0, 0.0),
+            Vector3::new(80.0, 60.0, 0.0),
+        )));
+        scene.set_current_layout("Model".to_string());
+
+        let vis_bounds = [0.0, 0.0, 300.0, 220.0];
+        let (img_w, img_h) = (600_u32, 440_u32);
+        let mut highlight = rustc_hash::FxHashSet::default();
+        highlight.insert(sheet_line);
+
+        let sheet_grounding = compute_offscreen_grounding(
+            &scene,
+            sheet_block,
+            vis_bounds,
+            img_w,
+            img_h,
+            Some(&highlight),
+            true,
+            None,
+        );
+
+        // Exact affine inverse roundtrip at corners and interior sample
+        let p2w = sheet_grounding.pixel_to_world_matrix;
+        let w2p = sheet_grounding.world_to_pixel_matrix;
+        for (px, py) in [(0.0, 0.0), (600.0, 440.0), (137.5, 291.25)] {
+            let wx = p2w[0] * px + p2w[1] * py + p2w[4];
+            let wy = p2w[2] * px + p2w[3] * py + p2w[5];
+            let rx = w2p[0] * wx + w2p[1] * wy + w2p[4];
+            let ry = w2p[2] * wx + w2p[3] * wy + w2p[5];
+            assert!((rx - px).abs() < 1e-9, "rx={rx}, px={px}");
+            assert!((ry - py).abs() < 1e-9, "ry={ry}, py={py}");
+        }
+        assert!((p2w[4] - vis_bounds[0]).abs() < 1e-9);
+        assert!((p2w[5] - vis_bounds[3]).abs() < 1e-9);
+
+        // Sheet grounding includes only the sheet line (not model_line or sheet viewport)
+        let sheet_handles: Vec<String> = sheet_grounding
+            .visible_entities
+            .iter()
+            .map(|e| e["handle"].as_str().unwrap().to_string())
+            .collect();
+        let sheet_line_hex = format!("{:X}", sheet_line.value());
+        let model_line_hex = format!("{:X}", model_line.value());
+        let sheet_vp_hex = format!("{:X}", sheet_vp.value());
+        assert_eq!(sheet_handles, vec![sheet_line_hex.clone()]);
+        assert!(!sheet_handles.contains(&model_line_hex));
+        assert!(!sheet_handles.contains(&sheet_vp_hex));
+        assert_eq!(sheet_grounding.visible_entities[0]["selected"], true);
+
+        // Model grounding includes visible Model entities only (excludes off,
+        // frozen, invisible, and non-plotting Defpoints entities when plotting).
+        let mut hidden_line = Line::from_points(
+            Vector3::new(15.0, 15.0, 0.0),
+            Vector3::new(40.0, 25.0, 0.0),
+        );
+        hidden_line.common.invisible = true;
+        let hidden_h = scene.add_entity(EntityType::Line(hidden_line));
+
+        let mut frozen_layer = document::tables::Layer::new("FROZEN_L");
+        frozen_layer.flags.frozen = true;
+        let _ = scene.document.layers.add(frozen_layer);
+        let mut frozen_line = Line::from_points(
+            Vector3::new(15.0, 15.0, 0.0),
+            Vector3::new(40.0, 25.0, 0.0),
+        );
+        frozen_line.common.layer = "FROZEN_L".to_string();
+        let frozen_h = scene.add_entity(EntityType::Line(frozen_line));
+
+        let mut defpoints_layer = document::tables::Layer::new("Defpoints");
+        defpoints_layer.is_plottable = false;
+        let _ = scene.document.layers.add(defpoints_layer);
+        let mut defpoints_line = Line::from_points(
+            Vector3::new(15.0, 15.0, 0.0),
+            Vector3::new(40.0, 25.0, 0.0),
+        );
+        defpoints_line.common.layer = "Defpoints".to_string();
+        let defpoints_h = scene.add_entity(EntityType::Line(defpoints_line));
+
+        let model_cpu = compute_offscreen_grounding(
+            &scene,
+            model_block,
+            vis_bounds,
+            img_w,
+            img_h,
+            None,
+            true,
+            None,
+        );
+        let cpu_handles: Vec<String> = model_cpu
+            .visible_entities
+            .iter()
+            .map(|e| e["handle"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(cpu_handles, vec![model_line_hex.clone()]);
+        assert!(!cpu_handles.contains(&sheet_line_hex));
+        assert!(!cpu_handles.contains(&format!("{:X}", hidden_h.value())));
+        assert!(!cpu_handles.contains(&format!("{:X}", frozen_h.value())));
+        assert!(!cpu_handles.contains(&format!("{:X}", defpoints_h.value())));
+        assert_eq!(model_cpu.visible_entities[0]["selected"], false);
+
+        // With require_plottable=false (GPU WYSIWYG mode), Defpoints IS grounded
+        // while invisible/frozen entities stay excluded.
+        let model_gpu = compute_offscreen_grounding(
+            &scene,
+            model_block,
+            vis_bounds,
+            img_w,
+            img_h,
+            None,
+            false,
+            None,
+        );
+        let gpu_handles: Vec<String> = model_gpu
+            .visible_entities
+            .iter()
+            .map(|e| e["handle"].as_str().unwrap().to_string())
+            .collect();
+        assert!(gpu_handles.contains(&model_line_hex));
+        assert!(gpu_handles.contains(&format!("{:X}", defpoints_h.value())));
+        assert!(!gpu_handles.contains(&format!("{:X}", hidden_h.value())));
+        assert!(!gpu_handles.contains(&format!("{:X}", frozen_h.value())));
+
+        // Transient layout helper visits Sheet and restores Model state afterwards
+        let resolved_block = scene.with_transient_layout("Sheet", |s| {
+            assert_eq!(s.current_layout, "Sheet");
+            s.current_layout_block_handle_pub()
+        });
+        assert_eq!(resolved_block, sheet_block);
+        assert_eq!(scene.current_layout, "Model");
     }
 }

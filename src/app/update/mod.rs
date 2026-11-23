@@ -159,7 +159,7 @@ pub(in crate::app) mod command;
 pub(crate) mod context_menu;
 mod dialog;
 mod dynamic;
-mod file;
+pub(in crate::app) mod file;
 mod graphic_attributes;
 mod keytips;
 pub(in crate::app) mod linetype_manager;

@@ -64,8 +64,9 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// The enhanced attribute editor joined them: `attr_editor`.
 /// Find and Replace is driveable from a script: `find_replace_dialog`.
 /// `save` describes its `target_version` as the DWG version.
+/// `ocs_capture` / `ocs_render` gained `layout`, `aspect_fit`, and `renderer` (`document_id` on `ocs_capture`) for headless off-screen capture.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "595860464ba36279bcbcf5522d67b70806d605e8702bbea4b86ac497281726ea";
+const TOOL_SCHEMA_DIGEST: &str = "586df5bc8dbab0ae7b9d7959dc227dbf46e9baeedf9a8c6dec423d389a04eb5a";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
@@ -490,6 +491,39 @@ struct CachedSnapshot {
     metadata: Value,
 }
 
+fn encode_uri_segment(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for &b in s.as_bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+fn decode_uri_segment(s: &str) -> Option<String> {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            if i + 2 >= bytes.len() {
+                return None;
+            }
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok()?;
+            let val = u8::from_str_radix(hex, 16).ok()?;
+            out.push(val);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
 #[derive(Default)]
 struct ResourceStore {
     snapshots: HashMap<String, CachedSnapshot>,
@@ -498,6 +532,7 @@ struct ResourceStore {
     tiles: HashMap<String, CachedSnapshot>,
     tile_order: VecDeque<String>,
     pyramid_manifests: HashMap<String, Value>,
+    layout_manifests: HashMap<(String, String), Value>,
 }
 
 const MAX_STORED_SNAPSHOTS: usize = 32;
@@ -511,6 +546,18 @@ impl ResourceStore {
         data_base64: String,
         bytes_len: usize,
         metadata: Value,
+    ) -> String {
+        self.insert_with_latest(session_id, hash, data_base64, bytes_len, metadata, true)
+    }
+
+    fn insert_with_latest(
+        &mut self,
+        session_id: &str,
+        hash: &str,
+        data_base64: String,
+        bytes_len: usize,
+        metadata: Value,
+        update_latest: bool,
     ) -> String {
         let uri = format!("cad://session/{session_id}/snapshot/{hash}.png");
         let now = iso8601_now();
@@ -533,25 +580,25 @@ impl ResourceStore {
             self.order.push_back(uri.clone());
         }
         self.snapshots.insert(uri.clone(), snapshot);
-        self.latest.insert(session_id.to_string(), uri.clone());
+        if update_latest {
+            self.latest.insert(session_id.to_string(), uri.clone());
+        }
         uri
     }
 
-    fn insert_tile(
+    fn insert_tile_entry(
         &mut self,
         session_id: &str,
-        level: u32,
-        x: u32,
-        y: u32,
+        uri: String,
+        hash: String,
         data_base64: String,
         bytes_len: usize,
         metadata: Value,
     ) -> String {
-        let uri = format!("cad://session/{session_id}/tile/{level}/{x}/{y}.png");
         let now = iso8601_now();
         let snapshot = CachedSnapshot {
             session_id: session_id.to_string(),
-            hash: format!("tile-{level}-{x}-{y}"),
+            hash,
             created_at: now,
             mime_type: "image/png".to_string(),
             data_base64,
@@ -571,11 +618,101 @@ impl ResourceStore {
         uri
     }
 
+    fn insert_tile(
+        &mut self,
+        session_id: &str,
+        level: u32,
+        x: u32,
+        y: u32,
+        data_base64: String,
+        bytes_len: usize,
+        metadata: Value,
+    ) -> String {
+        let uri = format!("cad://session/{session_id}/tile/{level}/{x}/{y}.png");
+        let hash = format!("tile-{level}-{x}-{y}");
+        self.insert_tile_entry(session_id, uri, hash, data_base64, bytes_len, metadata)
+    }
+
+    fn tile_uri_for(
+        session_id: &str,
+        layout: Option<&str>,
+        level: u32,
+        x: u32,
+        y: u32,
+    ) -> String {
+        match layout.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(lay) => {
+                let enc = encode_uri_segment(lay);
+                format!("cad://session/{session_id}/layout/{enc}/tile/{level}/{x}/{y}.png")
+            }
+            None => format!("cad://session/{session_id}/tile/{level}/{x}/{y}.png"),
+        }
+    }
+
+    fn manifest_uri_for(session_id: &str, layout: Option<&str>) -> String {
+        match layout.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(lay) => {
+                let enc = encode_uri_segment(lay);
+                format!("cad://session/{session_id}/layout/{enc}/pyramid/manifest.json")
+            }
+            None => format!("cad://session/{session_id}/pyramid/manifest.json"),
+        }
+    }
+
+    fn insert_tile_for_layout(
+        &mut self,
+        session_id: &str,
+        layout: Option<&str>,
+        level: u32,
+        x: u32,
+        y: u32,
+        data_base64: String,
+        bytes_len: usize,
+        metadata: Value,
+    ) -> String {
+        match layout.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(lay) => {
+                let enc = encode_uri_segment(lay);
+                let uri = Self::tile_uri_for(session_id, Some(lay), level, x, y);
+                let hash = format!("tile-{enc}-{level}-{x}-{y}");
+                self.insert_tile_entry(session_id, uri, hash, data_base64, bytes_len, metadata)
+            }
+            None => self.insert_tile(session_id, level, x, y, data_base64, bytes_len, metadata),
+        }
+    }
+
     fn insert_pyramid_manifest(&mut self, session_id: &str, manifest: Value) -> String {
         let uri = format!("cad://session/{session_id}/pyramid/manifest.json");
         self.pyramid_manifests
             .insert(session_id.to_string(), manifest);
         uri
+    }
+
+    fn insert_layout_manifest(
+        &mut self,
+        session_id: &str,
+        layout: &str,
+        mut manifest: Value,
+    ) -> String {
+        let enc = encode_uri_segment(layout);
+        let uri = Self::manifest_uri_for(session_id, Some(layout));
+        if let Some(obj) = manifest.as_object_mut() {
+            obj.insert("layout".into(), Value::String(layout.to_string()));
+            obj.insert(
+                "tile_uri_template".into(),
+                Value::String(format!(
+                    "cad://session/{session_id}/layout/{enc}/tile/{{level}}/{{x}}/{{y}}.png"
+                )),
+            );
+        }
+        self.layout_manifests
+            .insert((session_id.to_string(), layout.to_ascii_lowercase()), manifest);
+        uri
+    }
+
+    fn get_layout_manifest(&self, session_id: &str, layout: &str) -> Option<&Value> {
+        self.layout_manifests
+            .get(&(session_id.to_string(), layout.to_ascii_lowercase()))
     }
 
     fn get_by_uri(&self, uri: &str) -> Option<&CachedSnapshot> {
@@ -611,6 +748,26 @@ impl ResourceStore {
                 "description": format!("Multiscale DeepZoom pyramidal tiling manifest for session {session_id}."),
                 "mimeType": "application/json"
             }));
+            let mut session_layouts: Vec<(&str, &Value)> = self
+                .layout_manifests
+                .iter()
+                .filter_map(|((sess, key_layout), manifest)| {
+                    (sess == session_id).then_some((key_layout.as_str(), manifest))
+                })
+                .collect();
+            session_layouts.sort_by(|(a, _), (b, _)| a.cmp(b));
+            for (key_layout, manifest) in session_layouts {
+                let layout_name = manifest
+                    .get("layout")
+                    .and_then(Value::as_str)
+                    .unwrap_or(key_layout);
+                list.push(json!({
+                    "uri": Self::manifest_uri_for(session_id, Some(layout_name)),
+                    "name": format!("Layout Pyramid Manifest ({session_id}: {layout_name})"),
+                    "description": format!("Multiscale DeepZoom pyramidal tiling manifest for session {session_id}, layout {layout_name}."),
+                    "mimeType": "application/json"
+                }));
+            }
             if let Some(latest_uri) = self.latest.get(session_id) {
                 if let Some(snap) = self.snapshots.get(latest_uri) {
                     list.push(json!({
@@ -1825,6 +1982,161 @@ fn guide_resource(name: &str) -> Result<Value, String> {
     )
 }
 
+fn parse_tile_subpath(trimmed: &str) -> Option<(u32, u32, u32, bool)> {
+    let is_json = trimmed.ends_with(".json");
+    let core = trimmed.trim_end_matches(".png").trim_end_matches(".json");
+    let parts: Vec<&str> = core.split('/').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let level = parts[0].parse::<u32>().ok()?;
+    let x = parts[1].parse::<u32>().ok()?;
+    let y = parts[2].parse::<u32>().ok()?;
+    Some((level, x, y, is_json))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn serve_tile_resource(
+    uri: &str,
+    session_id: &str,
+    layout_opt: Option<&str>,
+    level: u32,
+    x: u32,
+    y: u32,
+    is_json: bool,
+    clients: &mut HashMap<String, GuiClient>,
+    resources: &mut ResourceStore,
+    pump: &mut CancelPump,
+    mcp_id: Option<&Value>,
+) -> Result<Value, String> {
+    let png_uri = ResourceStore::tile_uri_for(session_id, layout_opt, level, x, y);
+    if is_json {
+        if let Some(tile_snap) = resources.tiles.get(&png_uri) {
+            let meta_text = serde_json::to_string_pretty(&tile_snap.metadata)
+                .unwrap_or_else(|_| tile_snap.metadata.to_string());
+            return Ok(json!({
+                "contents": [
+                    {
+                        "uri": uri,
+                        "mimeType": "application/json",
+                        "text": meta_text
+                    }
+                ]
+            }));
+        }
+    }
+    if let Some(tile_snap) = resources.tiles.get(&png_uri) {
+        return Ok(json!({
+            "contents": [
+                {
+                    "uri": png_uri,
+                    "mimeType": "image/png",
+                    "blob": tile_snap.data_base64
+                }
+            ]
+        }));
+    }
+
+    let manifest = match layout_opt {
+        Some(lay) => Some(resources.get_layout_manifest(session_id, lay).ok_or_else(|| {
+            format!("No cached pyramid manifest for layout '{lay}'; capture layout '{lay}' first")
+        })?),
+        None => resources.pyramid_manifests.get(session_id),
+    };
+    let manifest_layout = layout_opt.or_else(|| manifest.and_then(|m| m.get("layout")).and_then(Value::as_str)).map(str::to_string);
+    let manifest_renderer = manifest
+        .and_then(|m| m.get("renderer"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let base_bounds = match manifest {
+        Some(m) => m
+            .get("world_bounds")
+            .and_then(Value::as_array)
+            .and_then(|arr| bounds_from_array(arr, true))
+            .ok_or_else(|| "Cached pyramid manifest is missing valid world_bounds".to_string())?,
+        None => [-100.0, -100.0, 100.0, 100.0],
+    };
+
+    let tile_bounds =
+        crate::app::control::vision::compute_tile_bounds(base_bounds, level, x, y)?;
+    let path = std::env::temp_dir().join(format!(
+        "ocs-tile-{session_id}-{}-{level}-{x}-{y}.png",
+        layout_opt.map(encode_uri_segment).unwrap_or_else(|| "active".to_string())
+    ));
+    let mut req = json!({
+        "op": "capture",
+        "path": path.to_string_lossy(),
+        "scope": "viewport",
+        "view": "region",
+        "bounds": tile_bounds,
+        "max_dimension": 512,
+    });
+    if let Some(ref lay) = manifest_layout {
+        req["layout"] = json!(lay);
+        req["aspect_fit"] = json!(true);
+    }
+    if let Some(ref rend) = manifest_renderer {
+        req["renderer"] = json!(rend);
+    }
+
+    let result = client(clients, session_id)?.request(req, 20.0, pump, mcp_id)?;
+    if result["ok"].as_bool() != Some(true) || result["status"].as_str() != Some("completed") {
+        return Err(result.to_string());
+    }
+    let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
+    let _ = std::fs::remove_file(path);
+    let b64 = BASE64.encode(&bytes);
+    let bytes_len = bytes.len();
+    let manifest_uri = ResourceStore::manifest_uri_for(session_id, layout_opt);
+    let mut meta = result.get("result").cloned().unwrap_or_else(|| json!({}));
+    if let Some(obj) = meta.as_object_mut() {
+        obj.remove("path");
+        obj.insert("uri".into(), Value::String(png_uri.clone()));
+        obj.insert(
+            "pyramid".into(),
+            json!({
+                "level": level,
+                "x": x,
+                "y": y,
+                "tile_world_bounds": tile_bounds,
+                "tile_uri": png_uri,
+                "manifest_uri": manifest_uri,
+            }),
+        );
+    }
+    resources.insert_tile_for_layout(
+        session_id,
+        layout_opt,
+        level,
+        x,
+        y,
+        b64.clone(),
+        bytes_len,
+        meta.clone(),
+    );
+    if is_json {
+        let meta_text = serde_json::to_string_pretty(&meta).unwrap_or_else(|_| meta.to_string());
+        return Ok(json!({
+            "contents": [
+                {
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": meta_text
+                }
+            ]
+        }));
+    }
+    Ok(json!({
+        "contents": [
+            {
+                "uri": png_uri,
+                "mimeType": "image/png",
+                "blob": b64
+            }
+        ]
+    }))
+}
+
 fn read_resource(
     uri: &str,
     clients: &mut HashMap<String, GuiClient>,
@@ -1927,138 +2239,64 @@ fn read_resource(
                         }
                     ]
                 }));
-            } else if subpath.starts_with("tile/") {
-                let trimmed = subpath.strip_prefix("tile/").unwrap_or("");
-                let is_json = trimmed.ends_with(".json");
-                let core = trimmed.trim_end_matches(".png").trim_end_matches(".json");
-                let parts: Vec<&str> = core.split('/').collect();
-                if parts.len() == 3 {
-                    if let (Ok(level), Ok(x), Ok(y)) = (
-                        parts[0].parse::<u32>(),
-                        parts[1].parse::<u32>(),
-                        parts[2].parse::<u32>(),
-                    ) {
-                        let png_uri =
-                            format!("cad://session/{session_id}/tile/{level}/{x}/{y}.png");
-                        if is_json {
-                            if let Some(tile_snap) = resources.tiles.get(&png_uri) {
-                                let meta_text = serde_json::to_string_pretty(&tile_snap.metadata)
-                                    .unwrap_or_else(|_| tile_snap.metadata.to_string());
-                                return Ok(json!({
-                                    "contents": [
-                                        {
-                                            "uri": uri,
-                                            "mimeType": "application/json",
-                                            "text": meta_text
-                                        }
-                                    ]
-                                }));
-                            }
-                        }
-
-                        if let Some(tile_snap) = resources.tiles.get(&png_uri) {
-                            return Ok(json!({
-                                "contents": [
-                                    {
-                                        "uri": png_uri,
-                                        "mimeType": "image/png",
-                                        "blob": tile_snap.data_base64
-                                    }
-                                ]
-                            }));
-                        }
-
-                        let mut base_bounds = [-100.0, -100.0, 100.0, 100.0];
-                        if let Some(manifest) = resources.pyramid_manifests.get(session_id) {
-                            if let Some(arr) =
-                                manifest.get("world_bounds").and_then(Value::as_array)
+            } else if let Some(layout_rest) = subpath.strip_prefix("layout/") {
+                let Some((enc_layout, tail)) = layout_rest.split_once('/') else {
+                    return Err(format!("Unsupported layout resource URI: {uri}"));
+                };
+                let Some(layout) = decode_uri_segment(enc_layout).filter(|s| !s.trim().is_empty())
+                else {
+                    return Err(format!("Invalid layout encoding in URI: {uri}"));
+                };
+                if tail == "pyramid/manifest.json" {
+                    let manifest = resources
+                        .get_layout_manifest(session_id, &layout)
+                        .ok_or_else(|| {
+                            format!("No cached pyramid manifest for layout '{layout}'; capture layout '{layout}' first")
+                        })?;
+                    let text = serde_json::to_string_pretty(manifest)
+                        .unwrap_or_else(|_| manifest.to_string());
+                    return Ok(json!({
+                        "contents": [
                             {
-                                if arr.len() == 4 {
-                                    if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (
-                                        arr[0].as_f64(),
-                                        arr[1].as_f64(),
-                                        arr[2].as_f64(),
-                                        arr[3].as_f64(),
-                                    ) {
-                                        base_bounds = [x0, y0, x1, y1];
-                                    }
-                                }
+                                "uri": uri,
+                                "mimeType": "application/json",
+                                "text": text
                             }
-                        }
-                        let tile_bounds = crate::app::control::vision::compute_tile_bounds(
-                            base_bounds,
-                            level,
-                            x,
-                            y,
-                        )?;
-                        let path = std::env::temp_dir()
-                            .join(format!("ocs-tile-{session_id}-{level}-{x}-{y}.png"));
-                        let req = json!({
-                            "op": "capture",
-                            "path": path.to_string_lossy(),
-                            "scope": "viewport",
-                            "view": "region",
-                            "bounds": tile_bounds,
-                            "max_dimension": 512,
-                        });
-                        let result =
-                            client(clients, session_id)?.request(req, 20.0, pump, mcp_id)?;
-                        if result["ok"].as_bool() != Some(true)
-                            || result["status"].as_str() != Some("completed")
-                        {
-                            return Err(result.to_string());
-                        }
-                        let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
-                        let _ = std::fs::remove_file(path);
-                        let b64 = BASE64.encode(&bytes);
-                        let bytes_len = bytes.len();
-                        let mut meta = result.get("result").cloned().unwrap_or_else(|| json!({}));
-                        if let Some(obj) = meta.as_object_mut() {
-                            obj.remove("path");
-                            obj.insert(
-                                "pyramid".into(),
-                                json!({
-                                    "level": level,
-                                    "x": x,
-                                    "y": y,
-                                    "tile_world_bounds": tile_bounds,
-                                    "tile_uri": png_uri,
-                                    "manifest_uri": format!("cad://session/{session_id}/pyramid/manifest.json")
-                                }),
-                            );
-                        }
-                        resources.insert_tile(
+                        ]
+                    }));
+                } else if let Some(trimmed) = tail.strip_prefix("tile/") {
+                    if let Some((level, x, y, is_json)) = parse_tile_subpath(trimmed) {
+                        return serve_tile_resource(
+                            uri,
                             session_id,
+                            Some(&layout),
                             level,
                             x,
                             y,
-                            b64.clone(),
-                            bytes_len,
-                            meta.clone(),
+                            is_json,
+                            clients,
+                            resources,
+                            pump,
+                            mcp_id,
                         );
-                        if is_json {
-                            let meta_text = serde_json::to_string_pretty(&meta)
-                                .unwrap_or_else(|_| meta.to_string());
-                            return Ok(json!({
-                                "contents": [
-                                    {
-                                        "uri": uri,
-                                        "mimeType": "application/json",
-                                        "text": meta_text
-                                    }
-                                ]
-                            }));
-                        }
-                        return Ok(json!({
-                            "contents": [
-                                {
-                                    "uri": png_uri,
-                                    "mimeType": "image/png",
-                                    "blob": b64
-                                }
-                            ]
-                        }));
                     }
+                }
+                return Err(format!("Unsupported layout resource URI: {uri}"));
+            } else if let Some(trimmed) = subpath.strip_prefix("tile/") {
+                if let Some((level, x, y, is_json)) = parse_tile_subpath(trimmed) {
+                    return serve_tile_resource(
+                        uri,
+                        session_id,
+                        None,
+                        level,
+                        x,
+                        y,
+                        is_json,
+                        clients,
+                        resources,
+                        pump,
+                        mcp_id,
+                    );
                 }
             } else if subpath == "viewport.png" {
                 let path = std::env::temp_dir().join(format!("ocs-resource-{}.png", random_id()?));
@@ -2242,6 +2480,20 @@ fn call_tool(
             refuse_retired_capture_parameters(arguments).map_err(CallError::from)?;
             let tile = arguments.get("tile");
             let want_manifest = arguments["pyramid_manifest"].as_bool().unwrap_or(false);
+            let requested_layout = arguments.get("layout").and_then(Value::as_str);
+            let requested_renderer = arguments.get("renderer").and_then(Value::as_str);
+            let requested_doc_id = arguments.get("document_id").and_then(Value::as_u64);
+
+            if tile.is_some()
+                && arguments
+                    .get("focus_handles")
+                    .and_then(Value::as_array)
+                    .is_some_and(|a| !a.is_empty())
+            {
+                return Err(CallError::Tool(
+                    "tile cannot be combined with focus_handles; compute bounds from a capture or supply explicit 'bounds'".to_string(),
+                ));
+            }
 
             let mut tile_info: Option<(u32, u32, u32, [f64; 4])> = None;
             if let Some(tile_val) = tile {
@@ -2250,54 +2502,13 @@ fn call_tool(
                     tile_val.get("x").and_then(Value::as_u64),
                     tile_val.get("y").and_then(Value::as_u64),
                 ) {
-                    let mut base_bounds = [-100.0, -100.0, 100.0, 100.0];
-                    if let Some(bounds_arr) = arguments.get("bounds").and_then(Value::as_array) {
-                        if bounds_arr.len() >= 4 {
-                            if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (
-                                bounds_arr[0].as_f64(),
-                                bounds_arr[1].as_f64(),
-                                bounds_arr[2].as_f64(),
-                                bounds_arr[3].as_f64(),
-                            ) {
-                                base_bounds = [x0, y0, x1, y1];
-                            }
-                        }
-                    } else if let Some(manifest) = resources.pyramid_manifests.get(session_id) {
-                        if let Some(arr) = manifest.get("world_bounds").and_then(Value::as_array) {
-                            if arr.len() == 4 {
-                                if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (
-                                    arr[0].as_f64(),
-                                    arr[1].as_f64(),
-                                    arr[2].as_f64(),
-                                    arr[3].as_f64(),
-                                ) {
-                                    base_bounds = [x0, y0, x1, y1];
-                                }
-                            }
-                        }
-                    } else if let Some(latest_uri) = resources.latest.get(session_id) {
-                        if let Some(snap) = resources.snapshots.get(latest_uri) {
-                            if let Some(spatial) = snap.metadata.get("_spatial") {
-                                if let Some(wb) = spatial.get("world_bounds") {
-                                    if let (Some(min), Some(max)) = (
-                                        wb.get("min").and_then(Value::as_array),
-                                        wb.get("max").and_then(Value::as_array),
-                                    ) {
-                                        if min.len() >= 2 && max.len() >= 2 {
-                                            if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (
-                                                min[0].as_f64(),
-                                                min[1].as_f64(),
-                                                max[0].as_f64(),
-                                                max[1].as_f64(),
-                                            ) {
-                                                base_bounds = [x0, y0, x1, y1];
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    let base_bounds = resolve_tile_base_bounds(
+                        arguments,
+                        resources,
+                        session_id,
+                        requested_layout,
+                    )
+                    .map_err(CallError::Tool)?;
                     let tb = crate::app::control::vision::compute_tile_bounds(
                         base_bounds,
                         level as u32,
@@ -2339,6 +2550,18 @@ fn call_tool(
             if let Some(annotate) = arguments.get("annotate").and_then(Value::as_bool) {
                 req["annotate"] = json!(annotate);
             }
+            if let Some(layout) = requested_layout {
+                req["layout"] = json!(layout);
+            }
+            if let Some(aspect_fit) = arguments.get("aspect_fit").and_then(Value::as_bool) {
+                req["aspect_fit"] = json!(aspect_fit);
+            }
+            if let Some(renderer) = requested_renderer {
+                req["renderer"] = json!(renderer);
+            }
+            if let Some(document_id) = requested_doc_id {
+                req["document_id"] = json!(document_id);
+            }
             let result = client(clients, session_id)?.request(req, 30.0, pump, mcp_id)?;
             if result["ok"].as_bool() != Some(true)
                 || result["status"].as_str() != Some("completed")
@@ -2346,6 +2569,12 @@ fn call_tool(
                 // Failed capture response from the GUI: retryable, stays Tool.
                 return Err(result.to_string().into());
             }
+            let targets_other_doc = requested_doc_id.is_some_and(|doc_id| {
+                clients
+                    .get(session_id)
+                    .and_then(|c| c.state["document_id"].as_u64())
+                    .is_some_and(|active_id| active_id != doc_id)
+            });
             let bytes = std::fs::read(&path).map_err(|error| error.to_string())?;
             let _ = std::fs::remove_file(path);
             let mut meta = result.get("result").cloned().unwrap_or_else(|| json!({}));
@@ -2362,28 +2591,37 @@ fn call_tool(
             let b64 = BASE64.encode(&bytes);
             let bytes_len = bytes.len();
 
-            let uri = resources.insert(session_id, &hash, b64.clone(), bytes_len, meta.clone());
+            let uri = resources.insert_with_latest(
+                session_id,
+                &hash,
+                b64.clone(),
+                bytes_len,
+                meta.clone(),
+                !targets_other_doc,
+            );
             if let Some(obj) = meta.as_object_mut() {
                 obj.insert("uri".into(), Value::String(uri.clone()));
-                obj.insert(
-                    "latest_uri".into(),
-                    Value::String(format!("cad://session/{session_id}/snapshot/latest.png")),
-                );
+                if !targets_other_doc {
+                    obj.insert(
+                        "latest_uri".into(),
+                        Value::String(format!("cad://session/{session_id}/snapshot/latest.png")),
+                    );
+                }
                 obj.insert("hash".into(), Value::String(hash.clone()));
                 obj.insert("bytes".into(), Value::from(bytes_len));
             }
 
+            let effective_layout = meta
+                .get("layout")
+                .and_then(Value::as_str)
+                .or(requested_layout)
+                .map(str::to_string);
+            let tile_layout = requested_layout.and(effective_layout.as_deref());
+
             let mut final_uri = uri.clone();
             if let Some((level, x, y, tb)) = tile_info {
-                let tile_uri = resources.insert_tile(
-                    session_id,
-                    level,
-                    x,
-                    y,
-                    b64.clone(),
-                    bytes_len,
-                    meta.clone(),
-                );
+                let tile_uri = ResourceStore::tile_uri_for(session_id, tile_layout, level, x, y);
+                let manifest_uri = ResourceStore::manifest_uri_for(session_id, tile_layout);
                 final_uri = tile_uri.clone();
                 let pyr = json!({
                     "level": level,
@@ -2391,49 +2629,98 @@ fn call_tool(
                     "y": y,
                     "tile_world_bounds": tb,
                     "tile_uri": tile_uri,
-                    "manifest_uri": format!("cad://session/{session_id}/pyramid/manifest.json")
+                    "manifest_uri": manifest_uri,
                 });
                 if let Some(obj) = meta.as_object_mut() {
                     obj.insert("pyramid".into(), pyr);
                     obj.insert("uri".into(), Value::String(final_uri.clone()));
                 }
+                if !targets_other_doc {
+                    resources.insert_tile_for_layout(
+                        session_id,
+                        tile_layout,
+                        level,
+                        x,
+                        y,
+                        b64.clone(),
+                        bytes_len,
+                        meta.clone(),
+                    );
+                }
             }
 
-            if want_manifest
-                || (!resources.pyramid_manifests.contains_key(session_id) && tile_info.is_none())
-            {
-                let mut bounds = [-100.0, -100.0, 100.0, 100.0];
-                let mut unit = "Millimeters".to_string();
-                if let Some(spatial) = meta.get("_spatial") {
-                    if let Some(u) = spatial.get("unit").and_then(Value::as_str) {
-                        unit = u.to_string();
-                    }
-                    if let Some(wb) = spatial.get("world_bounds") {
-                        if let (Some(min), Some(max)) = (
-                            wb.get("min").and_then(Value::as_array),
-                            wb.get("max").and_then(Value::as_array),
-                        ) {
-                            if min.len() >= 2 && max.len() >= 2 {
-                                if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (
-                                    min[0].as_f64(),
-                                    min[1].as_f64(),
-                                    max[0].as_f64(),
-                                    max[1].as_f64(),
-                                ) {
-                                    bounds = [x0, y0, x1, y1];
-                                }
-                            }
-                        }
-                    }
-                }
+            let needs_manifest = if let Some(eff_lay) = tile_layout {
+                want_manifest
+                    || (!targets_other_doc
+                        && tile_info.is_none()
+                        && resources.get_layout_manifest(session_id, eff_lay).is_none())
+            } else {
+                let manifest_stale = manifest_layout_differs(
+                    resources.pyramid_manifests.get(session_id),
+                    effective_layout.as_deref(),
+                );
+                want_manifest
+                    || (!targets_other_doc
+                        && tile_info.is_none()
+                        && (!resources.pyramid_manifests.contains_key(session_id)
+                            || manifest_stale))
+            };
+            if needs_manifest {
+                let bounds = spatial_world_bounds(&meta).unwrap_or([-100.0, -100.0, 100.0, 100.0]);
+                let unit = meta
+                    .get("_spatial")
+                    .and_then(|s| s.get("unit"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("Millimeters")
+                    .to_string();
                 let manifest = crate::app::control::vision::compute_pyramid_manifest(
                     session_id, &unit, bounds, 4, 512,
                 );
-                if let Ok(manifest_val) = serde_json::to_value(&manifest) {
-                    resources.insert_pyramid_manifest(session_id, manifest_val.clone());
+                if let Ok(mut manifest_val) = serde_json::to_value(&manifest) {
+                    if let Some(renderer) = meta
+                        .get("renderer")
+                        .and_then(Value::as_str)
+                        .or(requested_renderer)
+                    {
+                        if let Some(obj) = manifest_val.as_object_mut() {
+                            obj.insert("renderer".into(), Value::String(renderer.to_string()));
+                        }
+                    }
+                    let manifest_for_meta = if let Some(eff_lay) = tile_layout {
+                        if !targets_other_doc {
+                            resources.insert_layout_manifest(session_id, eff_lay, manifest_val);
+                            resources
+                                .get_layout_manifest(session_id, eff_lay)
+                                .cloned()
+                        } else {
+                            let enc = encode_uri_segment(eff_lay);
+                            if let Some(obj) = manifest_val.as_object_mut() {
+                                obj.insert("layout".into(), Value::String(eff_lay.to_string()));
+                                obj.insert(
+                                    "tile_uri_template".into(),
+                                    Value::String(format!(
+                                        "cad://session/{session_id}/layout/{enc}/tile/{{level}}/{{x}}/{{y}}.png"
+                                    )),
+                                );
+                            }
+                            Some(manifest_val)
+                        }
+                    } else {
+                        if let Some(layout) = effective_layout.as_deref() {
+                            if let Some(obj) = manifest_val.as_object_mut() {
+                                obj.insert("layout".into(), Value::String(layout.to_string()));
+                            }
+                        }
+                        if !targets_other_doc {
+                            resources.insert_pyramid_manifest(session_id, manifest_val.clone());
+                        }
+                        Some(manifest_val)
+                    };
                     if want_manifest {
-                        if let Some(obj) = meta.as_object_mut() {
-                            obj.insert("pyramid_manifest".into(), manifest_val);
+                        if let Some(mval) = manifest_for_meta {
+                            if let Some(obj) = meta.as_object_mut() {
+                                obj.insert("pyramid_manifest".into(), mval);
+                            }
                         }
                     }
                 }
@@ -2544,6 +2831,10 @@ pub(crate) fn capture_input_schema() -> Value {
             "focus_handles":{"type":"array","items":{"type":"string"},"description":"Hex handles of entities to zoom and fit in view before capturing."},
             "highlight_handles":{"type":"array","items":{"type":"string"},"description":"Hex handles of entities to select/highlight before capturing."},
             "annotate":{"type":"boolean","default":false,"description":"Overlay Set-of-Marks numbered tags on visible entities for visual grounding."},
+            "layout":{"type":"string","minLength":1,"description":"Capture a specific layout ('Model' or any paper-space layout name) headlessly off-screen without switching the active GUI tab, moving the live camera, or mutating selection. Defaults aspect_fit to true unless aspect_fit: false is explicitly passed."},
+            "aspect_fit":{"type":"boolean","default":false,"description":"Render off-screen with output pixel dimensions fitted to the aspect ratio of the framed bounds/extents (longest edge = max_dimension) instead of the live GUI viewport aspect ratio. On layout captures, defaults to true unless explicitly set false."},
+            "renderer":{"type":"string","enum":["auto","gpu","cpu"],"default":"auto","description":"Off-screen rendering backend: 'auto' uses headless wgpu (WYSIWYG canvas) when available and falls back to CPU SVG/resvg, 'gpu' requires headless wgpu, 'cpu' forces vector SVG/resvg rasterization."},
+            "document_id":{"type":"integer","minimum":0,"description":"Optional open document id (from ocs_sessions) to capture headlessly off-screen without activating its tab."},
             "tile":{"type":"object","properties":{"level":{"type":"integer","minimum":0,"maximum":6,"description":"Pyramid zoom level (0 = full overview, 1 = 2x2 grid, 2 = 4x4 grid, etc.)."},"x":{"type":"integer","minimum":0,"description":"Tile column index (0-indexed, left-to-right)."},"y":{"type":"integer","minimum":0,"description":"Tile row index (0-indexed, top-to-bottom)."}},"required":["level","x","y"],"description":"Fetch a specific DeepZoom pyramid tile. Automatically computes tile world bounds and frames the camera."},
             "pyramid_manifest":{"type":"boolean","default":false,"description":"If true, generates and returns the complete multiscale pyramid manifest (levels, grid dimensions, tile world spans and resource URIs) in the response metadata."}
         },
@@ -2603,6 +2894,143 @@ fn refuse_retired_capture_parameters(arguments: &Value) -> Result<(), String> {
         )),
         None => Ok(()),
     }
+}
+
+fn capture_layout_matches(entry: &Value, requested_layout: Option<&str>) -> bool {
+    match requested_layout {
+        None => true,
+        Some(req_lay) => entry
+            .get("layout")
+            .and_then(Value::as_str)
+            .is_some_and(|lay| lay.eq_ignore_ascii_case(req_lay)),
+    }
+}
+
+fn manifest_layout_differs(manifest: Option<&Value>, effective_layout: Option<&str>) -> bool {
+    match (effective_layout, manifest) {
+        (Some(eff_lay), Some(manifest)) => manifest
+            .get("layout")
+            .and_then(Value::as_str)
+            .is_none_or(|lay| !lay.eq_ignore_ascii_case(eff_lay)),
+        (None, Some(manifest)) => manifest.get("layout").is_some(),
+        _ => false,
+    }
+}
+
+fn bounds_from_array(arr: &[Value], exact_len: bool) -> Option<[f64; 4]> {
+    let valid_len = if exact_len {
+        arr.len() == 4
+    } else {
+        arr.len() >= 4
+    };
+    if !valid_len {
+        return None;
+    }
+    Some([
+        arr[0].as_f64()?,
+        arr[1].as_f64()?,
+        arr[2].as_f64()?,
+        arr[3].as_f64()?,
+    ])
+}
+
+fn spatial_world_bounds(meta: &Value) -> Option<[f64; 4]> {
+    let wb = meta.get("_spatial")?.get("world_bounds")?;
+    let min = wb.get("min")?.as_array()?;
+    let max = wb.get("max")?.as_array()?;
+    if min.len() < 2 || max.len() < 2 {
+        return None;
+    }
+    Some([
+        min[0].as_f64()?,
+        min[1].as_f64()?,
+        max[0].as_f64()?,
+        max[1].as_f64()?,
+    ])
+}
+
+fn resolve_tile_base_bounds(
+    arguments: &Value,
+    resources: &ResourceStore,
+    session_id: &str,
+    requested_layout: Option<&str>,
+) -> Result<[f64; 4], String> {
+    const DEFAULT_BOUNDS: [f64; 4] = [-100.0, -100.0, 100.0, 100.0];
+    if let Some(bounds_arr) = arguments.get("bounds").and_then(Value::as_array) {
+        return bounds_from_array(bounds_arr, false)
+            .filter(|b| b.iter().all(|v| v.is_finite()))
+            .ok_or_else(|| {
+                "bounds must be a 4-element finite numeric array [min_x, min_y, max_x, max_y]"
+                    .to_string()
+            });
+    }
+    if let Some(req_lay) = requested_layout {
+        if let Some(bounds) = resources
+            .get_layout_manifest(session_id, req_lay)
+            .and_then(|m| m.get("world_bounds").and_then(Value::as_array))
+            .and_then(|arr| bounds_from_array(arr, true))
+        {
+            return Ok(bounds);
+        }
+        if let Some(bounds) = resources
+            .pyramid_manifests
+            .get(session_id)
+            .filter(|m| capture_layout_matches(m, Some(req_lay)))
+            .and_then(|m| m.get("world_bounds").and_then(Value::as_array))
+            .and_then(|arr| bounds_from_array(arr, true))
+        {
+            return Ok(bounds);
+        }
+        if let Some(bounds) = resources
+            .latest
+            .get(session_id)
+            .and_then(|latest_uri| resources.snapshots.get(latest_uri))
+            .filter(|snap| capture_layout_matches(&snap.metadata, Some(req_lay)))
+            .and_then(|snap| spatial_world_bounds(&snap.metadata))
+        {
+            return Ok(bounds);
+        }
+        if let Some(bounds) = resources
+            .order
+            .iter()
+            .rev()
+            .filter_map(|uri| resources.snapshots.get(uri))
+            .find(|snap| {
+                snap.session_id == session_id
+                    && capture_layout_matches(&snap.metadata, Some(req_lay))
+            })
+            .and_then(|snap| spatial_world_bounds(&snap.metadata))
+        {
+            return Ok(bounds);
+        }
+        return Err(format!(
+            "No cached bounds or pyramid manifest for layout '{req_lay}'; capture layout '{req_lay}' first or supply explicit 'bounds'"
+        ));
+    }
+    if let Some(manifest) = resources
+        .pyramid_manifests
+        .get(session_id)
+        .filter(|m| capture_layout_matches(m, None))
+    {
+        if let Some(bounds) = manifest
+            .get("world_bounds")
+            .and_then(Value::as_array)
+            .and_then(|arr| bounds_from_array(arr, true))
+        {
+            return Ok(bounds);
+        }
+    }
+    if let Some(snap) = resources
+        .latest
+        .get(session_id)
+        .and_then(|latest_uri| resources.snapshots.get(latest_uri))
+        .filter(|snap| capture_layout_matches(&snap.metadata, None))
+    {
+        if let Some(bounds) = spatial_world_bounds(&snap.metadata) {
+            return Ok(bounds);
+        }
+    }
+    Ok(DEFAULT_BOUNDS)
 }
 
 fn tool_result(value: Value) -> Value {
@@ -2938,6 +3366,11 @@ fn handle_message(
                     session_ids.push(k.clone());
                 }
             }
+            for (k, _) in resources.layout_manifests.keys() {
+                if !session_ids.contains(k) {
+                    session_ids.push(k.clone());
+                }
+            }
             // Deterministic order: HashMap iteration is random, and stable
             // ordering keeps client caches and prompt caches hitting.
             session_ids.sort();
@@ -2969,6 +3402,12 @@ fn handle_message(
                         "uriTemplate": "cad://session/{session_id}/tile/{level}/{x}/{y}.png",
                         "name": "Pyramid tile",
                         "description": "DeepZoom viewport tile at zoom level, column x, row y.",
+                        "mimeType": "image/png"
+                    },
+                    {
+                        "uriTemplate": "cad://session/{session_id}/layout/{layout}/tile/{level}/{x}/{y}.png",
+                        "name": "Layout pyramid tile",
+                        "description": "DeepZoom off-screen tile for a specific layout at zoom level, column x, row y.",
                         "mimeType": "image/png"
                     },
                     {
@@ -4353,6 +4792,134 @@ mod tests {
             );
         }
         assert!(refuse_retired_capture_parameters(&json!({"ocs_session_id": "s1"})).is_ok());
+    }
+
+    #[test]
+    fn capture_schema_exposes_layout_and_aspect_fit() {
+        let schema = capture_input_schema();
+        let props = schema["properties"].as_object().unwrap();
+        assert_eq!(props["layout"]["type"], "string");
+        assert_eq!(props["layout"]["minLength"], 1);
+        assert_eq!(props["aspect_fit"]["type"], "boolean");
+        assert_eq!(props["aspect_fit"]["default"], false);
+        assert_eq!(props["renderer"]["type"], "string");
+        assert_eq!(props["renderer"]["enum"], json!(["auto", "gpu", "cpu"]));
+        assert_eq!(props["renderer"]["default"], "auto");
+        assert_eq!(props["document_id"]["type"], "integer");
+        assert_eq!(props["document_id"]["minimum"], 0);
+
+        let required = schema["required"].as_array().unwrap();
+        assert!(!required.contains(&json!("layout")));
+        assert!(!required.contains(&json!("aspect_fit")));
+        assert!(!required.contains(&json!("renderer")));
+        assert!(!required.contains(&json!("document_id")));
+    }
+
+    #[test]
+    fn capture_layout_cache_isolates_bounds_across_layouts() {
+        let mut resources = ResourceStore::default();
+        let m_uri = resources.insert_layout_manifest(
+            "s1",
+            "Model",
+            json!({"world_bounds":[0.0, 0.0, 1000.0, 500.0],"renderer":"gpu"}),
+        );
+        assert_eq!(m_uri, "cad://session/s1/layout/Model/pyramid/manifest.json");
+        let s_uri = resources.insert_layout_manifest(
+            "s1",
+            "Sheet 1",
+            json!({"world_bounds":[0.0, 0.0, 297.0, 210.0],"renderer":"cpu"}),
+        );
+        assert_eq!(
+            s_uri,
+            "cad://session/s1/layout/Sheet%201/pyramid/manifest.json"
+        );
+
+        assert_eq!(
+            resolve_tile_base_bounds(&json!({}), &resources, "s1", Some("model")).unwrap(),
+            [0.0, 0.0, 1000.0, 500.0]
+        );
+        assert_eq!(
+            resolve_tile_base_bounds(&json!({}), &resources, "s1", Some("sheet 1")).unwrap(),
+            [0.0, 0.0, 297.0, 210.0]
+        );
+        assert!(resolve_tile_base_bounds(&json!({}), &resources, "s1", Some("Uncaptured")).is_err());
+        assert_eq!(
+            resolve_tile_base_bounds(
+                &json!({"bounds": [0.0, 0.0, 420.0, 297.0]}),
+                &resources,
+                "s1",
+                Some("Uncaptured"),
+            )
+            .unwrap(),
+            [0.0, 0.0, 420.0, 297.0]
+        );
+
+        let t_model = resources.insert_tile_for_layout(
+            "s1",
+            Some("Model"),
+            1,
+            0,
+            0,
+            "AAAA".into(),
+            3,
+            json!({"layout":"Model","tag":"model-tile"}),
+        );
+        let t_sheet = resources.insert_tile_for_layout(
+            "s1",
+            Some("Sheet 1"),
+            1,
+            0,
+            0,
+            "BBBB".into(),
+            3,
+            json!({"layout":"Sheet 1","tag":"sheet-tile"}),
+        );
+        assert_eq!(t_model, "cad://session/s1/layout/Model/tile/1/0/0.png");
+        assert_eq!(t_sheet, "cad://session/s1/layout/Sheet%201/tile/1/0/0.png");
+
+        let mut clients = HashMap::new();
+        let mut tasks = TaskStore::default();
+        let read_s_man = handle_message(
+            json!({"jsonrpc":"2.0","id":"r-sman","method":"resources/read","params":{"uri":s_uri}}),
+            &mut clients,
+            &mut tasks,
+            &mut resources,
+            &mut detached_pump(),
+        )
+        .unwrap();
+        let s_man_txt = read_s_man["result"]["contents"][0]["text"].as_str().unwrap();
+        assert!(s_man_txt.contains("cad://session/s1/layout/Sheet%201/tile/{level}/{x}/{y}.png"));
+
+        let read_m_tile = handle_message(
+            json!({"jsonrpc":"2.0","id":"r-mtile","method":"resources/read","params":{"uri":t_model}}),
+            &mut clients,
+            &mut tasks,
+            &mut resources,
+            &mut detached_pump(),
+        )
+        .unwrap();
+        assert_eq!(read_m_tile["result"]["contents"][0]["blob"], "AAAA");
+
+        let read_s_tile_json = handle_message(
+            json!({"jsonrpc":"2.0","id":"r-stile-json","method":"resources/read","params":{"uri":"cad://session/s1/layout/Sheet%201/tile/1/0/0.json"}}),
+            &mut clients,
+            &mut tasks,
+            &mut resources,
+            &mut detached_pump(),
+        )
+        .unwrap();
+        assert!(read_s_tile_json["result"]["contents"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("sheet-tile"));
+
+        let untagged = json!({"world_bounds": [0.0, 0.0, 10.0, 10.0]});
+        let model = json!({"layout": "Model", "world_bounds": [0.0, 0.0, 10.0, 10.0]});
+        assert!(!manifest_layout_differs(Some(&untagged), None));
+        assert!(manifest_layout_differs(Some(&untagged), Some("Sheet1")));
+        assert!(!manifest_layout_differs(Some(&model), Some("model")));
+        assert!(manifest_layout_differs(Some(&model), Some("Sheet1")));
+        assert!(manifest_layout_differs(Some(&model), None));
     }
 
     #[test]

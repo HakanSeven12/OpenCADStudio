@@ -119,7 +119,7 @@ impl Default for ViewportLightingSettings {
 /// mode, and the screen rectangle it occupies. The unified renderer carries
 /// a `Vec<ViewportData>` (one per tiled / floating viewport); each gets its
 /// own inner `Pipeline` instance drawn into its own rectangle.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ViewportData {
     /// Stable identity of the source viewport (its entity handle / tile index /
     /// sheet role). The renderer addresses pipeline slots by list index but
@@ -170,6 +170,9 @@ pub struct ViewportData {
     /// only reusable while this is unchanged.
     pub(in crate::scene) draw_depth_generation: u64,
     pub(in crate::scene) draw_depths: std::sync::Weak<rustc_hash::FxHashMap<u64, [f32; 2]>>,
+    /// Keeps `draw_depths` alive for off-screen async captures even if the
+    /// live scene mutates or closes before the worker thread prepares.
+    pub(in crate::scene) _draw_depths_copy: Option<Arc<rustc_hash::FxHashMap<u64, [f32; 2]>>>,
     pub(in crate::scene) hatches: Arc<Vec<HatchModel>>,
     /// Wipeout fills — rendered in a separate pass AFTER wires.
     pub(in crate::scene) wipeout_hatches: Arc<Vec<HatchModel>>,
@@ -396,30 +399,102 @@ impl shader::Primitive for Primitive {
         bounds: &Rectangle,
         viewport: &Viewport,
     ) {
+        self.prepare_inner(
+            pipeline,
+            device,
+            queue,
+            bounds,
+            viewport.physical_size(),
+            viewport.scale_factor(),
+            false,
+        );
+    }
+
+    fn render(
+        &self,
+        pipeline: &MultiPipeline,
+        encoder: &mut iced::wgpu::CommandEncoder,
+        target: &iced::wgpu::TextureView,
+        clip: &Rectangle<u32>,
+    ) {
+        self.render_inner(pipeline, encoder, target, clip, false);
+    }
+}
+
+impl Primitive {
+    /// Headless off-screen equivalent of [`shader::Primitive::prepare`] that
+    /// leaves global GUI HiDPI scale and GPU status counters untouched.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn prepare_offscreen(
+        &self,
+        pipeline: &mut MultiPipeline,
+        device: &iced::wgpu::Device,
+        queue: &iced::wgpu::Queue,
+        bounds: &Rectangle,
+    ) {
+        let physical_size = iced::Size::new(
+            bounds.width.round().max(1.0) as u32,
+            bounds.height.round().max(1.0) as u32,
+        );
+        self.prepare_inner(pipeline, device, queue, bounds, physical_size, 1.0, true);
+    }
+
+    /// Headless off-screen equivalent of [`shader::Primitive::render`] that
+    /// skips GUI frame telemetry.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn render_offscreen(
+        &self,
+        pipeline: &MultiPipeline,
+        encoder: &mut iced::wgpu::CommandEncoder,
+        target: &iced::wgpu::TextureView,
+        clip: &Rectangle<u32>,
+    ) {
+        self.render_inner(pipeline, encoder, target, clip, true);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_inner(
+        &self,
+        pipeline: &mut MultiPipeline,
+        device: &iced::wgpu::Device,
+        queue: &iced::wgpu::Queue,
+        bounds: &Rectangle,
+        physical_size: iced::Size<u32>,
+        scale: f32,
+        headless: bool,
+    ) {
         let closed = pipeline.release_closed_slots(device);
         if self.viewports.is_empty() {
-            if closed > 0 {
+            if !headless && closed > 0 {
                 report_gpu_live(pipeline);
             }
             return;
         }
         let nav_prepare_started = iced::time::Instant::now();
-        if let Some(gap_ms) = crate::perf::take_view_to_prepare_ms() {
-            if gap_ms >= 1.0 && crate::perf::has_pending_pointer_moves() {
-                crate::perf_record!("[perf] view-to-prepare {:>7.1}ms", gap_ms);
+        if !headless {
+            if let Some(gap_ms) = crate::perf::take_view_to_prepare_ms() {
+                if gap_ms >= 1.0 && crate::perf::has_pending_pointer_moves() {
+                    crate::perf_record!("[perf] view-to-prepare {:>7.1}ms", gap_ms);
+                }
             }
         }
-        let errors_at_entry = crate::scene::pipeline::gpu_errors_seen();
-        let mut recovering = pipeline.gpu_error_epoch != errors_at_entry;
-        if recovering {
-            pipeline.gpu_error_streak = pipeline.gpu_error_streak.saturating_add(1);
-            pipeline.gpu_clean_frames = 0;
+        let errors_at_entry = if headless {
+            0
         } else {
-            // Not every prepare is followed by a draw that can fail, so one
-            // clean prepare does not end a run of failing frames.
-            pipeline.gpu_clean_frames = pipeline.gpu_clean_frames.saturating_add(1);
-            if pipeline.gpu_clean_frames >= 8 {
-                pipeline.gpu_error_streak = 0;
+            crate::scene::pipeline::gpu_errors_seen()
+        };
+        let mut recovering = !headless && pipeline.gpu_error_epoch != errors_at_entry;
+        if !headless {
+            if recovering {
+                pipeline.gpu_error_streak = pipeline.gpu_error_streak.saturating_add(1);
+                pipeline.gpu_clean_frames = 0;
+            } else {
+                // Not every prepare is followed by a draw that can fail, so one
+                // clean prepare does not end a run of failing frames.
+                pipeline.gpu_clean_frames = pipeline.gpu_clean_frames.saturating_add(1);
+                if pipeline.gpu_clean_frames >= 8 {
+                    pipeline.gpu_error_streak = 0;
+                }
             }
         }
         // Rebuilding the caches answers a rejected allocation. When the
@@ -430,7 +505,7 @@ impl shader::Primitive for Primitive {
         const REBUILD_TRIES: u32 = 4;
         const RETRY_EVERY: u32 = 256;
         let streak = pipeline.gpu_error_streak;
-        if streak > REBUILD_TRIES && streak % RETRY_EVERY != 0 {
+        if !headless && streak > REBUILD_TRIES && streak % RETRY_EVERY != 0 {
             static REPORTED: std::sync::Once = std::sync::Once::new();
             REPORTED.call_once(|| {
                 eprintln!(
@@ -449,15 +524,22 @@ impl shader::Primitive for Primitive {
             pipeline.block_geometry.clear();
             pipeline.gpu_error_epoch = errors_at_entry;
         }
-        let scale = viewport.scale_factor();
-        DEVICE_SCALE.store(scale.to_bits(), std::sync::atomic::Ordering::Relaxed);
+        if !headless {
+            DEVICE_SCALE.store(scale.to_bits(), std::sync::atomic::Ordering::Relaxed);
+        }
         let instance_ids: Vec<u64> = self.viewports.iter().map(|vp| vp.instance_id).collect();
         let slots = pipeline.resolve_slots(device, queue, &instance_ids);
         for (i, vp) in self.viewports.iter().enumerate() {
             let inner = &mut pipeline.inners[slots[i]];
-            inner.sync_gpu_error_epoch();
+            if !headless {
+                inner.sync_gpu_error_epoch();
+            }
             // Do not latch rejected uploads as current content.
-            let slot_errors_before = crate::scene::pipeline::gpu_errors_seen();
+            let slot_errors_before = if headless {
+                0
+            } else {
+                crate::scene::pipeline::gpu_errors_seen()
+            };
             // Pipeline slots are addressed by list index, but off-canvas
             // viewports are dropped from the list — so a slot can be reused by a
             // DIFFERENT viewport across frames (e.g. the first viewport scrolls
@@ -480,7 +562,7 @@ impl shader::Primitive for Primitive {
                     width: vp.screen_rect.width * bounds.width * scale,
                     height: vp.screen_rect.height * bounds.height * scale,
                 },
-                viewport.physical_size(),
+                physical_size,
             );
             let clip_size = placement.size;
             inner.viewport = Some(placement);
@@ -1508,58 +1590,63 @@ retained_contributors={}",
             // them all, so the next frame rebuilds this slot instead of
             // drawing nothing for the rest of the session — which is what
             // sent a user to REGENALL to get the model back.
-            if crate::scene::pipeline::gpu_errors_seen() != slot_errors_before {
+            if !headless && crate::scene::pipeline::gpu_errors_seen() != slot_errors_before {
                 inner.forget_cached_keys();
             }
         }
-        let prepare_ms = nav_prepare_started.elapsed().as_secs_f64() * 1000.0;
-        if let Some(sample) = self.nav_perf {
-            crate::perf::record(format_args!(
-                "[perf] nav-prepare op={} cause={} space={} mode={} input={:.2}ms build={:.2}ms prepare={:.2}ms elapsed={:.2}ms viewports={}",
-                sample.op.label(),
-                sample.cause,
-                sample.space,
-                sample.mode,
-                sample.input_ms,
-                sample.build_ms,
-                prepare_ms,
-                sample.started.elapsed().as_secs_f64() * 1000.0,
-                self.viewports.len(),
-            ));
-        } else if crate::perf::enabled() {
-            crate::perf_record!(
-                "[perf] frame-prepare {:>7.2}ms viewports={}",
-                prepare_ms,
-                self.viewports.len(),
-            );
+        if !headless {
+            let prepare_ms = nav_prepare_started.elapsed().as_secs_f64() * 1000.0;
+            if let Some(sample) = self.nav_perf {
+                crate::perf::record(format_args!(
+                    "[perf] nav-prepare op={} cause={} space={} mode={} input={:.2}ms build={:.2}ms prepare={:.2}ms elapsed={:.2}ms viewports={}",
+                    sample.op.label(),
+                    sample.cause,
+                    sample.space,
+                    sample.mode,
+                    sample.input_ms,
+                    sample.build_ms,
+                    prepare_ms,
+                    sample.started.elapsed().as_secs_f64() * 1000.0,
+                    self.viewports.len(),
+                ));
+            } else if crate::perf::enabled() {
+                crate::perf_record!(
+                    "[perf] frame-prepare {:>7.2}ms viewports={}",
+                    prepare_ms,
+                    self.viewports.len(),
+                );
+            }
+            // Memory pressure shortens cold-slot retention without evicting siblings.
+            let errors_now = crate::scene::pipeline::gpu_errors_seen();
+            let urgent = recovering || errors_now != errors_at_entry;
+            let released = pipeline.release_idle_slots(device, &slots, urgent);
+            if released > 0 && crate::perf::enabled() {
+                crate::perf_record!(
+                    "[perf] slots-released n={released} urgent={urgent} slots={}",
+                    pipeline.inners.len(),
+                );
+            }
+            report_gpu_live(pipeline);
         }
-        // Memory pressure shortens cold-slot retention without evicting siblings.
-        let errors_now = crate::scene::pipeline::gpu_errors_seen();
-        let urgent = recovering || errors_now != errors_at_entry;
-        let released = pipeline.release_idle_slots(device, &slots, urgent);
-        if released > 0 && crate::perf::enabled() {
-            crate::perf_record!(
-                "[perf] slots-released n={released} urgent={urgent} slots={}",
-                pipeline.inners.len(),
-            );
-        }
-        report_gpu_live(pipeline);
     }
 
-    fn render(
+    fn render_inner(
         &self,
         pipeline: &MultiPipeline,
         encoder: &mut iced::wgpu::CommandEncoder,
         target: &iced::wgpu::TextureView,
         clip: &Rectangle<u32>,
+        headless: bool,
     ) {
         if self.viewports.is_empty() {
             return;
         }
         let nav_render_started = iced::time::Instant::now();
-        pipeline
-            .frame_rendered
-            .store(true, std::sync::atomic::Ordering::Relaxed);
+        if !headless {
+            pipeline
+                .frame_rendered
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         let clip_right = clip.x + clip.width;
         let clip_bottom = clip.y + clip.height;
         for vp in &self.viewports {
@@ -1614,24 +1701,26 @@ retained_contributors={}",
                 inner.viewcube.render(encoder, target, surface_clip);
             }
         }
-        let render_ms = nav_render_started.elapsed().as_secs_f64() * 1000.0;
-        crate::perf::note_frame_render(render_ms);
-        if let Some(sample) = self.nav_perf {
-            crate::perf::record(format_args!(
-                "[perf] nav-render op={} space={} mode={} encode={:.2}ms elapsed={:.2}ms viewports={}",
-                sample.op.label(),
-                sample.space,
-                sample.mode,
-                render_ms,
-                sample.started.elapsed().as_secs_f64() * 1000.0,
-                self.viewports.len(),
-            ));
-        } else if crate::perf::enabled() && render_ms >= 5.0 {
-            crate::perf_record!(
-                "[perf] frame-encode  {:>7.1}ms viewports={}",
-                render_ms,
-                self.viewports.len(),
-            );
+        if !headless {
+            let render_ms = nav_render_started.elapsed().as_secs_f64() * 1000.0;
+            crate::perf::note_frame_render(render_ms);
+            if let Some(sample) = self.nav_perf {
+                crate::perf::record(format_args!(
+                    "[perf] nav-render op={} space={} mode={} encode={:.2}ms elapsed={:.2}ms viewports={}",
+                    sample.op.label(),
+                    sample.space,
+                    sample.mode,
+                    render_ms,
+                    sample.started.elapsed().as_secs_f64() * 1000.0,
+                    self.viewports.len(),
+                ));
+            } else if crate::perf::enabled() && render_ms >= 5.0 {
+                crate::perf_record!(
+                    "[perf] frame-encode  {:>7.1}ms viewports={}",
+                    render_ms,
+                    self.viewports.len(),
+                );
+            }
         }
     }
 }
@@ -5121,6 +5210,218 @@ impl Scene {
         }
     }
 
+    /// Build a headless off-screen [`Primitive`] for the active layout without
+    /// mutating `vp_size`, render aspect, nav-perf, or live selection state.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn build_offscreen_primitive(
+        &self,
+        bounds: Rectangle,
+        model_render_mode: document::entities::ViewportRenderMode,
+        highlight_handles: Option<&rustc_hash::FxHashSet<document::Handle>>,
+        paper_space_last: bool,
+    ) -> Primitive {
+        let canvas = (bounds.width.max(1.0), bounds.height.max(1.0));
+        let instances = if self.current_layout == "Model" {
+            let tiles = self.model_tiles.borrow();
+            let active = self
+                .active_model_tile
+                .get()
+                .min(tiles.len().saturating_sub(1));
+            vec![ViewportInstance {
+                handle: Handle::NULL,
+                tile_idx: (!tiles.is_empty()).then_some(active),
+                screen_rect: Rectangle {
+                    x: 0.0,
+                    y: 0.0,
+                    width: canvas.0,
+                    height: canvas.1,
+                },
+                camera: self.camera.borrow().clone(),
+                render_mode: model_render_mode,
+                active: true,
+                grid_on: false,
+                paper_sheet: false,
+            }]
+        } else {
+            self.active_viewports(canvas.0, canvas.1, model_render_mode)
+        };
+
+        let mut viewports: Vec<ViewportData> = instances
+            .iter()
+            .filter_map(|inst| self.viewport_data_for(inst, canvas, None, false, false, true))
+            .collect();
+
+        // Retain strong Arcs so async background GPU preparation never loses Weak targets.
+        for vp in &mut viewports {
+            vp.skip_hatch = false;
+            vp.force_rasterize = true;
+            if vp._wires_copy.is_none() {
+                if let Some(wires) = vp.wires.upgrade() {
+                    vp._wires_copy = Some(wires);
+                }
+            }
+            if vp._draw_depths_copy.is_none() {
+                if let Some(depths) = vp.draw_depths.upgrade() {
+                    vp._draw_depths_copy = Some(depths);
+                }
+            }
+        }
+
+        // Paper space sheet adjustments: strip `paper_printable_area` guide and
+        // optionally split the sheet into background fill (first) + content
+        // viewports + paper overlay entities (last, matching `draw_viewports_first`).
+        if self.current_layout != "Model" && !viewports.is_empty() {
+            if let Some(wires) = viewports[0]._wires_copy.as_mut() {
+                if wires.iter().any(|w| w.name == "paper_printable_area") {
+                    Arc::make_mut(wires).retain(|w| w.name != "paper_printable_area");
+                    viewports[0].wires = Arc::downgrade(wires);
+                    viewports[0].wire_content_id = viewports[0]
+                        .wire_content_id
+                        .wrapping_mul(31)
+                        .wrapping_add(1);
+                }
+            }
+
+            if paper_space_last && viewports.len() > 1 {
+                let sheet = viewports.remove(0);
+                let mut bg_sheet = sheet.clone();
+                let empty_wires = Arc::new(Vec::new());
+                bg_sheet.wires = Arc::downgrade(&empty_wires);
+                bg_sheet._wires_copy = Some(empty_wires);
+                bg_sheet.face3d_wires = Arc::new(Vec::new());
+                bg_sheet.text_verts = Arc::new(Vec::new());
+                bg_sheet.annotation_context_wires = Arc::new(Vec::new());
+                bg_sheet.selected_annotation_context_wires = Arc::new(Vec::new());
+                bg_sheet.preview_wires = Arc::new(Vec::new());
+                bg_sheet.preview_hatches = Arc::new(Vec::new());
+                bg_sheet.preview_text_verts = Arc::new(Vec::new());
+                bg_sheet.wipeout_hatches = Arc::new(Vec::new());
+                bg_sheet.images = Arc::new(Vec::new());
+                bg_sheet.meshes = Arc::new(Vec::new());
+                let bg_hatches: Vec<_> = sheet
+                    .hatches
+                    .iter()
+                    .filter(|h| h.draw_depth <= -1.5)
+                    .cloned()
+                    .collect();
+                bg_sheet.hatches = Arc::new(bg_hatches);
+                bg_sheet.skip_background = false;
+                bg_sheet.wire_content_id = 0;
+
+                let mut overlay_sheet = sheet;
+                overlay_sheet.instance_id ^= 0x5053_4f56_4552_4c41;
+                overlay_sheet.skip_background = true;
+                if overlay_sheet.hatches.iter().any(|h| h.draw_depth <= -1.5) {
+                    Arc::make_mut(&mut overlay_sheet.hatches).retain(|h| h.draw_depth > -1.5);
+                }
+
+                let mut reordered = Vec::with_capacity(viewports.len() + 2);
+                reordered.push(bg_sheet);
+                reordered.extend(viewports);
+                reordered.push(overlay_sheet);
+                viewports = reordered;
+            }
+        }
+
+        let hl_color = [0.0, 0.72, 1.0, 1.0];
+        let mut selection_effect = false;
+        let mut selection_color = self.selection_color;
+        let mut selection_widen = self.selection_widen;
+        if let Some(hl) = highlight_handles.filter(|s| !s.is_empty()) {
+            let mut sig: u64 = 0xcbf29ce484222325;
+            let mut sorted: Vec<u64> = hl.iter().map(|h| h.value()).collect();
+            sorted.sort_unstable();
+            for val in sorted {
+                sig ^= val;
+                sig = sig.wrapping_mul(0x100000001b3);
+            }
+            let hl_arc = Arc::new(hl.clone());
+            selection_effect = true;
+            selection_color = hl_color;
+            selection_widen = self.selection_widen.max(1.5);
+            for vp in &mut viewports {
+                vp.selected_handles = Arc::clone(&hl_arc);
+                vp.selection_generation = sig.max(1);
+                vp.selected_sig = sig.max(1);
+
+                if vp
+                    .hatches
+                    .iter()
+                    .any(|h| h.entity.is_some_and(|e| hl.contains(&e)))
+                {
+                    for hatch in Arc::make_mut(&mut vp.hatches).iter_mut() {
+                        if hatch.entity.is_some_and(|e| hl.contains(&e)) {
+                            hatch.color = hl_color;
+                            hatch.aci = 0;
+                            hatch.line_weight_px = hatch.line_weight_px.max(2.5);
+                            if let crate::scene::model::hatch_model::HatchPattern::Gradient {
+                                color2,
+                                ..
+                            } = &mut hatch.pattern
+                            {
+                                *color2 = hl_color;
+                            }
+                        }
+                    }
+                }
+
+                // Highlighted wipeouts may lack a wire border when WIPEOUTFRAME=0;
+                // add a cyan perimeter wire so they light up cleanly on GPU too.
+                if vp
+                    .wipeout_hatches
+                    .iter()
+                    .any(|w| w.entity.is_some_and(|e| hl.contains(&e)))
+                {
+                    let mut extra = Vec::new();
+                    for wipeout in vp.wipeout_hatches.iter() {
+                        if wipeout.entity.is_some_and(|e| hl.contains(&e))
+                            && wipeout.boundary.len() >= 2
+                        {
+                            let ox = wipeout.world_origin[0];
+                            let oy = wipeout.world_origin[1];
+                            let mut points: Vec<[f64; 3]> = wipeout
+                                .boundary
+                                .iter()
+                                .map(|&[bx, by]| [ox + f64::from(bx), oy + f64::from(by), 0.0])
+                                .collect();
+                            if points.first() != points.last() {
+                                if let Some(&first) = points.first() {
+                                    points.push(first);
+                                }
+                            }
+                            let mut wire = WireModel::solid_f64(
+                                format!("{}", wipeout.entity.unwrap_or(Handle::NULL).value()),
+                                points,
+                                hl_color,
+                                false,
+                            );
+                            wire.line_weight_px = 2.5;
+                            extra.push(wire);
+                        }
+                    }
+                    if !extra.is_empty() {
+                        if let Some(wires) = vp._wires_copy.as_mut() {
+                            Arc::make_mut(wires).extend(extra);
+                            vp.wires = Arc::downgrade(wires);
+                            vp.wire_content_id = vp.wire_content_id.wrapping_add(1);
+                        }
+                    }
+                }
+            }
+        }
+
+        Primitive {
+            scene_owner: std::sync::Arc::downgrade(&self.render_lifetime),
+            viewports,
+            bg_color: [0.0, 0.0, 0.0, 0.0],
+            viewcube_text_color: [1.0, 1.0, 1.0, 1.0],
+            selection_color,
+            selection_effect,
+            selection_widen,
+            nav_perf: None,
+        }
+    }
+
     /// Build a single-pane Model primitive: the viewport for tile `tile_idx`,
     /// filling the shader widget's own `bounds` (= the pane rectangle the
     /// `pane_grid` laid out). Each Model pane is its own shader widget, so the
@@ -5832,6 +6133,7 @@ impl Scene {
             preview_text_verts,
             draw_depth_generation: self.draw_depth_generation(),
             draw_depths: Arc::downgrade(&draw_depths),
+            _draw_depths_copy: None,
             hatches,
             wipeout_hatches,
             images,

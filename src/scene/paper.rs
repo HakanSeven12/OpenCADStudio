@@ -2,7 +2,7 @@
 use super::*;
 
 impl Scene {
-    pub(super) fn paper_viewport_handles(&self) -> (Handle, Handle, Arc<Vec<Handle>>) {
+    pub(crate) fn paper_viewport_handles(&self) -> (Handle, Handle, Arc<Vec<Handle>>) {
         {
             let cache = self.paper_viewport_cache.borrow();
             if let Some(cache) = cache.get(&self.current_layout) {
@@ -725,7 +725,7 @@ impl Scene {
     /// Build a Camera oriented and scaled to match a paper-space Viewport entity.
     /// Used by `active_viewports` to render model-space content through each
     /// content viewport's own view direction and scale.
-    pub(super) fn camera_for_viewport(&self, vp_handle: Handle) -> Option<view::camera::Camera> {
+    pub(crate) fn camera_for_viewport(&self, vp_handle: Handle) -> Option<view::camera::Camera> {
         let mut camera = self.viewport_view_camera(vp_handle)?;
         // The view decides where the camera looks; its depth range must still
         // hold the whole model. Sized from the view height alone (64 times

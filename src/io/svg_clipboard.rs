@@ -99,4 +99,41 @@ mod tests {
         // And reads back as geometry.
         assert!(crate::io::svg_import::read(svg.as_bytes(), [100.0, 100.0]).is_ok());
     }
+
+    /// The size an SVG reader gets when it takes the user unit as a CSS
+    /// pixel (1/96 in), as SVG does by default and as drawing programs do
+    /// when they paste: `width` × `height` in millimetres.
+    fn size_at_one_unit_per_px(svg: &str) -> [f64; 2] {
+        let attribute = |name: &str| {
+            let start = svg.find(&format!(" {name}=\"")).unwrap() + name.len() + 3;
+            let end = start + svg[start..].find('"').unwrap();
+            svg[start..end].to_owned()
+        };
+        let view_box: Vec<f64> = attribute("viewBox")
+            .split_whitespace()
+            .map(|v| v.parse().unwrap())
+            .collect();
+        let mm_per_px = 25.4 / 96.0;
+        [view_box[2] * mm_per_px, view_box[3] * mm_per_px]
+    }
+
+    #[test]
+    fn a_reader_taking_svg_units_as_pixels_gets_the_size_in_millimetres() {
+        let mut wire = WireModel::default();
+        wire.points = vec![
+            [0.0, 0.0, 0.0],
+            [60.0, 0.0, 0.0],
+            [60.0, 40.0, 0.0],
+            [0.0, 40.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ];
+        wire.color = [0.0, 0.0, 1.0, 1.0];
+        let svg = wires_svg(&[&wire]).unwrap();
+        assert!(svg.contains(r#"width="60mm" height="40mm""#), "{svg}");
+        let [width, height] = size_at_one_unit_per_px(&svg);
+        assert!(
+            (width - 60.0).abs() < 1e-6 && (height - 40.0).abs() < 1e-6,
+            "a 60 × 40 mm drawing reads as {width:.3} × {height:.3} mm"
+        );
+    }
 }

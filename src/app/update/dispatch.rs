@@ -9129,14 +9129,9 @@ impl OpenCADStudio {
                 let i = self.active_tab;
                 let handles = self.property_target_handles(i);
                 if handles.is_empty() {
-                    if self.has_property_selection(i) {
-                        return Task::none();
-                    }
-                    self.tabs[i].scene.document.header.current_line_weight = lw.value();
-                    self.tabs[i].dirty = true;
-                    self.ribbon.active_lineweight = lw;
+                    let task = self.on_ribbon_lineweight_changed(lw);
                     self.refresh_properties();
-                    return Task::none();
+                    return task;
                 }
                 self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
                     if let Some(entity) = app.tabs[i].scene.document.get_entity_mut(handle) {

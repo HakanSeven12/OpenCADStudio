@@ -4745,6 +4745,17 @@ impl Pipeline {
 }
 
 impl MultiPipeline {
+    /// After a panic in `prepare` the caches can be half written: forget
+    /// them, so that the next draw builds them again.
+    pub(in crate::scene) fn forget_after_draw_panic(&mut self) {
+        self.wire_buffer_cache.clear();
+        self.mesh_batch_cache.clear();
+        self.block_geometry.clear();
+        for inner in &mut self.inners {
+            inner.forget_cached_keys();
+        }
+    }
+
     /// A closed scene no longer owns any GPU slot, even on the Start tab.
     pub(in crate::scene) fn release_closed_slots(&mut self, device: &wgpu::Device) -> usize {
         let mut released = 0;
@@ -4971,6 +4982,8 @@ pub struct MultiPipeline {
     slot_last_used: Vec<u64>,
     slot_clock: u64,
     pub(crate) frame_rendered: std::sync::atomic::AtomicBool,
+    /// The frames whose draw panicked, so that their data is not drawn again.
+    pub(crate) draw_faults: crate::scene::view::draw_guard::DrawFaults,
     pub(crate) gpu_error_epoch: usize,
     /// Consecutive frames that each reported new device errors.
     pub(crate) gpu_error_streak: u32,
@@ -5314,6 +5327,7 @@ impl MultiPipeline {
             slot_last_used: vec![0],
             slot_clock: 0,
             frame_rendered: std::sync::atomic::AtomicBool::new(false),
+            draw_faults: Default::default(),
             gpu_error_epoch: 0,
             gpu_error_streak: 0,
             gpu_clean_frames: 0,
@@ -5335,6 +5349,7 @@ impl iced::widget::shader::Pipeline for MultiPipeline {
             slot_last_used: vec![0],
             slot_clock: 0,
             frame_rendered: std::sync::atomic::AtomicBool::new(false),
+            draw_faults: Default::default(),
             gpu_error_epoch: gpu_errors_seen(),
             gpu_error_streak: 0,
             gpu_clean_frames: 0,

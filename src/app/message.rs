@@ -623,6 +623,8 @@ pub enum Message {
     TabClose(u64),
     /// Save every drawing that already has a file path.
     DocTabSaveAll,
+    /// Draw again a window whose view panicked.
+    RetryWindowView(window::Id),
     /// Close every non-Start drawing tab.
     DocTabCloseAll,
     /// Close every non-Start drawing tab except the given one.

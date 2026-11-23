@@ -796,9 +796,68 @@ fn named_visual_style(
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// A test sets it to make the next window view panic.
+    pub(in crate::app) static TEST_VIEW_PANIC: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
+/// What a window shows after its view panicked: the user can still save.
+#[cfg(not(target_arch = "wasm32"))]
+fn failed_window_view(window_id: window::Id) -> Element<'static, Message> {
+    let actions = row![
+        button(text(t!("Save As"))).on_press(Message::SaveAs),
+        button(text(t!("Save All"))).on_press(Message::DocTabSaveAll),
+        button(text(t!("Try again"))).on_press(Message::RetryWindowView(window_id)),
+    ]
+    .spacing(8);
+    let message = text(t!(
+        "This window could not be drawn. Save your work under a new name."
+    ));
+    container(column![message, actions].spacing(12))
+        .center(Fill)
+        .into()
+}
+
 impl OpenCADStudio {
+    /// The view of a window, under a panic guard (`scene/view/draw_guard.rs`).
+    /// After a panic the window shows [`failed_window_view`] until the user
+    /// asks to try again.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn view(&self, window_id: window::Id) -> Element<'_, Message> {
+        if !self.window_view_failed(window_id) {
+            let drawn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.view_window(window_id)
+            }));
+            match drawn {
+                Ok(element) => return element,
+                Err(payload) => {
+                    crate::scene::view::draw_guard::note_panic(payload.as_ref());
+                    self.failed_views
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .push(window_id);
+                }
+            }
+        }
+        failed_window_view(window_id)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn window_view_failed(&self, window_id: window::Id) -> bool {
+        self.failed_views
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&window_id)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn view_window(&self, window_id: window::Id) -> Element<'_, Message> {
+        #[cfg(test)]
+        if TEST_VIEW_PANIC.with(|panic| panic.replace(false)) {
+            panic!("test panic in view");
+        }
         crate::sys::startup_times::view_tick();
         // ── Windows of their own ──────────────────────────────────────────
         // A tool dialog or dock pallet moved out of the main window draws

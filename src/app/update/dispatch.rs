@@ -2996,6 +2996,13 @@ impl OpenCADStudio {
             }
 
             Message::DocTabSaveAll => self.dispatch_command("SAVEALL"),
+            Message::RetryWindowView(window_id) => {
+                self.failed_views
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .retain(|failed| *failed != window_id);
+                Task::none()
+            }
 
             // Both close-* variants resolve ids against the live tab list at
             // handling time (like `TabClose` above), so a batch that closed

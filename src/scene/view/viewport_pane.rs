@@ -156,6 +156,7 @@ impl<Msg> shader::Program<Msg> for ReleaseClosedViewports {
             selection_effect: false,
             selection_widen: 0.0,
             nav_perf: None,
+            geometry_epoch: 0,
         }
     }
 }

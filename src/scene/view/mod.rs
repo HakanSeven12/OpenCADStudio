@@ -1,5 +1,6 @@
 pub mod camera;
 pub mod dispatch;
+pub(crate) mod draw_guard;
 pub mod projection;
 pub mod render;
 pub mod transform;

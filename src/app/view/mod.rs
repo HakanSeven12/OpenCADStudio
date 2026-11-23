@@ -4269,6 +4269,29 @@ impl OpenCADStudio {
         } else {
             event::listen_with(window_event)
         };
+        // While a column divider is dragged, a release anywhere ends it: the
+        // capture layers only hear a release over their own window, and one
+        // past the edge of a pallet's window of its own left the column
+        // following the pointer until the next click.
+        let column_drag_release = if matches!(
+            self.dock_drag,
+            Some(
+                crate::ui::dock::DockDrag::LayerColumn(_)
+                    | crate::ui::dock::DockDrag::WalkColumn(_)
+            )
+        ) {
+            event::listen_with(|event, _, _| {
+                use iced::mouse::{Button, Event as Mouse};
+                match event {
+                    iced::Event::Mouse(Mouse::ButtonReleased(Button::Left)) => {
+                        Some(Message::Dock(crate::ui::dock::DockMsg::DragRelease))
+                    }
+                    _ => None,
+                }
+            })
+        } else {
+            Subscription::none()
+        };
         #[cfg(not(target_arch = "wasm32"))]
         let control = iced::Subscription::batch([
             super::control::subscribe().map(Message::ControlRequest),
@@ -4306,6 +4329,7 @@ impl OpenCADStudio {
                 _ => None,
             }),
             control,
+            column_drag_release,
             point_cloud_reads,
             frames,
             history_tick,

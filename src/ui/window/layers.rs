@@ -213,23 +213,19 @@ pub fn toggle_column(col: LayerSortCol) {
     });
 }
 
-/// Move `col` one place left (`-1`) or right (`1`) among the shown
-/// columns: the hidden ones it passes keep their places.
-pub fn move_column(col: LayerSortCol, step: i8) {
+/// Move `col` to the other side of `past`, the column the header shows
+/// next to it; the columns between them that the header does not show keep
+/// their places.
+pub fn move_column(col: LayerSortCol, past: LayerSortCol) {
     COLUMN_LAYOUT.with(|layout| {
         let mut layout = layout.borrow_mut();
-        let Some(at) = layout.iter().position(|(c, _)| *c == col) else {
+        let (Some(at), Some(to)) = (
+            layout.iter().position(|(c, _)| *c == col),
+            layout.iter().position(|(c, _)| *c == past),
+        ) else {
             return;
         };
-        let next = if step < 0 {
-            layout[..at].iter().rposition(|(_, shown)| *shown)
-        } else {
-            layout[at + 1..]
-                .iter()
-                .position(|(_, shown)| *shown)
-                .map(|i| at + 1 + i)
-        };
-        if let Some(to) = next {
+        if at != to {
             let entry = layout.remove(at);
             layout.insert(to, entry);
         }
@@ -1432,14 +1428,18 @@ impl LayerPanel {
         ]
         .spacing(km::TOOL_GAP)
         .align_y(iced::Center);
-        for col in &columns {
+        for (n, col) in columns.iter().enumerate() {
+            // Its neighbours as the header shows them, which the menu moves
+            // it past.
+            let left = n.checked_sub(1).map(|i| columns[i]);
+            let right = columns.get(n + 1).copied();
             header_row = header_row.push(with_column_menu(
                 header_cell(
                     sortable_header(col.label(), *col, Fill, sc, sa),
                     column_width(col_w, *col),
                     Message::LayerColGrab(*col),
                 ),
-                Some(*col),
+                Some((*col, left, right)),
             ));
         }
 
@@ -1860,11 +1860,15 @@ fn more_item(label: Cow<'static, str>, msg: Message) -> Item {
     Item::new(label, Message::LayerMoreRun(Box::new(msg)))
 }
 
+/// The movable column right-clicked, with the columns the header shows to its
+/// left and right.
+type ClickedColumn = (LayerSortCol, Option<LayerSortCol>, Option<LayerSortCol>);
+
 /// `header` with the column menu on a right-click. `clicked`: the movable
 /// column right-clicked, which the menu can move.
 fn with_column_menu<'a>(
     header: Element<'a, Message>,
-    clicked: Option<LayerSortCol>,
+    clicked: Option<ClickedColumn>,
 ) -> Element<'a, Message> {
     iced_aw::ContextMenu::new(header, move || column_menu(clicked)).into()
 }
@@ -1872,22 +1876,18 @@ fn with_column_menu<'a>(
 /// The header's right-click menu, a kit menu like every other: Move Left and
 /// Move Right for the column clicked, a tick for every movable column to show
 /// or hide it, and Show All. A press runs the item and closes the menu.
-fn column_menu(clicked: Option<LayerSortCol>) -> Element<'static, Message> {
+fn column_menu(clicked: Option<ClickedColumn>) -> Element<'static, Message> {
     let layout = column_layout();
     let mut items: Vec<Item> = Vec::new();
-    if let Some(col) = clicked {
-        // Moves step over hidden columns: they are where the header shows.
-        let shown: Vec<LayerSortCol> = layout
-            .iter()
-            .filter(|(_, shown)| *shown)
-            .map(|(c, _)| *c)
-            .collect();
-        let at = shown.iter().position(|c| *c == col);
-        let can_left = at.is_some_and(|at| at > 0);
-        let can_right = at.is_some_and(|at| at + 1 < shown.len());
-        items.push(Item::new(t!("Move Left"), Message::LayerColumnMove(col, -1)).enabled(can_left));
-        items
-            .push(Item::new(t!("Move Right"), Message::LayerColumnMove(col, 1)).enabled(can_right));
+    if let Some((col, left, right)) = clicked {
+        // Each move goes past the neighbour the header shows, so it always
+        // changes what is seen; a narrow pallet hides some columns.
+        let step = |label: Cow<'static, str>, past: Option<LayerSortCol>| match past {
+            Some(past) => Item::new(label, Message::LayerColumnMove(col, past)),
+            None => Item::new(label, Message::LayerColumnMove(col, col)).enabled(false),
+        };
+        items.push(step(t!("Move Left"), left));
+        items.push(step(t!("Move Right"), right));
         items.push(Item::Separator);
     }
     let all_shown = layout.iter().all(|(_, shown)| *shown);
@@ -2595,7 +2595,7 @@ pub const COL_MIN_W: f32 = 24.0;
 /// The width the table's rows need: the status and Name columns, the
 /// `columns` shown, `viewports` viewport columns and the eye, with the
 /// gaps and the row's side padding between and around them.
-pub fn table_content_width(
+fn table_content_width(
     name_col_w: f32,
     widths: &HashMap<LayerSortCol, f32>,
     columns: &[LayerSortCol],
@@ -2638,12 +2638,15 @@ mod column_layout_tests {
     fn columns_hide_move_and_round_trip() {
         set_column_layout_names(&[]);
         toggle_column(LayerSortCol::Plot);
-        move_column(LayerSortCol::Color, -1);
-        move_column(LayerSortCol::On, -1);
+        // Left past Lock, the column the header shows before it: the hidden
+        // Plot between them keeps its place.
+        move_column(LayerSortCol::Color, LayerSortCol::Lock);
         let names = column_layout_names();
-        // Color steps left past the hidden Plot, to before Lock; On is first
-        // and stays.
         assert_eq!(names[..5], ["On", "Freeze", "Color", "Lock", "-Plot"]);
+        // And right again past Lock.
+        move_column(LayerSortCol::Color, LayerSortCol::Lock);
+        let names = column_layout_names();
+        assert_eq!(names[..5], ["On", "Freeze", "Lock", "Color", "-Plot"]);
         show_all_columns();
         assert!(column_layout().iter().all(|(_, shown)| *shown));
         set_column_layout_names(&["-Lock".into(), "Transparency".into(), "bogus".into()]);

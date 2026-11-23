@@ -12591,8 +12591,8 @@ impl OpenCADStudio {
                 self.save_config();
                 Task::none()
             }
-            Message::LayerColumnMove(col, step) => {
-                crate::ui::window::layers::move_column(col, step);
+            Message::LayerColumnMove(col, past) => {
+                crate::ui::window::layers::move_column(col, past);
                 self.save_config();
                 Task::none()
             }

@@ -902,8 +902,12 @@ pub enum Message {
     LayerColumnsShowAll,
     /// Show or hide a Layer Manager column.
     LayerColumnToggle(crate::ui::window::layers::LayerSortCol),
-    /// Move a Layer Manager column left (-1) or right (1).
-    LayerColumnMove(crate::ui::window::layers::LayerSortCol, i8),
+    /// Move a Layer Manager column past the column the header shows next to
+    /// it (the second).
+    LayerColumnMove(
+        crate::ui::window::layers::LayerSortCol,
+        crate::ui::window::layers::LayerSortCol,
+    ),
     /// Toggle the persistent literal-space mode (the `>` button): while on,
     /// every command line behaves as if it started with `>` — Space stays in
     /// the input instead of submitting. Saved in the user config.

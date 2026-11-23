@@ -38,8 +38,9 @@ const ROW_H: f32 = km::ROW_H;
 /// (picking, filtering, walking) are handled in `app::layer_walk`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LayerWalkMsg {
-    /// Start dragging the divider after a column: 0 the name, 1 the count.
-    ColumnGrab(usize),
+    /// Start dragging the divider after a column (0 the name, 1 the count)
+    /// from the width it shows.
+    ColumnGrab(usize, f32),
     /// A row was pressed. Iced's `mouse_area` carries no modifier state, so
     /// the view bakes in the app's live Ctrl/Shift tracking (#1664).
     RowClick {
@@ -662,9 +663,20 @@ pub const COL_MIN_W: f32 = 24.0;
 /// The name and object-count columns' widths until the user sizes them.
 pub const DEFAULT_COL_W: [f32; 2] = [240.0, 48.0];
 
+/// The widths the columns show in a list `room` wide: the Name column at
+/// its default gives way to the other columns (down to its least width); a
+/// width set by a drag is kept.
+fn shown_col_w(col_w: [f32; 2], room: f32) -> [f32; 2] {
+    if col_w[0] != DEFAULT_COL_W[0] {
+        return col_w;
+    }
+    let others = list_content_width([0.0, col_w[1]]);
+    [col_w[0].min(room - others).max(COL_MIN_W), col_w[1]]
+}
+
 /// The width a row needs: the name, swatch and count columns, the pin and
 /// the state marks, with the gaps between them and the row's side padding.
-pub fn list_content_width(col_w: [f32; 2]) -> f32 {
+fn list_content_width(col_w: [f32; 2]) -> f32 {
     2.0 * km::CELL_PAD_X
         + col_w[0]
         + COL_SWATCH
@@ -689,10 +701,12 @@ pub fn view<'a>(
     width: f32,
     chrome: crate::ui::dock::Chrome,
 ) -> Element<'a, Message> {
-    // The columns keep the widths they were dragged to, as in the Layer
-    // Manager; when they need more room than the pallet has, the list
-    // scrolls sideways.
+    // Columns set by a drag keep their width, as in the Layer Manager, and
+    // the list scrolls sideways when they need more room than the pallet
+    // has. An untouched Name column still gives way, so the eye stays in
+    // view on a narrow pallet.
     let room = (width - km::GRID_INSET_L - km::GRID_INSET_R).max(0.0);
+    let col_w = shown_col_w(col_w, room);
     let body = container(view_content(
         rows,
         session,
@@ -870,7 +884,7 @@ fn view_content<'a>(
         container(
             row![
                 head,
-                kit::column_divider(Some(msg(LayerWalkMsg::ColumnGrab(grab))))
+                kit::column_divider(Some(msg(LayerWalkMsg::ColumnGrab(grab, width))))
             ]
             .height(Fill),
         )
@@ -1694,5 +1708,23 @@ mod tests {
         assert_eq!(s.selected, vec!["L4999"]);
         assert!(key_navigate(&rows, &mut s, false).is_some());
         assert!(start.elapsed() < std::time::Duration::from_secs(2));
+    }
+}
+
+#[cfg(test)]
+mod column_width_tests {
+    use super::*;
+
+    /// An untouched Name column gives way on a narrow pallet so the eye stays
+    /// in view; one set by a drag keeps its width and the list scrolls.
+    #[test]
+    fn only_the_untouched_name_column_gives_way() {
+        let others = list_content_width([0.0, DEFAULT_COL_W[1]]);
+        let narrow = others + 100.0;
+        assert_eq!(shown_col_w(DEFAULT_COL_W, narrow)[0], 100.0);
+        assert_eq!(shown_col_w(DEFAULT_COL_W, 2000.0), DEFAULT_COL_W);
+        assert_eq!(shown_col_w(DEFAULT_COL_W, 0.0)[0], COL_MIN_W);
+        let set = [300.0, DEFAULT_COL_W[1]];
+        assert_eq!(shown_col_w(set, narrow), set);
     }
 }

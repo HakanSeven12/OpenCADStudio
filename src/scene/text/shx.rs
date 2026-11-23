@@ -103,6 +103,12 @@ thread_local! {
     pub(crate) static DISK_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread has read a font file.
+    pub(crate) static FILE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn load_file(path: &str) -> Option<Arc<ShxFile>> {
     if let Ok(c) = file_cache().lock() {
         if let Some(hit) = c.get(path) {
@@ -117,6 +123,8 @@ fn load_file(path: &str) -> Option<Arc<ShxFile>> {
 }
 
 fn parse_file(path: &str) -> Option<ShxFile> {
+    #[cfg(test)]
+    FILE_READS.with(|count| count.set(count.get() + 1));
     let bytes = std::fs::read(path).ok()?;
     // Header line: `AutoCAD-86 <kind> 1.x` + CR LF SUB.
     let head_end = bytes.iter().position(|&b| b == 0x1A)?;
@@ -1121,5 +1129,43 @@ pub(crate) mod tests {
         let (lo, hi) = ys.fold((f32::MAX, f32::MIN), |(lo, hi), y| (lo.min(y), hi.max(y)));
         // 36 font units at above = 36 → the 9-unit cap height.
         assert!(((hi - lo) - 9.0).abs() < 0.05, "ink height {}", hi - lo);
+    }
+
+    /// The open worker reads the font of each text style, also of a style
+    /// that no text in model space uses. The first refresh of the
+    /// Properties palette resolves each style on the UI thread
+    /// (`set_fixed_text_heights`), and read those font files there.
+    #[test]
+    fn the_open_worker_reads_the_font_of_a_style_that_no_text_uses() {
+        let path = tmp("unused-style.shx", &synthetic_bigfont());
+        let mut document = document::Document::new();
+        let mut style = document::tables::TextStyle::new("UNUSED");
+        style.font_file = path.clone();
+        document.text_styles.add(style).unwrap();
+
+        // The open worker.
+        let prepared = std::thread::spawn(move || {
+            let mut caches = crate::scene::build_derived_caches_impl(&document, None, None);
+            let (document, _) =
+                crate::scene::prepare_open_geometry(document, &mut caches, [0.0, 0.0, 0.0, 1.0]);
+            (document, FILE_READS.with(|count| count.get()))
+        })
+        .join()
+        .unwrap();
+        let (document, worker_reads) = prepared;
+        assert_eq!(worker_reads, 1, "the worker read the font file");
+
+        // The UI thread: the style is resolved from what the worker read.
+        let before = FILE_READS.with(|count| count.get());
+        crate::entities::common::set_fixed_text_heights(&document);
+        assert_eq!(
+            FILE_READS.with(|count| count.get()) - before,
+            0,
+            "the UI thread reads no font file"
+        );
+        assert!(
+            load_file(&path).is_some(),
+            "the font is in the cache for the draw"
+        );
     }
 }

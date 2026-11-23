@@ -1479,7 +1479,8 @@ fn dim_seg(a: Vector3, b: Vector3, common: &document::entities::EntityCommon) ->
 
 fn dim_geom_entities(
     geometry: &crate::scene::convert::tessellate::DimGeom,
-    ext_common: &document::entities::EntityCommon,
+    first_ext_common: &document::entities::EntityCommon,
+    second_ext_common: &document::entities::EntityCommon,
     dim_common: &document::entities::EntityCommon,
 ) -> Vec<EntityType> {
     let mut entities = Vec::new();
@@ -1496,8 +1497,12 @@ fn dim_geom_entities(
     let mut arrow_common = dim_common.clone();
     arrow_common.linetype = "Continuous".into();
     arrow_common.linetype_handle = None;
+    let (first, second) = geometry
+        .ext_lines
+        .split_at(geometry.ext2_start.unwrap_or(geometry.ext_lines.len()));
     for (points, common) in [
-        (geometry.ext_lines.as_slice(), ext_common),
+        (first, first_ext_common),
+        (second, second_ext_common),
         (geometry.dim_lines.as_slice(), dim_common),
         (geometry.arrow_lines.as_slice(), &arrow_common),
     ] {
@@ -1762,6 +1767,7 @@ struct DimMetrics {
     dimlwe: i16,
     dimltype: Handle,
     dimltex1: Handle,
+    dimltex2: Handle,
     arrow1: crate::scene::convert::tessellate::ArrowKind,
     arrow2: crate::scene::convert::tessellate::ArrowKind,
 }
@@ -1880,6 +1886,7 @@ fn dim_metrics(dim: &Dimension, doc: &Document) -> DimMetrics {
         dimlwe: style.map(|s| s.dimlwe).unwrap_or(-2),
         dimltype: style.map(|s| s.dimltex_handle).unwrap_or(Handle::NULL),
         dimltex1: style.map(|s| s.dimltex1_handle).unwrap_or(Handle::NULL),
+        dimltex2: style.map(|s| s.dimltex2_handle).unwrap_or(Handle::NULL),
         arrow1,
         arrow2,
     }
@@ -1926,12 +1933,7 @@ fn with_dim_linetype(
     common
 }
 
-/// Baked geometry for an angular dimension, matching the live render exactly:
-/// an extension line from each measured ray point flush out to the dimension
-/// arc, the swept arc, and a terminator at each arc end. (The live angular path
-/// applies neither DIMEXO/DIMEXE nor DIMSE suppression, so the bake mustn't
-/// either, or the dim would shift on reload. Adding those to both is tracked as
-/// a separate live-render enhancement.) #181 / DIM-022.
+/// Geometry for a three-point angle or arc-length dimension block.
 fn angular_block_segs(
     vertex: Vector3,
     p1: Vector3,
@@ -2337,61 +2339,6 @@ fn explode_dimension(dim: &Dimension, doc: &Document) -> Vec<EntityType> {
             result.push(make_seg(&point, &leader, &dim_c));
             // The dimension line reaches the centre, so no centre mark.
         }
-        Dimension::Angular2Ln(d) => {
-            // Two lines, `first_point`→`second_point` and `angle_vertex`→
-            // `definition_point`, measured at their crossing, as drawn live.
-            let dv = |p: Vector3| DVec3::new(p.x, p.y, p.z);
-            let lines = [
-                (dv(d.first_point), dv(d.second_point)),
-                (dv(d.angle_vertex), dv(d.definition_point)),
-            ];
-            let arc_point = dv(d.dimension_arc);
-            match crate::entities::dimension::two_line_angle_frame_f64(
-                lines[0].0, lines[0].1, lines[1].0, lines[1].1, arc_point,
-            ) {
-                Some((vertex, start, end)) => {
-                    let radius = vertex.distance(arc_point);
-                    // An extension line runs from the side's nearer end out
-                    // to the arc, and not at all where the arc crosses it.
-                    let foot = |angle: f64| {
-                        let dir = DVec3::new(angle.cos(), angle.sin(), 0.0);
-                        let deviation =
-                            |(a, b): (DVec3, DVec3)| (b - a).normalize_or(dir).cross(dir).length();
-                        let (a, b) = if deviation(lines[0]) <= deviation(lines[1]) {
-                            lines[0]
-                        } else {
-                            lines[1]
-                        };
-                        let along = |p: DVec3| (p - vertex).dot(dir);
-                        let arc_end = vertex + dir * radius;
-                        if radius >= along(a).min(along(b)) - 1e-9
-                            && radius <= along(a).max(along(b)) + 1e-9
-                        {
-                            arc_end
-                        } else if a.distance(arc_end) <= b.distance(arc_end) {
-                            a
-                        } else {
-                            b
-                        }
-                    };
-                    let v = |p: DVec3| Vector3::new(p.x, p.y, p.z);
-                    result.extend(angular_block_segs(
-                        v(vertex),
-                        v(foot(start)),
-                        v(foot(end)),
-                        d.dimension_arc,
-                        &met,
-                        &ext_c,
-                        &dim_c,
-                        Some((start, end)),
-                    ));
-                }
-                None => {
-                    result.push(make_seg(&d.first_point, &d.second_point, &ext_c));
-                    result.push(make_seg(&d.angle_vertex, &d.definition_point, &ext_c));
-                }
-            }
-        }
         Dimension::Angular3Pt(d) => {
             result.extend(angular_block_segs(
                 d.angle_vertex,
@@ -2436,17 +2383,27 @@ fn explode_dimension(dim: &Dimension, doc: &Document) -> Vec<EntityType> {
                 ));
             }
         }
-        Dimension::Diameter(_) | Dimension::LargeRadial(_) => {
-            let geometry = crate::entities::dimension::baked_radial_geometry(
+        Dimension::Angular2Ln(_) | Dimension::Diameter(_) | Dimension::LargeRadial(_) => {
+            let geometry = crate::entities::dimension::baked_dimension_geometry(
                 dim,
                 doc,
                 annotative_picture_scale(dim, doc),
                 &met.arrow1,
                 &met.arrow2,
             );
-            let radial_ext_c = with_dim_linetype(ext_c.clone(), doc, met.dimltex1);
-            let radial_dim_c = with_dim_linetype(dim_c.clone(), doc, met.dimltype);
-            result.extend(dim_geom_entities(&geometry, &radial_ext_c, &radial_dim_c));
+            let line_common = |common: &EntityCommon, linetype: Handle| {
+                if linetype.is_null() && matches!(dim, Dimension::Angular2Ln(_)) {
+                    common.clone()
+                } else {
+                    with_dim_linetype(common.clone(), doc, linetype)
+                }
+            };
+            result.extend(dim_geom_entities(
+                &geometry,
+                &line_common(&ext_c, met.dimltex1),
+                &line_common(&ext_c, met.dimltex2),
+                &line_common(&dim_c, met.dimltype),
+            ));
         }
     }
 
@@ -3433,6 +3390,140 @@ mod tests {
             lines > 5,
             "angular bake must include arc chords, got {lines} lines"
         );
+    }
+
+    #[test]
+    fn two_line_angular_limits_survive_dxf_save_and_reopen() {
+        let mut doc = Document::new();
+        let style = doc.dim_styles.get_mut("Standard").unwrap();
+        style.dimlim = true;
+        style.dimtp = 1.0;
+        style.dimtm = 2.0;
+        style.dimadec = 0;
+        style.dimtad = 0;
+        style.dimtix = true;
+        style.dimtxt = 0.4;
+        style.dimasz = 0.2;
+        style.dimexo = 0.25;
+        style.dimexe = 0.75;
+        let vertex = Vector3::new(1_000_000.125, 4_000_000.375, 0.0);
+        let on_ray = |degrees: f64, radius: f64| {
+            let (sin, cos) = degrees.to_radians().sin_cos();
+            vertex + Vector3::new(radius * cos, radius * sin, 0.0)
+        };
+        let mut angular = document::entities::DimensionAngular2Ln::new(
+            vertex,
+            on_ray(0.0, 2.0),
+            on_ray(45.0, 3.0),
+        );
+        angular.base.definition_point = angular.definition_point;
+        angular.dimension_arc = on_ray(22.5, 8.0);
+        let handle = doc
+            .add_entity(EntityType::Dimension(Box::new(Dimension::Angular2Ln(
+                angular,
+            ))))
+            .unwrap();
+        let file = tempfile::Builder::new()
+            .suffix(".dxf")
+            .tempfile()
+            .unwrap()
+            .into_temp_path();
+        crate::io::save_as_version(&doc, &file, document::DxfVersion::AC1024).unwrap();
+        let loaded = crate::io::load_file(&file).unwrap();
+        let Some(EntityType::Dimension(dim)) = loaded.get_entity(handle) else {
+            panic!("missing reopened angular dimension");
+        };
+        let block = &dim.base().block_name;
+        let owner = loaded.block_records.get(block).unwrap().handle;
+        let parts = || {
+            loaded
+                .entities()
+                .filter(|e| e.common().owner_handle == owner)
+        };
+        assert_eq!(
+            parts()
+                .filter(|e| matches!(e, EntityType::Solid(_)))
+                .count(),
+            2
+        );
+        let label = parts()
+            .find_map(|e| match e {
+                EntityType::MText(t) => Some(t),
+                _ => None,
+            })
+            .expect("stacked limits");
+        assert!(
+            label.value.contains("46") && label.value.contains("43") && label.value.contains("\\S")
+        );
+        assert!(
+            label.insertion_point.distance(&on_ray(22.5, 8.0)) < 1e-4,
+            "label drifted from the middle of its arc"
+        );
+        let lines = baked_segments(&loaded, block);
+        for (angle, length) in [(0.0, 2.0), (45.0, 3.0)] {
+            assert!(
+                lines
+                    .iter()
+                    .any(|(a, b)| a.distance(&on_ray(angle, length + 0.25)) < 1e-4
+                        && b.distance(&on_ray(angle, 8.75)) < 1e-4),
+                "missing extension gap or overhang at {angle} degrees"
+            );
+        }
+        // The arc remains on both sides of the text, with a gap at its centre.
+        let mut sides = [false; 2];
+        for (a, b) in &lines {
+            if (a.distance(&vertex) - 8.0).abs() < 1e-4 && (b.distance(&vertex) - 8.0).abs() < 1e-4
+            {
+                let delta = *b - *a;
+                let t =
+                    ((label.insertion_point - *a).dot(&delta) / delta.dot(&delta)).clamp(0.0, 1.0);
+                assert!(
+                    (*a + delta * t).distance(&label.insertion_point) > 0.15,
+                    "arc crosses the limits"
+                );
+                sides[usize::from(a.y > on_ray(22.5, 8.0).y)] = true;
+            }
+        }
+        assert_eq!(sides, [true, true], "arc missing beside the label");
+    }
+
+    #[test]
+    fn two_line_angular_covered_side_preserves_other_extension_linetype() {
+        let mut doc = Document::new();
+        let mut linetype = document::tables::LineType::new("SecondExtension");
+        linetype.handle = doc.allocate_handle();
+        let style_handle = linetype.handle;
+        doc.line_types.add(linetype).unwrap();
+        let style = doc.dim_styles.get_mut("Standard").unwrap();
+        style.dimltex2_handle = style_handle;
+        style.dimexo = 0.25;
+        style.dimexe = 0.5;
+        let mut angular = document::entities::DimensionAngular2Ln::new(
+            Vector3::ZERO,
+            Vector3::new(10.0, 0.0, 0.0),
+            Vector3::new(0.0, 2.0, 0.0),
+        );
+        angular.dimension_arc = Vector3::new(3.0, 4.0, 0.0);
+        let parts = explode_dimension(&Dimension::Angular2Ln(angular), &doc);
+        let lines: Vec<_> = parts
+            .iter()
+            .filter_map(|part| match part {
+                EntityType::Line(line) => Some(line),
+                _ => None,
+            })
+            .collect();
+        // The arc at radius five crosses the horizontal measured segment.
+        assert!(!lines.iter().any(|line| line.start.y.abs() < 1e-5
+            && line.end.y.abs() < 1e-5
+            && line.start.distance(&line.end) > 1.0));
+        let extension = lines
+            .iter()
+            .find(|line| {
+                line.start.distance(&Vector3::new(0.0, 2.25, 0.0)) < 1e-5
+                    && line.end.distance(&Vector3::new(0.0, 5.5, 0.0)) < 1e-5
+            })
+            .unwrap();
+        assert_eq!(extension.common.linetype_handle, Some(style_handle));
     }
 
     #[test]

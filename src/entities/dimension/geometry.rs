@@ -7,6 +7,7 @@ pub(crate) fn apply_dimension_breaks(
     dimension: Handle,
     lines: &mut Vec<[f32; 3]>,
     origin: Vector3,
+    mut ext2_start: Option<&mut usize>,
 ) {
     let references: Vec<_> = document
         .objects
@@ -33,7 +34,7 @@ pub(crate) fn apply_dimension_breaks(
     }
 
     let mut output = Vec::with_capacity(lines.len() + references.len() * 3);
-    for run in lines.split(|point| point[0].is_nan()) {
+    for (index, run) in lines.split(|point| point[0].is_nan()).enumerate() {
         for segment in run.windows(2) {
             let a = Vec3::from_array(segment[0]);
             let b = Vec3::from_array(segment[1]);
@@ -88,6 +89,12 @@ pub(crate) fn apply_dimension_breaks(
                 if end - start > 1e-6 {
                     add_segment(&mut output, a + direction * start, a + direction * end);
                 }
+            }
+        }
+        // All pieces of the first extension retain its linetype after a break.
+        if index == 0 {
+            if let Some(split) = ext2_start.take().filter(|split| **split != 0) {
+                *split = output.len();
             }
         }
     }
@@ -534,6 +541,7 @@ pub(crate) fn dimension_geometry(
                 // extension lines alone say where the dimension was.
                 None => {
                     add_segment(&mut g.ext_lines, p1, p2);
+                    g.ext2_start = Some(g.ext_lines.len());
                     add_segment(&mut g.ext_lines, p3, p4);
                 }
             }
@@ -1654,6 +1662,7 @@ pub(crate) fn append_angular_dimension(
     let radius = vertex.distance(arc_point);
     if radius <= 1e-6 {
         add_segment(&mut g.ext_lines, vertex, first);
+        g.ext2_start = Some(g.ext_lines.len());
         add_segment(&mut g.ext_lines, vertex, second);
         return;
     }
@@ -1687,6 +1696,7 @@ pub(crate) fn append_angular_dimension(
     if !suppress.ext1 {
         add_segment(&mut g.ext_lines, ext1_start, ext1_end);
     }
+    g.ext2_start = Some(g.ext_lines.len());
     if !suppress.ext2 {
         add_segment(&mut g.ext_lines, ext2_start, ext2_end);
     }

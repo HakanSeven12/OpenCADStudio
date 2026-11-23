@@ -922,7 +922,10 @@ pub(crate) fn emit_wire_packed(
         wire.pattern[6],
         wire.pattern[7],
     ];
-    let half_width = wire.line_weight_px.max(1.0) * 0.5;
+    // The lineweight's own half-width, even under half a pixel: the shaders
+    // keep every line at least half a pixel wide after the layout's scale,
+    // and a floor here made every weight up to 0.26 mm one on paper (#3470).
+    let half_width = wire.line_weight_px.max(0.0) * 0.5;
     let n = wire.points.len();
     let seg_count = n.saturating_sub(1);
     if seg_count == 0 {
@@ -1024,7 +1027,8 @@ pub(crate) fn emit_wire_native(
             wire.pattern[6],
             wire.pattern[7],
         ],
-        half_width: wire.line_weight_px.max(1.0) * 0.5,
+        // Under half a pixel too, as in `emit_wire_packed` (#3470).
+        half_width: wire.line_weight_px.max(0.0) * 0.5,
         pattern_length: wire.pattern_length,
         draw_depth,
         _reserved: 0.0,

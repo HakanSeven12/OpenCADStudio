@@ -37,6 +37,8 @@ pub mod hatch_gpu;
 mod hatch_tone_tests;
 pub mod image_gpu;
 pub mod mesh_gpu;
+#[cfg(test)]
+mod paper_lineweight_tests;
 pub mod point_cloud_gpu;
 pub mod text_gpu;
 pub mod uniforms;

@@ -208,7 +208,10 @@
 /// `HostRequest::GetInputKind`, `HostResponse::InputKind`, and
 /// `InteractiveEvent::TextInput`) for command-line text prompts; plugins on
 /// v3–v27 remain supported unchanged.
-pub const API_VERSION: u32 = 28;
+/// v29 appends `PluginRequest::PanelSurfacePublish`: a plugin publishes a
+/// bounded `PanelScene` (`PanelSurface::Scene`) for a panel it registered and
+/// gets the stored revision or a typed `SurfaceReject` back.
+pub const API_VERSION: u32 = 29;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

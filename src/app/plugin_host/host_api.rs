@@ -337,6 +337,7 @@ impl HostApi for HostSession<'_> {
 
         let state = crate::ui::window::plugin_panel::PluginPanelState::from_def(panel);
         self.app.plugin_panels.insert(id.clone(), state);
+        self.app.panel_surfaces.remove(&id);
 
         // Pallet-menu listing is capped per edge so a plugin cannot widen
         // the palette beyond a bounded length (see docs/plugin-pallet-menu.md).
@@ -461,6 +462,48 @@ impl HostApi for HostSession<'_> {
         } else {
             false
         }
+    }
+
+    /// V29: publish the panel's scene for the authenticated owner. Attachment
+    /// and ownership resolve here; the store applies the revision rules and
+    /// checks the owner again.
+    fn panel_surface_publish_for_plugin(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        surface: ocs_plugin_api::scene::PanelSurface,
+    ) -> Result<ocs_plugin_api::scene::SceneRevision, ocs_plugin_api::scene::SurfaceReject> {
+        use ocs_plugin_api::scene::SurfaceRejectCode;
+        if plugin_id.is_empty() || panel_id.trim().is_empty() {
+            return Err(ocs_plugin_api::scene::SurfaceReject {
+                code: SurfaceRejectCode::Unattached,
+                current_revision: None,
+            });
+        }
+        // Alias-resolve, then enforce F5's honest distinctions: a panel this
+        // plugin never registered is `Unattached`; one registered by a
+        // different plugin is `OwnedByOther`.
+        let Some(resolved) = resolve_toggle_panel_id(self.app, panel_id) else {
+            return Err(ocs_plugin_api::scene::SurfaceReject {
+                code: SurfaceRejectCode::Unattached,
+                current_revision: None,
+            });
+        };
+        let Some(registered) = self.app.plugin_panels.get(&resolved) else {
+            return Err(ocs_plugin_api::scene::SurfaceReject {
+                code: SurfaceRejectCode::Unattached,
+                current_revision: None,
+            });
+        };
+        if registered.owner_plugin_id.as_deref() != Some(plugin_id) {
+            return Err(ocs_plugin_api::scene::SurfaceReject {
+                code: SurfaceRejectCode::OwnedByOther,
+                current_revision: None,
+            });
+        }
+        self.app
+            .panel_surfaces
+            .publish(plugin_id, &resolved, surface)
     }
 
     fn update_panel_for_plugin(

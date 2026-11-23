@@ -769,6 +769,7 @@ impl OpenCADStudio {
                     .map(|owner| visible(owner))
                     .unwrap_or(true)
             });
+            self.panel_surfaces.retain_owners(|owner| visible(owner));
             let dying_drag = self
                 .active_plugin_grip()
                 .map(|active| !visible(&active.plugin))

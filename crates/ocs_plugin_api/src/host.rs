@@ -34,6 +34,7 @@ pub use document::xdata::{ExtendedDataRecord, XDataValue};
 pub use document::{Document, EntityType, Handle};
 
 use crate::ipc::protocol::{PluginRequest, PluginResponse};
+use crate::scene::{PanelSurface, SceneRevision, SurfaceReject, SurfaceRejectCode};
 
 /// Thread-safe handle that can issue host requests from plugin worker threads.
 /// Out-of-process V4 plugins implement this; in-process hosts may return `None`.
@@ -2388,6 +2389,44 @@ pub trait HostApi {
     /// `false` when the drawing had none (no undo step is recorded then).
     fn remove_geo_location(&mut self) -> Result<bool, String> {
         Err("Geographic location writes are not supported by this host".to_owned())
+    }
+
+    /// Publish or replace a panel's scene (API v29). A host without surface
+    /// support refuses: `InvalidSurface` for an invalid scene, otherwise
+    /// `Unattached`.
+    fn panel_surface_publish(
+        &mut self,
+        _panel_id: &str,
+        surface: PanelSurface,
+    ) -> Result<SceneRevision, SurfaceReject> {
+        Err(surface_reject_default(&surface))
+    }
+
+    /// [`Self::panel_surface_publish`] for the transport's authenticated
+    /// `plugin_id`.
+    fn panel_surface_publish_for_plugin(
+        &mut self,
+        _plugin_id: &str,
+        panel_id: &str,
+        surface: PanelSurface,
+    ) -> Result<SceneRevision, SurfaceReject> {
+        self.panel_surface_publish(panel_id, surface)
+    }
+}
+
+/// The answer of a host without surface support: `InvalidSurface` for an
+/// invalid scene, otherwise `Unattached`.
+pub(crate) fn surface_reject_default(surface: &PanelSurface) -> SurfaceReject {
+    let structural = match surface {
+        PanelSurface::Scene(scene) => scene.validate().is_ok(),
+    };
+    SurfaceReject {
+        code: if structural {
+            SurfaceRejectCode::Unattached
+        } else {
+            SurfaceRejectCode::InvalidSurface
+        },
+        current_revision: None,
     }
 }
 

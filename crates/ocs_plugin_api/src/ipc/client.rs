@@ -16,6 +16,7 @@ use crate::ipc::protocol::{
     HostResponse, HostToPlugin, PluginRequest, PluginResponse, PluginToHost, RunnerHandshake,
 };
 use crate::ipc::transport::{recv, send};
+use crate::scene::{PanelSurface, SceneRevision, SurfaceReject, SurfaceRejectCode};
 use crate::shm::{DocumentViewData, DocumentViewInfo, SharedDocumentReader};
 
 /// Shared registry of active interactive commands, keyed by host-assigned id.
@@ -1125,6 +1126,33 @@ impl HostApi for PluginHostApi {
             Ok(PluginResponse::Error(error)) => Err(error),
             Ok(other) => Err(format!("unexpected RemoveGeoLocation response: {other:?}")),
             Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn panel_surface_publish(
+        &mut self,
+        panel_id: &str,
+        surface: PanelSurface,
+    ) -> Result<SceneRevision, SurfaceReject> {
+        match self.client.request(PluginRequest::PanelSurfacePublish {
+            panel_id: panel_id.to_string(),
+            surface,
+        }) {
+            Ok(PluginResponse::PanelSurfacePublished(result)) => result,
+            Ok(other) => {
+                eprintln!("[plugin] unexpected PanelSurfacePublish response: {other:?}");
+                Err(SurfaceReject {
+                    code: SurfaceRejectCode::Unattached,
+                    current_revision: None,
+                })
+            }
+            Err(e) => {
+                eprintln!("[plugin] PanelSurfacePublish request failed: {e}");
+                Err(SurfaceReject {
+                    code: SurfaceRejectCode::Unattached,
+                    current_revision: None,
+                })
+            }
         }
     }
 

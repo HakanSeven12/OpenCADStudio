@@ -436,6 +436,13 @@ pub enum PluginRequest {
     },
     /// V22 (additive): remove the model-space GEODATA object.
     RemoveGeoLocation,
+    /// V29: publish or replace one panel's surface for the authenticated
+    /// owner. The first publish mounts it; a later one replaces it when its
+    /// revision advances, and the same scene at the head is a no-op.
+    PanelSurfacePublish {
+        panel_id: String,
+        surface: crate::scene::PanelSurface,
+    },
 }
 
 /// Responses the host sends back for `PluginRequest`.
@@ -532,6 +539,8 @@ pub enum PluginResponse {
     GeoLocationSet(Result<crate::host::Handle, String>),
     /// V22 (additive): whether `RemoveGeoLocation` removed an object.
     GeoLocationRemoved(Result<bool, String>),
+    /// V29: the stored revision, or the reason the publish was refused.
+    PanelSurfacePublished(Result<crate::scene::SceneRevision, crate::scene::SurfaceReject>),
 }
 
 /// Messages sent from the host to the plugin runner.
@@ -593,6 +602,7 @@ impl OwnedPluginManifest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scene::{PanelScene, PanelSurface, SceneRevision, SurfaceReject, SurfaceRejectCode};
 
     fn discriminant_of<T: Serialize>(value: &T) -> u32 {
         let bytes = bincode::serialize(value).expect("serialize");
@@ -723,6 +733,71 @@ mod tests {
         let bytes = bincode::serialize(&response).expect("serialize panel snapshot response");
         match bincode::deserialize::<PluginResponse>(&bytes).expect("deserialize response") {
             PluginResponse::PanelSnapshot(Err(error)) => assert_eq!(error, "unsupported"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    /// The v29 panel-surface tail is pinned: the scene publish is the last
+    /// request variant (after `RemoveGeoLocation` 62), the typed answer is
+    /// the last response variant (after `GeoLocationRemoved` 48), and the
+    /// surface envelope starts at `Scene` = 0. The widget-surface stage
+    /// appends its kind; these never renumber. A v28 runner cannot decode
+    /// tag 63, so a plugin that sends it declares v29 (see manifest).
+    #[test]
+    fn panel_surface_publish_v29_wire_tail_is_pinned() {
+        let scene = PanelScene {
+            revision: SceneRevision(4),
+            elements: Vec::new(),
+        };
+        assert_eq!(discriminant_of(&PluginRequest::RemoveGeoLocation), 62);
+        assert_eq!(
+            discriminant_of(&PluginRequest::PanelSurfacePublish {
+                panel_id: "graph".into(),
+                surface: PanelSurface::Scene(scene.clone()),
+            }),
+            63
+        );
+        assert_eq!(discriminant_of(&PanelSurface::Scene(scene.clone())), 0);
+        assert_eq!(
+            discriminant_of(&PluginResponse::GeoLocationRemoved(Ok(true))),
+            48
+        );
+        assert_eq!(
+            discriminant_of(&PluginResponse::PanelSurfacePublished(Ok(SceneRevision(9)))),
+            49
+        );
+
+        let request = PluginRequest::PanelSurfacePublish {
+            panel_id: "graph".into(),
+            surface: PanelSurface::Scene(scene),
+        };
+        match bincode::deserialize::<PluginRequest>(
+            &bincode::serialize(&request).expect("serialize request"),
+        )
+        .expect("deserialize request")
+        {
+            PluginRequest::PanelSurfacePublish { panel_id, surface } => {
+                assert_eq!(panel_id, "graph");
+                assert!(matches!(surface, PanelSurface::Scene(_)));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+        let reject = PluginResponse::PanelSurfacePublished(Err(SurfaceReject {
+            code: SurfaceRejectCode::NonMonotonicRevision,
+            current_revision: Some(SceneRevision(3)),
+        }));
+        match bincode::deserialize::<PluginResponse>(
+            &bincode::serialize(&reject).expect("serialize response"),
+        )
+        .expect("deserialize response")
+        {
+            PluginResponse::PanelSurfacePublished(Err(SurfaceReject {
+                code,
+                current_revision,
+            })) => {
+                assert_eq!(code, SurfaceRejectCode::NonMonotonicRevision);
+                assert_eq!(current_revision, Some(SceneRevision(3)));
+            }
             other => panic!("unexpected: {other:?}"),
         }
     }

@@ -772,6 +772,44 @@ impl SceneBuilder {
     }
 }
 
+/// The surface a panel publish carries. Variants append at the end; `Scene`
+/// stays 0.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum PanelSurface {
+    /// The panel's declarative scene snapshot (bounded, validated).
+    Scene(PanelScene),
+}
+
+/// Why a panel surface publish was refused; a refusal changes nothing.
+/// Codes append at the end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SurfaceRejectCode {
+    /// Nothing is attached for this panel: the receiving host has no
+    /// surface-supporting attach, or the addressed panel is not a panel
+    /// the authenticated plugin registered.
+    Unattached,
+    /// The panel's surface is owned by a different verified plugin.
+    OwnedByOther,
+    /// The surface is structurally invalid (failed its validation
+    /// budgets); refused without any state change.
+    InvalidSurface,
+    /// The published revision is not a strict advance over the stored
+    /// head and is not an identical idempotent resurface at that head.
+    NonMonotonicRevision,
+}
+
+/// A refused publish: the code, and the stored revision when the refusal is
+/// about the revision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct SurfaceReject {
+    pub code: SurfaceRejectCode,
+    /// The stored head when the refusal is revision-related; `None`
+    /// otherwise.
+    pub current_revision: Option<SceneRevision>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

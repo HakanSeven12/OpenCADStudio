@@ -679,8 +679,47 @@ mod tests {
     }
 
     #[test]
+    fn lengthen_continues_when_the_lock_of_its_defaults_is_poisoned() {
+        let _ = std::thread::spawn(|| {
+            let _guard = LENGTHEN_DEFAULTS.lock();
+            panic!("poison the LENGTHEN defaults");
+        })
+        .join();
+        assert!(LENGTHEN_DEFAULTS.is_poisoned());
+
+        // Each step below takes the lock. The values are the defaults, so
+        // this test changes nothing for the other tests.
+        let mut command = LengthenCommand::new();
+        assert!(command.on_text_input("T").is_some());
+        assert!(command.prompt().contains("total length"));
+        assert!(command.on_text_input("1").is_some());
+        for (mode, text) in [
+            (ValueMode::Delta, "delta length"),
+            (ValueMode::Percent, "percentage"),
+            (ValueMode::DeltaAngle, "delta angle"),
+            (ValueMode::TotalAngle, "total angle"),
+        ] {
+            command.state = LenState::Value(mode);
+            assert!(command.prompt().contains(text));
+        }
+        let mut command = LengthenCommand::new();
+        command.on_enter();
+        assert!(matches!(command.state, LenState::Value(ValueMode::Total)));
+        command.on_enter();
+        assert!(matches!(command.state, LenState::Apply(_)));
+
+        LENGTHEN_DEFAULTS.clear_poison();
+    }
+
+    #[test]
     fn default_total_angle_is_a_half_turn_in_degrees() {
-        assert_eq!(LENGTHEN_DEFAULTS.lock().unwrap().total_angle, 180.0);
+        assert_eq!(
+            LENGTHEN_DEFAULTS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .total_angle,
+            180.0
+        );
     }
 
     #[test]

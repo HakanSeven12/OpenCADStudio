@@ -806,4 +806,20 @@ mod tests {
         let (status, body) = read_response(&mut select_conn);
         assert_eq!(status, 200, "{body}");
     }
+
+    #[test]
+    fn harvest_records_the_document_through_a_poisoned_cache() {
+        let cache = Arc::new(Mutex::new(Some(1_u64)));
+        let held = Arc::clone(&cache);
+        let _ = std::thread::spawn(move || {
+            let _guard = held.lock();
+            panic!("poison the document cache");
+        })
+        .join();
+        assert!(cache.is_poisoned());
+
+        harvest(&cache, &json!({"document_id": 7}));
+
+        assert_eq!(*cache.lock().unwrap_or_else(|e| e.into_inner()), Some(7));
+    }
 }

@@ -42,3 +42,20 @@ pub fn validate_shape(schema: &Value, value: &Value, path: &str) -> Result<(), S
         format!("{path}{}{suffix}: {error}", error.instance_path())
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::validate_shape;
+    use serde_json::json;
+
+    #[test]
+    fn a_schema_that_does_not_compile_does_not_stop_later_validations() {
+        let bad = json!({"type": "no-such-type"});
+        let failed = std::panic::catch_unwind(|| validate_shape(&bad, &json!(1), ""));
+        assert!(failed.is_err(), "the bad schema must panic");
+
+        let good = json!({"type": "integer"});
+        assert_eq!(validate_shape(&good, &json!(1), ""), Ok(()));
+        assert!(validate_shape(&good, &json!("text"), "").is_err());
+    }
+}

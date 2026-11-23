@@ -896,6 +896,92 @@ fn draw_depth_add_and_erase_keep_existing_labels_stable() {
     assert!(!after_erase.contains_key(&h2.value()));
 }
 
+/// Undoing an erase gives each entity back the label its block's order
+/// kept for it. Walking the order for every one of them made the undo of an
+/// erase of 100,000 objects spend two seconds there. An entity the sort
+/// table left alone is at the place of its own handle.
+#[test]
+fn a_draw_depth_entry_is_found_at_the_place_of_its_own_handle() {
+    let order =
+        seed_draw_depth_entries((1..=5_000u64).map(|index| (index * 3, index * 3)).collect());
+    for entry in &order {
+        let found = draw_depth_entry_at_own_key(&order, entry.handle)
+            .expect("an entry under its own handle is at that handle's place");
+        assert_eq!((found.handle, found.label), (entry.handle, entry.label));
+    }
+    // A handle the order does not hold gets no entry.
+    assert!(draw_depth_entry_at_own_key(&order, 4).is_none());
+    assert!(draw_depth_entry(&order, 4).is_none());
+}
+
+/// DRAWORDER files an entity under another key than its handle. Its entry is
+/// not at the place of its handle, and is found all the same.
+#[test]
+fn a_draw_depth_entry_the_sort_table_moved_is_still_found() {
+    let mut keyed: Vec<(u64, u64)> = (1..=20u64).map(|index| (index * 3, index * 3)).collect();
+    // Handle 30 is drawn first and handle 6 last.
+    keyed[9].1 = 1;
+    keyed[1].1 = 1_000;
+    keyed.sort_unstable_by_key(|(handle, effective)| (*effective, *handle));
+    let order = seed_draw_depth_entries(keyed);
+    assert_eq!(order.first().map(|entry| entry.handle), Some(30));
+    assert_eq!(order.last().map(|entry| entry.handle), Some(6));
+    for moved in [30, 6] {
+        assert!(draw_depth_entry_at_own_key(&order, moved).is_none());
+    }
+    for entry in &order {
+        let found = draw_depth_entry(&order, entry.handle).expect("every entry is found");
+        assert_eq!((found.handle, found.label), (entry.handle, entry.label));
+    }
+}
+
+/// The erase of many entities and its undo leave every draw depth as it was,
+/// the kept entities' and the restored ones'.
+#[test]
+fn undoing_an_erase_gives_every_entity_its_draw_depth_back() {
+    use document::entities::Line;
+    use document::types::Vector3;
+
+    let mut scene = Scene::new();
+    let handles: Vec<Handle> = (0..300)
+        .map(|row| {
+            let y = row as f64;
+            scene.add_entity(EntityType::Line(Line::from_points(
+                Vector3::new(0.0, y, 0.0),
+                Vector3::new(10.0, y, 0.0),
+            )))
+        })
+        .collect();
+    let before: HashMap<u64, [f32; 2]> = (*scene.draw_depth_map()).clone();
+    assert_eq!(before.len(), handles.len());
+
+    // Every entity but each seventh goes, then comes back.
+    let erased: Vec<Handle> = handles
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| index % 7 != 0)
+        .map(|(_, handle)| *handle)
+        .collect();
+    let images: Vec<_> = erased
+        .iter()
+        .map(|handle| scene.document.get_entity_arc(*handle).unwrap())
+        .collect();
+    scene.erase_entities(&erased);
+    let after_erase = scene.draw_depth_map();
+    assert_eq!(after_erase.len(), handles.len() - erased.len());
+    drop(after_erase);
+    let generation = scene.draw_depth_generation();
+
+    assert_eq!(scene.restore_erased_entities(images).len(), erased.len());
+    let restored = scene.draw_depth_map();
+    assert_eq!(*restored, before);
+    assert_eq!(
+        scene.draw_depth_generation(),
+        generation,
+        "the restore patches the labels in place, with no relabelling"
+    );
+}
+
 #[test]
 fn category_gate_keeps_unrelated_caches_warm() {
     let mut s = Scene::new();

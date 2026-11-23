@@ -1,12 +1,16 @@
 use std::{fs, io, path::Path};
 
-/// Keep a best-effort sibling backup before overwriting a drawing.
+/// Before overwriting `path`, copy the existing file to a sibling
+/// `<name>.bak` so a faulty or accidental save can be recovered. A failed
+/// backup never blocks the save and never truncates the previous backup.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub fn write_backup(path: &Path) {
     if path.exists() {
         let _ = copy_backup(path, |src, dst| fs::copy(src, dst));
     }
 }
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn copy_backup(path: &Path, copy: impl FnOnce(&Path, &Path) -> io::Result<u64>) -> io::Result<()> {
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -42,6 +46,7 @@ mod tests {
     #[test]
     fn partial_copy_preserves_previous_backup() -> io::Result<()> {
         let dir = std::env::temp_dir().join(format!("ocs-backup-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
         fs::create_dir(&dir)?;
         let drawing = dir.join("drawing.dwg");
         let backup = drawing.with_extension("bak");

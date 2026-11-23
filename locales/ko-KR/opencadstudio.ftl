@@ -1622,6 +1622,7 @@ common =
     .ccw = CCW
     .cw = CW
     .total-length = { common.total } · { common.length }
+    .total-area = { common.total } · { common.area }
     .visible = 표시
     .top-attachment-e7595c = 상단 부착:
     .bottom-attachment-28500d = 하단 부착:

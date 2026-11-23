@@ -1611,6 +1611,7 @@ common =
     .ccw = CCW
     .cw = CW
     .total-length = { common.total } · { common.length }
+    .total-area = { common.total } · { common.area }
     .visible = दृश्य
     .top-attachment-e7595c = शीर्ष लगाव:
     .bottom-attachment-28500d = नीचे लगाव:

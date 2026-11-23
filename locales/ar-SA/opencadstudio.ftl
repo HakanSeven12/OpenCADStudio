@@ -1635,6 +1635,7 @@ common =
     .ccw = CCW
     .cw = CW
     .total-length = { common.total } · { common.length }
+    .total-area = { common.total } · { common.area }
     .visible = مرئي
     .top-attachment-e7595c = الإرفاق العلوي:
     .bottom-attachment-28500d = الإرفاق السفلي:

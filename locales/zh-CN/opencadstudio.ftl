@@ -1610,6 +1610,7 @@ common =
     .ccw = CCW
     .cw = CW
     .total-length = { common.total } · { common.length }
+    .total-area = { common.total } · { common.area }
     .visible = 可见
     .top-attachment-e7595c = 上附着：
     .bottom-attachment-28500d = 下附着：

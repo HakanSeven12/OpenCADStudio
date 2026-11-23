@@ -1623,6 +1623,7 @@ common =
     .ccw = CCW
     .cw = CW
     .total-length = { common.total } · { common.length }
+    .total-area = { common.total } · { common.area }
     .visible = Visível
     .top-attachment-e7595c = Conexão superior:
     .bottom-attachment-28500d = Conexão inferior:

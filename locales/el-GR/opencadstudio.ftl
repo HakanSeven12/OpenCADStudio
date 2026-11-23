@@ -1624,6 +1624,7 @@ common =
     .ccw = CCW
     .cw = CW
     .total-length = { common.total } · { common.length }
+    .total-area = { common.total } · { common.area }
     .visible = Ορατό
     .top-attachment-e7595c = Σύνδεση πάνω:
     .bottom-attachment-28500d = Σύνδεση κάτω:

@@ -1627,6 +1627,7 @@ common =
     .ccw = Proti směru hod. ručiček
     .cw = Po směru hod. ručiček
     .total-length = { common.total } · { common.length }
+    .total-area = { common.total } · { common.area }
     .visible = Viditelné
     .top-attachment-e7595c = Připojení nahoře:
     .bottom-attachment-28500d = Připojení dole:

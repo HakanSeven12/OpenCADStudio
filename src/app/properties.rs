@@ -5201,23 +5201,44 @@ pub(super) fn aggregate_sections(
                 _ => None,
             })
             .sum::<f64>();
-        for section in result.iter_mut() {
-            if let Some(at) = section.props.iter().position(|p| p.field == "length") {
-                section.props.insert(
-                    at + 1,
-                    crate::scene::model::object::Property {
-                        label: t!("Total length").into_owned(),
-                        field: "total_length",
-                        value: crate::scene::model::object::PropValue::ReadOnly(
-                            crate::entities::common::format_length(total),
-                        ),
-                    },
-                );
-                break;
-            }
-        }
+        insert_total(&mut result, "length", t!("Total length").into_owned(), "total_length", crate::entities::common::format_length(total));
+    }
+    // Several polylines: their summed area and length below each row
+    // (#3528).
+    if selected.len() > 1
+        && selected
+            .iter()
+            .all(|(_, entity)| matches!(entity, document::EntityType::LwPolyline(_)))
+    {
+        use crate::entities::traits::MassPropsCalc;
+        let (area, length) = selected
+            .iter()
+            .filter_map(|(_, entity)| match entity {
+                document::EntityType::LwPolyline(pline) => Some(pline.mass_props()),
+                _ => None,
+            })
+            .fold((0.0, 0.0), |(a, l), mp| (a + mp.area, l + mp.perimeter));
+        insert_total(&mut result, "area", t!("Total area").into_owned(), "total_area", crate::entities::common::format_area(area));
+        insert_total(&mut result, "length", t!("Total length").into_owned(), "total_length", crate::entities::common::format_length(length));
     }
     result
+}
+
+/// Inserts a read-only total row below the first row of `field`.
+fn insert_total(result: &mut [crate::scene::model::object::PropSection], field: &str, label: String, total_field: &'static str, value: String) {
+    for section in result.iter_mut() {
+        if let Some(at) = section.props.iter().position(|p| p.field == field) {
+            section.props.insert(
+                at + 1,
+                crate::scene::model::object::Property {
+                    label,
+                    field: total_field,
+                    value: crate::scene::model::object::PropValue::ReadOnly(value),
+                },
+            );
+            return;
+        }
+    }
 }
 
 fn aggregate_solid_history_sections(
@@ -7223,4 +7244,42 @@ pub(crate) fn property_linetype_items(
         })
         .chain(super::layers::catalog_linetype_items(doc))
         .collect()
+}
+
+#[cfg(test)]
+mod polyline_total_tests {
+    use super::aggregate_sections;
+    use document::entities::LwPolyline;
+    use document::types::Vector2;
+    use document::{EntityType, Handle};
+
+    fn square(x: f64, side: f64) -> EntityType {
+        let mut pline = LwPolyline::from_points(vec![
+            Vector2::new(x, 0.0),
+            Vector2::new(x + side, 0.0),
+            Vector2::new(x + side, side),
+            Vector2::new(x, side),
+        ]);
+        pline.close();
+        EntityType::LwPolyline(pline)
+    }
+
+    fn row(sections: &[crate::scene::model::object::PropSection], field: &str) -> Option<String> {
+        sections.iter().flat_map(|s| &s.props).find(|p| p.field == field).map(|p| match &p.value {
+            crate::scene::model::object::PropValue::ReadOnly(v) => v.clone(),
+            other => panic!("{field}: {other:?}"),
+        })
+    }
+
+    /// #3528: several polylines show their summed area and length.
+    #[test]
+    fn several_polylines_show_their_total_area_and_length() {
+        let (a, b) = (square(0.0, 2.0), square(10.0, 3.0));
+        let selected = [(Handle::new(1), &a), (Handle::new(2), &b)];
+        let sections = aggregate_sections(&selected, &[]);
+        assert_eq!(row(&sections, "total_area"), Some(crate::entities::common::format_area(13.0)));
+        assert_eq!(row(&sections, "total_length"), Some(crate::entities::common::format_length(20.0)));
+        // One polyline has no totals.
+        assert_eq!(row(&aggregate_sections(&selected[..1], &[]), "total_area"), None);
+    }
 }

@@ -1610,6 +1610,7 @@ common =
     .ccw = CCW
     .cw = CW
     .total-length = Total length
+    .total-area = Total area
     .visible = Visible
     .top-attachment-e7595c = Top Attachment
     .bottom-attachment-28500d = Bottom Attachment

@@ -1628,6 +1628,7 @@ common =
     .ccw = ທວນເຂັມໂມງ
     .cw = ຕາມເຂັມໂມງ
     .total-length = ຄວາມຍາວທັງໝົດ
+    .total-area = ພື້ນທີ່ທັງໝົດ
     .visible = ເບິ່ງເຫັນໄດ້
     .top-attachment-e7595c = ການຕິດດ້ານເທິງ
     .bottom-attachment-28500d = ການຕິດດ້ານລຸ່ມ

@@ -1623,6 +1623,7 @@ common =
     .ccw = Ngược chiều kim đồng hồ
     .cw = Thuận chiều kim đồng hồ
     .total-length = Tổng chiều dài
+    .total-area = Tổng diện tích
     .visible = Hiển thị
     .top-attachment-e7595c = Gắn trên
     .bottom-attachment-28500d = Gắn dưới

@@ -1621,6 +1621,7 @@ common =
     .ccw = CCW
     .cw = CW
     .total-length = { common.total } · { common.length }
+    .total-area = { common.total } · { common.area }
     .visible = Zichtbaar
     .top-attachment-e7595c = Bovenste bijlage:
     .bottom-attachment-28500d = Onderaanvoegen:

@@ -1620,6 +1620,7 @@ common =
     .ccw = Óramutatóval szemben
     .cw = Óramutató szerint
     .total-length = Teljes hossz
+    .total-area = Teljes terület
     .visible = Látható
     .top-attachment-e7595c = Felső csatlakozás
     .bottom-attachment-28500d = Alsó csatlakozás

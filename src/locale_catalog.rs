@@ -5837,6 +5837,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "CCW" => Some(("common", "ccw")),
         "CW" => Some(("common", "cw")),
         "Total length" => Some(("common", "total-length")),
+        "Total area" => Some(("common", "total-area")),
         "Visible" => Some(("common", "visible")),
         "Visible block" => Some(("properties", "visible-block")),
         "Top Attachment" => Some(("common", "top-attachment-e7595c")),

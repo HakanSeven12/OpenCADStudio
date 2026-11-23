@@ -1622,6 +1622,7 @@ common =
     .ccw = 逆時針（CCW）
     .cw = 順時針（CW）
     .total-length = { common.total } · { common.length }
+    .total-area = { common.total } · { common.area }
     .visible = 可見
     .top-attachment-e7595c = 頂端附加：
     .bottom-attachment-28500d = 底端附加：

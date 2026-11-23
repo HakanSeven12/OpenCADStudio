@@ -1437,6 +1437,118 @@ mod tests {
         assert!(!app.tool_open(ModalKind::BlockDefinition));
     }
 
+    /// Real events traverse the listener and both kinds of tool window.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn unsaved_shortcuts_follow_keyboard_focus_and_preserve_close_actions() {
+        use iced::event::Status;
+        use iced::keyboard::{key::NativeCode, key::Physical, Event, Key, Location, Modifiers};
+
+        fn send(
+            app: &mut OpenCADStudio,
+            id: iced::window::Id,
+            main: iced::window::Id,
+            ch: &str,
+            modifiers: Modifiers,
+            status: Status,
+        ) {
+            let key = Key::Character(ch.into());
+            let event = iced::Event::Keyboard(Event::KeyPressed {
+                key: key.clone(),
+                modified_key: key,
+                physical_key: Physical::Unidentified(NativeCode::Unidentified),
+                location: Location::Standard,
+                modifiers,
+                text: Some(ch.into()),
+                repeat: false,
+            });
+            if let Some(message) =
+                crate::app::view::window_event_with_context(event, status, id, id == main)
+            {
+                let _ = app.update_root(message);
+            }
+        }
+        for native in [false, true] {
+            for letter in ["c", "N", "s"] {
+                let mut app = OpenCADStudio::new_for_test();
+                let id = app.push_test_document();
+                let index = app.tabs.len() - 1;
+                app.active_tab = index;
+                app.tabs[index].dirty = true;
+                let main = iced::window::Id::unique();
+                if native {
+                    app.main_window = Some(main);
+                }
+                let _ = app.update_root(Message::TabClose(id));
+                assert!(app.tool_open(ModalKind::Unsaved));
+                let target = if native {
+                    dialog_window(&mut app, ModalKind::Unsaved).id
+                } else {
+                    main
+                };
+                send(
+                    &mut app,
+                    target,
+                    main,
+                    "n",
+                    Modifiers::empty(),
+                    Status::Captured,
+                );
+                send(
+                    &mut app,
+                    target,
+                    main,
+                    "n",
+                    Modifiers::CTRL,
+                    Status::Ignored,
+                );
+                assert!(app.tool_open(ModalKind::Unsaved));
+                assert!(app.tabs.iter().any(|tab| tab.id == id));
+                // The drawing, not the question, owns these keys until the
+                // frame is raised again. A separate window is isolated by id.
+                if !native {
+                    let _ = app.update_root(Message::ViewportLeftPress);
+                }
+                send(
+                    &mut app,
+                    main,
+                    main,
+                    "n",
+                    Modifiers::empty(),
+                    Status::Ignored,
+                );
+                assert!(app.tabs.iter().any(|tab| tab.id == id));
+                assert!(app.tool_open(ModalKind::Unsaved));
+                if !native {
+                    let _ = app.update_root(Message::ToolWindowRaise(ModalKind::Unsaved));
+                }
+                send(
+                    &mut app,
+                    target,
+                    main,
+                    letter,
+                    Modifiers::empty(),
+                    Status::Ignored,
+                );
+                match letter {
+                    "c" => {
+                        assert!(app.pending_close.is_none());
+                        assert!(app.tabs.iter().any(|tab| tab.id == id && tab.dirty));
+                    }
+                    "N" => assert!(!app.tabs.iter().any(|tab| tab.id == id)),
+                    "s" => {
+                        assert!(app.tabs.iter().any(|tab| tab.id == id));
+                        assert!(
+                            app.save_dialog_for_unsaved,
+                            "save starts the existing save flow"
+                        );
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn a_dialog_that_picks_on_the_drawing_comes_back_with_the_pick() {

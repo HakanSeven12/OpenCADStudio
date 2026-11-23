@@ -84,3 +84,21 @@ fn block_close_dialog_explains_the_risk_and_counts_references() {
             .any(|message| matches!(message, Message::BlockEditChangesSave)));
     });
 }
+
+#[test]
+fn unsaved_dialog_shows_shortcut_hints() {
+    with_ui_test(|| {
+        let content = unsaved_changes_dialog_window(
+            "Drawing.dwg",
+            crate::ui::modal::ModalSizing {
+                width: 500.0.into(),
+                height: 250.0.into(),
+            },
+            None,
+        );
+        let mut ui = Simulator::with_size(iced::Settings::default(), (900.0, 700.0), content);
+        visible(&mut ui, "Save (S)");
+        visible(&mut ui, "Don't Save (N)");
+        visible(&mut ui, "Cancel (C)");
+    });
+}

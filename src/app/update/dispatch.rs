@@ -3112,6 +3112,7 @@ impl OpenCADStudio {
             }
 
             Message::CommandAppendChar(s) => self.on_command_append_char(s),
+            Message::UnsavedShortcut(ch) => self.on_command_append_char(ch.to_string()),
             Message::HeldOverrideRelease => {
                 self.release_held_override();
                 Task::none()

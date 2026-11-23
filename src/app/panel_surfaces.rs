@@ -2,8 +2,7 @@
 //! attachment; this store applies the revision rules of a publish and keeps
 //! no renderer state.
 
-use ocs_plugin_api::scene::{PanelScene, SceneRevision};
-use ocs_plugin_api::scene::{PanelSurface, SurfaceReject, SurfaceRejectCode};
+use ocs_plugin_api::scene::{PanelScene, SceneRevision, SurfaceReject, SurfaceRejectCode};
 
 /// Stored surface per panel id: strictly one authoritative record per
 /// panel, owned by the authenticated plugin that published it. A panel
@@ -300,7 +299,7 @@ mod tests {
         let mut store = PanelSurfaceStore::default();
         let scene = one_rect_scene(7);
         assert_eq!(
-            store.publish(PLUGIN, PANEL, PanelSurface::Scene(scene.clone())),
+            store.publish(PLUGIN, PANEL, scene.clone()),
             Ok(SceneRevision(7))
         );
         assert_eq!(store.scene(PLUGIN, PANEL), Some(&scene));
@@ -310,22 +309,18 @@ mod tests {
     fn a_dead_owner_or_a_new_registration_forgets_the_scene() {
         let mut store = PanelSurfaceStore::default();
         store
-            .publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(9)))
+            .publish(PLUGIN, PANEL, one_rect_scene(9))
             .expect("first publish");
         store.retain_owners(|owner| owner != PLUGIN);
         assert_eq!(store.scene(PLUGIN, PANEL), None);
         // A restarted plugin starts again from revision 1.
         assert_eq!(
-            store.publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(1))),
+            store.publish(PLUGIN, PANEL, one_rect_scene(1)),
             Ok(SceneRevision(1))
         );
         store.remove(PANEL);
         assert_eq!(
-            store.publish(
-                "other.plugin",
-                PANEL,
-                PanelSurface::Scene(one_rect_scene(1))
-            ),
+            store.publish("other.plugin", PANEL, one_rect_scene(1)),
             Ok(SceneRevision(1))
         );
     }
@@ -334,10 +329,10 @@ mod tests {
     fn identical_resurface_at_head_is_idempotent() {
         let mut store = PanelSurfaceStore::default();
         store
-            .publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(3)))
+            .publish(PLUGIN, PANEL, one_rect_scene(3))
             .expect("first publish");
         assert_eq!(
-            store.publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(3))),
+            store.publish(PLUGIN, PANEL, one_rect_scene(3)),
             Ok(SceneRevision(3))
         );
     }
@@ -346,14 +341,14 @@ mod tests {
     fn same_revision_different_content_is_refused_without_mutation() {
         let mut store = PanelSurfaceStore::default();
         store
-            .publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(3)))
+            .publish(PLUGIN, PANEL, one_rect_scene(3))
             .expect("first publish");
         let mut changed = one_rect_scene(3);
         if let SceneElement::Rect { size, .. } = &mut changed.elements[0] {
             size.0[0] = 99.0;
         }
         assert_eq!(
-            store.publish(PLUGIN, PANEL, PanelSurface::Scene(changed)),
+            store.publish(PLUGIN, PANEL, changed),
             Err(SurfaceReject {
                 code: SurfaceRejectCode::NonMonotonicRevision,
                 current_revision: Some(SceneRevision(3)),
@@ -365,10 +360,10 @@ mod tests {
     fn stale_revision_is_refused_with_the_stored_head() {
         let mut store = PanelSurfaceStore::default();
         store
-            .publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(5)))
+            .publish(PLUGIN, PANEL, one_rect_scene(5))
             .expect("first publish");
         assert_eq!(
-            store.publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(4))),
+            store.publish(PLUGIN, PANEL, one_rect_scene(4)),
             Err(SurfaceReject {
                 code: SurfaceRejectCode::NonMonotonicRevision,
                 current_revision: Some(SceneRevision(5)),
@@ -380,10 +375,10 @@ mod tests {
     fn advancing_revision_replaces_wholesale() {
         let mut store = PanelSurfaceStore::default();
         store
-            .publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(5)))
+            .publish(PLUGIN, PANEL, one_rect_scene(5))
             .expect("first publish");
         assert_eq!(
-            store.publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(6))),
+            store.publish(PLUGIN, PANEL, one_rect_scene(6)),
             Ok(SceneRevision(6))
         );
         assert_eq!(
@@ -396,14 +391,14 @@ mod tests {
     fn invalid_scene_is_refused_and_touches_nothing() {
         let mut store = PanelSurfaceStore::default();
         store
-            .publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(5)))
+            .publish(PLUGIN, PANEL, one_rect_scene(5))
             .expect("first publish");
         let mut invalid = one_rect_scene(9);
         if let SceneElement::Rect { size, .. } = &mut invalid.elements[0] {
             size.0[1] = 0.0; // zero height: InvalidRect
         }
         assert_eq!(
-            store.publish(PLUGIN, PANEL, PanelSurface::Scene(invalid)),
+            store.publish(PLUGIN, PANEL, invalid),
             Err(SurfaceReject {
                 code: SurfaceRejectCode::InvalidSurface,
                 current_revision: None,
@@ -419,14 +414,10 @@ mod tests {
     fn foreign_owner_is_refused_and_cannot_read() {
         let mut store = PanelSurfaceStore::default();
         store
-            .publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(2)))
+            .publish(PLUGIN, PANEL, one_rect_scene(2))
             .expect("first publish");
         assert_eq!(
-            store.publish(
-                "other.plugin",
-                PANEL,
-                PanelSurface::Scene(one_rect_scene(3))
-            ),
+            store.publish("other.plugin", PANEL, one_rect_scene(3)),
             Err(SurfaceReject {
                 code: SurfaceRejectCode::OwnedByOther,
                 current_revision: Some(SceneRevision(2)),
@@ -444,14 +435,14 @@ mod tests {
     fn blank_identities_are_refused() {
         let mut store = PanelSurfaceStore::default();
         assert!(matches!(
-            store.publish("", PANEL, PanelSurface::Scene(one_rect_scene(1))),
+            store.publish("", PANEL, one_rect_scene(1)),
             Err(SurfaceReject {
                 code: SurfaceRejectCode::Unattached,
                 ..
             })
         ));
         assert!(matches!(
-            store.publish(PLUGIN, "   ", PanelSurface::Scene(one_rect_scene(1))),
+            store.publish(PLUGIN, "   ", one_rect_scene(1)),
             Err(SurfaceReject {
                 code: SurfaceRejectCode::Unattached,
                 ..
@@ -471,7 +462,7 @@ mod tests {
     fn patch_applies_atomically_and_advances_one_revision() {
         let mut store = PanelSurfaceStore::default();
         store
-            .publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(5)))
+            .publish(PLUGIN, PANEL, one_rect_scene(5))
             .expect("publish");
         let patch = ocs_plugin_api::scene::ScenePatch {
             base_revision: ocs_plugin_api::scene::SceneRevision(5),
@@ -506,7 +497,7 @@ mod tests {
     fn stale_base_patch_refuses_with_the_head() {
         let mut store = PanelSurfaceStore::default();
         store
-            .publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(5)))
+            .publish(PLUGIN, PANEL, one_rect_scene(5))
             .expect("publish");
         let patch = ocs_plugin_api::scene::ScenePatch {
             base_revision: ocs_plugin_api::scene::SceneRevision(4),
@@ -530,7 +521,7 @@ mod tests {
     fn foreign_patch_is_refused() {
         let mut store = PanelSurfaceStore::default();
         store
-            .publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(2)))
+            .publish(PLUGIN, PANEL, one_rect_scene(2))
             .expect("publish");
         let patch = ocs_plugin_api::scene::ScenePatch {
             base_revision: ocs_plugin_api::scene::SceneRevision(2),

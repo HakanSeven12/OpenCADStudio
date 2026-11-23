@@ -13620,13 +13620,33 @@ pub fn selection_box_crossing(anchor: iced::Point, current: iced::Point) -> bool
 /// PICKLOCKED: objects on a locked layer can be selected (they are never
 /// editable). Off takes them out of every selection; they stay visible and
 /// snappable.
+#[cfg(not(test))]
 static PICK_LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
+/// Each test thread owns its PICKLOCKED value. In the shipped app this is a
+/// process-wide setting, but in tests every app that is constructed applies
+/// its own settings: with a shared atomic, one test could flip the flag under
+/// another test that had just set it and was asserting the result.
+#[cfg(test)]
+thread_local! {
+    static PICK_LOCKED_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
 pub fn pick_locked() -> bool {
-    PICK_LOCKED.load(std::sync::atomic::Ordering::Relaxed)
+    #[cfg(test)]
+    {
+        PICK_LOCKED_TEST.with(|cell| cell.get())
+    }
+    #[cfg(not(test))]
+    {
+        PICK_LOCKED.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 pub fn set_pick_locked(on: bool) {
+    #[cfg(test)]
+    PICK_LOCKED_TEST.with(|cell| cell.set(on));
+    #[cfg(not(test))]
     PICK_LOCKED.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 

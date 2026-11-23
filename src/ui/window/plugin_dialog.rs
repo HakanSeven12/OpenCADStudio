@@ -17,6 +17,11 @@ use ocs_plugin_api::dialog::{
 use crate::app::Message;
 use crate::ui::style::form::{button_style, dialog_button, field_style};
 
+/// Height cap of a long table's scroll box in a plugin dialog.
+const TABLE_MAX_HEIGHT_PX: f32 = 420.0;
+/// Tables up to this many rows take their natural height.
+const TABLE_SHRINK_ROWS: usize = 14;
+
 /// State backing an active declarative plugin modal dialog.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PluginDialogState {
@@ -1422,13 +1427,21 @@ impl<'a> FormControlView<'a> {
                     }
                 }
 
+                let long_table =
+                    self.table_values.get(id).map_or(0, |rows| rows.len()) > TABLE_SHRINK_ROWS;
                 let scrollable_rows = scrollable(rows_list)
                     .direction(scrollable::Direction::Vertical(
                         scrollable::Scrollbar::default(),
                     ))
-                    .height(Length::Shrink)
+                    .height(if long_table {
+                        Length::Fixed(TABLE_MAX_HEIGHT_PX)
+                    } else {
+                        Length::Shrink
+                    })
                     .width(Fill);
 
+                // Bounded like the dock panel tables: a full-height table of
+                // thousands of rows exhausts memory on every repaint.
                 grid_col = grid_col.push(scrollable_rows);
 
                 let grid_container = container(grid_col)

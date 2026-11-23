@@ -4,6 +4,11 @@
 //! widget trees with title bar, collapse pins, inputs, buttons, collapsible sections,
 //! and data tables, integrated with OpenCADStudio's docking system.
 
+/// Height cap of a table's scroll box in a dock panel.
+const TABLE_MAX_HEIGHT_PX: f32 = 360.0;
+/// Tables up to this many rows take their natural height.
+const TABLE_SHRINK_ROWS: usize = 12;
+
 use iced::widget::{
     button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space,
 };
@@ -1080,6 +1085,15 @@ impl PluginPanelState {
                     }
                 }
 
+                // A long table scrolls inside a bounded box: laid out at full
+                // height, a 1000-row result table made every repaint allocate a
+                // full-content buffer and ran the machine out of memory.
+                let row_count = current_rows.map_or(0, |rows| rows.len());
+                let grid_height = if row_count > TABLE_SHRINK_ROWS {
+                    Length::Fixed(TABLE_MAX_HEIGHT_PX)
+                } else {
+                    Length::Shrink
+                };
                 let grid_container = container(
                     scrollable(rows_list)
                         .direction(scrollable::Direction::Vertical(
@@ -1088,7 +1102,7 @@ impl PluginPanelState {
                                 .scroller_width(km::SCROLL_THUMB_W),
                         ))
                         .style(kit::scroll_style)
-                        .height(Length::Shrink)
+                        .height(grid_height)
                         .width(Fill),
                 )
                 .padding(km::line())

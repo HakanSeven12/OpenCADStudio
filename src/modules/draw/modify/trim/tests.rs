@@ -2900,3 +2900,38 @@ fn arc_tangent_line_precision_sweep() {
     println!("Sweep results: failed_cuts={failed_cuts}, max_dist={max_dist:e}");
     assert_eq!(failed_cuts, 0, "No cuts should fail across angle sweep");
 }
+
+/// A fence that crosses one self-crossing polyline twice removes only the two
+/// pieces it touches: the crossing of the polyline with itself stays a cut
+/// after the first piece is gone (#3505).
+#[test]
+fn fence_keeps_the_self_crossing_cut_of_a_polyline() {
+    let mut poly = LwPolyline::new();
+    poly.common.handle = Handle::new(1);
+    poly.vertices = [(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)]
+        .into_iter()
+        .map(|(x, y)| LwVertex::from_coords(x, y))
+        .collect();
+    let all = vec![EntityType::LwPolyline(poly)];
+    // Crosses the first segment at (2, 2) and the last one at (8, 2).
+    let fence = [[1.0, 3.0], [3.0, 1.0], [7.0, 1.0], [9.0, 3.0]];
+    let replacements = fence_pass(
+        &all,
+        &ModifyEntityIndex::build(&all),
+        &build_geos(&all),
+        &fence,
+        None,
+        false,
+    );
+    let (_, pieces) = replacements
+        .iter()
+        .find(|(handle, _)| *handle == Handle::new(1))
+        .expect("the polyline is trimmed");
+    assert_eq!(pieces.len(), 1, "{pieces:?}");
+    let EntityType::LwPolyline(kept) = &pieces[0] else {
+        panic!("expected a polyline piece, got {:?}", pieces[0]);
+    };
+    let ends = [kept.vertices[0].location, kept.vertices[kept.vertices.len() - 1].location];
+    let near = |p: document::types::Vector2, x: f64, y: f64| (p.x - x).abs() < 1e-6 && (p.y - y).abs() < 1e-6;
+    assert!(near(ends[0], 5.0, 5.0) && near(ends[1], 0.0, 10.0), "{ends:?}");
+}

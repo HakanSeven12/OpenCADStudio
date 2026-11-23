@@ -488,4 +488,241 @@ mod tests {
             assert!(drawn > 500, "{drawn} damaged files drawn");
         });
     }
+
+    /// SAT text of bodies with spline curves and surfaces: two lofts
+    /// between circles and an extruded closed spline.
+    fn spline_sat_fixtures() -> Vec<String> {
+        use solidcore_ops::sweep::Curve;
+        let circle = |z: f64, radius: f64, x: f64| Curve::Arc {
+            center: [x, 0.0, z],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius,
+            start: 0.0,
+            end: std::f64::consts::TAU,
+        };
+        let points = [
+            [0.0, 0.0],
+            [6.0, -1.0],
+            [8.0, 4.0],
+            [3.0, 7.0],
+            [-2.0, 4.0],
+            [0.0, 0.0],
+        ]
+        .iter()
+        .map(|p| [p[0], p[1], 0.0, 1.0])
+        .collect();
+        let spline = Curve::Nurbs {
+            degree: 3,
+            points,
+            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 3.0, 3.0, 3.0],
+        };
+        [
+            ocs_solid::model::loft(
+                &[vec![circle(0.0, 5.0, 0.0)], vec![circle(8.0, 3.0, 2.0)]],
+                3,
+                true,
+            ),
+            ocs_solid::model::loft(
+                &[
+                    vec![circle(0.0, 5.0, 0.0)],
+                    vec![circle(5.0, 2.0, 1.0)],
+                    vec![circle(9.0, 4.0, -1.0)],
+                ],
+                3,
+                true,
+            ),
+            ocs_solid::model::extrude(&[spline], [0.0, 0.0, 1.0], 6.0, 0.0, true),
+        ]
+        .into_iter()
+        .map(|body| {
+            crate::scene::convert::acis_export::solid_to_sat(&body.expect("the body is made"))
+                .expect("the body writes")
+                .to_sat_string()
+        })
+        .collect()
+    }
+
+    /// Damaged copies of `text`: cut at each line and at each seventh byte,
+    /// each line left out, and each number and record pointer replaced by a
+    /// value that a damaged file can hold.
+    fn damaged_copies(text: &str) -> Vec<String> {
+        const VALUES: [&str; 9] = [
+            "0", "-1", "1e308", "-1e308", "1e-308", "99999999", "nan", "$-1", "$99999",
+        ];
+        let lines: Vec<&str> = text.lines().collect();
+        let mut damaged = Vec::new();
+        for n in 0..lines.len() {
+            damaged.push(lines[..n].join("\n"));
+            damaged.push([&lines[..n], &lines[n + 1..]].concat().join("\n"));
+        }
+        for cut in (0..text.len()).step_by(7) {
+            damaged.push(text[..cut].to_string());
+        }
+        let mut value = 0;
+        for (n, line) in lines.iter().enumerate() {
+            let tokens: Vec<&str> = line.split(' ').collect();
+            for k in 0..tokens.len() {
+                if !tokens[k].starts_with('$') && tokens[k].parse::<f64>().is_err() {
+                    continue;
+                }
+                for _ in 0..2 {
+                    let mut replaced = tokens.clone();
+                    replaced[k] = VALUES[value % VALUES.len()];
+                    value += 1;
+                    let replaced = replaced.join(" ");
+                    let mut copy = lines.clone();
+                    copy[n] = &replaced;
+                    damaged.push(copy.join("\n"));
+                }
+            }
+        }
+        damaged
+    }
+
+    /// The spline fixtures are read whole: the limits on a spline's degree
+    /// and knot counts refuse nothing that the app's own writer makes.
+    #[test]
+    fn spline_bodies_from_the_writer_are_read_whole() {
+        for text in spline_sat_fixtures() {
+            assert!(text.contains("spline-surface") && text.contains("intcurve-curve"));
+            let parsed = document::entities::acis::SatDocument::parse(&text).expect("SAT text");
+            let (bodies, loss) = ocs_solid::lift(&parsed);
+            assert_eq!(bodies.len(), 1);
+            assert!(loss.is_empty(), "nothing is lost: {loss:?}");
+        }
+    }
+
+    /// A spline record names how many times each knot repeats, and its
+    /// degree. The reader made one knot for each repeat, so a count from a
+    /// damaged file became memory without a limit (32 GB for a count of
+    /// 4,000,000,000), and a degree of -1 overflowed. The parser now refuses
+    /// such a record: the body is read without that curve or surface, and
+    /// the loss names it.
+    #[test]
+    fn a_spline_with_a_count_that_is_not_possible_is_lost_alone() {
+        let text = spline_sat_fixtures().swap_remove(0);
+        let curve = text
+            .lines()
+            .find(|line| line.starts_with("intcurve-curve"))
+            .expect("the loft has a spline curve");
+        let surface = text
+            .lines()
+            .find(|line| line.starts_with("spline-surface"))
+            .expect("the loft has a spline surface");
+        // (the record, the token after `nubs` or `nurbs` to replace, the value)
+        let cases = [
+            ("curve multiplicity", curve, 5, "50000000"),
+            ("curve degree", curve, 1, "-1"),
+            ("curve knot count", curve, 3, "50000000"),
+            ("surface multiplicity", surface, 11, "50000000"),
+            ("surface degree", surface, 1, "-1"),
+            ("surface knot count", surface, 8, "50000000"),
+            // A count that is much larger than the record.
+            ("curve knot count, very large", curve, 3, "9000000000000000"),
+        ];
+        let parsed = document::entities::acis::SatDocument::parse(&text).expect("the loft is SAT");
+        let index = |kind: &str| {
+            let record = parsed.records.iter().find(|r| r.entity_type == kind);
+            record.map(|r| r.index as usize).expect(kind)
+        };
+        let (curve_record, surface_record) = (index("intcurve-curve"), index("spline-surface"));
+        for (name, line, offset, value) in cases {
+            let (curves, surfaces) = if line == curve {
+                (vec![curve_record], vec![])
+            } else {
+                (vec![], vec![surface_record])
+            };
+            let mut tokens: Vec<&str> = line.split(' ').collect();
+            let spline = tokens
+                .iter()
+                .rposition(|token| *token == "nubs" || *token == "nurbs")
+                .expect("the record has a spline");
+            assert!(
+                tokens[spline + offset].parse::<i64>().is_ok(),
+                "{name}: the token is a count: {}",
+                tokens[spline + offset]
+            );
+            tokens[spline + offset] = value;
+            let damaged = text.replace(line, &tokens.join(" "));
+            ends_in(20, "the read and the draw of the damaged loft", move || {
+                let parsed = document::entities::acis::SatDocument::parse(&damaged)
+                    .expect("the damaged file is still SAT text");
+                let (bodies, loss) = ocs_solid::lift(&parsed);
+                assert_eq!(bodies.len(), 1, "{name}: the body is read");
+                assert_eq!(
+                    (&loss.curves, &loss.surfaces, loss.broken.len()),
+                    (&curves, &surfaces, 0),
+                    "{name}: only the damaged record is lost: {loss:?}"
+                );
+                if let Some(imported) = read(ModelFormat::Sat, damaged.as_bytes(), None, "x") {
+                    draw(imported.entities);
+                }
+            });
+        }
+    }
+
+    /// The damaged copies of the spline bodies: each is read, and each
+    /// eighth one that still reads is drawn.
+    #[test]
+    fn damaged_spline_sat_files_never_panic() {
+        ends_in(120, "the read and the draw of the damaged files", || {
+            let (mut cases, mut drawn) = (0, 0);
+            for text in spline_sat_fixtures() {
+                for damaged in damaged_copies(&text) {
+                    cases += 1;
+                    let imported = read(ModelFormat::Sat, damaged.as_bytes(), None, "x");
+                    if let Some(imported) = imported.filter(|_| cases % 8 == 0) {
+                        drawn += 1;
+                        draw(imported.entities);
+                    }
+                }
+            }
+            assert!(cases > 4000, "{cases} damaged files");
+            assert!(drawn > 300, "{drawn} damaged files drawn");
+        });
+    }
+
+    /// The steps after the draw, on each sixteenth damaged copy that still
+    /// reads: the mass properties, and a save to DXF and to DWG with a
+    /// reload and a draw of what comes back. None can panic.
+    #[test]
+    fn damaged_sat_bodies_survive_mass_properties_and_a_save() {
+        use crate::entities::traits::EntityTypeOps;
+        ends_in(120, "the steps after the draw of the damaged files", || {
+            let (mut cases, mut saved) = (0, 0);
+            for text in sat_fixtures().into_iter().chain(spline_sat_fixtures()) {
+                for damaged in damaged_copies(&text) {
+                    cases += 1;
+                    if cases % 16 != 0 {
+                        continue;
+                    }
+                    let Some(imported) = read(ModelFormat::Sat, damaged.as_bytes(), None, "x")
+                    else {
+                        continue;
+                    };
+                    let mut scene = crate::scene::Scene::new();
+                    for entity in imported.entities {
+                        let _ = entity.mass_props();
+                        scene.add_entity(entity);
+                    }
+                    for ext in ["dxf", "dwg"] {
+                        let version = scene.document.version;
+                        let Ok(bytes) = crate::io::save_to_bytes(&scene.document, ext, version)
+                        else {
+                            continue;
+                        };
+                        if let Ok(document) = crate::io::load_bytes(&format!("x.{ext}"), bytes) {
+                            saved += 1;
+                            draw(document.entities().cloned().collect());
+                        }
+                    }
+                }
+            }
+            assert!(
+                saved > 500,
+                "{saved} saves of a damaged body were read back"
+            );
+        });
+    }
 }

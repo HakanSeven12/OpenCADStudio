@@ -882,11 +882,84 @@ mod tests {
         ] {
             assert!(!is_unrestorable_assoc_object(name), "{name}");
         }
-        for name in [
+    }
+
+    /// A dynamic block's purge preventer and its extension dictionary entry,
+    /// the way `src/scene/block_authoring.rs` creates them.
+    fn document_with_purge_preventer() -> (Document, Handle, Handle) {
+        use document::objects::{BlockRepresentationData, DynamicBlockData, DynamicBlockObject};
+        use document::tables::BlockRecord;
+        let mut doc = Document::new();
+        let mut record = BlockRecord::new("PP_BLOCK");
+        record.handle = doc.allocate_handle();
+        record.block_entity_handle = doc.allocate_handle();
+        record.block_end_handle = doc.allocate_handle();
+        let block = record.handle;
+        doc.block_records.add(record).unwrap();
+        let dictionary = doc.ensure_extension_dictionary(block);
+        let preventer = doc.allocate_handle();
+        let mut object = DynamicBlockObject::new(
             "ACDB_DYNAMICBLOCKPURGEPREVENTER_VERSION",
             "AcDbDynamicBlockPurgePreventer",
+        );
+        object.handle = preventer;
+        object.owner = dictionary;
+        object.reactors.push(dictionary);
+        object.data = DynamicBlockData::Representation(BlockRepresentationData { flags: 1, block });
+        doc.objects
+            .insert(preventer, ObjectType::DynamicBlock(object));
+        if let Some(ObjectType::Dictionary(entries)) = doc.objects.get_mut(&dictionary) {
+            entries.add_entry("AcDbDynamicBlockRoundTripPurgePreventer", preventer);
+        }
+        (doc, dictionary, preventer)
+    }
+
+    #[test]
+    fn dxf_save_copy_keeps_a_dynamic_block_purge_preventer() {
+        let (mut doc, dictionary, preventer) = document_with_purge_preventer();
+        let before = doc.clone();
+        prune_omitted_dxf_records(&mut doc);
+        assert!(
+            doc.objects.contains_key(&preventer),
+            "the purge preventer was pruned from the DXF save copy"
+        );
+        match doc.objects.get(&dictionary) {
+            Some(ObjectType::Dictionary(entries)) => assert!(
+                entries.entries.iter().any(|(key, handle)| {
+                    key == "AcDbDynamicBlockRoundTripPurgePreventer" && *handle == preventer
+                }),
+                "the dictionary entry was pruned: {:?}",
+                entries.entries
+            ),
+            other => panic!("the extension dictionary was pruned: {other:?}"),
+        }
+        assert_eq!(doc, before);
+        assert!(!has_omitted_dxf_records(&doc));
+    }
+
+    #[test]
+    fn dynamic_block_records_are_not_classified_as_omitted() {
+        use document::objects::{BlockRepresentationData, DynamicBlockData, DynamicBlockObject};
+        let doc = Document::new();
+        for (dxf_name, class) in [
+            (
+                "ACDB_DYNAMICBLOCKPURGEPREVENTER_VERSION",
+                "AcDbDynamicBlockPurgePreventer",
+            ),
+            (
+                "ACDB_BLOCKREPRESENTATION_DATA",
+                "AcDbBlockRepresentationData",
+            ),
         ] {
-            assert!(is_unrestorable_assoc_object(name), "{name}");
+            let mut object = DynamicBlockObject::new(dxf_name, class);
+            object.data = DynamicBlockData::Representation(BlockRepresentationData {
+                flags: 1,
+                block: Handle::NULL,
+            });
+            assert!(
+                !dxf_skips_object(&ObjectType::DynamicBlock(object), &doc),
+                "{dxf_name}"
+            );
         }
     }
 

@@ -270,6 +270,15 @@ impl Scene {
         self.undo_recording.is_some()
     }
 
+    /// Whether the open recording (if any) can be undone as an entity delta:
+    /// it recorded a change, and the command touched no state that such a
+    /// delta cannot restore.
+    pub fn open_undo_recording_is_a_plain_delta(&self) -> bool {
+        self.undo_recording
+            .as_ref()
+            .is_some_and(|recording| !recording.is_empty() && !recording.is_poisoned())
+    }
+
     /// Finish and return the open recording (if any) for the app to build a
     /// history delta from.
     pub fn take_undo_recording(&mut self) -> Option<UndoRecording> {

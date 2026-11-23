@@ -128,6 +128,11 @@ impl OpenCADStudio {
             let _ = self.apply_cmd_result(crate::command::CmdResult::Cancel);
             self.tabs[i].active_cmd = None;
         }
+        // A command that panicked between the start and the end of its undo
+        // delta left the recording open, with what it changed until then.
+        // Close it into one undo record, so that the roll back below takes
+        // those changes back too.
+        self.close_abandoned_undo_recording(i);
         match before {
             // The handler can switch or close tabs; undo acts on the active
             // one, so only take back what belongs to the same tab.

@@ -427,3 +427,111 @@ fn a_new_group_takes_a_name_no_variable_has() {
         "{described:#?}"
     );
 }
+
+/// The key of `parameter`: whether enabled, its number, its variable's
+/// expression and value.
+fn key_of(
+    document: &Document,
+    parameter: &str,
+) -> (Value, Value, String, document::objects::AssocEvalValue) {
+    let model = document.header.model_space_block_handle;
+    for feature in features(document, model) {
+        let properties = super::properties(document, feature).unwrap();
+        if properties.text("Name") != Some(parameter) {
+            continue;
+        }
+        for reactor in properties.get("Reactors").unwrap().items().unwrap() {
+            let reactor = super::properties(document, reactor.object().unwrap()).unwrap();
+            if reactor.get("IsKeyVar") != Some(&Value::Flag(true)) {
+                continue;
+            }
+            let handle = reactor.get("VarId").unwrap().object().unwrap();
+            let Some(ObjectType::Associative(AssociativeObject {
+                data: AssociativeData::Variable(variable),
+                ..
+            })) = document.objects.get(&handle)
+            else {
+                panic!()
+            };
+            return (
+                reactor.get("IsEnabled").unwrap().clone(),
+                reactor.get("Value").unwrap().clone(),
+                variable.expression.clone(),
+                variable.value.value.clone(),
+            );
+        }
+    }
+    panic!("no key of {parameter}");
+}
+
+/// openCirt's templates have keys BricsCAD left disabled over a variable
+/// with an expression of its own (a key showing the second state over `0`).
+/// BricsCAD reads such a state by name and leaves the key alone until the
+/// parameter's state is picked; then it enables the key and drops the
+/// expression. A key re-enabled under its expression would make BricsCAD
+/// show the first state on its next evaluation.
+#[test]
+fn a_disabled_key_is_left_alone_until_its_state_is_picked() {
+    use document::objects::{AssocEvalValue, AssocEvalVariant};
+    let mut scene = fixture("authoring-select.dwg");
+    let model = scene.document.header.model_space_block_handle;
+    // P2 shows Sichtbar (row 0); make its key like the templates' ones.
+    for feature in features(&scene.document, model) {
+        let properties = super::properties(&scene.document, feature).unwrap();
+        if properties.text("Name") != Some("P2") {
+            continue;
+        }
+        for reactor in properties.get("Reactors").unwrap().items().unwrap() {
+            let handle = reactor.object().unwrap();
+            let mut record = record(&scene.document, handle).unwrap();
+            let reactor = record.body.properties_mut();
+            if reactor.get("IsKeyVar") != Some(&Value::Flag(true)) {
+                continue;
+            }
+            reactor.set("IsEnabled", Value::Flag(false));
+            reactor.set("Value", Value::Real(1.0));
+            let variable = reactor.get("VarId").unwrap().object().unwrap();
+            super::switch::store(&mut scene.document, &record);
+            super::switch::set_variable(
+                &mut scene.document,
+                variable,
+                Some("1".into()),
+                AssocEvalVariant {
+                    code: 90,
+                    value: AssocEvalValue::Long(1),
+                },
+            )
+            .unwrap();
+        }
+    }
+    scene.load_named_parameters_from_document();
+    let before = key_of(&scene.document, "P2");
+    run(
+        &mut scene,
+        &[
+            ("P1", "S1", Action::Select, &[]),
+            ("P1", "S4", Action::Invisible, &[4]),
+            ("P1", "S2", Action::Visible, &[5]),
+        ],
+    );
+    assert_eq!(
+        key_of(&scene.document, "P2"),
+        before,
+        "P2 was not asked about"
+    );
+    assert_eq!(
+        current_state(&scene.document, model, "P2").as_deref(),
+        Some("Sichtbar"),
+        "still shows Sichtbar"
+    );
+    run(&mut scene, &[("P2", "Unsichtbar", Action::Select, &[])]);
+    assert_eq!(
+        key_of(&scene.document, "P2"),
+        (
+            Value::Flag(true),
+            Value::Real(1.0),
+            String::new(),
+            AssocEvalValue::Real(1.0)
+        )
+    );
+}

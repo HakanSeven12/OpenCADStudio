@@ -283,6 +283,7 @@ impl Scene {
                 )
             })
             .collect();
+        let parameter_name = setup.parameters[p].name.clone();
         setup.write(&mut self.document)?;
         let members = owner_members(&self.document, owner);
         apply_states(
@@ -292,19 +293,25 @@ impl Scene {
             &layers,
             &states,
             &BTreeSet::new(),
+            true,
         )?;
-        number_keys(&mut self.document, owner)?;
+        let chosen = (action == Action::Select).then_some(parameter_name);
+        number_keys(&mut self.document, owner, chosen.as_deref())?;
         self.load_named_parameters_from_document();
         self.load_parametric_constraints_from_document();
         Ok(())
     }
 }
 
-/// Give each parameter's key the number of the state it shows. BricsCAD
-/// shows the state of that number again when it next evaluates the owner;
-/// its own state selection leaves the number behind, so the next edit there
-/// jumps back to an earlier state.
-fn number_keys(document: &mut Document, owner: Handle) -> Result<()> {
+/// Give each enabled key the number of the state it shows: BricsCAD shows the
+/// state of that number again when it next evaluates the owner. A disabled
+/// key is left alone; BricsCAD reads its state by name, and its variable may
+/// hold an expression of its own (openCirt's templates have keys showing the
+/// second state over a variable `0`). The key of `chosen`, the parameter a
+/// state was picked for, is set the way BricsCAD sets it when it shows a
+/// state: enabled, holding the state's number, its variable that number with
+/// no expression.
+fn number_keys(document: &mut Document, owner: Handle, chosen: Option<&str>) -> Result<()> {
     for feature in features(document, owner) {
         let Some(properties) = super::properties(document, feature) else {
             continue;
@@ -327,6 +334,11 @@ fn number_keys(document: &mut Document, owner: Handle) -> Result<()> {
                     .collect()
             })
             .ok_or(UNSUPPORTED)?;
+        let is_chosen = chosen.is_some_and(|name| {
+            properties
+                .text("Name")
+                .is_some_and(|own| own.eq_ignore_ascii_case(name))
+        });
         let reactors: Vec<Handle> = properties
             .get("Reactors")
             .and_then(Value::items)
@@ -336,6 +348,9 @@ fn number_keys(document: &mut Document, owner: Handle) -> Result<()> {
             let mut record = read_record(document, reactor).ok_or(UNSUPPORTED)?;
             let properties = record.body.properties_mut();
             if properties.get("IsKeyVar") != Some(&Value::Flag(true)) {
+                continue;
+            }
+            if !is_chosen && properties.get("IsEnabled") == Some(&Value::Flag(false)) {
                 continue;
             }
             let Some(row) = properties
@@ -349,18 +364,26 @@ fn number_keys(document: &mut Document, owner: Handle) -> Result<()> {
                 .and_then(Value::object)
                 .ok_or(UNSUPPORTED)?;
             properties.set("Value", Value::Real(row as f64));
+            if is_chosen {
+                properties.set("IsEnabled", Value::Flag(true));
+            }
             store(document, &record);
-            let value = match variable_value(document, variable).value {
-                AssocEvalValue::Long(_) => AssocEvalVariant {
-                    code: 90,
-                    value: AssocEvalValue::Long(row as i32),
-                },
-                _ => AssocEvalVariant {
-                    code: 40,
-                    value: AssocEvalValue::Real(row as f64),
-                },
+            let real = AssocEvalVariant {
+                code: 40,
+                value: AssocEvalValue::Real(row as f64),
             };
-            set_variable(document, variable, None, value)?;
+            if is_chosen {
+                set_variable(document, variable, Some(String::new()), real)?;
+            } else {
+                let value = match variable_value(document, variable).value {
+                    AssocEvalValue::Long(_) => AssocEvalVariant {
+                        code: 90,
+                        value: AssocEvalValue::Long(row as i32),
+                    },
+                    _ => real,
+                };
+                set_variable(document, variable, None, value)?;
+            }
         }
     }
     Ok(())

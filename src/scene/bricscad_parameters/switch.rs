@@ -359,7 +359,15 @@ impl Scene {
         store(document, &record);
 
         let layers: FxHashMap<Handle, String> = copy_members.iter().copied().zip(layers).collect();
-        apply_states(document, copy, &copy_members, &layers, states, listed)?;
+        apply_states(
+            document,
+            copy,
+            &copy_members,
+            &layers,
+            states,
+            listed,
+            false,
+        )?;
         Ok(copy)
     }
 }
@@ -476,7 +484,10 @@ fn remap_associative(
 /// parameter the state, the values of its table's columns and, for a
 /// parameter in `listed`, the marks BricsCAD sets on an instance's own
 /// parameter; for each suppression its value, status and the layers of the
-/// members it moved to `*SUPPRESS`.
+/// members it moved to `*SUPPRESS`. With `keep_keys` the key reactors keep
+/// whether they are enabled and the number they hold (model space of a block
+/// drawing, where BricsCAD leaves the keys of parameters it was not asked
+/// about as they are).
 pub(super) fn apply_states(
     document: &mut Document,
     copy: Handle,
@@ -484,6 +495,7 @@ pub(super) fn apply_states(
     layers: &FxHashMap<Handle, String>,
     states: &BTreeMap<String, String>,
     listed: &BTreeSet<String>,
+    keep_keys: bool,
 ) -> Result<()> {
     let features = features(document, copy);
     let mut columns: FxHashMap<String, f64> = FxHashMap::default();
@@ -557,7 +569,9 @@ pub(super) fn apply_states(
                 .ok_or(UNSUPPORTED)?;
             if properties.get("IsKeyVar") == Some(&Value::Flag(true)) {
                 properties.set("String", Value::Text(state.clone()));
-                properties.set("IsEnabled", Value::Flag(!own));
+                if !keep_keys {
+                    properties.set("IsEnabled", Value::Flag(!own));
+                }
                 if own {
                     properties.set("Value", Value::Real(row as f64));
                     set_variable(

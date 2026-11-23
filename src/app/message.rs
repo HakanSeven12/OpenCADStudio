@@ -2674,6 +2674,8 @@ pub enum Message {
     /// A click or search in the Point Cloud Manager.
     PcManager(crate::ui::window::pc_manager::PcManagerMsg),
     Count(crate::ui::window::count_palette::CountMsg),
+    /// The Visibility States palette of a BricsCAD parametric block.
+    BricscadVisibility(crate::ui::window::bricscad_visibility::VisMsg),
     /// The LayerWalk pallet (LAYWALK).
     Laywalk(crate::ui::window::layer_walk::LayerWalkMsg),
     /// The QuickCalc pallet.

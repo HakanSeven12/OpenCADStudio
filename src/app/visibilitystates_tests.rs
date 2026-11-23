@@ -167,3 +167,141 @@ fn objects_picked_when_the_command_asks_are_the_ones_it_takes() {
         crate::scene::bricscad_parameters::author_tests::describe(&scene.document)
     );
 }
+
+mod palette {
+    use super::*;
+    use crate::scene::bricscad_parameters::author_tests::LINES;
+    use crate::ui::window::bricscad_visibility::VisMsg;
+
+    fn send(app: &mut OpenCADStudio, message: VisMsg) {
+        let _ = app.update(Message::BricscadVisibility(message));
+    }
+
+    fn states(app: &OpenCADStudio) -> Vec<(String, Vec<String>, usize)> {
+        let i = app.active_tab;
+        let model = app
+            .bricscad_visibility_model(&app.tabs[i])
+            .expect("model space");
+        model
+            .parameters
+            .as_ref()
+            .expect("the parameters can be edited")
+            .iter()
+            .map(|p| (p.name.clone(), p.states.clone(), p.current))
+            .collect()
+    }
+
+    fn shown_in(app: &OpenCADStudio, parameter: &str, state: &str) -> Vec<u64> {
+        let i = app.active_tab;
+        let model = app.bricscad_visibility_model(&app.tabs[i]).unwrap();
+        let p = model
+            .parameters
+            .as_ref()
+            .unwrap()
+            .iter()
+            .find(|p| p.name == parameter)
+            .unwrap()
+            .clone();
+        let s = p.states.iter().position(|x| x == state).unwrap();
+        p.objects
+            .iter()
+            .filter(|(_, pattern)| pattern[s])
+            .map(|(h, _)| h.value())
+            .collect()
+    }
+
+    #[test]
+    fn the_palette_switches_moves_adds_and_each_step_undoes() {
+        let mut app = opened("authoring-select.dwg");
+        let i = app.active_tab;
+        let _ = app.dispatch_command("VISIBILITYSTATESPANELOPEN");
+        assert!(app.bricscad_visibility.show);
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            states(&app)[0],
+            ("P1".into(), s(&["S1", "S2", "S3", "S4"]), 2)
+        );
+
+        // A click on a state shows it.
+        send(&mut app, VisMsg::Select("P1".into(), "S1".into()));
+        assert_eq!(states(&app)[0].2, 0);
+
+        // Up and down: the order Properties lists them in.
+        send(&mut app, VisMsg::Move("P1".into(), "S4".into(), true));
+        assert_eq!(
+            states(&app)[0],
+            ("P1".into(), s(&["S1", "S2", "S4", "S3"]), 0)
+        );
+        let _ = app.update(Message::Undo);
+        assert_eq!(states(&app)[0].1, s(&["S1", "S2", "S3", "S4"]));
+
+        // A new state opens its page; a tick shows an object in it.
+        send(&mut app, VisMsg::NewState("P1".into()));
+        send(&mut app, VisMsg::NewStateName("Leer".into()));
+        send(&mut app, VisMsg::NewStateCommit);
+        assert_eq!(
+            app.bricscad_visibility.page,
+            Some(("P1".into(), "Leer".into()))
+        );
+        assert_eq!(shown_in(&app, "P1", "Leer"), Vec::<u64>::new());
+        send(&mut app, VisMsg::Show(Handle::from(LINES[0]), true));
+        assert_eq!(shown_in(&app, "P1", "Leer"), vec![LINES[0]]);
+
+        // Add objects: picked in the drawing, they show in this state only.
+        send(&mut app, VisMsg::AddObjects);
+        assert!(
+            app.tabs[i].active_cmd.is_some(),
+            "the palette asks for objects"
+        );
+        let _ = app.tabs[i]
+            .active_cmd
+            .as_mut()
+            .unwrap()
+            .on_entity_pick(Handle::from(LINES[4]), glam::DVec3::ZERO);
+        feed(&mut app, "");
+        assert!(app.tabs[i].active_cmd.is_none());
+        assert_eq!(shown_in(&app, "P1", "Leer"), vec![LINES[0], LINES[4]]);
+        assert_eq!(shown_in(&app, "P1", "S1"), vec![LINES[0], LINES[1]]);
+
+        // Removed from the parameter: no state rules it any more.
+        send(&mut app, VisMsg::Remove(Handle::from(LINES[4])));
+        assert_eq!(shown_in(&app, "P1", "Leer"), vec![LINES[0]]);
+        let _ = app.update(Message::Undo);
+        assert_eq!(shown_in(&app, "P1", "Leer"), vec![LINES[0], LINES[4]]);
+    }
+
+    #[test]
+    fn a_new_parameter_starts_with_the_objects_picked() {
+        let mut app = opened("authoring-start.dwg");
+        let i = app.active_tab;
+        let _ = app.dispatch_command("VISIBILITYSTATESPANELOPEN");
+        assert_eq!(states(&app), vec![]);
+        send(&mut app, VisMsg::NewParameter);
+        send(&mut app, VisMsg::NewParameterName("LAMPE".into()));
+        send(&mut app, VisMsg::NewParameterState("An".into()));
+        send(&mut app, VisMsg::NewParameterPick);
+        for handle in [LINES[1], LINES[2]] {
+            let _ = app.tabs[i]
+                .active_cmd
+                .as_mut()
+                .expect("the palette asks for objects")
+                .on_entity_pick(Handle::from(handle), glam::DVec3::ZERO);
+        }
+        feed(&mut app, "");
+        assert_eq!(states(&app), vec![("LAMPE".into(), vec!["An".into()], 0)]);
+        assert_eq!(shown_in(&app, "LAMPE", "An"), vec![LINES[1], LINES[2]]);
+        assert_eq!(
+            app.bricscad_visibility.page,
+            Some(("LAMPE".into(), "An".into()))
+        );
+    }
+
+    #[test]
+    fn outside_model_space_the_palette_shows_nothing_to_edit() {
+        let mut app = opened("visibility-states.dwg");
+        let i = app.active_tab;
+        assert!(app.bricscad_visibility_model(&app.tabs[i]).is_some());
+        let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", 0xEE));
+        assert!(app.bricscad_visibility_model(&app.tabs[i]).is_none());
+    }
+}

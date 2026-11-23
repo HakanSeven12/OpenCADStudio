@@ -83,7 +83,7 @@ Dynamic blocks change shape through grips on each reference: a door that sets it
 
 **Visibility states.** `BVSTATE` creates and switches visibility states; <img src="images/icons/constrain/show.svg" width="20" alt=""> `BVSHOW` and <img src="images/icons/constrain/hide_all.svg" width="20" alt=""> `BVHIDE` choose which objects show in the current state. Each reference then has a list to pick its state.
 
-**BricsCAD parametric blocks.** A reference to a block made parametric in BricsCAD lists the states of its visibility parameters in Properties; the state you pick shows the way BricsCAD shows it. [`VISIBILITYSTATES`](VISIBILITYSTATES-Command) creates and edits those states in model space of the block's own drawing, stored where BricsCAD reads them.
+**BricsCAD parametric blocks.** A reference to a block made parametric in BricsCAD lists the states of its visibility parameters in Properties; the state you pick shows the way BricsCAD shows it. [`VISIBILITYSTATES`](VISIBILITYSTATES-Command) creates and edits those states in model space of the block's own drawing, stored where BricsCAD reads them; the [Visibility States palette](VISIBILITYSTATESPANELOPEN-Command) does it with the mouse and orders the states.
 
 **Block properties table.** `BTABLE` defines combinations of parameter values in a table, so each reference picks a row.
 

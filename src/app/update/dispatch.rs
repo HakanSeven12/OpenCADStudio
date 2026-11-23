@@ -1943,6 +1943,7 @@ impl OpenCADStudio {
             Message::PdfShxDialog(message) => self.update_pdf_shx_dialog(message),
             Message::PcManager(message) => self.update_pc_manager(message),
             Message::Count(message) => self.on_count(message),
+            Message::BricscadVisibility(message) => self.on_bricscad_visibility(message),
             Message::Laywalk(message) => self.on_layer_walk(message),
             Message::QuickCalc(message) => self.on_quick_calc(message),
             Message::Assistant(message) => self.on_assistant(message),

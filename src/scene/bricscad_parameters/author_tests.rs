@@ -3,7 +3,7 @@
 //! along one run of the command on five lines (see the README there). The
 //! same run here leaves the same visibility setup.
 
-use super::author::Action;
+use super::author::{Action, Naming};
 use super::record::Value;
 use super::*;
 use crate::scene::Scene;
@@ -70,7 +70,7 @@ pub(super) fn run(scene: &mut Scene, steps: &[Step]) {
                 state,
                 *action,
                 &objects,
-                super::author::Naming::GERMAN,
+                Naming::GERMAN,
             )
             .unwrap_or_else(|error| panic!("{parameter} {state} {action:?} {lines:?}: {error}"));
     }
@@ -428,6 +428,140 @@ fn a_new_group_takes_a_name_no_variable_has() {
     );
 }
 
+/// Each state of `parameter` by name with the objects it shows.
+fn shown_by_state(
+    document: &Document,
+    parameter: &str,
+) -> std::collections::BTreeMap<String, Vec<u64>> {
+    let model = document.header.model_space_block_handle;
+    let view = super::parameter_views(document, model)
+        .unwrap()
+        .into_iter()
+        .find(|p| p.name == parameter)
+        .unwrap();
+    view.states
+        .iter()
+        .enumerate()
+        .map(|(s, state)| {
+            (
+                state.clone(),
+                view.objects
+                    .iter()
+                    .filter(|(_, pattern)| pattern[s])
+                    .map(|(entity, _)| entity.value())
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+fn states_of(document: &Document, parameter: &str) -> (Vec<String>, usize) {
+    let model = document.header.model_space_block_handle;
+    let view = super::parameter_views(document, model)
+        .unwrap()
+        .into_iter()
+        .find(|p| p.name == parameter)
+        .unwrap();
+    (view.states, view.current)
+}
+
+/// The number the key variable of `parameter` holds.
+fn key_number(document: &Document, parameter: &str) -> Value {
+    let model = document.header.model_space_block_handle;
+    for feature in features(document, model) {
+        let properties = super::properties(document, feature).unwrap();
+        if properties.text("Name") != Some(parameter) {
+            continue;
+        }
+        for reactor in properties.get("Reactors").unwrap().items().unwrap() {
+            let reactor = super::properties(document, reactor.object().unwrap()).unwrap();
+            if reactor.get("IsKeyVar") == Some(&Value::Flag(true)) {
+                return reactor.get("Value").unwrap().clone();
+            }
+        }
+    }
+    panic!("no key of {parameter}");
+}
+
+#[test]
+fn a_state_moves_with_its_objects_and_the_shown_state_stays_shown() {
+    let mut scene = fixture("authoring-select.dwg");
+    let before = shown_by_state(&scene.document, "P1");
+    assert_eq!(
+        states_of(&scene.document, "P1"),
+        (vec!["S1".into(), "S2".into(), "S3".into(), "S4".into()], 2)
+    );
+    let layers = |document: &Document| -> Vec<String> {
+        LINES
+            .iter()
+            .map(|h| {
+                document
+                    .get_entity(Handle::from(*h))
+                    .unwrap()
+                    .common()
+                    .layer
+                    .clone()
+            })
+            .collect()
+    };
+    let shown = layers(&scene.document);
+    run(&mut scene, &[("P1", "S3", Action::MoveUp, &[])]);
+    assert_eq!(
+        states_of(&scene.document, "P1"),
+        (vec!["S1".into(), "S3".into(), "S2".into(), "S4".into()], 1)
+    );
+    assert_eq!(shown_by_state(&scene.document, "P1"), before);
+    assert_eq!(layers(&scene.document), shown, "the drawing shows the same");
+    assert_eq!(key_number(&scene.document, "P1"), Value::Real(1.0));
+    run(&mut scene, &[("P1", "S1", Action::MoveDown, &[])]);
+    assert_eq!(
+        states_of(&scene.document, "P1"),
+        (vec!["S3".into(), "S1".into(), "S2".into(), "S4".into()], 0)
+    );
+    assert_eq!(shown_by_state(&scene.document, "P1"), before);
+    // Past either end nothing moves.
+    let model = scene.document.header.model_space_block_handle;
+    let unchanged = scene.document.clone();
+    for (state, action) in [("S3", Action::MoveUp), ("S4", Action::MoveDown)] {
+        assert!(scene
+            .edit_bricscad_visibility_named(model, "P1", state, action, &[], Naming::GERMAN)
+            .is_err());
+    }
+    assert!(scene.document == unchanged);
+}
+
+#[test]
+fn a_new_state_hides_every_object_of_its_parameter_and_is_shown() {
+    let mut scene = fixture("authoring-select.dwg");
+    run(&mut scene, &[("P1", "Leer", Action::NewState, &[])]);
+    let (states, current) = states_of(&scene.document, "P1");
+    assert_eq!(states.last().map(String::as_str), Some("Leer"));
+    assert_eq!(current, states.len() - 1);
+    assert_eq!(
+        shown_by_state(&scene.document, "P1")["Leer"],
+        Vec::<u64>::new()
+    );
+    // L1 and L2 are ruled by P1 (L2 also by P2): both hidden now.
+    for handle in [0x92, 0x93] {
+        assert_eq!(
+            scene
+                .document
+                .get_entity(Handle::from(handle))
+                .unwrap()
+                .common()
+                .layer,
+            "*SUPPRESS"
+        );
+    }
+    let model = scene.document.header.model_space_block_handle;
+    assert!(scene
+        .edit_bricscad_visibility_named(model, "P1", "leer", Action::NewState, &[], Naming::GERMAN)
+        .is_err());
+    assert!(scene
+        .edit_bricscad_visibility_named(model, "P9", "S1", Action::NewState, &[], Naming::GERMAN)
+        .is_err());
+}
+
 /// The key of `parameter`: whether enabled, its number, its variable's
 /// expression and value.
 fn key_of(
@@ -510,7 +644,8 @@ fn a_disabled_key_is_left_alone_until_its_state_is_picked() {
         &mut scene,
         &[
             ("P1", "S1", Action::Select, &[]),
-            ("P1", "S4", Action::Invisible, &[4]),
+            ("P1", "S4", Action::MoveUp, &[]),
+            ("P1", "Neu", Action::NewState, &[]),
             ("P1", "S2", Action::Visible, &[5]),
         ],
     );
@@ -520,8 +655,8 @@ fn a_disabled_key_is_left_alone_until_its_state_is_picked() {
         "P2 was not asked about"
     );
     assert_eq!(
-        current_state(&scene.document, model, "P2").as_deref(),
-        Some("Sichtbar"),
+        states_of(&scene.document, "P2").1,
+        0,
         "still shows Sichtbar"
     );
     run(&mut scene, &[("P2", "Unsichtbar", Action::Select, &[])]);

@@ -28,7 +28,7 @@ mod author;
 pub(crate) mod record;
 mod switch;
 
-pub(crate) use author::{parameter_states, Action};
+pub(crate) use author::{parameter_states, parameter_views, shown_layers, Action, ParameterView};
 
 pub(crate) use switch::can_switch;
 

@@ -45,14 +45,6 @@ impl VisibilityStatesCommand {
             .unwrap_or_default()
     }
 
-    fn list(names: &[String]) -> String {
-        if names.is_empty() {
-            String::new()
-        } else {
-            format!(" or [{}]", names.join("/"))
-        }
-    }
-
     fn done(parts: &[&str]) -> CmdResult {
         let mut command = String::from("_VISIBILITYSTATES");
         for part in parts {
@@ -72,18 +64,30 @@ impl CadCommand for VisibilityStatesCommand {
         match &self.step {
             Step::Parameter => {
                 let names: Vec<String> = self.parameters.iter().map(|(n, _)| n.clone()).collect();
-                crate::tf!(
-                    "VISIBILITYSTATES  Enter a new parameter{}:",
-                    Self::list(&names)
-                )
-                .into_owned()
+                if names.is_empty() {
+                    crate::t!("VISIBILITYSTATES  Enter a new parameter:").into_owned()
+                } else {
+                    crate::tf!(
+                        "VISIBILITYSTATES  Enter a new parameter or [{}]:",
+                        names.join("/")
+                    )
+                    .into_owned()
+                }
             }
-            Step::State(parameter) => crate::tf!(
-                "VISIBILITYSTATES  Enter a new state for {}{}:",
-                parameter,
-                Self::list(&self.states(parameter))
-            )
-            .into_owned(),
+            Step::State(parameter) => {
+                let states = self.states(parameter);
+                if states.is_empty() {
+                    crate::tf!("VISIBILITYSTATES  Enter a new state for {}:", parameter)
+                        .into_owned()
+                } else {
+                    crate::tf!(
+                        "VISIBILITYSTATES  Enter a new state for {} or [{}]:",
+                        parameter,
+                        states.join("/")
+                    )
+                    .into_owned()
+                }
+            }
             Step::Action(..) => crate::t!(
                 "VISIBILITYSTATES  Select action [Add objects/Remove objects/make objects Visible/make objects Invisible/Select state] <Add objects>:"
             )
@@ -143,13 +147,14 @@ impl CadCommand for VisibilityStatesCommand {
                 Some(CmdResult::NeedPoint)
             }
             Step::Action(parameter, state) => {
+                // A translated prompt hands back the whole source option.
                 let keyword = text.trim_start_matches('_').to_ascii_uppercase();
                 let action = match keyword.as_str() {
-                    "" | "A" | "ADD" => "ADD",
-                    "R" | "REMOVE" => "REMOVE",
-                    "V" | "VISIBLE" => "VISIBLE",
-                    "I" | "INVISIBLE" => "INVISIBLE",
-                    "S" | "SELECT" | "ST" | "STATE" => "SELECT",
+                    "" | "A" | "ADD" | "ADD OBJECTS" => "ADD",
+                    "R" | "REMOVE" | "REMOVE OBJECTS" => "REMOVE",
+                    "V" | "VISIBLE" | "MAKE OBJECTS VISIBLE" => "VISIBLE",
+                    "I" | "INVISIBLE" | "MAKE OBJECTS INVISIBLE" => "INVISIBLE",
+                    "S" | "SELECT" | "ST" | "STATE" | "SELECT STATE" => "SELECT",
                     _ => {
                         return Some(CmdResult::ReportError(
                             crate::t!("Invalid option keyword.").into_owned(),
@@ -175,7 +180,11 @@ impl CadCommand for VisibilityStatesCommand {
 }
 
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["VISIBILITYSTATES"]
+    names: &[
+        "VISIBILITYSTATES",
+        "VISIBILITYSTATESPANELOPEN",
+        "VISIBILITYSTATESPANELCLOSE"
+    ]
 });
 
 #[cfg(test)]
@@ -218,6 +227,8 @@ mod tests {
             ("v", "VISIBLE"),
             ("_Invisible", "INVISIBLE"),
             ("S", "SELECT"),
+            ("make objects Visible", "VISIBLE"),
+            ("Select state", "SELECT"),
         ] {
             let mut command = command();
             command.on_text_input("Label");

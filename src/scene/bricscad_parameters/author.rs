@@ -55,12 +55,22 @@ pub(crate) enum Action {
     Invisible,
     /// Make the state current.
     Select,
+    /// Add the state, with every object the parameter rules hidden, and make
+    /// it current (the palette's "Add state"; the command makes a state with
+    /// its first action).
+    NewState,
+    /// Move the state one place up or down in the parameter's list, the
+    /// order Properties lists the states in.
+    MoveUp,
+    MoveDown,
 }
 
 const UNSUPPORTED: &str = "The visibility states here cannot be edited.";
 const OLD_FORMAT: &str = "Visibility states need a drawing in DWG 2010 format or later.";
 const NO_PARAMETER: &str = "No visibility parameter of that name.";
 const NO_STATE: &str = "No visibility state of that name.";
+const STATE_EXISTS: &str = "That visibility state exists already.";
+const CANNOT_MOVE: &str = "The visibility state cannot move further.";
 const BAD_NAME: &str = "Enter a name of letters, digits and underscores.";
 const NAME_TAKEN: &str = "That name is used by another variable.";
 const NO_OBJECTS: &str = "Select objects of the space being edited.";
@@ -154,6 +164,67 @@ impl Naming {
 }
 
 /// The visibility parameters of an owner, with their states, for the prompts.
+/// A visibility parameter of an owner as the palette shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ParameterView {
+    pub(crate) name: String,
+    pub(crate) states: Vec<String>,
+    /// The state shown, by index into `states`.
+    pub(crate) current: usize,
+    /// Each object the parameter rules, in drawing order, with whether it
+    /// shows in each state.
+    pub(crate) objects: Vec<(Handle, Vec<bool>)>,
+}
+
+/// The visibility parameters of `owner` with the objects each rules; `None`
+/// when they cannot be edited here.
+pub(crate) fn parameter_views(document: &Document, owner: Handle) -> Option<Vec<ParameterView>> {
+    let setup = Setup::read(document, owner).ok()?;
+    let order: FxHashMap<Handle, usize> = owner_members(document, owner)
+        .into_iter()
+        .enumerate()
+        .map(|(k, handle)| (handle, k))
+        .collect();
+    Some(
+        setup
+            .parameters
+            .iter()
+            .enumerate()
+            .map(|(p, parameter)| {
+                let mut objects: Vec<(Handle, Vec<bool>)> = setup
+                    .groups
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(g, group)| {
+                        let pattern = setup.signature(g).remove(&p)?;
+                        Some(
+                            group
+                                .members
+                                .iter()
+                                .map(move |member| (member.entity, pattern.clone())),
+                        )
+                    })
+                    .flatten()
+                    .collect();
+                objects.sort_by_key(|(entity, _)| order.get(entity).copied().unwrap_or(usize::MAX));
+                ParameterView {
+                    name: parameter.name.clone(),
+                    states: parameter.states.clone(),
+                    current: parameter
+                        .current
+                        .min(parameter.states.len().saturating_sub(1)),
+                    objects,
+                }
+            })
+            .collect(),
+    )
+}
+
+/// The layer each member of `owner` is on when no state hides it.
+pub(crate) fn shown_layers(document: &Document, owner: Handle) -> FxHashMap<Handle, String> {
+    original_layers(document, owner)
+}
+
 pub(crate) fn parameter_states(document: &Document, owner: Handle) -> Vec<(String, Vec<String>)> {
     Setup::read(document, owner)
         .map(|setup| {
@@ -222,7 +293,9 @@ impl Scene {
             .position(|p| p.name.eq_ignore_ascii_case(parameter))
         {
             Some(p) => p,
-            None if matches!(action, Action::Select | Action::Remove) => return Err(NO_PARAMETER),
+            None if !matches!(action, Action::Add | Action::Visible | Action::Invisible) => {
+                return Err(NO_PARAMETER)
+            }
             None => {
                 if !valid_name(parameter) {
                     return Err(BAD_NAME);
@@ -242,11 +315,31 @@ impl Scene {
             .iter()
             .position(|s| s.eq_ignore_ascii_case(state))
         {
+            Some(_) if action == Action::NewState => return Err(STATE_EXISTS),
             Some(s) => s,
-            None if matches!(action, Action::Select | Action::Remove) => return Err(NO_STATE),
-            None => setup.parameters[p].add_state(state),
+            None if matches!(
+                action,
+                Action::Select | Action::Remove | Action::MoveUp | Action::MoveDown
+            ) =>
+            {
+                return Err(NO_STATE)
+            }
+            None => {
+                if !valid_name(state) {
+                    return Err(BAD_NAME);
+                }
+                setup.parameters[p].add_state(state)
+            }
         };
-        if action == Action::Select {
+        if matches!(action, Action::MoveUp | Action::MoveDown) {
+            let parameter = &mut setup.parameters[p];
+            let to = if action == Action::MoveUp {
+                s.checked_sub(1)
+            } else {
+                (s + 1 < parameter.states.len()).then_some(s + 1)
+            };
+            parameter.swap_states(s, to.ok_or(CANNOT_MOVE)?);
+        } else if matches!(action, Action::Select | Action::NewState) {
             setup.parameters[p].current = s;
         } else {
             // BricsCAD works through a selection from its last object.
@@ -295,7 +388,7 @@ impl Scene {
             &BTreeSet::new(),
             true,
         )?;
-        let chosen = (action == Action::Select).then_some(parameter_name);
+        let chosen = matches!(action, Action::Select | Action::NewState).then_some(parameter_name);
         number_keys(&mut self.document, owner, chosen.as_deref())?;
         self.load_named_parameters_from_document();
         self.load_parametric_constraints_from_document();
@@ -485,6 +578,19 @@ impl Parameter {
     }
 
     /// A new state, in which every group is hidden.
+    /// Swap two states with their rows; the shown state stays shown.
+    fn swap_states(&mut self, a: usize, b: usize) {
+        self.states.swap(a, b);
+        for column in &mut self.columns {
+            column.values.swap(a, b);
+        }
+        if self.current == a {
+            self.current = b;
+        } else if self.current == b {
+            self.current = a;
+        }
+    }
+
     fn add_state(&mut self, name: &str) -> usize {
         self.states.push(name.to_string());
         for column in &mut self.columns {
@@ -898,7 +1004,9 @@ impl Setup {
             let old = group.map(|g| self.signature(g)).unwrap_or_default();
             let mut new = old.clone();
             match (old.get(&p), action) {
-                (Some(_), Action::Add) | (None, Action::Remove) | (_, Action::Select) => {}
+                (Some(_), Action::Add)
+                | (None, Action::Remove)
+                | (_, Action::Select | Action::NewState | Action::MoveUp | Action::MoveDown) => {}
                 (Some(_), Action::Remove) => {
                     new.remove(&p);
                 }

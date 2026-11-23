@@ -135,7 +135,15 @@ pub(crate) fn mline_miter_factor(vertex: &MLineVertex, normal: Vector3) -> f64 {
         .normalize_or(glam::DVec3::X);
     let miter = glam::DVec3::new(vertex.miter.x, vertex.miter.y, vertex.miter.z)
         .normalize_or(glam::DVec3::Y);
-    miter.dot(normal.cross(direction)).abs().max(1.0e-9)
+    // Signed: an element's offset is measured from the left of the segment
+    // direction, and after a mirror the miter points to its right while the
+    // scale factor turns negative (#3497).
+    let factor = miter.dot(normal.cross(direction));
+    if factor.abs() < 1.0e-9 {
+        1.0e-9_f64.copysign(factor)
+    } else {
+        factor
+    }
 }
 
 fn adjusted_mline_endpoint(
@@ -1412,18 +1420,33 @@ fn restore_mline_offsets(mline: &mut MLine, offsets: &[Vec<Option<f64>>]) {
 
 impl Transformable for MLine {
     fn apply_transform(&mut self, t: &EntityTransform) {
-        crate::scene::view::transform::apply_standard_entity_transform(
-            self,
-            t,
-            |entity, p1, p2| {
-                // The document's reflection moves the direction and the miter
-                // of each vertex with its position.
-                document::Entity::apply_transform(
-                    entity,
-                    &crate::scene::view::transform::reflection_about_xy_line(p1, p2),
-                )
-            },
-        );
+        // The document's mirror keeps the reflected side as a negative scale
+        // factor, the file's own way, so a later edit rebuilds the elements
+        // on the mirrored side.
+        match t {
+            EntityTransform::Mirror {
+                p1,
+                p2,
+                working_normal,
+            } => document::Entity::apply_mirror(
+                self,
+                &crate::scene::view::transform::reflection_about_working_line(
+                    *p1,
+                    *p2,
+                    *working_normal,
+                ),
+            ),
+            EntityTransform::Affine(transform)
+                if transform.matrix.to_matrix3().determinant() < 0.0 =>
+            {
+                document::Entity::apply_mirror(self, transform)
+            }
+            _ => crate::scene::view::transform::apply_standard_entity_transform(
+                self,
+                t,
+                |_, _, _| {},
+            ),
+        }
     }
 }
 
@@ -1755,5 +1778,44 @@ mod tests {
         }
         // Guards against a list of cases that draws nothing.
         assert!(compared > 2000, "only {compared} points were compared");
+    }
+
+    /// An edit after MIRROR (a grip edit, MLEDIT) rebuilds the geometry; the
+    /// elements stay on the mirrored side (#3497).
+    #[test]
+    fn a_mirrored_multiline_keeps_its_mirror_image_after_a_rebuild() {
+        use crate::entities::transform::EntityTransform;
+        let (p1, p2) = (
+            glam::DVec3::new(3.0, -2.0, 0.0),
+            glam::DVec3::new(6.0, 9.0, 0.0),
+        );
+        let axis = (p2 - p1).normalize();
+        let mirror_image = |p: [f64; 3]| {
+            let d = glam::DVec3::new(p[0], p[1], p[2]) - p1;
+            let r = p1 + 2.0 * d.dot(axis) * axis - d;
+            [r.x, r.y, p[2]]
+        };
+        let mut compared = 0;
+        for case in cases() {
+            let before = mline_lines_resolved(&case.bare, case.style.as_ref());
+            let mut mirrored = case.bare.clone();
+            Transformable::apply_transform(
+                &mut mirrored,
+                &EntityTransform::Mirror {
+                    p1,
+                    p2,
+                    working_normal: glam::DVec3::Z,
+                },
+            );
+            rebuild_mline_geometry(&mut mirrored);
+            let after = mline_lines_resolved(&mirrored, case.style.as_ref());
+            assert_eq!(before.len(), after.len(), "{}: line count", case.name);
+            for (index, (b, a)) in before.iter().zip(&after).enumerate() {
+                let expected: Vec<[f64; 3]> = b.points.iter().copied().map(mirror_image).collect();
+                assert_same_points(&case.name, &format!("line {index}"), &expected, &a.points);
+                compared += expected.len();
+            }
+        }
+        assert!(compared > 1000, "only {compared} points were compared");
     }
 }

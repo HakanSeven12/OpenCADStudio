@@ -2538,6 +2538,57 @@ pub trait HostApi {
     ) -> Result<crate::widget::WidgetRevision, crate::widget::WidgetReject> {
         self.panel_surface_page(panel_id, page)
     }
+
+    /// Publish (or replace) a panel's TABLE surface (API v29, additive):
+    /// stable row keys, typed scalar cells. The default is the
+    /// transport-era stub (Unattached; nothing stored); surface-aware
+    /// hosts override [`HostApi::panel_table_publish_for_plugin`].
+    fn panel_table_publish(
+        &mut self,
+        _panel_id: &str,
+        _surface: crate::tables::TableSurface,
+    ) -> Result<crate::tables::TableRevision, crate::tables::TableReject> {
+        Err(crate::tables::TableReject {
+            code: crate::tables::TableRejectCode::Unattached,
+            current_revision: None,
+        })
+    }
+
+    /// [`Self::panel_table_publish`] for the transport's authenticated
+    /// `plugin_id`.
+    fn panel_table_publish_for_plugin(
+        &mut self,
+        _plugin_id: &str,
+        panel_id: &str,
+        surface: crate::tables::TableSurface,
+    ) -> Result<crate::tables::TableRevision, crate::tables::TableReject> {
+        self.panel_table_publish(panel_id, surface)
+    }
+
+    /// Patch a panel's stored TABLE atomically (API v29, additive):
+    /// cell/row ops apply all-or-nothing against the stored head. The
+    /// default is the transport-era stub (Unattached; nothing stored).
+    fn panel_surface_table_patch(
+        &mut self,
+        _panel_id: &str,
+        _patch: crate::tables::TablePatch,
+    ) -> Result<crate::tables::TableRevision, crate::tables::TableReject> {
+        Err(crate::tables::TableReject {
+            code: crate::tables::TableRejectCode::Unattached,
+            current_revision: None,
+        })
+    }
+
+    /// [`Self::panel_surface_table_patch`] for the transport's
+    /// authenticated `plugin_id`.
+    fn panel_surface_table_patch_for_plugin(
+        &mut self,
+        _plugin_id: &str,
+        panel_id: &str,
+        patch: crate::tables::TablePatch,
+    ) -> Result<crate::tables::TableRevision, crate::tables::TableReject> {
+        self.panel_surface_table_patch(panel_id, patch)
+    }
 }
 
 /// The answer of a host without surface support: `InvalidSurface` for an

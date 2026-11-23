@@ -810,6 +810,11 @@ pub enum PanelSurface {
     /// host-local, and children a plugin has not pushed yet page in via
     /// `WidgetPage` installs.
     Widgets(crate::widget::WidgetSurface),
+    /// The panel's typed-table surface (api v29, S07): stable row keys,
+    /// typed scalar cells, atomic cell/row patches — rendered and edited
+    /// with NATIVE host widgets (edits are host-local drafts until the
+    /// plugin canonicalizes them with its own patch).
+    Tables(crate::tables::TableSurface),
 }
 
 /// Why a panel surface publish was refused; a refusal changes nothing.

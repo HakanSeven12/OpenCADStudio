@@ -1237,6 +1237,60 @@ impl HostApi for PluginHostApi {
         }
     }
 
+    fn panel_table_publish(
+        &mut self,
+        panel_id: &str,
+        surface: crate::tables::TableSurface,
+    ) -> Result<crate::tables::TableRevision, crate::tables::TableReject> {
+        match self.client.request(PluginRequest::PanelSurfacePublish {
+            panel_id: panel_id.to_string(),
+            surface: PanelSurface::Tables(surface),
+        }) {
+            Ok(PluginResponse::PanelTablePublished(result)) => result,
+            Ok(other) => {
+                eprintln!("[plugin] unexpected table publish response: {other:?}");
+                Err(crate::tables::TableReject {
+                    code: crate::tables::TableRejectCode::Unattached,
+                    current_revision: None,
+                })
+            }
+            Err(e) => {
+                eprintln!("[plugin] table publish request failed: {e}");
+                Err(crate::tables::TableReject {
+                    code: crate::tables::TableRejectCode::Unattached,
+                    current_revision: None,
+                })
+            }
+        }
+    }
+
+    fn panel_surface_table_patch(
+        &mut self,
+        panel_id: &str,
+        patch: crate::tables::TablePatch,
+    ) -> Result<crate::tables::TableRevision, crate::tables::TableReject> {
+        match self.client.request(PluginRequest::PanelSurfaceTablePatch {
+            panel_id: panel_id.to_string(),
+            patch,
+        }) {
+            Ok(PluginResponse::PanelTablePatchResult(result)) => result,
+            Ok(other) => {
+                eprintln!("[plugin] unexpected table patch response: {other:?}");
+                Err(crate::tables::TableReject {
+                    code: crate::tables::TableRejectCode::Unattached,
+                    current_revision: None,
+                })
+            }
+            Err(e) => {
+                eprintln!("[plugin] table patch request failed: {e}");
+                Err(crate::tables::TableReject {
+                    code: crate::tables::TableRejectCode::Unattached,
+                    current_revision: None,
+                })
+            }
+        }
+    }
+
     fn panel_snapshot(&self, panel_id: &str) -> Result<crate::dialog::PanelSnapshot, String> {
         match self.client.request(PluginRequest::PanelSnapshot {
             panel_id: panel_id.to_string(),

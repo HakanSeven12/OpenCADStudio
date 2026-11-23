@@ -254,6 +254,46 @@ fn apply_op(table: &mut TableSurface, op: &TableOp) -> Result<(), TableError> {
     Ok(())
 }
 
+/// Why a table-tier wire request refused. The table tier carries its own
+/// rejection type so its independent revision space (finding F1) is
+/// type-safe end to end; codes append at the end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TableRejectCode {
+    /// Nothing is attached for this panel (no host attach, or the panel
+    /// is not registered by the authenticated plugin), or the table was
+    /// never published so it cannot be patched.
+    Unattached,
+    /// The surface is owned by a different verified plugin.
+    OwnedByOther,
+    /// The request is structurally invalid; refused without any state
+    /// change.
+    InvalidSurface,
+    /// The request's revision is not usable against the stored head.
+    NonMonotonicRevision,
+}
+
+/// Typed rejection of a table-tier request: the machine-readable code
+/// plus the stored head when the refusal is revision-related.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct TableReject {
+    pub code: TableRejectCode,
+    /// The stored head when the refusal is revision-related; `None`
+    /// otherwise.
+    pub current_revision: Option<TableRevision>,
+}
+
+impl From<crate::scene::SurfaceRejectCode> for TableRejectCode {
+    fn from(code: crate::scene::SurfaceRejectCode) -> Self {
+        match code {
+            crate::scene::SurfaceRejectCode::Unattached => TableRejectCode::Unattached,
+            crate::scene::SurfaceRejectCode::OwnedByOther => TableRejectCode::OwnedByOther,
+            _ => TableRejectCode::InvalidSurface,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4508,6 +4508,7 @@ dependencies = [
  "serde-reflection",
  "serde_bytes",
  "serde_json",
+ "serial_test",
  "thiserror 1.0.69",
  "windows-sys 0.61.2",
 ]

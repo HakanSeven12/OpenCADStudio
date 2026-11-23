@@ -57,3 +57,4 @@ document = { package = "opencaddocument", git = "https://github.com/HakanSeven12
 [dev-dependencies]
 serde_json = "1"
 bincode = "1"
+serial_test = "4.0"

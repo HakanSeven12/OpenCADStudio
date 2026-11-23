@@ -189,6 +189,8 @@ mod qselect;
 mod style;
 pub(in crate::app) mod table_style_cells;
 pub(crate) mod style_import;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(in crate::app) mod undo_record_guard;
 pub(in crate::app) mod util;
 mod viewport;
 pub(in crate::app) mod viewport_snap;
@@ -1148,6 +1150,8 @@ impl OpenCADStudio {
         // answered move writes it. Answer the withheld position first, so the
         // order stays the order the pointer reported — the hazard
         // `on_snap_dwell_tick` documents is a replay that lands *after*.
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        let undo_guard = undo_record_guard::begin_message(self, &msg);
         let owed = self.flush_owed_pointer_move(&msg);
         let task = Task::batch([owed, self.update_inner(msg)]);
         let perf_dispatch_ms = crate::perf::elapsed_ms(perf_started);
@@ -1181,6 +1185,8 @@ impl OpenCADStudio {
         // Close the document-level first-touch transaction started by
         // push_undo_snapshot at this message boundary.
         self.finish_all_pending_history();
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        undo_record_guard::end(self, undo_guard);
         if self.tabs[self.active_tab].active_cmd.is_none() {
             self.tool_palettes.placing = None;
         }

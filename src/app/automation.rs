@@ -944,6 +944,21 @@ impl OpenCADStudio {
     /// Handle one JSON request line and return the JSON response.
     #[cfg(any(test, not(target_arch = "wasm32")))]
     pub(crate) fn automation_op(&mut self, line: &str) -> Value {
+        // A test build checks that a change of the drawing has an undo step.
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        let undo_guard = super::update::undo_record_guard::begin_request(
+            self,
+            "automation",
+            &serde_json::from_str::<Value>(line).unwrap_or(Value::Null),
+        );
+        let response = self.automation_op_unguarded(line);
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        super::update::undo_record_guard::end(self, undo_guard);
+        response
+    }
+
+    #[cfg(any(test, not(target_arch = "wasm32")))]
+    fn automation_op_unguarded(&mut self, line: &str) -> Value {
         // The plugin pump exists only on native targets (the plugins are
         // native processes); on wasm this is a no-op.
         #[cfg(not(target_arch = "wasm32"))]

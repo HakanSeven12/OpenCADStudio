@@ -1416,33 +1416,12 @@ impl Transformable for MLine {
             self,
             t,
             |entity, p1, p2| {
-                // The elements are drawn at `position + miter × distance`, so
-                // the two vectors of each vertex are reflected with it.
-                let (ax, ay) = (p2.x - p1.x, p2.y - p1.y);
-                let length2 = ax * ax + ay * ay;
-                let reflect = |v: &mut Vector3| {
-                    if length2 > 1e-12 {
-                        let along = (v.x * ax + v.y * ay) / length2;
-                        v.x = 2.0 * along * ax - v.x;
-                        v.y = 2.0 * along * ay - v.y;
-                    }
-                };
-                for v in &mut entity.vertices {
-                    crate::scene::view::transform::reflect_xy_point(
-                        &mut v.position.x,
-                        &mut v.position.y,
-                        p1,
-                        p2,
-                    );
-                    reflect(&mut v.direction);
-                    reflect(&mut v.miter);
-                }
-                crate::scene::view::transform::reflect_xy_point(
-                    &mut entity.start_point.x,
-                    &mut entity.start_point.y,
-                    p1,
-                    p2,
-                );
+                // The document's reflection moves the direction and the miter
+                // of each vertex with its position.
+                document::Entity::apply_transform(
+                    entity,
+                    &crate::scene::view::transform::reflection_about_xy_line(p1, p2),
+                )
             },
         );
     }

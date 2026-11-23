@@ -462,10 +462,7 @@ impl PanelSurfaceStore {
     }
 
     /// Owner-agnostic table-tier read (see `scene_any_owner`).
-    pub fn table_any_owner(
-        &self,
-        panel_id: &str,
-    ) -> Option<&ocs_plugin_api::tables::TableSurface> {
+    pub fn table_any_owner(&self, panel_id: &str) -> Option<&ocs_plugin_api::tables::TableSurface> {
         self.tables.get(panel_id).map(|record| &record.surface)
     }
 }

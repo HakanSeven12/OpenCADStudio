@@ -216,7 +216,8 @@ mod tests {
     fn expansion_state_is_host_local_and_idempotent() {
         let mut ui = WidgetUiState::default();
         let children = WidgetChildren::Loaded(vec![StableId(3)]);
-        assert!(ui.toggle_expanded(StableId(1), &children));
+        // A loaded row expands on the host alone: no notification.
+        assert!(!ui.toggle_expanded(StableId(1), &children));
         assert!(ui.expanded.contains(&StableId(1)));
         assert!(!ui.toggle_expanded(StableId(1), &children));
         assert!(!ui.expanded.contains(&StableId(1)));

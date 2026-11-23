@@ -7249,7 +7249,6 @@ mod batch5_tests {
 
     #[test]
     fn associative_array_honours_the_base_point() {
-        use document::Entity as _;
 
         let mut app = new_app();
         let before: Vec<_> = app.tabs[app.active_tab]
@@ -7336,7 +7335,6 @@ mod batch5_tests {
 
     #[test]
     fn setbylayer_reset_is_scriptable() {
-        use document::Entity as _;
 
         let mut app = new_app();
         let reply = app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
@@ -7370,7 +7368,6 @@ mod batch5_tests {
 /// Batch 6: per-viewport layer overrides and other gaps closed on HEAD.
 #[cfg(test)]
 mod batch6_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
 
     fn out_text(app: &OpenCADStudio) -> String {
@@ -7820,7 +7817,6 @@ mod batch6_tests {
 /// and the four WEAK ones), implemented on HEAD.
 #[cfg(test)]
 mod batch7_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
 
     fn out_text(app: &OpenCADStudio) -> String {
@@ -8149,7 +8145,6 @@ mod batch7_tests {
     #[test]
     fn autoconstrain_reports_the_breakdown_for_a_rectangle() {
         let mut app = new_app();
-        let i = app.active_tab;
         let a = add_line(&mut app, 0.0, 0.0, 100.0, 0.0);
         let b = add_line(&mut app, 100.0, 0.0, 100.0, 50.0);
         let c = add_line(&mut app, 100.0, 50.0, 0.0, 50.0);
@@ -8176,7 +8171,6 @@ mod batch7_tests {
     #[test]
     fn autoconstrain_honours_the_enabled_kinds() {
         let mut app = new_app();
-        let i = app.active_tab;
         app.auto_constrain_settings
             .enabled
             .retain(|kind| *kind != crate::app::settings::AutoConstraintKind::Coincident);
@@ -8205,7 +8199,6 @@ mod batch7_tests {
         for (tolerance, expect_coincident) in [(0.05, true), (1e-6, false)] {
             let mut app = new_app();
             app.auto_constrain_settings.distance_tolerance = tolerance;
-            let i = app.active_tab;
             let a = add_line(&mut app, 0.0, 0.0, 100.0, 0.0);
             let b = add_line(&mut app, 100.0, 0.02, 200.0, 0.0);
             let _ = app.automation_op(&format!(
@@ -8746,7 +8739,6 @@ mod batch7_tests {
 
 #[cfg(test)]
 mod batch8_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
 
     fn out_text(app: &OpenCADStudio) -> String {
@@ -8883,7 +8875,6 @@ mod batch8_tests {
 
 #[cfg(test)]
 mod text_mask_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
 
     /// A mask is a wipeout around the text, so it must turn with the text.
@@ -8940,7 +8931,6 @@ mod text_mask_tests {
 
 #[cfg(test)]
 mod change_properties_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use document::entities::Line;
     use document::types::{Color, Vector3};
@@ -8985,7 +8975,6 @@ mod change_properties_tests {
 
 #[cfg(test)]
 mod table_style_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use document::objects::ObjectType;
 
@@ -9038,7 +9027,6 @@ mod table_style_tests {
 
 #[cfg(test)]
 mod layer_command_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use document::types::Color;
 
@@ -9079,7 +9067,6 @@ mod layer_command_tests {
 
 #[cfg(test)]
 mod layer_tool_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use document::entities::Line;
     use document::types::Vector3;
@@ -9152,7 +9139,6 @@ mod layer_tool_tests {
 
 #[cfg(test)]
 mod attedit_one_at_a_time_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use document::entities::{AttributeEntity, Insert};
     use document::types::Vector3;
@@ -9202,7 +9188,6 @@ mod attedit_one_at_a_time_tests {
 
 #[cfg(test)]
 mod viewport_annotation_sync_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use document::entities::Viewport;
     use document::EntityType;
@@ -9260,7 +9245,6 @@ mod viewport_annotation_sync_tests {
 
 #[cfg(test)]
 mod data_extraction_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use document::entities::Line;
     use document::types::Vector3;
@@ -9340,7 +9324,6 @@ mod data_extraction_tests {
 
 #[cfg(test)]
 mod attsync_order_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use document::entities::{AttributeDefinition, AttributeEntity, Insert};
     use document::EntityType;
@@ -9429,7 +9412,6 @@ mod attsync_order_tests {
 
 #[cfg(test)]
 mod battman_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use document::entities::{AttributeDefinition, AttributeEntity, Insert};
     use document::EntityType;
@@ -9495,10 +9477,9 @@ mod battman_tests {
 
 #[cfg(test)]
 mod hatch_panel_edit_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use crate::modules::draw::draw::hatch::{HatchFill, HatchSettings};
-    use document::entities::{BoundaryEdge, BoundaryPath, Hatch, PolylineEdge};
+    use document::entities::{BoundaryEdge, Hatch, PolylineEdge};
     use document::types::{Color, Vector2};
 
     fn app_base_settings(fill: HatchFill) -> HatchSettings {
@@ -9568,7 +9549,6 @@ mod hatch_panel_edit_tests {
 
 #[cfg(test)]
 mod group_roundtrip_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use document::entities::Line;
     use document::types::Vector3;
@@ -9622,7 +9602,6 @@ mod group_roundtrip_tests {
 
 #[cfg(test)]
 mod copy_draw_order_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use document::entities::Line;
     use document::types::Vector3;
@@ -9721,7 +9700,6 @@ mod copy_draw_order_tests {
 
 #[cfg(test)]
 mod dimension_query_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
 
     /// The automation query answers for a dimension like it does for the
@@ -9749,7 +9727,6 @@ mod dimension_query_tests {
 
 #[cfg(test)]
 mod dim_baseline_chain_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
 
     /// DIMBASELINE takes the last dimension as its base and grows the
@@ -9793,7 +9770,6 @@ mod dim_baseline_chain_tests {
 
 #[cfg(test)]
 mod dim_continue_chain_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
 
     /// DIMCONTINUE chains from the last dimension: each typed origin
@@ -9836,7 +9812,6 @@ mod dim_continue_chain_tests {
 
 #[cfg(test)]
 mod dim_inspect_window_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use crate::ui::window::dim_inspect_dialog::DimInspectMsg;
     use crate::app::Message;
@@ -9900,7 +9875,6 @@ mod dim_inspect_window_tests {
 
 #[cfg(test)]
 mod join_command_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use document::entities::Line;
     use document::types::Vector3;
@@ -9946,7 +9920,6 @@ mod join_command_tests {
 
 #[cfg(test)]
 mod array_surface_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use document::entities::Line;
     use document::types::Vector3;
@@ -9999,7 +9972,6 @@ mod array_surface_tests {
 
 #[cfg(test)]
 mod scale_rotate_copy_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use document::entities::Line;
     use document::types::Vector3;
@@ -10093,7 +10065,6 @@ mod scale_rotate_copy_tests {
 
 #[cfg(test)]
 mod attedit_editor_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use document::entities::{AttributeEntity, Insert};
     use document::types::Vector3;
@@ -10136,7 +10107,6 @@ mod attedit_editor_tests {
 
 #[cfg(test)]
 mod count_mode_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use document::entities::Insert;
     use document::types::Vector3;
@@ -10175,7 +10145,6 @@ mod count_mode_tests {
 
 #[cfg(test)]
 mod select_by_handle_tests {
-    use super::*;
     use crate::app::OpenCADStudio;
     use document::entities::{Insert, Line};
     use document::types::Vector3;
@@ -11310,7 +11279,6 @@ mod attdef_dialog_automation_tests {
         assert_eq!(state.default, "A-101");
         assert_eq!(state.coords[0], "5");
         assert_eq!(state.coords[1], "7");
-        drop(state);
 
         let mut ok_req = serde_json::json!({"op":"action","name":"dialog_ok"});
         let applied = apply_control_request(&mut app, &mut ok_req);

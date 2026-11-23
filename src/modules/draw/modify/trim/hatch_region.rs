@@ -473,5 +473,5 @@ impl HatchTrim {
 }
 
 #[cfg(test)]
-#[path = "trim_hatch_tests.rs"]
+#[path = "hatch_tests.rs"]
 mod tests;

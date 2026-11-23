@@ -7956,23 +7956,43 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ToggleSelectionCycling => {
-                self.selection_cycling ^= true;
-                self.cycle_candidates = None;
-                self.tabs[self.active_tab].scene.set_hover_highlight(None);
+                self.toggle_selection_cycling(self.selection_cycling <= 0);
+                self.persist_settings_if_changed();
                 Task::none()
             }
             Message::CycleSelect(handle) => {
-                // Add the picked object to the current selection (accumulate).
-                let quick_properties_anchor =
-                    self.cycle_candidates.as_ref().map(|(point, _)| *point);
-                self.cycle_candidates = None;
+                let Some(cycle) = self.cycle_candidates.take() else {
+                    return Task::none();
+                };
                 let i = self.active_tab;
+                if cycle.tab_id != self.tabs[i].id || !cycle.handles.contains(&handle) {
+                    return Task::none();
+                }
                 self.tabs[i].scene.set_hover_highlight(None);
-                self.tabs[i].scene.select_entity(handle, false);
-                self.tabs[i].scene.expand_selection_for_groups(&[handle]);
-                self.refresh_properties();
-                if let Some(point) = quick_properties_anchor {
-                    self.quick_properties_anchor = point;
+                if let Some((shift, remove)) = cycle.modifiers {
+                    if !self.commit_point_selection(i, handle, shift, remove) {
+                        return Task::none();
+                    }
+                    self.quick_properties_anchor = cycle.point;
+                    if self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .is_some_and(|cmd| cmd.is_selection_gathering())
+                    {
+                        let handles = self.tabs[i]
+                            .scene
+                            .selected_entities()
+                            .into_iter()
+                            .map(|(handle, _)| handle)
+                            .collect();
+                        return self
+                            .feed_command(crate::command::StepInput::SelectionComplete(handles));
+                    }
+                } else {
+                    self.tabs[i].scene.select_entity(handle, false);
+                    self.tabs[i].scene.expand_selection_for_groups(&[handle]);
+                    self.queue_properties_refresh(i);
+                    self.quick_properties_anchor = cycle.point;
                 }
                 Task::none()
             }
@@ -8086,9 +8106,9 @@ impl OpenCADStudio {
                 if let Ok(degrees) = state.base_angle.trim().parse::<f64>() {
                     header.angle_base = degrees.to_radians();
                 }
+                let units_before = header.insertion_units;
                 header.insertion_units = state.insertion_units;
-                self.tabs[i].scene.sync_annotation_scale_from_header();
-                self.tabs[i].scene.invalidate_annotation_dependencies();
+                self.tabs[i].scene.insertion_units_changed(units_before);
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.bump_geometry();
                 self.refresh_properties();
@@ -8618,8 +8638,7 @@ impl OpenCADStudio {
                 // menu having done nothing. (#668)
                 self.push_undo_snapshot(i, "UNITS");
                 self.tabs[i].scene.document.header.insertion_units = code;
-                self.tabs[i].scene.sync_annotation_scale_from_header();
-                self.tabs[i].scene.invalidate_annotation_dependencies();
+                self.tabs[i].scene.insertion_units_changed(current);
                 self.tabs[i].dirty = true;
                 let label = crate::modules::draw::units::label(code);
                 self.command_line.push_output(
@@ -11767,6 +11786,9 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ShortcutPressed(key) => {
+                if key == "SPACE" && self.cycle_lasso_mode() {
+                    return Task::none();
+                }
                 if key == "ESCAPE" && self.cancel_layer_manager_edit() {
                     return Task::none();
                 }
@@ -12626,6 +12648,7 @@ impl OpenCADStudio {
             // "Use Shift to add" is the inverse of PICKADD.
             Message::ShiftToAddToggled(shift_to_add) => {
                 self.pick_add = !shift_to_add;
+                self.pick_add_retains = !shift_to_add;
                 self.persist_settings_if_changed();
                 Task::none()
             }
@@ -12925,7 +12948,7 @@ impl OpenCADStudio {
             }
 
             Message::SelectionCyclingChanged(on) => {
-                self.selection_cycling = on;
+                self.toggle_selection_cycling(on);
                 self.persist_settings_if_changed();
                 Task::none()
             }
@@ -12965,8 +12988,18 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::PickDragRectToggled(rectangle) => {
-                self.pick_drag_rect = rectangle;
+            Message::PickDragModeChanged(mode) => {
+                self.pick_drag_mode = mode;
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+            Message::PickAutoBitToggled(bit, checked) => {
+                self.pick_auto = (self.pick_auto & !bit) | if checked { bit } else { 0 };
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+            Message::PickFirstToggled(enabled) => {
+                self.set_pick_first(enabled);
                 self.persist_settings_if_changed();
                 Task::none()
             }

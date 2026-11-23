@@ -1111,7 +1111,9 @@ inventory::submit!(crate::command::CommandRegistration {
         "MULTIPLE",
         // Plan (top) view.
         "PICKADD",
+        "PICKAUTO",
         "PICKDRAG",
+        "PICKFIRST",
         "PLAN",
         // Current object colour (CECOLOR).
         "COLOR",

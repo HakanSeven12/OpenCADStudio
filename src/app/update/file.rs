@@ -986,7 +986,8 @@ impl OpenCADStudio {
             show_ucs_icon: self.show_ucs_icon,
             show_viewport_controls: self.show_viewport_controls,
             ucs_icon_at_origin: self.ucs_icon_at_origin,
-            selection_cycling: self.selection_cycling,
+            selection_cycling: self.selection_cycling > 0,
+            selection_cycling_mode: Some(self.selection_cycling),
             osnap_z: self.osnap_z,
             select_similar_mode: self.select_similar_mode,
             double_click_block_refedit: self.double_click_block_refedit,
@@ -1105,7 +1106,11 @@ impl OpenCADStudio {
             script_commands: self.script_commands,
             default_save_format: self.default_save_format.clone(),
             pick_add: self.pick_add,
-            pick_drag_rect: self.pick_drag_rect,
+            pick_add_retains: self.pick_add_retains,
+            pick_drag_rect: self.pick_drag_mode != 0 && self.pick_auto & 4 == 0,
+            pick_drag_mode: Some(self.pick_drag_mode),
+            pick_auto: self.pick_auto,
+            pick_first: self.pick_first,
             quick_properties: self.quick_properties,
             quick_properties_float: self.quick_properties_float,
             quick_properties_pos: [self.quick_properties_pos.x, self.quick_properties_pos.y],
@@ -1214,7 +1219,10 @@ impl OpenCADStudio {
         self.ribbon.set_viewcube(self.show_viewcube);
         self.ribbon.set_ucs_icon(self.show_ucs_icon);
         self.ucs_icon_at_origin = s.ucs_icon_at_origin;
-        self.selection_cycling = s.selection_cycling;
+        self.selection_cycling = s
+            .selection_cycling_mode
+            .filter(|mode| (-2..=2).contains(mode))
+            .unwrap_or(if s.selection_cycling { 2 } else { 0 });
         self.osnap_z = s.osnap_z;
         self.select_similar_mode = s.select_similar_mode & 255;
         self.double_click_block_refedit = s.double_click_block_refedit;
@@ -1367,7 +1375,16 @@ impl OpenCADStudio {
         self.default_save_format =
             crate::io::canonical_save_format(&s.default_save_format).to_string();
         self.pick_add = s.pick_add;
-        self.pick_drag_rect = s.pick_drag_rect;
+        self.pick_add_retains = s.pick_add && s.pick_add_retains;
+        let pick_drag_mode = s.pick_drag_mode.filter(|&mode| mode <= 2);
+        self.pick_drag_mode = pick_drag_mode.unwrap_or(2);
+        self.pick_auto = if pick_drag_mode.is_none() && s.pick_drag_rect {
+            // Older profiles used a rectangle for both click-click and drag.
+            3
+        } else {
+            s.pick_auto & 7
+        };
+        self.pick_first = s.pick_first;
         self.quick_properties = s.quick_properties;
         self.quick_properties_float = s.quick_properties_float;
         self.quick_properties_pos = iced::Point::new(

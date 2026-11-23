@@ -1457,7 +1457,7 @@ pub fn view_dgn_import<'a>(
 #[cfg(test)]
 mod dgn_dialog_view_tests {
     use super::*;
-    use iced::advanced::widget::{self, Operation};
+    use iced::advanced::widget;
 
     /// A generated DGN Import dialog must keep its Ok/Cancel bar visible at
     /// the dialog's capped height and at clamped window heights: the body

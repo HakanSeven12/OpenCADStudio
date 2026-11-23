@@ -1510,7 +1510,8 @@ fn block_move_point_targets_support_window_and_lasso_selection() {
             .name;
         begin(&mut app, insert);
         app.pick_add = pick_add;
-        app.pick_drag_rect = method == 2;
+        app.pick_drag_mode = if method == 2 { 1 } else { 2 };
+        app.pick_auto = if method == 2 { 1 } else { 5 };
         let i = app.active_tab;
         app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600., 900.);
         app.tabs[i].scene.camera.borrow_mut().fit_to_bounds_f64(
@@ -1897,7 +1898,8 @@ fn block_flip_action_targets_support_commands_and_reference_history() {
     assert_eq!(frame(&app).base, child.base);
 
     app.tabs[i].selected_authoring = Some(action);
-    app.pick_drag_rect = true;
+    app.pick_drag_mode = 1;
+    app.pick_auto = 1;
     let _ = app.dispatch_command("BACTIONSET");
     feed(&mut app, "Add");
     let _ = app.update(Message::ViewportLeftPressAt(iced::Point::new(

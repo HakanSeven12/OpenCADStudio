@@ -942,7 +942,7 @@ Type a name to read it and be prompted for a new value (`OSMODE <4133>`). A dash
 | `PICKADD` | 2 | Integer Read/Write | Controls whether subsequent object selections replace or add to the current selection set (0=replace, 1=add, 2=add and retain selection after command ends). Tip: If clicking a new object deselects your previous object, PICKADD was accidentally changed to 0; set back to 2. |
 | `PICKAUTO` | 5 | Integer Read/Write | Controls automatic window selection when clicking open space (window, crossing, fence, lasso). Tip: Set to 1 for classic window/crossing without accidental lasso dragging. |
 | `PICKBOX` | 3 (Pixels) | Integer Read/Write | Sets the object selection target pickbox height in device pixels (0 to 50). Tip: Increase on 4K high-DPI displays to make selecting fine lines effortless. |
-| `PICKDRAG` | 2 | Boolean Read/Write | Controls how selection windows are drawn: 0=two clicks, 1=press and drag, 2=auto-detect both. Tip: Set to 0 if you find yourself accidentally dragging selection windows. |
+| `PICKDRAG` | 2 | Integer Read/Write | Controls automatic area gestures. Use 0 for two clicks, 1 for press and drag, or 2 for either. PICKAUTO controls which gestures are enabled and where they can start. |
 | `PICKFIRST` | 1 (On) | Boolean Read/Write | Controls whether you can select objects before starting a command (Noun/Verb selection). Tip: If pressing Delete key or running MOVE no longer works on pre-selected objects, set PICKFIRST to 1. |
 | `PICKSTYLE` | — | — | — |
 | `PLIMCHECK` | — | — | — |

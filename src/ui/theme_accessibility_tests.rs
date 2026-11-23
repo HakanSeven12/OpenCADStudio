@@ -12,7 +12,7 @@
 //! - Block Palette (card labels in normal/hover/pressed/placing states,
 //!   header icon buttons, empty-state muted text)
 
-use crate::ui::style::common::{accessible_accent, accessible_accent_threshold, wcag_contrast};
+use crate::ui::style::common::wcag_contrast;
 use iced::{Color, Theme};
 
 /// Composite a semi-transparent foreground color over a solid background color.

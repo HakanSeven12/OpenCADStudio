@@ -1974,7 +1974,8 @@ fn tessellate_sub_local(
             plinegen: wire.plinegen,
             snap_only: wire.snap_only,
             region_boundary_click: wire.region_boundary_click,
-            plot_visible: !wire.snap_only
+            plot_visible: wire.plot_visible
+                && !wire.snap_only
                 && frame_mode.is_none_or(|mode| mode == 1)
                 && (on_l0 || layer_plottable),
             plot_l0: on_l0,

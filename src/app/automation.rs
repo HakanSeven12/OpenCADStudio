@@ -5646,20 +5646,16 @@ DEAD
         }
     }
 
-    /// PICKADD / PICKDRAG (#226): the command flips the live flag both via the
-    /// inline form and the two-step ValuePrompt flow.
     #[test]
     fn lasso_press_drag_selects() {
-        // Press-drag lasso must select crossed entities — regression probe
-        // for the #226 PICKDRAG work (both PICKDRAG modes complete through
-        // the poly path).
         use crate::app::Message;
         for (add, rect) in [(true, false), (true, true), (false, false), (false, true)] {
             let mut app = OpenCADStudio::new_for_test();
             app.automation_op(r#"{"op":"new"}"#);
             let i = app.active_tab;
             app.pick_add = add;
-            app.pick_drag_rect = rect;
+            app.pick_drag_mode = if rect { 1 } else { 2 };
+            app.pick_auto = if rect { 1 } else { 5 };
             let _ = app.run_command_line("LINE 0,0 10,10");
             app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
             let _ = app.run_command_line("ZOOM EXTENTS");
@@ -5701,16 +5697,6 @@ DEAD
                 path[0].0, path[0].1,
             )));
             let _ = app.update(Message::ViewportLeftPress);
-            // Deterministically simulate an intentional hold-to-lasso.
-            // A fast click+move must no longer activate a lasso just
-            // because the cursor crossed the old 24 px shortcut.
-            let held_since = iced::time::Instant::now() - std::time::Duration::from_millis(260);
-            app.tabs[i]
-                .scene
-                .selection
-                .borrow_mut()
-                .input
-                .left_press_time = Some(held_since);
             for &(x, y) in &path {
                 let _ = app.update(Message::ViewportMove(iced::Point::new(x, y)));
             }
@@ -5745,13 +5731,13 @@ DEAD
     }
 
     #[test]
-    fn fast_click_move_release_arms_a_box_at_the_actual_press_location() {
+    fn click_only_mode_arms_a_box_at_the_actual_press_location() {
         use crate::app::Message;
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        app.pick_drag_rect = false;
+        app.pick_drag_mode = 0;
         app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
 
         let pressed = iced::Point::new(100.0, 180.0);
@@ -5763,7 +5749,7 @@ DEAD
             let sel = app.tabs[i].scene.selection.borrow();
             assert!(
                 !sel.input.left_dragging,
-                "fast first click must win over lasso"
+                "the click-only mode keeps the press classified as a click"
             );
             assert!(!sel.gesture.poly_active, "the lasso must not arm");
         }
@@ -5780,20 +5766,16 @@ DEAD
         app.automation_op(r#"{"op":"new"}"#);
         // The boot path may have restored a persisted value — normalize.
         app.pick_add = true;
-        app.pick_drag_rect = false;
+        app.pick_drag_mode = 0;
         let _ = app.run_command_line("PICKADD 0");
         assert!(!app.pick_add, "PICKADD 0 must switch to replace mode");
         let _ = app.run_command_line("PICKADD 1");
         assert!(app.pick_add);
-        // Two-step: bare command then the value, like typing 1 + Enter
-        // (feed_active_cmd is the same path the GUI submit offers first).
         let _ = app.run_command_line("PICKDRAG");
-        assert!(
-            app.tabs[app.active_tab].active_cmd.is_some(),
-            "prompt must open"
-        );
-        let _ = app.feed_active_cmd("1");
-        assert!(app.pick_drag_rect, "PICKDRAG 1 via the prompt must switch");
+        assert_eq!(app.pending_setvar.as_deref(), Some("PICKDRAG"));
+        app.command_line.input = "1".into();
+        let _ = app.update(crate::app::Message::CommandSubmit);
+        assert_eq!(app.pick_drag_mode, 1);
     }
 
     #[test]

@@ -7910,6 +7910,60 @@ impl Scene {
         true
     }
 
+    /// The drawing's insertion units changed from `from` to what the header
+    /// now holds. The standard reducing scales stored in `from`'s unit (a
+    /// metre drawing's 1:50 as 1 = 0.05) are converted to the new one, so a
+    /// metre drawing switched to millimetres draws 1:50 annotations at 50x,
+    /// not 0.05x (#1939). A scale edited away from that stored ratio keeps
+    /// its own. The annotation multiplier follows.
+    pub fn insertion_units_changed(&mut self, from: i16) {
+        let to = self.document.header.insertion_units;
+        self.document.header.insertion_units = from;
+        let (old_factor, old_scales) = (self.default_scale_unit_factor(), self.default_scales());
+        self.document.header.insertion_units = to;
+        let (new_factor, new_scales) = (self.default_scale_unit_factor(), self.default_scales());
+        let mut converted = false;
+        if std::ptr::eq(old_scales, new_scales) && (old_factor - new_factor).abs() > 1e-12 {
+            for object in self.document.objects.values_mut() {
+                let ObjectType::Scale(scale) = object else {
+                    continue;
+                };
+                let Some(&(label, factor)) = new_scales
+                    .iter()
+                    .find(|(label, _)| label.eq_ignore_ascii_case(&scale.name))
+                else {
+                    continue;
+                };
+                // The same paper and drawing sides `add_default_scales` wrote.
+                let (paper, drawing) = label
+                    .split_once(':')
+                    .and_then(|(p, d)| {
+                        Some((p.trim().parse::<f64>().ok()?, d.trim().parse::<f64>().ok()?))
+                    })
+                    .filter(|&(p, d)| p > 0.0 && d > 0.0)
+                    .unwrap_or((1.0, 1.0 / factor));
+                let stored = drawing / old_factor;
+                if paper > drawing
+                    || (scale.paper_units - paper).abs() > 1e-9 * paper
+                    || (scale.drawing_units - stored).abs() > 1e-9 * stored.max(1.0)
+                {
+                    continue;
+                }
+                scale.drawing_units = drawing / new_factor;
+                converted = true;
+            }
+        }
+        if converted {
+            self.bump_scale_epoch();
+            let current = self.document.header.current_annotation_scale.clone();
+            if self.set_annotation_scale_named(&current).is_some() {
+                return;
+            }
+        }
+        self.sync_annotation_scale_from_header();
+        self.invalidate_annotation_dependencies();
+    }
+
     /// Add the standard scale set, skipping names the drawing already has.
     fn add_default_scales(&mut self) {
         let unit_factor = self.default_scale_unit_factor();

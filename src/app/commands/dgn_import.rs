@@ -1453,7 +1453,6 @@ fn placed_dimension_text(
 #[cfg(test)]
 mod dgn_dialog_tests {
     use super::*;
-    use crate::scene::model::underlay_vector::dgn_import;
     use crate::ui::window::pdf_dialogs::PageThumb;
 
     fn stub_dialog() -> DgnImportState {

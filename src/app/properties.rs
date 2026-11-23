@@ -1073,6 +1073,7 @@ impl OpenCADStudio {
                     custom_properties.extend(Self::visibility_property(doc, handle));
                 }
                 custom_properties.extend(Self::visible_blocks_property(doc, handle));
+                custom_properties.extend(Self::bricscad_visibility_properties(doc, handle));
                 if !custom_properties.is_empty() {
                     sections.push(crate::scene::model::object::PropSection {
                         title: t!("Custom").into_owned(),

@@ -36,6 +36,8 @@ mod block_test;
 #[cfg(test)]
 mod block_test_tests;
 mod block_visibility;
+#[cfg(test)]
+mod bricscad_visibility_tests;
 pub(crate) mod calc;
 mod command_driver;
 mod extraction_catalog;

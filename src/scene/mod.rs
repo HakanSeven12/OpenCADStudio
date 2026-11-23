@@ -26,6 +26,7 @@ pub(crate) mod block_point_parameter;
 pub(crate) mod block_properties_table;
 pub mod block_service;
 pub mod block_visibility;
+pub(crate) mod bricscad_parameters;
 pub mod cache;
 pub mod compare;
 pub mod convert;

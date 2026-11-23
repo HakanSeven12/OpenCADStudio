@@ -626,6 +626,31 @@ impl OpenCADStudio {
         })
     }
 
+    /// The visibility parameters of a reference to a BricsCAD parametric
+    /// block, one read-only row each with the state the reference shows and
+    /// the parameter's states as tooltip. They are read from BricsCAD's own
+    /// objects, which are kept as they were read, so they are not changed
+    /// here.
+    pub(super) fn bricscad_visibility_properties(
+        doc: &document::Document,
+        handle: Handle,
+    ) -> Vec<Property> {
+        crate::scene::bricscad_parameters::reference_parameters(doc, handle)
+            .into_iter()
+            .map(|parameter| Property {
+                value: PropValue::ReadOnlyWithTooltip {
+                    value: parameter
+                        .current
+                        .and_then(|index| parameter.states.get(index).cloned())
+                        .unwrap_or_default(),
+                    tooltip: parameter.states.join(", "),
+                },
+                label: parameter.name,
+                field: "bricscad_visibility",
+            })
+            .collect()
+    }
+
     /// Recompute the visibility grip for the active tab's single selection and
     /// append it (as a Triangle grip) to `selected_grips`. Clears it when the
     /// selection is not a dynamic-block reference. `wo` is the world offset

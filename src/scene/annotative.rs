@@ -790,13 +790,17 @@ pub fn active_object_context_for_scale(
     entity: Handle,
     scale_handle: Option<Handle>,
 ) -> Option<&ObjectContextData> {
+    // An entity with no scale representations has no context, whatever its
+    // flag says. Ask for them first: the flag of a block reference needs a
+    // search for its definition, and this runs for each entity of a pass.
+    let collection = annotation_scales_dict(doc, entity)?;
     if doc
         .get_entity(entity)
         .is_some_and(|entity| explicit_annotation_flag(doc, entity.common()) == Some(false))
     {
         return None;
     }
-    active_context_in(doc, annotation_scales_dict(doc, entity)?, scale_handle)
+    active_context_in(doc, collection, scale_handle)
 }
 
 fn active_context_in(
@@ -2475,6 +2479,8 @@ pub fn block_is_annotative(doc: &Document, name: &str) -> bool {
 }
 
 fn insert_annotation_flag(doc: &Document, insert: &document::entities::Insert) -> Option<bool> {
+    #[cfg(test)]
+    INSERT_FLAG_LOOKUPS.with(|count| count.set(count.get() + 1));
     block_annotation_flag(doc, &insert.block_name).or_else(|| {
         // Some files link the source only through per-reference RepData.
         let source = doc.dynamic_definition_for_insert(insert.common.handle)?;
@@ -2483,6 +2489,14 @@ fn insert_annotation_flag(doc: &Document, insert: &document::entities::Insert) -
             .find(|record| record.handle == source)
             .and_then(|record| definition_annotation_flag(doc, record))
     })
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread asked for the annotation flag of a block
+    /// reference's definition (`insert_annotation_flag`).
+    pub(crate) static INSERT_FLAG_LOOKUPS: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
 }
 
 /// Explicit flags outrank retained context dictionaries. Attributes without

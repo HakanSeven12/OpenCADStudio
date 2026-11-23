@@ -1650,6 +1650,12 @@ pub(super) struct OpenCADStudio {
         String,
         crate::ui::window::plugin_widgets::WidgetUiState,
     >,
+    /// Host-local EDITING session per panel id (api v29): draft cells
+    /// and selection. The plugin stays the data authority.
+    pub(crate) panel_table_ui: std::collections::BTreeMap<
+        String,
+        crate::ui::window::plugin_tables::TableUiState,
+    >,
     /// Numeric mapping for PanelId::Plugin(u32).
     pub(crate) plugin_panel_ids: std::collections::HashMap<String, u32>,
     pub(crate) plugin_panel_by_num: std::collections::HashMap<u32, String>,
@@ -3261,6 +3267,7 @@ impl OpenCADStudio {
             panel_event_router:
                 crate::app::panel_events::PanelEventRouter::new(),
             panel_widget_ui: std::collections::BTreeMap::new(),
+            panel_table_ui: std::collections::BTreeMap::new(),
             plugin_panel_ids: std::collections::HashMap::new(),
             plugin_panel_by_num: std::collections::HashMap::new(),
             hyperlink_editor_handles: Vec::new(),

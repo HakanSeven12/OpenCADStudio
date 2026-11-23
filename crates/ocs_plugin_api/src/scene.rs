@@ -883,6 +883,16 @@ pub enum SurfaceEvent {
     /// one expansion case that is NOT host-local — the plugin is the
     /// data source).
     NodeExpanded { node: StableId },
+    /// A committed cell edit on a table surface (api v29, S07): the
+    /// host-local editing session committed a draft under the
+    /// typed-commit rule; the plugin remains the data authority and
+    /// canonicalizes by pushing its own table patch. Best-effort like
+    /// every surface event.
+    CellEdited {
+        row: StableId,
+        column: StableId,
+        value: crate::tables::CellValue,
+    },
 }
 
 /// Maximum patch ops accepted in one patch frame, bounding allocation and

@@ -551,6 +551,29 @@ pub enum Message {
         panel: String,
         node: ocs_plugin_api::scene::StableId,
     },
+    /// A keystroke in a table cell editor: host-local draft state only.
+    PanelTableCellDraft {
+        owner: String,
+        panel: String,
+        row: ocs_plugin_api::scene::StableId,
+        column: ocs_plugin_api::scene::StableId,
+        text: String,
+    },
+    /// A table cell editor was submitted: the typed-commit rule runs and
+    /// a successful commit notifies `SurfaceEvent::CellEdited`.
+    PanelTableCellCommitted {
+        owner: String,
+        panel: String,
+        row: ocs_plugin_api::scene::StableId,
+        column: ocs_plugin_api::scene::StableId,
+    },
+    /// A table cell editor gained focus: host-local selection.
+    PanelTableCellSelected {
+        owner: String,
+        panel: String,
+        row: ocs_plugin_api::scene::StableId,
+        column: ocs_plugin_api::scene::StableId,
+    },
     /// Checkbox toggle in a plugin modal dialog control.
     PluginDialogBoolToggle(String, bool),
     /// Dropdown choice selection in a plugin modal dialog control.

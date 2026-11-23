@@ -2935,3 +2935,39 @@ fn fence_keeps_the_self_crossing_cut_of_a_polyline() {
     let near = |p: document::types::Vector2, x: f64, y: f64| (p.x - x).abs() < 1e-6 && (p.y - y).abs() < 1e-6;
     assert!(near(ends[0], 5.0, 5.0) && near(ends[1], 0.0, 10.0), "{ends:?}");
 }
+
+/// #3504: a TRIM preview marks only the removed part. On an arc sampled
+/// alike for the object and its kept pieces, the uncovered run is the middle
+/// third, reaching the cuts.
+#[test]
+fn trim_preview_marks_only_the_removed_part() {
+    let arc = |from: f32, to: f32, n: usize| -> Vec<[f32; 3]> {
+        (0..=n)
+            .map(|i| {
+                let a = from + (to - from) * i as f32 / n as f32;
+                [10.0 * a.cos(), 10.0 * a.sin(), 0.0]
+            })
+            .collect()
+    };
+    let whole = arc(0.0, 3.0, 60);
+    let first = arc(0.0, 1.0, 17);
+    let last = arc(2.0, 3.0, 23);
+    let runs = uncovered_runs(&whole, &[&first, &last]);
+    assert_eq!(runs.len(), 1);
+    let run = &runs[0];
+    let angle = |p: [f32; 3]| p[1].atan2(p[0]);
+    assert!((angle(run[0]) - 1.0).abs() < 0.06, "{}", angle(run[0]));
+    assert!((angle(*run.last().unwrap()) - 2.0).abs() < 0.06);
+    // Everything covered: nothing to mark; no cover: all of it.
+    assert!(uncovered_runs(&whole, &[&whole]).is_empty());
+    assert_eq!(uncovered_runs(&whole, &[]), vec![whole.clone()]);
+
+    let wires = vec![
+        WireModel::solid("trim_rm".into(), whole.clone(), TRIM_REMOVE_GRAY, false),
+        WireModel::solid("trim_keep_0".into(), first, WireModel::CYAN, false),
+        WireModel::solid("trim_keep_1".into(), last, WireModel::CYAN, false),
+    ];
+    let marked = trim_removed_only(wires);
+    assert_eq!(marked.len(), 1);
+    assert_eq!(marked[0].name, "trim_rm_0");
+}

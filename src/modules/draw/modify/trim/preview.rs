@@ -58,6 +58,78 @@ pub(crate) fn trimmed_line_removed_preview(
 
 pub(crate) const TRIM_REMOVE_GRAY: [f32; 4] = [0.40, 0.40, 0.40, 0.88];
 
+/// A TRIM preview marks only what the pick removes (#3504): the parts of
+/// the removed object (`trim_rm`) that no kept piece (`trim_keep_*`) covers,
+/// each drawn faded; the kept pieces keep their own look. Other wires pass
+/// through unchanged.
+pub(crate) fn trim_removed_only(wires: Vec<WireModel>) -> Vec<WireModel> {
+    let is_keep = |w: &WireModel| w.name.starts_with("trim_keep_");
+    let Some(removed) = wires.iter().find(|w| w.name == "trim_rm") else {
+        return wires;
+    };
+    let keeps: Vec<&[[f32; 3]]> = wires
+        .iter()
+        .filter(|w| is_keep(w))
+        .map(|w| w.geom.points.as_slice())
+        .collect();
+    let runs = uncovered_runs(&removed.geom.points, &keeps);
+    let mut out: Vec<WireModel> = wires
+        .iter()
+        .filter(|w| w.name != "trim_rm" && !is_keep(w))
+        .cloned()
+        .collect();
+    out.extend(runs.into_iter().enumerate().map(|(i, run)| {
+        WireModel::solid(format!("trim_rm_{i}"), run, TRIM_REMOVE_GRAY, false)
+    }));
+    out
+}
+
+/// The runs of `points` that lie off every polyline of `covers` (each run
+/// reaching to the covered neighbours on both sides, so it meets the cuts).
+/// A point counts as covered within a quarter of the covers' longest
+/// segment: both are samplings of the same curve.
+pub(crate) fn uncovered_runs(points: &[[f32; 3]], covers: &[&[[f32; 3]]]) -> Vec<Vec<[f32; 3]>> {
+    if covers.is_empty() {
+        return if points.len() >= 2 { vec![points.to_vec()] } else { Vec::new() };
+    }
+    let sub = |a: [f32; 3], b: [f32; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let segments = || covers.iter().flat_map(|c| c.windows(2).map(|w| (w[0], w[1])));
+    let longest = segments()
+        .map(|(a, b)| dot(sub(b, a), sub(b, a)).sqrt())
+        .fold(0.0f32, f32::max);
+    let tolerance = (0.25 * longest).max(1.0e-6);
+    let distance = |p: [f32; 3]| {
+        segments()
+            .map(|(a, b)| {
+                let d = sub(b, a);
+                let len2 = dot(d, d);
+                let t = if len2 > 0.0 { (dot(sub(p, a), d) / len2).clamp(0.0, 1.0) } else { 0.0 };
+                let q = [a[0] + d[0] * t, a[1] + d[1] * t, a[2] + d[2] * t];
+                dot(sub(p, q), sub(p, q)).sqrt()
+            })
+            .fold(f32::INFINITY, f32::min)
+    };
+    let covered: Vec<bool> = points.iter().map(|p| distance(*p) <= tolerance).collect();
+    let mut runs = Vec::new();
+    let mut i = 0;
+    while i < points.len() {
+        if covered[i] {
+            i += 1;
+            continue;
+        }
+        let start = i.saturating_sub(1);
+        while i < points.len() && !covered[i] {
+            i += 1;
+        }
+        let end = i.min(points.len() - 1);
+        if end > start {
+            runs.push(points[start..=end].to_vec());
+        }
+    }
+    runs
+}
+
 pub(crate) fn line_pts(l: &LineEnt) -> Vec<[f32; 3]> {
     geom::line_points(
         [l.start.x, l.start.y, l.start.z],
@@ -188,14 +260,14 @@ pub(crate) fn fence_result_preview(
         }
         let cutters = cutters_near(e, geos, !extend && !implied_edges);
         if let Some(pieces) = fence_pieces(e, &cutters, &fence_geos, window, extend) {
-            out.push(WireModel::solid(
+            let mut wires = vec![WireModel::solid(
                 "trim_rm".into(),
                 entity_pts(e),
                 TRIM_REMOVE_GRAY,
                 false,
-            ));
+            )];
             for (i, pe) in pieces.iter().enumerate() {
-                out.push(WireModel::solid(
+                wires.push(WireModel::solid(
                     format!("trim_keep_{i}"),
                     entity_pts(pe),
                     WireModel::CYAN,
@@ -203,10 +275,12 @@ pub(crate) fn fence_result_preview(
                 ));
                 if extend {
                     if let Some(t) = extend_tail_preview(e, pe, "extend_tail") {
-                        out.push(t);
+                        wires.push(t);
                     }
                 }
             }
+            // A trim marks what it removes; an extend shows its result.
+            out.extend(if extend { wires } else { trim_removed_only(wires) });
             if implied_edges {
                 let cuts = piece_cut_points(e, &pieces);
                 out.extend(implied_cut_guides(all, e.common().handle, &cuts));

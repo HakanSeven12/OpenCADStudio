@@ -466,7 +466,15 @@ impl CadCommand for ExtendCommand {
                     }
                     return vec![];
                 }
-                let mut out = Vec::new();
+                let Some(entity) = self.entity_index.get(&self.all_entities, handle) else {
+                    return vec![];
+                };
+                let mut out = vec![WireModel::solid(
+                    "trim_rm".into(),
+                    entity_pts(entity),
+                    TRIM_REMOVE_GRAY,
+                    false,
+                )];
                 for (i, e) in pieces.iter().enumerate() {
                     out.push(WireModel::solid(
                         format!("trim_keep_{i}"),
@@ -475,7 +483,7 @@ impl CadCommand for ExtendCommand {
                         false,
                     ));
                 }
-                return out;
+                return trim_removed_only(out);
             }
             return vec![];
         }

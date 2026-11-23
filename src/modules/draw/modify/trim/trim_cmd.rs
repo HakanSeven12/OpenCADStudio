@@ -1029,6 +1029,7 @@ impl CadCommand for TrimCommand {
             }
             _ => vec![],
         };
+        hover_wires = trim_removed_only(hover_wires);
         // Edge: Extend — explain cuts landing on an IMPLIED boundary with a
         // dashed guide from that boundary's drawn end to the cut point (#336).
         if self.implied_edges && !hover_wires.is_empty() {

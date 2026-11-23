@@ -109,6 +109,10 @@ pub(crate) mod node_graph;
 #[cfg(test)]
 mod object_isolation_tests;
 mod options_session;
+/// Pure panel-surface event routing (api v29): pointer semantics, drag
+/// state machine, per-surface event identity. Host-owned input; no
+/// renderer or wire coupling.
+pub mod panel_events;
 #[cfg(test)]
 mod paste_special_tests;
 #[cfg(not(target_arch = "wasm32"))]

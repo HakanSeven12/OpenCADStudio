@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use ocs_plugin_api::host::{HostNotification, PluginNotification};
-use ocs_plugin_api::host_v4::{manager, HostV4SnapshotManager};
+use ocs_plugin_api::host_v4::{HostV4SnapshotManager, manager};
 use ocs_plugin_api::process::NotificationHandler;
 use ocs_plugin_api::shm::DocumentViewInfo;
 
@@ -282,6 +282,34 @@ pub fn publish_panel_action_to_plugin(
         }
         None => publish_panel_action(panel_id, control_id, action, value),
     }
+}
+
+/// Deliver a semantic panel-surface event to the OWNING plugin only
+/// (api v29). Panel surfaces are plugin-owned: only the owner may act on
+/// its events (no fan-out). Best-effort by contract — a dead owner's
+/// event drops silently (the same law as every v4 notification), and the
+/// runner-side `notification_api_version` gate keeps v28 runners from
+/// receiving tag 16.
+pub fn publish_surface_event_to_plugin(
+    plugin_id: &str,
+    panel_id: String,
+    sequence: u64,
+    event: ocs_plugin_api::scene::SurfaceEvent,
+) {
+    let notification = HostNotification::PanelSurfaceEvent {
+        panel_id,
+        sequence,
+        event,
+    };
+    #[cfg(test)]
+    record_test_dispatch(&notification);
+    crate::plugin::external::with_manager(|mgr| {
+        if let Some((process, _api_version, alive)) = mgr.grip_endpoint(plugin_id) {
+            if alive {
+                let _ = process.notify_plugin(None, notification);
+            }
+        }
+    });
 }
 
 /// Deliver a quad cursor menu pick to the OWNING plugin only (API v15).

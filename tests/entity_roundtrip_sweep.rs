@@ -27,6 +27,10 @@ const KNOWN_DIFFERENCES: &[(&str, &str, &str)] = &[
     ("dxf", "tolerance", "text_height"),
     ("dwg", "tolerance", "text_height"),
     ("dwg", "attribute_definition", "alignment_point"),
+    // The old polyline record is read back as a 3D polyline, with the same
+    // vertices.
+    ("dxf", "polyline", "(type)"),
+    ("dwg", "polyline", "(type)"),
 ];
 
 fn roundtrip(doc: &Document, ext: &str) -> Result<Document, String> {

@@ -1,11 +1,19 @@
 //! The selection as SVG for the system clipboard, so other programs paste
 //! it as editable paths: each object's outline as a stroked path in its
 //! colour, one drawing unit to one millimetre, Y pointing up as drawn.
+//!
+//! The coordinates are written in CSS pixels, SVG's own user unit, with the
+//! size in millimetres: drawing programs take the user unit as a pixel when
+//! they paste, and read the size from `width` and `height` otherwise. Both
+//! give one drawing unit as one millimetre.
 
 use std::fmt::Write;
 
 use crate::scene::{Scene, WireModel};
 use document::Handle;
+
+/// CSS pixels (1/96 in) in a millimetre: SVG user units per drawing unit.
+const PX_PER_MM: f64 = 96.0 / 25.4;
 
 fn point(wire: &WireModel, index: usize) -> [f64; 2] {
     let high = wire.points[index];
@@ -45,7 +53,13 @@ pub fn wires_svg(wires: &[&WireModel]) -> Option<String> {
             }
             min = [min[0].min(x), min[1].min(y)];
             max = [max[0].max(x), max[1].max(y)];
-            let _ = write!(path, "{}{} {} ", if pen_down { "L" } else { "M" }, x, -y);
+            let _ = write!(
+                path,
+                "{}{} {} ",
+                if pen_down { "L" } else { "M" },
+                x * PX_PER_MM,
+                -y * PX_PER_MM
+            );
             pen_down = true;
         }
         if path.is_empty() {
@@ -73,8 +87,11 @@ pub fn wires_svg(wires: &[&WireModel]) -> Option<String> {
     }
     let (width, height) = ((max[0] - min[0]).max(1e-6), (max[1] - min[1]).max(1e-6));
     Some(format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}mm\" height=\"{height}mm\" viewBox=\"{} {} {width} {height}\">\n<g fill=\"none\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-linejoin=\"round\" vector-effect=\"non-scaling-stroke\" style=\"vector-effect:non-scaling-stroke\">\n{body}</g>\n</svg>\n",
-        min[0], -max[1],
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}mm\" height=\"{height}mm\" viewBox=\"{} {} {} {}\">\n<g fill=\"none\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-linejoin=\"round\" vector-effect=\"non-scaling-stroke\" style=\"vector-effect:non-scaling-stroke\">\n{body}</g>\n</svg>\n",
+        min[0] * PX_PER_MM,
+        -max[1] * PX_PER_MM,
+        width * PX_PER_MM,
+        height * PX_PER_MM,
     ))
 }
 
@@ -88,12 +105,23 @@ mod tests {
         wire.points = vec![[0.0, 0.0, 0.0], [10.0, 5.0, 0.0]];
         wire.color = [1.0, 0.0, 0.0, 1.0];
         let svg = wires_svg(&[&wire]).unwrap();
+        // 10 × 5 mm; the coordinates in CSS pixels, 96 to the inch.
+        let px = |mm: f64| mm * (96.0 / 25.4);
         assert!(
-            svg.contains(r#"width="10mm" height="5mm" viewBox="0 -5 10 5""#),
+            svg.contains(&format!(
+                r#"width="10mm" height="5mm" viewBox="0 {} {} {}""#,
+                -px(5.0),
+                px(10.0),
+                px(5.0)
+            )),
             "{svg}"
         );
         assert!(
-            svg.contains(r##"<path d="M0 -0 L10 -5" stroke="#ff0000"/>"##),
+            svg.contains(&format!(
+                r##"<path d="M0 -0 L{} {}" stroke="#ff0000"/>"##,
+                px(10.0),
+                -px(5.0)
+            )),
             "{svg}"
         );
         // And reads back as geometry.

@@ -524,6 +524,17 @@ pub enum Message {
     },
     /// Live text change in a plugin modal dialog control.
     PluginDialogTextChange(String, String),
+    /// Raw pointer transition on a plugin scene surface (api v29): the
+    /// canvas resolved the scene-space position and the topmost element;
+    /// the app's `PanelEventRouter` owns the semantics (click vs drag,
+    /// coalescing, settle/cancel) and delivery to the owning plugin.
+    PanelSurfacePointer {
+        owner: String,
+        panel: String,
+        pointer: crate::app::panel_events::Pointer,
+        element: Option<ocs_plugin_api::scene::StableId>,
+        pos: ocs_plugin_api::scene::Vec2,
+    },
     /// Checkbox toggle in a plugin modal dialog control.
     PluginDialogBoolToggle(String, bool),
     /// Dropdown choice selection in a plugin modal dialog control.

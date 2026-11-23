@@ -767,7 +767,10 @@ impl OpenCADStudio {
                                 .map(|scene| (owner.to_owned(), scene))
                         }) {
                             let (owner, scene) = scene;
-                            crate::ui::window::plugin_scene::scene_view(&owner, panel_id, scene)
+                            let preview = self.panel_event_router.drag_preview(panel_id);
+                            crate::ui::window::plugin_scene::scene_view(
+                                &owner, panel_id, scene, preview,
+                            )
                         } else {
                             state.view(num, width, chrome)
                         }

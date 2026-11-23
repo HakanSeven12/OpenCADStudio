@@ -21,16 +21,6 @@ use document::{
     Document, Handle,
 };
 
-fn is_unrestorable_assoc_object(dxf_name: &str) -> bool {
-    // Match the pinned codec writer: typed constraint dependencies are supported.
-    let normalized: String = dxf_name
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .map(|c| c.to_ascii_uppercase())
-        .collect();
-    normalized.starts_with("ACDBDYNAMICBLOCKPURGEPREVENTER")
-}
-
 fn find_root_dict_handle(doc: &Document) -> Handle {
     let header_root = doc.header.named_objects_dict_handle;
     if !header_root.is_null()
@@ -87,18 +77,13 @@ fn dxf_skips_object(object: &ObjectType, doc: &Document) -> bool {
             type_name,
             raw_dxf_codes,
             ..
-        } => {
-            is_unrestorable_assoc_object(type_name)
-                || raw_dxf_codes
-                    .as_ref()
-                    .is_none_or(|codes| codes.is_empty() || type_name.is_empty())
-        }
+        } => raw_dxf_codes
+            .as_ref()
+            .is_none_or(|codes| codes.is_empty() || type_name.is_empty()),
         ObjectType::Arch(arch) => arch
             .raw_dxf_codes
             .as_ref()
             .is_none_or(|codes| codes.is_empty() || arch.dxf_name.is_empty()),
-        ObjectType::DynamicBlock(obj) => is_unrestorable_assoc_object(&obj.dxf_name),
-        ObjectType::Associative(obj) => is_unrestorable_assoc_object(&obj.dxf_name),
         ObjectType::DataObject(obj) => matches!(
             &obj.data,
             DataObjectData::BreakData(b) if b.dimension_reference.is_null()
@@ -871,18 +856,6 @@ pub fn prune_omitted_dxf_records(doc: &mut Document) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn supported_constraint_records_are_not_classified_as_omitted() {
-        for name in [
-            "ACDBASSOCDEPENDENCY",
-            "ACDBASSOCVALUEDEPENDENCY",
-            "ACDBASSOCGEOMDEPENDENCY",
-            "ACDBASSOCDIMDEPENDENCYBODY",
-        ] {
-            assert!(!is_unrestorable_assoc_object(name), "{name}");
-        }
-    }
 
     /// A dynamic block's purge preventer and its extension dictionary entry,
     /// the way `src/scene/block_authoring.rs` creates them.

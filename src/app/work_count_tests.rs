@@ -43,6 +43,23 @@ const LIMITS: &[(&str, Work)] = &[
     ("end the selection of all lines in MOVE", limit(0, 0, 1, 0)),
     ("pointer move in MOVE of all lines", limit(0, 0, 0, 0)),
     ("move all lines", limit(0, 1, 0, 0)),
+    // The mixed drawing: block references, text, hatches and dimensions.
+    ("pointer move in the mixed drawing", limit(0, 0, 0, 0)),
+    // The prompts of -INSERT take 7 contexts, on a drawing of any size. The
+    // settings keep the blocks that were used last: one write.
+    ("add one block reference", limit(0, 1, 7, 1)),
+    ("add one dimension", limit(0, 1, 0, 0)),
+    ("erase one dimension", limit(0, 1, 0, 0)),
+    (
+        "end the selection of the mixed drawing in MOVE",
+        limit(0, 0, 1, 0),
+    ),
+    (
+        "pointer move in MOVE of the mixed drawing",
+        limit(0, 0, 0, 0),
+    ),
+    ("move the mixed drawing", limit(0, 1, 0, 0)),
+    ("regenerate the mixed drawing", limit(1, 0, 0, 0)),
     // One write for the new value, and none for the events after it (#3392).
     ("change a setting", limit(0, 0, 0, 1)),
     ("pointer move after a changed setting", limit(0, 0, 0, 0)),
@@ -290,6 +307,131 @@ fn a_move_of_all_lines_does_no_work_for_each_line_until_its_second_point() {
     });
     assert_eq!(start_of(&app, line), (x + 5.0, y + 5.0), "the lines moved");
     assert_eq!(draw(&app), LINES, "the display shows each line");
+}
+
+/// How many times [`mixed_drawing`] copies its entities: 5 entities
+/// become 5,120.
+const DOUBLINGS: u32 = 10;
+
+/// An app with a drawing of block references, text, hatched circles and
+/// dimensions, that was drawn one time.
+fn mixed_drawing() -> OpenCADStudio {
+    let mut app = OpenCADStudio::new_for_test();
+    let _ = app.automation_op(r#"{"op":"new"}"#);
+    let tab = app.active_tab;
+    app.tabs[tab].scene.define_block_raw(
+        "PART",
+        Vector3::ZERO,
+        vec![EntityType::Line(Line::from_points(
+            Vector3::ZERO,
+            Vector3::new(4.0, 0.0, 0.0),
+        ))],
+    );
+    for line in [
+        "-INSERT PART 1,1 1 1 0",
+        "TEXT 1,3 1 0 Hello",
+        "CIRCLE 7,3 2",
+        "HATCH 7,3",
+        "DIMLINEAR 0,6 9,6 5,8",
+    ] {
+        command(&mut app, line);
+    }
+    // TEXT waits for a next line of text: an empty line ends it.
+    script(&mut app, "");
+    assert!(app.text_inline.is_none(), "the text editor is closed");
+    // The line of the block definition is the sixth entity.
+    assert_eq!(entities(&app), 6, "one entity of each kind");
+    for doubling in 0..DOUBLINGS {
+        let step = 12 << (doubling / 2);
+        let to = if doubling % 2 == 0 {
+            format!("{step},0")
+        } else {
+            format!("0,{step}")
+        };
+        command(&mut app, &format!("COPY ALL ENTER 0,0 {to} ENTER"));
+    }
+    assert_eq!(entities(&app), (5 << DOUBLINGS) + 1);
+    assert!(draw(&app) >= entities(&app), "each entity has a wire");
+    app
+}
+
+/// One whole command line.
+fn command(app: &mut OpenCADStudio, line: &str) {
+    let _ = app.run_command_line(line);
+}
+
+fn count(app: &OpenCADStudio, is_kind: fn(&EntityType) -> bool) -> usize {
+    let document = &app.tabs[app.active_tab].scene.document;
+    document.entities().filter(|entity| is_kind(entity)).count()
+}
+
+#[test]
+fn a_new_entity_of_the_mixed_drawing_is_patched_into_the_display() {
+    let mut app = mixed_drawing();
+    let is_insert = |entity: &EntityType| matches!(entity, EntityType::Insert(_));
+    let is_dimension = |entity: &EntityType| matches!(entity, EntityType::Dimension(_));
+    let (inserts, dimensions) = (count(&app, is_insert), count(&app, is_dimension));
+
+    within_limit(&mut app, "pointer move in the mixed drawing", |app| {
+        pointer_to(app, 400.0, 300.0);
+        pointer_to(app, 410.0, 305.0);
+    });
+
+    within_limit(&mut app, "add one block reference", |app| {
+        command(app, "-INSERT PART 1,-5 1 1 0");
+        // The next event writes the changed settings.
+        pointer_to(app, 420.0, 300.0);
+    });
+    assert_eq!(count(&app, is_insert), inserts + 1);
+
+    within_limit(&mut app, "add one dimension", |app| {
+        command(app, "DIMLINEAR 0,-12 9,-12 5,-10");
+    });
+    assert_eq!(count(&app, is_dimension), dimensions + 1);
+
+    within_limit(&mut app, "erase one dimension", |app| {
+        script(app, "ERASE L ");
+    });
+    assert_eq!(count(&app, is_dimension), dimensions);
+}
+
+#[test]
+fn a_move_and_a_regen_of_the_mixed_drawing_are_one_pass() {
+    let mut app = mixed_drawing();
+    let all = entities(&app);
+    within_limit(
+        &mut app,
+        "end the selection of the mixed drawing in MOVE",
+        |app| {
+            script(app, "MOVE ALL  ");
+        },
+    );
+    assert!(
+        prompt(&app).contains("base point"),
+        "MOVE has its selection and asks for the base point: {}",
+        prompt(&app)
+    );
+
+    script(&mut app, "0,0 ");
+    within_limit(
+        &mut app,
+        "pointer move in MOVE of the mixed drawing",
+        |app| {
+            pointer_to(app, 410.0, 300.0);
+            pointer_to(app, 420.0, 310.0);
+        },
+    );
+
+    within_limit(&mut app, "move the mixed drawing", |app| {
+        script(app, "5,5 ");
+    });
+    assert_eq!(prompt(&app), "", "MOVE ended");
+
+    within_limit(&mut app, "regenerate the mixed drawing", |app| {
+        script(app, "REGEN ");
+    });
+    assert_eq!(entities(&app), all);
+    assert!(draw(&app) >= all, "the display shows each entity");
 }
 
 #[test]

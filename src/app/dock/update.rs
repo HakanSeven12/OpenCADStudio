@@ -1288,4 +1288,25 @@ mod ui_state_tests {
         assert!(again.show_block_palette);
         assert!(!again.show_file_tabs);
     }
+
+    /// #3527: the External References pallet docked on the right comes back
+    /// open, in its place.
+    #[test]
+    fn external_references_pallet_survives_a_restart() {
+        use crate::ui::dock::PanelId;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.update(Message::ToggleXrefManager);
+        assert!(app.dock_panel_visible(PanelId::ExternalReferences));
+        let place = app.dock.location(PanelId::ExternalReferences);
+        let saved = app.current_config();
+        assert!(saved.show_external_references);
+
+        let mut again = OpenCADStudio::new_for_test();
+        again.apply_config(saved);
+        again.automation_op(r#"{"op":"new"}"#);
+        assert!(again.show_external_references);
+        assert_eq!(again.dock.location(PanelId::ExternalReferences), place);
+        assert!(again.dock_panel_visible(PanelId::ExternalReferences));
+    }
 }

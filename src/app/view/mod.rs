@@ -3516,21 +3516,22 @@ bg={bg_ms:.1}ms n={view_count}"
         // a tall one (Layer Manager with many layers) are not hidden by it.
         let center_stack = self.dock_overlay(center_stack, tab);
 
-        let center_stack: Element<'_, Message> = if self.command_line_moving {
-            mouse_area(center_stack)
+        // The wrapper stays in the tree while nothing is dragged: adding it on
+        // the first press rebuilt the grip's state and lost its double click
+        // (#3491).
+        let mut center_area = mouse_area(center_stack);
+        if self.command_line_moving {
+            center_area = center_area
                 .on_move(Message::CommandLineMoveMove)
                 .on_release(Message::CommandLineMoveRelease)
-                .interaction(iced::mouse::Interaction::Grabbing)
-                .into()
+                .interaction(iced::mouse::Interaction::Grabbing);
         } else if self.command_history_resizing {
-            mouse_area(center_stack)
+            center_area = center_area
                 .on_move(Message::CommandHistoryResizeMove)
                 .on_release(Message::CommandHistoryResizeRelease)
-                .interaction(iced::mouse::Interaction::ResizingVertically)
-                .into()
-        } else {
-            center_stack
-        };
+                .interaction(iced::mouse::Interaction::ResizingVertically);
+        }
+        let center_stack: Element<'_, Message> = center_area.into();
 
         let main_ui = container({
             // Clean-screen mode drops the ribbon for a full-canvas view; the

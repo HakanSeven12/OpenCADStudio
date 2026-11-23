@@ -142,6 +142,12 @@ pub(in crate::app) struct Frame {
     tabs: Vec<TabBefore>,
 }
 
+impl Frame {
+    pub(super) fn depth(&self) -> u32 {
+        self.depth
+    }
+}
+
 impl Drop for Frame {
     fn drop(&mut self) {
         DEPTH.with(|depth| depth.set(self.depth));

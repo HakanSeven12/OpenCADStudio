@@ -191,6 +191,8 @@ pub(in crate::app) mod table_style_cells;
 pub(crate) mod style_import;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(in crate::app) mod undo_record_guard;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod undo_record_guard_tests;
 pub(in crate::app) mod util;
 mod viewport;
 pub(in crate::app) mod viewport_snap;

@@ -62,6 +62,8 @@ pub(crate) mod dim_viewport;
 #[cfg(test)]
 mod dimension_convert_tests;
 #[cfg(test)]
+mod dimension_polyline_reference_tests;
+#[cfg(test)]
 mod dimension_preview_tests;
 mod dock;
 mod drafting_settings;

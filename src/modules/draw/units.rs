@@ -103,7 +103,7 @@ pub fn label(code: i16) -> &'static str {
         .iter()
         .find(|&&(candidate, ..)| candidate == code)
         .map(|&(_, label, _)| label)
-        .unwrap_or_else(|| crate::app::properties::insunits_name(code))
+        .unwrap_or_else(|| crate::entities::units::insunits_name(code))
 }
 
 /// The short form shown on the status-bar pill.
@@ -132,7 +132,7 @@ pub fn code_for_keyword(name: &str) -> Option<i16> {
 /// `None` when either side is unitless: a drawing that does not say what its
 /// numbers count cannot be converted, only relabelled.
 pub fn conversion_factor(from: i16, to: i16) -> Option<f64> {
-    let millimetres = crate::app::properties::insunits_to_mm;
+    let millimetres = crate::entities::units::insunits_to_mm;
     Some(millimetres(from)? / millimetres(to)?)
 }
 

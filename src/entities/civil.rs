@@ -1128,7 +1128,7 @@ fn part_unit_mm(unit: &str) -> Option<f64> {
 /// Number fields of the part definition among `handles`, by context name,
 /// in drawing units where the field has a unit.
 fn part_size(document: &document::Document, handles: &[u64]) -> std::collections::HashMap<String, f64> {
-    let drawing_mm = crate::app::properties::insunits_to_mm(document.header.insertion_units);
+    let drawing_mm = crate::entities::units::insunits_to_mm(document.header.insertion_units);
     handles
         .iter()
         .filter_map(|h| object_arch(document, *h))

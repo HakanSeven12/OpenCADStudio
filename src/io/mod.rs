@@ -91,6 +91,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU16, AtomicU32, AtomicU8, Ordering};
 use std::sync::Arc;
 
+// Phase encoding for OpenProgress.phase atomic. Updated from the background
+// loader thread, read by the UI overlay on every frame.
+pub const OPEN_PHASE_READING: u8 = 0;
+pub const OPEN_PHASE_PARSING: u8 = 1;
+pub const OPEN_PHASE_XREF: u8 = 2;
+pub const OPEN_PHASE_CACHING: u8 = 3;
+pub const OPEN_PHASE_FINALIZING: u8 = 4;
+
 /// Thread-safe state shared by the native loader and the open overlay.
 ///
 /// `basis_points` is monotonic in 0..=10000. `completed/total` describe the
@@ -136,11 +144,11 @@ impl OpenProgressState {
 
 pub fn open_phase_name(phase: u8) -> &'static str {
     match phase {
-        crate::app::OPEN_PHASE_READING => "reading",
-        crate::app::OPEN_PHASE_PARSING => "parsing",
-        crate::app::OPEN_PHASE_XREF => "references",
-        crate::app::OPEN_PHASE_CACHING => "derived-caches",
-        crate::app::OPEN_PHASE_FINALIZING => "finalizing",
+        OPEN_PHASE_READING => "reading",
+        OPEN_PHASE_PARSING => "parsing",
+        OPEN_PHASE_XREF => "references",
+        OPEN_PHASE_CACHING => "derived-caches",
+        OPEN_PHASE_FINALIZING => "finalizing",
         _ => "unknown",
     }
 }
@@ -485,13 +493,13 @@ async fn open_path_with_phase_attempt(
             let attempted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 (|| -> Result<_, OpenAttemptFailure> {
                     use iced::time::Instant;
-                    progress2.set(crate::app::OPEN_PHASE_PARSING, 200, 0, 1000);
+                    progress2.set(OPEN_PHASE_PARSING, 200, 0, 1000);
                     let t_parse = Instant::now();
                     let parser_progress = {
                         let progress = Arc::clone(&progress2);
                         let callback: Arc<dyn Fn(u16) + Send + Sync> = Arc::new(move |value| {
                             progress.set_fraction(
-                                crate::app::OPEN_PHASE_PARSING,
+                                OPEN_PHASE_PARSING,
                                 200,
                                 5600,
                                 value as usize,
@@ -537,7 +545,7 @@ async fn open_path_with_phase_attempt(
                     let read_stats = outcome.stats;
                     let mut doc = outcome.document;
                     let parse_ms = t_parse.elapsed().as_millis() as u32;
-                    progress2.set(crate::app::OPEN_PHASE_PARSING, 5800, 1000, 1000);
+                    progress2.set(OPEN_PHASE_PARSING, 5800, 1000, 1000);
                     let t_purge = Instant::now();
                     if matches!(attempt, OpenAttempt::Recovery(..)) {
                         repair_drawing(&mut doc);
@@ -548,7 +556,7 @@ async fn open_path_with_phase_attempt(
                     // the first view drawn without their shapes. None is added:
                     // the drawing keeps exactly its own linetypes (#1826).
                     crate::io::linetypes::repair_document(&mut doc);
-                    progress2.set(crate::app::OPEN_PHASE_XREF, 6000, 0, 1);
+                    progress2.set(OPEN_PHASE_XREF, 6000, 0, 1);
                     let t_xref = Instant::now();
                     let xref_infos = if let Some(base_dir) = path2.parent() {
                         let xref_progress = {
@@ -556,7 +564,7 @@ async fn open_path_with_phase_attempt(
                             let callback: Arc<dyn Fn(usize, usize) + Send + Sync> =
                                 Arc::new(move |completed, total| {
                                     progress.set_fraction(
-                                        crate::app::OPEN_PHASE_XREF,
+                                        OPEN_PHASE_XREF,
                                         6000,
                                         1400,
                                         completed,
@@ -576,11 +584,11 @@ async fn open_path_with_phase_attempt(
                         Vec::new()
                     };
                     let xref_ms = t_xref.elapsed().as_millis() as u32;
-                    progress2.set(crate::app::OPEN_PHASE_CACHING, 7400, 0, 10000);
+                    progress2.set(OPEN_PHASE_CACHING, 7400, 0, 10000);
                     let t_caches = Instant::now();
                     let cache_progress = |value: u16| {
                         progress2.set_fraction(
-                            crate::app::OPEN_PHASE_CACHING,
+                            OPEN_PHASE_CACHING,
                             7400,
                             2200,
                             value as usize,
@@ -606,14 +614,14 @@ async fn open_path_with_phase_attempt(
                         caches.source_sha256 =
                             stable_sha256_file(&path2, initial_fingerprint.as_ref());
                     }
-                    progress2.set(crate::app::OPEN_PHASE_FINALIZING, 9600, 0, 1);
+                    progress2.set(OPEN_PHASE_FINALIZING, 9600, 0, 1);
                     let t_finalize = Instant::now();
                     let (prepared_doc, prepared_geometry) =
                         crate::scene::prepare_open_geometry(doc, &mut caches, model_bg);
                     caches.timings.finalize_ms = t_finalize.elapsed().as_millis() as u32;
                     doc = prepared_doc;
                     caches.prepared_geometry = Some(prepared_geometry);
-                    progress2.set(crate::app::OPEN_PHASE_FINALIZING, 9950, 1, 1);
+                    progress2.set(OPEN_PHASE_FINALIZING, 9950, 1, 1);
                     crate::perf_record!(
                     "[perf] open-phases parse={}ms purge={}ms xref={}ms caches={}ms finalize={}ms",
                     caches.timings.parse_ms,
@@ -728,7 +736,7 @@ pub async fn pick_and_load_web(progress: Arc<OpenProgressState>) -> WebOpenOutco
         };
     };
     let name = handle.file_name();
-    progress.set(crate::app::OPEN_PHASE_READING, 500, 1, 2);
+    progress.set(OPEN_PHASE_READING, 500, 1, 2);
     let bytes: Arc<[u8]> = Arc::from(handle.read().await);
     open_bytes_web(name, bytes, progress).await
 }
@@ -815,12 +823,7 @@ async fn open_recent_web_attempt(
             };
         }
     };
-    progress.set(
-        crate::app::OPEN_PHASE_READING,
-        1000,
-        bytes.len(),
-        bytes.len(),
-    );
+    progress.set(OPEN_PHASE_READING, 1000, bytes.len(), bytes.len());
     let result = load_web_bytes(&name, &bytes, progress, recovery_mode, &initial_error, None).await;
     // A recent reopened from OPFS registers like a picked or dropped file,
     // so it can serve as another drawing's xref in this session.
@@ -850,7 +853,7 @@ async fn load_web_bytes(
     initial_error: &str,
     mut initial_stats: Option<document::ReadStats>,
 ) -> Result<OpenedDrawing, OpenLoadError> {
-    progress.set(crate::app::OPEN_PHASE_PARSING, 1000, 0, 1);
+    progress.set(OPEN_PHASE_PARSING, 1000, 0, 1);
     let is_ifccad = is_ifccad_path(Path::new(name), Some(bytes));
     let (outcome, mut source_sha256, ifccad_session) = if is_ifccad {
         let (outcome, session) =
@@ -901,7 +904,7 @@ async fn load_web_bytes(
     // Opening is a field evaluation event (FIELDEVAL bit 1), as on the
     // native open: object-property fields show the drawing's own state.
     crate::entities::field::update_fields(&mut doc, 1, None);
-    progress.set(crate::app::OPEN_PHASE_CACHING, 7000, 0, 1);
+    progress.set(OPEN_PHASE_CACHING, 7000, 0, 1);
     if recovery_mode {
         repair_drawing(&mut doc);
     }
@@ -917,7 +920,7 @@ async fn load_web_bytes(
         source_sha256 = web_worker::sha256_document(bytes).await.ok();
     }
     caches.source_sha256 = source_sha256;
-    progress.set(crate::app::OPEN_PHASE_FINALIZING, 9900, 1, 1);
+    progress.set(OPEN_PHASE_FINALIZING, 9900, 1, 1);
     let path = PathBuf::from(name);
     Ok((name.to_string(), path, doc, caches, ifccad_session))
 }
@@ -997,7 +1000,7 @@ async fn resolve_web_xrefs(
         .collect();
     let total = pending.len().max(1);
     for (index, raw_path) in pending.iter().enumerate() {
-        progress.set(crate::app::OPEN_PHASE_XREF, 5900, index, total);
+        progress.set(OPEN_PHASE_XREF, 5900, index, total);
         let Some(key) = crate::io::xref::find_registered_source(raw_path) else {
             continue;
         };
@@ -1011,13 +1014,13 @@ async fn resolve_web_xrefs(
             crate::io::xref::register_parsed(&key, outcome);
         }
     }
-    progress.set(crate::app::OPEN_PHASE_XREF, 5900, total, total);
+    progress.set(OPEN_PHASE_XREF, 5900, total, total);
     // `set_fraction` is native-only; the web phase reports completed/total
     // directly, which the open overlay surfaces alongside the fixed weight.
     let xref_progress: Arc<dyn Fn(usize, usize) + Send + Sync> = {
         let progress = Arc::clone(&progress);
         Arc::new(move |completed, total| {
-            progress.set(crate::app::OPEN_PHASE_XREF, 5900, completed, total);
+            progress.set(OPEN_PHASE_XREF, 5900, completed, total);
         })
     };
     crate::io::xref::resolve_xrefs_with_progress_in_session(

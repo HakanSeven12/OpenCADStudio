@@ -136,7 +136,7 @@ pub async fn open_dropped(
     // name, and the registry — not the absent filesystem — is what
     // re-resolves that reference when its host is reopened or reloaded.
     super::xref::register_source(&name, std::sync::Arc::new(bytes.clone()));
-    progress.set(crate::app::OPEN_PHASE_READING, 500, 1, 2);
+    progress.set(crate::io::OPEN_PHASE_READING, 500, 1, 2);
     let bytes: std::sync::Arc<[u8]> = std::sync::Arc::from(bytes);
     let size_bytes = bytes.len() as u64;
     let result = super::load_web_bytes(&name, &bytes, progress, false, "", None).await;

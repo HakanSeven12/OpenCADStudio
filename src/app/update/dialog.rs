@@ -514,6 +514,7 @@ impl OpenCADStudio {
         if entities.is_empty() {
             return Err("No model-space entities in that file.".to_string());
         }
+        let file_units = doc.header.insertion_units;
         let base = glam::DVec3::new(
             doc.header.model_space_insertion_base.x,
             doc.header.model_space_insertion_base.y,
@@ -651,6 +652,12 @@ impl OpenCADStudio {
             for def in defs.iter().chain(file_def.iter()) {
                 import_block_def_graph(document, def, &records);
             }
+        }
+        // The block is drawn in the file's units: a reference placed later
+        // scales by them against the drawing's INSUNITS, as an XREF of the
+        // file does (#3474). A unitless file stays unitless.
+        if let Some(record) = self.tabs[i].scene.document.block_records.get_mut(&name) {
+            record.units = file_units;
         }
         self.tabs[i].scene.populate_meshes_from_document();
         self.tabs[i].dirty = true;

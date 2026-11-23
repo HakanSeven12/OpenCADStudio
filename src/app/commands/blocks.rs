@@ -96,7 +96,14 @@ impl OpenCADStudio {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            iced::clipboard::write(svg).discard()
+            // Where the platform has a registered SVG format, the markup
+            // goes there as well as text, in one write; drawing programs
+            // read it from there (#2018). Elsewhere the toolkit writes text.
+            if crate::sys::clipboard_svg::write(&svg) {
+                Task::none()
+            } else {
+                iced::clipboard::write(svg).discard()
+            }
         }
     }
 
@@ -3435,6 +3442,15 @@ mod svg_clipboard_format_tests {
         app.tabs[i].scene.select_entity(line, true);
         let task = app.dispatch_command("COPYCLIP");
         let writes = toolkit_clipboard_writes(task);
+        let written = crate::sys::clipboard_svg::test_record::take();
+        assert_eq!(written.len(), 1, "one write of the system clipboard");
+        let formats: Vec<&str> = written[0].iter().map(|(f, _)| f.as_str()).collect();
+        assert_eq!(formats, ["CF_UNICODETEXT", "image/svg+xml"]);
+        let svg = std::str::from_utf8(&written[0][1].1).expect("UTF-8 markup");
+        assert!(
+            svg.starts_with("<?xml") && svg.contains("<svg"),
+            "{svg:.60}"
+        );
         assert!(
             writes.is_empty(),
             "the SVG went to the clipboard as text only: {:?}",

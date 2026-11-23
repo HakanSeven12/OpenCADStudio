@@ -2,6 +2,7 @@
 // (wasm) build must handle differently or skip.
 
 pub mod clipboard_link;
+pub mod clipboard_svg;
 pub mod startup_times;
 pub mod ui_font;
 

@@ -466,10 +466,11 @@ impl HostApi for V4PluginHostApi {
     }
 
     fn add_entity(&mut self, entity: EntityType) -> Handle {
+        let full_refresh = crate::ipc::snapshot_patch::edit_needs_full_refresh(&entity);
         match self.request(PluginRequest::AddEntity(entity)) {
             Ok(PluginResponse::Handle(h)) => {
                 // Patch the cached snapshot with the host's post-edit copy.
-                if h.is_null() {
+                if h.is_null() || full_refresh {
                     self.document_cache = OnceCell::new();
                 } else {
                     self.patch_cache(&[h], &[]);
@@ -488,11 +489,19 @@ impl HostApi for V4PluginHostApi {
     }
 
     fn add_entities(&mut self, entities: Vec<EntityType>) -> Vec<Handle> {
+        let full_refresh = entities
+            .iter()
+            .any(crate::ipc::snapshot_patch::edit_needs_full_refresh);
         match self.request(PluginRequest::AddEntities(entities)) {
             Ok(PluginResponse::Handles(handles)) => {
                 // Patch the cached snapshot with the host's post-edit copies.
-                let added: Vec<Handle> = handles.iter().copied().filter(|h| !h.is_null()).collect();
-                self.patch_cache(&added, &[]);
+                if full_refresh {
+                    self.document_cache = OnceCell::new();
+                } else {
+                    let added: Vec<Handle> =
+                        handles.iter().copied().filter(|h| !h.is_null()).collect();
+                    self.patch_cache(&added, &[]);
+                }
                 handles
             }
             Ok(other) => {
@@ -535,7 +544,15 @@ impl HostApi for V4PluginHostApi {
     fn remove_entity(&mut self, handle: Handle) -> bool {
         match self.request(PluginRequest::RemoveEntity { handle }) {
             Ok(PluginResponse::Bool(b)) => {
-                if b {
+                // A nested attribute is not in the cached entity store: the
+                // host removed it from its block reference.
+                let nested = self
+                    .document_cache
+                    .get()
+                    .is_some_and(|doc| doc.get_entity(handle).is_none());
+                if b && nested {
+                    self.document_cache = OnceCell::new();
+                } else if b {
                     self.patch_cache(&[], &[handle]);
                 }
                 b

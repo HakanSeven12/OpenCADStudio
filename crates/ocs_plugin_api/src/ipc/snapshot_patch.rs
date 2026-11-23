@@ -22,9 +22,9 @@ pub(crate) fn edit_needs_full_refresh(entity: &EntityType) -> bool {
 /// Patch `doc` with the host's copies of the `refreshed` handles (`fresh`, in
 /// the same order; `None` = the host no longer has the entity) and drop the
 /// `removed` handles. Returns `false` when the patch cannot be exact: a length
-/// mismatch, an entity that cannot be inserted, or an entity on a layer the
-/// cached layer table does not know (the host created it). The caller then
-/// drops the cache.
+/// mismatch, an entity that cannot be inserted, or an entity on a layer or a
+/// block reference to a block that the cached tables do not know (the host
+/// created it). The caller then drops the cache.
 pub(crate) fn apply_refreshed(
     doc: &mut Document,
     refreshed: &[Handle],
@@ -34,15 +34,15 @@ pub(crate) fn apply_refreshed(
     if fresh.len() != refreshed.len() {
         return false;
     }
-    if fresh
-        .iter()
-        .flatten()
-        .any(|entity| !doc.layers.contains(&entity.common().layer))
-    {
+    if fresh.iter().flatten().any(|entity| {
+        !doc.layers.contains(&entity.common().layer)
+            || matches!(entity, EntityType::Insert(insert)
+                if doc.block_records.get(&insert.block_name).is_none())
+    }) {
         return false;
     }
     for handle in removed {
-        doc.remove_entity(*handle);
+        remove_cached(doc, *handle);
     }
     for (handle, entity) in refreshed.iter().zip(fresh) {
         match entity {
@@ -53,12 +53,22 @@ pub(crate) fn apply_refreshed(
                     return false;
                 }
             }
-            None => {
-                doc.remove_entity(*handle);
-            }
+            None => remove_cached(doc, *handle),
         }
     }
     true
+}
+
+/// Remove `handle` the way the host does: the document keeps a block record's
+/// member list apart from the entity store, so the handle leaves that too.
+fn remove_cached(doc: &mut Document, handle: Handle) {
+    let owner = doc.get_entity(handle).map(|entity| entity.common().owner_handle);
+    doc.remove_entity(handle);
+    if let Some(owner) = owner {
+        if let Some(record) = doc.block_records.iter_mut().find(|r| r.handle == owner) {
+            record.entity_handles.retain(|member| *member != handle);
+        }
+    }
 }
 
 /// Mirror a successful `WriteRecord` (`Some`) or `RemoveRecord` (`None`) in
@@ -146,6 +156,36 @@ mod tests {
     fn a_short_batch_answer_is_not_patched() {
         let (mut doc, handle) = doc_with_point();
         assert!(!apply_refreshed(&mut doc, &[handle], Vec::new(), &[]));
+    }
+
+    #[test]
+    fn a_removed_entity_leaves_its_block_member_list() {
+        let (mut doc, handle) = doc_with_point();
+        let owner = doc.get_entity(handle).unwrap().common().owner_handle;
+        let record = doc
+            .block_records
+            .iter_mut()
+            .find(|record| record.handle == owner)
+            .expect("the owner block record");
+        if !record.entity_handles.contains(&handle) {
+            record.entity_handles.push(handle);
+        }
+        assert!(apply_refreshed(&mut doc, &[], Vec::new(), &[handle]));
+        assert!(!doc
+            .block_records
+            .iter()
+            .any(|record| record.entity_handles.contains(&handle)));
+    }
+
+    #[test]
+    fn a_reference_to_a_block_the_cache_does_not_know_is_not_patched() {
+        let (mut doc, handle) = doc_with_point();
+        let mut insert = EntityType::Insert(document::entities::Insert::new(
+            "CREATED_BY_THE_HOST",
+            document::types::Vector3::ZERO,
+        ));
+        insert.common_mut().handle = handle;
+        assert!(!apply_refreshed(&mut doc, &[handle], vec![Some(insert)], &[]));
     }
 
     #[test]

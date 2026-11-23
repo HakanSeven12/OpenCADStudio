@@ -443,6 +443,15 @@ pub enum PluginRequest {
         panel_id: String,
         surface: crate::scene::PanelSurface,
     },
+    /// V29 (additive): apply a bounded, revision-checked op list to the
+    /// panel's stored scene atomically (all-or-nothing): a stale base or
+    /// any op failure refuses with the typed rejection and zero mutation;
+    /// success stores the patched scene at exactly one revision past the
+    /// base. Same ownership rules as the publish.
+    PanelSurfacePatch {
+        panel_id: String,
+        patch: crate::scene::ScenePatch,
+    },
 }
 
 /// Responses the host sends back for `PluginRequest`.
@@ -541,6 +550,11 @@ pub enum PluginResponse {
     GeoLocationRemoved(Result<bool, String>),
     /// V29: the stored revision, or the reason the publish was refused.
     PanelSurfacePublished(Result<crate::scene::SceneRevision, crate::scene::SurfaceReject>),
+    /// V29 (additive): outcome of a panel surface patch — the stored
+    /// revision after the atomic apply, or the typed refusal (stale base,
+    /// foreign ownership, unknown ids, budget overflow); the stored scene
+    /// never ends up partially patched.
+    PanelSurfacePatchResult(Result<crate::scene::SceneRevision, crate::scene::SurfaceReject>),
 }
 
 /// Messages sent from the host to the plugin runner.
@@ -612,13 +626,15 @@ mod tests {
     #[test]
     fn plugin_request_v14_to_v16_discriminants_are_preserved() {
         assert_eq!(
-            discriminant_of(&PluginRequest::ShowDialog(crate::dialog::DialogDef::new("T"))),
+            discriminant_of(&PluginRequest::ShowDialog(crate::dialog::DialogDef::new(
+                "T"
+            ))),
             50
         );
         assert_eq!(
-            discriminant_of(&PluginRequest::RegisterPanel(
-                crate::dialog::PanelDef::new("id", "T")
-            )),
+            discriminant_of(&PluginRequest::RegisterPanel(crate::dialog::PanelDef::new(
+                "id", "T"
+            ))),
             51
         );
         assert_eq!(
@@ -643,9 +659,7 @@ mod tests {
         );
         assert_eq!(discriminant_of(&PluginRequest::EndUndoGroup), 55);
         assert_eq!(
-            discriminant_of(&PluginRequest::QueryEntities {
-                query: "{}".into(),
-            }),
+            discriminant_of(&PluginRequest::QueryEntities { query: "{}".into() }),
             56
         );
         assert_eq!(
@@ -682,9 +696,7 @@ mod tests {
             19
         );
         assert_eq!(
-            discriminant_of(&HostResponse::InputKind(
-                InteractiveInputKind::SingleToken
-            )),
+            discriminant_of(&HostResponse::InputKind(InteractiveInputKind::SingleToken)),
             14
         );
         assert_eq!(
@@ -797,6 +809,51 @@ mod tests {
             })) => {
                 assert_eq!(code, SurfaceRejectCode::NonMonotonicRevision);
                 assert_eq!(current_revision, Some(SceneRevision(3)));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    /// The v29 patch tail is pinned: the patch request is variant 64
+    /// (right after the publish 63) and its typed result is response
+    /// variant 50 (right after the publish answer 49). Appends only.
+    #[test]
+    fn panel_surface_patch_v29_wire_tail_is_pinned() {
+        let patch = crate::scene::ScenePatch {
+            base_revision: SceneRevision(4),
+            ops: vec![crate::scene::SceneOp::Remove {
+                id: crate::scene::StableId(7),
+            }],
+        };
+        assert_eq!(
+            discriminant_of(&PluginRequest::PanelSurfacePatch {
+                panel_id: "graph".into(),
+                patch: patch.clone(),
+            }),
+            64
+        );
+        assert_eq!(
+            discriminant_of(&PluginResponse::PanelSurfacePatchResult(Ok(SceneRevision(
+                5
+            )))),
+            50
+        );
+        match bincode::deserialize::<PluginRequest>(
+            &bincode::serialize(&PluginRequest::PanelSurfacePatch {
+                panel_id: "graph".into(),
+                patch,
+            })
+            .expect("serialize patch request"),
+        )
+        .expect("deserialize patch request")
+        {
+            PluginRequest::PanelSurfacePatch { panel_id, patch } => {
+                assert_eq!(panel_id, "graph");
+                assert_eq!(patch.base_revision, SceneRevision(4));
+                assert!(matches!(
+                    patch.ops.as_slice(),
+                    [crate::scene::SceneOp::Remove { id }] if *id == crate::scene::StableId(7)
+                ));
             }
             other => panic!("unexpected: {other:?}"),
         }

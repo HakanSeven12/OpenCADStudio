@@ -748,7 +748,8 @@ impl OpenCADStudio {
                             .is_none_or(|(_, _, alive)| alive)
                     })
             });
-            for i in 0..self.tabs.len() {                self.tabs[i]
+            for i in 0..self.tabs.len() {
+                self.tabs[i]
                     .plugin_grips
                     .retain_alive(|plugin| visible(plugin));
                 // API v14: the class registry reaps with the same liveness —
@@ -770,6 +771,9 @@ impl OpenCADStudio {
                     .unwrap_or(true)
             });
             self.panel_surfaces.retain_owners(|owner| visible(owner));
+            // Dead owners' retained projections die with them (the cache
+            // is one bounded entry; clearing is O(1) and correct).
+            crate::ui::window::plugin_scene::forget_all_projections();
             let dying_drag = self
                 .active_plugin_grip()
                 .map(|active| !visible(&active.plugin))

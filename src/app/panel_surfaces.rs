@@ -78,6 +78,50 @@ impl PanelSurfaceStore {
         Ok(revision)
     }
 
+    /// Apply a bounded, revision-checked patch to the stored scene
+    /// atomically. The patch must be based on the stored head
+    /// (`SceneError::StaleBase` maps to `NonMonotonicRevision` with the
+    /// head attached, so the publisher can rebase); any op failure maps
+    /// to `InvalidSurface` and leaves the stored scene untouched. Only a
+    /// previously published surface can be patched.
+    pub fn patch(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        patch: ocs_plugin_api::scene::ScenePatch,
+    ) -> Result<SceneRevision, SurfaceReject> {
+        use ocs_plugin_api::scene::SceneError;
+        if plugin_id.is_empty() || panel_id.trim().is_empty() {
+            return Err(SurfaceReject {
+                code: SurfaceRejectCode::Unattached,
+                current_revision: None,
+            });
+        }
+        let Some(record) = self.scenes.get_mut(panel_id) else {
+            return Err(SurfaceReject {
+                code: SurfaceRejectCode::Unattached,
+                current_revision: None,
+            });
+        };
+        if record.owner_plugin_id != plugin_id {
+            return Err(SurfaceReject {
+                code: SurfaceRejectCode::OwnedByOther,
+                current_revision: Some(record.scene.revision),
+            });
+        }
+        match patch.apply_to(&mut record.scene) {
+            Ok(revision) => Ok(revision),
+            Err(SceneError::StaleBase { current }) => Err(SurfaceReject {
+                code: SurfaceRejectCode::NonMonotonicRevision,
+                current_revision: Some(current),
+            }),
+            Err(_) => Err(SurfaceReject {
+                code: SurfaceRejectCode::InvalidSurface,
+                current_revision: None,
+            }),
+        }
+    }
+
     /// Ownership-checked read (api v29): a scene reads back only for its
     /// authenticated owner. `None` for unknown panels, foreign owners, and
     /// panels whose surface was never published — callers that must
@@ -100,7 +144,8 @@ impl PanelSurfaceStore {
 
     /// Keep only the scenes whose owner `keep` accepts (the live plugins).
     pub fn retain_owners(&mut self, mut keep: impl FnMut(&str) -> bool) {
-        self.scenes.retain(|_, record| keep(&record.owner_plugin_id));
+        self.scenes
+            .retain(|_, record| keep(&record.owner_plugin_id));
     }
 }
 
@@ -152,7 +197,11 @@ mod tests {
         );
         store.remove(PANEL);
         assert_eq!(
-            store.publish("other.plugin", PANEL, PanelSurface::Scene(one_rect_scene(1))),
+            store.publish(
+                "other.plugin",
+                PANEL,
+                PanelSurface::Scene(one_rect_scene(1))
+            ),
             Ok(SceneRevision(1))
         );
     }
@@ -279,6 +328,115 @@ mod tests {
         ));
         assert!(matches!(
             store.publish(PLUGIN, "   ", PanelSurface::Scene(one_rect_scene(1))),
+            Err(SurfaceReject {
+                code: SurfaceRejectCode::Unattached,
+                ..
+            })
+        ));
+    }
+
+    fn remove_op(id: u64) -> ocs_plugin_api::scene::SceneOp {
+        ocs_plugin_api::scene::SceneOp::Remove {
+            id: ocs_plugin_api::scene::StableId(id),
+        }
+    }
+
+    /// The happy patch path: a patch based on the stored head applies
+    /// atomically and the revision advances by exactly one.
+    #[test]
+    fn patch_applies_atomically_and_advances_one_revision() {
+        let mut store = PanelSurfaceStore::default();
+        store
+            .publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(5)))
+            .expect("publish");
+        let patch = ocs_plugin_api::scene::ScenePatch {
+            base_revision: ocs_plugin_api::scene::SceneRevision(5),
+            ops: vec![remove_op(1), remove_op(2)],
+        };
+        assert_eq!(
+            store.patch(PLUGIN, PANEL, patch),
+            Err(SurfaceReject {
+                code: SurfaceRejectCode::InvalidSurface,
+                current_revision: None,
+            })
+        );
+        // The second remove names a missing id: the WHOLE patch refused,
+        // including the first (valid) remove — no partial mutation.
+        assert_eq!(
+            store.scene(PLUGIN, PANEL).unwrap().elements.len(),
+            1,
+            "first op must not survive a failed patch"
+        );
+
+        let patch = ocs_plugin_api::scene::ScenePatch {
+            base_revision: ocs_plugin_api::scene::SceneRevision(5),
+            ops: vec![remove_op(1)],
+        };
+        assert_eq!(store.patch(PLUGIN, PANEL, patch), Ok(SceneRevision(6)));
+        assert_eq!(store.scene(PLUGIN, PANEL).unwrap().elements.len(), 0);
+    }
+
+    /// A stale base refuses with the stored head so the publisher can
+    /// rebase; the stored scene is untouched.
+    #[test]
+    fn stale_base_patch_refuses_with_the_head() {
+        let mut store = PanelSurfaceStore::default();
+        store
+            .publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(5)))
+            .expect("publish");
+        let patch = ocs_plugin_api::scene::ScenePatch {
+            base_revision: ocs_plugin_api::scene::SceneRevision(4),
+            ops: vec![remove_op(1)],
+        };
+        assert_eq!(
+            store.patch(PLUGIN, PANEL, patch),
+            Err(SurfaceReject {
+                code: SurfaceRejectCode::NonMonotonicRevision,
+                current_revision: Some(SceneRevision(5)),
+            })
+        );
+        assert_eq!(
+            store.scene(PLUGIN, PANEL).unwrap().revision,
+            SceneRevision(5)
+        );
+    }
+
+    /// A foreign plugin cannot patch (or read) another plugin's surface.
+    #[test]
+    fn foreign_patch_is_refused() {
+        let mut store = PanelSurfaceStore::default();
+        store
+            .publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(2)))
+            .expect("publish");
+        let patch = ocs_plugin_api::scene::ScenePatch {
+            base_revision: ocs_plugin_api::scene::SceneRevision(2),
+            ops: vec![remove_op(1)],
+        };
+        assert_eq!(
+            store.patch("other.plugin", PANEL, patch),
+            Err(SurfaceReject {
+                code: SurfaceRejectCode::OwnedByOther,
+                current_revision: Some(SceneRevision(2)),
+            })
+        );
+        assert_eq!(
+            store.scene(PLUGIN, PANEL).unwrap().elements.len(),
+            1,
+            "foreign patch must not mutate"
+        );
+    }
+
+    /// Patching a panel that never published a scene is Unattached —
+    /// patches target an existing stored surface, they never create one.
+    #[test]
+    fn patch_without_a_stored_scene_is_unattached() {
+        let mut store = PanelSurfaceStore::default();
+        let patch = ocs_plugin_api::scene::ScenePatch {
+            base_revision: ocs_plugin_api::scene::SceneRevision(1),
+            ops: vec![remove_op(1)],
+        };
+        assert!(matches!(
+            store.patch(PLUGIN, PANEL, patch),
             Err(SurfaceReject {
                 code: SurfaceRejectCode::Unattached,
                 ..

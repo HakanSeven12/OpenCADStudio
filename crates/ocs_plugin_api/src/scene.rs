@@ -173,6 +173,15 @@ pub enum SceneError {
     /// A coordinate, size, or stroke width is not finite, or a stroke width
     /// is not strictly positive.
     NonFiniteCoordinate,
+    /// The patch's `base_revision` did not match the stored head; `current`
+    /// names the head so the publisher can rebase. No op applied.
+    StaleBase { current: SceneRevision },
+    /// The patch carried more ops than [`MAX_PATCH_OPS`] allows.
+    PatchTooLarge { ops: usize, max: usize },
+    /// An `Add` named a parent id that is not a group in the scene.
+    UnknownParent(StableId),
+    /// A `Replace`/`Remove` named an id that is not in the scene.
+    UnknownElement(StableId),
 }
 
 impl std::fmt::Display for SceneError {
@@ -202,6 +211,24 @@ impl std::fmt::Display for SceneError {
                 f,
                 "scene coordinate is not finite (NaN or float meta values are rejected)"
             ),
+            SceneError::StaleBase { current } => write!(
+                f,
+                "patch base is not the current head (head is revision {})",
+                current.0
+            ),
+            SceneError::PatchTooLarge { ops, max } => {
+                write!(f, "patch carries {ops} ops, over the {max} budget")
+            }
+            SceneError::UnknownParent(id) => {
+                write!(
+                    f,
+                    "patch add parent id {} is not a group in the scene",
+                    id.0
+                )
+            }
+            SceneError::UnknownElement(id) => {
+                write!(f, "patch element id {} is not in the scene", id.0)
+            }
         }
     }
 }
@@ -808,6 +835,149 @@ pub struct SurfaceReject {
     /// The stored head when the refusal is revision-related; `None`
     /// otherwise.
     pub current_revision: Option<SceneRevision>,
+}
+
+/// Maximum patch ops accepted in one patch frame, bounding allocation and
+/// CPU magnification per frame (mirrors [`MAX_SCENE_NODES`]'s spirit: the
+/// cap is well above any authored update and far below a denial budget).
+pub const MAX_PATCH_OPS: usize = 10_000;
+
+/// One atomic scene update op. `Add` appends `element` under `parent`
+/// (`None` = root append; `Some(id)` = append inside that group), `Replace`
+/// swaps the payload of the element carrying `id` (the replacement must
+/// carry the SAME `StableId`), `Remove` deletes the element and its whole
+/// subtree by id. New ops append at the end; never renumber.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum SceneOp {
+    Add {
+        parent: Option<StableId>,
+        element: SceneElement,
+    },
+    Replace {
+        id: StableId,
+        element: SceneElement,
+    },
+    Remove {
+        id: StableId,
+    },
+}
+
+/// A revision-checked patch: `ops` apply atomically (all-or-nothing) to a
+/// `PanelScene` whose revision equals `base_revision`; the host bumps the
+/// revision by exactly one on success. A stale base (or any op failure)
+/// refuses with zero mutation — the publisher re-synchronizes; it never
+/// muddles through.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScenePatch {
+    /// The revision the publisher based these ops on.
+    pub base_revision: SceneRevision,
+    /// Bounded op list (see [`MAX_PATCH_OPS`]), applied in order.
+    pub ops: Vec<SceneOp>,
+}
+
+impl ScenePatch {
+    /// Apply the patch to `scene` atomically: on any refusal the scene is
+    /// byte-for-byte unchanged. On success the revision advances by one
+    /// and the whole result re-validates (budgets, id uniqueness, finite
+    /// floats), so a stored scene is a validated scene by construction.
+    pub fn apply_to(&self, scene: &mut PanelScene) -> Result<SceneRevision, SceneError> {
+        if self.base_revision != scene.revision {
+            return Err(SceneError::StaleBase {
+                current: scene.revision,
+            });
+        }
+        if self.ops.len() > MAX_PATCH_OPS {
+            return Err(SceneError::PatchTooLarge {
+                ops: self.ops.len(),
+                max: MAX_PATCH_OPS,
+            });
+        }
+        // All-or-nothing: stage the candidate, swap only on full success.
+        let mut candidate = scene.clone();
+        for op in &self.ops {
+            apply_op(&mut candidate, op)?;
+        }
+        candidate.revision = SceneRevision(scene.revision.0 + 1);
+        candidate.validate()?;
+        *scene = candidate;
+        Ok(scene.revision)
+    }
+}
+
+fn apply_op(scene: &mut PanelScene, op: &SceneOp) -> Result<(), SceneError> {
+    match op {
+        SceneOp::Add { parent, element } => match parent {
+            None => scene.elements.push(element.clone()),
+            Some(parent_id) => {
+                let container = container_for_add(&mut scene.elements, *parent_id)?;
+                container.push(element.clone());
+            }
+        },
+        SceneOp::Replace { id, element } => {
+            if element.stable_id() != *id {
+                return Err(SceneError::DuplicateId(element.stable_id()));
+            }
+            let slot = element_at_mut(&mut scene.elements, *id)?;
+            *slot = element.clone();
+        }
+        SceneOp::Remove { id } => remove_element(&mut scene.elements, *id)?,
+    }
+    Ok(())
+}
+
+/// Find the children vec of the group `parent_id` for an `Add`. Only
+/// groups are containers: adding under a non-group id is `UnknownParent`.
+fn container_for_add<'a>(
+    elements: &'a mut [SceneElement],
+    parent_id: StableId,
+) -> Result<&'a mut Vec<SceneElement>, SceneError> {
+    for element in elements.iter_mut() {
+        if let SceneElement::Group { id, children, .. } = element {
+            if *id == parent_id {
+                return Ok(children);
+            }
+            if let Ok(found) = container_for_add(children, parent_id) {
+                return Ok(found);
+            }
+        }
+    }
+    Err(SceneError::UnknownParent(parent_id))
+}
+
+/// Mutable lookup by id across the whole tree (first match wins; ids are
+/// unique in a validated scene).
+fn element_at_mut<'a>(
+    elements: &'a mut [SceneElement],
+    id: StableId,
+) -> Result<&'a mut SceneElement, SceneError> {
+    for element in elements.iter_mut() {
+        if element.stable_id() == id {
+            return Ok(element);
+        }
+        if let SceneElement::Group { children, .. } = element {
+            if let Ok(found) = element_at_mut(children, id) {
+                return Ok(found);
+            }
+        }
+    }
+    Err(SceneError::UnknownElement(id))
+}
+
+/// Remove the element carrying `id` together with its whole subtree.
+fn remove_element(elements: &mut Vec<SceneElement>, id: StableId) -> Result<(), SceneError> {
+    let before = elements.len();
+    elements.retain(|element| element.stable_id() != id);
+    if elements.len() < before {
+        return Ok(());
+    }
+    for element in elements.iter_mut() {
+        if let SceneElement::Group { children, .. } = element {
+            if remove_element(children, id).is_ok() {
+                return Ok(());
+            }
+        }
+    }
+    Err(SceneError::UnknownElement(id))
 }
 
 #[cfg(test)]

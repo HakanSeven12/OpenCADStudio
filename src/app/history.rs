@@ -1081,6 +1081,30 @@ impl OpenCADStudio {
         layer_exists && app_ids_exist
     }
 
+    /// Closes a delta recording that its command did not close, because the
+    /// handler panicked between `begin_undo` and `commit_undo_delta`. The
+    /// changes that it recorded become one undo record, which the panic
+    /// guard then takes back.
+    ///
+    /// A recording that is empty is dropped. So is one that touched state
+    /// which an entity delta cannot restore (a new layer, a block): its
+    /// structure snapshot went with the stack of the failed handler.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn close_abandoned_undo_recording(&mut self, i: usize) {
+        if !self.tabs[i].scene.open_undo_recording_is_a_plain_delta() {
+            let _ = self.tabs[i].scene.take_undo_recording();
+            return;
+        }
+        let pending = PendingDelta {
+            label: "failed command".into(),
+            current_layout: self.tabs[i].scene.current_layout.clone(),
+            selected_before: self.tabs[i].scene.selected.iter().copied().collect(),
+            dirty_before: self.tabs[i].dirty,
+            structure_before: None,
+        };
+        self.commit_undo_delta(i, pending);
+    }
+
     /// Close the delta transaction opened by [`OpenCADStudio::begin_undo`]:
     /// harvests the recorded before-images, pairs each with the entity's current
     /// (after) state, and pushes a symmetric [`DeltaSnapshot`] onto the undo

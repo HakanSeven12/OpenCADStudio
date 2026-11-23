@@ -171,27 +171,40 @@ fn wires(app: &OpenCADStudio) -> usize {
     app.tabs[app.active_tab].scene.entity_wires().len()
 }
 
-/// A panic in the middle of a change: the new line is in the document, and
-/// it has no undo record and no wire yet. The guard cannot take such a
-/// change back. It builds the display again, so the line that a save writes
-/// is on the screen, and the user can erase it with an undo record.
+/// A panic in the middle of a change: the scene put the line into the
+/// document and stopped before it made its wire. The undo record of the
+/// line is written directly after the document has it, and the guard closes
+/// the undo recording that the command left open. So the guard takes the
+/// line back, and the display shows the drawing as it was.
 #[test]
-fn a_panic_in_the_middle_of_a_change_leaves_a_display_that_shows_the_document() {
+fn a_panic_in_the_middle_of_a_change_is_taken_back() {
     let mut app = app_with_a_circle();
+    let before = handles(&app);
     assert_eq!(wires(&app), 1, "the circle's wire");
     crate::scene::TEST_PANIC_AFTER_DOCUMENT_ADD.with(|point| point.set(true));
 
     let _ = app.update_root(Message::ScriptLine("LINE 0,0 10,0 ".to_string()));
 
-    assert!(last_error(&app).contains("test panic after the document add"));
+    let error = last_error(&app);
+    assert!(error.contains("test panic after the document add"));
+    assert!(error.contains("its changes were undone"), "{error}");
     assert!(app.tabs[app.active_tab].active_cmd.is_none(), "LINE ended");
-    assert_eq!(entities(&app), 2, "the line stays in the document");
-    assert_eq!(undo_depth(&app), 1, "and it has no undo record");
-    assert_eq!(wires(&app), 2, "so the display must show it");
+    assert_eq!(handles(&app), before, "the line is not in the document");
+    assert_eq!(undo_depth(&app), 1, "only the circle's record");
+    assert_eq!(
+        redo_depth(&app),
+        0,
+        "the failed command cannot be done again"
+    );
+    assert!(
+        !app.tabs[app.active_tab].scene.is_recording_undo(),
+        "no undo recording stays open"
+    );
+    assert_eq!(wires(&app), 1, "the display shows the circle only");
 
-    // The session goes on, and the user can remove the line.
-    let _ = app.update_root(Message::ScriptLine("ERASE ALL ".to_string()));
-    assert_eq!(entities(&app), 0);
-    assert_eq!(undo_depth(&app), 2, "the erase has its undo record");
-    assert_eq!(wires(&app), 0);
+    // The session goes on: the next command has its own undo record.
+    let _ = app.update_root(Message::ScriptLine("LINE 0,0 10,0 ".to_string()));
+    assert_eq!(entities(&app), 2);
+    assert_eq!(undo_depth(&app), 2);
+    assert_eq!(wires(&app), 2);
 }

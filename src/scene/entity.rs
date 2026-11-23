@@ -585,6 +585,22 @@ impl Scene {
         } else {
             self.document.add_entity(entity).unwrap_or(Handle::NULL)
         };
+        // Delta-undo: the new handle's before-image is "nothing" (it did not
+        // exist). Poison the recording if this add also mutated non-entity
+        // state (a new layer, application ID, or block). This is the first
+        // step after the document has the entity: a panic in a later step
+        // (the display models, the material) then leaves an entity that the
+        // undo history can take back.
+        if !handle.is_null() && self.is_recording_undo() {
+            self.record_undo_before(handle, None);
+            if creates_layer
+                || creates_app_id
+                || mutates_block_structure
+                || creates_section_structure
+            {
+                self.poison_undo_recording();
+            }
+        }
         #[cfg(test)]
         if super::TEST_PANIC_AFTER_DOCUMENT_ADD.with(|point| point.replace(false)) {
             panic!("test panic after the document add");
@@ -631,19 +647,6 @@ impl Scene {
                     );
                 }
                 self.meshes.insert(handle, model);
-            }
-            // Delta-undo: the new handle's before-image is "nothing" (it did not
-            // exist). Poison the recording if this add also mutated non-entity
-            // state (a new layer, application ID, or block).
-            if self.is_recording_undo() {
-                self.record_undo_before(handle, None);
-                if creates_layer
-                    || creates_app_id
-                    || mutates_block_structure
-                    || creates_section_structure
-                {
-                    self.poison_undo_recording();
-                }
             }
             if bump {
                 if affects_blocks {

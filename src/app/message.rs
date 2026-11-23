@@ -824,8 +824,6 @@ pub enum Message {
     /// itself isn't focused (focus parked on viewport / button / etc.)
     /// so typing still routes to the command line.
     CommandAppendChar(String),
-    /// An unmodified S, N or C key, which may answer the unsaved question.
-    UnsavedShortcut(char),
     /// A character key went up: ends a held Shift+letter override.
     HeldOverrideRelease,
     /// Pop the trailing character off the command-line input — backspace

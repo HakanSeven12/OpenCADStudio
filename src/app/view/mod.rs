@@ -413,7 +413,7 @@ pub(crate) fn window_event_with_context(
     ev: iced::Event,
     status: iced::event::Status,
     win_id: window::Id,
-    _is_main: bool,
+    #[cfg_attr(target_arch = "wasm32", allow(unused_variables))] is_main: bool,
 ) -> Option<Message> {
     use iced::event::Status;
     match ev {
@@ -440,11 +440,11 @@ pub(crate) fn window_event_with_context(
         }
         iced::Event::Window(window::Event::Closed) => Some(Message::OsWindowClosed(win_id)),
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Window(window::Event::Resized(sz)) if !_is_main => {
+        iced::Event::Window(window::Event::Resized(sz)) if !is_main => {
             Some(Message::OsWindowResized(win_id, sz.width, sz.height))
         }
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Window(window::Event::Moved(at)) if !_is_main => {
+        iced::Event::Window(window::Event::Moved(at)) if !is_main => {
             Some(Message::OsWindowMoved(win_id, at))
         }
         // Keys typed in a window of its own stay with its widgets; only Esc,
@@ -456,7 +456,7 @@ pub(crate) fn window_event_with_context(
             text,
             repeat,
             ..
-        }) if !_is_main => {
+        }) if !is_main => {
             let name = match key {
                 keyboard::Key::Character(ref value)
                     if status == Status::Ignored
@@ -492,16 +492,16 @@ pub(crate) fn window_event_with_context(
             Some(Message::OsWindowKey(win_id, name.to_string()))
         }
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Keyboard(keyboard::Event::KeyReleased { .. }) if !_is_main => None,
+        iced::Event::Keyboard(keyboard::Event::KeyReleased { .. }) if !is_main => None,
         iced::Event::Window(window::Event::Resized(sz)) => {
             Some(Message::WindowResized(sz.width, sz.height))
         }
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Window(window::Event::Opened { scale_factor, .. }) if !_is_main => {
+        iced::Event::Window(window::Event::Opened { scale_factor, .. }) if !is_main => {
             Some(Message::OsWindowScale(win_id, scale_factor))
         }
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Window(window::Event::Rescaled(scale_factor)) if !_is_main => {
+        iced::Event::Window(window::Event::Rescaled(scale_factor)) if !is_main => {
             Some(Message::OsWindowScale(win_id, scale_factor))
         }
         // The ribbon's arrows sit on whole physical pixels.
@@ -586,15 +586,6 @@ pub(crate) fn window_event_with_context(
             if !shortcut_modifier && status == Status::Ignored {
                 if let Some(t) = text.as_deref() {
                     if !t.is_empty() && t.chars().all(|c| !c.is_control() && !c.is_whitespace()) {
-                        if !repeat
-                            && !modifiers.control()
-                            && !modifiers.alt()
-                            && !modifiers.logo()
-                            && t.len() == 1
-                            && matches!(t.to_ascii_lowercase().as_str(), "s" | "n" | "c")
-                        {
-                            return Some(Message::UnsavedShortcut(t.chars().next()?));
-                        }
                         return Some(Message::CommandAppendChar(t.to_string()));
                     }
                 }

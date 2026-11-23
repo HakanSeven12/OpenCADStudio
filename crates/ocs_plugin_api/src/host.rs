@@ -1658,7 +1658,7 @@ pub trait HostApi {
     /// `{"layer":"*-OPENBARE_RUIMTE_*","type":"Mesh","xdata_app":"OPENINFRA",
     /// "bounds":[x0,y0,x1,y1],"offset":0,"limit":500}`: `layer` takes `*` and
     /// `?`, `where` filters properties by JSON Pointer, and `limit` is at
-    /// most 10000. One message carries at most 64 MiB either way, so batch
+    /// most 10000. One message carries at most 1 GiB either way, so batch
     /// writes and size pages to stay under it.
     fn query_entities(&mut self, query: &str) -> Result<EntityPage, String> {
         let _ = query;

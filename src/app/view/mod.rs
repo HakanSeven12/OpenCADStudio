@@ -22,6 +22,8 @@ mod hatch_panel_widget_tests;
 mod select_similar_clipboard_tests;
 #[cfg(test)]
 mod table_inplace_widget_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod view_guard_tests;
 
 /// Invisible event surface for accurate point picking. MouseArea emits a
 /// positionless press message; capturing the cursor in the actual button

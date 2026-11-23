@@ -98,26 +98,43 @@ impl CadCommand for LengthenCommand {
             }
             LenState::Value(ValueMode::Delta) => format!(
                 "LENGTHEN  Enter delta length <{}>:",
-                LENGTHEN_DEFAULTS.lock().unwrap().delta
+                LENGTHEN_DEFAULTS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .delta
             ),
             LenState::Value(ValueMode::Total) => format!(
                 "LENGTHEN  Enter total length <{}>:",
-                LENGTHEN_DEFAULTS.lock().unwrap().total
+                LENGTHEN_DEFAULTS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .total
             ),
             LenState::Value(ValueMode::Percent) => format!(
                 "LENGTHEN  Enter percentage length <{}>:",
-                LENGTHEN_DEFAULTS.lock().unwrap().percent
+                LENGTHEN_DEFAULTS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .percent
             ),
             LenState::Value(ValueMode::DeltaAngle) => format!(
                 "LENGTHEN  Enter delta angle <{}>:",
                 crate::entities::common::format_angle(
-                    LENGTHEN_DEFAULTS.lock().unwrap().delta_angle.to_radians(),
+                    LENGTHEN_DEFAULTS
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .delta_angle
+                        .to_radians(),
                 )
             ),
             LenState::Value(ValueMode::TotalAngle) => format!(
                 "LENGTHEN  Enter total angle <{}>:",
                 crate::entities::common::format_angle(
-                    LENGTHEN_DEFAULTS.lock().unwrap().total_angle.to_radians(),
+                    LENGTHEN_DEFAULTS
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .total_angle
+                        .to_radians(),
                 )
             ),
             LenState::DynamicPoint { .. } => "LENGTHEN  Specify new end point:".into(),
@@ -246,7 +263,10 @@ impl CadCommand for LengthenCommand {
                 "DY" | "DYNAMIC" => ValueMode::Dynamic,
                 _ => return Some(CmdResult::NeedPoint),
             };
-            LENGTHEN_DEFAULTS.lock().unwrap().mode = mode;
+            LENGTHEN_DEFAULTS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .mode = mode;
             self.state = if matches!(mode, ValueMode::Dynamic) {
                 LenState::DynamicPick
             } else {
@@ -284,7 +304,7 @@ impl CadCommand for LengthenCommand {
             return Some(CmdResult::NeedPoint);
         }
         {
-            let mut defaults = LENGTHEN_DEFAULTS.lock().unwrap();
+            let mut defaults = LENGTHEN_DEFAULTS.lock().unwrap_or_else(|e| e.into_inner());
             match mode {
                 ValueMode::Delta => defaults.delta = value,
                 ValueMode::Total => defaults.total = value,
@@ -341,7 +361,10 @@ impl CadCommand for LengthenCommand {
     fn on_enter(&mut self) -> CmdResult {
         match self.state {
             LenState::ChooseMode => {
-                let mode = LENGTHEN_DEFAULTS.lock().unwrap().mode;
+                let mode = LENGTHEN_DEFAULTS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .mode;
                 self.state = if matches!(mode, ValueMode::Dynamic) {
                     LenState::DynamicPick
                 } else {
@@ -351,7 +374,7 @@ impl CadCommand for LengthenCommand {
             }
             LenState::Value(mode) => {
                 let value = {
-                    let defaults = LENGTHEN_DEFAULTS.lock().unwrap();
+                    let defaults = LENGTHEN_DEFAULTS.lock().unwrap_or_else(|e| e.into_inner());
                     match mode {
                         ValueMode::Delta => defaults.delta,
                         ValueMode::Total => defaults.total,

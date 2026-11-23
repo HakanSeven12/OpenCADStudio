@@ -12,10 +12,12 @@ pub fn validate_shape(schema: &Value, value: &Value, path: &str) -> Result<(), S
         OnceLock::new();
     let key = schema.to_string();
     let validator = {
+        // A schema that does not compile panics below with the lock held. The
+        // map is not changed then, so the cache stays good.
         let mut cache = VALIDATORS
             .get_or_init(Default::default)
             .lock()
-            .expect("schema cache poisoned");
+            .unwrap_or_else(|e| e.into_inner());
         if let Some(validator) = cache.get(&key) {
             Arc::clone(validator)
         } else {

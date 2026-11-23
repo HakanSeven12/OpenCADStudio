@@ -2007,6 +2007,12 @@ pub fn prepare_open_geometry(
     scene.bg_color = model_bg;
     scene.sync_annotation_scale_from_header();
     scene.current_layout = "Model".to_string();
+    // The Properties palette resolves each text style at its first refresh,
+    // on the UI thread. Resolve them here, so that the font files of the
+    // styles that no model-space text uses are read on this worker.
+    for style in scene.document.text_styles.iter() {
+        let _ = crate::entities::text_support::resolve_text_style(&style.name, &scene.document);
+    }
     let camera = scene.camera.borrow().clone();
     let perf = crate::perf::enabled();
     let t_wires = perf.then(iced::time::Instant::now);

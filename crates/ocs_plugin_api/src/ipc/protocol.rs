@@ -565,11 +565,11 @@ pub enum PluginResponse {
     PanelSurfacePatchResult(Result<crate::scene::SceneRevision, crate::scene::SurfaceReject>),
     /// V29 (additive): outcome of a widget page install — the stored
     /// widget revision after the atomic install, or the typed refusal.
-    PanelSurfacePageResult(Result<crate::widget::WidgetRevision, crate::scene::SurfaceReject>),
+    PanelSurfacePageResult(Result<crate::widget::WidgetRevision, crate::widget::WidgetReject>),
     /// V29 (additive): outcome of a WIDGET surface publish — the stored
     /// widget revision (the widget tier's independent revision space), or
     /// the typed refusal.
-    PanelWidgetPublished(Result<crate::widget::WidgetRevision, crate::scene::SurfaceReject>),
+    PanelWidgetPublished(Result<crate::widget::WidgetRevision, crate::widget::WidgetReject>),
 }
 
 /// Messages sent from the host to the plugin runner.

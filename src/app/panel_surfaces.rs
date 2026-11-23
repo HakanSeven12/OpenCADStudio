@@ -166,24 +166,25 @@ impl PanelSurfaceStore {
         plugin_id: &str,
         panel_id: &str,
         surface: ocs_plugin_api::widget::WidgetSurface,
-    ) -> Result<ocs_plugin_api::widget::WidgetRevision, SurfaceReject> {
+    ) -> Result<ocs_plugin_api::widget::WidgetRevision, ocs_plugin_api::widget::WidgetReject> {
+        use ocs_plugin_api::widget::{WidgetReject, WidgetRejectCode};
         if plugin_id.is_empty() || panel_id.trim().is_empty() {
-            return Err(SurfaceReject {
-                code: SurfaceRejectCode::Unattached,
+            return Err(WidgetReject {
+                code: WidgetRejectCode::Unattached,
                 current_revision: None,
             });
         }
         if surface.validate().is_err() {
-            return Err(SurfaceReject {
-                code: SurfaceRejectCode::InvalidSurface,
+            return Err(WidgetReject {
+                code: WidgetRejectCode::InvalidSurface,
                 current_revision: None,
             });
         }
         if let Some(record) = self.widgets.get(panel_id) {
             if record.owner_plugin_id != plugin_id {
-                return Err(SurfaceReject {
-                    code: SurfaceRejectCode::OwnedByOther,
-                    current_revision: Some(record.surface.revision.0),
+                return Err(WidgetReject {
+                    code: WidgetRejectCode::OwnedByOther,
+                    current_revision: Some(record.surface.revision),
                 });
             }
             let head = record.surface.revision;
@@ -191,15 +192,15 @@ impl PanelSurfaceStore {
                 if surface == record.surface {
                     return Ok(head); // idempotent: identical at the head
                 }
-                return Err(SurfaceReject {
-                    code: SurfaceRejectCode::NonMonotonicRevision,
-                    current_revision: Some(head.0),
+                return Err(WidgetReject {
+                    code: WidgetRejectCode::NonMonotonicRevision,
+                    current_revision: Some(head),
                 });
             }
             if surface.revision < head {
-                return Err(SurfaceReject {
-                    code: SurfaceRejectCode::NonMonotonicRevision,
-                    current_revision: Some(head.0),
+                return Err(WidgetReject {
+                    code: WidgetRejectCode::NonMonotonicRevision,
+                    current_revision: Some(head),
                 });
             }
         }
@@ -222,34 +223,34 @@ impl PanelSurfaceStore {
         plugin_id: &str,
         panel_id: &str,
         page: ocs_plugin_api::widget::WidgetPage,
-    ) -> Result<ocs_plugin_api::widget::WidgetRevision, SurfaceReject> {
-        use ocs_plugin_api::widget::WidgetError;
+    ) -> Result<ocs_plugin_api::widget::WidgetRevision, ocs_plugin_api::widget::WidgetReject> {
+        use ocs_plugin_api::widget::{WidgetReject, WidgetRejectCode};
         if plugin_id.is_empty() || panel_id.trim().is_empty() {
-            return Err(SurfaceReject {
-                code: SurfaceRejectCode::Unattached,
+            return Err(WidgetReject {
+                code: WidgetRejectCode::Unattached,
                 current_revision: None,
             });
         }
         let Some(record) = self.widgets.get_mut(panel_id) else {
-            return Err(SurfaceReject {
-                code: SurfaceRejectCode::Unattached,
+            return Err(WidgetReject {
+                code: WidgetRejectCode::Unattached,
                 current_revision: None,
             });
         };
         if record.owner_plugin_id != plugin_id {
-            return Err(SurfaceReject {
-                code: SurfaceRejectCode::OwnedByOther,
-                current_revision: Some(record.surface.revision.0),
+            return Err(WidgetReject {
+                code: WidgetRejectCode::OwnedByOther,
+                current_revision: Some(record.surface.revision),
             });
         }
-        match page.apply_to(&mut record.surface) {
+        match record.surface.apply_page(&page) {
             Ok(revision) => Ok(revision),
-            Err(WidgetError::StaleBase) => Err(SurfaceReject {
-                code: SurfaceRejectCode::NonMonotonicRevision,
-                current_revision: Some(record.surface.revision.0),
+            Err(ocs_plugin_api::widget::WidgetError::StaleBase) => Err(WidgetReject {
+                code: WidgetRejectCode::NonMonotonicRevision,
+                current_revision: Some(record.surface.revision),
             }),
-            Err(_) => Err(SurfaceReject {
-                code: SurfaceRejectCode::InvalidSurface,
+            Err(_) => Err(WidgetReject {
+                code: WidgetRejectCode::InvalidSurface,
                 current_revision: None,
             }),
         }

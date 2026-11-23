@@ -471,33 +471,6 @@ impl HostApi for HostSession<'_> {
     /// V29: publish the panel's scene for the authenticated owner. Attachment
     /// and ownership resolve here; the store applies the revision rules and
     /// checks the owner again.
-    /// Shared attachment/ownership resolution for the surface tier: an
-    /// unregistered alias is `Unattached`, a foreign-registered panel is
-    /// `OwnedByOther`.
-    fn resolve_surface_panel(
-        &self,
-        plugin_id: &str,
-        panel_id: &str,
-    ) -> Result<String, ocs_plugin_api::scene::SurfaceReject> {
-        use ocs_plugin_api::scene::SurfaceRejectCode;
-        let refuse = |code| ocs_plugin_api::scene::SurfaceReject {
-            code,
-            current_revision: None,
-        };
-        if plugin_id.is_empty() || panel_id.trim().is_empty() {
-            return Err(refuse(SurfaceRejectCode::Unattached));
-        }
-        let Some(resolved) = resolve_toggle_panel_id(self.app, panel_id) else {
-            return Err(refuse(SurfaceRejectCode::Unattached));
-        };
-        let Some(registered) = self.app.plugin_panels.get(&resolved) else {
-            return Err(refuse(SurfaceRejectCode::Unattached));
-        };
-        if registered.owner_plugin_id.as_deref() != Some(plugin_id) {
-            return Err(refuse(SurfaceRejectCode::OwnedByOther));
-        }
-        Ok(resolved)
-    }
 
     fn panel_surface_publish_for_plugin(
         &mut self,
@@ -505,7 +478,12 @@ impl HostApi for HostSession<'_> {
         panel_id: &str,
         scene: ocs_plugin_api::scene::PanelScene,
     ) -> Result<ocs_plugin_api::scene::SceneRevision, ocs_plugin_api::scene::SurfaceReject> {
-        let resolved = self.resolve_surface_panel(plugin_id, panel_id)?;
+        let resolved = self
+            .resolve_surface_panel(plugin_id, panel_id)
+            .map_err(|code| ocs_plugin_api::scene::SurfaceReject {
+                code,
+                current_revision: None,
+            })?;
         self.app.panel_surfaces.publish(plugin_id, &resolved, scene)
     }
 
@@ -517,8 +495,13 @@ impl HostApi for HostSession<'_> {
         plugin_id: &str,
         panel_id: &str,
         surface: ocs_plugin_api::widget::WidgetSurface,
-    ) -> Result<ocs_plugin_api::widget::WidgetRevision, ocs_plugin_api::scene::SurfaceReject> {
-        let resolved = self.resolve_surface_panel(plugin_id, panel_id)?;
+    ) -> Result<ocs_plugin_api::widget::WidgetRevision, ocs_plugin_api::widget::WidgetReject> {
+        let resolved = self
+            .resolve_surface_panel(plugin_id, panel_id)
+            .map_err(|code| ocs_plugin_api::widget::WidgetReject {
+                code: code.into(),
+                current_revision: None,
+            })?;
         self.app
             .panel_surfaces
             .publish_widget(plugin_id, &resolved, surface)
@@ -531,8 +514,13 @@ impl HostApi for HostSession<'_> {
         plugin_id: &str,
         panel_id: &str,
         page: ocs_plugin_api::widget::WidgetPage,
-    ) -> Result<ocs_plugin_api::widget::WidgetRevision, ocs_plugin_api::scene::SurfaceReject> {
-        let resolved = self.resolve_surface_panel(plugin_id, panel_id)?;
+    ) -> Result<ocs_plugin_api::widget::WidgetRevision, ocs_plugin_api::widget::WidgetReject> {
+        let resolved = self
+            .resolve_surface_panel(plugin_id, panel_id)
+            .map_err(|code| ocs_plugin_api::widget::WidgetReject {
+                code: code.into(),
+                current_revision: None,
+            })?;
         self.app
             .panel_surfaces
             .install_widget_page(plugin_id, &resolved, page)

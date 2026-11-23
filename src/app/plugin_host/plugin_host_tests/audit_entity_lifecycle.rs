@@ -118,53 +118,77 @@ fn audit_python_circle_lifecycle_over_real_ipc() {
 #[test]
 fn audit_python_arc_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: "doc.create_entity('Arc', center=P(0.0, 0.0, 0.0), radius=5.0, start_angle=0.0, end_angle=1.5)",
-            edit: concat!("e = doc.entities[HANDLE]\n", "with doc.transaction('Edit'):\n", "    e.end_angle = 2.0\n", "    e.radius = 6.0\n", "doc.selection = [e]\n"),
-            rejects: &[
-                ("'radius':0.0", "radius"),
-                ("'end_angle':float('nan')", "finite"),
-                ("'center':{'x':float('nan'),'y':0.0,'z':0.0}", "finite"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::Arc(_)),
-            digest: |entity| match entity {
-                EntityType::Arc(v) => format!("r{:.1} {:.1}..{:.1}", v.radius, v.start_angle, v.end_angle),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::Arc(v) = entity { v.start_angle = 0.5; },
-            expect_created: "r5.0 0.0..1.5",
-            expect_edited: "r6.0 0.0..2.0",
-            expect_reedited: "r6.0 0.5..2.0",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: "doc.create_entity('Arc', center=P(0.0, 0.0, 0.0), radius=5.0, start_angle=0.0, end_angle=1.5)",
+        edit: concat!(
+            "e = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit'):\n",
+            "    e.end_angle = 2.0\n",
+            "    e.radius = 6.0\n",
+            "doc.selection = [e]\n"
+        ),
+        rejects: &[
+            ("'radius':0.0", "radius"),
+            ("'end_angle':float('nan')", "finite"),
+            ("'center':{'x':float('nan'),'y':0.0,'z':0.0}", "finite"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::Arc(_)),
+        digest: |entity| match entity {
+            EntityType::Arc(v) => {
+                format!("r{:.1} {:.1}..{:.1}", v.radius, v.start_angle, v.end_angle)
+            }
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::Arc(v) = entity {
+                v.start_angle = 0.5;
+            }
+        },
+        expect_created: "r5.0 0.0..1.5",
+        expect_edited: "r6.0 0.0..2.0",
+        expect_reedited: "r6.0 0.5..2.0",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
 fn audit_python_ellipse_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: "doc.create_entity('Ellipse', center=P(0.0, 0.0, 0.0), major_axis=P(10.0, 0.0, 0.0), minor_axis_ratio=0.5)",
-            edit: concat!("e = doc.entities[HANDLE]\n", "with doc.transaction('Edit'):\n", "    e.minor_axis_ratio = 0.25\n", "    e.end_parameter = 3.0\n", "doc.selection = [e]\n"),
-            rejects: &[
-                ("'minor_axis_ratio':0.0", "ratio"),
-                ("'minor_axis_ratio':2.0", "ratio"),
-                ("'major_axis':{'x':0.0,'y':0.0,'z':0.0}", "axis"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::Ellipse(_)),
-            digest: |entity| match entity {
-                EntityType::Ellipse(v) => format!("q{:.2} ..{:.1}", v.minor_axis_ratio, v.end_parameter),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::Ellipse(v) = entity { v.minor_axis_ratio = 0.75; },
-            expect_created: "q0.50 ..6.3",
-            expect_edited: "q0.25 ..3.0",
-            expect_reedited: "q0.75 ..3.0",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: "doc.create_entity('Ellipse', center=P(0.0, 0.0, 0.0), major_axis=P(10.0, 0.0, 0.0), minor_axis_ratio=0.5)",
+        edit: concat!(
+            "e = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit'):\n",
+            "    e.minor_axis_ratio = 0.25\n",
+            "    e.end_parameter = 3.0\n",
+            "doc.selection = [e]\n"
+        ),
+        rejects: &[
+            ("'minor_axis_ratio':0.0", "ratio"),
+            ("'minor_axis_ratio':2.0", "ratio"),
+            ("'major_axis':{'x':0.0,'y':0.0,'z':0.0}", "axis"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::Ellipse(_)),
+        digest: |entity| match entity {
+            EntityType::Ellipse(v) => {
+                format!("q{:.2} ..{:.1}", v.minor_axis_ratio, v.end_parameter)
+            }
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::Ellipse(v) = entity {
+                v.minor_axis_ratio = 0.75;
+            }
+        },
+        expect_created: "q0.50 ..6.3",
+        expect_edited: "q0.25 ..3.0",
+        expect_reedited: "q0.75 ..3.0",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
@@ -208,8 +232,7 @@ fn audit_python_ray_lifecycle_over_real_ipc() {
 #[test]
 fn audit_python_xline_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-        create:
-            "doc.create_entity('XLine', base_point=P(0.0, 0.0, 0.0), direction=P(1.0, 0.0, 0.0))",
+        create: "doc.create_entity('XLine', base_point=P(0.0, 0.0, 0.0), direction=P(1.0, 0.0, 0.0))",
         edit: concat!(
             "e = doc.entities[HANDLE]\n",
             "with doc.transaction('Edit'):\n",
@@ -247,52 +270,83 @@ fn audit_python_xline_lifecycle_over_real_ipc() {
 #[test]
 fn audit_python_solid_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: "doc.create_entity('Solid', first_corner=P(0.0, 0.0, 0.0), second_corner=P(4.0, 0.0, 0.0), third_corner=P(0.0, 4.0, 0.0), fourth_corner=P(4.0, 4.0, 0.0))",
-            edit: concat!("e = doc.entities[HANDLE]\n", "with doc.transaction('Edit'):\n", "    e.fourth_corner = (5.0, 5.0, 0.0)\n", "    e.thickness = 2.0\n", "doc.selection = [e]\n"),
-            rejects: &[
-                ("'first_corner':{'x':float('nan'),'y':0.0,'z':0.0}", "finite"),
-                ("'thickness':float('inf')", "finite"),
-                ("'normal':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::Solid(_)),
-            digest: |entity| match entity {
-                EntityType::Solid(v) => format!("{:.1},{:.1} th{:.1}", v.fourth_corner.x, v.fourth_corner.y, v.thickness),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::Solid(v) = entity { v.first_corner.x = 1.0; },
-            expect_created: "4.0,4.0 th0.0",
-            expect_edited: "5.0,5.0 th2.0",
-            expect_reedited: "5.0,5.0 th2.0",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: "doc.create_entity('Solid', first_corner=P(0.0, 0.0, 0.0), second_corner=P(4.0, 0.0, 0.0), third_corner=P(0.0, 4.0, 0.0), fourth_corner=P(4.0, 4.0, 0.0))",
+        edit: concat!(
+            "e = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit'):\n",
+            "    e.fourth_corner = (5.0, 5.0, 0.0)\n",
+            "    e.thickness = 2.0\n",
+            "doc.selection = [e]\n"
+        ),
+        rejects: &[
+            (
+                "'first_corner':{'x':float('nan'),'y':0.0,'z':0.0}",
+                "finite",
+            ),
+            ("'thickness':float('inf')", "finite"),
+            ("'normal':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::Solid(_)),
+        digest: |entity| match entity {
+            EntityType::Solid(v) => format!(
+                "{:.1},{:.1} th{:.1}",
+                v.fourth_corner.x, v.fourth_corner.y, v.thickness
+            ),
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::Solid(v) = entity {
+                v.first_corner.x = 1.0;
+            }
+        },
+        expect_created: "4.0,4.0 th0.0",
+        expect_edited: "5.0,5.0 th2.0",
+        expect_reedited: "5.0,5.0 th2.0",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
 fn audit_python_face3d_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: "doc.create_entity('Face3D', first_corner=P(0.0, 0.0, 0.0), second_corner=P(4.0, 0.0, 0.0), third_corner=P(4.0, 4.0, 1.0), fourth_corner=P(0.0, 4.0, 1.0))",
-            edit: concat!("e = doc.entities[HANDLE]\n", "with doc.transaction('Edit'):\n", "    e.third_corner = (4.0, 4.0, 2.0)\n", "    e.invisible_edges = 3\n", "doc.selection = [e]\n"),
-            rejects: &[
-                ("'first_corner':{'x':float('nan'),'y':0.0,'z':0.0}", "finite"),
-                ("'invisible_edges':64", "bits"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::Face3D(_)),
-            digest: |entity| match entity {
-                EntityType::Face3D(v) => format!("z{:.1} inv{}", v.third_corner.z, v.invisible_edges.bits()),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::Face3D(v) = entity { v.first_corner.x = 1.0; },
-            expect_created: "z1.0 inv0",
-            expect_edited: "z2.0 inv3",
-            expect_reedited: "z2.0 inv3",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: "doc.create_entity('Face3D', first_corner=P(0.0, 0.0, 0.0), second_corner=P(4.0, 0.0, 0.0), third_corner=P(4.0, 4.0, 1.0), fourth_corner=P(0.0, 4.0, 1.0))",
+        edit: concat!(
+            "e = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit'):\n",
+            "    e.third_corner = (4.0, 4.0, 2.0)\n",
+            "    e.invisible_edges = 3\n",
+            "doc.selection = [e]\n"
+        ),
+        rejects: &[
+            (
+                "'first_corner':{'x':float('nan'),'y':0.0,'z':0.0}",
+                "finite",
+            ),
+            ("'invisible_edges':64", "bits"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::Face3D(_)),
+        digest: |entity| match entity {
+            EntityType::Face3D(v) => {
+                format!("z{:.1} inv{}", v.third_corner.z, v.invisible_edges.bits())
+            }
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::Face3D(v) = entity {
+                v.first_corner.x = 1.0;
+            }
+        },
+        expect_created: "z1.0 inv0",
+        expect_edited: "z2.0 inv3",
+        expect_reedited: "z2.0 inv3",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
@@ -335,163 +389,293 @@ fn audit_python_text_lifecycle_over_real_ipc() {
 #[test]
 fn audit_python_mtext_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: "doc.create_entity('MText', text='Line one', insertion=P(1.0, 2.0, 0.0), height=2.5, rectangle_width=30.0)",
-            edit: concat!("e = doc.entities[HANDLE]\n", "with doc.transaction('Edit'):\n", "    e.text = 'Line two'\n", "    e.rectangle_width = 40.0\n", "    e.rotation = 0.5\n", "doc.selection = [e]\n"),
-            rejects: &[
-                ("'height':0.0", "height"),
-                ("'rectangle_width':-1.0", "width"),
-                ("'insertion':{'x':float('nan'),'y':0.0,'z':0.0}", "finite"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::MText(_)),
-            digest: |entity| match entity {
-                EntityType::MText(v) => format!("{} w{:.1} r{:.1}", v.value, v.rectangle_width, v.rotation),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::MText(v) = entity { v.rectangle_width = 50.0; },
-            expect_created: "Line one w30.0 r0.0",
-            expect_edited: "Line two w40.0 r0.5",
-            expect_reedited: "Line two w50.0 r0.5",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: "doc.create_entity('MText', text='Line one', insertion=P(1.0, 2.0, 0.0), height=2.5, rectangle_width=30.0)",
+        edit: concat!(
+            "e = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit'):\n",
+            "    e.text = 'Line two'\n",
+            "    e.rectangle_width = 40.0\n",
+            "    e.rotation = 0.5\n",
+            "doc.selection = [e]\n"
+        ),
+        rejects: &[
+            ("'height':0.0", "height"),
+            ("'rectangle_width':-1.0", "width"),
+            ("'insertion':{'x':float('nan'),'y':0.0,'z':0.0}", "finite"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::MText(_)),
+        digest: |entity| match entity {
+            EntityType::MText(v) => {
+                format!("{} w{:.1} r{:.1}", v.value, v.rectangle_width, v.rotation)
+            }
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::MText(v) = entity {
+                v.rectangle_width = 50.0;
+            }
+        },
+        expect_created: "Line one w30.0 r0.0",
+        expect_edited: "Line two w40.0 r0.5",
+        expect_reedited: "Line two w50.0 r0.5",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
 fn audit_python_lwpolyline_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: concat!("doc.create_entity('LwPolyline', vertices=[{'location': {'x': 0.0, 'y': 0.0}}, {'location': {'x': 10.0, 'y': 0.0}}, {'location': {'x': 10.0, 'y': 5.0}}])\n"),
-            edit: concat!("e = doc.entities[HANDLE]\n", "with doc.transaction('Edit'):\n", "    e.vertices = [{'location': {'x': 0.0, 'y': 0.0}}, {'location': {'x': 10.0, 'y': 0.0}}, {'location': {'x': 10.0, 'y': 8.0}, 'bulge': 0.5}, {'location': {'x': 0.0, 'y': 8.0}}]\n", "    e.is_closed = True\n", "    e.constant_width = 0.5\n", "doc.selection = [e]\n"),
-            rejects: &[
-                ("'vertices':[{'location':{'x':0.0,'y':0.0}}]", "at least 2"),
-                ("'constant_width':-1.0", "non-negative"),
-                ("'vertices':[{'location':{'x':float('nan'),'y':0.0}},{'location':{'x':1.0,'y':0.0}}]", "finite"),
-                ("'normal':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::LwPolyline(_)),
-            digest: |entity| match entity {
-                EntityType::LwPolyline(v) => format!("n{} closed{} w{:.1} bulge{:.1}", v.vertices.len(), v.is_closed, v.constant_width, v.vertices.get(2).map_or(0.0, |x| x.bulge)),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::LwPolyline(v) = entity { v.constant_width = 1.0; },
-            expect_created: "n3 closedfalse w0.0 bulge0.0",
-            expect_edited: "n4 closedtrue w0.5 bulge0.5",
-            expect_reedited: "n4 closedtrue w1.0 bulge0.5",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: concat!(
+            "doc.create_entity('LwPolyline', vertices=[{'location': {'x': 0.0, 'y': 0.0}}, {'location': {'x': 10.0, 'y': 0.0}}, {'location': {'x': 10.0, 'y': 5.0}}])\n"
+        ),
+        edit: concat!(
+            "e = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit'):\n",
+            "    e.vertices = [{'location': {'x': 0.0, 'y': 0.0}}, {'location': {'x': 10.0, 'y': 0.0}}, {'location': {'x': 10.0, 'y': 8.0}, 'bulge': 0.5}, {'location': {'x': 0.0, 'y': 8.0}}]\n",
+            "    e.is_closed = True\n",
+            "    e.constant_width = 0.5\n",
+            "doc.selection = [e]\n"
+        ),
+        rejects: &[
+            ("'vertices':[{'location':{'x':0.0,'y':0.0}}]", "at least 2"),
+            ("'constant_width':-1.0", "non-negative"),
+            (
+                "'vertices':[{'location':{'x':float('nan'),'y':0.0}},{'location':{'x':1.0,'y':0.0}}]",
+                "finite",
+            ),
+            ("'normal':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::LwPolyline(_)),
+        digest: |entity| match entity {
+            EntityType::LwPolyline(v) => format!(
+                "n{} closed{} w{:.1} bulge{:.1}",
+                v.vertices.len(),
+                v.is_closed,
+                v.constant_width,
+                v.vertices.get(2).map_or(0.0, |x| x.bulge)
+            ),
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::LwPolyline(v) = entity {
+                v.constant_width = 1.0;
+            }
+        },
+        expect_created: "n3 closedfalse w0.0 bulge0.0",
+        expect_edited: "n4 closedtrue w0.5 bulge0.5",
+        expect_reedited: "n4 closedtrue w1.0 bulge0.5",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
 fn audit_python_polyline2d_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: concat!("doc.create_entity('Polyline2D', vertices=[{'location': {'x': 0.0, 'y': 0.0, 'z': 0.0}}, {'location': {'x': 10.0, 'y': 0.0, 'z': 0.0}}, {'location': {'x': 10.0, 'y': 5.0, 'z': 0.0}}])\n"),
-            edit: concat!("e = doc.entities[HANDLE]\n", "with doc.transaction('Edit'):\n", "    e.vertices = [{'location': {'x': 0.0, 'y': 0.0, 'z': 0.0}}, {'location': {'x': 10.0, 'y': 0.0, 'z': 0.0}}, {'location': {'x': 10.0, 'y': 8.0, 'z': 0.0}}, {'location': {'x': 0.0, 'y': 8.0, 'z': 0.0}}]\n", "    e.closed = True\n", "    e.thickness = 1.0\n", "doc.selection = [e]\n"),
-            rejects: &[
-                ("'vertices':[{'location':{'x':0.0,'y':0.0,'z':0.0}}]", "at least 2"),
-                ("'thickness':float('inf')", "finite"),
-                ("'vertices':[{'location':{'x':float('nan'),'y':0.0,'z':0.0}},{'location':{'x':1.0,'y':0.0,'z':0.0}}]", "finite"),
-                ("'normal':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::Polyline2D(_)),
-            digest: |entity| match entity {
-                EntityType::Polyline2D(v) => format!("n{} closed{} th{:.1}", v.vertices.len(), v.flags.is_closed(), v.thickness),
-                other => format!("wrong kind {}", format!("{other:?}").split('(').next().unwrap()),
-            },
-            reedit: |entity| if let EntityType::Polyline2D(v) = entity { v.thickness = 2.0; },
-            expect_created: "n3 closedfalse th0.0",
-            expect_edited: "n4 closedtrue th1.0",
-            expect_reedited: "n4 closedtrue th2.0",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "wrong kind LwPolyline",
-            expect_reedited_dxf: "wrong kind LwPolyline",
-        });
+        create: concat!(
+            "doc.create_entity('Polyline2D', vertices=[{'location': {'x': 0.0, 'y': 0.0, 'z': 0.0}}, {'location': {'x': 10.0, 'y': 0.0, 'z': 0.0}}, {'location': {'x': 10.0, 'y': 5.0, 'z': 0.0}}])\n"
+        ),
+        edit: concat!(
+            "e = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit'):\n",
+            "    e.vertices = [{'location': {'x': 0.0, 'y': 0.0, 'z': 0.0}}, {'location': {'x': 10.0, 'y': 0.0, 'z': 0.0}}, {'location': {'x': 10.0, 'y': 8.0, 'z': 0.0}}, {'location': {'x': 0.0, 'y': 8.0, 'z': 0.0}}]\n",
+            "    e.closed = True\n",
+            "    e.thickness = 1.0\n",
+            "doc.selection = [e]\n"
+        ),
+        rejects: &[
+            (
+                "'vertices':[{'location':{'x':0.0,'y':0.0,'z':0.0}}]",
+                "at least 2",
+            ),
+            ("'thickness':float('inf')", "finite"),
+            (
+                "'vertices':[{'location':{'x':float('nan'),'y':0.0,'z':0.0}},{'location':{'x':1.0,'y':0.0,'z':0.0}}]",
+                "finite",
+            ),
+            ("'normal':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::Polyline2D(_)),
+        digest: |entity| match entity {
+            EntityType::Polyline2D(v) => format!(
+                "n{} closed{} th{:.1}",
+                v.vertices.len(),
+                v.flags.is_closed(),
+                v.thickness
+            ),
+            other => format!(
+                "wrong kind {}",
+                format!("{other:?}").split('(').next().unwrap()
+            ),
+        },
+        reedit: |entity| {
+            if let EntityType::Polyline2D(v) = entity {
+                v.thickness = 2.0;
+            }
+        },
+        expect_created: "n3 closedfalse th0.0",
+        expect_edited: "n4 closedtrue th1.0",
+        expect_reedited: "n4 closedtrue th2.0",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "wrong kind LwPolyline",
+        expect_reedited_dxf: "wrong kind LwPolyline",
+    });
 }
 
 #[test]
 fn audit_python_polyline_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: "# MAKEPOLYLINE
+        create: "# MAKEPOLYLINE
 ",
-            edit: concat!("e = doc.entities[HANDLE]\n", "with doc.transaction('Edit'):\n", "    e.vertices = [{'location': {'x': 0.0, 'y': 0.0, 'z': 0.0}}, {'location': {'x': 10.0, 'y': 0.0, 'z': 2.0}}, {'location': {'x': 10.0, 'y': 8.0, 'z': 6.0}}, {'location': {'x': 0.0, 'y': 8.0, 'z': 6.0}}]\n", "    e.closed = True\n", "doc.selection = [e]\n"),
-            rejects: &[
-                ("'vertices':[{'location':{'x':0.0,'y':0.0,'z':0.0}}]", "at least 2"),
-                ("'vertices':[{'location':{'x':float('nan'),'y':0.0,'z':0.0}},{'location':{'x':1.0,'y':0.0,'z':0.0}}]", "finite"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::Polyline(_)),
-            digest: |entity| match entity {
-                EntityType::Polyline(v) => format!("n{} closed{} lastz{:.1}", v.vertices.len(), v.flags.is_closed(), v.vertices.last().map_or(0.0, |x| x.location.z)),
-                other => format!("wrong kind {}", format!("{other:?}").split('(').next().unwrap()),
-            },
-            reedit: |entity| if let EntityType::Polyline(v) = entity { v.vertices[0].location.z = 1.0; },
-            expect_created: "n3 closedfalse lastz4.0",
-            expect_edited: "n4 closedtrue lastz6.0",
-            expect_reedited: "n4 closedtrue lastz6.0",
-            expect_edited_dwg: "wrong kind Polyline3D",
-            expect_reedited_dwg: "wrong kind Polyline3D",
-            expect_edited_dxf: "wrong kind Polyline3D",
-            expect_reedited_dxf: "wrong kind Polyline3D",
-        });
+        edit: concat!(
+            "e = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit'):\n",
+            "    e.vertices = [{'location': {'x': 0.0, 'y': 0.0, 'z': 0.0}}, {'location': {'x': 10.0, 'y': 0.0, 'z': 2.0}}, {'location': {'x': 10.0, 'y': 8.0, 'z': 6.0}}, {'location': {'x': 0.0, 'y': 8.0, 'z': 6.0}}]\n",
+            "    e.closed = True\n",
+            "doc.selection = [e]\n"
+        ),
+        rejects: &[
+            (
+                "'vertices':[{'location':{'x':0.0,'y':0.0,'z':0.0}}]",
+                "at least 2",
+            ),
+            (
+                "'vertices':[{'location':{'x':float('nan'),'y':0.0,'z':0.0}},{'location':{'x':1.0,'y':0.0,'z':0.0}}]",
+                "finite",
+            ),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::Polyline(_)),
+        digest: |entity| match entity {
+            EntityType::Polyline(v) => format!(
+                "n{} closed{} lastz{:.1}",
+                v.vertices.len(),
+                v.flags.is_closed(),
+                v.vertices.last().map_or(0.0, |x| x.location.z)
+            ),
+            other => format!(
+                "wrong kind {}",
+                format!("{other:?}").split('(').next().unwrap()
+            ),
+        },
+        reedit: |entity| {
+            if let EntityType::Polyline(v) = entity {
+                v.vertices[0].location.z = 1.0;
+            }
+        },
+        expect_created: "n3 closedfalse lastz4.0",
+        expect_edited: "n4 closedtrue lastz6.0",
+        expect_reedited: "n4 closedtrue lastz6.0",
+        expect_edited_dwg: "wrong kind Polyline3D",
+        expect_reedited_dwg: "wrong kind Polyline3D",
+        expect_edited_dxf: "wrong kind Polyline3D",
+        expect_reedited_dxf: "wrong kind Polyline3D",
+    });
 }
 
 #[test]
 fn audit_python_polyline3d_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: concat!("doc.create_entity('Polyline3D', vertices=[{'position': {'x': 0.0, 'y': 0.0, 'z': 0.0}}, {'position': {'x': 10.0, 'y': 0.0, 'z': 2.0}}, {'position': {'x': 10.0, 'y': 5.0, 'z': 4.0}}])\n"),
-            edit: concat!("e = doc.entities[HANDLE]\n", "with doc.transaction('Edit'):\n", "    e.vertices = [{'position': {'x': 0.0, 'y': 0.0, 'z': 0.0}}, {'position': {'x': 10.0, 'y': 0.0, 'z': 2.0}}, {'position': {'x': 10.0, 'y': 8.0, 'z': 6.0}}, {'position': {'x': 0.0, 'y': 8.0, 'z': 6.0}}]\n", "    e.elevation = 1.5\n", "doc.selection = [e]\n"),
-            rejects: &[
-                ("'vertices':[{'position':{'x':0.0,'y':0.0,'z':0.0}}]", "at least 2"),
-                ("'elevation':float('inf')", "finite"),
-                ("'vertices':[{'position':{'x':float('nan'),'y':0.0,'z':0.0}},{'position':{'x':1.0,'y':0.0,'z':0.0}}]", "finite"),
-                ("'normal':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::Polyline3D(_)),
-            digest: |entity| match entity {
-                EntityType::Polyline3D(v) => format!("n{} el{:.1} lastz{:.1}", v.vertices.len(), v.elevation, v.vertices.last().map_or(0.0, |x| x.position.z)),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::Polyline3D(v) = entity { v.elevation = 2.5; },
-            expect_created: "n3 el0.0 lastz4.0",
-            expect_edited: "n4 el1.5 lastz6.0",
-            expect_reedited: "n4 el2.5 lastz6.0",
-            expect_edited_dwg: "n4 el0.0 lastz6.0",
-            expect_reedited_dwg: "n4 el0.0 lastz6.0",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: concat!(
+            "doc.create_entity('Polyline3D', vertices=[{'position': {'x': 0.0, 'y': 0.0, 'z': 0.0}}, {'position': {'x': 10.0, 'y': 0.0, 'z': 2.0}}, {'position': {'x': 10.0, 'y': 5.0, 'z': 4.0}}])\n"
+        ),
+        edit: concat!(
+            "e = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit'):\n",
+            "    e.vertices = [{'position': {'x': 0.0, 'y': 0.0, 'z': 0.0}}, {'position': {'x': 10.0, 'y': 0.0, 'z': 2.0}}, {'position': {'x': 10.0, 'y': 8.0, 'z': 6.0}}, {'position': {'x': 0.0, 'y': 8.0, 'z': 6.0}}]\n",
+            "    e.elevation = 1.5\n",
+            "doc.selection = [e]\n"
+        ),
+        rejects: &[
+            (
+                "'vertices':[{'position':{'x':0.0,'y':0.0,'z':0.0}}]",
+                "at least 2",
+            ),
+            ("'elevation':float('inf')", "finite"),
+            (
+                "'vertices':[{'position':{'x':float('nan'),'y':0.0,'z':0.0}},{'position':{'x':1.0,'y':0.0,'z':0.0}}]",
+                "finite",
+            ),
+            ("'normal':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::Polyline3D(_)),
+        digest: |entity| match entity {
+            EntityType::Polyline3D(v) => format!(
+                "n{} el{:.1} lastz{:.1}",
+                v.vertices.len(),
+                v.elevation,
+                v.vertices.last().map_or(0.0, |x| x.position.z)
+            ),
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::Polyline3D(v) = entity {
+                v.elevation = 2.5;
+            }
+        },
+        expect_created: "n3 el0.0 lastz4.0",
+        expect_edited: "n4 el1.5 lastz6.0",
+        expect_reedited: "n4 el2.5 lastz6.0",
+        expect_edited_dwg: "n4 el0.0 lastz6.0",
+        expect_reedited_dwg: "n4 el0.0 lastz6.0",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
 fn audit_python_spline_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: concat!("doc.create_entity('Spline', degree=2, knots=[0.0, 0.0, 0.0, 1.0, 1.0, 1.0], control_points=[{'x': 0.0, 'y': 0.0, 'z': 0.0}, {'x': 5.0, 'y': 5.0, 'z': 0.0}, {'x': 10.0, 'y': 0.0, 'z': 0.0}])\n"),
-            edit: concat!("e = doc.entities[HANDLE]\n", "with doc.transaction('Edit'):\n", "    e.control_points = [{'x': 0.0, 'y': 0.0, 'z': 0.0}, {'x': 5.0, 'y': 8.0, 'z': 0.0}, {'x': 10.0, 'y': 0.0, 'z': 0.0}]\n", "    e.weights = [1.0, 2.0, 1.0]\n", "doc.selection = [e]\n"),
-            rejects: &[
-                ("'degree':0", "at least 1"),
-                ("'knots':[0.0,1.0]", "must hold"),
-                ("'weights':[1.0,0.0,1.0]", "greater than zero"),
-                ("'weights':[1.0]", "match"),
-                ("'control_points':[{'x':float('nan'),'y':0.0,'z':0.0},{'x':1.0,'y':0.0,'z':0.0},{'x':2.0,'y':0.0,'z':0.0}]", "finite"),
-                ("'knots':[0.0,0.0,1.0,0.5,1.0,1.0]", "nondecreasing"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::Spline(_)),
-            digest: |entity| match entity {
-                EntityType::Spline(v) => format!("deg{} cp{} y{:.1} w{:?}", v.degree, v.control_points.len(), v.control_points[1].y, v.weights),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::Spline(v) = entity { v.control_points[1].y = 9.0; },
-            expect_created: "deg2 cp3 y5.0 w[]",
-            expect_edited: "deg2 cp3 y8.0 w[1.0, 2.0, 1.0]",
-            expect_reedited: "deg2 cp3 y9.0 w[1.0, 2.0, 1.0]",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-            expect_edited_dxf: "",
-            expect_reedited_dxf: "",
-        });
+        create: concat!(
+            "doc.create_entity('Spline', degree=2, knots=[0.0, 0.0, 0.0, 1.0, 1.0, 1.0], control_points=[{'x': 0.0, 'y': 0.0, 'z': 0.0}, {'x': 5.0, 'y': 5.0, 'z': 0.0}, {'x': 10.0, 'y': 0.0, 'z': 0.0}])\n"
+        ),
+        edit: concat!(
+            "e = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit'):\n",
+            "    e.control_points = [{'x': 0.0, 'y': 0.0, 'z': 0.0}, {'x': 5.0, 'y': 8.0, 'z': 0.0}, {'x': 10.0, 'y': 0.0, 'z': 0.0}]\n",
+            "    e.weights = [1.0, 2.0, 1.0]\n",
+            "doc.selection = [e]\n"
+        ),
+        rejects: &[
+            ("'degree':0", "at least 1"),
+            ("'knots':[0.0,1.0]", "must hold"),
+            ("'weights':[1.0,0.0,1.0]", "greater than zero"),
+            ("'weights':[1.0]", "match"),
+            (
+                "'control_points':[{'x':float('nan'),'y':0.0,'z':0.0},{'x':1.0,'y':0.0,'z':0.0},{'x':2.0,'y':0.0,'z':0.0}]",
+                "finite",
+            ),
+            ("'knots':[0.0,0.0,1.0,0.5,1.0,1.0]", "nondecreasing"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::Spline(_)),
+        digest: |entity| match entity {
+            EntityType::Spline(v) => format!(
+                "deg{} cp{} y{:.1} w{:?}",
+                v.degree,
+                v.control_points.len(),
+                v.control_points[1].y,
+                v.weights
+            ),
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::Spline(v) = entity {
+                v.control_points[1].y = 9.0;
+            }
+        },
+        expect_created: "deg2 cp3 y5.0 w[]",
+        expect_edited: "deg2 cp3 y8.0 w[1.0, 2.0, 1.0]",
+        expect_reedited: "deg2 cp3 y9.0 w[1.0, 2.0, 1.0]",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+        expect_edited_dxf: "",
+        expect_reedited_dxf: "",
+    });
 }
 
 #[test]
@@ -556,60 +740,82 @@ fn audit_python_insert_lifecycle_over_real_ipc() {
 #[test]
 fn audit_python_attribute_definition_lifecycle_over_real_ipc() {
     run_mesh_lifecycle(&MeshCase {
-            create: concat!(
-                "# MAKEBLOCK\n",
-                "doc.create_entity('AttributeDefinition', owner_handle=BLOCKRECORD, tag='PART_NO', prompt='Part number',\n",
-                "    default_value='PN-001', insertion_point=P(1.0, 2.0, 0.0), height=2.5, width_factor=1.25, oblique_angle=0.1,\n",
-                "    rotation=0.25, horizontal_alignment='Center', vertical_alignment='Top', alignment_point=P(3.0, 4.0, 0.0),\n",
-                "    flags={'invisible': True, 'constant': False, 'verify': True, 'preset': False, 'locked_position': False, 'annotative': False},\n",
-                "    field_length=12, text_generation_flags=2, lock_position=True)\n"),
-            edit: concat!(
-                "e = doc.entities[HANDLE]\n",
-                "with doc.transaction('Edit'):\n",
-                "    e.insertion_point = (4.0, 5.0, 0.0)\n",
-                "    e.default_value = 'PN-002'\n",
-                "    e.prompt = 'Serial'\n",
-                "    e.height = 3.0\n",
-                "    e.width_factor = 0.8\n",
-                "    e.rotation = 0.5\n",
-                "    e.oblique_angle = 0.2\n",
-                "    e.horizontal_alignment = 'Right'\n",
-                "    e.vertical_alignment = 'Middle'\n",
-                "    e.flags = {'invisible': False, 'constant': True, 'verify': False, 'preset': True, 'locked_position': False, 'annotative': False}\n",
-                "    e.field_length = 20\n",
-                "doc.selection = [e]\n"),
-            rejects: &[
-                ("'tag':'BAD TAG'", "whitespace"),
-                ("'height':0.0", "greater than zero"),
-                ("'width_factor':0.0", "width_factor"),
-                ("'text_style':'Missing'", "does not exist"),
-                ("'owner_handle':999999", "read-only"),
-                ("'normal':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
-                ("'rotation':float('nan')", "finite"),
-                ("'horizontal_alignment':'Nowhere'", "unsupported"),
-            ],
-            is_kind: |entity| matches!(entity, EntityType::AttributeDefinition(_)),
-            digest: |entity| match entity {
-                EntityType::AttributeDefinition(v) => format!(
-                    "{}|{}|{} ins{:.1},{:.1} al{:.1},{:.1} h{:.1} r{:.2} wf{:.2} ob{:.2} {:?}/{:?} f{}{}{}{} fl{} tg{} lock{}",
-                    v.tag, v.prompt, v.default_value, v.insertion_point.x, v.insertion_point.y,
-                    v.alignment_point.x, v.alignment_point.y, v.height, v.rotation, v.width_factor, v.oblique_angle,
-                    v.horizontal_alignment, v.vertical_alignment,
-                    u8::from(v.flags.invisible), u8::from(v.flags.constant), u8::from(v.flags.verify), u8::from(v.flags.preset),
-                    v.field_length, v.text_generation_flags, u8::from(v.lock_position)),
-                _ => "wrong kind".into(),
-            },
-            reedit: |entity| if let EntityType::AttributeDefinition(v) = entity { v.default_value = "PN-003".into(); },
-            expect_created: "PART_NO|Part number|PN-001 ins1.0,2.0 al3.0,4.0 h2.5 r0.25 wf1.25 ob0.10 Center/Top f1010 fl12 tg2 lock1",
-            expect_edited: "PART_NO|Serial|PN-002 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
-            expect_reedited: "PART_NO|Serial|PN-003 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
-            // Reading a DXF derives a justified attribute's insertion point
-            // from its alignment point (#2728).
-            expect_edited_dxf: "PART_NO|Serial|PN-002 ins-11.0,-5.4 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
-            expect_reedited_dxf: "PART_NO|Serial|PN-003 ins-11.0,-5.4 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
-            expect_edited_dwg: "",
-            expect_reedited_dwg: "",
-        });
+        create: concat!(
+            "# MAKEBLOCK\n",
+            "doc.create_entity('AttributeDefinition', owner_handle=BLOCKRECORD, tag='PART_NO', prompt='Part number',\n",
+            "    default_value='PN-001', insertion_point=P(1.0, 2.0, 0.0), height=2.5, width_factor=1.25, oblique_angle=0.1,\n",
+            "    rotation=0.25, horizontal_alignment='Center', vertical_alignment='Top', alignment_point=P(3.0, 4.0, 0.0),\n",
+            "    flags={'invisible': True, 'constant': False, 'verify': True, 'preset': False, 'locked_position': False, 'annotative': False},\n",
+            "    field_length=12, text_generation_flags=2, lock_position=True)\n"
+        ),
+        edit: concat!(
+            "e = doc.entities[HANDLE]\n",
+            "with doc.transaction('Edit'):\n",
+            "    e.insertion_point = (4.0, 5.0, 0.0)\n",
+            "    e.default_value = 'PN-002'\n",
+            "    e.prompt = 'Serial'\n",
+            "    e.height = 3.0\n",
+            "    e.width_factor = 0.8\n",
+            "    e.rotation = 0.5\n",
+            "    e.oblique_angle = 0.2\n",
+            "    e.horizontal_alignment = 'Right'\n",
+            "    e.vertical_alignment = 'Middle'\n",
+            "    e.flags = {'invisible': False, 'constant': True, 'verify': False, 'preset': True, 'locked_position': False, 'annotative': False}\n",
+            "    e.field_length = 20\n",
+            "doc.selection = [e]\n"
+        ),
+        rejects: &[
+            ("'tag':'BAD TAG'", "whitespace"),
+            ("'height':0.0", "greater than zero"),
+            ("'width_factor':0.0", "width_factor"),
+            ("'text_style':'Missing'", "does not exist"),
+            ("'owner_handle':999999", "read-only"),
+            ("'normal':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
+            ("'rotation':float('nan')", "finite"),
+            ("'horizontal_alignment':'Nowhere'", "unsupported"),
+        ],
+        is_kind: |entity| matches!(entity, EntityType::AttributeDefinition(_)),
+        digest: |entity| match entity {
+            EntityType::AttributeDefinition(v) => format!(
+                "{}|{}|{} ins{:.1},{:.1} al{:.1},{:.1} h{:.1} r{:.2} wf{:.2} ob{:.2} {:?}/{:?} f{}{}{}{} fl{} tg{} lock{}",
+                v.tag,
+                v.prompt,
+                v.default_value,
+                v.insertion_point.x,
+                v.insertion_point.y,
+                v.alignment_point.x,
+                v.alignment_point.y,
+                v.height,
+                v.rotation,
+                v.width_factor,
+                v.oblique_angle,
+                v.horizontal_alignment,
+                v.vertical_alignment,
+                u8::from(v.flags.invisible),
+                u8::from(v.flags.constant),
+                u8::from(v.flags.verify),
+                u8::from(v.flags.preset),
+                v.field_length,
+                v.text_generation_flags,
+                u8::from(v.lock_position)
+            ),
+            _ => "wrong kind".into(),
+        },
+        reedit: |entity| {
+            if let EntityType::AttributeDefinition(v) = entity {
+                v.default_value = "PN-003".into();
+            }
+        },
+        expect_created: "PART_NO|Part number|PN-001 ins1.0,2.0 al3.0,4.0 h2.5 r0.25 wf1.25 ob0.10 Center/Top f1010 fl12 tg2 lock1",
+        expect_edited: "PART_NO|Serial|PN-002 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
+        expect_reedited: "PART_NO|Serial|PN-003 ins4.0,5.0 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
+        // Reading a DXF derives a justified attribute's insertion point
+        // from its alignment point (#2728).
+        expect_edited_dxf: "PART_NO|Serial|PN-002 ins-11.0,-5.4 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
+        expect_reedited_dxf: "PART_NO|Serial|PN-003 ins-11.0,-5.4 al3.0,4.0 h3.0 r0.50 wf0.80 ob0.20 Right/Middle f0101 fl20 tg2 lock1",
+        expect_edited_dwg: "",
+        expect_reedited_dwg: "",
+    });
 }
 
 #[test]
@@ -655,9 +861,11 @@ fn audit_python_insert_creation_rules_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let last = |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
     let count = |host: &HostSession<'_>| {
@@ -668,7 +876,8 @@ fn audit_python_insert_creation_rules_over_real_ipc() {
     };
     let create = |name: &str, extra: &str| {
         format!(
-            "PY_EVAL ocs.active_document.create_entity('Insert', block_name='{name}', insert_point={{'x':0.0,'y':0.0,'z':0.0}}{extra})")
+            "PY_EVAL ocs.active_document.create_entity('Insert', block_name='{name}', insert_point={{'x':0.0,'y':0.0,'z':0.0}}{extra})"
+        )
     };
 
     // A valid insert of INNER into the drawing works.

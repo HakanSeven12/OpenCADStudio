@@ -75,7 +75,7 @@ pub struct WidgetPage {
     pub next: Option<StableId>,
 }
 
-/// Why a page install refused. Codes append at the end.
+/// Why a widget page install refused. Codes append at the end.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WidgetError {
@@ -241,6 +241,46 @@ impl WidgetSurface {
         candidate.validate()?;
         *self = candidate;
         Ok(self.revision)
+    }
+}
+
+/// Why a widget-tier wire request refused. The widget tier carries its
+/// own rejection type so its independent revision space (finding F1) is
+/// type-safe end to end; codes append at the end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WidgetRejectCode {
+    /// Nothing is attached for this panel (no host attach, or the panel
+    /// is not registered by the authenticated plugin), or the surface
+    /// was never published so it cannot be paged.
+    Unattached,
+    /// The surface is owned by a different verified plugin.
+    OwnedByOther,
+    /// The request is structurally invalid; refused without any state
+    /// change.
+    InvalidSurface,
+    /// The request's revision is not usable against the stored head.
+    NonMonotonicRevision,
+}
+
+/// Typed rejection of a widget-tier request: the machine-readable code
+/// plus the stored head when the refusal is revision-related.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct WidgetReject {
+    pub code: WidgetRejectCode,
+    /// The stored head when the refusal is revision-related; `None`
+    /// otherwise.
+    pub current_revision: Option<WidgetRevision>,
+}
+
+impl From<crate::scene::SurfaceRejectCode> for WidgetRejectCode {
+    fn from(code: crate::scene::SurfaceRejectCode) -> Self {
+        match code {
+            crate::scene::SurfaceRejectCode::Unattached => WidgetRejectCode::Unattached,
+            crate::scene::SurfaceRejectCode::OwnedByOther => WidgetRejectCode::OwnedByOther,
+            _ => WidgetRejectCode::InvalidSurface,
+        }
     }
 }
 

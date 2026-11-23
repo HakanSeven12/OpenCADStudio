@@ -31,9 +31,11 @@ fn staged_python_plugin_line_lifecycle_over_real_ipc() {
     .expect("spawn staged Python plugin");
     assert_eq!(process.id(), "opencad.python");
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     dispatch(
         &mut host,
@@ -54,10 +56,13 @@ fn staged_python_plugin_line_lifecycle_over_real_ipc() {
         matches!(host.document().get_entity(handle), Some(EntityType::Line(line)) if line.end.x == 1.0)
     );
     let before_edit = host.document().get_entity(handle).unwrap().clone();
-    dispatch(&mut host, &format!(
+    dispatch(
+        &mut host,
+        &format!(
             "PY_EVAL ocs.update_many('Move line', [{{'handle':{},'end':{{'x':5.0,'y':0.0,'z':0.0}}}}])",
             handle.value()
-        ));
+        ),
+    );
     let mut expected_after_edit = before_edit;
     let EntityType::Line(expected_line) = &mut expected_after_edit else {
         unreachable!()
@@ -68,27 +73,35 @@ fn staged_python_plugin_line_lifecycle_over_real_ipc() {
         Some(&expected_after_edit),
         "partial Python edit must preserve every unmentioned common and geometry field"
     );
-    dispatch(&mut host, &format!(
+    dispatch(
+        &mut host,
+        &format!(
             "PY_EVAL ocs.update_many('Reject NaN', [{{'handle':{},'start':{{'x':float('nan'),'y':0.0,'z':0.0}}}}])",
             handle.value()
-        ));
+        ),
+    );
     assert_eq!(
         host.document().get_entity(handle),
         Some(&expected_after_edit),
         "invalid geometry changed the line"
     );
-    assert!(host
-        .app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("finite coordinates"));
-    dispatch(&mut host, &format!(
+    assert!(
+        host.app
+            .command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("finite coordinates")
+    );
+    dispatch(
+        &mut host,
+        &format!(
             "PY_EVAL ocs.update_many('Reject duplicate', [{{'handle':{},'end':{{'x':8.0,'y':0.0,'z':0.0}}}},{{'handle':{},'end':{{'x':9.0,'y':0.0,'z':0.0}}}}])",
-            handle.value(), handle.value()
-        ));
+            handle.value(),
+            handle.value()
+        ),
+    );
     assert!(
         matches!(host.document().get_entity(handle), Some(EntityType::Line(line)) if line.end.x == 5.0),
         "rejected batch changed the line"
@@ -162,9 +175,11 @@ fn staged_python_tolerance_lifecycle_over_real_ipc() {
     )
     .expect("spawn staged Python plugin");
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     dispatch(
         &mut host,
@@ -197,14 +212,15 @@ fn staged_python_tolerance_lifecycle_over_real_ipc() {
             handle.value()
         ),
     );
-    assert!(host
-        .app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("POSITION%%v0.1"));
+    assert!(
+        host.app
+            .command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("POSITION%%v0.1")
+    );
 
     let script_path = std::env::temp_dir().join(format!(
         "ocs_tolerance_document_model_{}.py",
@@ -254,30 +270,40 @@ fn staged_python_tolerance_lifecycle_over_real_ipc() {
         "Python selection did not reach the canvas"
     );
 
-    dispatch(&mut host, &format!(
+    dispatch(
+        &mut host,
+        &format!(
             "PY_EVAL ocs.update_many('Reject direction', [{{'handle':{},'direction':{{'x':2.0,'y':0.0,'z':0.0}}}}])",
-            handle.value()));
+            handle.value()
+        ),
+    );
     assert_eq!(host.document().get_entity(handle), Some(&expected));
-    assert!(host
-        .app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("unit vector"));
-    dispatch(&mut host, &format!(
+    assert!(
+        host.app
+            .command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("unit vector")
+    );
+    dispatch(
+        &mut host,
+        &format!(
             "PY_EVAL ocs.update_many('Reject style', [{{'handle':{},'dimension_style_name':'Missing'}}])",
-            handle.value()));
+            handle.value()
+        ),
+    );
     assert_eq!(host.document().get_entity(handle), Some(&expected));
-    assert!(host
-        .app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("does not exist"));
+    assert!(
+        host.app
+            .command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("does not exist")
+    );
 
     let dwg_bytes = document::DwgWriter::write_to_vec(host.document()).unwrap();
     let dwg_doc = document::DwgReader::from_stream(std::io::Cursor::new(dwg_bytes))
@@ -362,9 +388,11 @@ fn staged_python_shape_lifecycle_over_real_ipc() {
     )
     .expect("spawn staged Python plugin");
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     dispatch(
         &mut host,
@@ -393,14 +421,15 @@ fn staged_python_shape_lifecycle_over_real_ipc() {
             handle.value()
         ),
     );
-    assert!(host
-        .app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("ARROW"));
+    assert!(
+        host.app
+            .command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("ARROW")
+    );
 
     let script_path = std::env::temp_dir().join(format!(
         "ocs_shape_document_model_{}.py",
@@ -479,14 +508,15 @@ fn staged_python_shape_lifecycle_over_real_ipc() {
         ),
     );
     assert_eq!(host.document().get_entity(handle), Some(&expected));
-    assert!(host
-        .app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("does not exist"));
+    assert!(
+        host.app
+            .command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("does not exist")
+    );
 
     let dwg_bytes = document::DwgWriter::write_to_vec(host.document()).unwrap();
     let dwg_doc = crate::io::load_bytes("shape.dwg", dwg_bytes).unwrap();
@@ -580,9 +610,11 @@ fn staged_python_attribute_definition_lifecycle_over_real_ipc() {
     )
     .expect("spawn staged Python plugin");
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     dispatch(
         &mut host,
@@ -608,17 +640,23 @@ fn staged_python_attribute_definition_lifecycle_over_real_ipc() {
     assert_eq!(created.common.owner_handle, block_record_handle);
     assert_eq!(created.tag, "PART_NO");
     assert_eq!(created.text_style, "Standard");
-    assert!(host
-        .document()
-        .block_records
-        .get("TAGBLOCK")
-        .unwrap()
-        .entity_handles
-        .contains(&handle));
+    assert!(
+        host.document()
+            .block_records
+            .get("TAGBLOCK")
+            .unwrap()
+            .entity_handles
+            .contains(&handle)
+    );
     let created = created.clone();
-    dispatch(&mut host, &format!(
+    dispatch(
+        &mut host,
+        &format!(
             "PY_EVAL (ocs.active_document.entities[{}].tag, ocs.active_document.entities[{}].owner_handle)",
-            handle.value(), handle.value()));
+            handle.value(),
+            handle.value()
+        ),
+    );
     let readback = &host.app.command_line.history.last().unwrap().text;
     assert!(
         readback.contains("PART_NO") && readback.contains(&block_record_handle.value().to_string())
@@ -677,10 +715,12 @@ fn staged_python_attribute_definition_lifecycle_over_real_ipc() {
         panic!("expected attribute definition text");
     };
     assert!(!strokes.is_empty());
-    assert!(strokes.iter().any(|stroke| stroke
-        .run
-        .as_ref()
-        .is_some_and(|run| run.text.contains("PART_NO"))));
+    assert!(strokes.iter().any(|stroke| {
+        stroke
+            .run
+            .as_ref()
+            .is_some_and(|run| run.text.contains("PART_NO"))
+    }));
 
     for (label, patch, message) in [
         ("Reject tag", "'tag':'BAD TAG'", "whitespace"),
@@ -696,14 +736,15 @@ fn staged_python_attribute_definition_lifecycle_over_real_ipc() {
             ),
         );
         assert_eq!(host.document().get_entity(handle), Some(&expected));
-        assert!(host
-            .app
-            .command_line
-            .history
-            .last()
-            .unwrap()
-            .text
-            .contains(message));
+        assert!(
+            host.app
+                .command_line
+                .history
+                .last()
+                .unwrap()
+                .text
+                .contains(message)
+        );
     }
 
     let assert_persisted = |label: &str, document: &Document, full_text_state: bool| {
@@ -724,12 +765,14 @@ fn staged_python_attribute_definition_lifecycle_over_real_ipc() {
                 "{label}: {actual:?}"
             );
         }
-        assert!(document
-            .block_records
-            .get("TAGBLOCK")
-            .unwrap()
-            .entity_handles
-            .contains(&handle));
+        assert!(
+            document
+                .block_records
+                .get("TAGBLOCK")
+                .unwrap()
+                .entity_handles
+                .contains(&handle)
+        );
         assert!(
             matches!(document.get_entity(insert_handle), Some(EntityType::Insert(value))
                 if value.block_name == "TAGBLOCK")
@@ -854,9 +897,11 @@ fn staged_python_attribute_entity_lifecycle_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     dispatch(
         &mut host,
@@ -944,14 +989,15 @@ fn staged_python_attribute_entity_lifecycle_over_real_ipc() {
             host.nested_attribute(attribute_handle),
             Some(expected.clone())
         );
-        assert!(host
-            .app
-            .command_line
-            .history
-            .last()
-            .unwrap()
-            .text
-            .contains(message));
+        assert!(
+            host.app
+                .command_line
+                .history
+                .last()
+                .unwrap()
+                .text
+                .contains(message)
+        );
     }
 
     let assert_saved = |document: &Document| {
@@ -1056,9 +1102,11 @@ fn staged_python_hatch_lifecycle_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let script = std::env::temp_dir().join(format!("ocs_hatch_create_{}.py", std::process::id()));
     std::fs::write(&script, concat!(
@@ -1090,11 +1138,13 @@ fn staged_python_hatch_lifecycle_over_real_ipc() {
             )
         });
     let created = host.document().get_entity(hatch_handle).unwrap().clone();
-    assert!(host.app.tabs[0]
-        .scene
-        .hatches
-        .get(&hatch_handle)
-        .is_some_and(|model| model.boundary.len() >= 4 && model.name == "SOLID"));
+    assert!(
+        host.app.tabs[0]
+            .scene
+            .hatches
+            .get(&hatch_handle)
+            .is_some_and(|model| model.boundary.len() >= 4 && model.name == "SOLID")
+    );
     dispatch(
         &mut host,
         &format!(
@@ -1102,14 +1152,15 @@ fn staged_python_hatch_lifecycle_over_real_ipc() {
             hatch_handle.value()
         ),
     );
-    assert!(host
-        .app
-        .command_line
-        .history
-        .last()
-        .unwrap()
-        .text
-        .contains("SOLID"));
+    assert!(
+        host.app
+            .command_line
+            .history
+            .last()
+            .unwrap()
+            .text
+            .contains("SOLID")
+    );
 
     let script = std::env::temp_dir().join(format!("ocs_hatch_edit_{}.py", std::process::id()));
     std::fs::write(&script, format!(concat!(
@@ -1148,28 +1199,45 @@ fn staged_python_hatch_lifecycle_over_real_ipc() {
         }
     );
     assert_eq!(host.selection(), vec![hatch_handle]);
-    assert!(host.app.tabs[0]
-        .scene
-        .hatches
-        .get(&hatch_handle)
-        .is_some_and(|model| model.boundary.len() >= 4
-            && model.name == "TEST"
-            && matches!(&model.pattern,
+    assert!(
+        host.app.tabs[0]
+            .scene
+            .hatches
+            .get(&hatch_handle)
+            .is_some_and(|model| model.boundary.len() >= 4
+                && model.name == "TEST"
+                && matches!(&model.pattern,
                     crate::scene::model::hatch_model::HatchPattern::Pattern(lines)
-                        if !lines.is_empty())));
+                        if !lines.is_empty()))
+    );
 
     for (patch, message) in [
-            ("'pattern_scale':0.0", "greater than zero"),
-            ("'is_associative':True", "requires boundary handles"),
-            ("'gradient_color':{}", "outside the editable schema"),
-            ("'paths':[{'flags':1,'edges':[{'kind':'Line','value':{'start':{'x':0.0,'y':0.0},'end':{'x':1.0,'y':0.0}}}],'boundary_handles':[]}]", "not closed"),
-        ] {
-            dispatch(&mut host, &format!(
+        ("'pattern_scale':0.0", "greater than zero"),
+        ("'is_associative':True", "requires boundary handles"),
+        ("'gradient_color':{}", "outside the editable schema"),
+        (
+            "'paths':[{'flags':1,'edges':[{'kind':'Line','value':{'start':{'x':0.0,'y':0.0},'end':{'x':1.0,'y':0.0}}}],'boundary_handles':[]}]",
+            "not closed",
+        ),
+    ] {
+        dispatch(
+            &mut host,
+            &format!(
                 "PY_EVAL ocs.update_many('Reject hatch', [{{'handle':{}, {patch}}}])",
-                hatch_handle.value()));
-            assert_eq!(host.document().get_entity(hatch_handle), Some(&expected));
-            assert!(host.app.command_line.history.last().unwrap().text.contains(message));
-        }
+                hatch_handle.value()
+            ),
+        );
+        assert_eq!(host.document().get_entity(hatch_handle), Some(&expected));
+        assert!(
+            host.app
+                .command_line
+                .history
+                .last()
+                .unwrap()
+                .text
+                .contains(message)
+        );
+    }
 
     let assert_saved = |document: &Document| {
         assert!(
@@ -1235,10 +1303,12 @@ fn staged_python_hatch_lifecycle_over_real_ipc() {
                 .unwrap(),
         ),
     ] {
-        assert!(crate::io::load_bytes(name, bytes)
-            .unwrap()
-            .get_entity(hatch_handle)
-            .is_none());
+        assert!(
+            crate::io::load_bytes(name, bytes)
+                .unwrap()
+                .get_entity(hatch_handle)
+                .is_none()
+        );
     }
     drop(process);
     drop(host);
@@ -1255,17 +1325,21 @@ fn staged_python_hatch_lifecycle_over_real_ipc() {
         Some(&created)
     );
     app.undo_steps(1);
-    assert!(app.tabs[0]
-        .scene
-        .document
-        .get_entity(hatch_handle)
-        .is_none());
+    assert!(
+        app.tabs[0]
+            .scene
+            .document
+            .get_entity(hatch_handle)
+            .is_none()
+    );
     app.redo_steps(3);
-    assert!(app.tabs[0]
-        .scene
-        .document
-        .get_entity(hatch_handle)
-        .is_none());
+    assert!(
+        app.tabs[0]
+            .scene
+            .document
+            .get_entity(hatch_handle)
+            .is_none()
+    );
 }
 
 #[test]
@@ -1287,9 +1361,11 @@ fn staged_python_leader_lifecycle_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let last_output =
         |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
@@ -1350,10 +1426,12 @@ fn staged_python_leader_lifecycle_over_real_ipc() {
             panic!("expected leader linework");
         };
         assert!(points.len() >= leader.vertices.len());
-        assert!(points
-            .iter()
-            .flatten()
-            .all(|value| value.is_nan() || value.is_finite()));
+        assert!(
+            points
+                .iter()
+                .flatten()
+                .all(|value| value.is_nan() || value.is_finite())
+        );
     };
     assert_geometry(&created, host.document());
     dispatch(
@@ -1594,20 +1672,24 @@ fn staged_python_leader_lifecycle_over_real_ipc() {
         Some(&created)
     );
     app.undo_steps(1);
-    assert!(app.tabs[0]
-        .scene
-        .document
-        .get_entity(leader_handle)
-        .is_none());
+    assert!(
+        app.tabs[0]
+            .scene
+            .document
+            .get_entity(leader_handle)
+            .is_none()
+    );
     assert!(app.tabs[0].scene.document.get_entity(text_handle).is_some());
     app.undo_steps(1);
     assert!(app.tabs[0].scene.document.get_entity(text_handle).is_none());
     app.redo_steps(4);
-    assert!(app.tabs[0]
-        .scene
-        .document
-        .get_entity(leader_handle)
-        .is_none());
+    assert!(
+        app.tabs[0]
+            .scene
+            .document
+            .get_entity(leader_handle)
+            .is_none()
+    );
     assert!(app.tabs[0].scene.document.get_entity(text_handle).is_none());
 }
 
@@ -1630,9 +1712,11 @@ fn staged_python_mline_lifecycle_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let last_output =
         |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
@@ -1693,11 +1777,13 @@ fn staged_python_mline_lifecycle_over_real_ipc() {
         assert_eq!(mline.vertices.len(), expected_vertices);
         let lines = crate::entities::mline::mline_lines(mline, document);
         assert!(lines.len() >= 2, "expected styled element lines");
-        assert!(lines
-            .iter()
-            .flat_map(|line| &line.points)
-            .flatten()
-            .all(|v| v.is_finite()));
+        assert!(
+            lines
+                .iter()
+                .flat_map(|line| &line.points)
+                .flatten()
+                .all(|v| v.is_finite())
+        );
     };
     assert_lines(&created, host.document(), 2);
 
@@ -1757,21 +1843,49 @@ fn staged_python_mline_lifecycle_over_real_ipc() {
     assert_eq!(host.selection(), vec![handle]);
 
     for (patch, message) in [
-            ("'style_name':'Missing'", "does not exist"),
-            ("'vertices':[{'position':{'x':0.0,'y':0.0,'z':0.0}}]", "at least 2"),
-            ("'scale_factor':0.0", "nonzero"),
-            ("'flags':64", "unknown bits"),
-            ("'flags':3,'vertices':[{'position':{'x':0.0,'y':0.0,'z':0.0}},{'position':{'x':1.0,'y':0.0,'z':0.0}}]", "requires at least 3"),
-            ("'vertices':[{'position':{'x':0.0,'y':0.0,'z':0.0}},{'position':{'x':0.0,'y':0.0,'z':0.0}}]", "coincide"),
-            ("'vertices':[{'position':{'x':0.0,'y':0.0,'z':0.0}},{'position':{'x':1.0,'y':float('nan'),'z':0.0}}]", "finite"),
-            ("'vertices':[{'position':{'x':0.0,'y':0.0,'z':0.0},'segments':[{}]},{'position':{'x':1.0,'y':0.0,'z':0.0}}]", "segments but style"),
-            ("'start_point':{'x':5.0,'y':5.0,'z':0.0}", "read-only"),
-        ] {
-            dispatch(&mut host, &format!(
-                "PY_EVAL ocs.update_many('Reject mline', [{{'handle':{}, {patch}}}])", handle.value()));
-            assert_eq!(host.document().get_entity(handle), Some(&expected), "{patch}");
-            assert!(last_output(&host).contains(message), "{patch}: {}", last_output(&host));
-        }
+        ("'style_name':'Missing'", "does not exist"),
+        (
+            "'vertices':[{'position':{'x':0.0,'y':0.0,'z':0.0}}]",
+            "at least 2",
+        ),
+        ("'scale_factor':0.0", "nonzero"),
+        ("'flags':64", "unknown bits"),
+        (
+            "'flags':3,'vertices':[{'position':{'x':0.0,'y':0.0,'z':0.0}},{'position':{'x':1.0,'y':0.0,'z':0.0}}]",
+            "requires at least 3",
+        ),
+        (
+            "'vertices':[{'position':{'x':0.0,'y':0.0,'z':0.0}},{'position':{'x':0.0,'y':0.0,'z':0.0}}]",
+            "coincide",
+        ),
+        (
+            "'vertices':[{'position':{'x':0.0,'y':0.0,'z':0.0}},{'position':{'x':1.0,'y':float('nan'),'z':0.0}}]",
+            "finite",
+        ),
+        (
+            "'vertices':[{'position':{'x':0.0,'y':0.0,'z':0.0},'segments':[{}]},{'position':{'x':1.0,'y':0.0,'z':0.0}}]",
+            "segments but style",
+        ),
+        ("'start_point':{'x':5.0,'y':5.0,'z':0.0}", "read-only"),
+    ] {
+        dispatch(
+            &mut host,
+            &format!(
+                "PY_EVAL ocs.update_many('Reject mline', [{{'handle':{}, {patch}}}])",
+                handle.value()
+            ),
+        );
+        assert_eq!(
+            host.document().get_entity(handle),
+            Some(&expected),
+            "{patch}"
+        );
+        assert!(
+            last_output(&host).contains(message),
+            "{patch}: {}",
+            last_output(&host)
+        );
+    }
     dispatch(
         &mut host,
         &format!(
@@ -1874,10 +1988,12 @@ fn staged_python_mline_lifecycle_over_real_ipc() {
                 .unwrap(),
         ),
     ] {
-        assert!(crate::io::load_bytes(name, bytes)
-            .unwrap()
-            .get_entity(handle)
-            .is_none());
+        assert!(
+            crate::io::load_bytes(name, bytes)
+                .unwrap()
+                .get_entity(handle)
+                .is_none()
+        );
     }
     drop(process);
     drop(host);
@@ -1918,25 +2034,63 @@ fn staged_python_dimension_lifecycle_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let last_output =
         |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
 
     // (subtype, python fields, expected measurement)
     let fixtures: [(&str, &str, f64); 9] = [
-            ("Linear", "definition_point=P(10,5), first_point=P(0,0), second_point=P(10,0)", 10.0),
-            ("Aligned", "definition_point=P(1,5.5), first_point=P(0,0), second_point=P(3,4)", 5.0),
-            ("Radius", "definition_point=P(5,0), angle_vertex=P(0,0)", 5.0),
-            ("Diameter", "definition_point=P(10,0), angle_vertex=P(0,0)", 10.0),
-            ("Angular3Pt", "definition_point=P(3,3), first_point=P(5,0), second_point=P(0,5), angle_vertex=P(0,0)", std::f64::consts::FRAC_PI_2),
-            ("Angular2Ln", "definition_point=P(0,5), dimension_arc=P(3,3), first_point=P(0,0), second_point=P(5,0), angle_vertex=P(0,0)", std::f64::consts::FRAC_PI_2),
-            ("Ordinate", "feature_location=P(5,3), leader_endpoint=P(5,8), is_ordinate_type_x=True", 5.0),
-            ("Arc", "definition_point=P(3.5,3.5), first_extension_point=P(5,0), second_extension_point=P(0,5), center_point=P(0,0), arc_start_parameter=0.0, arc_end_parameter=1.5707963267948966", 5.0 * std::f64::consts::FRAC_PI_2),
-            ("LargeRadial", "definition_point=P(10,0), chord_point=P(4,0)", 6.0),
-        ];
+        (
+            "Linear",
+            "definition_point=P(10,5), first_point=P(0,0), second_point=P(10,0)",
+            10.0,
+        ),
+        (
+            "Aligned",
+            "definition_point=P(1,5.5), first_point=P(0,0), second_point=P(3,4)",
+            5.0,
+        ),
+        (
+            "Radius",
+            "definition_point=P(5,0), angle_vertex=P(0,0)",
+            5.0,
+        ),
+        (
+            "Diameter",
+            "definition_point=P(10,0), angle_vertex=P(0,0)",
+            10.0,
+        ),
+        (
+            "Angular3Pt",
+            "definition_point=P(3,3), first_point=P(5,0), second_point=P(0,5), angle_vertex=P(0,0)",
+            std::f64::consts::FRAC_PI_2,
+        ),
+        (
+            "Angular2Ln",
+            "definition_point=P(0,5), dimension_arc=P(3,3), first_point=P(0,0), second_point=P(5,0), angle_vertex=P(0,0)",
+            std::f64::consts::FRAC_PI_2,
+        ),
+        (
+            "Ordinate",
+            "feature_location=P(5,3), leader_endpoint=P(5,8), is_ordinate_type_x=True",
+            5.0,
+        ),
+        (
+            "Arc",
+            "definition_point=P(3.5,3.5), first_extension_point=P(5,0), second_extension_point=P(0,5), center_point=P(0,0), arc_start_parameter=0.0, arc_end_parameter=1.5707963267948966",
+            5.0 * std::f64::consts::FRAC_PI_2,
+        ),
+        (
+            "LargeRadial",
+            "definition_point=P(10,0), chord_point=P(4,0)",
+            6.0,
+        ),
+    ];
     let mut script =
         String::from("def P(x, y): return {'x': x, 'y': y, 'z': 0.0}\ndoc = ocs.active_document\n");
     for (subtype, fields, _) in &fixtures {
@@ -2129,14 +2283,30 @@ fn staged_python_dimension_lifecycle_over_real_ipc() {
     );
     assert_eq!(host.document().get_entity(linear), Some(&expected_linear));
     for (patch, message) in [
-            ("ocs.active_document.create_entity('Dimension', definition_point=P(0,0))", "requires subtype"),
-            ("ocs.active_document.create_entity('Dimension', subtype='Cone')", "unsupported Dimension subtype"),
-            ("ocs.active_document.create_entity('Dimension', subtype='Linear', first_point=P(0,0), second_point=P(1,0))", "requires definition_point"),
-        ] {
-            dispatch(&mut host, &format!("PY_EVAL (lambda P: {patch})(lambda x, y: {{'x': x, 'y': y, 'z': 0.0}})"));
-            assert_eq!(handles_by_subtype(host.document()).len(), 9, "{patch}");
-            assert!(last_output(&host).contains(message), "{patch}: {}", last_output(&host));
-        }
+        (
+            "ocs.active_document.create_entity('Dimension', definition_point=P(0,0))",
+            "requires subtype",
+        ),
+        (
+            "ocs.active_document.create_entity('Dimension', subtype='Cone')",
+            "unsupported Dimension subtype",
+        ),
+        (
+            "ocs.active_document.create_entity('Dimension', subtype='Linear', first_point=P(0,0), second_point=P(1,0))",
+            "requires definition_point",
+        ),
+    ] {
+        dispatch(
+            &mut host,
+            &format!("PY_EVAL (lambda P: {patch})(lambda x, y: {{'x': x, 'y': y, 'z': 0.0}})"),
+        );
+        assert_eq!(handles_by_subtype(host.document()).len(), 9, "{patch}");
+        assert!(
+            last_output(&host).contains(message),
+            "{patch}: {}",
+            last_output(&host)
+        );
+    }
 
     // DWG and DXF: every subtype is recorded separately.
     let mut failures = Vec::new();
@@ -2254,9 +2424,11 @@ fn staged_python_multileader_lifecycle_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let last_output =
         |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
@@ -2477,10 +2649,12 @@ fn staged_python_multileader_lifecycle_over_real_ipc() {
                 .unwrap(),
         ),
     ] {
-        assert!(crate::io::load_bytes(name, bytes)
-            .unwrap()
-            .get_entity(handle)
-            .is_none());
+        assert!(
+            crate::io::load_bytes(name, bytes)
+                .unwrap()
+                .get_entity(handle)
+                .is_none()
+        );
     }
     drop(process);
     drop(host);
@@ -2521,14 +2695,19 @@ fn staged_python_table_lifecycle_over_real_ipc() {
     )
     .unwrap();
     let dispatch = |host: &mut HostSession<'_>, command: &str| {
-        assert!(process
-            .dispatch(host, command, &mut |_| {})
-            .expect("Python dispatch"));
+        assert!(
+            process
+                .dispatch(host, command, &mut |_| {})
+                .expect("Python dispatch")
+        );
     };
     let last_output =
         |host: &HostSession<'_>| host.app.command_line.history.last().unwrap().text.clone();
 
-    dispatch(&mut host, "PY_EVAL ocs.active_document.create_entity('Table', insertion_point={'x':5.0,'y':5.0,'z':0.0}).handle");
+    dispatch(
+        &mut host,
+        "PY_EVAL ocs.active_document.create_entity('Table', insertion_point={'x':5.0,'y':5.0,'z':0.0}).handle",
+    );
     let handle = host
         .document()
         .entities()
@@ -2592,22 +2771,50 @@ fn staged_python_table_lifecycle_over_real_ipc() {
     assert!(!host.app.tabs[0].scene.wire_models_for(&[handle]).is_empty());
 
     for (patch, message) in [
-            ("'columns':[{'name':'A','width':0.0},{'width':1.0},{'width':1.0}]", "greater than zero"),
-            ("'columns':[{'width':5.0}]", "cells but the table has 1 columns"),
-            ("'columns':[]", "at least one row and one column"),
-            ("'merged_ranges':[{'top_row':0,'left_col':0,'bottom_row':9,'right_col':0}]", "outside the"),
-            ("'merged_ranges':[{'top_row':1,'left_col':0,'bottom_row':2,'right_col':1},{'top_row':2,'left_col':1,'bottom_row':3,'right_col':2}]", "overlaps"),
-            ("'table_style_handle':999999", "does not exist"),
-            ("'block_name':'x'", "read-only"),
-            ("'normal':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
-            ("'break_spacing':-1.0", "non-negative"),
-            ("'insertion_point':{'x':float('nan'),'y':0.0,'z':0.0}", "finite"),
-        ] {
-            dispatch(&mut host, &format!(
-                "PY_EVAL ocs.update_many('Reject table', [{{'handle':{}, {patch}}}])", handle.value()));
-            assert_eq!(host.document().get_entity(handle), Some(&expected), "{patch}");
-            assert!(last_output(&host).contains(message), "{patch}: {}", last_output(&host));
-        }
+        (
+            "'columns':[{'name':'A','width':0.0},{'width':1.0},{'width':1.0}]",
+            "greater than zero",
+        ),
+        (
+            "'columns':[{'width':5.0}]",
+            "cells but the table has 1 columns",
+        ),
+        ("'columns':[]", "at least one row and one column"),
+        (
+            "'merged_ranges':[{'top_row':0,'left_col':0,'bottom_row':9,'right_col':0}]",
+            "outside the",
+        ),
+        (
+            "'merged_ranges':[{'top_row':1,'left_col':0,'bottom_row':2,'right_col':1},{'top_row':2,'left_col':1,'bottom_row':3,'right_col':2}]",
+            "overlaps",
+        ),
+        ("'table_style_handle':999999", "does not exist"),
+        ("'block_name':'x'", "read-only"),
+        ("'normal':{'x':0.0,'y':0.0,'z':0.0}", "nonzero"),
+        ("'break_spacing':-1.0", "non-negative"),
+        (
+            "'insertion_point':{'x':float('nan'),'y':0.0,'z':0.0}",
+            "finite",
+        ),
+    ] {
+        dispatch(
+            &mut host,
+            &format!(
+                "PY_EVAL ocs.update_many('Reject table', [{{'handle':{}, {patch}}}])",
+                handle.value()
+            ),
+        );
+        assert_eq!(
+            host.document().get_entity(handle),
+            Some(&expected),
+            "{patch}"
+        );
+        assert!(
+            last_output(&host).contains(message),
+            "{patch}: {}",
+            last_output(&host)
+        );
+    }
     dispatch(
         &mut host,
         &format!(
@@ -2721,10 +2928,12 @@ fn staged_python_table_lifecycle_over_real_ipc() {
                 .unwrap(),
         ),
     ] {
-        assert!(crate::io::load_bytes(name, bytes)
-            .unwrap()
-            .get_entity(handle)
-            .is_none());
+        assert!(
+            crate::io::load_bytes(name, bytes)
+                .unwrap()
+                .get_entity(handle)
+                .is_none()
+        );
     }
     drop(process);
     drop(host);

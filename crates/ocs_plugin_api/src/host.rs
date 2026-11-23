@@ -2463,9 +2463,9 @@ pub trait HostApi {
         &mut self,
         _panel_id: &str,
         _surface: crate::widget::WidgetSurface,
-    ) -> Result<crate::widget::WidgetRevision, SurfaceReject> {
-        Err(SurfaceReject {
-            code: SurfaceRejectCode::Unattached,
+    ) -> Result<crate::widget::WidgetRevision, crate::widget::WidgetReject> {
+        Err(crate::widget::WidgetReject {
+            code: crate::widget::WidgetRejectCode::Unattached,
             current_revision: None,
         })
     }
@@ -2477,7 +2477,7 @@ pub trait HostApi {
         _plugin_id: &str,
         panel_id: &str,
         surface: crate::widget::WidgetSurface,
-    ) -> Result<crate::widget::WidgetRevision, SurfaceReject> {
+    ) -> Result<crate::widget::WidgetRevision, crate::widget::WidgetReject> {
         self.panel_widget_publish(panel_id, surface)
     }
 
@@ -2520,9 +2520,9 @@ pub trait HostApi {
         &mut self,
         _panel_id: &str,
         _page: crate::widget::WidgetPage,
-    ) -> Result<crate::widget::WidgetRevision, SurfaceReject> {
-        Err(SurfaceReject {
-            code: SurfaceRejectCode::Unattached,
+    ) -> Result<crate::widget::WidgetRevision, crate::widget::WidgetReject> {
+        Err(crate::widget::WidgetReject {
+            code: crate::widget::WidgetRejectCode::Unattached,
             current_revision: None,
         })
     }
@@ -2535,7 +2535,7 @@ pub trait HostApi {
         _plugin_id: &str,
         panel_id: &str,
         page: crate::widget::WidgetPage,
-    ) -> Result<crate::widget::WidgetRevision, SurfaceReject> {
+    ) -> Result<crate::widget::WidgetRevision, crate::widget::WidgetReject> {
         self.panel_surface_page(panel_id, page)
     }
 }

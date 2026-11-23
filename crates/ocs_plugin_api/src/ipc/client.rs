@@ -18,7 +18,7 @@ use crate::ipc::protocol::{
 use crate::ipc::transport::{recv, send};
 use crate::scene::{PanelScene, PanelSurface, SceneRevision, SurfaceReject, SurfaceRejectCode};
 use crate::shm::{DocumentViewData, DocumentViewInfo, SharedDocumentReader};
-use crate::widget::{WidgetRevision, WidgetSurface};
+use crate::widget::{WidgetReject, WidgetRejectCode, WidgetRevision, WidgetSurface};
 
 /// Shared registry of active interactive commands, keyed by host-assigned id.
 pub type InteractiveRegistry = Rc<RefCell<HashMap<u64, Box<dyn InteractiveCommand>>>>;
@@ -1160,7 +1160,7 @@ impl HostApi for PluginHostApi {
         &mut self,
         panel_id: &str,
         surface: WidgetSurface,
-    ) -> Result<WidgetRevision, SurfaceReject> {
+    ) -> Result<WidgetRevision, WidgetReject> {
         match self.client.request(PluginRequest::PanelSurfacePublish {
             panel_id: panel_id.to_string(),
             surface: PanelSurface::Widgets(surface),
@@ -1168,15 +1168,15 @@ impl HostApi for PluginHostApi {
             Ok(PluginResponse::PanelWidgetPublished(result)) => result,
             Ok(other) => {
                 eprintln!("[plugin] unexpected widget publish response: {other:?}");
-                Err(SurfaceReject {
-                    code: SurfaceRejectCode::Unattached,
+                Err(WidgetReject {
+                    code: WidgetRejectCode::Unattached,
                     current_revision: None,
                 })
             }
             Err(e) => {
                 eprintln!("[plugin] widget publish request failed: {e}");
-                Err(SurfaceReject {
-                    code: SurfaceRejectCode::Unattached,
+                Err(WidgetReject {
+                    code: WidgetRejectCode::Unattached,
                     current_revision: None,
                 })
             }
@@ -1214,7 +1214,7 @@ impl HostApi for PluginHostApi {
         &mut self,
         panel_id: &str,
         page: crate::widget::WidgetPage,
-    ) -> Result<crate::widget::WidgetRevision, SurfaceReject> {
+    ) -> Result<crate::widget::WidgetRevision, WidgetReject> {
         match self.client.request(PluginRequest::PanelSurfacePage {
             panel_id: panel_id.to_string(),
             page,
@@ -1222,15 +1222,15 @@ impl HostApi for PluginHostApi {
             Ok(PluginResponse::PanelSurfacePageResult(result)) => result,
             Ok(other) => {
                 eprintln!("[plugin] unexpected PanelSurfacePage response: {other:?}");
-                Err(SurfaceReject {
-                    code: SurfaceRejectCode::Unattached,
+                Err(WidgetReject {
+                    code: WidgetRejectCode::Unattached,
                     current_revision: None,
                 })
             }
             Err(e) => {
                 eprintln!("[plugin] PanelSurfacePage request failed: {e}");
-                Err(SurfaceReject {
-                    code: SurfaceRejectCode::Unattached,
+                Err(WidgetReject {
+                    code: WidgetRejectCode::Unattached,
                     current_revision: None,
                 })
             }

@@ -25,10 +25,11 @@ fn xrecord_crud_round_trips_refusals_and_list() {
     // Dictionary lookup is case-insensitive, both for the path …
     assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
     // â€¦ and re-creating an existing name is refused without any change.
-    assert!(host
-        .create_xrecord(&["plugin"], "ALPHA", entries())
-        .unwrap_err()
-        .contains("already exists"));
+    assert!(
+        host.create_xrecord(&["plugin"], "ALPHA", entries())
+            .unwrap_err()
+            .contains("already exists")
+    );
 
     // Namespace reuse is idempotent: the root still holds one PLUGIN entry.
     let beta = host.create_xrecord(&["PLUGIN"], "beta", entries()).unwrap();
@@ -58,15 +59,18 @@ fn xrecord_crud_round_trips_refusals_and_list() {
     // The root dictionary holds non-XRecord entries (ACAD_LAYOUT et al.);
     // listing only reports XRecords.
     let root_names = host.list_xrecords(&[]).unwrap();
-    assert!(!root_names
-        .iter()
-        .any(|n| n.eq_ignore_ascii_case("ACAD_LAYOUT")));
+    assert!(
+        !root_names
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case("ACAD_LAYOUT"))
+    );
 
     // Update refuses on a missing name and never creates anything.
-    assert!(host
-        .update_xrecord(&["PLUGIN"], "gamma", entries())
-        .unwrap_err()
-        .contains("does not exist"));
+    assert!(
+        host.update_xrecord(&["PLUGIN"], "gamma", entries())
+            .unwrap_err()
+            .contains("does not exist")
+    );
     // Case-insensitive resolution finds the stored ALPHA and replaces its
     // entries atomically; the handle is stable.
     assert_eq!(
@@ -85,54 +89,61 @@ fn xrecord_crud_round_trips_refusals_and_list() {
 
     // Entries are validated before any change: reserved and out-of-range
     // group codes refuse (5 and 105 are the object handle codes).
-    assert!(host
-        .create_xrecord(
+    assert!(
+        host.create_xrecord(
             &["PLUGIN"],
             "gamma",
             vec![document::objects::XRecordEntry::int16(5, 1)]
         )
         .unwrap_err()
-        .contains("reserved"));
-    assert!(host
-        .create_xrecord(
+        .contains("reserved")
+    );
+    assert!(
+        host.create_xrecord(
             &["PLUGIN"],
             "gamma",
             vec![document::objects::XRecordEntry::int16(400, 1)]
         )
         .unwrap_err()
-        .contains("out of range"));
-    assert!(host
-        .update_xrecord(
+        .contains("out of range")
+    );
+    assert!(
+        host.update_xrecord(
             &["PLUGIN"],
             "alpha",
             vec![document::objects::XRecordEntry::int16(105, 1)]
         )
-        .is_err());
+        .is_err()
+    );
     assert_eq!(
         host.read_xrecord(&["PLUGIN"], "alpha").unwrap(),
         vec![document::objects::XRecordEntry::string(1, "v2")]
     );
     // Dictionary and record names are symbol names.
     assert!(host.create_xrecord(&["PLUGIN"], "  ", entries()).is_err());
-    assert!(host
-        .create_xrecord(&["PLUGIN", "A|B"], "gamma", entries())
-        .is_err());
+    assert!(
+        host.create_xrecord(&["PLUGIN", "A|B"], "gamma", entries())
+            .is_err()
+    );
     assert!(host.create_xrecord(&["PLUGIN"], "a<b", entries()).is_err());
 
     // Reads distinguish a missing dictionary, a missing name and a name
     // that addresses another object kind.
-    assert!(host
-        .read_xrecord(&["NOPE"], "alpha")
-        .unwrap_err()
-        .contains("does not exist"));
-    assert!(host
-        .read_xrecord(&["PLUGIN", "LAYOUTS"], "alpha")
-        .unwrap_err()
-        .contains("does not exist"));
-    assert!(host
-        .delete_xrecord(&["PLUGIN"], "LAYOUTS")
-        .unwrap_err()
-        .contains("not an XRecord"));
+    assert!(
+        host.read_xrecord(&["NOPE"], "alpha")
+            .unwrap_err()
+            .contains("does not exist")
+    );
+    assert!(
+        host.read_xrecord(&["PLUGIN", "LAYOUTS"], "alpha")
+            .unwrap_err()
+            .contains("does not exist")
+    );
+    assert!(
+        host.delete_xrecord(&["PLUGIN"], "LAYOUTS")
+            .unwrap_err()
+            .contains("not an XRecord")
+    );
 
     // Delete removes exactly the named record and returns its content.
     let removed = host.delete_xrecord(&["PLUGIN"], "beta").unwrap();
@@ -142,10 +153,11 @@ fn xrecord_crud_round_trips_refusals_and_list() {
         host.list_xrecords(&["PLUGIN"]).unwrap(),
         vec!["alpha".to_owned()]
     );
-    assert!(host
-        .read_xrecord(&["PLUGIN"], "beta")
-        .unwrap_err()
-        .contains("does not exist"));
+    assert!(
+        host.read_xrecord(&["PLUGIN"], "beta")
+            .unwrap_err()
+            .contains("does not exist")
+    );
     assert!(host.delete_xrecord(&["PLUGIN"], "beta").is_err());
 }
 
@@ -170,12 +182,14 @@ fn xrecord_mutations_are_single_undo_steps_that_restore_objects() {
             .create_xrecord(&["PLUGIN"], "beta", original_entries())
             .unwrap();
         // Refusals record no undo step.
-        assert!(host
-            .create_xrecord(&["PLUGIN"], "alpha", original_entries())
-            .is_err());
-        assert!(host
-            .update_xrecord(&["PLUGIN"], "gamma", original_entries())
-            .is_err());
+        assert!(
+            host.create_xrecord(&["PLUGIN"], "alpha", original_entries())
+                .is_err()
+        );
+        assert!(
+            host.update_xrecord(&["PLUGIN"], "gamma", original_entries())
+                .is_err()
+        );
         host.update_xrecord(&["PLUGIN"], "alpha", changed_entries())
             .unwrap();
         let removed = host.delete_xrecord(&["PLUGIN"], "beta").unwrap();
@@ -261,9 +275,10 @@ fn xrecord_writes_join_a_plugin_initiated_undo_scope() {
             .create_xrecord(&["PLUGIN", "LAYOUTS"], "nested", original_entries())
             .unwrap();
         // A refusal inside the scope records nothing at all.
-        assert!(host
-            .create_xrecord(&["PLUGIN"], "ALPHA", original_entries())
-            .is_err());
+        assert!(
+            host.create_xrecord(&["PLUGIN"], "ALPHA", original_entries())
+                .is_err()
+        );
         assert_eq!(
             host.update_xrecord(&["PLUGIN"], "alpha", changed_entries())
                 .unwrap(),

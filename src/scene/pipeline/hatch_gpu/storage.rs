@@ -417,7 +417,9 @@ impl StorageHatchBatch {
                         // along-line phase.
                         let perp_step = fam.dy;
                         let along_step = fam.dx;
-                        let line_width = h.line_weight_px.max(1.0);
+                        // Under a pixel too: `display_lineweight` in the
+                        // shader keeps one pixel after the layout's scale (#3470).
+                        let line_width = h.line_weight_px.max(0.0);
                         let period: f32 = fam.dashes.iter().map(|d| d.abs()).sum();
                         families.push(LineFamilyGpu {
                             cos_a: fam.angle_deg.to_radians().cos(),

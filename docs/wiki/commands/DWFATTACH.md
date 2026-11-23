@@ -25,3 +25,4 @@ ribbon: Insert tab › Reference panel
 - When [`FILEDIA`](FILEDIA-System-Variable) is 0, `DWFATTACH` uses the command-line form.
 - The **Attach Underlay** drop-down on the ribbon also offers PDF, image, DGN and point cloud files.
 - After attaching, use [`DWFADJUST`](DWFADJUST-Command) for fade and contrast and [`DWFCLIP`](DWFCLIP-Command) to clip.
+- The raster images of a DWF sheet are shown and plotted with the underlay, in the order the sheet draws them.

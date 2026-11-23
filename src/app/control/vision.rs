@@ -484,7 +484,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_draw_som_badge_renders_without_panics() {
+    fn draw_som_badge_renders_without_panics() {
         let mut img = image::RgbaImage::from_pixel(120, 100, image::Rgba([40, 40, 40, 255]));
 
         // Render normal badge
@@ -504,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_grounding_identifies_visible_entities() {
+    fn compute_grounding_identifies_visible_entities() {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app.automation_op(r#"{"op":"run","cmd":"CIRCLE 0,0 5"}"#);
@@ -683,7 +683,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pyramid_tiling_manifest_and_bounds() {
+    fn pyramid_tiling_manifest_and_bounds() {
         let wb = [0.0, 0.0, 200.0, 100.0];
         let manifest = compute_pyramid_manifest("sess_test", "Millimeters", wb, 3, 512);
 

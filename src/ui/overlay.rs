@@ -7169,7 +7169,7 @@ mod selection_visual_color_tests {
     }
 
     #[test]
-    fn test_selection_fill_alpha_clamping() {
+    fn selection_fill_alpha_clamping() {
         // Dark canvas preserves user opacity directly clamped to [0.0, 1.0]
         assert_eq!(selection_fill_alpha(0.0, false), 0.0);
         assert!((selection_fill_alpha(50.0, false) - 0.5).abs() < 1e-5);

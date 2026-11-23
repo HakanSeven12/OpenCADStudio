@@ -27,7 +27,7 @@ fn composite_over(fg: Color, bg: Color) -> Color {
 }
 
 #[test]
-fn test_theme_core_surfaces_contrast() {
+fn theme_core_surfaces_contrast() {
     for theme in Theme::ALL {
         let p = theme.palette();
 
@@ -70,7 +70,7 @@ fn test_theme_core_surfaces_contrast() {
 }
 
 #[test]
-fn test_ribbon_contrast() {
+fn ribbon_contrast() {
     for theme in Theme::ALL {
         let p = theme.palette();
 
@@ -149,7 +149,7 @@ fn test_ribbon_contrast() {
 }
 
 #[test]
-fn test_statusbar_contrast() {
+fn statusbar_contrast() {
     for theme in Theme::ALL {
         let p = theme.palette();
         let statusbar_bg = p.background.base.color;
@@ -189,7 +189,7 @@ fn test_statusbar_contrast() {
 }
 
 #[test]
-fn test_modals_and_action_buttons_contrast() {
+fn modals_and_action_buttons_contrast() {
     for theme in Theme::ALL {
         let p = theme.palette();
         let modal_bg = p.background.base.color;
@@ -242,7 +242,7 @@ fn test_modals_and_action_buttons_contrast() {
 }
 
 #[test]
-fn test_viewport_controls_toggle_buttons_contrast() {
+fn viewport_controls_toggle_buttons_contrast() {
     use crate::ui::style::chrome;
     for theme in Theme::ALL {
         // 1. Active toggle (grid, snap, outline): lit like a ribbon button,
@@ -277,7 +277,7 @@ fn test_viewport_controls_toggle_buttons_contrast() {
 }
 
 #[test]
-fn test_block_palette_contrast() {
+fn block_palette_contrast() {
     use crate::ui::window::block_palette::{block_card_border, block_card_colors};
     use iced::widget::button::Status as BtnStatus;
 

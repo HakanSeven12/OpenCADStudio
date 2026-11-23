@@ -142,6 +142,11 @@ pub struct InsertBlockCommand {
     scale: [f64; 3],
     rotation: f64,
     pending_insert: Option<Insert>,
+    /// The block's units against the drawing's INSUNITS. The reference this
+    /// command hands over keeps the typed scale and is converted when it is
+    /// added to the drawing; the preview and the base point's offset use the
+    /// converted size, so the block lands where it is drawn (#3474).
+    unit_factor: f64,
     plane: WorkingPlane,
     /// The referenced block's insertion base point. Attributes are placed
     /// through the same base-point convention the render path uses, so the
@@ -180,6 +185,7 @@ impl InsertBlockCommand {
             scale: [1.0; 3],
             rotation: 0.0,
             pending_insert: None,
+            unit_factor: 1.0,
             plane: WorkingPlane::default(),
             block_base: Vector3::ZERO,
             preview_origin: DVec3::ZERO,
@@ -366,12 +372,14 @@ impl InsertBlockCommand {
         CmdResult::AttreqNeeded { block_name }
     }
 
-    /// The scaled, rotated block-space offset of `p`.
+    /// The scaled, rotated block-space offset of `p`, at the size the
+    /// reference has once its units are converted.
     fn local_offset(&self, p: DVec3) -> DVec3 {
+        let k = self.unit_factor;
         let s = DVec3::new(
-            p.x * self.scale[0],
-            p.y * self.scale[1],
-            p.z * self.scale[2],
+            p.x * self.scale[0] * k,
+            p.y * self.scale[1] * k,
+            p.z * self.scale[2] * k,
         );
         let (sin, cos) = self.rotation.sin_cos();
         DVec3::new(s.x * cos - s.y * sin, s.x * sin + s.y * cos, s.z)
@@ -470,6 +478,18 @@ impl CadCommand for InsertBlockCommand {
     fn refresh_point_pick_scene(&mut self, scene: &crate::scene::Scene) {
         if self.mode == Mode::Classic {
             self.preview = scene.block_preview_wires(&self.name);
+        }
+        if self.mode != Mode::Paste {
+            let document = &scene.document;
+            let units = document
+                .block_records
+                .get(&self.name)
+                .map_or(0, |record| record.units);
+            self.unit_factor = crate::app::properties::insert_unit_scale(
+                document.header.insertion_units,
+                units,
+            )
+            .unwrap_or(1.0);
         }
         self.alignment = alignment::InsertionAlignment::from_scene(scene, &self.name, self.plane);
     }
@@ -964,6 +984,7 @@ impl CadCommand for InsertBlockCommand {
             _ => return Vec::new(),
         };
         let (pt, rotation) = self.aligned_pose(pt, scale, rotation);
+        let scale = scale.map(|v| v * self.unit_factor);
         let (sin, cos) = rotation.sin_cos();
         let base = self.preview_origin + self.base;
         let origin = self.plane.to_local(pt);

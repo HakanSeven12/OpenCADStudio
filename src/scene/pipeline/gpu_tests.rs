@@ -162,6 +162,69 @@ fn block_edits_preserve_cache_coordinates_and_arena_partition() {
     );
 }
 
+/// Slabs rewritten side by side reach the arena as one write. A patch left
+/// with a write per object costs more than building the arena again, and says
+/// so instead of making them.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_wire_patch_of_many_scattered_objects_asks_for_the_rebuild() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        .expect("GPU adapter");
+    let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_limits: adapter.limits(),
+        ..Default::default()
+    }))
+    .expect("GPU device");
+    let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let pipeline = Pipeline::new(&device, &queue, wgpu::TextureFormat::Bgra8UnormSrgb);
+
+    const LINES: u64 = 4096;
+    let lines_at = |shift: f32| -> Vec<WireModel> {
+        (1..=LINES)
+            .map(|handle| {
+                let y = handle as f32 + shift;
+                WireModel::solid(
+                    handle.to_string(),
+                    vec![[0.0, y, 0.0], [1.0, y, 0.0]],
+                    [1.0; 4],
+                    false,
+                )
+            })
+            .collect()
+    };
+    let (drawn, moved) = (lines_at(0.0), lines_at(0.5));
+    let drawn: Vec<&WireModel> = drawn.iter().collect();
+    let depth = rustc_hash::FxHashMap::default();
+    for layout in [pipeline.wire_const_bgl.as_ref(), None] {
+        // Move every `step`-th line of a freshly built arena.
+        let patch = |step: usize| {
+            let mut arena = wire_arena::PersistentWireArena::build(
+                &device, &queue, &drawn, &depth, layout, false,
+            )
+            .unwrap();
+            let changes: Vec<_> = (1..=LINES)
+                .step_by(step)
+                .map(|handle| (Handle::new(handle), crate::scene::ChangeKind::Modified))
+                .collect();
+            let runs = changes
+                .iter()
+                .map(|(handle, _)| (*handle, vec![&moved[handle.value() as usize - 1]]))
+                .collect();
+            arena.patch(&queue, &changes, &runs, true, &depth)
+        };
+        assert!(patch(1), "every slab, side by side, is one write");
+        assert!(patch(64), "64 writes are not worth a rebuild");
+        assert!(!patch(2), "2,048 writes cost more than these 4,096 lines");
+    }
+    queue.submit([]);
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    assert!(
+        block_on(validation.pop()).is_none(),
+        "GPU validation failed"
+    );
+}
+
 // OCS_GPU_CHUNK_MIB=1 cargo test --lib bounded_gpu_uploads -- --ignored --nocapture
 #[test]
 #[ignore = "requires a GPU adapter and OCS_GPU_CHUNK_MIB=1"]
@@ -612,7 +675,7 @@ fn late_device_errors_invalidate_uploaded_content_and_targets() {
 
 #[test]
 #[ignore = "requires a GPU adapter"]
-fn test_selected_circle_arc_ellipse_highlight_overlay() {
+fn selected_circle_arc_ellipse_highlight_overlay() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
         .expect("GPU adapter");
@@ -737,7 +800,7 @@ fn test_selected_circle_arc_ellipse_highlight_overlay() {
 
 #[test]
 #[ignore = "requires a GPU adapter"]
-fn test_thick_and_tapered_arc_gpu_rendering() {
+fn thick_and_tapered_arc_gpu_rendering() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
         .expect("GPU adapter");
@@ -840,7 +903,7 @@ fn test_thick_and_tapered_arc_gpu_rendering() {
 
 #[test]
 #[ignore = "requires a GPU adapter"]
-fn test_tilted_3d_donut_and_thick_arc_gpu_rendering() {
+fn tilted_3d_donut_and_thick_arc_gpu_rendering() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
         .expect("GPU adapter");
@@ -960,7 +1023,7 @@ fn test_tilted_3d_donut_and_thick_arc_gpu_rendering() {
 
 #[test]
 #[ignore = "requires a GPU adapter"]
-fn test_selected_ellipse_overlay() {
+fn selected_ellipse_overlay() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
         .expect("GPU adapter");
@@ -1088,7 +1151,7 @@ fn test_selected_ellipse_overlay() {
 
 #[test]
 #[ignore = "requires a GPU adapter"]
-fn test_pline_arc_switch_preview_and_render() {
+fn pline_arc_switch_preview_and_render() {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
         .expect("GPU adapter");

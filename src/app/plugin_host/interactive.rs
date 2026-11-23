@@ -2,6 +2,20 @@
 
 use super::*;
 
+fn plugin_input_kind_to_host(
+    kind: ocs_plugin_api::host::InteractiveInputKind,
+) -> crate::command::InputKind {
+    match kind {
+        ocs_plugin_api::host::InteractiveInputKind::Point => crate::command::InputKind::Point,
+        ocs_plugin_api::host::InteractiveInputKind::SingleToken => {
+            crate::command::InputKind::SingleToken
+        }
+        ocs_plugin_api::host::InteractiveInputKind::FreeText => {
+            crate::command::InputKind::FreeText
+        }
+    }
+}
+
 /// Bridges a plugin's [`InteractiveCommand`](ocs_plugin_api::host::InteractiveCommand)
 /// to the host's internal `CadCommand`, so a plugin tool drives the host's
 /// point-collection flow (viewport clicks or `--serve` coordinates) just like a
@@ -133,6 +147,23 @@ impl crate::command::CadCommand for PluginInteractiveAdapter {
         })
         .unwrap_or_default()
     }
+    fn input_kind(&self) -> crate::command::InputKind {
+        crate::plugin::guard("InteractiveCommand::input_kind", || self.inner.input_kind())
+            .map(plugin_input_kind_to_host)
+            .unwrap_or_default()
+    }
+    fn on_text_input(&mut self, text: &str) -> Option<crate::command::CmdResult> {
+        if !self.input_kind().wants_text() {
+            return None;
+        }
+        Some(
+            crate::plugin::guard("InteractiveCommand::on_text_input", || {
+                self.inner.on_text_input(text)
+            })
+            .map(plugin_step_to_result)
+            .unwrap_or(crate::command::CmdResult::Cancel),
+        )
+    }
 }
 
 /// Bridges an out-of-process plugin's interactive command to the host's
@@ -143,6 +174,7 @@ pub(crate) struct PluginProcessInteractiveAdapter {
     pub process: std::sync::Arc<ocs_plugin_api::process::PluginProcess>,
     pub command_id: u64,
     prompt: Option<String>,
+    input_kind: ocs_plugin_api::host::InteractiveInputKind,
     needs_entity_pick: Option<bool>,
     is_selection_gathering: Option<bool>,
     accepts_drag_selection: Option<bool>,
@@ -156,6 +188,7 @@ impl PluginProcessInteractiveAdapter {
         command_id: u64,
     ) -> Self {
         let prompt = process.get_prompt(command_id).ok();
+        let input_kind = process.get_input_kind(command_id).unwrap_or_default();
         let needs_entity_pick = process.needs_entity_pick(command_id).ok();
         let is_selection_gathering = process.is_selection_gathering(command_id).ok();
         let accepts_drag_selection = process.accepts_drag_selection(command_id).ok();
@@ -165,6 +198,7 @@ impl PluginProcessInteractiveAdapter {
             process,
             command_id,
             prompt,
+            input_kind,
             needs_entity_pick,
             is_selection_gathering,
             accepts_drag_selection,
@@ -175,6 +209,7 @@ impl PluginProcessInteractiveAdapter {
 
     fn refresh(&mut self) {
         self.prompt = self.process.get_prompt(self.command_id).ok();
+        self.input_kind = self.process.get_input_kind(self.command_id).unwrap_or_default();
         self.needs_entity_pick = self.process.needs_entity_pick(self.command_id).ok();
         self.is_selection_gathering = self.process.is_selection_gathering(self.command_id).ok();
         self.accepts_drag_selection = self.process.accepts_drag_selection(self.command_id).ok();
@@ -400,6 +435,33 @@ impl crate::command::CadCommand for PluginProcessInteractiveAdapter {
             self.refresh();
         }
         result
+    }
+    fn input_kind(&self) -> crate::command::InputKind {
+        plugin_input_kind_to_host(self.input_kind)
+    }
+    fn on_text_input(&mut self, text: &str) -> Option<crate::command::CmdResult> {
+        if !self.input_kind().wants_text() {
+            return None;
+        }
+        use ocs_plugin_api::ipc::protocol::InteractiveEvent;
+        let result = self
+            .process
+            .interactive_event(self.command_id, InteractiveEvent::TextInput(text.to_string()))
+            .map(plugin_step_to_result)
+            .unwrap_or(crate::command::CmdResult::Cancel);
+        if matches!(
+            result,
+            crate::command::CmdResult::CommitAndExit(_)
+                | crate::command::CmdResult::CommitEntitiesAndExit(_)
+                | crate::command::CmdResult::Done
+                | crate::command::CmdResult::Script(_)
+                | crate::command::CmdResult::Cancel
+        ) {
+            self.is_done = true;
+        } else {
+            self.refresh();
+        }
+        Some(result)
     }
     fn owner_plugin_id(&self) -> Option<&str> {
         Some(self.process.id())

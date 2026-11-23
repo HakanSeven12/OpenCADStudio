@@ -352,3 +352,63 @@ fn attributes_of_a_non_annotative_dynamic_block_ignore_obsolete_placement() {
     ));
     assert_eq!(attribute.insertion_point, Vector3::new(11., 12., 0.));
 }
+
+/// How many times `work` asked for the annotation flag of a block
+/// reference's definition.
+fn insert_flag_lookups(work: impl FnOnce()) -> usize {
+    use crate::scene::annotative::INSERT_FLAG_LOOKUPS;
+    INSERT_FLAG_LOOKUPS.with(|count| count.set(0));
+    work();
+    INSERT_FLAG_LOOKUPS.with(std::cell::Cell::get)
+}
+
+/// A pass over the drawing asks each block reference for its scale
+/// representation. A reference that has none must not pay for the flag of
+/// its definition: that lookup searches the definitions of the drawing.
+#[test]
+fn a_reference_with_no_scale_representation_does_not_ask_for_its_definitions_flag() {
+    use crate::scene::annotative::{
+        active_object_context_for_scale, entity_for_annotation_context,
+    };
+    use document::entities::{Insert, Line};
+
+    let mut scene = scene_on(None);
+    scene.define_block_raw(
+        "PLAIN",
+        Vector3::ZERO,
+        vec![EntityType::Line(Line::from_coords(0., 0., 0., 2., 0., 0.))],
+    );
+    let insert = scene
+        .document
+        .add_entity(EntityType::Insert(Insert::new(
+            "PLAIN",
+            Vector3::new(10., 10., 0.),
+        )))
+        .unwrap();
+    let entity = scene.document.get_entity(insert).unwrap();
+
+    let lookups = insert_flag_lookups(|| {
+        assert!(active_object_context_for_scale(&scene.document, insert, None).is_none());
+        let placed = entity_for_annotation_context(&scene.document, entity, None);
+        assert!(matches!(placed, std::borrow::Cow::Borrowed(_)));
+    });
+    assert_eq!(lookups, 0);
+}
+
+/// A reference that has a scale representation still asks, and the flag of
+/// its definition still decides: off hides the representation, on or absent
+/// keeps it.
+#[test]
+fn a_reference_with_a_scale_representation_still_obeys_its_definitions_flag() {
+    use crate::scene::annotative::active_object_context_for_scale;
+
+    for (flag, kept) in [(Some(false), false), (Some(true), true), (None, true)] {
+        let (scene, insert, _, _) = block_with_retained_context(flag);
+        let mut found = false;
+        let lookups = insert_flag_lookups(|| {
+            found = active_object_context_for_scale(&scene.document, insert, None).is_some();
+        });
+        assert_eq!(found, kept, "flag {flag:?}");
+        assert_eq!(lookups, 1, "flag {flag:?}");
+    }
+}

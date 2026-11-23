@@ -1202,6 +1202,7 @@ pub mod crash_log {
 
     #[cfg(test)]
     mod tests {
+        use serial_test::serial;
         /// The report has to carry the two things a maintainer cannot guess:
         /// what the message was and where it came from. It also has to be
         /// readable — an earlier version built it with `\` continuations and
@@ -1254,6 +1255,7 @@ pub mod crash_log {
         /// The backend line is what the sentinel joins on, so it has to come
         /// back out — and "(default)" names nothing to blame.
         #[test]
+        #[serial]
         fn the_backend_is_read_back_out_of_a_report() {
             // SAFETY: single-threaded test mutating a process-local variable.
             unsafe { std::env::set_var("WGPU_BACKEND", "dx12") };

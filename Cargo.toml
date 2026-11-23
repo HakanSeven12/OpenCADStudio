@@ -1,6 +1,6 @@
 [package]
 name = "OpenCADStudio"
-version = "2026.46.0"
+version = "2026.47.0"
 edition = "2021"
 build = "build.rs"
 default-run = "OpenCADStudio"
@@ -31,7 +31,7 @@ serde_json = "1"
 # Offline validation of the same contracts published to automation clients.
 jsonschema = { version = "0.49", default-features = false }
 serde = { version = "1", features = ["derive"] }
-calamine = "0.36.1"
+calamine = "0.38.0"
 base64 = "0.22"
 semver = "1"
 url = "2"
@@ -46,7 +46,7 @@ clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
 svgtypes = "0.15.3"
-document = { package = "opencaddocument", git = "https://github.com/BjornFidder/opencaddocument.git", rev = "eca49894258e95b94d310deaf919fe17295aa20a", features = ["serde", "mline-pilot"] }
+document = { package = "opencaddocument", git = "https://github.com/BjornFidder/opencaddocument.git", rev = "e43a079e69ca1abf244d550409d80b22b5d21da6", features = ["serde", "mline-pilot"] }
 # 2D curve algebra, the B-rep model and the constraint solver (from
 # opencadkernel); the operations on solids are Solidcore's.
 ocs_geom = { path = "crates/ocs_geom" }
@@ -122,6 +122,10 @@ lru = { version = "0.16.4", default-features = false }
 fluent-syntax = "0.12"
 iced_test = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 naga = { version = "27", features = ["wgsl-in"] }
+pretty_assertions = "1.4"
+rstest = "0.29"
+serial_test = "4.0"
+tempfile = "3.27"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 libloading = "0.8"
@@ -142,28 +146,30 @@ block2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString", "NSObject", "NSNotification", "NSThread", "NSEnumerator"] }
 
 [patch.crates-io]
-iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
 
 # The pinned iced revision plus upstream 478c363df: a mesh clipped out of its
 # layer did not advance the index offset, so every later mesh in that layer
 # was drawn with the wrong indices (stale glyph outlines left across the top
-# of the window by rotated canvas text, #3063). Drop when iced is bumped past it.
+# of the window by rotated canvas text, #3063), and upstream b54f2c59: the
+# event loop no longer spins on a stale redraw deadline (#3418). Drop when iced
+# is bumped past both.
 [patch."https://github.com/iced-rs/iced.git"]
-iced = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_debug = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_futures = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_graphics = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_program = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_renderer = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_runtime = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_selector = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_test = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_tiny_skia = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
-iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "e4b2fc1aa4d8b4fa882aec36c404b99ddd439343" }
+iced = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_debug = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_futures = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_graphics = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_program = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_renderer = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_runtime = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_selector = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_test = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_tiny_skia = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 mimalloc = { version = "0.1", default-features = false }
@@ -491,6 +497,123 @@ name = "polygon_overlay_and_clip"
 harness = false
 
 [[test]]
-name = "integration"
-path = "tests/integration.rs"
+name = "active_space_roundtrip"
+path = "tests/active_space_roundtrip.rs"
+
+[[test]]
+name = "annotative_context_roundtrip"
+path = "tests/annotative_context_roundtrip.rs"
+
+[[test]]
+name = "annotative_context_synthesis"
+path = "tests/annotative_context_synthesis.rs"
+
+[[test]]
+name = "annotative_dim_picture"
+path = "tests/annotative_dim_picture.rs"
+
+[[test]]
+name = "block_hatch_export"
+path = "tests/block_hatch_export.rs"
+
+[[test]]
+name = "block_text_draw_depth"
+path = "tests/block_text_draw_depth.rs"
+
+[[test]]
+name = "dim_copy_check"
+path = "tests/dim_copy_check.rs"
+
+[[test]]
+name = "dim_leader_render_check"
+path = "tests/dim_leader_render_check.rs"
+
+[[test]]
+name = "dim_line_color_roundtrip"
+path = "tests/dim_line_color_roundtrip.rs"
+
+[[test]]
+name = "explode_regression"
+path = "tests/explode_regression.rs"
+
+[[test]]
+name = "flatten_regression"
+path = "tests/flatten_regression.rs"
+
+[[test]]
+name = "geodata_roundtrip"
+path = "tests/geodata_roundtrip.rs"
+
+[[test]]
+name = "hatch_shader_lod"
+path = "tests/hatch_shader_lod.rs"
+
+[[test]]
+name = "mesh_shader_limits"
+path = "tests/mesh_shader_limits.rs"
+
+[[test]]
+name = "page_setup_root_repair"
+path = "tests/page_setup_root_repair.rs"
+
+[[test]]
+name = "parametric_constraints_solve"
+path = "tests/parametric_constraints_solve.rs"
+
+[[test]]
+name = "pdf_export_images_check"
+path = "tests/pdf_export_images_check.rs"
+
+[[test]]
+name = "pdf_export_text_check"
+path = "tests/pdf_export_text_check.rs"
+
+[[test]]
+name = "pdf_page_tree_cycle"
+path = "tests/pdf_page_tree_cycle.rs"
+
+[[test]]
+name = "presspull_curved_boundary"
+path = "tests/presspull_curved_boundary.rs"
+
+[[test]]
+name = "scale_list_nan"
+path = "tests/scale_list_nan.rs"
+
+[[test]]
+name = "section_plane_roundtrip"
+path = "tests/section_plane_roundtrip.rs"
+
+[[test]]
+name = "text_font_rendering"
+path = "tests/text_font_rendering.rs"
+
+[[test]]
+name = "text_shader_minification"
+path = "tests/text_shader_minification.rs"
+
+[[test]]
+name = "ucs_face_plane"
+path = "tests/ucs_face_plane.rs"
+
+[[test]]
+name = "viewport_wide_polyline_plot_width"
+path = "tests/viewport_wide_polyline_plot_width.rs"
+
+[[test]]
+name = "xclip_plot_test"
+path = "tests/xclip_plot_test.rs"
+
+[[test]]
+name = "zoom_extents_coverage"
+path = "tests/zoom_extents_coverage.rs"
+
+[[test]]
+name = "zoom_extents_xline"
+path = "tests/zoom_extents_xline.rs"
+
+# These two suites share helpers, so they stay in one binary.
+[[test]]
+name = "entity_roundtrip"
+path = "tests/entity_roundtrip.rs"
 

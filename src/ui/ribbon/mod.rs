@@ -359,6 +359,9 @@ pub struct Ribbon {
     active_tool: Option<String>,
     pub wireframe: bool,
     pub ortho_mode: bool,
+    /// The ribbon is closed (Classic workspace): floating panels are the
+    /// toolbars then and have no ribbon to return to.
+    pub closed: bool,
     /// ViewCube (NAVVCUBE) visibility — drives the View Cube button highlight.
     pub show_viewcube: bool,
     /// UCS icon (UCSICON) visibility — drives the UCS Icon button highlight.
@@ -580,6 +583,7 @@ impl Ribbon {
             active: 0,
             active_tool: None,
             wireframe: false,
+            closed: false,
             ortho_mode: true,
             show_viewcube: true,
             show_ucs_icon: true,

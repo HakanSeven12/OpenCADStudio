@@ -82,7 +82,7 @@ fn wire_points(wire: &WireModel, delta: [f64; 3]) -> Vec<[f64; 3]> {
         .enumerate()
         .filter(|(_, point)| point[0].is_finite())
         .map(|(index, point)| {
-            let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+            let low = wire.points_low.get(index).unwrap_or([0.0; 3]);
             [
                 point[0] as f64 + low[0] as f64 + delta[0],
                 point[1] as f64 + low[1] as f64 + delta[1],

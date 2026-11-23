@@ -519,6 +519,65 @@ impl DocumentTab {
         }
     }
 
+    /// Take the exact categorized document boundary (API v27): the scene
+    /// journal's coalesced per-handle changes between the last published
+    /// epoch (`plugin_dirty_epoch`) and the tab's current geometry epoch,
+    /// classified into added/modified/deleted, folded with the drained
+    /// legacy region sets. The legacy sets keep their degrade-to-empty
+    /// semantics (`DocumentChangedRegions`, byte-identical stream for pre-27
+    /// plugins); the journal is the delta's honesty source — `None` (a gap,
+    /// eviction past the cap, or a whole-document/`full` bump) forces
+    /// `full_refresh_required` instead of a plausible but incomplete claim.
+    /// `snapshot_failed` (a failed V4 publication at this boundary) likewise
+    /// forces the flag and withdraws the snapshot claim: never cite a
+    /// snapshot that was not published. Desktop-only: the wasm32 build has
+    /// no plugin-host surface, and `ocs_plugin_api::host` does not exist
+    /// there.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn take_document_boundary(
+        &mut self,
+        snapshot: Option<ocs_plugin_api::host::DocumentDeltaSnapshot>,
+        snapshot_failed: bool,
+    ) -> crate::plugin::v4_support::DocumentBoundary {
+        // The journal anchor must be captured BEFORE the drain resets it:
+        // these are the changes since the last published boundary.
+        let anchor = self.plugin_dirty_epoch;
+        let replay = self.scene.replay_since(anchor);
+        let (legacy_entities, records) = self.take_plugin_dirty();
+        let (mut added, mut modified, mut deleted) = (Vec::new(), Vec::new(), Vec::new());
+        let mut full_refresh_required = snapshot_failed;
+        match replay {
+            Some(changes) => {
+                for (handle, kind) in changes {
+                    match kind {
+                        crate::scene::ChangeKind::Added => added.push(handle),
+                        crate::scene::ChangeKind::Modified => modified.push(handle),
+                        crate::scene::ChangeKind::Removed => deleted.push(handle),
+                    }
+                }
+                // Deterministic wire shape: ascending handles, deduplicated
+                // (the replay already coalesces per handle; the sort fixes
+                // only the map-iteration order).
+                for list in [&mut added, &mut modified, &mut deleted] {
+                    list.sort_unstable();
+                    list.dedup();
+                }
+            }
+            None => {
+                full_refresh_required = true;
+            }
+        }
+        crate::plugin::v4_support::DocumentBoundary {
+            added,
+            modified,
+            deleted,
+            records,
+            legacy_entities,
+            snapshot: if snapshot_failed { None } else { snapshot },
+            full_refresh_required,
+        }
+    }
+
     /// The active WCS↔UCS converter for this tab — identity when no UCS is set.
     /// Every consumer that needs UCS-relative coordinates goes through this.
     pub(super) fn ucs_xform(&self) -> super::helpers::UcsXform {

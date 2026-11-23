@@ -393,6 +393,9 @@ pub fn handle_plugin_request(
         PanelSnapshot { panel_id } => {
             PluginResponse::PanelSnapshot(host.panel_snapshot_for_plugin(plugin_id, &panel_id))
         }
+        PanelSurfacePublish { panel_id, surface } => PluginResponse::PanelSurfacePublished(
+            host.panel_surface_publish_for_plugin(plugin_id, &panel_id, surface),
+        ),
         SetGeoLocation { location } => {
             PluginResponse::GeoLocationSet(host.set_geo_location(&location))
         }

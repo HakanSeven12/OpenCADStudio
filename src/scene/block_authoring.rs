@@ -150,14 +150,16 @@ pub(super) fn graph(
         return Err("The block authoring graph has an invalid owner.");
     }
     let nodes: rustc_hash::FxHashSet<_> = graph.nodes.iter().map(|node| node.id).collect();
-    let edges: rustc_hash::FxHashSet<_> = graph.edges.iter().map(|edge| edge.id).collect();
+    // An erased edge keeps its slot with id -1; it links nothing.
+    let live = || graph.edges.iter().filter(|edge| edge.id != -1);
+    let edges: rustc_hash::FxHashSet<_> = live().map(|edge| edge.id).collect();
     if nodes.len() != graph.nodes.len()
-        || edges.len() != graph.edges.len()
+        || edges.len() != live().count()
         || graph
             .nodes
             .iter()
             .any(|node| node.id < 0 || document.objects.get(&node.expression).is_none())
-        || graph.edges.iter().any(|edge| {
+        || live().any(|edge| {
             edge.id < 0
                 || !nodes.contains(&edge.source_node)
                 || !nodes.contains(&edge.destination_node)

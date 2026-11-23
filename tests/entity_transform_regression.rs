@@ -7,7 +7,7 @@
 // unchanged. A change that is meant to alter transform behaviour regenerates
 // it with
 //
-//     OCS_UPDATE_GOLDEN=1 cargo test --locked --test integration entity_transform_regression
+//     OCS_UPDATE_GOLDEN=1 cargo test --locked --test entity_roundtrip entity_transform_regression
 //
 // and the diff of the golden file shows exactly what changed. Numbers are
 // compared with a small tolerance, so last-bit differences between the
@@ -26,8 +26,8 @@ use document::entities::{
     DimensionDiameter, DimensionLargeRadial, DimensionLinear, DimensionOrdinate, DimensionRadius,
     Ellipse, Face3D, Hatch, HatchPatternLine, Helix, Insert, Leader, Light, Line, LineEdge,
     LwPolyline, LwVertex, MText, Mesh, Point, PolyfaceMesh, PolygonMeshEntity, PolygonMeshVertex,
-    Polyline2D, Polyline3D, PolylineEdge, Ray, Shape, Solid, Spline, Text, Tolerance, Vertex2D,
-    XLine,
+    Polyline, Polyline2D, Polyline3D, PolylineEdge, RasterImage, Ray, Shape, Solid, Spline, Text,
+    Tolerance, Underlay, UnderlayType, Vertex2D, Vertex3D, Viewport, Wipeout, XLine,
 };
 use document::types::{Vector2, Vector3};
 use document::EntityType;
@@ -56,7 +56,7 @@ fn tilted_plane() -> WorkingPlane {
     )
 }
 
-fn transforms() -> Vec<(&'static str, EntityTransform)> {
+pub(super) fn transforms() -> Vec<(&'static str, EntityTransform)> {
     vec![
         (
             "translate",
@@ -121,7 +121,7 @@ fn transforms() -> Vec<(&'static str, EntityTransform)> {
     ]
 }
 
-fn entities() -> Vec<(&'static str, EntityType)> {
+pub(super) fn entities() -> Vec<(&'static str, EntityType)> {
     let mut ellipse = Ellipse::from_center_axes(v3(6.0, -2.0, 0.0), v3(4.0, 1.0, 0.0), 0.4);
     ellipse.start_parameter = 0.5;
     ellipse.end_parameter = 4.0;
@@ -455,6 +455,39 @@ fn entities() -> Vec<(&'static str, EntityType)> {
         ),
         ("light", EntityType::Light(Box::new(light))),
     ]
+    .into_iter()
+    .chain(image_and_frame_entities())
+    .collect()
+}
+
+/// The entities that hold a picture or a view, and the old 3D polyline
+/// record.
+fn image_and_frame_entities() -> Vec<(&'static str, EntityType)> {
+    let mut image = RasterImage::new("picture.png", v3(2.0, 1.0, 0.0), 40.0, 30.0);
+    image.u_vector = v3(0.1, 0.0, 0.0);
+    image.v_vector = v3(0.0, 0.1, 0.0);
+
+    let wipeout = Wipeout::from_corners(v3(1.0, 3.0, 0.0), v3(5.0, 5.0, 0.0));
+
+    let mut underlay = Underlay::with_scale(UnderlayType::Pdf, v3(3.0, -2.0, 0.0), 1.5);
+    underlay.rotation = 0.4;
+
+    let viewport = Viewport::with_size(v3(6.0, 4.0, 0.0), 8.0, 5.0);
+
+    let mut polyline = Polyline::new();
+    polyline.vertices = vec![
+        Vertex3D::new(v3(0.0, 0.0, 0.0)),
+        Vertex3D::new(v3(4.0, 0.0, 1.0)),
+        Vertex3D::new(v3(4.0, 3.0, 2.0)),
+    ];
+
+    vec![
+        ("raster_image", EntityType::RasterImage(image)),
+        ("wipeout", EntityType::Wipeout(wipeout)),
+        ("underlay", EntityType::Underlay(underlay)),
+        ("viewport", EntityType::Viewport(Box::new(viewport))),
+        ("polyline", EntityType::Polyline(polyline)),
+    ]
 }
 
 // ── Description ───────────────────────────────────────────────────────────
@@ -483,7 +516,7 @@ fn pts(list: &[Vector3]) -> String {
 }
 
 /// The geometric fields of an entity, one per line.
-fn describe(entity: &EntityType) -> String {
+pub(super) fn describe(entity: &EntityType) -> String {
     let mut s = String::new();
     let mut field = |name: &str, value: String| {
         let _ = writeln!(s, "  {name}: {value}");
@@ -799,6 +832,55 @@ fn describe(entity: &EntityType) -> String {
             field("hotspot_angle", num(e.hotspot_angle));
             field("falloff_angle", num(e.falloff_angle));
         }
+        EntityType::RasterImage(e) => {
+            field("insertion_point", pt(e.insertion_point));
+            field("u_vector", pt(e.u_vector));
+            field("v_vector", pt(e.v_vector));
+            field("size", format!("({}, {})", num(e.size.x), num(e.size.y)));
+        }
+        EntityType::Wipeout(e) => {
+            field("insertion_point", pt(e.insertion_point));
+            field("u_vector", pt(e.u_vector));
+            field("v_vector", pt(e.v_vector));
+            field("size", format!("({}, {})", num(e.size.x), num(e.size.y)));
+            let boundary: Vec<String> = e
+                .clip_boundary_vertices
+                .iter()
+                .map(|v| format!("({}, {})", num(v.x), num(v.y)))
+                .collect();
+            field("clip_boundary_vertices", boundary.join(" "));
+        }
+        EntityType::Underlay(e) => {
+            field("insertion_point", pt(e.insertion_point));
+            field(
+                "scale",
+                format!(
+                    "({}, {}, {})",
+                    num(e.x_scale),
+                    num(e.y_scale),
+                    num(e.z_scale)
+                ),
+            );
+            field("rotation", num(e.rotation));
+            field("normal", pt(e.normal));
+        }
+        EntityType::Viewport(e) => {
+            field("center", pt(e.center));
+            field("width", num(e.width));
+            field("height", num(e.height));
+            field("view_center", pt(e.view_center));
+            field("view_target", pt(e.view_target));
+            field("view_direction", pt(e.view_direction));
+            field("view_height", num(e.view_height));
+            field("twist_angle", num(e.twist_angle));
+            field("custom_scale", num(e.custom_scale));
+        }
+        EntityType::Polyline(e) => {
+            field(
+                "vertices",
+                pts(&e.vertices.iter().map(|v| v.location).collect::<Vec<_>>()),
+            );
+        }
         other => panic!("describe() has no case for {other:?}"),
     }
     s
@@ -907,7 +989,7 @@ fn split_numbers(line: &str) -> (String, Vec<f64>) {
 /// The first line where `actual` differs from `expected`, ignoring number
 /// differences small enough to be platform rounding. The golden prints nine
 /// decimals, so a last-bit difference can move a printed value by 1e-9.
-fn first_difference(expected: &str, actual: &str) -> Option<String> {
+pub(super) fn first_difference(expected: &str, actual: &str) -> Option<String> {
     const TOLERANCE: f64 = 2e-9;
     let (expected_lines, actual_lines): (Vec<_>, Vec<_>) =
         (expected.lines().collect(), actual.lines().collect());
@@ -1050,6 +1132,10 @@ fn world_points(entity: &EntityType) -> Vec<Vector3> {
         EntityType::Light(e) => vec![e.position, e.target],
         EntityType::Spline(e) => [e.control_points.clone(), e.fit_points.clone()].concat(),
         EntityType::Polyline3D(e) => e.vertices.iter().map(|v| v.position).collect(),
+        EntityType::Polyline(e) => e.vertices.iter().map(|v| v.location).collect(),
+        EntityType::RasterImage(e) => vec![e.insertion_point],
+        EntityType::Wipeout(e) => vec![e.insertion_point],
+        EntityType::Viewport(e) => vec![e.center],
         EntityType::PolyfaceMesh(e) => e.vertices.iter().map(|v| v.location).collect(),
         EntityType::PolygonMesh(e) => e.vertices.iter().map(|v| v.location).collect(),
         EntityType::Mesh(e) => e.vertices.clone(),

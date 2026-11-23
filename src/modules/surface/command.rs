@@ -31,8 +31,12 @@ pub enum Filter {
     SampleLineGroups,
     /// Civil 3D TIN surfaces; a step of them may be passed with none selected.
     TinSurfaces,
+    /// Civil 3D feature lines.
+    FeatureLines,
     /// Lines, 2D and 3D polylines.
     Paths,
+    /// Lines, 2D and 3D polylines; a step of them may be passed with none selected.
+    OptionalPaths,
 }
 
 /// The Civil 3D class of `entity`, if it is one.
@@ -73,7 +77,8 @@ impl Filter {
             Filter::Assemblies => |e| civil_class(e) == Some("AECC_ASSEMBLY"),
             Filter::SampleLineGroups => |e| civil_class(e) == Some("AECC_SAMPLE_LINE_GROUP"),
             Filter::TinSurfaces => |e| civil_class(e) == Some("AECC_TIN_SURFACE"),
-            Filter::Paths => |e| {
+            Filter::FeatureLines => |e| civil_class(e) == Some("AECC_FEATURE_LINE"),
+            Filter::Paths | Filter::OptionalPaths => |e| {
                 matches!(e, EntityType::Line(_) | EntityType::LwPolyline(_) | EntityType::Polyline2D(_) | EntityType::Polyline3D(_))
             },
         }
@@ -418,7 +423,7 @@ impl CadCommand for SurfaceCommand {
         match self.step() {
             // Enter with nothing selected ends the command.
             Some(Step::Objects { slot, filter, .. })
-                if self.request.objects[slot].is_empty() && !matches!(filter, Filter::TinSurfaces | Filter::CogoPoints) =>
+                if self.request.objects[slot].is_empty() && !matches!(filter, Filter::TinSurfaces | Filter::CogoPoints | Filter::OptionalPaths) =>
             {
                 CmdResult::Done
             }

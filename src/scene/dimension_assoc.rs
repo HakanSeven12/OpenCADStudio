@@ -630,6 +630,27 @@ fn source_marker(entity: &EntityType, point: Vector3) -> Option<i32> {
         .map(|(index, _)| index as i32)
 }
 
+/// The stored form of a reference to `marker`: a polyline vertex is written
+/// the way the file format names it, as an edge (subentity 2, one-based edge
+/// marker) and its start (0) or end (1). Everything else keeps subentity 1.
+fn stored_marker(entity: &EntityType, marker: i32, parameter: f64) -> (i32, i32, f64) {
+    let vertices = match entity {
+        EntityType::LwPolyline(polyline) => Some((polyline.vertices.len(), polyline.is_closed)),
+        EntityType::Polyline2D(polyline) => Some((polyline.vertices.len(), polyline.is_closed())),
+        _ => None,
+    };
+    match (vertices, usize::try_from(marker)) {
+        (Some((count, closed)), Ok(vertex)) if parameter == 0.0 && vertex < count && count > 1 => {
+            if vertex + 1 < count || closed {
+                (2, vertex as i32 + 1, 0.0)
+            } else {
+                (2, vertex as i32, 1.0)
+            }
+        }
+        _ => (1, marker, parameter),
+    }
+}
+
 // ── Chain-aware reference resolution ──────────────────────────────────────
 
 /// Transform an entity-local feature through its block path and optional viewport.
@@ -1135,10 +1156,14 @@ pub(crate) fn constraint_from_associative_dimension(
     }
     let point = |index: usize| {
         let reference = association.references.get(index)?.first()?;
-        Some(ParametricRef::point(
-            *reference.xrefs.first()?,
-            reference.main_gs_marker,
-        ))
+        // An edge reference (subentity 2) names a vertex as the start (0) or
+        // the end (1) of a one-based edge.
+        let vertex = if reference.main_subent_type == 2 {
+            reference.main_gs_marker - 1 + reference.osnap_distance.round() as i32
+        } else {
+            reference.main_gs_marker
+        };
+        Some(ParametricRef::point(*reference.xrefs.first()?, vertex))
     };
     let whole = |index: usize| {
         let reference = association.references.get(index)?.first()?;
@@ -1344,7 +1369,7 @@ impl Scene {
         if source_data.is_empty() {
             return;
         }
-        let resolved: Vec<Option<(Handle, i32, f64, u8)>> = source_data
+        let resolved: Vec<Option<(Handle, i32, i32, f64, u8)>> = source_data
             .iter()
             .take(4)
             .enumerate()
@@ -1360,7 +1385,12 @@ impl Scene {
                 } else {
                     1
                 };
-                Some((source.handle, marker, parameter, osnap_type))
+                let (subent, marker, parameter) = if osnap_type == 1 {
+                    stored_marker(entity, marker, parameter)
+                } else {
+                    (1, marker, parameter)
+                };
+                Some((source.handle, subent, marker, parameter, osnap_type))
             })
             .collect();
         if resolved.iter().all(Option::is_none) {
@@ -1368,12 +1398,12 @@ impl Scene {
         }
 
         let reference =
-            |source: Handle, marker: i32, parameter: f64, osnap_type: u8, point: Vector3| {
+            |source: Handle, subent: i32, marker: i32, parameter: f64, osnap_type: u8, point: Vector3| {
                 AssocDimensionReference {
                     class_name: "AcDbOsnapPointRef".to_string(),
                     osnap_type,
                     xrefs: vec![source],
-                    main_subent_type: 1,
+                    main_subent_type: subent,
                     main_gs_marker: marker,
                     osnap_distance: parameter,
                     osnap_point: point,
@@ -1386,10 +1416,11 @@ impl Scene {
             if index >= references.len() {
                 break;
             }
-            if let Some((source, marker, parameter, osnap_type)) = resolved {
+            if let Some((source, subent, marker, parameter, osnap_type)) = resolved {
                 associativity |= 1 << index;
                 references[index].push(reference(
                     source,
+                    subent,
                     marker,
                     parameter,
                     osnap_type,
@@ -1544,6 +1575,11 @@ impl Scene {
             let Some((marker, parameter)) = marker_parameter else {
                 continue;
             };
+            let (subent, marker, parameter) = if osnap_type == chain::osnap::END {
+                stored_marker(entity, marker, parameter)
+            } else {
+                (1, marker, parameter)
+            };
             let mut intersection_objects = Vec::new();
             if matches!(
                 source.snap_type,
@@ -1568,7 +1604,7 @@ impl Scene {
                 osnap_type,
                 xrefs,
                 intersection_objects,
-                main_subent_type: 1,
+                main_subent_type: subent,
                 main_gs_marker: marker,
                 osnap_distance: parameter,
                 // Store the source's owning-space point: model coordinates for
@@ -2131,8 +2167,16 @@ impl Scene {
     }
 
     pub(crate) fn infer_dimension_sources(&self, dimension: Handle) -> Vec<Option<Handle>> {
-        let Some(EntityType::Dimension(entity)) = self.document.get_entity(dimension) else {
+        let Some(found @ EntityType::Dimension(entity)) = self.document.get_entity(dimension) else {
             return Vec::new();
+        };
+        // Only geometry of the dimension's own space: a block definition's
+        // member at the same point is not a source (#3502).
+        let owner = found.common().owner_handle;
+        let candidates = || {
+            self.document.entities().filter(move |candidate| {
+                candidate.common().handle != dimension && candidate.common().owner_handle == owner
+            })
         };
         let radial_data = match &**entity {
             Dimension::Radius(radius) => Some((
@@ -2154,10 +2198,7 @@ impl Scene {
         };
         if let Some((center, radius, chord)) = radial_data {
             let tolerance = radius.abs().max(1.0) * 1e-9;
-            let source = self
-                .document
-                .entities()
-                .filter(|candidate| candidate.common().handle != dimension)
+            let source = candidates()
                 .filter_map(|candidate| {
                     let radial = radial_source_matching(candidate, center, radius, chord)?;
                     let center_error = point_distance_squared(radial.center_world(), center);
@@ -2173,9 +2214,7 @@ impl Scene {
             .into_iter()
             .map(|point| {
                 point.and_then(|point| {
-                    self.document
-                        .entities()
-                        .filter(|entity| entity.common().handle != dimension)
+                    candidates()
                         .filter_map(|entity| {
                             source_distance_squared(entity, point)
                                 .map(|distance| (distance, entity.common().handle))

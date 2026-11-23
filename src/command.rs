@@ -4263,7 +4263,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_mid2point_command() {
+    fn mid2point_command() {
         let mut cmd = Mid2PointCommand::new();
         assert_eq!(cmd.name(), "MTP");
         assert_eq!(cmd.prompt(), "_mtp Specify first point of mid:");
@@ -4283,14 +4283,14 @@ mod tests {
     }
 
     #[test]
-    fn test_mid2point_cancel() {
+    fn mid2point_cancel() {
         let mut cmd = Mid2PointCommand::new();
         assert!(matches!(cmd.on_escape(), CmdResult::Cancel));
         assert!(matches!(cmd.on_enter(), CmdResult::Cancel));
     }
 
     #[test]
-    fn test_mtp_registered() {
+    fn mtp_registered() {
         let names = all_registered_command_names();
         assert!(names.contains(&"MTP"));
         assert!(names.contains(&"M2P"));

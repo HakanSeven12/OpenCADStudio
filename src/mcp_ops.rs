@@ -235,7 +235,11 @@ pub static CANCEL: OpDef = OpDef {
     name: "cancel",
     doc: "Cancel the active command, equivalent to pressing Escape.",
     batchable: true,
-    params: &[],
+    params: &[opt(
+        "force",
+        Ty::Raw(r#"{"type":"boolean","default":false}"#),
+        "Also cancel a command another client started.",
+    )],
     rules: &[],
     example: r#"{"op":"cancel"}"#,
 };

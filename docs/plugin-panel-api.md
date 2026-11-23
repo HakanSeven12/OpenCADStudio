@@ -1,4 +1,4 @@
-# Plugin panel API — behaviour as implemented (API v21 base + v22 additions)
+# Plugin panel API — behaviour as implemented (API v21 base, v22 + v27 additions)
 
 Behaviour documentation for the dockable-side-panel surface a plugin
 exercises, verified against a live host (see `plugin-pallet-menu.md` for the
@@ -139,6 +139,34 @@ Evidence: the `firetest-ocsgui` skill (native MCP bridge firetest,
   clobbered), selection restored via `set_selection`.
 - Benchmarks (digest-vs-handle payloads, burst coalescing, apply/revert
   timings) live in the v22 addition's session notes and the table below.
+
+## API v27 — document delta
+
+- `notification_api_version` is **27** (`API_VERSION` moved 26→27,
+  `crates/ocs_plugin_api/src/manifest.rs`). The runner ABI gate is
+  unchanged: manifests report their own `api_version`, and the host streams
+  each plugin the event shapes it understands.
+- **`DocumentChangedDelta`** (discriminant 15, ser+deser) is what an API-27+
+  plugin receives at every document boundary INSTEAD of
+  `DocumentChangedRegions`: `{tab_id, version, added, modified, deleted,
+  records, snapshot, full_refresh_required}` — categorized entity handles
+  of the boundary (added / modified / deleted, folded per handle,
+  deduplicated and ascending), the same (entity, app-name) XDATA/XRecord
+  touch `records` pairs the v13 Regions event carried, an optional
+  `DocumentDeltaSnapshot { version, generation }` correlating the boundary
+  with the tab's V4 snapshot store (versions match the
+  `DocumentChangedV4` event for the same boundary; `generation` increments
+  when the backing file mapping is replaced, so versions from different
+  generations are never comparable — re-fetch the store path and re-open;
+  `snapshot: None` = no V4 store open for the tab, legitimate, not a
+  failure), and `full_refresh_required` (the honesty flag: `true` = the
+  host cannot prove the lists are complete and the plugin MUST
+  resynchronize the whole document; `false` with all lists empty = an EXACT
+  "nothing relevant changed", not the legacy empty-set-unknown). See
+  [plugin-architecture.md](plugin-architecture.md) for the delta section.
+- Legacy plugins (below API 27) keep the byte-identical
+  `DocumentChangedRegions` stream — per-plugin routing means no endpoint
+  receives both variants.
 
 ## Benchmarks (v22 digest vs legacy selection events)
 

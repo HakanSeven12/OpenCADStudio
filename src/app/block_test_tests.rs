@@ -715,7 +715,7 @@ fn block_test_lookup_choice_evaluates_temporary_reference_only() {
 /// lookup row on screen, and a pick from either widget changes only the
 /// temporary reference.
 #[test]
-fn test_window_widgets_apply_visibility_and_lookup_to_the_reference() {
+fn window_widgets_apply_visibility_and_lookup_to_the_reference() {
     use crate::scene::{block_actions, block_distance_parameter as distance, block_lookup};
 
     let (mut app, source, _) = fixture();
@@ -883,7 +883,7 @@ fn test_window_widgets_apply_visibility_and_lookup_to_the_reference() {
 
 /// A widget pick routed while a drawing tab is in front changes nothing.
 #[test]
-fn test_widget_picks_on_a_drawing_tab_do_nothing() {
+fn widget_picks_on_a_drawing_tab_do_nothing() {
     let (mut app, source, _) = fixture();
     let before = app.tabs[source].scene.document.clone();
     let _ = app.update(Message::TestVisibilityPick(0));

@@ -712,16 +712,12 @@ impl LeaderTess for Leader {
                 geom: std::sync::Arc::new(crate::scene::WireGeom {
                     taper_widths: Vec::new(),
                     pattern_stations: Vec::new(),
-                    pick_tris: Vec::new(),
-                    pick_tris_low: Vec::new(),
                     text_verts: Vec::new(),
                     points: vec![],
-                    points_low: Vec::new(),
+                    points_low: Default::default(),
                     snap_pts: vec![],
                     tangent_geoms: vec![],
                     key_vertices: vec![],
-                    fill_tris: vec![],
-                    fill_tris_low: Vec::new(),
                     ..crate::scene::WireGeom::default()
                 }),
                 ..Default::default()
@@ -896,16 +892,18 @@ impl LeaderTess for Leader {
             geom: std::sync::Arc::new(crate::scene::WireGeom {
                 taper_widths: Vec::new(),
                 pattern_stations: Vec::new(),
-                pick_tris: Vec::new(),
-                pick_tris_low: Vec::new(),
                 text_verts: Vec::new(),
                 points,
-                points_low,
+                points_low: points_low.into(),
                 snap_pts: vec![],
                 tangent_geoms: tangents,
                 key_vertices,
-                fill_tris,
-                fill_tris_low,
+                surfaces: crate::scene::model::wire_model::WireSurfaces {
+                    fill_tris,
+                    fill_tris_low,
+                    ..Default::default()
+                }
+                .into_optional(),
                 ..crate::scene::WireGeom::default()
             }),
             ..Default::default()

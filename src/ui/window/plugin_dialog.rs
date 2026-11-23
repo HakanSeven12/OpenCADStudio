@@ -17,6 +17,11 @@ use ocs_plugin_api::dialog::{
 use crate::app::Message;
 use crate::ui::style::form::{button_style, dialog_button, field_style};
 
+/// Height cap of a long table's scroll box in a plugin dialog.
+const TABLE_MAX_HEIGHT_PX: f32 = 420.0;
+/// Tables up to this many rows take their natural height.
+const TABLE_SHRINK_ROWS: usize = 14;
+
 /// State backing an active declarative plugin modal dialog.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PluginDialogState {
@@ -1422,11 +1427,19 @@ impl<'a> FormControlView<'a> {
                     }
                 }
 
+                // Bounded like the dock panel tables: a full-height table of
+                // thousands of rows exhausts memory on every repaint.
+                let long_table =
+                    self.table_values.get(id).map_or(0, |rows| rows.len()) > TABLE_SHRINK_ROWS;
                 let scrollable_rows = scrollable(rows_list)
                     .direction(scrollable::Direction::Vertical(
                         scrollable::Scrollbar::default(),
                     ))
-                    .height(Length::Shrink)
+                    .height(if long_table {
+                        Length::Fixed(TABLE_MAX_HEIGHT_PX)
+                    } else {
+                        Length::Shrink
+                    })
                     .width(Fill);
 
                 grid_col = grid_col.push(scrollable_rows);
@@ -1582,7 +1595,7 @@ mod tests {
     use ocs_plugin_api::dialog::{DialogControl, DialogDef, DialogValue};
 
     #[test]
-    fn test_dialog_state_update_values_inplace() {
+    fn dialog_state_update_values_inplace() {
         let def = DialogDef::new("Test Dialog")
             .with_control(DialogControl::Text {
                 id: "status".to_string(),
@@ -1678,7 +1691,7 @@ mod tests {
     }
 
     #[test]
-    fn test_panel_state_shares_update_values_and_choice_lookup() {
+    fn panel_state_shares_update_values_and_choice_lookup() {
         use crate::ui::window::plugin_panel::PluginPanelState;
         use ocs_plugin_api::dialog::PanelDef;
 

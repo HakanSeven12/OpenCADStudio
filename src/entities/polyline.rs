@@ -1658,7 +1658,7 @@ mod tests {
     }
 
     #[test]
-    fn test_polyline2d_uniform_width_shows_global_width() {
+    fn polyline2d_uniform_width_shows_global_width() {
         let pl = make_test_polyline2d(3, 4.0, 4.0);
         assert_eq!(polyline2d_global_width(&pl), Some(4.0));
 
@@ -1675,7 +1675,7 @@ mod tests {
     }
 
     #[test]
-    fn test_polyline2d_varying_vertex_width_shows_varies() {
+    fn polyline2d_varying_vertex_width_shows_varies() {
         let mut pl = make_test_polyline2d(3, 4.0, 4.0);
         pl.vertices[0].start_width = 1.0;
         pl.vertices[0].end_width = 2.0;
@@ -1695,7 +1695,7 @@ mod tests {
     }
 
     #[test]
-    fn test_polyline2d_modifying_global_width_sets_all_vertex_widths() {
+    fn polyline2d_modifying_global_width_sets_all_vertex_widths() {
         let mut pl = make_test_polyline2d(3, 4.0, 4.0);
         pl.vertices[0].start_width = 1.0;
         pl.vertices[0].end_width = 2.0;
@@ -1712,7 +1712,7 @@ mod tests {
     }
 
     #[test]
-    fn test_polyline2d_modifying_segment_width_materializes_default_width() {
+    fn polyline2d_modifying_segment_width_materializes_default_width() {
         let mut pl = make_test_polyline2d(3, 4.0, 4.0);
         assert_eq!(pl.vertices[0].start_width, 0.0);
 

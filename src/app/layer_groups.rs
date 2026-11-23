@@ -309,17 +309,22 @@ impl OpenCADStudio {
         layers: &[String],
         add: bool,
     ) {
-        let mut members = layer_groups(&self.tabs[i].scene.document)
+        let current = layer_groups(&self.tabs[i].scene.document)
             .into_iter()
             .find(|group| group.name.eq_ignore_ascii_case(name))
-            .map(|group| group.layers)
-            .unwrap_or_default();
+            .map(|group| group.layers);
+        let mut members = current.clone().unwrap_or_default();
         for handle in self.layer_handles(i, layers) {
             if add && !members.contains(&handle) {
                 members.push(handle);
             } else if !add {
                 members.retain(|member| *member != handle);
             }
+        }
+        // An unchanged group is left as read: rewriting it would drop its
+        // DWG record and count as an edit (an empty undo step, #3417).
+        if current.as_ref() == Some(&members) {
+            return;
         }
         let name = name.to_string();
         self.edit_layer_groups(i, "LAYERGROUP", |document| {

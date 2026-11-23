@@ -237,6 +237,8 @@ pub enum TreeNode {
     Unused,
     /// Layers of the objects selected in the drawing.
     Selected,
+    /// The drawing's own layers: none of an xref's (`name|layer`).
+    Local,
     /// The layers of one xref (`name|layer`).
     Xref(String),
     /// Layers with a colour or freeze override in a layout viewport.
@@ -255,6 +257,7 @@ impl TreeNode {
             Self::Used => t!("Used layers").into_owned(),
             Self::Unused => t!("Unused layers").into_owned(),
             Self::Selected => t!("Layers of selected objects").into_owned(),
+            Self::Local => t!("Layers of this drawing").into_owned(),
             Self::Xref(name) | Self::Group(name) | Self::Filter(name) => name.clone(),
             Self::ViewportOverrides => t!("Viewport overrides").into_owned(),
             Self::Found => t!("Layers of the filter result").into_owned(),
@@ -604,11 +607,11 @@ impl LayerPanel {
             (TreeNode::Unused, 1),
             (TreeNode::Selected, 1),
         ];
-        nodes.extend(
-            self.xref_names()
-                .into_iter()
-                .map(|x| (TreeNode::Xref(x), 1)),
-        );
+        let xrefs = self.xref_names();
+        if !xrefs.is_empty() {
+            nodes.push((TreeNode::Local, 1));
+        }
+        nodes.extend(xrefs.into_iter().map(|x| (TreeNode::Xref(x), 1)));
         if !self.vp_cols.is_empty() {
             nodes.push((TreeNode::ViewportOverrides, 1));
         }
@@ -660,6 +663,7 @@ impl LayerPanel {
             TreeNode::Selected => self
                 .selected_object_layers
                 .contains(&layer.name.to_lowercase()),
+            TreeNode::Local => !layer.name.contains('|'),
             TreeNode::Xref(xref) => layer
                 .name
                 .split_once('|')
@@ -709,6 +713,10 @@ impl LayerPanel {
                 .into_iter()
                 .map(|node| TreeRow::Node(node, 1)),
         );
+        // With xrefs attached, one click hides their layers (#3446).
+        if !self.xref_names().is_empty() {
+            rows.push(TreeRow::Node(TreeNode::Local, 1));
+        }
         let section = |rows: &mut Vec<TreeRow>, section: TreeSection, nodes: Vec<TreeNode>| {
             rows.push(TreeRow::Section(section, 1));
             if self.section_open(section) {

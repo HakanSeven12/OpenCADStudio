@@ -90,7 +90,7 @@ fn drawn_precise(document: &Document, dim: &Dimension) -> (Vec<DVec3>, usize) {
         }
     };
     for wire in &wires {
-        collect(&wire.points, &wire.points_low, &mut points);
+        collect(&wire.points, &wire.points_low.iter().collect::<Vec<_>>(), &mut points);
         collect(&wire.fill_tris, &wire.fill_tris_low, &mut points);
         // Key vertices are dually used for snapping/picking; they must be
         // world-space like the rendered points.

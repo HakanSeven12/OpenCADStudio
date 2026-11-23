@@ -79,7 +79,7 @@ fn strokes(wires: &[WireModel]) -> Vec<Vec<[f64; 2]>> {
                 out.push(std::mem::take(&mut stroke));
                 continue;
             }
-            let low = wire.points_low.get(i).copied().unwrap_or([0.0; 3]);
+            let low = wire.points_low.get(i).unwrap_or([0.0; 3]);
             stroke.push([p[0] as f64 + low[0] as f64, p[1] as f64 + low[1] as f64]);
         }
         out.push(stroke);
@@ -629,28 +629,20 @@ fn complex_linetype_in_a_block_stays_at_drawing_length_with_msltscale_off() {
 }
 
 #[test]
-fn complex_linetype_keeps_its_length_in_a_scaled_insert() {
-    let mut document = fence_document();
-    line_block(&mut document, "B", "0", "FENCE", 1.0);
-    let mut insert = Insert::new("B", Vector3::ZERO);
-    insert.set_x_scale(2.0);
-    insert.set_y_scale(2.0);
-    assert_same_stations(
-        &glyph_stations(&insert_wires(&document, insert, 1.0), [0.0, 0.0], 0.5),
-        &line_stations(200.0, 1.0, 1.0, 0.5),
-    );
-}
-
-#[test]
-fn complex_linetype_is_not_stretched_by_a_non_uniform_insert() {
-    let mut document = fence_document();
-    line_block(&mut document, "B", "0", "FENCE", 1.0);
-    let mut insert = Insert::new("B", Vector3::ZERO);
-    insert.set_x_scale(2.0);
-    assert_same_stations(
-        &glyph_stations(&insert_wires(&document, insert, 1.0), [0.0, 0.0], 0.5),
-        &line_stations(200.0, 1.0, 1.0, 0.5),
-    );
+fn complex_linetype_ignores_insert_scale() {
+    // Uniform and non-uniform INSERT scales are the same case for linetype
+    // length: both must leave the measured stations untouched.
+    for (x, y) in [(2.0, 2.0), (2.0, 1.0)] {
+        let mut document = fence_document();
+        line_block(&mut document, "B", "0", "FENCE", 1.0);
+        let mut insert = Insert::new("B", Vector3::ZERO);
+        insert.set_x_scale(x);
+        insert.set_y_scale(y);
+        assert_same_stations(
+            &glyph_stations(&insert_wires(&document, insert, 1.0), [0.0, 0.0], 0.5),
+            &line_stations(200.0, 1.0, 1.0, 0.5),
+        );
+    }
 }
 
 #[test]
@@ -1446,7 +1438,7 @@ fn a_tapered_polyline_narrows_along_its_dashes() {
     for dash in dashes {
         assert_eq!(dash.taper_widths.len(), dash.points.len());
         for (point, width) in dash.points.iter().zip(&dash.taper_widths) {
-            let low = dash.points_low.first().map_or(0.0, |low| low[0]);
+            let low = dash.points_low.get(0).map_or(0.0, |low| low[0]);
             let x = point[0] + low;
             assert!((width - x * 0.06).abs() < 1e-2, "{width} at x={x}");
             widest = widest.max(*width);
@@ -1473,7 +1465,7 @@ fn a_tapered_polyline_restarts_its_pattern_at_each_vertex() {
     );
     let starts_at_vertex = |wires: &[WireModel]| {
         dash_wires(wires).iter().any(|dash| {
-            let low = dash.points_low.first().map_or(0.0, |low| low[0]);
+            let low = dash.points_low.get(0).map_or(0.0, |low| low[0]);
             (dash.points[0][0] + low - 60.0).abs() < 1e-3
         })
     };

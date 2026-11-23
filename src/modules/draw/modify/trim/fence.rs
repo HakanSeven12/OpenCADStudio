@@ -44,35 +44,23 @@ pub(crate) fn crossing_trim_lwpolyline(
     geos: &[Geo],
     window: CrossingWindow,
 ) -> Option<Vec<EntityType>> {
-    let handle = poly.common.handle;
     let n = poly.vertices.len();
     if n < 2 {
         return None;
     }
-    let closed = poly.is_closed;
-    let seg_count = if closed { n } else { n - 1 };
-    let total = seg_count as f64;
+    let seg_count = if poly.is_closed { n } else { n - 1 };
     let vertex_xy = |i: usize| {
         let v = &poly.vertices[i % n];
         [v.location.x, v.location.y]
     };
     let seg_bulge = |i: usize| -> f64 { poly.vertices[i % n].bulge };
 
-    // Cuts along the whole polyline as global parameters (segment index +
-    // local parameter), as a single pick finds them: vertices are not cuts,
-    // and an open polyline's own ends are not either (#2130).
-    let mut cuts = lwpoly_self_cut_params(poly, geos);
     // The parts of the polyline inside the crossing box.
     let mut inside = Vec::<(f64, f64)>::new();
     for i in 0..seg_count {
         let a = vertex_xy(i);
         let b = vertex_xy(i + 1);
         let bulge = seg_bulge(i);
-        cuts.extend(
-            polyline_seg_ts(a, b, bulge, handle, geos)
-                .into_iter()
-                .map(|t| i as f64 + t),
-        );
         let window_range = if let Some(ba) = BulgeArc::from_bulge(a, b, bulge) {
             let steps = 32usize;
             let mut min_t: Option<f64> = None;
@@ -102,6 +90,80 @@ pub(crate) fn crossing_trim_lwpolyline(
     }
     if inside.is_empty() {
         return None;
+    }
+    trim_lwpolyline_where(poly, geos, |(lo, hi)| {
+        inside
+            .iter()
+            .any(|&(a, b)| b >= lo - 1e-6 && a <= hi + 1e-6 && hi - lo > 1e-6)
+    })
+}
+
+/// Fence trims an LwPolyline the way Crossing does: every cut along the whole
+/// polyline is found once, and each piece a fence crossing lies on goes.
+/// Trimming the pieces again one by one lost the polyline's crossings with
+/// itself, so a later crossing trimmed too far (#3505).
+pub(crate) fn fence_trim_lwpolyline(
+    poly: &LwPolyline,
+    geos: &[Geo],
+    fence_geos: &[Geo],
+) -> Option<Vec<EntityType>> {
+    let n = poly.vertices.len();
+    if n < 2 {
+        return None;
+    }
+    let seg_count = if poly.is_closed { n } else { n - 1 };
+    let crossings: Vec<f64> = (0..seg_count)
+        .flat_map(|i| {
+            let (a, b) = (&poly.vertices[i % n], &poly.vertices[(i + 1) % n]);
+            polyline_seg_ts(
+                [a.location.x, a.location.y],
+                [b.location.x, b.location.y],
+                a.bulge,
+                Handle::new(FENCE_PROBE),
+                fence_geos,
+            )
+            .into_iter()
+            .map(move |t| i as f64 + t)
+        })
+        .collect();
+    if crossings.is_empty() {
+        return None;
+    }
+    trim_lwpolyline_where(poly, geos, |(lo, hi)| {
+        crossings.iter().any(|&c| c > lo + 1e-9 && c < hi - 1e-9)
+    })
+}
+
+/// Cut `poly` at every cutting edge and at its crossings with itself, drop
+/// the pieces `removes` names, and return what is left.
+fn trim_lwpolyline_where(
+    poly: &LwPolyline,
+    geos: &[Geo],
+    removes: impl Fn((f64, f64)) -> bool,
+) -> Option<Vec<EntityType>> {
+    let handle = poly.common.handle;
+    let n = poly.vertices.len();
+    let closed = poly.is_closed;
+    let seg_count = if closed { n } else { n - 1 };
+    let total = seg_count as f64;
+
+    // Cuts along the whole polyline as global parameters (segment index +
+    // local parameter), as a single pick finds them: vertices are not cuts,
+    // and an open polyline's own ends are not either (#2130).
+    let mut cuts = lwpoly_self_cut_params(poly, geos);
+    for i in 0..seg_count {
+        let (a, b) = (&poly.vertices[i % n], &poly.vertices[(i + 1) % n]);
+        cuts.extend(
+            polyline_seg_ts(
+                [a.location.x, a.location.y],
+                [b.location.x, b.location.y],
+                a.bulge,
+                handle,
+                geos,
+            )
+            .into_iter()
+            .map(|t| i as f64 + t),
+        );
     }
     if closed {
         for t in &mut cuts {
@@ -140,11 +202,7 @@ pub(crate) fn crossing_trim_lwpolyline(
             pieces.push((pair[0], pair[1]));
         }
     }
-    let overlaps = |(lo, hi): (f64, f64)| {
-        inside
-            .iter()
-            .any(|&(a, b)| b >= lo - 1e-6 && a <= hi + 1e-6 && hi - lo > 1e-6)
-    };
+    let overlaps = |piece: (f64, f64)| removes(piece);
     let mut removed: Vec<(f64, f64)> = if closed {
         // The wrapped piece counts as one: both of its halves go together.
         let wrapped = (cuts[cuts.len() - 1], total);
@@ -372,8 +430,11 @@ pub(crate) fn fence_pieces(
     extend: bool,
 ) -> Option<Vec<EntityType>> {
     if !extend {
-        if let (EntityType::LwPolyline(poly), Some(window)) = (e, window) {
-            return crossing_trim_lwpolyline(poly, geos, window);
+        if let EntityType::LwPolyline(poly) = e {
+            return match window {
+                Some(window) => crossing_trim_lwpolyline(poly, geos, window),
+                None => fence_trim_lwpolyline(poly, geos, fence_geos),
+            };
         }
     }
 

@@ -258,7 +258,7 @@ sequenceDiagram
 
 ## Notifications
 
-- **Host → plugin:** `HostNotification` in [`src/host.rs`](src/host.rs). V4-only delivery via `PluginManager::broadcast_notification`. Currently emitted examples: `DocumentChangedV4`, `SelectionChangedV4`, `DocumentTabClosed`.
+- **Host → plugin:** `HostNotification` in [`src/host.rs`](src/host.rs). V4-only delivery via `PluginManager::broadcast_notification`. Currently emitted examples: `DocumentChangedV4`, `SelectionChangedV4`, `DocumentTabClosed`, and — routed per endpoint instead of the legacy `DocumentChangedRegions` stream to manifests declaring API 27+ — `DocumentChangedDelta` (`broadcast_for_api`).
 - **Plugin → host:** `PluginNotification` in [`src/host.rs`](src/host.rs). Examples: `Output`, `Progress`, `Log`. Handler installed via `PluginManager::set_notification_handler`.
 
 Broadcasting is V4-gated inside `PluginManager::broadcast_notification`: V2/V3 processes are skipped. The handler runs on the V4 reader thread and must not block.

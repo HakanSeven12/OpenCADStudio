@@ -195,7 +195,12 @@ impl OpenCADStudio {
                 let describe = |c: &Color| match c {
                     Color::ByLayer => "ByLayer".to_string(),
                     Color::ByBlock => "ByBlock".to_string(),
-                    Color::Index(n) => crate::tf!("index {n}").into_owned(),
+                    // 1-7 by their (translated) names, the rest by number.
+                    Color::Index(n @ 1..=7) => crate::t!(
+                        crate::ui::window::attman_dialog::COLORS[*n as usize + 1]
+                    )
+                    .into_owned(),
+                    Color::Index(n) => n.to_string(),
                     _ => "(custom)".to_string(),
                 };
                 let arg = if cmd == "BYLAYER" {
@@ -1020,6 +1025,7 @@ impl OpenCADStudio {
                     | "UCSORTHO"
                     | "UCSVIEW"
                     | "LAYOUTCREATEVIEWPORT"
+                    | "PICKLOCKED"
                     | "PDFIMPORTMODE"
                     | "PDFIMPORTFILTER"
                     | "PDFIMPORTLAYERS"
@@ -1028,6 +1034,7 @@ impl OpenCADStudio {
                     | "PDFSHXBESTFONT"
                     | "PDFSHXTEXTSETTINGS"
                     | "XDWGFADECTL"
+                    | "LAYLOCKFADECTL"
                     | "POINTCLOUDCLIPFRAME"
                     | "POINTCLOUDDENSITY"
                     | "POINTCLOUDPOINTSIZE"
@@ -1226,30 +1233,31 @@ impl OpenCADStudio {
                         }
                         return Some(self.finish_dispatch(cmd));
                     }
-                    if name == "XDWGFADECTL" {
-                        let current = crate::scene::cache::block_cache::xref_fade_ctl();
+                    if name == "XDWGFADECTL" || name == "LAYLOCKFADECTL" {
+                        let locked = name == "LAYLOCKFADECTL";
+                        let current = if locked {
+                            crate::scene::cache::block_cache::layer_lock_fade_ctl()
+                        } else {
+                            crate::scene::cache::block_cache::xref_fade_ctl()
+                        };
                         if let Some(value) = &value {
                             match value.parse::<i32>().ok().filter(|v| (-90..=90).contains(v)) {
+                                Some(fade) if locked => self.set_layer_lock_fade(fade),
                                 Some(fade) => self.set_xref_fade(fade),
                                 // Refused: say why and ask again.
                                 None => {
                                     self.command_line
                                         .push_rejection("Requires an integer between -90 and 90.");
                                     self.command_line.push_output(
-                                        &crate::ui::command_line::value_prompt(
-                                            "XDWGFADECTL",
-                                            &current,
-                                        ),
+                                        &crate::ui::command_line::value_prompt(&name, &current),
                                     );
                                     self.pending_setvar = Some(name.clone());
                                 }
                             }
                         } else {
-                            self.command_line
-                                .push_output(&crate::ui::command_line::value_prompt(
-                                    "XDWGFADECTL",
-                                    &current,
-                                ));
+                            self.command_line.push_output(
+                                &crate::ui::command_line::value_prompt(&name, &current),
+                            );
                             self.pending_setvar = Some(name.clone());
                         }
                         return Some(self.finish_dispatch(cmd));
@@ -1416,13 +1424,15 @@ impl OpenCADStudio {
                         }
                         return Some(self.finish_dispatch(cmd));
                     }
-                    if name == "LAYOUTCREATEVIEWPORT" {
+                    if matches!(name.as_str(), "LAYOUTCREATEVIEWPORT" | "PICKLOCKED") {
                         // A profile switch shown and taken as ON / OFF or 1 / 0.
-                        let current = if crate::scene::layout_create_viewport() {
-                            "ON"
+                        let pick_locked = name == "PICKLOCKED";
+                        let is_on = if pick_locked {
+                            crate::scene::pick_locked()
                         } else {
-                            "OFF"
+                            crate::scene::layout_create_viewport()
                         };
+                        let current = if is_on { "ON" } else { "OFF" };
                         let parsed = value.as_deref().map(|v| {
                             match v
                                 .trim()
@@ -1437,8 +1447,26 @@ impl OpenCADStudio {
                         });
                         match parsed {
                             Some(Some(on)) => {
-                                if crate::scene::layout_create_viewport() != on {
-                                    crate::scene::set_layout_create_viewport(on);
+                                if is_on != on {
+                                    if pick_locked {
+                                        crate::scene::set_pick_locked(on);
+                                        // What is already selected on a locked
+                                        // layer leaves the selection with it.
+                                        if !on {
+                                            for tab in &mut self.tabs {
+                                                let locked: Vec<_> = tab
+                                                    .scene
+                                                    .selected_entities()
+                                                    .into_iter()
+                                                    .map(|(handle, _)| handle)
+                                                    .filter(|&h| tab.scene.is_layer_locked(h))
+                                                    .collect();
+                                                tab.scene.deselect_entities(&locked);
+                                            }
+                                        }
+                                    } else {
+                                        crate::scene::set_layout_create_viewport(on);
+                                    }
                                     self.save_config();
                                 }
                             }
@@ -4923,7 +4951,13 @@ fn command_color(arg: &str) -> Option<document::types::Color> {
         "BLUE" => Some(Color::Index(5)),
         "MAGENTA" => Some(Color::Index(6)),
         "WHITE" => Some(Color::Index(7)),
-        index => index.parse::<i16>().ok().map(Color::from_index),
+        index => index.parse::<i16>().ok().map(Color::from_index).or_else(|| {
+            // The colour names as the prompt shows them in the UI language.
+            let colors = &crate::ui::window::attman_dialog::COLORS;
+            (2..colors.len())
+                .find(|&n| crate::t!(colors[n]).to_uppercase() == index.to_uppercase())
+                .map(|n| Color::Index(n as u8 - 1))
+        }),
     }
 }
 
@@ -5138,7 +5172,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cad_selection_and_model_space_sysvars() {
+    fn cad_selection_and_model_space_sysvars() {
         let mut app = fresh_app();
 
         // SELECTIONAREA toggle
@@ -5193,7 +5227,7 @@ mod tests {
     }
 
     #[test]
-    fn test_background_command_modes() {
+    fn background_command_modes() {
         let mut app = fresh_app();
         let i = app.active_tab;
 
@@ -5235,7 +5269,7 @@ mod tests {
     }
 
     #[test]
-    fn test_reviewer_feedback_fixes() {
+    fn reviewer_feedback_fixes() {
         let mut app = fresh_app();
 
         // An empty background restores MatchTheme.
@@ -5268,7 +5302,7 @@ mod tests {
     }
 
     #[test]
-    fn test_grip_and_desk_surround_sysvars() {
+    fn grip_and_desk_surround_sysvars() {
         let mut app = fresh_app();
 
         // 1. Desk surround background message
@@ -5551,6 +5585,18 @@ impl OpenCADStudio {
             )
             .as_ref(),
         );
+    }
+
+    /// LAYLOCKFADECTL: store it in the profile and redraw every tab.
+    pub(in crate::app) fn set_layer_lock_fade(&mut self, fade: i32) {
+        crate::scene::cache::block_cache::set_layer_lock_fade_ctl(fade);
+        self.save_config();
+        for tab in &mut self.tabs {
+            if !tab.is_start {
+                tab.scene.recolor_meshes();
+                tab.scene.bump_geometry();
+            }
+        }
     }
 
     /// XDWGFADECTL: store it in the profile, show it on the ribbon and redraw

@@ -7,10 +7,8 @@
 //! transport learned this the hard way (`src/rest.rs`); this module is the
 //! shared ceiling for every other line-oriented channel.
 //!
-//! The cap matches the plugin IPC frame budget
-//! (`MAX_MESSAGE_SIZE = 64 MiB` in `crates/ocs_plugin_api`): generous enough
-//! that no legitimate message (base64 images included) is refused, small
-//! enough that memory stays bounded.
+//! 64 MiB is generous enough that no legitimate message (base64 images
+//! included) is refused, small enough that memory stays bounded.
 
 use std::io::{BufRead, Read};
 

@@ -506,6 +506,13 @@ pub(crate) fn supported(e: &EntityType) -> bool {
     match e {
         EntityType::Polyline2D(p) => return in_xy(p.normal),
         EntityType::Solid(s) => return in_xy(s.normal),
+        EntityType::Insert(i) => return in_xy(i.normal),
+        // A flat spline in the XY plane; its stored normal is often unset.
+        EntityType::Spline(s) => {
+            let mut z = s.control_points.iter().chain(&s.fit_points).map(|p| p.z);
+            let first = z.next();
+            return first.is_some_and(|f| z.all(|z| z == f));
+        }
         _ => {}
     }
     matches!(
@@ -518,6 +525,10 @@ pub(crate) fn supported(e: &EntityType) -> bool {
             | EntityType::Point(_)
             | EntityType::Text(_)
             | EntityType::MText(_)
+            | EntityType::AttributeDefinition(_)
+            | EntityType::Wipeout(_)
+            | EntityType::Hatch(_)
+            | EntityType::Dimension(_)
     )
 }
 #[cfg(test)]
@@ -2407,8 +2418,11 @@ fn action_schedule(
                 return Err("An action chain names more than one action.");
             }
             let Some(&next) = by_chain_id.get(id) else {
-                // Native Stretch records also carry binding codes in this list.
-                if graph_nodes.contains(id) || matches!(kind, Kind::Stretch | Kind::PolarStretch) {
+                // Native Stretch and Flip records also carry the codes of their
+                // selected objects (erased ones too) in this list.
+                if graph_nodes.contains(id)
+                    || matches!(kind, Kind::Stretch | Kind::PolarStretch | Kind::Flip)
+                {
                     continue;
                 }
                 return Err("An action chain names an object outside this block.");

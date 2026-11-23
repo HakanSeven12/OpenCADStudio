@@ -1967,7 +1967,7 @@ fn trim_circle_with_tangent_arcs_touching_at_endpoints() {
 }
 
 #[test]
-fn test_trim_circle_between_two_tangent_lines() {
+fn trim_circle_between_two_tangent_lines() {
     use document::entities::{Circle as CircleEnt, Line as LineEnt};
     let mut c = CircleEnt::new();
     c.common.handle = Handle::new(1);
@@ -2327,7 +2327,7 @@ fn trim_arc_selection_tracking_near_start_endpoint() {
 }
 
 #[test]
-fn test_tangent_circles_or_arcs_trim() {
+fn tangent_circles_or_arcs_trim() {
     use document::entities::{Arc as ArcEnt, Circle as CircleEnt};
     let mut c1 = CircleEnt::new();
     c1.common.handle = Handle::new(1);
@@ -2538,7 +2538,7 @@ fn test_tangent_circles_or_arcs_trim() {
 }
 
 #[test]
-fn test_skinny_ellipse_crossing_arc() {
+fn skinny_ellipse_crossing_arc() {
     use document::entities::{Arc as ArcEnt, Ellipse as EllipseEnt};
     let mut e = EllipseEnt::new();
     e.common.handle = Handle::new(100);
@@ -2601,7 +2601,7 @@ fn test_skinny_ellipse_crossing_arc() {
 }
 
 #[test]
-fn test_trim_line_tangent_to_arc() {
+fn trim_line_tangent_to_arc() {
     use document::entities::{Arc as ArcEnt, Line as LineEnt};
     let mut l1 = LineEnt::new();
     l1.common.handle = Handle::new(1);
@@ -2631,7 +2631,7 @@ fn test_trim_line_tangent_to_arc() {
 }
 
 #[test]
-fn test_trim_arc_tangent_to_two_lines() {
+fn trim_arc_tangent_to_two_lines() {
     use crate::command::{TangentObject, WorkingPlane};
     use crate::modules::draw::draw::arc::{solve_arc_3_inputs, ArcPick};
     use document::entities::{Arc as CadArc, Line as LineEnt};
@@ -2716,7 +2716,7 @@ fn test_trim_arc_tangent_to_two_lines() {
 }
 
 #[test]
-fn test_trim_arc_tangent_angled_lines() {
+fn trim_arc_tangent_angled_lines() {
     use crate::command::{TangentObject, WorkingPlane};
     use crate::modules::draw::draw::arc::{solve_arc_3_inputs, ArcPick};
     use document::entities::{Arc as CadArc, Line as LineEnt};
@@ -2810,7 +2810,7 @@ fn test_trim_arc_tangent_angled_lines() {
 }
 
 #[test]
-fn test_arc_tangent_line_precision_sweep() {
+fn arc_tangent_line_precision_sweep() {
     use crate::command::{TangentObject, WorkingPlane};
     use crate::modules::draw::draw::arc::{solve_arc_3_inputs, ArcPick};
     use document::entities::{Arc as CadArc, Line as LineEnt};
@@ -2899,4 +2899,39 @@ fn test_arc_tangent_line_precision_sweep() {
     }
     println!("Sweep results: failed_cuts={failed_cuts}, max_dist={max_dist:e}");
     assert_eq!(failed_cuts, 0, "No cuts should fail across angle sweep");
+}
+
+/// A fence that crosses one self-crossing polyline twice removes only the two
+/// pieces it touches: the crossing of the polyline with itself stays a cut
+/// after the first piece is gone (#3505).
+#[test]
+fn fence_keeps_the_self_crossing_cut_of_a_polyline() {
+    let mut poly = LwPolyline::new();
+    poly.common.handle = Handle::new(1);
+    poly.vertices = [(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)]
+        .into_iter()
+        .map(|(x, y)| LwVertex::from_coords(x, y))
+        .collect();
+    let all = vec![EntityType::LwPolyline(poly)];
+    // Crosses the first segment at (2, 2) and the last one at (8, 2).
+    let fence = [[1.0, 3.0], [3.0, 1.0], [7.0, 1.0], [9.0, 3.0]];
+    let replacements = fence_pass(
+        &all,
+        &ModifyEntityIndex::build(&all),
+        &build_geos(&all),
+        &fence,
+        None,
+        false,
+    );
+    let (_, pieces) = replacements
+        .iter()
+        .find(|(handle, _)| *handle == Handle::new(1))
+        .expect("the polyline is trimmed");
+    assert_eq!(pieces.len(), 1, "{pieces:?}");
+    let EntityType::LwPolyline(kept) = &pieces[0] else {
+        panic!("expected a polyline piece, got {:?}", pieces[0]);
+    };
+    let ends = [kept.vertices[0].location, kept.vertices[kept.vertices.len() - 1].location];
+    let near = |p: document::types::Vector2, x: f64, y: f64| (p.x - x).abs() < 1e-6 && (p.y - y).abs() < 1e-6;
+    assert!(near(ends[0], 5.0, 5.0) && near(ends[1], 0.0, 10.0), "{ends:?}");
 }

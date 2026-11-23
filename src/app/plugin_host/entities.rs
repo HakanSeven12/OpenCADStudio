@@ -502,6 +502,7 @@ impl<'a> HostSession<'a> {
         }
         let scene = &mut self.app.tabs[self.tab].scene;
         scene.replace_selection_exact(handles);
+        self.refresh_grips_of_active_tab();
         #[cfg(not(target_arch = "wasm32"))]
         {
             if self.tab == self.app.active_tab {

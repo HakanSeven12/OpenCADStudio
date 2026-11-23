@@ -581,8 +581,14 @@ fn read_edge_curve(
         // A whole circle or ellipse has one vertex, which fixes where the turn starts.
         let low = turn_near(angle(ends[0]), near);
         let mut high = if apart { turn_near(angle(ends[1]), low) } else { low + TAU };
-        while high <= low + 1e-12 {
+        // `turn_near` gives the turn within half a turn of `low`, so one more turn is enough.
+        if high <= low + 1e-12 {
             high += TAU;
+        }
+        // A stored parameter that is not finite, or so large that a turn does not change it (a
+        // damaged file), gives no range: a loop that adds turns would never end.
+        if low.is_nan() || high.is_nan() || high <= low + 1e-12 {
+            return None;
         }
         return Some((curve, [low, high]));
     }

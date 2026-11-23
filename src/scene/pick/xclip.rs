@@ -491,7 +491,7 @@ pub fn clip_wires(wires: &mut Vec<WireModel>, poly: &[[f64; 2]]) {
                     if !hi[0].is_finite() || !hi[1].is_finite() {
                         return NAN3;
                     }
-                    let lo = w.points_low.get(i).copied().unwrap_or([0.0; 3]);
+                    let lo = w.points_low.get(i).unwrap_or([0.0; 3]);
                     let a = abs(hi, lo);
                     [(a[0] - rx) as f32, (a[1] - ry) as f32, a[2] as f32]
                 })
@@ -523,7 +523,7 @@ pub fn clip_wires(wires: &mut Vec<WireModel>, poly: &[[f64; 2]]) {
                 lo.push([lx, ly, lz]);
             }
             w.points = hi;
-            w.points_low = lo;
+            w.points_low = lo.into();
             w.dash_closure = Default::default();
             if let Some(source_length) = source_length {
                 w.pattern_stations = encode_pattern_stations(
@@ -661,16 +661,12 @@ pub fn frame_wire(
         geom: std::sync::Arc::new(crate::scene::WireGeom {
             taper_widths: Vec::new(),
             pattern_stations: Vec::new(),
-            pick_tris: Vec::new(),
-            pick_tris_low: Vec::new(),
             text_verts: Vec::new(),
             points: hi,
-            points_low: lo,
+            points_low: lo.into(),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![],
-            fill_tris: vec![],
-            fill_tris_low: Vec::new(),
             ..crate::scene::WireGeom::default()
         }),
         ..Default::default()

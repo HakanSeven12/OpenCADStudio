@@ -192,7 +192,26 @@
 /// v26 appends `TableOperation::CustomPropertiesSet`: a plugin sets the
 /// drawing's custom properties (DWGPROPS Custom) in one undo step. A v25 host
 /// cannot decode it, so a plugin that sends it declares v26.
-pub const API_VERSION: u32 = 26;
+/// v27 adds `HostNotification::DocumentChangedDelta` (wire tag 15): the
+/// categorized, exact successor of the v13 `DocumentChangedRegions` boundary
+/// notification — `added` / `modified` / `deleted` entity handle lists plus
+/// the same record tuples, an optional V4 snapshot correlation, and an
+/// explicit `full_refresh_required` flag for boundaries whose incremental
+/// sets the host cannot prove complete. The host routes per endpoint: plugins
+/// reporting v27+ receive the delta INSTEAD OF the Regions notification at
+/// every document boundary (no duplicate stream), while plugins reporting
+/// v26 or older keep their exact legacy Regions streams. A v26 runner cannot
+/// decode tag 15, so the host never sends the variant to it — the
+/// `notification_api_version` gate drops it.
+/// v28 appends `InteractiveCommand::input_kind` and
+/// `InteractiveCommand::on_text_input` (with `InteractiveInputKind`,
+/// `HostRequest::GetInputKind`, `HostResponse::InputKind`, and
+/// `InteractiveEvent::TextInput`) for command-line text prompts; plugins on
+/// v3–v27 remain supported unchanged.
+/// v29 appends `PluginRequest::PanelSurfacePublish`: a plugin publishes a
+/// bounded `PanelScene` (`PanelSurface::Scene`) for a panel it registered and
+/// gets the stored revision or a typed `SurfaceReject` back.
+pub const API_VERSION: u32 = 29;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the
@@ -273,6 +292,7 @@ pub struct EntityClasses {
 #[cfg(test)]
 mod tests {
     use crate::test_lock::ENV_LOCK;
+    use serial_test::serial;
 
     use super::*;
 
@@ -300,6 +320,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn effective_max_defaults_to_api_version() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var(MAX_API_VERSION_ENV);
@@ -307,6 +328,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn effective_max_can_disable_v4() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var(MAX_API_VERSION_ENV, "3");
@@ -318,6 +340,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn effective_max_below_minimum_is_v3_only_mode() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var(MAX_API_VERSION_ENV, "2");
@@ -329,6 +352,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn effective_max_clamps_to_supported_range() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var(MAX_API_VERSION_ENV, "99");
@@ -339,6 +363,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn host_accepts_supported_range() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var(MAX_API_VERSION_ENV);

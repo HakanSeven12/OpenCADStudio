@@ -97,7 +97,7 @@ impl OpenCADStudio {
         // `gain_focus` alone is ignored by most Linux WMs (focus-stealing
         // prevention), so pair it with an urgency hint so the window is at
         // least flagged for attention when the compositor blocks the raise.
-        match self.main_window {
+        let focus = match self.main_window {
             Some(id) => Task::batch([
                 iced::window::gain_focus(id),
                 iced::window::request_user_attention(
@@ -106,7 +106,9 @@ impl OpenCADStudio {
                 ),
             ]),
             None => Task::none(),
-        }
+        };
+        // A previously focused command input must not capture the answer.
+        Task::batch([focus, self.unfocus_widgets()])
     }
 
     pub(in crate::app) fn close_unsaved_dialog_window(&mut self) -> Task<Message> {
@@ -512,6 +514,7 @@ impl OpenCADStudio {
         if entities.is_empty() {
             return Err("No model-space entities in that file.".to_string());
         }
+        let file_units = doc.header.insertion_units;
         let base = glam::DVec3::new(
             doc.header.model_space_insertion_base.x,
             doc.header.model_space_insertion_base.y,
@@ -649,6 +652,12 @@ impl OpenCADStudio {
             for def in defs.iter().chain(file_def.iter()) {
                 import_block_def_graph(document, def, &records);
             }
+        }
+        // The block is drawn in the file's units: a reference placed later
+        // scales by them against the drawing's INSUNITS, as an XREF of the
+        // file does (#3474). A unitless file stays unitless.
+        if let Some(record) = self.tabs[i].scene.document.block_records.get_mut(&name) {
+            record.units = file_units;
         }
         self.tabs[i].scene.populate_meshes_from_document();
         self.tabs[i].dirty = true;
@@ -2085,7 +2094,7 @@ mod tests {
     }
 
     #[test]
-    fn test_interactive_dialog_action_pick_updates_table() {
+    fn interactive_dialog_action_pick_updates_table() {
         use crate::command::{CadCommand, CmdResult};
         use ocs_plugin_api::dialog::{
             DialogActionResponse, DialogControl, DialogDef, DialogEvent, DialogValue,
@@ -2194,7 +2203,7 @@ mod tests {
     }
 
     #[test]
-    fn test_interactive_dialog_choice_static_and_dynamic_text_and_tab_routing() {
+    fn interactive_dialog_choice_static_and_dynamic_text_and_tab_routing() {
         use crate::command::{CadCommand, CmdResult};
         use ocs_plugin_api::dialog::{
             DialogActionResponse, DialogControl, DialogDef, DialogEvent, DialogValue,
@@ -2316,7 +2325,7 @@ mod tests {
     }
 
     #[test]
-    fn test_interactive_dialog_button_fallback_when_command_returns_none() {
+    fn interactive_dialog_button_fallback_when_command_returns_none() {
         use ocs_plugin_api::dialog::{DialogControl, DialogDef};
 
         let mut app = fresh();
@@ -2419,7 +2428,7 @@ mod tests {
     }
 
     #[test]
-    fn test_interactive_dialog_autolisp_exact_flow() {
+    fn interactive_dialog_autolisp_exact_flow() {
         use crate::command::CadCommand;
         use ocs_plugin_api::dialog::*;
 

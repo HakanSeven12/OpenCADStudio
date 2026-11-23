@@ -1702,24 +1702,30 @@ fn page_size_mm(path: &str, page: &str) -> String {
 }
 
 #[cfg(test)]
-mod import_window_tests {
+mod test_support {
     use super::*;
-    use crate::app::ModalKind;
-    use std::sync::Arc;
 
-    fn new_app() -> OpenCADStudio {
+    pub(super) fn new_app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app
     }
 
-    fn last_line(app: &OpenCADStudio) -> String {
+    pub(super) fn last_line(app: &OpenCADStudio) -> String {
         app.command_line
             .history
             .last()
             .map(|entry| entry.text.clone())
             .unwrap_or_default()
     }
+}
+
+#[cfg(test)]
+mod import_window_tests {
+    use super::*;
+    use super::test_support::{last_line, new_app};
+    use crate::app::ModalKind;
+    use std::sync::Arc;
 
     /// A PDF with a 10 × 5 inch page and a 2 × 1 inch page, registered as
     /// a file picked this session under `name`.
@@ -1893,22 +1899,9 @@ mod import_window_tests {
 #[cfg(test)]
 mod point_cloud_attach_read_tests {
     use super::*;
+    use super::test_support::{last_line, new_app};
     use crate::app::ModalKind;
     use crate::scene::model::point_cloud::test_scan_file;
-
-    fn new_app() -> OpenCADStudio {
-        let mut app = OpenCADStudio::new_for_test();
-        app.automation_op(r#"{"op":"new"}"#);
-        app
-    }
-
-    fn last_line(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .last()
-            .map(|entry| entry.text.clone())
-            .unwrap_or_default()
-    }
 
     /// The window opens only when the read ends, after a `Reading` line,
     /// with what the read found.
@@ -1998,10 +1991,8 @@ mod point_cloud_attach_read_tests {
     #[test]
     fn a_file_that_cannot_be_read_gives_the_two_errors() {
         let mut app = new_app();
-        let path = std::env::temp_dir().join(format!(
-            "ocs-pointcloud-attach-bad-{}.rcs",
-            std::process::id()
-        ));
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join("ocs-pointcloud-attach-bad.rcs");
         std::fs::write(&path, b"not a scan").expect("write the bad scan");
         let task = app.read_point_cloud_for_attach(path.clone());
         app.drive_headless_task(task).expect("the read task");
@@ -2080,23 +2071,10 @@ mod point_cloud_attach_read_tests {
 #[cfg(test)]
 mod underlay_attach_read_tests {
     use super::*;
+    use super::test_support::{last_line, new_app};
     use crate::app::ModalKind;
     use document::entities::UnderlayType;
     use std::sync::Arc;
-
-    fn new_app() -> OpenCADStudio {
-        let mut app = OpenCADStudio::new_for_test();
-        app.automation_op(r#"{"op":"new"}"#);
-        app
-    }
-
-    fn last_line(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history
-            .last()
-            .map(|entry| entry.text.clone())
-            .unwrap_or_default()
-    }
 
     /// A PDF with a 10 × 5 inch page and a 2 × 1 inch page.
     fn two_pages() -> Vec<u8> {
@@ -2129,11 +2107,11 @@ mod underlay_attach_read_tests {
     }
 
     /// A file in the temporary folder, with a name for this process.
-    fn temp_file(name: &str, bytes: &[u8]) -> std::path::PathBuf {
-        let path =
-            std::env::temp_dir().join(format!("ocs-underlay-attach-{}-{name}", std::process::id()));
+    fn temp_file(name: &str, bytes: &[u8]) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let path = dir.path().join(format!("ocs-underlay-attach-{name}"));
         std::fs::write(&path, bytes).expect("write the test file");
-        path
+        (dir, path)
     }
 
     /// The window opens only when the read ends, after a `Reading` line,
@@ -2185,8 +2163,8 @@ mod underlay_attach_read_tests {
     /// read from the disk, and the window opens when it ends.
     #[test]
     fn the_attach_picker_reads_pdf_and_dgn_files_on_a_worker() {
-        let pdf = temp_file("picked.pdf", &two_pages());
-        let dgn = temp_file(
+        let (_pdf_dir, pdf) = temp_file("picked.pdf", &two_pages());
+        let (_dgn_dir, dgn) = temp_file(
             "picked.dgn",
             &crate::modules::insert::dgn_import::test_files::minimal_v7_line(),
         );
@@ -2214,7 +2192,7 @@ mod underlay_attach_read_tests {
     #[test]
     fn a_file_picked_again_is_read_again() {
         let mut app = new_app();
-        let dgn = temp_file(
+        let (_dgn_dir, dgn) = temp_file(
             "picked-again.dgn",
             &crate::modules::insert::dgn_import::test_files::minimal_v7_line(),
         );
@@ -2246,7 +2224,7 @@ mod underlay_attach_read_tests {
     fn a_changed_file_picked_again_shows_its_new_units() {
         let mut app = new_app();
         let mut bytes = crate::modules::insert::dgn_import::test_files::minimal_v7_line();
-        let dgn = temp_file("changed-units.dgn", &bytes);
+        let (_dgn_dir, dgn) = temp_file("changed-units.dgn", &bytes);
         let task = app.update(Message::AttachPickResult(Ok(dgn.clone())));
         app.drive_headless_task(task).expect("the read task");
         assert_eq!(
@@ -2271,8 +2249,8 @@ mod underlay_attach_read_tests {
     #[test]
     fn a_pdf_that_cannot_be_read_gives_the_error() {
         let mut app = new_app();
-        let missing =
-            std::env::temp_dir().join(format!("ocs-underlay-missing-{}.pdf", std::process::id()));
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let missing = dir.path().join("ocs-underlay-missing.pdf");
         let task = app.update(Message::AttachPickResult(Ok(missing)));
         app.drive_headless_task(task).expect("the read task");
         assert_eq!(app.active_modal, None);
@@ -2285,8 +2263,8 @@ mod underlay_attach_read_tests {
     #[test]
     fn a_dgn_that_cannot_be_read_gives_not_found() {
         let mut app = new_app();
-        let missing =
-            std::env::temp_dir().join(format!("ocs-underlay-missing-{}.dgn", std::process::id()));
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let missing = dir.path().join("ocs-underlay-missing.dgn");
         let task = app.update(Message::AttachPickResult(Ok(missing.clone())));
         app.drive_headless_task(task).expect("the read task");
         assert_eq!(app.active_modal, None);

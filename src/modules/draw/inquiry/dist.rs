@@ -159,7 +159,7 @@ mod tests {
         let wire = rubber_band(p1, pt);
         for (index, expected) in [p1, pt].into_iter().enumerate() {
             let high = wire.points[index];
-            let low = wire.points_low[index];
+            let low = wire.points_low.get(index).unwrap_or([0.0; 3]);
             let actual = DVec3::new(
                 high[0] as f64 + low[0] as f64,
                 high[1] as f64 + low[1] as f64,

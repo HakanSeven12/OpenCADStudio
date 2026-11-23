@@ -18,4 +18,5 @@ related: ADJUST, DWFATTACH, DWFCLIP, PDFADJUST
 ## Notes
 - Only DWF underlays are taken from the selection. [`ADJUST`](ADJUST-Command) works on images and on PDF and DGN underlays too.
 - Underlays on locked layers are skipped.
+- The raster images of a sheet keep their own colors: fade, contrast and monochrome change its lines, fills and text.
 - The option and the values you used last become the defaults for the next run.

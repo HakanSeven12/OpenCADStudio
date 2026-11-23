@@ -353,6 +353,7 @@ fn notification_api_version(notification: &crate::host::HostNotification) -> u32
         N::QuadAction { .. } => 15,
         N::SelectionChangedDigest { .. } => 22,
         N::DocumentChangedRegions { .. } => 13,
+        N::DocumentChangedDelta { .. } => 27,
         N::DocumentOpened { .. } => 9,
         N::CommandStateChanged { .. } | N::DrawingChanged { .. } => 7,
         N::DocumentChangedV4 { .. }
@@ -471,6 +472,7 @@ fn handle_host_request(
                     }
                     InteractiveEvent::Cancel => CommandStep::Cancel,
                     InteractiveEvent::DialogResponse(res) => cmd_ref.on_dialog_response(res),
+                    InteractiveEvent::TextInput(_) => CommandStep::NeedPoint,
                 }));
                 match res {
                     Ok(s) => {
@@ -612,6 +614,9 @@ fn handle_host_request(
         HostRequest::CallTool { .. } => {
             HostResponse::Error("AI tools require the V4 protocol".to_string())
         }
+        HostRequest::GetInputKind { .. } => {
+            HostResponse::InputKind(crate::host::InteractiveInputKind::Point)
+        }
         HostRequest::ExecuteCode { .. } => {
             HostResponse::Error("ExecuteCode requires V4 protocol".to_string())
         }
@@ -715,6 +720,13 @@ fn handle_host_request_v4(
                     }
                     InteractiveEvent::Cancel => CommandStep::Cancel,
                     InteractiveEvent::DialogResponse(res) => cmd_ref.on_dialog_response(res),
+                    InteractiveEvent::TextInput(text) => {
+                        if api_version >= 28 {
+                            cmd_ref.on_text_input(&text)
+                        } else {
+                            CommandStep::NeedPoint
+                        }
+                    }
                 }));
                 match res {
                     Ok(s) => {
@@ -898,6 +910,26 @@ fn handle_host_request_v4(
             Some(HostResponse::ToolResult(result.unwrap_or_else(|_| {
                 Err(format!("plugin tool '{name}' panicked"))
             })))
+        }
+        HostRequest::GetInputKind { command_id } => {
+            if api_version < 28 {
+                return Some(HostResponse::InputKind(
+                    crate::host::InteractiveInputKind::Point,
+                ));
+            }
+            let result = {
+                let registry = interactive.borrow();
+                registry.get(&command_id).map(|cmd| {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cmd.input_kind()))
+                })
+            };
+            match result {
+                Some(Ok(kind)) => Some(HostResponse::InputKind(kind)),
+                Some(Err(_)) => Some(HostResponse::Error("input_kind() panicked".to_string())),
+                None => Some(HostResponse::Error(format!(
+                    "unknown interactive command {command_id}"
+                ))),
+            }
         }
         HostRequest::ExecuteCode {
             command_id,
@@ -1474,5 +1506,272 @@ mod tests {
             }
             other => panic!("expected error response, got {other:?}"),
         }
+    }
+
+    /// Records every notification the runner gate hands it (the v27 delta
+    /// routing harness). The gate reads the API version NUMERICALLY, so the
+    /// manifest (v4) is irrelevant here and both sides reuse `TEST_MANIFEST`.
+    struct NotifPlugin {
+        delivered: std::sync::Arc<std::sync::Mutex<Vec<HostNotification>>>,
+    }
+
+    impl BuiltinPlugin for NotifPlugin {
+        fn manifest(&self) -> &'static PluginManifest {
+            &TEST_MANIFEST
+        }
+        fn ribbon(&self) -> Box<dyn CadModule> {
+            Box::new(EmptyModule)
+        }
+        fn dispatch(&self, _host: &mut dyn HostApi, _cmd: &str) -> bool {
+            false
+        }
+        fn on_notification(&mut self, _command_id: Option<u64>, notification: HostNotification) {
+            self.delivered
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(notification);
+        }
+    }
+
+    /// Deliver the v13 Regions + v27 delta boundary pair at `socket`, then end
+    /// the connection after the frames are certainly queued so `run_v4`
+    /// drains them and sees the disconnect.
+    fn send_boundary_pair(
+        socket: Stream,
+        regions: HostNotification,
+        delta: HostNotification,
+    ) -> thread::JoinHandle<()> {
+        use crate::ipc::transport::send;
+        use crate::ipc::v4::protocol::{HostToPluginV4, NotificationEnvelope};
+
+        thread::spawn(move || {
+            let mut socket = socket;
+            for notification in [regions, delta] {
+                send(
+                    &mut socket,
+                    &HostToPluginV4::Notification(NotificationEnvelope {
+                        command_id: None,
+                        payload: notification,
+                    }),
+                )
+                .expect("send boundary notification");
+            }
+            // Let the client's reader thread pick both frames up before the
+            // socket ends; run_v4's drain hands them to the plugin on the
+            // next pass and disconnects out of the loop hereafter.
+            thread::sleep(std::time::Duration::from_millis(400));
+        })
+    }
+
+    fn drain_boundary_pair_through_run_v4(api_version: u32) -> Vec<HostNotification> {
+        let (host_stream, runner_stream) = connect_pair();
+        let client = V4Client::from_stream_for_test(runner_stream);
+        let interactive: InteractiveRegistry = Rc::new(RefCell::new(HashMap::new()));
+        let delivered = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        // The boundary pair of one real change boundary: the legacy v13
+        // Regions stream, and the v27 categorized delta the host routes
+        // INSTEAD OF it to API v27+ endpoints.
+        let regions = HostNotification::DocumentChangedRegions {
+            tab_id: 7,
+            version: 41,
+            entities: Vec::new(),
+            records: Vec::new(),
+        };
+        let delta = HostNotification::DocumentChangedDelta {
+            tab_id: 7,
+            version: 41,
+            added: vec![document::Handle::from(5)],
+            modified: vec![document::Handle::from(9)],
+            deleted: vec![document::Handle::from(11)],
+            records: Vec::new(),
+            snapshot: Some(crate::host::DocumentDeltaSnapshot {
+                version: 41,
+                generation: 2,
+            }),
+            full_refresh_required: true,
+        };
+
+        let sender = send_boundary_pair(host_stream, regions, delta);
+
+        let mut plugin = NotifPlugin {
+            delivered: std::sync::Arc::clone(&delivered),
+        };
+        run_v4(&mut plugin, &interactive, client, api_version).expect("run_v4 drains and exits");
+        sender.join().expect("boundary sender thread");
+        let got = delivered.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        got
+    }
+
+    #[test]
+    fn notification_api_version_pins_document_changed_delta_at_27() {
+        // The v27 delta routes (via the runner gate) to plugins whose
+        // exported `ocs_plugin_api_version` reports 27+: the gate maps the
+        // variant to exactly 27, keeping the v13 Regions stream it replaces
+        // at its legacy 13.
+        assert_eq!(
+            notification_api_version(&HostNotification::DocumentChangedDelta {
+                tab_id: 0,
+                version: 0,
+                added: Vec::new(),
+                modified: Vec::new(),
+                deleted: Vec::new(),
+                records: Vec::new(),
+                snapshot: None,
+                full_refresh_required: false,
+            }),
+            27
+        );
+        assert_eq!(
+            notification_api_version(&HostNotification::DocumentChangedRegions {
+                tab_id: 0,
+                version: 0,
+                entities: Vec::new(),
+                records: Vec::new(),
+            }),
+            13
+        );
+    }
+
+    #[test]
+    fn run_v4_drops_document_changed_delta_from_pre_v27_plugin() {
+        // API v26 runner: the delta is newer than the plugin's ABI — the
+        // runner gate drops it (UB guard) and the legacy Regions stream is
+        // the exact, sole delivery.
+        let from_v26 = drain_boundary_pair_through_run_v4(26);
+        assert_eq!(
+            from_v26.len(),
+            1,
+            "a pre-v27 runner delivers exactly the legacy Regions stream: {from_v26:?}"
+        );
+        assert!(
+            matches!(
+                from_v26.first(),
+                Some(HostNotification::DocumentChangedRegions { .. })
+            ),
+            "the legacy stream is what a v26 plugin sees: {from_v26:?}"
+        );
+        assert!(
+            !from_v26
+                .iter()
+                .any(|n| matches!(n, HostNotification::DocumentChangedDelta { .. })),
+            "a pre-v27 plugin must never see the delta (UB guard)"
+        );
+    }
+
+    #[test]
+    fn run_v4_delivers_document_changed_delta_to_v27_plugin() {
+        // API v27 runner: the categorized delta rides the state-only
+        // on_notification callback exactly like the legacy Regions stream
+        // next to it.
+        let from_v27 = drain_boundary_pair_through_run_v4(27);
+        assert!(
+            matches!(
+                from_v27.first(),
+                Some(HostNotification::DocumentChangedRegions { .. })
+            ),
+            "the legacy Regions stream still arrives: {from_v27:?}"
+        );
+        assert!(
+            from_v27
+                .iter()
+                .any(|n| matches!(n, HostNotification::DocumentChangedDelta { .. })),
+            "a v27 plugin receives the categorized delta: {from_v27:?}"
+        );
+        assert_eq!(
+            from_v27.len(),
+            2,
+            "both boundary notifications arrive once each: {from_v27:?}"
+        );
+    }
+
+    #[test]
+    fn text_input_and_input_kind_are_gated_by_api_version() {
+        struct TextPromptCommand {
+            seen: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        }
+        impl InteractiveCommand for TextPromptCommand {
+            fn prompt(&self) -> String {
+                "Enter label:".into()
+            }
+            fn on_point(&mut self, _pt: [f64; 3]) -> CommandStep {
+                CommandStep::NeedPoint
+            }
+            fn input_kind(&self) -> crate::host::InteractiveInputKind {
+                crate::host::InteractiveInputKind::FreeText
+            }
+            fn on_text_input(&mut self, text: &str) -> CommandStep {
+                self.seen.lock().expect("seen").push(text.to_string());
+                CommandStep::Done
+            }
+        }
+
+        let (host_stream, runner_stream) = connect_pair();
+        let client = V4Client::from_stream_for_test(runner_stream);
+        let interactive: InteractiveRegistry = Rc::new(RefCell::new(HashMap::new()));
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        interactive.borrow_mut().insert(
+            9,
+            Box::new(TextPromptCommand { seen: seen.clone() }) as Box<dyn InteractiveCommand>,
+        );
+        let mut plugin = UnsupportedReplPlugin;
+
+        assert!(matches!(
+            handle_host_request_v4(
+                &mut plugin,
+                &interactive,
+                &client,
+                1,
+                27,
+                HostRequest::GetInputKind { command_id: 9 },
+            ),
+            Some(HostResponse::InputKind(
+                crate::host::InteractiveInputKind::Point
+            ))
+        ));
+        assert!(matches!(
+            handle_host_request_v4(
+                &mut plugin,
+                &interactive,
+                &client,
+                2,
+                27,
+                HostRequest::InteractiveEvent {
+                    command_id: 9,
+                    event: InteractiveEvent::TextInput("ignored".into()),
+                },
+            ),
+            Some(HostResponse::CommandStep(step)) if matches!(*step, CommandStep::NeedPoint)
+        ));
+
+        assert!(matches!(
+            handle_host_request_v4(
+                &mut plugin,
+                &interactive,
+                &client,
+                3,
+                28,
+                HostRequest::GetInputKind { command_id: 9 },
+            ),
+            Some(HostResponse::InputKind(
+                crate::host::InteractiveInputKind::FreeText
+            ))
+        ));
+        assert!(matches!(
+            handle_host_request_v4(
+                &mut plugin,
+                &interactive,
+                &client,
+                4,
+                28,
+                HostRequest::InteractiveEvent {
+                    command_id: 9,
+                    event: InteractiveEvent::TextInput("Hello World".into()),
+                },
+            ),
+            Some(HostResponse::CommandStep(step)) if matches!(*step, CommandStep::Done)
+        ));
+        assert_eq!(*seen.lock().expect("seen"), ["Hello World"]);
+        drop(host_stream);
     }
 }

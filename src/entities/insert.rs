@@ -498,6 +498,8 @@ pub(crate) fn append_insert_attribute_wires(
                 w.aci = sub_aci;
                 w.aabb = sub_aabb;
                 w.plot_visible &= attr_plottable;
+                // Over every member of the block, its wipeouts included.
+                w.depth_override = Some(crate::scene::INSERT_ATTRIBUTE_RANK);
             }
             wires.extend(attr_wires);
         }
@@ -1154,7 +1156,7 @@ mod tests {
             let mut geometry_xs = Vec::new();
             for wire in &wires {
                 for (index, point) in wire.points.iter().enumerate() {
-                    let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+                    let low = wire.points_low.get(index).unwrap_or([0.0; 3]);
                     geometry_xs.push(f64::from(point[0]) + f64::from(low[0]));
                 }
                 geometry_xs.extend(

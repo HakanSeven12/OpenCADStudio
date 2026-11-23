@@ -914,6 +914,94 @@ mod tests {
     }
 
     #[test]
+    fn v27_document_changed_delta_notification_roundtrips() {
+        // API v27: the categorized delta rides the same v4 notification
+        // discipline as every other variant — a NotificationEnvelope over
+        // plain bincode, command id intact, snapshot correlation and the
+        // honesty flag preserved. The Unknown passthrough above covers peers
+        // that predate the discriminant; this pins the typed path.
+        let notification = HostNotification::DocumentChangedDelta {
+            tab_id: 12,
+            version: 93,
+            added: vec![document::Handle::new(0x2A)],
+            modified: vec![document::Handle::new(0x2B)],
+            deleted: vec![document::Handle::new(0x15)],
+            records: vec![(document::Handle::new(0x8A), "CVIFC".to_owned())],
+            snapshot: Some(crate::host::DocumentDeltaSnapshot {
+                version: 93,
+                generation: 2,
+            }),
+            full_refresh_required: true,
+        };
+        let frame = HostToPluginV4::Notification(NotificationEnvelope {
+            command_id: Some(77),
+            payload: notification.clone(),
+        });
+        let bytes = bincode::serialize(&frame).unwrap();
+        let got: HostToPluginV4 = bincode::deserialize(&bytes).unwrap();
+        match got {
+            HostToPluginV4::Notification(env) => {
+                assert_eq!(env.command_id, Some(77));
+                assert_eq!(env.payload, notification);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+
+        // The no-snapshot boundary (no V4 store open — the legitimate
+        // no-consumer case) stays distinguishable from a refresh-forcing one.
+        let no_snapshot = HostNotification::DocumentChangedDelta {
+            tab_id: 5,
+            version: 93,
+            added: vec![],
+            modified: vec![],
+            deleted: vec![],
+            records: vec![],
+            snapshot: None,
+            full_refresh_required: false,
+        };
+        let bytes = bincode::serialize(&no_snapshot).unwrap();
+        let got: HostNotification = bincode::deserialize(&bytes).unwrap();
+        assert_eq!(got, no_snapshot);
+    }
+
+    #[test]
+    fn truncated_document_changed_delta_payload_is_a_decode_error() {
+        // Twin of `unknown_notification_deserializes_as_unknown` on the
+        // malformed side: a v27 host never sends a delta to a pre-v27 runner,
+        // and no payload truncation may silently degrade into a wrong variant
+        // either — a frame carrying a shorter tag-15 payload must fail to
+        // decode (the length framing of the transport catches it at
+        // `recv`; bincode sees short bytes and errors) so the V4 reader
+        // policy (connection break, no phantom notification) holds.
+        let delta = HostNotification::DocumentChangedDelta {
+            tab_id: 12,
+            version: 93,
+            added: vec![document::Handle::new(0x2A)],
+            modified: vec![document::Handle::new(0x2B)],
+            deleted: vec![],
+            records: vec![],
+            snapshot: None,
+            full_refresh_required: false,
+        };
+        let frame = HostToPluginV4::Notification(NotificationEnvelope {
+            command_id: Some(77),
+            payload: delta,
+        });
+        let bytes = bincode::serialize(&frame).unwrap();
+        assert!(
+            bincode::deserialize::<HostToPluginV4>(&bytes).is_ok(),
+            "the intact frame decodes"
+        );
+        for cut in 0..bytes.len() {
+            assert!(
+                bincode::deserialize::<HostToPluginV4>(&bytes[..cut]).is_err(),
+                "a frame cut to {cut} of {} bytes must be a decode error",
+                bytes.len()
+            );
+        }
+    }
+
+    #[test]
     fn v3_runner_handshake_token_roundtrips_after_tokenv4() {
         use crate::ipc::protocol::RunnerHandshake;
         let original = RunnerHandshake::Token("abc".to_string());

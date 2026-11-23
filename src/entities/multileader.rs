@@ -274,11 +274,7 @@ fn to_render(ml: &MultiLeader, document: &document::Document) -> Option<RenderEn
                 style: &resolved,
                 // Side-anchored on the leader-facing edge so the text reads
                 // outward; flips live with the leader/text side.
-                attach_h_anchor: match ctx.text_attachment_point {
-                    document::entities::multileader::TextAttachmentPointType::Left => 0.0,
-                    document::entities::multileader::TextAttachmentPointType::Center => 0.5,
-                    document::entities::multileader::TextAttachmentPointType::Right => 1.0,
-                },
+                attach_h_anchor: attachment_column(ctx.text_attachment_point) as f32 * 0.5,
                 v_anchor: mleader_v_anchor(if text_sign >= 0.0 {
                     ctx.text_left_attachment
                 } else {
@@ -503,11 +499,7 @@ fn text_box_geom(ml: &MultiLeader) -> ([f64; 2], [f64; 3]) {
         ctx.text_flow_direction,
         document::entities::multileader::FlowDirectionType::Vertical
     );
-    let h_anchor: f32 = match ctx.text_attachment_point {
-        document::entities::multileader::TextAttachmentPointType::Left => 0.0,
-        document::entities::multileader::TextAttachmentPointType::Center => 0.5,
-        document::entities::multileader::TextAttachmentPointType::Right => 1.0,
-    };
+    let h_anchor: f32 = attachment_column(ctx.text_attachment_point) as f32 * 0.5;
     let (dir_v, k) = crate::entities::text_support::flow_grip_axis(
         rot,
         vertical,
@@ -1835,6 +1827,14 @@ fn apply_transform(ml: &mut MultiLeader, t: &EntityTransform) {
     });
 }
 
+/// Column (0 left, 1 center, 2 right) of a text attachment point; the
+/// point holds the nine MTEXT positions, numbered row by row.
+pub(crate) fn attachment_column(
+    point: document::entities::multileader::TextAttachmentPointType,
+) -> usize {
+    (point as usize - 1) % 3
+}
+
 /// MIRROR of the content, as AutoCAD does it. MTEXT stays readable whatever
 /// MIRRTEXT says: its direction and rotation are kept and the text moves to
 /// the other side of its location. Block content becomes a true mirror
@@ -1843,12 +1843,15 @@ fn mirror_content_orientation(ml: &mut MultiLeader, p1: DVec3, p2: DVec3) {
     use document::entities::multileader::TextAttachmentPointType;
     // AutoCAD changes only the drawn (context) content; the entity-level
     // values are style overrides and keep their values.
-    let (attachment, alignment) = match ml.context.text_attachment_point {
-        TextAttachmentPointType::Left => (TextAttachmentPointType::Right, TextAlignmentType::Right),
-        TextAttachmentPointType::Right => (TextAttachmentPointType::Left, TextAlignmentType::Left),
-        TextAttachmentPointType::Center => {
-            (TextAttachmentPointType::Center, ml.context.text_alignment)
-        }
+    // The point's row stays, its column swaps sides.
+    let point = ml.context.text_attachment_point;
+    let col = attachment_column(point);
+    let attachment =
+        TextAttachmentPointType::from(((point as i16 - 1) / 3) * 3 + (2 - col as i16) + 1);
+    let alignment = match col {
+        0 => TextAlignmentType::Right,
+        2 => TextAlignmentType::Left,
+        _ => ml.context.text_alignment,
     };
     ml.context.text_attachment_point = attachment;
     if ml.context.text_alignment != TextAlignmentType::Center {
@@ -2259,8 +2262,10 @@ fn lift_wire_to_world(w: &mut crate::scene::model::wire_model::WireModel, origin
         *low = lo;
     };
     let geom = w.geom_mut();
-    lift(&mut geom.fill_tris, &mut geom.fill_tris_low);
-    lift(&mut geom.pick_tris, &mut geom.pick_tris_low);
+    if let Some(surfaces) = geom.surfaces.as_deref_mut() {
+        lift(&mut surfaces.fill_tris, &mut surfaces.fill_tris_low);
+        lift(&mut surfaces.pick_tris, &mut surfaces.pick_tris_low);
+    }
     let offset = DVec3::from_array(origin);
     for (p, _) in &mut w.snap_pts {
         *p += offset;
@@ -2640,21 +2645,22 @@ impl MultiLeaderFrameTess for MultiLeader {
             geom: std::sync::Arc::new(crate::scene::WireGeom {
                 taper_widths: Vec::new(),
                 pattern_stations: Vec::new(),
-                pick_tris: Vec::new(),
-                pick_tris_low: Vec::new(),
                 text_verts: Vec::new(),
                 points,
-                points_low: Vec::new(),
+                points_low: Default::default(),
                 snap_pts,
                 tangent_geoms: tangents,
                 key_vertices: key_verts,
-                fill_tris: arrow_fill,
                 // fill_tris_low intentionally empty: this fill renders on the
                 // top-level path, where consumers (face3d_gpu, xclip) treat a short
                 // low half as all-zero, so it draws at f32 precision (sub-metre
                 // error at UTM scale) — not a crash. Follow-up: double-single-split
                 // via points_to_ds to match emit_wire's paired fill path.
-                fill_tris_low: Vec::new(),
+                surfaces: crate::scene::model::wire_model::WireSurfaces {
+                    fill_tris: arrow_fill,
+                    ..Default::default()
+                }
+                .into_optional(),
                 ..crate::scene::WireGeom::default()
             }),
             ..Default::default()
@@ -2774,11 +2780,7 @@ impl MultiLeaderFrameTess for MultiLeader {
             use document::entities::multileader::TextAttachmentDirectionType;
             // The context's attachment point exists in every DWG version;
             // the entity-level copy only exists from R2010 on.
-            let h_anchor: f32 = match ctx.text_attachment_point {
-                document::entities::multileader::TextAttachmentPointType::Left => 0.0,
-                document::entities::multileader::TextAttachmentPointType::Center => 0.5,
-                document::entities::multileader::TextAttachmentPointType::Right => 1.0,
-            };
+            let h_anchor: f32 = attachment_column(ctx.text_attachment_point) as f32 * 0.5;
             // Pick the vertical-anchor attachment based on text_attachment_direction:
             //   Horizontal — leader attaches left/right; use ml.text_left_attachment
             //                (matches the file's stored ctx.text_left_attachment).
@@ -3094,20 +3096,21 @@ impl MultiLeaderFrameTess for MultiLeader {
                         geom: std::sync::Arc::new(crate::scene::WireGeom {
                             taper_widths: Vec::new(),
                             pattern_stations: Vec::new(),
-                            pick_tris: Vec::new(),
-                            pick_tris_low: Vec::new(),
                             text_verts: sdf_verts,
                             searchable_text: searchable,
                             points: deco_pts,
-                            points_low: Vec::new(),
+                            points_low: Default::default(),
                             snap_pts: vec![(
                                 glam::DVec3::new(local_ins_x as f64, local_ins_y as f64, z as f64),
                                 SnapHint::Node,
                             )],
                             tangent_geoms: vec![],
                             key_vertices: vec![],
-                            fill_tris: deco_fill,
-                            fill_tris_low: Vec::new(),
+                            surfaces: crate::scene::model::wire_model::WireSurfaces {
+                                fill_tris: deco_fill,
+                                ..Default::default()
+                            }
+                            .into_optional(),
                             ..crate::scene::WireGeom::default()
                         }),
                     });
@@ -3204,16 +3207,12 @@ impl MultiLeaderFrameTess for MultiLeader {
                     geom: std::sync::Arc::new(crate::scene::WireGeom {
                         taper_widths: Vec::new(),
                         pattern_stations: Vec::new(),
-                        pick_tris: Vec::new(),
-                        pick_tris_low: Vec::new(),
                         text_verts: Vec::new(),
                         points: pts,
-                        points_low: Vec::new(),
+                        points_low: Default::default(),
                         snap_pts: vec![],
                         tangent_geoms: vec![],
                         key_vertices: vec![],
-                        fill_tris: vec![],
-                        fill_tris_low: Vec::new(),
                         ..crate::scene::WireGeom::default()
                     }),
                     ..Default::default()
@@ -3307,16 +3306,17 @@ impl MultiLeaderFrameTess for MultiLeader {
                         geom: std::sync::Arc::new(crate::scene::WireGeom {
                             taper_widths: Vec::new(),
                             pattern_stations: Vec::new(),
-                            pick_tris: Vec::new(),
-                            pick_tris_low: Vec::new(),
                             text_verts: Vec::new(),
                             points: vec![],
-                            points_low: Vec::new(),
+                            points_low: Default::default(),
                             snap_pts: vec![],
                             tangent_geoms: vec![],
                             key_vertices: vec![],
-                            fill_tris,
-                            fill_tris_low: Vec::new(),
+                            surfaces: crate::scene::model::wire_model::WireSurfaces {
+                                fill_tris,
+                                ..Default::default()
+                            }
+                            .into_optional(),
                             ..crate::scene::WireGeom::default()
                         }),
                         ..Default::default()
@@ -3357,16 +3357,12 @@ impl MultiLeaderFrameTess for MultiLeader {
                         geom: std::sync::Arc::new(crate::scene::WireGeom {
                             taper_widths: Vec::new(),
                             pattern_stations: Vec::new(),
-                            pick_tris: Vec::new(),
-                            pick_tris_low: Vec::new(),
                             text_verts: Vec::new(),
                             points: frame_points,
-                            points_low: Vec::new(),
+                            points_low: Default::default(),
                             snap_pts: vec![],
                             tangent_geoms: vec![],
                             key_vertices: vec![],
-                            fill_tris: vec![],
-                            fill_tris_low: Vec::new(),
                             ..crate::scene::WireGeom::default()
                         }),
                         ..Default::default()
@@ -3385,7 +3381,7 @@ mod tests {
     use document::Document;
 
     #[test]
-    fn test_mleader_arabic_text_tessellation() {
+    fn mleader_arabic_text_tessellation() {
         let doc = Document::default();
         let mut ml = MultiLeader::default();
         ml.content_type = LeaderContentType::MText;
@@ -3428,7 +3424,7 @@ mod tests {
     }
 
     #[test]
-    fn test_background_mask_switch_masks_with_background() {
+    fn background_mask_switch_masks_with_background() {
         // Switching "Background mask" on in Properties must mask with the
         // drawing background, not fill with the inherited text colour and
         // hide the text (#2131).
@@ -3535,7 +3531,7 @@ mod tests {
     }
 
     #[test]
-    fn test_attachment_labels_follow_autocad() {
+    fn attachment_labels_follow_autocad() {
         // A drawing made in AutoCAD 2025, one MLEADER per option picked by
         // name in its Properties palette, stores these values.
         use document::entities::multileader::TextAttachmentType as TA;
@@ -3559,7 +3555,7 @@ mod tests {
     }
 
     #[test]
-    fn test_annotative_mleader_ignores_overall_scale() {
+    fn annotative_mleader_ignores_overall_scale() {
         // AutoCAD greys out the overall scale of an annotative MLEADER and
         // draws it at its context height. A file with overall scale 50 at a
         // 1:50 annotation scale rendered its text 50× too large.
@@ -3602,7 +3598,7 @@ mod tests {
     }
 
     #[test]
-    fn test_added_leader_line_takes_lowest_free_index() {
+    fn added_leader_line_takes_lowest_free_index() {
         // Remove the first leader, then add one: the new line must not repeat
         // the index of the line that is left (it takes the free 0).
         let mut ml = MultiLeader::default();
@@ -3622,7 +3618,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mleader_right_underline_attachment_meets_landing() {
+    fn mleader_right_underline_attachment_meets_landing() {
         // Text left of its leader attaches with its RIGHT attachment
         // ("underline bottom line" here, while the left one is "underline top
         // line"): the underline must lie on the landing and run on to it, and
@@ -3640,7 +3636,7 @@ mod tests {
         ctx.text_height = 1.0;
         ctx.landing_gap = 0.5;
         ctx.text_location = Vector3::new(7.5, 5.0, 0.0);
-        ctx.text_attachment_point = document::entities::multileader::TextAttachmentPointType::Right;
+        ctx.text_attachment_point = document::entities::multileader::TextAttachmentPointType::TopRight;
         ctx.text_left_attachment = TextAttachmentType::BottomOfTopLineUnderlineBottomLine;
         ctx.text_right_attachment = TextAttachmentType::BottomLine;
         let root = ctx.add_leader_root();
@@ -3708,7 +3704,7 @@ mod tests {
         ml.context.text_string = text.to_string();
         ml.context.text_height = H;
         ml.context.landing_gap = GAP;
-        ml.context.text_attachment_point = TextAttachmentPointType::Left;
+        ml.context.text_attachment_point = TextAttachmentPointType::TopLeft;
         ml.context.text_left_attachment = attach;
         ml.context.text_location = Vector3::new(DOGLEG + GAP, 1.2 * H, 0.0);
         let mut line = LeaderLine::default();
@@ -3758,7 +3754,7 @@ mod tests {
         };
         let mut out = Vec::new();
         for w in wires {
-            out.extend(ds(&w.points, &w.points_low));
+            out.extend(ds(&w.points, &w.points_low.iter().collect::<Vec<_>>()));
             out.extend(ds(&w.fill_tris, &w.fill_tris_low));
             let (pos, low): (Vec<_>, Vec<_>) =
                 w.text_verts.iter().map(|v| (v.pos, v.pos_low)).unzip();
@@ -3816,7 +3812,7 @@ mod tests {
     }
 
     #[test]
-    fn test_underline_attachment_runs_from_landing_end() {
+    fn underline_attachment_runs_from_landing_end() {
         // Measured on AutoCAD 2025 by exploding an MLEADER with "underline"
         // attachment: the underline is the landing continued under the text,
         // from the dogleg's end to the far end of the text, and the text's
@@ -3853,7 +3849,7 @@ mod tests {
     }
 
     #[test]
-    fn test_underline_attachment_values_match_autocad() {
+    fn underline_attachment_values_match_autocad() {
         // AutoCAD 2025, three-line text, one MLEADER per attachment value
         // (see `underlined_line`): 5 underlines the bottom line, 6 and 8 the
         // top line, 7 draws no underline. The underlined line meets the
@@ -3927,7 +3923,7 @@ mod tests {
             ctx.landing_gap = 0.5;
             ctx.text_rotation = 0.0; // direction vector governs below
             ctx.text_direction = Vector3::new(tx, ty, 0.0);
-            ctx.text_attachment_point = TextAttachmentPointType::Center;
+            ctx.text_attachment_point = TextAttachmentPointType::TopCenter;
             ctx.text_left_attachment = TextAttachmentType::BottomLine;
             ctx.text_right_attachment = TextAttachmentType::BottomLine;
             // The connection the leader lands on; the writer left the anchor
@@ -4052,7 +4048,7 @@ mod tests {
         ctx.text_string = "SS100-pilíř\\P (štxhv 400x240x510)".to_string();
         ctx.text_height = 1.0;
         ctx.landing_gap = 0.5;
-        ctx.text_attachment_point = TextAttachmentPointType::Center;
+        ctx.text_attachment_point = TextAttachmentPointType::TopCenter;
         ctx.text_left_attachment = TextAttachmentType::BottomLine;
         ctx.text_right_attachment = TextAttachmentType::BottomLine;
         ctx.text_direction = Vector3::new(1.0, 0.0, 0.0);
@@ -4195,9 +4191,9 @@ mod tests {
         ml.context.text_location = Vector3::new(60.0, 81.18, 0.0);
         ml.context.text_direction = Vector3::new(1.0, 0.0, 0.0);
         ml.context.base_direction = Vector3::new(1.0, 0.0, 0.0);
-        ml.context.text_attachment_point = TextAttachmentPointType::Left;
+        ml.context.text_attachment_point = TextAttachmentPointType::TopLeft;
         ml.context.text_alignment = TextAlignmentType::Left;
-        ml.text_attachment_point = TextAttachmentPointType::Left;
+        ml.text_attachment_point = TextAttachmentPointType::TopLeft;
         ml.context.content_base_point = Vector3::new(65.0, 41.0, 0.0);
         ml.context.block_content_location = Vector3::new(60.0, 40.0, 0.0);
         let mirror = EntityTransform::Mirror {
@@ -4214,7 +4210,7 @@ mod tests {
             "text stays readable"
         );
         assert_eq!(ctx.base_direction, Vector3::new(1.0, 0.0, 0.0));
-        assert_eq!(ctx.text_attachment_point, TextAttachmentPointType::Right);
+        assert_eq!(ctx.text_attachment_point, TextAttachmentPointType::TopRight);
         assert_eq!(ctx.text_alignment, TextAlignmentType::Right);
         assert!(ml
             .property_override_flags
@@ -4236,7 +4232,7 @@ mod tests {
         // AutoCAD keeps the entity-level overrides.
         assert_eq!(ml.block_scale.x, 1.0);
         assert_eq!(ml.block_rotation, 0.0);
-        assert_eq!(ml.text_attachment_point, TextAttachmentPointType::Left);
+        assert_eq!(ml.text_attachment_point, TextAttachmentPointType::TopLeft);
     }
 
     #[test]
@@ -4295,9 +4291,9 @@ pub(crate) fn text_top_offset(ml: &MultiLeader) -> f64 {
 pub(crate) fn set_mleader_text_side(ml: &mut MultiLeader, to_right: bool) {
     use document::entities::multileader::TextAttachmentPointType;
     let (attachment, alignment) = if to_right {
-        (TextAttachmentPointType::Left, TextAlignmentType::Left)
+        (TextAttachmentPointType::TopLeft, TextAlignmentType::Left)
     } else {
-        (TextAttachmentPointType::Right, TextAlignmentType::Right)
+        (TextAttachmentPointType::TopRight, TextAlignmentType::Right)
     };
     ml.text_attachment_point = attachment;
     ml.context.text_attachment_point = attachment;

@@ -10,7 +10,7 @@ fn points(wires: &[WireModel]) -> Vec<[f64; 3]> {
     let mut points = Vec::new();
     for wire in wires {
         for (i, p) in wire.points.iter().enumerate() {
-            let lo = wire.points_low.get(i).copied().unwrap_or([0.; 3]);
+            let lo = wire.points_low.get(i).unwrap_or([0.; 3]);
             let point = std::array::from_fn(|j| f64::from(p[j]) + f64::from(lo[j]));
             // NaN vertices separate batched wire segments; they are not geometry.
             if point.iter().all(|coordinate| coordinate.is_finite()) {
@@ -272,7 +272,9 @@ fn block_parameter_geometry_preview_drops_stale_locked_and_disassociated_targets
             assert!(!app.tabs[i].scene.preview_wires.is_empty());
             match invalid {
                 0 => app.tabs[i].id += 1,
-                1 => app.tabs[i].selected_handle = None,
+                1 => {
+                    app.tabs[i].scene.selected.remove(&insert);
+                }
                 2 => {
                     app.tabs[i]
                         .scene
@@ -316,6 +318,21 @@ fn block_parameter_geometry_preview_drops_stale_locked_and_disassociated_targets
         }
     }
 }
+/// With several objects selected no single `selected_handle` is set; a
+/// grip of a selected reference still previews (#3506).
+#[test]
+fn block_parameter_geometry_preview_works_with_several_objects_selected() {
+    for testing in [false, true] {
+        let (mut app, insert, _, _) = setup(0, testing);
+        let i = app.active_tab;
+        app.tabs[i].selected_handle = None;
+        assert!(app.tabs[i].scene.selected.contains(&insert));
+        app.tabs[i].last_cursor_world = DVec3::new(120., 220., 30.);
+        app.refresh_active_cmd_preview(i);
+        assert!(!app.tabs[i].scene.preview_wires.is_empty());
+    }
+}
+
 #[test]
 fn block_array_over_budget_preview_restores_source_and_preserves_history() {
     for testing in [false, true] {

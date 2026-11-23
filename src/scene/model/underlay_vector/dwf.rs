@@ -1,13 +1,15 @@
 //! DWF (6.x, a zip after a "(DWF V06.00)" tag, sheets as W2D streams) and
 //! DWFx (an XPS package, sheets as fixed pages) underlays: sheet names, and
 //! each sheet's plotted geometry mapped back to the model units it was
-//! plotted from, which is how an underlay places it.
+//! plotted from, which is how an underlay places it. A W2D sheet's raster
+//! images are read with it.
 
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
 use super::model::{
-    arc_cubics, paths_bounds, Path, PathBuilder, Segment, Sheet, SubPath, Text, CAP_PER_EM,
+    arc_cubics, paths_bounds, Path, PathBuilder, Segment, Sheet, SheetImage, SubPath, Text,
+    CAP_PER_EM,
 };
 
 /// The package's files, with `\` separators turned into `/`.
@@ -210,7 +212,7 @@ pub fn sheet(bytes: &[u8], name: &str) -> Option<Sheet> {
         .find(|s| s.name.eq_ignore_ascii_case(name))
         .or_else(|| (name.is_empty()).then(|| entries.first()).flatten())?;
     let data = files.get(&entry.graphics)?;
-    let (paths, view, texts) = if entry.graphics.to_ascii_lowercase().ends_with(".w2d") {
+    let (paths, view, texts, images) = if entry.graphics.to_ascii_lowercase().ends_with(".w2d") {
         w2d::read(data)?
     } else {
         let w2x = entry.w2x.as_ref().and_then(|p| files.get(p));
@@ -231,13 +233,15 @@ pub fn sheet(bytes: &[u8], name: &str) -> Option<Sheet> {
             let name = key.rsplit('/').next()?;
             font_family(&deobfuscate(data, name)?)
         };
-        xps::read(data, w2x.map(|v| v.as_slice()), entry, &family)?
+        let (paths, view, texts) = xps::read(data, w2x.map(|v| v.as_slice()), entry, &family)?;
+        (paths, view, texts, Vec::new())
     };
     let rect = view.or_else(|| paths_bounds(&paths))?;
     Some(Sheet {
         rect,
         paths,
         texts,
+        images,
         sub_per_master: 1.0,
         table_colors: false,
         element_colors: Vec::new(),
@@ -462,8 +466,125 @@ mod w2d {
         (r[0] < r[2] && r[1] < r[3]).then_some(r)
     }
 
-    /// The stream's geometry and text in model units, and its plotted view.
-    pub fn read(b: &[u8]) -> Option<(Vec<Path>, Option<[f64; 4]>, Vec<Text>)> {
+    /// The rectangle that holds both.
+    fn union(a: Option<[f64; 4]>, b: Option<[f64; 4]>) -> Option<[f64; 4]> {
+        match (a, b) {
+            (Some(a), Some(b)) => Some([
+                a[0].min(b[0]),
+                a[1].min(b[1]),
+                a[2].max(b[2]),
+                a[3].max(b[3]),
+            ]),
+            (a, b) => a.or(b),
+        }
+    }
+
+    /// The most pixels an image of a sheet may have.
+    const MAX_IMAGE_PIXELS: usize = 1 << 26;
+
+    /// A raster image of the stream: what follows the size of its block.
+    ///
+    /// The block is "{", the size of what follows, a format, the columns
+    /// and rows of the pixel array, the lower-left corner, the upper-right
+    /// corner, an identifier, and then the pixels as the format has them,
+    /// before the closing "}".
+    struct ImageBlock<'a> {
+        format: u16,
+        columns: usize,
+        rows: usize,
+        /// The lower-left corner, from the point before the image.
+        low: [f64; 2],
+        /// The upper-right corner, from the lower-left one.
+        high: [f64; 2],
+        /// What follows the identifier.
+        rest: &'a [u8],
+    }
+
+    impl<'a> ImageBlock<'a> {
+        const RGB: u16 = 0x0006;
+        const RGBA: u16 = 0x0007;
+        const JPEG: u16 = 0x0008;
+        const PNG: u16 = 0x000C;
+
+        /// The image of a block; `None` for a block of another kind.
+        fn of(body: &'a [u8]) -> Option<Self> {
+            let mut r = Reader { b: body, i: 0 };
+            let format = r.u16()?;
+            // The formats that start alike: mapped, indexed and Group 3
+            // (0x0002 to 0x0005), which are not drawn, and the four above.
+            if !matches!(format, 0x0002..=0x0008 | Self::PNG) {
+                return None;
+            }
+            let (columns, rows) = (r.u16()? as usize, r.u16()? as usize);
+            let low = [r.i32()? as f64, r.i32()? as f64];
+            let high = [r.i32()? as f64, r.i32()? as f64];
+            // The identifier other opcodes may name the image by.
+            r.i32()?;
+            Some(Self {
+                format,
+                columns,
+                rows,
+                low,
+                high,
+                rest: &body[r.i..],
+            })
+        }
+
+        /// The image's size and its pixels as RGBA, rows from the top;
+        /// `None` when the format is not drawn or the pixels are not all
+        /// there.
+        fn pixels(&self) -> Option<(u32, u32, Vec<u8>)> {
+            let mut r = Reader { b: self.rest, i: 0 };
+            let size = usize::try_from(r.i32()?).ok()?;
+            let data = self.rest.get(r.i..r.i.checked_add(size)?)?;
+            let count = self.columns.checked_mul(self.rows)?;
+            if count == 0 || count > MAX_IMAGE_PIXELS {
+                return None;
+            }
+            let size = (self.columns as u32, self.rows as u32);
+            match self.format {
+                Self::RGB => {
+                    let data = data.get(..count * 3)?;
+                    let pixels = data
+                        .chunks_exact(3)
+                        .flat_map(|p| [p[0], p[1], p[2], 255])
+                        .collect();
+                    Some((size.0, size.1, pixels))
+                }
+                // Blue first, as the files plotted with it have it.
+                Self::RGBA => {
+                    let data = data.get(..count * 4)?;
+                    let pixels = data
+                        .chunks_exact(4)
+                        .flat_map(|p| [p[2], p[1], p[0], p[3]])
+                        .collect();
+                    Some((size.0, size.1, pixels))
+                }
+                Self::JPEG => decoded(data, image::ImageFormat::Jpeg),
+                Self::PNG => decoded(data, image::ImageFormat::Png),
+                _ => None,
+            }
+        }
+    }
+
+    /// A picture file's size and pixels as RGBA, rows from the top.
+    fn decoded(data: &[u8], format: image::ImageFormat) -> Option<(u32, u32, Vec<u8>)> {
+        let reader = || image::ImageReader::with_format(std::io::Cursor::new(data), format);
+        let (width, height) = reader().into_dimensions().ok()?;
+        let count = (width as usize).checked_mul(height as usize)?;
+        if count == 0 || count > MAX_IMAGE_PIXELS {
+            return None;
+        }
+        let picture = reader().decode().ok()?.into_rgba8();
+        Some((width, height, picture.into_raw()))
+    }
+
+    /// What a stream draws, in model units: its geometry, the rectangle of
+    /// its sheet (its view together with the contours of its viewports), its
+    /// text and its raster images.
+    pub type Drawn = (Vec<Path>, Option<[f64; 4]>, Vec<Text>, Vec<SheetImage>);
+
+    pub fn read(b: &[u8]) -> Option<Drawn> {
         let mut r = Reader { b, i: 0 };
         // The current font: family, em height (graphics units), rotation
         // (radians) and width scale.
@@ -471,11 +592,17 @@ mod w2d {
         let mut texts: Vec<(String, [f64; 2], (String, f64, f64, f64), [u8; 3])> = Vec::new();
         let mut units = Units::identity();
         let mut view: Option<[f64; 4]> = None;
+        // The contours of the viewports: where the sheet's geometry is drawn.
+        // The view is only the rectangle to show first, and may hold less.
+        let mut drawn: Option<[f64; 4]> = None;
         let mut color = [0u8, 0, 0];
         let mut weight = 0.0f64;
         let mut visible = true;
         let mut at = [0f64; 2];
         let mut raw: Vec<(Vec<SubPath>, [u8; 3], f64, bool)> = Vec::new();
+        // The images: how many paths the stream held before each, its
+        // corners, its size and its pixels.
+        let mut pictures: Vec<(usize, [[f64; 2]; 2], (u32, u32, Vec<u8>))> = Vec::new();
         let rel = |at: &mut [f64; 2], dx: f64, dy: f64| {
             at[0] += dx;
             at[1] += dy;
@@ -490,11 +617,15 @@ mod w2d {
                     match name.as_str() {
                         "Units" => units = units_of(body).unwrap_or(units),
                         "View" => view = rect_of(&points_of(body)).or(view),
-                        "Viewport" if view.is_none() => {
-                            view = rect_of(&points_of(body));
-                            if let Some(u) = units_of(body) {
-                                units = u;
+                        "Viewport" => {
+                            let contour = rect_of(&points_of(body));
+                            if view.is_none() {
+                                view = contour;
+                                if let Some(u) = units_of(body) {
+                                    units = u;
+                                }
                             }
+                            drawn = union(drawn, contour);
                         }
                         "Color" => {
                             let v = super::numbers(&String::from_utf8_lossy(body));
@@ -515,7 +646,17 @@ mod w2d {
                 b'{' => {
                     r.i += 1;
                     let size = r.i32()?;
-                    r.i = r.i.checked_add(size.max(0) as usize)?;
+                    let end = r.i.checked_add(size.max(0) as usize)?;
+                    if let Some(block) = b.get(r.i..end).and_then(ImageBlock::of) {
+                        // The corners are relative like every other point,
+                        // and what follows goes on from the second one.
+                        let low = rel(&mut at, block.low[0], block.low[1]);
+                        let high = rel(&mut at, block.high[0], block.high[1]);
+                        if let Some(pixels) = block.pixels().filter(|_| visible) {
+                            pictures.push((raw.len(), [low, high], pixels));
+                        }
+                    }
+                    r.i = end;
                 }
                 b'O' => {
                     // Set origin: the absolute point later relative
@@ -699,6 +840,26 @@ mod w2d {
                 _ => break,
             }
         }
+        let images = pictures
+            .into_iter()
+            .filter_map(|(before, [low, high], (width, height, pixels))| {
+                let (a, b) = (units.model(low), units.model(high));
+                let rect = [
+                    a[0].min(b[0]),
+                    a[1].min(b[1]),
+                    a[0].max(b[0]),
+                    a[1].max(b[1]),
+                ];
+                (rect[0] < rect[2] && rect[1] < rect[3]).then(|| SheetImage {
+                    rect,
+                    width,
+                    height,
+                    pixels: std::sync::Arc::new(pixels),
+                    // Paths drawn while nothing shows are not kept.
+                    after: raw[..before].iter().filter(|path| path.3).count(),
+                })
+            })
+            .collect();
         let paths = raw
             .into_iter()
             .filter(|(_, _, _, visible)| *visible)
@@ -722,7 +883,7 @@ mod w2d {
                 }
             })
             .collect();
-        let view = view.map(|v| {
+        let view = union(view, drawn).map(|v| {
             let a = units.model([v[0], v[1]]);
             let b = units.model([v[2], v[3]]);
             [
@@ -744,10 +905,13 @@ mod w2d {
                 font: family,
             })
             .collect();
-        Some((paths, view, texts))
+        Some((paths, view, texts, images))
     }
 
-    /// A W2D string: quoted ASCII, or a count followed by UTF-16 units.
+    /// A W2D string: quoted ASCII; between braces, a 32-bit count of
+    /// characters and their UTF-16 units, which is how a binary stream
+    /// writes a string that is not plain ASCII; or a short count followed by
+    /// UTF-16 units.
     fn read_string(r: &mut Reader) -> Option<String> {
         if r.b.get(r.i) == Some(&b'\'') {
             r.i += 1;
@@ -757,6 +921,8 @@ mod w2d {
             }
             r.i += 1;
             Some(String::from_utf8_lossy(&r.b[start..r.i - 1]).to_string())
+        } else if let Some(text) = braced_string(r) {
+            Some(text)
         } else {
             let n = r.count()?;
             let units: Vec<u16> =
@@ -767,6 +933,33 @@ mod w2d {
             r.i += n * 2;
             Some(String::from_utf16_lossy(&units))
         }
+    }
+
+    /// "{" count units "}": the string, with the reader past it. `None`
+    /// leaves the reader where it was: the bytes are not that form unless
+    /// the closing brace stands where the count says.
+    fn braced_string(r: &mut Reader) -> Option<String> {
+        let start = r.i;
+        let text = (|| {
+            if r.u8()? != b'{' {
+                return None;
+            }
+            let count = usize::try_from(r.i32()?).ok()?;
+            let end = r.i.checked_add(count.checked_mul(2)?)?;
+            if r.b.get(end) != Some(&b'}') {
+                return None;
+            }
+            let units: Vec<u16> = r.b[r.i..end]
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
+            r.i = end + 1;
+            Some(String::from_utf16_lossy(&units))
+        })();
+        if text.is_none() {
+            r.i = start;
+        }
+        text
     }
 }
 
@@ -1217,6 +1410,341 @@ mod xps {
     }
 }
 
+/// Streams and packages for tests of what a sheet draws.
+#[cfg(test)]
+pub(crate) mod samples {
+    /// An image block of `columns` by `rows` pixels: its lower-left corner
+    /// `low` from the point before it, its upper-right corner `high` from
+    /// the lower-left one, and `data` in the format of `opcode`.
+    pub fn image(
+        opcode: u16,
+        [columns, rows]: [u16; 2],
+        low: [i32; 2],
+        high: [i32; 2],
+        data: &[u8],
+    ) -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend(opcode.to_le_bytes());
+        body.extend(columns.to_le_bytes());
+        body.extend(rows.to_le_bytes());
+        for v in [low[0], low[1], high[0], high[1]] {
+            body.extend(v.to_le_bytes());
+        }
+        // The image's identifier.
+        body.extend(1i32.to_le_bytes());
+        body.extend((data.len() as i32).to_le_bytes());
+        body.extend(data);
+        body.push(b'}');
+        let mut block = vec![b'{'];
+        block.extend((body.len() as i32).to_le_bytes());
+        block.extend(body);
+        block
+    }
+
+    /// A line whose first point is `start` from the point before it and
+    /// whose second is `run` from the first.
+    pub fn line(start: [i32; 2], run: [i32; 2]) -> Vec<u8> {
+        let mut bytes = vec![b'l'];
+        for v in [start[0], start[1], run[0], run[1]] {
+            bytes.extend(v.to_le_bytes());
+        }
+        bytes
+    }
+
+    /// A package of one sheet, "Sheet", 300 by 200 units with one graphics
+    /// unit to the unit, whose stream draws `parts`.
+    pub fn package(parts: &[&[u8]]) -> Vec<u8> {
+        use std::io::Write;
+        let mut stream = b"(W2D V06.00)(View 0,0 300,200)".to_vec();
+        for part in parts {
+            stream.extend(*part);
+        }
+        stream.extend(b"(EndOfDWF)");
+        let mut package = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        let descriptor = br#"<Page name="Sheet"><GraphicResource role="2d streaming graphics" href="sheet\sheet.w2d"/></Page>"#;
+        for (name, data) in [
+            ("sheet/descriptor.xml", &descriptor[..]),
+            ("sheet/sheet.w2d", &stream[..]),
+        ] {
+            package.start_file(name, options).expect("a file starts");
+            package.write_all(data).expect("a file is written");
+        }
+        package.finish().expect("the package ends").into_inner()
+    }
+}
+
+#[cfg(test)]
+mod w2d_image_tests {
+    use super::samples::{image, line};
+    use super::w2d;
+    use super::{Path, Segment, SheetImage};
+
+    /// One graphics unit to the model unit.
+    const HEADER: &[u8] = b"(W2D V06.00)(View 0,0 1000,1000)";
+
+    /// What a stream of `parts` draws: its paths and its images.
+    fn read(parts: &[&[u8]]) -> (Vec<Path>, Vec<SheetImage>) {
+        let mut stream = HEADER.to_vec();
+        for part in parts {
+            stream.extend(*part);
+        }
+        stream.extend(b"(EndOfDWF)");
+        let (paths, _, _, images) = w2d::read(&stream).expect("the stream reads");
+        (paths, images)
+    }
+
+    /// Where a path starts.
+    fn start(path: &Path) -> [f64; 2] {
+        match path.subpaths[0].segments[0] {
+            Segment::Line(a, _) | Segment::Cubic(a, ..) => a,
+        }
+    }
+
+    /// Two by two pixels, four bytes each in the order blue, green, red,
+    /// alpha, rows from the top.
+    const BGRA: [u8; 16] = [
+        10, 20, 30, 255, 40, 50, 60, 128, //
+        70, 80, 90, 0, 100, 110, 120, 255,
+    ];
+
+    #[test]
+    fn an_rgba_image_is_read_at_its_place_with_its_pixels() {
+        let (_, images) = read(&[&image(0x0007, [2, 2], [100, 200], [300, 400], &BGRA)]);
+
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].rect, [100.0, 200.0, 400.0, 600.0]);
+        assert_eq!((images[0].width, images[0].height), (2, 2));
+        assert_eq!(
+            images[0].pixels.as_slice(),
+            [
+                30, 20, 10, 255, 60, 50, 40, 128, //
+                90, 80, 70, 0, 120, 110, 100, 255,
+            ],
+            "red, green, blue, alpha"
+        );
+    }
+
+    #[test]
+    fn an_rgb_image_is_opaque() {
+        let data = [10, 20, 30, 40, 50, 60];
+        let (_, images) = read(&[&image(0x0006, [2, 1], [0, 0], [20, 10], &data)]);
+
+        assert_eq!(images.len(), 1);
+        assert_eq!((images[0].width, images[0].height), (2, 1));
+        assert_eq!(
+            images[0].pixels.as_slice(),
+            [10, 20, 30, 255, 40, 50, 60, 255]
+        );
+    }
+
+    #[test]
+    fn a_png_image_is_decoded() {
+        let picture = image::RgbaImage::from_fn(4, 2, |x, y| {
+            image::Rgba([x as u8 * 60, y as u8 * 200, 90, 255 - x as u8 * 40])
+        });
+        let mut png = Vec::new();
+        picture
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .expect("the picture is written");
+        let (_, images) = read(&[&image(0x000C, [4, 2], [0, 0], [40, 20], &png)]);
+
+        assert_eq!(images.len(), 1);
+        assert_eq!((images[0].width, images[0].height), (4, 2));
+        assert_eq!(images[0].pixels.as_slice(), picture.as_raw().as_slice());
+    }
+
+    #[test]
+    fn a_jpeg_image_is_decoded() {
+        let picture = image::RgbImage::from_pixel(16, 8, image::Rgb([200, 40, 40]));
+        let mut jpeg = Vec::new();
+        picture
+            .write_to(
+                &mut std::io::Cursor::new(&mut jpeg),
+                image::ImageFormat::Jpeg,
+            )
+            .expect("the picture is written");
+        let (_, images) = read(&[&image(0x0008, [16, 8], [0, 0], [160, 80], &jpeg)]);
+
+        assert_eq!(images.len(), 1);
+        assert_eq!((images[0].width, images[0].height), (16, 8));
+        let pixel = &images[0].pixels[..4];
+        assert!(
+            pixel[0] > 180 && pixel[1] < 70 && pixel[2] < 70 && pixel[3] == 255,
+            "{pixel:?}"
+        );
+    }
+
+    #[test]
+    fn an_image_lies_where_the_units_of_the_stream_put_it() {
+        // Two graphics units to the model unit, the model's origin 100 of
+        // them along x.
+        let units = b"(Units '' ((2 0 0 0)(0 2 0 0)(0 0 1 0)(100 0 0 1)))";
+        let (_, images) = read(&[units, &image(0x0007, [2, 2], [100, 200], [300, 400], &BGRA)]);
+
+        assert_eq!(images[0].rect, [0.0, 100.0, 150.0, 300.0]);
+    }
+
+    #[test]
+    fn what_is_drawn_after_an_image_goes_on_from_its_upper_right_corner() {
+        let (paths, _) = read(&[
+            &image(0x0007, [2, 2], [100, 200], [300, 400], &BGRA),
+            &line([10, 10], [50, 0]),
+        ]);
+
+        assert_eq!(start(&paths[0]), [410.0, 610.0]);
+    }
+
+    #[test]
+    fn an_image_in_a_format_that_is_not_drawn_still_moves_the_point() {
+        // A Group 3 image: its lines are not decoded.
+        let (paths, images) = read(&[
+            &image(0x0003, [2, 2], [100, 200], [300, 400], &[0; 12]),
+            &line([10, 10], [50, 0]),
+        ]);
+
+        assert!(images.is_empty());
+        assert_eq!(start(&paths[0]), [410.0, 610.0]);
+    }
+
+    #[test]
+    fn an_image_knows_how_many_paths_are_drawn_before_it() {
+        let (paths, images) = read(&[
+            &line([0, 0], [50, 0]),
+            &line([0, 10], [50, 0]),
+            &image(0x0007, [2, 2], [100, 200], [300, 400], &BGRA),
+            &line([0, 10], [50, 0]),
+        ]);
+
+        assert_eq!(paths.len(), 3);
+        assert_eq!(images[0].after, 2);
+    }
+
+    #[test]
+    fn what_is_drawn_while_nothing_shows_is_left_out() {
+        // "v" turns visibility off and "V" on: the first line and the first
+        // image are not on the sheet.
+        let (paths, images) = read(&[
+            b"v",
+            &line([0, 0], [50, 0]),
+            &image(0x0007, [2, 2], [100, 200], [300, 400], &BGRA),
+            b"V",
+            &image(0x0007, [2, 2], [100, 200], [300, 400], &BGRA),
+            &line([0, 10], [50, 0]),
+        ]);
+
+        assert_eq!(paths.len(), 1);
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].after, 0, "the hidden line does not count");
+        assert_eq!(images[0].rect, [550.0, 800.0, 850.0, 1200.0]);
+    }
+
+    #[test]
+    fn an_image_without_all_its_pixels_is_left_out_and_the_stream_goes_on() {
+        let (paths, images) = read(&[
+            &image(0x0007, [2, 2], [100, 200], [300, 400], &BGRA[..8]),
+            &line([10, 10], [50, 0]),
+        ]);
+
+        assert!(images.is_empty());
+        assert_eq!(paths.len(), 1);
+        assert_eq!(start(&paths[0]), [410.0, 610.0]);
+    }
+
+    #[test]
+    fn an_image_without_size_is_left_out() {
+        let (_, images) = read(&[
+            &image(0x0007, [2, 2], [100, 200], [0, 400], &BGRA),
+            &image(0x0007, [0, 2], [100, 200], [300, 400], &[]),
+        ]);
+
+        assert!(images.is_empty());
+    }
+
+    #[test]
+    fn a_block_cut_short_ends_the_stream_where_it_is() {
+        let mut stream = HEADER.to_vec();
+        stream.extend(line([0, 0], [50, 0]));
+        let block = image(0x0007, [2, 2], [100, 200], [300, 400], &BGRA);
+        stream.extend(&block[..block.len() - 6]);
+        let (paths, _, _, images) = w2d::read(&stream).expect("the stream reads");
+
+        assert_eq!(paths.len(), 1);
+        assert!(images.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod w2d_sheet_rect_tests {
+    use super::w2d;
+
+    /// Two graphics units to the model unit, the model's origin 100 of them
+    /// along x.
+    const UNITS: &str = "((2 0 0 0)(0 2 0 0)(0 0 1 0)(100 0 0 1))";
+    /// A viewport 1000 by 1000 model units from the origin, and one beside it.
+    const VIEWPORT: &str = "2100,0 2100,2000 100,2000 100,0";
+    const SECOND_VIEWPORT: &str = "4100,0 4100,2000 2100,2000 2100,0";
+
+    /// The sheet rectangle of a stream with the given view and viewport
+    /// contours.
+    fn sheet_rect(view: Option<&str>, contours: &[&str]) -> Option<[f64; 4]> {
+        let mut stream = format!("(W2D V06.00)(Units '' {UNITS})");
+        if let Some(view) = view {
+            stream.push_str(&format!("(View {view})"));
+        }
+        for contour in contours {
+            stream.push_str(&format!(
+                "(Viewport '' (Contour 1 4 {contour}) (Units '' {UNITS}))"
+            ));
+        }
+        stream.push_str("(EndOfDWF)");
+        w2d::read(stream.as_bytes()).expect("the stream reads").1
+    }
+
+    #[test]
+    fn a_view_narrower_than_its_viewport_does_not_narrow_the_sheet() {
+        // The view shows the viewport's whole width and the middle of its
+        // height: what the viewport draws above and below it is on the sheet.
+        let sheet = sheet_rect(Some("100,200 2100,1800"), &[VIEWPORT]);
+
+        assert_eq!(sheet, Some([0.0, 0.0, 1000.0, 1000.0]));
+    }
+
+    #[test]
+    fn the_sheet_holds_every_viewport() {
+        // The view shows the first of two viewports side by side.
+        let sheet = sheet_rect(Some("100,0 2100,2000"), &[VIEWPORT, SECOND_VIEWPORT]);
+
+        assert_eq!(sheet, Some([0.0, 0.0, 2000.0, 1000.0]));
+    }
+
+    #[test]
+    fn a_stream_without_a_view_is_as_large_as_its_viewports() {
+        assert_eq!(
+            sheet_rect(None, &[VIEWPORT]),
+            Some([0.0, 0.0, 1000.0, 1000.0])
+        );
+        assert_eq!(
+            sheet_rect(None, &[VIEWPORT, SECOND_VIEWPORT]),
+            Some([0.0, 0.0, 2000.0, 1000.0])
+        );
+    }
+
+    #[test]
+    fn a_view_wider_than_its_viewport_stays_the_sheet() {
+        let sheet = sheet_rect(Some("100,0 4100,3000"), &[VIEWPORT]);
+
+        assert_eq!(sheet, Some([0.0, 0.0, 2000.0, 1500.0]));
+    }
+
+    #[test]
+    fn a_view_alone_is_the_sheet() {
+        let sheet = sheet_rect(Some("100,200 2100,1800"), &[]);
+
+        assert_eq!(sheet, Some([0.0, 100.0, 1000.0, 900.0]));
+    }
+}
+
 #[cfg(test)]
 mod xps_depth_tests {
     use super::{xps, SheetEntry};
@@ -1345,5 +1873,81 @@ mod xps_depth_tests {
         let mut files = std::collections::HashMap::new();
         files.insert("3D/descriptor.xml".to_string(), deep.into_bytes());
         assert!(super::sheets(&files).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod w2d_string_tests {
+    use super::w2d;
+
+    /// A stream with texts from (100, 200) on, each 50 above the one before:
+    /// a font height, then a text opcode for each of `strings`, given as the
+    /// bytes of its string operand.
+    fn text_stream(strings: &[Vec<u8>]) -> Vec<u8> {
+        let mut stream = b"(W2D V06.00)V".to_vec();
+        stream.extend_from_slice(&[0x06, 0x20, 0x00]);
+        stream.extend_from_slice(&500i32.to_le_bytes());
+        for (index, string) in strings.iter().enumerate() {
+            let (dx, dy) = if index == 0 { (100, 200) } else { (0, 50) };
+            stream.push(b'x');
+            stream.extend_from_slice(&i32::to_le_bytes(dx));
+            stream.extend_from_slice(&i32::to_le_bytes(dy));
+            stream.extend_from_slice(string);
+        }
+        stream.extend_from_slice(b"(EndOfDWF)");
+        stream
+    }
+
+    /// A string as a binary stream writes one that is not plain ASCII: a
+    /// brace, a 32-bit count of characters, their UTF-16 units and a brace.
+    fn braced(text: &str) -> Vec<u8> {
+        let units: Vec<u16> = text.encode_utf16().collect();
+        let mut string = vec![b'{'];
+        string.extend_from_slice(&(units.len() as i32).to_le_bytes());
+        for unit in units {
+            string.extend_from_slice(&unit.to_le_bytes());
+        }
+        string.push(b'}');
+        string
+    }
+
+    #[test]
+    fn a_string_between_braces_is_its_utf16_units() {
+        let text = "\u{d1}and\u{fa} \u{f8} 25 \u{2014} \u{ab}sala\u{bb}";
+
+        let (_, _, texts, _) = w2d::read(&text_stream(&[braced(text)])).expect("the stream reads");
+
+        assert_eq!(texts.len(), 1);
+        assert_eq!(texts[0].text, text);
+        assert_eq!(texts[0].origin, [100.0, 200.0]);
+    }
+
+    #[test]
+    fn what_follows_a_braced_string_is_still_read() {
+        let stream = text_stream(&[braced("caf\u{e9}"), b"'ROOM 12'".to_vec()]);
+
+        let (_, _, texts, _) = w2d::read(&stream).expect("the stream reads");
+
+        let read: Vec<&str> = texts.iter().map(|text| text.text.as_str()).collect();
+        assert_eq!(read, vec!["caf\u{e9}", "ROOM 12"]);
+        assert_eq!(texts[1].origin, [100.0, 250.0]);
+    }
+
+    #[test]
+    fn quoted_and_counted_strings_read_as_before() {
+        let counted = {
+            let units: Vec<u16> = "na\u{ef}ve".encode_utf16().collect();
+            let mut string = vec![units.len() as u8];
+            for unit in units {
+                string.extend_from_slice(&unit.to_le_bytes());
+            }
+            string
+        };
+        let stream = text_stream(&[b"'ROOM 12'".to_vec(), counted]);
+
+        let (_, _, texts, _) = w2d::read(&stream).expect("the stream reads");
+
+        let read: Vec<&str> = texts.iter().map(|text| text.text.as_str()).collect();
+        assert_eq!(read, vec!["ROOM 12", "na\u{ef}ve"]);
     }
 }

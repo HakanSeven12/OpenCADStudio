@@ -21,7 +21,7 @@ fn leaked(tag: &str) -> &'static str {
     let mut keys = KEYS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
-        .expect("extraction catalog lock");
+        .unwrap_or_else(|e| e.into_inner());
     if let Some(found) = keys.get(tag) {
         return found;
     }

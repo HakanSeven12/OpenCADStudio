@@ -631,6 +631,14 @@ pub struct RibbonConfig {
     pub layout: RibbonLayout,
 }
 
+// How many times this thread asked for the config to be written. A test
+// build writes nothing (see `save`), so a test reads this to see that a step
+// would write the settings file.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static SAVES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl AppConfig {
     /// Read the saved config, or all-defaults when the file is missing or
     /// unreadable. Unknown or missing fields fall back to their section defaults
@@ -656,6 +664,8 @@ impl AppConfig {
     /// preferences on them — without this, running `cargo test` rewrites the
     /// settings of whoever ran it.
     pub fn save(&self) {
+        #[cfg(test)]
+        SAVES.with(|count| count.set(count.get() + 1));
         if cfg!(test) {
             return;
         }
@@ -713,7 +723,7 @@ mod tests {
     }
 
     #[test]
-    fn test_model_space_defaults() {
+    fn model_space_defaults() {
         let cfg = ModelSpaceThemeConfig::default();
         assert_eq!(cfg.mode, ModelSpaceMode::MatchTheme);
         assert_eq!(cfg.custom_bg, None);
@@ -729,7 +739,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_model_bg_match_theme() {
+    fn resolve_model_bg_match_theme() {
         let cfg = ModelSpaceThemeConfig {
             mode: ModelSpaceMode::MatchTheme,
             ..Default::default()
@@ -747,7 +757,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_model_bg_classic_dark() {
+    fn resolve_model_bg_classic_dark() {
         let cfg = ModelSpaceThemeConfig {
             mode: ModelSpaceMode::ClassicDark,
             ..Default::default()
@@ -761,7 +771,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_model_bg_custom() {
+    fn resolve_model_bg_custom() {
         let cfg = ModelSpaceThemeConfig {
             mode: ModelSpaceMode::Custom,
             custom_bg: Some([10, 20, 30]),
@@ -774,7 +784,7 @@ mod tests {
     }
 
     #[test]
-    fn test_model_space_config_serde_roundtrip() {
+    fn model_space_config_serde_roundtrip() {
         let mut original = AppConfig::default();
         original.model_space.mode = ModelSpaceMode::Custom;
         original.model_space.custom_bg = Some([12, 34, 56]);
@@ -805,52 +815,29 @@ mod tests {
         assert!(restored.show_graphic_attributes);
     }
 
+    // All four plot flags are serde-defaulted to false and round-trip through
+    // the same config; one parameterized test covers them without repeating the
+    // serialize/deserialize setup four times.
     #[test]
-    fn svg_text_as_outlines_defaults_off_and_round_trips() {
+    fn plot_flag_configs_default_off_and_round_trip() {
         let old: AppConfig = serde_json::from_str(r#"{"plot":{}}"#).expect("old config");
         assert!(!old.plot.text_as_outlines);
-
-        let mut original = AppConfig::default();
-        original.plot.text_as_outlines = true;
-        let serialized = serde_json::to_string(&original).expect("serialize config");
-        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
-        assert!(restored.plot.text_as_outlines);
-    }
-
-    #[test]
-    fn non_scaling_stroke_config_default_and_round_trip() {
-        let old: AppConfig = serde_json::from_str(r#"{"plot":{}}"#).expect("old config");
         assert!(!old.plot.non_scaling_stroke);
-
-        let mut original = AppConfig::default();
-        original.plot.non_scaling_stroke = true;
-        let serialized = serde_json::to_string(&original).expect("serialize config");
-        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
-        assert!(restored.plot.non_scaling_stroke);
-    }
-
-    #[test]
-    fn layer_attributes_config_default_and_round_trip() {
-        let old: AppConfig = serde_json::from_str(r#"{"plot":{}}"#).expect("old config");
         assert!(!old.plot.layer_attributes);
-
-        let mut original = AppConfig::default();
-        original.plot.layer_attributes = true;
-        let serialized = serde_json::to_string(&original).expect("serialize config");
-        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
-        assert!(restored.plot.layer_attributes);
-    }
-
-    #[test]
-    fn geopdf_config_defaults_off_and_round_trips() {
-        let old: AppConfig = serde_json::from_str(r#"{"plot":{}}"#).expect("old config");
         assert!(!old.plot.geopdf);
 
-        let mut original = AppConfig::default();
-        original.plot.geopdf = true;
-        let serialized = serde_json::to_string(&original).expect("serialize config");
-        let restored: AppConfig = serde_json::from_str(&serialized).expect("deserialize config");
-        assert!(restored.plot.geopdf);
+        fn round_trip(set: impl FnOnce(&mut AppConfig), get: impl FnOnce(&AppConfig) -> bool) {
+            let mut original = AppConfig::default();
+            set(&mut original);
+            let serialized = serde_json::to_string(&original).expect("serialize config");
+            let restored: AppConfig =
+                serde_json::from_str(&serialized).expect("deserialize config");
+            assert!(get(&restored));
+        }
+        round_trip(|c| c.plot.text_as_outlines = true, |c| c.plot.text_as_outlines);
+        round_trip(|c| c.plot.non_scaling_stroke = true, |c| c.plot.non_scaling_stroke);
+        round_trip(|c| c.plot.layer_attributes = true, |c| c.plot.layer_attributes);
+        round_trip(|c| c.plot.geopdf = true, |c| c.plot.geopdf);
     }
 
     #[test]
@@ -1034,7 +1021,7 @@ mod tests {
     /// `byte index 2 is not a char boundary; it is inside 'é'`. Pasting it
     /// into any Options colour field killed the process on the keystroke.
     #[test]
-    fn test_parse_hex_rejects_multibyte_input_without_panicking() {
+    fn parse_hex_rejects_multibyte_input_without_panicking() {
         for value in ["aébé", "#aébé", "éééééé", "#ébé#"] {
             assert_eq!(parse_hex(value), None, "{value} should not parse");
         }

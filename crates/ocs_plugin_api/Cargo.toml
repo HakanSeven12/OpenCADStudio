@@ -15,7 +15,7 @@ serde_json = { version = "1", optional = true }
 # Pulled in only by the `host` feature, which adds the `document`-typed
 # `HostApi` runtime surface. The default crate stays dependency-free so engine
 # crates and external tooling can depend on the manifest/ribbon contract cheaply.
-document = { package = "opencaddocument", git = "https://github.com/BjornFidder/opencaddocument.git", rev = "eca49894258e95b94d310deaf919fe17295aa20a", optional = true, features = ["serde"] }
+document = { package = "opencaddocument", git = "https://github.com/BjornFidder/opencaddocument.git", rev = "e43a079e69ca1abf244d550409d80b22b5d21da6", optional = true, features = ["serde"] }
 
 # Runtime IPC and serialization (host feature only).
 interprocess = { version = "2", optional = true }
@@ -52,8 +52,9 @@ serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 cargo-lock = "11"
 # document is scanned at build time to generate the embedded type registry.
-document = { package = "opencaddocument", git = "https://github.com/BjornFidder/opencaddocument.git", rev = "eca49894258e95b94d310deaf919fe17295aa20a", features = ["serde"] }
+document = { package = "opencaddocument", git = "https://github.com/BjornFidder/opencaddocument.git", rev = "e43a079e69ca1abf244d550409d80b22b5d21da6", features = ["serde"] }
 
 [dev-dependencies]
 serde_json = "1"
 bincode = "1"
+serial_test = "4.0"

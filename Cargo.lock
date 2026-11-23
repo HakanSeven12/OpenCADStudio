@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "OpenCADStudio"
-version = "2026.46.0"
+version = "2026.47.0"
 dependencies = [
  "aes",
  "allsorts",
@@ -61,6 +61,7 @@ dependencies = [
  "opencaddocument",
  "opencadgraph",
  "pollster",
+ "pretty_assertions",
  "printpdf",
  "proj4rs",
  "proj4wkt",
@@ -68,11 +69,13 @@ dependencies = [
  "resvg",
  "rfd",
  "roxmltree",
+ "rstest",
  "rust-embed",
  "rustc-hash 2.1.3",
  "semver",
  "serde",
  "serde_json",
+ "serial_test",
  "sha2 0.10.9",
  "skrifa 0.42.1",
  "solidcore",
@@ -83,6 +86,7 @@ dependencies = [
  "solidcore-tess",
  "step-export",
  "svgtypes",
+ "tempfile",
  "tiny-skia",
  "ttf-parser",
  "unicode-bidi",
@@ -93,7 +97,7 @@ dependencies = [
  "web-sys",
  "windows-sys 0.61.2",
  "winresource",
- "zip",
+ "zip 8.6.0",
 ]
 
 [[package]]
@@ -115,7 +119,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.6.8"
-source = "git+https://github.com/hakanaktt/acadrust.git?rev=a7d378502748e6428655aa091306f01f7f3a17a9#a7d378502748e6428655aa091306f01f7f3a17a9"
+source = "git+https://github.com/hakanaktt/acadrust.git?rev=14f7da106cdd20fac94ffbdc238e3012bbe4a553#14f7da106cdd20fac94ffbdc238e3012bbe4a553"
 dependencies = [
  "anyhow",
  "bitflags 2.13.1",
@@ -959,9 +963,9 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "calamine"
-version = "0.36.1"
+version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fa68281b1a76b54a62156474adb06bb380a67e07dd60656e3217152b42183f3"
+checksum = "f431b67cba6122a1f7d26b7adafc71bbdf07026095fe811f5efc025d8748e1d8"
 dependencies = [
  "atoi_simd",
  "byteorder",
@@ -969,9 +973,9 @@ dependencies = [
  "encoding_rs",
  "fast-float2",
  "log",
- "quick-xml 0.41.0",
+ "quick-xml 0.42.0",
  "serde",
- "zip",
+ "zip 9.8.1",
 ]
 
 [[package]]
@@ -1214,6 +1218,15 @@ name = "const-oid"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
+
+[[package]]
+name = "constant_time_eq"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9eb6feb175df65d0a3ccd3e73484e940d0ac664e8034f0519fd49a93db3071d9"
+dependencies = [
+ "rustversion",
+]
 
 [[package]]
 name = "core-foundation"
@@ -1491,6 +1504,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "diff"
+version = "0.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1537,7 +1556,7 @@ checksum = "c6232dd377dcc64799954cbd3a9bb882e9cdc1308ccd87b1c098f1fb2eaf82a8"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -2158,6 +2177,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "037711b3d59c33004d3856fbdc83b99d4ff37a24768fa1be9ce3538a1cde4393"
 
 [[package]]
+name = "futures-timer"
+version = "3.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af43fadb8a98512d547e37b4e92e0ced13e205c061b87b4623eff01d918d6968"
+
+[[package]]
 name = "futures-util"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2235,8 +2260,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 6.0.0",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -2285,6 +2312,12 @@ dependencies = [
  "smallvec",
  "vello_common",
 ]
+
+[[package]]
+name = "glob"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
 name = "glow"
@@ -2677,7 +2710,7 @@ dependencies = [
 [[package]]
 name = "iced"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=e4b2fc1aa4d8b4fa882aec36c404b99ddd439343#e4b2fc1aa4d8b4fa882aec36c404b99ddd439343"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
 dependencies = [
  "iced_core",
  "iced_debug",
@@ -2706,7 +2739,7 @@ dependencies = [
 [[package]]
 name = "iced_core"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=e4b2fc1aa4d8b4fa882aec36c404b99ddd439343#e4b2fc1aa4d8b4fa882aec36c404b99ddd439343"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
 dependencies = [
  "bitflags 2.13.1",
  "bytes",
@@ -2724,7 +2757,7 @@ dependencies = [
 [[package]]
 name = "iced_debug"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=e4b2fc1aa4d8b4fa882aec36c404b99ddd439343#e4b2fc1aa4d8b4fa882aec36c404b99ddd439343"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
 dependencies = [
  "iced_core",
  "iced_futures",
@@ -2746,7 +2779,7 @@ dependencies = [
 [[package]]
 name = "iced_futures"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=e4b2fc1aa4d8b4fa882aec36c404b99ddd439343#e4b2fc1aa4d8b4fa882aec36c404b99ddd439343"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
 dependencies = [
  "futures",
  "iced_core",
@@ -2760,7 +2793,7 @@ dependencies = [
 [[package]]
 name = "iced_graphics"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=e4b2fc1aa4d8b4fa882aec36c404b99ddd439343#e4b2fc1aa4d8b4fa882aec36c404b99ddd439343"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
 dependencies = [
  "bitflags 2.13.1",
  "bytemuck",
@@ -2781,7 +2814,7 @@ dependencies = [
 [[package]]
 name = "iced_program"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=e4b2fc1aa4d8b4fa882aec36c404b99ddd439343#e4b2fc1aa4d8b4fa882aec36c404b99ddd439343"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
 dependencies = [
  "iced_graphics",
  "iced_runtime",
@@ -2790,7 +2823,7 @@ dependencies = [
 [[package]]
 name = "iced_renderer"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=e4b2fc1aa4d8b4fa882aec36c404b99ddd439343#e4b2fc1aa4d8b4fa882aec36c404b99ddd439343"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
 dependencies = [
  "iced_graphics",
  "iced_tiny_skia",
@@ -2802,7 +2835,7 @@ dependencies = [
 [[package]]
 name = "iced_runtime"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=e4b2fc1aa4d8b4fa882aec36c404b99ddd439343#e4b2fc1aa4d8b4fa882aec36c404b99ddd439343"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
 dependencies = [
  "bytes",
  "iced_core",
@@ -2813,7 +2846,7 @@ dependencies = [
 [[package]]
 name = "iced_selector"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=e4b2fc1aa4d8b4fa882aec36c404b99ddd439343#e4b2fc1aa4d8b4fa882aec36c404b99ddd439343"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
 dependencies = [
  "iced_core",
 ]
@@ -2821,7 +2854,7 @@ dependencies = [
 [[package]]
 name = "iced_test"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=e4b2fc1aa4d8b4fa882aec36c404b99ddd439343#e4b2fc1aa4d8b4fa882aec36c404b99ddd439343"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
 dependencies = [
  "iced_futures",
  "iced_program",
@@ -2837,7 +2870,7 @@ dependencies = [
 [[package]]
 name = "iced_tiny_skia"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=e4b2fc1aa4d8b4fa882aec36c404b99ddd439343#e4b2fc1aa4d8b4fa882aec36c404b99ddd439343"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
 dependencies = [
  "bytemuck",
  "cosmic-text 0.19.0",
@@ -2854,7 +2887,7 @@ dependencies = [
 [[package]]
 name = "iced_wgpu"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=e4b2fc1aa4d8b4fa882aec36c404b99ddd439343#e4b2fc1aa4d8b4fa882aec36c404b99ddd439343"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
 dependencies = [
  "bitflags 2.13.1",
  "bytemuck",
@@ -2874,7 +2907,7 @@ dependencies = [
 [[package]]
 name = "iced_widget"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=e4b2fc1aa4d8b4fa882aec36c404b99ddd439343#e4b2fc1aa4d8b4fa882aec36c404b99ddd439343"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
 dependencies = [
  "iced_renderer",
  "iced_runtime",
@@ -2889,7 +2922,7 @@ dependencies = [
 [[package]]
 name = "iced_winit"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=e4b2fc1aa4d8b4fa882aec36c404b99ddd439343#e4b2fc1aa4d8b4fa882aec36c404b99ddd439343"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
 dependencies = [
  "arboard",
  "iced_debug",
@@ -3916,6 +3949,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
+name = "nix"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77730ed34f01f4990cb2ea67fec715ecebc6fab9a6396cf83c5529b13f581bdc"
+dependencies = [
+ "bitflags 2.13.1",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "no_std_io2"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4486,6 +4531,7 @@ dependencies = [
  "serde-reflection",
  "serde_bytes",
  "serde_json",
+ "serial_test",
  "thiserror 1.0.69",
  "windows-sys 0.61.2",
 ]
@@ -4563,7 +4609,7 @@ dependencies = [
 [[package]]
 name = "opencaddocument"
 version = "0.1.0"
-source = "git+https://github.com/BjornFidder/opencaddocument.git?rev=eca49894258e95b94d310deaf919fe17295aa20a#eca49894258e95b94d310deaf919fe17295aa20a"
+source = "git+https://github.com/BjornFidder/opencaddocument.git?rev=e43a079e69ca1abf244d550409d80b22b5d21da6#e43a079e69ca1abf244d550409d80b22b5d21da6"
 dependencies = [
  "acadrust",
  "ifccad",
@@ -4986,6 +5032,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8cf8e6a8aa66ce33f63993ffc4ea4271eb5b0530a9002db8455ea6050c77bfa"
 
 [[package]]
+name = "pretty_assertions"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ae130e2f271fbc2ac3a40fb1d07180839cdbbe443c7a27e1e3c13c5cac0116d"
+dependencies = [
+ "diff",
+ "yansi",
+]
+
+[[package]]
 name = "printpdf"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5058,7 +5114,7 @@ dependencies = [
  "proc-macro-error-attr3",
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -5221,9 +5277,9 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.41.0"
+version = "0.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
+checksum = "41b1177fdf999d2321d3fb46ff47159d9c1fb9ad66a4879f8c50a0b504615e9b"
 dependencies = [
  "encoding_rs",
  "memchr",
@@ -5513,7 +5569,7 @@ checksum = "92ecd8964f8453721699a1ed72037b0db49ce2f5a5138486ee89bed6f67cdf3a"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -5561,6 +5617,12 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+
+[[package]]
+name = "relative-path"
+version = "1.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba39f3699c378cd8970968dcbff9c43159ea4cfbd88d43c00b22f2ef10a435d2"
 
 [[package]]
 name = "rend"
@@ -5701,6 +5763,35 @@ name = "roxmltree"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
+
+[[package]]
+name = "rstest"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1493d41b35c0ca33433425bd25fc76f9595f2d6031727bc54a86317d73974f05"
+dependencies = [
+ "futures-timer",
+ "futures-util",
+ "rstest_macros",
+]
+
+[[package]]
+name = "rstest_macros"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05c7b2f315394a42e73034681345115eaa5ee454617c3f7bf802dab2a5c02f6c"
+dependencies = [
+ "cfg-if",
+ "glob",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "relative-path",
+ "rustc_version",
+ "syn 3.0.10",
+ "unicode-ident",
+]
 
 [[package]]
 name = "rust-embed"
@@ -6070,6 +6161,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6662b5879511e06e8999a8a235d848113e942c9124f211511b16466ee2995f26"
 dependencies = [
  "serde_core",
+]
+
+[[package]]
+name = "serial_test"
+version = "4.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6df5ed973ad8d834e09f824f9e9f449af6b9a3745f78dec7cc752770bd3bf11"
+dependencies = [
+ "futures-executor",
+ "futures-util",
+ "log",
+ "once_cell",
+ "parking_lot",
+ "serial_test_derive",
+]
+
+[[package]]
+name = "serial_test_derive"
+version = "4.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a22144e767da4ddd8416dbf383700542ffd8a5dc493dfecedfe1fe3ad03c98ae"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -6548,9 +6664,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "3.0.3"
+version = "3.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
+checksum = "4ae9ccbea3a7b0b09443036490c8f34a8b1b760fd345e5c0dae0aac718faea79"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6879,6 +6995,12 @@ name = "typed-path"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e"
+
+[[package]]
+name = "typed-path"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ce898823d8cd0f028662d2f349694b1af0a5cc9be83f1d213a00d3147445e1e"
 
 [[package]]
 name = "typeid"
@@ -7643,7 +7765,7 @@ checksum = "cb15ad553239d9fdefac12e31e16c7682dc62a2106ba035aec69c5dd15835a7b"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -8197,6 +8319,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a5a4b21e1a62b67a2970e6831bc091d7b87e119e7f9791aef9702e3bef04448"
 
 [[package]]
+name = "yansi"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
+
+[[package]]
 name = "yazi"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8338,6 +8466,20 @@ name = "zeroize"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
+dependencies = [
+ "zeroize_derive",
+]
+
+[[package]]
+name = "zeroize_derive"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c50655cbb0fe3fc43170059e702f1ce5e19b84cec58dc87b037a09935c2f328"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
 
 [[package]]
 name = "zerotrie"
@@ -8370,7 +8512,7 @@ checksum = "47402523226a02bfe5230160dc3ccc089aa6f6f19e7fcbb4e6f824bbb1b4aa62"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn 3.0.10",
 ]
 
 [[package]]
@@ -8383,7 +8525,27 @@ dependencies = [
  "flate2",
  "indexmap",
  "memchr",
- "typed-path",
+ "typed-path 0.12.3",
+ "zopfli",
+]
+
+[[package]]
+name = "zip"
+version = "9.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9534624d547e3f516ecde0ed9a70d37788f01d340efcfdd03bf3ea8e163c1d0"
+dependencies = [
+ "constant_time_eq",
+ "crc32fast",
+ "flate2",
+ "getrandom 0.4.3",
+ "indexmap",
+ "libc",
+ "memchr",
+ "nix",
+ "typed-path 0.13.0",
+ "windows-sys 0.61.2",
+ "zeroize",
  "zopfli",
 ]
 

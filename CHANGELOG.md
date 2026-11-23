@@ -8,7 +8,8 @@
 
 | Release | Date | Highlights | Details |
 | :--- | :--- | :--- | :--- |
-| **[Unreleased](changelogs/unreleased.md)** | *2026-11-15 to Present* | Text Editor ribbon tab, `POPMENU` cursor menu, `ADDVERTEX`/`DELVERTEX`, `PanelStyle::Form` plugin panels, localized command names, annotation scale prompt, smooth hatch boundary arcs in PDF/SVG | [changelogs/unreleased.md](changelogs/unreleased.md) |
+| **[Unreleased](changelogs/unreleased.md)** | *2026-11-22 to Present* | — | [changelogs/unreleased.md](changelogs/unreleased.md) |
+| **[v2026.47](changelogs/v2026.47.md)** | *2026-11-22* | Text Editor ribbon tab, `POPMENU` cursor menu, `ADDVERTEX`/`DELVERTEX`, `PanelStyle::Form` plugin panels, localized command names, annotation scale prompt, smooth hatch boundary arcs in PDF/SVG | [changelogs/v2026.47.md](changelogs/v2026.47.md) |
 | **[v2026.46](changelogs/v2026.46.md)** | *2026-11-15* | UI kit & Studio Dark redesign, `GEOGRAPHICLOCATION` & GeoPDF placement/export, `ETRANSMIT` ZIP, annotation scaling & Dim/MLeader/Text Style managers, Civil 3D objects, `LINETYPE` manager, table formulas & `PASTESPEC` data links, `ASSISTANT` AI pallet, Plugin API v19–v23, batched Python `ocs` primitives, `mimalloc` & scene/text LRU caches | [changelogs/v2026.46.md](changelogs/v2026.46.md) |
 | **[v2026.45](changelogs/v2026.45.md)** | *2026-11-08* | Layer Manager with in-drawing filters & Quick Select/FILTER, tables overhaul (cell styles, in-place editing, fill grips), quad cursor menu with plugin surface, Flip parameters & Parameters Manager, `BLOCKREPLACE`/`XPLODE`, HATCH/OFFSET/MATCHPROP/SELECT parity, annotation scale & complex linetypes, SVG import, CUI/Quick Access Toolbar, TRIM/OSNAP/OTRACK performance | [changelogs/v2026.45.md](changelogs/v2026.45.md) |
 | **[v2026.44](changelogs/v2026.44.md)** | *2026-11-01* | Shared OpenCADDocument model with IFCX and converter interchange, dimension/multileader/text/table overhauls, ribbon redesign, layer tools, Plugin API 14, MCP intent tools, and plotting/import/performance fixes | [changelogs/v2026.44.md](changelogs/v2026.44.md) |
@@ -21,9 +22,13 @@
 
 ---
 
-## [Unreleased] - 2026-11-15
+## [Unreleased] - 2026-11-22
 
-> **Summary:** Added the contextual Text Editor ribbon tab, `POPMENU`, `ADDVERTEX`/`DELVERTEX`, `PanelStyle::Form` plugin panels, localized command-line command names, annotation scale prompting, smooth hatch boundary curves in PDF/SVG plots, and fixes across Text Style Apply/Discard, TrueType glyph widths, DGN/WMF/3DS/PDF readers, undo granularity, and WASM linking. See the [full Unreleased notes](changelogs/unreleased.md).
+> **Summary:** Nothing yet. See the [full Unreleased notes](changelogs/unreleased.md).
+
+## [v2026.47] - 2026-11-22
+
+> **Summary:** Added the contextual Text Editor ribbon tab, `POPMENU`, `ADDVERTEX`/`DELVERTEX`, `PanelStyle::Form` plugin panels, localized command-line command names, annotation scale prompting, smooth hatch boundary curves in PDF/SVG plots, and fixes across Text Style Apply/Discard, TrueType glyph widths, DGN/WMF/3DS/PDF readers, undo granularity, and WASM linking. See the [full v2026.47 release notes](changelogs/v2026.47.md).
 
 ## [v2026.46] - 2026-11-15
 

@@ -23,6 +23,39 @@ pub(crate) fn control_points(e: &EntityType) -> Result<Vec<DVec3>, &'static str>
             document::types::Matrix3::arbitrary_axis(t.normal) * t.insertion_point
         )],
         EntityType::MText(t) => vec![v(t.insertion_point)],
+        EntityType::AttributeDefinition(t) => vec![v(
+            document::types::Matrix3::arbitrary_axis(t.normal) * t.insertion_point
+        )],
+        EntityType::Insert(i) if supported(e) => vec![v(i.insert_point)],
+        EntityType::Wipeout(w) => crate::entities::raster_image::wipeout_boundary(w)
+            .into_iter()
+            .map(DVec3::from_array)
+            .collect(),
+        EntityType::Spline(s) if supported(e) => s
+            .control_points
+            .iter()
+            .chain(&s.fit_points)
+            .map(|p| v(*p))
+            .collect(),
+        // Both extension-line origins, then the dimension line's two ends.
+        EntityType::Dimension(d) => {
+            let (p1, p2, def, u) = match &**d {
+                document::entities::Dimension::Linear(d) => (
+                    v(d.first_point),
+                    v(d.second_point),
+                    v(d.definition_point),
+                    DVec3::new(d.rotation.cos(), d.rotation.sin(), 0.0),
+                ),
+                document::entities::Dimension::Aligned(d) => (
+                    v(d.first_point),
+                    v(d.second_point),
+                    v(d.definition_point),
+                    (v(d.second_point) - v(d.first_point)).normalize_or_zero(),
+                ),
+                _ => return Err("Select a supported Stretch object."),
+            };
+            vec![p1, p2, def + u * (p1 - def).dot(u), def]
+        }
         EntityType::LwPolyline(p) => {
             let p = crate::entities::curve::lwpolyline_world_xy(p)
                 .ok_or("Stretch requires a planar XY lightweight polyline.")?;
@@ -238,21 +271,20 @@ pub(crate) fn validate(
         if !a.action.dependencies.contains(&binding.handle) || !seen.insert(binding.handle) {
             return Err("The Stretch action has invalid target bindings.");
         }
-        let count = control_points(
-            doc.get_entity(binding.handle)
-                .ok_or("A Stretch target is unavailable.")?,
-        )?
-        .len();
+        let entity = doc
+            .get_entity(binding.handle)
+            .ok_or("A Stretch target is unavailable.")?;
+        let count = control_points(entity)?.len();
         let unique = binding
             .indexes
             .iter()
             .copied()
             .collect::<std::collections::BTreeSet<_>>();
+        // A bound circle moves whole; drawings may list more than its center.
         if unique.len() != binding.indexes.len()
-            || binding
-                .indexes
-                .iter()
-                .any(|i| *i < 0 || *i as usize >= count)
+            || binding.indexes.iter().any(|i| {
+                *i < 0 || (*i as usize >= count && !matches!(entity, EntityType::Circle(_)))
+            })
         {
             return Err("A Stretch vertex binding no longer matches its object.");
         }
@@ -413,7 +445,9 @@ pub(crate) fn apply(
         | EntityType::Ellipse(_)
         | EntityType::Point(_)
         | EntityType::Text(_)
-        | EntityType::MText(_) => {
+        | EntityType::MText(_)
+        | EntityType::AttributeDefinition(_)
+        | EntityType::Insert(_) => {
             crate::scene::view::dispatch::apply_transform(
                 e,
                 &crate::entities::transform::EntityTransform::Translate(delta),
@@ -508,6 +542,67 @@ pub(crate) fn apply(
                 {
                     *corner = *corner + native(delta);
                 }
+            }
+        }
+        EntityType::Dimension(d) => {
+            let moves = |i: i32| binding.indexes.contains(&i);
+            let (p1, p2, def, rotation) = match &mut **d {
+                document::entities::Dimension::Linear(d) => (
+                    &mut d.first_point,
+                    &mut d.second_point,
+                    &mut d.definition_point,
+                    Some(d.rotation),
+                ),
+                document::entities::Dimension::Aligned(d) => {
+                    (&mut d.first_point, &mut d.second_point, &mut d.definition_point, None)
+                }
+                _ => return Err("Unsupported Stretch target."),
+            };
+            for (point, moved) in [(&mut *p1, moves(0)), (&mut *p2, moves(1))] {
+                if moved {
+                    *point = *point + native(delta);
+                }
+            }
+            let u = match rotation {
+                Some(r) => DVec3::new(r.cos(), r.sin(), 0.0),
+                None => (v(*p2) - v(*p1)).normalize_or_zero(),
+            };
+            // A moved end shifts the dimension line across itself; the
+            // definition point stays where the line meets extension line 2.
+            let across = if moves(2) || moves(3) {
+                delta - u * delta.dot(u)
+            } else {
+                DVec3::ZERO
+            };
+            let line = v(*def) + across;
+            *def = native(line + u * (v(*p2) - line).dot(u));
+            d.base_mut().actual_measurement = d.stored_measurement();
+        }
+        // Bound points move through the shared STRETCH code.
+        EntityType::Wipeout(_) | EntityType::Spline(_) => {
+            let points = control_points(e)?;
+            let bound = binding
+                .indexes
+                .iter()
+                .filter_map(|i| points.get(*i as usize).copied())
+                .collect::<Vec<_>>();
+            let in_win = |x: f64, y: f64| {
+                bound
+                    .iter()
+                    .any(|p| (p.x - x).abs() <= 1e-9 && (p.y - y).abs() <= 1e-9)
+            };
+            match e {
+                EntityType::Wipeout(w) => {
+                    crate::entities::raster_image::stretch_wipeout(w, &in_win, delta);
+                }
+                EntityType::Spline(s) => {
+                    for p in s.control_points.iter_mut().chain(s.fit_points.iter_mut()) {
+                        if in_win(p.x, p.y) {
+                            *p = *p + native(delta);
+                        }
+                    }
+                }
+                _ => unreachable!(),
             }
         }
         _ => return Err("Unsupported Stretch target."),

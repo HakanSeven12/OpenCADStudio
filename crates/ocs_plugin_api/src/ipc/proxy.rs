@@ -19,7 +19,12 @@ use std::time::{Duration, Instant};
 use crate::host::{PluginRequestError, PluginRequestSender};
 use crate::ipc::protocol::{PluginRequest, PluginResponse};
 
-const MAX_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
+// Same limit as `transport`: a full document snapshot of a large drawing (about 90 MB) must fit.
+const MAX_MESSAGE_SIZE: usize = 1024 * 1024 * 1024;
+
+/// The payload buffer grows by at most this much ahead of the bytes read, so
+/// a frame header alone does not allocate the whole frame.
+const READ_CHUNK: usize = 16 * 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The proxy per-direction read/write deadline (review finding 13):
@@ -98,8 +103,13 @@ pub fn recv_framed<R: Read, T: serde::de::DeserializeOwned>(
     if len > MAX_MESSAGE_SIZE {
         return Err(ProxyError::TooLarge(len));
     }
-    let mut buf = vec![0u8; len];
-    reader.read_exact(&mut buf)?;
+    let mut buf = Vec::with_capacity(len.min(READ_CHUNK));
+    if reader.by_ref().take(len as u64).read_to_end(&mut buf)? < len {
+        return Err(ProxyError::Io(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "proxy disconnected",
+        )));
+    }
     // Wire the per-frame dialog decode budget (see `crate::dialog`).
     crate::dialog::dialog_decode_frame_begin();
     let msg = bincode::deserialize(&buf)?;
@@ -184,8 +194,12 @@ fn recv_framed_with_poll<R: Read>(
     if len > MAX_MESSAGE_SIZE {
         return Err(ProxyError::TooLarge(len).into());
     }
-    let mut buf = vec![0u8; len];
-    read_with_poll(reader, &mut buf, poll, deadline)?;
+    let mut buf = Vec::with_capacity(len.min(READ_CHUNK));
+    while buf.len() < len {
+        let start = buf.len();
+        buf.resize((start + READ_CHUNK).min(len), 0);
+        read_with_poll(reader, &mut buf[start..], poll, deadline)?;
+    }
     // Wire the per-frame dialog decode budget (see `crate::dialog`).
     crate::dialog::dialog_decode_frame_begin();
     let msg = bincode::deserialize(&buf).map_err(ProxyError::Encode)?;

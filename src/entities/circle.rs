@@ -396,7 +396,7 @@ mod tests {
     }
 
     #[test]
-    fn test_circle_segments_scales_with_zoom() {
+    fn circle_segments_scales_with_zoom() {
         let r = 10.0;
         // Default / invalid cases return baseline floor of 48.
         assert_eq!(circle_segments(r, None), 48);
@@ -434,7 +434,7 @@ mod tests {
     }
 
     #[test]
-    fn test_circle_segments_scales_with_radius() {
+    fn circle_segments_scales_with_radius() {
         let wpp = Some(0.1);
         let seg_small = circle_segments(1.0, wpp);
         let seg_med = circle_segments(20.0, wpp);
@@ -448,7 +448,7 @@ mod tests {
     }
 
     #[test]
-    fn test_circle_to_render_points_increase_with_zoom() {
+    fn circle_to_render_points_increase_with_zoom() {
         let mut circle = Circle::default();
         circle.radius = 10.0;
 
@@ -472,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn test_thick_circle_to_render_points_increase_with_zoom() {
+    fn thick_circle_to_render_points_increase_with_zoom() {
         let mut circle = Circle::default();
         circle.radius = 10.0;
         circle.thickness = 2.0;

@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod batch7_tests {
+mod xref_and_sheet_set_tests {
     use crate::app::OpenCADStudio;
 
     fn out_text(app: &OpenCADStudio) -> String {

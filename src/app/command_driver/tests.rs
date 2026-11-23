@@ -2260,9 +2260,9 @@ mod menu_keyboard_tests {
     }
 }
 
-/// Batch 4: behaviour that still failed against current HEAD.
+/// Copy, scale and viewport command coverage.
 #[cfg(test)]
-mod batch4_tests;
+mod copy_and_viewport_commands;
 
 #[cfg(test)]
 mod array_zoom_extents_tests {
@@ -2314,18 +2314,17 @@ mod array_zoom_extents_tests {
 }
 
 #[cfg(test)]
-mod batch5_tests;
-/// Batch 6: per-viewport layer overrides and other gaps closed on HEAD.
+mod insert_and_dimstyle_commands;
+/// Per-viewport layer overrides and style commands.
 #[cfg(test)]
-mod batch6_tests;
+mod layer_and_style_commands;
 
-/// Batch 7: remaining gaps found in the HEAD audit (evidence-only missions
-/// and the four WEAK ones), implemented on HEAD.
+/// XREF and sheet-set command coverage.
 #[cfg(test)]
-mod batch7_tests;
+mod xref_and_sheet_set_tests;
 
 #[cfg(test)]
-mod batch8_tests;
+mod selection_and_attribute_sync_tests;
 
 #[cfg(test)]
 mod text_mask_tests {

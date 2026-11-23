@@ -1,6 +1,5 @@
-/// Batch 5: the missions that were still open on HEAD.
 #[cfg(test)]
-mod batch5_tests {
+mod insert_and_dimstyle_commands {
     use crate::app::OpenCADStudio;
 
     fn new_app() -> OpenCADStudio {

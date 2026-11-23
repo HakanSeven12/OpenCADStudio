@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod batch6_tests {
+mod layer_and_style_commands {
     use crate::app::OpenCADStudio;
 
     fn out_text(app: &OpenCADStudio) -> String {

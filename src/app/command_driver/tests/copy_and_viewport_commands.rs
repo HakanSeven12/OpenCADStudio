@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod batch4_tests {
+mod copy_and_viewport_commands {
     use crate::app::OpenCADStudio;
 
     fn new_app() -> OpenCADStudio {

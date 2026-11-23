@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod batch8_tests {
+mod selection_and_attribute_sync_tests {
     use crate::app::OpenCADStudio;
 
     fn out_text(app: &OpenCADStudio) -> String {

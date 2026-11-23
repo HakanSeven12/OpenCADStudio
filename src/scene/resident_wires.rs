@@ -221,6 +221,8 @@ impl Scene {
         self.last_tess_ms
             .set(t_tess.elapsed().as_secs_f32() * 1000.0);
         self.last_tess_wires.set(wires.len());
+        self.resident_full_builds
+            .set(self.resident_full_builds.get() + 1);
         let arc = Arc::new(wires);
         // The memo keeps one copy of what this set holds; read before the
         // previous set is evicted below, which may hold runs it still needs.

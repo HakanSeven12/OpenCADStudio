@@ -22,6 +22,9 @@ pub enum BlockParameterComponent {
     Angle,
     Flip,
     Visibility(u64),
+    // A BricsCAD parametric block's visibility parameter, with a hash of its
+    // name and states.
+    Bricscad(u64),
     TableRow(u64),
     LookupOutput { column: usize, revision: u64 },
 }

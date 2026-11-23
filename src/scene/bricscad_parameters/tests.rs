@@ -1,4 +1,5 @@
 use super::*;
+use document::DxfVersion;
 
 /// The BricsCAD drawing in `tests/fixtures/bricscad` (see its README).
 fn fixture() -> Document {
@@ -47,11 +48,13 @@ fn the_definition_names_its_parameters_their_states_and_the_ones_it_shows() {
                 name: "LAMP".into(),
                 states: vec!["On".into(), "Off".into()],
                 current: Some(0),
+                feature: Handle::from(0x16Fu64),
             },
             VisibilityParameter {
                 name: "LABEL".into(),
                 states: vec!["Shown".into(), "Hidden".into()],
                 current: Some(0),
+                feature: Handle::from(0x176u64),
             },
         ]
     );
@@ -121,14 +124,18 @@ fn a_cut_record_decodes_to_nothing_rather_than_a_wrong_answer() {
         if type_name != "BDMDBCONFIGURATIONTABLE" {
             continue;
         }
-        let whole = decode(data, *raw_dwg_handle_bits, *version).expect("the whole record");
-        assert!(whole.get("KeyValues").is_some());
+        let whole = record::decode(type_name, data, *raw_dwg_handle_bits, *version)
+            .expect("the whole record");
+        assert!(whole.body.properties().get("KeyValues").is_some());
         records += 1;
         for length in 0..data.len() {
             // Shorter by whole bytes: the streams no longer line up.
-            let _ = decode(&data[..length], *raw_dwg_handle_bits, *version);
+            let _ = record::decode(type_name, &data[..length], *raw_dwg_handle_bits, *version);
         }
-        assert_eq!(decode(data, *raw_dwg_handle_bits, DxfVersion::AC1021), None);
+        assert_eq!(
+            record::decode(type_name, data, *raw_dwg_handle_bits, DxfVersion::AC1021),
+            None
+        );
     }
     assert_eq!(records, 6, "two tables in each of the three blocks");
 }

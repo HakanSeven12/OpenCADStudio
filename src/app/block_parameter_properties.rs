@@ -45,8 +45,13 @@ impl OpenCADStudio {
         } else {
             None
         };
-        let definition =
-            |handle| crate::scene::block_actions::instance::definition(&tab.scene.document, handle);
+        // A BricsCAD parametric block's references, whether they show the
+        // block or a copy of it, share the block.
+        let definition = |handle| {
+            crate::scene::bricscad_parameters::master_block(&tab.scene.document, handle).or_else(
+                || crate::scene::block_actions::instance::definition(&tab.scene.document, handle),
+            )
+        };
         let first = definition(handles[0])?;
         handles
             .iter()
@@ -71,6 +76,12 @@ impl OpenCADStudio {
             let doc = &tab.scene.document;
             let mut rows = native::properties(doc, None, tab.id, insert);
             rows.extend(Self::indexed_visibility_property(doc, tab.id, insert));
+            rows.extend(Self::bricscad_visibility_properties(
+                doc,
+                tab.id,
+                insert,
+                editor_session.is_none(),
+            ));
             rows
         };
         let key = |value: &PropValue| match value {
@@ -175,6 +186,8 @@ impl OpenCADStudio {
                 .document
                 .dynamic_visibility_for_insert(key.insert)
                 .map(|(definition, _)| definition)
+        } else if matches!(key.component, BlockParameterComponent::Bricscad(_)) {
+            crate::scene::bricscad_parameters::master_block(&tab.scene.document, key.insert)
         } else {
             crate::scene::block_actions::instance::definition(&tab.scene.document, key.insert)
         };
@@ -229,6 +242,9 @@ impl OpenCADStudio {
                         (BlockParameterComponent::Visibility(_), Input::Choice(state)) => {
                             Self::stage_visibility_property(source, target, state)
                         }
+                        (BlockParameterComponent::Bricscad(_), Input::Choice(state)) => {
+                            Self::stage_bricscad_visibility(source, target, state)
+                        }
                         _ => native::evaluate(source, None, target, input),
                     }?;
                     if let Some(next) = next {
@@ -241,6 +257,9 @@ impl OpenCADStudio {
             match (key.component, input) {
                 (BlockParameterComponent::Visibility(_), Input::Choice(state)) => {
                     Self::stage_visibility_property(&tab.scene.document, key, state)
+                }
+                (BlockParameterComponent::Bricscad(_), Input::Choice(state)) => {
+                    Self::stage_bricscad_visibility(&tab.scene.document, key, state)
                 }
                 _ => native::evaluate(&tab.scene.document, baseline, key, input),
             }

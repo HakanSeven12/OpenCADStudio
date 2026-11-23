@@ -1,25 +1,9 @@
-// A transform has two paths through the code. MOVE, ROTATE, SCALE and MIRROR
-// give a typed `EntityTransform`. ALIGN, WBLOCK, the block base point and
-// QDIM give the motion as a matrix (`EntityTransform::Affine`). The two paths
-// must move an entity to the same place.
-//
-// This test applies each typed transform of the golden test to each of its
-// fixture entities, applies the matrix of that transform
-// (`codec_transform`), and compares each described field. The fields that
-// differ today are in `KNOWN_DIFFERENCES`. A new difference fails the test,
-// and so does a line of the list that no longer differs.
-//
-// When this test fails after a change to a transform:
-//
-// - The failure shows the value of each path. A difference that your change
-//   made is a fault in the path that you changed, until evidence shows that
-//   the other path was wrong. Repair it.
-// - Add a line to `KNOWN_DIFFERENCES` only with evidence of which value is
-//   correct: the reference application, or the DXF or DWG format. Write the
-//   evidence in the comment of the line. A line that is there only to make
-//   the test pass hides a fault.
-// - A group that is marked "Not examined" records what the code does. It
-//   does not say that the difference is correct.
+// A typed transform (MOVE, ROTATE, SCALE, MIRROR) and its matrix
+// (`codec_transform`, as ALIGN, WBLOCK and the block base point give it) must
+// move each fixture entity of the golden test to the same place. The fields
+// that differ today are in `KNOWN_DIFFERENCES`; a new difference fails, and so
+// does a listed one that no longer differs. Add a line there only with
+// evidence of which value is correct, written in its comment.
 
 use std::collections::{BTreeMap, BTreeSet};
 

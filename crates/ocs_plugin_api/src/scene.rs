@@ -772,27 +772,16 @@ impl SceneBuilder {
     }
 }
 
-/// Which surface kind a panel publish frame carries — the minimal common
-/// surface envelope shared by scene and (later) widget surfaces: identity is
-/// the transport-authenticated plugin plus the panel id, each surface kind
-/// carries its own independent revision, and the wire never carries native
-/// widget objects or callbacks. One frame publishes one surface.
-///
-/// Lives beside the scene tree (not in `ipc`) so the pure app-side store —
-/// which compiles without the `host` feature — shares the exact vocabulary
-/// the wire carries.
-///
-/// Compatibility rule: variants append at the END (the widget-surface
-/// stage appends its kind); the scene leg's discriminant (0) is pinned from
-/// creation and never renumbers.
+/// The surface a panel publish carries. Variants append at the end; `Scene`
+/// stays 0.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PanelSurface {
     /// The panel's declarative scene snapshot (bounded, validated).
     Scene(PanelScene),
 }
 
-/// Why a panel surface publish refused. Codes append at the end; the
-/// refusal never mutates host state (no partial writes, ever).
+/// Why a panel surface publish was refused; a refusal changes nothing.
+/// Codes append at the end.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SurfaceRejectCode {
@@ -810,9 +799,8 @@ pub enum SurfaceRejectCode {
     NonMonotonicRevision,
 }
 
-/// Typed rejection of a panel surface publish (or, later, patch): the
-/// machine-readable code plus the stored head when the refusal is
-/// revision-related, so the publisher can resynchronize.
+/// A refused publish: the code, and the stored revision when the refusal is
+/// about the revision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct SurfaceReject {

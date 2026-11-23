@@ -5,7 +5,7 @@ use crate::app::tab_document::DocumentTab;
 use crate::app::{Message, OpenCADStudio};
 use crate::t;
 use crate::ui::dock::{DOCK_DIVIDER_W, DOCK_FLOAT_BAR_W, RAIL_ICON};
-use iced::widget::{Space, button, canvas, column, container, mouse_area, row, stack, text};
+use iced::widget::{button, canvas, column, container, mouse_area, row, stack, text, Space};
 use iced::{Background, Border, Color, Element, Fill, Length, Theme};
 
 /// One row of the edge (+) pallet menu: a built-in panel, or a panel a
@@ -219,8 +219,10 @@ impl OpenCADStudio {
         let mut entries: Vec<(MenuPanel, bool)> = PanelId::ALL
             .iter()
             .filter(|p| {
-                !matches!(**p, PanelId::AuthoringPalettes | PanelId::ParametersManager)
-                    || edit_session
+                !matches!(
+                    **p,
+                    PanelId::AuthoringPalettes | PanelId::ParametersManager
+                ) || edit_session
             })
             .map(|p| {
                 let here = self.dock.location(*p).map(|(s, _)| s) == Some(side);
@@ -240,7 +242,11 @@ impl OpenCADStudio {
             .iter()
             .filter_map(|(id, state)| {
                 let num = *num_by_id.get(id.as_str())?;
-                let here = self.dock.location(PanelId::Plugin(num)).map(|(s, _)| s) == Some(side);
+                let here = self
+                    .dock
+                    .location(PanelId::Plugin(num))
+                    .map(|(s, _)| s)
+                    == Some(side);
                 Some((
                     num,
                     state.def.title.clone(),
@@ -362,7 +368,7 @@ impl OpenCADStudio {
     fn dock_icon_strip(&self, side: crate::app::config::DockSide) -> Element<'_, Message> {
         use crate::app::config::DockSide;
         use crate::ui::dock::{
-            DOCK_STRIP_W, DockMsg, DropTarget, STRIP_GRIP_W, STRIP_PAD, STRIP_PLUS_GAP,
+            DockMsg, DropTarget, DOCK_STRIP_W, STRIP_GRIP_W, STRIP_PAD, STRIP_PLUS_GAP,
             STRIP_PLUS_H,
         };
         use crate::ui::style::{chrome, kit_metrics as km};
@@ -1067,7 +1073,7 @@ impl OpenCADStudio {
         target: crate::ui::dock::DropTarget,
     ) -> Vec<Element<'_, Message>> {
         use crate::app::config::DockSide;
-        use crate::ui::dock::{DOCK_STRIP_W, DropTarget};
+        use crate::ui::dock::{DropTarget, DOCK_STRIP_W};
         let (ww, _) = self.dock_workspace_size();
         let strip_x = match side {
             DockSide::Left => 0.0,

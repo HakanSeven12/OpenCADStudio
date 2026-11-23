@@ -337,6 +337,7 @@ impl HostApi for HostSession<'_> {
 
         let state = crate::ui::window::plugin_panel::PluginPanelState::from_def(panel);
         self.app.plugin_panels.insert(id.clone(), state);
+        self.app.panel_surfaces.remove(&id);
 
         // Pallet-menu listing is capped per edge so a plugin cannot widen
         // the palette beyond a bounded length (see docs/plugin-pallet-menu.md).
@@ -463,11 +464,9 @@ impl HostApi for HostSession<'_> {
         }
     }
 
-    /// V29 (additive): publish (or replace) the panel's declarative scene
-    /// surface from the authenticated transport owner. Attachment and
-    /// ownership resolve here (registered alias-aware, transport-checked);
-    /// structural and revision semantics live in the pure store, which
-    /// re-checks ownership so no path can bypass it.
+    /// V29: publish the panel's scene for the authenticated owner. Attachment
+    /// and ownership resolve here; the store applies the revision rules and
+    /// checks the owner again.
     fn panel_surface_publish_for_plugin(
         &mut self,
         plugin_id: &str,

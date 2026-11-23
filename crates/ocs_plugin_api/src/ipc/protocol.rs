@@ -436,16 +436,9 @@ pub enum PluginRequest {
     },
     /// V22 (additive): remove the model-space GEODATA object.
     RemoveGeoLocation,
-    /// V29 (additive): publish (or replace) one panel's declarative surface
-    /// from the authenticated owning plugin — the bounded data tree the
-    /// host renders natively. Plugin identity is the transport's serving
-    /// manifest, never a wire field; `panel_id` scopes the surface the way
-    /// `RegisterPanel` scopes the panel. The first publish mounts the
-    /// surface; a later publish replaces it wholesale exactly when its
-    /// revision strictly advances (an identical resurface at the stored
-    /// head is an idempotent no-op). Deliberately no event piggyback:
-    /// events are host→plugin notifications, not publish payload — the two
-    /// directions never ride the same frame.
+    /// V29: publish or replace one panel's surface for the authenticated
+    /// owner. The first publish mounts it; a later one replaces it when its
+    /// revision advances, and the same scene at the head is a no-op.
     PanelSurfacePublish {
         panel_id: String,
         surface: crate::scene::PanelSurface,
@@ -546,12 +539,7 @@ pub enum PluginResponse {
     GeoLocationSet(Result<crate::host::Handle, String>),
     /// V22 (additive): whether `RemoveGeoLocation` removed an object.
     GeoLocationRemoved(Result<bool, String>),
-    /// V29 (additive): outcome of a panel surface publish — the stored
-    /// surface revision on success, a typed rejection otherwise. The
-    /// rejection never mutates host state (no partial writes, ever).
-    /// The `PanelSurface` envelope and the typed `SurfaceReject` live in
-    /// `crate::scene` so the pure app-side store (which has no host
-    /// feature) shares the exact same vocabulary the wire carries.
+    /// V29: the stored revision, or the reason the publish was refused.
     PanelSurfacePublished(Result<crate::scene::SceneRevision, crate::scene::SurfaceReject>),
 }
 
@@ -624,15 +612,13 @@ mod tests {
     #[test]
     fn plugin_request_v14_to_v16_discriminants_are_preserved() {
         assert_eq!(
-            discriminant_of(&PluginRequest::ShowDialog(crate::dialog::DialogDef::new(
-                "T"
-            ))),
+            discriminant_of(&PluginRequest::ShowDialog(crate::dialog::DialogDef::new("T"))),
             50
         );
         assert_eq!(
-            discriminant_of(&PluginRequest::RegisterPanel(crate::dialog::PanelDef::new(
-                "id", "T"
-            ))),
+            discriminant_of(&PluginRequest::RegisterPanel(
+                crate::dialog::PanelDef::new("id", "T")
+            )),
             51
         );
         assert_eq!(
@@ -657,7 +643,9 @@ mod tests {
         );
         assert_eq!(discriminant_of(&PluginRequest::EndUndoGroup), 55);
         assert_eq!(
-            discriminant_of(&PluginRequest::QueryEntities { query: "{}".into() }),
+            discriminant_of(&PluginRequest::QueryEntities {
+                query: "{}".into(),
+            }),
             56
         );
         assert_eq!(
@@ -694,7 +682,9 @@ mod tests {
             19
         );
         assert_eq!(
-            discriminant_of(&HostResponse::InputKind(InteractiveInputKind::SingleToken)),
+            discriminant_of(&HostResponse::InputKind(
+                InteractiveInputKind::SingleToken
+            )),
             14
         );
         assert_eq!(

@@ -208,16 +208,9 @@
 /// `HostRequest::GetInputKind`, `HostResponse::InputKind`, and
 /// `InteractiveEvent::TextInput`) for command-line text prompts; plugins on
 /// v3–v27 remain supported unchanged.
-/// v29 appends panel surface publishing: `PluginRequest::PanelSurfacePublish`
-/// carries a bounded declarative `PanelScene` (`SceneOrWidgetSurface::Scene`)
-/// for a panel the authenticated plugin registered, and
-/// `PluginResponse::PanelSurfacePublished` answers with the stored surface
-/// revision or a typed `SurfaceReject` (`Unattached`, `OwnedByOther`,
-/// `InvalidSurface`, `NonMonotonicRevision`; rejection never mutates host
-/// state). The host stores and natively renders the scene; plugin and host
-/// share only the serializable tree. A v28 runner cannot decode the request,
-/// so a plugin that sends it declares v29. Panel surface variants append at
-/// the end (`SceneOrWidgetSurface` starts with `Scene` = 0, pinned).
+/// v29 appends `PluginRequest::PanelSurfacePublish`: a plugin publishes a
+/// bounded `PanelScene` (`PanelSurface::Scene`) for a panel it registered and
+/// gets the stored revision or a typed `SurfaceReject` back.
 pub const API_VERSION: u32 = 29;
 
 /// Oldest plugin API major the current host still loads. This keeps previously

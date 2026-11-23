@@ -136,9 +136,10 @@ impl PluginHostApi {
     /// Fetch (never cache) the CURRENT document view info from the host.
     fn fetch_document_view(&self) -> Option<DocumentViewInfo> {
         match self.client.request(PluginRequest::OpenDocumentView) {
-            Ok(PluginResponse::DocumentView { path, version }) => {
-                Some(DocumentViewInfo { path, version })
-            }
+            Ok(PluginResponse::DocumentView { path, version }) => Some(DocumentViewInfo {
+                path,
+                version,
+            }),
             Ok(other) => {
                 eprintln!("[plugin] unexpected OpenDocumentView response: {other:?}");
                 None
@@ -1107,8 +1108,8 @@ mod tests {
     use document::entities::Point;
     use document::{EntityType, Handle};
     use interprocess::local_socket::{
-        GenericNamespaced, ListenerOptions, Stream, ToNsName,
         traits::{Listener, Stream as StreamTrait},
+        GenericNamespaced, ListenerOptions, Stream, ToNsName,
     };
 
     use crate::host::HostApi;
@@ -1159,10 +1160,9 @@ mod tests {
             "out-of-process ensure_plugin_state must degrade, not panic: {:?}",
             outcome.err()
         );
-        assert!(
-            api.ensure_plugin_state_any("opencad.demo", &mut || Box::new(7u32))
-                .is_none()
-        );
+        assert!(api
+            .ensure_plugin_state_any("opencad.demo", &mut || Box::new(7u32))
+            .is_none());
     }
 
     #[test]
@@ -1373,7 +1373,7 @@ mod tests {
             send(
                 &mut peer,
                 &HostToPlugin::Response(Box::new(PluginResponse::XRecordNames(Ok(vec![
-                    "alpha".to_owned(),
+                    "alpha".to_owned()
                 ])))),
             )
             .unwrap();

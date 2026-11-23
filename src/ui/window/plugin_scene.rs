@@ -1,20 +1,11 @@
-//! Native projection of plugin panel scenes (api v29).
-//!
-//! Ownership split: the plugin owns the *semantic* scene — the
-//! `ocs_plugin_api::scene::PanelScene` tree, what it means and holds; the
-//! host owns the *projection*: flattening that validated tree into ordered
-//! paint primitives and painting them on its own canvas. Plugin and host
-//! share nothing but the serializable tree. This stage is deliberately
-//! static: every frame re-projects the stored scene; the retained cache and
-//! hit-testing are later stages.
-//!
-//! The projection is pure and iced-free (`project_scene` produces prims
-//! that carry semantic colors); the theme resolves only inside the canvas
-//! program's `draw`, the single place the host theme is consulted.
+//! Native projection of plugin panel scenes (api v29): the plugin owns the
+//! `PanelScene` tree, the host flattens it into paint primitives
+//! (`project_scene`, without iced) and paints them on its canvas, resolving
+//! theme colors only in `draw`.
 
 use crate::app::Message;
 use iced::widget::canvas;
-use iced::{Color, Element, Length, Point, Rectangle, Size, Theme, mouse};
+use iced::{mouse, Color, Element, Length, Point, Rectangle, Size, Theme};
 use ocs_plugin_api::scene::{PanelScene, SceneColor, SceneElement, ThemeColor};
 
 /// One flattened paint primitive, semantic colors unresolved. Paint order
@@ -141,13 +132,13 @@ impl canvas::Program<Message> for SceneCanvas {
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         for prim in &self.prims {
-            paint_prim(&mut frame, theme, bounds, prim);
+            paint_prim(&mut frame, theme, prim);
         }
         vec![frame.into_geometry()]
     }
 }
 
-fn paint_prim(frame: &mut canvas::Frame, theme: &Theme, _bounds: Rectangle, prim: &ScenePrim) {
+fn paint_prim(frame: &mut canvas::Frame, theme: &Theme, prim: &ScenePrim) {
     match prim {
         ScenePrim::Rect {
             x,

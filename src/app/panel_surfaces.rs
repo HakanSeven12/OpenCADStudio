@@ -1,17 +1,6 @@
-//! Pure panel surface publish semantics (api v29).
-//!
-//! Ownership and attachment are resolved by the caller (the host session
-//! knows the authenticated transport owner and the registered panels); this
-//! module owns the structural and revision semantics of a publish and never
-//! touches the renderer. Nothing here draws, and nothing here depends on
-//! iced — the UI projects from the stored state.
-//!
-//! Publish contract (mirrors the wire documentation on
-//! `PluginRequest::PanelSurfacePublish`): the first publish stores the
-//! scene; a later publish replaces it wholesale exactly when its revision
-//! strictly advances over the stored head; an identical resurface at the
-//! head is an idempotent no-op; anything else is refused with a typed
-//! [`SurfaceReject`] and no partial state change.
+//! Stored panel scenes (api v29). The caller resolves ownership and
+//! attachment; this store applies the revision rules of a publish and keeps
+//! no renderer state.
 
 use ocs_plugin_api::scene::{PanelScene, SceneRevision};
 use ocs_plugin_api::scene::{PanelSurface, SurfaceReject, SurfaceRejectCode};
@@ -102,6 +91,17 @@ impl PanelSurfaceStore {
             .filter(|record| record.owner_plugin_id == plugin_id)
             .map(|record| &record.scene)
     }
+
+    /// Forget the scene of `panel_id`: a panel registered again starts
+    /// without the scene and the revision of its earlier registration.
+    pub fn remove(&mut self, panel_id: &str) {
+        self.scenes.remove(panel_id);
+    }
+
+    /// Keep only the scenes whose owner `keep` accepts (the live plugins).
+    pub fn retain_owners(&mut self, mut keep: impl FnMut(&str) -> bool) {
+        self.scenes.retain(|_, record| keep(&record.owner_plugin_id));
+    }
 }
 
 #[cfg(test)]
@@ -135,6 +135,26 @@ mod tests {
             Ok(SceneRevision(7))
         );
         assert_eq!(store.scene(PLUGIN, PANEL), Some(&scene));
+    }
+
+    #[test]
+    fn a_dead_owner_or_a_new_registration_forgets_the_scene() {
+        let mut store = PanelSurfaceStore::default();
+        store
+            .publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(9)))
+            .expect("first publish");
+        store.retain_owners(|owner| owner != PLUGIN);
+        assert_eq!(store.scene(PLUGIN, PANEL), None);
+        // A restarted plugin starts again from revision 1.
+        assert_eq!(
+            store.publish(PLUGIN, PANEL, PanelSurface::Scene(one_rect_scene(1))),
+            Ok(SceneRevision(1))
+        );
+        store.remove(PANEL);
+        assert_eq!(
+            store.publish("other.plugin", PANEL, PanelSurface::Scene(one_rect_scene(1))),
+            Ok(SceneRevision(1))
+        );
     }
 
     #[test]

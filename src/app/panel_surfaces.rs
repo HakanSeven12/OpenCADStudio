@@ -6,16 +6,25 @@ use ocs_plugin_api::scene::{PanelScene, SceneRevision};
 use ocs_plugin_api::scene::{PanelSurface, SurfaceReject, SurfaceRejectCode};
 
 /// Stored surface per panel id: strictly one authoritative record per
-/// panel, owned by the authenticated plugin that published it.
+/// panel, owned by the authenticated plugin that published it. A panel
+/// owns ONE scene AND one widget surface side by side (finding F1: the
+/// two kinds advance on independent revisions).
 #[derive(Debug, Default)]
 pub struct PanelSurfaceStore {
     scenes: std::collections::BTreeMap<String, SceneRecord>,
+    widgets: std::collections::BTreeMap<String, WidgetRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 struct SceneRecord {
     owner_plugin_id: String,
     scene: PanelScene,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct WidgetRecord {
+    owner_plugin_id: String,
+    surface: ocs_plugin_api::widget::WidgetSurface,
 }
 
 impl PanelSurfaceStore {
@@ -28,7 +37,7 @@ impl PanelSurfaceStore {
         &mut self,
         plugin_id: &str,
         panel_id: &str,
-        surface: PanelSurface,
+        scene: PanelScene,
     ) -> Result<SceneRevision, SurfaceReject> {
         if plugin_id.is_empty() || panel_id.trim().is_empty() {
             return Err(SurfaceReject {
@@ -36,7 +45,6 @@ impl PanelSurfaceStore {
                 current_revision: None,
             });
         }
-        let PanelSurface::Scene(scene) = surface;
         if scene.validate().is_err() {
             return Err(SurfaceReject {
                 code: SurfaceRejectCode::InvalidSurface,
@@ -146,6 +154,121 @@ impl PanelSurfaceStore {
     pub fn retain_owners(&mut self, mut keep: impl FnMut(&str) -> bool) {
         self.scenes
             .retain(|_, record| keep(&record.owner_plugin_id));
+        self.widgets
+            .retain(|_, record| keep(&record.owner_plugin_id));
+    }
+
+    /// Publish (or replace) the panel's WIDGET surface (api v29, S05):
+    /// the same ownership/revision rules as scene publishes, on the
+    /// widget tier's independent revision space.
+    pub fn publish_widget(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        surface: ocs_plugin_api::widget::WidgetSurface,
+    ) -> Result<ocs_plugin_api::widget::WidgetRevision, SurfaceReject> {
+        if plugin_id.is_empty() || panel_id.trim().is_empty() {
+            return Err(SurfaceReject {
+                code: SurfaceRejectCode::Unattached,
+                current_revision: None,
+            });
+        }
+        if surface.validate().is_err() {
+            return Err(SurfaceReject {
+                code: SurfaceRejectCode::InvalidSurface,
+                current_revision: None,
+            });
+        }
+        if let Some(record) = self.widgets.get(panel_id) {
+            if record.owner_plugin_id != plugin_id {
+                return Err(SurfaceReject {
+                    code: SurfaceRejectCode::OwnedByOther,
+                    current_revision: Some(record.surface.revision.0),
+                });
+            }
+            let head = record.surface.revision;
+            if surface.revision == head {
+                if surface == record.surface {
+                    return Ok(head); // idempotent: identical at the head
+                }
+                return Err(SurfaceReject {
+                    code: SurfaceRejectCode::NonMonotonicRevision,
+                    current_revision: Some(head.0),
+                });
+            }
+            if surface.revision < head {
+                return Err(SurfaceReject {
+                    code: SurfaceRejectCode::NonMonotonicRevision,
+                    current_revision: Some(head.0),
+                });
+            }
+        }
+        let revision = surface.revision;
+        self.widgets.insert(
+            panel_id.to_string(),
+            WidgetRecord {
+                owner_plugin_id: plugin_id.to_string(),
+                surface,
+            },
+        );
+        Ok(revision)
+    }
+
+    /// Install a bounded widget page atomically (the lazy-expansion and
+    /// paging primitive). Only a previously published widget surface can
+    /// be paged; ownership and revision rules match publishing.
+    pub fn install_widget_page(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        page: ocs_plugin_api::widget::WidgetPage,
+    ) -> Result<ocs_plugin_api::widget::WidgetRevision, SurfaceReject> {
+        use ocs_plugin_api::widget::WidgetError;
+        if plugin_id.is_empty() || panel_id.trim().is_empty() {
+            return Err(SurfaceReject {
+                code: SurfaceRejectCode::Unattached,
+                current_revision: None,
+            });
+        }
+        let Some(record) = self.widgets.get_mut(panel_id) else {
+            return Err(SurfaceReject {
+                code: SurfaceRejectCode::Unattached,
+                current_revision: None,
+            });
+        };
+        if record.owner_plugin_id != plugin_id {
+            return Err(SurfaceReject {
+                code: SurfaceRejectCode::OwnedByOther,
+                current_revision: Some(record.surface.revision.0),
+            });
+        }
+        match page.apply_to(&mut record.surface) {
+            Ok(revision) => Ok(revision),
+            Err(WidgetError::StaleBase) => Err(SurfaceReject {
+                code: SurfaceRejectCode::NonMonotonicRevision,
+                current_revision: Some(record.surface.revision.0),
+            }),
+            Err(_) => Err(SurfaceReject {
+                code: SurfaceRejectCode::InvalidSurface,
+                current_revision: None,
+            }),
+        }
+    }
+
+    /// Ownership-checked widget read (api v29): a widget surface reads
+    /// back only for its authenticated owner.
+    pub fn widget(
+        &self,
+        plugin_id: &str,
+        panel_id: &str,
+    ) -> Option<&ocs_plugin_api::widget::WidgetSurface> {
+        if plugin_id.is_empty() {
+            return None;
+        }
+        self.widgets
+            .get(panel_id)
+            .filter(|record| record.owner_plugin_id == plugin_id)
+            .map(|record| &record.surface)
     }
 }
 

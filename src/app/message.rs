@@ -641,8 +641,6 @@ pub enum Message {
     ParametersManagerFilterMode(crate::scene::block_parameters_manager::FilterMode),
     /// Toggles the funnel's two-entry menu.
     ParametersManagerFilterMenu,
-    /// Toggles the header's column menu.
-    ParametersManagerHeaderMenu,
     /// Shows or hides one header column.
     ParametersManagerColumn(crate::ui::window::parameters_manager::Column),
     ParametersManagerSearch(String),
@@ -900,8 +898,8 @@ pub enum Message {
     LayerNameColGrab,
     /// Start dragging the divider after a Layer Manager column.
     LayerColGrab(crate::ui::window::layers::LayerSortCol),
-    /// Open or close the Layer Manager's column chooser.
-    LayerColumnsMenu(bool),
+    /// Show every Layer Manager column again (the header's right-click menu).
+    LayerColumnsShowAll,
     /// Show or hide a Layer Manager column.
     LayerColumnToggle(crate::ui::window::layers::LayerSortCol),
     /// Move a Layer Manager column left (-1) or right (1).

@@ -662,6 +662,18 @@ pub const COL_MIN_W: f32 = 24.0;
 /// The name and object-count columns' widths until the user sizes them.
 pub const DEFAULT_COL_W: [f32; 2] = [240.0, 48.0];
 
+/// The width a row needs: the name, swatch and count columns, the pin and
+/// the state marks, with the gaps between them and the row's side padding.
+pub fn list_content_width(col_w: [f32; 2]) -> f32 {
+    2.0 * km::CELL_PAD_X
+        + col_w[0]
+        + COL_SWATCH
+        + col_w[1]
+        + COL_PIN
+        + COL_STATE
+        + 4.0 * km::TOOL_GAP
+}
+
 /// The whole pallet: chrome title, header, list, inline dialogs and footer.
 /// The pallet stays non-modal, so its dialogs are drawn inside it rather than
 /// floating over the drawing.
@@ -677,11 +689,10 @@ pub fn view<'a>(
     width: f32,
     chrome: crate::ui::dock::Chrome,
 ) -> Element<'a, Message> {
-    // The name column keeps its width while the palette has room for it and
-    // the fixed columns, and gives way when it does not.
-    let fixed = COL_SWATCH + col_w[1] + COL_PIN + COL_STATE + 4.0 * km::TOOL_GAP;
-    let room = width - km::GRID_INSET_L - km::GRID_INSET_R - 2.0 * km::CELL_PAD_X - fixed;
-    let col_w = [col_w[0].min(room).max(COL_MIN_W), col_w[1]];
+    // The columns keep the widths they were dragged to, as in the Layer
+    // Manager; when they need more room than the pallet has, the list
+    // scrolls sideways.
+    let room = (width - km::GRID_INSET_L - km::GRID_INSET_R).max(0.0);
     let body = container(view_content(
         rows,
         session,
@@ -691,6 +702,7 @@ pub fn view<'a>(
         ctrl,
         shift,
         col_w,
+        room,
     ))
     .width(Length::Fixed(width))
     .height(Fill);
@@ -715,6 +727,7 @@ fn view_content<'a>(
     ctrl: bool,
     shift: bool,
     col_w: [f32; 2],
+    room: f32,
 ) -> Element<'a, Message> {
     // ── Toolbar ───────────────────────────────────────────────────────────
     let select_btn = kit::tool_button(
@@ -986,17 +999,31 @@ fn view_content<'a>(
     };
 
     // The list (its column header, an inline dialog, the rows) sits inside
-    // the palette's insets, as the bands above it do.
+    // the palette's insets, as the bands above it do. It is as wide as the
+    // wider of its columns and the pallet, worked out rather than left to
+    // `Fill`, which inside the sideways scrollable measured as wide as the
+    // pallet and cut the columns past it off.
+    let content_w = list_content_width(col_w).max(room);
     let mut grid = column![header_grid];
     if let Some(dialog) = dialog {
+        // The dialog stays in the part of the list the pallet shows.
         grid = grid.push(
             container(dialog)
                 .padding([km::TOOL_GAP, 0.0])
-                .width(Fill)
+                .width(Length::Fixed(room))
                 .align_x(iced::Center),
         );
     }
-    let grid = container(grid.push(list).height(Fill))
+    let grid = scrollable(grid.push(list).width(Length::Fixed(content_w)).height(Fill))
+        .direction(iced::widget::scrollable::Direction::Horizontal(
+            iced::widget::scrollable::Scrollbar::new()
+                .width(km::SCROLL_THUMB_W)
+                .scroller_width(km::SCROLL_THUMB_W),
+        ))
+        .style(kit::scroll_style)
+        .width(Fill)
+        .height(Fill);
+    let grid = container(grid)
         .padding(Padding {
             top: km::TOOL_GAP,
             bottom: 0.0,

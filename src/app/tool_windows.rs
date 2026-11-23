@@ -1205,7 +1205,7 @@ impl OpenCADStudio {
                 let body = iced::widget::responsive(move |size| {
                     self.panel_body(panel, size.width, true, tab)
                 });
-                column![header, body].into()
+                self.os_window_drag_capture(id, column![header, body].into())
             }
         };
         Some(
@@ -1220,6 +1220,39 @@ impl OpenCADStudio {
                 })
                 .into(),
         )
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl OpenCADStudio {
+    /// A pallet's window takes the pointer while one of its column dividers
+    /// (the Layer Manager's, Layer Walk's, the External References') is
+    /// dragged, as the main window's workspace does for a docked pallet.
+    /// Without it the drag only followed the pointer once it was over the
+    /// drawing, in the main window's coordinates. Always a mouse area, even
+    /// with no drag: iced keeps the pallet's widget state only while the
+    /// tree keeps its shape.
+    fn os_window_drag_capture<'a>(
+        &self,
+        window: iced::window::Id,
+        body: Element<'a, Message>,
+    ) -> Element<'a, Message> {
+        use crate::ui::dock::{DockDrag, DockMsg};
+        let columns = matches!(
+            self.dock_drag,
+            Some(DockDrag::LayerColumn(_) | DockDrag::WalkColumn(_))
+        );
+        let xref = self.xref_col_drag.is_some() || self.xref_split_drag;
+        let mut capture = mouse_area(body);
+        if columns {
+            capture = capture
+                .on_move(move |p| Message::Dock(DockMsg::DragMoveIn(window, p)))
+                .interaction(iced::mouse::Interaction::ResizingHorizontally);
+        }
+        if columns || xref {
+            capture = capture.on_release(Message::Dock(DockMsg::DragRelease));
+        }
+        capture.into()
     }
 }
 
@@ -1846,6 +1879,58 @@ mod tests {
         ));
         let editor = dialog_window(&mut app, ModalKind::LayerStateEditor);
         assert_eq!(editor.opener, Some(manager));
+    }
+
+    /// A column divider of the Layer Manager in its own window follows the
+    /// pointer over that window. Its window had no capture, so the column only
+    /// changed while the pointer was over the drawing in the main window.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_column_divider_drags_in_the_managers_own_window() {
+        use crate::ui::dock::DockMsg;
+        let (mut app, manager) = app_with_layer_manager_window();
+        let start = app.layer_name_col_w;
+        let _ = app.update_root(Message::LayerNameColGrab);
+        let messages = {
+            let mut ui = iced_test::simulator(
+                app.os_window_view(manager)
+                    .expect("the manager's window shows it"),
+            );
+            for x in [200.0, 240.0] {
+                let at = Point::new(x, 120.0);
+                ui.point_at(at);
+                ui.simulate([iced::Event::Mouse(iced::mouse::Event::CursorMoved {
+                    position: at,
+                })]);
+            }
+            ui.into_messages().collect::<Vec<_>>()
+        };
+        assert!(
+            messages
+                .iter()
+                .any(|m| matches!(m, Message::Dock(DockMsg::DragMoveIn(id, _)) if *id == manager)),
+            "the window reports the pointer while the divider is held: {messages:?}"
+        );
+        for message in messages {
+            let _ = app.update_root(message);
+        }
+        assert_eq!(
+            app.layer_name_col_w,
+            start + 40.0,
+            "the Name column follows"
+        );
+        // Into the main window: its points have another origin, so the drag
+        // goes on from there instead of jumping by the difference.
+        let _ = app.on_dock(DockMsg::DragMove(Point::new(900.0, 500.0)));
+        assert_eq!(
+            app.layer_name_col_w,
+            start + 40.0,
+            "no jump between windows"
+        );
+        let _ = app.on_dock(DockMsg::DragMove(Point::new(910.0, 500.0)));
+        assert_eq!(app.layer_name_col_w, start + 50.0);
+        let _ = app.on_dock(DockMsg::DragRelease);
+        assert!(app.dock_drag.is_none(), "a release ends the drag");
     }
 
     /// LAYERS, and the ribbon's toggle, bring up a manager that is behind

@@ -213,15 +213,35 @@ pub fn toggle_column(col: LayerSortCol) {
     });
 }
 
-/// Move `col` one place left (`-1`) or right (`1`).
+/// Move `col` one place left (`-1`) or right (`1`) among the shown
+/// columns: the hidden ones it passes keep their places.
 pub fn move_column(col: LayerSortCol, step: i8) {
     COLUMN_LAYOUT.with(|layout| {
         let mut layout = layout.borrow_mut();
         let Some(at) = layout.iter().position(|(c, _)| *c == col) else {
             return;
         };
-        let to = (at as i64 + i64::from(step)).clamp(0, layout.len() as i64 - 1) as usize;
-        layout.swap(at, to);
+        let next = if step < 0 {
+            layout[..at].iter().rposition(|(_, shown)| *shown)
+        } else {
+            layout[at + 1..]
+                .iter()
+                .position(|(_, shown)| *shown)
+                .map(|i| at + 1 + i)
+        };
+        if let Some(to) = next {
+            let entry = layout.remove(at);
+            layout.insert(to, entry);
+        }
+    });
+}
+
+/// Show every column again.
+pub fn show_all_columns() {
+    COLUMN_LAYOUT.with(|layout| {
+        for entry in layout.borrow_mut().iter_mut() {
+            entry.1 = true;
+        }
     });
 }
 
@@ -464,9 +484,6 @@ pub struct LayerPanel {
     pub sort_asc: bool,
     /// Live name filter from the search box; empty shows every layer (#343).
     pub filter: String,
-    /// The column chooser (a right-click on the header) is open; it stays
-    /// open while columns are ticked, until Close.
-    pub columns_menu: bool,
     /// The drawing's layer groups by layer name.
     pub groups: Vec<(String, Vec<String>)>,
     /// The filter tree's node shown in the table.
@@ -540,7 +557,6 @@ impl Default for LayerPanel {
             sort_col: Some(LayerSortCol::Name),
             sort_asc: true,
             filter: String::new(),
-            columns_menu: false,
             groups: Vec::new(),
             view: TreeNode::All,
             invert: false,
@@ -1381,7 +1397,7 @@ impl LayerPanel {
         let _ = has_selection;
 
         // The room the table has: beside the tree on a wide pallet.
-        let table_w = if band == WidthBand::Wide && !self.columns_menu {
+        let table_w = if band == WidthBand::Wide {
             (inner_w - TREE_W - km::LINE).max(0.0)
         } else {
             inner_w
@@ -1390,28 +1406,40 @@ impl LayerPanel {
         // ── Column header ─────────────────────────────────────────────────
         let sc = self.sort_col;
         let sa = self.sort_asc;
+        // A right-click anywhere on the header opens the column menu; on a
+        // column that can move, the menu also moves it.
         let mut header_row = row![
-            text(t!("Status"))
-                .size(ui_text::UI)
-                .line_height(ui_line())
-                .font(kit::SEMIBOLD)
-                .wrapping(iced::widget::text::Wrapping::None)
-                .width(COL_STATUS),
+            with_column_menu(
+                text(t!("Status"))
+                    .size(ui_text::UI)
+                    .line_height(ui_line())
+                    .font(kit::SEMIBOLD)
+                    .wrapping(iced::widget::text::Wrapping::None)
+                    .width(COL_STATUS)
+                    .into(),
+                None,
+            ),
             // Its divider sizes the Name column (#359), as each column's
             // divider sizes that column.
-            header_cell(
-                sortable_header(t!("Name"), LayerSortCol::Name, Fill, sc, sa),
-                name_col_w,
-                Message::LayerNameColGrab,
+            with_column_menu(
+                header_cell(
+                    sortable_header(t!("Name"), LayerSortCol::Name, Fill, sc, sa),
+                    name_col_w,
+                    Message::LayerNameColGrab,
+                ),
+                None,
             ),
         ]
         .spacing(km::TOOL_GAP)
         .align_y(iced::Center);
         for col in &columns {
-            header_row = header_row.push(header_cell(
-                sortable_header(col.label(), *col, Fill, sc, sa),
-                column_width(col_w, *col),
-                Message::LayerColGrab(*col),
+            header_row = header_row.push(with_column_menu(
+                header_cell(
+                    sortable_header(col.label(), *col, Fill, sc, sa),
+                    column_width(col_w, *col),
+                    Message::LayerColGrab(*col),
+                ),
+                Some(*col),
             ));
         }
 
@@ -1420,20 +1448,31 @@ impl LayerPanel {
             .iter()
             .filter(|vp| active_vp.is_none_or(|h| h == vp.handle))
         {
-            header_row = header_row.push(
+            header_row = header_row.push(with_column_menu(
                 text(vp.label.as_str())
                     .size(ui_text::UI)
                     .line_height(ui_line())
                     .font(kit::SEMIBOLD)
                     .wrapping(iced::widget::text::Wrapping::None)
-                    .width(Length::Fixed(COL_ICON * 2.0 + km::TOOL_GAP)),
-            );
+                    .width(Length::Fixed(COL_ICON * 2.0 + km::TOOL_GAP))
+                    .into(),
+                None,
+            ));
         }
         // Over the rows' eye buttons, after the same filler the rows have.
         header_row = header_row
             .width(Fill)
-            .push(iced::widget::Space::new().width(Fill))
-            .push(iced::widget::Space::new().width(COL_EYE));
+            .push(with_column_menu(
+                iced::widget::Space::new().width(Fill).height(Fill).into(),
+                None,
+            ))
+            .push(with_column_menu(
+                iced::widget::Space::new()
+                    .width(COL_EYE)
+                    .height(Fill)
+                    .into(),
+                None,
+            ));
 
         let col_header = container(header_row)
             .style(|theme: &Theme| container::Style {
@@ -1443,9 +1482,6 @@ impl LayerPanel {
             .height(km::ROW_H)
             .padding(Padding::ZERO.left(km::CELL_PAD_X).right(km::CELL_PAD_X))
             .width(Length::Fill);
-        // A right-click on the header chooses the columns.
-        let col_header =
-            iced::widget::mouse_area(col_header).on_right_press(Message::LayerColumnsMenu(true));
 
         // ── Layer rows ────────────────────────────────────────────────────
         let mut rows_col = column![].spacing(0);
@@ -1514,22 +1550,25 @@ impl LayerPanel {
             .width(Length::Fill)
             .height(Length::Fill);
 
-        // The header and table stretch to the wider of their columns and the
-        // pallet (the zero-height spacer), so the header's grey band and
-        // borders always run to the pallet's edge; a narrower pallet scrolls
-        // the table sideways while the toolbar stays put.
+        // The header and table are as wide as the wider of their columns and
+        // the pallet, so the header's grey band and borders always run to the
+        // pallet's edge, and columns past the edge scroll the table sideways
+        // while the toolbar stays put. The width is worked out, not left to
+        // `Fill`: inside the sideways scrollable a filling row measured as
+        // wide as the pallet, the columns past it were cut off and there was
+        // nothing to scroll.
         // The table sits inside the palette's insets, as the bands above it
         // do.
-        let grid = column![
-            col_header,
-            table,
-            iced::widget::Space::new()
-                .width(Length::Fixed(
-                    (table_w - km::GRID_INSET_L - km::GRID_INSET_R).max(0.0)
-                ))
-                .height(0),
-        ]
-        .height(Length::Fill);
+        let shown_vps = self
+            .vp_cols
+            .iter()
+            .filter(|vp| active_vp.is_none_or(|h| h == vp.handle))
+            .count();
+        let content_w = table_content_width(name_col_w, col_w, &columns, shown_vps)
+            .max((table_w - km::GRID_INSET_L - km::GRID_INSET_R).max(0.0));
+        let grid = column![col_header, table]
+            .width(Length::Fixed(content_w))
+            .height(Length::Fill);
         let grid = scrollable(grid)
             .direction(iced::widget::scrollable::Direction::Horizontal(
                 iced::widget::scrollable::Scrollbar::new()
@@ -1543,11 +1582,7 @@ impl LayerPanel {
             .padding(Padding::ZERO.left(km::GRID_INSET_L).right(km::GRID_INSET_R))
             .width(Length::Fill)
             .height(Length::Fill);
-        if self.columns_menu {
-            column![toolbar, column_chooser(), grid]
-                .height(Length::Fill)
-                .into()
-        } else if band == WidthBand::Wide {
+        if band == WidthBand::Wide {
             // A wide pallet has the tree beside the table.
             column![
                 toolbar,
@@ -1825,55 +1860,44 @@ fn more_item(label: Cow<'static, str>, msg: Message) -> Item {
     Item::new(label, Message::LayerMoreRun(Box::new(msg)))
 }
 
-/// Every movable column with a tick to show it and arrows to move it; it
-/// stays open while several are changed.
-fn column_chooser<'a>() -> Element<'a, Message> {
-    let mut list = column![];
+/// `header` with the column menu on a right-click. `clicked`: the movable
+/// column right-clicked, which the menu can move.
+fn with_column_menu<'a>(
+    header: Element<'a, Message>,
+    clicked: Option<LayerSortCol>,
+) -> Element<'a, Message> {
+    iced_aw::ContextMenu::new(header, move || column_menu(clicked)).into()
+}
+
+/// The header's right-click menu, a kit menu like every other: Move Left and
+/// Move Right for the column clicked, a tick for every movable column to show
+/// or hide it, and Show All. A press runs the item and closes the menu.
+fn column_menu(clicked: Option<LayerSortCol>) -> Element<'static, Message> {
     let layout = column_layout();
-    let last = layout.len().saturating_sub(1);
-    for (n, (col, shown)) in layout.into_iter().enumerate() {
-        let arrow = |up: bool| {
-            let icon = if up {
-                crate::ui::icons::themed_arrow_up(km::CARET)
-            } else {
-                crate::ui::icons::themed_arrow_down(km::CARET)
-            };
-            let enabled = if up { n > 0 } else { n < last };
-            button(icon)
-                .on_press_maybe(
-                    enabled.then_some(Message::LayerColumnMove(col, if up { -1 } else { 1 })),
-                )
-                .style(kit::flat_button_style(false))
-                .width(km::BAR_BUTTON)
-                .height(km::BAR_BUTTON)
-                .padding((km::BAR_BUTTON - km::CARET) / 2.0)
-        };
-        list = list.push(
-            row![
-                checkbox(shown)
-                    .label(col.label())
-                    .text_size(ui_text::UI)
-                    .size(km::CHECK)
-                    .on_toggle(move |_| Message::LayerColumnToggle(col))
-                    .width(Length::Fill),
-                arrow(true),
-                arrow(false),
-            ]
-            .height(km::ROW_H)
-            .align_y(iced::Center),
-        );
+    let mut items: Vec<Item> = Vec::new();
+    if let Some(col) = clicked {
+        // Moves step over hidden columns: they are where the header shows.
+        let shown: Vec<LayerSortCol> = layout
+            .iter()
+            .filter(|(_, shown)| *shown)
+            .map(|(c, _)| *c)
+            .collect();
+        let at = shown.iter().position(|c| *c == col);
+        let can_left = at.is_some_and(|at| at > 0);
+        let can_right = at.is_some_and(|at| at + 1 < shown.len());
+        items.push(Item::new(t!("Move Left"), Message::LayerColumnMove(col, -1)).enabled(can_left));
+        items
+            .push(Item::new(t!("Move Right"), Message::LayerColumnMove(col, 1)).enabled(can_right));
+        items.push(Item::Separator);
     }
-    let close = kit::text_button(t!("Close"), Some(Message::LayerColumnsMenu(false)), false);
-    container(column![list, close].spacing(km::TOOL_GAP))
-        .style(crate::ui::kit::menu::frame_style)
-        .padding(Padding {
-            top: km::TOOL_GAP,
-            bottom: km::TOOL_GAP,
-            left: km::GRID_INSET_L,
-            right: km::GRID_INSET_L,
-        })
-        .width(Length::Fixed(COLUMN_CHOOSER_W))
-        .into()
+    let all_shown = layout.iter().all(|(_, shown)| *shown);
+    for (col, shown) in layout {
+        items
+            .push(Item::new(col.label(), Message::LayerColumnToggle(col)).mark(Mark::Check(shown)));
+    }
+    items.push(Item::Separator);
+    items.push(Item::new(t!("Show All"), Message::LayerColumnsShowAll).enabled(!all_shown));
+    menu::view(items)
 }
 
 // ── Sorting helpers ─────────────────────────────────────────────────────────
@@ -2568,6 +2592,25 @@ const COL_ICON: f32 = 36.0;
 /// The narrowest a column can be dragged.
 pub const COL_MIN_W: f32 = 24.0;
 
+/// The width the table's rows need: the status and Name columns, the
+/// `columns` shown, `viewports` viewport columns and the eye, with the
+/// gaps and the row's side padding between and around them.
+pub fn table_content_width(
+    name_col_w: f32,
+    widths: &HashMap<LayerSortCol, f32>,
+    columns: &[LayerSortCol],
+    viewports: usize,
+) -> f32 {
+    let gap = km::TOOL_GAP;
+    let movable: f32 = columns
+        .iter()
+        .map(|col| gap + column_width(widths, *col))
+        .sum();
+    let vps = viewports as f32 * (gap + COL_ICON * 2.0 + gap);
+    // The filler before the eye is a cell of its own, so two gaps.
+    km::CELL_PAD_X * 2.0 + COL_STATUS + gap + name_col_w + movable + vps + gap * 2.0 + COL_EYE
+}
+
 /// Width of column `col`: the user's, else its default.
 pub fn column_width(widths: &HashMap<LayerSortCol, f32>, col: LayerSortCol) -> f32 {
     widths.get(&col).copied().unwrap_or_else(|| col.width())
@@ -2586,8 +2629,6 @@ const COL_STATUS: f32 = 36.0;
 const COL_EYE: f32 = 30.0;
 /// Width of the tree's node list on a medium pallet's toolbar.
 const NODE_PICKER_W: f32 = 130.0;
-/// Width of the column chooser.
-const COLUMN_CHOOSER_W: f32 = 220.0;
 #[cfg(test)]
 mod column_layout_tests {
     use super::*;
@@ -2600,7 +2641,11 @@ mod column_layout_tests {
         move_column(LayerSortCol::Color, -1);
         move_column(LayerSortCol::On, -1);
         let names = column_layout_names();
-        assert_eq!(names[..5], ["On", "Freeze", "Lock", "Color", "-Plot"]);
+        // Color steps left past the hidden Plot, to before Lock; On is first
+        // and stays.
+        assert_eq!(names[..5], ["On", "Freeze", "Color", "Lock", "-Plot"]);
+        show_all_columns();
+        assert!(column_layout().iter().all(|(_, shown)| *shown));
         set_column_layout_names(&["-Lock".into(), "Transparency".into(), "bogus".into()]);
         let layout = column_layout();
         assert_eq!(layout[0], (LayerSortCol::Lock, false));
@@ -2658,5 +2703,74 @@ mod more_menu_tests {
                 "{label:?} is not below the toolbar: {bounds:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod table_scroll_tests {
+    use super::*;
+    use iced_test::Simulator;
+
+    fn ui_at(width: f32, widths: &HashMap<LayerSortCol, f32>) -> Simulator<'static, Message> {
+        let panel = Box::leak(Box::new(LayerPanel {
+            layers: vec![Layer::new("0", AcadColor::Index(7))],
+            ..LayerPanel::default()
+        }));
+        Simulator::with_size(
+            iced::Settings::default(),
+            iced::Size::new(width, 400.0),
+            panel.view_content(140.0, widths, width, None),
+        )
+    }
+
+    /// Columns past the pallet's edge scroll into view sideways: the table had
+    /// measured as wide as the pallet, so they were cut off with no scroll bar.
+    #[test]
+    fn columns_past_the_pallet_edge_scroll_into_view() {
+        set_column_layout_names(&[]);
+        let mut widths = HashMap::new();
+        widths.insert(LayerSortCol::Description, 600.0);
+        let mut ui = ui_at(500.0, &widths);
+        let label = LayerSortCol::Description.label().into_owned();
+        let before = ui
+            .find(label.clone())
+            .expect("the Description header is laid out")
+            .visible_bounds();
+        assert!(before.is_none(), "it starts past the edge: {before:?}");
+        // Over the header, which only the sideways scrollable takes.
+        let name = ui
+            .find(LayerSortCol::Name.label().into_owned())
+            .expect("the Name header")
+            .visible_bounds()
+            .expect("Name is in view");
+        ui.point_at(name.center());
+        ui.simulate([iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
+            delta: iced::mouse::ScrollDelta::Pixels { x: -2000.0, y: 0.0 },
+        })]);
+        let after = ui
+            .find(label)
+            .expect("the Description header is laid out")
+            .visible_bounds();
+        assert!(after.is_some(), "scrolled sideways it comes into view");
+    }
+
+    /// The worked-out width covers every cell of a row.
+    #[test]
+    fn the_table_is_as_wide_as_its_columns() {
+        let mut widths = HashMap::new();
+        widths.insert(LayerSortCol::Description, 600.0);
+        let columns = [LayerSortCol::On, LayerSortCol::Description];
+        let w = table_content_width(140.0, &widths, &columns, 1);
+        let gap = km::TOOL_GAP;
+        let expected = km::CELL_PAD_X * 2.0
+            + COL_STATUS
+            + gap
+            + 140.0
+            + (gap + COL_ICON)
+            + (gap + 600.0)
+            + (gap + COL_ICON * 2.0 + gap)
+            + gap * 2.0
+            + COL_EYE;
+        assert_eq!(w, expected);
     }
 }

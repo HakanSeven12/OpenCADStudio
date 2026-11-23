@@ -12581,9 +12581,9 @@ impl OpenCADStudio {
                 self.tabs[i].layers.filter = f;
                 Task::none()
             }
-            Message::LayerColumnsMenu(open) => {
-                let i = self.active_tab;
-                self.tabs[i].layers.columns_menu = open;
+            Message::LayerColumnsShowAll => {
+                crate::ui::window::layers::show_all_columns();
+                self.save_config();
                 Task::none()
             }
             Message::LayerColumnToggle(col) => {
@@ -13357,16 +13357,10 @@ impl OpenCADStudio {
                 panel.filter_menu = !panel.filter_menu;
                 Task::none()
             }
-            Message::ParametersManagerHeaderMenu => {
-                let panel = &mut self.tabs[self.active_tab].parameters_panel;
-                panel.header_menu = !panel.header_menu;
-                Task::none()
-            }
             Message::ParametersManagerColumn(column) => {
                 let panel = &mut self.tabs[self.active_tab].parameters_panel;
                 let index = column.index();
                 panel.columns[index] = !panel.columns[index];
-                panel.header_menu = false;
                 Task::none()
             }
             Message::ParametersManagerSearch(value) => {

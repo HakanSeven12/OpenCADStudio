@@ -43,6 +43,8 @@ mod attr_editor;
 mod insert_attributes;
 #[cfg(test)]
 mod insert_attributes_tests;
+#[cfg(test)]
+mod work_count_tests;
 pub(crate) use command_driver::{
     copy_to_clipboard_kernel, define_block_raw_doc, paste_entities_kernel, PasteSpace,
 };

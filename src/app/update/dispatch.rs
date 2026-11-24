@@ -8091,21 +8091,7 @@ impl OpenCADStudio {
                 }
                 let handles: Vec<_> = self.tabs[i].scene.selected.iter().cloned().collect();
                 if !handles.is_empty() {
-                    // Erase is delta-safe unless a target is in a group (group
-                    // cleanup rewrites document.objects).
-                    let delta_safe = self.delta_erase_safe(i, &handles);
-                    let pending = self.begin_undo(i, "ERASE", handles.len(), delta_safe);
-                    // Stash the erased entities so OOPS can restore them.
-                    self.oops_cache = handles
-                        .iter()
-                        .filter_map(|h| self.tabs[i].scene.document.get_entity_arc(*h))
-                        .collect();
-                    self.tabs[i].scene.erase_entities(&handles);
-                    self.tabs[i].dirty = true;
-                    self.refresh_properties();
-                    if let Some(pd) = pending {
-                        self.commit_undo_delta(i, pd);
-                    }
+                    self.erase_selected_handles(i, &handles);
                 }
                 Task::none()
             }

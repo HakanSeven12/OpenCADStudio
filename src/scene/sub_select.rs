@@ -115,6 +115,56 @@ impl Scene {
             .flatten()
     }
 
+    /// What is left of LWPOLYLINE `handle` once its picked segments are
+    /// erased (#3552): one open polyline per run of unpicked segments, none
+    /// when every segment was picked. `None` when `handle` is not a
+    /// lightweight polyline with picked segments, so it erases whole.
+    // ponytail: heavy 2D polylines still erase whole; map `plain_polyline`'s
+    // drawn vertices back to theirs if that is asked for.
+    pub(crate) fn polyline_without_picked_segments(
+        &self,
+        handle: Handle,
+    ) -> Option<Vec<EntityType>> {
+        let picked = self.picked_segments(handle)?;
+        let Some(EntityType::LwPolyline(polyline)) = self.document.get_entity(handle) else {
+            return None;
+        };
+        let n = polyline.vertices.len();
+        let segments = if polyline.is_closed { n } else { n.saturating_sub(1) };
+        // A closed polyline is walked from just after a picked segment, so
+        // no run wraps past the start.
+        let start = if polyline.is_closed {
+            picked.iter().next().map_or(0, |&first| first + 1)
+        } else {
+            0
+        };
+        let mut pieces = Vec::new();
+        let mut run: Vec<usize> = Vec::new();
+        let mut flush = |run: &mut Vec<usize>| {
+            let Some(&last) = run.last() else {
+                return;
+            };
+            let mut piece = polyline.clone();
+            piece.is_closed = false;
+            piece.vertices = run.iter().map(|&k| polyline.vertices[k % n].clone()).collect();
+            let mut end = polyline.vertices[(last + 1) % n].clone();
+            end.bulge = 0.0;
+            piece.vertices.push(end);
+            pieces.push(EntityType::LwPolyline(piece));
+            run.clear();
+        };
+        for step in 0..segments {
+            let k = (start + step) % segments.max(1);
+            if picked.contains(&k) {
+                flush(&mut run);
+            } else {
+                run.push(k);
+            }
+        }
+        flush(&mut run);
+        Some(pieces)
+    }
+
     /// World points of the picked segments of `handle`, NaN-separated, for
     /// the selection highlight.
     pub(crate) fn picked_segment_points(&self, handle: Handle) -> Option<Vec<[f64; 3]>> {

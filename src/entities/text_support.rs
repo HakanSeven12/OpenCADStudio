@@ -2224,7 +2224,11 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                 | ParaLineSpacing::Multiple(n)
                 | ParaLineSpacing::AtLeast(n) => n > 0.0,
             });
-            let measure_ascent = index == 0 || (spacing.is_none() && !opts.exact_line_spacing);
+            // Only the first line's glyph ink places the text below the top;
+            // every other gap follows the character heights, so a line with an
+            // accented capital or a bracket keeps the same pitch as its
+            // neighbours.
+            let measure_ascent = index == 0;
             let mut cap = 0.0_f32;
             let mut ascent = 0.0_f32;
             for atom in &line.atoms {
@@ -2269,10 +2273,10 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                 }
                 None if opts.exact_line_spacing => (line_h, None),
                 None => {
-                    // The top-to-top pitch includes the current line's ascent and
+                    // The top-to-top pitch is the line's character height plus
                     // one third of each of the run and entity heights as leading.
-                    let pitch = (ascent + (cap + entity_h) / 3.0) * ls_factor * font_spacing;
-                    (pitch, Some(ascent))
+                    let pitch = (cap + (cap + entity_h) / 3.0) * ls_factor * font_spacing;
+                    (pitch, Some(cap))
                 }
             };
             LineMetrics {

@@ -2912,6 +2912,7 @@ where
         }
         return Err(SaveFailure::replacing(path, error));
     }
+    remove_stale_save_temps(path);
     if perf {
         crate::perf_record!(
             "[perf] save total={:.1}ms clone={:.1} styles={:.1} dimensions={:.1} write={:.1} entities={} objects={} path={}",
@@ -2931,6 +2932,22 @@ where
 fn save_temp_path(path: &Path) -> PathBuf {
     static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let serial = SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let (start, end) = save_temp_name_parts(path);
+    let name = format!("{start}{}-{serial}{end}", std::process::id());
+    save_folder(path).join(name)
+}
+
+/// The folder of `path`: `.` for a bare file name such as `plan.dwg`.
+fn save_folder(path: &Path) -> &Path {
+    match path.parent() {
+        Some(folder) if !folder.as_os_str().is_empty() => folder,
+        _ => Path::new("."),
+    }
+}
+
+/// The name of a temporary file of a save of `path` without its middle
+/// part, `<process id>-<serial>`: `(".plan.ocs-save-", ".dwg")`.
+fn save_temp_name_parts(path: &Path) -> (String, String) {
     let stem = path
         .file_stem()
         .map(|value| value.to_string_lossy().into_owned())
@@ -2939,11 +2956,45 @@ fn save_temp_path(path: &Path) -> PathBuf {
         .extension()
         .map(|value| value.to_string_lossy().into_owned())
         .unwrap_or_else(|| "dwg".to_string());
-    let name = format!(
-        ".{stem}.ocs-save-{}-{serial}.{extension}",
-        std::process::id()
-    );
-    path.parent().unwrap_or_else(|| Path::new(".")).join(name)
+    (format!(".{stem}.ocs-save-"), format!(".{extension}"))
+}
+
+/// Removes the temporary files of saves of `path` that the system stopped
+/// before their replace. A save that runs writes to its file all the time,
+/// so a file that nothing wrote to for an hour is not a running save of
+/// another instance.
+fn remove_stale_save_temps(path: &Path) {
+    const STALE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+    let Ok(entries) = std::fs::read_dir(save_folder(path)) else {
+        return;
+    };
+    let (start, end) = save_temp_name_parts(path);
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let Some(middle) = name
+            .strip_prefix(start.as_str())
+            .and_then(|rest| rest.strip_suffix(end.as_str()))
+        else {
+            continue;
+        };
+        let Some((process, serial)) = middle.split_once('-') else {
+            continue;
+        };
+        let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+        if !digits(process) || !digits(serial) {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age >= STALE);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 #[cfg(not(target_os = "windows"))]

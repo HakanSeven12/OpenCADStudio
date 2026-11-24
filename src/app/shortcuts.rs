@@ -1163,6 +1163,119 @@ mod tests {
         assert_eq!(app.active_tab, (start + 1) % count);
     }
 
+    /// A new drawing with three paper layouts whose tab order is not their
+    /// creation order: the last one made is moved to the front.
+    fn drawing_with_reordered_layouts() -> (OpenCADStudio, Vec<String>) {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        while app.tabs[i].scene.layout_names().len() < 4 {
+            let _ = app.update(Message::LayoutCreate);
+        }
+        let paper = app.tabs[i].scene.layout_names()[1..].to_vec();
+        let _ = app.update(Message::LayoutReorder {
+            from: paper[2].clone(),
+            to: paper[0].clone(),
+            after: false,
+        });
+        let names = app.tabs[i].scene.layout_names();
+        assert_eq!(names[1], paper[2], "the reorder must change the tab order");
+        let _ = app.update(Message::LayoutSwitch("Model".into()));
+        (app, names)
+    }
+
+    fn current_layout(app: &OpenCADStudio) -> &str {
+        &app.tabs[app.active_tab].scene.current_layout
+    }
+
+    fn press(app: &mut OpenCADStudio, key: &str) {
+        let _ = app.update(Message::ShortcutPressed(format!("{ACCEL}+{key}")));
+    }
+
+    /// Ctrl+PgDn and Ctrl+PgUp (Cmd on macOS) move to the next and the
+    /// previous layout tab, in the order of the tabs, not the order the
+    /// layouts were made in.
+    #[test]
+    fn page_keys_step_through_the_layout_tabs_in_tab_order() {
+        let (mut app, names) = drawing_with_reordered_layouts();
+        for name in &names[1..] {
+            press(&mut app, "PAGEDOWN");
+            assert_eq!(current_layout(&app), name);
+        }
+        for name in names[..names.len() - 1].iter().rev() {
+            press(&mut app, "PAGEUP");
+            assert_eq!(current_layout(&app), name);
+        }
+    }
+
+    /// As Ctrl+Tab does with drawings, the keys wrap around: from the last
+    /// tab to Model, and from Model to the last tab.
+    #[test]
+    fn page_keys_wrap_around_at_the_first_and_the_last_tab() {
+        let (mut app, names) = drawing_with_reordered_layouts();
+        let last = names.last().unwrap();
+        press(&mut app, "PAGEUP");
+        assert_eq!(current_layout(&app), last);
+        press(&mut app, "PAGEDOWN");
+        assert_eq!(current_layout(&app), "Model");
+    }
+
+    /// A settings file saved before the keys were bound gets them: its
+    /// bindings and its `known_defaults` are the other defaults.
+    #[test]
+    fn page_keys_reach_a_configuration_saved_before_them() {
+        let (mut app, names) = drawing_with_reordered_layouts();
+        let new_keys = [format!("{ACCEL}+PAGEDOWN"), format!("{ACCEL}+PAGEUP")];
+        let older: BTreeMap<String, String> = default_bindings()
+            .into_iter()
+            .filter(|(key, _)| !new_keys.contains(key))
+            .collect();
+        let saved = serde_json::json!({
+            "shortcuts": {
+                "known_defaults": older.keys().collect::<Vec<_>>(),
+                "bindings": older,
+            }
+        });
+        app.apply_config(serde_json::from_value(saved).unwrap());
+        press(&mut app, "PAGEDOWN");
+        assert_eq!(current_layout(&app), names[1]);
+        press(&mut app, "PAGEUP");
+        assert_eq!(current_layout(&app), "Model");
+    }
+
+    /// In the block editor the keys do nothing: a layout switch there closes
+    /// the editor, and a key must not do that.
+    #[test]
+    fn page_keys_do_not_leave_the_block_editor() {
+        let (mut app, _) = drawing_with_reordered_layouts();
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "KEYS",
+            document::types::Vector3::ZERO,
+            vec![document::EntityType::Line(
+                document::entities::Line::from_points(
+                    document::types::Vector3::ZERO,
+                    document::types::Vector3::UNIT_X,
+                ),
+            )],
+        );
+        let reference = app.tabs[i]
+            .scene
+            .document
+            .add_entity(document::EntityType::Insert(
+                document::entities::Insert::new("KEYS", document::types::Vector3::ZERO),
+            ))
+            .unwrap();
+        let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", reference.value()));
+        assert!(app.tabs[i].active_block_edit.is_some());
+        press(&mut app, "PAGEDOWN");
+        press(&mut app, "PAGEUP");
+        assert!(
+            app.tabs[i].active_block_edit.is_some(),
+            "the editor stays open"
+        );
+    }
+
     /// #2805: Ctrl+Shift+A turns group selection on and off.
     #[test]
     fn ctrl_shift_a_toggles_group_selection() {

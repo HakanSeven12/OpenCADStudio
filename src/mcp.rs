@@ -4,9 +4,9 @@
 //! to the authenticated GUI control bridge; this module contains no geometry.
 
 use crate::mcp_ops::{batch_bindings, validate_execute_request};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::Deserialize;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 #[cfg(any(windows, target_os = "macos"))]
 use std::collections::HashSet;
@@ -66,7 +66,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// `save` describes its `target_version` as the DWG version.
 /// `ocs_capture` / `ocs_render` gained `layout`, `aspect_fit`, and `renderer` (`document_id` on `ocs_capture`) for headless off-screen capture.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "586df5bc8dbab0ae7b9d7959dc227dbf46e9baeedf9a8c6dec423d389a04eb5a";
+const TOOL_SCHEMA_DIGEST: &str = "b6f40c032594c2626b6eeb04d4eb0c1532c3722a3d2dca3368ee5b73983ec3cc";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;
@@ -74,7 +74,7 @@ const CACHE_TTL_MS: u64 = 3_600_000;
 /// land. Tools and discovery are static by comparison, so they keep the hour.
 const RESOURCE_TTL_MS: u64 = 60_000;
 const TASK_TTL_MS: u64 = 3_600_000;
-pub(crate) const INSTRUCTIONS: &str = "Prefer intent tools: ocs_inspect, ocs_query, ocs_run, ocs_new/open/save, ocs_render. Use ocs_read/ocs_execute for advanced work and explicit envelopes. ocs_session_id is optional with one session. Intent calls need no request_id, but reuse one to retry a mutation; after an uncertain outcome query the operation, and never replay a mutation with a new id. Read capabilities and record_schema before unfamiliar ops; use entity_schema for creation, validate for preflight. Preserve document_id and revision from state. running/waiting_input are not completion: follow state.command.accepts, options, input_example. Let the geometry kernel do the math. Before delivery audit the target format/version, then save_verified or ocs_save_verified to an absolute path. Announce the bridge build on connection and change. For batches use response_detail: summary; bindings reuse earlier results. Read guides via cad://guides/{name} or ocs_read op: guide, parameters.name: workflow, architecture, capture, batch-bindings. Read architecture before floorplan vectorization; capture before visual verification.";
+pub(crate) const INSTRUCTIONS: &str = "Prefer intent tools: ocs_inspect, ocs_query, ocs_run, ocs_new/open/save, ocs_render. Inspect and drive plugin panel surfaces with ocs_panels and ocs_panel_action. Use ocs_read/ocs_execute for advanced work and explicit envelopes. ocs_session_id is optional with one session. Intent calls need no request_id, but reuse one to retry a mutation; after an uncertain outcome query the operation, and never replay a mutation with a new id. Read capabilities and record_schema before unfamiliar ops; use entity_schema for creation, validate for preflight. Preserve document_id and revision from state. running/waiting_input are not completion: follow state.command.accepts, options, input_example. Let the geometry kernel do the math. Before delivery audit the target format/version, then save_verified or ocs_save_verified to an absolute path. Announce the bridge build on connection and change. For batches use response_detail: summary; bindings reuse earlier results. Read guides via cad://guides/{name} or ocs_read op: guide, parameters.name: workflow, architecture, capture, plugin-panels, batch-bindings. Read architecture before floorplan vectorization; capture before visual verification.";
 const READ_OPS: &[&str] = &[
     "state",
     "hello",
@@ -111,6 +111,7 @@ const READ_OPS: &[&str] = &[
     "keytips",
     "plugins",
     "capture",
+    "plugin_panels",
 ];
 const EXECUTE_OPS: &[&str] = &[
     "new",
@@ -132,6 +133,7 @@ const EXECUTE_OPS: &[&str] = &[
     "panel_input",
     "panel_button",
     "panel_action",
+    "plugin_panel_action",
     "action",
     "embed_image",
     "dgn_import",
@@ -633,13 +635,7 @@ impl ResourceStore {
         self.insert_tile_entry(session_id, uri, hash, data_base64, bytes_len, metadata)
     }
 
-    fn tile_uri_for(
-        session_id: &str,
-        layout: Option<&str>,
-        level: u32,
-        x: u32,
-        y: u32,
-    ) -> String {
+    fn tile_uri_for(session_id: &str, layout: Option<&str>, level: u32, x: u32, y: u32) -> String {
         match layout.map(str::trim).filter(|s| !s.is_empty()) {
             Some(lay) => {
                 let enc = encode_uri_segment(lay);
@@ -705,8 +701,10 @@ impl ResourceStore {
                 )),
             );
         }
-        self.layout_manifests
-            .insert((session_id.to_string(), layout.to_ascii_lowercase()), manifest);
+        self.layout_manifests.insert(
+            (session_id.to_string(), layout.to_ascii_lowercase()),
+            manifest,
+        );
         uri
     }
 
@@ -1962,6 +1960,11 @@ const GUIDES: &[(&str, &str, &str)] = &[
         include_str!("../docs/automation/guides/capture.md"),
     ),
     (
+        "plugin-panels",
+        "Plugin panel surfaces",
+        include_str!("../docs/automation/guides/plugin-panels.md"),
+    ),
+    (
         "batch-bindings",
         "Dependent batch steps",
         include_str!("../docs/automation/batch-bindings.md"),
@@ -2043,7 +2046,13 @@ fn serve_tile_resource(
         })?),
         None => resources.pyramid_manifests.get(session_id),
     };
-    let manifest_layout = layout_opt.or_else(|| manifest.and_then(|m| m.get("layout")).and_then(Value::as_str)).map(str::to_string);
+    let manifest_layout = layout_opt
+        .or_else(|| {
+            manifest
+                .and_then(|m| m.get("layout"))
+                .and_then(Value::as_str)
+        })
+        .map(str::to_string);
     let manifest_renderer = manifest
         .and_then(|m| m.get("renderer"))
         .and_then(Value::as_str)
@@ -2057,11 +2066,12 @@ fn serve_tile_resource(
         None => [-100.0, -100.0, 100.0, 100.0],
     };
 
-    let tile_bounds =
-        crate::app::control::vision::compute_tile_bounds(base_bounds, level, x, y)?;
+    let tile_bounds = crate::app::control::vision::compute_tile_bounds(base_bounds, level, x, y)?;
     let path = std::env::temp_dir().join(format!(
         "ocs-tile-{session_id}-{}-{level}-{x}-{y}.png",
-        layout_opt.map(encode_uri_segment).unwrap_or_else(|| "active".to_string())
+        layout_opt
+            .map(encode_uri_segment)
+            .unwrap_or_else(|| "active".to_string())
     ));
     let mut req = json!({
         "op": "capture",
@@ -2285,16 +2295,7 @@ fn read_resource(
             } else if let Some(trimmed) = subpath.strip_prefix("tile/") {
                 if let Some((level, x, y, is_json)) = parse_tile_subpath(trimmed) {
                     return serve_tile_resource(
-                        uri,
-                        session_id,
-                        None,
-                        level,
-                        x,
-                        y,
-                        is_json,
-                        clients,
-                        resources,
-                        pump,
+                        uri, session_id, None, level, x, y, is_json, clients, resources, pump,
                         mcp_id,
                     );
                 }
@@ -2689,9 +2690,7 @@ fn call_tool(
                     let manifest_for_meta = if let Some(eff_lay) = tile_layout {
                         if !targets_other_doc {
                             resources.insert_layout_manifest(session_id, eff_lay, manifest_val);
-                            resources
-                                .get_layout_manifest(session_id, eff_lay)
-                                .cloned()
+                            resources.get_layout_manifest(session_id, eff_lay).cloned()
                         } else {
                             let enc = encode_uri_segment(eff_lay);
                             if let Some(obj) = manifest_val.as_object_mut() {
@@ -2854,7 +2853,7 @@ pub(crate) fn tool_definitions() -> Value {
         },
         {
             "name":"ocs_read",
-            "description":"Use entity_schema with parameters.type for creation fields/examples; omit type to list. Use validate with parameters.request to check an execute request without running it (no live document checks). Use guide with parameters.name to read workflow, architecture, capture or batch-bindings guidance (omit name to list). Discover capabilities and record schemas, or read state, complete database records, command manifests, entities, blocks (semantic block instances with attributes, definition tags and dynamic properties), properties, kernel measurements and spatial relationships, history, events or operation status from a live OCS session. Use batch_result with parameters.request_id to retrieve retained batch details without executing steps; available only in the originating MCP connection, for up to 64 retained batches per session.",
+            "description":"Use entity_schema with parameters.type for creation fields/examples; omit type to list. Use validate with parameters.request to check an execute request without running it (no live document checks). Use guide with parameters.name to read workflow, architecture, capture, plugin-panels or batch-bindings guidance (omit name to list). Discover capabilities and record schemas, or read state, complete database records, command manifests, entities, blocks (semantic block instances with attributes, definition tags and dynamic properties), properties, kernel measurements and spatial relationships, history, events or operation status from a live OCS session. Use batch_result with parameters.request_id to retrieve retained batch details without executing steps; available only in the originating MCP connection, for up to 64 retained batches per session.",
             "inputSchema":{"type":"object","properties":{"ocs_session_id":{"type":"string","minLength":1,"description":"Value of session_id returned by ocs_sessions."},"op":{"type":"string","enum":READ_OPS,"default":"state"},"parameters":{"type":"object","description":"Operation-specific filters.","properties":{"layout":{"type":"string","minLength":1,"description":"Layout name for op: page_setup_get."},"request":{"type":"object","description":"Execute request to preflight without dispatch. request_id may be omitted. Batch bindings are checked structurally; result-dependent values require execution."},"name":{"type":"string","description":"Command name, block name/glob, or record name."},"names":{"type":"array","items":{"type":"string"},"description":"Block name or wildcard glob filters (e.g. ['*'], ['DOOR*']) for op: blocks."},"extract_attributes":{"type":"boolean","default":true,"description":"Extract ATTRIB values, ATTDEF defaults, and visible definition text tags (e.g. TAG, DIMS) for op: blocks."},"extract_dynamic_properties":{"type":"boolean","default":true,"description":"Extract dynamic block parameters, visibility states, and lookup values for op: blocks."},"include_anonymous":{"type":"boolean","default":false,"description":"Include unlinked internal anonymous blocks (*U..., *D..., *T...) in op: blocks."},"search":{"type":"string","description":"Case-insensitive command or record-type search."},"find":{"type":"string","description":"Text query string for text_search."},"match_case":{"type":"boolean","default":false,"description":"Case-sensitive text search."},"whole_word":{"type":"boolean","default":false,"description":"Match only whole words."},"ignore_accents":{"type":"boolean","description":"Ignore accents/diacritics in text (defaults to true when match_case is false)."},"scope":{"type":"string","enum":["all","active_space","blocks"],"default":"all","description":"Text search scope."},"system_spellcheck":{"type":"boolean","default":false,"description":"Use native OS spell-checker (Windows, macOS, Linux)."},"language":{"type":"string","description":"Language tag for spell-checker (e.g. 'fr-FR', 'en-US', 'de-DE', 'es-ES')."},"suggest":{"type":"boolean","default":true,"description":"Include suggested corrections for misspelled words."},"check_terms":{"type":"array","items":{"type":"string"},"description":"List of terms or suspect misspellings to flag in text_audit."},"dictionary":{"type":"array","items":{"type":"string"},"description":"Known valid words for text_audit dictionary check."},"pairs":{"type":"array","description":"Find/replace pairs for dry-run simulation in text_audit.","items":{"type":"object","properties":{"find":{"type":"string"},"replace":{"type":"string"}},"required":["find","replace"]}},"dry_run_pairs":{"type":"array","description":"Alias for pairs in text_audit.","items":{"type":"object","properties":{"find":{"type":"string"},"replace":{"type":"string"}},"required":["find","replace"]}},"document_id":{"type":"integer","minimum":0},"path":{"type":"string","description":"Optional intended output path for audit; extension determines target format."},"target_format":{"type":"string","enum":["dwg","dxf"],"description":"Intended output format for audit."},"target_version":{"type":"string","enum":["R14","2000","2004","2007","2010","2013","2018","AC1014","AC1015","AC1018","AC1021","AC1024","AC1027","AC1032"],"description":"Intended CAD output version for audit."},"collection":{"type":"string","description":"Record collection, all for records, or omit to discover collections and schema types."},"handle":{"type":"string"},"handles":{"type":"array","items":{"type":"string"},"description":"Exact entity or record handles."},"type":{"type":"string","description":"Entity or record type filter; for record_schema, returns its complete type graph and writable field paths."},"layer":{"type":"string","description":"Layer name filter for query; * and ? are wildcards."},"xdata_app":{"type":"string","description":"Only entities carrying XDATA of this application (query)."},"detail":{"type":"string","enum":["summary","geometry","full"],"default":"geometry","description":"Entity detail returned by query."},"fields":{"type":"array","items":{"type":"string"},"description":"Return only these entity fields plus handle."},"paths":{"type":"array","items":{"type":"string"},"description":"Project RFC 6901 JSON Pointer paths relative to record.properties."},"where":{"type":"array","description":"All property filters must match.","items":{"type":"object","properties":{"path":{"type":"string"},"op":{"type":"string","enum":["eq","ne","lt","lte","gt","gte","contains","starts_with","ends_with","in","exists","not_exists"],"default":"eq"},"value":{}},"required":["path"],"additionalProperties":false}},"near":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Rank planar curves by exact kernel distance to this world XY point."},"point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"World point whose object snap the snap op reports."},"from":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Base point for perpendicular and tangent snaps (snap op)."},"contains_point":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":3,"description":"Return closed planar curves containing this world XY point."},"bounds":{"type":"array","items":{"type":"number"},"minItems":4,"maxItems":4,"description":"Filter entities whose world XY bounds overlap [min_x,min_y,max_x,max_y]."},"intersections":{"type":"array","items":{"type":"string"},"minItems":2,"maxItems":2,"description":"Return exact kernel intersections between two planar curve handles."},"after":{"type":"integer","minimum":0,"description":"Event cursor."},"request_id":{"type":"string","description":"Operation id to query."},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":10000},"station":{"type":"number","description":"Alignment station for op: civil_station_offset."},"offset_distance":{"type":"number","description":"Signed perpendicular distance from the alignment, positive right of travel, for op: civil_station_offset."},"handle":{"type":"string"},"handles":{"type":"array","items":{"type":"string"},"description":"Exact entity or record handles."}},"additionalProperties":false}},"anyOf":[{"required":["ocs_session_id"]},{"required":["op"],"properties":{"op":{"enum":["guide","entity_schema","validate"]}}}],"additionalProperties":false},
             "outputSchema":read_output_schema(),
             "title":"Read OCS state","annotations":{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
@@ -3716,7 +3715,7 @@ mod tests {
             &names[..4],
             ["ocs_sessions", "ocs_read", "ocs_execute", "ocs_capture"]
         );
-        assert_eq!(names.len(), 20);
+        assert_eq!(names.len(), 22);
         // The build announcement must live in the entry-point tool
         // description: global instructions don't reliably reach agents.
         assert!(
@@ -3728,15 +3727,19 @@ mod tests {
         );
         assert_eq!(tools[0]["annotations"]["readOnlyHint"], false);
         for tool in [&tools[1], &tools[2], &tools[3]] {
-            assert!(tool["inputSchema"]["properties"]
-                .get("session_id")
-                .is_none());
+            assert!(
+                tool["inputSchema"]["properties"]
+                    .get("session_id")
+                    .is_none()
+            );
         }
         for tool in [&tools[2], &tools[3]] {
-            assert!(tool["inputSchema"]["required"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("ocs_session_id")));
+            assert!(
+                tool["inputSchema"]["required"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!("ocs_session_id"))
+            );
         }
         let read_schema = &tools[1]["inputSchema"];
         for op in ["guide", "entity_schema", "validate"] {
@@ -3798,8 +3801,8 @@ mod tests {
         let save_var = find_variant("save_verified");
         assert_eq!(save_var["properties"]["target_version"]["enum"][0], "R14");
         assert_eq!(
-            tools[1]["inputSchema"]["properties"]["parameters"]["properties"]["where"]["items"]
-                ["properties"]["op"]["enum"],
+            tools[1]["inputSchema"]["properties"]["parameters"]["properties"]["where"]["items"]["properties"]
+                ["op"]["enum"],
             json!([
                 "eq",
                 "ne",
@@ -3841,10 +3844,12 @@ mod tests {
             initialized["result"]["capabilities"]["resources"]["subscribe"],
             false
         );
-        assert!(initialized["result"]["instructions"]
-            .as_str()
-            .unwrap()
-            .contains("geometry kernel"));
+        assert!(
+            initialized["result"]["instructions"]
+                .as_str()
+                .unwrap()
+                .contains("geometry kernel")
+        );
 
         let listed = handle_message(
             json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
@@ -3854,7 +3859,7 @@ mod tests {
             &mut detached_pump(),
         )
         .unwrap();
-        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 20);
+        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 22);
         // SEP-2549: freshness hints ship on every protocol version; only
         // the modern envelope stays negotiated (see
         // legacy_list_results_carry_sep2549_ttl).
@@ -3879,9 +3884,10 @@ mod tests {
         assert_eq!(discovered["result"]["cacheScope"], "public");
         assert_eq!(discovered["result"]["supportedVersions"][0], "2026-07-28");
         assert!(discovered["result"]["capabilities"]["resources"].is_object());
-        assert!(discovered["result"]["capabilities"]["extensions"]
-            ["io.modelcontextprotocol/tasks"]
-            .is_object());
+        assert!(
+            discovered["result"]["capabilities"]["extensions"]["io.modelcontextprotocol/tasks"]
+                .is_object()
+        );
         assert_eq!(
             discovered["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
             "OpenCADStudio"
@@ -4334,12 +4340,16 @@ mod tests {
             )
             .unwrap();
             let templates = listed["result"]["resourceTemplates"].as_array().unwrap();
-            assert!(templates
-                .iter()
-                .any(|t| t["uriTemplate"].as_str().unwrap().contains("{level}")));
-            assert!(templates
-                .iter()
-                .any(|t| t["uriTemplate"].as_str().unwrap().contains("{hash}")));
+            assert!(
+                templates
+                    .iter()
+                    .any(|t| t["uriTemplate"].as_str().unwrap().contains("{level}"))
+            );
+            assert!(
+                templates
+                    .iter()
+                    .any(|t| t["uriTemplate"].as_str().unwrap().contains("{hash}"))
+            );
             assert_eq!(listed["result"]["ttlMs"], RESOURCE_TTL_MS);
             assert_eq!(listed["result"]["cacheScope"], "public");
         }
@@ -4495,10 +4505,12 @@ mod tests {
             .unwrap();
         let prop = &capture["inputSchema"]["properties"]["request_id"];
         assert_eq!(prop["type"], "string");
-        assert!(!capture["inputSchema"]["required"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("request_id")));
+        assert!(
+            !capture["inputSchema"]["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("request_id"))
+        );
     }
 
     #[test]
@@ -4595,10 +4607,12 @@ mod tests {
         .unwrap();
         assert_eq!(called["result"]["isError"], true);
         assert!(called["result"].get("structuredContent").is_none());
-        assert!(called["result"]["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("request_id"));
+        assert!(
+            called["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("request_id")
+        );
     }
 
     #[test]
@@ -4647,9 +4661,11 @@ mod tests {
         .unwrap();
         let res_arr = listed["result"]["resources"].as_array().unwrap();
         assert!(res_arr.iter().any(|r| r["uri"] == uri));
-        assert!(res_arr
-            .iter()
-            .any(|r| r["uri"] == "cad://session/sess1/snapshot/latest.png"));
+        assert!(
+            res_arr
+                .iter()
+                .any(|r| r["uri"] == "cad://session/sess1/snapshot/latest.png")
+        );
 
         // Test resources/read with png
         let read_png = handle_message(
@@ -4734,10 +4750,12 @@ mod tests {
         );
         let content = res_res["content"].as_array().unwrap();
         assert_eq!(content[0]["type"], "text");
-        assert!(content[0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("cad://session/s1/snapshot/hash123.png"));
+        assert!(
+            content[0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("cad://session/s1/snapshot/hash123.png")
+        );
         assert_eq!(content[1]["type"], "resource_link");
         assert_eq!(content[1]["name"], "Captured viewport");
         assert_eq!(content[1]["mimeType"], "image/png");
@@ -4842,7 +4860,9 @@ mod tests {
             resolve_tile_base_bounds(&json!({}), &resources, "s1", Some("sheet 1")).unwrap(),
             [0.0, 0.0, 297.0, 210.0]
         );
-        assert!(resolve_tile_base_bounds(&json!({}), &resources, "s1", Some("Uncaptured")).is_err());
+        assert!(
+            resolve_tile_base_bounds(&json!({}), &resources, "s1", Some("Uncaptured")).is_err()
+        );
         assert_eq!(
             resolve_tile_base_bounds(
                 &json!({"bounds": [0.0, 0.0, 420.0, 297.0]}),
@@ -4887,7 +4907,9 @@ mod tests {
             &mut detached_pump(),
         )
         .unwrap();
-        let s_man_txt = read_s_man["result"]["contents"][0]["text"].as_str().unwrap();
+        let s_man_txt = read_s_man["result"]["contents"][0]["text"]
+            .as_str()
+            .unwrap();
         assert!(s_man_txt.contains("cad://session/s1/layout/Sheet%201/tile/{level}/{x}/{y}.png"));
 
         let read_m_tile = handle_message(
@@ -4908,10 +4930,12 @@ mod tests {
             &mut detached_pump(),
         )
         .unwrap();
-        assert!(read_s_tile_json["result"]["contents"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("sheet-tile"));
+        assert!(
+            read_s_tile_json["result"]["contents"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("sheet-tile")
+        );
 
         let untagged = json!({"world_bounds": [0.0, 0.0, 10.0, 10.0]});
         let model = json!({"layout": "Model", "world_bounds": [0.0, 0.0, 10.0, 10.0]});
@@ -4934,11 +4958,13 @@ mod tests {
             }));
             assert_eq!(result["isError"], false);
             assert_eq!(result["structuredContent"], metadata);
-            assert!(result["content"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|block| block["type"] == "image" && block["data"] == "capture-png"));
+            assert!(
+                result["content"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|block| block["type"] == "image" && block["data"] == "capture-png")
+            );
         }
     }
 
@@ -5019,10 +5045,12 @@ mod tests {
         .unwrap();
         let man_contents = read_man["result"]["contents"].as_array().unwrap();
         assert_eq!(man_contents[0]["mimeType"], "application/json");
-        assert!(man_contents[0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("cad://session/sess1/tile/{level}/{x}/{y}.png"));
+        assert!(
+            man_contents[0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("cad://session/sess1/tile/{level}/{x}/{y}.png")
+        );
 
         // 5. Test resources/read with tile png
         let read_tile = handle_message(
@@ -5082,9 +5110,11 @@ mod tests {
             "request_id":"draw",
             "steps":[{"op":"run","request_id":"nested","cmd":"LINE 0,0 10,0"}]
         });
-        assert!(validate_execute_request(&invalid, "batch")
-            .unwrap_err()
-            .contains("omit request_id"));
+        assert!(
+            validate_execute_request(&invalid, "batch")
+                .unwrap_err()
+                .contains("omit request_id")
+        );
 
         let compact = compact_state(&json!({
             "session_id":"s","document_id":3,"revision":4,"geometry_revision":5,
@@ -5192,10 +5222,12 @@ mod tests {
         }));
         assert_eq!(result["isError"], true);
         assert!(result.get("structuredContent").is_none());
-        assert!(result["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("stale_state"));
+        assert!(
+            result["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("stale_state")
+        );
     }
 
     #[test]
@@ -5252,8 +5284,10 @@ mod tests {
         });
         let batch_res = validate_execute_request(&batch, "batch").expect("batch passes");
         assert_eq!(batch_res.warnings.len(), 1);
-        assert!(batch_res.warnings[0]
-            .contains("batch step 0: unknown parameter 'stray' ignored for op 'run'"));
+        assert!(
+            batch_res.warnings[0]
+                .contains("batch step 0: unknown parameter 'stray' ignored for op 'run'")
+        );
     }
 
     #[test]
@@ -5407,15 +5441,19 @@ mod tests {
         // Reconstruct the old duplicated layout using the same operation
         // definitions, so the size comparison stays meaningful as ops evolve.
         let mut old = standalone.clone();
-        old["anyOf"] = json!(crate::mcp_ops::OPS
-            .iter()
-            .map(|op| crate::mcp_ops::op_schema(op))
-            .collect::<Vec<_>>());
-        old["$defs"]["batch_step"]["anyOf"] = json!(crate::mcp_ops::OPS
-            .iter()
-            .filter(|op| op.batchable)
-            .map(|op| crate::mcp_ops::op_schema(op))
-            .collect::<Vec<_>>());
+        old["anyOf"] = json!(
+            crate::mcp_ops::OPS
+                .iter()
+                .map(|op| crate::mcp_ops::op_schema(op))
+                .collect::<Vec<_>>()
+        );
+        old["$defs"]["batch_step"]["anyOf"] = json!(
+            crate::mcp_ops::OPS
+                .iter()
+                .filter(|op| op.batchable)
+                .map(|op| crate::mcp_ops::op_schema(op))
+                .collect::<Vec<_>>()
+        );
         old["$defs"]
             .as_object_mut()
             .unwrap()
@@ -5460,10 +5498,12 @@ mod tests {
             json!({"request":{"op":"entities_create","entities":[{"type":"Circle","center":["bad",0],"radius":2}]}}),
         );
         assert_eq!(invalid["valid"], false);
-        assert!(invalid["error"]
-            .as_str()
-            .unwrap()
-            .contains("/entities/0/center/0"));
+        assert!(
+            invalid["error"]
+                .as_str()
+                .unwrap()
+                .contains("/entities/0/center/0")
+        );
         assert!(clients.is_empty());
         assert!(resources.latest.is_empty());
         let rejected = call_tool(
@@ -5504,7 +5544,7 @@ mod tests {
 
     #[test]
     fn guides_are_discoverable_without_a_gui_session() {
-        assert!(INSTRUCTIONS.len() < 1100);
+        assert!(INSTRUCTIONS.len() < 1200);
         assert!(INSTRUCTIONS.contains("state.command.accepts"));
         assert!(INSTRUCTIONS.contains("never replay a mutation"));
         let mut clients = HashMap::new();
@@ -5529,11 +5569,13 @@ mod tests {
         assert_eq!(tool_list["guides"].as_array().unwrap().len(), GUIDES.len());
         for (name, _, text) in GUIDES {
             let uri = format!("cad://guides/{name}");
-            assert!(listed["result"]["resources"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|r| r["uri"] == uri));
+            assert!(
+                listed["result"]["resources"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|r| r["uri"] == uri)
+            );
             let resource = read_resource(
                 &uri,
                 &mut clients,
@@ -5556,14 +5598,16 @@ mod tests {
             assert_eq!(tool["ok"], true);
             assert_eq!(tool_list["ok"], true);
         }
-        assert!(read_resource(
-            "cad://guides/missing",
-            &mut clients,
-            &mut resources,
-            &mut detached_pump(),
-            None
-        )
-        .is_err());
+        assert!(
+            read_resource(
+                "cad://guides/missing",
+                &mut clients,
+                &mut resources,
+                &mut detached_pump(),
+                None
+            )
+            .is_err()
+        );
         assert!(clients.is_empty());
     }
 
@@ -5571,20 +5615,24 @@ mod tests {
     fn batch_bindings_validate_and_preserve_types() {
         let step = json!({"op":"group_create","name":"walls","bindings":{"handles":{"step":0,"path":"/result/a~1b~0c"}}});
         let request = json!({"op":"batch","steps":[{"op":"run","cmd":"LINE 0,0 1,1"},step]});
-        assert!(validate_execute_request(&request, "batch")
-            .unwrap()
-            .warnings
-            .is_empty());
+        assert!(
+            validate_execute_request(&request, "batch")
+                .unwrap()
+                .warnings
+                .is_empty()
+        );
         let results = vec![json!({"ok":true,"status":"completed","result":{"a/b~c":["A","B"]}})];
         let resolved = resolve_batch_step(&step, 1, &results).unwrap();
         assert_eq!(resolved["handles"], json!(["A", "B"]));
         assert!(resolved.get("bindings").is_none());
-        assert!(resolve_batch_step(
-            &step,
-            1,
-            &[json!({"status":"completed","result":{"a/b~c":42}})]
-        )
-        .is_err());
+        assert!(
+            resolve_batch_step(
+                &step,
+                1,
+                &[json!({"status":"completed","result":{"a/b~c":42}})]
+            )
+            .is_err()
+        );
         assert!(resolve_batch_step(&step, 1, &[json!({"status":"running"})]).is_err());
         assert!(resolve_batch_step(&step, 1, &[json!({"status":"completed"})]).is_err());
         for binding in [
@@ -5849,9 +5897,11 @@ mod tests {
         assert!(schema["$defs"]["window"].is_object());
         assert!(schema["$defs"]["batch_step"].is_object());
         let json_str = schema.to_string();
-        // Generates cleanly without exponential blowup: compact ~15KB to 45KB
+        // Generates cleanly without exponential blowup: compact ~15KB to 48KB
+        // (the catalogue's 13th execute op, plugin_panel_action, sits inside
+        // the deliberate 2026-11 budget revisit)
         assert!(
-            json_str.len() < 45_000,
+            json_str.len() < 48_000,
             "schema size is {} bytes",
             json_str.len()
         );

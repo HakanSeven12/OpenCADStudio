@@ -20,18 +20,18 @@
 //!                                             bounds and counts (read)
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::io::line_read::{lines_capped, MAX_LINE_BYTES};
+use crate::io::line_read::{MAX_LINE_BYTES, lines_capped};
 use std::collections::{BTreeMap, HashSet};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::Write;
 use std::path::PathBuf;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 #[cfg(not(target_arch = "wasm32"))]
 use sha2::{Digest, Sha256};
 
-use super::control::{layout_listing, page_setup_read};
 use super::OpenCADStudio;
+use super::control::{layout_listing, page_setup_read};
 
 /// Run the headless JSON server. Default transport is stdin/stdout; with
 /// `--port <N>` it instead listens on `127.0.0.1:<N>` and serves one client at
@@ -281,6 +281,16 @@ fn err(msg: impl std::fmt::Display) -> Value {
     json!({ "ok": false, "error": msg.to_string() })
 }
 
+/// One typed table cell, as the automation facade's `plugin_panels` read
+/// exposes it (api v29, S08): the scalar itself, typed by JSON kind.
+fn cell_value_json(value: &ocs_plugin_api::tables::CellValue) -> Value {
+    match value {
+        ocs_plugin_api::tables::CellValue::Text(text) => json!(text),
+        ocs_plugin_api::tables::CellValue::Number(number) => json!(number),
+        ocs_plugin_api::tables::CellValue::Bool(flag) => json!(flag),
+    }
+}
+
 /// The constraints that reference `entity`, as the entity read exposes them:
 /// the kind, every distinct participating handle, and whether the solver is
 /// still honouring it. Built from the live constraint sets — the structure a
@@ -348,7 +358,7 @@ pub(crate) fn entity_type_matches(entity: &document::EntityType, requested: &str
         }
     }
     // The node library's object names ("Construction Line", "2D Solid").
-    use crate::ui::node_graph::{ObjectKind, OBJECTS};
+    use crate::ui::node_graph::{OBJECTS, ObjectKind};
     OBJECTS.iter().any(|kind| {
         *kind != ObjectKind::Object
             && kind.name().eq_ignore_ascii_case(requested)
@@ -409,19 +419,23 @@ pub(crate) fn entity_json(
             map.insert("knots".into(), json!(spline.knots));
             map.insert(
                 "control_points".into(),
-                json!(spline
-                    .control_points
-                    .iter()
-                    .map(|point| v3(*point))
-                    .collect::<Vec<_>>()),
+                json!(
+                    spline
+                        .control_points
+                        .iter()
+                        .map(|point| v3(*point))
+                        .collect::<Vec<_>>()
+                ),
             );
             map.insert(
                 "fit_points".into(),
-                json!(spline
-                    .fit_points
-                    .iter()
-                    .map(|point| v3(*point))
-                    .collect::<Vec<_>>()),
+                json!(
+                    spline
+                        .fit_points
+                        .iter()
+                        .map(|point| v3(*point))
+                        .collect::<Vec<_>>()
+                ),
             );
             map.insert("weights".into(), json!(spline.weights));
         }
@@ -520,7 +534,9 @@ pub(crate) fn entity_json(
             if !text.is_empty() {
                 map.insert(
                     "text".into(),
-                    json!(crate::entities::text_support::resolve_dxf_special_chars(text)),
+                    json!(crate::entities::text_support::resolve_dxf_special_chars(
+                        text
+                    )),
                 );
             }
         }
@@ -535,13 +551,13 @@ pub(crate) fn entity_json(
                     .edges
                     .iter()
                     .filter_map(|edge| match edge {
-                        document::entities::BoundaryEdge::Polyline(polyline) => {
-                            Some(json!(polyline
+                        document::entities::BoundaryEdge::Polyline(polyline) => Some(json!(
+                            polyline
                                 .vertices
                                 .iter()
                                 .map(|v| [v.x, v.y])
-                                .collect::<Vec<_>>()))
-                        }
+                                .collect::<Vec<_>>()
+                        )),
                         _ => None,
                     })
                     .collect();
@@ -681,7 +697,7 @@ pub(super) fn requested_save_target(
         Some(value) => {
             return Err(format!(
                 "unsupported target format {value:?}; use dwg or dxf"
-            ))
+            ));
         }
         None => None,
     };
@@ -1147,18 +1163,14 @@ impl OpenCADStudio {
             "entities" => self.entity_summary(),
             "audit" => self.document_audit(&req),
             "query" => self.entity_query(self.active_tab, &req),
-            "civil_station_offset" => {
-                crate::app::civil_query::civil_station_offset(
-                    &self.tabs[self.active_tab].scene.document,
-                    &req,
-                )
-            }
-            "civil_surface_stats" => {
-                crate::app::civil_query::civil_surface_stats(
-                    &self.tabs[self.active_tab].scene.document,
-                    &req,
-                )
-            }
+            "civil_station_offset" => crate::app::civil_query::civil_station_offset(
+                &self.tabs[self.active_tab].scene.document,
+                &req,
+            ),
+            "civil_surface_stats" => crate::app::civil_query::civil_surface_stats(
+                &self.tabs[self.active_tab].scene.document,
+                &req,
+            ),
             "text_search" => self.automation_text_search(&req),
             "text_audit" => self.automation_text_audit(&req),
             "text_replace" => self.automation_text_replace(&req),
@@ -1442,9 +1454,327 @@ impl OpenCADStudio {
                     Err(e) => err(format!("save: {e}")),
                 }
             }
+            "plugin_panels" => self.plugin_panels_read(&req),
+            "plugin_panel_action" => self.plugin_panel_action(&req),
             "" => err("missing \"op\""),
             other => err(format!("unknown op: {other}")),
         }
+    }
+
+    /// Bounded reads of the plugin panel surfaces (api v29, S08): the
+    /// automation facade's `plugin_panels`. Without panel_id: one summary
+    /// line per surface (owner + per-tier revision and counts). With
+    /// panel_id: one tier's detail — scene counts only, widget/table rows
+    /// as keyed pages (`after` cursor + `next` continuation) that never
+    /// materialize more than the page.
+    pub(super) fn plugin_panels_read(&self, req: &Value) -> Value {
+        let Some(panel_id) = req["panel_id"].as_str() else {
+            let panels: Vec<Value> = self
+                .panel_surfaces
+                .surface_summaries()
+                .into_iter()
+                .map(|s| {
+                    let mut entry = json!({
+                        "panel_id": s.panel_id,
+                        "owner": s.owner,
+                    });
+                    if let Some((revision, elements)) = s.scene {
+                        entry["tiers"]["scene"] =
+                            json!({"revision": revision, "elements": elements});
+                    }
+                    if let Some((revision, rows)) = s.widgets {
+                        entry["tiers"]["widgets"] = json!({"revision": revision, "rows": rows});
+                    }
+                    if let Some((revision, rows, columns)) = s.tables {
+                        entry["tiers"]["tables"] =
+                            json!({"revision": revision, "rows": rows, "columns": columns});
+                    }
+                    entry
+                })
+                .collect();
+            return json!({
+                "ok": true,
+                "panels": panels,
+                "next": "Pass panel_id for one surface's bounded detail; plugin_panel_action activates an element.",
+            });
+        };
+        self.plugin_panels_detail(panel_id, req)
+    }
+
+    /// One panel's tier detail (see `plugin_panels_read`).
+    fn plugin_panels_detail(&self, panel_id: &str, req: &Value) -> Value {
+        let tier = req["tier"].as_str().map(|tier| tier.to_ascii_lowercase());
+        let tier = tier.as_deref().or({
+            // Default to the panel's first published tier.
+            if self.panel_surfaces.scene_any_owner(panel_id).is_some() {
+                Some("scene")
+            } else if self.panel_surfaces.widget_any_owner(panel_id).is_some() {
+                Some("widgets")
+            } else if self.panel_surfaces.table_any_owner(panel_id).is_some() {
+                Some("tables")
+            } else {
+                None
+            }
+        });
+        let Some(tier) = tier else {
+            return err(format!("plugin_panels: no surface for panel {panel_id}"));
+        };
+        let rows_limit = req["rows"].as_u64().unwrap_or(50).min(200) as usize;
+        let after = req["after"].as_u64().map(ocs_plugin_api::scene::StableId);
+        match tier {
+            "scene" => {
+                let Some(scene) = self.panel_surfaces.scene_any_owner(panel_id) else {
+                    return err(format!(
+                        "plugin_panels: panel {panel_id} has no scene surface"
+                    ));
+                };
+                let mut by_type = json!({"group": 0, "rect": 0, "path": 0, "text": 0});
+                fn count(element: &ocs_plugin_api::scene::SceneElement, by_type: &mut Value) {
+                    match element {
+                        ocs_plugin_api::scene::SceneElement::Group { children, .. } => {
+                            by_type["group"] = json!(by_type["group"].as_u64().unwrap_or(0) + 1);
+                            for child in children {
+                                count(child, by_type);
+                            }
+                        }
+                        ocs_plugin_api::scene::SceneElement::Rect { .. } => {
+                            by_type["rect"] = json!(by_type["rect"].as_u64().unwrap_or(0) + 1);
+                        }
+                        ocs_plugin_api::scene::SceneElement::Path { .. } => {
+                            by_type["path"] = json!(by_type["path"].as_u64().unwrap_or(0) + 1);
+                        }
+                        ocs_plugin_api::scene::SceneElement::Text { .. } => {
+                            by_type["text"] = json!(by_type["text"].as_u64().unwrap_or(0) + 1);
+                        }
+                    }
+                }
+                for element in &scene.elements {
+                    count(element, &mut by_type);
+                }
+                json!({
+                    "ok": true,
+                    "panel_id": panel_id,
+                    "tier": "scene",
+                    "revision": scene.revision.0,
+                    "elements": scene.elements.len(),
+                    "by_type": by_type,
+                    "note": "Scene surfaces expose counts; activate an element with plugin_panel_action.",
+                })
+            }
+            "widgets" => {
+                let Some(surface) = self.panel_surfaces.widget_any_owner(panel_id) else {
+                    return err(format!(
+                        "plugin_panels: panel {panel_id} has no widget surface"
+                    ));
+                };
+                // Keyed page over the row map in StableId order (the same
+                // order the keyed page installs read back in): never more
+                // than the page, cursor-continuable.
+                let start: std::ops::Bound<ocs_plugin_api::scene::StableId> = match after {
+                    Some(id) => std::ops::Bound::Excluded(id),
+                    None => std::ops::Bound::Unbounded,
+                };
+                let mut rows_json = Vec::with_capacity(rows_limit.min(surface.rows.len()));
+                let mut last: Option<ocs_plugin_api::scene::StableId> = None;
+                let mut more = false;
+                for (id, row) in surface.rows.range::<ocs_plugin_api::scene::StableId, _>((
+                    start,
+                    std::ops::Bound::Unbounded,
+                )) {
+                    if rows_json.len() >= rows_limit {
+                        more = true;
+                        break;
+                    }
+                    let children = match &row.children {
+                        ocs_plugin_api::widget::WidgetChildren::Leaf => json!("leaf"),
+                        ocs_plugin_api::widget::WidgetChildren::Unloaded => json!("unloaded"),
+                        ocs_plugin_api::widget::WidgetChildren::Loaded(children) => {
+                            json!(children.iter().map(|c| c.0).collect::<Vec<u64>>())
+                        }
+                    };
+                    rows_json.push(json!({
+                        "id": id.0,
+                        "label": row.label,
+                        "children": children,
+                        "action": row.action,
+                    }));
+                    last = Some(*id);
+                }
+                json!({
+                    "ok": true,
+                    "panel_id": panel_id,
+                    "tier": "widgets",
+                    "revision": surface.revision.0,
+                    "total_rows": surface.rows.len(),
+                    "rows": rows_json,
+                    "next": last.filter(|_| more).map(|id| json!({
+                        "after": id.0,
+                        "note": "Pass as `after` with the same rows page size."
+                    })).unwrap_or(json!(null)),
+                })
+            }
+            "tables" => {
+                let Some(surface) = self.panel_surfaces.table_any_owner(panel_id) else {
+                    return err(format!(
+                        "plugin_panels: panel {panel_id} has no table surface"
+                    ));
+                };
+                let columns: Vec<Value> = surface
+                    .columns
+                    .iter()
+                    .map(|column| json!({"id": column.id.0, "label": column.label}))
+                    .collect();
+                // Paged rows in the surface's own `order` (positioned
+                // semantics), cursor = the last returned row id.
+                let start_index = match after {
+                    Some(id) => surface
+                        .order
+                        .iter()
+                        .position(|row_id| *row_id == id)
+                        .map_or(surface.order.len(), |index| index + 1),
+                    None => 0,
+                };
+                let page: Vec<&ocs_plugin_api::scene::StableId> = surface
+                    .order
+                    .get(start_index..)
+                    .unwrap_or(&[])
+                    .iter()
+                    .take(rows_limit)
+                    .collect();
+                let mut rows_json = Vec::with_capacity(page.len());
+                for row_id in &page {
+                    let cells = surface
+                        .rows
+                        .get(*row_id)
+                        .map(|cells| cells.iter().map(cell_value_json).collect::<Vec<Value>>())
+                        .unwrap_or_default();
+                    rows_json.push(json!({"id": row_id.0, "cells": cells}));
+                }
+                let remaining = surface.order.len().saturating_sub(start_index);
+                let more = remaining > page.len();
+                let next = page.last().filter(|_| more).map(|id| {
+                    json!({
+                        "after": id.0,
+                        "note": "Pass as `after` with the same rows page size."
+                    })
+                });
+                json!({
+                    "ok": true,
+                    "panel_id": panel_id,
+                    "tier": "tables",
+                    "revision": surface.revision.0,
+                    "total_rows": surface.rows.len(),
+                    "columns": columns,
+                    "rows": rows_json,
+                    "next": next.unwrap_or(json!(null)),
+                })
+            }
+            other => err(format!(
+                "plugin_panels: unknown tier {other} (scene | widgets | tables)"
+            )),
+        }
+    }
+
+    /// Activate one element of a plugin panel surface (api v29, S08): the
+    /// automation facade's `plugin_panel_action`. Routes through the SAME
+    /// [`PanelEventRouter`](crate::app::panel_events::PanelEventRouter)
+    /// constructors the GUI gestures use, then delivers owner-targeted via
+    /// the same `publish_surface_event_to_plugin` — so an MCP-triggered
+    /// activation is the GUI-triggered event, by construction (and by the
+    /// recorded-dispatch equivalence test).
+    pub(super) fn plugin_panel_action(&mut self, req: &Value) -> Value {
+        let Some(panel_id) = req["panel_id"].as_str() else {
+            return err("plugin_panel_action: missing panel_id");
+        };
+        let Some(raw_element) = req["element"].as_u64() else {
+            return err("plugin_panel_action: missing element (stable id)");
+        };
+        let element = ocs_plugin_api::scene::StableId(raw_element);
+        let Some(registered) = self.plugin_panels.get(panel_id) else {
+            return err(format!(
+                "plugin_panel_action: unknown panel {panel_id} (not registered)"
+            ));
+        };
+        let Some(owner) = registered.owner_plugin_id.as_deref() else {
+            return err(format!(
+                "plugin_panel_action: panel {panel_id} has no owning plugin"
+            ));
+        };
+        // The element must exist in the surface the kind addresses, so a
+        // typo activates nothing (and no sequence number burns).
+        let in_widgets = self
+            .panel_surfaces
+            .widget_any_owner(panel_id)
+            .is_some_and(|surface| surface.rows.contains_key(&element));
+        let in_scene = self
+            .panel_surfaces
+            .scene_any_owner(panel_id)
+            .is_some_and(|scene| {
+                scene
+                    .elements
+                    .iter()
+                    .any(|node| node.stable_id() == element)
+            });
+        let requested = req["kind"].as_str().map(|kind| kind.to_ascii_lowercase());
+        let requested = requested.as_deref();
+        let kind = match requested {
+            Some("node_activated") => {
+                if !in_widgets {
+                    return err(format!(
+                        "plugin_panel_action: panel {panel_id} has no widget row {raw_element}"
+                    ));
+                }
+                "node_activated"
+            }
+            Some("element_clicked") => {
+                if !in_scene {
+                    return err(format!(
+                        "plugin_panel_action: panel {panel_id} has no scene element {raw_element}"
+                    ));
+                }
+                "element_clicked"
+            }
+            Some(other) => {
+                return err(format!(
+                    "plugin_panel_action: unknown kind {other} (node_activated | element_clicked)"
+                ));
+            }
+            None => {
+                if in_widgets {
+                    "node_activated"
+                } else if in_scene {
+                    "element_clicked"
+                } else {
+                    return err(format!(
+                        "plugin_panel_action: panel {panel_id} has no surface element {raw_element}"
+                    ));
+                }
+            }
+        };
+        let routed = if kind == "node_activated" {
+            self.panel_event_router.on_node_activated(panel_id, element)
+        } else {
+            self.panel_event_router
+                .on_element_clicked(panel_id, element)
+        };
+        let sequence = routed.sequence;
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::plugin::v4_support::publish_surface_event_to_plugin(
+            owner,
+            routed.panel_id,
+            routed.sequence,
+            routed.event,
+        );
+        #[cfg(target_arch = "wasm32")]
+        let _ = (owner, routed);
+        json!({
+            "ok": true,
+            "panel_id": panel_id,
+            "element": raw_element,
+            "kind": kind,
+            "sequence": sequence,
+            "delivery": "best_effort_owner_targeted",
+        })
     }
 
     /// Run a command line headlessly. Thin wrapper over the shared
@@ -2220,8 +2550,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn plugin_edit_publication_is_not_repeated_at_message_boundary() {
-        use document::entities::Point;
         use document::EntityType;
+        use document::entities::Point;
 
         let mut app = super::OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -2247,11 +2577,223 @@ mod tests {
         crate::plugin::v4_support::take_test_dispatch_log()
     }
 
+    // ── Plugin-panel surface facade (api v29, S08) ───────────────────────
+    //
+    // The MCP facade must produce the SAME event the GUI gesture produces:
+    // both routes run through the one PanelEventRouter and the one
+    // owner-targeted delivery, and the recorded dispatch log proves it.
+
+    fn register_widget_panel(app: &mut super::OpenCADStudio, panel_id: &str) {
+        // The reaper keeps surfaces only for VISIBLE owners; an in-process
+        // test sink makes "acme.widgetpack" visible without a process.
+        crate::plugin::grip_points::install_in_process_sink("acme.widgetpack", |_host, _event| {
+            ocs_plugin_api::host::CustomGripResponse::default()
+        });
+        let panel = ocs_plugin_api::dialog::PanelDef::new(panel_id, "Tree");
+        let mut state = crate::ui::window::plugin_panel::PluginPanelState::from_def(panel);
+        state.owner_plugin_id = Some("acme.widgetpack".into());
+        app.plugin_panels.insert(panel_id.to_string(), state);
+        let mut surface =
+            ocs_plugin_api::widget::WidgetSurface::new(ocs_plugin_api::widget::WidgetRevision(1));
+        surface.rows.insert(
+            ocs_plugin_api::scene::StableId(7),
+            ocs_plugin_api::widget::WidgetRow {
+                label: "Run".to_owned(),
+                children: ocs_plugin_api::widget::WidgetChildren::Leaf,
+                action: Some("run".to_owned()),
+            },
+        );
+        surface.roots = vec![ocs_plugin_api::scene::StableId(7)];
+        app.panel_surfaces
+            .publish_widget("acme.widgetpack", panel_id, surface)
+            .expect("widget surface publishes");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn mcp_panel_action_routes_the_same_event_as_the_gui_gesture() {
+        let mut app = super::OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        register_widget_panel(&mut app, "acme:tree");
+
+        // GUI path: the message the native widget renderer sends on
+        // activation (button row = the user pressed the button). Drain the
+        // log first: setup dispatches (new drawing etc.) must not count.
+        let _ = plugin_dispatch_log();
+        let _ = app.update(crate::app::Message::PanelWidgetNodeActivated {
+            owner: "acme.widgetpack".into(),
+            panel: "acme:tree".into(),
+            node: ocs_plugin_api::scene::StableId(7),
+        });
+        let gui_log = plugin_dispatch_log();
+        assert_eq!(
+            gui_log.len(),
+            1,
+            "GUI activation dispatches exactly one event"
+        );
+
+        // MCP path: the SAME activation through the facade.
+        let result = app.automation_op(
+            r#"{"op":"plugin_panel_action","panel_id":"acme:tree","element":7,"kind":"node_activated"}"#,
+        );
+        assert_eq!(result["ok"], true, "facade result: {result}");
+        let mcp_log = plugin_dispatch_log();
+        assert_eq!(
+            mcp_log.len(),
+            1,
+            "facade activation dispatches exactly one event"
+        );
+
+        // Equivalence: same panel + same event; the per-surface sequence
+        // advanced by exactly one (identity is the sequence, not content).
+        let gui = gui_log[0].clone();
+        let mcp = mcp_log[0].clone();
+        assert!(
+            gui.starts_with("PanelSurfaceEvent(acme:tree, seq 1, "),
+            "gui: {gui}"
+        );
+        assert!(
+            mcp.starts_with("PanelSurfaceEvent(acme:tree, seq 2, "),
+            "mcp: {mcp}"
+        );
+        let event_part = |entry: &str| {
+            let (_seq, event) = entry
+                .split_once(", seq ")
+                .map(|(head, rest)| rest.split_once(", ").map_or((rest, ""), |parts| parts))
+                .expect("seq split");
+            event.to_string()
+        };
+        assert_eq!(
+            event_part(&mcp),
+            event_part(&gui),
+            "identical event payloads"
+        );
+        assert_eq!(result["sequence"], 2);
+        assert_eq!(result["kind"], "node_activated");
+    }
+
+    #[test]
+    fn plugin_panels_overview_and_paged_rows_stay_bounded() {
+        let mut app = super::OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        register_widget_panel(&mut app, "acme:tree");
+
+        let overview = app.automation_op(r#"{"op":"plugin_panels"}"#);
+        assert_eq!(overview["ok"], true);
+        assert_eq!(overview["panels"][0]["panel_id"], "acme:tree");
+        assert_eq!(overview["panels"][0]["owner"], "acme.widgetpack");
+        assert_eq!(overview["panels"][0]["tiers"]["widgets"]["rows"], 1);
+
+        let detail =
+            app.automation_op(r#"{"op":"plugin_panels","panel_id":"acme:tree","tier":"widgets"}"#);
+        assert_eq!(detail["ok"], true);
+        assert_eq!(detail["rows"][0]["id"], 7);
+        assert_eq!(detail["rows"][0]["action"], "run");
+        assert_eq!(detail["rows"][0]["children"], "leaf");
+        assert!(detail["next"].is_null(), "single row has no next cursor");
+
+        // Unknown elements/panels refuse without dispatching any SURFACE
+        // event (the automation wrapper's post-op document notifications
+        // are the ordinary broadcast law, not the surface tier).
+        let surface_events = |log: &[String]| {
+            log.iter()
+                .filter(|e| e.starts_with("PanelSurfaceEvent"))
+                .count()
+        };
+        let before = surface_events(&plugin_dispatch_log());
+        let missing = app
+            .automation_op(r#"{"op":"plugin_panel_action","panel_id":"acme:tree","element":99}"#);
+        assert_eq!(missing["ok"], false);
+        let unknown = app
+            .automation_op(r#"{"op":"plugin_panel_action","panel_id":"nobody:here","element":7}"#);
+        assert_eq!(unknown["ok"], false);
+        assert_eq!(
+            surface_events(&plugin_dispatch_log()),
+            before,
+            "refusals dispatch no surface events"
+        );
+    }
+
+    #[test]
+    fn plugin_panels_pages_a_10k_row_surface_without_materializing_it() {
+        let mut app = super::OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        // Same visibility law as the helper: an in-process test sink keeps
+        // the owner's surface alive across the pump's reaper sweep.
+        crate::plugin::grip_points::install_in_process_sink("acme.widgetpack", |_host, _event| {
+            ocs_plugin_api::host::CustomGripResponse::default()
+        });
+        let panel = ocs_plugin_api::dialog::PanelDef::new("acme:big", "Big");
+        let mut state = crate::ui::window::plugin_panel::PluginPanelState::from_def(panel);
+        state.owner_plugin_id = Some("acme.widgetpack".into());
+        app.plugin_panels.insert("acme:big".into(), state);
+        let mut surface =
+            ocs_plugin_api::widget::WidgetSurface::new(ocs_plugin_api::widget::WidgetRevision(1));
+        for id in 1..=10_000u64 {
+            surface.rows.insert(
+                ocs_plugin_api::scene::StableId(id),
+                ocs_plugin_api::widget::WidgetRow {
+                    label: format!("row {id}"),
+                    children: ocs_plugin_api::widget::WidgetChildren::Leaf,
+                    action: None,
+                },
+            );
+        }
+        surface.roots = (1..=10_000u64)
+            .map(ocs_plugin_api::scene::StableId)
+            .collect();
+        app.panel_surfaces
+            .publish_widget("acme.widgetpack", "acme:big", surface)
+            .expect("10k-row surface publishes (at the budget cap)");
+
+        let detail = app.automation_op(
+            r#"{"op":"plugin_panels","panel_id":"acme:big","tier":"widgets","rows":200}"#,
+        );
+        assert_eq!(detail["total_rows"], 10_000);
+        assert_eq!(detail["rows"].as_array().map(Vec::len), Some(200));
+
+        // Walk the cursor to the end: 50 pages of 200, ids strictly
+        // increasing, every row seen exactly once.
+        let mut seen = Vec::new();
+        let mut after: Option<u64> = None;
+        for _ in 0..1_000 {
+            let mut request = json!({
+                "op":"plugin_panels",
+                "panel_id":"acme:big",
+                "tier":"widgets",
+                "rows":200,
+            });
+            if let Some(after) = after {
+                request["after"] = json!(after);
+            }
+            let page = app.automation_op(&request.to_string());
+            assert_eq!(page["ok"], true);
+            let rows = page["rows"].as_array().cloned().unwrap_or_default();
+            let empty = rows.is_empty();
+            for row in &rows {
+                seen.push(row["id"].as_u64().expect("row id"));
+            }
+            match page["next"]["after"].as_u64() {
+                Some(next) => after = Some(next),
+                None => break,
+            }
+            if empty {
+                panic!("empty page with a next cursor");
+            }
+        }
+        assert_eq!(seen.len(), 10_000, "every row paged exactly once");
+        let mut sorted = seen.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, seen, "pages are strictly increasing");
+        assert_eq!(seen.first(), Some(&1));
+        assert_eq!(seen.last(), Some(&10_000));
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn an_edit_dispatches_document_changed_once_per_epoch() {
-        use document::entities::Point;
         use document::EntityType;
+        use document::entities::Point;
 
         let mut app = super::OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -2406,8 +2948,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn idempotent_designation_remarks_cannot_loop_the_dispatch() {
-        use document::entities::Point;
         use document::EntityType;
+        use document::entities::Point;
 
         // Models the consumer plugin's re-mark handler: on DocumentChanged it
         // re-marks its entities through the plugin host API. The write goes
@@ -2450,8 +2992,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn history_replay_emits_no_plugin_notifications_itself() {
-        use document::entities::Point;
         use document::EntityType;
+        use document::entities::Point;
 
         // Undo/redo replay never publishes: the notification boundary is the
         // only channel, so replaying history steps in isolation is silent.
@@ -2517,7 +3059,7 @@ mod tests {
         );
     }
     use crate::app::{Message, OpenCADStudio};
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     #[test]
     fn audit_rejects_an_undeclared_entity_layer() {
@@ -2693,10 +3235,12 @@ mod tests {
         let ordinary =
             app.automation_op(&serde_json::json!({"op":"save", "path":path}).to_string());
         assert_eq!(ordinary["ok"], true, "{ordinary}");
-        assert!(!ordinary["error"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("changed outside"));
+        assert!(
+            !ordinary["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("changed outside")
+        );
         let _ = std::fs::remove_file(path);
     }
 
@@ -4626,8 +5170,14 @@ DEAD
             .scene
             .replay_since(geometry_before)
             .expect("targeted block invalidation");
-        assert!(changes.contains(&(line, crate::scene::ChangeKind::Modified)), "{changes:?}");
-        assert!(changes.contains(&(insert, crate::scene::ChangeKind::Modified)), "{changes:?}");
+        assert!(
+            changes.contains(&(line, crate::scene::ChangeKind::Modified)),
+            "{changes:?}"
+        );
+        assert!(
+            changes.contains(&(insert, crate::scene::ChangeKind::Modified)),
+            "{changes:?}"
+        );
         app.undo_active_tab();
         assert_eq!(
             app.tabs[i]
@@ -4856,7 +5406,14 @@ DEAD
         let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#);
         let handle = q["entities"][0]["handle"].as_str().unwrap().to_owned();
         let tab = app.active_tab;
-        app.tabs[tab].scene.document.layers.get_mut("0").unwrap().flags.locked = true;
+        app.tabs[tab]
+            .scene
+            .document
+            .layers
+            .get_mut("0")
+            .unwrap()
+            .flags
+            .locked = true;
         app.tabs[tab].dirty = false;
 
         // On a locked layer the line stays; listed twice, it is one object.
@@ -4875,7 +5432,14 @@ DEAD
         assert_eq!(count_type(&mut app, "Line"), 1);
         assert!(!app.tabs[tab].dirty, "nothing was erased");
 
-        app.tabs[tab].scene.document.layers.get_mut("0").unwrap().flags.locked = false;
+        app.tabs[tab]
+            .scene
+            .document
+            .layers
+            .get_mut("0")
+            .unwrap()
+            .flags
+            .locked = false;
         let r = mutate(
             &mut app,
             &format!(
@@ -4892,11 +5456,12 @@ DEAD
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
-        let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
-            ["entities"][0]["handle"]
-            .as_str()
-            .unwrap()
-            .to_owned();
+        let handle =
+            app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)["entities"][0]
+                ["handle"]
+                .as_str()
+                .unwrap()
+                .to_owned();
 
         let r = mutate(
             &mut app,
@@ -4959,11 +5524,12 @@ DEAD
             r#"{{"protocol":1,"op":"block_define","request_id":"rb1","document_id":{doc},"name":"READBOX","base":[0,0,0],"handles":[{joined}]}}"#
         ));
         assert_eq!(defined["ok"], true, "{defined}");
-        let insert = app.automation_op(r#"{"op":"query","type":"Insert","detail":"summary"}"#)
-            ["entities"][0]["handle"]
-            .as_str()
-            .unwrap()
-            .to_owned();
+        let insert =
+            app.automation_op(r#"{"op":"query","type":"Insert","detail":"summary"}"#)["entities"]
+                [0]["handle"]
+                .as_str()
+                .unwrap()
+                .to_owned();
 
         let scaled = mutate(
             &mut app,
@@ -5002,11 +5568,12 @@ DEAD
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app.automation_op(r#"{"op":"run","cmd":"LINE 10,0 20,0"}"#);
-        let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
-            ["entities"][0]["handle"]
-            .as_str()
-            .unwrap()
-            .to_owned();
+        let handle =
+            app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)["entities"][0]
+                ["handle"]
+                .as_str()
+                .unwrap()
+                .to_owned();
         let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
 
         // Rotate 90° CCW about the origin: (10,0)→(0,10), (20,0)→(0,20).
@@ -5066,11 +5633,12 @@ DEAD
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app.automation_op(r#"{"op":"run","cmd":"CIRCLE 0,0 1"}"#);
-        let handle = app.automation_op(r#"{"op":"query","type":"Circle","detail":"summary"}"#)
-            ["entities"][0]["handle"]
-            .as_str()
-            .unwrap()
-            .to_owned();
+        let handle =
+            app.automation_op(r#"{"op":"query","type":"Circle","detail":"summary"}"#)["entities"]
+                [0]["handle"]
+                .as_str()
+                .unwrap()
+                .to_owned();
         let r = mutate(
             &mut app,
             &format!(
@@ -5101,11 +5669,12 @@ DEAD
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app.automation_op(r#"{"op":"run","cmd":"CIRCLE 5,5 2"}"#);
-        let handle = app.automation_op(r#"{"op":"query","type":"Circle","detail":"summary"}"#)
-            ["entities"][0]["handle"]
-            .as_str()
-            .unwrap()
-            .to_owned();
+        let handle =
+            app.automation_op(r#"{"op":"query","type":"Circle","detail":"summary"}"#)["entities"]
+                [0]["handle"]
+                .as_str()
+                .unwrap()
+                .to_owned();
 
         let r = mutate(
             &mut app,
@@ -5477,11 +6046,12 @@ DEAD
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app.automation_op(r#"{"op":"run","cmd":"CIRCLE 5,5 2"}"#);
-        let handle = app.automation_op(r#"{"op":"query","type":"Circle","detail":"summary"}"#)
-            ["entities"][0]["handle"]
-            .as_str()
-            .unwrap()
-            .to_owned();
+        let handle =
+            app.automation_op(r#"{"op":"query","type":"Circle","detail":"summary"}"#)["entities"]
+                [0]["handle"]
+                .as_str()
+                .unwrap()
+                .to_owned();
         let r = mutate(
             &mut app,
             &format!(
@@ -5870,7 +6440,7 @@ DEAD
     #[test]
     fn matchprop_uses_single_preselected_source_for_successive_destinations() {
         use crate::command::StepInput;
-        use document::{entities::Line, types::Vector3, EntityType};
+        use document::{EntityType, entities::Line, types::Vector3};
 
         for command in ["MA", "MATCHPROP"] {
             let mut app = OpenCADStudio::new_for_test();
@@ -5976,7 +6546,7 @@ DEAD
     #[test]
     fn matchprop_requests_source_without_a_single_preselected_object() {
         use crate::command::StepInput;
-        use document::{entities::Line, EntityType};
+        use document::{EntityType, entities::Line};
 
         for preselect in [false, true] {
             let mut app = OpenCADStudio::new_for_test();
@@ -6092,7 +6662,7 @@ DEAD
     #[test]
     fn matchprop_source_glow_survives_preview_refresh_and_destination_apply() {
         use crate::command::StepInput;
-        use document::{entities::Line, types::Vector3, EntityType};
+        use document::{EntityType, entities::Line, types::Vector3};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -6614,12 +7184,14 @@ DEAD
                 Some("LINE")
             );
             assert_eq!(app.tabs[0].active_cmd.as_ref().unwrap().prompt(), prompt);
-            assert!(app.tabs[0]
-                .active_cmd
-                .as_ref()
-                .unwrap()
-                .resolved_anchor()
-                .is_none());
+            assert!(
+                app.tabs[0]
+                    .active_cmd
+                    .as_ref()
+                    .unwrap()
+                    .resolved_anchor()
+                    .is_none()
+            );
             assert_eq!(app.last_point, previous);
             assert!(app.tabs[0].suspended_cmd.is_none());
             assert!(app.tabs[0].scene.document.entities().next().is_none());
@@ -6801,10 +7373,11 @@ DEAD
         // Snapper is now forced on with only Midpoint enabled
         assert!(app.snapper.snap_enabled);
         assert_eq!(app.snapper.enabled.len(), 1);
-        assert!(app
-            .snapper
-            .enabled
-            .contains(&crate::snap::SnapType::Midpoint));
+        assert!(
+            app.snapper
+                .enabled
+                .contains(&crate::snap::SnapType::Midpoint)
+        );
 
         // Submit first point (0,0)
         let _ = app.update(Message::CommandInput("0,0".to_string()));
@@ -6817,10 +7390,11 @@ DEAD
         let _ = app.update(Message::CommandInput("END".to_string()));
         let _ = app.update(Message::CommandSubmit);
         assert!(app.snapper.snap_enabled);
-        assert!(app
-            .snapper
-            .enabled
-            .contains(&crate::snap::SnapType::Endpoint));
+        assert!(
+            app.snapper
+                .enabled
+                .contains(&crate::snap::SnapType::Endpoint)
+        );
 
         // Escape cancels LINE and clears unconsumed snap override
         let _ = app.update(Message::CommandEscape);
@@ -6857,8 +7431,8 @@ DEAD
     fn serve_socket_drops_a_client_streaming_an_oversize_line() {
         use std::io::{BufRead, BufReader, Write};
         use std::net::TcpStream;
-        use std::sync::atomic::{AtomicU16, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicU16, Ordering};
 
         let bound = Arc::new(AtomicU16::new(0));
         let listen_bound = bound.clone();
@@ -6924,8 +7498,8 @@ DEAD
     fn serve_socket_drops_an_idle_client_and_keeps_serving() {
         use std::io::{BufRead, BufReader};
         use std::net::TcpStream;
-        use std::sync::atomic::{AtomicU16, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicU16, Ordering};
         use std::time::Duration;
 
         let bound = Arc::new(AtomicU16::new(0));

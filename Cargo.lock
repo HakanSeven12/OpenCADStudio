@@ -123,7 +123,7 @@ checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 [[package]]
 name = "acadrust"
 version = "0.6.8"
-source = "git+https://github.com/hakanaktt/acadrust.git?rev=265cc683d22d3a5b97d3a904a05b29201a79f36f#265cc683d22d3a5b97d3a904a05b29201a79f36f"
+source = "git+https://github.com/hakanaktt/acadrust.git?rev=483de92780b7ef26632647709ac383fc0dbd42be#483de92780b7ef26632647709ac383fc0dbd42be"
 dependencies = [
  "anyhow",
  "bitflags 2.13.1",
@@ -2852,7 +2852,7 @@ checksum = "180cbc5c4af5d8f57b8096c3cf39efdac3642ece00ca54710db44db3536baed4"
 [[package]]
 name = "iced"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=ba4ef4c495d16493a599a58fb8f2448fc9fc5a89#ba4ef4c495d16493a599a58fb8f2448fc9fc5a89"
 dependencies = [
  "iced_core",
  "iced_debug",
@@ -2881,7 +2881,7 @@ dependencies = [
 [[package]]
 name = "iced_core"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=ba4ef4c495d16493a599a58fb8f2448fc9fc5a89#ba4ef4c495d16493a599a58fb8f2448fc9fc5a89"
 dependencies = [
  "bitflags 2.13.1",
  "bytes",
@@ -2899,7 +2899,7 @@ dependencies = [
 [[package]]
 name = "iced_debug"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=ba4ef4c495d16493a599a58fb8f2448fc9fc5a89#ba4ef4c495d16493a599a58fb8f2448fc9fc5a89"
 dependencies = [
  "iced_core",
  "iced_futures",
@@ -2921,7 +2921,7 @@ dependencies = [
 [[package]]
 name = "iced_futures"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=ba4ef4c495d16493a599a58fb8f2448fc9fc5a89#ba4ef4c495d16493a599a58fb8f2448fc9fc5a89"
 dependencies = [
  "futures",
  "iced_core",
@@ -2935,7 +2935,7 @@ dependencies = [
 [[package]]
 name = "iced_graphics"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=ba4ef4c495d16493a599a58fb8f2448fc9fc5a89#ba4ef4c495d16493a599a58fb8f2448fc9fc5a89"
 dependencies = [
  "bitflags 2.13.1",
  "bytemuck",
@@ -2956,7 +2956,7 @@ dependencies = [
 [[package]]
 name = "iced_program"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=ba4ef4c495d16493a599a58fb8f2448fc9fc5a89#ba4ef4c495d16493a599a58fb8f2448fc9fc5a89"
 dependencies = [
  "iced_graphics",
  "iced_runtime",
@@ -2965,7 +2965,7 @@ dependencies = [
 [[package]]
 name = "iced_renderer"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=ba4ef4c495d16493a599a58fb8f2448fc9fc5a89#ba4ef4c495d16493a599a58fb8f2448fc9fc5a89"
 dependencies = [
  "iced_graphics",
  "iced_tiny_skia",
@@ -2977,7 +2977,7 @@ dependencies = [
 [[package]]
 name = "iced_runtime"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=ba4ef4c495d16493a599a58fb8f2448fc9fc5a89#ba4ef4c495d16493a599a58fb8f2448fc9fc5a89"
 dependencies = [
  "bytes",
  "iced_core",
@@ -2988,7 +2988,7 @@ dependencies = [
 [[package]]
 name = "iced_selector"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=ba4ef4c495d16493a599a58fb8f2448fc9fc5a89#ba4ef4c495d16493a599a58fb8f2448fc9fc5a89"
 dependencies = [
  "iced_core",
 ]
@@ -2996,7 +2996,7 @@ dependencies = [
 [[package]]
 name = "iced_test"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=ba4ef4c495d16493a599a58fb8f2448fc9fc5a89#ba4ef4c495d16493a599a58fb8f2448fc9fc5a89"
 dependencies = [
  "iced_futures",
  "iced_program",
@@ -3012,7 +3012,7 @@ dependencies = [
 [[package]]
 name = "iced_tiny_skia"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=ba4ef4c495d16493a599a58fb8f2448fc9fc5a89#ba4ef4c495d16493a599a58fb8f2448fc9fc5a89"
 dependencies = [
  "bytemuck",
  "cosmic-text 0.19.0",
@@ -3029,7 +3029,7 @@ dependencies = [
 [[package]]
 name = "iced_wgpu"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=ba4ef4c495d16493a599a58fb8f2448fc9fc5a89#ba4ef4c495d16493a599a58fb8f2448fc9fc5a89"
 dependencies = [
  "bitflags 2.13.1",
  "bytemuck",
@@ -3049,7 +3049,7 @@ dependencies = [
 [[package]]
 name = "iced_widget"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=ba4ef4c495d16493a599a58fb8f2448fc9fc5a89#ba4ef4c495d16493a599a58fb8f2448fc9fc5a89"
 dependencies = [
  "iced_renderer",
  "iced_runtime",
@@ -3064,7 +3064,7 @@ dependencies = [
 [[package]]
 name = "iced_winit"
 version = "0.15.0-dev"
-source = "git+https://github.com/HakanSeven12/iced.git?rev=7dea84044e22dca45a2934f95c77bc8bb07c4707#7dea84044e22dca45a2934f95c77bc8bb07c4707"
+source = "git+https://github.com/HakanSeven12/iced.git?rev=ba4ef4c495d16493a599a58fb8f2448fc9fc5a89#ba4ef4c495d16493a599a58fb8f2448fc9fc5a89"
 dependencies = [
  "arboard",
  "iced_debug",
@@ -4835,7 +4835,7 @@ dependencies = [
 [[package]]
 name = "opencaddocument"
 version = "0.1.0"
-source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=0b5d7e9994d8f1d3879fca8bf1c589fc9b55b258#0b5d7e9994d8f1d3879fca8bf1c589fc9b55b258"
+source = "git+https://github.com/HakanSeven12/opencaddocument.git?rev=66ee6f1f7def5a74fbbf5674be6c59748e102a2d#66ee6f1f7def5a74fbbf5674be6c59748e102a2d"
 dependencies = [
  "acadrust",
  "ifccad",

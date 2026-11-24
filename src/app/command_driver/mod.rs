@@ -517,6 +517,27 @@ impl OpenCADStudio {
         self.refresh_active_cmd_preview(i);
     }
 
+    pub(in crate::app) fn start_point_filter_modifier(
+        &mut self,
+        i: usize,
+        filter: crate::command::PointFilter,
+    ) {
+        if self.tabs[i].suspended_cmd.is_some() {
+            return;
+        }
+        let parent = self.tabs[i].active_cmd.take();
+        self.tabs[i].suspended_cmd = parent;
+        self.tabs[i].scene.clear_preview_wire();
+        let cmd = crate::command::PointFilterCommand::new(filter, self.last_point);
+        let prompt = crate::command::CadCommand::prompt(&cmd);
+        self.tabs[i].active_cmd = Some(Box::new(cmd));
+        self.push_ucs_to_cmd(i);
+        self.command_line.push_info(&prompt);
+        self.command_line.set_step_options(Vec::new());
+        self.sync_dyn_fields();
+        self.refresh_active_cmd_preview(i);
+    }
+
     pub(in crate::app) fn relative_input_base(&self, i: usize) -> Option<glam::DVec3> {
         self.tabs[i]
             .active_cmd

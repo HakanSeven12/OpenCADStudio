@@ -6675,6 +6675,84 @@ DEAD
         }
     }
 
+    /// A point filter typed at LINE's first point: the filtered axes come
+    /// from the first point, the others from the second.
+    #[test]
+    fn point_filters_combine_two_typed_points() {
+        for (filter, expected) in [
+            (".X", glam::DVec3::new(10.0, 40.0, 7.0)),
+            (".Y", glam::DVec3::new(30.0, 20.0, 7.0)),
+            (".Z", glam::DVec3::new(30.0, 40.0, 5.0)),
+            (".XY", glam::DVec3::new(10.0, 20.0, 7.0)),
+            (".XZ", glam::DVec3::new(10.0, 40.0, 5.0)),
+            (".yz", glam::DVec3::new(30.0, 20.0, 5.0)),
+        ] {
+            let mut app = from_line_test_app();
+            for token in [filter, "10,20,5", "30,40,7"] {
+                from_submit(&mut app, token);
+            }
+            let line = app.tabs[0].active_cmd.as_ref().unwrap();
+            assert_eq!(line.name(), "LINE", "{filter}");
+            assert_eq!(line.resolved_anchor(), Some(expected), "{filter}");
+            assert_eq!(app.last_point, Some(expected), "{filter}");
+            assert!(app.tabs[0].suspended_cmd.is_none(), "{filter}");
+        }
+    }
+
+    /// A script's point filter takes the axes of the active UCS.
+    #[test]
+    fn point_filter_script_uses_rotated_ucs() {
+        let mut app = from_line_test_app();
+        let mut ucs = document::tables::Ucs::new("FILTER-test");
+        ucs.origin = document::types::Vector3::new(100.0, 200.0, 0.0);
+        ucs.x_axis = document::types::Vector3::new(0.0, 1.0, 0.0);
+        ucs.y_axis = document::types::Vector3::new(-1.0, 0.0, 0.0);
+        app.tabs[0].active_ucs = Some(ucs);
+        for token in [".X", "3,4", "6,8"] {
+            let _ = app.feed_active_cmd(token);
+        }
+        // UCS (3, 8): 3 along the UCS X axis (WCS +Y), 8 along its Y axis
+        // (WCS -X).
+        assert_eq!(
+            app.tabs[0].active_cmd.as_ref().unwrap().resolved_anchor(),
+            Some(glam::DVec3::new(92.0, 203.0, 0.0))
+        );
+    }
+
+    #[test]
+    fn point_filter_cancel_restores_the_line_prompt() {
+        for enter in [false, true] {
+            let mut app = from_line_test_app();
+            from_submit(&mut app, "3,4");
+            let prompt = app.tabs[0].active_cmd.as_ref().unwrap().prompt();
+            for token in [".X", "10,10"] {
+                from_submit(&mut app, token);
+            }
+            if enter {
+                from_submit(&mut app, "");
+            } else {
+                let _ = app.update(Message::CommandEscape);
+            }
+            let line = app.tabs[0].active_cmd.as_ref().unwrap();
+            assert_eq!(line.name(), "LINE");
+            assert_eq!(line.prompt(), prompt);
+            assert_eq!(app.last_point, Some(glam::DVec3::new(3.0, 4.0, 0.0)));
+            assert!(app.tabs[0].suspended_cmd.is_none());
+            assert!(app.tabs[0].scene.document.entities().next().is_none());
+        }
+    }
+
+    /// At a prompt that reads a name, `.X` is the name, not a filter.
+    #[test]
+    fn point_filter_is_text_at_a_name_prompt() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        for token in ["-LAYOUT", "N", ".X"] {
+            from_submit(&mut app, token);
+        }
+        assert!(app.tabs[0].scene.layout_names().contains(&".X".to_string()));
+    }
+
     fn from_submit(app: &mut OpenCADStudio, token: &str) {
         let _ = app.update(Message::CommandInput(token.to_string()));
         let _ = app.update(Message::CommandSubmit);

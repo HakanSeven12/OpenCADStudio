@@ -452,9 +452,15 @@ fn fit_circle(points: &[glam::DVec2]) -> Option<(glam::DVec2, f64, f64, f64)> {
         ab.x * ac.length_squared() - ac.x * ab.length_squared(),
     ) / det;
     let radius = center.distance(a);
-    if points
-        .iter()
-        .any(|point| (point.distance(center) - radius).abs() > radius * 1.0e-3)
+    // Tolerances follow the run's own size: against the radius alone, a run
+    // of nearly collinear points fits a huge circle whose arc leaves the
+    // boundary far behind (#3611).
+    let span = points.iter().map(|point| point.distance(a)).fold(0.0, f64::max);
+    let tolerance = radius.min(span) * 1.0e-3;
+    if radius > span * 1.0e3
+        || points
+            .iter()
+            .any(|point| (point.distance(center) - radius).abs() > tolerance)
     {
         return None;
     }
@@ -522,7 +528,8 @@ fn ring_arc_runs(ring: &[glam::DVec2]) -> Vec<(usize, usize)> {
         while end + 1 < ring.len() {
             let next = ring[end + 1];
             let turn = (ring[end] - center).angle_to(next - center);
-            if (next.distance(center) - radius).abs() > radius * 1.0e-3
+            if (next.distance(center) - radius).abs()
+                > radius.min(ring[start].distance(next)) * 1.0e-3
                 || turn * sweep <= 0.0
                 || turn.abs() > MAX_STEP
             {
@@ -684,5 +691,14 @@ mod tests {
         let square = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]
             .map(DVec2::from);
         assert!(super::curved_ring(&square).iter().all(|(_, control)| !control));
+        // A slightly bowed side and the corner after it stay chords: fitted
+        // to a huge circle, the run took the corner in and its arc ended 3
+        // units off it (#3611).
+        let bowed = [[0.0, 0.0], [10.0, 0.001], [20.0, 0.0015], [30.0, 0.001], [40.0, 0.0]]
+            .into_iter()
+            .chain([[41.0, -3.0], [0.0, -3.0]])
+            .map(DVec2::from)
+            .collect::<Vec<_>>();
+        assert!(super::ring_arc_runs(&bowed).is_empty());
     }
 }

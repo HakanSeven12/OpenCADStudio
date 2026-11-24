@@ -23,6 +23,7 @@ language =
     .bulgarian = Български
     .greek = Ελληνικά
     .vietnamese = Tiếng Việt
+    .uzbek = Özbekça
 
 mtext-source-errors = MTEXT
     .nesting = MTEXT: tato úprava by překročila bezpečný limit vnoření formátovacích skupin.

@@ -23,6 +23,7 @@ language =
     .bulgarian = Български
     .greek = Ελληνικά
     .vietnamese = Tiếng Việt
+    .uzbek = Özbekça
 
 mtext-source-errors = MTEXT
     .nesting = MTEXT：此編輯會超過安全格式群組巢狀層級限制。

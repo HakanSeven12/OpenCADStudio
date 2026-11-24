@@ -73,10 +73,12 @@ pub enum Language {
     ElGr,
     #[serde(rename = "vi-VN")]
     ViVn,
+    #[serde(rename = "uz-UZ")]
+    UzUz,
 }
 
 impl Language {
-    pub const ALL: [Language; 24] = [
+    pub const ALL: [Language; 25] = [
         Language::System,
         Language::EnUs,
         Language::BgBg,
@@ -101,6 +103,7 @@ impl Language {
         Language::HiIn,
         Language::ArSa,
         Language::ViVn,
+        Language::UzUz,
     ];
 
     fn requested(self) -> Vec<i18n_embed::unic_langid::LanguageIdentifier> {
@@ -129,6 +132,7 @@ impl Language {
             Language::ZhTw => vec!["zh-TW".parse().expect("valid locale")],
             Language::ElGr => vec!["el-GR".parse().expect("valid locale")],
             Language::ViVn => vec!["vi-VN".parse().expect("valid locale")],
+            Language::UzUz => vec!["uz-UZ".parse().expect("valid locale")],
         }
     }
 
@@ -158,6 +162,7 @@ impl Language {
             Language::ZhTw => crate::tr!("language", "chinese-traditional"),
             Language::ElGr => crate::tr!("language", "greek"),
             Language::ViVn => crate::tr!("language", "vietnamese"),
+            Language::UzUz => crate::tr!("language", "uzbek"),
         }
     }
 }

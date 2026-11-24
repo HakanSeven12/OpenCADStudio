@@ -40,7 +40,7 @@
     "loading": "लोड हो रहा है…"
   },
   "hu-HU": {
-    "title": "Open CAD Studio — Web",
+    "title": "Open CAD Studio webalkalmazás",
     "loading": "Betöltés…"
   },
   "it-IT": {
@@ -79,8 +79,12 @@
     "title": "Open CAD Studio — Web",
     "loading": "Yükleniyor…"
   },
+  "uz-UZ": {
+    "title": "Open CAD Studio veb-ilovasi",
+    "loading": "Yuklanmoqda…"
+  },
   "vi-VN": {
-    "title": "Open CAD Studio — Web",
+    "title": "Ứng dụng Web Open CAD Studio",
     "loading": "Đang tải…"
   },
   "zh-CN": {
@@ -88,7 +92,7 @@
     "loading": "正在加载…"
   },
   "zh-TW": {
-    "title": "Open CAD Studio — Web",
+    "title": "Open CAD Studio — 網頁",
     "loading": "載入中…"
   }
 }

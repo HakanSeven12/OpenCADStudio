@@ -84,8 +84,8 @@ pub use snap::{
 pub use tessellate::{arc, ellipse_arc, lerp, DEFAULT_SEGMENTS_PER_RADIAN};
 pub use transform::Transform;
 pub use triangulate::{
-    nesting_depths as ring_nesting_depths, polygon as triangulate, polygon_frame,
-    rings as triangulate_rings, PolygonFrame,
+    intersect_rings_even_odd_f32, nesting_depths as ring_nesting_depths, polygon as triangulate,
+    polygon_frame, rings as triangulate_rings, PolygonFrame,
 };
 pub use vec::Vec2;
 

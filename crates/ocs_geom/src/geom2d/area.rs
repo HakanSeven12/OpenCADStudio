@@ -27,9 +27,8 @@
 //! caller that wants a magnitude takes the absolute value; a caller deciding
 //! whether a loop is a hole wants the sign.
 
-use super::arrangement::{bounded_faces, signed_area};
-use super::curve::{Curve, Line};
-use super::Tolerance;
+use super::arrangement::signed_area;
+use super::curve::Curve;
 use super::polyline::{BulgeArc, Polyline};
 use super::transform::Transform;
 use super::vec::Vec2;
@@ -293,70 +292,41 @@ fn bulge_moments(arc: &BulgeArc) -> (f64, f64, f64) {
 /// shrinks with the square of the step.
 fn covered_area(curve: &Curve) -> Option<f64> {
     let coarse = covered_ring_area(curve, 64.0)?;
+    if matches!(curve, Curve::Line(_))
+        || matches!(curve, Curve::Polyline(p) if p.vertices.iter().all(|v| v.bulge == 0.0))
+    {
+        return Some(coarse);
+    }
     let fine = covered_ring_area(curve, 128.0)?;
     Some(fine + (fine - coarse) / 3.0)
 }
 
 fn covered_ring_area(curve: &Curve, segments_per_radian: f64) -> Option<f64> {
+    use i_overlay::core::fill_rule::FillRule;
+    use i_overlay::float::simplify::SimplifyShape;
+
     let mut ring = curve.tessellate(segments_per_radian);
-    if ring.first() != ring.last() {
-        ring.push(ring[0]);
+    if ring.len() > 1 && ring.first() == ring.last() {
+        ring.pop();
     }
-    let segments: Vec<Line> = ring
-        .windows(2)
-        .filter(|pair| pair[0] != pair[1])
-        .map(|pair| Line {
-            start: pair[0],
-            end: pair[1],
-        })
-        .collect();
     let extent = ring.iter().fold(0.0_f64, |size, point| {
         size.max((point[0] - ring[0][0]).abs())
             .max((point[1] - ring[0][1]).abs())
     });
-    if segments.len() < 3 || !(extent > 0.0) || !extent.is_finite() {
+    if ring.len() < 3 || !(extent > 0.0) || !extent.is_finite() {
         return None;
     }
-    let faces = bounded_faces(&segments, Tolerance::new(extent * 1.0e-12));
-    let covered: f64 = faces
+    let shapes = ring.simplify_shape(FillRule::NonZero);
+    let covered: f64 = shapes
         .iter()
-        .filter(|face| winding_inside(face, &ring) != 0)
-        .map(|face| signed_area(face).abs())
+        .map(|shape| {
+            let outer = signed_area(&shape[0]).abs();
+            let holes: f64 = shape[1..].iter().map(|hole| signed_area(hole).abs()).sum();
+            outer - holes
+        })
         .sum();
     // Wound round at most once everywhere: the integral is the area.
     ((covered - signed_area(&ring).abs()).abs() > covered * 1.0e-9).then_some(covered)
-}
-
-/// How many times `ring` winds round a point just inside `face` (a
-/// counter-clockwise region of the arrangement the ring makes).
-fn winding_inside(face: &[[f64; 2]], ring: &[[f64; 2]]) -> i32 {
-    // Off the middle of the face's longest edge, a hair to its left.
-    let Some((a, b)) = face
-        .iter()
-        .zip(face.iter().cycle().skip(1))
-        .max_by(|(a, b), (c, d)| {
-            Vec2::from(**a)
-                .distance(Vec2::from(**b))
-                .total_cmp(&Vec2::from(**c).distance(Vec2::from(**d)))
-        })
-    else {
-        return 0;
-    };
-    let (a, b) = (Vec2::from(*a), Vec2::from(*b));
-    let along = b - a;
-    let left = Vec2::new(-along.y, along.x) * 1.0e-6;
-    let point = (a + b) * 0.5 + left;
-    let mut winding = 0;
-    for pair in ring.windows(2) {
-        let (p, q) = (Vec2::from(pair[0]), Vec2::from(pair[1]));
-        let side = (q - p).cross(point - p);
-        if p.y <= point.y && q.y > point.y && side > 0.0 {
-            winding += 1;
-        } else if q.y <= point.y && p.y > point.y && side < 0.0 {
-            winding -= 1;
-        }
-    }
-    winding
 }
 
 fn line_moments(start: [f64; 2], end: [f64; 2]) -> (f64, f64, f64) {

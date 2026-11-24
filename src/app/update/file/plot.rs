@@ -4164,12 +4164,11 @@ impl OpenCADStudio {
         } else {
             let factor = plot_dialog_scale_factor(&self.plot_dialog);
             if factor > 0.0 {
-                let mm_per_unit = if self.tabs[i].scene.current_layout == "Model" {
-                    1.0
-                } else {
-                    1.0 / self.tabs[i].scene.paper_space_unit_factor().max(1e-9)
-                };
-                PlotScale::Ratio(factor * mm_per_unit)
+                // The factor is already millimetres per drawing unit in paper
+                // space too: a layout's paper unit comes from its own plot
+                // scale, so applying that again plotted a 1:200 window at
+                // 1:40000 (#3437).
+                PlotScale::Ratio(factor)
             } else {
                 PlotScale::Fit
             }

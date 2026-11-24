@@ -6,6 +6,7 @@ use crate::modules::surface::command::{Filter, Opt, OptKind, Step};
 use crate::modules::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
 
 pub mod point_manual;
+pub mod point_object;
 
 pub struct CivilModule;
 

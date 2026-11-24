@@ -72,6 +72,8 @@ const MENUS: &[(&str, &[Entry])] = &[
             Cmd("Save", "QSAVE", "Ctrl+S"),
             Cmd("Save As...", "SAVEAS", "Ctrl+Shift+S"),
             Cmd("Export...", "EXPORT", ""),
+            Cmd("Export STL", "STLOUT", ""),
+            Cmd("Export STEP AP214", "STEPOUT", ""),
             Cmd("eTransmit...", "ETRANSMIT", ""),
             Sep,
             Cmd("Page Setup Manager...", "PAGESETUP", ""),

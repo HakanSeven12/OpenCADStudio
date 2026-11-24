@@ -716,6 +716,12 @@ impl OpenCADStudio {
             crate::ui::dock::PanelId::NodeGraph => {
                 tab.graph.panel(width, chrome, self.node_graph_links)
             }
+            crate::ui::dock::PanelId::BricscadVisibility => crate::ui::window::bricscad_visibility::view(
+                &self.bricscad_visibility,
+                self.bricscad_visibility_model(tab),
+                width,
+                chrome,
+            ),
             crate::ui::dock::PanelId::Count => crate::ui::window::count_palette::view(
                 &self.count_palette,
                 tab.count.as_ref(),

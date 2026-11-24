@@ -24,8 +24,11 @@
 use document::objects::ObjectType;
 use document::{Document, EntityType, Handle};
 
+mod author;
 pub(crate) mod record;
 mod switch;
+
+pub(crate) use author::{parameter_states, parameter_views, shown_layers, Action, ParameterView};
 
 pub(crate) use switch::can_switch;
 
@@ -58,6 +61,14 @@ pub fn reference_parameters(document: &Document, insert: Handle) -> Vec<Visibili
     shown_block(document, insert)
         .map(|block| visibility_parameters(document, block))
         .unwrap_or_default()
+}
+
+/// The state parameter `name` of `owner` (block or model space) shows.
+pub fn current_state(document: &Document, owner: Handle, name: &str) -> Option<String> {
+    visibility_parameters(document, owner)
+        .into_iter()
+        .find(|parameter| parameter.name.eq_ignore_ascii_case(name))
+        .and_then(|parameter| parameter.states.get(parameter.current?).cloned())
 }
 
 /// The block an anonymous copy of a BricsCAD parametric block was made from.
@@ -179,3 +190,6 @@ mod record_tests;
 
 #[cfg(test)]
 mod switch_tests;
+
+#[cfg(test)]
+pub(crate) mod author_tests;

@@ -29,6 +29,7 @@ pub(crate) fn linetype_library_lock() -> std::sync::MutexGuard<'static, ()> {
 mod revcloud_vars;
 pub(crate) use purge::purge_pass;
 mod block_editor_vars;
+mod bricscad_visibility;
 mod bvisibility;
 mod count;
 mod dash;
@@ -814,6 +815,9 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_model_import(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_bricscad_visibility(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_bvisibility(cmd, i) {

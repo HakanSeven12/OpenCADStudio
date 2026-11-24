@@ -246,6 +246,29 @@ pub(crate) struct Record {
 }
 
 impl Record {
+    /// A new record of the class with DWG type number `object_type`; no
+    /// extended data, reactors or extension dictionary.
+    pub(crate) fn new(
+        object_type: u16,
+        handle: Handle,
+        owner: Ref,
+        body: Body,
+        version: DxfVersion,
+    ) -> Self {
+        Self {
+            object_type,
+            handle,
+            handle_code: 0,
+            extended_data: Vec::new(),
+            owner,
+            reactors: Vec::new(),
+            extension_dictionary: None,
+            binary_data: false,
+            body,
+            version,
+        }
+    }
+
     /// A new record of the class of `template`, which gives the type number
     /// and the version; no extended data, reactors or extension dictionary.
     pub(crate) fn like(template: &Record, handle: Handle, owner: Ref, body: Body) -> Self {

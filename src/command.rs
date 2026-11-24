@@ -4388,6 +4388,62 @@ mod tests {
     }
 
     #[test]
+    fn point_filter_parses_the_six_filters_only() {
+        for token in [".X", ".y", " .Z ", ".XY", ".xz", ".YZ"] {
+            assert!(PointFilter::parse(token).is_some(), "{token}");
+        }
+        for token in ["X", ".", ".5", ".W", ".XX", ".YX", ".XYZ", "..X", ""] {
+            assert!(PointFilter::parse(token).is_none(), "{token}");
+        }
+    }
+
+    /// The filtered axes come from the first point and the others from the
+    /// second, both in the command's plane: a UCS turned 30° about Z, with
+    /// its origin away from the WCS origin.
+    #[test]
+    fn point_filter_command_combines_the_points_in_its_plane() {
+        let (sin, cos) = 30f64.to_radians().sin_cos();
+        let plane = WorkingPlane::new(
+            DVec3::new(3.0, -2.0, 1.5),
+            DVec3::new(cos, sin, 0.0),
+            DVec3::new(-sin, cos, 0.0),
+        );
+        let first = DVec3::new(1.0, 2.0, 3.0);
+        let second = DVec3::new(7.0, 11.0, 13.0);
+        for (filter, need, expected) in [
+            (".X", "(need YZ):", DVec3::new(1.0, 11.0, 13.0)),
+            (".XZ", "(need Y):", DVec3::new(1.0, 11.0, 3.0)),
+            (".YZ", "(need X):", DVec3::new(7.0, 2.0, 3.0)),
+        ] {
+            let mut cmd = PointFilterCommand::new(PointFilter::parse(filter).unwrap(), None);
+            cmd.set_working_plane(plane);
+            assert_eq!(cmd.prompt(), format!("{filter} of:"));
+            assert!(matches!(
+                cmd.on_point(plane.to_world(first)),
+                CmdResult::NeedPoint
+            ));
+            assert_eq!(cmd.prompt(), need);
+            let CmdResult::ReturnPoint(point) = cmd.on_point(plane.to_world(second)) else {
+                panic!("{filter}: no point returned");
+            };
+            assert!(
+                plane.to_local(point).abs_diff_eq(expected, 1e-9),
+                "{filter}: {:?}",
+                plane.to_local(point)
+            );
+        }
+    }
+
+    #[test]
+    fn point_filter_cancel_restores_the_previous_point() {
+        let previous = Some(DVec3::new(4.0, 5.0, 6.0));
+        let mut cmd = PointFilterCommand::new(PointFilter::parse(".X").unwrap(), previous);
+        assert_eq!(cmd.modifier_restore_point(), Some(previous));
+        assert!(matches!(cmd.on_escape(), CmdResult::Cancel));
+        assert!(matches!(cmd.on_enter(), CmdResult::Cancel));
+    }
+
+    #[test]
     fn mid2point_cancel() {
         let mut cmd = Mid2PointCommand::new();
         assert!(matches!(cmd.on_escape(), CmdResult::Cancel));

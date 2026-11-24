@@ -731,6 +731,12 @@ impl OpenCADStudio {
                 width,
                 chrome,
             ),
+            crate::ui::dock::PanelId::GeometryCleanup => crate::ui::window::geometry_cleanup::view(
+                &self.geometry_cleanup,
+                tab.id,
+                width,
+                chrome,
+            ),
             crate::ui::dock::PanelId::PointCloudManager => crate::ui::window::pc_manager::view(
                 &self.pc_manager,
                 &tab.scene.document,

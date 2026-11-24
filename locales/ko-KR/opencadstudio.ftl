@@ -6716,6 +6716,22 @@ manage =
     .find-non-purgeable-items =
         비 찾기
         제거 가능한 항목
+    .geometry-cleanup = Geometry Cleanup
+    .geometry-cleanup-cannot-fix = This error cannot be fixed that way.
+    .geometry-cleanup-empty = Select objects to find gaps, overshoots and undershoots.
+    .geometry-cleanup-error-gone = The error is no longer in the drawing.
+    .geometry-cleanup-found = Geometry Cleanup: __ocs_fmt_0__ error(s) found.
+    .geometry-cleanup-no-errors = No errors found.
+    .geometry-cleanup-overshoot = Overshoot
+    .geometry-cleanup-remaining = Remaining Errors: __ocs_fmt_0__
+    .geometry-cleanup-rescan = Rescan
+    .geometry-cleanup-tip-extend = Lengthen the end along its own line or arc to the object it stops short of.
+    .geometry-cleanup-tip-extend-both = Lengthen both ends along their own lines to the corner where they meet.
+    .geometry-cleanup-tip-move = Move the whole object so that its end meets the other end.
+    .geometry-cleanup-tip-stretch = Move only this end onto the other end. The rest of the object stays.
+    .geometry-cleanup-tip-trim = Cut the end back to the object it crosses.
+    .geometry-cleanup-tolerance = Tolerance: __ocs_fmt_0__
+    .geometry-cleanup-undershoot = Undershoot
     .ignore-object-property = 무시할 객체 특성
     .load-partial-cui = 부분 CUI 로드
     .maintain-associative-objects = 연관 객체 유지

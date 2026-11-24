@@ -16,6 +16,7 @@ pub mod band;
 mod boundary_recovery;
 pub mod clip;
 pub mod centerline;
+pub mod cleanup;
 pub mod containment;
 pub mod construct;
 pub mod constrained;

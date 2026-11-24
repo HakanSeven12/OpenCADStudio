@@ -5406,7 +5406,14 @@ DEAD
         let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#);
         let handle = q["entities"][0]["handle"].as_str().unwrap().to_owned();
         let tab = app.active_tab;
-        app.tabs[tab].scene.document.layers.get_mut("0").unwrap().flags.locked = true;
+        app.tabs[tab]
+            .scene
+            .document
+            .layers
+            .get_mut("0")
+            .unwrap()
+            .flags
+            .locked = true;
         app.tabs[tab].dirty = false;
 
         // On a locked layer the line stays; listed twice, it is one object.
@@ -5425,7 +5432,14 @@ DEAD
         assert_eq!(count_type(&mut app, "Line"), 1);
         assert!(!app.tabs[tab].dirty, "nothing was erased");
 
-        app.tabs[tab].scene.document.layers.get_mut("0").unwrap().flags.locked = false;
+        app.tabs[tab]
+            .scene
+            .document
+            .layers
+            .get_mut("0")
+            .unwrap()
+            .flags
+            .locked = false;
         let r = mutate(
             &mut app,
             &format!(

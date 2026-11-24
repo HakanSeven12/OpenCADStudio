@@ -1534,7 +1534,7 @@ ZOOM EXTENTS
         let mut archive =
             zip::ZipArchive::new(std::io::Cursor::new(std::fs::read(output).unwrap())).unwrap();
         assert!(archive.len() >= 2);
-        assert_eq!(archive.by_index(0).unwrap().name(), "root.dxf");
+        assert_eq!(archive.by_index(0).unwrap().name().unwrap(), "root.dxf");
         let mut drawing = Vec::new();
         std::io::Read::read_to_end(&mut archive.by_index(0).unwrap(), &mut drawing).unwrap();
         assert_eq!(drawing, expected);
@@ -1542,7 +1542,8 @@ ZOOM EXTENTS
             archive
                 .by_name(crate::io::transmit::REPORT_FILE)
                 .unwrap()
-                .name(),
+                .name()
+                .unwrap(),
             crate::io::transmit::REPORT_FILE
         );
         assert!(!dir.join("root_archive").exists());

@@ -22,7 +22,7 @@ pub fn preview(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).ok()?;
     for i in 0..archive.len() {
         let file = archive.by_index(i).ok()?;
-        if file.name().to_ascii_lowercase().ends_with(".jpg") {
+        if file.name().ok()?.to_ascii_lowercase().ends_with(".jpg") {
             let mut picture = Vec::new();
             file.take(32 << 20).read_to_end(&mut picture).ok()?;
             return Some(picture);
@@ -39,7 +39,7 @@ pub fn scans(bytes: &[u8], project: &Path) -> Option<Vec<ScanEntry>> {
     let folder = project.parent().unwrap_or(Path::new(""));
     for i in 0..archive.len() {
         let file = archive.by_index(i).ok()?;
-        if !file.name().to_ascii_lowercase().ends_with(".xml") {
+        if !file.name().ok()?.to_ascii_lowercase().ends_with(".xml") {
             continue;
         }
         let mut text = String::new();

@@ -156,7 +156,7 @@ fn block_edits_preserve_cache_coordinates_and_arena_partition() {
             "the block must not also enter the regular arena"
         );
 
-        let projection = glam::Mat4::orthographic_rh(-50.0, 50.0, -50.0, 50.0, 0.1, 1000.0);
+        let projection = glam::camera::rh::proj::directx::orthographic(-50.0, 50.0, -50.0, 50.0, 0.1, 1000.0);
         let eye = glam::DVec3::new(0.0, 0.0, 100.0);
         let view = wire_arena::WireCullView::new(projection, eye, 800, 800);
         assert_eq!(arena.wire_gpus_visible(projection, eye, 800, 800).len(), 1);
@@ -547,7 +547,7 @@ fn instances_of_a_solid_draw_its_coarser_levels_when_they_are_small() {
     let mut drawn_at = |scale: f32| {
         let half = 500.0 / scale;
         pipeline.mesh_lod_view = Some((
-            glam::Mat4::orthographic_rh(-half, half, -half, half, -10_000.0, 10_000.0),
+            glam::camera::rh::proj::directx::orthographic(-half, half, -half, half, -10_000.0, 10_000.0),
             glam::DVec3::new(285.0, 285.0, 0.0),
             [1000.0, 1000.0],
         ));

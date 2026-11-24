@@ -179,7 +179,7 @@ fn sha256(path: &Path) -> String {
         }
         hash.update(&buf[..n]);
     }
-    format!("{:x}", hash.finalize())
+    OpenCADStudio::io::recovery::hex_digest(hash.finalize())
 }
 
 fn main() {

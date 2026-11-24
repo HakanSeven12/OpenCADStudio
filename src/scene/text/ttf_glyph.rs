@@ -1482,9 +1482,9 @@ fn outline_from_fallback_face(
     // Default family → cosmic's own fallback search chooses a covering font.
     let attrs = Attrs::new();
     let mut buf = Buffer::new(&mut fs, Metrics::new(SHAPE_FS, SHAPE_FS));
-    buf.set_size(&mut fs, None, None);
+    buf.set_size(None, None);
     let s = ch.to_string();
-    buf.set_text(&mut fs, &s, &attrs, Shaping::Advanced, None);
+    buf.set_text(&s, &attrs, Shaping::Advanced, None);
     buf.shape_until_scroll(&mut fs, false);
 
     for run in buf.layout_runs() {
@@ -1602,12 +1602,12 @@ fn build_shaped(_family: &str, text: &str) -> Option<ShapedRun> {
         .family(Family::SansSerif)
         .font_features(unkerned());
     let mut buffer = Buffer::new(&mut font_system, Metrics::new(SHAPE_FS, SHAPE_FS));
-    buffer.set_size(&mut font_system, None, None);
+    buffer.set_size(None, None);
     // A leading left-to-right mark keeps the paragraph direction left to
     // right, as the reference lays text out (right-to-left runs still read
     // backwards); `cells` stay relative to `text`.
     let marked = format!("{LRM}{text}");
-    buffer.set_text(&mut font_system, &marked, &attrs, Shaping::Advanced, None);
+    buffer.set_text(&marked, &attrs, Shaping::Advanced, None);
     buffer.shape_until_scroll(&mut font_system, false);
 
     let mut glyphs = Vec::new();
@@ -1706,7 +1706,7 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
     let (buf, marked) = scratch_guard.get_or_insert_with(|| {
         let mut buf = Buffer::new(&mut fs, Metrics::new(SHAPE_FS, SHAPE_FS));
         // No wrapping: a run is a single line.
-        buf.set_size(&mut fs, None, None);
+        buf.set_size(None, None);
         (buf, String::new())
     });
     // A leading left-to-right mark keeps the paragraph direction left to
@@ -1715,7 +1715,7 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
     marked.clear();
     marked.push(LRM);
     marked.push_str(text);
-    buf.set_text(&mut fs, marked, &attrs, Shaping::Advanced, None);
+    buf.set_text(marked, &attrs, Shaping::Advanced, None);
     buf.shape_until_scroll(&mut fs, false);
 
     if primary_metrics.is_none() {

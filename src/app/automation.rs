@@ -756,7 +756,7 @@ fn document_manifest(document: &document::Document) -> Value {
 fn sha256_file(path: &std::path::Path) -> Result<String, String> {
     let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
     let digest = Sha256::digest(bytes);
-    Ok(format!("{digest:x}"))
+    Ok(crate::io::recovery::hex_digest(digest))
 }
 
 #[cfg(not(target_arch = "wasm32"))]

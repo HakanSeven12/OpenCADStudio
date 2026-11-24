@@ -6093,19 +6093,19 @@ mod tests {
         // Monochrome maps every index colour (ByLayer cyan frame, explicit
         // red) to black; the true-color line keeps its RGB by definition.
         assert!(
-            !text.contains("0 1 1 rg") && !text.contains("0 1 1 RG"),
+            !text.contains("0.0 1.0 1.0 rg") && !text.contains("0.0 1.0 1.0 RG"),
             "cyan frame must be CTB-mapped to monochrome"
         );
         assert!(
-            !text.contains("1 0 0 rg") && !text.contains("1 0 0 RG"),
+            !text.contains("1.0 0.0 0.0 rg") && !text.contains("1.0 0.0 0.0 RG"),
             "explicit red must be CTB-mapped to monochrome"
         );
         assert!(
-            text.contains("0 1 0 rg") || text.contains("0 1 0 RG"),
+            text.contains("0.0 1.0 0.0 rg") || text.contains("0.0 1.0 0.0 RG"),
             "true-color line keeps its RGB (aci 0 is not CTB-mapped)"
         );
         assert!(
-            text.contains("0 0 0 rg") || text.contains("0 0 0 RG"),
+            text.contains("0.0 0.0 0.0 rg") || text.contains("0.0 0.0 0.0 RG"),
             "monochrome strokes must plot black"
         );
 

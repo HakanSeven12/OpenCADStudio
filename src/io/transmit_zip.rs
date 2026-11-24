@@ -140,7 +140,7 @@ mod tests {
         let mut entries = Vec::with_capacity(archive.len());
         for index in 0..archive.len() {
             let mut file = archive.by_index(index).unwrap();
-            let name = file.name().to_owned();
+            let name = file.name().unwrap().into_owned();
             let compression = file.compression();
             let mut data = Vec::new();
             file.read_to_end(&mut data).unwrap();

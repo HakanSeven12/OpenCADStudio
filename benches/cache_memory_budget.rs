@@ -180,7 +180,7 @@ impl Probe {
             }
             .into(),
             logical_cpus: std::thread::available_parallelism().map_or(1, usize::from),
-            workload_sha256: format!("{:x}", workload.finalize()),
+            workload_sha256: OpenCADStudio::io::recovery::hex_digest(workload.finalize()),
             cache_budgets_bytes: cache_budgets(),
             scenario: scenario.into(),
             baseline_live_bytes: self.baseline,

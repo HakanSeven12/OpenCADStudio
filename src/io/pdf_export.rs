@@ -1552,7 +1552,8 @@ fn append_pdf_page(
                 let dash = if dash_arr.is_empty() {
                     LineDashPattern::default()
                 } else {
-                    LineDashPattern::from_array(&dash_arr, 0)
+                    let pattern: Vec<f32> = dash_arr.iter().map(|&d| d as f32).collect();
+                    LineDashPattern::new(0.0, &pattern)
                 };
                 ops.push(Op::SetLineDashPattern { dash });
                 last_dash = Some(dash_arr.clone());
@@ -2260,8 +2261,18 @@ impl GradientShadings {
             if !resources.has(b"Shading") {
                 resources.set("Shading", Dictionary::new());
             }
-            if let Ok(Object::Dictionary(names)) = resources.get_mut(b"Shading") {
-                names.set(format!("OcsSh{number}"), shading);
+            let name = format!("OcsSh{number}");
+            // printpdf writes the page's shading names as an object of
+            // their own, referenced from the resources.
+            match resources.get_mut(b"Shading") {
+                Ok(Object::Dictionary(names)) => names.set(name, shading),
+                Ok(Object::Reference(id)) => {
+                    let id = *id;
+                    if let Ok(names) = doc.get_dictionary_mut(id) {
+                        names.set(name, shading);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -3358,7 +3369,7 @@ impl TextFonts {
             Some(slot) => *slot,
             None => {
                 let parses =
-                    ParsedFont::from_bytes(&source.font.data, source.font.index, &mut Vec::new())
+                    ParsedFont::from_bytes(&source.font.data, source.font.index as usize, &mut Vec::new())
                         .is_some();
                 let slot = parses.then(|| {
                     self.fonts.push(EmbeddedFont {
@@ -4067,7 +4078,7 @@ mod tests {
             "alpha state missing"
         );
         assert!(
-            on.contains("1 0 0 RG"),
+            on.contains("1.0 0.0 0.0 RG"),
             "colour must not be blended towards white"
         );
         let off = pdf_stream_text(&render_pdf_bytes(&[make_page(false)], None).unwrap());
@@ -4075,7 +4086,7 @@ mod tests {
             !off.contains("/ca ") && !off.contains("/CA "),
             "no alpha without transparency"
         );
-        assert!(off.contains("1 0 0 RG"), "opaque red without transparency");
+        assert!(off.contains("1.0 0.0 0.0 RG"), "opaque red without transparency");
     }
 
     #[test]
@@ -4120,11 +4131,11 @@ mod tests {
         let styled = pdf_stream_text(&render_pdf_bytes(&[make_page()], Some(&monochrome)).unwrap());
 
         assert!(
-            unstyled.contains("1 0 0 rg") || unstyled.contains("1 0 0 RG"),
+            unstyled.contains("1.0 0.0 0.0 rg") || unstyled.contains("1.0 0.0 0.0 RG"),
             "unstyled export should keep the wire's RGB color"
         );
         assert!(
-            !styled.contains("1 0 0 rg") && !styled.contains("1 0 0 RG"),
+            !styled.contains("1.0 0.0 0.0 rg") && !styled.contains("1.0 0.0 0.0 RG"),
             "monochrome fallback must recolor the wire"
         );
     }
@@ -4178,7 +4189,7 @@ mod tests {
         named.named_entries.insert("Normal".to_string(), normal);
         let styled = pdf_stream_text(&render_pdf_bytes(&[make_page()], Some(&named)).unwrap());
         assert!(
-            !styled.contains("1 0 0 rg") && !styled.contains("1 0 0 RG"),
+            !styled.contains("1.0 0.0 0.0 rg") && !styled.contains("1.0 0.0 0.0 RG"),
             "STB Normal (black) must recolor the wire"
         );
     }
@@ -4224,12 +4235,12 @@ mod tests {
         let text =
             pdf_stream_text(&render_pdf_bytes(std::slice::from_ref(&page), Some(&named)).unwrap());
         assert!(
-            text.contains("0 0 1 RG"),
+            text.contains("0.0 0.0 1.0 RG"),
             "named style Blue applies: {text}"
         );
-        assert!(text.contains("0 1 0 RG"), "explicit Normal applies");
+        assert!(text.contains("0.0 1.0 0.0 RG"), "explicit Normal applies");
         assert!(
-            !text.contains("1 0 0 RG"),
+            !text.contains("1.0 0.0 0.0 RG"),
             "no wire keeps its object colour"
         );
         page.content
@@ -4241,7 +4252,7 @@ mod tests {
             "{error}"
         );
         let text = pdf_stream_text(&render_pdf_bytes(&[page], Some(&named)).unwrap());
-        assert!(text.contains("0 1 0 RG"), "a missing style plots with Normal");
+        assert!(text.contains("0.0 1.0 0.0 RG"), "a missing style plots with Normal");
     }
 
     #[test]
@@ -4717,7 +4728,12 @@ mod tests {
             lopdf::Object::Reference(id) => doc.get_dictionary(*id).unwrap(),
             other => other.as_dict().unwrap(),
         };
-        let Ok(names) = resources.get(b"Shading").and_then(lopdf::Object::as_dict) else {
+        let names = match resources.get(b"Shading") {
+            Ok(lopdf::Object::Reference(id)) => doc.get_dictionary(*id).ok(),
+            Ok(other) => other.as_dict().ok(),
+            Err(_) => None,
+        };
+        let Some(names) = names else {
             return Vec::new();
         };
         names
@@ -5062,7 +5078,7 @@ mod tests {
             let shown = format!("<{gid:04X}>");
             let page = whole.get_pages().into_values().next().unwrap();
             let content =
-                String::from_utf8_lossy(&whole.get_page_content(page).unwrap()).into_owned();
+                String::from_utf8_lossy(&whole.get_page_content(page)).into_owned();
             assert!(
                 content.contains(&shown),
                 "glyph {gid} keeps its id in {content}"

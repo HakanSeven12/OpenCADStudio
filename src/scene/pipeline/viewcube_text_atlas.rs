@@ -64,9 +64,9 @@ fn rasterize_label(
         None => Attrs::new().family(Family::SansSerif).weight(weight),
     };
     let mut buffer = Buffer::new(font_system, Metrics::new(FONT_PX, LINE_PX));
-    buffer.set_size(font_system, None, None);
-    buffer.set_wrap(font_system, Wrap::None);
-    buffer.set_text(font_system, text, &attrs, Shaping::Advanced, None);
+    buffer.set_size(None, None);
+    buffer.set_wrap(Wrap::None);
+    buffer.set_text(text, &attrs, Shaping::Advanced, None);
     buffer.shape_until_scroll(font_system, false);
 
     let logical_width = buffer

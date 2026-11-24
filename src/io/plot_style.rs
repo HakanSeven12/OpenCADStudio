@@ -32,7 +32,7 @@ impl PickedPlotStyle {
             } else {
                 IfccadPlotStyleTableKind::Ctb
             },
-            sha256: Some(format!("{:x}", Sha256::digest(&bytes))),
+            sha256: Some(crate::io::recovery::hex_digest(Sha256::digest(&bytes))),
         };
         Ok(Self {
             table,
@@ -387,7 +387,7 @@ pub(crate) fn resolve_external_table(
         found_name = true;
         let bytes = std::fs::read(path)
             .map_err(|error| format!("Cannot read plot style table {name:?}: {error}"))?;
-        if sha256.is_some_and(|expected| format!("{:x}", Sha256::digest(&bytes)) != expected) {
+        if sha256.is_some_and(|expected| crate::io::recovery::hex_digest(Sha256::digest(&bytes)) != expected) {
             continue;
         }
         if contents.as_ref().is_some_and(|previous| *previous != bytes) {

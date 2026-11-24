@@ -3080,7 +3080,7 @@ mod lod_selection_tests {
     fn instances_measure_as_one_of_them_under_an_orthographic_view() {
         // 1 world unit = 1 px. A 30 x 40 x 5 instance somewhere in a field
         // of them: 50 px wherever the field and the eye are.
-        let ortho = glam::Mat4::orthographic_rh(-100.0, 100.0, -100.0, 100.0, -1000.0, 1000.0);
+        let ortho = glam::camera::rh::proj::directx::orthographic(-100.0, 100.0, -100.0, 100.0, -1000.0, 1000.0);
         let instance = [510.0, 210.0, 0.0, 540.0, 250.0, 5.0];
         let field = [-2000.0, -900.0, 0.0, 3000.0, 800.0, 60.0];
         for eye in [glam::DVec3::ZERO, glam::DVec3::new(900.0, -300.0, 500.0)] {
@@ -3104,7 +3104,7 @@ mod lod_selection_tests {
         // The eye looks down -Z from the origin at a field of unit cubes
         // between 10 and 100 away. None of them shows larger than the size
         // the boxes give, and the one nearest the eye shows about that size.
-        let perspective = glam::Mat4::perspective_rh(1.0, 1.0, 0.1, 1000.0);
+        let perspective = glam::camera::rh::proj::directx::perspective(1.0, 1.0, 0.1, 1000.0);
         let eye = glam::DVec3::ZERO;
         let field = [-40.0, -40.0, -100.0, 40.0, 40.0, -10.0];
         let cube = |x: f32, y: f32, z: f32| [x, y, z - 1.0, x + 1.0, y + 1.0, z];
@@ -3163,7 +3163,7 @@ mod lod_selection_tests {
     #[test]
     fn a_box_projects_to_its_pixel_diagonal() {
         // Orthographic: 1 world unit = 1 px across a 200 px viewport.
-        let ortho = glam::Mat4::orthographic_rh(-100.0, 100.0, -100.0, 100.0, -1000.0, 1000.0);
+        let ortho = glam::camera::rh::proj::directx::orthographic(-100.0, 100.0, -100.0, 100.0, -1000.0, 1000.0);
         let size = projected_diagonal(
             [10.0, 10.0, 0.0, 40.0, 50.0, 5.0],
             &ortho,
@@ -3172,7 +3172,7 @@ mod lod_selection_tests {
         );
         assert!((size - 50.0).abs() < 1e-3, "{size}");
         // A box straddling the eye in perspective is as large as can be.
-        let perspective = glam::Mat4::perspective_rh(1.0, 1.0, 0.1, 100.0);
+        let perspective = glam::camera::rh::proj::directx::perspective(1.0, 1.0, 0.1, 100.0);
         let behind = projected_diagonal(
             [-1.0, -1.0, -1.0, 1.0, 1.0, 1.0],
             &perspective,

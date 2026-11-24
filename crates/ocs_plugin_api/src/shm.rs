@@ -181,7 +181,7 @@ impl<T: SnapshotData> DocumentSnapshotStore<T> {
     fn temp_path(tab_id: u64, id: usize) -> PathBuf {
         let mut path = std::env::temp_dir();
         let mut suffix = [0u8; 8];
-        if getrandom::getrandom(&mut suffix).is_err() {
+        if getrandom::fill(&mut suffix).is_err() {
             suffix = [0u8; 8];
         }
         path.push(format!(

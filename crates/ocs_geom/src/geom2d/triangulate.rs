@@ -739,10 +739,8 @@ pub fn intersect_rings_even_odd_f32(
         clip_max[0] = clip_max[0].max(p[0]);
         clip_max[1] = clip_max[1].max(p[1]);
     }
-    let options = OverlayOptions {
-        clean_result: true,
-        ..Default::default()
-    };
+    let mut options = OverlayOptions::default();
+    options.clean_result = true;
     let mut out = Vec::with_capacity(loops.len());
     for &ring in loops {
         let n_ring = ring.len();
@@ -839,11 +837,9 @@ fn split_self_crossing(input: &[Vec<[f64; 2]>]) -> Vec<Vec<[f64; 2]>> {
     use i_overlay::float::overlay::OverlayOptions;
     use i_overlay::float::simplify::SimplifyShape;
 
-    let options = OverlayOptions {
-        ogc: true,
-        clean_result: true,
-        ..Default::default()
-    };
+    let mut options = OverlayOptions::default();
+    options.ogc = true;
+    options.clean_result = true;
     let mut out = Vec::with_capacity(input.len());
     for raw in input {
         let ring = sanitize(raw);
@@ -917,11 +913,9 @@ fn uncross(input: &[Vec<[f64; 2]>]) -> Vec<Vec<[f64; 2]>> {
         .filter(|(index, _)| members(roots[*index]).count() == 1)
         .map(|(_, ring)| ring.clone())
         .collect();
-    let options = OverlayOptions {
-        ogc: true,
-        clean_result: true,
-        ..Default::default()
-    };
+    let mut options = OverlayOptions::default();
+    options.ogc = true;
+    options.clean_result = true;
     for root in (0..rings.len()).filter(|index| roots[*index] == *index) {
         let group: Vec<usize> = members(root).collect();
         if group.len() < 2 {

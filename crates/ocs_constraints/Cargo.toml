@@ -6,4 +6,4 @@ description = "Two-dimensional geometric constraint solver"
 license = "LGPL-2.1-or-later"
 
 [dependencies]
-nalgebra = "0.33"
+nalgebra = "0.35"

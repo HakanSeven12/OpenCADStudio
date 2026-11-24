@@ -2318,7 +2318,7 @@ fn read_resource(
 
                 let mut hasher = Sha256::new();
                 hasher.update(&bytes);
-                let hash = format!("{:x}", hasher.finalize());
+                let hash = crate::io::recovery::hex_digest(hasher.finalize());
                 let b64 = BASE64.encode(&bytes);
                 let bytes_len = bytes.len();
                 let meta = result.get("result").cloned().unwrap_or_else(|| json!({}));
@@ -2588,7 +2588,7 @@ fn call_tool(
 
             let mut hasher = Sha256::new();
             hasher.update(&bytes);
-            let hash = format!("{:x}", hasher.finalize());
+            let hash = crate::io::recovery::hex_digest(hasher.finalize());
             let b64 = BASE64.encode(&bytes);
             let bytes_len = bytes.len();
 
@@ -3135,7 +3135,7 @@ fn tool_schema_digest() -> String {
     let canonical = serde_json::to_string(&tool_definitions()).unwrap_or_default();
     let mut hasher = Sha256::new();
     hasher.update(canonical.as_bytes());
-    format!("{:x}", hasher.finalize())
+    crate::io::recovery::hex_digest(hasher.finalize())
 }
 
 fn modern_request(params: &Value) -> bool {

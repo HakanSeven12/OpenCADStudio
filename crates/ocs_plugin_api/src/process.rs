@@ -1887,7 +1887,7 @@ fn generate_socket_name() -> String {
     // would re-open the guessing/squatting the suffix exists to close): the
     // pid+counter name alone stays unique within this host process, matching
     // the pre-hardening shape.
-    match getrandom::getrandom(&mut bytes) {
+    match getrandom::fill(&mut bytes) {
         Ok(()) => format!(
             "ocs_plugin_{}_{n}_{:016x}",
             std::process::id(),
@@ -1900,7 +1900,7 @@ fn generate_socket_name() -> String {
 /// Generate a 32-byte random token for runner authentication.
 fn generate_token() -> Result<String, PluginError> {
     let mut bytes = [0u8; PLUGIN_TOKEN_LEN];
-    getrandom::getrandom(&mut bytes)
+    getrandom::fill(&mut bytes)
         .map_err(|e| PluginError::Runner(format!("token generation failed: {e}")))?;
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(bytes.len() * 2);

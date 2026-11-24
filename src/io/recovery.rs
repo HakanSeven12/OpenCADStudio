@@ -455,8 +455,8 @@ pub fn sha256_file(_path: &Path) -> Result<String, String> {
     Err("filesystem hashing is unavailable on this target".to_string())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
+/// `bytes` as lowercase hexadecimal, two digits a byte.
+pub fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
     let bytes = bytes.as_ref();
     let mut output = String::with_capacity(bytes.len() * 2);
     for byte in bytes {

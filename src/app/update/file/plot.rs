@@ -3850,7 +3850,7 @@ impl OpenCADStudio {
             let bytes = session_table(&format!("{hash}/{name}"))
                 .or_else(|| {
                     session_table(name)
-                        .filter(|bytes| format!("{:x}", Sha256::digest(bytes.as_slice())) == hash)
+                        .filter(|bytes| crate::io::recovery::hex_digest(Sha256::digest(bytes.as_slice())) == hash)
                 })
                 .ok_or_else(|| {
                     format!(

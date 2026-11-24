@@ -2199,7 +2199,7 @@ mod tests {
                 let mut file = archive.by_index(index).expect("an entry");
                 let mut data = Vec::new();
                 file.read_to_end(&mut data).expect("inflates");
-                (file.name().to_string(), data)
+                (file.name().expect("an entry name").to_string(), data)
             })
             .collect()
     }

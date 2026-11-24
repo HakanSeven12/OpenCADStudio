@@ -3026,10 +3026,10 @@ fn save_temp_name_parts(path: &Path) -> (String, String) {
     (format!(".{stem}.ocs-save-"), format!(".{extension}"))
 }
 
-/// Removes the temporary files of saves of `path` that the system stopped
-/// before their replace. A save that runs writes to its file all the time,
-/// so a file that nothing wrote to for an hour is not a running save of
-/// another instance.
+/// Removes the temporary files of saves and exports of `path` that the
+/// system stopped before their replace. A save that runs writes to its file
+/// all the time, so a file that nothing wrote to for an hour is not a
+/// running save of another instance.
 fn remove_stale_save_temps(path: &Path) {
     const STALE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
     let Ok(entries) = std::fs::read_dir(save_folder(path)) else {

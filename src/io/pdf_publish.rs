@@ -285,6 +285,7 @@ impl PublishPdf {
         super::replace_save_file(&self.temp_path, &self.path, false)
             .map_err(|error| format!("Failed to replace PDF file: {error}"))?;
         self.finished = true;
+        super::remove_stale_save_temps(&self.path);
         Ok(self.offset)
     }
 

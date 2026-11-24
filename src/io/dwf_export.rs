@@ -212,6 +212,7 @@ pub fn export_dwf_pages(
         let _ = std::fs::remove_file(&temp_path);
         return Err(format!("Failed to replace DWF file: {error}"));
     }
+    super::remove_stale_save_temps(path);
     Ok(())
 }
 

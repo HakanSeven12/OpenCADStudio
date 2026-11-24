@@ -63,7 +63,7 @@ Settings, the alias file, shortcuts and your own patterns and linetypes are kept
 
 ## Language
 
-The interface is available in 23 languages. By default it follows the system language. Change it under **Options › General**.
+The interface is available in 24 languages. By default it follows the system language. Change it under **Options › General**.
 
 ## Building from source
 

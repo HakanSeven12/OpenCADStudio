@@ -148,7 +148,26 @@ pub const TOOLS: &[Entry] = &[
 // ponytail: entries answer "not yet implemented" until their command lands;
 // drop each from here as it does.
 pub fn is_pending(cmd: &str) -> bool {
-    !matches!(cmd, "CREATEPOINTMANUAL" | "CREATEPOINTGROUP")
+    !matches!(
+        cmd,
+        "CREATEPOINTMANUAL"
+            | "CREATEPOINTGROUP"
+            | "CREATEPOINTNORTHINGEASTING"
+            | "CREATEPOINTBEARING"
+            | "CREATEPOINTAZIMUTH"
+            | "CREATEPOINTANGLE"
+            | "CREATEPOINTDEFLECTION"
+            | "CREATEPTSTATIONOFFSETOBJ"
+            | "CREATEPOINTAUTOMATIC"
+            | "CREATEPTALONGLNCURVESPIR"
+            | "CREATEPTONLINECURVESPIRAL"
+            | "CREATEPOINTDIVIDEOBJECT"
+            | "CREATEPOINTMEASUREOBJECT"
+            | "CREATEPTPLYLINECTRVERTMAN"
+            | "CREATEPTPLYLNCTRVERTAUTO"
+            | "CREATEPOINTRESECTION"
+            | "CREATEPTGEODETICDIR"
+    )
         && (GROUPS.iter().flat_map(|g| g.entries.iter().flatten()).any(|e| e.command == cmd)
             || TOOLS.iter().any(|e| e.command == cmd))
 }

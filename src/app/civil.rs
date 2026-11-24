@@ -1046,10 +1046,11 @@ impl OpenCADStudio {
     /// A point of CREATEPOINTMANUAL: written at once on the layer the drawing's
     /// point creation settings name (else the current layer), then its
     /// northing and easting echoed. The command's points are one undo step.
-    pub(super) fn add_created_cogo_point(&mut self, at: glam::DVec3, description: Option<String>, elevation: Option<f64>) {
+    pub(super) fn add_created_cogo_point(&mut self, at: glam::DVec3, description: Option<String>, elevation: Option<f64>, echo: bool) {
         let i = self.active_tab;
         if self.tabs[i].history.pending.is_none() {
-            self.push_undo_snapshot(i, "CREATEPOINTMANUAL");
+            let label = self.tabs[i].active_cmd.as_ref().map_or("CREATEPOINTMANUAL", |c| c.name());
+            self.push_undo_snapshot(i, label);
         }
         let current = self.tabs[i].active_layer.clone();
         let doc = &mut self.tabs[i].scene.document;
@@ -1066,7 +1067,9 @@ impl OpenCADStudio {
                 let (n, e) = (format!("{:.4}{unit}", at.y), format!("{:.4}{unit}", at.x));
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.bump_entities(&[(point, ChangeKind::Added)]);
-                self.command_line.push_output(&crate::tf!("N: {}   E: {}", n, e));
+                if echo {
+                    self.command_line.push_output(&crate::tf!("N: {}   E: {}", n, e));
+                }
             }
             Err(document::error::DxfError::Parse(message)) => self.command_line.push_error(&message),
             Err(e) => self.command_line.push_error(&e.to_string()),

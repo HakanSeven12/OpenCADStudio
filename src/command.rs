@@ -2087,6 +2087,10 @@ pub enum CmdResult {
         position: DVec3,
         description: Option<String>,
         elevation: Option<f64>,
+        /// Echo the point's northing and easting (the manual commands do).
+        echo: bool,
+        /// A line shown before the command's next prompt.
+        then: Option<String>,
     },
     /// Update the committed-segment wire (normal colour) and keep collecting points.
     InterimWire(WireModel),

@@ -2669,8 +2669,28 @@ impl OpenCADStudio {
 
             "ULAYERS" => self.open_underlay_layers_dialog(i),
             crate::ui::points_menu::OPEN_COMMAND => self.points_menu.open = !self.points_menu.open,
-            "CREATEPOINTMANUAL" => {
-                let c = crate::modules::civil::point_manual::CreatePointManualCommand::new();
+            "CREATEPOINTMANUAL" | "CREATEPOINTNORTHINGEASTING" | "CREATEPOINTBEARING" | "CREATEPOINTAZIMUTH" | "CREATEPOINTANGLE" | "CREATEPOINTDEFLECTION" => {
+                use crate::modules::civil::point_manual::{CreatePointManualCommand, Mode};
+                let mode = match cmd {
+                    "CREATEPOINTNORTHINGEASTING" => Mode::NorthingEasting,
+                    "CREATEPOINTBEARING" => Mode::Bearing,
+                    "CREATEPOINTAZIMUTH" => Mode::Azimuth,
+                    "CREATEPOINTANGLE" => Mode::Angle,
+                    "CREATEPOINTDEFLECTION" => Mode::Deflection,
+                    _ => Mode::Manual,
+                };
+                let c = CreatePointManualCommand::with_mode(mode);
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+            }
+            // The drawing has no coordinate transformation settings, which
+            // the command needs (the reference refuses the same way).
+            "CREATEPTGEODETICDIR" => {
+                self.command_line.push_error(&crate::t!("Coordinate transformations must be enabled for this command."));
+            }
+            cmd if crate::modules::civil::point_object::Kind::of(cmd).is_some() => {
+                let kind = crate::modules::civil::point_object::Kind::of(cmd).unwrap();
+                let c = crate::modules::civil::point_object::ObjectPointCommand::new(kind);
                 self.command_line.push_info(&c.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }

@@ -4,7 +4,11 @@
 //! The GUI toolkit writes text only. Drawing programs paste SVG markup that
 //! arrives as text as text, or not at all; they look for it under the SVG
 //! MIME type: a registered clipboard format on Windows, a selection target
-//! on X11 (which XWayland hands on to Wayland programs).
+//! on X11 (which XWayland hands on to Wayland programs). On Windows the
+//! outlines also go on as an enhanced metafile, the vector format most
+//! Windows drawing programs paste (CorelDRAW reads no SVG from there).
+
+use crate::io::svg_clipboard::Stroke;
 
 /// The clipboard format, or selection target, SVG is read from.
 pub const SVG_FORMAT: &str = "image/svg+xml";
@@ -34,30 +38,33 @@ pub fn formats(svg: &str) -> Vec<(&'static str, Vec<u8>)> {
     }
 }
 
-/// Put `svg` on the system clipboard in all its `formats`, in one write.
-/// `false` when this platform has no such write, or it failed; the caller
-/// then puts the text there through the GUI toolkit.
-pub fn write(svg: &str) -> bool {
+/// Put `svg` on the system clipboard in all its `formats`, in one write,
+/// and on Windows `strokes` as a metafile with them. `false` when this
+/// platform has no such write, or it failed; the caller then puts the text
+/// there through the GUI toolkit.
+pub fn write(svg: &str, strokes: &[Stroke]) -> bool {
     let formats = formats(svg);
     if formats.is_empty() {
         return false;
     }
     #[cfg(test)]
     {
+        let _ = strokes;
         test_record::record(formats);
         true
     }
     #[cfg(all(not(test), target_os = "windows"))]
     {
-        windows::write(&formats)
+        windows::write(&formats, strokes)
     }
     #[cfg(all(not(test), target_os = "linux"))]
     {
+        let _ = strokes;
         x11::write(formats)
     }
     #[cfg(all(not(test), not(any(target_os = "windows", target_os = "linux"))))]
     {
-        let _ = formats;
+        let _ = (formats, strokes);
         false
     }
 }
@@ -86,14 +93,83 @@ pub mod test_record {
 
 #[cfg(all(not(test), target_os = "windows"))]
 mod windows {
-    use windows_sys::Win32::Foundation::{GlobalFree, HGLOBAL};
+    use windows_sys::Win32::Foundation::{GlobalFree, HGLOBAL, POINT, RECT};
+    use windows_sys::Win32::Graphics::Gdi::{
+        CloseEnhMetaFile, CreateEnhMetaFileW, CreatePen, DeleteEnhMetaFile, DeleteObject,
+        Polyline, SelectObject, SetMapMode, HENHMETAFILE, MM_HIMETRIC, PS_SOLID,
+    };
     use windows_sys::Win32::System::DataExchange::{
         CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
     };
     use windows_sys::Win32::System::Memory::{
         GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE,
     };
-    use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
+    use windows_sys::Win32::System::Ole::{CF_ENHMETAFILE, CF_UNICODETEXT};
+
+    use crate::io::svg_clipboard::{strokes_extent, Stroke};
+
+    /// `strokes` recorded as an enhanced metafile, one drawing unit to one
+    /// millimetre (scaled down when that does not fit GDI's coordinates),
+    /// its lower-left corner at the drawing's.
+    fn metafile(strokes: &[Stroke]) -> Option<HENHMETAFILE> {
+        let (min, max) = strokes_extent(strokes)?;
+        let span = (max[0] - min[0]).max(max[1] - min[1]).max(1e-9);
+        // Hundredths of a millimetre per drawing unit, kept inside i32.
+        let scale = 100.0_f64.min(1.0e9 / span);
+        let to_device = |[x, y]: [f64; 2]| POINT {
+            x: ((x - min[0]) * scale).round() as i32,
+            // MM_HIMETRIC: Y up, the top edge at 0.
+            y: ((y - max[1]) * scale).round() as i32,
+        };
+        let frame = RECT {
+            left: 0,
+            top: 0,
+            right: ((max[0] - min[0]) * scale).round().max(1.0) as i32,
+            bottom: ((max[1] - min[1]) * scale).round().max(1.0) as i32,
+        };
+        // SAFETY: the recording DC is closed, and every pen made for it is
+        // deselected and deleted, before returning.
+        unsafe {
+            let dc = CreateEnhMetaFileW(
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                &frame,
+                std::ptr::null(),
+            );
+            if dc.is_null() {
+                return None;
+            }
+            SetMapMode(dc, MM_HIMETRIC);
+            for stroke in strokes {
+                let [r, g, b] = stroke.rgb;
+                let colour = u32::from(r) | u32::from(g) << 8 | u32::from(b) << 16;
+                let pen = CreatePen(PS_SOLID, 0, colour);
+                let old = SelectObject(dc, pen);
+                for run in stroke.runs.iter().filter(|run| run.len() > 1) {
+                    let points: Vec<POINT> = run.iter().copied().map(to_device).collect();
+                    Polyline(dc, points.as_ptr(), points.len() as i32);
+                }
+                SelectObject(dc, old);
+                DeleteObject(pen);
+            }
+            let handle = CloseEnhMetaFile(dc);
+            (!handle.is_null()).then_some(handle)
+        }
+    }
+
+    /// Hand the metafile of `strokes` to the open clipboard; the clipboard
+    /// owns it once it is set.
+    fn set_metafile(strokes: &[Stroke]) {
+        let Some(handle) = metafile(strokes) else {
+            return;
+        };
+        // SAFETY: the clipboard is open and emptied by this process.
+        unsafe {
+            if SetClipboardData(u32::from(CF_ENHMETAFILE), handle).is_null() {
+                DeleteEnhMetaFile(handle);
+            }
+        }
+    }
 
     /// A movable global block holding `bytes`, as the clipboard takes data.
     fn global(bytes: &[u8]) -> Option<HGLOBAL> {
@@ -141,7 +217,7 @@ mod windows {
         unsafe { RegisterClipboardFormatW(name.as_ptr()) }
     }
 
-    pub fn write(formats: &[(&str, Vec<u8>)]) -> bool {
+    pub fn write(formats: &[(&str, Vec<u8>)], strokes: &[Stroke]) -> bool {
         // Another program may hold the clipboard for a moment.
         let mut open = false;
         for _ in 0..10 {
@@ -160,6 +236,9 @@ mod windows {
             && formats
                 .iter()
                 .all(|(name, bytes)| set(format_id(name), bytes));
+        if written {
+            set_metafile(strokes);
+        }
         // SAFETY: this function opened the clipboard.
         unsafe {
             CloseClipboard();

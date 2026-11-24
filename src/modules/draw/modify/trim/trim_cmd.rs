@@ -506,6 +506,7 @@ impl CadCommand for TrimCommand {
                             | EntityType::LwPolyline(_)
                             | EntityType::MLine(_)
                             | EntityType::Hatch(_)
+                            | EntityType::Dimension(_)
                     )
                 ) {
                     return CmdResult::NeedPoint;

@@ -31,6 +31,7 @@ pub mod field_dialog;
 pub mod find_replace;
 pub mod geographic_location;
 pub mod geometric_tolerance;
+pub mod geometry_cleanup;
 pub mod gradient_editor;
 pub mod graphic_attributes;
 pub mod hatch_dialogs;

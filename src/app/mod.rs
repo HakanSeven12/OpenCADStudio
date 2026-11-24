@@ -1467,6 +1467,8 @@ pub(super) struct OpenCADStudio {
     /// Point Cloud Manager palette (POINTCLOUDMANAGER).
     pub(crate) pc_manager: crate::ui::window::pc_manager::PcManager,
     pub(crate) count_palette: crate::ui::window::count_palette::CountPalette,
+    /// The Geometry Cleanup palette (GEOMETRYCLEANUPOPEN).
+    pub(crate) geometry_cleanup: crate::ui::window::geometry_cleanup::GeometryCleanupPalette,
     pub(crate) bricscad_visibility: crate::ui::window::bricscad_visibility::VisibilityPanel,
     /// The QuickCalc pallet (QUICKCALC / QC).
     pub(crate) quick_calc: crate::ui::window::quick_calc::QuickCalcPalette,
@@ -3201,6 +3203,7 @@ impl OpenCADStudio {
             show_browser: false,
             pc_manager: Default::default(),
             count_palette: Default::default(),
+            geometry_cleanup: Default::default(),
             bricscad_visibility: Default::default(),
             quick_calc: Default::default(),
             assistant: Default::default(),

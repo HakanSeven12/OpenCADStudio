@@ -3203,7 +3203,8 @@ impl Scene {
         // (bit 4), and any loop one level in — a selected island of island
         // the reference flags 0 is not filled, while a first island flagged
         // 0 by another writer still cuts its hole — Outer those flagged
-        // external or outermost, Ignore only
+        // external or outermost, and a first island flagged 0 too (the
+        // hole a band such as a bent bar's outline leaves, #3503), Ignore only
         // those flagged external. A counter stored as an external loop is a
         // hole even with Ignore. When no loop carries the flag the style
         // needs, nesting depth picks them instead.
@@ -3235,7 +3236,11 @@ impl Scene {
         {
             let keep = if by_flags {
                 style_keeps(path)
-                    || (dxf.style == document::entities::HatchStyleType::Normal && depth <= 1)
+                    || (matches!(
+                        dxf.style,
+                        document::entities::HatchStyleType::Normal
+                            | document::entities::HatchStyleType::Outer
+                    ) && depth <= 1)
             } else {
                 match dxf.style {
                     document::entities::HatchStyleType::Normal => true,
@@ -4983,6 +4988,31 @@ mod hatch_single_loop_depth_tests {
             let (_, fill_mesh) = model.fill_mesh();
             assert!(!fill_mesh.is_empty(), "{style:?}: fill mesh is built");
         }
+    }
+
+    /// An Outer hatch whose island is stored without flags, as the band of
+    /// a bent bar is (#3503): the island still cuts its hole.
+    #[test]
+    fn an_unflagged_first_island_cuts_its_hole_in_an_outer_hatch() {
+        let mut hatch = single_loop_hatch(HatchStyleType::Outer, true);
+        let mut island = BoundaryPath::new();
+        island.add_edge(BoundaryEdge::Polyline(PolylineEdge::new(
+            vec![
+                Vector2::new(2.0, 2.0),
+                Vector2::new(8.0, 2.0),
+                Vector2::new(8.0, 8.0),
+                Vector2::new(2.0, 8.0),
+            ],
+            true,
+        )));
+        hatch.paths.push(island);
+        let model = Scene::hatch_model_from_dxf(&hatch, [1.0, 1.0, 1.0, 1.0])
+            .expect("the hatch renders");
+        let exterior = model
+            .boundary_exterior
+            .as_ref()
+            .expect("loop exterior flags stored");
+        assert_eq!(exterior.as_ref(), &[true, false], "the island is kept as a hole");
     }
 
     #[test]

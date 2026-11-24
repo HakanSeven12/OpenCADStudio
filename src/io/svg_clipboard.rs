@@ -24,9 +24,15 @@ fn point(wire: &WireModel, index: usize) -> [f64; 2] {
     ]
 }
 
-/// The outlines of `handles` as an SVG document, `None` when they draw
-/// nothing.
-pub fn selection_svg(scene: &Scene, handles: &[Handle]) -> Option<String> {
+/// One object's outline for the clipboard: its pen-down runs in drawing
+/// units, and its colour as drawn on paper.
+pub struct Stroke {
+    pub runs: Vec<Vec<[f64; 2]>>,
+    pub rgb: [u8; 3],
+}
+
+/// The outlines of `handles`, empty when they draw nothing.
+pub fn selection_strokes(scene: &Scene, handles: &[Handle]) -> Vec<Stroke> {
     let wanted: rustc_hash::FxHashSet<Handle> = handles.iter().copied().collect();
     let all = scene.entity_wires();
     let wires: Vec<&WireModel> = all
@@ -35,15 +41,23 @@ pub fn selection_svg(scene: &Scene, handles: &[Handle]) -> Option<String> {
             Scene::handle_from_wire_name(&wire.name).is_some_and(|h| wanted.contains(&h))
         })
         .collect();
-    wires_svg(&wires)
+    strokes(&wires)
+}
+
+/// The outlines of `handles` as an SVG document, `None` when they draw
+/// nothing.
+pub fn selection_svg(scene: &Scene, handles: &[Handle]) -> Option<String> {
+    strokes_svg(&selection_strokes(scene, handles))
 }
 
 pub fn wires_svg(wires: &[&WireModel]) -> Option<String> {
-    let mut min = [f64::INFINITY; 2];
-    let mut max = [f64::NEG_INFINITY; 2];
-    let mut body = String::new();
+    strokes_svg(&strokes(wires))
+}
+
+fn strokes(wires: &[&WireModel]) -> Vec<Stroke> {
+    let mut out = Vec::new();
     for wire in wires {
-        let mut path = String::new();
+        let mut runs: Vec<Vec<[f64; 2]>> = Vec::new();
         let mut pen_down = false;
         for index in 0..wire.points.len() {
             let [x, y] = point(wire, index);
@@ -51,18 +65,15 @@ pub fn wires_svg(wires: &[&WireModel]) -> Option<String> {
                 pen_down = false;
                 continue;
             }
-            min = [min[0].min(x), min[1].min(y)];
-            max = [max[0].max(x), max[1].max(y)];
-            let _ = write!(
-                path,
-                "{}{} {} ",
-                if pen_down { "L" } else { "M" },
-                x * PX_PER_MM,
-                -y * PX_PER_MM
-            );
+            if !pen_down {
+                runs.push(Vec::new());
+            }
+            if let Some(run) = runs.last_mut() {
+                run.push([x, y]);
+            }
             pen_down = true;
         }
-        if path.is_empty() {
+        if runs.is_empty() {
             continue;
         }
         // Drawn light on the dark canvas, white reads as black on paper.
@@ -73,13 +84,46 @@ pub fn wires_svg(wires: &[&WireModel]) -> Option<String> {
             (r, g, b)
         };
         let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        out.push(Stroke {
+            runs,
+            rgb: [byte(r), byte(g), byte(b)],
+        });
+    }
+    out
+}
+
+/// The bounding box of `strokes`, `None` when they hold no point.
+pub fn strokes_extent(strokes: &[Stroke]) -> Option<([f64; 2], [f64; 2])> {
+    let mut min = [f64::INFINITY; 2];
+    let mut max = [f64::NEG_INFINITY; 2];
+    for [x, y] in strokes.iter().flat_map(|s| s.runs.iter().flatten()) {
+        min = [min[0].min(*x), min[1].min(*y)];
+        max = [max[0].max(*x), max[1].max(*y)];
+    }
+    min[0].is_finite().then_some((min, max))
+}
+
+pub fn strokes_svg(strokes: &[Stroke]) -> Option<String> {
+    let (min, max) = strokes_extent(strokes)?;
+    let mut body = String::new();
+    for stroke in strokes {
+        let mut path = String::new();
+        for run in &stroke.runs {
+            for (k, [x, y]) in run.iter().enumerate() {
+                let _ = write!(
+                    path,
+                    "{}{} {} ",
+                    if k == 0 { "M" } else { "L" },
+                    x * PX_PER_MM,
+                    -y * PX_PER_MM
+                );
+            }
+        }
+        let [r, g, b] = stroke.rgb;
         let _ = writeln!(
             body,
-            r##"<path d="{}" stroke="#{:02x}{:02x}{:02x}"/>"##,
+            r##"<path d="{}" stroke="#{r:02x}{g:02x}{b:02x}"/>"##,
             path.trim_end(),
-            byte(r),
-            byte(g),
-            byte(b)
         );
     }
     if body.is_empty() {

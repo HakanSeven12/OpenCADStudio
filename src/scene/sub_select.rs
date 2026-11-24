@@ -63,6 +63,16 @@ fn segment_points(curve: &PlanarCurve, index: usize) -> Vec<[f64; 3]> {
     crate::entities::curve::curve_points(&part)
 }
 
+/// Whether segments `a`-`b` and `c`-`d` cross or touch.
+fn segments_cross(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> bool {
+    let side = |p: [f64; 2], q: [f64; 2], r: [f64; 2]| {
+        (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+    };
+    let (d1, d2) = (side(c, d, a), side(c, d, b));
+    let (d3, d4) = (side(a, b, c), side(a, b, d));
+    d1 * d2 <= 0.0 && d3 * d4 <= 0.0
+}
+
 impl Scene {
     /// Ctrl+click: toggle the segment of polyline `handle` nearest `point`
     /// and keep the polyline selected while any of its segments is. `false`
@@ -103,6 +113,57 @@ impl Scene {
         } else {
             self.select_entity(handle, false);
         }
+        self.bump_selection_set();
+        true
+    }
+
+    /// Ctrl+window: the segments of polyline `handle` a selection box
+    /// catches join its picked segments, as a Ctrl+click picks one. A
+    /// segment is caught when it lies wholly inside the box (`min`..`max`,
+    /// in the space `to_screen` maps to) or, for a crossing box, when it
+    /// also just touches it. `false` when none was caught.
+    pub fn add_box_sub_segments(
+        &mut self,
+        handle: Handle,
+        to_screen: impl Fn(DVec3) -> [f64; 2],
+        min: [f64; 2],
+        max: [f64; 2],
+        crossing: bool,
+    ) -> bool {
+        let Some((curve, _)) = self.document.get_entity(handle).and_then(plain_polyline) else {
+            return false;
+        };
+        let inside =
+            |p: [f64; 2]| p[0] >= min[0] && p[0] <= max[0] && p[1] >= min[1] && p[1] <= max[1];
+        let corners = [min, [max[0], min[1]], max, [min[0], max[1]]];
+        let crosses_box = |a: [f64; 2], b: [f64; 2]| {
+            (0..4).any(|k| segments_cross(a, b, corners[k], corners[(k + 1) % 4]))
+        };
+        let caught: Vec<usize> = (0..vertex_count(&curve))
+            .filter(|&index| {
+                let points: Vec<[f64; 2]> = segment_points(&curve, index)
+                    .into_iter()
+                    .map(|p| to_screen(DVec3::from_array(p)))
+                    .collect();
+                if points.is_empty() {
+                    return false;
+                }
+                if points.iter().all(|p| inside(*p)) {
+                    return true;
+                }
+                crossing
+                    && (points.iter().any(|p| inside(*p))
+                        || points.windows(2).any(|pair| crosses_box(pair[0], pair[1])))
+            })
+            .collect();
+        if caught.is_empty() {
+            return false;
+        }
+        if !self.selected.contains(&handle) {
+            self.sub_segments.remove(&handle);
+        }
+        self.sub_segments.entry(handle).or_default().extend(caught);
+        self.select_entity(handle, false);
         self.bump_selection_set();
         true
     }
@@ -238,5 +299,46 @@ impl Scene {
             self.update_entity(moved);
         }
         whole
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use document::entities::{LwPolyline, LwVertex};
+
+    /// Ctrl+window (#748): a window takes the segments wholly inside it, a
+    /// crossing box also those it touches; the polyline is selected with
+    /// only them picked.
+    #[test]
+    fn a_box_picks_the_segments_it_catches() {
+        let polyline = || {
+            let mut p = LwPolyline::new();
+            p.vertices = vec![
+                LwVertex::from_coords(0.0, 0.0),
+                LwVertex::from_coords(10.0, 0.0),
+                LwVertex::from_coords(20.0, 0.0),
+                LwVertex::from_coords(30.0, 0.0),
+            ];
+            EntityType::LwPolyline(p)
+        };
+        let to_screen = |p: DVec3| [p.x, p.y];
+
+        let mut scene = Scene::new();
+        let handle = scene.add_entity(polyline());
+        assert!(scene.add_box_sub_segments(handle, to_screen, [-1.0, -1.0], [21.0, 1.0], false));
+        let picked: Vec<usize> = scene.picked_segments(handle).unwrap().iter().copied().collect();
+        assert_eq!(picked, [0, 1], "a window takes the segments wholly inside");
+
+        let mut scene = Scene::new();
+        let handle = scene.add_entity(polyline());
+        assert!(scene.add_box_sub_segments(handle, to_screen, [15.0, -1.0], [25.0, 1.0], true));
+        let picked: Vec<usize> = scene.picked_segments(handle).unwrap().iter().copied().collect();
+        assert_eq!(picked, [1, 2], "a crossing box also takes the segments it touches");
+
+        let mut scene = Scene::new();
+        let handle = scene.add_entity(polyline());
+        assert!(!scene.add_box_sub_segments(handle, to_screen, [15.0, -1.0], [25.0, 1.0], false));
+        assert!(!scene.selected.contains(&handle));
     }
 }

@@ -46,7 +46,7 @@ clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
 svgtypes = "0.15.3"
-document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "0b5d7e9994d8f1d3879fca8bf1c589fc9b55b258", features = ["serde", "mline-pilot"] }
+document = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "66ee6f1f7def5a74fbbf5674be6c59748e102a2d", features = ["serde", "mline-pilot"] }
 # 2D curve algebra, the B-rep model and the constraint solver (from
 # opencadkernel); the operations on solids are Solidcore's.
 ocs_geom = { path = "crates/ocs_geom" }
@@ -150,30 +150,32 @@ block2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString", "NSObject", "NSNotification", "NSThread", "NSEnumerator"] }
 
 [patch.crates-io]
-iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
 
 # The pinned iced revision plus upstream 478c363df: a mesh clipped out of its
 # layer did not advance the index offset, so every later mesh in that layer
 # was drawn with the wrong indices (stale glyph outlines left across the top
 # of the window by rotated canvas text, #3063), and upstream b54f2c59: the
-# event loop no longer spins on a stale redraw deadline (#3418). Drop when iced
-# is bumped past both.
+# event loop no longer spins on a stale redraw deadline (#3418); upstream
+# bc9182e6/be79a169 (fix-strict-gles): no arrays in the triangle gradient
+# shader, which strict GLES drivers and WebGL on Mali rejected (#2608, #3587).
+# Drop when iced is bumped past all of them.
 [patch."https://github.com/iced-rs/iced.git"]
-iced = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_debug = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_futures = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_graphics = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_program = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_renderer = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_runtime = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_selector = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_test = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_tiny_skia = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
-iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "7dea84044e22dca45a2934f95c77bc8bb07c4707" }
+iced = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_core = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_debug = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_futures = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_graphics = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_program = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_renderer = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_runtime = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_selector = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_test = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_tiny_skia = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
+iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 mimalloc = { version = "0.1", default-features = false }

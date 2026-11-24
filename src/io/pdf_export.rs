@@ -553,12 +553,59 @@ fn render_pdf_bytes_impl(
             }
         }
     }
+    compress_font_programs(&mut lo);
     let precise = if include_geopdf {
         crate::io::geopdf_export::apply_metadata(&mut lo, pages)?
     } else {
         Vec::new()
     };
     crate::io::geopdf_export::save_document(&mut lo, &precise)
+}
+
+/// printpdf embeds the font programs uncompressed, tens of kilobytes a face
+/// in every PDF; let them be Flate-compressed with the content streams. A
+/// TrueType program records its decoded length (`/Length1`), as the format
+/// asks of it.
+fn compress_font_programs(doc: &mut lopdf::Document) {
+    fn collect(object: &lopdf::Object, programs: &mut Vec<(lopdf::ObjectId, bool)>) {
+        match object {
+            lopdf::Object::Dictionary(dict) => {
+                for (key, value) in dict.iter() {
+                    match (key.as_slice(), value) {
+                        (b"FontFile2", lopdf::Object::Reference(id)) => {
+                            programs.push((*id, true))
+                        }
+                        (b"FontFile3", lopdf::Object::Reference(id)) => {
+                            programs.push((*id, false))
+                        }
+                        _ => collect(value, programs),
+                    }
+                }
+            }
+            lopdf::Object::Array(items) => {
+                for item in items {
+                    collect(item, programs);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut programs = Vec::new();
+    for object in doc.objects.values() {
+        collect(object, &mut programs);
+    }
+    for (id, truetype) in programs {
+        if let Ok(stream) = doc
+            .get_object_mut(id)
+            .and_then(lopdf::Object::as_stream_mut)
+        {
+            if truetype && !stream.dict.has(b"Length1") {
+                let length = stream.content.len() as i64;
+                stream.dict.set("Length1", lopdf::Object::Integer(length));
+            }
+            stream.allows_compression = true;
+        }
+    }
 }
 
 fn append_pdf_page(
@@ -4057,6 +4104,27 @@ mod tests {
         assert!(
             !stream.contains("/Helvetica"),
             "own-family run must not fall back to Helvetica"
+        );
+        // The program is Flate-compressed and inflates to the length it records.
+        let doc = lopdf::Document::load_mem(&bytes).unwrap();
+        let program = doc
+            .objects
+            .values()
+            .filter_map(|object| object.as_dict().ok())
+            .find_map(|dict| {
+                dict.get(b"FontFile2")
+                    .and_then(lopdf::Object::as_reference)
+                    .ok()
+            })
+            .expect("a font descriptor names the program");
+        let program = doc.get_object(program).unwrap().as_stream().unwrap();
+        assert_eq!(
+            program.dict.get(b"Filter").unwrap().as_name().unwrap(),
+            b"FlateDecode"
+        );
+        assert_eq!(
+            program.decompressed_content().unwrap().len() as i64,
+            program.dict.get(b"Length1").unwrap().as_i64().unwrap()
         );
         assert!(
             bytes.len() < full_len,

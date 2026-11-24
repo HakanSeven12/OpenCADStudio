@@ -471,6 +471,9 @@ impl ClipboardDeps {
         let mut seen: FxHashSet<document::Handle> = FxHashSet::default();
         let mut queue = vec![root];
         let mut out = Vec::new();
+        // A dimension's DIMASSOC ties it to the source geometry; the copy
+        // carries none of it (nor the dictionary entry naming it).
+        let mut dimension_associations: FxHashSet<document::Handle> = FxHashSet::default();
         while let Some(h) = queue.pop() {
             if h.is_null() || !seen.insert(h) {
                 continue;
@@ -478,6 +481,15 @@ impl ClipboardDeps {
             let Some(obj) = doc.objects.get(&h) else {
                 continue;
             };
+            if let ObjectType::Associative(object) = obj {
+                if matches!(
+                    object.data,
+                    document::objects::AssociativeData::DimensionAssociation(_)
+                ) {
+                    dimension_associations.insert(h);
+                    continue;
+                }
+            }
             // Enqueue children referenced by this object.
             match obj {
                 ObjectType::Dictionary(d) => {
@@ -506,6 +518,14 @@ impl ClipboardDeps {
                 _ => {}
             }
             out.push((h, obj.clone()));
+        }
+        if !dimension_associations.is_empty() {
+            for (_, object) in &mut out {
+                if let ObjectType::Dictionary(d) = object {
+                    d.entries
+                        .retain(|(_, child)| !dimension_associations.contains(child));
+                }
+            }
         }
         out
     }

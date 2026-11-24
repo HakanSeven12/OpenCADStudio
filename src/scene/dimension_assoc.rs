@@ -1472,6 +1472,34 @@ impl Scene {
         let mut object = AssociativeObject::new("DIMASSOC", "AcDbDimAssoc");
         object.handle = association_handle;
         self.has_dimension_associations.set(Some(true));
+        // The association lives in the dimension's extension dictionary,
+        // under ACAD_DIMASSOC and owned by it, as the file format keeps it.
+        let existing = self.document.extension_dictionary_handle(dimension);
+        if self.is_recording_undo() {
+            let before = self.document.get_entity_arc(dimension);
+            self.record_undo_before(dimension, before);
+        }
+        if let Some(dictionary) = existing {
+            let before = self.document.objects.get(&dictionary).cloned();
+            self.record_undo_object_before(dictionary, before);
+        }
+        let dictionary = self.document.ensure_extension_dictionary(dimension);
+        if existing.is_none() {
+            self.record_undo_object_before(dictionary, None);
+        }
+        if let Some(ObjectType::Dictionary(entries)) = self.document.objects.get_mut(&dictionary) {
+            if let Some((_, handle)) = entries
+                .entries
+                .iter_mut()
+                .find(|(name, _)| name.eq_ignore_ascii_case("ACAD_DIMASSOC"))
+            {
+                *handle = association_handle;
+            } else {
+                entries.add_entry("ACAD_DIMASSOC", association_handle);
+            }
+        }
+        object.owner = dictionary;
+        object.reactors.push(dictionary);
         object.reactors.push(dimension);
         object.data = AssociativeData::DimensionAssociation(AssocDimensionAssociation {
             associativity,
@@ -1873,35 +1901,72 @@ impl Scene {
     /// reactor it left on every entity and its entry in the owning dictionary.
     /// Returns whether the dimension was associative.
     pub(crate) fn detach_dimension_association(&mut self, dimension: Handle) -> bool {
-        let found = self.document.objects.iter().find_map(|(handle, object)| {
-            let ObjectType::Associative(object) = object else {
-                return None;
-            };
-            matches!(
-                &object.data,
-                AssociativeData::DimensionAssociation(data) if data.dimension == dimension
-            )
-            .then_some((*handle, object.owner))
-        });
-        let Some((association, owner)) = found else {
-            return false;
-        };
-        let before = self.document.objects.get(&association).cloned();
-        self.record_undo_object_before(association, before);
-        if let Some(ObjectType::Dictionary(dictionary)) = self.document.objects.get(&owner) {
-            let before = ObjectType::Dictionary(dictionary.clone());
-            self.record_undo_object_before(owner, Some(before));
+        let dimensions: rustc_hash::FxHashSet<Handle> = [dimension].into_iter().collect();
+        self.detach_dimension_associations(&dimensions) > 0
+    }
+
+    /// The DIMASSOCs of erased dimensions go with them: one left behind
+    /// points at a dimension no reader can resolve.
+    pub(crate) fn detach_erased_dimension_associations(
+        &mut self,
+        erased: &rustc_hash::FxHashSet<Handle>,
+    ) {
+        if !erased.is_empty() && self.dimension_associations_possible() {
+            self.detach_dimension_associations(erased);
         }
-        if let Some(ObjectType::Dictionary(dictionary)) = self.document.objects.get_mut(&owner) {
-            dictionary
-                .entries
-                .retain(|(_, handle)| *handle != association);
+    }
+
+    /// [`Self::detach_dimension_association`] for every dimension in
+    /// `dimensions` at once, in one walk over the objects and one over the
+    /// entities. Returns how many associations were removed.
+    fn detach_dimension_associations(
+        &mut self,
+        dimensions: &rustc_hash::FxHashSet<Handle>,
+    ) -> usize {
+        let found: Vec<(Handle, Handle)> = self
+            .document
+            .objects
+            .iter()
+            .filter_map(|(handle, object)| {
+                let ObjectType::Associative(object) = object else {
+                    return None;
+                };
+                matches!(
+                    &object.data,
+                    AssociativeData::DimensionAssociation(data) if dimensions.contains(&data.dimension)
+                )
+                .then_some((*handle, object.owner))
+            })
+            .collect();
+        if found.is_empty() {
+            return 0;
         }
-        self.document.objects.remove(&association);
+        for &(association, owner) in &found {
+            let before = self.document.objects.get(&association).cloned();
+            self.record_undo_object_before(association, before);
+            if let Some(ObjectType::Dictionary(dictionary)) = self.document.objects.get(&owner) {
+                let before = ObjectType::Dictionary(dictionary.clone());
+                self.record_undo_object_before(owner, Some(before));
+            }
+            if let Some(ObjectType::Dictionary(dictionary)) = self.document.objects.get_mut(&owner)
+            {
+                dictionary
+                    .entries
+                    .retain(|(_, handle)| *handle != association);
+            }
+            self.document.objects.remove(&association);
+        }
+        let removed: rustc_hash::FxHashSet<Handle> = found.iter().map(|(h, _)| *h).collect();
         let holders: Vec<Handle> = self
             .document
             .entities()
-            .filter(|entity| entity.common().reactors.contains(&association))
+            .filter(|entity| {
+                entity
+                    .common()
+                    .reactors
+                    .iter()
+                    .any(|reactor| removed.contains(reactor))
+            })
             .map(|entity| entity.common().handle)
             .collect();
         for handle in holders {
@@ -1913,11 +1978,11 @@ impl Scene {
                 entity
                     .common_mut()
                     .reactors
-                    .retain(|reactor| *reactor != association);
+                    .retain(|reactor| !removed.contains(reactor));
             }
         }
         self.invalidate_dependency_index();
-        true
+        found.len()
     }
 
     /// Preserve an association only when the dimension and every source-chain
@@ -2897,6 +2962,41 @@ mod tests {
         // Detaching the association settles the answer back to false.
         assert!(scene.detach_dimension_association(dimension));
         assert!(!scene.dimension_associations_possible());
+    }
+
+    /// The DIMASSOC sits in its dimension's extension dictionary, owned by
+    /// it, and goes when the dimension is erased (#3124: one left behind,
+    /// unowned, crashed an older reader).
+    #[test]
+    fn a_dimension_association_lives_in_the_dimensions_dictionary_and_goes_with_it() {
+        let mut scene = Scene::new();
+        let circle = scene.add_entity(EntityType::Circle(Circle::from_center_radius(
+            Vector3::ZERO,
+            5.0,
+        )));
+        let dimension = scene.add_entity(EntityType::Dimension(Box::new(Dimension::Diameter(
+            DimensionDiameter::new(Vector3::new(5.0, 0.0, 0.0), Vector3::new(-5.0, 0.0, 0.0)),
+        ))));
+        scene.attach_dimension_association(dimension, vec![Some(circle)]);
+        let dictionary = scene
+            .document
+            .extension_dictionary_handle(dimension)
+            .expect("the dimension gets an extension dictionary");
+        let Some(ObjectType::Dictionary(entries)) = scene.document.objects.get(&dictionary) else {
+            panic!("expected the extension dictionary");
+        };
+        let association = entries.get("ACAD_DIMASSOC").expect("ACAD_DIMASSOC entry");
+        let Some(ObjectType::Associative(object)) = scene.document.objects.get(&association) else {
+            panic!("expected the DIMASSOC object");
+        };
+        assert_eq!(object.owner, dictionary);
+
+        scene.erase_entities(&[dimension]);
+        assert!(scene.document.objects.get(&association).is_none());
+        assert!(scene
+            .document
+            .get_entity(circle)
+            .is_some_and(|c| !c.common().reactors.contains(&association)));
     }
 }
 

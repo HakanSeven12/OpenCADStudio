@@ -1406,6 +1406,8 @@ impl Scene {
             handle_set.insert(h);
             erased.push((h, ChangeKind::Removed));
         }
+        // Erased dimensions take their DIMASSOC along.
+        self.detach_erased_dimension_associations(&handle_set);
         // Once for the whole batch: per handle this is quadratic in the selection.
         if selection_changed {
             self.selected_order

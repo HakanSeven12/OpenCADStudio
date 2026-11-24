@@ -1268,6 +1268,10 @@ impl Scene {
         // own pass fills its preallocated handle.
         let mut order: Vec<Handle> = Vec::new();
         let mut index = rustc_hash::FxHashMap::default();
+        // A dimension's DIMASSOC names the source dimension and its
+        // geometry: the copy gets its own from `copy_dimension_associations`
+        // (or none), so the source's is neither cloned nor listed.
+        let mut dimension_associations = rustc_hash::FxHashSet::default();
         let mut stack = vec![src_root];
         while let Some(h) = stack.pop() {
             if index.contains_key(&h) {
@@ -1282,6 +1286,19 @@ impl Scene {
                 }
                 continue;
             };
+            if h != src_root
+                && matches!(
+                    obj,
+                    document::objects::ObjectType::Associative(object)
+                        if matches!(
+                            object.data,
+                            document::objects::AssociativeData::DimensionAssociation(_)
+                        )
+                )
+            {
+                dimension_associations.insert(h);
+                continue;
+            }
             index.insert(h, order.len());
             order.push(h);
             match obj {
@@ -1349,6 +1366,8 @@ impl Scene {
                 document::objects::ObjectType::Dictionary(d) => {
                     d.handle = new_h;
                     d.owner = rewrite(d.owner);
+                    d.entries
+                        .retain(|(_, child)| !dimension_associations.contains(child));
                     for (_, child) in &mut d.entries {
                         *child = rewrite(*child);
                     }

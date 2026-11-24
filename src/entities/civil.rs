@@ -669,20 +669,54 @@ fn cogo_point_of(data: &ArchEntityData, document: &document::Document) -> Option
 const POINT_MARKER: usize = 0;
 const POINT_LABEL: usize = 1;
 
+/// The point and label styles a COGO point draws with: those of the first
+/// point group in the drawing's group order that holds it, unless the point
+/// has its own and the group does not override them; the point's own
+/// outside every group. A style the group leaves empty draws nothing.
+// ponytail: the group node's order is taken as the display order, top first;
+// check against a drawing whose groups are reordered.
+fn point_styles(point: &CogoPoint, document: &document::Document) -> (u64, u64) {
+    let groups = document.objects.values().find_map(|o| match o {
+        ObjectType::Arch(node) if node.dxf_name == "AECC_POINT_GROUP_NODE" => Some(node.decode().handles),
+        _ => None,
+    });
+    for group in groups.unwrap_or_default() {
+        let Some(g) = object_arch(document, group).filter(|g| g.dxf_name == "AECC_POINT_PG") else { continue };
+        if !g.point_group_numbers().contains(&point.number) {
+            continue;
+        }
+        let refs = g.decode().handles;
+        let (label, style) = (refs.first().copied().unwrap_or(0), refs.get(1).copied().unwrap_or(0));
+        let o = g.point_group_overrides();
+        let pick = |overridden: bool, own: u64, group: u64| if overridden || own == 0 { group } else { own };
+        return (
+            pick(o.as_ref().is_some_and(|o| o.point_style.is_some()), point.style, style),
+            pick(o.as_ref().is_some_and(|o| o.label_style.is_some()), point.label_style, label),
+        );
+    }
+    (point.style, point.label_style)
+}
+
+/// Whether a COGO point's stored z means it has no elevation.
+pub(crate) fn has_elevation(z: f64) -> bool {
+    z > document::classes::civil::NO_ELEVATION * 0.5
+}
+
 /// A COGO point: its marker, then its label at the point.
 fn cogo_point(data: &ArchEntityData, document: &document::Document, out: &mut Decoded) -> Option<()> {
     let point = cogo_point_of(data, document)?;
     let at = Vector2::new(point.position.x, point.position.y);
-    let components = style_components(document, &[point.style], "AECC_POINT_STYLE");
-    if let Some(symbol) = object_arch(document, point.style).and_then(|o| o.marker()) {
+    let (point_style, label_style) = point_styles(&point, document);
+    let components = style_components(document, &[point_style], "AECC_POINT_STYLE");
+    if let Some(symbol) = object_arch(document, point_style).and_then(|o| o.marker()) {
         marker(out, component(document, components.as_deref(), POINT_MARKER), at, &symbol, drawing_scale(document));
     }
     if component(document, components.as_deref(), POINT_LABEL).is_some() {
-        if let Some(style) = object_arch(document, point.label_style).filter(|o| o.dxf_name == "AECC_LABEL_COLLECTOR_STYLE") {
+        if let Some(style) = object_arch(document, label_style).filter(|o| o.dxf_name == "AECC_LABEL_COLLECTOR_STYLE") {
             let style = collector(document, style);
             let elevation = point.position.z;
             let value = move |field: u32, options: &[u32]| {
-                (field == property::POINT_ELEVATION).then(|| LabelPart::format_value(options, elevation))
+                (field == property::POINT_ELEVATION && has_elevation(elevation)).then(|| LabelPart::format_value(options, elevation))
             };
             place(out, document, &style, at, 0.0, &value);
         }
@@ -711,7 +745,11 @@ pub(crate) fn properties(entity: &EntityType, document: &document::Document) -> 
             ro_prop(crate::t!("Description").as_ref(), "ext_civil_description", point.description.clone().unwrap_or_default()),
             ro_prop(crate::t!("Easting").as_ref(), "ext_civil_easting", format!("{:.4}", point.position.x)),
             ro_prop(crate::t!("Northing").as_ref(), "ext_civil_northing", format!("{:.4}", point.position.y)),
-            ro_prop(crate::t!("Elevation").as_ref(), "ext_civil_elevation", format!("{:.4}", point.position.z)),
+            ro_prop(
+                crate::t!("Elevation").as_ref(),
+                "ext_civil_elevation",
+                if has_elevation(point.position.z) { format!("{:.4}", point.position.z) } else { String::new() },
+            ),
         ],
     }]
 }

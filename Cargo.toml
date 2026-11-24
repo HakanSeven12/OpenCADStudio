@@ -621,3 +621,6 @@ path = "tests/zoom_extents_xline.rs"
 name = "entity_roundtrip"
 path = "tests/entity_roundtrip.rs"
 
+
+[patch."https://github.com/hakanaktt/acadrust.git"]
+acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "484a2a1c365ffe09d00a41172e89e49a597d7c45" }

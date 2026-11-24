@@ -2657,6 +2657,11 @@ impl OpenCADStudio {
 
             "ULAYERS" => self.open_underlay_layers_dialog(i),
             crate::ui::points_menu::OPEN_COMMAND => self.points_menu.open = !self.points_menu.open,
+            "CREATEPOINTMANUAL" => {
+                let c = crate::modules::civil::point_manual::CreatePointManualCommand::new();
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+            }
             cmd if crate::ui::points_menu::is_pending(cmd) => {
                 self.command_line
                     .push_info(crate::tf!("{cmd}: not yet implemented.").as_ref());

@@ -44,7 +44,7 @@ pub const GROUPS: &[Group] = &[
         label: "Create Points - Miscellaneous",
         icon: icon!("misc"),
         entries: &[
-            e("Manual", icon!("manual"), "CREATEPOINTS"),
+            e("Manual", icon!("manual"), "CREATEPOINTMANUAL"),
             e("Northing/Easting", icon!("ne"), "CREATEPOINTNORTHINGEASTING"),
             e("Bearing", icon!("bearing"), "CREATEPOINTBEARING"),
             e("Azimuth", icon!("azimuth"), "CREATEPOINTAZIMUTH"),
@@ -148,7 +148,7 @@ pub const TOOLS: &[Entry] = &[
 // ponytail: entries answer "not yet implemented" until their command lands;
 // drop each from here as it does.
 pub fn is_pending(cmd: &str) -> bool {
-    !matches!(cmd, "CREATEPOINTS" | "CREATEPOINTGROUP")
+    !matches!(cmd, "CREATEPOINTMANUAL" | "CREATEPOINTGROUP")
         && (GROUPS.iter().flat_map(|g| g.entries.iter().flatten()).any(|e| e.command == cmd)
             || TOOLS.iter().any(|e| e.command == cmd))
 }

@@ -1976,6 +1976,13 @@ pub enum CmdResult {
     },
     /// Command is still waiting for the next point; show updated prompt.
     NeedPoint,
+    /// Write a COGO point as the point creation commands do (`None`
+    /// elevation: the point has none) and keep the command running.
+    AddCogoPoint {
+        position: DVec3,
+        description: Option<String>,
+        elevation: Option<f64>,
+    },
     /// Update the committed-segment wire (normal colour) and keep collecting points.
     InterimWire(WireModel),
     /// Update the in-progress (cyan) preview wire in the viewport.

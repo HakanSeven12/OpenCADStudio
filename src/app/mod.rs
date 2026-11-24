@@ -2674,6 +2674,7 @@ pub enum ModalKind {
     FindReplace,
     /// OVERKILL settings for the selected objects.
     Overkill,
+    GeometryCleanupSettings,
     AecDropWarning,
     /// A converter would drop part of the drawing on save.
     ConversionLoss,

@@ -427,17 +427,61 @@ fn corner(a: &EndInfo, b: &EndInfo, tolerance: f64, weld: f64) -> Option<[f64; 2
         .then(|| [a.point[0] + u[0] * s, a.point[1] + u[1] * s])
 }
 
-/// The ends of `curves` that almost meet other geometry: each within
-/// `tolerance`, and more than `weld` away (closer counts as meeting).
+/// The tolerance of each error type. `None`: the scan does not look for
+/// that type.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Tolerances {
+    pub gap: Option<f64>,
+    pub overshoot: Option<f64>,
+    pub undershoot: Option<f64>,
+}
+
+impl Tolerances {
+    /// The same tolerance for each type.
+    pub fn all(tolerance: f64) -> Self {
+        Self {
+            gap: Some(tolerance),
+            overshoot: Some(tolerance),
+            undershoot: Some(tolerance),
+        }
+    }
+
+    pub fn get(&self, kind: EndErrorKind) -> Option<f64> {
+        match kind {
+            EndErrorKind::Gap => self.gap,
+            EndErrorKind::Overshoot => self.overshoot,
+            EndErrorKind::Undershoot => self.undershoot,
+        }
+    }
+
+    /// The largest tolerance of the types that are scanned.
+    pub fn largest(&self) -> Option<f64> {
+        [self.gap, self.overshoot, self.undershoot]
+            .into_iter()
+            .flatten()
+            .reduce(f64::max)
+    }
+}
+
+/// The ends of `curves` that almost meet other geometry: each within the
+/// tolerance of its error type, and more than `weld` away (closer counts as
+/// meeting). A type with no tolerance is not looked for.
 ///
 /// Lines, arcs and polylines are read; any other curve is ignored. A closed
 /// polyline has no ends but is still geometry that ends can meet. The
 /// errors come in the order of their ends.
-pub fn end_errors(curves: &[Curve], tolerance: f64, weld: Tolerance) -> Vec<EndError> {
+pub fn end_errors(curves: &[Curve], tolerances: Tolerances, weld: Tolerance) -> Vec<EndError> {
     let weld = weld.linear();
+    // The search reaches as far as the largest tolerance; each candidate
+    // is then held to the tolerance of its own type, before the nearest
+    // error of each end is picked.
+    let Some(tolerance) = tolerances.largest() else {
+        return Vec::new();
+    };
     if !tolerance.is_finite() || tolerance <= weld {
         return Vec::new();
     }
+    let within = |kind: EndErrorKind, d: f64| tolerances.get(kind).is_some_and(|t| d <= t);
     let pieces = pieces_of(curves);
     let ends = ends_of(curves, &pieces);
     let mean = if pieces.is_empty() {
@@ -482,7 +526,9 @@ pub fn end_errors(curves: &[Curve], tolerance: f64, weld: Tolerance) -> Vec<EndE
             continue;
         }
         // Gaps: another loose end close by, of another curve or the other
-        // end of the same polyline.
+        // end of the same polyline. The corner of a gap is held to the gap
+        // tolerance.
+        let gap_tolerance = tolerances.gap.unwrap_or(0.0);
         let (cx, cy) = cell(end.point);
         for x in cx - 1..=cx + 1 {
             for y in cy - 1..=cy + 1 {
@@ -495,14 +541,14 @@ pub fn end_errors(curves: &[Curve], tolerance: f64, weld: Tolerance) -> Vec<EndE
                         continue;
                     }
                     let gap = distance(end.point, other.point);
-                    if gap > weld && gap <= tolerance {
+                    if gap > weld && within(EndErrorKind::Gap, gap) {
                         candidates.push(EndError {
                             kind: EndErrorKind::Gap,
                             end: end.end,
                             location: end.point,
                             target: other.point,
                             other: Some(other.end),
-                            corner: corner(end, other, tolerance, weld),
+                            corner: corner(end, other, gap_tolerance, weld),
                             deviation: gap,
                         });
                     }
@@ -521,7 +567,7 @@ pub fn end_errors(curves: &[Curve], tolerance: f64, weld: Tolerance) -> Vec<EndE
             // Undershoot: the end's continuation reaches the piece.
             for crossing in intersect(&reach, &target, Tolerance::new(weld)) {
                 let d = along(end, crossing.point, true);
-                if d > weld && d <= tolerance {
+                if d > weld && within(EndErrorKind::Undershoot, d) {
                     candidates.push(EndError {
                         kind: EndErrorKind::Undershoot,
                         end: end.end,
@@ -538,7 +584,7 @@ pub fn end_errors(curves: &[Curve], tolerance: f64, weld: Tolerance) -> Vec<EndE
             // polyline goes on, or a short line is attached) is not one.
             for crossing in intersect(&own.shape.curve(), &target, Tolerance::new(weld)) {
                 let d = along(end, crossing.point, false);
-                if d > weld && d <= tolerance && d < end.piece_length - weld {
+                if d > weld && within(EndErrorKind::Overshoot, d) && d < end.piece_length - weld {
                     candidates.push(EndError {
                         kind: EndErrorKind::Overshoot,
                         end: end.end,
@@ -602,7 +648,7 @@ mod tests {
     }
 
     fn scan(curves: &[Curve], tolerance: f64) -> Vec<EndError> {
-        end_errors(curves, tolerance, Tolerance::new(1e-9))
+        end_errors(curves, Tolerances::all(tolerance), Tolerance::new(1e-9))
     }
 
     fn near(a: [f64; 2], b: [f64; 2]) -> bool {
@@ -983,8 +1029,13 @@ mod tests {
             line([0.0, 0.0], [10.0, 0.0]),
             line([10.2, 0.0], [20.0, 0.0]),
         ];
-        assert!(end_errors(&curves, 1e-9, Tolerance::new(1e-9)).is_empty());
-        assert!(end_errors(&curves, f64::NAN, Tolerance::new(1e-9)).is_empty());
-        assert!(end_errors(&curves, f64::INFINITY, Tolerance::new(1e-9)).is_empty());
+        assert!(end_errors(&curves, Tolerances::all(1e-9), Tolerance::new(1e-9)).is_empty());
+        assert!(end_errors(&curves, Tolerances::all(f64::NAN), Tolerance::new(1e-9)).is_empty());
+        assert!(end_errors(
+            &curves,
+            Tolerances::all(f64::INFINITY),
+            Tolerance::new(1e-9)
+        )
+        .is_empty());
     }
 }

@@ -37,6 +37,7 @@ impl OpenCADStudio {
             Some(K::Options) => crate::tr!("action", "options"),
             Some(K::FindReplace) => crate::tr!("modal", "find-replace"),
             Some(K::Overkill) => crate::t!("Delete Duplicate Objects").into_owned(),
+            Some(K::GeometryCleanupSettings) => crate::t!("Geometry Cleanup Settings").into_owned(),
             Some(K::PluginManager) => crate::tr!("modal", "plugin-manager"),
             Some(K::UpdateNotice) => crate::tr!("modal", "update-available"),
             Some(K::DonationPrompt) => crate::tr!("donation", "title"),
@@ -443,6 +444,13 @@ impl OpenCADStudio {
                 let state = self.overkill_dialog.as_ref()?;
                 automatic_flow(ex, |flow| {
                     crate::ui::window::overkill::view_window(state, flow)
+                })
+            }
+            super::super::ModalKind::GeometryCleanupSettings => {
+                let dialog = self.geometry_cleanup.dialog.as_ref()?;
+                let rescan = self.geometry_cleanup_scan_here(self.active_tab).is_some();
+                automatic_flow(ex, |flow| {
+                    crate::ui::window::geometry_cleanup_settings::view_window(dialog, rescan, flow)
                 })
             }
             super::super::ModalKind::FindReplace => automatic_flow(ex, |flow| {

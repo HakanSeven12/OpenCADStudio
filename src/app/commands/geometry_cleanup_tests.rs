@@ -93,7 +93,14 @@ fn a_scan_lists_each_end_error_of_the_selection() {
     let objects = errors_drawing(&mut app);
     let [_, over, under, left, right] = objects;
     let found = scan(&mut app, &objects);
-    let tolerance = app.geometry_cleanup.scan.as_ref().unwrap().tolerance;
+    let tolerance = app
+        .geometry_cleanup
+        .scan
+        .as_ref()
+        .unwrap()
+        .tolerances
+        .gap
+        .unwrap();
     assert!(tolerance > 0.4, "proposed tolerance {tolerance}");
     let mut kinds: Vec<(EndErrorKind, Handle)> = found.iter().map(|f| (f.kind, f.handle)).collect();
     kinds.sort_by_key(|(kind, handle)| (*kind, handle.value()));

@@ -36,6 +36,13 @@ pub struct AppConfig {
     pub show_tool_palettes: bool,
     /// Whether the Command History pallet is open.
     pub show_command_history: bool,
+    /// The Geometry Cleanup settings, in the form of a `.gcs` file. `None`
+    /// until the user saves them: each drawing then uses its proposed
+    /// tolerance.
+    /// Settings that cannot be read are dropped, not the whole profile.
+    #[serde(deserialize_with = "lenient")]
+    pub geometry_cleanup:
+        Option<crate::modules::manage::geometry_cleanup_settings::CleanupSettings>,
     /// Whether the Layer Manager pallet is open.
     pub show_layers: bool,
     /// Whether the Blocks palette is open.
@@ -81,6 +88,7 @@ impl Default for AppConfig {
             show_graphic_attributes: false,
             show_tool_palettes: false,
             show_command_history: false,
+            geometry_cleanup: None,
             show_layers: false,
             show_block_palette: false,
             show_external_references: false,
@@ -695,6 +703,17 @@ impl AppConfig {
             let _ = storage.set_item(WEB_CONFIG_KEY, &json);
         }
     }
+}
+
+/// A field that is `None` when its value cannot be read, so that one bad
+/// value does not reset the whole profile.
+fn lenient<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).ok())
 }
 
 #[cfg(target_arch = "wasm32")]

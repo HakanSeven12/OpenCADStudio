@@ -3,11 +3,15 @@
 
 use crate::app::{Message, OpenCADStudio};
 use crate::modules::manage::geometry_cleanup as cleanup;
+use crate::modules::manage::geometry_cleanup_settings::{
+    clean_tolerance, CleanupSettings, MIN_TOLERANCE,
+};
 use crate::ui::dock::PanelId;
 use crate::ui::window::geometry_cleanup::{rows, Finding, Fix, GeometryCleanupMsg, Scan};
+use crate::ui::window::geometry_cleanup_settings::SettingsDialog;
 use document::{EntityType, Handle};
 use iced::Task;
-use ocs_geom::geom2d::cleanup::{end_errors, proposed_tolerance};
+use ocs_geom::geom2d::cleanup::{end_errors, proposed_tolerance, Tolerances};
 use ocs_geom::geom2d::{Curve, Tolerance};
 
 /// Ends nearer than this meet: they are not an error.
@@ -77,16 +81,17 @@ impl OpenCADStudio {
             .collect()
     }
 
-    /// The errors among `objects` now, within `tolerance`.
+    /// The errors among `objects` now, each within the tolerance of its
+    /// type.
     fn geometry_cleanup_findings(
         &self,
         i: usize,
         objects: &[Handle],
-        tolerance: f64,
+        tolerances: Tolerances,
     ) -> Vec<Finding> {
         let kept = self.geometry_cleanup_curves(i, objects);
         let curves: Vec<Curve> = kept.iter().map(|(_, curve)| curve.clone()).collect();
-        end_errors(&curves, tolerance, Tolerance::new(WELD))
+        end_errors(&curves, tolerances, Tolerance::new(WELD))
             .into_iter()
             .map(|error| Finding {
                 kind: error.kind,
@@ -103,28 +108,46 @@ impl OpenCADStudio {
             .collect()
     }
 
-    /// Scan `objects` and show what was found. A new selection gets the
-    /// tolerance proposed for the drawing and a report on the command line;
-    /// a rescan keeps the tolerance, and the picked error if it is still
-    /// there.
-    fn geometry_cleanup_scan(
+    /// The objects in model space that Geometry Cleanup may read.
+    pub(in crate::app) fn geometry_cleanup_model_space(&self, i: usize) -> Vec<Handle> {
+        let document = &self.tabs[i].scene.document;
+        document
+            .entities()
+            .map(|entity| entity.common().handle)
+            .filter(|handle| cleanup::is_candidate(document, *handle))
+            .collect()
+    }
+
+    /// The tolerance proposed for the drawing of tab `i`.
+    pub(in crate::app) fn geometry_cleanup_proposed(&self, i: usize) -> f64 {
+        let objects = self.geometry_cleanup_model_space(i);
+        let drawing: Vec<Curve> = self
+            .geometry_cleanup_curves(i, &objects)
+            .into_iter()
+            .map(|(_, curve)| curve)
+            .collect();
+        // As the settings keep it, so that the palette and the dialog show
+        // the same value.
+        clean_tolerance(proposed_tolerance(&drawing)).unwrap_or(MIN_TOLERANCE)
+    }
+
+    /// Scan `objects` and show what was found. A new scan (`tolerances` is
+    /// `None`) uses the saved settings, or the tolerance proposed for the
+    /// drawing when there are none; a rescan keeps the tolerances of its
+    /// scan, and the picked error if it is still there.
+    pub(in crate::app) fn geometry_cleanup_scan(
         &mut self,
         i: usize,
         objects: Vec<Handle>,
-        tolerance: Option<f64>,
+        tolerances: Option<Tolerances>,
         report: bool,
     ) {
-        let rescan = tolerance.is_some();
-        let tolerance = tolerance.unwrap_or_else(|| {
-            let document = &self.tabs[i].scene.document;
-            let drawing: Vec<Curve> = document
-                .entities()
-                .filter(|entity| cleanup::is_candidate(document, entity.common().handle))
-                .filter_map(cleanup::cleanup_curve)
-                .collect();
-            proposed_tolerance(&drawing)
+        let rescan = tolerances.is_some();
+        let tolerances = tolerances.unwrap_or_else(|| match &self.geometry_cleanup.settings {
+            Some(settings) => settings.tolerances(),
+            None => Tolerances::all(self.geometry_cleanup_proposed(i)),
         });
-        let findings = self.geometry_cleanup_findings(i, &objects, tolerance);
+        let findings = self.geometry_cleanup_findings(i, &objects, tolerances);
         if report {
             self.command_line.push_output(&crate::tf!(
                 "Geometry Cleanup: {} error(s) found.",
@@ -141,7 +164,7 @@ impl OpenCADStudio {
             tab: self.tabs[i].id,
             epoch: self.tabs[i].scene.geometry_epoch,
             objects,
-            tolerance,
+            tolerances,
             findings,
         });
         self.geometry_cleanup.picked = picked;
@@ -163,12 +186,12 @@ impl OpenCADStudio {
         if scan.epoch == self.tabs[i].scene.geometry_epoch {
             return;
         }
-        let (objects, tolerance) = (scan.objects.clone(), scan.tolerance);
-        self.geometry_cleanup_scan(i, objects, Some(tolerance), false);
+        let (objects, tolerances) = (scan.objects.clone(), scan.tolerances);
+        self.geometry_cleanup_scan(i, objects, Some(tolerances), false);
     }
 
     /// The scan of the active tab, if the palette shows one.
-    fn geometry_cleanup_scan_here(&self, i: usize) -> Option<&Scan> {
+    pub(in crate::app) fn geometry_cleanup_scan_here(&self, i: usize) -> Option<&Scan> {
         self.geometry_cleanup
             .scan
             .as_ref()
@@ -191,8 +214,8 @@ impl OpenCADStudio {
             }
             GeometryCleanupMsg::Rescan => {
                 if let Some(scan) = self.geometry_cleanup_scan_here(i) {
-                    let (objects, tolerance) = (scan.objects.clone(), scan.tolerance);
-                    self.geometry_cleanup_scan(i, objects, Some(tolerance), true);
+                    let (objects, tolerances) = (scan.objects.clone(), scan.tolerances);
+                    self.geometry_cleanup_scan(i, objects, Some(tolerances), true);
                 }
             }
             GeometryCleanupMsg::Pick(index) => {
@@ -200,7 +223,7 @@ impl OpenCADStudio {
                     scan.findings
                         .get(index)
                         .copied()
-                        .map(|f| (f, scan.tolerance))
+                        .map(|f| (f, scan.tolerances))
                 }) else {
                     return Task::none();
                 };
@@ -223,11 +246,11 @@ impl OpenCADStudio {
                     .chain(rows[..at].iter().rev())
                     .map(|&row| scan.findings[row])
                     .collect();
-                let (objects, tolerance) = (scan.objects.clone(), scan.tolerance);
-                if !self.geometry_cleanup_fix(i, picked, fix, &objects, tolerance) {
+                let (objects, tolerances) = (scan.objects.clone(), scan.tolerances);
+                if !self.geometry_cleanup_fix(i, picked, fix, &objects, tolerances) {
                     return Task::none();
                 }
-                self.geometry_cleanup_scan(i, objects, Some(tolerance), false);
+                self.geometry_cleanup_scan(i, objects, Some(tolerances), false);
                 self.geometry_cleanup_pick_next(i, &after);
             }
             GeometryCleanupMsg::Fold(kind) => {
@@ -238,6 +261,151 @@ impl OpenCADStudio {
                     folded.push(kind);
                 }
             }
+            m => return self.on_geometry_cleanup_settings(m),
+        }
+        Task::none()
+    }
+
+    /// The messages of the Settings dialog.
+    fn on_geometry_cleanup_settings(&mut self, m: GeometryCleanupMsg) -> Task<Message> {
+        let i = self.active_tab;
+        match m {
+            GeometryCleanupMsg::OpenSettings => {
+                let proposed = self.geometry_cleanup_proposed(i);
+                let settings = self
+                    .geometry_cleanup
+                    .settings
+                    .clone()
+                    .unwrap_or_else(|| CleanupSettings::proposed(proposed));
+                self.geometry_cleanup.dialog = Some(SettingsDialog::new(
+                    &settings,
+                    proposed,
+                    self.geometry_cleanup.settings_file.clone(),
+                ));
+                self.active_modal = Some(crate::app::ModalKind::GeometryCleanupSettings);
+            }
+            GeometryCleanupMsg::SettingsTolerance(kind, value) => {
+                if let Some(dialog) = self.geometry_cleanup.dialog.as_mut() {
+                    dialog.set_text(kind, value);
+                }
+            }
+            GeometryCleanupMsg::SettingsUseProposed(kind) => {
+                if let Some(dialog) = self.geometry_cleanup.dialog.as_mut() {
+                    dialog.use_proposed(kind);
+                }
+            }
+            GeometryCleanupMsg::SettingsRemove(kind) => {
+                if let Some(dialog) = self.geometry_cleanup.dialog.as_mut() {
+                    dialog.remove(kind);
+                }
+            }
+            GeometryCleanupMsg::SettingsAdd(kind) => {
+                if let Some(dialog) = self.geometry_cleanup.dialog.as_mut() {
+                    dialog.add(kind);
+                }
+            }
+            GeometryCleanupMsg::SettingsImport => {
+                return Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title(crate::t!("Import Geometry Cleanup Settings").as_ref())
+                            .add_filter(
+                                crate::t!("Geometry Cleanup Settings").as_ref(),
+                                &["gcs", "GCS"],
+                            )
+                            .pick_file()
+                            .await
+                            .map(|handle| crate::sys::handle_path(&handle))
+                    },
+                    |picked| match picked {
+                        Some(path) => {
+                            Message::GeometryCleanup(GeometryCleanupMsg::SettingsImported(path))
+                        }
+                        None => Message::Noop,
+                    },
+                );
+            }
+            GeometryCleanupMsg::SettingsImported(path) => {
+                let read = std::fs::read_to_string(&path)
+                    .map_err(|e| e.to_string())
+                    .and_then(|text| CleanupSettings::parse_gcs(&text));
+                match read {
+                    Ok(settings) => {
+                        if let Some(dialog) = self.geometry_cleanup.dialog.as_mut() {
+                            *dialog = SettingsDialog::new(
+                                &settings,
+                                dialog.proposed,
+                                Some(path.display().to_string()),
+                            );
+                        }
+                    }
+                    Err(error) => self
+                        .command_line
+                        .push_error(&crate::tf!("The settings file cannot be read: {}", error)),
+                }
+            }
+            GeometryCleanupMsg::SettingsExport => {
+                return Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title(crate::t!("Export Geometry Cleanup Settings").as_ref())
+                            .add_filter(crate::t!("Geometry Cleanup Settings").as_ref(), &["gcs"])
+                            .set_file_name("GeometryCleanup.gcs")
+                            .save_file()
+                            .await
+                            .map(|handle| crate::sys::handle_path(&handle))
+                    },
+                    |picked| match picked {
+                        Some(path) => {
+                            Message::GeometryCleanup(GeometryCleanupMsg::SettingsExportTo(path))
+                        }
+                        None => Message::Noop,
+                    },
+                );
+            }
+            GeometryCleanupMsg::SettingsExportTo(path) => {
+                let Some(settings) = self
+                    .geometry_cleanup
+                    .dialog
+                    .as_ref()
+                    .and_then(|d| d.parsed())
+                else {
+                    return Task::none();
+                };
+                if let Err(error) = std::fs::write(&path, settings.to_gcs()) {
+                    self.command_line.push_error(&crate::tf!(
+                        "The settings file cannot be written: {}",
+                        error
+                    ));
+                }
+            }
+            GeometryCleanupMsg::SettingsCancel => {
+                self.geometry_cleanup.dialog = None;
+                self.close_active_modal();
+            }
+            GeometryCleanupMsg::SettingsScan => {
+                let Some(dialog) = self.geometry_cleanup.dialog.as_ref() else {
+                    return Task::none();
+                };
+                let Some(settings) = dialog.parsed() else {
+                    return Task::none();
+                };
+                let file = dialog.file.clone();
+                let tolerances = settings.tolerances();
+                self.geometry_cleanup.settings = Some(settings);
+                self.geometry_cleanup.settings_file = file;
+                self.geometry_cleanup.dialog = None;
+                self.close_active_modal();
+                // Scan the objects of the palette's scan again, or all of
+                // model space when the palette has no scan of this drawing.
+                let objects = match self.geometry_cleanup_scan_here(i) {
+                    Some(scan) => scan.objects.clone(),
+                    None => self.geometry_cleanup_model_space(i),
+                };
+                self.set_geometry_cleanup(true);
+                self.geometry_cleanup_scan(i, objects, Some(tolerances), true);
+            }
+            _ => {}
         }
         Task::none()
     }
@@ -248,19 +416,20 @@ impl OpenCADStudio {
         let Some(scan) = self.geometry_cleanup_scan_here(i) else {
             return;
         };
-        let tolerance = scan.tolerance;
+        let tolerances = scan.tolerances;
         let next = after.iter().find_map(|old| {
             let index = scan.findings.iter().position(|f| f.same_error(old))?;
             Some((index, scan.findings[index]))
         });
         self.geometry_cleanup.picked = next.map(|(index, _)| index);
         if let Some((_, finding)) = next {
-            self.geometry_cleanup_show(i, finding, tolerance);
+            self.geometry_cleanup_show(i, finding, tolerances);
         }
     }
 
     /// Zoom to an error and select its objects.
-    fn geometry_cleanup_show(&mut self, i: usize, finding: Finding, tolerance: f64) {
+    fn geometry_cleanup_show(&mut self, i: usize, finding: Finding, tolerances: Tolerances) {
+        let tolerance = tolerances.get(finding.kind).unwrap_or(finding.deviation);
         let reach = (tolerance * 25.0).max(finding.deviation * 5.0);
         let [x, y] = finding.location;
         self.handle_zoom_to_window(
@@ -285,10 +454,10 @@ impl OpenCADStudio {
         picked: Finding,
         fix: Fix,
         objects: &[Handle],
-        tolerance: f64,
+        tolerances: Tolerances,
     ) -> bool {
         let Some(finding) = self
-            .geometry_cleanup_findings(i, objects, tolerance)
+            .geometry_cleanup_findings(i, objects, tolerances)
             .into_iter()
             .find(|f| f.same_error(&picked))
         else {

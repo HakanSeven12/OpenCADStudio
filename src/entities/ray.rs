@@ -11,6 +11,32 @@ use crate::scene::model::object::{GripApply, GripDef, PropSection};
 /// Display length used when rendering semi-infinite / infinite lines.
 const DISPLAY_EXTENT: f64 = 1_000_000.0;
 
+/// Points along `dir` from `bp`, one per decade (1, 10, ... DISPLAY_EXTENT),
+/// in the order of `sign` (+1 outward, -1 inward towards `bp`). A single
+/// segment to the far end degenerates on screen when the view is zoomed in
+/// far: the GPU expands it in f32 from ends ~1e6 units away, its sub-pixel
+/// width offset rounds away and the line vanishes. With a vertex every decade
+/// the segment under the view ends within ~10x the view's distance from the
+/// base point.
+fn decade_points(bp: [f64; 3], dir: [f64; 3], sign: f64) -> Vec<[f64; 3]> {
+    let mut steps = Vec::new();
+    let mut d = 1.0;
+    while d <= DISPLAY_EXTENT {
+        steps.push(d);
+        d *= 10.0;
+    }
+    if sign < 0.0 {
+        steps.reverse();
+    }
+    steps
+        .into_iter()
+        .map(|d| {
+            let t = sign * d;
+            [bp[0] + dir[0] * t, bp[1] + dir[1] * t, bp[2] + dir[2] * t]
+        })
+        .collect()
+}
+
 // ── Ray (semi-infinite line) ──────────────────────────────────────────────────
 
 impl RenderConvertible for Ray {
@@ -24,15 +50,12 @@ impl RenderConvertible for Ray {
             return None;
         }
         let (nx, ny, nz) = (dir.x / len, dir.y / len, dir.z / len);
-        let far: [f64; 3] = [
-            bp.x + nx * DISPLAY_EXTENT,
-            bp.y + ny * DISPLAY_EXTENT,
-            bp.z + nz * DISPLAY_EXTENT,
-        ];
         let start: [f64; 3] = [bp.x, bp.y, bp.z];
+        let mut run = vec![start];
+        run.extend(decade_points(start, [nx, ny, nz], 1.0));
         Some(RenderEntity {
             pick_tris: Vec::new(),
-            object: RenderObject::Lines(vec![start, far]),
+            object: RenderObject::Lines(run),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![start],
@@ -180,19 +203,14 @@ impl RenderConvertible for XLine {
             return None;
         }
         let (nx, ny, nz) = (dir.x / len, dir.y / len, dir.z / len);
-        let far_pos: [f64; 3] = [
-            bp.x + nx * DISPLAY_EXTENT,
-            bp.y + ny * DISPLAY_EXTENT,
-            bp.z + nz * DISPLAY_EXTENT,
-        ];
-        let far_neg: [f64; 3] = [
-            bp.x - nx * DISPLAY_EXTENT,
-            bp.y - ny * DISPLAY_EXTENT,
-            bp.z - nz * DISPLAY_EXTENT,
-        ];
+        let base: [f64; 3] = [bp.x, bp.y, bp.z];
+        let unit = [nx, ny, nz];
+        let mut run = decade_points(base, unit, -1.0);
+        run.push(base);
+        run.extend(decade_points(base, unit, 1.0));
         Some(RenderEntity {
             pick_tris: Vec::new(),
-            object: RenderObject::Lines(vec![far_neg, far_pos]),
+            object: RenderObject::Lines(run),
             snap_pts: vec![],
             tangent_geoms: vec![],
             key_vertices: vec![[bp.x, bp.y, bp.z]],
@@ -327,5 +345,43 @@ impl Transformable for XLine {
                 }
             },
         );
+    }
+}
+
+#[cfg(test)]
+mod display_run_tests {
+    use super::*;
+    use document::types::Vector3;
+
+    fn run(entity: Option<RenderEntity>) -> Vec<[f64; 3]> {
+        match entity.expect("renders").object {
+            RenderObject::Lines(points) => points,
+            _ => panic!("expected a line run"),
+        }
+    }
+
+    #[test]
+    fn xline_renders_a_vertex_every_decade_both_ways() {
+        let doc = document::Document::new();
+        let xl = XLine::new(Vector3::new(700.0, 20.0, 0.0), Vector3::new(2.0, 0.0, 0.0));
+        let pts = run(xl.to_render(&doc));
+        assert_eq!(pts.len(), 15);
+        assert_eq!(pts[7], [700.0, 20.0, 0.0]);
+        assert_eq!(pts[0][0], 700.0 - DISPLAY_EXTENT);
+        assert_eq!(pts[6][0], 699.0);
+        assert_eq!(pts[8][0], 701.0);
+        assert_eq!(pts[14][0], 700.0 + DISPLAY_EXTENT);
+        assert!(pts.windows(2).all(|w| w[1][0] > w[0][0]));
+    }
+
+    #[test]
+    fn ray_renders_from_its_base_with_decade_vertices() {
+        let doc = document::Document::new();
+        let ray = Ray::new(Vector3::new(1.0, 2.0, 0.0), Vector3::new(0.0, -1.0, 0.0));
+        let pts = run(ray.to_render(&doc));
+        assert_eq!(pts.len(), 8);
+        assert_eq!(pts[0], [1.0, 2.0, 0.0]);
+        assert_eq!(pts[1], [1.0, 1.0, 0.0]);
+        assert_eq!(pts[7], [1.0, 2.0 - DISPLAY_EXTENT, 0.0]);
     }
 }

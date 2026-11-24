@@ -48,15 +48,6 @@ pub(in crate::app) fn test_panic_point(at: TestPanicAt) {
     }
 }
 
-/// The text of a panic payload.
-fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
-    payload
-        .downcast_ref::<&str>()
-        .map(|text| (*text).to_string())
-        .or_else(|| payload.downcast_ref::<String>().cloned())
-        .unwrap_or_else(|| "(no message)".to_string())
-}
-
 impl OpenCADStudio {
     /// [`Self::update`] under a panic guard. See the module comment.
     pub(in crate::app) fn update_guarded(&mut self, msg: Message) -> Task<Message> {
@@ -89,7 +80,7 @@ impl OpenCADStudio {
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.rebuild_display_after_failed_command()
         }));
-        let text = panic_text(payload.as_ref());
+        let text = crate::scene::view::draw_guard::panic_text(payload.as_ref());
         let notice = match undone {
             Ok(0) => crate::tf!(
                 "Internal error: {}. The command was cancelled. Save your work under a new name.",

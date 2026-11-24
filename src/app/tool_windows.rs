@@ -293,6 +293,15 @@ impl OpenCADStudio {
         let task = self.update_guarded(msg);
         #[cfg(target_arch = "wasm32")]
         let task = self.update(msg);
+        if let Some(text) = crate::scene::view::draw_guard::take_notice() {
+            self.command_line.push_error(
+                crate::tf!(
+                    "Internal error while drawing: {}. Save your work under a new name.",
+                    text
+                )
+                .as_ref(),
+            );
+        }
         let settled = self.settle_tool_windows();
         Task::batch([task, settled])
     }

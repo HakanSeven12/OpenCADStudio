@@ -2080,6 +2080,9 @@ pub(super) struct OpenCADStudio {
     /// (`update/panic_guard.rs`).
     #[cfg(not(target_arch = "wasm32"))]
     caught_panics: u32,
+    /// Windows whose view panicked; each shows a fallback until the user
+    /// asks to try again (`view/mod.rs`).
+    failed_views: std::sync::Mutex<Vec<iced::window::Id>>,
 
     // ── Keyboard Shortcut Editor ──────────────────────────────────────────
     /// Complete editable key → command/action table.
@@ -3447,6 +3450,7 @@ impl OpenCADStudio {
             saved_custom_palette: None,
             #[cfg(not(target_arch = "wasm32"))]
             caught_panics: 0,
+            failed_views: Default::default(),
             // Keyboard shortcuts
             shortcut_bindings: rustc_hash::FxHashMap::default(),
             shortcut_editor_rows: Vec::new(),

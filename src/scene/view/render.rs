@@ -299,6 +299,8 @@ pub struct Primitive {
     pub(in crate::scene) selection_widen: f32,
     /// One input-to-render sample, carried only when PERF tracing is enabled.
     pub(in crate::scene) nav_perf: Option<NavPerfSample>,
+    /// The scene's `geometry_epoch` when the frame was built.
+    pub(in crate::scene) geometry_epoch: u64,
 }
 
 /// Flags the render pipeline consumes, derived from
@@ -399,15 +401,25 @@ impl shader::Primitive for Primitive {
         bounds: &Rectangle,
         viewport: &Viewport,
     ) {
-        self.prepare_inner(
-            pipeline,
-            device,
-            queue,
-            bounds,
-            viewport.physical_size(),
-            viewport.scale_factor(),
-            false,
-        );
+        let key = self.content_key();
+        if pipeline.draw_faults.has(key) {
+            return;
+        }
+        let panicked = super::draw_guard::panicked(|| {
+            self.prepare_inner(
+                pipeline,
+                device,
+                queue,
+                bounds,
+                viewport.physical_size(),
+                viewport.scale_factor(),
+                false,
+            );
+        });
+        if panicked {
+            pipeline.draw_faults.add(key);
+            pipeline.forget_after_draw_panic();
+        }
     }
 
     fn render(
@@ -417,11 +429,33 @@ impl shader::Primitive for Primitive {
         target: &iced::wgpu::TextureView,
         clip: &Rectangle<u32>,
     ) {
-        self.render_inner(pipeline, encoder, target, clip, false);
+        let key = self.content_key();
+        if pipeline.draw_faults.has(key) {
+            return;
+        }
+        if super::draw_guard::panicked(|| self.render_inner(pipeline, encoder, target, clip, false))
+        {
+            pipeline.draw_faults.add(key);
+        }
     }
 }
 
 impl Primitive {
+    /// A key that changes when the scene's geometry or the set of viewports
+    /// changes, and not for a camera move or a preview. The draw guard does
+    /// not draw again the data of a frame whose draw panicked.
+    pub(in crate::scene) fn content_key(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = rustc_hash::FxHasher::default();
+        self.scene_owner.as_ptr().hash(&mut h);
+        self.geometry_epoch.hash(&mut h);
+        for vp in &self.viewports {
+            vp.instance_id.hash(&mut h);
+            vp.draw_depth_generation.hash(&mut h);
+        }
+        h.finish().max(1)
+    }
+
     /// Headless off-screen equivalent of [`shader::Primitive::prepare`] that
     /// leaves global GUI HiDPI scale and GPU status counters untouched.
     #[cfg(not(target_arch = "wasm32"))]
@@ -5200,6 +5234,7 @@ impl Scene {
         });
         Primitive {
             scene_owner: std::sync::Arc::downgrade(&self.render_lifetime),
+            geometry_epoch: self.geometry_epoch,
             viewports,
             bg_color,
             viewcube_text_color,
@@ -5412,6 +5447,7 @@ impl Scene {
 
         Primitive {
             scene_owner: std::sync::Arc::downgrade(&self.render_lifetime),
+            geometry_epoch: self.geometry_epoch,
             viewports,
             bg_color: [0.0, 0.0, 0.0, 0.0],
             viewcube_text_color: [1.0, 1.0, 1.0, 1.0],
@@ -5446,6 +5482,7 @@ impl Scene {
         let Some(tile) = tiles.get(tile_idx) else {
             return Primitive {
                 scene_owner: std::sync::Arc::downgrade(&self.render_lifetime),
+                geometry_epoch: self.geometry_epoch,
                 viewports: vec![],
                 bg_color,
                 viewcube_text_color,
@@ -5510,6 +5547,7 @@ impl Scene {
         });
         Primitive {
             scene_owner: std::sync::Arc::downgrade(&self.render_lifetime),
+            geometry_epoch: self.geometry_epoch,
             viewports,
             bg_color,
             viewcube_text_color,

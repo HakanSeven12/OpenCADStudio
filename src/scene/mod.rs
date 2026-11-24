@@ -121,6 +121,8 @@ mod modify;
 mod selection_preview_tests;
 #[cfg(test)]
 mod sheet_underlay_tests;
+#[cfg(test)]
+mod sheet_paper_change_tests;
 pub(crate) mod table_content;
 pub(crate) mod table_fields;
 pub(crate) use modify::inverse_affine;

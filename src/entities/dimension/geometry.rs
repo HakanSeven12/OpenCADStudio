@@ -321,6 +321,8 @@ pub(crate) struct DimLineParams {
     pub(crate) horizontal_text: bool,
     /// DIMTAD lifts aligned text off its dimension line.
     pub(crate) text_lifted: bool,
+    /// DIMTAD 4: the text sits below its line rather than above.
+    pub(crate) text_below: bool,
     pub(crate) text_movement: i16,
     pub(crate) text_break: Option<TextBreak>,
     /// DIMTMOVE 1: the point the file stores is where the leader's hook starts,
@@ -1020,6 +1022,27 @@ pub(crate) fn append_radial_leader(
     }
     if params.horizontal_text {
         let side = if text.x >= tip.x { 1.0 } else { -1.0 };
+        // Text above or below the line (DIMTAD) stands on a landing that
+        // starts an arrow before the text and runs on under it to a gap past
+        // its far edge (#3525).
+        if let Some(text_break) = params
+            .text_break
+            .filter(|b| params.text_lifted && !b.through && params.leader_anchor.is_none())
+        {
+            let lift = text_break.half_height + text_break.padding;
+            let y = text.y + if params.text_below { lift } else { -lift };
+            let near = text.x - side * params.text_width * 0.5;
+            let hook_start = Vec3::new(near - side * params.arrow_len, y, text.z);
+            let far = Vec3::new(text.x + side * params.text_width * 0.5, y, text.z);
+            let slope = (hook_start - tip).y.abs().atan2((hook_start - tip).x.abs());
+            if slope > 15.0_f32.to_radians() {
+                add_segment(&mut g.dim_lines, tip, hook_start);
+                add_segment(&mut g.dim_lines, hook_start, far);
+            } else {
+                add_segment(&mut g.dim_lines, tip, far);
+            }
+            return;
+        }
         let (hook_start, text_edge) = match params.leader_anchor {
             Some(anchor) => (anchor, anchor + Vec3::X * (side * params.arrow_len)),
             None => {

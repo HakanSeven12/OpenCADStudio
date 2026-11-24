@@ -330,6 +330,7 @@ pub(crate) fn tessellate_dimension_inner(
             text_position: text_layout.position,
             horizontal_text: text_layout.horizontal,
             text_lifted: style.map(|s| s.dimtad).unwrap_or(1) != 0 || text_splits_at_line(dim),
+            text_below: style.is_some_and(|s| s.dimtad == 4),
             text_movement,
             text_break: text_layout.break_box,
             leader_anchor: stored_text_point(dim)

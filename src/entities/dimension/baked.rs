@@ -67,6 +67,7 @@ pub(crate) fn baked_dimension_geometry(
             horizontal_text: text.horizontal,
             text_lifted: style.map(|style| style.dimtad).unwrap_or(1) != 0
                 || text_splits_at_line(dimension),
+            text_below: style.is_some_and(|style| style.dimtad == 4),
             text_movement: style.map(|style| style.dimtmove).unwrap_or(0),
             text_break: text.break_box,
             leader_anchor: stored_text_point(dimension)

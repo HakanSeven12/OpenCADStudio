@@ -500,7 +500,7 @@ fn render_pdf_bytes_impl(
     plot_style: Option<&PlotStyleTable>,
     include_geopdf: bool,
 ) -> Result<Vec<u8>, String> {
-    let mut lo = render_pdf_document(pages, plot_style)?;
+    let mut lo = render_pdf_document(pages, plot_style, FontEmbedding::Subset)?;
     let precise = if include_geopdf {
         crate::io::geopdf_export::apply_metadata(&mut lo, pages)?
     } else {
@@ -509,11 +509,23 @@ fn render_pdf_bytes_impl(
     crate::io::geopdf_export::save_document(&mut lo, &precise)
 }
 
+/// How the faces embedded-font text is drawn with go into the file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FontEmbedding {
+    /// Each face reduced to the glyphs the pages use: the smallest single file.
+    Subset,
+    /// A plain TrueType face of up to 4 MB whole, its glyph ids unchanged:
+    /// every drawing of a published set then embeds the same program, which
+    /// the set writes once instead of a subset per drawing.
+    Whole,
+}
+
 /// Render pages to a PDF document not yet serialised, without geospatial
 /// metadata: the sheet-list PUBLISH appends it to the set it is writing.
 pub(crate) fn render_pdf_document(
     pages: &[PdfPageInput],
     plot_style: Option<&PlotStyleTable>,
+    fonts_as: FontEmbedding,
 ) -> Result<lopdf::Document, String> {
     // A style the table lacks plots with Normal here; the automation export
     // checks `validate_plot_styles` up front and refuses instead.
@@ -544,7 +556,7 @@ pub(crate) fn render_pdf_document(
     }
     // Subset and embed the TrueType faces the text was drawn with, now that
     // every page has recorded which glyphs it uses.
-    text_fonts.install(&mut doc);
+    text_fonts.install(&mut doc, fonts_as);
     let mut warnings = Vec::new();
     // printpdf 0.9's `optimize` is a no-op (its `doc.compress()` is commented
     // out), so every page's content stream — megabytes of vector operators
@@ -577,6 +589,8 @@ pub(crate) fn render_pdf_document(
             }
         }
     }
+    // Every page as compact as it draws the same.
+    crate::io::pdf_compact::compact_document(&mut lo);
     shadings.install(&mut lo);
     compress_font_programs(&mut lo);
     let annotations = pages
@@ -3395,10 +3409,24 @@ impl TextFonts {
     /// Subset each face to its used glyphs, renumber those glyphs in the page
     /// streams, and register the fonts under the ids the pages already use.
     /// A face that fails to subset is embedded whole, ids unchanged.
-    fn install(self, doc: &mut PdfDocument) {
+    fn install(self, doc: &mut PdfDocument, fonts_as: FontEmbedding) {
         // A face only probed by `embeds_all` for a run that kept its outlines
         // draws nothing.
         for font in self.fonts.into_iter().filter(|font| !font.used.is_empty()) {
+            // A collection cannot be embedded as it is; a big face is subset.
+            let plain_truetype = font.blob.index == 0
+                && font.blob.data.len() <= 4 << 20
+                && (font.blob.data.starts_with(&[0, 1, 0, 0])
+                    || font.blob.data.starts_with(b"true"));
+            if fonts_as == FontEmbedding::Whole && plain_truetype {
+                if let Some(parsed) = parsed_with_widths(font.blob.data.clone(), 0) {
+                    doc.resources
+                        .fonts
+                        .map
+                        .insert(font.id, PdfFont::new(parsed));
+                    continue;
+                }
+            }
             // `.notdef` must stay glyph 0; the subset numbers glyphs in list order.
             let gids: Vec<u16> = std::iter::once(0)
                 .chain(font.used.keys().copied().filter(|&gid| gid != 0))
@@ -3920,7 +3948,8 @@ mod tests {
                 .windows(3)
                 .filter_map(|items| (items[2] == "l").then(|| items[0].parse().unwrap()))
                 .collect();
-            if ends.len() != 1 || (ends[0] - 12.0 * MM_TO_PT).abs() >= 0.001 {
+            // Coordinates are written to 0.01 pt (`pdf_compact`).
+            if ends.len() != 1 || (ends[0] - 12.0 * MM_TO_PT).abs() > 0.005 {
                 missing.push((stationed, ends));
             }
         }
@@ -3952,7 +3981,8 @@ mod tests {
             .filter_map(|items| (items[2] == "l").then(|| items[0].parse().unwrap()))
             .collect();
         assert_eq!(ends.len(), 1);
-        assert!((ends[0] - 10.25 * MM_TO_PT).abs() < 0.001);
+        // Coordinates are written to 0.01 pt (`pdf_compact`).
+        assert!((ends[0] - 10.25 * MM_TO_PT).abs() <= 0.005);
     }
 
     #[test]
@@ -4948,7 +4978,7 @@ mod tests {
         // or unfill them concurrently; a change between laying the quads out
         // and exporting them invalidates their tile keys, so retry until one
         // export runs against a stable, filled atlas.
-        let (bytes, text) = (0..20)
+        let (bytes, text, whole) = (0..20)
             .find_map(|_| {
                 let generation = sdf_atlas::generation();
                 if !sdf_atlas::textfill() {
@@ -4979,19 +5009,22 @@ mod tests {
                     },
                     draw_depth: 0.0,
                 };
-                let bytes = render_pdf_bytes(&[test_page(vec![wire])], None).unwrap();
+                let pages = [test_page(vec![wire])];
+                let bytes = render_pdf_bytes(&pages, None).unwrap();
+                let whole = render_pdf_document(&pages, None, FontEmbedding::Whole).unwrap();
                 let stable = sdf_atlas::generation() == generation && sdf_atlas::textfill();
                 stable.then(|| {
                     let text = pdf_stream_text(&bytes);
-                    (bytes, text)
+                    (bytes, text, whole)
                 })
             })
             .expect("the shared glyph atlas never held still for one export");
         assert!(text.contains(" Tf"), "glyphs drawn as text in a font");
+        assert_eq!(text.matches(" TJ").count(), 3, "each glyph shown once");
         assert_eq!(
-            text.matches(" Tm").count(),
-            3,
-            "one positioned text object per glyph"
+            text.matches("BT").count(),
+            1,
+            "the glyphs of a run share one text object"
         );
         assert!(
             String::from_utf8_lossy(&bytes).contains("/FontFile2"),
@@ -5004,5 +5037,41 @@ mod tests {
             bytes.len(),
             source.font.data.len()
         );
+        // For a published set a plain TrueType face goes in whole, so every
+        // drawing embeds the same program; the glyphs keep their ids.
+        let programs: Vec<Vec<u8>> = whole
+            .objects
+            .values()
+            .filter_map(|object| object.as_dict().ok())
+            .filter_map(|dict| dict.get(b"FontFile2").ok()?.as_reference().ok())
+            .map(|id| {
+                let stream = whole.get_object(id).unwrap().as_stream().unwrap();
+                stream
+                    .decompressed_content()
+                    .unwrap_or(stream.content.clone())
+            })
+            .collect();
+        assert_eq!(programs.len(), 1, "one face embedded");
+        let font = &source.font;
+        let plain_truetype = font.index == 0
+            && font.data.len() <= 4 << 20
+            && (font.data.starts_with(&[0, 1, 0, 0]) || font.data.starts_with(b"true"));
+        if plain_truetype {
+            assert!(programs[0] == font.data, "the face is embedded whole");
+            let gid = source.gid;
+            let shown = format!("<{gid:04X}>");
+            let page = whole.get_pages().into_values().next().unwrap();
+            let content =
+                String::from_utf8_lossy(&whole.get_page_content(page).unwrap()).into_owned();
+            assert!(
+                content.contains(&shown),
+                "glyph {gid} keeps its id in {content}"
+            );
+        } else {
+            assert!(
+                programs[0].len() < font.data.len(),
+                "a collection or a big face is subset"
+            );
+        }
     }
 }

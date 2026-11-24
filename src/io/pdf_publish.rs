@@ -34,6 +34,10 @@ pub struct PublishPdf {
     /// Optional-content group of each layer name, in first-seen order.
     layers: Vec<u32>,
     layer_ids: HashMap<Vec<u8>, u32>,
+    /// Streams already written that reference nothing - font programs,
+    /// images - by their bytes' hash and length: another drawing's identical
+    /// stream points there instead of being written again.
+    shared: HashMap<(u64, usize), u32>,
 }
 
 impl PublishPdf {
@@ -55,6 +59,7 @@ impl PublishPdf {
             destinations: Vec::new(),
             layers: Vec::new(),
             layer_ids: HashMap::new(),
+            shared: HashMap::new(),
         };
         // A binary comment tells transfer tools the file is not text.
         pdf.write(b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n")?;
@@ -132,6 +137,14 @@ impl PublishPdf {
                 self.layer_ids.insert(name.clone(), shared);
                 self.layers.push(shared);
                 renumber.insert(id, shared);
+            } else if let Some(key) = doc.get_object(id).ok().and_then(leaf_stream_key) {
+                if let Some(&shared) = self.shared.get(&key) {
+                    renumber.insert(id, shared);
+                    continue;
+                }
+                let number = self.reserve();
+                self.shared.insert(key, number);
+                renumber.insert(id, number);
             } else {
                 let number = self.reserve();
                 renumber.insert(id, number);
@@ -340,6 +353,28 @@ impl Drop for PublishPdf {
             let _ = std::fs::remove_file(&self.temp_path);
         }
     }
+}
+
+/// The identity of a stream worth sharing: one of at least 1 KiB that
+/// references no other object, by the hash and length of its bytes.
+fn leaf_stream_key(object: &Object) -> Option<(u64, usize)> {
+    use std::hash::{Hash, Hasher};
+    let Object::Stream(stream) = object else {
+        return None;
+    };
+    if stream.content.len() < 1024 {
+        return None;
+    }
+    let mut references = Vec::new();
+    collect_references(&Object::Dictionary(stream.dict.clone()), &mut references);
+    if !references.is_empty() {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(stream.content.len() + 64);
+    serialize(&mut bytes, object);
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    Some((hasher.finish(), bytes.len()))
 }
 
 /// Queue the objects `object` references.
@@ -726,6 +761,49 @@ mod tests {
                 catalog.get(b"Pages").unwrap().as_reference().unwrap()
             );
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A stream that references nothing and comes again in another drawing -
+    /// the same font program in every sheet - is written once.
+    #[test]
+    fn identical_streams_of_several_drawings_are_written_once() {
+        let dir = std::env::temp_dir().join(format!("ocs-publish-shared-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("set.pdf");
+        let program: Vec<u8> = (0..4096u32).map(|i| (i * 7 % 251) as u8).collect();
+        let with_program = |bytes: &[u8]| {
+            let mut doc = sheet(100, 100, &["0"]);
+            let stream = doc
+                .add_object(Stream::new(Dictionary::new(), bytes.to_vec()).with_compression(false));
+            let page = doc.get_pages().into_values().next().unwrap();
+            doc.get_dictionary_mut(page)
+                .unwrap()
+                .set("Thumb", Object::Reference(stream));
+            doc
+        };
+        let mut pdf = PublishPdf::create(&path).unwrap();
+        pdf.append(with_program(&program), &[], &[]).unwrap();
+        pdf.append(with_program(&program), &[], &[]).unwrap();
+        let mut other = program.clone();
+        other[0] ^= 1;
+        pdf.append(with_program(&other), &[], &[]).unwrap();
+        pdf.finish("Set", false).unwrap();
+        let doc = lopdf::Document::load(&path).unwrap();
+        let thumbs: Vec<ObjectId> = doc
+            .get_pages()
+            .into_values()
+            .map(|page| {
+                doc.get_dictionary(page)
+                    .unwrap()
+                    .get(b"Thumb")
+                    .unwrap()
+                    .as_reference()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(thumbs[0], thumbs[1], "the same program is shared");
+        assert_ne!(thumbs[0], thumbs[2], "a different one is not");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

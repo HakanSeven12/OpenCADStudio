@@ -290,7 +290,11 @@ impl OpenCADStudio {
                 let Some(pdf) = job.pdf.as_mut() else {
                     return;
                 };
-                match crate::io::pdf_export::render_pdf_document(&pages, style.as_ref())
+                match crate::io::pdf_export::render_pdf_document(
+                    &pages,
+                    style.as_ref(),
+                    crate::io::pdf_export::FontEmbedding::Whole,
+                )
                     .and_then(|doc| pdf.append(doc, &titles, &names))
                 {
                     Ok(appended) => job.published += appended,

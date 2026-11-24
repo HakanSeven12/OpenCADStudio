@@ -31,6 +31,7 @@ pub mod obj;
 pub mod ole_embed;
 pub mod paper_catalog;
 pub mod patterns;
+pub mod pdf_compact;
 pub mod pdf_export;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod pdf_publish;

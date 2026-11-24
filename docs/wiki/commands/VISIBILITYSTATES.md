@@ -26,6 +26,6 @@ web: Not available in the web app.
 - An object ruled by several parameters shows only when every one of them shows it.
 - New suppression and object names follow the names the drawing already uses; in a drawing without any they follow the interface language (English or German names).
 - The command works in model space only. In the Block Editor it does nothing, because the copies of the block that its references show would keep the old states; edit the block's own drawing instead.
-- The drawing must be DWG 2010 or later. Dynamic blocks made in OCS or AutoCAD use [`BVSTATE`](BVSTATE-Command) instead.
+- The drawing must be DWG 2010 or later. Dynamic blocks made in OCS or other CAD programs use [`BVSTATE`](BVSTATE-Command) instead.
 - Each run of the command is one undo step.
 - The [Visibility States palette](VISIBILITYSTATESPANELOPEN-Command) does the same with the mouse, and also orders the states.

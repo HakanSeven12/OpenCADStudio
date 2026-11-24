@@ -350,7 +350,12 @@ impl CadModule for CivilModule {
                 RibbonGroup {
                     title: "Points",
                     tools: vec![
-                        tool("CREATEPOINTS", "Create Points", icon!("points")),
+                        RibbonItem::LargeTool(ToolDef {
+                            id: "CREATEPOINTS",
+                            label: "Create Points",
+                            icon: icon!("points"),
+                            event: ModuleEvent::Command(crate::ui::points_menu::OPEN_COMMAND.to_string()),
+                        }),
                         tool("CREATEPOINTGROUP", "Create Point Group", icon!("pointgroup")),
                         tool("CREATEPOINTLABELSTYLE", "Create Point Label Style", icon!("pointlabelstyle")),
                     ],

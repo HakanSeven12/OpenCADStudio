@@ -2071,6 +2071,10 @@ impl OpenCADStudio {
                 follow.map_or_else(Task::none, Task::done)
             }
 
+            Message::PointsMenu(msg) => {
+                self.points_menu.update(msg);
+                Task::none()
+            }
             Message::RibbonToolClick { tool_id, event } => {
                 // A tool clicked in a minimized ribbon's popup closes it.
                 self.ribbon.close_popup();

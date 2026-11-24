@@ -1436,6 +1436,8 @@ pub(super) struct OpenCADStudio {
     show_graphic_attributes: bool,
     /// The Command History pallet is open.
     pub(crate) show_command_history: bool,
+    /// The civil Create Points menu (open, and its folded-open group).
+    pub(crate) points_menu: crate::ui::points_menu::PointsMenu,
     graphic_attributes: crate::ui::window::graphic_attributes::GraphicAttributesState,
     /// Docked Insert Block panel visibility.
     pub(crate) show_block_palette: bool,
@@ -3183,6 +3185,7 @@ impl OpenCADStudio {
             show_layers: false,
             show_graphic_attributes: false,
             show_command_history: false,
+            points_menu: Default::default(),
             graphic_attributes: Default::default(),
             show_block_palette: false,
             show_tool_palettes: false,

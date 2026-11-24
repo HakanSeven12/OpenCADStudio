@@ -48,7 +48,7 @@ struct VertexOut {
     @location(7) @interpolate(flat) min_elem:    f32,
     @location(8) @interpolate(flat) start_param: f32,
     @location(9) @interpolate(flat) end_param:   f32,
-    @location(10) @interpolate(linear) ndc:      vec2<f32>,
+    @location(10) clip_xyw:      vec3<f32>,
 }
 
 // The selection pass widens highlighted lines by `highlight_widen` pixels;
@@ -108,7 +108,8 @@ fn resolve_hw_base(px_hw: f32) -> f32 {
 
     var out: VertexOut;
     out.clip_pos = clip_pos;
-    out.ndc = clip_pos.xy / clip_pos.w;
+    // Divided per fragment: WebGL2 has no noperspective interpolation (#3543).
+    out.clip_xyw = vec3<f32>(clip_pos.xy, clip_pos.w);
     out.local_pos = vec2<f32>(u_val * ext_u, v_val * ext_v);
     out.semi_axes = vec2<f32>(a, b);
     out.hw_px = hw_px;
@@ -227,7 +228,7 @@ fn physical_per_logical(ndc: vec2<f32>) -> f32 {
 
 @fragment fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let ab = in.semi_axes;
-    let px_scale = physical_per_logical(in.ndc);
+    let px_scale = physical_per_logical(in.clip_xyw.xy / in.clip_xyw.z);
     let res = closest_point_ellipse(in.local_pos, ab);
     let q = res.q;
     let t = res.t;

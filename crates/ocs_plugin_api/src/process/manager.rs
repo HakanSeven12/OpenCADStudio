@@ -172,6 +172,20 @@ impl PluginManager {
             Some(h) => Arc::clone(h),
             None => Arc::new(|_id, _cmd, _notif| {}),
         };
+        // A notification that arrives before the spawn pins the manifest id
+        // carries the empty placeholder. The package-declared id names this
+        // process from the start, so the ChannelReady ack of one of several
+        // plugins booting together is not ambiguous (#3581).
+        let handler: NotificationHandler = match expected_id {
+            Some(expected) if !expected.is_empty() => {
+                let expected = expected.to_string();
+                Arc::new(move |id, command, notification| {
+                    let id = if id.is_empty() { expected.as_str() } else { id };
+                    handler(id, command, notification)
+                })
+            }
+            _ => handler,
+        };
         // The spawn bootstrap IS the declaration window: quad panels/classes/
         // grips register while GetManifest is still in flight (the spawn
         // attributes them to the package-declared id). Mark the boot so the
@@ -376,7 +390,7 @@ impl PluginManager {
         match self
             .plugins
             .iter()
-            .position(|p| p.process.id() == plugin_id)
+            .position(|p| p.process.id().eq_ignore_ascii_case(plugin_id))
         {
             Some(index) => self.attach_by_index(index),
             None => AttachOutcome::UnknownPlugin,

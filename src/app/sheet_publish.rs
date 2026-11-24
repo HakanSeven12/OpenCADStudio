@@ -30,9 +30,43 @@ pub(in crate::app) struct SheetPublish {
     opening: Option<(PathBuf, usize, usize)>,
     /// The tab that was active when the job began, active again at its end.
     return_tab: u64,
+    /// The destination name of each sheet's page, by its drawing and layout
+    /// (lower case), and of a drawing's first sheet: what links open.
+    destinations: std::collections::HashMap<(PathBuf, String), String>,
+    first_destinations: std::collections::HashMap<PathBuf, String>,
     published: usize,
     failed: usize,
     started: std::time::Instant,
+}
+
+/// The destination name of the page of sheet `index` (0-based); in order,
+/// as a name tree lists them.
+fn sheet_destination(index: usize) -> String {
+    format!("OcsSheet{:06}", index + 1)
+}
+
+/// `path` as the file system resolves it, so that two spellings of a drawing
+/// compare equal; as it is when it does not exist.
+fn canonical(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+impl SheetPublish {
+    /// The page `link` opens in the PDF: the sheet of its drawing (this
+    /// sheet's `drawing` for a link without an address) and named location,
+    /// or the drawing's first sheet when the link names no layout of it.
+    fn link_destination(&self, link: &crate::io::plot::PlotLink, drawing: &Path) -> Option<String> {
+        let target = canonical(&link.drawing(Some(drawing))?);
+        for layout in link.layout_candidates() {
+            if let Some(name) = self
+                .destinations
+                .get(&(target.clone(), layout.to_lowercase()))
+            {
+                return Some(name.clone());
+            }
+        }
+        self.first_destinations.get(&target).cloned()
+    }
 }
 
 impl OpenCADStudio {
@@ -85,6 +119,16 @@ impl OpenCADStudio {
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
             .unwrap_or_default();
+        let mut destinations = std::collections::HashMap::new();
+        let mut first_destinations = std::collections::HashMap::new();
+        for (index, sheet) in list.sheets.iter().enumerate() {
+            let name = sheet_destination(index);
+            let drawing = canonical(&sheet.drawing);
+            destinations
+                .entry((drawing.clone(), sheet.layout.to_lowercase()))
+                .or_insert_with(|| name.clone());
+            first_destinations.entry(drawing).or_insert(name);
+        }
         self.sheet_publish = Some(Box::new(SheetPublish {
             list,
             title,
@@ -92,6 +136,8 @@ impl OpenCADStudio {
             pdf,
             opening: None,
             return_tab: self.tabs[self.active_tab].id,
+            destinations,
+            first_destinations,
             published: 0,
             failed: 0,
             started: std::time::Instant::now(),
@@ -193,10 +239,26 @@ impl OpenCADStudio {
         let count = job.list.sheets.len();
         let mut pages = Vec::new();
         let mut titles = Vec::new();
+        let mut names = Vec::new();
+        let one_file = matches!(job.list.target, Target::MultiSheetPdf(_));
         for k in start..end {
             let sheet = &job.list.sheets[k];
             match self.sheet_page(sheet) {
-                Ok(page) => {
+                Ok(mut page) => {
+                    // In one PDF, a link to a sheet of the list opens its page.
+                    let content = &mut page.content;
+                    content.destination = None;
+                    for link in &mut content.links {
+                        link.destination = if one_file {
+                            job.link_destination(link, &sheet.drawing)
+                        } else {
+                            None
+                        };
+                    }
+                    if one_file {
+                        content.destination = Some(sheet_destination(k));
+                    }
+                    names.push(content.destination.clone());
                     self.command_line.push_output(
                         crate::tf!(
                             "  [{}/{count}] {}: {:.1}×{:.1} mm",
@@ -229,7 +291,7 @@ impl OpenCADStudio {
                     return;
                 };
                 match crate::io::pdf_export::render_pdf_document(&pages, style.as_ref())
-                    .and_then(|doc| pdf.append(doc, &titles))
+                    .and_then(|doc| pdf.append(doc, &titles, &names))
                 {
                     Ok(appended) => job.published += appended,
                     Err(error) => {
@@ -533,6 +595,149 @@ mod tests {
         assert!(dir.join("A_ one.pdf").is_file());
         assert!(dir.join("A two.pdf").is_file());
         assert_eq!(app.tabs.iter().filter(|tab| !tab.is_start).count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The page annotations of a PDF page, as (action type, target).
+    fn annotations(
+        doc: &lopdf::Document,
+        page: lopdf::ObjectId,
+    ) -> Vec<(String, String, [f32; 4])> {
+        let page = doc.get_dictionary(page).unwrap();
+        let Ok(list) = page.get(b"Annots").and_then(lopdf::Object::as_array) else {
+            return Vec::new();
+        };
+        list.iter()
+            .map(|annotation| {
+                let annotation = doc
+                    .get_dictionary(annotation.as_reference().unwrap())
+                    .unwrap();
+                let action = annotation.get(b"A").unwrap().as_dict().unwrap();
+                let kind = String::from_utf8(action.get(b"S").unwrap().as_name().unwrap().to_vec())
+                    .unwrap();
+                let target = action
+                    .get(b"D")
+                    .or_else(|_| action.get(b"URI"))
+                    .unwrap()
+                    .as_str()
+                    .unwrap();
+                let rect: Vec<f32> = annotation
+                    .get(b"Rect")
+                    .unwrap()
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_float().unwrap())
+                    .collect();
+                (
+                    kind,
+                    String::from_utf8(target.to_vec()).unwrap(),
+                    [rect[0], rect[1], rect[2], rect[3]],
+                )
+            })
+            .collect()
+    }
+
+    /// A table-of-contents row the way openCirt links it: a text of spaces
+    /// fitted over the row, linked to the other drawing (relative path, its
+    /// layout). In the published PDF the row opens that sheet's page; a web
+    /// link stays an address.
+    #[test]
+    fn a_link_to_a_sheet_of_the_list_opens_its_page() {
+        use crate::scene::hyperlink::Link;
+        use document::types::Vector3;
+        let dir = temp_dir("publish-links");
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let (toc, b) = (dir.join("toc.dxf"), dir.join("sub").join("b.dxf"));
+        drawing(&b);
+        let mut doc = document::Document::new();
+        let frame = document::entities::Line::from_points(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(200.0, 100.0, 0.0),
+        );
+        let frame = doc.add_entity(document::EntityType::Line(frame)).unwrap();
+        let mut row = document::entities::Text::with_value(" ", Vector3::new(20.0, 50.0, 0.0));
+        row.height = 10.0;
+        row.horizontal_alignment = document::entities::TextHorizontalAlignment::Fit;
+        row.alignment_point = Some(Vector3::new(180.0, 50.0, 0.0));
+        let row = doc.add_entity(document::EntityType::Text(row)).unwrap();
+        crate::scene::hyperlink::set(
+            &mut doc,
+            row,
+            Some(&Link {
+                url: "sub/b.dxf".into(),
+                text: "Blatt B".into(),
+                location: "Model".into(),
+                flags: 0,
+            }),
+        );
+        crate::scene::hyperlink::set(
+            &mut doc,
+            frame,
+            Some(&Link {
+                url: "https://example.org/".into(),
+                ..Default::default()
+            }),
+        );
+        std::fs::write(
+            &toc,
+            crate::io::save_to_bytes(&doc, "dxf", doc.version).unwrap(),
+        )
+        .unwrap();
+        let out = dir.join("set.pdf");
+        let list = dir.join("set.dsd");
+        std::fs::write(
+            &list,
+            [
+                sheet("0001 - Inhalt", &toc, "Model"),
+                sheet("0002 - Blatt B", &b, "Model"),
+                format!("[Target]\nType=6\nDWF={}\n", out.display()),
+            ]
+            .concat(),
+        )
+        .unwrap();
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(
+            app.run_batch(&format!("PUBLISH \"{}\"\n", list.display()), &[]),
+            0
+        );
+        let pdf = lopdf::Document::load(&out).unwrap();
+        let pages: Vec<lopdf::ObjectId> = pdf.get_pages().into_values().collect();
+        let links = annotations(&pdf, pages[0]);
+        assert_eq!(links.len(), 2, "{links:?}");
+        let row_link = links.iter().find(|link| link.0 == "GoTo").unwrap();
+        assert_eq!(row_link.1, "OcsSheet000002");
+        // The row's link is far wider than high.
+        let [x0, y0, x1, y1] = row_link.2;
+        assert!(x1 - x0 > 5.0 * (y1 - y0) && y1 > y0, "{row_link:?}");
+        assert!(links
+            .iter()
+            .any(|link| link.0 == "URI" && link.1 == "https://example.org/"));
+        let names = pdf
+            .catalog()
+            .unwrap()
+            .get(b"Names")
+            .unwrap()
+            .as_dict()
+            .unwrap();
+        let tree = names
+            .get(b"Dests")
+            .unwrap()
+            .as_dict()
+            .unwrap()
+            .get(b"Names")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        let target = tree
+            .chunks(2)
+            .find(|pair| pair[0].as_str().unwrap() == b"OcsSheet000002")
+            .unwrap();
+        assert_eq!(
+            target[1].as_array().unwrap()[0].as_reference().unwrap(),
+            pages[1]
+        );
+        assert!(annotations(&pdf, pages[1]).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

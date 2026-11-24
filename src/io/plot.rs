@@ -167,6 +167,91 @@ pub struct PlotContent {
     /// Effective STB style keyed by the plotted object and optional block member.
     pub entity_plot_styles:
         std::collections::HashMap<(document::Handle, Option<document::Handle>), String>,
+    /// The hyperlinks of the plotted objects, for formats that carry links.
+    pub links: Vec<PlotLink>,
+    /// The name links reach this page by, when a page of the same file is
+    /// their target (a named destination of the PDF).
+    pub destination: Option<String>,
+}
+
+/// A hyperlink on a plotted object.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PlotLink {
+    /// The object the link sits on: its plotted geometry is the link's area.
+    pub entity: Option<document::Handle>,
+    /// The area in drawing coordinates (`[x0, y0, x1, y1]`) where the object
+    /// plots nothing, such as a text of spaces.
+    pub bounds: Option<[f64; 4]>,
+    /// The address as stored: a web address, a file, or empty for the
+    /// drawing itself.
+    pub url: String,
+    /// The named location: a layout or a view.
+    pub location: String,
+    /// The folder a relative file address is taken from.
+    pub base: Option<std::path::PathBuf>,
+    /// A page of the same file the link opens (its `destination`), when the
+    /// target is one of the pages written with it.
+    pub destination: Option<String>,
+}
+
+impl PlotLink {
+    /// A web, mail or other address with a scheme, not a file.
+    pub fn is_web(&self) -> bool {
+        let url = self.url.trim();
+        let scheme = url.split_once(':').map(|(scheme, _)| scheme).unwrap_or("");
+        // `C:` is a drive, not a scheme.
+        scheme.len() > 1
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+    }
+
+    /// The drawing a file link opens: its address taken from `base` when
+    /// relative, the drawing `own` for an empty address. `None` for a web
+    /// address.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn drawing(&self, own: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+        let url = self.url.trim().trim_matches('"');
+        if url.is_empty() {
+            return own.map(std::path::Path::to_path_buf);
+        }
+        if self.is_web() && !url.to_ascii_lowercase().starts_with("file:") {
+            return None;
+        }
+        let url = url
+            .strip_prefix("file:///")
+            .map(|rest| {
+                if cfg!(windows) {
+                    rest.to_string()
+                } else {
+                    format!("/{rest}")
+                }
+            })
+            .unwrap_or_else(|| url.to_string());
+        let mut path = std::path::PathBuf::from(&url);
+        let base = self.base.clone().unwrap_or_default();
+        // A link written on Windows names its folders with backslashes.
+        #[cfg(not(windows))]
+        if url.contains('\\') && !base.join(&path).exists() {
+            path = std::path::PathBuf::from(url.replace('\\', "/"));
+        }
+        if path.is_relative() {
+            path = base.join(path);
+        }
+        Some(std::fs::canonicalize(&path).unwrap_or(path))
+    }
+
+    /// The layouts the named location can mean: the whole location, and the
+    /// layout of a `view,layout` pair.
+    pub fn layout_candidates(&self) -> Vec<&str> {
+        let location = self.location.trim();
+        let mut names = vec![location];
+        if let Some((_, layout)) = location.rsplit_once(',') {
+            names.push(layout.trim());
+        }
+        names.retain(|name| !name.is_empty());
+        names
+    }
 }
 
 /// Owned geometry and settings for one plot page.

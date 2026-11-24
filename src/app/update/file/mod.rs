@@ -324,6 +324,8 @@ impl OpenCADStudio {
 
 #[cfg(test)]
 mod plot_paper_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod plot_link_tests;
 
 #[cfg(test)]
 mod plot_device_persistence_tests;

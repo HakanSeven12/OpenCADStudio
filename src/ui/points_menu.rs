@@ -41,7 +41,7 @@ pub struct Group {
 
 pub const GROUPS: &[Group] = &[
     Group {
-        label: "Create Points - Miscellaneous",
+        label: "Miscellaneous",
         icon: icon!("misc"),
         entries: &[
             e("Manual", icon!("manual"), "CREATEPOINTMANUAL"),
@@ -65,7 +65,7 @@ pub const GROUPS: &[Group] = &[
         ],
     },
     Group {
-        label: "Create Points - Intersections",
+        label: "Intersections",
         icon: icon!("inter"),
         entries: &[
             e("Direction/Direction", icon!("dirdir"), "CREATEPOINTDIRECTIONDIR"),
@@ -86,7 +86,7 @@ pub const GROUPS: &[Group] = &[
         ],
     },
     Group {
-        label: "Create Points - Alignments",
+        label: "Alignments",
         icon: icon!("align"),
         entries: &[
             e("Station/Offset", icon!("staoff2"), "CREATEPOINTSTATIONOFFSET"),
@@ -99,7 +99,7 @@ pub const GROUPS: &[Group] = &[
         ],
     },
     Group {
-        label: "Create Points - Surface",
+        label: "Surface",
         icon: icon!("surf"),
         entries: &[
             e("Random Points", icon!("random"), "CREATEPOINTRANDOMPOINTS"),
@@ -110,7 +110,7 @@ pub const GROUPS: &[Group] = &[
         ],
     },
     Group {
-        label: "Create Points - Slope",
+        label: "Slope",
         icon: icon!("slope"),
         entries: &[
             e("High/Low Point", icon!("highlow"), "CREATEPOINTHIGHLOWPOINT"),
@@ -119,7 +119,7 @@ pub const GROUPS: &[Group] = &[
         ],
     },
     Group {
-        label: "Create Points - Interpolate",
+        label: "Interpolate",
         icon: icon!("interp"),
         entries: &[
             e("Interpolate", icon!("interp1"), "CREATEPOINTINTERPOLATE"),

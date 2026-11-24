@@ -834,6 +834,20 @@ mod tests {
     }
 
     #[test]
+    fn a_published_set_removes_the_temporary_file_of_a_stopped_publish() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("set.pdf");
+        let stopped = crate::io::stopped_save_temp(&path);
+
+        let mut pdf = PublishPdf::create(&path).unwrap();
+        pdf.append(sheet(100, 100, &["0"]), &[], &[]).unwrap();
+        pdf.finish("Set", false).unwrap();
+
+        assert!(path.exists());
+        assert!(!stopped.exists());
+    }
+
+    #[test]
     fn names_and_strings_are_escaped() {
         let mut out = Vec::new();
         serialize(

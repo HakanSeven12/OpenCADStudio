@@ -1532,6 +1532,18 @@ mod tests {
     }
 
     #[test]
+    fn an_svg_export_removes_the_temporary_file_of_a_stopped_export() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("plan.svg");
+        let stopped = crate::io::stopped_save_temp(&path);
+
+        export_svg(&page_with(Default::default(), 210.0, 297.0), &path).unwrap();
+
+        assert!(path.exists());
+        assert!(!stopped.exists());
+    }
+
+    #[test]
     fn empty_page_builds_a_valid_svg_shell() {
         let page = page_with(Default::default(), 210.0, 297.0);
         let svg = build_svg(&page, None).expect("builds");

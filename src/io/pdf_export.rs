@@ -4024,6 +4024,18 @@ mod tests {
     }
 
     #[test]
+    fn a_pdf_export_removes_the_temporary_file_of_a_stopped_export() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("plan.pdf");
+        let stopped = crate::io::stopped_save_temp(&path);
+
+        write_pdf_atomically(&path, b"new").unwrap();
+
+        assert!(path.exists());
+        assert!(!stopped.exists());
+    }
+
+    #[test]
     fn clip_and_scale_emit_pdf_bytes() {
         let w = PlotWire {
             wire: WireModel::solid(

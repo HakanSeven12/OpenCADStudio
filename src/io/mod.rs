@@ -3064,6 +3064,18 @@ fn remove_stale_save_temps(path: &Path) {
     }
 }
 
+/// Writes the temporary file that a save or export of `path`, stopped two
+/// hours ago, leaves beside it. Returns the file's path.
+#[cfg(test)]
+pub(crate) fn stopped_save_temp(path: &Path) -> PathBuf {
+    let (start, end) = save_temp_name_parts(path);
+    let temp_path = save_folder(path).join(format!("{start}4242-1{end}"));
+    let file = std::fs::File::create(&temp_path).unwrap();
+    let modified = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 60 * 60);
+    file.set_modified(modified).unwrap();
+    temp_path
+}
+
 #[cfg(not(target_os = "windows"))]
 fn replace_save_file(
     temp_path: &Path,

@@ -2206,6 +2206,18 @@ mod tests {
     }
 
     #[test]
+    fn a_dwf_export_removes_the_temporary_file_of_a_stopped_export() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("plan.dwf");
+        let stopped = crate::io::stopped_save_temp(&path);
+
+        export_dwf(&page(PlotContent::default(), 297.0, 210.0), "Model", &path).unwrap();
+
+        assert!(path.exists());
+        assert!(!stopped.exists());
+    }
+
+    #[test]
     fn an_empty_page_is_a_dwf_6_package_with_one_sheet() {
         let empty = page(PlotContent::default(), 297.0, 210.0);
         let bytes = build_dwf(

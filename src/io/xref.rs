@@ -4102,6 +4102,27 @@ pub fn set_ref_path(doc: &mut Document, key: u64, new_raw: &str) -> Result<Strin
             match doc.objects.get_mut(&handle) {
                 Some(ObjectType::ImageDefinition(def)) => {
                     def.file_name = new_raw.to_string();
+                    // Each image entity carries the file it was resolved to at
+                    // open and draws from that, so it follows the new path too
+                    // (#3515); otherwise the old picture stays until re-attach.
+                    let images: Vec<document::Handle> = doc
+                        .entities()
+                        .filter_map(|entity| match entity {
+                            document::EntityType::RasterImage(image)
+                                if image.definition_handle == Some(handle) =>
+                            {
+                                Some(entity.common().handle)
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    for image in images {
+                        if let Some(document::EntityType::RasterImage(image)) =
+                            doc.get_entity_mut(image)
+                        {
+                            image.file_path = new_raw.to_string();
+                        }
+                    }
                     Ok(name)
                 }
                 _ => Err(crate::t!("XREF: no loaded reference with that key.").to_string()),

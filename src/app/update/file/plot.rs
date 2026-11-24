@@ -2328,7 +2328,13 @@ impl OpenCADStudio {
                 } else {
                     "pdf"
                 };
-                folder.join(format!("{stem}.{ext}"))
+                // A plot never replaces an earlier one: several sheets of
+                // one drawing share its name, so the next free number is
+                // added (#3575).
+                std::iter::once(folder.join(format!("{stem}.{ext}")))
+                    .chain((2..).map(|n| folder.join(format!("{stem}-{n}.{ext}"))))
+                    .find(|path| !path.exists())
+                    .expect("an unused name")
             });
         (stem, path)
     }

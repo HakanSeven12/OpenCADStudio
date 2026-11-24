@@ -2971,3 +2971,40 @@ fn trim_preview_marks_only_the_removed_part() {
     assert_eq!(marked.len(), 1);
     assert_eq!(marked[0].name, "trim_rm_0");
 }
+
+/// TRIM and EXTEND move a linear dimension's extension line on the picked
+/// side to the boundary the dimension line meets (#3434).
+#[test]
+fn trim_and_extend_move_a_linear_dimensions_extension_line() {
+    use document::entities::{Dimension, DimensionLinear};
+    let dimension = |second: f64| {
+        let mut d = DimensionLinear::horizontal(Vector3::ZERO, Vector3::new(second, 0.0, 0.0));
+        d.definition_point = Vector3::new(second, 3.0, 0.0);
+        d.base.common.handle = Handle::new(1);
+        EntityType::Dimension(Box::new(Dimension::Linear(d)))
+    };
+    let linear = |entity: &EntityType| match entity {
+        EntityType::Dimension(d) => match &**d {
+            Dimension::Linear(d) => d.clone(),
+            _ => panic!("expected a linear dimension"),
+        },
+        _ => panic!("expected a dimension"),
+    };
+
+    let all = vec![dimension(10.0), vertical_boundary(4.0, -5.0, 5.0, 2)];
+    let trimmed = pick_trim_at(&all, &build_geos(&all), Handle::new(1), 2.0, 3.0)
+        .expect("the dimension should trim to the boundary");
+    let d = linear(&trimmed[0]);
+    assert!((d.first_point.x - 4.0).abs() < 1e-9, "{:?}", d.first_point);
+    assert!((d.second_point.x - 10.0).abs() < 1e-9);
+    assert!((d.base.actual_measurement - 6.0).abs() < 1e-9);
+
+    let all = vec![dimension(4.0), vertical_boundary(7.0, -5.0, 5.0, 2)];
+    let extended = pick_extend_at(&all, &build_geos(&all), Handle::new(1), 3.5, 3.0)
+        .expect("the dimension should extend to the boundary");
+    let d = linear(&extended);
+    assert!((d.first_point.x).abs() < 1e-9);
+    assert!((d.second_point.x - 7.0).abs() < 1e-9, "{:?}", d.second_point);
+    assert!((d.definition_point.x - 7.0).abs() < 1e-9);
+    assert!((d.base.actual_measurement - 7.0).abs() < 1e-9);
+}

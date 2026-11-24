@@ -1197,6 +1197,156 @@ pub(crate) fn trim_xline(orig: &XLineEnt, ts: &[f64], t_click: f64) -> Vec<Entit
         .collect()
 }
 
+// ── Dimensions ────────────────────────────────────────────────────────────
+
+/// The measured span of a linear or aligned dimension on its dimension
+/// line, from the first extension line to the second, with the unit
+/// direction it measures along. Other dimension kinds have none.
+fn dimension_span(
+    dimension: &document::entities::Dimension,
+) -> Option<([f64; 2], [f64; 2], [f64; 2])> {
+    use document::entities::Dimension;
+    let (first, second, on_line, direction) = match dimension {
+        Dimension::Linear(d) => (
+            d.first_point,
+            d.second_point,
+            d.definition_point,
+            [d.rotation.cos(), d.rotation.sin()],
+        ),
+        Dimension::Aligned(d) => {
+            let dx = d.second_point.x - d.first_point.x;
+            let dy = d.second_point.y - d.first_point.y;
+            let length = dx.hypot(dy);
+            if length < 1e-12 {
+                return None;
+            }
+            (
+                d.first_point,
+                d.second_point,
+                d.definition_point,
+                [dx / length, dy / length],
+            )
+        }
+        _ => return None,
+    };
+    let on_dimension_line = |p: Vector3| {
+        let along = (p.x - on_line.x) * direction[0] + (p.y - on_line.y) * direction[1];
+        [on_line.x + along * direction[0], on_line.y + along * direction[1]]
+    };
+    let (a, b) = (on_dimension_line(first), on_dimension_line(second));
+    ((b[0] - a[0]).hypot(b[1] - a[1]) > 1e-9).then_some((a, b, direction))
+}
+
+/// `dimension` with its extension lines moved along the measurement by
+/// `start` (first) and `end` (second) — how TRIM and EXTEND shorten or
+/// lengthen it to a boundary; `None` when neither moves.
+fn shifted_dimension(
+    dimension: &document::entities::Dimension,
+    direction: [f64; 2],
+    start: f64,
+    end: f64,
+) -> Option<EntityType> {
+    use document::entities::Dimension;
+    if start.abs() < 1e-9 && end.abs() < 1e-9 {
+        return None;
+    }
+    let shift = |p: &mut Vector3, by: f64| {
+        p.x += direction[0] * by;
+        p.y += direction[1] * by;
+    };
+    let mut dimension = dimension.clone();
+    match &mut dimension {
+        Dimension::Linear(d) => {
+            shift(&mut d.first_point, start);
+            shift(&mut d.second_point, end);
+            // The dimension line point sits on the second extension line.
+            shift(&mut d.definition_point, end);
+        }
+        Dimension::Aligned(d) => {
+            shift(&mut d.first_point, start);
+            shift(&mut d.second_point, end);
+            shift(&mut d.definition_point, end);
+        }
+        _ => return None,
+    }
+    let measurement = dimension.stored_measurement();
+    let base = dimension.base_mut();
+    base.common.handle = Handle::NULL;
+    // Text at its default place stays centred on the dimension line.
+    if !base.text_user_positioned {
+        shift(&mut base.text_middle_point, (start + end) * 0.5);
+    }
+    base.actual_measurement = measurement;
+    Some(EntityType::Dimension(Box::new(dimension)))
+}
+
+/// TRIM on a linear or aligned dimension: the extension line on the picked
+/// side moves to the nearest cutting edge across the dimension line. A pick
+/// between two cuts would split it, which a dimension cannot be.
+fn trim_dimension(
+    dimension: &document::entities::Dimension,
+    handle: Handle,
+    geos: &[Geo],
+    px: f64,
+    py: f64,
+) -> Option<EntityType> {
+    let (a, b, direction) = dimension_span(dimension)?;
+    let ts = line_seg_ts(a[0], a[1], b[0], b[1], handle, geos);
+    let length = (b[0] - a[0]).hypot(b[1] - a[1]);
+    let t_click =
+        ((px - a[0]) * (b[0] - a[0]) + (py - a[1]) * (b[1] - a[1])) / (length * length);
+    let below = ts
+        .iter()
+        .copied()
+        .filter(|t| *t < t_click)
+        .max_by(f64::total_cmp);
+    let above = ts
+        .iter()
+        .copied()
+        .filter(|t| *t > t_click)
+        .min_by(f64::total_cmp);
+    // The measured direction may run from the second point to the first.
+    let sign = if (b[0] - a[0]) * direction[0] + (b[1] - a[1]) * direction[1] >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+    match (below, above) {
+        (None, Some(cut)) => shifted_dimension(dimension, direction, sign * cut * length, 0.0),
+        (Some(cut), None) => {
+            shifted_dimension(dimension, direction, 0.0, sign * (cut - 1.0) * length)
+        }
+        _ => None,
+    }
+}
+
+/// EXTEND on a linear or aligned dimension: the extension line on the
+/// picked end moves out to the first boundary the dimension line meets.
+fn extend_dimension(
+    dimension: &document::entities::Dimension,
+    handle: Handle,
+    geos: &[Geo],
+    px: f64,
+    py: f64,
+) -> Option<EntityType> {
+    let (a, b, direction) = dimension_span(dimension)?;
+    let length = (b[0] - a[0]).hypot(b[1] - a[1]);
+    let t_click =
+        ((px - a[0]) * (b[0] - a[0]) + (py - a[1]) * (b[1] - a[1])) / (length * length);
+    let extend_end = t_click >= 0.5;
+    let t = extension_hit(a, b, handle, geos, extend_end)?;
+    let sign = if (b[0] - a[0]) * direction[0] + (b[1] - a[1]) * direction[1] >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+    if extend_end {
+        shifted_dimension(dimension, direction, 0.0, sign * (t - 1.0) * length)
+    } else {
+        shifted_dimension(dimension, direction, sign * t * length, 0.0)
+    }
+}
+
 // ── Point-generation helpers ──────────────────────────────────────────────
 
 pub(crate) fn pick_trim_at(
@@ -1323,6 +1473,9 @@ pub(crate) fn pick_trim_at(
         }
         Some(EntityType::Hatch(hatch)) => trim_hatch_at(hatch, geos, px, py)
             .map(|result| vec![EntityType::Hatch(Box::new(result))]),
+        Some(EntityType::Dimension(dimension)) => {
+            trim_dimension(dimension, handle, geos, px, py).map(|trimmed| vec![trimmed])
+        }
         _ => None,
     };
     result
@@ -1427,6 +1580,7 @@ pub(crate) fn pick_extend_at(
                 .unwrap_or(0.5);
             extend_spline(s, t_click, geos)
         }
+        Some(EntityType::Dimension(dimension)) => extend_dimension(dimension, handle, geos, px, py),
         _ => None,
     };
     result

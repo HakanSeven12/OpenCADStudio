@@ -5,6 +5,7 @@
 # By design: the drawing is made, opened or saved. These are not edits.
 FileOpened
 SaveFinished(SaveOutcome)
+UnsavedDialogSave
 ScriptLine during EXIT
 ScriptPump
 TabNew

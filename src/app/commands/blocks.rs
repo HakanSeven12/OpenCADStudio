@@ -85,8 +85,8 @@ impl OpenCADStudio {
         i: usize,
         handles: &[document::Handle],
     ) -> Task<Message> {
-        let Some(svg) = crate::io::svg_clipboard::selection_svg(&self.tabs[i].scene, handles)
-        else {
+        let strokes = crate::io::svg_clipboard::selection_strokes(&self.tabs[i].scene, handles);
+        let Some(svg) = crate::io::svg_clipboard::strokes_svg(&strokes) else {
             return Task::none();
         };
         #[cfg(target_arch = "wasm32")]
@@ -98,8 +98,9 @@ impl OpenCADStudio {
         {
             // Where the platform has a registered SVG format, the markup
             // goes there as well as text, in one write; drawing programs
-            // read it from there (#2018). Elsewhere the toolkit writes text.
-            if crate::sys::clipboard_svg::write(&svg) {
+            // read it from there (#2018); on Windows a metafile goes with it
+            // (#3431). Elsewhere the toolkit writes text.
+            if crate::sys::clipboard_svg::write(&svg, &strokes) {
                 Task::none()
             } else {
                 iced::clipboard::write(svg).discard()

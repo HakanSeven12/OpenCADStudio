@@ -3211,6 +3211,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "MLEADERSTYLE: current style set to '{name}'." => Some(("layers", "mleaderstyle-current-style-set-to-name")),
         "MLEADERSTYLE: unknown property '{}'. Try: text_height arrowhead_size landing_distance landing_gap" => Some(("layers", "mleaderstyle-unknown-property-try-text-height")),
         "Add Vertex" => Some(("modify", "add-vertex")),
+        "Extend Vertex" => Some(("modify", "extend-vertex")),
         "Closed Cross" => Some(("modify", "closed-cross")),
         "Closed Tee" => Some(("modify", "closed-tee")),
         "Corner Joint" => Some(("modify", "corner-joint")),

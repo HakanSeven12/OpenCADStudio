@@ -3520,6 +3520,7 @@ modify =
     .count-objects = (__ocs_arg_count__ αντικείμενα)
     .edge-extend-indented-title-case = [Ακμή: Επέκταση]
     .add-vertex = Προσθήκη κορυφής
+    .extend-vertex = Extend Vertex
     .closed-cross = Κλειστός σταυρός
     .closed-tee = Κλειστό ταυ
     .corner-joint = Γωνιακή ένωση

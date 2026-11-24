@@ -3530,6 +3530,7 @@ draw =
 
 modify =
     .add-vertex = إضافة رأس
+    .extend-vertex = Extend Vertex
     .closed-cross = تقاطع مغلق
     .closed-tee = وصلة T مغلقة
     .corner-joint = وصلة زاوية

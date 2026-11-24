@@ -3521,6 +3521,7 @@ modify =
     .count-objects =  (__ocs_arg_count__ objects)
     .edge-extend-indented-title-case =  [Edge: Extend]
     .add-vertex = Add Vertex
+    .extend-vertex = Extend Vertex
     .closed-cross = Closed Cross
     .closed-tee = Closed Tee
     .corner-joint = Corner Joint

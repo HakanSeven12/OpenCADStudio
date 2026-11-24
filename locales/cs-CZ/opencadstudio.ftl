@@ -3522,6 +3522,7 @@ draw =
 
 modify =
     .add-vertex = Přidat vrchol
+    .extend-vertex = Extend Vertex
     .closed-cross = Uzavřený kříž
     .closed-tee = Uzavřené T
     .corner-joint = Rohový spoj

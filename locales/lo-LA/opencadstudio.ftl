@@ -3521,6 +3521,7 @@ modify =
     .count-objects =  (__ocs_arg_count__ ວັດຖຸ)
     .edge-extend-indented-title-case =  [ຂອບ: ຍືດເສັ້ນ]
     .add-vertex = ເພີ່ມຈຸດຍອດ
+    .extend-vertex = Extend Vertex
     .closed-cross = ສີ່ແຍກແບບປິດ
     .closed-tee = ສາມແຍກແບບປິດ
     .corner-joint = ຕໍ່ມຸມ

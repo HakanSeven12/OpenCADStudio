@@ -3506,6 +3506,7 @@ draw =
 
 modify =
     .add-vertex = शीर्ष जोड़ें
+    .extend-vertex = Extend Vertex
     .closed-cross = बंद क्रॉस
     .closed-tee = बंद T-जोड़
     .corner-joint = कोने का जोड़

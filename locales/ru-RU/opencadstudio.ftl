@@ -3521,6 +3521,7 @@ draw =
 
 modify =
     .add-vertex = Добавить вершину
+    .extend-vertex = Extend Vertex
     .closed-cross = Закрытое пересечение
     .closed-tee = Закрытое Т-соединение
     .corner-joint = Угловое соединение

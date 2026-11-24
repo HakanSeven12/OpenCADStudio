@@ -3517,6 +3517,7 @@ draw =
 
 modify =
     .add-vertex = Добавяне на връх
+    .extend-vertex = Extend Vertex
     .closed-cross = Затворен кръст
     .closed-tee = Затворено Т-съединение
     .corner-joint = Ъглова връзка

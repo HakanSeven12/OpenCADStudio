@@ -3508,6 +3508,7 @@ draw =
 
 modify =
     .add-vertex = 頂点を追加
+    .extend-vertex = Extend Vertex
     .closed-cross = 閉じた交差
     .closed-tee = 閉じたT字
     .corner-joint = コーナージョイント

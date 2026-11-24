@@ -3521,6 +3521,7 @@ modify =
     .count-objects =  (__ocs_arg_count__ ta obyekt)
     .edge-extend-indented-title-case =  [Qirra: Uzaytiriş]
     .add-vertex = Uç qöşiş
+    .extend-vertex = Extend Vertex
     .closed-cross = Yopiq xoç
     .closed-tee = Yopiq T-tutaşuv
     .corner-joint = Burçakli tutaşuv

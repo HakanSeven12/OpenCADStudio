@@ -3518,6 +3518,7 @@ draw =
 
 modify =
     .add-vertex = Adicionar vértice
+    .extend-vertex = Extend Vertex
     .closed-cross = Cruz fechada
     .closed-tee = T fechado
     .corner-joint = Junção de canto

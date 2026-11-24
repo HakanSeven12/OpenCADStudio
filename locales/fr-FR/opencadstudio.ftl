@@ -3518,6 +3518,7 @@ draw =
 
 modify =
     .add-vertex = Ajouter un sommet
+    .extend-vertex = Extend Vertex
     .closed-cross = Croix fermée
     .closed-tee = Té fermé
     .corner-joint = Raccord d’angle

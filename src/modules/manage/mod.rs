@@ -8,6 +8,7 @@ mod cui_export;
 mod cui_import;
 mod find_nonpurgeable;
 pub mod geometry_cleanup;
+pub mod geometry_cleanup_settings;
 mod options;
 mod overkill;
 mod purge;

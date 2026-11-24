@@ -4,13 +4,14 @@
 //! in `app::commands::geometry_cleanup`.
 
 use crate::app::Message;
+use crate::modules::manage::geometry_cleanup_settings::CleanupSettings;
 use crate::ui::dock::PanelId;
 use crate::ui::kit;
 use crate::ui::style::kit_metrics as km;
 use document::Handle;
 use iced::widget::{button, column, container, row, text, Space};
 use iced::{Element, Fill, Padding};
-use ocs_geom::geom2d::cleanup::EndErrorKind;
+use ocs_geom::geom2d::cleanup::{EndErrorKind, Tolerances};
 
 pub const ICON: &[u8] = include_bytes!("../../../assets/icons/geometry_cleanup.svg");
 
@@ -123,7 +124,7 @@ pub struct Scan {
     pub epoch: u64,
     /// The objects that were selected for the scan.
     pub objects: Vec<Handle>,
-    pub tolerance: f64,
+    pub tolerances: Tolerances,
     pub findings: Vec<Finding>,
 }
 
@@ -135,6 +136,12 @@ pub struct GeometryCleanupPalette {
     pub picked: Option<usize>,
     /// The error types whose list is folded.
     pub folded: Vec<EndErrorKind>,
+    /// The saved settings; `None` until the user saves them.
+    pub settings: Option<CleanupSettings>,
+    /// The file that the saved settings were imported from, for display.
+    pub settings_file: Option<String>,
+    /// The open Settings dialog.
+    pub dialog: Option<crate::ui::window::geometry_cleanup_settings::SettingsDialog>,
 }
 
 #[derive(Debug, Clone)]
@@ -145,6 +152,20 @@ pub enum GeometryCleanupMsg {
     Pick(usize),
     Fix(usize, Fix),
     Fold(EndErrorKind),
+    /// The Settings dialog.
+    OpenSettings,
+    SettingsTolerance(EndErrorKind, String),
+    /// Put the proposed tolerance in the type's box.
+    SettingsUseProposed(EndErrorKind),
+    SettingsRemove(EndErrorKind),
+    SettingsAdd(EndErrorKind),
+    SettingsImport,
+    SettingsImported(std::path::PathBuf),
+    SettingsExport,
+    SettingsExportTo(std::path::PathBuf),
+    SettingsCancel,
+    /// Save the settings, close the dialog and scan.
+    SettingsScan,
 }
 
 /// The errors of a scan by type, in the order of the tree: each type with
@@ -204,6 +225,12 @@ pub fn view<'a>(
             scan.map(|_| msg(GeometryCleanupMsg::Rescan)),
             false,
         ),
+        kit::tool_button(
+            kit::tool_icon(crate::ui::icons::GEAR),
+            crate::t!("Geometry Cleanup Settings").into_owned(),
+            Some(msg(GeometryCleanupMsg::OpenSettings)),
+            false,
+        ),
         Space::new().width(Fill),
     ]
     .spacing(km::TOOL_GAP)
@@ -233,7 +260,12 @@ pub fn view<'a>(
     for (kind, indices) in groups(scan) {
         let folded = palette.folded.contains(&kind);
         list = list.push(kit::category_bar(
-            format!("{}: {}", crate::t!(kind_label(kind)), indices.len()),
+            format!(
+                "{}: {} ({})",
+                crate::t!(kind_label(kind)),
+                indices.len(),
+                scan.tolerances.get(kind).unwrap_or_default()
+            ),
             folded,
             msg(GeometryCleanupMsg::Fold(kind)),
         ));
@@ -255,7 +287,6 @@ pub fn view<'a>(
 
     let body = column![
         kit::band(tools),
-        kit::name_text(crate::tf!("Tolerance: {}", scan.tolerance).into_owned()),
         container(kit::scroll_area(list)).height(Fill),
     ];
     kit::palette(title_bar, body, width)

@@ -1043,6 +1043,36 @@ impl OpenCADStudio {
         Ok(message)
     }
 
+    /// A point of CREATEPOINTMANUAL: written at once on the layer the drawing's
+    /// point creation settings name (else the current layer), then its
+    /// northing and easting echoed. The command's points are one undo step.
+    pub(super) fn add_created_cogo_point(&mut self, at: glam::DVec3, description: Option<String>, elevation: Option<f64>) {
+        let i = self.active_tab;
+        if self.tabs[i].history.pending.is_none() {
+            self.push_undo_snapshot(i, "CREATEPOINTMANUAL");
+        }
+        let current = self.tabs[i].active_layer.clone();
+        let doc = &mut self.tabs[i].scene.document;
+        let layer = c3d::point_creation_layer(doc).filter(|l| doc.layers.get(l).is_some()).unwrap_or(current);
+        let z = elevation.unwrap_or(c3d::NO_ELEVATION);
+        match c3d::create_cogo_point(doc, Vector3::new(at.x, at.y, z), description.as_deref(), Some(&layer)) {
+            Ok((point, _)) => {
+                // Coordinates as the drawing's units show them: 4 places, m or '.
+                let unit = match doc.header.insertion_units {
+                    6 => "m",
+                    2 | 21 => "'",
+                    _ => "",
+                };
+                let (n, e) = (format!("{:.4}{unit}", at.y), format!("{:.4}{unit}", at.x));
+                self.tabs[i].dirty = true;
+                self.tabs[i].scene.bump_entities(&[(point, ChangeKind::Added)]);
+                self.command_line.push_output(&crate::tf!("N: {}   E: {}", n, e));
+            }
+            Err(document::error::DxfError::Parse(message)) => self.command_line.push_error(&message),
+            Err(e) => self.command_line.push_error(&e.to_string()),
+        }
+    }
+
     /// The Name row of a selected COGO point: the typed name, none when cleared.
     pub(super) fn commit_cogo_point_name(&mut self) -> iced::Task<crate::app::Message> {
         let i = self.active_tab;

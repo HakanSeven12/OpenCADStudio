@@ -932,6 +932,13 @@ impl OpenCADStudio {
     }
 
     pub(crate) fn os_window_moved(&mut self, id: iced::window::Id, at: Point) {
+        if self.main_window == Some(id) {
+            // Minimizing parks the window off screen: keep where it was.
+            if at.x > -10000.0 && at.y > -10000.0 {
+                *MAIN_WINDOW_AT.lock().unwrap_or_else(|e| e.into_inner()) = Some(at);
+            }
+            return;
+        }
         if let Some(window) = self.os_windows.iter_mut().find(|window| window.id == id) {
             if window.placing {
                 // The window's own move to its place is still to come.
@@ -1095,6 +1102,19 @@ impl OpenCADStudio {
                         h,
                     }
                 });
+            // A dialog without a place of its own, and every prompt (save on
+            // exit and the like), comes up over the main window.
+            let placement =
+                if kind.fixed_size() || !placement.x.is_finite() || !placement.y.is_finite() {
+                    centred_over_main(
+                        placement,
+                        *MAIN_WINDOW_AT.lock().unwrap_or_else(|e| e.into_inner()),
+                        self.win_size,
+                        crate::ui::icons::scale_factor(),
+                    )
+                } else {
+                    placement
+                };
             // A dialog opened from another dialog's window comes up in front
             // of it, not behind the window that was clicked (#2750).
             let (id, open) = open_window(
@@ -1291,6 +1311,31 @@ pub(crate) fn float_os_windows(
         })
 }
 
+/// Where the main window was last moved to (logical, its top-left corner).
+#[cfg(not(target_arch = "wasm32"))]
+static MAIN_WINDOW_AT: std::sync::Mutex<Option<Point>> = std::sync::Mutex::new(None);
+
+/// `placement` centred over the main window (`at` = its logical top-left
+/// corner, `main` = its logical size, `scale` = its scale factor), so a
+/// dialog comes up on the monitor the app is on, not on the primary one
+/// (`Position::Centered`). Unchanged while the main window's place is unknown.
+#[cfg(not(target_arch = "wasm32"))]
+fn centred_over_main(
+    placement: WindowPlacement,
+    at: Option<Point>,
+    main: (f32, f32),
+    scale: f32,
+) -> WindowPlacement {
+    match at {
+        Some(at) if main.0 > 0.0 && main.1 > 0.0 => WindowPlacement {
+            x: (at.x + ((main.0 - placement.w) / 2.0).max(0.0)) * scale,
+            y: (at.y + ((main.1 - placement.h) / 2.0).max(0.0)) * scale,
+            ..placement
+        },
+        _ => placement,
+    }
+}
+
 /// Open a window of its own at `placement` (centred when it has no place).
 #[cfg(not(target_arch = "wasm32"))]
 fn open_window(
@@ -1345,6 +1390,21 @@ fn open_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A prompt opens over the main window on whichever monitor it is, not
+    /// centred on the primary one; with the main window's place unknown the
+    /// placement is left alone (centred by the system).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn prompt_is_centred_over_the_main_window() {
+        let prompt = WindowPlacement { x: f32::NAN, y: f32::NAN, w: 400.0, h: 200.0 };
+        // Main window on a second monitor to the right, 1600 x 900 logical, scale 1.5.
+        let placed = centred_over_main(prompt, Some(Point::new(1920.0, 0.0)), (1600.0, 900.0), 1.5);
+        assert_eq!((placed.x, placed.y), ((1920.0 + 600.0) * 1.5, 350.0 * 1.5));
+        assert_eq!((placed.w, placed.h), (400.0, 200.0));
+        let unknown = centred_over_main(prompt, None, (1600.0, 900.0), 1.5);
+        assert!(unknown.x.is_nan() && unknown.y.is_nan());
+    }
 
     /// An unplaced window must not make the whole settings file unreadable.
     #[test]

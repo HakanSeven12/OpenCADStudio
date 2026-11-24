@@ -473,6 +473,16 @@ pub fn reassembled(brep: &r::Brep, matrix: &[[f64; 4]; 4]) -> Option<r::Brep> {
     })
 }
 
+/// How far `points` may lie from the conic or quadric they are labelled as: `relative` to their
+/// own reach, and the rounding of their coordinates. Their distance from the world's origin says
+/// nothing about the shape: at survey coordinates it would pass a thin pipe as anything.
+fn label_tolerance(relative: f64, points: impl Iterator<Item = [f64; 3]> + Clone) -> f64 {
+    let Some(first) = points.clone().next() else { return 0.0 };
+    let reach = points.clone().map(|p| length(sub(p, first))).fold(0.0, f64::max);
+    let far = points.map(length).fold(0.0, f64::max);
+    relative * reach + 16.0 * f64::EPSILON * far
+}
+
 /// A spline that runs along a circle or an ellipse over `interval`, as that conic: its frame's
 /// x along the ellipse's first axis (toward the spline's start on a circle), turning the way
 /// the spline runs.
@@ -490,8 +500,7 @@ pub fn conic_of(curve: &r::Curve, interval: [f64; 2]) -> Option<r::Curve> {
         return None;
     }
     let normal = unit(n)?;
-    let size = points.iter().map(|p| length(*p)).fold(1.0, f64::max);
-    let tolerance = 1e-9 * size;
+    let tolerance = label_tolerance(1e-9, points.iter().copied());
     if points.iter().any(|p| dot(sub(*p, a), normal).abs() > tolerance) {
         return None;
     }
@@ -588,8 +597,22 @@ pub fn quadric_of(surface: &r::Surface, domain: [[f64; 2]; 2]) -> Option<r::Surf
             samples.push((on.point(uv)?, on.normal(uv)?));
         }
     }
-    let size = samples.iter().map(|(p, _)| length(*p)).fold(1.0, f64::max);
-    let tolerance = 1e-8 * size;
+    let tolerance = label_tolerance(1e-8, samples.iter().map(|(p, _)| *p));
+    // Fitted about the surface itself: about the world's origin, the rounding of survey
+    // coordinates tilts a thin cylinder into a cone, of a negative radius at its origin.
+    let base = samples[0].0;
+    for (p, _) in &mut samples {
+        *p = sub(*p, base);
+    }
+    let mut quadric = quadric_through(&samples, tolerance)?;
+    if let r::Surface::Sphere { frame, .. } | r::Surface::Cylinder { frame, .. } | r::Surface::Cone { frame, .. } = &mut quadric {
+        frame.origin = add(frame.origin, base);
+    }
+    Some(quadric)
+}
+
+/// The sphere, cylinder or cone through `samples` (points and normals) to `tolerance`.
+fn quadric_through(samples: &[([f64; 3], [f64; 3])], tolerance: f64) -> Option<r::Surface> {
     // The two normals furthest apart, and where their lines pass closest: on the axis of a
     // surface of revolution, at the centre of a sphere.
     let (mut best, mut pair) = (0.0, (0, 1));
@@ -681,8 +704,8 @@ pub fn quadric_of(surface: &r::Surface, domain: [[f64; 2]; 2]) -> Option<r::Surf
     }
     let x = unit(sub(sub(p1, meet), scale(axis, h1)))?;
     let f = frame(meet, x, axis)?;
-    Some(if tan.abs() <= 1e-12 {
-        r::Surface::Cylinder { frame: f, radius: r0 }
+    Some(if tan.abs() <= 1e-12 || (rh - rl).abs() <= tolerance {
+        r::Surface::Cylinder { frame: f, radius: (rl + rh) * 0.5 }
     } else {
         r::Surface::Cone { frame: f, radius_at_origin: r0, half_angle: tan.atan() }
     })

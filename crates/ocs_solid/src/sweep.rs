@@ -87,6 +87,19 @@ enum Piece {
 }
 
 impl Piece {
+    /// The piece moved by `by`; `None` for a spline.
+    fn moved(&self, by: Vec3) -> Option<Self> {
+        match self {
+            Self::Line(a, b) => Some(Self::Line(*a + by, *b + by)),
+            Self::Planar(plane, curve, forward) => {
+                let mut plane = *plane;
+                plane.origin = (Vec3::from(plane.origin) + by).to_array();
+                Some(Self::Planar(plane, curve.clone(), *forward))
+            }
+            Self::Spline(..) => None,
+        }
+    }
+
     fn point(&self, t: f64) -> Vec3 {
         Vec3::from(match self {
             Self::Line(a, b) => a.lerp(*b, t).to_array(),
@@ -750,9 +763,30 @@ pub fn sweep_path(profile_plane: Plane, wires: &[Vec<Curve>], path: SweepPath<'_
     let normal = Vec3::from(placed_plane.normal().ok_or(Error::Argument)?);
     let x = Vec3::from(placed_plane.x_axis).normalize().ok_or(Error::Argument)?;
     let frame = [start, x, normal.cross(x), normal];
-    let mut body = swept(&loops[0].0, &pieces, frame, tangent, options, cap)?;
+    // Made about the world's origin and moved to where the path lies: at survey coordinates
+    // the sweep of a thin section is slow, or comes back as no solid.
+    let Some(near) = pieces.iter().map(|piece| piece.moved(-start)).collect::<Option<Vec<Piece>>>() else {
+        return swept_loops(&loops, &pieces, frame, tangent, options, cap);
+    };
+    let local = [Vec3::ZERO, frame[1], frame[2], frame[3]];
+    let loops: Vec<(Vec<sweep::Curve>, bool)> =
+        loops.iter().map(|(curves, closed)| (curves.iter().map(|c| translated(c, -start)).collect(), *closed)).collect();
+    let body = swept_loops(&loops, &near, local, tangent, options, cap)?;
+    model::transform(&body, &model::affine([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], start.to_array()))
+}
+
+/// An outer loop swept, less its holes.
+fn swept_loops(
+    loops: &[(Vec<sweep::Curve>, bool)],
+    pieces: &[Piece],
+    frame: [Vec3; 4],
+    tangent: Vec3,
+    options: SweepOptions,
+    cap: bool,
+) -> Result<Brep, Error> {
+    let mut body = swept(&loops[0].0, pieces, frame, tangent, options, cap)?;
     for (hole, _) in &loops[1..] {
-        let cut = swept(hole, &pieces, frame, tangent, options, cap)?;
+        let cut = swept(hole, pieces, frame, tangent, options, cap)?;
         body = if cap {
             model::boolean(&body, &cut, BooleanOp::Subtract)?.ok_or(Error::Empty)?
         } else {
@@ -1165,5 +1199,106 @@ mod tests {
         let body = sweep_path(plane, &[square], SweepPath::Polyline3d { points: &points, closed: false }, options).unwrap();
         let volume = model::volume(&body).unwrap();
         assert!((volume - 40.0).abs() < 1e-2 * 40.0, "{volume}");
+    }
+
+    use solidcore_record::brep as r;
+
+    /// A circle swept along `points` (moved to `origin`), reopened by the kernel and as large as
+    /// its section's area times the path's length: a mitre keeps that.
+    fn swept_pipe(points: &[[f64; 3]], origin: [f64; 2], radius: f64) -> Result<(), String> {
+        swept_pipe_from([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], points, origin, radius)?;
+        swept_pipe_from([0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], points, origin, radius)
+    }
+
+    fn swept_pipe_from(x: [f64; 3], y: [f64; 3], points: &[[f64; 3]], origin: [f64; 2], radius: f64) -> Result<(), String> {
+        let points: Vec<[f64; 3]> = points.iter().map(|p| [origin[0] + p[0], origin[1] + p[1], p[2]]).collect();
+        let plane = Plane::from_axes(points[0], x, y);
+        let body = sweep_path(plane, &circle(radius), SweepPath::Polyline3d { points: &points, closed: false }, SweepOptions::default())
+            .map_err(|e| format!("{e:?}"))?;
+        let volume = model::volume(&body).map_err(|e| format!("made, but does not open again: {e:?}"))?;
+        // A straight wall is a cylinder, whatever its coordinates; and what the drawing stores
+        // of it, read back, is the one body.
+        if let Some(face) = body.faces.iter().find(|f| matches!(f.surface, r::Surface::Sphere { .. } | r::Surface::Cone { .. })) {
+            return Err(format!("a wall labelled {:?}", face.surface));
+        }
+        let mut sat = document::entities::acis::SatDocument::new();
+        crate::acis::append(&body, &mut sat).map_err(|e| format!("not written as ACIS: {e:?}"))?;
+        let (read, loss) = crate::acis::lift(&document::entities::acis::SatDocument::parse(&sat.to_sat_string()).map_err(|e| format!("{e:?}"))?);
+        if read.len() != 1 || !loss.is_empty() {
+            return Err(format!("{} bodies read back from ACIS, {loss:?}", read.len()));
+        }
+        let length: f64 = points.windows(2).map(|w| Vec3::from(w[0]).distance(Vec3::from(w[1]))).sum();
+        let expected = PI * radius * radius * length;
+        // One wall a chord and the two ends.
+        if body.faces.len() != points.len() + 1 {
+            return Err(format!("{} faces on {} chords", body.faces.len(), points.len() - 1));
+        }
+        ((volume - expected).abs() < 1e-6 * expected).then_some(()).ok_or(format!("volume {volume}, not {expected}"))
+    }
+
+    const ORIGINS: [[f64; 2]; 5] = [[0.0, 0.0], [1e3, 1e3], [1e4, 1e4], [1e5, 1e5], [540000.0, 6580000.0]];
+
+    #[test]
+    fn a_pipe_round_a_corner_is_swept_wherever_it_lies() {
+        let mut failed = Vec::new();
+        for radius in [0.01, 0.055, 1.0] {
+            for origin in ORIGINS {
+                if let Err(e) = swept_pipe(&[[0.0, 0.0, 10.0], [10.0, 0.0, 10.0], [10.0, 10.0, 10.0]], origin, radius) {
+                    failed.push(format!("r {radius} at {origin:?}: {e}"));
+                }
+            }
+        }
+        assert!(failed.is_empty(), "{}", failed.join("\n"));
+    }
+
+    #[test]
+    fn a_pipe_round_a_bend_of_short_chords_is_swept_wherever_it_lies() {
+        let mut failed = Vec::new();
+        for chords in [3, 9] {
+            let bend = 0.24;
+            let mut points = vec![[0.0, 0.0, 10.0]];
+            points.extend((0..=chords).map(|i| {
+                let a = FRAC_PI_2 * i as f64 / chords as f64;
+                [10.0 - bend + bend * a.sin(), bend - bend * a.cos(), 10.0]
+            }));
+            points.push([10.0, 10.0, 10.0]);
+            for origin in ORIGINS {
+                if let Err(e) = swept_pipe(&points, origin, 0.01) {
+                    failed.push(format!("{chords} chords at {origin:?}: {e}"));
+                }
+            }
+        }
+        assert!(failed.is_empty(), "{}", failed.join("\n"));
+    }
+
+    #[test]
+    fn a_sloped_pipe_is_swept_wherever_it_lies() {
+        let mut failed = Vec::new();
+        for origin in ORIGINS {
+            if let Err(e) = swept_pipe(&[[3.0, 1.0, 9.6], [8.0, 1.0, 10.6]], origin, 0.01) {
+                failed.push(format!("{origin:?}: {e}"));
+            }
+        }
+        assert!(failed.is_empty(), "{}", failed.join("\n"));
+    }
+
+    #[test]
+    fn a_pipe_over_a_ridge_is_swept_wherever_it_lies() {
+        // Two slopes of 1:5 and the bend between them in three chords of 3 cm.
+        let ridge = [
+            [2.0, 5.0, 9.4],
+            [9.952932127, 5.0, 10.9905864255],
+            [9.984219748, 5.0, 10.9947277173],
+            [10.015780252, 5.0, 10.9947277173],
+            [10.047067873, 5.0, 10.9905864255],
+            [18.0, 5.0, 9.4],
+        ];
+        let mut failed = Vec::new();
+        for origin in ORIGINS {
+            if let Err(e) = swept_pipe(&ridge, origin, 0.01) {
+                failed.push(format!("{origin:?}: {e}"));
+            }
+        }
+        assert!(failed.is_empty(), "{}", failed.join("\n"));
     }
 }

@@ -578,3 +578,413 @@ pub fn end_errors(curves: &[Curve], tolerance: f64, weld: Tolerance) -> Vec<EndE
     errors.sort_by_key(|error| error.end);
     errors
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom2d::{Polyline, PolylineVertex};
+
+    fn line(start: [f64; 2], end: [f64; 2]) -> Curve {
+        Curve::Line(Line { start, end })
+    }
+
+    fn polyline(points: &[[f64; 2]], closed: bool) -> Curve {
+        Curve::Polyline(Polyline {
+            vertices: points
+                .iter()
+                .map(|&position| PolylineVertex {
+                    position,
+                    bulge: 0.0,
+                })
+                .collect(),
+            closed,
+        })
+    }
+
+    fn scan(curves: &[Curve], tolerance: f64) -> Vec<EndError> {
+        end_errors(curves, tolerance, Tolerance::new(1e-9))
+    }
+
+    fn near(a: [f64; 2], b: [f64; 2]) -> bool {
+        distance(a, b) < 1e-9
+    }
+
+    fn end(curve: usize, at_start: bool) -> CurveEnd {
+        CurveEnd { curve, at_start }
+    }
+
+    #[test]
+    fn ends_that_meet_or_are_far_apart_are_not_errors() {
+        let meeting = [
+            line([0.0, 0.0], [10.0, 0.0]),
+            line([10.0, 0.0], [10.0, 10.0]),
+        ];
+        assert!(scan(&meeting, 0.5).is_empty());
+        let far = [
+            line([0.0, 0.0], [10.0, 0.0]),
+            line([11.0, 0.0], [20.0, 0.0]),
+        ];
+        assert!(scan(&far, 0.5).is_empty());
+    }
+
+    #[test]
+    fn a_gap_between_two_ends_targets_the_other_end_and_its_corner() {
+        let curves = [
+            line([0.0, 0.0], [10.0, 0.0]),
+            line([10.2, 0.1], [10.2, 10.0]),
+        ];
+        let errors = scan(&curves, 0.5);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let gap = errors[0];
+        assert_eq!(gap.kind, EndErrorKind::Gap);
+        assert_eq!(gap.end, end(0, false));
+        assert_eq!(gap.other, Some(end(1, true)));
+        assert!(near(gap.location, [10.0, 0.0]));
+        assert!(near(gap.target, [10.2, 0.1]));
+        assert!(near(gap.corner.expect("a corner"), [10.2, 0.0]));
+        assert!((gap.deviation - 0.05f64.sqrt()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_gap_between_collinear_ends_has_no_corner() {
+        let curves = [
+            line([0.0, 0.0], [10.0, 0.0]),
+            line([10.3, 0.0], [20.0, 0.0]),
+        ];
+        let errors = scan(&curves, 0.5);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].kind, EndErrorKind::Gap);
+        assert_eq!(errors[0].corner, None);
+    }
+
+    #[test]
+    fn an_end_short_of_a_line_is_an_undershoot() {
+        let curves = [
+            line([0.0, 0.0], [9.7, 0.0]),
+            line([10.0, -5.0], [10.0, 5.0]),
+        ];
+        let errors = scan(&curves, 0.5);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let undershoot = errors[0];
+        assert_eq!(undershoot.kind, EndErrorKind::Undershoot);
+        assert_eq!(undershoot.end, end(0, false));
+        assert!(near(undershoot.target, [10.0, 0.0]));
+        assert!((undershoot.deviation - 0.3).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_end_past_a_line_is_an_overshoot() {
+        let curves = [
+            line([10.4, 0.0], [0.0, 0.0]),
+            line([10.0, -5.0], [10.0, 5.0]),
+        ];
+        let errors = scan(&curves, 0.5);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let overshoot = errors[0];
+        assert_eq!(overshoot.kind, EndErrorKind::Overshoot);
+        assert_eq!(overshoot.end, end(0, true));
+        assert!(near(overshoot.target, [10.0, 0.0]));
+        assert!((overshoot.deviation - 0.4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_short_line_attached_at_its_other_end_is_not_an_overshoot() {
+        let curves = [
+            line([10.0, 0.0], [10.3, 0.0]),
+            line([10.0, -5.0], [10.0, 5.0]),
+        ];
+        assert!(scan(&curves, 0.5).is_empty());
+    }
+
+    #[test]
+    fn an_arc_end_reaches_along_its_circle() {
+        // A quarter arc of radius 10 about the origin that stops 0.03 rad
+        // short of the y axis, where a line runs.
+        let stop = std::f64::consts::FRAC_PI_2 - 0.03;
+        let arc = Curve::Arc(Arc {
+            centre: [0.0, 0.0],
+            radius: 10.0,
+            start_angle: 0.0,
+            end_angle: stop,
+        });
+        let curves = [arc, line([0.0, 0.0], [0.0, 20.0])];
+        let errors = scan(&curves, 0.5);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].kind, EndErrorKind::Undershoot);
+        assert_eq!(errors[0].end, end(0, false));
+        assert!(near(errors[0].target, [0.0, 10.0]));
+        assert!((errors[0].deviation - 0.3).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_almost_closed_polyline_has_a_gap_between_its_own_ends() {
+        let outline = polyline(
+            &[
+                [0.0, 0.0],
+                [10.0, 0.0],
+                [10.0, 10.0],
+                [0.0, 10.0],
+                [0.0, 0.2],
+            ],
+            false,
+        );
+        let errors = scan(&[outline], 0.5);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].kind, EndErrorKind::Gap);
+        assert_eq!(errors[0].end, end(0, true));
+        assert_eq!(errors[0].other, Some(end(0, false)));
+    }
+
+    #[test]
+    fn a_line_shorter_than_the_tolerance_has_no_gap_to_itself() {
+        assert!(scan(&[line([0.0, 0.0], [0.2, 0.0])], 0.5).is_empty());
+    }
+
+    #[test]
+    fn a_closed_polyline_has_no_ends_but_ends_can_fall_short_of_it() {
+        let square = polyline(&[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]], true);
+        assert!(scan(std::slice::from_ref(&square), 0.5).is_empty());
+        let errors = scan(&[square, line([5.0, 20.0], [5.0, 10.2])], 0.5);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].kind, EndErrorKind::Undershoot);
+        assert!(near(errors[0].target, [5.0, 10.0]));
+    }
+
+    #[test]
+    fn each_end_is_reported_once_as_its_nearest_error() {
+        // The end of the first line is 0.1 short of the vertical line and
+        // 0.4 from the end of the third line: the undershoot wins, and the
+        // third line's end, left without a partner, is not reported.
+        let curves = [
+            line([0.0, 0.0], [9.9, 0.0]),
+            line([10.0, -5.0], [10.0, 5.0]),
+            line([9.9, 0.4], [9.9, 8.0]),
+        ];
+        let errors = scan(&curves, 0.5);
+        let kinds: Vec<_> = errors.iter().map(|e| (e.kind, e.end)).collect();
+        assert!(
+            kinds.contains(&(EndErrorKind::Undershoot, end(0, false))),
+            "{errors:?}"
+        );
+        assert!(
+            !errors.iter().any(|e| e.kind == EndErrorKind::Gap),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_polyline_end_reaches_along_its_last_segment() {
+        let path = polyline(&[[0.0, 0.0], [5.0, 0.0], [5.0, 4.8]], false);
+        let errors = scan(&[path, line([0.0, 5.0], [10.0, 5.0])], 0.5);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].kind, EndErrorKind::Undershoot);
+        assert_eq!(errors[0].end, end(0, false));
+        assert!(near(errors[0].target, [5.0, 5.0]));
+    }
+
+    #[test]
+    fn the_proposed_tolerance_is_a_hundredth_of_the_mean_length() {
+        let curves = [line([0.0, 0.0], [10.0, 0.0]), line([0.0, 0.0], [0.0, 30.0])];
+        assert!((proposed_tolerance(&curves) - 0.2).abs() < 1e-12);
+        assert_eq!(proposed_tolerance(&[]), 0.0001);
+        assert_eq!(
+            proposed_tolerance(&[line([0.0, 0.0], [0.001, 0.0])]),
+            0.0001
+        );
+    }
+
+    fn arc(centre: [f64; 2], radius: f64, start_angle: f64, end_angle: f64) -> Curve {
+        Curve::Arc(Arc {
+            centre,
+            radius,
+            start_angle,
+            end_angle,
+        })
+    }
+
+    #[test]
+    fn an_oblique_corner_is_where_both_lines_cross() {
+        // Both lines run towards (6, 5): the first stops 0.2 short of it
+        // along (0.6, 0.8), the second 0.3 short along (-0.8, 0.6).
+        let curves = [
+            line([-0.12, -3.16], [5.88, 4.84]),
+            line([14.24, -1.18], [6.24, 4.82]),
+        ];
+        let errors = scan(&curves, 0.5);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].kind, EndErrorKind::Gap);
+        assert_eq!(errors[0].other, Some(end(1, false)));
+        let corner = errors[0].corner.expect("a corner");
+        assert!(distance(corner, [6.0, 5.0]) < 1e-9, "{corner:?}");
+        assert!((errors[0].deviation - 0.36f64.hypot(0.02)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_corner_farther_than_the_tolerance_from_an_end_is_not_offered() {
+        // The lines cross 0.525 ahead of the first end.
+        let curves = [
+            line([-10.0, 0.0], [0.0, 0.0]),
+            line([-5.7, 8.3], [0.3, 0.3]),
+        ];
+        let errors = scan(&curves, 0.5);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].kind, EndErrorKind::Gap);
+        assert_eq!(errors[0].corner, None);
+    }
+
+    #[test]
+    fn both_ends_of_an_arc_reach_along_its_circle() {
+        let centre = [3.0, -2.0];
+        let quarter = std::f64::consts::FRAC_PI_2;
+        let curves = [
+            arc(centre, 10.0, 0.03, quarter - 0.03),
+            line(centre, [3.0, 20.0]),
+            line(centre, [20.0, -2.0]),
+        ];
+        let errors = scan(&curves, 0.5);
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(errors.iter().all(|e| e.kind == EndErrorKind::Undershoot));
+        let at = |at_start| {
+            errors
+                .iter()
+                .find(|e| e.end == end(0, at_start))
+                .expect("both ends")
+        };
+        let start = [3.0 + 10.0 * 0.03f64.cos(), -2.0 + 10.0 * 0.03f64.sin()];
+        assert!(near(at(true).location, start), "{errors:?}");
+        assert!(near(at(true).target, [13.0, -2.0]), "{errors:?}");
+        assert!(near(at(false).target, [3.0, 8.0]), "{errors:?}");
+        assert!(errors.iter().all(|e| (e.deviation - 0.3).abs() < 1e-9));
+    }
+
+    #[test]
+    fn an_arc_end_past_a_line_is_an_overshoot() {
+        let curves = [
+            arc([3.0, -2.0], 10.0, 0.0, std::f64::consts::FRAC_PI_2 + 0.03),
+            line([3.0, 0.0], [3.0, 20.0]),
+        ];
+        let errors = scan(&curves, 0.5);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].kind, EndErrorKind::Overshoot);
+        assert_eq!(errors[0].end, end(0, false));
+        assert!(near(errors[0].target, [3.0, 8.0]), "{errors:?}");
+        assert!((errors[0].deviation - 0.3).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_small_arc_reaches_the_tolerance_along_its_circle() {
+        // Radius 0.5: the 0.3 shortfall is 0.6 rad of the circle.
+        let curves = [
+            arc([2.0, 1.0], 0.5, 0.0, std::f64::consts::FRAC_PI_2 - 0.6),
+            line([2.0, 0.6], [2.0, 5.0]),
+        ];
+        let errors = scan(&curves, 0.4);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].kind, EndErrorKind::Undershoot);
+        assert!(near(errors[0].target, [2.0, 1.5]), "{errors:?}");
+        assert!((errors[0].deviation - 0.3).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_clockwise_polyline_arc_reaches_along_its_circle() {
+        // From the top of a circle about (3, -2) clockwise to 0.03 rad
+        // above its right side.
+        let to = [3.0 + 10.0 * 0.03f64.cos(), -2.0 + 10.0 * 0.03f64.sin()];
+        let sweep = -(std::f64::consts::FRAC_PI_2 - 0.03);
+        let path = Curve::Polyline(Polyline {
+            vertices: vec![
+                PolylineVertex {
+                    position: [3.0, 8.0],
+                    bulge: (sweep / 4.0).tan(),
+                },
+                PolylineVertex {
+                    position: to,
+                    bulge: 0.0,
+                },
+            ],
+            closed: false,
+        });
+        let errors = scan(&[path, line([8.0, -2.0], [20.0, -2.0])], 0.5);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].kind, EndErrorKind::Undershoot);
+        assert_eq!(errors[0].end, end(0, false));
+        assert!(near(errors[0].target, [13.0, -2.0]), "{errors:?}");
+        assert!((errors[0].deviation - 0.3).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_large_tolerance_reaches_as_far_as_it_says() {
+        let gap = [
+            line([-50.0, 1.0], [1.0, 1.0]),
+            line([4.0, 3.0], [4.0, 50.0]),
+        ];
+        let errors = scan(&gap, 5.0);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].kind, EndErrorKind::Gap);
+        assert!(near(errors[0].corner.expect("a corner"), [4.0, 1.0]));
+        let under = [
+            line([-50.0, 0.0], [0.0, 0.0]),
+            line([4.0, -50.0], [4.0, 50.0]),
+        ];
+        let errors = scan(&under, 5.0);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].kind, EndErrorKind::Undershoot);
+        assert!((errors[0].deviation - 4.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_gap_is_found_across_the_edge_of_a_search_cell() {
+        // With a tolerance of 1, the ends at 0.9 and 1.1 are in cells next
+        // to each other: along X and along Y, with the lower or the upper
+        // cell scanned first.
+        let flip = |p: [f64; 2]| [p[1], p[0]];
+        let close = [([-10.0, 0.0], [0.9, 0.0]), ([1.1, 0.1], [1.1, 10.0])];
+        for swap in [false, true] {
+            for reverse in [false, true] {
+                let mut curves: Vec<Curve> = close
+                    .iter()
+                    .map(|&(a, b)| {
+                        if swap {
+                            line(flip(a), flip(b))
+                        } else {
+                            line(a, b)
+                        }
+                    })
+                    .collect();
+                if reverse {
+                    curves.reverse();
+                }
+                let errors = scan(&curves, 1.0);
+                assert_eq!(errors.len(), 1, "swap {swap} reverse {reverse}: {errors:?}");
+                assert_eq!(errors[0].kind, EndErrorKind::Gap);
+            }
+        }
+        // Ends in cells next to each other but more than the tolerance
+        // apart are not a gap.
+        let apart = [
+            line([-10.0, 0.0], [0.9, 0.0]),
+            line([1.95, 0.5], [1.95, 10.0]),
+        ];
+        assert!(scan(&apart, 1.0).is_empty());
+    }
+
+    #[test]
+    fn the_proposed_tolerance_leaves_out_arcs_unless_there_are_only_arcs() {
+        let quarter = arc([0.0, 0.0], 10.0, 0.0, std::f64::consts::FRAC_PI_2);
+        let expected = 0.01 * 5.0 * std::f64::consts::PI;
+        assert!((proposed_tolerance(std::slice::from_ref(&quarter)) - expected).abs() < 1e-12);
+        let mixed = [quarter, line([0.0, 0.0], [10.0, 0.0])];
+        assert!((proposed_tolerance(&mixed) - 0.1).abs() < 1e-12);
+    }
+
+    #[test]
+    fn no_tolerance_above_the_weld_finds_nothing() {
+        let curves = [
+            line([0.0, 0.0], [10.0, 0.0]),
+            line([10.2, 0.0], [20.0, 0.0]),
+        ];
+        assert!(end_errors(&curves, 1e-9, Tolerance::new(1e-9)).is_empty());
+        assert!(end_errors(&curves, f64::NAN, Tolerance::new(1e-9)).is_empty());
+        assert!(end_errors(&curves, f64::INFINITY, Tolerance::new(1e-9)).is_empty());
+    }
+}

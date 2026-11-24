@@ -35,6 +35,8 @@ mod count;
 mod dash;
 mod dgn_import;
 mod geometry_cleanup;
+#[cfg(test)]
+mod geometry_cleanup_tests;
 mod ifc_plan;
 pub(in crate::app) use dgn_import::read_reference_drawings;
 mod dim;

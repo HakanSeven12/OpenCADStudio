@@ -6653,6 +6653,16 @@ plot =
     .via-the-pdf-application = чрез PDF приложението
     .direct-print = директен печат
     .y-mm = Y (мм)
+    .publish-no-folder = PUBLISH: папката __ocs_fmt_0__ не съществува.
+    .publish-not-opened = чертежът не можа да бъде отворен.
+    .publish-drawing-missing = чертежът __ocs_fmt_0__ не е намерен.
+    .publish-no-layout = чертежът няма оформление с име „__ocs_fmt_0__“.
+    .publish-foreign-setup = настройката на страницата „__ocs_fmt_0__“ е от друг чертеж (__ocs_fmt_1__); поддържат се само настройките на страницата на самия чертеж.
+    .publish-no-setup = чертежът няма настройка на страницата с име „__ocs_fmt_0__“.
+    .publish-start = Публикуване на листове (__ocs_fmt_0__) от __ocs_fmt_1__ в __ocs_fmt_2__
+    .publish-done = Публикувано: __ocs_fmt_0__  страници: __ocs_fmt_1__, байта: __ocs_fmt_2__, __ocs_fmt_3__ s
+    .publish-done-files = Публикувано: PDF файлове: __ocs_fmt_0__ в __ocs_fmt_1__, __ocs_fmt_2__ s
+    .publish-failed-count = PUBLISH: непубликувани листове: __ocs_fmt_0__.
 
 manage =
     .about = Относно

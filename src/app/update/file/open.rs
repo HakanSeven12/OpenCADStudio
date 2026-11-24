@@ -159,6 +159,13 @@ impl OpenCADStudio {
             );
         }
         self.tabs[i].disk_fingerprint = loaded_fingerprint.or(current_fingerprint);
+        // A drawing a sheet list opens only to plot it is closed unsaved
+        // right after: it leaves no lock file beside the drawing.
+        if self.opened_for_publish(path) {
+            self.tabs[i].edit_lease = None;
+            self.tabs[i].edit_lock_conflict = false;
+            return;
+        }
         match crate::io::edit_lock::EditLease::acquire(path) {
             Ok(lease) => {
                 if let Some(warning) = lease.platform_warning() {

@@ -6652,6 +6652,16 @@ plot =
     .via-the-pdf-application = przez aplikację PDF
     .direct-print = wydruk bezpośredni
     .y-mm = Y (mm)
+    .publish-no-folder = PUBLISH: folder __ocs_fmt_0__ nie istnieje.
+    .publish-not-opened = nie można otworzyć rysunku.
+    .publish-drawing-missing = nie znaleziono rysunku __ocs_fmt_0__.
+    .publish-no-layout = rysunek nie ma układu o nazwie „__ocs_fmt_0__”.
+    .publish-foreign-setup = ustawienia strony „__ocs_fmt_0__” pochodzą z innego rysunku (__ocs_fmt_1__); obsługiwane są tylko ustawienia strony samego rysunku.
+    .publish-no-setup = rysunek nie ma ustawień strony o nazwie „__ocs_fmt_0__”.
+    .publish-start = Publikowanie arkuszy (__ocs_fmt_0__) z __ocs_fmt_1__ do __ocs_fmt_2__
+    .publish-done = Opublikowano: __ocs_fmt_0__  stron: __ocs_fmt_1__, bajtów: __ocs_fmt_2__, __ocs_fmt_3__ s
+    .publish-done-files = Opublikowano: plików PDF: __ocs_fmt_0__ w __ocs_fmt_1__, __ocs_fmt_2__ s
+    .publish-failed-count = PUBLISH: nieopublikowane arkusze: __ocs_fmt_0__.
 
 manage =
     .about = O

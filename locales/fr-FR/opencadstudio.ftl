@@ -6654,6 +6654,16 @@ plot =
     .via-the-pdf-application = via l'application PDF
     .direct-print = impression directe
     .y-mm = Y (mm)
+    .publish-no-folder = PUBLISH : le dossier __ocs_fmt_0__ n’existe pas.
+    .publish-not-opened = le dessin n’a pas pu être ouvert.
+    .publish-drawing-missing = dessin __ocs_fmt_0__ introuvable.
+    .publish-no-layout = le dessin n’a pas de présentation nommée « __ocs_fmt_0__ ».
+    .publish-foreign-setup = la mise en page « __ocs_fmt_0__ » provient d’un autre dessin (__ocs_fmt_1__) ; seules les mises en page du dessin lui-même sont prises en charge.
+    .publish-no-setup = le dessin n’a pas de mise en page nommée « __ocs_fmt_0__ ».
+    .publish-start = Publication de __ocs_fmt_0__ feuille(s) de __ocs_fmt_1__ vers __ocs_fmt_2__
+    .publish-done = Publié : __ocs_fmt_0__  __ocs_fmt_1__ page(s), __ocs_fmt_2__ octets, __ocs_fmt_3__ s
+    .publish-done-files = Publié : __ocs_fmt_0__ fichier(s) PDF dans __ocs_fmt_1__, __ocs_fmt_2__ s
+    .publish-failed-count = PUBLISH : __ocs_fmt_0__ feuille(s) n’ont pas été publiées.
 
 manage =
     .about = À propos

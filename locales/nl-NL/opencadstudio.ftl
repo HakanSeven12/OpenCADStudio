@@ -6651,6 +6651,16 @@ plot =
     .via-the-pdf-application = via de PDF-toepassing
     .direct-print = rechtstreeks afdrukken
     .y-mm = Y (mm)
+    .publish-no-folder = PUBLISH: de map __ocs_fmt_0__ bestaat niet.
+    .publish-not-opened = de tekening kon niet worden geopend.
+    .publish-drawing-missing = tekening __ocs_fmt_0__ niet gevonden.
+    .publish-no-layout = de tekening heeft geen layout met de naam '__ocs_fmt_0__'.
+    .publish-foreign-setup = paginaconfiguratie '__ocs_fmt_0__' komt uit een andere tekening (__ocs_fmt_1__); alleen de eigen paginaconfiguraties van de tekening worden ondersteund.
+    .publish-no-setup = de tekening heeft geen paginaconfiguratie met de naam '__ocs_fmt_0__'.
+    .publish-start = __ocs_fmt_0__ blad(en) uit __ocs_fmt_1__ publiceren naar __ocs_fmt_2__
+    .publish-done = Gepubliceerd: __ocs_fmt_0__  __ocs_fmt_1__ pagina('s), __ocs_fmt_2__ bytes, __ocs_fmt_3__ s
+    .publish-done-files = Gepubliceerd: __ocs_fmt_0__ PDF-bestand(en) naar __ocs_fmt_1__, __ocs_fmt_2__ s
+    .publish-failed-count = PUBLISH: __ocs_fmt_0__ blad(en) zijn niet gepubliceerd.
 
 manage =
     .about = Over

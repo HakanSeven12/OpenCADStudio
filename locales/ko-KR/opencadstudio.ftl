@@ -6652,6 +6652,16 @@ plot =
     .via-the-pdf-application = PDF 응용 프로그램 경유
     .direct-print = 직접 인쇄
     .y-mm = Y (mm)
+    .publish-no-folder = PUBLISH: __ocs_fmt_0__ 폴더가 없습니다.
+    .publish-not-opened = 도면을 열 수 없습니다.
+    .publish-drawing-missing = 도면 __ocs_fmt_0__을(를) 찾을 수 없습니다.
+    .publish-no-layout = 도면에 '__ocs_fmt_0__'(이)라는 배치가 없습니다.
+    .publish-foreign-setup = 페이지 설정 '__ocs_fmt_0__'은(는) 다른 도면(__ocs_fmt_1__)의 것입니다. 도면 자체의 페이지 설정만 지원됩니다.
+    .publish-no-setup = 도면에 '__ocs_fmt_0__'(이)라는 페이지 설정이 없습니다.
+    .publish-start = __ocs_fmt_1__의 시트 __ocs_fmt_0__개를 __ocs_fmt_2__(으)로 게시하는 중
+    .publish-done = 게시됨: __ocs_fmt_0__  __ocs_fmt_1__페이지, __ocs_fmt_2__바이트, __ocs_fmt_3__초
+    .publish-done-files = 게시됨: PDF 파일 __ocs_fmt_0__개를 __ocs_fmt_1__에, __ocs_fmt_2__초
+    .publish-failed-count = PUBLISH: 시트 __ocs_fmt_0__개가 게시되지 않았습니다.
 
 manage =
     .about = 소개

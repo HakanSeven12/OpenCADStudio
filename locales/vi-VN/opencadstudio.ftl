@@ -6660,6 +6660,16 @@ plot =
     .via-the-pdf-application = thông qua ứng dụng PDF
     .direct-print = in trực tiếp
     .y-mm = Y (mm)
+    .publish-no-folder = PUBLISH: thư mục __ocs_fmt_0__ không tồn tại.
+    .publish-not-opened = không thể mở bản vẽ.
+    .publish-drawing-missing = không tìm thấy bản vẽ __ocs_fmt_0__.
+    .publish-no-layout = bản vẽ không có bố cục tên '__ocs_fmt_0__'.
+    .publish-foreign-setup = thiết lập trang '__ocs_fmt_0__' đến từ một bản vẽ khác (__ocs_fmt_1__); chỉ hỗ trợ các thiết lập trang của chính bản vẽ.
+    .publish-no-setup = bản vẽ không có thiết lập trang tên '__ocs_fmt_0__'.
+    .publish-start = Đang xuất bản __ocs_fmt_0__ tờ từ __ocs_fmt_1__ sang __ocs_fmt_2__
+    .publish-done = Đã xuất bản: __ocs_fmt_0__  __ocs_fmt_1__ trang, __ocs_fmt_2__ byte, __ocs_fmt_3__ giây
+    .publish-done-files = Đã xuất bản: __ocs_fmt_0__ tệp PDF vào __ocs_fmt_1__, __ocs_fmt_2__ giây
+    .publish-failed-count = PUBLISH: __ocs_fmt_0__ tờ chưa được xuất bản.
 
 manage =
     .about = Giới thiệu

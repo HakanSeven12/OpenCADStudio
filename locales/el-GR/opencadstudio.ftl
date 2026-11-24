@@ -6653,6 +6653,16 @@ plot =
     .via-the-pdf-application = μέσω της εφαρμογής PDF
     .direct-print = απευθείας εκτύπωση
     .y-mm = Y (mm)
+    .publish-no-folder = PUBLISH: ο φάκελος __ocs_fmt_0__ δεν υπάρχει.
+    .publish-not-opened = δεν ήταν δυνατό να ανοίξει το σχέδιο.
+    .publish-drawing-missing = το σχέδιο __ocs_fmt_0__ δεν βρέθηκε.
+    .publish-no-layout = το σχέδιο δεν έχει διάταξη με όνομα «__ocs_fmt_0__».
+    .publish-foreign-setup = η ρύθμιση σελίδας «__ocs_fmt_0__» προέρχεται από άλλο σχέδιο (__ocs_fmt_1__)· υποστηρίζονται μόνο οι ρυθμίσεις σελίδας του ίδιου του σχεδίου.
+    .publish-no-setup = το σχέδιο δεν έχει ρύθμιση σελίδας με όνομα «__ocs_fmt_0__».
+    .publish-start = Δημοσίευση φύλλων (__ocs_fmt_0__) από __ocs_fmt_1__ σε __ocs_fmt_2__
+    .publish-done = Δημοσιεύτηκε: __ocs_fmt_0__  σελίδες: __ocs_fmt_1__, byte: __ocs_fmt_2__, __ocs_fmt_3__ s
+    .publish-done-files = Δημοσιεύτηκε: αρχεία PDF: __ocs_fmt_0__ σε __ocs_fmt_1__, __ocs_fmt_2__ s
+    .publish-failed-count = PUBLISH: φύλλα που δεν δημοσιεύτηκαν: __ocs_fmt_0__.
 
 manage =
     .about = Σχετικά

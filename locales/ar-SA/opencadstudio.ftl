@@ -6665,6 +6665,16 @@ plot =
     .via-the-pdf-application = عبر تطبيق PDF
     .direct-print = طباعة مباشرة
     .y-mm = Y (مم)
+    .publish-no-folder = PUBLISH: المجلد __ocs_fmt_0__ غير موجود.
+    .publish-not-opened = تعذر فتح الرسم.
+    .publish-drawing-missing = لم يتم العثور على الرسم __ocs_fmt_0__.
+    .publish-no-layout = لا يحتوي الرسم على تخطيط باسم '__ocs_fmt_0__'.
+    .publish-foreign-setup = إعداد الصفحة '__ocs_fmt_0__' مأخوذ من رسم آخر (__ocs_fmt_1__)؛ لا تُدعم إلا إعدادات الصفحة الخاصة بالرسم نفسه.
+    .publish-no-setup = لا يحتوي الرسم على إعداد صفحة باسم '__ocs_fmt_0__'.
+    .publish-start = جارٍ نشر __ocs_fmt_0__ ورقة من __ocs_fmt_1__ إلى __ocs_fmt_2__
+    .publish-done = تم النشر: __ocs_fmt_0__  __ocs_fmt_1__ صفحة، __ocs_fmt_2__ بايت، __ocs_fmt_3__ ث
+    .publish-done-files = تم النشر: __ocs_fmt_0__ ملف PDF إلى __ocs_fmt_1__، __ocs_fmt_2__ ث
+    .publish-failed-count = PUBLISH: لم يتم نشر __ocs_fmt_0__ ورقة.
 
 manage =
     .about = حول

@@ -1179,6 +1179,11 @@ impl OpenCADStudio {
             "PRINTALL" | "PUBLISH" => {
                 return Some(Task::done(Message::PrintAllOpen));
             }
+            // A sheet list PUBLISH's step between two drawings.
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::app::sheet_publish::NEXT_STEP => {
+                return Some(self.sheet_publish_step());
+            }
             // PRINTERS — what the system reports about printing, on the
             // command line: the default printer, every printer it lists (or
             // why it could not), and how a plot will reach them. The report
@@ -1259,6 +1264,13 @@ impl OpenCADStudio {
                     .split_once(char::is_whitespace)
                     .map(|(_, rest)| rest.trim())
                     .unwrap_or("");
+                // PUBLISH <list.dsd>: the sheets of a sheet list, from every
+                // drawing it names.
+                #[cfg(not(target_arch = "wasm32"))]
+                if crate::io::dsd::is_sheet_list_path(rest) {
+                    let path = std::path::PathBuf::from(rest.trim_matches('"'));
+                    return Some(self.start_sheet_publish(&path));
+                }
                 let (path_text, sheet_text) = if let Some(stripped) = rest.strip_prefix('"') {
                     match stripped.split_once('"') {
                         Some((path, tail)) => (path, tail.trim()),

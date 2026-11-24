@@ -6648,6 +6648,16 @@ plot =
     .via-the-pdf-application = 透過 PDF 應用程式
     .direct-print = 直接列印
     .y-mm = Y （公釐）
+    .publish-no-folder = PUBLISH：資料夾 __ocs_fmt_0__ 不存在。
+    .publish-not-opened = 無法開啟圖面。
+    .publish-drawing-missing = 找不到圖面 __ocs_fmt_0__。
+    .publish-no-layout = 圖面中沒有名為「__ocs_fmt_0__」的配置。
+    .publish-foreign-setup = 頁面設定「__ocs_fmt_0__」來自另一個圖面（__ocs_fmt_1__）；僅支援圖面本身的頁面設定。
+    .publish-no-setup = 圖面中沒有名為「__ocs_fmt_0__」的頁面設定。
+    .publish-start = 正在將 __ocs_fmt_1__ 中的 __ocs_fmt_0__ 張圖紙發佈到 __ocs_fmt_2__
+    .publish-done = 已發佈：__ocs_fmt_0__  __ocs_fmt_1__ 頁，__ocs_fmt_2__ 位元組，__ocs_fmt_3__ 秒
+    .publish-done-files = 已發佈：__ocs_fmt_0__ 個 PDF 檔案到 __ocs_fmt_1__，__ocs_fmt_2__ 秒
+    .publish-failed-count = PUBLISH：__ocs_fmt_0__ 張圖紙未發佈。
 
 manage =
     .about = 關於

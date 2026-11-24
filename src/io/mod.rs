@@ -12,6 +12,8 @@ pub mod edit_lock;
 // inside is wasm-only.
 pub mod brep_build;
 pub mod crs;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod dsd;
 pub mod dwf_export;
 pub mod fbx;
 pub mod file_association;
@@ -30,6 +32,8 @@ pub mod ole_embed;
 pub mod paper_catalog;
 pub mod patterns;
 pub mod pdf_export;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod pdf_publish;
 pub mod picture_import;
 pub mod plot;
 pub mod plot_device;

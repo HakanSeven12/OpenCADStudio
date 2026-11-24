@@ -6652,6 +6652,16 @@ plot =
     .via-the-pdf-application = PDF-sovelluksen kautta
     .direct-print = suoratulostus
     .y-mm = Y (mm)
+    .publish-no-folder = PUBLISH: kansiota __ocs_fmt_0__ ei ole.
+    .publish-not-opened = piirustusta ei voitu avata.
+    .publish-drawing-missing = piirustusta __ocs_fmt_0__ ei löytynyt.
+    .publish-no-layout = piirustuksessa ei ole asettelua nimeltä ”__ocs_fmt_0__”.
+    .publish-foreign-setup = sivuasetus ”__ocs_fmt_0__” on toisesta piirustuksesta (__ocs_fmt_1__); vain piirustuksen omia sivuasetuksia tuetaan.
+    .publish-no-setup = piirustuksessa ei ole sivuasetusta nimeltä ”__ocs_fmt_0__”.
+    .publish-start = Julkaistaan arkkeja (__ocs_fmt_0__) luettelosta __ocs_fmt_1__ kohteeseen __ocs_fmt_2__
+    .publish-done = Julkaistu: __ocs_fmt_0__  sivuja: __ocs_fmt_1__, tavuja: __ocs_fmt_2__, __ocs_fmt_3__ s
+    .publish-done-files = Julkaistu: PDF-tiedostoja: __ocs_fmt_0__ kansioon __ocs_fmt_1__, __ocs_fmt_2__ s
+    .publish-failed-count = PUBLISH: julkaisematta jäi arkkeja: __ocs_fmt_0__.
 
 manage =
     .about = Tietoja

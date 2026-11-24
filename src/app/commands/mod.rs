@@ -992,7 +992,17 @@ pub fn start_allowed(cmd: &str) -> bool {
     // opens the drawings it works on by path, and EXIT answers its save
     // questions from any tab.
     let verb = cmd.split_whitespace().next().unwrap_or("");
+    // A sheet list PUBLISH opens the drawings it names; PUBLISHNEXT is its
+    // step between two of them.
+    let sheet_list = verb == "PUBLISHNEXT"
+        || matches!(verb, "PUBLISH" | "-PUBLISH")
+            && cmd
+                .trim_end()
+                .trim_end_matches('"')
+                .to_ascii_lowercase()
+                .ends_with(".dsd");
     is_spacemouse_command(cmd)
+        || sheet_list
         || matches!(verb, "OPEN" | "SCRIPT" | "SCR" | "FILEDIA" | "SDI" | "EXIT")
         || matches!(
             cmd,

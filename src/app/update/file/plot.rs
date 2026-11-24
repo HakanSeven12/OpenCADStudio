@@ -1354,16 +1354,24 @@ impl OpenCADStudio {
     pub(in crate::app) fn print_all_pages(&mut self) -> Result<Vec<crate::io::pdf_export::PdfPageInput>, String> {
         self.stamp_plot_fields();
         let available = self.tabs[self.active_tab].scene.layout_names();
-        let selected: Vec<String> = self
+        let selected: Vec<(String, Option<document::objects::PlotSettings>)> = self
             .print_all_layouts
             .iter()
             .filter(|(name, checked)| *checked && available.contains(name))
-            .map(|(name, _)| name.clone())
+            .map(|(name, _)| (name.clone(), None))
             .collect();
         if selected.is_empty() {
             return Err(crate::t!("Select at least one layout.").into_owned());
         }
+        self.plot_layout_pages(&selected)
+    }
 
+    /// The pages of `sheets` in the active drawing, each layout plotted with
+    /// its own page setup or with the page setup given beside it.
+    pub(in crate::app) fn plot_layout_pages(
+        &mut self,
+        sheets: &[(String, Option<document::objects::PlotSettings>)],
+    ) -> Result<Vec<crate::io::pdf_export::PdfPageInput>, String> {
         let i = self.active_tab;
         let original_layout = self.tabs[i].scene.current_layout.clone();
         let original_viewport = self.tabs[i].scene.active_viewport;
@@ -1386,12 +1394,14 @@ impl OpenCADStudio {
             .print_all_settings_override
             .then(|| original_style.clone());
         let result = (|| {
-            let mut pages = Vec::with_capacity(selected.len());
-            for name in selected {
-                let page_setup = self.tabs[i]
-                    .scene
-                    .plot_settings_for(&name)
-                    .ok_or_else(|| crate::tf!("Layout '{name}' has no page setup.").into_owned())?;
+            let mut pages = Vec::with_capacity(sheets.len());
+            for (name, setup) in sheets {
+                let page_setup = match setup {
+                    Some(setup) => setup.clone(),
+                    None => self.tabs[i].scene.plot_settings_for(name).ok_or_else(|| {
+                        crate::tf!("Layout '{name}' has no page setup.").into_owned()
+                    })?,
+                };
                 {
                     let scene = &mut self.tabs[i].scene;
                     scene.current_layout = name.clone();
@@ -1403,7 +1413,8 @@ impl OpenCADStudio {
                     self.active_plot_style = override_style.clone().flatten();
                     self.plot_window = original_window;
                 } else {
-                    self.plot_dialog.paper_space = true;
+                    // A sheet list can name model space.
+                    self.plot_dialog.paper_space = name != "Model";
                     self.plot_window = None;
                     self.plot_dialog.window = None;
                     self.load_plotsettings_into_dialog(&page_setup);

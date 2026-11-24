@@ -6652,6 +6652,16 @@ plot =
     .via-the-pdf-application = tramite l'applicazione PDF
     .direct-print = stampa diretta
     .y-mm = Y (mm)
+    .publish-no-folder = PUBLISH: la cartella __ocs_fmt_0__ non esiste.
+    .publish-not-opened = impossibile aprire il disegno.
+    .publish-drawing-missing = disegno __ocs_fmt_0__ non trovato.
+    .publish-no-layout = il disegno non ha un layout denominato «__ocs_fmt_0__».
+    .publish-foreign-setup = l'impostazione pagina «__ocs_fmt_0__» proviene da un altro disegno (__ocs_fmt_1__); sono supportate solo le impostazioni pagina del disegno stesso.
+    .publish-no-setup = il disegno non ha un'impostazione pagina denominata «__ocs_fmt_0__».
+    .publish-start = Pubblicazione di __ocs_fmt_0__ fogli da __ocs_fmt_1__ in __ocs_fmt_2__
+    .publish-done = Pubblicato: __ocs_fmt_0__  __ocs_fmt_1__ pagine, __ocs_fmt_2__ byte, __ocs_fmt_3__ s
+    .publish-done-files = Pubblicato: __ocs_fmt_0__ file PDF in __ocs_fmt_1__, __ocs_fmt_2__ s
+    .publish-failed-count = PUBLISH: __ocs_fmt_0__ fogli non sono stati pubblicati.
 
 manage =
     .about = Informazioni

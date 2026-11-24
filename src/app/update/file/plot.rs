@@ -456,6 +456,8 @@ pub(crate) fn plot_scene_content(
             group_splits: splits,
             entity_layers,
             entity_plot_styles,
+            links: plot_links(scene),
+            destination: None,
         };
     }
     let (mut model_pattern_wires, model_hatches, model_wipeouts, model_images) =
@@ -514,7 +516,215 @@ pub(crate) fn plot_scene_content(
         group_splits: splits,
         entity_layers,
         entity_plot_styles,
+        links: plot_links(scene),
+        destination: None,
     }
+}
+
+/// The hyperlinks the plot of the current layout carries, as the reference
+/// application exports them: those of the layout's own objects, and of the
+/// model-space objects a viewport of the layout shows (their area mapped onto
+/// the sheet and cut to the viewport), on layers that plot. Block members
+/// and attributes take no part. A relative file address is taken from
+/// HYPERLINKBASE, else from the drawing's folder.
+pub(crate) fn plot_links(scene: &crate::scene::Scene) -> Vec<crate::io::plot::PlotLink> {
+    let doc = &scene.document;
+    let owner = scene.current_layout_block_handle();
+    let base = match doc.header.hyperlink_base.trim() {
+        "" => scene.material_base_dir.clone(),
+        base => Some(std::path::PathBuf::from(base)),
+    };
+    let linked = |entity: &document::EntityType| {
+        let common = entity.common();
+        if common.invisible {
+            return None;
+        }
+        let link = crate::scene::hyperlink::Link::of(entity).filter(|link| !link.is_empty())?;
+        doc.layers
+            .get(&common.layer)
+            .is_none_or(|layer| layer.is_plottable && !layer.flags.frozen && !layer.flags.off)
+            .then_some(link)
+    };
+    let plot_link =
+        |link: crate::scene::hyperlink::Link, entity, bounds| crate::io::plot::PlotLink {
+            entity,
+            bounds,
+            url: link.url,
+            location: link.location,
+            base: base.clone(),
+            destination: None,
+        };
+    let mut links = Vec::new();
+    for entity in doc.entities() {
+        if entity.common().owner_handle != owner {
+            continue;
+        }
+        if let Some(link) = linked(entity) {
+            links.push(plot_link(
+                link,
+                Some(entity.common().handle),
+                link_bounds(entity),
+            ));
+        }
+    }
+    if scene.current_layout == "Model" {
+        return links;
+    }
+    let model = doc.header.model_space_block_handle;
+    let (_, _, viewports) = scene.paper_viewport_handles();
+    for &handle in viewports.iter() {
+        let Some(document::EntityType::Viewport(viewport)) = doc.get_entity(handle) else {
+            continue;
+        };
+        if viewport.common.owner_handle != owner || !viewport.is_on() {
+            continue;
+        }
+        let Some(frame) = scene.viewport_frame(handle) else {
+            continue;
+        };
+        let (cx, cy) = (viewport.center.x, viewport.center.y);
+        let (hw, hh) = (viewport.width / 2.0, viewport.height / 2.0);
+        for entity in doc.entities() {
+            if entity.common().owner_handle != model {
+                continue;
+            }
+            let Some(link) = linked(entity) else {
+                continue;
+            };
+            let Some([x0, y0, x1, y1]) = link_bounds(entity) else {
+                continue;
+            };
+            let mut area = [
+                f64::INFINITY,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::NEG_INFINITY,
+            ];
+            for (x, y) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)] {
+                let p = frame.model_to_paper(glam::DVec3::new(x, y, 0.0));
+                area = [
+                    area[0].min(p.x),
+                    area[1].min(p.y),
+                    area[2].max(p.x),
+                    area[3].max(p.y),
+                ];
+            }
+            let area = [
+                area[0].max(cx - hw),
+                area[1].max(cy - hh),
+                area[2].min(cx + hw),
+                area[3].min(cy + hh),
+            ];
+            if area[2] > area[0] && area[3] > area[1] {
+                links.push(plot_link(link, None, Some(area)));
+            }
+        }
+    }
+    links
+}
+
+/// Pages of one drawing's layouts written into one file: a link to one of
+/// these layouts (an address naming no file, or this drawing) opens its page.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn link_layouts_within(
+    pages: &mut [crate::io::pdf_export::PdfPageInput],
+    names: &[String],
+    own: Option<&std::path::Path>,
+) {
+    let canonical =
+        |path: &std::path::Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let own_file = own.map(canonical);
+    let destination = |layout: &str| format!("OcsLayout {layout}");
+    let mut targets = std::collections::HashSet::new();
+    for page in pages.iter_mut() {
+        for link in &mut page.content.links {
+            let this_drawing = link.url.trim().is_empty()
+                || link
+                    .drawing(own)
+                    .is_some_and(|target| own_file.as_ref() == Some(&canonical(&target)));
+            if !this_drawing {
+                continue;
+            }
+            let layout = link.layout_candidates().into_iter().find_map(|candidate| {
+                names
+                    .iter()
+                    .find(|name| name.eq_ignore_ascii_case(candidate))
+            });
+            if let Some(layout) = layout {
+                link.destination = Some(destination(layout));
+                targets.insert(layout.clone());
+            }
+        }
+    }
+    for (page, name) in pages.iter_mut().zip(names) {
+        if targets.contains(name) {
+            page.content.destination = Some(destination(name));
+        }
+    }
+}
+
+/// The area of a linked object that plots no ink, such as a text of spaces
+/// stretched over a table row as the link of that row. A text between two
+/// points (fit, aligned) spans them, from below its baseline to above its
+/// height as the reference application sizes it (0.226 and 0.834 of the
+/// height); other objects their extents, a flat text given its height.
+fn link_bounds(entity: &document::EntityType) -> Option<[f64; 4]> {
+    use document::entities::TextHorizontalAlignment as Horizontal;
+    let (below, above) = (0.226, 0.834);
+    let corners: Vec<[f64; 2]> = match entity {
+        document::EntityType::Text(text)
+            if matches!(
+                text.horizontal_alignment,
+                Horizontal::Fit | Horizontal::Aligned
+            ) =>
+        {
+            let start = text.insertion_point;
+            let end = text.alignment_point?;
+            let (dx, dy) = (end.x - start.x, end.y - start.y);
+            let length = dx.hypot(dy);
+            if length <= 0.0 {
+                return None;
+            }
+            // Up is to the left of the baseline.
+            let (ux, uy) = (-dy / length * text.height, dx / length * text.height);
+            [(start.x, start.y), (end.x, end.y)]
+                .into_iter()
+                .flat_map(|(x, y)| {
+                    [
+                        [x - ux * below, y - uy * below],
+                        [x + ux * above, y + uy * above],
+                    ]
+                })
+                .collect()
+        }
+        _ => {
+            let (min, max) = crate::scene::convert::tess::entity_bounds(entity);
+            let (mut y0, mut y1) = (min[1], max[1]);
+            if let document::EntityType::Text(text) = entity {
+                if y1 - y0 <= 0.0 {
+                    y0 -= text.height * below;
+                    y1 += text.height * above;
+                }
+            }
+            vec![[min[0], y0], [max[0], y1]]
+        }
+    };
+    let mut bounds = [
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    ];
+    for [x, y] in corners {
+        bounds = [
+            bounds[0].min(x),
+            bounds[1].min(y),
+            bounds[2].max(x),
+            bounds[3].max(y),
+        ];
+    }
+    (bounds.iter().all(|v| v.is_finite()) && bounds[2] > bounds[0] && bounds[3] > bounds[1])
+        .then_some(bounds)
 }
 
 /// Resolve the object style and ByLayer or ByBlock inheritance for the
@@ -1363,7 +1573,15 @@ impl OpenCADStudio {
         if selected.is_empty() {
             return Err(crate::t!("Select at least one layout.").into_owned());
         }
-        self.plot_layout_pages(&selected)
+        let mut pages = self.plot_layout_pages(&selected)?;
+        let names: Vec<String> = selected.into_iter().map(|(name, _)| name).collect();
+        #[cfg(not(target_arch = "wasm32"))]
+        link_layouts_within(
+            &mut pages,
+            &names,
+            self.tabs[self.active_tab].current_path.as_deref(),
+        );
+        Ok(pages)
     }
 
     /// The pages of `sheets` in the active drawing, each layout plotted with

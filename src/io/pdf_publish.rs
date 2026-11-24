@@ -29,6 +29,8 @@ pub struct PublishPdf {
     pages: Vec<u32>,
     /// Bookmark title and page of each sheet.
     bookmarks: Vec<(String, u32)>,
+    /// The pages links reach by name, and their names.
+    destinations: Vec<(String, u32)>,
     /// Optional-content group of each layer name, in first-seen order.
     layers: Vec<u32>,
     layer_ids: HashMap<Vec<u8>, u32>,
@@ -50,6 +52,7 @@ impl PublishPdf {
             pages_id: 0,
             pages: Vec::new(),
             bookmarks: Vec::new(),
+            destinations: Vec::new(),
             layers: Vec::new(),
             layer_ids: HashMap::new(),
         };
@@ -65,8 +68,14 @@ impl PublishPdf {
     }
 
     /// Append every page of `doc` in order, the page at index `i` bookmarked
-    /// with `titles[i]`. Returns the number of pages appended.
-    pub fn append(&mut self, mut doc: lopdf::Document, titles: &[String]) -> Result<usize, String> {
+    /// with `titles[i]` and named `destinations[i]` for links that open it.
+    /// Returns the number of pages appended.
+    pub fn append(
+        &mut self,
+        mut doc: lopdf::Document,
+        titles: &[String],
+        destinations: &[Option<String>],
+    ) -> Result<usize, String> {
         doc.compress();
         let pages: Vec<ObjectId> = doc.get_pages().into_values().collect();
         // The drawing's layers: its optional-content groups by name.
@@ -158,6 +167,9 @@ impl PublishPdf {
             if let Some(title) = titles.get(index) {
                 self.bookmarks.push((title.clone(), number));
             }
+            if let Some(Some(name)) = destinations.get(index) {
+                self.destinations.push((name.clone(), number));
+            }
         }
         Ok(self.pages.len() - first_page)
     }
@@ -190,6 +202,25 @@ impl PublishPdf {
             let outlines = self.write_bookmarks()?;
             catalog.set("Outlines", Object::Reference((outlines, 0)));
             catalog.set("PageMode", Object::Name(b"UseOutlines".to_vec()));
+        }
+        if !self.destinations.is_empty() {
+            // A name tree lists its keys in order; a name links to its first page.
+            let mut names = std::mem::take(&mut self.destinations);
+            names.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+            names.dedup_by(|a, b| a.0 == b.0);
+            let mut list = Vec::with_capacity(names.len() * 2);
+            for (name, page) in names {
+                list.push(Object::String(name.into_bytes(), StringFormat::Literal));
+                list.push(Object::Array(vec![
+                    Object::Reference((page, 0)),
+                    Object::Name(b"Fit".to_vec()),
+                ]));
+            }
+            let tree = Dictionary::from_iter([("Names", Object::Array(list))]);
+            catalog.set(
+                "Names",
+                Dictionary::from_iter([("Dests", Object::Dictionary(tree))]),
+            );
         }
         if !self.layers.is_empty() {
             let groups: Vec<Object> = self
@@ -576,14 +607,19 @@ mod tests {
         let path = dir.join("set.pdf");
         let mut pdf = PublishPdf::create(&path).unwrap();
         assert_eq!(
-            pdf.append(sheet(1191, 842, &["0", "Walls"]), &["0001 - A3".into()])
-                .unwrap(),
+            pdf.append(
+                sheet(1191, 842, &["0", "Walls"]),
+                &["0001 - A3".into()],
+                &[]
+            )
+            .unwrap(),
             1
         );
         assert_eq!(
             pdf.append(
                 sheet(842, 595, &["Walls", "Doors"]),
-                &["0002 - Übersicht".into()]
+                &["0002 - Übersicht".into()],
+                &[Some("Sheet 2".into())]
             )
             .unwrap(),
             1
@@ -633,6 +669,17 @@ mod tests {
                 ("0001 - A3".to_string(), pages[0]),
                 ("0002 - Übersicht".to_string(), pages[1])
             ]
+        );
+
+        // Links open the second sheet by its name.
+        let names = catalog.get(b"Names").unwrap().as_dict().unwrap();
+        let dests = names.get(b"Dests").unwrap().as_dict().unwrap();
+        let list = dests.get(b"Names").unwrap().as_array().unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].as_str().unwrap(), b"Sheet 2");
+        assert_eq!(
+            list[1].as_array().unwrap()[0].as_reference().unwrap(),
+            pages[1]
         );
 
         // "Walls" is one group for both sheets; each page's properties name
@@ -688,12 +735,13 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("set.pdf");
         let mut pdf = PublishPdf::create(&path).unwrap();
-        pdf.append(sheet(100, 100, &[]), &[]).unwrap();
+        pdf.append(sheet(100, 100, &[]), &[], &[]).unwrap();
         drop(pdf);
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
 
         let mut pdf = PublishPdf::create(&path).unwrap();
-        pdf.append(sheet(100, 100, &["0"]), &["x".into()]).unwrap();
+        pdf.append(sheet(100, 100, &["0"]), &["x".into()], &[])
+            .unwrap();
         pdf.finish("Set", false).unwrap();
         let doc = lopdf::Document::load(&path).unwrap();
         assert!(doc.catalog().unwrap().get(b"Outlines").is_err());

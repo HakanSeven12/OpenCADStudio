@@ -1367,6 +1367,7 @@ impl OpenCADStudio {
                             .set_title(&title)
                             .set_file_name("block.dwg")
                             .add_filter(crate::t!("DWG Files").as_ref(), &["dwg"])
+                            .add_filter(crate::t!("DXF Files").as_ref(), &["dxf"])
                             .save_file()
                             .await
                             .map(|h| crate::sys::handle_path(&h));

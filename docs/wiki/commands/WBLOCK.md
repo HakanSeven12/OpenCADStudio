@@ -22,7 +22,7 @@ web: In the web app the new drawing is downloaded by the browser.
 | **Base point** | **Pick point** picks the base point in the drawing, or type **X**, **Y** and **Z**. Objects only. |
 | **Select objects** / quick select button | Picks the objects to write, or opens quick select. The dialog shows how many objects are selected. |
 | **Retain** / **Convert to block** / **Delete from drawing** | What happens to the selected objects in the current drawing after they are written. |
-| **File name and path** | Where the new drawing is saved. The `...` button opens a file browser. It starts as `new block` in the drawing's folder, or in your documents folder for an unsaved drawing. |
+| **File name and path** | Where the new drawing is saved. The `...` button opens a file browser. It starts as `new block` in the drawing's folder, or in your documents folder for an unsaved drawing. A `.dxf` name writes a DXF file instead of a DWG. |
 | **Insert units** | The units stored in the new drawing. |
 
 ## Command-line form

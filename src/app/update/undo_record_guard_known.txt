@@ -21,10 +21,13 @@ control:save
 CommandInput during PLINE
 CommandOptionPick during PLINE
 ContextMenuPick(Grip)
+GripMenuPick
 SetModifiers
 ViewportLeftPressAt(Point) during PLINE
 
-# By design: a cancelled command takes back what it placed.
+# By design: a cancelled command takes back what it placed, and a cancelled
+# grip edit puts back the entity that it changed.
+CommandEscape
 CommandEscape during BACTION
 
 # By design: view state. A viewport's stale saved view is corrected when

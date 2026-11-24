@@ -325,8 +325,19 @@ impl OpenCADStudio {
             let w = self.tabs[i].last_cursor_world;
             let xf = self.tabs[i].ucs_xform();
             let d_ucs = xf.vec_to_ucs(w - anchor);
-            let dx = d_ucs.x;
-            let dy = d_ucs.y;
+            let (mut dx, mut dy) = (d_ucs.x, d_ucs.y);
+            // Tracking moves along the plane axis nearest the cursor.
+            if self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|c| c.name() == "TRACKING")
+            {
+                if dx.abs() >= dy.abs() {
+                    dy = 0.0;
+                } else {
+                    dx = 0.0;
+                }
+            }
             // In the plane unless the cursor is tracked straight up or down
             // (#2796), where what is left in the plane is only noise.
             let in_plane = (dx * dx + dy * dy).sqrt();

@@ -1723,7 +1723,7 @@ impl OpenCADStudio {
                 || self.tabs[i]
                     .active_cmd
                     .as_ref()
-                    .is_some_and(|cmd| matches!(cmd.name(), "FROM" | "MTP" | "POINTFILTER"))
+                    .is_some_and(|cmd| matches!(cmd.name(), "FROM" | "MTP" | "POINTFILTER" | "TRACKING"))
             {
                 // Rebuild only the command overlay, not the resident drawing;
                 // the full snap pass still waits for the normal dwell tick.

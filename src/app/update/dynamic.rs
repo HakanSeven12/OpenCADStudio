@@ -866,7 +866,7 @@ impl OpenCADStudio {
     ) -> Option<(Vec<crate::scene::WireModel>, Vec<document::Handle>)> {
         let tab = &mut self.tabs[i];
         let modifier = tab.active_cmd.as_ref()?;
-        if !matches!(modifier.name(), "FROM" | "MTP" | "POINTFILTER") {
+        if !matches!(modifier.name(), "FROM" | "MTP" | "POINTFILTER" | "TRACKING") {
             return None;
         }
         tab.suspended_cmd.as_ref()?;

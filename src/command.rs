@@ -1199,6 +1199,111 @@ impl CadCommand for PointFilterCommand {
     }
 }
 
+/// `TK`, `TRACK` or `TRACKING` typed at a point prompt.
+pub fn is_tracking_token(token: &str) -> bool {
+    matches!(
+        token.trim().trim_start_matches('_').to_ascii_uppercase().as_str(),
+        "TK" | "TRACK" | "TRACKING"
+    )
+}
+
+/// Point-entry modifier for tracking: a first tracking point, then any number
+/// of next points, each kept on the plane axis through the previous one that
+/// it lies nearest. Enter returns the last tracking point to the parked command.
+#[derive(Debug)]
+pub struct TrackingCommand {
+    last: Option<DVec3>,
+    plane: WorkingPlane,
+    previous_point: Option<DVec3>,
+}
+
+impl TrackingCommand {
+    pub fn new(previous_point: Option<DVec3>) -> Self {
+        Self {
+            last: None,
+            plane: WorkingPlane::default(),
+            previous_point,
+        }
+    }
+
+    /// `pt` moved onto the plane X or Y axis through the last tracking point,
+    /// whichever it is nearer.
+    pub fn orthogonal(&self, pt: DVec3) -> DVec3 {
+        let Some(last) = self.last else {
+            return pt;
+        };
+        let (base, mut local) = (self.plane.to_local(last), self.plane.to_local(pt));
+        if (local.x - base.x).abs() >= (local.y - base.y).abs() {
+            local.y = base.y;
+        } else {
+            local.x = base.x;
+        }
+        local.z = base.z;
+        self.plane.to_world(local)
+    }
+}
+
+impl CadCommand for TrackingCommand {
+    fn name(&self) -> &'static str {
+        "TRACKING"
+    }
+
+    fn prompt(&self) -> String {
+        crate::t!(if self.last.is_none() {
+            "First tracking point:"
+        } else {
+            "Next point (Press ENTER to end tracking):"
+        })
+        .into_owned()
+    }
+
+    fn set_working_plane(&mut self, plane: WorkingPlane) {
+        self.plane = plane;
+    }
+
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        self.last = Some(self.orthogonal(pt));
+        CmdResult::NeedPoint
+    }
+
+    fn resolved_anchor(&self) -> Option<DVec3> {
+        self.last
+    }
+
+    fn modifier_restore_point(&self) -> Option<Option<DVec3>> {
+        Some(self.previous_point)
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        match self.last {
+            Some(pt) => CmdResult::ReturnPoint(pt),
+            None => CmdResult::Cancel,
+        }
+    }
+
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+
+    fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
+        let Some(last) = self.last else {
+            return Vec::new();
+        };
+        let mut guide = WireModel::solid_f64(
+            "tracking_guide".to_string(),
+            vec![last.to_array(), self.orthogonal(pt).to_array()],
+            [0.2, 0.9, 0.5, 1.0],
+            false,
+        );
+        let [dash, gap] = crate::ui::overlay::TRACKING_DASH_PX;
+        guide.pattern_length = dash + gap;
+        guide.pattern = [dash, -gap, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        guide.dash_from_start = true;
+        guide.set_fixed_screen_width(1.5);
+        vec![guide]
+    }
+}
+
 /// Generic interactive front-end for a keyword command that operates on the
 /// current selection (CHPROP, ADJUST, XDATA, UNDERLAY, DRAWORDER…). If nothing
 /// is selected when it starts it first gathers a selection (Enter confirms),
@@ -4432,6 +4537,20 @@ mod tests {
                 plane.to_local(point)
             );
         }
+    }
+
+    #[test]
+    fn tracking_keeps_each_point_on_an_axis_of_the_previous() {
+        assert!(is_tracking_token("tk") && is_tracking_token("_TRACKING"));
+        let mut cmd = TrackingCommand::new(None);
+        assert!(matches!(cmd.on_enter(), CmdResult::Cancel));
+        let mut cmd = TrackingCommand::new(None);
+        cmd.on_point(DVec3::new(1.0, 2.0, 0.0));
+        cmd.on_point(DVec3::new(11.0, 3.0, 0.0));
+        cmd.on_point(DVec3::new(10.0, 7.0, 0.0));
+        assert!(
+            matches!(cmd.on_enter(), CmdResult::ReturnPoint(p) if p == DVec3::new(11.0, 7.0, 0.0))
+        );
     }
 
     #[test]

@@ -538,11 +538,28 @@ impl OpenCADStudio {
         self.refresh_active_cmd_preview(i);
     }
 
+    pub(in crate::app) fn start_tracking_modifier(&mut self, i: usize) {
+        if self.tabs[i].suspended_cmd.is_some() {
+            return;
+        }
+        let parent = self.tabs[i].active_cmd.take();
+        self.tabs[i].suspended_cmd = parent;
+        self.tabs[i].scene.clear_preview_wire();
+        let cmd = crate::command::TrackingCommand::new(self.last_point);
+        let prompt = crate::command::CadCommand::prompt(&cmd);
+        self.tabs[i].active_cmd = Some(Box::new(cmd));
+        self.push_ucs_to_cmd(i);
+        self.command_line.push_info(&prompt);
+        self.command_line.set_step_options(Vec::new());
+        self.sync_dyn_fields();
+        self.refresh_active_cmd_preview(i);
+    }
+
     pub(in crate::app) fn relative_input_base(&self, i: usize) -> Option<glam::DVec3> {
         self.tabs[i]
             .active_cmd
             .as_ref()
-            .filter(|c| c.name() == "FROM")
+            .filter(|c| matches!(c.name(), "FROM" | "TRACKING"))
             .and_then(|c| c.resolved_anchor())
             .or(self.last_point)
     }

@@ -47,6 +47,27 @@ const LIMITS: &[(&str, Work)] = &[
     // One write for the new value, and none for the events after it (#3392).
     ("change a setting", limit(0, 0, 0, 1)),
     ("pointer move after a changed setting", limit(0, 0, 0, 0)),
+    ("copy all lines", limit(0, 1, 1, 0)),
+    ("undo the copy of all lines", limit(0, 1, 0, 0)),
+    ("rotate all lines", limit(0, 1, 1, 0)),
+    ("select all lines", limit(0, 0, 0, 0)),
+    ("pointer move with all lines selected", limit(0, 0, 0, 0)),
+    ("pan with the middle button", limit(0, 0, 0, 0)),
+    ("zoom with the wheel", limit(0, 0, 0, 0)),
+    // A step that changes which entities the display holds can assemble
+    // the set one time.
+    ("regenerate the drawing", limit(1, 0, 0, 0)),
+    ("erase all lines", limit(1, 0, 0, 0)),
+    ("turn off the layer of all lines", limit(1, 0, 0, 0)),
+    ("turn on the layer of all lines", limit(0, 1, 0, 0)),
+    ("freeze the layer of all lines", limit(1, 0, 0, 0)),
+    ("thaw the layer of all lines", limit(0, 1, 0, 0)),
+    (
+        "change the colour of the layer of all lines",
+        limit(0, 1, 0, 0),
+    ),
+    ("switch to a paper layout", limit(1, 1, 0, 0)),
+    ("switch back to model space", limit(0, 1, 0, 0)),
 ];
 
 const fn limit(full_builds: u64, patches: u64, contexts: u64, settings_writes: u64) -> Work {
@@ -60,18 +81,24 @@ const fn limit(full_builds: u64, patches: u64, contexts: u64, settings_writes: u
 
 /// An app with a drawing of [`LINES`] lines that was drawn one time.
 fn large_drawing() -> OpenCADStudio {
+    large_drawing_on("0")
+}
+
+/// [`large_drawing`] with its lines on `layer`.
+fn large_drawing_on(layer: &str) -> OpenCADStudio {
     let mut app = OpenCADStudio::new_for_test();
     let _ = app.automation_op(r#"{"op":"new"}"#);
+    if layer != "0" {
+        script(&mut app, &format!("-LAYER N {layer}  "));
+    }
     let tab = app.active_tab;
     for i in 0..LINES {
         let x = (i % 100) as f64 * 10.0;
         let y = (i / 100) as f64 * 10.0;
-        app.tabs[tab]
-            .scene
-            .add_entity(EntityType::Line(Line::from_points(
-                Vector3::new(x, y, 0.0),
-                Vector3::new(x + 5.0, y + 5.0, 0.0),
-            )));
+        let mut line =
+            Line::from_points(Vector3::new(x, y, 0.0), Vector3::new(x + 5.0, y + 5.0, 0.0));
+        line.common.layer = layer.to_string();
+        app.tabs[tab].scene.add_entity(EntityType::Line(line));
     }
     let before = work(&app);
     assert_eq!(draw(&app), LINES, "one wire for each line");
@@ -352,4 +379,157 @@ fn a_changed_setting_is_written_one_time_and_not_again() {
         pointer_to(app, 400.0, 300.0);
         pointer_to(app, 410.0, 305.0);
     });
+}
+
+/// The wires that the display shows, and how many of them are red.
+fn shown(app: &OpenCADStudio) -> (usize, usize) {
+    let scene = &app.tabs[app.active_tab].scene;
+    let wires = scene.model_tile_wires_arc(0, &Camera::default(), 1.0, 1.0);
+    let shown = wires.iter().filter(|wire| wire.display_visible);
+    let red = shown
+        .clone()
+        .filter(|wire| wire.color[0] > 0.9 && wire.color[1] < 0.1)
+        .count();
+    (shown.count(), red)
+}
+
+/// Where the view looks, and from how far.
+fn view(app: &OpenCADStudio) -> (glam::DVec3, f32) {
+    let camera = app.tabs[app.active_tab].scene.camera.borrow();
+    (camera.target, camera.distance)
+}
+
+#[test]
+fn a_copy_of_all_lines_and_its_undo_are_one_pass() {
+    let mut app = large_drawing();
+    within_limit(&mut app, "copy all lines", |app| {
+        script(app, "COPY ALL  ");
+        script(app, "0,0 ");
+        script(app, "3,3 ");
+        script(app, " ");
+    });
+    assert_eq!(entities(&app), 2 * LINES);
+
+    within_limit(&mut app, "undo the copy of all lines", |app| {
+        let _ = app.update(Message::Undo);
+    });
+    assert_eq!(entities(&app), LINES);
+}
+
+#[test]
+fn a_rotation_of_all_lines_is_one_pass() {
+    let mut app = large_drawing();
+    let line = last_line(&app);
+    let (x, y) = start_of(&app, line);
+    within_limit(&mut app, "rotate all lines", |app| {
+        script(app, "ROTATE ALL  ");
+        script(app, "0,0 ");
+        script(app, "90 ");
+    });
+    let (rotated_x, rotated_y) = start_of(&app, line);
+    assert!(
+        (rotated_x + y).abs() < 1e-6 && (rotated_y - x).abs() < 1e-6,
+        "the lines turned: ({x}, {y}) to ({rotated_x}, {rotated_y})"
+    );
+}
+
+#[test]
+fn a_selection_of_all_lines_does_no_work() {
+    let mut app = large_drawing();
+    within_limit(&mut app, "select all lines", |app| {
+        let _ = app.update(Message::SelectAllShortcut);
+    });
+    assert_eq!(
+        app.tabs[app.active_tab].scene.selected_entities().len(),
+        LINES
+    );
+
+    within_limit(&mut app, "pointer move with all lines selected", |app| {
+        pointer_to(app, 400.0, 300.0);
+        pointer_to(app, 410.0, 305.0);
+    });
+}
+
+#[test]
+fn a_pan_and_a_wheel_zoom_do_no_work() {
+    let mut app = large_drawing();
+    let before = view(&app);
+    within_limit(&mut app, "pan with the middle button", |app| {
+        pointer_to(app, 400.0, 300.0);
+        let _ = app.update(Message::ViewportMiddlePress);
+        pointer_to(app, 450.0, 320.0);
+        pointer_to(app, 470.0, 330.0);
+        let _ = app.update(Message::ViewportMiddleRelease);
+    });
+    let panned = view(&app);
+    assert_ne!(panned.0, before.0, "the view moved");
+
+    within_limit(&mut app, "zoom with the wheel", |app| {
+        let _ = app.update(Message::ViewportScroll(iced::mouse::ScrollDelta::Lines {
+            x: 0.0,
+            y: 1.0,
+        }));
+    });
+    assert_ne!(view(&app).1, panned.1, "the view zoomed");
+}
+
+#[test]
+fn a_regen_and_an_erase_of_all_lines_assemble_the_display_one_time() {
+    let mut app = large_drawing();
+    within_limit(&mut app, "regenerate the drawing", |app| {
+        script(app, "REGEN ");
+    });
+    assert_eq!(shown(&app).0, LINES);
+
+    within_limit(&mut app, "erase all lines", |app| {
+        script(app, "ERASE ALL  ");
+    });
+    assert_eq!(entities(&app), 0);
+    assert_eq!(shown(&app).0, 0, "the display is empty");
+}
+
+#[test]
+fn a_change_of_the_layer_of_all_lines_is_one_pass() {
+    let mut app = large_drawing_on("WORK");
+    within_limit(&mut app, "turn off the layer of all lines", |app| {
+        script(app, "-LAYER OFF WORK  ");
+    });
+    assert_eq!(shown(&app).0, 0, "a layer that is off shows nothing");
+    within_limit(&mut app, "turn on the layer of all lines", |app| {
+        script(app, "-LAYER ON WORK  ");
+    });
+    assert_eq!(shown(&app).0, LINES);
+
+    within_limit(&mut app, "freeze the layer of all lines", |app| {
+        script(app, "-LAYER F WORK  ");
+    });
+    assert_eq!(shown(&app).0, 0, "a frozen layer shows nothing");
+    within_limit(&mut app, "thaw the layer of all lines", |app| {
+        script(app, "-LAYER T WORK  ");
+    });
+    assert_eq!(shown(&app).0, LINES);
+
+    within_limit(
+        &mut app,
+        "change the colour of the layer of all lines",
+        |app| {
+            script(app, "-LAYER C 1 WORK  ");
+        },
+    );
+    assert_eq!(shown(&app), (LINES, LINES), "each line is red");
+}
+
+#[test]
+fn a_layout_switch_assembles_the_display_one_time() {
+    let mut app = large_drawing();
+    within_limit(&mut app, "switch to a paper layout", |app| {
+        let _ = app.update(Message::LayoutSwitch("Layout1".to_string()));
+    });
+    assert_eq!(app.tabs[app.active_tab].scene.current_layout, "Layout1");
+
+    within_limit(&mut app, "switch back to model space", |app| {
+        let _ = app.update(Message::LayoutSwitch("Model".to_string()));
+    });
+    assert_eq!(app.tabs[app.active_tab].scene.current_layout, "Model");
+    assert_eq!(shown(&app).0, LINES);
 }

@@ -46,5 +46,6 @@ pub mod traits;
 pub mod transform;
 pub(crate) mod ucs_xform;
 pub mod underlay;
+pub mod units;
 pub mod view_symbol;
 pub mod viewport;

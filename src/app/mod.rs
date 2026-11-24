@@ -484,13 +484,10 @@ pub(super) const DRAG_START_FAST_PX2: f32 = 144.0;
 pub(super) const VARIES_LABEL: &str = "*VARIES*";
 
 // ── File-open progress ─────────────────────────────────────────────────────
-// Phase encoding for OpenProgress.phase atomic. Updated from the background
-// loader thread, read by the UI overlay on every frame.
-pub const OPEN_PHASE_READING: u8 = 0;
-pub const OPEN_PHASE_PARSING: u8 = 1;
-pub const OPEN_PHASE_XREF: u8 = 2;
-pub const OPEN_PHASE_CACHING: u8 = 3;
-pub const OPEN_PHASE_FINALIZING: u8 = 4;
+pub use crate::io::{
+    OPEN_PHASE_CACHING, OPEN_PHASE_FINALIZING, OPEN_PHASE_PARSING, OPEN_PHASE_READING,
+    OPEN_PHASE_XREF,
+};
 
 #[derive(Debug, Clone)]
 pub struct OpenProgress {

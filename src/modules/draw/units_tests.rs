@@ -2,7 +2,7 @@
 //! of INSUNITS codes (`insunits_to_mm`, `insunits_name`).
 
 use super::*;
-use crate::app::properties::{insunits_name, insunits_to_mm};
+use crate::entities::units::{insunits_name, insunits_to_mm};
 
 /// Each INSUNITS code that has a size converts to each other one, by the
 /// ratio of their sizes.

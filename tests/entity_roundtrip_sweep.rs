@@ -21,7 +21,6 @@ const KNOWN_DIFFERENCES: &[(&str, &str, &str)] = &[
     ("dxf", "polyline2d", "(type)"),
     ("dxf", "dim_radius", "base.definition_point"),
     ("dwg", "dim_radius", "base.definition_point"),
-    ("dxf", "dim_diameter", "leader_length"),
     ("dwg", "spline", "control_points"),
     ("dwg", "leader", "text_height"),
     ("dxf", "tolerance", "text_height"),

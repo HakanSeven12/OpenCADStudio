@@ -6592,6 +6592,16 @@ plot =
     .via-the-pdf-application = PDF uygulaması üzerinden
     .direct-print = doğrudan yazdırma
     .y-mm = Y (mm)
+    .publish-no-folder = PUBLISH: __ocs_fmt_0__ klasörü yok.
+    .publish-not-opened = çizim açılamadı.
+    .publish-drawing-missing = __ocs_fmt_0__ çizimi bulunamadı.
+    .publish-no-layout = çizimde '__ocs_fmt_0__' adlı bir düzen yok.
+    .publish-foreign-setup = '__ocs_fmt_0__' sayfa yapısı başka bir çizimden geliyor (__ocs_fmt_1__); yalnızca çizimin kendi sayfa yapıları desteklenir.
+    .publish-no-setup = çizimde '__ocs_fmt_0__' adlı bir sayfa yapısı yok.
+    .publish-start = __ocs_fmt_1__ listesindeki __ocs_fmt_0__ pafta __ocs_fmt_2__ hedefine yayımlanıyor
+    .publish-done = Yayımlandı: __ocs_fmt_0__  __ocs_fmt_1__ sayfa, __ocs_fmt_2__ bayt, __ocs_fmt_3__ sn
+    .publish-done-files = Yayımlandı: __ocs_fmt_0__ PDF dosyası __ocs_fmt_1__ klasörüne, __ocs_fmt_2__ sn
+    .publish-failed-count = PUBLISH: __ocs_fmt_0__ pafta yayımlanmadı.
 
 manage =
     .about = Hakkında

@@ -500,6 +500,21 @@ fn render_pdf_bytes_impl(
     plot_style: Option<&PlotStyleTable>,
     include_geopdf: bool,
 ) -> Result<Vec<u8>, String> {
+    let mut lo = render_pdf_document(pages, plot_style)?;
+    let precise = if include_geopdf {
+        crate::io::geopdf_export::apply_metadata(&mut lo, pages)?
+    } else {
+        Vec::new()
+    };
+    crate::io::geopdf_export::save_document(&mut lo, &precise)
+}
+
+/// Render pages to a PDF document not yet serialised, without geospatial
+/// metadata: the sheet-list PUBLISH appends it to the set it is writing.
+pub(crate) fn render_pdf_document(
+    pages: &[PdfPageInput],
+    plot_style: Option<&PlotStyleTable>,
+) -> Result<lopdf::Document, String> {
     // A style the table lacks plots with Normal here; the automation export
     // checks `validate_plot_styles` up front and refuses instead.
     let mut doc = PdfDocument::new("Open CAD Studio Export");
@@ -553,12 +568,7 @@ fn render_pdf_bytes_impl(
             }
         }
     }
-    let precise = if include_geopdf {
-        crate::io::geopdf_export::apply_metadata(&mut lo, pages)?
-    } else {
-        Vec::new()
-    };
-    crate::io::geopdf_export::save_document(&mut lo, &precise)
+    Ok(lo)
 }
 
 fn append_pdf_page(

@@ -6653,6 +6653,16 @@ plot =
     .via-the-pdf-application = ຜ່ານແອັບພລິເຄຊັນ PDF
     .direct-print = ພິມໂດຍກົງ
     .y-mm = Y (ມມ)
+    .publish-no-folder = PUBLISH: ບໍ່ມີໂຟນເດີ __ocs_fmt_0__.
+    .publish-not-opened = ບໍ່ສາມາດເປີດແບບແຕ້ມໄດ້.
+    .publish-drawing-missing = ບໍ່ພົບແບບແຕ້ມ __ocs_fmt_0__.
+    .publish-no-layout = ແບບແຕ້ມບໍ່ມີເລເອົາຕ໌ຊື່ '__ocs_fmt_0__'.
+    .publish-foreign-setup = ການຕັ້ງຄ່າໜ້າເຈ້ຍ '__ocs_fmt_0__' ມາຈາກແບບແຕ້ມອື່ນ (__ocs_fmt_1__); ຮອງຮັບສະເພາະການຕັ້ງຄ່າໜ້າເຈ້ຍຂອງແບບແຕ້ມເອງ.
+    .publish-no-setup = ແບບແຕ້ມບໍ່ມີການຕັ້ງຄ່າໜ້າເຈ້ຍຊື່ '__ocs_fmt_0__'.
+    .publish-start = ກຳລັງເຜີຍແຜ່ __ocs_fmt_0__ ແຜ່ນຈາກ __ocs_fmt_1__ ໄປທີ່ __ocs_fmt_2__
+    .publish-done = ເຜີຍແຜ່ແລ້ວ: __ocs_fmt_0__  __ocs_fmt_1__ ໜ້າ, __ocs_fmt_2__ ໄບຕ໌, __ocs_fmt_3__ ວິ
+    .publish-done-files = ເຜີຍແຜ່ແລ້ວ: __ocs_fmt_0__ ໄຟລ໌ PDF ໄປທີ່ __ocs_fmt_1__, __ocs_fmt_2__ ວິ
+    .publish-failed-count = PUBLISH: __ocs_fmt_0__ ແຜ່ນບໍ່ໄດ້ເຜີຍແຜ່.
 
 manage =
     .about = ກ່ຽວກັບ

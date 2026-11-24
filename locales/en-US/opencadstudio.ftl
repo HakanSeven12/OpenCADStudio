@@ -6653,6 +6653,16 @@ plot =
     .via-the-pdf-application = via the PDF application
     .direct-print = direct print
     .y-mm = Y (mm)
+    .publish-no-folder = PUBLISH: the folder __ocs_fmt_0__ does not exist.
+    .publish-not-opened = the drawing could not be opened.
+    .publish-drawing-missing = drawing __ocs_fmt_0__ not found.
+    .publish-no-layout = the drawing has no layout named '__ocs_fmt_0__'.
+    .publish-foreign-setup = page setup '__ocs_fmt_0__' comes from another drawing (__ocs_fmt_1__); only the drawing's own page setups are supported.
+    .publish-no-setup = the drawing has no page setup named '__ocs_fmt_0__'.
+    .publish-start = Publishing __ocs_fmt_0__ sheet(s) from __ocs_fmt_1__ to __ocs_fmt_2__
+    .publish-done = Published: __ocs_fmt_0__  __ocs_fmt_1__ page(s), __ocs_fmt_2__ bytes, __ocs_fmt_3__ s
+    .publish-done-files = Published: __ocs_fmt_0__ PDF file(s) to __ocs_fmt_1__, __ocs_fmt_2__ s
+    .publish-failed-count = PUBLISH: __ocs_fmt_0__ sheet(s) were not published.
 
 manage =
     .about = About

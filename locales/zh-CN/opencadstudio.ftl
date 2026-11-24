@@ -6635,6 +6635,16 @@ plot =
     .via-the-pdf-application = 通过 PDF 应用程序
     .direct-print = 直接打印
     .y-mm = Y (毫米)
+    .publish-no-folder = PUBLISH：文件夹 __ocs_fmt_0__ 不存在。
+    .publish-not-opened = 无法打开图形。
+    .publish-drawing-missing = 未找到图形 __ocs_fmt_0__。
+    .publish-no-layout = 图形中没有名为“__ocs_fmt_0__”的布局。
+    .publish-foreign-setup = 页面设置“__ocs_fmt_0__”来自另一个图形（__ocs_fmt_1__）；仅支持图形自身的页面设置。
+    .publish-no-setup = 图形中没有名为“__ocs_fmt_0__”的页面设置。
+    .publish-start = 正在将 __ocs_fmt_1__ 中的 __ocs_fmt_0__ 张图纸发布到 __ocs_fmt_2__
+    .publish-done = 已发布：__ocs_fmt_0__  __ocs_fmt_1__ 页，__ocs_fmt_2__ 字节，__ocs_fmt_3__ 秒
+    .publish-done-files = 已发布：__ocs_fmt_0__ 个 PDF 文件到 __ocs_fmt_1__，__ocs_fmt_2__ 秒
+    .publish-failed-count = PUBLISH：__ocs_fmt_0__ 张图纸未发布。
 
 manage =
     .about = 关于

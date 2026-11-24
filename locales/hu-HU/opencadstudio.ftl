@@ -6635,6 +6635,16 @@ plot =
     .via-the-pdf-application = a PDF-alkalmazáson keresztül
     .direct-print = közvetlen nyomtatás
     .y-mm = Y (mm)
+    .publish-no-folder = PUBLISH: a(z) __ocs_fmt_0__ mappa nem létezik.
+    .publish-not-opened = a rajzot nem sikerült megnyitni.
+    .publish-drawing-missing = a(z) __ocs_fmt_0__ rajz nem található.
+    .publish-no-layout = a rajzban nincs „__ocs_fmt_0__” nevű elrendezés.
+    .publish-foreign-setup = a(z) „__ocs_fmt_0__” oldalbeállítás másik rajzból származik (__ocs_fmt_1__); csak a rajz saját oldalbeállításai támogatottak.
+    .publish-no-setup = a rajzban nincs „__ocs_fmt_0__” nevű oldalbeállítás.
+    .publish-start = Lapok közzététele (__ocs_fmt_0__): __ocs_fmt_1__ → __ocs_fmt_2__
+    .publish-done = Közzétéve: __ocs_fmt_0__  oldalak: __ocs_fmt_1__, bájt: __ocs_fmt_2__, __ocs_fmt_3__ s
+    .publish-done-files = Közzétéve: PDF-fájlok: __ocs_fmt_0__ ide: __ocs_fmt_1__, __ocs_fmt_2__ s
+    .publish-failed-count = PUBLISH: nem közzétett lapok: __ocs_fmt_0__.
 
 manage =
     .about = Névjegy

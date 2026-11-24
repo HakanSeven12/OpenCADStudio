@@ -6640,6 +6640,16 @@ plot =
     .via-the-pdf-application = PDF アプリケーション経由
     .direct-print = 直接印刷
     .y-mm = Y（mm）
+    .publish-no-folder = PUBLISH: フォルダー __ocs_fmt_0__ が存在しません。
+    .publish-not-opened = 図面を開けませんでした。
+    .publish-drawing-missing = 図面 __ocs_fmt_0__ が見つかりません。
+    .publish-no-layout = 図面に「__ocs_fmt_0__」という名前のレイアウトがありません。
+    .publish-foreign-setup = ページ設定「__ocs_fmt_0__」は別の図面 (__ocs_fmt_1__) のものです。図面自身のページ設定のみサポートされます。
+    .publish-no-setup = 図面に「__ocs_fmt_0__」という名前のページ設定がありません。
+    .publish-start = __ocs_fmt_1__ の __ocs_fmt_0__ シートを __ocs_fmt_2__ にパブリッシュしています
+    .publish-done = パブリッシュ完了: __ocs_fmt_0__  __ocs_fmt_1__ ページ、__ocs_fmt_2__ バイト、__ocs_fmt_3__ 秒
+    .publish-done-files = パブリッシュ完了: PDF ファイル __ocs_fmt_0__ 個を __ocs_fmt_1__ に、__ocs_fmt_2__ 秒
+    .publish-failed-count = PUBLISH: __ocs_fmt_0__ シートがパブリッシュされませんでした。
 
 manage =
     .about = バージョン情報

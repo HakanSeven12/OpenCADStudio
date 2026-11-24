@@ -72,6 +72,8 @@ pub(crate) mod filter_dialog;
 mod find_replace;
 pub(crate) mod text_match;
 mod geographic_location;
+#[cfg(not(target_arch = "wasm32"))]
+mod sheet_publish;
 pub(crate) mod helpers;
 mod history;
 mod layer_filter_store;
@@ -2279,6 +2281,9 @@ pub(super) struct OpenCADStudio {
     /// cannot mark a newer document state clean or redirect its path.
     #[cfg(not(target_arch = "wasm32"))]
     active_save_jobs: std::collections::HashMap<u64, u64>,
+    /// The sheet list PUBLISH is working through, between its script steps.
+    #[cfg(not(target_arch = "wasm32"))]
+    sheet_publish: Option<Box<sheet_publish::SheetPublish>>,
     #[cfg(not(target_arch = "wasm32"))]
     save_job_serial: u64,
     /// Destination leases held while Save As workers are active.
@@ -3413,6 +3418,8 @@ impl OpenCADStudio {
             pending_block_close: None,
             #[cfg(not(target_arch = "wasm32"))]
             active_save_jobs: std::collections::HashMap::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            sheet_publish: None,
             #[cfg(not(target_arch = "wasm32"))]
             save_job_serial: 0,
             #[cfg(not(target_arch = "wasm32"))]

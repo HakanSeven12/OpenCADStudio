@@ -6640,6 +6640,16 @@ plot =
     .via-the-pdf-application = PDF एप्लिकेशन के माध्यम से
     .direct-print = सीधी प्रिंटिंग
     .y-mm = Y (मिमी)
+    .publish-no-folder = PUBLISH: फ़ोल्डर __ocs_fmt_0__ मौजूद नहीं है।
+    .publish-not-opened = ड्रॉइंग खोली नहीं जा सकी।
+    .publish-drawing-missing = ड्रॉइंग __ocs_fmt_0__ नहीं मिली।
+    .publish-no-layout = ड्रॉइंग में '__ocs_fmt_0__' नाम का कोई लेआउट नहीं है।
+    .publish-foreign-setup = पेज सेटअप '__ocs_fmt_0__' किसी दूसरी ड्रॉइंग (__ocs_fmt_1__) से है; केवल ड्रॉइंग के अपने पेज सेटअप समर्थित हैं।
+    .publish-no-setup = ड्रॉइंग में '__ocs_fmt_0__' नाम का कोई पेज सेटअप नहीं है।
+    .publish-start = __ocs_fmt_1__ से __ocs_fmt_0__ शीट __ocs_fmt_2__ पर प्रकाशित की जा रही हैं
+    .publish-done = प्रकाशित: __ocs_fmt_0__  __ocs_fmt_1__ पेज, __ocs_fmt_2__ बाइट, __ocs_fmt_3__ सेकंड
+    .publish-done-files = प्रकाशित: __ocs_fmt_0__ PDF फ़ाइलें __ocs_fmt_1__ में, __ocs_fmt_2__ सेकंड
+    .publish-failed-count = PUBLISH: __ocs_fmt_0__ शीट प्रकाशित नहीं हुईं।
 
 manage =
     .about = के बारे में

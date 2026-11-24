@@ -6654,6 +6654,16 @@ plot =
     .via-the-pdf-application = přes aplikaci PDF
     .direct-print = přímý tisk
     .y-mm = Y (mm)
+    .publish-no-folder = PUBLISH: složka __ocs_fmt_0__ neexistuje.
+    .publish-not-opened = výkres se nepodařilo otevřít.
+    .publish-drawing-missing = výkres __ocs_fmt_0__ nebyl nalezen.
+    .publish-no-layout = výkres nemá rozvržení s názvem „__ocs_fmt_0__“.
+    .publish-foreign-setup = nastavení stránky „__ocs_fmt_0__“ pochází z jiného výkresu (__ocs_fmt_1__); podporována jsou jen nastavení stránky samotného výkresu.
+    .publish-no-setup = výkres nemá nastavení stránky s názvem „__ocs_fmt_0__“.
+    .publish-start = Publikování listů (__ocs_fmt_0__) z __ocs_fmt_1__ do __ocs_fmt_2__
+    .publish-done = Publikováno: __ocs_fmt_0__  stran: __ocs_fmt_1__, bajtů: __ocs_fmt_2__, __ocs_fmt_3__ s
+    .publish-done-files = Publikováno: souborů PDF: __ocs_fmt_0__ do __ocs_fmt_1__, __ocs_fmt_2__ s
+    .publish-failed-count = PUBLISH: nepublikované listy: __ocs_fmt_0__.
 
 manage =
     .about = O aplikaci

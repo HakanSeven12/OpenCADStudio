@@ -6650,6 +6650,16 @@ plot =
     .via-the-pdf-application = über die PDF-Anwendung
     .direct-print = Direktdruck
     .y-mm = Y (mm)
+    .publish-no-folder = PUBLISH: Der Ordner __ocs_fmt_0__ existiert nicht.
+    .publish-not-opened = die Zeichnung konnte nicht geöffnet werden.
+    .publish-drawing-missing = Zeichnung __ocs_fmt_0__ nicht gefunden.
+    .publish-no-layout = die Zeichnung hat kein Layout „__ocs_fmt_0__“.
+    .publish-foreign-setup = Seiteneinrichtung „__ocs_fmt_0__“ stammt aus einer anderen Zeichnung (__ocs_fmt_1__); nur Seiteneinrichtungen der Zeichnung selbst werden unterstützt.
+    .publish-no-setup = die Zeichnung hat keine Seiteneinrichtung „__ocs_fmt_0__“.
+    .publish-start = Veröffentliche __ocs_fmt_0__ Blatt/Blätter aus __ocs_fmt_1__ nach __ocs_fmt_2__
+    .publish-done = Veröffentlicht: __ocs_fmt_0__  __ocs_fmt_1__ Seite(n), __ocs_fmt_2__ Bytes, __ocs_fmt_3__ s
+    .publish-done-files = Veröffentlicht: __ocs_fmt_0__ PDF-Datei(en) nach __ocs_fmt_1__, __ocs_fmt_2__ s
+    .publish-failed-count = PUBLISH: __ocs_fmt_0__ Blatt/Blätter wurden nicht veröffentlicht.
 
 manage =
     .about = Über

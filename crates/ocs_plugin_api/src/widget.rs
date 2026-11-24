@@ -55,11 +55,9 @@ pub enum WidgetChildren {
 pub struct WidgetRow {
     pub label: String,
     pub children: WidgetChildren,
-    /// When set, the row is a BUTTON: activating it carries this action
-    /// name to the plugin through `SurfaceEvent::NodeActivated` (the
-    /// host's activation gesture; the plugin binds the semantics).
-    /// Buttons are leaf rows — an `action` together with children is
-    /// refused by validation. Bounded by the text budget.
+    /// When set, the row is a button named by this action. Activating it
+    /// sends `SurfaceEvent::NodeActivated` for the row; the plugin maps the
+    /// row to its action. A button has no children.
     #[serde(default)]
     pub action: Option<String>,
 }

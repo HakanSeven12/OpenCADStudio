@@ -124,8 +124,7 @@ fn render_level<'a>(
                 node: row_id,
             })
             .style(move |_, status| {
-                // Semantic BUTTON rows (an `action` is set) render with a
-                // visible border so they read as controls, not tree rows.
+                // A button row has a border.
                 let mut style = iced::widget::button::Style::default();
                 if is_action {
                     style.border = iced::Border {

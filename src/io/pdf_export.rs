@@ -512,12 +512,15 @@ fn render_pdf_bytes_impl(
     let mut text_fonts = TextFonts::default();
     // One optional-content group per drawing layer, shared by every page.
     let mut layer_ids = std::collections::HashMap::new();
+    let mut shadings = GradientShadings::default();
     for (index, page) in pages.iter().enumerate() {
+        shadings.page = index;
         append_pdf_page(
             &mut doc,
             &mut image_resources,
             &mut text_fonts,
             &mut layer_ids,
+            &mut shadings,
             page,
             plot_style,
             &fonts,
@@ -532,7 +535,13 @@ fn render_pdf_bytes_impl(
     // out), so every page's content stream — megabytes of vector operators
     // for a CAD sheet — went out uncompressed: a 16-sheet set weighed 280 MB.
     // Serialise through lopdf ourselves and Flate-compress the streams.
-    let mut lo = printpdf::to_lopdf_doc(&doc, &PdfSaveOptions::default(), &mut warnings);
+    // Gradient fills paint with `sh`, which printpdf has no operation for:
+    // they go out as custom operations, which its default "secure" mode drops.
+    let save_options = PdfSaveOptions {
+        secure: false,
+        ..PdfSaveOptions::default()
+    };
+    let mut lo = printpdf::to_lopdf_doc(&doc, &save_options, &mut warnings);
     // printpdf writes page boxes rounded to whole points (an A3 sheet came
     // out 1191 x 842 instead of 1190.55 x 841.89); write the exact size.
     for (page, id) in pages.iter().zip(lo.get_pages().into_values()) {
@@ -553,6 +562,7 @@ fn render_pdf_bytes_impl(
             }
         }
     }
+    shadings.install(&mut lo);
     compress_font_programs(&mut lo);
     let precise = if include_geopdf {
         crate::io::geopdf_export::apply_metadata(&mut lo, pages)?
@@ -613,6 +623,7 @@ fn append_pdf_page(
     image_resources: &mut std::collections::HashMap<(usize, u32, u32), printpdf::XObjectId>,
     text_fonts: &mut TextFonts,
     layer_ids: &mut std::collections::HashMap<String, printpdf::LayerInternalId>,
+    shadings: &mut GradientShadings,
     page: &PdfPageInput,
     fallback_plot_style: Option<&PlotStyleTable>,
     fonts: &SearchableFontSet,
@@ -983,6 +994,7 @@ fn append_pdf_page(
                 DrawItem::WireFill(wire) => {
                     emit_wire_fills(
                         &mut ops,
+                        shadings,
                         std::slice::from_ref(&wire.wire),
                         wire.draw_depth,
                         ox,
@@ -1000,6 +1012,7 @@ fn append_pdf_page(
                 DrawItem::Hatch(hatch) => {
                     emit_hatch(
                         &mut ops,
+                        shadings,
                         hatch,
                         ox,
                         oy,
@@ -1733,6 +1746,7 @@ fn plotted_color(rgb: [f32; 3], _alpha: f32, screening: f32, _options: PdfPlotOp
 
 fn emit_wire_fills(
     ops: &mut Vec<Op>,
+    shadings: &mut GradientShadings,
     wires: &[WireModel],
     wire_depth: f32,
     ox: f64,
@@ -1799,6 +1813,7 @@ fn emit_wire_fills(
                 };
                 emit_hatch(
                     ops,
+                    shadings,
                     &hatch,
                     ox,
                     oy,
@@ -1909,13 +1924,183 @@ fn emit_plot_stamp(ops: &mut Vec<Op>) {
     ]);
 }
 
+/// The gradient fills of the pages being rendered, each a PDF shading named
+/// `OcsSh<n>` in its page's resources.
+#[derive(Default)]
+struct GradientShadings {
+    /// The page being rendered.
+    page: usize,
+    /// The page and the shading of each gradient, by its number.
+    entries: Vec<(usize, lopdf::Object)>,
+}
+
+impl GradientShadings {
+    /// Add a shading of the current page; returns its resource name.
+    fn add(&mut self, shading: lopdf::Object) -> String {
+        self.entries.push((self.page, shading));
+        format!("OcsSh{}", self.entries.len() - 1)
+    }
+
+    /// Name each shading in its page's resources. The names are unique in
+    /// the document, so pages sharing one resource dictionary are fine.
+    fn install(self, doc: &mut lopdf::Document) {
+        use lopdf::{Dictionary, Object};
+        let pages: Vec<lopdf::ObjectId> = doc.get_pages().into_values().collect();
+        for (number, (page, shading)) in self.entries.into_iter().enumerate() {
+            let Some(&page_id) = pages.get(page) else {
+                continue;
+            };
+            // A mesh shading is a stream, which has to be an object of its own.
+            let shading = match shading {
+                Object::Stream(stream) => Object::Reference(doc.add_object(stream)),
+                other => other,
+            };
+            let shared = match doc
+                .get_dictionary(page_id)
+                .and_then(|page| page.get(b"Resources"))
+            {
+                Ok(Object::Reference(id)) => Some(*id),
+                _ => None,
+            };
+            let resources = match shared {
+                Some(id) => doc.get_dictionary_mut(id).ok(),
+                None => doc.get_dictionary_mut(page_id).ok().and_then(|page| {
+                    if !page.has(b"Resources") {
+                        page.set("Resources", Dictionary::new());
+                    }
+                    page.get_mut(b"Resources").ok()?.as_dict_mut().ok()
+                }),
+            };
+            let Some(resources) = resources else {
+                continue;
+            };
+            if !resources.has(b"Shading") {
+                resources.set("Shading", Dictionary::new());
+            }
+            if let Ok(Object::Dictionary(names)) = resources.get_mut(b"Shading") {
+                names.set(format!("OcsSh{number}"), shading);
+            }
+        }
+    }
+}
+
+/// The PDF shading of a gradient fill from `color1` to `color2`, shaped as
+/// [`GradientBox::mix`](crate::scene::model::hatch_model::GradientBox::mix)
+/// says: a linear one as an axial shading, the others as a lattice of 25×25
+/// colours across the fill's frame that the viewer blends between (a type 5
+/// shading). `None` when the boundary gives no frame to shade across.
+#[allow(clippy::too_many_arguments)]
+fn gradient_shading(
+    hatch: &HatchModel,
+    angle_deg: f32,
+    kind: crate::scene::model::hatch_model::GradientKind,
+    invert: bool,
+    shift: f32,
+    color1: [f32; 3],
+    color2: [f32; 3],
+    ox: f64,
+    oy: f64,
+) -> Option<lopdf::Object> {
+    use crate::scene::model::hatch_model::GradientKind;
+    use lopdf::{Dictionary, Object};
+    const LATTICE: usize = 25;
+    let frame = hatch.gradient_box(angle_deg)?;
+    // The frame is in the boundary's local coordinates, as the boundary is.
+    let page = |[x, y]: [f64; 2]| {
+        [
+            (x + hatch.world_origin[0] + ox) * MM_TO_PT as f64,
+            (y + hatch.world_origin[1] + oy) * MM_TO_PT as f64,
+        ]
+    };
+    let color = |t: f64| -> [f32; 3] {
+        let t = t.clamp(0.0, 1.0) as f32;
+        std::array::from_fn(|i| color1[i] + (color2[i] - color1[i]) * t)
+    };
+    let rgb = |c: [f32; 3]| Object::Array(c.iter().map(|&v| Object::Real(v)).collect());
+    if kind == GradientKind::Linear {
+        let a = frame.half_u;
+        let [x0, y0] = page(frame.local(-a, 0.0));
+        let [x1, y1] = page(frame.local(a, 0.0));
+        let function = Dictionary::from_iter([
+            ("FunctionType", Object::Integer(2)),
+            ("Domain", Object::Array(vec![0.into(), 1.into()])),
+            ("C0", rgb(color(frame.mix(kind, invert, shift, -a, 0.0)))),
+            ("C1", rgb(color(frame.mix(kind, invert, shift, a, 0.0)))),
+            ("N", Object::Integer(1)),
+        ]);
+        return Some(Object::Dictionary(Dictionary::from_iter([
+            ("ShadingType", Object::Integer(2)),
+            ("ColorSpace", Object::Name(b"DeviceRGB".to_vec())),
+            (
+                "Coords",
+                Object::Array([x0, y0, x1, y1].map(|v| Object::Real(v as f32)).to_vec()),
+            ),
+            ("Function", Object::Dictionary(function)),
+            (
+                "Extend",
+                Object::Array(vec![Object::Boolean(true), Object::Boolean(true)]),
+            ),
+        ])));
+    }
+    // A little past the boundary's extent, so arcs that bulge between their
+    // points stay covered.
+    let (reach_u, reach_w) = (frame.half_u * 1.02, frame.half_w * 1.02);
+    let step = |i: usize, reach: f64| -reach + 2.0 * reach * i as f64 / (LATTICE - 1) as f64;
+    let mut vertices = Vec::with_capacity(LATTICE * LATTICE);
+    for row in 0..LATTICE {
+        let w = step(row, reach_w);
+        for column in 0..LATTICE {
+            let u = step(column, reach_u);
+            vertices.push((
+                page(frame.local(u, w)),
+                color(frame.mix(kind, invert, shift, u, w)),
+            ));
+        }
+    }
+    let extent = |axis: usize| {
+        vertices
+            .iter()
+            .fold([f64::INFINITY, f64::NEG_INFINITY], |[low, high], (p, _)| {
+                [low.min(p[axis]), high.max(p[axis])]
+            })
+    };
+    let (xs, ys) = (extent(0), extent(1));
+    if !(xs[1] > xs[0] && ys[1] > ys[0]) {
+        return None;
+    }
+    let quantize =
+        |v: f64, [low, high]: [f64; 2]| ((v - low) / (high - low) * u32::MAX as f64).round() as u32;
+    let mut data = Vec::with_capacity(vertices.len() * 11);
+    for ([x, y], c) in &vertices {
+        data.extend_from_slice(&quantize(*x, xs).to_be_bytes());
+        data.extend_from_slice(&quantize(*y, ys).to_be_bytes());
+        data.extend(c.iter().map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8));
+    }
+    let decode = [xs[0], xs[1], ys[0], ys[1]]
+        .map(|v| Object::Real(v as f32))
+        .into_iter()
+        .chain([0, 1, 0, 1, 0, 1].map(Object::Integer))
+        .collect();
+    let dict = Dictionary::from_iter([
+        ("ShadingType", Object::Integer(5)),
+        ("ColorSpace", Object::Name(b"DeviceRGB".to_vec())),
+        ("BitsPerCoordinate", Object::Integer(32)),
+        ("BitsPerComponent", Object::Integer(8)),
+        ("VerticesPerRow", Object::Integer(LATTICE as i64)),
+        ("Decode", Object::Array(decode)),
+    ]);
+    Some(Object::Stream(lopdf::Stream::new(dict, data)))
+}
+
 /// Emit a single hatch / wipeout as a filled (or stroked, for pattern fills)
 /// polygon. NaN sentinels in `hatch.boundary` split the path into multiple
 /// rings so islands and holes render correctly under the even-odd rule.
-/// Mirrors `scene::paper_canvas::draw_hatch`: solid → fill, pattern → outline,
-/// gradient → solid fill of the averaged colour.
+/// Mirrors `scene::paper_canvas::draw_hatch`: solid → fill, pattern → outline;
+/// a gradient paints its shading clipped to the boundary, as the screen draws
+/// it.
 fn emit_hatch(
     ops: &mut Vec<Op>,
+    shadings: &mut GradientShadings,
     hatch: &HatchModel,
     ox: f64,
     oy: f64,
@@ -1953,9 +2138,13 @@ fn emit_hatch(
     let mut screening = 1.0;
     let mut lw_override = None;
     let mut color_overridden = false;
+    // A gradient's colours are true colours, which a colour-dependent table
+    // does not map, as it maps no true colour here; BricsCAD plots them so.
+    let own_colors = matches!(hatch.pattern, HatchPattern::Gradient { .. })
+        && plot_style.is_some_and(|table| !table.is_stb);
     if !is_wipeout {
         if let Some(table) = plot_style {
-            if hatch.aci > 0 {
+            if hatch.aci > 0 && !own_colors {
                 if let Some([cr, cg, cb]) = table.resolve_style_color(hatch.aci) {
                     r = cr;
                     g = cg;
@@ -1980,6 +2169,8 @@ fn emit_hatch(
         // indexed colours meant for the dark screen are adapted. (#1417)
         && hatch.aci != 0
         && !(hatch.aci == 7 && matches!(hatch.pattern, HatchPattern::Solid))
+        // A gradient's stops are true colours: its white plots white.
+        && !matches!(hatch.pattern, HatchPattern::Gradient { .. })
     {
         [r, g, b] = adapt_to_paper([r, g, b]);
     }
@@ -2023,25 +2214,64 @@ fn emit_hatch(
             // the fill.
             (PaintMode::Clip, [r, g, b]) // sentinel — handled below
         }
-        HatchPattern::Gradient { color2, .. } => {
-            // PDF gradients are stored in resource dictionaries; for the
-            // fast path we average the two colours, matching paper_canvas.
-            let second = if color_overridden {
-                [r, g, b]
+        HatchPattern::Gradient {
+            angle_deg,
+            color2,
+            kind,
+            invert,
+            shift,
+        } => {
+            // A plot style colour paints the whole fill.
+            if color_overridden {
+                (PaintMode::Fill, [r, g, b])
             } else {
-                plotted_color(
-                    adapt_to_paper([color2[0], color2[1], color2[2]]),
+                let second = plotted_color(
+                    [color2[0], color2[1], color2[2]],
                     color2[3],
                     screening,
                     options,
-                )
-            };
-            let avg = [
-                (r + second[0]) * 0.5,
-                (g + second[1]) * 0.5,
-                (b + second[2]) * 0.5,
-            ];
-            (PaintMode::Fill, avg)
+                );
+                let shading = gradient_shading(
+                    hatch,
+                    *angle_deg,
+                    *kind,
+                    *invert,
+                    *shift,
+                    [r, g, b],
+                    second,
+                    ox,
+                    oy,
+                );
+                match shading {
+                    Some(shading) => {
+                        let name = shadings.add(shading);
+                        ops.push(Op::SaveGraphicsState);
+                        ops.push(Op::DrawPolygon {
+                            polygon: Polygon {
+                                rings,
+                                mode: PaintMode::Clip,
+                                winding_order: WindingOrder::EvenOdd,
+                            },
+                        });
+                        ops.push(Op::Unknown {
+                            key: "sh".into(),
+                            value: vec![printpdf::DictItem::Name(name.into_bytes())],
+                        });
+                        ops.push(Op::RestoreGraphicsState);
+                        return;
+                    }
+                    // No frame to shade across (a degenerate boundary): the
+                    // middle colour.
+                    None => (
+                        PaintMode::Fill,
+                        [
+                            (r + second[0]) * 0.5,
+                            (g + second[1]) * 0.5,
+                            (b + second[2]) * 0.5,
+                        ],
+                    ),
+                }
+            }
         }
     };
 
@@ -3172,6 +3402,7 @@ mod tests {
     }
 
     use super::*;
+    use crate::scene::model::hatch_model::GradientKind;
 
     #[test]
     fn only_colour_7_adapts_to_the_white_sheet() {
@@ -4132,6 +4363,138 @@ mod tests {
             bytes.len(),
             full_len
         );
+    }
+
+    /// A page with one gradient fill over the square (20, 20)–(40, 40) mm.
+    fn gradient_page(
+        kind: GradientKind,
+        color: [f32; 4],
+        color2: [f32; 4],
+        aci: u8,
+    ) -> PdfPageInput {
+        let mut page = test_page(Vec::new());
+        page.content.hatches = vec![HatchModel {
+            entity: None,
+            effective_layer: None,
+            pattern_origin: None,
+            render_instance: None,
+            world_origin: [0.0, 0.0],
+            boundary: std::sync::Arc::new(vec![
+                [20.0, 20.0],
+                [40.0, 20.0],
+                [40.0, 40.0],
+                [20.0, 40.0],
+            ]),
+            boundary_wcs: None,
+            fill_plane: None,
+            fill_plane_boundary: None,
+            boundary_exterior: None,
+            boundary_sources: None,
+            boundary_paths: None,
+            style: document::entities::HatchStyleType::Normal,
+            pattern: HatchPattern::Gradient {
+                angle_deg: 0.0,
+                color2,
+                kind,
+                invert: false,
+                shift: 0.0,
+            },
+            name: "GRADIENT".into(),
+            color,
+            aci,
+            line_weight_px: 1.0,
+            angle_offset: 0.0,
+            scale: 1.0,
+            draw_depth: 0.0,
+        }];
+        page
+    }
+
+    /// The shadings the first page names in its resources.
+    fn page_shadings(doc: &lopdf::Document) -> Vec<lopdf::Object> {
+        let page = doc.get_pages().into_values().next().unwrap();
+        let page = doc.get_dictionary(page).unwrap();
+        let resources = match page.get(b"Resources").unwrap() {
+            lopdf::Object::Reference(id) => doc.get_dictionary(*id).unwrap(),
+            other => other.as_dict().unwrap(),
+        };
+        let Ok(names) = resources.get(b"Shading").and_then(lopdf::Object::as_dict) else {
+            return Vec::new();
+        };
+        names
+            .iter()
+            .map(|(_, value)| match value {
+                lopdf::Object::Reference(id) => doc.get_object(*id).unwrap().clone(),
+                other => other.clone(),
+            })
+            .collect()
+    }
+
+    /// A curved blue-to-white fill of colour 252 under a table that plots
+    /// 252 grey shades from blue at the top to white at the bottom, as
+    /// BricsCAD plots it; before, it went out as one grey fill.
+    #[test]
+    fn a_gradient_shades_in_its_own_colours_under_a_colour_table() {
+        let mut table = PlotStyleTable::identity("Display.ctb");
+        table.aci_entries[252].color = Some([132, 132, 132]);
+        let page = gradient_page(GradientKind::Curved, [0.0, 0.5, 1.0, 1.0], [1.0; 4], 252);
+        let bytes = render_pdf_bytes(&[page], Some(&table)).unwrap();
+        assert!(
+            pdf_stream_text(&bytes).contains("/OcsSh0 sh"),
+            "the fill paints its shading"
+        );
+        let doc = lopdf::Document::load_mem(&bytes).unwrap();
+        let shadings = page_shadings(&doc);
+        assert_eq!(shadings.len(), 1);
+        let mesh = shadings[0].as_stream().unwrap();
+        assert_eq!(mesh.dict.get(b"ShadingType").unwrap().as_i64().unwrap(), 5);
+        let per_row = mesh.dict.get(b"VerticesPerRow").unwrap().as_i64().unwrap() as usize;
+        let data = mesh.decompressed_content().unwrap();
+        let color = |row: usize, column: usize| {
+            let at = (row * per_row + column) * 11 + 8;
+            [data[at], data[at + 1], data[at + 2]]
+        };
+        let middle = per_row / 2;
+        // Rows run from the bottom up.
+        let bottom = color(0, middle);
+        let top = color(data.len() / 11 / per_row - 1, middle);
+        assert!(
+            bottom.iter().all(|&c| c > 245),
+            "white at the bottom: {bottom:?}"
+        );
+        assert!(top[0] < 80 && top[2] == 255, "blue at the top: {top:?}");
+        assert!(
+            !(0..per_row).any(|c| color(per_row / 2, c) == [132, 132, 132]),
+            "the table's grey does not paint the fill"
+        );
+    }
+
+    /// A linear fill is an axial shading from its first colour at one edge
+    /// to its second at the other; a white end stays white on paper.
+    #[test]
+    fn a_linear_gradient_is_an_axial_shading_across_the_fill() {
+        let page = gradient_page(GradientKind::Linear, [1.0, 0.0, 0.0, 1.0], [1.0; 4], 1);
+        let bytes = render_pdf_bytes(&[page], None).unwrap();
+        let doc = lopdf::Document::load_mem(&bytes).unwrap();
+        let shadings = page_shadings(&doc);
+        let axial = shadings[0].as_dict().unwrap();
+        assert_eq!(axial.get(b"ShadingType").unwrap().as_i64().unwrap(), 2);
+        let numbers = |object: &lopdf::Object| -> Vec<f32> {
+            object
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_float().unwrap())
+                .collect()
+        };
+        let coords = numbers(axial.get(b"Coords").unwrap());
+        let expected = [20.0, 30.0, 40.0, 30.0].map(|mm| mm * MM_TO_PT);
+        for (got, want) in coords.iter().zip(expected) {
+            assert!((got - want).abs() < 0.01, "{coords:?}");
+        }
+        let function = axial.get(b"Function").unwrap().as_dict().unwrap();
+        assert_eq!(numbers(function.get(b"C0").unwrap()), vec![1.0, 0.0, 0.0]);
+        assert_eq!(numbers(function.get(b"C1").unwrap()), vec![1.0, 1.0, 1.0]);
     }
 
     // Runs fully outside the export window never reach the content stream.

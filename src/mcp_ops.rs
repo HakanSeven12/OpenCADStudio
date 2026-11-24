@@ -1672,7 +1672,6 @@ pub static OPS: &[&OpDef] = &[
     &PANEL_INPUT,
     &PANEL_BUTTON,
     &PANEL_ACTION,
-    &PLUGIN_PANELS,
     &PLUGIN_PANEL_ACTION,
     &ACTION,
     &EMBED_IMAGE,

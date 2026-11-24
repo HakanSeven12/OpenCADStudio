@@ -549,7 +549,7 @@ mod tests {
     #[test]
     fn generated_schemas_expose_public_arguments_without_required_envelopes() {
         let tools = tool_definitions();
-        assert_eq!(tools.len(), 16);
+        assert_eq!(tools.len(), 18);
         for tool in &tools {
             let schema = &tool["inputSchema"];
             assert_eq!(schema["type"], "object");
@@ -911,10 +911,10 @@ mod tests {
     }
 
     #[test]
-    fn all_tools_keep_facades_first_and_append_sixteen_intents() {
+    fn all_tools_keep_facades_first_and_append_eighteen_intents() {
         let tools = crate::mcp::tool_definitions();
         let tools = tools.as_array().unwrap();
-        assert_eq!(tools.len(), 20);
+        assert_eq!(tools.len(), 22);
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())

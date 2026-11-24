@@ -1094,6 +1094,111 @@ impl CadCommand for FromPointCommand {
 
 inventory::submit!(CommandRegistration { names: &["FROM"] });
 
+/// A point filter typed at a point prompt: `.X`, `.Y`, `.Z`, `.XY`, `.XZ` or
+/// `.YZ`. It names the UCS axes taken from the first point; the second point
+/// gives the others.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PointFilter {
+    take: [bool; 3],
+}
+
+impl PointFilter {
+    pub fn parse(token: &str) -> Option<Self> {
+        let take = match token
+            .trim()
+            .strip_prefix('.')?
+            .to_ascii_uppercase()
+            .as_str()
+        {
+            "X" => [true, false, false],
+            "Y" => [false, true, false],
+            "Z" => [false, false, true],
+            "XY" => [true, true, false],
+            "XZ" => [true, false, true],
+            "YZ" => [false, true, true],
+            _ => return None,
+        };
+        Some(Self { take })
+    }
+
+    /// The axes taken from the first point (`taken`), or the others.
+    fn axes(self, taken: bool) -> String {
+        "XYZ"
+            .chars()
+            .zip(self.take)
+            .filter_map(|(axis, take)| (take == taken).then_some(axis))
+            .collect()
+    }
+}
+
+/// Point-entry modifier for a point filter: asks for the point to take the
+/// filtered axes from, then for the point that gives the others, and returns
+/// the combined point to the parked command.
+#[derive(Debug)]
+pub struct PointFilterCommand {
+    filter: PointFilter,
+    first: Option<DVec3>,
+    plane: WorkingPlane,
+    previous_point: Option<DVec3>,
+}
+
+impl PointFilterCommand {
+    pub fn new(filter: PointFilter, previous_point: Option<DVec3>) -> Self {
+        Self {
+            filter,
+            first: None,
+            plane: WorkingPlane::default(),
+            previous_point,
+        }
+    }
+}
+
+impl CadCommand for PointFilterCommand {
+    fn name(&self) -> &'static str {
+        "POINTFILTER"
+    }
+
+    fn prompt(&self) -> String {
+        if self.first.is_none() {
+            let filter = format!(".{}", self.filter.axes(true));
+            crate::t!("%{filter} of:", filter = filter).into_owned()
+        } else {
+            crate::t!("(need %{axes}):", axes = self.filter.axes(false)).into_owned()
+        }
+    }
+
+    fn set_working_plane(&mut self, plane: WorkingPlane) {
+        self.plane = plane;
+    }
+
+    fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        let Some(first) = self.first else {
+            self.first = Some(pt);
+            return CmdResult::NeedPoint;
+        };
+        let (first, second) = (self.plane.to_local(first), self.plane.to_local(pt));
+        let mut local = second;
+        for axis in 0..3 {
+            if self.filter.take[axis] {
+                local[axis] = first[axis];
+            }
+        }
+        CmdResult::ReturnPoint(self.plane.to_world(local))
+    }
+
+    fn modifier_restore_point(&self) -> Option<Option<DVec3>> {
+        Some(self.previous_point)
+    }
+
+    fn on_enter(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+
+    fn on_escape(&mut self) -> CmdResult {
+        CmdResult::Cancel
+    }
+}
+
 /// Generic interactive front-end for a keyword command that operates on the
 /// current selection (CHPROP, ADJUST, XDATA, UNDERLAY, DRAWORDER…). If nothing
 /// is selected when it starts it first gathers a selection (Enter confirms),

@@ -7299,6 +7299,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "_mtp Specify first point of mid:" => Some(("common", "mtp-specify-first-point-of-mid")),
         "Base point:" => Some(("common", "from-base-point")),
         "<Offset>:" => Some(("common", "from-offset")),
+        "%{filter} of:" => Some(("common", "point-filter-of")),
+        "(need %{axes}):" => Some(("common", "point-filter-need")),
         "FROM needs an active point prompt." => Some(("common", "from-needs-an-active-point-prompt")),
         "_mtp Specify second point of mid:" => Some(("common", "mtp-specify-second-point-of-mid")),
         "formula" => Some(("common", "formula-2")),

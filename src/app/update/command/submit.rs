@@ -489,6 +489,13 @@ impl OpenCADStudio {
                 self.start_mtp_modifier(i);
                 return self.focus_cmd_input();
             }
+            if let Some(filter) =
+                crate::command::PointFilter::parse(&raw).filter(|_| self.point_modifier_step(i))
+            {
+                self.command_line.input.clear();
+                self.start_point_filter_modifier(i, filter);
+                return self.focus_cmd_input();
+            }
             if let Some(kind) = self.typed_snap_override(i, &raw) {
                 self.command_line.input.clear();
                 self.apply_snap_override(kind);

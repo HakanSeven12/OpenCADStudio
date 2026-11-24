@@ -2861,6 +2861,7 @@ where
     let perf = crate::perf::enabled();
     let total_started = iced::time::Instant::now();
     doc.version = version;
+    list_layout_viewports(&mut doc);
     let styles_started = iced::time::Instant::now();
     sync_current_styles_on_save(&mut doc);
     let styles_ms = styles_started.elapsed().as_secs_f64() * 1000.0;
@@ -3178,6 +3179,7 @@ pub fn prepare_document_for_save(mut doc: Document, version: document::DxfVersio
     for layout in without_sheet {
         crate::scene::Scene::ensure_layout_sheet_viewport(&mut doc, &layout);
     }
+    list_layout_viewports(&mut doc);
     let styles_started = perf.then(iced::time::Instant::now);
     sync_current_styles_on_save(&mut doc);
     let styles_ms = crate::perf::elapsed_ms(styles_started);
@@ -3232,6 +3234,44 @@ pub fn prepare_document_for_save(mut doc: Document, version: document::DxfVersio
         );
     }
     doc
+}
+
+/// A layout lists its viewports, and a viewport missing from that list opens
+/// switched off in other programs (#3514). Viewports a copy, a paste or an
+/// undo put on a sheet went past the list, so every viewport the layout's
+/// block holds is added to it, behind the ones listed.
+fn list_layout_viewports(doc: &mut Document) {
+    use document::objects::ObjectType;
+    let missing: Vec<(document::Handle, Vec<document::Handle>)> = doc
+        .objects
+        .iter()
+        .filter_map(|(handle, object)| {
+            let ObjectType::Layout(layout) = object else {
+                return None;
+            };
+            if layout.name.eq_ignore_ascii_case("Model") {
+                return None;
+            }
+            let unlisted: Vec<document::Handle> = doc
+                .entities()
+                .filter_map(|entity| match entity {
+                    document::EntityType::Viewport(viewport)
+                        if viewport.common.owner_handle == layout.block_record
+                            && !layout.viewports.contains(&viewport.common.handle) =>
+                    {
+                        Some(viewport.common.handle)
+                    }
+                    _ => None,
+                })
+                .collect();
+            (!unlisted.is_empty()).then_some((*handle, unlisted))
+        })
+        .collect();
+    for (handle, unlisted) in missing {
+        if let Some(ObjectType::Layout(layout)) = doc.objects.get_mut(&handle) {
+            layout.viewports.extend(unlisted);
+        }
+    }
 }
 
 /// A justified TEXT is drawn from its alignment point, but readers that do not

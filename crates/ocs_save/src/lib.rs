@@ -228,7 +228,7 @@ fn external_read_outcome(document: Document, losses: Vec<document::Loss>) -> Rea
     ReadOutcome::new(document, stats)
 }
 
-pub use ifccad::{read_ifccad_for_edit, IfccadSession};
+pub use ifccad::{read_ifccad_for_edit, read_ifccad_source, IfccadSession};
 
 // ── Runtime-field sidecar ──────────────────────────────────────────────────
 

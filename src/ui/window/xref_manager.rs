@@ -692,10 +692,10 @@ impl XrefManagerPanel {
         )
         .into_owned();
         let attach = if IS_WASM {
-            toolbar_tip(crate::t!("Attach DWG").into_owned(), web_tip.clone())
+            toolbar_tip(crate::t!("Attach").into_owned(), web_tip.clone())
         } else {
             split_button(
-                crate::t!("Attach DWG").into_owned(),
+                crate::t!("Attach").into_owned(),
                 Some(Message::XAttachPick),
                 self.attach_open,
                 Message::XrefManagerAttachMenu,

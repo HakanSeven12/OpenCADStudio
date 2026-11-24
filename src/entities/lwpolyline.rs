@@ -48,7 +48,6 @@ pub(crate) fn lwpolyline_global_width(pline: &LwPolyline) -> Option<f64> {
     Some(w0)
 }
 
-/// Midpoint position on an arc segment defined by its bulge.
 /// Append a provisional vertex on the end of an open polyline, joined to the
 /// old end by a straight segment.
 fn append_end_vertex(pline: &mut LwPolyline) {
@@ -61,6 +60,7 @@ fn append_end_vertex(pline: &mut LwPolyline) {
     pline.vertices.push(new_v);
 }
 
+/// Midpoint position on an arc segment defined by its bulge.
 fn arc_midpoint(p0: [f64; 2], p1: [f64; 2], bulge: f64) -> [f64; 2] {
     match crate::entities::common::BulgeArc::from_bulge(p0, p1, bulge) {
         Some(arc) => arc.sample(0.5),

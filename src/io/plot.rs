@@ -346,20 +346,27 @@ impl Default for PlotOptions {
 /// end]`, in the coordinates of its own points, so a plot draws the true
 /// curve instead of the screen's chords (#2854). The wire's tangent geometry
 /// only says that it is one circle or arc; the curve is fitted to the points,
-/// which a layout viewport has already carried onto the sheet. `None` for any
-/// other wire, or when a point is off that circle: the chords are plotted.
+/// which a layout viewport has already carried onto the sheet. A spline or
+/// ellipse wire (no straight-segment vertices, no circle) is drawn through
+/// its points by [`smooth_spans`] (#3526). `None` for any other wire, or when
+/// a point is off that circle: the chords are plotted.
 pub(crate) fn wire_arc_beziers(wire: &WireModel, view_h: f64) -> Option<Vec<[glam::DVec2; 4]>> {
     use crate::scene::model::wire_model::TangentGeom;
     use glam::DVec2;
-    let curve = matches!(
+    let arc = matches!(
         wire.tangent_geoms.as_slice(),
         [TangentGeom::Circle { .. } | TangentGeom::PlanarCircle { .. } | TangentGeom::Arc { .. }]
     );
-    if !curve
+    let sampled = wire.key_vertices.is_empty()
+        && matches!(
+            wire.tangent_geoms.as_slice(),
+            [] | [TangentGeom::PlanarEllipse { .. }]
+        );
+    if !(arc || sampled)
         || wire.world_width > 0.0
         || wire.point_marker.is_some()
         || wire.stub.is_some()
-        || wire.points.len() < 5
+        || wire.points.len() < if arc { 5 } else { 3 }
     {
         return None;
     }
@@ -370,7 +377,60 @@ pub(crate) fn wire_arc_beziers(wire: &WireModel, view_h: f64) -> Option<Vec<[gla
     if !points.iter().all(|point| point.is_finite()) {
         return None;
     }
-    circle_beziers(&points)
+    if arc {
+        circle_beziers(&points)
+    } else {
+        smooth_spans(&points)
+    }
+}
+
+/// Chords sampled from a smooth curve (a spline or an ellipse tessellated for
+/// the screen, at most 7.5° a step) as cubic Bézier spans through the same
+/// points (#3526). A vertex turning more than 8° is a corner and stays one;
+/// a chord leaving a run of smooth vertices curves only when it is at most
+/// twice as long as its neighbour in the run, so a line meeting a curve stays
+/// straight. Straight chords come back as straight spans. `None` when nothing
+/// curves.
+fn smooth_spans(points: &[glam::DVec2]) -> Option<Vec<[glam::DVec2; 4]>> {
+    use glam::DVec2;
+    const MAX_TURN: f64 = 8.0 * std::f64::consts::PI / 180.0;
+    let n = points.len();
+    if n < 3 {
+        return None;
+    }
+    let dir = |i: usize| (points[i + 1] - points[i]).normalize_or_zero();
+    let tangent: Vec<Option<DVec2>> = (0..n)
+        .map(|i| {
+            if i == 0 || i + 1 == n {
+                return None;
+            }
+            let (a, b) = (dir(i - 1), dir(i));
+            (a != DVec2::ZERO && b != DVec2::ZERO && a.angle_to(b).abs() <= MAX_TURN)
+                .then(|| (a + b).normalize())
+        })
+        .collect();
+    let length = |i: usize| points[i].distance(points[i + 1]);
+    // The end tangent of a parabola through the run: the inner one mirrored
+    // in the chord.
+    let mirror = |t: DVec2, d: DVec2| (2.0 * t.dot(d) * d - t).normalize_or_zero();
+    let mut curved = false;
+    let spans = (0..n - 1)
+        .map(|i| {
+            let (p, q, len, d) = (points[i], points[i + 1], length(i), dir(i));
+            let ends = match (tangent[i], tangent[i + 1]) {
+                (Some(a), Some(b)) => Some((a, b)),
+                (Some(a), None) if len <= 2.0 * length(i - 1) => Some((a, mirror(a, d))),
+                (None, Some(b)) if len <= 2.0 * length(i + 1) => Some((mirror(b, d), b)),
+                _ => None,
+            };
+            let Some((t0, t1)) = ends else {
+                return [p, p.lerp(q, 1.0 / 3.0), p.lerp(q, 2.0 / 3.0), q];
+            };
+            curved = true;
+            [p, p + t0 * len / 3.0, q - t1 * len / 3.0, q]
+        })
+        .collect();
+    curved.then_some(spans)
 }
 
 /// The one circle through `points`, turning one way at most once round it:
@@ -484,15 +544,29 @@ fn ring_arc_runs(ring: &[glam::DVec2]) -> Vec<(usize, usize)> {
 /// with every arc run among them replaced by its Bézier spans.
 pub(crate) fn curved_ring(ring: &[glam::DVec2]) -> Vec<(glam::DVec2, bool)> {
     let mut path = Vec::with_capacity(ring.len());
-    let mut next = 0;
+    let Some(&first) = ring.first() else {
+        return path;
+    };
+    path.push((first, false));
+    // The chords from the point already on the path; a spline among them is
+    // drawn as its curve (#3526).
+    let chords = |path: &mut Vec<(glam::DVec2, bool)>, run: &[glam::DVec2]| match smooth_spans(run) {
+        Some(spans) => {
+            for [_, c1, c2, point] in spans {
+                path.extend([(c1, true), (c2, true), (point, false)]);
+            }
+        }
+        None => path.extend(run.iter().skip(1).map(|&point| (point, false))),
+    };
+    let mut from = 0;
     for (start, end) in ring_arc_runs(ring) {
-        path.extend(ring[next..=start].iter().map(|&point| (point, false)));
+        chords(&mut path, &ring[from..=start]);
         for [_, c1, c2, point] in circle_beziers(&ring[start..=end]).unwrap_or_default() {
             path.extend([(c1, true), (c2, true), (point, false)]);
         }
-        next = end + 1;
+        from = end;
     }
-    path.extend(ring.get(next..).unwrap_or_default().iter().map(|&point| (point, false)));
+    chords(&mut path, &ring[from..]);
     path
 }
 

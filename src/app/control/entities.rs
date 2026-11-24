@@ -518,14 +518,36 @@ impl OpenCADStudio {
     /// `entities_delete` — erase by handles. Every handle is
     /// checked up front; nothing is erased when one is missing.
     pub(super) fn control_entities_delete(&mut self, req: &Value) -> Result<Task<Message>, Value> {
-        let handles = hex_handles(req, "handles")?;
+        let mut handles = hex_handles(req, "handles")?;
+        let mut seen = std::collections::HashSet::new();
+        handles.retain(|h| seen.insert(*h));
         let i = self.active_tab;
         require_existing(&self.tabs[i].scene.document, &handles)?;
         self.push_undo_snapshot(i, "ENTITIESDELETE");
         self.tabs[i].scene.erase_entities(&handles);
-        self.post_ref_op(i);
-        let erased = handles.len();
-        self.set_control_result(json!({ "erased": erased }));
+        // What the erase left in the drawing, and why.
+        let scene = &self.tabs[i].scene;
+        let skipped: Vec<Value> = handles
+            .iter()
+            .filter_map(|&h| {
+                let entity = scene.document.get_entity(h)?;
+                let reason = if scene.is_layer_locked(h) {
+                    "locked"
+                } else if scene.is_reference_only(h) || scene.native_edit_disabled(h) {
+                    "not_editable"
+                } else if matches!(entity, document::EntityType::Viewport(_)) {
+                    "sheet_viewport"
+                } else {
+                    "not_erased"
+                };
+                Some(json!({ "handle": format!("{:X}", h.value()), "reason": reason }))
+            })
+            .collect();
+        let erased = handles.len() - skipped.len();
+        if erased > 0 {
+            self.post_ref_op(i);
+        }
+        self.set_control_result(json!({ "erased": erased, "skipped": skipped }));
         Ok(Task::none())
     }
 

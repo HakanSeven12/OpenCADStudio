@@ -4834,6 +4834,45 @@ DEAD
     }
 
     #[test]
+    fn entities_delete_counts_what_is_gone_and_lists_what_stays() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,10"}"#);
+        let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#);
+        let handle = q["entities"][0]["handle"].as_str().unwrap().to_owned();
+        let tab = app.active_tab;
+        app.tabs[tab].scene.document.layers.get_mut("0").unwrap().flags.locked = true;
+        app.tabs[tab].dirty = false;
+
+        // On a locked layer the line stays; listed twice, it is one object.
+        let r = mutate(
+            &mut app,
+            &format!(
+                r#"{{"protocol":1,"op":"entities_delete","request_id":"d0","document_id":{{doc}},"handles":["{handle}","{handle}"]}}"#
+            ),
+        );
+        assert_eq!(r["ok"], true, "{}", r["error"]);
+        assert_eq!(r["result"]["erased"], 0);
+        assert_eq!(
+            r["result"]["skipped"],
+            json!([{ "handle": handle, "reason": "locked" }])
+        );
+        assert_eq!(count_type(&mut app, "Line"), 1);
+        assert!(!app.tabs[tab].dirty, "nothing was erased");
+
+        app.tabs[tab].scene.document.layers.get_mut("0").unwrap().flags.locked = false;
+        let r = mutate(
+            &mut app,
+            &format!(
+                r#"{{"protocol":1,"op":"entities_delete","request_id":"d1","document_id":{{doc}},"handles":["{handle}","{handle}"]}}"#
+            ),
+        );
+        assert_eq!(r["result"]["erased"], 1);
+        assert_eq!(r["result"]["skipped"], json!([]));
+        assert_eq!(count_type(&mut app, "Line"), 0);
+    }
+
+    #[test]
     fn entities_transform_moves_and_copies() {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);

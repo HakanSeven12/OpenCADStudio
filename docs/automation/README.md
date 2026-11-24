@@ -744,7 +744,9 @@ single undo group. Use generic REST `POST /api/v1/entities_set` or MCP
 
 `{"op":"entities_delete","handles":[…]}` — every handle must exist
 (`entity_absent` lists the missing ones and nothing is erased). One undo
-step; `result.erased` counts.
+step; `result.erased` counts the objects that are gone, and
+`result.skipped` lists the ones that stay with a `reason` (`locked`,
+`not_editable`, `sheet_viewport`). A repeated handle counts once.
 
 ### `entities_transform` — move, rotate, scale, mirror
 

@@ -294,7 +294,7 @@ Result: `{"handles":[…],"created":N,"layers_created":[…]}` → HTTP 201.
 | Op | Fields | Notes |
 |---|---|---|
 | `entities_set` | `handles` plus any of `layer`, `color`, `linetype`, `linetype_scale`, `invisible`, optional `label` | One validated flat patch and one undo step for all unique handles. Existing case-insensitive layer/linetype names; colors are ByLayer/ByBlock, ACI 0..256, `{Index:N}`, `{Rgb:{r,g,b}}` or `{rgb:[r,g,b]}`. Result `{requested,written,unchanged}`; no-op writes create no history. Unknown fields, missing/locked/non-native targets and invalid values are atomic refusals. |
-| `entities_delete` | `handles` | Every handle must exist; nothing is erased otherwise (`entity_absent` names them) |
+| `entities_delete` | `handles` | Every handle must exist; nothing is erased otherwise (`entity_absent` names them). Result `erased` (objects gone) and `skipped` (`handle`, `reason`: `locked`, `not_editable`, `sheet_viewport`) |
 | `entities_transform` | `handles`, `action`, per-action params | `move`/`copy`: `vector:[dx,dy(,dz)]` (copy returns new handles in `result.created`); `rotate`: `center`, `angle_deg`; `scale`: `center`, `factor` (≠ 0); `mirror`: `axis:[[x1,y1],[x2,y2]]`, optional `copy:true`; `array`: `rows`, `columns`, `row_spacing`, `column_spacing` |
 | `entities_copy_to` | `handles`, `document_id` (target) | Cross-document clone; the dependencies the interactive copy carries travel along (layers, linetypes, styles, and the block definitions the source holds for the copied references); result `created[]` + `count` |
 

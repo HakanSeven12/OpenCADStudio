@@ -2056,7 +2056,18 @@ fn tessellate_sub_local(
             lt_l0,
             lw_l0,
             aabb_local,
-            local_rank: depth_map.get(&h.value()).map_or(0.0, |d| d[0]),
+            // A wipeout's frame sits half a rank above its own mask, as at
+            // the top level (convert/tess.rs). At the mask's rank the later
+            // mask pass ties the depth test and erases part of the
+            // anti-aliased frame, and the frame's fringe then hides a
+            // coincident outline drawn after it in a bead pattern.
+            local_rank: depth_map.get(&h.value()).map_or(0.0, |d| {
+                if matches!(sub, EntityType::Wipeout(_)) {
+                    d[0] + 0.5 * d[1]
+                } else {
+                    d[0]
+                }
+            }),
             follows_previous_stroke: false,
         });
     }

@@ -23,6 +23,7 @@ language =
     .bulgarian = Tiếng Bulgaria
     .greek = Tiếng Hy Lạp
     .vietnamese = Tiếng Việt
+    .uzbek = Özbekça
 
 mtext-source-errors = MTEXT
     .nesting = MTEXT: this edit would exceed the safe formatting-group nesting limit.

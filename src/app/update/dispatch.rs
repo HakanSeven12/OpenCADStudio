@@ -10596,6 +10596,9 @@ impl OpenCADStudio {
                 if key == "ESCAPE" && self.cancel_layer_manager_edit() {
                     return Task::none();
                 }
+                if self.mtext_navigation_key(&key) {
+                    return Task::none();
+                }
                 if let Some(task) = self.layer_manager_key(&key) {
                     return task;
                 }

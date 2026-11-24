@@ -272,7 +272,12 @@ pub(in crate::app::view::overlay) fn smart_tag(
     let at = match tag {
         SmartTag::Stack(at) | SmartTag::List(at) => at,
     };
-    let glyph = ed.glyph_boxes.iter().find(|b| b.vis == at)?;
+    // The character, not the zero-width caret slot of its line's start.
+    let glyph = ed
+        .glyph_boxes
+        .iter()
+        .filter(|b| b.vis == at)
+        .max_by(|a, b| (a.xmax - a.xmin).total_cmp(&(b.xmax - b.xmin)))?;
     // Under a stack; left of a list marker, level with its line.
     let anchor = match tag {
         SmartTag::Stack(_) => place(glyph.local[0], glyph.local[1]),

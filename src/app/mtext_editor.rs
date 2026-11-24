@@ -681,17 +681,14 @@ fn word_range(cells: &[Cell], off: usize) -> (usize, usize) {
 use crate::scene::convert::tessellate;
 use crate::scene::model::wire_model::WireModel;
 
-fn vertical_caret_target(
+/// Where the caret at `caret` stands: its x and the bottom and top of its
+/// line, as the preview draws it (the leading edge of the cell after it, or
+/// the trailing edge of the cell before it).
+fn caret_anchor(
     boxes: &[crate::entities::text_support::GlyphBox],
     caret: usize,
-    visible_count: usize,
-    direction: i8,
-) -> usize {
-    if boxes.is_empty() || direction == 0 {
-        return caret.min(visible_count);
-    }
-
-    let anchor = boxes
+) -> Option<(f32, f32, f32)> {
+    boxes
         .iter()
         .find(|item| item.vis == caret)
         .map(|item| {
@@ -720,8 +717,43 @@ fn vertical_caret_target(
                     item.ymax,
                 )
             })
-        });
-    let Some((anchor_x, anchor_y, anchor_top)) = anchor else {
+        })
+}
+
+/// The caret at the start (`end` false) or the end of the caret's line.
+fn line_edge_caret(
+    boxes: &[crate::entities::text_support::GlyphBox],
+    caret: usize,
+    visible_count: usize,
+    end: bool,
+) -> usize {
+    let Some((_, anchor_y, anchor_top)) = caret_anchor(boxes, caret) else {
+        return caret.min(visible_count);
+    };
+    let line_epsilon = ((anchor_top - anchor_y).abs() * 0.15).max(1e-5);
+    let line = boxes
+        .iter()
+        .filter(|item| (item.ymin - anchor_y).abs() <= line_epsilon);
+    let edge = if end {
+        // A zero-width slot (an empty line's start) is the caret place itself.
+        line.map(|item| item.vis + usize::from(item.xmax > item.xmin))
+            .max()
+    } else {
+        line.map(|item| item.vis).min()
+    };
+    edge.unwrap_or(caret).min(visible_count)
+}
+
+fn vertical_caret_target(
+    boxes: &[crate::entities::text_support::GlyphBox],
+    caret: usize,
+    visible_count: usize,
+    direction: i8,
+) -> usize {
+    if boxes.is_empty() || direction == 0 {
+        return caret.min(visible_count);
+    }
+    let Some((anchor_x, anchor_y, anchor_top)) = caret_anchor(boxes, caret) else {
         return caret.min(visible_count);
     };
 
@@ -1235,6 +1267,46 @@ impl super::OpenCADStudio {
             }
             ed.caret_blink_on = true;
         }
+    }
+
+    /// Home / End / Page Up / Page Down in the editor: the start or end of
+    /// the caret's line, or with Ctrl (and the page keys) of the whole text.
+    /// Shift extends the selection. `false` when the editor is closed or the
+    /// key is another one.
+    pub(in crate::app) fn mtext_navigation_key(&mut self, key: &str) -> bool {
+        let Some(ed) = self.mtext_editor.as_mut().filter(|ed| ed.show_preview) else {
+            return false;
+        };
+        let mut parts: Vec<&str> = key.split('+').collect();
+        let Some(name) = parts.pop() else {
+            return false;
+        };
+        if parts.iter().any(|part| !matches!(*part, "SHIFT" | "CTRL")) {
+            return false;
+        }
+        let extend_selection = parts.contains(&"SHIFT");
+        let whole = parts.contains(&"CTRL");
+        let visible_count = doc_to_cells(&ed.doc).len();
+        let caret = match name {
+            "PAGEUP" => 0,
+            "PAGEDOWN" => visible_count,
+            "HOME" if whole => 0,
+            "END" if whole => visible_count,
+            "HOME" | "END" => {
+                line_edge_caret(&ed.glyph_boxes, ed.caret, visible_count, name == "END")
+            }
+            _ => return false,
+        };
+        ed.typing_format = Default::default();
+        ed.caret = caret;
+        if extend_selection {
+            ed.sel = Some((ed.sel_anchor.min(caret), ed.sel_anchor.max(caret)));
+        } else {
+            ed.sel = Some((caret, caret));
+            ed.sel_anchor = caret;
+        }
+        ed.caret_blink_on = true;
+        true
     }
 
     /// Visible-character count of the current text.

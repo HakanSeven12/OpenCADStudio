@@ -1976,6 +1976,9 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         indent_right: f32,
         tab_stops: Vec<TabStop>,
         is_first_in_paragraph: bool,
+        /// The character offset just past the paragraph break before this
+        /// line's paragraph: the editor's caret slot at the line's start.
+        line_start_offset: usize,
         starts_column: bool,
         /// Which column this line lives in; always 0 without a column layout.
         column: usize,
@@ -2002,6 +2005,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
         if para_idx > 0 {
             doc_char_offset += 1;
         }
+        let line_start_offset = doc_char_offset;
         let mut atoms: Vec<LayoutAtom> = Vec::new();
         for run in &para.runs {
             match &run.kind {
@@ -2159,6 +2163,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                 indent_right: para.indent_right,
                 tab_stops: para.tab_stops.clone(),
                 is_first_in_paragraph: idx == 0,
+                line_start_offset,
                 starts_column: idx == 0 && para.starts_column,
                 column,
                 // The gap above rides the first wrapped line; the gap below the
@@ -2182,6 +2187,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             indent_right: 0.0,
             tab_stops: Vec::new(),
             is_first_in_paragraph: true,
+            line_start_offset: 0,
             starts_column: false,
             column: 0,
             space_before: 0.0,
@@ -2569,7 +2575,6 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
     let mut v_col: usize = 0;
     let mut line_widths: Vec<f32> = Vec::with_capacity(sub_lines.len());
     let mut glyph_boxes: Vec<GlyphBox> = Vec::new();
-    let mut vis: usize = 0;
     // Transform an entity-local point to world space (mirrors the stroke
     // origin maths) so glyph boxes line up with the drawn glyphs.
     let to_world = |line_base_x: f32, line_base_y: f32, lx: f32, ly: f32| -> (f32, f32) {
@@ -2704,7 +2709,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             let (ax, ay) = to_world(line_base_x, line_base_y, cursor_start, 0.0);
             let (_, by) = to_world(line_base_x, line_base_y, cursor_start, caret_h);
             glyph_boxes.push(GlyphBox {
-                vis,
+                vis: sub.line_start_offset,
                 xmin: ax,
                 xmax: ax,
                 ymin: ay.min(by),
@@ -2717,7 +2722,6 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     line_ly + caret_h,
                 ],
             });
-            vis += 1;
         }
 
         // Justify / distribute fill the line to the content width. `qj` spreads
@@ -2882,7 +2886,6 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                     local: [gx, line_ly + ly, gx + run_h, line_ly + ly + cell],
                                 });
                             }
-                            vis += 1;
                             cursor_x += cell;
                         }
                         continue;

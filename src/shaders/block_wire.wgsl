@@ -148,6 +148,39 @@ fn front_t(w: f32, other: f32) -> f32 {
     return (eps - w) / (other - w);
 }
 
+// How much of the screen, as a multiple of its half-size, a thin segment
+// keeps around the view after `view_span` cuts it.
+const VIEW_REACH: f32 = 3.0;
+
+// The part of the segment a→b (clip space) within `VIEW_REACH` of the view,
+// as parameters along it. Deep in a zoom a far end lies millions of pixels
+// away, and the cap coordinate interpolated over that length loses its f32
+// precision near the visible end: the pixels there failed the cap test and
+// the line broke up near its vertex (#3610). A segment wholly outside keeps
+// its ends (nothing of it is drawn).
+fn view_span(a: vec4<f32>, b: vec4<f32>) -> vec2<f32> {
+    let ea = vec4<f32>(a.w, a.w, a.w, a.w) * VIEW_REACH + vec4<f32>(-a.x, a.x, -a.y, a.y);
+    let eb = vec4<f32>(b.w, b.w, b.w, b.w) * VIEW_REACH + vec4<f32>(-b.x, b.x, -b.y, b.y);
+    var lo = 0.0;
+    var hi = 1.0;
+    for (var i = 0; i < 4; i++) {
+        let da = ea[i];
+        let db = eb[i];
+        if da < 0.0 && db < 0.0 {
+            return vec2<f32>(0.0, 1.0);
+        }
+        if da < 0.0 {
+            lo = max(lo, da / (da - db));
+        } else if db < 0.0 {
+            hi = min(hi, da / (da - db));
+        }
+    }
+    if lo >= hi {
+        return vec2<f32>(0.0, 1.0);
+    }
+    return vec2<f32>(lo, hi);
+}
+
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut {
     let corner = vertex_index % 6u;
@@ -221,10 +254,15 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
         // Thin wires expand in screen pixels facing the camera with rounded end caps / joints.
         let raw_a = u.view_rot * vec4<f32>(rel_a, 1.0);
         let raw_b = u.view_rot * vec4<f32>(rel_b, 1.0);
-        let t_a = front_t(raw_a.w, raw_b.w);
-        let t_b = front_t(raw_b.w, raw_a.w);
-        let clip_a = mix(raw_a, raw_b, t_a);
-        let clip_b = mix(raw_b, raw_a, t_b);
+        let front_ta = front_t(raw_a.w, raw_b.w);
+        let front_tb = front_t(raw_b.w, raw_a.w);
+        let front_a = mix(raw_a, raw_b, front_ta);
+        let front_b = mix(raw_b, raw_a, front_tb);
+        let span = view_span(front_a, front_b);
+        let clip_a = mix(front_a, front_b, span.x);
+        let clip_b = mix(front_a, front_b, span.y);
+        let t_a = mix(front_ta, 1.0 - front_tb, span.x);
+        let t_b = 1.0 - mix(front_ta, 1.0 - front_tb, span.y);
         let screen_a = clip_a.xy / clip_a.w * u.viewport_size * 0.5;
         let screen_b = clip_b.xy / clip_b.w * u.viewport_size * 0.5;
         let segment = screen_b - screen_a;

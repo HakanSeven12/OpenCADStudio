@@ -1,5 +1,5 @@
 use crate::app::{Message, OpenCADStudio};
-use crate::modules::manage::geometry_cleanup_settings::{CleanupSettings, AUTOCAD_GCS};
+use crate::modules::manage::geometry_cleanup_settings::{CleanupSettings, SAMPLE_GCS};
 use crate::ui::dock::PanelId;
 use crate::ui::window::geometry_cleanup::{Finding, Fix, GeometryCleanupMsg};
 use document::entities::{Arc, Line, LwPolyline};
@@ -831,10 +831,10 @@ fn the_proposed_tolerance_is_put_in_the_box_and_a_removed_type_can_be_added_back
 }
 
 #[test]
-fn import_reads_an_autocad_file_and_export_writes_its_angle_rows_back() {
+fn import_reads_a_full_file_and_export_writes_its_angle_rows_back() {
     let dir = scratch("import-export");
     let source = dir.join("test.gcs");
-    std::fs::write(&source, AUTOCAD_GCS).unwrap();
+    std::fs::write(&source, SAMPLE_GCS).unwrap();
     let (mut app, _) = app();
     errors_drawing(&mut app);
     settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
@@ -857,7 +857,7 @@ fn import_reads_an_autocad_file_and_export_writes_its_angle_rows_back() {
     let written = std::fs::read_to_string(&target).unwrap();
     assert_eq!(
         CleanupSettings::parse_gcs(&written).unwrap(),
-        CleanupSettings::parse_gcs(AUTOCAD_GCS).unwrap()
+        CleanupSettings::parse_gcs(SAMPLE_GCS).unwrap()
     );
     std::fs::remove_dir_all(&dir).unwrap();
 }

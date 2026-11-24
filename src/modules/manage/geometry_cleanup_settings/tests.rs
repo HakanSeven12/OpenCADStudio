@@ -1,8 +1,8 @@
 use super::*;
 
 #[test]
-fn an_autocad_file_gives_its_length_tolerances_and_keeps_its_angle_rows() {
-    let settings = CleanupSettings::parse_gcs(AUTOCAD_GCS).unwrap();
+fn a_full_file_gives_its_length_tolerances_and_keeps_its_angle_rows() {
+    let settings = CleanupSettings::parse_gcs(SAMPLE_GCS).unwrap();
     for kind in [
         EndErrorKind::Gap,
         EndErrorKind::Overshoot,
@@ -17,7 +17,7 @@ fn an_autocad_file_gives_its_length_tolerances_and_keeps_its_angle_rows() {
 
 #[test]
 fn a_file_written_and_read_again_is_the_same() {
-    let settings = CleanupSettings::parse_gcs(AUTOCAD_GCS).unwrap();
+    let settings = CleanupSettings::parse_gcs(SAMPLE_GCS).unwrap();
     assert_eq!(
         CleanupSettings::parse_gcs(&settings.to_gcs()).unwrap(),
         settings
@@ -72,7 +72,7 @@ fn a_tolerance_below_the_minimum_becomes_the_minimum() {
 
 #[test]
 fn a_type_added_back_goes_before_the_angle_rows() {
-    let mut settings = CleanupSettings::parse_gcs(AUTOCAD_GCS).unwrap();
+    let mut settings = CleanupSettings::parse_gcs(SAMPLE_GCS).unwrap();
     settings.set(EndErrorKind::Overshoot, None);
     assert_eq!(settings.tolerances.len(), 6);
     settings.set(EndErrorKind::Overshoot, Some(0.3));

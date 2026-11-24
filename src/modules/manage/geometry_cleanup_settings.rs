@@ -1,6 +1,6 @@
 //! The Geometry Cleanup settings: the error types to find and a tolerance
 //! for each. They are kept in the user profile and read and written as
-//! AutoCAD `.gcs` files:
+//! `.gcs` files:
 //!
 //! ```json
 //! { "tolerances": [ { "name": "gap", "subName": "", "tolerance": 0.4 } ] }
@@ -143,10 +143,9 @@ impl CleanupSettings {
     }
 }
 
-/// A `.gcs` file written by AutoCAD 2027 (with one space at the end of a
-/// line removed).
+/// A `.gcs` file with angle rows as well as the length rows.
 #[cfg(test)]
-pub(crate) const AUTOCAD_GCS: &str = r#"{
+pub(crate) const SAMPLE_GCS: &str = r#"{
   "tolerances" :
   [
     {

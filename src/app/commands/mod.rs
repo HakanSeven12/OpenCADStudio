@@ -34,6 +34,7 @@ mod bvisibility;
 mod count;
 mod dash;
 mod dgn_import;
+mod geometry_cleanup;
 mod ifc_plan;
 pub(in crate::app) use dgn_import::read_reference_drawings;
 mod dim;
@@ -869,6 +870,9 @@ impl OpenCADStudio {
             return Some(t);
         }
         if let Some(t) = self.dispatch_count(cmd, i) {
+            return Some(t);
+        }
+        if let Some(t) = self.dispatch_geometry_cleanup(cmd, i) {
             return Some(t);
         }
         if let Some(t) = self.dispatch_attout(cmd, i) {

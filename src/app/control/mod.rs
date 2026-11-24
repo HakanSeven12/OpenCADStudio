@@ -700,6 +700,17 @@ impl OpenCADStudio {
     }
 
     pub(super) fn control_request(&mut self, req: Value) -> (Value, Task<Message>) {
+        // A test build checks that a change of the drawing has an undo step.
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        let undo_guard =
+            crate::app::update::undo_record_guard::begin_request(self, "control", &req);
+        let response = self.control_request_unguarded(req);
+        #[cfg(all(test, not(target_arch = "wasm32")))]
+        crate::app::update::undo_record_guard::end(self, undo_guard);
+        response
+    }
+
+    fn control_request_unguarded(&mut self, req: Value) -> (Value, Task<Message>) {
         // First control contact marks the session automated (#1349): a
         // DonationPrompt that is still queued (not yet shown) is dropped so
         // automation never waits behind it, and `queue_startup_prompts`

@@ -761,6 +761,17 @@ impl OpenCADStudio {
                 self.refresh_properties();
             }
             CmdResult::CopySelected(handles, transform) => {
+                // Every further copy is placed from the base point, so ortho,
+                // polar and a typed distance measure from it, not from the
+                // copy just made (#3519).
+                let i = self.active_tab;
+                if let Some(base) = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .and_then(|c| c.resolved_anchor())
+                {
+                    self.last_point = Some(base);
+                }
                 if let Some(task) = self.handle_copy_selected(handles, transform) {
                     return task;
                 }

@@ -1073,6 +1073,15 @@ impl OpenCADStudio {
                     custom_properties.extend(Self::visibility_property(doc, handle));
                 }
                 custom_properties.extend(Self::visible_blocks_property(doc, handle));
+                // A BricsCAD parametric block's states, switched from a list
+                // outside the Block Editor and Test Block.
+                custom_properties.extend(Self::bricscad_visibility_properties(
+                    doc,
+                    self.tabs[i].id,
+                    handle,
+                    self.tabs[i].active_block_edit_session().is_none()
+                        && self.tabs[i].block_test.is_none(),
+                ));
                 if !custom_properties.is_empty() {
                     sections.push(crate::scene::model::object::PropSection {
                         title: t!("Custom").into_owned(),

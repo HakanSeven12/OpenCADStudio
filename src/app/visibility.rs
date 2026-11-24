@@ -120,6 +120,15 @@ fn visibility_revision(parameter: &BlockVisibilityParameter) -> u64 {
     hash.finish()
 }
 
+/// Identifies a BricsCAD visibility parameter by its name and states, so a
+/// list built for one block is not applied to a parameter that changed.
+fn bricscad_revision(parameter: &crate::scene::bricscad_parameters::VisibilityParameter) -> u64 {
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    parameter.name.hash(&mut hash);
+    parameter.states.hash(&mut hash);
+    hash.finish()
+}
+
 fn visibility_label(parameter: &BlockVisibilityParameter) -> String {
     if parameter.name.trim().is_empty() {
         "Visibility1".into()
@@ -624,6 +633,96 @@ impl OpenCADStudio {
             field: "dyn_visible_block",
             value: crate::scene::model::object::PropValue::ReadOnly(names.join(", ")),
         })
+    }
+
+    /// The visibility parameters of a reference to a BricsCAD parametric
+    /// block, one row each with the state the reference shows. With
+    /// `editable`, a reference that can be switched (see
+    /// `bricscad_parameters::can_switch`) gets a list of the states; any
+    /// other shows the state with the states as tooltip.
+    pub(super) fn bricscad_visibility_properties(
+        doc: &document::Document,
+        document: u64,
+        handle: Handle,
+        editable: bool,
+    ) -> Vec<Property> {
+        use crate::scene::bricscad_parameters as bricscad;
+        let parameters = bricscad::reference_parameters(doc, handle);
+        if parameters.is_empty() {
+            return Vec::new();
+        }
+        let master = bricscad::master_block(doc, handle)
+            .filter(|_| editable && bricscad::can_switch(doc, handle));
+        let master_parameters = master
+            .map(|master| bricscad::visibility_parameters(doc, master))
+            .unwrap_or_default();
+        parameters
+            .into_iter()
+            .map(|parameter| {
+                let feature = master_parameters
+                    .iter()
+                    .find(|shown| shown.name == parameter.name && shown.states == parameter.states)
+                    .map(|shown| shown.feature);
+                let value = match (master, feature) {
+                    (Some(definition), Some(feature)) => PropValue::BlockChoice {
+                        key: BlockParameterKey {
+                            document,
+                            definition,
+                            insert: handle,
+                            batch_generation: None,
+                            editor_session: None,
+                            parameter: feature,
+                            component: BlockParameterComponent::Bricscad(bricscad_revision(
+                                &parameter,
+                            )),
+                        },
+                        selected: parameter.current.unwrap_or(usize::MAX),
+                        options: parameter.states.clone(),
+                        description: String::new(),
+                    },
+                    _ => PropValue::ReadOnlyWithTooltip {
+                        value: parameter
+                            .current
+                            .and_then(|index| parameter.states.get(index).cloned())
+                            .unwrap_or_default(),
+                        tooltip: parameter.states.join(", "),
+                    },
+                };
+                Property {
+                    value,
+                    label: parameter.name,
+                    field: "bricscad_visibility",
+                }
+            })
+            .collect()
+    }
+
+    /// Show state `state` of the BricsCAD visibility parameter `key` names on
+    /// a copy of `doc`; `None` when the reference shows it already.
+    pub(super) fn stage_bricscad_visibility(
+        doc: &document::Document,
+        key: BlockParameterKey,
+        state: usize,
+    ) -> Result<Option<document::Document>, &'static str> {
+        use crate::scene::bricscad_parameters as bricscad;
+        const INVALID: &str = "Select supported targets belonging to this block.";
+        if bricscad::master_block(doc, key.insert) != Some(key.definition) {
+            return Err(INVALID);
+        }
+        let parameter = bricscad::visibility_parameters(doc, key.definition)
+            .into_iter()
+            .find(|parameter| parameter.feature == key.parameter)
+            .ok_or(INVALID)?;
+        if key.component != BlockParameterComponent::Bricscad(bricscad_revision(&parameter)) {
+            return Err(INVALID);
+        }
+        let state = parameter.states.get(state).ok_or(INVALID)?;
+        let mut scene = crate::scene::Scene::new();
+        scene.document = doc.clone();
+        match scene.set_bricscad_visibility(key.insert, &parameter.name, state)? {
+            true => Ok(Some(scene.document)),
+            false => Ok(None),
+        }
     }
 
     /// Recompute the visibility grip for the active tab's single selection and

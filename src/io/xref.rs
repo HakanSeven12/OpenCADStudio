@@ -2731,10 +2731,22 @@ fn collect_entries_impl(
             .filter(|e| e.parent_key.is_some())
             .map(|e| e.name.to_uppercase())
             .collect();
+        // An insert inside a loaded xref's definition is the parent's own
+        // placement of its nested reference, not the host's (#2838).
+        let xref_records: HashSet<Handle> = doc
+            .block_records
+            .iter()
+            .filter(|br| br.flags.is_xref || br.flags.is_xref_overlay)
+            .map(|br| br.handle)
+            .collect();
         let inserted: HashSet<String> = doc
             .entities()
             .filter_map(|e| match e {
-                document::EntityType::Insert(insert) => Some(insert.block_name.to_uppercase()),
+                document::EntityType::Insert(insert)
+                    if !xref_records.contains(&insert.common.owner_handle) =>
+                {
+                    Some(insert.block_name.to_uppercase())
+                }
                 _ => None,
             })
             .collect();

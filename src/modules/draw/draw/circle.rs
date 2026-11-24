@@ -558,6 +558,10 @@ impl CadCommand for Circle2PCommand {
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
     }
+    fn tangent_to_lines(&self) -> bool {
+        true
+    }
+
     fn on_point_with_tangent(
         &mut self,
         pt: DVec3,
@@ -701,6 +705,10 @@ impl CadCommand for Circle3PCommand {
             } // collinear — ask again
         }
     }
+    fn tangent_to_lines(&self) -> bool {
+        true
+    }
+
     fn on_point_with_tangent(
         &mut self,
         pt: DVec3,

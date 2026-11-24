@@ -4255,6 +4255,13 @@ pub trait CadCommand: Send {
         None
     }
 
+    /// Whether a Tangent snap lands on straight lines too: the command takes
+    /// the touched object of a pick (`on_point_with_tangent`), not only a
+    /// tangent point from the last one.
+    fn tangent_to_lines(&self) -> bool {
+        false
+    }
+
     /// The command's current anchor (rubber-band origin) after a commit, so the
     /// host can sync `last_point` when the command replaced the picked
     /// coordinate — e.g. LINE resolving a deferred tangent to the true tangent

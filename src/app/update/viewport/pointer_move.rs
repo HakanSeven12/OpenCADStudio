@@ -1930,6 +1930,10 @@ impl OpenCADStudio {
                 // Construction anchor for perpendicular and tangent snaps
                 // in full f64 precision.
                 self.snapper.from_point = self.last_point;
+                self.snapper.tangent_lines = self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .is_some_and(|c| c.tangent_to_lines());
 
                 let construction_ray = if free_point {
                     None

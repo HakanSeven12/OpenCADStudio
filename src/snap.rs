@@ -385,9 +385,10 @@ pub struct Snapper {
     /// the snapped object's height. `None` keeps the object's point.
     pub osnap_z_plane: Option<(DVec3, DVec3)>,
     /// Whether Tangent also lands on straight lines. Only the tangent object
-    /// pick (TTR, TTT) wants a line; a running Tangent snap does not, since a
-    /// line has no tangent point from a base point.
-    tangent_lines: bool,
+    /// pick (TTR, TTT) and a command that takes a touched object as a pick
+    /// (CIRCLE 2P, 3P) want a line; elsewhere a running Tangent snap does
+    /// not, since a line has no tangent point from a base point.
+    pub(crate) tangent_lines: bool,
 }
 
 impl Default for Snapper {

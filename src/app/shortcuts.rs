@@ -55,6 +55,9 @@ pub(super) fn default_bindings() -> BTreeMap<String, String> {
         // The next and the previous open drawing.
         ("CTRL+TAB".to_string(), "NEXTDRAWING"),
         ("CTRL+SHIFT+TAB".to_string(), "PREVDRAWING"),
+        // The next and the previous layout tab of the drawing.
+        (format!("{ACCEL}+PAGEDOWN"), "NEXTLAYOUT"),
+        (format!("{ACCEL}+PAGEUP"), "PREVLAYOUT"),
         (format!("{ACCEL}+0"), "CLEANSCREEN"),
         (format!("{ACCEL}+9"), "COMMANDLINETOGGLE"),
         (format!("{ACCEL}+1"), "PROPERTIES"),
@@ -378,6 +381,8 @@ pub(super) const INPUT_ACTIONS: &[&str] = &[
     "QUADTOGGLE",
     "NEXTDRAWING",
     "PREVDRAWING",
+    "NEXTLAYOUT",
+    "PREVLAYOUT",
 ];
 
 impl OpenCADStudio {
@@ -524,6 +529,24 @@ impl OpenCADStudio {
         Task::done(Message::EnterViewport(next))
     }
 
+    /// The layout tab after (`forward`) or before the current one, in tab
+    /// order with Model first; it wraps around at the ends. None on the
+    /// Start tab and in the block editor, where a layout switch closes the
+    /// editor.
+    fn neighbour_layout(&self, forward: bool) -> Option<String> {
+        let tab = &self.tabs[self.active_tab];
+        if tab.is_start || tab.active_block_edit.is_some() {
+            return None;
+        }
+        let names = tab.scene.cached_layout_names();
+        let count = names.len();
+        let index = names
+            .iter()
+            .position(|name| *name == tab.scene.current_layout)?;
+        let step = if forward { 1 } else { count - 1 };
+        Some(names[(index + step) % count].clone())
+    }
+
     pub(super) fn run_shortcut(&mut self, key: &str) -> Task<Message> {
         // Configurations saved before these keys were bound still switch
         // drawings with them, rather than falling back to plain Tab.
@@ -637,6 +660,11 @@ impl OpenCADStudio {
                 };
                 Message::TabSwitch((self.active_tab + step) % count)
             }
+            // Ctrl+PgDn / Ctrl+PgUp (Cmd on macOS): the next / previous layout tab.
+            "NEXTLAYOUT" | "PREVLAYOUT" => match self.neighbour_layout(action == "NEXTLAYOUT") {
+                Some(name) => Message::LayoutSwitch(name),
+                None => return Task::none(),
+            },
             "SELECTALL" => Message::SelectAllShortcut,
             "PASTECLIP" => Message::PasteShortcut,
 

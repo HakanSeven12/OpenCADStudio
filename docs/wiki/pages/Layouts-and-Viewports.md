@@ -2,7 +2,7 @@
 
 You draw at full size in **model space**. To print, you place views of the model on a **layout**: a sheet of paper (paper space) with a title block, notes and one or more **layout viewports**, each showing the model at a scale.
 
-The **Model** tab and one tab per layout sit under the drawing area. Click a tab to switch, right-click it to create, rename, copy, move or delete layouts.
+The **Model** tab and one tab per layout sit under the drawing area. Click a tab to switch, right-click it to create, rename, copy, move or delete layouts. **Ctrl+PgDn** and **Ctrl+PgUp** move to the next and the previous tab.
 
 ## Creating a layout
 

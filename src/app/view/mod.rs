@@ -572,9 +572,12 @@ pub(crate) fn window_event_with_context(
             // The numpad decimal key emits the OS-layout separator
             // (a comma on German/European layouts), which the
             // coordinate parser rejects. Force it to a decimal point
-            // from the physical key, independent of layout.
+            // from the physical key, independent of layout. A key an input
+            // method composes arrives without text: it is the method's, and
+            // the focused field keeps it (#2835).
             if !shortcut_modifier
                 && status == Status::Ignored
+                && text.as_deref().is_some_and(|t| !t.is_empty())
                 && matches!(
                     physical_key,
                     keyboard::key::Physical::Code(

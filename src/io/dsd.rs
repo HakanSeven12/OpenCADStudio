@@ -1,5 +1,5 @@
-//! Sheet lists (`.dsd`): the drawing set description AutoCAD's and
-//! BricsCAD's PUBLISH save and `-PUBLISH` reads.
+//! Sheet lists (`.dsd`): the drawing set description other CAD programs'
+//! PUBLISH save and `-PUBLISH` reads.
 //!
 //! A sheet list is an INI file. Every `[DWF6Sheet:<name>]` section is one
 //! sheet, in publishing order: `DWG` names the drawing, `Layout` the layout
@@ -61,7 +61,7 @@ pub fn read(path: &Path) -> Result<SheetList, String> {
     parse(&decode(&bytes), base)
 }
 
-/// The text of a sheet list file. AutoCAD writes them in the system's ANSI
+/// The text of a sheet list file. Other programs write them in the system's ANSI
 /// code page or as Unicode with a byte-order mark; text that is not UTF-8
 /// and has no mark is read as Windows-1252.
 pub fn decode(bytes: &[u8]) -> String {

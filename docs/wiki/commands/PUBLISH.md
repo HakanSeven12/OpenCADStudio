@@ -11,7 +11,7 @@ web: Print opens a PDF of the chosen layouts in a browser tab, for the browser's
 - `PUBLISH <list.dsd>` (also `-PUBLISH`) publishes a sheet list: the sheets of as many drawings as it names, in its order. Put the path in quotes if it contains spaces.
 
 ## Sheet lists
-A sheet list is the `.dsd` file AutoCAD's and BricsCAD's PUBLISH save. Each `[DWF6Sheet:<name>]` section is one sheet:
+A sheet list is the `.dsd` drawing set description file that the PUBLISH command of other CAD programs saves. Each `[DWF6Sheet:<name>]` section is one sheet:
 - `DWG=` the drawing (a relative path starts from the sheet list's folder),
 - `Layout=` the layout, or `Model` for model space,
 - `Setup=` optionally a named page setup of the drawing to plot with instead of the layout's own.

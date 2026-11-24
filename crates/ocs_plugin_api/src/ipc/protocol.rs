@@ -460,6 +460,13 @@ pub enum PluginRequest {
         panel_id: String,
         page: crate::widget::WidgetPage,
     },
+    /// V29 (additive): apply a bounded, revision-checked table patch
+    /// (cell/row ops) to the panel's stored table atomically
+    /// (all-or-nothing) — the cell-edit and row-update primitive.
+    PanelSurfaceTablePatch {
+        panel_id: String,
+        patch: crate::tables::TablePatch,
+    },
 }
 
 /// Responses the host sends back for `PluginRequest`.
@@ -570,6 +577,14 @@ pub enum PluginResponse {
     /// widget revision (the widget tier's independent revision space), or
     /// the typed refusal.
     PanelWidgetPublished(Result<crate::widget::WidgetRevision, crate::widget::WidgetReject>),
+    /// V29 (additive): outcome of a TABLE surface publish — the stored
+    /// table revision (the table tier's independent revision space), or
+    /// the typed refusal.
+    PanelTablePublished(Result<crate::tables::TableRevision, crate::tables::TableReject>),
+    /// V29 (additive): outcome of a table patch — the stored revision
+    /// after the atomic apply, or the typed refusal; the stored table
+    /// never ends up partially patched.
+    PanelTablePatchResult(Result<crate::tables::TableRevision, crate::tables::TableReject>),
 }
 
 /// Messages sent from the host to the plugin runner.

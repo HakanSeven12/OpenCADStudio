@@ -769,7 +769,18 @@ impl OpenCADStudio {
                         // body when present, then the scene canvas, then
                         // the exact legacy tree.
                         let widget_ui = self.panel_widget_ui.get(panel_id);
-                        if let (Some(owner), Some(surface)) = (
+                        if let (Some(owner), Some(table)) = (
+                            state.owner_plugin_id.as_deref(),
+                            state
+                                .owner_plugin_id
+                                .as_deref()
+                                .and_then(|owner| self.panel_surfaces.table(owner, panel_id)),
+                        ) {
+                            let table_ui = self.panel_table_ui.get(panel_id);
+                            crate::ui::window::plugin_tables::table_view(
+                                owner, panel_id, table, table_ui,
+                            )
+                        } else if let (Some(owner), Some(surface)) = (
                             state.owner_plugin_id.as_deref(),
                             state
                                 .owner_plugin_id

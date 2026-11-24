@@ -62,6 +62,8 @@ pub mod plugin_manager;
 pub mod plugin_panel;
 /// Native scene-surface projection for plugin panels (api v29).
 pub mod plugin_scene;
+/// Native EDITABLE table rendering for plugin panels (api v29).
+pub mod plugin_tables;
 /// Native widget-surface rendering for plugin panels (api v29).
 pub mod plugin_widgets;
 pub mod print_all;

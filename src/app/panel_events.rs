@@ -230,6 +230,24 @@ impl PanelEventRouter {
         }
     }
 
+    /// A committed cell edit on a table surface (api v29, S07): the
+    /// explicit event identity is the per-surface sequence, as
+    /// everywhere.
+    pub fn on_cell_edited(
+        &mut self,
+        panel_id: &str,
+        row: StableId,
+        column: StableId,
+        value: ocs_plugin_api::tables::CellValue,
+    ) -> RoutedEvent {
+        let sequence = self.next_sequence(panel_id);
+        RoutedEvent {
+            panel_id: panel_id.to_owned(),
+            sequence,
+            event: SurfaceEvent::CellEdited { row, column, value },
+        }
+    }
+
     /// The one expansion case that is not host-local: expanding an
     /// `Unloaded` row asks the plugin (the data source) for a page.
     pub fn on_node_expanded(&mut self, panel_id: &str, node: StableId) -> RoutedEvent {

@@ -526,6 +526,45 @@ impl HostApi for HostSession<'_> {
             .install_widget_page(plugin_id, &resolved, page)
     }
 
+    /// V29 (additive): publish the panel's TABLE surface from the
+    /// authenticated transport owner; the table tier's independent
+    /// revision space.
+    fn panel_table_publish_for_plugin(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        surface: ocs_plugin_api::tables::TableSurface,
+    ) -> Result<ocs_plugin_api::tables::TableRevision, ocs_plugin_api::tables::TableReject> {
+        let resolved = self
+            .resolve_surface_panel(plugin_id, panel_id)
+            .map_err(|code| ocs_plugin_api::tables::TableReject {
+                code: code.into(),
+                current_revision: None,
+            })?;
+        self.app
+            .panel_surfaces
+            .publish_table(plugin_id, &resolved, surface)
+    }
+
+    /// V29 (additive): patch the panel's stored TABLE atomically from
+    /// the authenticated transport owner (cell/row ops).
+    fn panel_surface_table_patch_for_plugin(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        patch: ocs_plugin_api::tables::TablePatch,
+    ) -> Result<ocs_plugin_api::tables::TableRevision, ocs_plugin_api::tables::TableReject> {
+        let resolved = self
+            .resolve_surface_panel(plugin_id, panel_id)
+            .map_err(|code| ocs_plugin_api::tables::TableReject {
+                code: code.into(),
+                current_revision: None,
+            })?;
+        self.app
+            .panel_surfaces
+            .patch_table(plugin_id, &resolved, patch)
+    }
+
     /// V29 (additive): patch the panel's stored scene atomically from the
     /// authenticated transport owner. Same attachment/ownership
     /// resolution as publishing; the store owns structural and revision

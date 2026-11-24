@@ -38,6 +38,7 @@ pub mod entity_coverage_types;
 pub mod manifest;
 pub mod ribbon;
 pub mod scene;
+pub mod tables;
 pub mod type_registry;
 pub mod type_registry_types;
 pub mod version_info;
@@ -82,6 +83,10 @@ pub use ribbon::{CadModule, IconKind, ModuleEvent, RibbonGroup, RibbonItem, Styl
 pub use scene::{
     PanelScene, PanelSurface, Rect2D, Rgba8, SceneBuilder, SceneColor, SceneElement, SceneError,
     SceneRevision, StableId, Stroke, SurfaceReject, SurfaceRejectCode, ThemeColor, Vec2,
+};
+pub use tables::{
+    CellValue, MAX_TABLE_OPS, MAX_TABLE_ROWS, TableColumn, TableError, TableOp, TablePatch,
+    TableRevision, TableSurface,
 };
 pub use type_registry::{
     EnumVariantInfo, FieldInfo, MethodInfo, ParameterInfo, TypeId, TypeInfo, TypeKind,

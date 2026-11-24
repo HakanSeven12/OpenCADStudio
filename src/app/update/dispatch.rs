@@ -2165,6 +2165,70 @@ impl OpenCADStudio {
                 Task::none()
             }
 
+            Message::PanelTableCellDraft {
+                owner,
+                panel,
+                row,
+                column,
+                text,
+            } => {
+                // Host-local draft state; the stored table is untouched.
+                self.panel_table_ui
+                    .entry(panel.clone())
+                    .or_default()
+                    .set_draft(row, column, text);
+                let _ = owner;
+                Task::none()
+            }
+            Message::PanelTableCellSelected { owner, panel, row, column } => {
+                self.panel_table_ui
+                    .entry(panel.clone())
+                    .or_default()
+                    .select((row, column));
+                let _ = owner;
+                Task::none()
+            }
+            Message::PanelTableCellCommitted {
+                owner,
+                panel,
+                row,
+                column,
+            } => {
+                // Typed-commit rule: the edited value takes the existing
+                // cell's type; a failed parse keeps the draft. A commit
+                // notifies the plugin (best-effort, owner-targeted) — the
+                // plugin stays the data authority and canonicalizes with
+                // its own table patch.
+                let stored = self
+                    .panel_surfaces
+                    .table(&owner, &panel)
+                    .and_then(|surface| {
+                        let index = surface.columns.iter().position(|c| c.id == column)?;
+                        surface
+                            .rows
+                            .get(&row)
+                            .and_then(|cells| cells.get(index))
+                            .cloned()
+                    });
+                let value = self
+                    .panel_table_ui
+                    .entry(panel.clone())
+                    .or_default()
+                    .commit_draft(row, column, stored.as_ref());
+                if let Ok(value) = value {
+                    let routed = self
+                        .panel_event_router
+                        .on_cell_edited(&panel, row, column, value);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    crate::plugin::v4_support::publish_surface_event_to_plugin(
+                        &owner, routed.panel_id, routed.sequence, routed.event,
+                    );
+                    #[cfg(target_arch = "wasm32")]
+                    let _ = routed;
+                }
+                Task::none()
+            }
+
             Message::PluginDialogTextChange(id, val) => {
                 if let Some(state) = &mut self.plugin_dialog_state {
                     state.text_values.insert(id, val);

@@ -12,6 +12,13 @@ use ocs_plugin_api::scene::{PanelScene, SceneRevision, SurfaceReject, SurfaceRej
 pub struct PanelSurfaceStore {
     scenes: std::collections::BTreeMap<String, SceneRecord>,
     widgets: std::collections::BTreeMap<String, WidgetRecord>,
+    tables: std::collections::BTreeMap<String, TableRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct TableRecord {
+    owner_plugin_id: String,
+    surface: ocs_plugin_api::tables::TableSurface,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -155,6 +162,8 @@ impl PanelSurfaceStore {
             .retain(|_, record| keep(&record.owner_plugin_id));
         self.widgets
             .retain(|_, record| keep(&record.owner_plugin_id));
+        self.tables
+            .retain(|_, record| keep(&record.owner_plugin_id));
     }
 
     /// Publish (or replace) the panel's WIDGET surface (api v29, S05):
@@ -266,6 +275,119 @@ impl PanelSurfaceStore {
             return None;
         }
         self.widgets
+            .get(panel_id)
+            .filter(|record| record.owner_plugin_id == plugin_id)
+            .map(|record| &record.surface)
+    }
+
+    /// Publish (or replace) the panel's TABLE surface (api v29, S07):
+    /// the same ownership/revision rules, on the table tier's independent
+    /// revision space.
+    pub fn publish_table(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        surface: ocs_plugin_api::tables::TableSurface,
+    ) -> Result<ocs_plugin_api::tables::TableRevision, ocs_plugin_api::tables::TableReject> {
+        use ocs_plugin_api::tables::{TableReject, TableRejectCode};
+        if plugin_id.is_empty() || panel_id.trim().is_empty() {
+            return Err(TableReject {
+                code: TableRejectCode::Unattached,
+                current_revision: None,
+            });
+        }
+        if surface.validate().is_err() {
+            return Err(TableReject {
+                code: TableRejectCode::InvalidSurface,
+                current_revision: None,
+            });
+        }
+        if let Some(record) = self.tables.get(panel_id) {
+            if record.owner_plugin_id != plugin_id {
+                return Err(TableReject {
+                    code: TableRejectCode::OwnedByOther,
+                    current_revision: Some(record.surface.revision),
+                });
+            }
+            let head = record.surface.revision;
+            if surface.revision == head {
+                if surface == record.surface {
+                    return Ok(head);
+                }
+                return Err(TableReject {
+                    code: TableRejectCode::NonMonotonicRevision,
+                    current_revision: Some(head),
+                });
+            }
+            if surface.revision < head {
+                return Err(TableReject {
+                    code: TableRejectCode::NonMonotonicRevision,
+                    current_revision: Some(head),
+                });
+            }
+        }
+        let revision = surface.revision;
+        self.tables.insert(
+            panel_id.to_string(),
+            TableRecord {
+                owner_plugin_id: plugin_id.to_string(),
+                surface,
+            },
+        );
+        Ok(revision)
+    }
+
+    /// Apply a bounded table patch atomically (cell/row ops). Only a
+    /// previously published table can be patched; ownership and revision
+    /// rules match publishing.
+    pub fn patch_table(
+        &mut self,
+        plugin_id: &str,
+        panel_id: &str,
+        patch: ocs_plugin_api::tables::TablePatch,
+    ) -> Result<ocs_plugin_api::tables::TableRevision, ocs_plugin_api::tables::TableReject> {
+        use ocs_plugin_api::tables::{TableReject, TableRejectCode};
+        if plugin_id.is_empty() || panel_id.trim().is_empty() {
+            return Err(TableReject {
+                code: TableRejectCode::Unattached,
+                current_revision: None,
+            });
+        }
+        let Some(record) = self.tables.get_mut(panel_id) else {
+            return Err(TableReject {
+                code: TableRejectCode::Unattached,
+                current_revision: None,
+            });
+        };
+        if record.owner_plugin_id != plugin_id {
+            return Err(TableReject {
+                code: TableRejectCode::OwnedByOther,
+                current_revision: Some(record.surface.revision),
+            });
+        }
+        match record.surface.apply_patch(&patch) {
+            Ok(revision) => Ok(revision),
+            Err(ocs_plugin_api::tables::TableError::StaleBase) => Err(TableReject {
+                code: TableRejectCode::NonMonotonicRevision,
+                current_revision: Some(record.surface.revision),
+            }),
+            Err(_) => Err(TableReject {
+                code: TableRejectCode::InvalidSurface,
+                current_revision: None,
+            }),
+        }
+    }
+
+    /// Ownership-checked table read (api v29).
+    pub fn table(
+        &self,
+        plugin_id: &str,
+        panel_id: &str,
+    ) -> Option<&ocs_plugin_api::tables::TableSurface> {
+        if plugin_id.is_empty() {
+            return None;
+        }
+        self.tables
             .get(panel_id)
             .filter(|record| record.owner_plugin_id == plugin_id)
             .map(|record| &record.surface)

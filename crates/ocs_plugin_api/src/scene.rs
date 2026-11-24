@@ -810,6 +810,11 @@ pub enum PanelSurface {
     /// host-local, and children a plugin has not pushed yet page in via
     /// `WidgetPage` installs.
     Widgets(crate::widget::WidgetSurface),
+    /// The panel's typed-table surface (api v29, S07): stable row keys,
+    /// typed scalar cells, atomic cell/row patches — rendered and edited
+    /// with NATIVE host widgets (edits are host-local drafts until the
+    /// plugin canonicalizes them with its own patch).
+    Tables(crate::tables::TableSurface),
 }
 
 /// Why a panel surface publish was refused; a refusal changes nothing.
@@ -878,6 +883,16 @@ pub enum SurfaceEvent {
     /// one expansion case that is NOT host-local — the plugin is the
     /// data source).
     NodeExpanded { node: StableId },
+    /// A committed cell edit on a table surface (api v29, S07): the
+    /// host-local editing session committed a draft under the
+    /// typed-commit rule; the plugin remains the data authority and
+    /// canonicalizes by pushing its own table patch. Best-effort like
+    /// every surface event.
+    CellEdited {
+        row: StableId,
+        column: StableId,
+        value: crate::tables::CellValue,
+    },
 }
 
 /// Maximum patch ops accepted in one patch frame, bounding allocation and

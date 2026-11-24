@@ -3518,6 +3518,7 @@ draw =
 
 modify =
     .add-vertex = Scheitelpunkt hinzufügen
+    .extend-vertex = Extend Vertex
     .closed-cross = Geschlossenes Kreuz
     .closed-tee = Geschlossenes T-Stück
     .corner-joint = Eckverbindung

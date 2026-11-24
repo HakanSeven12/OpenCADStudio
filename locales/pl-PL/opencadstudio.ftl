@@ -3517,6 +3517,7 @@ draw =
 
 modify =
     .add-vertex = Dodaj wierzchołek
+    .extend-vertex = Extend Vertex
     .closed-cross = Zamknięte skrzyżowanie
     .closed-tee = Zamknięte połączenie T
     .corner-joint = Połączenie narożne

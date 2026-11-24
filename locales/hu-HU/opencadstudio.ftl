@@ -3514,6 +3514,7 @@ draw =
 
 modify =
     .add-vertex = Csúcs hozzáadása
+    .extend-vertex = Extend Vertex
     .closed-cross = Zárt kereszt
     .closed-tee = Zárt T-idom
     .corner-joint = Sarokkötés

@@ -3517,6 +3517,7 @@ draw =
 
 modify =
     .add-vertex = Lisää kärkipiste
+    .extend-vertex = Extend Vertex
     .closed-cross = Suljettu risteys
     .closed-tee = Suljettu T-liitos
     .corner-joint = Kulmaliitos

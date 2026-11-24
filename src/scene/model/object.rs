@@ -261,6 +261,9 @@ pub enum GripMenuAction {
     RectangleResize,
     MoveParallel,
     AddVertex,
+    /// Add a vertex beyond the start or the end of an open polyline, so the
+    /// user does not have to reverse it to extend it from its start.
+    ExtendVertex,
     RemoveVertex,
     ConvertToArc,
     /// Split the polyline at this vertex (a closed one opens here; an open

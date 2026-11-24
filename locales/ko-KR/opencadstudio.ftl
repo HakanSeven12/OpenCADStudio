@@ -3517,6 +3517,7 @@ draw =
 
 modify =
     .add-vertex = 정점 추가
+    .extend-vertex = Extend Vertex
     .closed-cross = 닫힌 십자
     .closed-tee = 닫힌 T자
     .corner-joint = 모서리 접합

@@ -3517,6 +3517,7 @@ draw =
 
 modify =
     .add-vertex = Aggiungi vertice
+    .extend-vertex = Extend Vertex
     .closed-cross = Croce chiusa
     .closed-tee = T chiusa
     .corner-joint = Giunto d’angolo

@@ -1,6 +1,24 @@
 use super::*;
 use super::super::util::*;
 
+/// Return `(new vertex grip id, old vertex count)` for Extend Vertex on the
+/// start or the end grip of an LWPOLYLINE: the new vertex is the first or the
+/// last one. The caller restores the entity if no vertex was added.
+fn polyline_extend_vertex_target(
+    entity: &AcadEntityType,
+    grip_id: usize,
+) -> Option<(usize, usize)> {
+    let AcadEntityType::LwPolyline(polyline) = entity else {
+        return None;
+    };
+    let n = polyline.vertices.len();
+    if grip_id + 1 == n {
+        Some((n, n))
+    } else {
+        (grip_id == 0).then_some((0, n))
+    }
+}
+
 /// Return `(new vertex grip id, old vertex count)` for polyline Add Vertex.
 /// LWPolyline segment grips live after the vertex grips, so translate their id
 /// back to the segment before selecting the inserted vertex.
@@ -505,15 +523,22 @@ impl OpenCADStudio {
         // regular snap/ortho/polar preview follows the cursor. One
         // click commits the whole append+move; Escape restores the
         // original entity.
-        if matches!(item.action, GripMenuAction::AddVertex) {
+        if matches!(
+            item.action,
+            GripMenuAction::AddVertex | GripMenuAction::ExtendVertex
+        ) {
             let placement = self.tabs[i]
                 .scene
                 .document
                 .get_entity(popup.handle)
                 .cloned()
                 .and_then(|original| {
-                    polyline_add_vertex_target(&original, popup.grip_id)
-                        .map(|(new_gid, old_len)| (original, new_gid, old_len))
+                    let target = if item.action == GripMenuAction::ExtendVertex {
+                        polyline_extend_vertex_target(&original, popup.grip_id)
+                    } else {
+                        polyline_add_vertex_target(&original, popup.grip_id)
+                    };
+                    target.map(|(new_gid, old_len)| (original, new_gid, old_len))
                 });
             if let Some((original, new_gid, old_len)) = placement {
                 let dirty_before = self.tabs[i].dirty;

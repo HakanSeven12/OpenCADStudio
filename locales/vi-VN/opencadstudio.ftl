@@ -3527,6 +3527,7 @@ modify =
     .count-objects =  (__ocs_arg_count__ đối tượng)
     .edge-extend-indented-title-case = [Cạnh: Kéo dài]
     .add-vertex = Thêm đỉnh
+    .extend-vertex = Extend Vertex
     .closed-cross = Chữ thập kín
     .closed-tee = Chữ T kín
     .corner-joint = Nối góc

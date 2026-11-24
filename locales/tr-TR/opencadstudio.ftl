@@ -3502,6 +3502,7 @@ modify =
     .count-objects = (__ocs_arg_count__ nesne)
     .edge-extend-indented-title-case = [Kenar: Uzat]
     .add-vertex = Tepe Noktası Ekle
+    .extend-vertex = Extend Vertex
     .closed-cross = Kapalı Kesişim
     .closed-tee = Kapalı T Birleşimi
     .corner-joint = Köşe Birleşimi

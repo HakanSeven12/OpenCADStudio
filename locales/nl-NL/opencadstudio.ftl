@@ -3518,6 +3518,7 @@ draw =
 
 modify =
     .add-vertex = Hoekpunt toevoegen
+    .extend-vertex = Extend Vertex
     .closed-cross = Gesloten kruis
     .closed-tee = Gesloten T-stuk
     .corner-joint = Hoekverbinding

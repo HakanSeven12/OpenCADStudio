@@ -821,6 +821,8 @@ std::thread_local! {
 #[cfg(test)]
 mod grip_ctrl_cycle_tests;
 #[cfg(test)]
+mod grip_extend_vertex_tests;
+#[cfg(test)]
 mod layer_name_target_tests;
 #[cfg(test)]
 mod layer_refresh_tests;

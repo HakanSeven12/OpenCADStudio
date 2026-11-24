@@ -4894,6 +4894,7 @@ insert =
     .bp-select-library-drawing = 選取要列出其圖塊的圖面
     .bp-open-library-drawing = 開啟圖面的圖塊...
     .bp-show-blocks = 顯示圖塊
+    .bp-open-drawing = 開啟圖面
     .bp-view-small = 小型圖示
     .bp-on-screen = 在畫面上指定
     .bp-block-not-found = 找不到圖塊 “__ocs_fmt_0__”。

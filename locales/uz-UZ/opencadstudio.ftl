@@ -4900,6 +4900,7 @@ insert =
     .bp-select-library-drawing = Bloklarini körsatiş uçun çizmani tanlang
     .bp-open-library-drawing = Çizma bloklarini oçiş...
     .bp-show-blocks = Bloklarni körsatiş
+    .bp-open-drawing = Chizmani ochish
     .bp-view-small = Kiçik belgilar
     .bp-on-screen = ekranda belgilangan
     .bp-block-not-found = "__ocs_fmt_0__" bloki topilmadi.

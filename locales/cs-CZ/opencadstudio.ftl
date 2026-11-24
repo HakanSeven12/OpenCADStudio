@@ -4901,6 +4901,7 @@ insert =
     .bp-select-library-drawing = Select a Drawing to List Its Blocks
     .bp-open-library-drawing = Open a drawing's blocks...
     .bp-show-blocks = Show Blocks
+    .bp-open-drawing = Otevřít výkres
     .bp-view-small = Malé ikony
     .bp-on-screen = určeno na obrazovce
     .bp-block-not-found = Blok „__ocs_fmt_0__“ nebyl nalezen.

@@ -1273,6 +1273,14 @@ pub struct UserSettings {
     /// 4 details, 5 list.
     #[serde(default = "default_block_view")]
     pub block_palette_view: u8,
+    /// Blocks palette: the tab it was left on (0 Current Drawing, 1 Recent,
+    /// 2 Favorites, 3 Libraries).
+    #[serde(default)]
+    pub block_palette_tab: u8,
+    /// Blocks palette: the library folder the Libraries tab showed last; it
+    /// opens there again unless BLOCKNAVIGATE names a folder.
+    #[serde(default)]
+    pub block_library_folder: String,
     /// Blocks palette insertion options.
     #[serde(default)]
     pub block_insert: BlockInsertOptions,
@@ -1681,6 +1689,8 @@ impl Default for UserSettings {
             block_favorites: Vec::new(),
             block_libraries: Vec::new(),
             block_palette_view: 1,
+            block_palette_tab: 0,
+            block_library_folder: String::new(),
             block_insert: BlockInsertOptions::default(),
             block_mru_list: 50,
             block_redefine_mode: 1,

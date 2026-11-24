@@ -4906,6 +4906,7 @@ insert =
     .bp-select-library-drawing = Select a Drawing to List Its Blocks
     .bp-open-library-drawing = Open a drawing's blocks...
     .bp-show-blocks = Show Blocks
+    .bp-open-drawing = Mở bản vẽ
     .bp-view-small = Biểu tượng nhỏ
     .bp-on-screen = được chỉ định trên màn hình
     .bp-block-not-found = Không tìm thấy khối "__ocs_fmt_0__".

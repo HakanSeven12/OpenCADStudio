@@ -93,7 +93,10 @@ impl OpenCADStudio {
     pub(super) fn on_block_palette(&mut self, m: BlockPaletteMsg) -> Task<Message> {
         match m {
             BlockPaletteMsg::Search(s) => self.block_palette.search = s,
-            BlockPaletteMsg::Tab(tab) => self.show_block_palette_tab(tab),
+            BlockPaletteMsg::Tab(tab) => {
+                self.show_block_palette_tab(tab);
+                self.persist_settings_if_changed();
+            }
             BlockPaletteMsg::View(v) => {
                 self.block_palette.view = v;
                 self.persist_settings_if_changed();
@@ -218,6 +221,7 @@ impl OpenCADStudio {
                 {
                     let parent = parent.to_path_buf();
                     self.list_block_library(parent);
+                    self.persist_settings_if_changed();
                 }
             }
             BlockPaletteMsg::Press(item) => self.block_palette.pressed = Some(item),
@@ -226,6 +230,7 @@ impl OpenCADStudio {
                     return match item {
                         Item::Folder(dir) => {
                             self.list_block_library(dir);
+                            self.persist_settings_if_changed();
                             Task::none()
                         }
                         item => self.palette_insert(item, None),
@@ -257,6 +262,7 @@ impl OpenCADStudio {
             let start = Some(self.block_navigate.trim())
                 .filter(|p| !p.is_empty() && *p != "." && Path::new(p).is_dir())
                 .map(PathBuf::from)
+                .or_else(|| self.block_palette.library_resume.take())
                 .or_else(|| self.block_palette.libraries.first().map(PathBuf::from));
             if let Some(dir) = start {
                 self.list_block_library(dir);
@@ -611,6 +617,13 @@ impl OpenCADStudio {
         };
         match action {
             MenuAction::Insert => return self.palette_insert(item, None),
+            // Opened as a drawing dropped on the window opens: a tab already
+            // showing it comes to the front.
+            MenuAction::OpenDrawing => {
+                if let Some(path) = item.drawing() {
+                    return self.update(Message::FileDropped(path));
+                }
+            }
             MenuAction::ShowBlocks => {
                 if let Item::File(path) = item {
                     self.list_block_library(path);

@@ -72,8 +72,8 @@ impl ModalKind {
         }
     }
 
-    /// A question or a notice: its window is the size of its content and
-    /// cannot be resized (#3241). Stretching it only adds empty space, and
+    /// A question or a notice: its window opens at the size of its content,
+    /// whatever size was remembered, and cannot be made smaller (#3241):
     /// shrinking it clips the buttons.
     pub(crate) fn fixed_size(self) -> bool {
         use ModalKind as K;
@@ -1101,7 +1101,7 @@ impl OpenCADStudio {
                 placement,
                 self.modal_title_for(kind),
                 true,
-                !kind.fixed_size(),
+                kind.fixed_size(),
             );
             if let Some(tool) = self.tool_windows.iter_mut().find(|tool| tool.kind == kind) {
                 tool.window = Some(id);
@@ -1134,7 +1134,7 @@ impl OpenCADStudio {
                     h: h.max(PALLET_WINDOW_MIN_H) + HEADER_H,
                 };
             }
-            let (id, open) = open_window(placement, panel.title().to_string(), false, true);
+            let (id, open) = open_window(placement, panel.title().to_string(), false, false);
             self.os_windows
                 .push(OsWindow::new(id, Detached::Panel(panel), placement, None));
             tasks.push(open);
@@ -1297,7 +1297,7 @@ fn open_window(
     placement: WindowPlacement,
     _title: String,
     focus: bool,
-    resizable: bool,
+    fixed: bool,
 ) -> (iced::window::Id, Task<Message>) {
     // The main window's scale is the best guess before the window exists;
     // `os_window_scale` puts it right once it knows its own.
@@ -1310,8 +1310,16 @@ fn open_window(
     let (id, open) = iced::window::open(iced::window::Settings {
         size: Size::new(placement.w.max(240.0), placement.h.max(160.0)),
         position,
-        min_size: Some(Size::new(240.0, 160.0)),
-        resizable,
+        // A question opens at its content's size and cannot be made smaller,
+        // so its buttons are never clipped (#3241). It can still be made
+        // larger: where the content measured short of what it draws, its
+        // buttons stay reachable (#3557).
+        min_size: Some(if fixed {
+            Size::new(placement.w.max(240.0), placement.h.max(160.0))
+        } else {
+            Size::new(240.0, 160.0)
+        }),
+        resizable: true,
         exit_on_close_request: false,
         // Opened from the app, which has the focus: above the main window.
         level: iced::window::Level::AlwaysOnTop,

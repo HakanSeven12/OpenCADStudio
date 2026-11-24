@@ -566,6 +566,9 @@ impl EntityTypeOps for EntityType {
     }
 
     fn mass_props(&self) -> Option<MassProps> {
+        if let EntityType::Region(region) = self {
+            return Some(crate::entities::solid3d::region_mass_props(region));
+        }
         dispatch!(self,
             |e| Some(MassPropsCalc::mass_props(e)),
             [Circle, Arc, Line, LwPolyline, Ellipse],

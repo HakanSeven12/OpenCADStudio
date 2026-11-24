@@ -1024,6 +1024,68 @@ mod tests {
     }
 
     #[test]
+    fn a_type_that_is_not_scanned_is_not_reported() {
+        let curves = [
+            line([0.0, 0.0], [9.7, 0.0]),
+            line([10.0, -5.0], [10.0, 5.0]),
+        ];
+        let off = Tolerances {
+            undershoot: None,
+            ..Tolerances::all(0.5)
+        };
+        assert!(end_errors(&curves, off, Tolerance::new(1e-9)).is_empty());
+        assert!(end_errors(&curves, Tolerances::default(), Tolerance::new(1e-9)).is_empty());
+    }
+
+    #[test]
+    fn each_type_uses_its_own_tolerance() {
+        // The end of the first line is 0.5 from the start of the third line
+        // (a gap) and 0.6 short of the wall (an undershoot). With a gap
+        // tolerance of 0.2, the undershoot is the error of that end.
+        let curves = [
+            line([-10.0, 0.0], [0.0, 0.0]),
+            line([0.6, -5.0], [0.6, 5.0]),
+            line([0.0, 0.5], [0.0, 10.0]),
+        ];
+        let tolerances = Tolerances {
+            gap: Some(0.2),
+            overshoot: Some(1.0),
+            undershoot: Some(1.0),
+        };
+        let errors = end_errors(&curves, tolerances, Tolerance::new(1e-9));
+        let first = errors
+            .iter()
+            .find(|e| e.end == end(0, false))
+            .expect("an error");
+        assert_eq!(first.kind, EndErrorKind::Undershoot);
+        assert!(near(first.target, [0.6, 0.0]));
+        assert!(
+            !errors.iter().any(|e| e.kind == EndErrorKind::Gap),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn a_gap_corner_is_held_to_the_gap_tolerance() {
+        // The second line ends 0.15 above the end of the first and meets
+        // its line 0.9 ahead: within the undershoot tolerance, not within
+        // the gap tolerance, so the gap has no corner.
+        let to = [0.0, 0.15];
+        let dir = [0.9 / 0.9f64.hypot(0.15), -0.15 / 0.9f64.hypot(0.15)];
+        let back = [to[0] - 5.0 * dir[0], to[1] - 5.0 * dir[1]];
+        let curves = [line([-10.0, 0.0], [0.0, 0.0]), line(back, to)];
+        let tolerances = Tolerances {
+            gap: Some(0.2),
+            overshoot: Some(1.0),
+            undershoot: Some(1.0),
+        };
+        let errors = end_errors(&curves, tolerances, Tolerance::new(1e-9));
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].kind, EndErrorKind::Gap);
+        assert_eq!(errors[0].corner, None);
+    }
+
+    #[test]
     fn no_tolerance_above_the_weld_finds_nothing() {
         let curves = [
             line([0.0, 0.0], [10.0, 0.0]),

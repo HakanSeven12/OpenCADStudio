@@ -142,3 +142,50 @@ impl CleanupSettings {
         }
     }
 }
+
+/// A `.gcs` file written by AutoCAD 2027 (with one space at the end of a
+/// line removed).
+#[cfg(test)]
+pub(crate) const AUTOCAD_GCS: &str = r#"{
+  "tolerances" :
+  [
+    {
+      "name" : "gap",
+      "subName" : "",
+      "tolerance" : 0.4
+    },
+    {
+      "name" : "overshoot",
+      "subName" : "",
+      "tolerance" : 0.4
+    },
+    {
+      "name" : "undershoot",
+      "subName" : "",
+      "tolerance" : 0.4
+    },
+    {
+      "name" : "absolute-angle",
+      "subName" : "0",
+      "tolerance" : 5.0
+    },
+    {
+      "name" : "absolute-angle",
+      "subName" : "90",
+      "tolerance" : 5.0
+    },
+    {
+      "name" : "relative-angle",
+      "subName" : "0",
+      "tolerance" : 5.0
+    },
+    {
+      "name" : "relative-angle",
+      "subName" : "90",
+      "tolerance" : 5.0
+    }
+  ]
+}"#;
+
+#[cfg(test)]
+mod tests;

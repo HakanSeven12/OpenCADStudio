@@ -1,4 +1,5 @@
 use crate::app::{Message, OpenCADStudio};
+use crate::modules::manage::geometry_cleanup_settings::{CleanupSettings, AUTOCAD_GCS};
 use crate::ui::dock::PanelId;
 use crate::ui::window::geometry_cleanup::{Finding, Fix, GeometryCleanupMsg};
 use document::entities::{Arc, Line, LwPolyline};
@@ -66,8 +67,8 @@ fn fix(app: &mut OpenCADStudio, kind: EndErrorKind, fix: Fix) {
 }
 
 /// A wall (x = 10), a line 0.4 past it, a line 0.3 short of it, and two
-/// lines whose ends are 0.2 apart. The mean length is 64, so the proposed
-/// tolerance (1% of it) is 0.64.
+/// lines whose ends are 0.2 apart. The mean length is 51.98, so the
+/// proposed tolerance (1% of it) is 0.5198.
 fn errors_drawing(app: &mut OpenCADStudio) -> [Handle; 5] {
     let wall = line(app, [10.0, -100.0], [10.0, 100.0]);
     let over = line(app, [0.0, 50.0], [10.4, 50.0]);
@@ -627,4 +628,350 @@ fn the_same_error_is_the_same_type_at_the_same_end_of_the_same_object() {
     ] {
         assert!(!error.same_error(&other), "{other:?}");
     }
+}
+
+#[test]
+fn the_settings_are_kept_in_the_user_profile() {
+    let (mut app, _) = app();
+    app.geometry_cleanup.settings = Some(CleanupSettings::proposed(0.4));
+    let json = serde_json::to_string(&app.current_config()).unwrap();
+    let loaded: crate::app::config::AppConfig = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        loaded.geometry_cleanup,
+        Some(CleanupSettings::proposed(0.4))
+    );
+    let (mut other, _) = self::app();
+    other.apply_config(loaded);
+    assert_eq!(
+        other.geometry_cleanup.settings,
+        Some(CleanupSettings::proposed(0.4))
+    );
+}
+
+#[test]
+fn a_profile_from_before_the_settings_has_none() {
+    let loaded: crate::app::config::AppConfig = serde_json::from_str("{}").unwrap();
+    assert_eq!(loaded.geometry_cleanup, None);
+}
+
+#[test]
+fn a_scan_uses_the_saved_tolerance_of_each_type() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    let mut settings = CleanupSettings::proposed(0.5198);
+    settings.set(EndErrorKind::Undershoot, None);
+    settings.set(EndErrorKind::Gap, Some(0.1));
+    app.geometry_cleanup.settings = Some(settings);
+    let kinds: Vec<EndErrorKind> = scan(&mut app, &objects).iter().map(|f| f.kind).collect();
+    assert_eq!(kinds, [EndErrorKind::Overshoot]);
+}
+
+#[test]
+fn without_saved_settings_each_type_uses_the_proposed_tolerance() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    scan(&mut app, &objects);
+    let tolerances = app.geometry_cleanup.scan.as_ref().unwrap().tolerances;
+    assert!(
+        (tolerances.gap.unwrap() - 0.5198).abs() < 1e-9,
+        "{tolerances:?}"
+    );
+    assert_eq!(tolerances.gap, tolerances.overshoot);
+    assert_eq!(tolerances.gap, tolerances.undershoot);
+}
+
+fn settings_msg(app: &mut OpenCADStudio, m: GeometryCleanupMsg) {
+    let _ = app.update(Message::GeometryCleanup(m));
+}
+
+/// A folder of its own for each test that writes files.
+fn scratch(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("ocs-gcs-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn shown_kinds(app: &OpenCADStudio) -> Vec<EndErrorKind> {
+    let dialog = app.geometry_cleanup.dialog.as_ref().expect("the dialog");
+    dialog.rows.iter().map(|(kind, _)| *kind).collect()
+}
+
+#[test]
+fn the_settings_dialog_opens_with_the_proposed_tolerances() {
+    let (mut app, _) = app();
+    errors_drawing(&mut app);
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    assert_eq!(
+        app.active_modal,
+        Some(crate::app::ModalKind::GeometryCleanupSettings)
+    );
+    let dialog = app.geometry_cleanup.dialog.as_ref().expect("the dialog");
+    assert_eq!(dialog.rows.len(), 3);
+    assert!((dialog.proposed - 0.5198).abs() < 1e-9);
+    assert_eq!(
+        dialog.parsed(),
+        Some(CleanupSettings::proposed(0.5198)),
+        "the boxes hold the proposed tolerance"
+    );
+}
+
+#[test]
+fn scan_saves_the_settings_and_scans_the_drawing() {
+    // No scan before: Scan scans all of model space.
+    let (mut app, _) = app();
+    errors_drawing(&mut app);
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsRemove(EndErrorKind::Undershoot),
+    );
+    settings_msg(&mut app, GeometryCleanupMsg::SettingsScan);
+    assert!(app.geometry_cleanup.dialog.is_none() && app.active_modal.is_none());
+    assert!(app.geometry_cleanup.show, "the palette shows the result");
+    let saved = app.geometry_cleanup.settings.as_ref().expect("saved");
+    assert_eq!(saved.tolerance(EndErrorKind::Undershoot), None);
+    let mut kinds: Vec<EndErrorKind> = findings(&app).iter().map(|f| f.kind).collect();
+    kinds.sort();
+    assert_eq!(kinds, [EndErrorKind::Gap, EndErrorKind::Overshoot]);
+}
+
+#[test]
+fn scan_rescans_the_objects_of_the_last_scan() {
+    let (mut app, _) = app();
+    let objects = errors_drawing(&mut app);
+    // A line 0.2 short of a second wall, not in the first scan.
+    let extra = line(&mut app, [100.0, 0.0], [109.8, 0.0]);
+    let _wall = line(&mut app, [110.0, -100.0], [110.0, 100.0]);
+    scan(&mut app, &objects);
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    settings_msg(&mut app, GeometryCleanupMsg::SettingsScan);
+    assert!(
+        !findings(&app).iter().any(|f| f.handle == extra),
+        "only the objects of the last scan"
+    );
+    assert_eq!(findings(&app).len(), 3);
+}
+
+#[test]
+fn scan_waits_for_tolerances_that_are_numbers() {
+    let (mut app, _) = app();
+    errors_drawing(&mut app);
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsTolerance(EndErrorKind::Gap, "abc".into()),
+    );
+    settings_msg(&mut app, GeometryCleanupMsg::SettingsScan);
+    assert!(app.geometry_cleanup.dialog.is_some());
+    assert!(app.geometry_cleanup.settings.is_none());
+}
+
+#[test]
+fn cancel_changes_nothing() {
+    let (mut app, _) = app();
+    errors_drawing(&mut app);
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsRemove(EndErrorKind::Gap),
+    );
+    settings_msg(&mut app, GeometryCleanupMsg::SettingsCancel);
+    assert!(app.geometry_cleanup.dialog.is_none() && app.active_modal.is_none());
+    assert!(app.geometry_cleanup.settings.is_none());
+    assert!(app.geometry_cleanup.scan.is_none());
+}
+
+#[test]
+fn the_proposed_tolerance_is_put_in_the_box_and_a_removed_type_can_be_added_back() {
+    let (mut app, _) = app();
+    errors_drawing(&mut app);
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsTolerance(EndErrorKind::Gap, "1".into()),
+    );
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsUseProposed(EndErrorKind::Gap),
+    );
+    let gap = |app: &OpenCADStudio| {
+        let dialog = app.geometry_cleanup.dialog.as_ref().unwrap();
+        dialog.parsed().unwrap().tolerance(EndErrorKind::Gap)
+    };
+    assert_eq!(gap(&app), Some(0.5198));
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsRemove(EndErrorKind::Overshoot),
+    );
+    assert_eq!(
+        app.geometry_cleanup.dialog.as_ref().unwrap().removed(),
+        [EndErrorKind::Overshoot]
+    );
+    assert_eq!(
+        shown_kinds(&app),
+        [EndErrorKind::Gap, EndErrorKind::Undershoot]
+    );
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsAdd(EndErrorKind::Overshoot),
+    );
+    assert_eq!(
+        shown_kinds(&app),
+        [
+            EndErrorKind::Gap,
+            EndErrorKind::Overshoot,
+            EndErrorKind::Undershoot
+        ]
+    );
+    let dialog = app.geometry_cleanup.dialog.as_ref().unwrap();
+    assert_eq!(
+        dialog.parsed().unwrap().tolerance(EndErrorKind::Overshoot),
+        Some(0.5198)
+    );
+}
+
+#[test]
+fn import_reads_an_autocad_file_and_export_writes_its_angle_rows_back() {
+    let dir = scratch("import-export");
+    let source = dir.join("test.gcs");
+    std::fs::write(&source, AUTOCAD_GCS).unwrap();
+    let (mut app, _) = app();
+    errors_drawing(&mut app);
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsImported(source.clone()),
+    );
+    let dialog = app.geometry_cleanup.dialog.as_ref().unwrap();
+    assert_eq!(dialog.rows[0].1, "0.4");
+    assert_eq!(dialog.hidden.len(), 4);
+    assert_eq!(
+        dialog.file.as_deref(),
+        Some(source.display().to_string().as_str())
+    );
+    let target = dir.join("out.gcs");
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsExportTo(target.clone()),
+    );
+    let written = std::fs::read_to_string(&target).unwrap();
+    assert_eq!(
+        CleanupSettings::parse_gcs(&written).unwrap(),
+        CleanupSettings::parse_gcs(AUTOCAD_GCS).unwrap()
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_file_that_cannot_be_read_changes_nothing() {
+    let dir = scratch("unreadable");
+    let broken = dir.join("broken.gcs");
+    std::fs::write(&broken, "not json").unwrap();
+    let (mut app, _) = app();
+    errors_drawing(&mut app);
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    let before = app.geometry_cleanup.dialog.as_ref().unwrap().parsed();
+    for path in [dir.join("missing.gcs"), broken] {
+        let errors = app.command_line.history.len();
+        settings_msg(&mut app, GeometryCleanupMsg::SettingsImported(path));
+        assert_eq!(
+            app.geometry_cleanup.dialog.as_ref().unwrap().parsed(),
+            before
+        );
+        assert!(app.command_line.history.len() > errors, "an error is shown");
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn scan_with_no_types_finds_nothing() {
+    let (mut app, _) = app();
+    errors_drawing(&mut app);
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    for kind in [
+        EndErrorKind::Gap,
+        EndErrorKind::Overshoot,
+        EndErrorKind::Undershoot,
+    ] {
+        settings_msg(&mut app, GeometryCleanupMsg::SettingsRemove(kind));
+    }
+    settings_msg(&mut app, GeometryCleanupMsg::SettingsScan);
+    assert!(app.geometry_cleanup.scan.is_some());
+    assert!(findings(&app).is_empty());
+}
+
+#[test]
+fn scan_from_another_tab_scans_the_current_drawing() {
+    let (mut app, _) = app();
+    let first = errors_drawing(&mut app);
+    scan(&mut app, &first[..1]);
+    app.push_test_document();
+    app.active_tab = app.tabs.len() - 1;
+    let i = app.active_tab;
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+    errors_drawing(&mut app);
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    settings_msg(&mut app, GeometryCleanupMsg::SettingsScan);
+    let scan = app.geometry_cleanup.scan.as_ref().unwrap();
+    assert_eq!(scan.tab, app.tabs[i].id);
+    assert_eq!(scan.findings.len(), 3);
+}
+
+#[test]
+fn a_tolerance_too_large_to_keep_disables_scan() {
+    let (mut app, _) = app();
+    errors_drawing(&mut app);
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsTolerance(EndErrorKind::Gap, "1e303".into()),
+    );
+    assert_eq!(app.geometry_cleanup.dialog.as_ref().unwrap().parsed(), None);
+    settings_msg(&mut app, GeometryCleanupMsg::SettingsScan);
+    assert!(app.geometry_cleanup.settings.is_none());
+}
+
+#[test]
+fn a_profile_with_settings_that_cannot_be_read_keeps_the_rest() {
+    let json = r#"{"show_command_history": true,
+        "geometry_cleanup": {"tolerances": [{"name": "gap", "tolerance": null}]}}"#;
+    let loaded: crate::app::config::AppConfig = serde_json::from_str(json).unwrap();
+    assert!(
+        loaded.show_command_history,
+        "the rest of the profile is kept"
+    );
+    assert_eq!(loaded.geometry_cleanup, None);
+}
+
+#[test]
+fn the_proposed_tolerance_has_at_most_six_decimals() {
+    // Lengths 1, 1 and 2: the mean is 4/3, 1% of it 0.013333...
+    let (mut app, _) = app();
+    let a = line(&mut app, [0.0, 0.0], [1.0, 0.0]);
+    let b = line(&mut app, [0.0, 5.0], [1.0, 5.0]);
+    let c = line(&mut app, [0.0, 9.0], [2.0, 9.0]);
+    scan(&mut app, &[a, b, c]);
+    let tolerances = app.geometry_cleanup.scan.as_ref().unwrap().tolerances;
+    assert_eq!(tolerances.gap, Some(0.013333));
+}
+
+#[test]
+fn a_typed_tolerance_changes_only_its_own_type() {
+    let (mut app, _) = app();
+    errors_drawing(&mut app);
+    settings_msg(&mut app, GeometryCleanupMsg::OpenSettings);
+    settings_msg(
+        &mut app,
+        GeometryCleanupMsg::SettingsTolerance(EndErrorKind::Gap, "0.25".into()),
+    );
+    let parsed = app
+        .geometry_cleanup
+        .dialog
+        .as_ref()
+        .unwrap()
+        .parsed()
+        .unwrap();
+    assert_eq!(parsed.tolerance(EndErrorKind::Gap), Some(0.25));
+    assert_eq!(parsed.tolerance(EndErrorKind::Overshoot), Some(0.5198));
+    assert_eq!(parsed.tolerance(EndErrorKind::Undershoot), Some(0.5198));
 }

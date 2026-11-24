@@ -250,7 +250,7 @@ fn group_view(i: usize, group: &'static Group, open: bool) -> Element<'static, M
             crate::ui::icons::semantic(group.icon, 18.0),
             if open { title.font(bold()) } else { title },
             Space::new().width(Length::Fill),
-            text(if open { "▾" } else { "▸" }).size(10).style(crate::ui::style::common::muted_style),
+            crate::ui::icons::themed_secondary(if open { crate::ui::icons::TRI_DOWN } else { crate::ui::icons::TRI_RIGHT }, 10.0),
         ]
         .spacing(8)
         .align_y(iced::Center),
@@ -302,7 +302,7 @@ fn tool_button(entry: &'static Entry) -> Element<'static, Message> {
 /// The menu, pinned to the canvas's right edge, its foot `bottom` above the
 /// canvas's (clear of the command line).
 pub fn view(state: &PointsMenu, bottom: f32) -> Element<'static, Message> {
-    let close = button(text("✕").size(12))
+    let close = button(crate::ui::icons::themed_secondary(crate::ui::icons::CLOSE, 12.0))
         .padding([1, 6])
         .on_press(Message::PointsMenu(PointsMenuMsg::Close))
         .style(row_style(false));

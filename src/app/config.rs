@@ -105,7 +105,10 @@ pub struct ShortcutConfig {
     pub bindings: std::collections::BTreeMap<String, String>,
     /// The shipped default keys this table has already been offered. A
     /// default added in a later release is backfilled once; one the user
-    /// removed stays removed.
+    /// removed stays removed. A table saved before this field existed has
+    /// been offered none, so the field reads as empty there, not as the
+    /// struct's default (every current key).
+    #[serde(default)]
     pub known_defaults: std::collections::BTreeSet<String>,
 }
 

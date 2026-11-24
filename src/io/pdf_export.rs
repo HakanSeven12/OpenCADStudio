@@ -130,6 +130,7 @@ fn write_pdf_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
         let _ = std::fs::remove_file(&temp_path);
         return Err(format!("Failed to replace PDF file: {error}"));
     }
+    super::remove_stale_save_temps(path);
     Ok(())
 }
 
@@ -4031,6 +4032,18 @@ mod tests {
 
         assert_eq!(std::fs::read(&path).unwrap(), b"new");
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn a_pdf_export_removes_the_temporary_file_of_a_stopped_export() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("plan.pdf");
+        let stopped = crate::io::stopped_save_temp(&path);
+
+        write_pdf_atomically(&path, b"new").unwrap();
+
+        assert!(path.exists());
+        assert!(!stopped.exists());
     }
 
     #[test]

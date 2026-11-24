@@ -3026,10 +3026,10 @@ fn save_temp_name_parts(path: &Path) -> (String, String) {
     (format!(".{stem}.ocs-save-"), format!(".{extension}"))
 }
 
-/// Removes the temporary files of saves of `path` that the system stopped
-/// before their replace. A save that runs writes to its file all the time,
-/// so a file that nothing wrote to for an hour is not a running save of
-/// another instance.
+/// Removes the temporary files of saves and exports of `path` that the
+/// system stopped before their replace. A save that runs writes to its file
+/// all the time, so a file that nothing wrote to for an hour is not a
+/// running save of another instance.
 fn remove_stale_save_temps(path: &Path) {
     const STALE: std::time::Duration = std::time::Duration::from_secs(60 * 60);
     let Ok(entries) = std::fs::read_dir(save_folder(path)) else {
@@ -3062,6 +3062,18 @@ fn remove_stale_save_temps(path: &Path) {
             let _ = std::fs::remove_file(entry.path());
         }
     }
+}
+
+/// Writes the temporary file that a save or export of `path`, stopped two
+/// hours ago, leaves beside it. Returns the file's path.
+#[cfg(test)]
+pub(crate) fn stopped_save_temp(path: &Path) -> PathBuf {
+    let (start, end) = save_temp_name_parts(path);
+    let temp_path = save_folder(path).join(format!("{start}4242-1{end}"));
+    let file = std::fs::File::create(&temp_path).unwrap();
+    let modified = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 60 * 60);
+    file.set_modified(modified).unwrap();
+    temp_path
 }
 
 #[cfg(not(target_os = "windows"))]

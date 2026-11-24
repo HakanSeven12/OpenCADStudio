@@ -285,6 +285,7 @@ impl PublishPdf {
         super::replace_save_file(&self.temp_path, &self.path, false)
             .map_err(|error| format!("Failed to replace PDF file: {error}"))?;
         self.finished = true;
+        super::remove_stale_save_temps(&self.path);
         Ok(self.offset)
     }
 
@@ -830,6 +831,20 @@ mod tests {
             .is_err());
         assert!(path.exists(), "a failed set keeps the previous file");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_published_set_removes_the_temporary_file_of_a_stopped_publish() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("set.pdf");
+        let stopped = crate::io::stopped_save_temp(&path);
+
+        let mut pdf = PublishPdf::create(&path).unwrap();
+        pdf.append(sheet(100, 100, &["0"]), &[], &[]).unwrap();
+        pdf.finish("Set", false).unwrap();
+
+        assert!(path.exists());
+        assert!(!stopped.exists());
     }
 
     #[test]

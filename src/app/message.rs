@@ -2,6 +2,8 @@ use super::*;
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// The civil Create Points menu at the canvas's right edge.
+    PointsMenu(crate::ui::points_menu::PointsMenuMsg),
     GraphicAttributes(crate::ui::window::graphic_attributes::GraphicAttributesMsg),
     SpaceMouseWake,
     SpaceMouseFrame(iced::time::Instant),

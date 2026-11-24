@@ -3074,6 +3074,11 @@ bg={bg_ms:.1}ms n={view_count}"
                 }
             }
 
+            // The civil Create Points menu, over the right-edge toolbars.
+            if self.points_menu.open && !tab.is_start {
+                viewport_stack = viewport_stack.push(crate::ui::points_menu::view(&self.points_menu, command_line_inset(self)));
+            }
+
             // In-place block edit (REFEDIT): right-edge toolbar with Save / Discard
             // so the edit can be finished by clicking. (#136)
             if let (Some(session), false) = (tab.refedit_session.as_ref(), tab.is_start) {

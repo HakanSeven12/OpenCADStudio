@@ -14,6 +14,7 @@ pub mod menu_bar;
 pub mod modal;
 pub mod node_graph;
 pub mod overlay;
+pub mod points_menu;
 pub mod popup;
 pub mod properties;
 pub mod read_only;

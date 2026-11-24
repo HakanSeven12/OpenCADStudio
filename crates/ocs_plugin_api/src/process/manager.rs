@@ -36,6 +36,9 @@ pub type NotificationHandler = Arc<dyn Fn(&str, Option<u64>, PluginNotification)
 pub struct PluginManager {
     plugins: Vec<LoadedPlugin>,
     notification_handler: Option<NotificationHandler>,
+}
+
+thread_local! {
     /// Ids of plugins whose spawn/bootstrap is IN FLIGHT (`load_with_expected_id`
     /// began and has not returned): owner-scoped declarations (entity classes,
     /// quad panels, custom grips) arrive as nested requests during that window —
@@ -43,7 +46,13 @@ pub struct PluginManager {
     /// but the registry entry does not exist until the load returns, and the
     /// empty-identity manifest call used to refuse them. Cleared when the load
     /// finishes (entry inserted) or fails, so a marker never outlives a plugin.
-    booting: std::sync::Mutex<std::collections::HashSet<String>>,
+    ///
+    /// Kept per THREAD, not per manager (#3602): the host's startup load fills
+    /// a local manager and installs it only after every plugin has loaded, so
+    /// a marker on that manager was invisible to the installed (empty) one the
+    /// declaration law asks. Boot and its nested requests run on one thread.
+    static BOOTING: std::cell::RefCell<std::collections::HashSet<String>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
 }
 
 struct LoadedPlugin {
@@ -124,7 +133,6 @@ impl PluginManager {
         Self {
             plugins: Vec::new(),
             notification_handler: None,
-            booting: std::sync::Mutex::new(std::collections::HashSet::new()),
         }
     }
 
@@ -546,22 +554,16 @@ impl PluginManager {
     /// Mark a plugin's boot as in flight: between this and [`Self::end_boot`],
     /// the owner-scoped declaration laws treat `id` as a live, authenticated
     /// transport (the spawn is actively talking to that process — see the
-    /// struct docs for `booting`). Callers must pair this with `end_boot` on
+    /// docs on `BOOTING`). Callers must pair this with `end_boot` on
     /// every return path (a leaked marker would make a never-loaded id
     /// declare owner-scoped state forever).
     pub fn begin_boot(&self, id: &str) {
-        self.booting
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(id.to_string());
+        BOOTING.with(|b| b.borrow_mut().insert(id.to_string()));
     }
 
     /// Close the in-flight boot marker for `id` (idempotent).
     pub fn end_boot(&self, id: &str) {
-        self.booting
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(id);
+        BOOTING.with(|b| b.borrow_mut().remove(id));
     }
 
     /// Whether owner-scoped declarations from `id` are attributable to a real,
@@ -573,10 +575,7 @@ impl PluginManager {
         if self.grip_endpoint(id).is_some_and(|(_, _, alive)| alive) {
             return true;
         }
-        self.booting
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .contains(id)
+        BOOTING.with(|b| b.borrow().contains(id))
     }
 
     /// Command names advertised by every alive, non-disabled plugin: each

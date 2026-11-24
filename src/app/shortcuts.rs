@@ -1146,6 +1146,43 @@ mod tests {
         assert!(app.quad, "SHIFT+F12 toggles the quad via QUADTOGGLE");
     }
 
+    /// #3154: a settings file saved before `known_defaults` existed has no
+    /// such field. It gets every default it lacks, and keeps its own rows.
+    #[test]
+    fn a_settings_file_without_known_defaults_gets_the_new_defaults() {
+        let saved = r#"{"shortcuts":{"bindings":{"F1":"LINE","F2":"COMMANDHISTORY"}}}"#;
+        let cfg: crate::app::config::AppConfig = serde_json::from_str(saved).unwrap();
+        let mut app = OpenCADStudio::new_for_test();
+        app.apply_config(cfg);
+        assert_eq!(
+            app.shortcut_bindings["F1"], "LINE",
+            "the user's own row stays"
+        );
+        for (key, action) in default_bindings()
+            .into_iter()
+            .filter(|(key, _)| key != "F1")
+        {
+            assert_eq!(app.shortcut_bindings.get(&key), Some(&action), "{key}");
+        }
+    }
+
+    /// A settings file with `known_defaults` keeps a default the user
+    /// removed removed.
+    #[test]
+    fn a_removed_default_stays_removed() {
+        let key = format!("{ACCEL}+9");
+        let saved = serde_json::json!({
+            "shortcuts": {
+                "bindings": {"F1": "HELP"},
+                "known_defaults": default_bindings().into_keys().collect::<Vec<_>>(),
+            }
+        });
+        let cfg: crate::app::config::AppConfig = serde_json::from_value(saved).unwrap();
+        let mut app = OpenCADStudio::new_for_test();
+        app.apply_config(cfg);
+        assert!(!app.shortcut_bindings.contains_key(&key));
+    }
+
     #[test]
     fn ctrl_tab_switches_drawings_also_without_a_binding() {
         let mut app = OpenCADStudio::new_for_test();

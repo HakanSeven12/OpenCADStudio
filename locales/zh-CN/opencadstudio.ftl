@@ -4882,6 +4882,7 @@ insert =
     .bp-select-library-drawing = Select a Drawing to List Its Blocks
     .bp-open-library-drawing = Open a drawing's blocks...
     .bp-show-blocks = Show Blocks
+    .bp-open-drawing = 打开图形
     .bp-view-small = Small Icons
     .bp-on-screen = specified on screen
     .bp-block-not-found = Block "__ocs_fmt_0__" not found.

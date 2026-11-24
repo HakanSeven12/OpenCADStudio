@@ -1374,6 +1374,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Select a Drawing to List Its Blocks" => Some(("insert", "bp-select-library-drawing")),
         "Open a drawing's blocks..." => Some(("insert", "bp-open-library-drawing")),
         "Show Blocks" => Some(("insert", "bp-show-blocks")),
+        "Open Drawing" => Some(("insert", "bp-open-drawing")),
         "Small Icons" => Some(("insert", "bp-view-small")),
         "specified on screen" => Some(("insert", "bp-on-screen")),
         "Block \"{}\" not found." => Some(("insert", "bp-block-not-found")),

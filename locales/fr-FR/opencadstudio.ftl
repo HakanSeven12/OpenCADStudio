@@ -4899,6 +4899,7 @@ insert =
     .bp-select-library-drawing = Sélectionner un dessin pour lister ses blocs
     .bp-open-library-drawing = Ouvrir les blocs d'un dessin...
     .bp-show-blocks = Afficher les blocs
+    .bp-open-drawing = Ouvrir le dessin
     .bp-view-small = Petites icônes
     .bp-on-screen = spécifier à l'écran
     .bp-block-not-found = Bloc "__ocs_fmt_0__" introuvable.

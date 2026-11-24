@@ -4889,6 +4889,7 @@ insert =
     .bp-select-library-drawing = Select a Drawing to List Its Blocks
     .bp-open-library-drawing = Open a drawing's blocks...
     .bp-show-blocks = Show Blocks
+    .bp-open-drawing = Rajz megnyitása
     .bp-view-small = Kis ikonok
     .bp-on-screen = képernyőn megadva
     .bp-block-not-found = A(z) „__ocs_fmt_0__” blokk nem található.

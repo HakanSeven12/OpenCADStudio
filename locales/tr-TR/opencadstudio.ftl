@@ -4859,6 +4859,7 @@ insert =
     .bp-select-library-drawing = Bloklarını listelemek için bir çizim seçin
     .bp-open-library-drawing = Bir çizimin bloklarını aç...
     .bp-show-blocks = Blokları göster
+    .bp-open-drawing = Çizimi aç
     .bp-view-small = Küçük simgeler
     .bp-on-screen = ekranda belirtilir
     .bp-block-not-found = "__ocs_fmt_0__" bloğu bulunamadı.

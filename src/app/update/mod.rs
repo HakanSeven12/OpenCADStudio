@@ -154,6 +154,8 @@ fn reorder_insertion_index(from: usize, to: usize, after: bool, len: usize) -> O
 
 #[cfg(test)]
 mod block_ops_tests;
+#[cfg(test)]
+mod block_palette_library_tests;
 pub(super) mod blocks_palette;
 pub(in crate::app) mod command;
 pub(crate) mod context_menu;

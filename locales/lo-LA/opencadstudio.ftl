@@ -4900,6 +4900,7 @@ insert =
     .bp-select-library-drawing = Select a Drawing to List Its Blocks
     .bp-open-library-drawing = Open a drawing's blocks...
     .bp-show-blocks = Show Blocks
+    .bp-open-drawing = ເປີດແບບແຕ້ມ
     .bp-view-small = ໄອຄອນນ້ອຍ
     .bp-on-screen = ກໍານົດເທິງໜ້າຈໍ
     .bp-block-not-found = ບໍ່ພົບຊື່ບລັອກ "__ocs_fmt_0__".

@@ -86,6 +86,8 @@ const MODEL_LINEWEIGHT_BOOST: f32 = 2.0;
 const MODEL_LINEWEIGHT_MAX_PX: f32 = 10.0;
 // Must match `MITER_LIMIT` in wire_gpu.rs.
 const MITER_LIMIT: f32 = 8.0;
+// Anti-aliasing pad: the quad reaches this many pixels past the stroke.
+const AA_PAD: f32 = 1.0;
 
 struct VertexOut {
     @invariant @builtin(position) clip_pos: vec4<f32>,
@@ -205,7 +207,10 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
         let world_hw_a = select(wire_const.world_half_width, seg_taper_ratio.x * wire_const.world_half_width, is_tapered);
         let world_hw_b = select(wire_const.world_half_width, seg_taper_ratio.y * wire_const.world_half_width, is_tapered);
         let cur_world_hw = mix(world_hw_a, world_hw_b, which_end);
-        let eff_hw = cur_world_hw + 0.5 * u.world_per_pixel;
+        // The quad reaches one pixel past the band; the fragment fades the
+        // outer pixel by coverage (edge anti-aliasing), so the band still
+        // draws half a pixel wider each side as before.
+        let eff_hw = cur_world_hw + AA_PAD * u.world_per_pixel;
 
         let world_delta = rel_b - rel_a;
         let world_len = length(world_delta);
@@ -240,7 +245,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
         final_clip = clip_pos;
         out_dist = mix(seg_distances.x, seg_distances.y, which_end) + along * (seg_distances.y - seg_distances.x) / max(world_len, 1e-6);
         out_cap = vec2<f32>(which_end * world_len, eff_hw * side);
-        out_cap_ends = vec3<f32>(world_len, world_hw_a, world_hw_b);
+        out_cap_ends = vec3<f32>(world_len, world_hw_a + 0.5 * u.world_per_pixel, world_hw_b + 0.5 * u.world_per_pixel);
         out_dot = vec2<f32>(max(cur_world_hw, 0.75 * u.world_per_pixel), eff_hw * side);
     } else {
         // Thin wires expand in screen pixels facing the camera with rounded end caps / joints.
@@ -262,19 +267,21 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
         let clip_position = mix(clip_a, clip_b, which_end);
 
         let half_width = resolve_hw(0.0, wire_const.world_half_width, wire_const.half_width);
+        // Quad padded for the anti-aliased edge; `half_width` stays the stroke radius.
+        let qhw = half_width + AA_PAD - 0.5;
         let extension = which_end * 2.0 - 1.0;
-        let offset_px = perpendicular * half_width * side
-            + direction * half_width * extension;
+        let offset_px = perpendicular * qhw * side
+            + direction * qhw * extension;
         let ndc_offset = offset_px / (u.viewport_size * 0.5);
         var clip_pos_out = clip_position + vec4<f32>(ndc_offset * clip_position.w, 0.0, 0.0);
         clip_pos_out = apply_draw_order(clip_pos_out, in.depth.x);
 
         final_clip = clip_pos_out;
         out_dist = mix(seg_distances.x, seg_distances.y, mix(t_a, 1.0 - t_b, which_end))
-            + extension * half_width * u.world_per_pixel;
-        out_cap = vec2<f32>(which_end * segment_length + extension * half_width, half_width * side);
+            + extension * qhw * u.world_per_pixel;
+        out_cap = vec2<f32>(which_end * segment_length + extension * qhw, qhw * side);
         out_cap_ends = vec3<f32>(segment_length, half_width, half_width);
-        out_dot = vec2<f32>(max(half_width, 0.75) * u.world_per_pixel, half_width * side * u.world_per_pixel);
+        out_dot = vec2<f32>(max(half_width, 0.75) * u.world_per_pixel, qhw * side * u.world_per_pixel);
     }
 
     let scale = u.linetype_scale;
@@ -376,18 +383,31 @@ fn in_dash(
     return false;
 }
 
-fn clipped_cap(cap: vec2<f32>, ends: vec3<f32>) -> bool {
+// Edge coverage (anti-aliasing): distance of the fragment from the stroke
+// (round joints / end caps outside the segment span) against the stroke
+// radius, in device pixels via the screen gradient of `cap.y`. 0 = outside
+// (discard), 1 = inside, a one-pixel ramp across the edge.
+fn edge_coverage(cap: vec2<f32>, cap_ends: vec3<f32>, px: f32) -> f32 {
+    var d = abs(cap.y);
+    var r = mix(cap_ends.y, cap_ends.z, clamp(cap.x / max(cap_ends.x, 1e-6), 0.0, 1.0));
     if cap.x < 0.0 {
-        return length(cap) > ends.y;
+        d = length(cap);
+        r = cap_ends.y;
+    } else if cap.x > cap_ends.x {
+        d = length(vec2<f32>(cap.x - cap_ends.x, cap.y));
+        r = cap_ends.z;
     }
-    if cap.x > ends.x {
-        return length(vec2<f32>(cap.x - ends.x, cap.y)) > ends.z;
-    }
-    return false;
+    return clamp(0.5 + (r - d) / px, 0.0, 1.0);
 }
 
-fn visible_fragment(in: VertexOut) -> bool {
-    if clipped_cap(in.cap, in.cap_ends) {
+// Size of one device pixel in `cap` units. Called first in the fragment
+// entry points (derivatives need uniform control flow, before any discard).
+fn cap_pixel(cap: vec2<f32>) -> f32 {
+    return max(length(vec2<f32>(dpdx(cap.y), dpdy(cap.y))), 1e-6);
+}
+
+fn visible_fragment(in: VertexOut, cov: f32) -> bool {
+    if cov <= 0.0 {
         return false;
     }
     if in.pattern_length > 0.0 && in.min_elem >= u.world_per_pixel {
@@ -406,18 +426,20 @@ fn visible_fragment(in: VertexOut) -> bool {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    if !visible_fragment(in) {
+    let cov = edge_coverage(in.cap, in.cap_ends, cap_pixel(in.cap));
+    if !visible_fragment(in, cov) {
         discard;
     }
-    let alpha = select(1.0, in.color.a, u.transparency_enable > 0.5);
+    let alpha = select(1.0, in.color.a, u.transparency_enable > 0.5) * cov;
     return vec4<f32>(in.color.rgb, alpha);
 }
 
 @fragment
 fn fs_black(in: VertexOut) -> @location(0) vec4<f32> {
-    if !visible_fragment(in) {
+    let cov = edge_coverage(in.cap, in.cap_ends, cap_pixel(in.cap));
+    if !visible_fragment(in, cov) {
         discard;
     }
-    let alpha = select(1.0, in.color.a, u.transparency_enable > 0.5);
+    let alpha = select(1.0, in.color.a, u.transparency_enable > 0.5) * cov;
     return vec4<f32>(edge_color(), alpha);
 }

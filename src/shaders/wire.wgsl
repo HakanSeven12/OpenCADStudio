@@ -85,6 +85,8 @@ const MODEL_LINEWEIGHT_BOOST: f32 = 2.0;
 const MODEL_LINEWEIGHT_MAX_PX: f32 = 10.0;
 // Must match `MITER_LIMIT` in wire_gpu.rs.
 const MITER_LIMIT: f32 = 8.0;
+// Anti-aliasing pad: the quad reaches this many pixels past the stroke.
+const AA_PAD: f32 = 1.0;
 
 struct VertexOut {
     @invariant @builtin(position)              clip_pos:       vec4<f32>,
@@ -204,7 +206,10 @@ fn front_t(w: f32, other: f32) -> f32 {
         let world_hw_a = select(in.misc.w, in.taper.x, in.taper.x >= 0.0);
         let world_hw_b = select(in.misc.w, in.taper.y, in.taper.y >= 0.0);
         let cur_world_hw = mix(world_hw_a, world_hw_b, which_end);
-        let eff_hw = cur_world_hw + 0.5 * u.world_per_pixel;
+        // The quad reaches one pixel past the band; the fragment fades the
+        // outer pixel by coverage (edge anti-aliasing), so the band still
+        // draws half a pixel wider each side as before.
+        let eff_hw = cur_world_hw + AA_PAD * u.world_per_pixel;
 
         let world_delta = rel_b - rel_a;
         let world_len = length(world_delta);
@@ -239,7 +244,7 @@ fn front_t(w: f32, other: f32) -> f32 {
         final_clip = clip_pos;
         out_dist = mix(in.dists.x, in.dists.y, which_end) + along * (in.dists.y - in.dists.x) / max(world_len, 1e-6);
         out_cap = vec2<f32>(which_end * world_len, eff_hw * side);
-        out_cap_ends = vec3<f32>(world_len, world_hw_a, world_hw_b);
+        out_cap_ends = vec3<f32>(world_len, world_hw_a + 0.5 * u.world_per_pixel, world_hw_b + 0.5 * u.world_per_pixel);
         out_dot = vec2<f32>(max(cur_world_hw, 0.75 * u.world_per_pixel), eff_hw * side);
     } else {
         // Thin wires expand in screen pixels facing the camera with rounded end caps / joints.
@@ -269,17 +274,19 @@ fn front_t(w: f32, other: f32) -> f32 {
         let clip_pos = mix(clip_a, clip_b, which_end);
 
         let hw = resolve_hw(-1.0, in.misc.w, in.dists.z);
+        // Quad padded for the anti-aliased edge; `hw` stays the stroke radius.
+        let qhw = hw + AA_PAD - 0.5;
         let ext = which_end * 2.0 - 1.0;
-        let offset_px = perp * hw * side + dir * hw * ext;
+        let offset_px = perp * qhw * side + dir * qhw * ext;
         let ndc_offset = offset_px / (u.viewport_size * 0.5);
         var clip_pos_out = clip_pos + vec4<f32>(ndc_offset * clip_pos.w, 0.0, 0.0);
         clip_pos_out = apply_draw_order(clip_pos_out, in.misc.x);
 
         final_clip = clip_pos_out;
-        out_dist = mix(in.dists.x, in.dists.y, mix(t_a, 1.0 - t_b, which_end)) + ext * hw * u.world_per_pixel;
-        out_cap = vec2<f32>(which_end * seg_len + ext * hw, hw * side);
+        out_dist = mix(in.dists.x, in.dists.y, mix(t_a, 1.0 - t_b, which_end)) + ext * qhw * u.world_per_pixel;
+        out_cap = vec2<f32>(which_end * seg_len + ext * qhw, qhw * side);
         out_cap_ends = vec3<f32>(seg_len, hw, hw);
-        out_dot = vec2<f32>(max(hw, 0.75) * u.world_per_pixel, hw * side * u.world_per_pixel);
+        out_dot = vec2<f32>(max(hw, 0.75) * u.world_per_pixel, qhw * side * u.world_per_pixel);
     }
 
     // Smallest non-zero dash / gap element, in world units. Used by
@@ -377,25 +384,38 @@ fn in_dash(dist: f32, pat_len: f32, p0: vec4<f32>, p1: vec4<f32>, align_end: f32
     return false;
 }
 
-// Round the cap overhang off: outside the segment span only pixels within
-// the end's half-width radius survive, giving round joints and end caps.
-fn cap_clipped(cap: vec2<f32>, cap_ends: vec3<f32>) -> bool {
+// Edge coverage (anti-aliasing): distance of the fragment from the stroke
+// (round joints / end caps outside the segment span) against the stroke
+// radius, in device pixels via the screen gradient of `cap.y`. 0 = outside
+// (discard), 1 = inside, a one-pixel ramp across the edge.
+fn edge_coverage(cap: vec2<f32>, cap_ends: vec3<f32>, px: f32) -> f32 {
+    var d = abs(cap.y);
+    var r = mix(cap_ends.y, cap_ends.z, clamp(cap.x / max(cap_ends.x, 1e-6), 0.0, 1.0));
     if cap.x < 0.0 {
-        return length(cap) > cap_ends.y;
+        d = length(cap);
+        r = cap_ends.y;
+    } else if cap.x > cap_ends.x {
+        d = length(vec2<f32>(cap.x - cap_ends.x, cap.y));
+        r = cap_ends.z;
     }
-    if cap.x > cap_ends.x {
-        return length(vec2<f32>(cap.x - cap_ends.x, cap.y)) > cap_ends.z;
-    }
-    return false;
+    return clamp(0.5 + (r - d) / px, 0.0, 1.0);
+}
+
+// Size of one device pixel in `cap` units. Called first in the fragment
+// entry points (derivatives need uniform control flow, before any discard).
+fn cap_pixel(cap: vec2<f32>) -> f32 {
+    return max(length(vec2<f32>(dpdx(cap.y), dpdy(cap.y))), 1e-6);
 }
 
 @fragment fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // Negative pattern length is the persistent-arena tombstone sentinel.
     // Discard before cap/alpha work so deleted slabs cannot write color/depth.
+    let px = cap_pixel(in.cap);
     if in.pattern_length < 0.0 {
         discard;
     }
-    if cap_clipped(in.cap, in.cap_ends) {
+    let cov = edge_coverage(in.cap, in.cap_ends, px);
+    if cov <= 0.0 {
         discard;
     }
     if in.pattern_length > 0.0 {
@@ -411,7 +431,7 @@ fn cap_clipped(cap: vec2<f32>, cap_ends: vec3<f32>) -> bool {
         }
     }
     // Transparency display off → force the line opaque.
-    let alpha = select(1.0, in.color.a, u.transparency_enable > 0.5);
+    let alpha = select(1.0, in.color.a, u.transparency_enable > 0.5) * cov;
     return vec4<f32>(in.color.rgb, alpha);
 }
 
@@ -419,10 +439,12 @@ fn cap_clipped(cap: vec2<f32>, cap_ends: vec3<f32>) -> bool {
 // mesh reads as a shaded surface framed by black edges. Keeps the dash/LOD
 // logic identical to `fs_main`; only the RGB is forced to the edge colour.
 @fragment fn fs_black(in: VertexOut) -> @location(0) vec4<f32> {
+    let px = cap_pixel(in.cap);
     if in.pattern_length < 0.0 {
         discard;
     }
-    if cap_clipped(in.cap, in.cap_ends) {
+    let cov = edge_coverage(in.cap, in.cap_ends, px);
+    if cov <= 0.0 {
         discard;
     }
     if in.pattern_length > 0.0 {
@@ -432,6 +454,6 @@ fn cap_clipped(cap: vec2<f32>, cap_ends: vec3<f32>) -> bool {
             }
         }
     }
-    let alpha = select(1.0, in.color.a, u.transparency_enable > 0.5);
+    let alpha = select(1.0, in.color.a, u.transparency_enable > 0.5) * cov;
     return vec4<f32>(edge_color(), alpha);
 }

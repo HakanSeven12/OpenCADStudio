@@ -1,7 +1,10 @@
 //! What a save that fails leaves in the session: the message, the edited
-//! mark, the path of the drawing and its recovery copy.
+//! mark, the path of the drawing and its recovery copy. A save that fails
+//! from the close prompt or at quit keeps the drawing open.
 
-use crate::app::{Message, OpenCADStudio, SaveContinuation, SaveOutcome, SavePurpose};
+use crate::app::{
+    Message, ModalKind, OpenCADStudio, PendingClose, SaveContinuation, SaveOutcome, SavePurpose,
+};
 use iced::futures::StreamExt;
 use std::path::{Path, PathBuf};
 
@@ -167,4 +170,201 @@ fn the_copy_of_an_ended_session_is_moved_aside_and_reported() {
     // A second start leaves the moved copy as it is.
     app.recover_ended_session_autosaves();
     assert!(folder.join(kept).is_file());
+}
+
+/// An app with one edited drawing that has no file yet.
+fn app_with_untitled_drawing(scratch: &Scratch) -> OpenCADStudio {
+    let mut app = OpenCADStudio::new_for_test();
+    app.save_file_path = scratch.0.join("recovery").to_string_lossy().into_owned();
+    app.tabs
+        .push(crate::app::tab_document::DocumentTab::new_drawing(1));
+    app.active_tab = app.tabs.len() - 1;
+    app.tabs[app.active_tab].dirty = true;
+    app
+}
+
+/// The answer of the system save dialog: the save goes to `folder`, with
+/// the name and format that the app suggested.
+fn save_dialog_answer(app: &mut OpenCADStudio, folder: &Path) -> SaveOutcome {
+    let path = folder.join(&app.save_dialog_filename);
+    finished(app.on_save_dialog_path_picked(Some(path)))
+}
+
+fn has_tab(app: &OpenCADStudio, id: u64) -> bool {
+    app.tabs.iter().any(|tab| tab.id == id)
+}
+
+/// Runs `step` until it gives a value, for at most 2 s. A child process
+/// that another test starts holds a copy of the open files of the test
+/// process for a moment, so a released lock can stay taken for some
+/// milliseconds (up to 11 ms in the runs tried).
+fn when_the_lock_is_free<T>(mut step: impl FnMut() -> Option<T>) -> T {
+    let started = std::time::Instant::now();
+    loop {
+        if let Some(value) = step() {
+            return value;
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "the lock stays taken"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn a_failed_save_from_the_close_prompt_keeps_the_drawing_open_and_asks_again() {
+    let scratch = Scratch::new("close-prompt");
+    let mut app = app_with_untitled_drawing(&scratch);
+    let i = app.active_tab;
+    let id = app.tabs[i].id;
+    let _ = app.update(Message::TabClose(id));
+    assert_eq!(app.active_modal, Some(ModalKind::Unsaved));
+
+    let _ = app.update(Message::UnsavedDialogSave);
+    assert_ne!(app.active_modal, Some(ModalKind::Unsaved));
+    let failed = save_dialog_answer(&mut app, &scratch.0.join("no-such-folder"));
+    assert!(failed.result.is_err());
+    let _ = app.on_save_finished(failed);
+
+    let error = app.command_line.last_error.as_deref().unwrap_or_default();
+    assert!(error.starts_with("Save failed"), "{error}");
+    assert!(has_tab(&app, id), "the drawing stays open");
+    assert!(app.tabs[i].dirty, "the drawing is still edited");
+    assert_eq!(app.tabs[i].current_path, None);
+    assert!(matches!(app.pending_close, Some(PendingClose::Tab(tab)) if tab == id));
+    assert_eq!(
+        app.active_modal,
+        Some(ModalKind::Unsaved),
+        "the prompt asks again"
+    );
+
+    // The second answer saves the drawing and closes it.
+    let _ = app.update(Message::UnsavedDialogSave);
+    let saved = save_dialog_answer(&mut app, &scratch.0);
+    assert!(saved.result.is_ok(), "{:?}", saved.result);
+    let drawing = saved.path.clone();
+    let _ = app.on_save_finished(saved);
+    assert!(drawing.is_file());
+    assert!(!has_tab(&app, id), "the saved drawing closes");
+    assert!(app.pending_close.is_none());
+}
+
+#[test]
+fn a_failed_save_at_quit_keeps_the_app_open_and_asks_again() {
+    let scratch = Scratch::new("quit");
+    let mut app = app_with_untitled_drawing(&scratch);
+    let i = app.active_tab;
+    let _ = app.request_quit_with_block_edits();
+    assert_eq!(app.active_modal, Some(ModalKind::Unsaved));
+
+    let _ = app.update(Message::UnsavedDialogSave);
+    let failed = save_dialog_answer(&mut app, &scratch.0.join("no-such-folder"));
+    assert!(failed.result.is_err());
+    let _ = app.on_save_finished(failed);
+
+    let error = app.command_line.last_error.as_deref().unwrap_or_default();
+    assert!(error.starts_with("Save failed"), "{error}");
+    assert!(!app.exit_requested, "the app does not quit");
+    assert!(app.tabs[i].dirty, "the drawing is still edited");
+    assert!(matches!(app.pending_close, Some(PendingClose::Quit)));
+    assert_eq!(
+        app.active_modal,
+        Some(ModalKind::Unsaved),
+        "the prompt asks again"
+    );
+
+    // The second answer saves the drawing, and the app quits.
+    let _ = app.update(Message::UnsavedDialogSave);
+    let saved = save_dialog_answer(&mut app, &scratch.0);
+    assert!(saved.result.is_ok(), "{:?}", saved.result);
+    let drawing = saved.path.clone();
+    let _ = app.on_save_finished(saved);
+    assert!(drawing.is_file());
+    assert!(app.exit_requested);
+}
+
+#[test]
+fn a_drawing_in_use_at_close_stays_open_until_its_save_succeeds() {
+    let scratch = Scratch::new("in-use");
+    let (mut app, drawing) = app_with_saved_drawing(&scratch);
+    let i = app.active_tab;
+    let id = app.tabs[i].id;
+    let before = std::fs::read(&drawing).unwrap();
+    // Another editor holds the lock of the drawing, as at an open that
+    // finds the lock taken.
+    app.tabs[i].edit_lease = None;
+    let other_editor =
+        when_the_lock_is_free(|| crate::io::edit_lock::EditLease::acquire(&drawing).ok());
+    app.tabs[i].edit_lock_conflict = true;
+
+    let _ = app.update(Message::TabClose(id));
+    let _ = app.update(Message::UnsavedDialogSave);
+    assert_eq!(app.active_modal, Some(ModalKind::FileInUse));
+    let error = app.command_line.last_error.as_deref().unwrap_or_default();
+    assert!(error.starts_with("Unable to save"), "{error}");
+
+    // Cancel: the drawing stays open and edited, and its file does not
+    // change.
+    let _ = app.update(Message::SaveFileInUseCancel);
+    assert_eq!(app.active_modal, None);
+    assert!(has_tab(&app, id));
+    assert!(app.tabs[i].dirty);
+    assert_eq!(std::fs::read(&drawing).unwrap(), before);
+
+    // The next close asks again. The other editor closes the drawing, and
+    // Retry saves it and closes the tab.
+    let _ = app.update(Message::TabClose(id));
+    let _ = app.update(Message::UnsavedDialogSave);
+    assert_eq!(app.active_modal, Some(ModalKind::FileInUse));
+    assert!(has_tab(&app, id));
+    drop(other_editor);
+    let saved = when_the_lock_is_free(|| {
+        let retry = app.update(Message::SaveFileInUseRetry);
+        (app.active_modal != Some(ModalKind::FileInUse)).then(|| finished(retry))
+    });
+    assert!(saved.result.is_ok(), "{:?}", saved.result);
+    let _ = app.on_save_finished(saved);
+    assert!(!has_tab(&app, id), "the saved drawing closes");
+    assert_ne!(std::fs::read(&drawing).unwrap(), before);
+}
+
+#[test]
+fn a_drawing_changed_outside_at_quit_is_kept_until_the_user_overwrites_it() {
+    let scratch = Scratch::new("changed-outside");
+    let (mut app, drawing) = app_with_saved_drawing(&scratch);
+    let i = app.active_tab;
+    // Windows refuses a write to the drawing while the app holds it open.
+    #[cfg(target_os = "windows")]
+    let _ = app.tabs[i].edit_lease.take();
+    let outside = b"changed by another program";
+    std::fs::write(&drawing, outside).unwrap();
+
+    let _ = app.request_quit_with_block_edits();
+    let failed = finished(app.update(Message::UnsavedDialogSave));
+    assert!(failed.result.is_err());
+    let _ = app.on_save_finished(failed);
+    assert_eq!(app.active_modal, Some(ModalKind::ExternalChange));
+    let error = app.command_line.last_error.as_deref().unwrap_or_default();
+    assert!(error.starts_with("Save stopped"), "{error}");
+
+    // Cancel: the app stays open, and the other program's file stays.
+    let _ = app.update(Message::ExternalChangeCancel);
+    assert_eq!(app.active_modal, None);
+    assert!(!app.exit_requested, "the app does not quit");
+    assert!(app.tabs[i].dirty);
+    assert_eq!(std::fs::read(&drawing).unwrap(), outside);
+
+    // The next quit asks again. Overwrite saves the drawing, and the app
+    // quits.
+    let _ = app.request_quit_with_block_edits();
+    let failed = finished(app.update(Message::UnsavedDialogSave));
+    let _ = app.on_save_finished(failed);
+    assert_eq!(app.active_modal, Some(ModalKind::ExternalChange));
+    assert!(!app.exit_requested);
+    let saved = finished(app.update(Message::ExternalChangeOverwrite));
+    assert!(saved.result.is_ok(), "{:?}", saved.result);
+    let _ = app.on_save_finished(saved);
+    assert!(app.exit_requested);
+    assert_ne!(std::fs::read(&drawing).unwrap(), outside);
 }

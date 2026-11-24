@@ -2514,6 +2514,62 @@ mod save_failure_tests {
         assert!(!path.with_extension("bak").exists());
         let _ = std::fs::remove_file(path);
     }
+
+    /// A save that the system stopped leaves its temporary file beside the
+    /// drawing. The next save of the drawing removes such a file when
+    /// nothing has written to it for an hour, and no other file.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_save_removes_the_temporary_files_of_stopped_saves() {
+        let folder = tempfile::tempdir().unwrap();
+        let now = std::time::SystemTime::now();
+        let minutes = |count: u64| now - std::time::Duration::from_secs(count * 60);
+        let file = |name: &str, modified: std::time::SystemTime| {
+            let path = folder.path().join(name);
+            std::fs::write(&path, b"part of a drawing").unwrap();
+            let file = std::fs::File::options().write(true).open(&path).unwrap();
+            file.set_modified(modified).unwrap();
+        };
+        // Removed: the files of two stopped saves.
+        file(".plan.ocs-save-4242-1.dwg", minutes(120));
+        file(".plan.ocs-save-17-305.dwg", minutes(61));
+        // Kept: a save that can still run, another drawing, other names.
+        file(".plan.ocs-save-4242-2.dwg", minutes(50));
+        file(".other.ocs-save-4242-1.dwg", minutes(120));
+        file(".plan.ocs-save-4242-1.dxf", minutes(120));
+        file(".plan.ocs-save-4242-1.dwg.bak", minutes(120));
+        file(".plan.ocs-save-4242.dwg", minutes(120));
+        file(".plan.ocs-save-x-1.dwg", minutes(120));
+        file("plan.ocs-save-4242-1.dwg", minutes(120));
+
+        save_over(folder.path(), "plan.dwg", None).unwrap();
+
+        assert_eq!(
+            names_in(folder.path()),
+            [
+                ".other.ocs-save-4242-1.dwg",
+                ".plan.ocs-save-4242-1.dwg.bak",
+                ".plan.ocs-save-4242-1.dxf",
+                ".plan.ocs-save-4242-2.dwg",
+                ".plan.ocs-save-4242.dwg",
+                ".plan.ocs-save-x-1.dwg",
+                "plan.dwg",
+                "plan.ocs-save-4242-1.dwg",
+            ]
+        );
+    }
+
+    /// A bare file name is in the current folder: a path typed at SAVEAS
+    /// can be one.
+    #[test]
+    fn the_folder_of_a_bare_file_name_is_the_current_folder() {
+        let folder = std::path::Path::new("drawings");
+        assert_eq!(super::save_folder(&folder.join("plan.dwg")), folder);
+        assert_eq!(
+            super::save_folder(std::path::Path::new("plan.dwg")),
+            std::path::Path::new(".")
+        );
+    }
 }
 
 // ── Plot Style Table ──────────────────────────────────────────────────────

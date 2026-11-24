@@ -728,6 +728,8 @@ impl OpenCADStudio {
                 let graph = &mut self.tabs[i].graph;
                 graph.hovered_label = None;
                 graph.picker = None;
+                graph.readers = None;
+                graph.flash = None;
                 self.persist_settings_if_changed();
             }
             // With labels, pressing an unlinked input's port picks its

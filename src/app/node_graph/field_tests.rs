@@ -6,7 +6,7 @@ use super::*;
 use crate::ui::node_graph::PaletteItem;
 use iced::keyboard::{self, key::Named, Key};
 use iced::mouse::{self, Button};
-use iced::{Event, Point, Size};
+use iced::{Event, Point, Size, Vector};
 use iced_test::core::renderer::{Headless, Settings};
 use iced_test::runtime::user_interface::{Cache, UserInterface};
 use iced_test::simulator::{press_key, typewrite};
@@ -1029,6 +1029,27 @@ impl Rig {
         Point::new(pos.x + 7.0, centre.y)
     }
 
+    /// The dropdown arrow at the right end of a label, or of a field.
+    fn label_arrow(&self, id: NodeId, field: &str) -> Point {
+        let centre = self.field(id, field);
+        let pos = self.app.tabs[self.i].graph.ui[&id].pos;
+        Point::new(pos.x + 255.0, centre.y)
+    }
+
+    /// A label's `←`, at its left end.
+    fn label_jump(&self, id: NodeId, field: &str) -> Point {
+        let centre = self.field(id, field);
+        let pos = self.app.tabs[self.i].graph.ui[&id].pos;
+        Point::new(pos.x + 123.0, centre.y)
+    }
+
+    /// Where a used output's `→N` sits, beside its port.
+    fn badge(&self, id: NodeId, field: &str) -> Point {
+        let centre = self.field(id, field);
+        let pos = self.app.tabs[self.i].graph.ui[&id].pos;
+        Point::new(pos.x + 257.0, centre.y)
+    }
+
     fn picker(&self) -> Option<Port> {
         let graph = &self.app.tabs[self.i].graph;
         graph.picker.as_ref().map(|picker| picker.to.clone())
@@ -1067,8 +1088,14 @@ fn clicking_a_label_opens_the_picker_and_a_choice_relinks() {
     let point = rig.op("Point", Point::new(400.0, 40.0));
     rig.link(a, "value", point, "x");
     rig.links(LinkDisplay::Labels);
+    // The source's name opens the picker, and so does the dropdown arrow.
     let label = rig.field(point, "x");
     rig.click(label);
+    assert_eq!(rig.picker(), Some(port(point, "x")));
+    rig.click(label);
+    assert_eq!(rig.picker(), None, "a second click closes it");
+    let arrow = rig.label_arrow(point, "x");
+    rig.click(arrow);
     assert_eq!(rig.picker(), Some(port(point, "x")));
     // The label took the press: the canvas did not start a pan.
     assert!(rig.app.tabs[rig.i].graph.drag.is_none());
@@ -1209,4 +1236,88 @@ fn folded_links_are_summed_up_on_the_row_that_stands_for_them() {
     let header = &closed.folded_by[&port(id, "loc_x")];
     assert_eq!(header.field, "§Geometry");
     assert_eq!(closed.folded[header].len(), 2);
+}
+
+// Readers of an output (`→N`) and jumping between linked nodes (#3141).
+
+#[test]
+fn clicking_the_arrow_of_a_label_jumps_to_its_source() {
+    use crate::ui::node_graph::LinkDisplay;
+    let mut rig = Rig::new();
+    let far = rig.op("Number", Point::new(2000.0, 1500.0));
+    let point = rig.op("Point", Point::new(400.0, 40.0));
+    rig.link(far, "value", point, "x");
+    rig.links(LinkDisplay::Labels);
+    let jump = rig.label_jump(point, "x");
+    rig.click(jump);
+    let graph = &rig.app.tabs[rig.i].graph;
+    assert_eq!(rig.picker(), None, "the ← jumps, the name picks");
+    assert_eq!(graph.flash, Some(far));
+    // The source now sits at the middle top of the 1200 x 800 canvas.
+    let expected = Vector::new((1200.0 - 280.0) * 0.5 - 2000.0, 800.0 * 0.3 - 1500.0);
+    assert!((graph.pan - expected).x.abs() < 1e-3, "{:?}", graph.pan);
+    assert!((graph.pan - expected).y.abs() < 1e-3, "{:?}", graph.pan);
+    // Raised above the other cards.
+    assert_eq!(graph.engine.nodes.last().map(|node| node.id), Some(far));
+    // The outline goes with the next press on the canvas.
+    rig.click(Point::new(1150.0, 780.0));
+    assert_eq!(rig.app.tabs[rig.i].graph.flash, None);
+}
+
+#[test]
+fn a_used_output_counts_its_readers_and_lists_them() {
+    use crate::ui::node_graph::LinkDisplay;
+    let mut rig = Rig::new();
+    let number = rig.op("Number", Point::new(40.0, 40.0));
+    let point = rig.op("Point", Point::new(400.0, 40.0));
+    rig.link(number, "value", point, "x");
+    rig.link(number, "value", point, "y");
+    let from = port(number, "value");
+    {
+        let graph = &rig.app.tabs[rig.i].graph;
+        let sections = rig.app.graph_all_sections(rig.i);
+        let sources = graph.sources(&sections);
+        let labels = graph.link_labels(&sections, &sources);
+        assert_eq!(labels.readers[&from], 2);
+        let names: Vec<String> = graph
+            .readers(&sections, &from)
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect();
+        assert_eq!(names, ["Point.x", "Point.y"]);
+    }
+    // Wires mode has no badge: the press lands on the field instead.
+    let badge = rig.badge(number, "value");
+    rig.click(badge);
+    assert!(rig.app.tabs[rig.i].graph.readers.is_none());
+    rig.key(Named::Escape);
+
+    rig.links(LinkDisplay::Labels);
+    rig.click(badge);
+    let open = rig.app.tabs[rig.i].graph.readers.as_ref();
+    assert_eq!(open.map(|readers| &readers.from), Some(&from));
+    // An entry jumps to the input's node and closes the list.
+    let _ = rig.app.on_graph(GraphMsg::Jump(point));
+    let graph = &rig.app.tabs[rig.i].graph;
+    assert!(graph.readers.is_none());
+    assert_eq!(graph.flash, Some(point));
+}
+
+#[test]
+fn the_picker_and_the_readers_list_replace_each_other() {
+    use crate::ui::node_graph::LinkDisplay;
+    let mut rig = Rig::new();
+    let number = rig.op("Number", Point::new(40.0, 40.0));
+    let point = rig.op("Point", Point::new(400.0, 40.0));
+    rig.link(number, "value", point, "x");
+    rig.links(LinkDisplay::Selection);
+    let _ = rig.app.on_graph(GraphMsg::Readers(port(number, "value")));
+    let _ = rig.app.on_graph(GraphMsg::Pick(port(point, "x")));
+    assert!(rig.app.tabs[rig.i].graph.readers.is_none());
+    assert_eq!(rig.picker(), Some(port(point, "x")));
+    let _ = rig.app.on_graph(GraphMsg::Readers(port(number, "value")));
+    assert_eq!(rig.picker(), None);
+    // Switching the mode closes it.
+    rig.links(LinkDisplay::Wires);
+    assert!(rig.app.tabs[rig.i].graph.readers.is_none());
 }

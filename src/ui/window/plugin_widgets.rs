@@ -116,6 +116,7 @@ fn render_level<'a>(
             text(" ").size(12).into()
         };
         let label = row.label.clone();
+        let is_action = row.action.is_some();
         let activate_btn = button(row![text(label).size(13)].spacing(4))
             .on_press(Message::PanelWidgetNodeActivated {
                 owner: owner.to_owned(),
@@ -123,7 +124,16 @@ fn render_level<'a>(
                 node: row_id,
             })
             .style(move |_, status| {
+                // Semantic BUTTON rows (an `action` is set) render with a
+                // visible border so they read as controls, not tree rows.
                 let mut style = iced::widget::button::Style::default();
+                if is_action {
+                    style.border = iced::Border {
+                        color: iced::Color::from_rgba8(150, 150, 190, 1.0),
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    };
+                }
                 if selected && status != iced::widget::button::Status::Disabled {
                     style.background = Some(iced::Background::Color(iced::Color::from_rgba8(
                         120, 120, 160, 0.25,
@@ -177,6 +187,7 @@ mod tests {
         WidgetRow {
             label: label.to_owned(),
             children,
+            action: None,
         }
     }
 

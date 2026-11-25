@@ -836,6 +836,9 @@ impl OpenCADStudio {
             self.hover_dwell = None;
             return Task::none();
         }
+        // A click drops what the selection filter (or PICKLOCKED) leaves out, so
+        // the rollover must not light it either.
+        hovered = hovered.filter(|&h| self.tabs[i].scene.passes_selection_filter(h));
         let preview_enabled = if self.tabs[i].active_cmd.is_none() {
             (self.model_space.selection_preview & 1) != 0
         } else {

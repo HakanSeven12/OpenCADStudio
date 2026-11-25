@@ -250,6 +250,14 @@ pub(crate) fn device_name_for_settings(
 ) -> String {
     use crate::io::plot_device::PlotDevice;
     let device = plot_dialog_device(d);
+    let dwf = d.to_file && d.file_dwf;
+    if dwf != crate::io::plot_device::is_dwf_device(&stored.printer_name) {
+        return if dwf {
+            crate::io::plot_device::DWF_DEVICE_NAME.to_string()
+        } else {
+            device.canonical_name()
+        };
+    }
     let (stored_device, keep_stored) = PlotDevice::from_stored_name(&stored.printer_name);
     if keep_stored && stored_device == device {
         stored.printer_name.clone()
@@ -2323,7 +2331,9 @@ impl OpenCADStudio {
         let path = folder
             .filter(|folder| std::fs::create_dir_all(folder).is_ok())
             .map(|folder| {
-                let ext = if self.plot_dialog.file_svg {
+                let ext = if self.plot_dialog.file_dwf {
+                    "dwf"
+                } else if self.plot_dialog.file_svg {
                     "svg"
                 } else {
                     "pdf"
@@ -2745,7 +2755,7 @@ impl OpenCADStudio {
         msg: crate::ui::window::plot::PlotDlgMsg,
     ) -> Task<Message> {
         use crate::ui::window::plot::{
-            PlotDlgMsg as M, PlotFlag, OUT_DEFAULT, OUT_PDF, OUT_SVG, STYLE_NONE,
+            PlotDlgMsg as M, PlotFlag, OUT_DEFAULT, OUT_DWF, OUT_PDF, OUT_SVG, STYLE_NONE,
         };
         match msg {
             M::Close => {
@@ -2759,7 +2769,8 @@ impl OpenCADStudio {
                 // Driver choices belong to a printer; the editor closes when
                 // the target changes.
                 self.plot_dialog.printer_editor = None;
-                if s == OUT_PDF {
+                self.plot_dialog.file_dwf = s == OUT_DWF;
+                if s == OUT_PDF || s == OUT_DWF {
                     self.plot_dialog.to_file = true;
                     self.plot_dialog.file_svg = false;
                 } else if s == OUT_SVG {
@@ -3036,7 +3047,7 @@ impl OpenCADStudio {
                     }
                     PlotFlag::GeoPdf
                         if (d.to_file || cfg!(target_arch = "wasm32"))
-                            && (!d.file_svg || cfg!(target_arch = "wasm32"))
+                            && (!(d.file_svg || d.file_dwf) || cfg!(target_arch = "wasm32"))
                             && !d.paper_space
                             && d.area != "Layout" =>
                     {
@@ -3309,6 +3320,7 @@ impl OpenCADStudio {
             let d = &mut self.plot_dialog;
             d.to_file = true;
             d.file_svg = false;
+            d.file_dwf = false;
             let a4 = crate::io::paper_catalog::default_paper();
             d.paper = a4.canonical.to_string();
             d.orientation = "Landscape".into();
@@ -3548,16 +3560,21 @@ impl OpenCADStudio {
             crate::io::plot_device::PlotDevice::Pdf => {
                 d.to_file = true;
                 d.file_svg = false;
+                // ponytail: DWF has no PlotDevice of its own; the stored
+                // DWF6 name is recognised here and kept by the stored-name rule.
+                d.file_dwf = crate::io::plot_device::is_dwf_device(&ps.printer_name);
                 d.printer = None;
             }
             crate::io::plot_device::PlotDevice::Printer(name) => {
                 d.to_file = false;
                 d.file_svg = false;
+                d.file_dwf = false;
                 d.printer = Some(name);
             }
             crate::io::plot_device::PlotDevice::None => {
                 d.to_file = false;
                 d.file_svg = false;
+                d.file_dwf = false;
                 d.printer = None;
             }
         }
@@ -3648,7 +3665,7 @@ impl OpenCADStudio {
         if d.geopdf
             && !preview
             && to_file
-            && (!d.file_svg || cfg!(target_arch = "wasm32"))
+            && (!(d.file_svg || d.file_dwf) || cfg!(target_arch = "wasm32"))
             && d.area != "Layout"
         {
             // Missing CRS or units means the ordinary plain-PDF fallback; only
@@ -3694,7 +3711,10 @@ impl OpenCADStudio {
                 self.active_modal = Some(crate::app::ModalKind::Plot);
                 return Task::none();
             };
-            if !preview && to_file && (!d.file_svg || cfg!(target_arch = "wasm32")) {
+            if !preview
+                && to_file
+                && (!(d.file_svg || d.file_dwf) || cfg!(target_arch = "wasm32"))
+            {
                 if let Err(error) = self.validate_geopdf_page(&page) {
                     self.command_line.push_error(&error);
                     self.active_modal = Some(crate::app::ModalKind::Plot);
@@ -3741,7 +3761,11 @@ impl OpenCADStudio {
 
         if to_file {
             // Reuse the tested PDF export flow (it opens a save dialog).
-            return Task::done(Message::PlotExport);
+            return Task::done(if d.file_dwf && cfg!(not(target_arch = "wasm32")) {
+                Message::PlotExportDwf
+            } else {
+                Message::PlotExport
+            });
         }
 
         let opts = self.plot_print_options(&d);

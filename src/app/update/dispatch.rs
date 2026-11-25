@@ -13965,7 +13965,7 @@ impl OpenCADStudio {
                 // SVG choice proposes `stem.svg` up front; EXPORTDWF
                 // proposes `stem.dwf`.
                 #[cfg(not(target_arch = "wasm32"))]
-                let svg = if dwf {
+                let svg = if dwf || self.plot_dialog.file_dwf {
                     crate::io::pdf_export::PlotFileKind::Dwf
                 } else if self.plot_dialog.file_svg {
                     crate::io::pdf_export::PlotFileKind::Svg
@@ -14006,7 +14006,9 @@ impl OpenCADStudio {
                     return Task::done(Message::PlotWindowExportPath(Some(path)));
                 }
                 #[cfg(not(target_arch = "wasm32"))]
-                let svg = if self.plot_dialog.file_svg {
+                let svg = if self.plot_dialog.file_dwf {
+                    crate::io::pdf_export::PlotFileKind::Dwf
+                } else if self.plot_dialog.file_svg {
                     crate::io::pdf_export::PlotFileKind::Svg
                 } else {
                     crate::io::pdf_export::PlotFileKind::Pdf

@@ -22,6 +22,13 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 /// the source application's plotter configuration name for PDF output.
 pub const PDF_DEVICE_NAME: &str = "DWG To PDF.pc3";
+/// The DWF plotter configuration, which the plot writes with the DWF exporter.
+pub const DWF_DEVICE_NAME: &str = "DWF6 ePlot.pc3";
+
+/// Whether a stored plotter name is the DWF6 ePlot device.
+pub fn is_dwf_device(name: &str) -> bool {
+    name.trim().to_ascii_uppercase().starts_with("DWF6")
+}
 /// the source application's spelling for "no plotter assigned" in the plot dialog…
 pub const NO_DEVICE_NAME: &str = "None";
 /// …and the name it actually stores in the drawing for that choice.

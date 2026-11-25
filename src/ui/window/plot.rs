@@ -24,6 +24,7 @@ use std::fmt;
 pub const OUT_DEFAULT: &str = "System default printer";
 pub const OUT_PDF: &str = "Save to PDF file…";
 pub const OUT_SVG: &str = "Save to SVG file…";
+pub const OUT_DWF: &str = "Save to DWF file…";
 
 /// Top-of-list entries: no page setup (defaults + PDF), and the last-used
 /// settings captured when the dialog opened.
@@ -557,6 +558,9 @@ pub struct PlotDialogState {
     /// drawing's page setup, which only knows printers and PDF drivers.
     #[serde(default)]
     pub file_svg: bool,
+    /// File output is DWF (the DWF6 ePlot device); wins over `file_svg`.
+    #[serde(default)]
+    pub file_dwf: bool,
     /// SVG-only text representation; an app preference, not a page-setup field.
     #[serde(default)]
     pub text_as_outlines: bool,
@@ -684,6 +688,7 @@ impl Default for PlotDialogState {
             raster_dpi: String::new(),
             vector_dpi: String::new(),
             file_svg: false,
+            file_dwf: false,
             text_as_outlines: false,
             non_scaling_stroke: false,
             layer_attributes: false,
@@ -745,6 +750,7 @@ impl PlotDialogState {
         self.printer = o.printer.clone();
         self.to_file = o.to_file;
         self.file_svg = o.file_svg;
+        self.file_dwf = o.file_dwf;
         self.text_as_outlines = o.text_as_outlines;
         self.non_scaling_stroke = o.non_scaling_stroke;
         self.layer_attributes = o.layer_attributes;
@@ -1257,6 +1263,7 @@ fn output_choices(printers: &[String]) -> Vec<PlotChoice> {
         out.extend(printers.iter().cloned().map(PlotChoice::raw));
         out.push(PlotChoice::localized(OUT_PDF));
         out.push(PlotChoice::localized(OUT_SVG));
+        out.push(PlotChoice::localized(OUT_DWF));
         out
     }
 }
@@ -1278,7 +1285,9 @@ pub fn view_window(
         t!("Apply")
     } else if to_file {
         // The web build writes PDF whatever a stored dialog state says.
-        if s.file_svg && cfg!(not(target_arch = "wasm32")) {
+        if s.file_dwf && cfg!(not(target_arch = "wasm32")) {
+            t!("Export DWF")
+        } else if s.file_svg && cfg!(not(target_arch = "wasm32")) {
             t!("Export SVG")
         } else {
             t!("Export PDF")
@@ -1432,7 +1441,9 @@ pub fn view_window(
     }
     let printer_sel = if to_file {
         Some(PlotChoice::localized(
-            if s.file_svg && cfg!(not(target_arch = "wasm32")) {
+            if s.file_dwf && cfg!(not(target_arch = "wasm32")) {
+                OUT_DWF
+            } else if s.file_svg && cfg!(not(target_arch = "wasm32")) {
                 OUT_SVG
             } else {
                 OUT_PDF
@@ -1901,7 +1912,7 @@ pub fn view_window(
             Space::new().height(0).into()
         };
     let pdf_geopdf_option: Element<'_, Message> = if to_file
-        && (!s.file_svg || cfg!(target_arch = "wasm32"))
+        && (!(s.file_svg || s.file_dwf) || cfg!(target_arch = "wasm32"))
         && !s.paper_space
         && s.area != "Layout"
     {

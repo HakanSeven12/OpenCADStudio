@@ -47,6 +47,48 @@ pub fn history_max_height(window_height: f32) -> f32 {
 
 /// How many autocomplete matches the suggestion popup shows at once.
 const AUTOCOMPLETE_LIMIT: usize = 8;
+/// How many drawing names the suggestion popup shows under the commands.
+const CONTENT_LIMIT: usize = 4;
+
+/// The kind of a drawing name that the command line suggests while no
+/// command runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ContentKind {
+    Layer,
+    Block,
+    HatchPattern,
+    View,
+}
+
+impl ContentKind {
+    /// The command whose icon the suggestion row shows.
+    fn icon_command(self) -> &'static str {
+        match self {
+            Self::Layer => "LAYER",
+            Self::Block => "INSERT",
+            Self::HatchPattern => "HATCH",
+            Self::View => "VIEW",
+        }
+    }
+
+    fn label(self) -> std::borrow::Cow<'static, str> {
+        match self {
+            Self::Layer => t!("Layer"),
+            Self::Block => t!("Block"),
+            Self::HatchPattern => t!("Hatch"),
+            Self::View => t!("View"),
+        }
+    }
+}
+
+/// A drawing name that contains the text typed at the command line.
+#[derive(Clone, Debug)]
+pub struct ContentMatch {
+    pub kind: ContentKind,
+    pub name: String,
+    /// A layer's colour, for the swatch.
+    pub color: Option<document::types::Color>,
+}
 
 // ── The bar's sizes ────────────────────────────────────────────────────────
 /// A history line's padding, and a suggestion row's.
@@ -239,6 +281,12 @@ pub struct CommandLine {
     /// replace normal command-name autocomplete, allowing commands to offer
     /// drawing-specific values such as layers, blocks or styles.
     pub contextual_suggestions: Vec<crate::command::CommandSuggestion>,
+    /// Layers, blocks, hatch patterns and named views that contain
+    /// `content_input`, shown under the command names while no command runs.
+    content_matches: Vec<ContentMatch>,
+    /// The typed text that `content_matches` were found for. When the input
+    /// changes, the popup does not show them until they are found again.
+    content_input: String,
     /// Command names contributed by loaded plugins, refreshed whenever the
     /// enabled-plugin set changes. Merged into autocomplete alongside the
     /// compile-time command registry, so runtime plugin commands are typeable
@@ -296,6 +344,8 @@ impl Default for CommandLine {
             float_offset: iced::Vector::ZERO,
             autocomplete_cursor: None,
             contextual_suggestions: Vec::new(),
+            content_matches: Vec::new(),
+            content_input: String::new(),
             dynamic_commands: Vec::new(),
             command_aliases: rustc_hash::FxHashMap::default(),
             step_prompt: None,
@@ -849,9 +899,41 @@ impl CommandLine {
         !self.contextual_suggestions.is_empty()
     }
 
+    /// Replace the drawing names found for `input`.
+    pub fn set_content_matches(&mut self, input: &str, matches: Vec<ContentMatch>) {
+        self.content_input = input.trim().to_string();
+        self.content_matches = matches;
+    }
+
+    /// The drawing names the popup shows under the command names: none
+    /// while a command offers its own suggestions, or when they were found
+    /// for other text than the input has now.
+    pub fn content_rows(&self) -> &[ContentMatch] {
+        if !self.contextual_suggestions.is_empty() || self.content_input != self.input.trim() {
+            return &[];
+        }
+        &self.content_matches
+    }
+
+    /// The highlighted drawing name, when the highlight is on one.
+    pub fn selected_content(&self) -> Option<ContentMatch> {
+        let commands = self.autocomplete_matches().len();
+        let rows = self.content_rows();
+        let index = self.autocomplete_cursor.unwrap_or(0);
+        index
+            .checked_sub(commands)
+            .and_then(|index| rows.get(index))
+            .cloned()
+    }
+
+    /// Command rows and drawing-name rows together.
+    fn row_count(&self) -> usize {
+        self.autocomplete_matches().len() + self.content_rows().len()
+    }
+
     /// Move the autocomplete highlight up one entry. Wraps to the last match.
     pub fn autocomplete_prev(&mut self) -> bool {
-        let len = self.autocomplete_matches().len();
+        let len = self.row_count();
         if len == 0 {
             return false;
         }
@@ -862,7 +944,7 @@ impl CommandLine {
 
     /// Move the autocomplete highlight down one entry. Wraps to the first match.
     pub fn autocomplete_next(&mut self) -> bool {
-        let len = self.autocomplete_matches().len();
+        let len = self.row_count();
         if len == 0 {
             return false;
         }
@@ -880,8 +962,11 @@ impl CommandLine {
         if matches.is_empty() {
             return None;
         }
-        let index = self.autocomplete_cursor.unwrap_or(0).min(matches.len() - 1);
-        matches.get(index).cloned()
+        let index = self.autocomplete_cursor.unwrap_or(0);
+        if index >= matches.len() && !self.content_rows().is_empty() {
+            return None;
+        }
+        matches.get(index.min(matches.len() - 1)).cloned()
     }
 
     /// Autocomplete suggestions for the current input — see
@@ -1199,11 +1284,12 @@ impl CommandLine {
             });
         // Autocomplete suggestions panel, shown above the input row
         // when the user has typed a prefix that matches at least one
-        // command. Each row is a button — clicking it dispatches the
-        // command directly.
+        // command or drawing name. Each row is a button — clicking it
+        // dispatches the command directly.
         let autocomplete: Element<'_, Message> = if show_autocomplete {
             let matches = self.autocomplete_matches();
-            if matches.is_empty() {
+            let content = self.content_rows();
+            if matches.is_empty() && content.is_empty() {
                 container(column![]).height(0).into()
             } else {
                 let cursor = self.autocomplete_cursor.unwrap_or(0);
@@ -1237,23 +1323,7 @@ impl CommandLine {
                         }
 
                         if let Some(color) = details.color {
-                            let swatch_color =
-                                crate::ui::window::layers::iced_color_from_acad(&color);
-
-                            let swatch = container(text(""))
-                                .style(move |theme: &Theme| container::Style {
-                                    background: Some(Background::Color(swatch_color)),
-                                    border: Border {
-                                        color: crate::ui::style::chrome::border(theme),
-                                        width: km::line(),
-                                        radius: 1.0.into(),
-                                    },
-                                    ..Default::default()
-                                })
-                                .width(SWATCH)
-                                .height(SWATCH);
-
-                            label = label.push(swatch);
+                            label = label.push(suggestion_swatch(&color));
                         }
                     } else {
                         // Normal command autocomplete keeps its existing command icon,
@@ -1278,21 +1348,7 @@ impl CommandLine {
                         if let Some(summary) =
                             crate::command::command_summary(target.unwrap_or(cmd))
                         {
-                            label = label.push(
-                                text(summary)
-                                    .size(ui_text::UI)
-                                    .wrapping(iced::widget::text::Wrapping::None)
-                                    .style(move |theme: &Theme| {
-                                        let base = if is_selected {
-                                            crate::ui::style::chrome::strong(theme)
-                                        } else {
-                                            crate::ui::style::chrome::text(theme)
-                                        };
-                                        iced::widget::text::Style {
-                                            color: Some(Color { a: 0.7, ..base }),
-                                        }
-                                    }),
-                            );
+                            label = label.push(suggestion_summary(summary, is_selected));
                         }
                     }
 
@@ -1301,31 +1357,32 @@ impl CommandLine {
                         .width(Length::Fill)
                         .padding(ROW_PAD)
                         .style(move |theme: &Theme, status| {
-                            let pair = if is_selected {
-                                iced::theme::palette::Pair::new(
-                                    crate::ui::style::chrome::lit(theme),
-                                    crate::ui::style::chrome::strong(theme),
-                                )
-                            } else if matches!(
-                                status,
-                                button::Status::Hovered | button::Status::Pressed
-                            ) {
-                                iced::theme::palette::Pair::new(
-                                    crate::ui::style::chrome::hover(theme),
-                                    crate::ui::style::chrome::strong(theme),
-                                )
-                            } else {
-                                iced::theme::palette::Pair::new(
-                                    crate::ui::style::chrome::surface(theme),
-                                    crate::ui::style::chrome::text(theme),
-                                )
-                            };
-                            button::Style {
-                                background: Some(Background::Color(pair.color)),
-                                text_color: pair.text,
-                                border: Border::default(),
-                                ..Default::default()
-                            }
+                            suggestion_row_style(theme, status, is_selected)
+                        });
+                    col = col.push(row);
+                }
+                // Drawing names, under the commands: the icon of the command
+                // that uses the name, a layer's colour, the name and its kind.
+                for (offset, item) in content.iter().enumerate() {
+                    let is_selected = matches.len() + offset == cursor;
+                    let icon: Element<'_, Message> =
+                        match crate::modules::registry::command_icon(item.kind.icon_command()) {
+                            Some(bytes) => crate::ui::icons::semantic(bytes, 14.0),
+                            None => Space::new().width(ICON_SLOT).into(),
+                        };
+                    let mut label = row![icon].spacing(ITEM_GAP).align_y(iced::Center);
+                    if let Some(color) = &item.color {
+                        label = label.push(suggestion_swatch(color));
+                    }
+                    label = label
+                        .push(text(item.name.clone()).size(ui_text::UI))
+                        .push(suggestion_summary(item.kind.label(), is_selected));
+                    let row = button(label)
+                        .on_press(Message::ContentSuggestionPick(item.clone()))
+                        .width(Length::Fill)
+                        .padding(ROW_PAD)
+                        .style(move |theme: &Theme, status| {
+                            suggestion_row_style(theme, status, is_selected)
                         });
                     col = col.push(row);
                 }
@@ -1672,6 +1729,103 @@ pub fn ranked_matches(
     }
     matches.truncate(AUTOCOMPLETE_LIMIT);
     matches
+}
+
+/// A layer colour's square in a suggestion row.
+fn suggestion_swatch<'a>(color: &document::types::Color) -> Element<'a, Message> {
+    let swatch_color = crate::ui::window::layers::iced_color_from_acad(color);
+    container(text(""))
+        .style(move |theme: &Theme| container::Style {
+            background: Some(Background::Color(swatch_color)),
+            border: Border {
+                color: crate::ui::style::chrome::border(theme),
+                width: km::line(),
+                radius: 1.0.into(),
+            },
+            ..Default::default()
+        })
+        .width(SWATCH)
+        .height(SWATCH)
+        .into()
+}
+
+/// The dimmed text after a suggestion's name: a command's summary, or the
+/// kind of a drawing name.
+fn suggestion_summary<'a>(
+    summary: impl iced::widget::text::IntoFragment<'a>,
+    is_selected: bool,
+) -> Element<'a, Message> {
+    text(summary)
+        .size(ui_text::UI)
+        .wrapping(iced::widget::text::Wrapping::None)
+        .style(move |theme: &Theme| {
+            let base = if is_selected {
+                crate::ui::style::chrome::strong(theme)
+            } else {
+                crate::ui::style::chrome::text(theme)
+            };
+            iced::widget::text::Style {
+                color: Some(Color { a: 0.7, ..base }),
+            }
+        })
+        .into()
+}
+
+/// A suggestion row: lit when highlighted, a hover colour under the pointer.
+fn suggestion_row_style(theme: &Theme, status: button::Status, is_selected: bool) -> button::Style {
+    let pair = if is_selected {
+        iced::theme::palette::Pair::new(
+            crate::ui::style::chrome::lit(theme),
+            crate::ui::style::chrome::strong(theme),
+        )
+    } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+        iced::theme::palette::Pair::new(
+            crate::ui::style::chrome::hover(theme),
+            crate::ui::style::chrome::strong(theme),
+        )
+    } else {
+        iced::theme::palette::Pair::new(
+            crate::ui::style::chrome::surface(theme),
+            crate::ui::style::chrome::text(theme),
+        )
+    };
+    button::Style {
+        background: Some(Background::Color(pair.color)),
+        text_color: pair.text,
+        border: Border::default(),
+        ..Default::default()
+    }
+}
+
+/// The drawing names that contain `needle`, ignoring case, for the
+/// suggestion popup: names that start with it first, then by kind (layers,
+/// blocks, hatch patterns, views) and name; at most [`CONTENT_LIMIT`]. An
+/// AutoLISP line (`(`...) finds none.
+pub fn ranked_content<'a>(
+    needle: &str,
+    names: impl IntoIterator<Item = (ContentKind, &'a str, Option<document::types::Color>)>,
+) -> Vec<ContentMatch> {
+    let needle = needle.trim().to_uppercase();
+    if needle.is_empty() || needle.starts_with('(') {
+        return Vec::new();
+    }
+    let mut found: Vec<(bool, ContentKind, String, ContentMatch)> = names
+        .into_iter()
+        .filter_map(|(kind, name, color)| {
+            let upper = name.to_uppercase();
+            upper.contains(&needle).then(|| {
+                let item = ContentMatch {
+                    kind,
+                    name: name.to_string(),
+                    color,
+                };
+                (!upper.starts_with(&needle), kind, upper, item)
+            })
+        })
+        .collect();
+    found.sort_by(|a, b| (a.0, a.1, &a.2).cmp(&(b.0, b.1, &b.2)));
+    found.truncate(CONTENT_LIMIT);
+    found.into_iter().map(|(_, _, _, item)| item).collect()
 }
 
 /// Flat button style for the history dropdown's Copy / Clear strip: a subtle

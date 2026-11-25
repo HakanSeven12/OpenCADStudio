@@ -3251,6 +3251,7 @@ impl OpenCADStudio {
                         };
 
                     self.command_line.set_contextual_suggestions(suggestions);
+                    self.refresh_content_suggestions();
 
                     if should_update {
                         self.command_line.set_step_options(opts);
@@ -3716,6 +3717,11 @@ impl OpenCADStudio {
                 self.command_line.input.clear();
                 self.command_line.autocomplete_cursor = None;
                 self.dispatch_command(&value)
+            }
+
+            Message::ContentSuggestionPick(item) => {
+                self.command_line.close_history();
+                self.run_content_suggestion(item)
             }
 
             Message::CommandOptionPick(kw) => {

@@ -414,6 +414,10 @@ impl OpenCADStudio {
                 self.command_line.push_command(&command);
                 return self.dispatch_command(&command);
             }
+            if let Some(item) = self.command_line.selected_content() {
+                self.command_line.push_command(&item.name);
+                return self.run_content_suggestion(item);
+            }
         } else if self.command_line.has_contextual_suggestions() {
             // During an active command Enter accepts the highlighted
             // contextual value instead of the user's partial search.

@@ -970,6 +970,9 @@ pub enum Message {
     /// User clicked an autocomplete suggestion — fill the input with
     /// the chosen command name and dispatch it.
     CommandSuggestionPick(String),
+    /// User clicked a drawing name in the suggestions: make the layer
+    /// current, insert the block, hatch with the pattern or restore the view.
+    ContentSuggestionPick(crate::ui::command_line::ContentMatch),
     /// User clicked a command-line option button — feed its keyword to the
     /// active command as if typed (empty keyword = Enter). (#304)
     CommandOptionPick(String),

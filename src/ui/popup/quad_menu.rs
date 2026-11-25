@@ -318,7 +318,8 @@ fn command_group(command: &str) -> &'static str {
         | "REVCLOUD_POLYGONAL" => "Draw",
         "TEXT" | "MTEXT" | "TEXTEDIT" | "DDEDIT" | "MTEDIT" | "TEDIT" | "TXT2MTXT" | "ATTDEF"
         | "ATTEDIT" | "LEADER" | "MLEADER" | "TABLE" | "TABLEDIT" => "Annotate",
-        "INSERT" | "BLOCK" | "BEDIT" | "REFEDIT" | "CLIP" | "XCLIP" | "XATTACH" | "ATTACH" => {
+        "INSERT" | "BLOCK" | "BEDIT" | "REFEDIT" | "RESETBLOCK" | "CLIP" | "XCLIP" | "XATTACH"
+        | "ATTACH" => {
             "Block"
         }
         _ => "Modify",

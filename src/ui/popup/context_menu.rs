@@ -432,6 +432,9 @@ pub enum MenuContext {
         single_hatch: bool,
         /// Exactly one multileader is selected: its leader rows are offered.
         single_mleader: bool,
+        /// Exactly one block reference is selected: its block rows are
+        /// offered; `Some(true)` when it is a dynamic block (Reset Block).
+        single_block: Option<bool>,
         selected_constraint: Option<ConstraintId>,
         isolation_active: bool,
         /// Recently run commands, newest first.
@@ -459,6 +462,7 @@ pub fn build_context_menu(ctx: &MenuContext, open_submenu: Option<SubmenuId>) ->
             has_selection,
             single_hatch,
             single_mleader,
+            single_block,
             selected_constraint,
             isolation_active,
             recent_cmds,
@@ -471,6 +475,7 @@ pub fn build_context_menu(ctx: &MenuContext, open_submenu: Option<SubmenuId>) ->
             *has_selection,
             *single_hatch,
             *single_mleader,
+            *single_block,
             *selected_constraint,
             *isolation_active,
             recent_cmds,
@@ -684,6 +689,7 @@ fn idle_rows(
     has_selection: bool,
     single_hatch: bool,
     single_mleader: bool,
+    single_block: Option<bool>,
     selected_constraint: Option<ConstraintId>,
     isolation_active: bool,
     recent_cmds: &[String],
@@ -785,6 +791,22 @@ fn idle_rows(
                 t!("Remove Leader").into_owned(),
                 "AIMLEADEREDITREMOVE",
             )));
+        }
+        if let Some(dynamic) = single_block {
+            rows.push(MenuRow::Item(cmd(
+                t!("Block Editor").into_owned(),
+                "BEDIT",
+            )));
+            rows.push(MenuRow::Item(cmd(
+                t!("Edit Block In-place").into_owned(),
+                "REFEDIT",
+            )));
+            if dynamic {
+                rows.push(MenuRow::Item(cmd(
+                    t!("Reset Block").into_owned(),
+                    "RESETBLOCK",
+                )));
+            }
         }
         rows.push(MenuRow::Item(
             MenuItem::new(t!("Erase").into_owned(), MenuAction::DeleteSelected)
@@ -1146,6 +1168,7 @@ mod tests {
             has_selection,
             single_hatch: false,
             single_mleader: false,
+            single_block: None,
             selected_constraint: None,
             isolation_active: false,
             recent_cmds: vec!["LINE".into(), "CIRCLE".into()],
@@ -1457,6 +1480,7 @@ mod customization_tests {
             has_selection: true,
             single_hatch: false,
             single_mleader: false,
+            single_block: None,
             selected_constraint: None,
             isolation_active: false,
             recent_cmds: vec!["LINE".into()],

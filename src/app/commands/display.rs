@@ -2694,6 +2694,12 @@ impl OpenCADStudio {
                 self.command_line.push_info(&c.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
+            cmd if crate::modules::civil::point_intersect::Kind::of(cmd).is_some() => {
+                let kind = crate::modules::civil::point_intersect::Kind::of(cmd).unwrap();
+                let c = crate::modules::civil::point_intersect::IntersectionPointCommand::new(kind);
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+            }
             cmd if crate::ui::points_menu::is_pending(cmd) => {
                 self.command_line
                     .push_info(crate::tf!("{cmd}: not yet implemented.").as_ref());

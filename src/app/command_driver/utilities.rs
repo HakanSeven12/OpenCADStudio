@@ -2040,11 +2040,12 @@ impl OpenCADStudio {
 
     pub(in crate::app) fn typed_object_pick(&mut self, token: &str) -> Option<Task<Message>> {
         let i = self.active_tab;
-        let (gathering, picks_entity, key) = self.tabs[i].active_cmd.as_ref().map(|command| {
+        let (gathering, picks_entity, key, keep) = self.tabs[i].active_cmd.as_ref().map(|command| {
             (
                 command.is_selection_gathering(),
                 command.needs_entity_pick() && command.typed_point_picks_entity(),
                 &**command as *const dyn crate::command::CadCommand as *const () as usize,
+                command.selection_entity_filter(),
             )
         })?;
         if let Some((pending, first)) = self.typed_window_corner.take() {
@@ -2106,7 +2107,7 @@ impl OpenCADStudio {
         // not: the object prompt then reads it as empty space.
         let found = self
             .typed_point_in_view(i, wcs)
-            .then(|| entity_at_typed_point(&self.tabs[i].scene.document, owner, wcs))
+            .then(|| entity_at_typed_point(&self.tabs[i].scene.document, owner, wcs, keep))
             .flatten();
         if gathering {
             self.last_point = Some(wcs);

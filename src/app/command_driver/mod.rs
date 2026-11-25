@@ -2507,20 +2507,26 @@ fn entity_at_typed_point(
     document: &document::Document,
     owner: Handle,
     point: glam::DVec3,
+    keep: Option<fn(&document::EntityType) -> bool>,
 ) -> Option<Handle> {
     let mut extent = 0.0f64;
     let mut nearest: Option<(f64, Handle)> = None;
     for entity in document.entities() {
         let common = entity.common();
-        if common.owner_handle != owner {
+        // Only the kinds of object the prompt takes: a point on an
+        // alignment drawn over its source polyline finds the alignment.
+        if common.owner_handle != owner || keep.is_some_and(|keep| !keep(entity)) {
             continue;
         }
         let bounds = entity.as_entity().bounding_box();
         extent = extent
             .max((bounds.max.x - bounds.min.x).abs())
             .max((bounds.max.y - bounds.min.y).abs());
+        // An alignment answers by its plan geometry.
+        let alignment = crate::modules::civil::point_intersect::alignment_curve(entity)
+            .map(|curve| ocs_geom::geom2d::closest_point(&curve, [point.x, point.y]).distance);
         let distance =
-            match crate::scene::viewport_dimension_pick::planar_pick_distance(entity, point) {
+            match alignment.or_else(|| crate::scene::viewport_dimension_pick::planar_pick_distance(entity, point)) {
                 Some(distance) => distance,
                 // A multileader answers by its leader lines and landings.
                 None if matches!(entity, document::EntityType::MultiLeader(_)) => match entity {
@@ -2570,7 +2576,9 @@ fn entity_at_typed_point(
                 }
                 None => continue,
             };
-        if nearest.is_none_or(|(best, _)| distance < best) {
+        // Of objects equally near, the one drawn last (on top) is found:
+        // an alignment over its source polyline, a line over an alignment.
+        if nearest.is_none_or(|(best, _)| distance <= best) {
             nearest = Some((distance, common.handle));
         }
     }

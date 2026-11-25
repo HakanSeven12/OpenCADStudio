@@ -6691,6 +6691,166 @@ mod ext_tests {
     }
 
     #[test]
+    fn a_skipped_snap_gives_way_to_the_next_one() {
+        // TAN and CEN on, the cursor at the tangent point of a circle seen
+        // from (100, 0): Tangent, then the rim-hover Center, then nothing.
+        let mut snapper = Snapper {
+            enabled: [SnapType::Tangent, SnapType::Center].into_iter().collect(),
+            from_point: Some(DVec3::new(100.0, 0.0, 0.0)),
+            ..Snapper::default()
+        };
+        let points = (0..=64)
+            .map(|i| {
+                let a = i as f32 / 64.0 * std::f32::consts::TAU;
+                [50.0 * a.cos(), 50.0 * a.sin(), 0.0]
+            })
+            .collect();
+        let wires = vec![WireModel {
+            aabb: [-50.0, -50.0, 50.0, 50.0],
+            geom: std::sync::Arc::new(crate::scene::WireGeom {
+                points,
+                snap_pts: vec![(DVec3::ZERO, SnapHint::Center)],
+                tangent_geoms: vec![TangentGeom::Circle {
+                    center: [0.0, 0.0, 0.0],
+                    radius: 50.0,
+                }],
+                ..crate::scene::WireGeom::default()
+            }),
+            ..Default::default()
+        }];
+        let view_rot = Mat4::from_scale(Vec3::new(0.005, 0.005, 1.0));
+        let bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1000.0,
+            height: 1000.0,
+        };
+        let tangent = DVec3::new(25.0, 50.0 * 0.75f64.sqrt(), 0.0);
+        let cursor = world_to_screen(tangent, view_rot, DVec3::ZERO, bounds);
+        let snap = |snapper: &Snapper| {
+            snapper.snap(
+                tangent,
+                cursor,
+                wires.as_slice(),
+                view_rot,
+                DVec3::ZERO,
+                bounds,
+                Vec3::ZERO,
+                (Vec3::X, Vec3::Y, Vec3::Z),
+                None,
+            )
+        };
+
+        let first = snap(&snapper).expect("Tangent");
+        assert_eq!(first.snap_type, SnapType::Tangent);
+        snapper.skip_in_cycle(&first, cursor);
+        let second = snap(&snapper).expect("the rim-hover Center");
+        assert_eq!(second.snap_type, SnapType::Center);
+        assert!(second.world.length() < 1e-9);
+        // The Center is not offered again as a point of the hovered circle.
+        snapper.skip_in_cycle(&second, cursor);
+        assert!(snap(&snapper).is_none());
+        assert_eq!(snapper.cycle_len(), 2);
+
+        snapper.end_cycle();
+        assert_eq!(snap(&snapper).unwrap().snap_type, SnapType::Tangent);
+    }
+
+    #[test]
+    fn a_skipped_tangent_gives_way_to_the_other_object() {
+        // A tangent object pick (TTR) over two circles that cross at the
+        // cursor: Tab moves from the first circle to the second.
+        let circle = |center: DVec3, radius: f64| {
+            let points = (0..=256)
+                .map(|i| {
+                    let a = i as f64 / 256.0 * std::f64::consts::TAU;
+                    let p = center + radius * DVec3::new(a.cos(), a.sin(), 0.0);
+                    [p.x as f32, p.y as f32, 0.0]
+                })
+                .collect();
+            WireModel {
+                aabb: [
+                    (center.x - radius) as f32,
+                    (center.y - radius) as f32,
+                    (center.x + radius) as f32,
+                    (center.y + radius) as f32,
+                ],
+                geom: std::sync::Arc::new(crate::scene::WireGeom {
+                    points,
+                    tangent_geoms: vec![TangentGeom::Circle {
+                        center: [center.x as f32, center.y as f32, 0.0],
+                        radius: radius as f32,
+                    }],
+                    ..crate::scene::WireGeom::default()
+                }),
+                ..Default::default()
+            }
+        };
+        let crossing = DVec3::new(50.0 * 0.6f64.cos(), 50.0 * 0.6f64.sin(), 0.0);
+        let second = crossing + 40.0 * DVec3::new((-0.3f64).cos(), (-0.3f64).sin(), 0.0);
+        let wires = vec![circle(DVec3::ZERO, 50.0), circle(second, 40.0)];
+        let view_rot = Mat4::from_scale(Vec3::new(0.005, 0.005, 1.0));
+        let bounds = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 1000.0,
+            height: 1000.0,
+        };
+        let cursor = world_to_screen(crossing, view_rot, DVec3::ZERO, bounds);
+        let mut snapper = Snapper::default();
+        let snap = |snapper: &Snapper| {
+            snapper
+                .snap_tangent_only(
+                    crossing.as_vec3(),
+                    cursor,
+                    wires.as_slice(),
+                    view_rot,
+                    DVec3::ZERO,
+                    bounds,
+                )
+                .expect("a tangent object")
+        };
+
+        let first = snap(&snapper);
+        assert_eq!(first.snap_type, SnapType::Tangent);
+        snapper.skip_in_cycle(&first, cursor);
+        let next = snap(&snapper);
+        assert_eq!(next.snap_type, SnapType::Tangent);
+        let centre = |hit: &SnapResult| match hit.tangent_obj {
+            Some(TangentObject::Circle { center, .. }) => center,
+            other => panic!("a circle, not {other:?}"),
+        };
+        assert!((centre(&first) - centre(&next)).length() > 1.0);
+    }
+
+    #[test]
+    fn the_cycle_ends_when_the_pointer_leaves_the_aperture() {
+        let mut snapper = Snapper {
+            osnap_radius_px: 10.0,
+            ..Snapper::default()
+        };
+        let hit = SnapResult {
+            world: DVec3::new(3.0, 7.0, 0.0),
+            screen: Point::new(300.0, 200.0),
+            snap_type: SnapType::Endpoint,
+            tangent_obj: None,
+            extension_base: None,
+            extension_base2: None,
+            extension_origin: None,
+            extension_dir: None,
+            viewport: None,
+            source: None,
+            secondary_source: None,
+            model_point: None,
+        };
+        snapper.skip_in_cycle(&hit, Point::new(300.0, 200.0));
+        snapper.keep_cycle_near(Point::new(306.0, 208.0));
+        assert_eq!(snapper.cycle_len(), 1, "10 px away: in the aperture");
+        snapper.keep_cycle_near(Point::new(306.0, 208.1));
+        assert_eq!(snapper.cycle_len(), 0);
+    }
+
+    #[test]
     fn perpendicular_foot_ranks_by_distance_like_endpoint() {
         // PER, END and CEN on, base at (100, 0): the foot on the circle at
         // (50, 0) is under the cursor, so it beats the rim-hover Center; a

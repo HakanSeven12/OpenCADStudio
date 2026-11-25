@@ -472,6 +472,9 @@ mod scroll_intent_tests;
 mod rapid_drawing_tests;
 
 #[cfg(test)]
+mod snap_cycle_tests;
+
+#[cfg(test)]
 mod zoom_dynamic_cursor_tests;
 
 #[cfg(test)]

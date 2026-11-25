@@ -148,7 +148,8 @@ pub const TOOLS: &[Entry] = &[
 // ponytail: entries answer "not yet implemented" until their command lands;
 // drop each from here as it does.
 pub fn is_pending(cmd: &str) -> bool {
-    !matches!(
+    crate::modules::civil::point_intersect::Kind::of(cmd).is_none()
+        && !matches!(
         cmd,
         "CREATEPOINTMANUAL"
             | "CREATEPOINTGROUP"

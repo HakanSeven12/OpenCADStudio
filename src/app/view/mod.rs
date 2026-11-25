@@ -3621,6 +3621,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     &tab.tab_display_name(),
                     tab.dirty,
                     self.ribbon.title_bar_search(),
+                    self.ribbon.title_bar_room(),
                     self.main_maximized,
                     self.title_bar_pressed,
                 ));

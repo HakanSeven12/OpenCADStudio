@@ -13,8 +13,8 @@ pub const TITLE_BAR_H_WINDOWS: f32 = 29.0;
 pub const TITLE_BAR_H_MAC: f32 = 28.0;
 /// Width of a window button (minimize, maximize, close) and its icon size.
 pub const CAPTION_W: f32 = 46.0;
-/// The icons fill 16 of their 24 grid units: at 15 px they are 10 px
-/// across with 1 px lines, as Windows draws its own.
+/// The icons fill 14 of their 24 grid units: at 15 px they are 10 px
+/// across, lines included, with 1 px lines, as Windows draws its own.
 pub const CAPTION_ICON: f32 = 15.0;
 /// GNOME's (Adwaita) round window buttons and their icons.
 pub const ADWAITA_BUTTON: f32 = 24.0;

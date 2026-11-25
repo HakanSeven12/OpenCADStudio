@@ -165,7 +165,7 @@ pub(super) struct SearchState {
     hidden: bool,
     /// The box is open for now: from the magnifier button while collapsed,
     /// or as the field over it on a narrow window.
-    temp_open: bool,
+    pub(super) temp_open: bool,
     /// When a temporary box closes after a press elsewhere.
     closing: Option<Instant>,
     scroll: f32,
@@ -878,6 +878,16 @@ impl Ribbon {
     /// Whether the full box shows in the tab row: kept open, or open for now.
     fn shows_box(&self) -> bool {
         !self.narrow() && (self.layout.search_expanded || self.search.temp_open)
+    }
+
+    /// The search box's width at rest: the box when it stays open, else its
+    /// magnifier, also while a collapsed search shows the box for a moment.
+    pub(super) fn search_rest_width(&self) -> f32 {
+        if !self.narrow() && self.layout.search_expanded {
+            BOX_W
+        } else {
+            MAGNIFIER_W
+        }
     }
 
     /// The search box, or its magnifier button while it is collapsed or the

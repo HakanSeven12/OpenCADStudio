@@ -1709,6 +1709,15 @@ impl Ribbon {
             .into()
     }
 
+    /// The widths around the drawing's name in the app's title bar.
+    pub fn title_bar_room(&self) -> crate::ui::title_bar::Room {
+        let start = f32::from_bits(self.title_start_w.load(Ordering::Relaxed));
+        crate::ui::title_bar::Room {
+            start: if start.is_nan() { 0.0 } else { start },
+            search: self.search_rest_width(),
+        }
+    }
+
     /// The search box for the end of the app's title bar. Like the ribbon,
     /// it asks for a fresh view when the room it was sized for changed
     /// without a resize (a toolbar that grew), also on a clean screen,
@@ -3249,6 +3258,20 @@ mod tests {
         assert!(!ribbon
             .search_in_tab_row
             .load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn a_search_open_for_a_moment_leaves_the_name_in_place() {
+        let mut ribbon = Ribbon::default();
+        ribbon.set_in_title_bar(true);
+        ribbon.set_window_size((1600.0, 900.0));
+        ribbon.set_layout(RibbonLayout {
+            search_expanded: false,
+            ..RibbonLayout::default()
+        });
+        let at_rest = ribbon.title_bar_room().search;
+        ribbon.search.temp_open = true;
+        assert_eq!(ribbon.title_bar_room().search, at_rest);
     }
 
     #[test]

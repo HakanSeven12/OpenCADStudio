@@ -93,11 +93,13 @@ pub enum TitleBarMsg {
 /// The title bar: `start` (logo and toolbar), the drawing `name` with a dot
 /// while it has unsaved changes, `search`, and the window buttons.
 /// `pressed`: its empty space is held down (see [`grab`]).
+/// `room`: the widths around the name, which keep it in place.
 pub fn view<'a>(
     start: Element<'a, Message>,
     name: &str,
     dirty: bool,
     search: Element<'a, Message>,
+    room: Room,
     maximized: bool,
     pressed: bool,
 ) -> Element<'a, Message> {
@@ -129,12 +131,22 @@ pub fn view<'a>(
                 }),
         );
 
-    let grab = grab(
-        container(title).center_x(Fill).center_y(Fill).clip(true),
-        pressed,
-    );
-
+    // The name sits in the middle of the window, as far from both ends as
+    // the wider of them reaches at rest. A collapsed search box that opens
+    // for a moment then draws over the name instead of moving it.
     let buttons = layout();
+    let ends = room.ends(buttons);
+    let name_layer = container(title)
+        .center_x(Fill)
+        .center_y(Fill)
+        .padding(Padding {
+            left: ends,
+            right: ends,
+            ..Padding::ZERO
+        })
+        .clip(true);
+    let grab = grab(Space::new().width(Fill).height(Fill), pressed);
+
     let bar = row![
         captions(buttons, &buttons.left, maximized, Side::Left),
         container(start).padding(Padding {
@@ -148,7 +160,7 @@ pub fn view<'a>(
     .align_y(iced::Center)
     .height(Length::Fixed(bar_height()));
 
-    container(bar)
+    container(stack![name_layer, bar].height(Length::Fixed(bar_height())))
         .width(Fill)
         .style(|theme: &Theme| container::Style {
             background: Some(Background::Color(chrome::bar(theme))),
@@ -176,10 +188,38 @@ fn grab<'a>(content: impl Into<Element<'a, Message>>, pressed: bool) -> Element<
 
 /// The Windows and Adwaita icons, on the 24-unit grid of
 /// [`crate::ui::icons::line_icon`].
-const MINIMIZE: &str = "M4 12h16";
-const MAXIMIZE: &str = "M4 4h16v16H4z";
-const RESTORE: &str = "M4 8h12v12H4z M8 4h12v12h-4";
-const CLOSE: &str = "M4 4l16 16M20 4L4 20";
+const MINIMIZE: &str = "M5 12h14";
+const MAXIMIZE: &str = "M5 5h14v14H5z";
+const RESTORE: &str = "M5 8h11v11H5z M8 5h11v11h-3";
+const CLOSE: &str = "M5 5l14 14M19 5L5 19";
+
+/// The widths that decide where the drawing's name sits.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Room {
+    /// The logo and the Quick Access Toolbar, as last laid out.
+    pub start: f32,
+    /// The search box at rest: the box, or its magnifier while collapsed,
+    /// not the box a collapsed search opens for a moment.
+    pub search: f32,
+}
+
+impl Room {
+    /// How far the name keeps from each end of the bar: the wider of the
+    /// two ends with their window buttons.
+    fn ends(self, buttons: &ButtonLayout) -> f32 {
+        let group = |n: usize| {
+            let (w, gap, margin) = button_metrics(buttons.style);
+            if n == 0 {
+                0.0
+            } else {
+                n as f32 * w + (n - 1) as f32 * gap + margin
+            }
+        };
+        let left = group(buttons.left.len()) + leading_inset() + self.start;
+        let right = self.search + 2.0 * metrics::TITLE_BAR_PAD + group(buttons.right.len());
+        left.max(right) + metrics::TITLE_BAR_PAD
+    }
+}
 
 /// Which end of the bar a group of window buttons sits at.
 #[derive(Clone, Copy, PartialEq, Eq)]

@@ -2645,7 +2645,7 @@ fn collect_entries_impl(
     deduplicate_nested: bool,
 ) -> Vec<crate::io::xref_model::ReferenceEntry> {
     use crate::io::xref_model::{
-        decide_status, normalize_lexical, RefKind, RefStatus, RefType, ReferenceEntry, UnloadKey,
+        decide_status, RefKind, RefStatus, RefType, ReferenceEntry, UnloadKey,
     };
     use document::objects::ObjectType;
 

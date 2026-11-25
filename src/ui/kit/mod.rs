@@ -39,6 +39,8 @@
 //! - `docs/ui/audit_counts.sh` counts generic colours and literal sizes in
 //!   the kit's users; CI reports a file that goes above its baseline in
 //!   `docs/ui/audit_counts.txt`, and the baseline only goes down.
+//! - Icons in `assets/icons/` follow `docs/ui/icon-spec.md`: sizes, pixel
+//!   grid, source colours and what the SVG may contain.
 
 mod dropdown;
 mod field;

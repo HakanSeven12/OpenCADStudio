@@ -34,6 +34,8 @@ mod clipboard;
 mod qselect_cmd;
 mod properties;
 
+mod content_search;
+
 pub(crate) use self::tabs::*;
 pub(crate) use self::submit::*;
 pub(crate) use self::layer_manager::*;
@@ -170,6 +172,7 @@ impl OpenCADStudio {
                     };
 
                 self.command_line.set_contextual_suggestions(suggestions);
+                self.refresh_content_suggestions();
 
                 if should_update {
                     self.command_line.set_step_options(opts);
@@ -247,6 +250,7 @@ impl OpenCADStudio {
                 }
             }
         }
+        self.refresh_content_suggestions();
         self.focus_cmd_input()
     }
 
@@ -818,6 +822,8 @@ std::thread_local! {
     static TREE_EXPENSIVE_RUNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+#[cfg(test)]
+mod content_search_tests;
 #[cfg(test)]
 mod grip_ctrl_cycle_tests;
 #[cfg(test)]

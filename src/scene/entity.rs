@@ -1256,15 +1256,18 @@ impl Scene {
     /// would advertise a block nobody made. Sorted by name, ignoring case,
     /// as the block lists show them.
     pub fn custom_block_names(&self) -> Vec<String> {
-        let mut names: Vec<String> = self
-            .document
+        let mut names: Vec<String> = self.placeable_block_names().map(str::to_string).collect();
+        names.sort_by_cached_key(|name| name.to_lowercase());
+        names
+    }
+
+    /// The names of [`Self::custom_block_names`], unsorted and not copied.
+    pub fn placeable_block_names(&self) -> impl Iterator<Item = &str> {
+        self.document
             .block_records
             .iter()
             .filter(|br| !br.is_standard() && !br.is_layout() && !br.is_anonymous())
-            .map(|br| br.name.clone())
-            .collect();
-        names.sort_by_cached_key(|name| name.to_lowercase());
-        names
+            .map(|br| br.name.as_str())
     }
 
     pub fn create_block_from_entities(

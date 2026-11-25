@@ -2230,6 +2230,93 @@ mod tests {
         assert!(last.pinned);
         assert_eq!(last.text, "ⓘ Specify first point:");
     }
+
+    fn names(found: &[super::ContentMatch]) -> Vec<(super::ContentKind, &str)> {
+        found
+            .iter()
+            .map(|item| (item.kind, item.name.as_str()))
+            .collect()
+    }
+
+    #[test]
+    fn drawing_names_that_start_with_the_text_rank_first_then_by_kind() {
+        use super::ContentKind::{Block, HatchPattern, Layer, View};
+        let found = super::ranked_content(
+            "door",
+            [
+                (View, "Front door", None),
+                (Block, "DOOR-36", None),
+                (Layer, "A-DOOR", None),
+                (Layer, "Doors", None),
+                (HatchPattern, "ANSI31", None),
+            ],
+        );
+        assert_eq!(
+            names(&found),
+            [
+                (Layer, "Doors"),
+                (Block, "DOOR-36"),
+                (Layer, "A-DOOR"),
+                (View, "Front door"),
+            ]
+        );
+    }
+
+    #[test]
+    fn at_most_four_drawing_names_and_none_for_lisp_or_no_text() {
+        use super::ContentKind::Layer;
+        let many = ["A1", "A2", "A3", "A4", "A5"].map(|name| (Layer, name, None));
+        assert_eq!(super::ranked_content("a", many).len(), 4);
+        assert!(super::ranked_content("(a", many).is_empty());
+        assert!(super::ranked_content("  ", many).is_empty());
+    }
+
+    fn line_with_content(input: &str) -> CommandLine {
+        let mut line = CommandLine::new();
+        line.clear_history();
+        line.command_aliases = FxHashMap::default();
+        line.input = input.to_string();
+        let found =
+            super::ranked_content(input, [(super::ContentKind::Layer, "LTGRAY walls", None)]);
+        line.set_content_matches(input, found);
+        line
+    }
+
+    #[test]
+    fn the_highlight_moves_from_the_commands_onto_the_drawing_names() {
+        // `LTGRAY` is no command, so the layer is the only row: Enter takes it.
+        let line = line_with_content("LTGRAY");
+        assert_eq!(line.selected_suggestion(), None);
+        assert_eq!(
+            line.selected_content().map(|item| item.name),
+            Some("LTGRAY walls".to_string())
+        );
+
+        // `LT` matches commands: the first command keeps the highlight, and
+        // the arrow keys reach the layer after the last command and wrap.
+        let mut line = line_with_content("LT");
+        let commands = line.autocomplete_matches().len();
+        assert!(commands > 0);
+        assert!(line.selected_content().is_none());
+        assert!(line.selected_suggestion().is_some());
+        for _ in 0..commands {
+            line.autocomplete_next();
+        }
+        assert_eq!(line.selected_suggestion(), None);
+        assert!(line.selected_content().is_some());
+        line.autocomplete_next();
+        assert_eq!(line.autocomplete_cursor, Some(0));
+        line.autocomplete_prev();
+        assert!(line.selected_content().is_some());
+    }
+
+    #[test]
+    fn drawing_names_found_for_other_text_are_not_shown() {
+        let mut line = line_with_content("LTGRAY");
+        line.input = "LTGRAYX".to_string();
+        assert!(line.content_rows().is_empty());
+        assert!(line.selected_content().is_none());
+    }
 }
 
 /// `Enter new value for NAME <current>:`, the one prompt every variable asks

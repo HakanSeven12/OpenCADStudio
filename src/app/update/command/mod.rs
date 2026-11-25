@@ -823,6 +823,8 @@ std::thread_local! {
 }
 
 #[cfg(test)]
+mod content_search_tests;
+#[cfg(test)]
 mod grip_ctrl_cycle_tests;
 #[cfg(test)]
 mod grip_extend_vertex_tests;

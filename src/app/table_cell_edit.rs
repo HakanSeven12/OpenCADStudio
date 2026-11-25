@@ -302,6 +302,95 @@ impl OpenCADStudio {
         true
     }
 
+    /// Ctrl+V over selected cells: one value goes into every selected cell;
+    /// a tab- and line-separated block fills from the top-left one.
+    pub(in crate::app) fn paste_into_table_cells(&mut self, text: &str) {
+        let i = self.active_tab;
+        let Some(sel) = self.tabs[i].scene.table_cells else {
+            return;
+        };
+        let handle = sel.table;
+        if self.tabs[i].scene.is_layer_locked(handle) {
+            return;
+        }
+        let rows: Vec<Vec<&str>> = text
+            .trim_end_matches(['\r', '\n'])
+            .lines()
+            .map(|line| line.trim_end_matches('\r').split('\t').collect())
+            .collect();
+        let (top, left) = (sel.anchor.0.min(sel.end.0), sel.anchor.1.min(sel.end.1));
+        let (bottom, right) = (sel.anchor.0.max(sel.end.0), sel.anchor.1.max(sel.end.1));
+        let targets: Vec<(usize, usize, &str)> = match rows.as_slice() {
+            [] => return,
+            [only] if only.len() == 1 => (top..=bottom)
+                .flat_map(|row| (left..=right).map(move |column| (row, column, only[0])))
+                .collect(),
+            _ => rows
+                .iter()
+                .enumerate()
+                .flat_map(|(r, values)| {
+                    values
+                        .iter()
+                        .enumerate()
+                        .map(move |(c, value)| (top + r, left + c, *value))
+                })
+                .collect(),
+        };
+        let mut changed = false;
+        for (row, column, value) in targets {
+            let document = &self.tabs[i].scene.document;
+            let Some(EntityType::Table(table)) = document.get_entity(handle) else {
+                break;
+            };
+            use document::entities::table::CellStateFlags as F;
+            // A merged range is written through its top-left cell only.
+            let (r, c, _, _) =
+                crate::entities::table::widen_to_merged(table, (row, column, row, column));
+            if (r, c) != (row, column)
+                || table.cell(row, column).is_none_or(|cell| {
+                    cell.state.intersects(F::CONTENT_LOCKED | F::CONTENT_READ_ONLY)
+                })
+            {
+                continue;
+            }
+            let mut command = crate::modules::annotate::table_cmd::TableCellEditCommand::new(
+                handle, table, row, column,
+            );
+            let Some(crate::command::CmdResult::ReplaceMany(mut replacements, _)) =
+                command.on_text_input(value)
+            else {
+                continue;
+            };
+            let Some(entity) = replacements.pop().and_then(|(_, mut entities)| entities.pop())
+            else {
+                continue;
+            };
+            if !changed {
+                self.push_undo_snapshot(i, "TABLE CELL");
+                changed = true;
+            }
+            let document = &mut self.tabs[i].scene.document;
+            if let Some(target) = document.get_entity_mut(handle) {
+                *target = entity;
+            }
+            document.prune_table_fields(handle);
+            crate::entities::table::typed_formula_to_field(document, handle, row, column);
+        }
+        if !changed {
+            return;
+        }
+        if let Some(EntityType::Table(table)) = self.tabs[i].scene.document.get_entity_mut(handle)
+        {
+            table.block_record_handle = None;
+        }
+        self.tabs[i]
+            .scene
+            .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
+        self.tabs[i].dirty = true;
+        self.finish_pending_history(i);
+        self.refresh_properties();
+    }
+
     pub(in crate::app) fn table_editor_step(
         &mut self,
         dr: isize,

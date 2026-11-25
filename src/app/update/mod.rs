@@ -11,7 +11,9 @@ use iced::Task;
 /// keyboard can't reach the main window (command line, F-key toggles, edit
 /// shortcuts) while a dialog is up. `CommandEscape` is handled separately (it
 /// closes the modal); a modal's own text fields emit their own messages, which
-/// are not in this set. See [`OpenCADStudio::update`] and #126.
+/// are not in this set. See [`OpenCADStudio::update`] and #126. The grid and
+/// grid-snap toggles are not in it: F7 and F9 reach them only through
+/// `ShortcutPressed`, so what is left is a click on their controls.
 pub(crate) fn is_modal_blocked_key_msg(msg: &Message) -> bool {
     matches!(
         msg,
@@ -34,9 +36,7 @@ pub(crate) fn is_modal_blocked_key_msg(msg: &Message) -> bool {
             | Message::DeleteSelected
             | Message::ToggleSnapEnabled
             | Message::ToggleSnap3dEnabled
-            | Message::ToggleGrid
             | Message::ToggleOrtho
-            | Message::ToggleGridSnap
             | Message::TogglePolar
             | Message::ToggleOTrack
             | Message::ToggleDynInput

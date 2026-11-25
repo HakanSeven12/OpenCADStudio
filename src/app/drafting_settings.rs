@@ -76,6 +76,25 @@ impl OpenCADStudio {
         self.dyn_mode.abs() & 2 != 0
     }
 
+    /// Show a toggle made outside the open Drafting Settings dialog (the
+    /// status bar, F7, F9) in it: in the checkbox and in the state that the
+    /// dialog opened with, so OK does not set the old state back and the
+    /// toggle alone does not ask to discard changes.
+    pub(in crate::app) fn show_toggle_in_drafting_settings(
+        &mut self,
+        set: impl Fn(&mut DraftingSettingsState),
+    ) {
+        for state in [
+            &mut self.drafting_settings_state,
+            &mut self.drafting_settings_saved,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            set(state);
+        }
+    }
+
     pub(super) fn drafting_settings_dirty(&self) -> bool {
         match (&self.drafting_settings_state, &self.drafting_settings_saved) {
             (Some(curr), Some(saved)) => curr.is_dirty(saved),
@@ -88,8 +107,9 @@ impl OpenCADStudio {
         let Some(state) = &self.drafting_settings_state.clone() else {
             return true;
         };
-        let x = crate::ui::window::drafting_settings::parse_snap_spacing(&state.snap_x_input);
-        let y = crate::ui::window::drafting_settings::parse_snap_spacing(&state.snap_y_input);
+        use crate::ui::window::drafting_settings::applied_spacing;
+        let x = applied_spacing(&state.snap_x_input, self.snapper.snap_spacing_x);
+        let y = applied_spacing(&state.snap_y_input, self.snapper.snap_spacing_y);
         let (Some(sx), Some(sy)) = (x, y) else {
             self.command_line
                 .push_error(crate::t!("Snap X and Y spacings must be positive numbers.").as_ref());
@@ -102,8 +122,8 @@ impl OpenCADStudio {
                 live.snap_y_input = live.snap_x_input.clone();
             }
         }
-        let gx = crate::ui::window::drafting_settings::parse_snap_spacing(&state.grid_x_input);
-        let gy = crate::ui::window::drafting_settings::parse_snap_spacing(&state.grid_y_input);
+        let gx = applied_spacing(&state.grid_x_input, self.grid_spacing_x);
+        let gy = applied_spacing(&state.grid_y_input, self.grid_spacing_y);
         let gm = crate::ui::window::drafting_settings::parse_grid_major(&state.grid_major_input);
         let (Some(gx), Some(gy), Some(gm)) = (gx, gy, gm) else {
             self.command_line.push_error(
@@ -375,7 +395,8 @@ mod tests {
         assert_eq!(parse_snap_spacing("-1"), None);
         assert_eq!(parse_snap_spacing("abc"), None);
         assert_eq!(parse_snap_spacing(""), None);
-        assert_eq!(format_snap_spacing(10.0), "10");
+        // A test thread has the default unit settings: LUNITS 2, LUPREC 4.
+        assert_eq!(format_snap_spacing(10.0), "10.0000");
         assert_eq!(parse_grid_major("5"), Some(5));
         assert_eq!(parse_grid_major("1"), None);
         assert_eq!(parse_grid_major("101"), None);

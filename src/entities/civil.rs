@@ -652,8 +652,17 @@ fn section_view(data: &ArchEntityData, out: &mut Decoded) -> Option<()> {
     Some(())
 }
 
-/// Stations as Civil 3D shows them along `alignment`: past a station
-/// equation they run on from its station ahead. Without an alignment, raw.
+/// Where a COGO point entity is, with its elevation.
+pub(crate) fn cogo_point_position(entity: &EntityType, document: &document::Document) -> Option<glam::DVec3> {
+    let EntityType::Extended(x) = entity else { return None };
+    let ExtendedEntityData::Arch(data) = &x.data else { return None };
+    if data.dxf_name != "AECC_COGO_POINT" {
+        return None;
+    }
+    let p = cogo_point_of(data, document)?;
+    Some(glam::DVec3::new(p.position.x, p.position.y, p.position.z))
+}
+
 /// The point database entry a COGO point entity shows.
 // ponytail: decodes the whole database per point; cache it by record bytes
 // if drawings with many uncached points get slow.

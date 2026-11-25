@@ -15,6 +15,7 @@ fn tile_inst(idx: usize, active: bool) -> ViewportInstance {
         active,
         grid_on: false,
         paper_sheet: false,
+        sheet_over: false,
     }
 }
 

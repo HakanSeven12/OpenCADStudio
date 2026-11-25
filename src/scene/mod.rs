@@ -2337,6 +2337,10 @@ pub struct ViewportInstance {
     /// view (paper-space entities, top-locked), the paper equivalent of the
     /// Model view. Floating content viewports overlay it.
     pub paper_sheet: bool,
+    /// `true` for the second sheet pass, drawn after the content viewports:
+    /// the paper-space entities that come after the first content viewport
+    /// in draw order, so they cover what the viewports show.
+    pub sheet_over: bool,
 }
 
 /// One pane of the Model-space tiled viewport layout: the normalized screen
@@ -3068,6 +3072,8 @@ pub struct Scene {
     /// movement scanned the whole document for wipeouts and recreated the same
     /// Arcs, making Paper frame construction CPU-bound on large drawings.
     paper_sheet_render_cache: RefCell<HashMap<String, PaperSheetRenderCache>>,
+    /// The sheet's models split at the first content viewport's draw order.
+    paper_sheet_split_cache: RefCell<paper::SheetSplitCache>,
     display_plot_style_cache:
         RefCell<HashMap<(String, String), Option<Arc<crate::io::plot_style::PlotStyleTable>>>>,
     styled_wire_cache: RefCell<HashMap<(u64, String), (u64, Arc<Vec<WireModel>>)>>,
@@ -3734,6 +3740,7 @@ impl Scene {
             paper_sheet_cache: RefCell::new(HashMap::default()),
             paper_viewport_cache: RefCell::new(HashMap::default()),
             paper_sheet_render_cache: RefCell::new(HashMap::default()),
+            paper_sheet_split_cache: RefCell::new(paper::SheetSplitCache::default()),
             display_plot_style_cache: RefCell::new(HashMap::default()),
             styled_wire_cache: RefCell::new(HashMap::default()),
             styled_hatch_cache: RefCell::new(HashMap::default()),
@@ -6781,10 +6788,10 @@ impl Scene {
     /// raster is drawn with (one with a zoomed-in region has the whole
     /// picture and the region in one texture) — the gathered placement, clip
     /// and draw depth stay valid — so lists that are current are patched in
-    /// place; lists already stale for other reasons, and lists holding an
-    /// instanced clone (an image inside a block reference), are evicted so
-    /// the next gather rebuilds them. The sheet of a layout keeps a list of
-    /// its own pictures, patched the same way.
+    /// place, an instanced clone (an image inside a block reference) through
+    /// the placement its corners give; lists already stale for other
+    /// reasons are evicted so the next gather rebuilds them. The sheet of a
+    /// layout keeps a list of its own pictures, patched the same way.
     pub(crate) fn patch_image_caches(&self, prev_epoch: u64, handles: &[Handle]) {
         if handles.is_empty() {
             return;
@@ -6820,10 +6827,10 @@ impl Scene {
         cache.borrow_mut().retain(|_, (entry_epoch, arc)| {
             seen += 1;
             // A list the patch cannot reason about — one that predates other
-            // changes, or holds an instanced clone whose transform the gather
-            // owns — is evicted: the reseed records no geometry change, so the
+            // changes, or holds an instanced clone whose placement its
+            // corners do not give — is evicted: the reseed records no geometry change, so the
             // journal replay would otherwise revalidate it with the old pixels.
-            if *entry_epoch != prev_epoch || Self::holds_instanced_image(arc, handles) {
+            if *entry_epoch != prev_epoch || self.holds_unplaceable_clone(arc, handles) {
                 stale += 1;
                 return false;
             }
@@ -6860,8 +6867,7 @@ impl Scene {
                 if !holds {
                     return true;
                 }
-                if sheet.epoch != prev_epoch || Self::holds_instanced_image(&sheet.images, handles)
-                {
+                if sheet.epoch != prev_epoch || self.holds_unplaceable_clone(&sheet.images, handles) {
                     stale += 1;
                     return false;
                 }
@@ -6875,11 +6881,15 @@ impl Scene {
     }
 
     /// `list` holds one of `handles` as an instanced clone (an image inside
-    /// a block reference), whose transform the gather owns.
-    fn holds_instanced_image(list: &[ImageModel], handles: &[Handle]) -> bool {
+    /// a block reference) whose placement cannot be read back from its
+    /// corners (a degenerate quad), so only the gather can place it.
+    fn holds_unplaceable_clone(&self, list: &[ImageModel], handles: &[Handle]) -> bool {
         list.iter().any(|model| {
             model.render_instance.is_some()
                 && model.entity.is_some_and(|entity| handles.contains(&entity))
+                && model.entity.and_then(|entity| self.images.get(&entity)).is_some_and(
+                    |fresh| image_clone_placement(fresh, model).is_none(),
+                )
         })
     }
 
@@ -6903,8 +6913,20 @@ impl Scene {
                         model.width = fresh.width;
                         model.height = fresh.height;
                         // The triangles go with the texture: they say
-                        // which part of it each one draws.
+                        // which part of it each one draws. A clone's are
+                        // placed as the gather placed its corners.
+                        let place = model
+                            .render_instance
+                            .is_some()
+                            .then(|| image_clone_placement(fresh, model))
+                            .flatten();
                         model.verts.clone_from(&fresh.verts);
+                        if let Some(place) = place {
+                            for vertex in &mut model.verts {
+                                let point = place(split_sum(vertex.pos, vertex.pos_low));
+                                (vertex.pos, vertex.pos_low) = split_f64(point);
+                            }
+                        }
                     }
                     touched = true;
                     true
@@ -13781,4 +13803,42 @@ mod block_incremental_invalidation;
 thread_local! {
     pub(crate) static TEST_PANIC_AFTER_DOCUMENT_ADD: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
+}
+
+/// A double-single coordinate (`hi` + `lo`) as one f64 point.
+fn split_sum(hi: [f32; 3], lo: [f32; 3]) -> [f64; 3] {
+    [0, 1, 2].map(|i| hi[i] as f64 + lo[i] as f64)
+}
+
+/// An f64 point as a double-single coordinate (`hi`, `lo`).
+fn split_f64(point: [f64; 3]) -> ([f32; 3], [f32; 3]) {
+    let hi = point.map(|v| v as f32);
+    let lo = [0, 1, 2].map(|i| (point[i] - hi[i] as f64) as f32);
+    (hi, lo)
+}
+
+/// The placement that takes `base`'s image plane onto `clone`'s, read from
+/// three of their corners: the affine map the gather applied to an image
+/// inside a block reference. `None` for a degenerate quad.
+fn image_clone_placement(
+    base: &ImageModel,
+    clone: &ImageModel,
+) -> Option<impl Fn([f64; 3]) -> [f64; 3]> {
+    let corner = |m: &ImageModel, i: usize| split_sum(m.corners[i], m.corners_low[i]);
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let (b0, k0) = (corner(base, 0), corner(clone, 0));
+    let (e1, e2) = (sub(corner(base, 1), b0), sub(corner(base, 2), b0));
+    let (f1, f2) = (sub(corner(clone, 1), k0), sub(corner(clone, 2), k0));
+    let (a, b, c) = (dot(e1, e1), dot(e1, e2), dot(e2, e2));
+    let det = a * c - b * b;
+    if !(det > 1.0e-12 * a * c) {
+        return None;
+    }
+    Some(move |p: [f64; 3]| {
+        let d = sub(p, b0);
+        let (r1, r2) = (dot(d, e1), dot(d, e2));
+        let (u, v) = ((c * r1 - b * r2) / det, (a * r2 - b * r1) / det);
+        [0, 1, 2].map(|i| k0[i] + u * f1[i] + v * f2[i])
+    })
 }

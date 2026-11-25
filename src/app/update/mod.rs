@@ -1700,6 +1700,8 @@ mod prop_pointer_tests;
 
 #[cfg(test)]
 mod anno_scale_toggle_tests;
+#[cfg(test)]
+mod autosnap_magnet_tests;
 
 #[cfg(test)]
 mod dock_visibility_tests;

@@ -7514,3 +7514,65 @@ mod crosshair_cursor_tests {
         assert!(marks.pickbox.is_some());
     }
 }
+
+#[cfg(test)]
+mod autosnap_magnet_tests {
+    use super::crosshair_centre;
+    use crate::snap::SnapType;
+    use iced::Point;
+
+    const POINTER: Point = Point::new(400.0, 300.0);
+    const SNAP: Point = Point::new(409.0, 294.0);
+
+    #[test]
+    fn the_magnet_draws_the_crosshairs_on_the_snap_point() {
+        for snap_type in [
+            SnapType::Endpoint,
+            SnapType::Extension,
+            SnapType::Vertex,
+            SnapType::ObjectPick,
+        ] {
+            assert_eq!(
+                crosshair_centre(None, Some((SNAP, snap_type)), true, Some(POINTER)),
+                Some(SNAP),
+                "{snap_type:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn without_the_magnet_the_crosshairs_stay_at_the_pointer() {
+        let snap = Some((SNAP, SnapType::Endpoint));
+        assert_eq!(
+            crosshair_centre(None, snap, false, Some(POINTER)),
+            Some(POINTER)
+        );
+    }
+
+    #[test]
+    fn a_grid_snap_does_not_move_the_crosshairs() {
+        let snap = Some((SNAP, SnapType::Grid));
+        assert_eq!(
+            crosshair_centre(None, snap, true, Some(POINTER)),
+            Some(POINTER)
+        );
+    }
+
+    #[test]
+    fn with_no_snap_marker_the_crosshairs_are_at_the_pointer() {
+        assert_eq!(
+            crosshair_centre(None, None, true, Some(POINTER)),
+            Some(POINTER)
+        );
+    }
+
+    #[test]
+    fn a_hovered_grip_keeps_the_crosshairs() {
+        let grip = Point::new(395.0, 305.0);
+        let snap = Some((SNAP, SnapType::Endpoint));
+        assert_eq!(
+            crosshair_centre(Some(grip), snap, true, Some(POINTER)),
+            Some(grip)
+        );
+    }
+}

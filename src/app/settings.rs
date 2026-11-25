@@ -1972,6 +1972,19 @@ mod tests {
     }
 
     #[test]
+    fn the_autosnap_magnet_defaults_to_on_and_round_trips() {
+        let old: UserSettings = serde_json::from_str(r#"{"pick_add": true}"#).unwrap();
+        assert!(old.autosnap_magnet);
+        let settings = UserSettings {
+            autosnap_magnet: false,
+            ..UserSettings::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        let back: UserSettings = serde_json::from_str(&json).unwrap();
+        assert!(!back.autosnap_magnet);
+    }
+
+    #[test]
     fn transmittal_layout_defaults_and_round_trips() {
         use crate::io::transmit::TransmittalLayout;
 

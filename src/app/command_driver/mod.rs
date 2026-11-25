@@ -1278,6 +1278,19 @@ impl OpenCADStudio {
                 }
                 let _ = self.handle_need_point();
             }
+            CmdResult::AddCogoPoints { points, lines, done } => {
+                for line in &lines {
+                    self.command_line.push_output(line);
+                }
+                for (position, description, elevation) in points {
+                    self.add_created_cogo_point(position, description, elevation, false);
+                }
+                if done {
+                    self.handle_done();
+                } else {
+                    let _ = self.handle_need_point();
+                }
+            }
             cancel @ (CmdResult::Cancel | CmdResult::CancelForSpaceChange) => {
                 self.handle_cancel(cancel);
             }

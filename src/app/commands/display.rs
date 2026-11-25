@@ -2694,6 +2694,26 @@ impl OpenCADStudio {
                 self.command_line.push_info(&c.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
+            // Import from File reads the station/offset file first.
+            "CREATEPOINTIMPORTFROMFILE" => {
+                return Some(Task::perform(
+                    async {
+                        let handle = crate::sys::file_dialog()
+                            .set_title(crate::t!("Import Alignment Station and Offset File").as_ref())
+                            .add_filter(crate::t!("Text/Template/Extract File (*.txt)").as_ref(), &["txt"])
+                            .pick_file()
+                            .await?;
+                        Some(String::from_utf8_lossy(&handle.read().await).into_owned())
+                    },
+                    Message::AlignmentPointFilePicked,
+                ));
+            }
+            cmd if crate::modules::civil::point_alignment::Kind::of(cmd).is_some() => {
+                let kind = crate::modules::civil::point_alignment::Kind::of(cmd).unwrap();
+                let c = crate::modules::civil::point_alignment::AlignmentPointCommand::new(kind);
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+            }
             cmd if crate::modules::civil::point_intersect::Kind::of(cmd).is_some() => {
                 let kind = crate::modules::civil::point_intersect::Kind::of(cmd).unwrap();
                 let c = crate::modules::civil::point_intersect::IntersectionPointCommand::new(kind);

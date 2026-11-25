@@ -1949,6 +1949,15 @@ impl OpenCADStudio {
         if !is_offscreen_capture && !waiting {
             self.control.owner = None;
         }
+        // A command that starts after the request returned (one that asks
+        // for a file first) belongs to the client that ran it.
+        if matches!(p.request["op"].as_str(), Some("run" | "start"))
+            && self.control.owner.is_none()
+            && self.tabs[self.active_tab].active_cmd.is_some()
+        {
+            let client = p.request["client_id"].as_str().unwrap_or("default").to_owned();
+            self.control.owner = Some((self.tabs[self.active_tab].id, client));
+        }
         let status = if failed {
             "failed"
         } else if p.cancelled || p.request["op"] == "cancel" {

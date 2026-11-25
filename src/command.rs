@@ -2092,6 +2092,14 @@ pub enum CmdResult {
         /// A line shown before the command's next prompt.
         then: Option<String>,
     },
+    /// Write several COGO points at once (position, description,
+    /// elevation), show `lines` first, then end the command (`done`) or
+    /// keep it running.
+    AddCogoPoints {
+        points: Vec<(DVec3, Option<String>, Option<f64>)>,
+        lines: Vec<String>,
+        done: bool,
+    },
     /// Update the committed-segment wire (normal colour) and keep collecting points.
     InterimWire(WireModel),
     /// Update the in-progress (cyan) preview wire in the viewport.

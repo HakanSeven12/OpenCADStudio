@@ -1538,6 +1538,18 @@ impl OpenCADStudio {
                 self.on_attout_save(text, path);
                 Task::none()
             }
+            Message::AlignmentPointFilePicked(None) => Task::none(),
+            Message::AlignmentPointFilePicked(Some(text)) => {
+                use crate::command::CadCommand;
+                let i = self.active_tab;
+                let c = crate::modules::civil::point_alignment::AlignmentPointCommand::import(text);
+                if let Some(menu) = c.intro() {
+                    self.command_line.push_output(&menu);
+                }
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+                Task::none()
+            }
             Message::AttOutSave(_, None) | Message::AttInPicked(None) => Task::none(),
             Message::AttInPicked(Some(text)) => {
                 self.on_attin_text(text);

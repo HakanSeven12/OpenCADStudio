@@ -149,6 +149,7 @@ pub const TOOLS: &[Entry] = &[
 // drop each from here as it does.
 pub fn is_pending(cmd: &str) -> bool {
     crate::modules::civil::point_intersect::Kind::of(cmd).is_none()
+        && crate::modules::civil::point_alignment::Kind::of(cmd).is_none()
         && !matches!(
         cmd,
         "CREATEPOINTMANUAL"

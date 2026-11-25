@@ -71,6 +71,10 @@ mod dimension_polyline_reference_tests;
 mod dimension_preview_tests;
 mod dock;
 mod drafting_settings;
+#[cfg(test)]
+mod drafting_settings_toggle_tests;
+#[cfg(test)]
+mod drafting_settings_units_tests;
 mod drawing_properties;
 pub(crate) mod filter_dialog;
 mod find_replace;

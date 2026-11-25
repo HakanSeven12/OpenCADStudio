@@ -109,22 +109,31 @@ impl DraftingSettingsState {
     }
 }
 
-/// Format a snap spacing value for the dialog's text inputs.
+/// Format a snap or grid spacing for the dialog's text inputs, in the
+/// drawing's units (LUNITS, LUPREC): `1'-6"` in an architectural drawing.
 pub fn format_snap_spacing(v: f32) -> String {
-    if (v - v.round()).abs() < 1e-4 {
-        format!("{}", v.round() as i32)
-    } else {
-        format!("{v}")
-    }
+    crate::entities::common::format_length(f64::from(v))
 }
 
-/// Parse a snap spacing input. Spacings must be positive and finite.
+/// Parse a snap or grid spacing input, as any length the command line reads
+/// (`10`, `2.5`, `1/2"`, `1'-6"`). Spacings must be positive and finite.
 pub fn parse_snap_spacing(s: &str) -> Option<f32> {
-    let v: f32 = s.trim().parse().ok()?;
+    let v = crate::entities::common::parse_length(s)? as f32;
     if v.is_finite() && v > 0.0 && v <= 1e9 {
         Some(v)
     } else {
         None
+    }
+}
+
+/// The spacing that an input gives on OK or Apply: `current` while the input
+/// still shows the text it opened with, so an untouched field does not round
+/// the spacing to LUPREC.
+pub fn applied_spacing(input: &str, current: f32) -> Option<f32> {
+    if input == format_snap_spacing(current) {
+        Some(current)
+    } else {
+        parse_snap_spacing(input)
     }
 }
 

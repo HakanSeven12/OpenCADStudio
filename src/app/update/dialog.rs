@@ -196,6 +196,10 @@ impl OpenCADStudio {
                     |(command, path)| Message::PluginFileDialogResult { command, path },
                 );
             }
+            // A browser picks files, not folders.
+            #[cfg(target_arch = "wasm32")]
+            ModuleEvent::PluginFolderDialog { .. } => {}
+            #[cfg(not(target_arch = "wasm32"))]
             ModuleEvent::PluginFolderDialog { command, title } => {
                 return Task::perform(
                     async move {

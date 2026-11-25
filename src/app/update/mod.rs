@@ -167,6 +167,7 @@ mod keytips;
 pub(in crate::app) mod linetype_manager;
 pub(in crate::app) mod mleader_style;
 mod dimstyle_dialog;
+mod title_bar;
 pub(super) mod tool_palettes;
 pub(in crate::app) use file::background_task;
 #[cfg(not(target_arch = "wasm32"))]

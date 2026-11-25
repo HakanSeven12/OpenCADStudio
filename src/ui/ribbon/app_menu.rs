@@ -18,7 +18,7 @@ pub const APP_MENU_ID: &str = "APP_MENU";
 const LOGO: f32 = 38.0;
 pub(super) const LOGO_PAD: f32 = 6.0;
 /// The compact logo at the start of the tab row.
-const COMPACT_W: f32 = 38.0;
+pub(super) const COMPACT_W: f32 = 38.0;
 const COMPACT_H: f32 = 18.0;
 const MENU_W: f32 = 300.0;
 /// How many recent drawings the menu lists.

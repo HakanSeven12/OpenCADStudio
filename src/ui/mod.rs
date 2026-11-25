@@ -23,6 +23,7 @@ pub mod side_toolbar;
 pub mod statusbar;
 pub mod style;
 pub mod text_util;
+pub mod title_bar;
 pub mod wide_menu;
 pub mod window;
 pub mod wrap_bar;

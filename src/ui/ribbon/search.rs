@@ -35,7 +35,7 @@ const BOX_ID: &str = "ribbon_search_box";
 const RESULTS_ID: &str = "ribbon_search_results";
 const RESULTS_SCROLL_ID: &str = "ribbon_search_scroll";
 /// The full box, its padding and the gap between its parts.
-const BOX_W: f32 = 190.0;
+pub(super) const BOX_W: f32 = 190.0;
 const BOX_H: f32 = 20.0;
 const BOX_PAD_LEFT: f32 = 6.0;
 /// The last button meets the box's border, so its hover fills to the edge.
@@ -44,7 +44,7 @@ const BOX_GAP: f32 = 5.0;
 /// The clear, collapse and keep-expanded buttons in the box.
 const BOX_BUTTON: f32 = 18.0;
 /// The magnifier button that stands for the box.
-const MAGNIFIER_W: f32 = 24.0;
+pub(super) const MAGNIFIER_W: f32 = 24.0;
 const MAGNIFIER_H: f32 = 20.0;
 /// Size of the typed text and the placeholder.
 const INPUT_SIZE: f32 = crate::ui::style::text::UI;
@@ -165,7 +165,7 @@ pub(super) struct SearchState {
     hidden: bool,
     /// The box is open for now: from the magnifier button while collapsed,
     /// or as the field over it on a narrow window.
-    temp_open: bool,
+    pub(super) temp_open: bool,
     /// When a temporary box closes after a press elsewhere.
     closing: Option<Instant>,
     scroll: f32,
@@ -828,6 +828,9 @@ impl Ribbon {
     /// in the menu row. The widths do not depend on the box, so the answer
     /// does not flip as the box comes and goes.
     fn tab_row_holds_box(&self) -> Option<bool> {
+        if self.in_title_bar {
+            return self.title_bar_holds_box();
+        }
         if !self.search_in_tab_row.load(Ordering::Relaxed) {
             return None;
         }
@@ -838,6 +841,20 @@ impl Ribbon {
         }
         let (logo, _) = self.tab_span.insets();
         Some(logo + flow + super::TAB_ROW_GAP + BOX_W + super::TAB_BAR_PAD_RIGHT <= self.win_w)
+    }
+
+    /// Whether the app's title bar holds its start (logo and toolbar), room
+    /// for the drawing's name, the full box and the window buttons, in the
+    /// window as wide as it is now; `None` before the first layout.
+    fn title_bar_holds_box(&self) -> Option<bool> {
+        use crate::ui::style::ribbon_metrics as m;
+        let start = f32::from_bits(self.title_start_w.load(Ordering::Relaxed));
+        if start.is_nan() {
+            return None;
+        }
+        // As the name is placed: in the window's middle, so the box fits
+        // while the name keeps its room between the two ends.
+        Some(crate::ui::title_bar::name_room(self.win_w, start, BOX_W) >= m::TITLE_NAME_ROOM)
     }
 
     /// Whether the last view's choice between the box and its magnifier no
@@ -859,6 +876,16 @@ impl Ribbon {
     /// Whether the full box shows in the tab row: kept open, or open for now.
     fn shows_box(&self) -> bool {
         !self.narrow() && (self.layout.search_expanded || self.search.temp_open)
+    }
+
+    /// The search box's width at rest: the box when it stays open, else its
+    /// magnifier, also while a collapsed search shows the box for a moment.
+    pub(super) fn search_rest_width(&self) -> f32 {
+        if !self.narrow() && self.layout.search_expanded {
+            BOX_W
+        } else {
+            MAGNIFIER_W
+        }
     }
 
     /// The search box, or its magnifier button while it is collapsed or the

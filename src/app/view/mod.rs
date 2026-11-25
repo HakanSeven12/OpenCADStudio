@@ -3610,9 +3610,40 @@ bg={bg_ms:.1}ms n={view_count}"
             // menu bar and status bar stay so commands remain reachable and
             // the mode can be toggled back off.
             let mut col = column![];
+            // With the toolbar below the ribbon, the pull-down menus take its
+            // place in the title bar instead of a row of their own.
+            let menus_in_title = self.show_menu_bar
+                && self.ribbon.menus_fit_title_bar(
+                    self.ribbon_closed || self.clean_screen,
+                    self.tabs[self.active_tab].is_start,
+                );
+            // The app's own title bar heads the window, also on a clean
+            // screen: it is the only way left to move or close it.
+            if self.draws_title_bar() {
+                let tab = &self.tabs[self.active_tab];
+                col = col.push(crate::ui::title_bar::view(
+                    self.ribbon.title_bar_start(
+                        self.ribbon_closed || self.clean_screen,
+                        tab.is_start,
+                        tab.history.undo_stack.len(),
+                        tab.history.redo_stack.len(),
+                        menus_in_title
+                            .then(|| crate::ui::menu_bar::view_inline(self.menu_context())),
+                    ),
+                    &tab.tab_display_name(),
+                    tab.dirty,
+                    self.ribbon.title_bar_search(),
+                    self.ribbon.title_bar_room(),
+                    self.main_maximized,
+                    self.title_bar_pressed,
+                ));
+            }
             if self.clean_screen {
-                // Clean screen keeps the menu row, led by the compact logo.
-                if self.show_menu_bar {
+                // Clean screen keeps the menu row, led by the compact logo;
+                // under the app's title bar, which holds both, it is alone.
+                if self.show_menu_bar && self.draws_title_bar() {
+                    col = col.push(crate::ui::menu_bar::view(self.menu_context()));
+                } else if self.show_menu_bar {
                     col = col.push(
                         row![
                             container(self.ribbon.logo_button(false)).padding([0, 6]),
@@ -3625,7 +3656,7 @@ bg={bg_ms:.1}ms n={view_count}"
             } else {
                 col = col.push(
                     self.ribbon.view(
-                        self.show_menu_bar
+                        (self.show_menu_bar && !menus_in_title)
                             .then(|| crate::ui::menu_bar::view(self.menu_context())),
                         self.ribbon_closed,
                         is_paper,
@@ -4002,8 +4033,11 @@ bg={bg_ms:.1}ms n={view_count}"
                 .iter()
                 .any(|tool| tool.kind == kind && !tool.in_canvas())
         });
+        // A dialog's backdrop covers the title bar (see `with_window_frame`).
+        let mut covered = false;
         let base: Element<'_, Message> = match self.modal_content().filter(|_| !in_own_window) {
             Some(content) => {
+                covered = true;
                 let modal_options = if cfg!(target_arch = "wasm32")
                     && matches!(self.active_modal, Some(super::ModalKind::PluginManager))
                 {
@@ -4050,26 +4084,95 @@ bg={bg_ms:.1}ms n={view_count}"
             }
         }
 
-        if let Some(picker) = self.color_picker.as_ref() {
+        let top: Element<'_, Message> = if let Some(picker) = self.color_picker.as_ref() {
             // While the eyedropper is picking, the panel steps aside so the
             // whole window can be sampled.
             if let Some(eyedropper) = picker.eyedropper_view() {
                 return iced::widget::stack![base, eyedropper].into();
             }
             if in_own_window {
-                return base;
+                base
+            } else {
+                covered = true;
+                crate::ui::modal::modal(
+                    base,
+                    t!("Select Color"),
+                    picker.view(),
+                    Message::CloseColorPicker,
+                    self.modal_offset,
+                    crate::ui::modal::ModalOptions::NOTICE,
+                )
             }
-            crate::ui::modal::modal(
-                base,
-                t!("Select Color"),
-                picker.view(),
-                Message::CloseColorPicker,
-                self.modal_offset,
-                crate::ui::modal::ModalOptions::NOTICE,
-            )
         } else {
             base
+        };
+        self.with_window_frame(top, covered)
+    }
+
+    /// The window without a system frame: invisible edges to resize it by
+    /// and, while a dialog's backdrop `covered` the title bar, its window
+    /// buttons and empty space laid over the backdrop, so the window can
+    /// still be moved, maximized or closed. The tree keeps one shape either
+    /// way, so maximizing loses no widget state.
+    fn with_window_frame<'a>(
+        &self,
+        top: Element<'a, Message>,
+        covered: bool,
+    ) -> Element<'a, Message> {
+        if !self.draws_title_bar() {
+            return top;
         }
+        let controls: Element<'a, Message> = if covered {
+            crate::ui::title_bar::controls(self.main_maximized, self.title_bar_pressed)
+        } else {
+            iced::widget::Space::new().width(0).height(0).into()
+        };
+        // The drawn maximize button answers as the system's only while
+        // nothing of the app's lies over it.
+        #[cfg(target_os = "windows")]
+        crate::ui::title_bar::windows::set_maximize_free(
+            !covered && !self.title_buttons_overlaid(),
+        );
+        // A window without a system frame that is not maximized gets a 1 px
+        // border in the ribbon's dark hairline colour, so it stands apart
+        // from what lies behind it. Maximized it has none, but the same
+        // container, so no widget below loses its state.
+        let bordered = crate::ui::title_bar::frameless() && !self.main_maximized;
+        let line = if bordered {
+            crate::ui::icons::hairline()
+        } else {
+            0.0
+        };
+        let framed = container(iced::widget::stack![top, controls])
+            .padding(line)
+            .style(move |theme: &Theme| container::Style {
+                border: iced::Border {
+                    color: crate::ui::style::chrome::edge(theme),
+                    width: line,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            });
+        crate::ui::title_bar::with_resize_edges(
+            framed.into(),
+            crate::ui::title_bar::app_draws_edges() && !self.main_maximized,
+        )
+    }
+
+    /// Whether something of the app's lies over the title bar's window
+    /// buttons: an open ribbon dropdown or menu, or a floating pallet.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(in crate::app) fn title_buttons_overlaid(&self) -> bool {
+        let right = self.win_size.0;
+        let left = right - crate::ui::title_bar::buttons_width();
+        let bottom = crate::ui::title_bar::bar_height();
+        self.ribbon.open_dropdown.is_some()
+            || self.ribbon.menu_open()
+            || self
+                .dock
+                .floating
+                .iter()
+                .any(|f| f.x < right && f.x + f.w > left && f.y < bottom)
     }
 
     /// Measured outer pixel bounds for whichever shared modal is visible, used

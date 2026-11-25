@@ -715,8 +715,18 @@ pub struct MenuContext<'a> {
     pub is_start: bool,
 }
 
-/// The menu bar, one pull-down per menu.
+/// The menu bar, one pull-down per menu, as a row across the window.
 pub fn view<'a>(context: MenuContext<'_>) -> Element<'a, Message> {
+    menus(context, Fill)
+}
+
+/// The menu bar as wide as its menus, for the app's title bar, where the
+/// rest of the row moves the window.
+pub fn view_inline<'a>(context: MenuContext<'_>) -> Element<'a, Message> {
+    menus(context, iced::Length::Shrink)
+}
+
+fn menus<'a>(context: MenuContext<'_>, width: iced::Length) -> Element<'a, Message> {
     let menus = menu_rows(context.aliases);
     let roots = MENUS
         .iter()
@@ -766,18 +776,37 @@ pub fn view<'a>(context: MenuContext<'_>) -> Element<'a, Message> {
             path: Background::Color(chrome::hover(theme)),
             path_border: Border::default(),
         });
-    container(bar)
+    // Where the menus are, for the keyboard menu (Alt+letter) to open under
+    // its title, in the title bar or the row of its own.
+    container(crate::ui::wrap_bar::PosReport::new(MENUS_ID, bar))
         .padding(iced::Padding {
             top: 1.0,
             ..iced::Padding::ZERO
         })
         .height(ROW_H)
-        .width(Fill)
+        .width(width)
         .style(|theme: &Theme| container::Style {
             background: Some(Background::Color(chrome::bar(theme))),
             ..Default::default()
         })
         .into()
+}
+
+/// The menu titles' place on screen, as last drawn.
+pub const MENUS_ID: &str = "menu_bar_menus";
+
+/// The width the menu titles take side by side (as the bar draws them).
+pub fn menus_width(is_start: bool) -> f32 {
+    MENUS
+        .iter()
+        .filter(|(title, _)| !is_start || START_MENUS.contains(title))
+        .map(|(title, _)| title_width(&crate::t!(*title)))
+        .sum()
+}
+
+/// One menu title's width: its text and the padding on both sides.
+fn title_width(label: &str) -> f32 {
+    crate::ui::style::text_metrics::width(label, 12.0, false) + 18.0
 }
 
 /// The menu whose (translated) title starts with `letter`, for Alt+letter,
@@ -793,7 +822,7 @@ pub fn menu_for_letter(letter: char, is_start: bool) -> Option<(usize, f32)> {
         if label.chars().next().and_then(|c| c.to_uppercase().next()) == Some(letter) {
             return Some((index, x));
         }
-        x += crate::ui::style::text_metrics::width(&label, 12.0, false) + 18.0;
+        x += title_width(&label);
     }
     None
 }
@@ -1318,6 +1347,27 @@ impl<'a> From<Title<'a>> for Element<'a, Message> {
 #[cfg(test)]
 mod tests {
     use super::MENUS;
+
+    #[test]
+    fn the_title_bar_menus_leave_the_rest_of_the_row_free() {
+        use iced::Length;
+        let aliases = rustc_hash::FxHashMap::default();
+        let context = || super::MenuContext {
+            drawings: Vec::new(),
+            aliases: &aliases,
+            is_start: false,
+        };
+        // In the title bar the menus take their own width, so the rest of
+        // the row still moves the window; the row of its own spans it.
+        assert_eq!(
+            super::view_inline(context()).as_widget().size().width,
+            Length::Shrink
+        );
+        assert_eq!(
+            super::view(context()).as_widget().size().width,
+            Length::Fill
+        );
+    }
 
     #[test]
     fn the_menu_tree_has_every_menu_of_the_design() {

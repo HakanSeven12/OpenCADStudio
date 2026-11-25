@@ -2332,6 +2332,8 @@ pub enum Message {
     FilterDialog(filter_dialog::FilterMsg),
     /// The user clicked the title-bar ✕ (fires before the window closes).
     WindowCloseRequested(window::Id),
+    /// The app's own title bar over the ribbon (see `ui::title_bar`).
+    TitleBar(crate::ui::title_bar::TitleBarMsg),
     /// A window was fully closed (fires after `window::close()` is called).
     OsWindowClosed(window::Id),
     /// No-op — used as a fallback when a TabEvent has no host mapping.

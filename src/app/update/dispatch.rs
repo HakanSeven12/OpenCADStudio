@@ -5571,7 +5571,27 @@ impl OpenCADStudio {
             // after the first resize.
             Message::WindowOpened(id, w, h) => {
                 if Some(id) == self.main_window {
-                    return self.update(Message::WindowResized(w, h));
+                    let resized = self.update(Message::WindowResized(w, h));
+                    // The drawn maximize button answers as the system's own,
+                    // for the Snap Layouts flyout.
+                    #[cfg(target_os = "windows")]
+                    if self.draws_title_bar() {
+                        use iced::window::raw_window_handle::RawWindowHandle;
+                        let snap = iced::window::run(id, |window| {
+                            if let Ok(handle) = window.window_handle() {
+                                if let RawWindowHandle::Win32(handle) = handle.as_raw() {
+                                    // Without it the app draws the edges
+                                    // and the button stays its own.
+                                    if !crate::ui::title_bar::windows::install(handle.hwnd.get()) {
+                                        log::warn!("title bar: subclassing the main window failed");
+                                    }
+                                }
+                            }
+                        })
+                        .discard();
+                        return Task::batch([resized, snap]);
+                    }
+                    return resized;
                 }
                 Task::none()
             }
@@ -5579,7 +5599,17 @@ impl OpenCADStudio {
                 self.vp_size = ((w - 440.0).max(200.0), h);
                 self.win_size = (w, h);
                 self.ribbon.set_window_size((w, h));
-                Task::none()
+                // A resize may have maximized or restored the window (a
+                // double click, a snap, the system menu): the title bar's
+                // maximize button follows.
+                match self.main_window {
+                    Some(id) if self.draws_title_bar() => {
+                        iced::window::is_maximized(id).map(|max| {
+                            Message::TitleBar(crate::ui::title_bar::TitleBarMsg::Maximized(max))
+                        })
+                    }
+                    _ => Task::none(),
+                }
             }
 
             Message::ViewCubeSnap(region) => self.on_view_cube_snap(region),
@@ -11610,6 +11640,8 @@ impl OpenCADStudio {
                 self.persist_settings_if_changed();
                 Task::none()
             }
+
+            Message::TitleBar(msg) => self.on_title_bar(msg),
 
             Message::RibbonVisibleChanged(shown) => {
                 self.ribbon_closed = !shown;

@@ -495,13 +495,13 @@ impl CadCommand for SurfacePointCommand {
                 let (u, v) = (DVec2::from_angle(self.rotation), DVec2::from_angle(self.rotation).perp());
                 let d = (pt - self.base).truncate();
                 let (du, dv) = (d.dot(u), d.dot(v));
-                let valid = du >= 0.0 && dv >= 0.0;
+                let valid = du > 1e-9 && dv > 1e-9;
                 if valid {
                     self.extent = Some((du, dv));
                 }
-                // Measured: a corner below or left of the base point is
-                // refused; once a grid was given, the grid keeps that extent
-                // (along and across) and the change prompt follows.
+                // Measured: a corner not above the base row and right of the
+                // base column is refused; once a grid was given, the grid keeps
+                // that extent (along and across) and the change prompt follows.
                 let Some((du, dv)) = self.extent else {
                     return CmdResult::ReportError(t("The specified point was not a valid upper right point."));
                 };

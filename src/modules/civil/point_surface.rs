@@ -171,7 +171,6 @@ pub struct SurfacePointCommand {
 /// What the list window's pick button answers the list prompt with.
 pub const PICK_SURFACE: &str = "_PICKSURFACE";
 
-
 impl SurfacePointCommand {
     pub fn new(kind: Kind, document: &document::Document) -> Self {
         let surfaces: Vec<Surface> = document.entities().filter_map(Surface::of).collect();
@@ -547,8 +546,7 @@ impl CadCommand for SurfacePointCommand {
                 if coordinate {
                     return None;
                 }
-                Some(CmdResult::ReportError(format!("{}
-{}", t("*Invalid selection*"), t("Expects a point or Last"))))
+                Some(CmdResult::ReportError(format!("{}\n{}", t("*Invalid selection*"), t("Expects a point or Last"))))
             }
             Step::SurfaceName if typed == PICK_SURFACE => {
                 self.step = Step::SurfacePick;

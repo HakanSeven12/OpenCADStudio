@@ -109,7 +109,8 @@ impl IThumbnailProvider_Impl for DwgThumbProvider_Impl {
         let bytes = bytes.as_deref().ok_or(windows::core::Error::from(E_FAIL))?;
         let mut img = dwg_thumbnailer::extract_bytes(bytes, cx.max(1))
             .ok_or(windows::core::Error::from(E_FAIL))?;
-        dwg_thumbnailer::badge_dwg(&mut img); // full-width "DWG" band
+        // Explorer draws the app icon on the bottom-right corner: keep "DWG" clear of it.
+        dwg_thumbnailer::badge_dwg_clear_of(&mut img, dwg_thumbnailer::WINDOWS_TYPE_OVERLAY);
         let hbmp = unsafe { rgba_to_hbitmap(&img)? };
         unsafe {
             *phbmp = hbmp;

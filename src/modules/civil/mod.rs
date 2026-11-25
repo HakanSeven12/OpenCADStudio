@@ -11,6 +11,7 @@ pub mod point_intersect;
 pub mod point_object;
 pub mod point_alignment;
 pub mod point_surface;
+pub mod point_slope;
 
 pub struct CivilModule;
 

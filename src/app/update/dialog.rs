@@ -317,7 +317,8 @@ impl OpenCADStudio {
                 }
             };
 
-            if self.active_save_jobs.contains_key(&self.tabs[idx].id) {
+            let tab_id = self.tabs[idx].id;
+            if self.active_save_jobs.contains_key(&tab_id) && !self.autosave_is_running(tab_id) {
                 self.command_line
                     .push_info(crate::t!("Save already running for this drawing.").as_ref());
                 return Task::none();

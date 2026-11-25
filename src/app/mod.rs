@@ -2296,6 +2296,13 @@ pub(super) struct OpenCADStudio {
     /// cannot mark a newer document state clean or redirect its path.
     #[cfg(not(target_arch = "wasm32"))]
     active_save_jobs: std::collections::HashMap<u64, u64>,
+    /// The jobs of `active_save_jobs` that are autosaves.
+    #[cfg(not(target_arch = "wasm32"))]
+    autosave_jobs: std::collections::HashSet<u64>,
+    /// A save asked for during an autosave of the same drawing, by stable
+    /// tab id. It starts when the autosave ends.
+    #[cfg(not(target_arch = "wasm32"))]
+    saves_after_autosave: std::collections::HashMap<u64, PendingNativeThumbnailSave>,
     /// The sheet list PUBLISH is working through, between its script steps.
     #[cfg(not(target_arch = "wasm32"))]
     sheet_publish: Option<Box<sheet_publish::SheetPublish>>,
@@ -3437,6 +3444,10 @@ impl OpenCADStudio {
             pending_block_close: None,
             #[cfg(not(target_arch = "wasm32"))]
             active_save_jobs: std::collections::HashMap::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            autosave_jobs: std::collections::HashSet::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            saves_after_autosave: std::collections::HashMap::new(),
             #[cfg(not(target_arch = "wasm32"))]
             sheet_publish: None,
             #[cfg(not(target_arch = "wasm32"))]

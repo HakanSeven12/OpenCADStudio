@@ -407,7 +407,9 @@ fn cap_scale(face: &ttf_parser::Face) -> f32 {
 
 /// The glyph of `ch`. A symbol font maps its characters at U+F000 + code
 /// (the Symbol font's bullet `·` is U+F0B7), so a character of the first 256
-/// codes it has not at its own code is looked up there.
+/// codes it has not at its own code is looked up there — only in a symbol
+/// cmap (Windows platform, symbol encoding): other faces may keep unrelated
+/// glyphs in that private-use range (CJK in Apple SD Gothic Neo, #3643).
 pub(crate) fn glyph_id(face: &ttf_parser::Face, ch: char) -> Option<ttf_parser::GlyphId> {
     face.glyph_index(ch).or_else(|| {
         let code = u32::from(ch);
@@ -416,6 +418,9 @@ pub(crate) fn glyph_id(face: &ttf_parser::Face, ch: char) -> Option<ttf_parser::
             .cmap?
             .subtables
             .into_iter()
+            .filter(|table| {
+                table.platform_id == ttf_parser::PlatformId::Windows && table.encoding_id == 0
+            })
             .find_map(|table| table.glyph_index(0xF000 + code))
     })
 }

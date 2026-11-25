@@ -1,7 +1,7 @@
 use crate::app::{Message, OpenCADStudio};
 use crate::modules::manage::geometry_cleanup_settings::{CleanupSettings, SAMPLE_GCS};
 use crate::ui::dock::PanelId;
-use crate::ui::window::geometry_cleanup::{Finding, Fix, GeometryCleanupMsg};
+use crate::ui::window::geometry_cleanup::{ErrorType, Finding, Fix, GeometryCleanupMsg};
 use document::entities::{Arc, Line, LwPolyline};
 use document::types::{Vector2, Vector3};
 use document::{EntityType, Handle};
@@ -56,7 +56,8 @@ fn findings(app: &OpenCADStudio) -> Vec<Finding> {
         .unwrap_or_default()
 }
 
-fn fix(app: &mut OpenCADStudio, kind: EndErrorKind, fix: Fix) {
+fn fix(app: &mut OpenCADStudio, kind: impl Into<ErrorType>, fix: Fix) {
+    let kind = kind.into();
     let index = findings(app)
         .iter()
         .position(|finding| finding.kind == kind)
@@ -103,17 +104,17 @@ fn a_scan_lists_each_end_error_of_the_selection() {
         .gap
         .unwrap();
     assert!(tolerance > 0.4, "proposed tolerance {tolerance}");
-    let mut kinds: Vec<(EndErrorKind, Handle)> = found.iter().map(|f| (f.kind, f.handle)).collect();
+    let mut kinds: Vec<(ErrorType, Handle)> = found.iter().map(|f| (f.kind, f.handle)).collect();
     kinds.sort_by_key(|(kind, handle)| (*kind, handle.value()));
     assert_eq!(
         kinds,
         [
-            (EndErrorKind::Gap, left),
-            (EndErrorKind::Overshoot, over),
-            (EndErrorKind::Undershoot, under),
+            (ErrorType::Gap, left),
+            (ErrorType::Overshoot, over),
+            (ErrorType::Undershoot, under),
         ]
     );
-    let gap = found.iter().find(|f| f.kind == EndErrorKind::Gap).unwrap();
+    let gap = found.iter().find(|f| f.kind == ErrorType::Gap).unwrap();
     assert_eq!(gap.other, Some((right, true)));
 }
 
@@ -127,7 +128,7 @@ fn trim_cuts_an_overshoot_back_as_one_undo_step() {
     assert!(
         !findings(&app)
             .iter()
-            .any(|f| f.kind == EndErrorKind::Overshoot),
+            .any(|f| f.kind == ErrorType::Overshoot),
         "the list is scanned again after the fix"
     );
     let _ = app.update(Message::Undo);
@@ -166,7 +167,7 @@ fn extend_takes_both_ends_of_a_corner_gap_to_the_corner() {
     let a = line(&mut app, [0.0, 0.0], [10.0, 0.0]);
     let b = line(&mut app, [10.2, 0.1], [10.2, 10.0]);
     let found = scan(&mut app, &[wide, a, b]);
-    let gap = found.iter().find(|f| f.kind == EndErrorKind::Gap).copied();
+    let gap = found.iter().find(|f| f.kind == ErrorType::Gap).copied();
     let gap = gap.expect("a gap");
     assert!(gap.fixes().contains(&Fix::ExtendBoth));
     fix(&mut app, EndErrorKind::Gap, Fix::ExtendBoth);
@@ -193,7 +194,7 @@ fn an_arc_end_is_trimmed_along_its_circle() {
     );
     let found = scan(&mut app, &[wall, arc]);
     assert_eq!(found.len(), 1, "{found:?}");
-    assert_eq!(found[0].kind, EndErrorKind::Overshoot);
+    assert_eq!(found[0].kind, ErrorType::Overshoot);
     fix(&mut app, EndErrorKind::Overshoot, Fix::Trim);
     match app.tabs[i].scene.document.get_entity(arc) {
         Some(EntityType::Arc(arc)) => {
@@ -223,7 +224,7 @@ fn a_polyline_arc_end_keeps_its_circle_when_extended() {
     let handle = add(&mut app, EntityType::LwPolyline(polyline));
     let found = scan(&mut app, &[wall, handle]);
     assert_eq!(found.len(), 1, "{found:?}");
-    assert_eq!(found[0].kind, EndErrorKind::Undershoot);
+    assert_eq!(found[0].kind, ErrorType::Undershoot);
     assert!(near(found[0].target, [0.0, 10.0]), "{found:?}");
     fix(&mut app, EndErrorKind::Undershoot, Fix::Extend);
     match app.tabs[i].scene.document.get_entity(handle) {
@@ -256,8 +257,8 @@ fn locked_layers_and_lines_off_the_xy_plane_are_not_scanned() {
             line.end.z = 1.0;
         }
     }
-    let kinds: Vec<EndErrorKind> = scan(&mut app, &objects).iter().map(|f| f.kind).collect();
-    assert_eq!(kinds, [EndErrorKind::Gap]);
+    let kinds: Vec<ErrorType> = scan(&mut app, &objects).iter().map(|f| f.kind).collect();
+    assert_eq!(kinds, [ErrorType::Gap]);
 }
 
 #[test]
@@ -300,10 +301,7 @@ fn picking_an_error_selects_its_objects() {
     let (mut app, i) = app();
     let objects = errors_drawing(&mut app);
     let found = scan(&mut app, &objects);
-    let gap = found
-        .iter()
-        .position(|f| f.kind == EndErrorKind::Gap)
-        .unwrap();
+    let gap = found.iter().position(|f| f.kind == ErrorType::Gap).unwrap();
     let _ = app.update(Message::GeometryCleanup(GeometryCleanupMsg::Pick(gap)));
     assert_eq!(app.geometry_cleanup.picked, Some(gap));
     let selected = &app.tabs[i].scene.selected;
@@ -337,11 +335,11 @@ fn the_open_palette_lists_an_error_again_after_its_repair_is_undone() {
     fix(&mut app, EndErrorKind::Overshoot, Fix::Trim);
     assert!(!findings(&app)
         .iter()
-        .any(|f| f.kind == EndErrorKind::Overshoot));
+        .any(|f| f.kind == ErrorType::Overshoot));
     let _ = app.update(Message::Undo);
     assert!(findings(&app)
         .iter()
-        .any(|f| f.kind == EndErrorKind::Overshoot));
+        .any(|f| f.kind == ErrorType::Overshoot));
 }
 
 #[test]
@@ -351,7 +349,7 @@ fn the_open_palette_scans_again_after_an_edit_and_keeps_the_picked_error() {
     open_and_scan(&mut app, &objects);
     let gap = findings(&app)
         .iter()
-        .position(|f| f.kind == EndErrorKind::Gap)
+        .position(|f| f.kind == ErrorType::Gap)
         .unwrap();
     let _ = app.update(Message::GeometryCleanup(GeometryCleanupMsg::Pick(gap)));
     let picked = findings(&app)[gap];
@@ -360,7 +358,7 @@ fn the_open_palette_scans_again_after_an_edit_and_keeps_the_picked_error() {
     app.refresh_geometry_cleanup_if_stale();
     let now = findings(&app);
     assert!(
-        !now.iter().any(|f| f.kind == EndErrorKind::Overshoot),
+        !now.iter().any(|f| f.kind == ErrorType::Overshoot),
         "{now:?}"
     );
     let index = app.geometry_cleanup.picked.expect("still picked");
@@ -420,10 +418,10 @@ fn a_repair_picks_the_next_row() {
     let [_, _, under, left, right] = objects;
     open_and_scan(&mut app, &objects);
     fix(&mut app, EndErrorKind::Overshoot, Fix::Trim);
-    assert_eq!(picked(&app).map(|f| f.kind), Some(EndErrorKind::Undershoot));
+    assert_eq!(picked(&app).map(|f| f.kind), Some(ErrorType::Undershoot));
     assert_eq!(selected(&app), [under]);
     fix(&mut app, EndErrorKind::Undershoot, Fix::Extend);
-    assert_eq!(picked(&app).map(|f| f.kind), Some(EndErrorKind::Gap));
+    assert_eq!(picked(&app).map(|f| f.kind), Some(ErrorType::Gap));
     assert_eq!(selected(&app), [left, right]);
     fix(&mut app, EndErrorKind::Gap, Fix::Stretch);
     assert_eq!(picked(&app), None, "no error is left");
@@ -435,10 +433,10 @@ fn a_folded_type_is_skipped_by_the_next_pick() {
     let objects = errors_drawing(&mut app);
     open_and_scan(&mut app, &objects);
     let _ = app.update(Message::GeometryCleanup(GeometryCleanupMsg::Fold(
-        EndErrorKind::Undershoot,
+        ErrorType::Undershoot,
     )));
     fix(&mut app, EndErrorKind::Overshoot, Fix::Trim);
-    assert_eq!(picked(&app).map(|f| f.kind), Some(EndErrorKind::Gap));
+    assert_eq!(picked(&app).map(|f| f.kind), Some(ErrorType::Gap));
 }
 
 #[test]
@@ -448,7 +446,7 @@ fn a_repair_that_fails_keeps_the_pick() {
     open_and_scan(&mut app, &objects);
     let gap = findings(&app)
         .iter()
-        .position(|f| f.kind == EndErrorKind::Gap)
+        .position(|f| f.kind == ErrorType::Gap)
         .unwrap();
     let _ = app.update(Message::GeometryCleanup(GeometryCleanupMsg::Pick(gap)));
     // The overshoot is gone before its repair is pressed; the list is not
@@ -458,7 +456,7 @@ fn a_repair_that_fails_keeps_the_pick() {
         line.end.x = 10.0;
     }
     fix(&mut app, EndErrorKind::Overshoot, Fix::Trim);
-    assert_eq!(picked(&app).map(|f| f.kind), Some(EndErrorKind::Gap));
+    assert_eq!(picked(&app).map(|f| f.kind), Some(ErrorType::Gap));
 }
 
 #[test]
@@ -479,11 +477,11 @@ fn folding_a_type_again_unfolds_it() {
     let (mut app, _) = app();
     let fold = |app: &mut OpenCADStudio| {
         let _ = app.update(Message::GeometryCleanup(GeometryCleanupMsg::Fold(
-            EndErrorKind::Gap,
+            ErrorType::Gap,
         )));
     };
     fold(&mut app);
-    assert_eq!(app.geometry_cleanup.folded, [EndErrorKind::Gap]);
+    assert_eq!(app.geometry_cleanup.folded, [ErrorType::Gap]);
     fold(&mut app);
     assert!(app.geometry_cleanup.folded.is_empty());
 }
@@ -493,8 +491,8 @@ fn move_takes_the_whole_object_across_a_gap_in_x_and_y() {
     let (mut app, _) = app();
     let a = line(&mut app, [-40.0, 5.0], [10.0, 5.0]);
     let b = line(&mut app, [10.2, 5.1], [60.0, 5.1]);
-    let kinds: Vec<EndErrorKind> = scan(&mut app, &[a, b]).iter().map(|f| f.kind).collect();
-    assert_eq!(kinds, [EndErrorKind::Gap]);
+    let kinds: Vec<ErrorType> = scan(&mut app, &[a, b]).iter().map(|f| f.kind).collect();
+    assert_eq!(kinds, [ErrorType::Gap]);
     fix(&mut app, EndErrorKind::Gap, Fix::Move);
     let moved = ends(&app, a);
     assert!(
@@ -558,11 +556,11 @@ fn a_two_point_polyline_is_extended_at_its_end() {
             Vector2::new(9.7, 0.0),
         ])),
     );
-    let kinds: Vec<EndErrorKind> = scan(&mut app, &[wall, handle])
+    let kinds: Vec<ErrorType> = scan(&mut app, &[wall, handle])
         .iter()
         .map(|f| f.kind)
         .collect();
-    assert_eq!(kinds, [EndErrorKind::Undershoot]);
+    assert_eq!(kinds, [ErrorType::Undershoot]);
     fix(&mut app, EndErrorKind::Undershoot, Fix::Extend);
     match app.tabs[i].scene.document.get_entity(handle) {
         Some(EntityType::LwPolyline(polyline)) => {
@@ -597,7 +595,7 @@ fn stretch_moves_the_grip_at_the_end_that_it_repairs() {
 #[test]
 fn the_same_error_is_the_same_type_at_the_same_end_of_the_same_object() {
     let error = Finding {
-        kind: EndErrorKind::Gap,
+        kind: ErrorType::Gap,
         handle: Handle::new(1),
         at_start: true,
         location: [0.0, 0.0],
@@ -605,6 +603,7 @@ fn the_same_error_is_the_same_type_at_the_same_end_of_the_same_object() {
         other: None,
         corner: None,
         deviation: 0.1,
+        angle: None,
     };
     let moved = Finding {
         location: [1.0, 1.0],
@@ -614,7 +613,7 @@ fn the_same_error_is_the_same_type_at_the_same_end_of_the_same_object() {
     assert!(error.same_error(&moved));
     for other in [
         Finding {
-            kind: EndErrorKind::Overshoot,
+            kind: ErrorType::Overshoot,
             ..error
         },
         Finding {
@@ -662,8 +661,8 @@ fn a_scan_uses_the_saved_tolerance_of_each_type() {
     settings.set(EndErrorKind::Undershoot, None);
     settings.set(EndErrorKind::Gap, Some(0.1));
     app.geometry_cleanup.settings = Some(settings);
-    let kinds: Vec<EndErrorKind> = scan(&mut app, &objects).iter().map(|f| f.kind).collect();
-    assert_eq!(kinds, [EndErrorKind::Overshoot]);
+    let kinds: Vec<ErrorType> = scan(&mut app, &objects).iter().map(|f| f.kind).collect();
+    assert_eq!(kinds, [ErrorType::Overshoot]);
 }
 
 #[test]
@@ -730,9 +729,9 @@ fn scan_saves_the_settings_and_scans_the_drawing() {
     assert!(app.geometry_cleanup.show, "the palette shows the result");
     let saved = app.geometry_cleanup.settings.as_ref().expect("saved");
     assert_eq!(saved.tolerance(EndErrorKind::Undershoot), None);
-    let mut kinds: Vec<EndErrorKind> = findings(&app).iter().map(|f| f.kind).collect();
+    let mut kinds: Vec<ErrorType> = findings(&app).iter().map(|f| f.kind).collect();
     kinds.sort();
-    assert_eq!(kinds, [EndErrorKind::Gap, EndErrorKind::Overshoot]);
+    assert_eq!(kinds, [ErrorType::Gap, ErrorType::Overshoot]);
 }
 
 #[test]

@@ -11,6 +11,10 @@
 //! An end that meets other geometry (within the weld tolerance) is not an
 //! error. An end with more than one candidate is reported once, as the
 //! candidate nearest to it; each end belongs to at most one error.
+//!
+//! [`angle_errors`] finds lines a little off an angle: off a standard angle
+//! (**Absolute**), or meeting another line a little off a standard angle
+//! (**Relative**).
 
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::{PI, TAU};
@@ -622,6 +626,204 @@ pub fn end_errors(curves: &[Curve], tolerances: Tolerances, weld: Tolerance) -> 
         })
         .collect();
     errors.sort_by_key(|error| error.end);
+    errors
+}
+
+/// What is wrong with the angle of a line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AngleErrorKind {
+    /// The line is a little off a standard angle.
+    Absolute,
+    /// The line meets another line a little off a standard angle.
+    Relative,
+}
+
+/// A standard angle and how far from it a line is an error, in degrees.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AngleTolerance {
+    pub angle: f64,
+    pub tolerance: f64,
+}
+
+/// The standard angles of each angle type. An empty list: the scan does
+/// not look for that type.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct AngleTolerances {
+    pub absolute: Vec<AngleTolerance>,
+    pub relative: Vec<AngleTolerance>,
+}
+
+/// A line a little off an angle.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AngleError {
+    pub kind: AngleErrorKind,
+    /// The index of the line.
+    pub curve: usize,
+    /// The line that it meets (Relative).
+    pub other: Option<usize>,
+    /// The middle of the line, or the point where the two lines meet.
+    pub location: [f64; 2],
+    /// The standard angle, in degrees.
+    pub angle: f64,
+    /// How far the line is off it, in degrees.
+    pub deviation: f64,
+    /// The turn, in radians counter-clockwise, that puts `curve` on the
+    /// angle. Relative: the opposite turn of `other` does it as well.
+    pub turn: f64,
+    /// Whether the start and the end of `curve` meet other geometry.
+    pub meets: [bool; 2],
+}
+
+/// Nearer than this to the angle, in degrees, is on it.
+const ON_ANGLE: f64 = 1e-6;
+
+/// `degrees` wrapped into [-90, 90): a line is the same line turned 180°.
+fn half_turn(degrees: f64) -> f64 {
+    (degrees + 90.0).rem_euclid(180.0) - 90.0
+}
+
+/// Of the standard angles with the turn (degrees) that reaches each, the
+/// one with the smallest turn within its tolerance and not on the angle.
+fn nearest(
+    candidates: impl Iterator<Item = (AngleTolerance, f64)>,
+) -> Option<(AngleTolerance, f64)> {
+    candidates
+        .filter(|(s, turn)| turn.abs() > ON_ANGLE && turn.abs() <= s.tolerance)
+        .min_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+}
+
+/// The lines among `curves` that are a little off an angle, each within
+/// the tolerance of the nearest standard angle and not on it. Angles are
+/// measured counter-clockwise from `x_axis` (radians from the X axis, for
+/// a UCS turned about Z). Two lines meet where they cross or touch within
+/// `weld`; they make two angles, θ and 180° − θ, and a standard angle
+/// matches the nearer one.
+///
+/// Only lines are read. Absolute errors come first, by line; then the
+/// Relative ones, by pair.
+pub fn angle_errors(
+    curves: &[Curve],
+    tolerances: &AngleTolerances,
+    x_axis: f64,
+    weld: Tolerance,
+) -> Vec<AngleError> {
+    let weld = weld.linear();
+    let lines: Vec<(usize, Line)> = curves
+        .iter()
+        .enumerate()
+        .filter_map(|(index, curve)| match curve {
+            Curve::Line(line) if line.length() > weld => Some((index, *line)),
+            _ => None,
+        })
+        .collect();
+    if lines.is_empty() || (tolerances.absolute.is_empty() && tolerances.relative.is_empty()) {
+        return Vec::new();
+    }
+    let direction = |line: &Line| {
+        (line.end[1] - line.start[1])
+            .atan2(line.end[0] - line.start[0])
+            .to_degrees()
+            - x_axis.to_degrees()
+    };
+    let pieces = pieces_of(curves);
+    let mean = pieces.iter().map(|p| shape_length(p.shape)).sum::<f64>() / pieces.len() as f64;
+    let size = if mean.is_finite() && mean > 0.0 {
+        mean
+    } else {
+        1.0
+    };
+    let grid = Grid::new(&pieces, size, weld);
+    let meets = |curve: usize, point: [f64; 2]| {
+        grid.near(point).any(|k| {
+            pieces[k].curve != curve
+                && super::containment::distance_to(&pieces[k].shape.curve(), point) <= weld
+        })
+    };
+
+    let mut errors = Vec::new();
+    for (curve, line) in &lines {
+        let angle = direction(line);
+        let candidates = tolerances
+            .absolute
+            .iter()
+            .map(|s| (*s, half_turn(s.angle - angle)));
+        if let Some((standard, turn)) = nearest(candidates) {
+            errors.push(AngleError {
+                kind: AngleErrorKind::Absolute,
+                curve: *curve,
+                other: None,
+                location: [
+                    (line.start[0] + line.end[0]) / 2.0,
+                    (line.start[1] + line.end[1]) / 2.0,
+                ],
+                angle: standard.angle,
+                deviation: turn.abs(),
+                turn: turn.to_radians(),
+                meets: [meets(*curve, line.start), meets(*curve, line.end)],
+            });
+        }
+    }
+
+    if tolerances.relative.is_empty() {
+        return errors;
+    }
+    // The pairs of lines that share a grid cell.
+    let line_grid = Grid::new(
+        &lines
+            .iter()
+            .map(|(curve, line)| Piece {
+                curve: *curve,
+                shape: Shape::Line(*line),
+            })
+            .collect::<Vec<_>>(),
+        size,
+        weld,
+    );
+    let mut pairs = HashSet::new();
+    for members in line_grid.cells.values() {
+        for (n, &a) in members.iter().enumerate() {
+            for &b in members[n + 1..].iter().chain(&line_grid.everywhere) {
+                pairs.insert((a.min(b), a.max(b)));
+            }
+        }
+    }
+    for (n, &a) in line_grid.everywhere.iter().enumerate() {
+        for &b in &line_grid.everywhere[n + 1..] {
+            pairs.insert((a.min(b), a.max(b)));
+        }
+    }
+    let mut pairs: Vec<(usize, usize)> = pairs.into_iter().filter(|(a, b)| a != b).collect();
+    pairs.sort_unstable();
+    for (a, b) in pairs {
+        let ((first, one), (second, two)) = (lines[a], lines[b]);
+        let crossings = intersect(&Curve::Line(one), &Curve::Line(two), Tolerance::new(weld));
+        let Some(meet) = crossings.first().map(|crossing| crossing.point) else {
+            continue;
+        };
+        // θ: from the first line to the second. Turning the first line by
+        // `turn` makes it θ − turn, which is the standard angle A or
+        // 180° − A (that is, −A modulo 180°).
+        let theta = direction(&two) - direction(&one);
+        let candidates = tolerances.relative.iter().flat_map(|s| {
+            [
+                (*s, half_turn(theta - s.angle)),
+                (*s, half_turn(theta + s.angle)),
+            ]
+        });
+        let Some((standard, turn)) = nearest(candidates) else {
+            continue;
+        };
+        errors.push(AngleError {
+            kind: AngleErrorKind::Relative,
+            curve: first,
+            other: Some(second),
+            location: meet,
+            angle: standard.angle,
+            deviation: turn.abs(),
+            turn: turn.to_radians(),
+            meets: [meets(first, one.start), meets(first, one.end)],
+        });
+    }
     errors
 }
 

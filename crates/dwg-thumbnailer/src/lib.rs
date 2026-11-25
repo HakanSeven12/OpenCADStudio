@@ -57,6 +57,16 @@ const BAND_RGBA: [u8; 4] = [0xB0, 0x30, 0x20, 0xFF];
 /// embedded preview and falls back to its file-type icon), so the label is
 /// always "DWG".
 pub fn badge_dwg(img: &mut RgbaImage) {
+    badge_dwg_clear_of(img, 0.0);
+}
+
+/// Windows Explorer draws the opening application's icon over the bottom-right
+/// corner of a thumbnail; the share of the width it may cover.
+pub const WINDOWS_TYPE_OVERLAY: f32 = 0.36;
+
+/// [`badge_dwg`] with the wordmark kept clear of the rightmost `right_clear`
+/// share of the width: it is centred in what is left.
+pub fn badge_dwg_clear_of(img: &mut RgbaImage, right_clear: f32) {
     let (w, h) = (img.width(), img.height());
     if w == 0 || h == 0 {
         return;
@@ -77,7 +87,8 @@ pub fn badge_dwg(img: &mut RgbaImage) {
             let mut target_w =
                 ((label.width() as f32 * target_h as f32 / label.height() as f32) as u32).max(1);
             // Don't let a wide wordmark spill past the thumbnail edges.
-            let max_w = ((w as f32 * 0.90) as u32).max(1);
+            let free_w = (w as f32 * (1.0 - right_clear)).max(1.0);
+            let max_w = ((free_w - w as f32 * 0.10) as u32).max(1);
             if target_w > max_w {
                 target_w = max_w;
                 target_h = ((label.height() as f32 * target_w as f32 / label.width() as f32)
@@ -85,7 +96,7 @@ pub fn badge_dwg(img: &mut RgbaImage) {
                     .max(1);
             }
             let label = image::imageops::thumbnail(&label, target_w, target_h);
-            let x = ((w as i64 - target_w as i64) / 2).max(0);
+            let x = ((free_w as i64 - target_w as i64) / 2).max(0);
             let y = h as i64 + (band_h as i64 - target_h as i64) / 2;
             image::imageops::overlay(&mut out, &label, x, y);
         }

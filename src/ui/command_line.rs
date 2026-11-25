@@ -2320,6 +2320,25 @@ mod tests {
     }
 
     #[test]
+    fn each_kind_of_drawing_name_has_the_icon_of_its_command() {
+        use super::ContentKind::*;
+        for kind in [
+            Layer,
+            Block,
+            HatchPattern,
+            View,
+            TextStyle,
+            DimStyle,
+            VisualStyle,
+        ] {
+            assert!(
+                crate::modules::registry::command_icon(kind.icon_command()).is_some(),
+                "{kind:?}"
+            );
+        }
+    }
+
+    #[test]
     fn drawing_names_found_for_other_text_are_not_shown() {
         let mut line = line_with_content("LTGRAY");
         line.input = "LTGRAYX".to_string();

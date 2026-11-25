@@ -558,13 +558,29 @@ impl OpenCADStudio {
         let codes: Vec<(String, bool)> = data.corridor_point_codes().into_iter().map(|c| (c, true)).collect();
         let lines = data.corridor_baselines();
         let definition = data.corridor_definition();
+        // A built corridor's definition leaves the baselines' alignments
+        // unread; its references hold them in baseline order.
+        // ponytail: a target alignment of an earlier baseline would take a
+        // later baseline's place here; read the baselines' references once
+        // the codec maps them for built corridors.
+        let referenced: Vec<u64> = data
+            .typed_handles()
+            .iter()
+            .map(|r| r.0)
+            .filter(|h| doc.get_entity(Handle::new(*h)).and_then(arch_entity).is_some_and(|a| a.dxf_name == "AECC_ALIGNMENT"))
+            .fold(Vec::new(), |mut v, h| {
+                if !v.contains(&h) {
+                    v.push(h);
+                }
+                v
+            });
         let baselines = lines
             .iter()
             .enumerate()
             .map(|(k, groups)| {
                 let stations = groups.iter().flatten().flatten().map(|(s, _)| *s);
                 let (lo, hi) = stations.fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), s| (a.min(s), b.max(s)));
-                let alignment = definition.as_ref().and_then(|d| d.baselines.get(k)).map(|b| b.alignment);
+                let alignment = definition.as_ref().and_then(|d| d.baselines.get(k)).map(|b| b.alignment).filter(|h| *h != 0).or_else(|| referenced.get(k).copied());
                 let name = alignment
                     .and_then(|h| doc.get_entity(Handle::new(h)))
                     .and_then(arch_entity)

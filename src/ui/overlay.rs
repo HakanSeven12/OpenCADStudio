@@ -7547,6 +7547,15 @@ mod autosnap_magnet_tests {
     }
 
     #[test]
+    fn a_grid_snap_moves_the_crosshairs_with_the_magnet_off() {
+        let snap = Some((SNAP, SnapType::Grid));
+        assert_eq!(
+            crosshair_centre(None, snap, false, Some(POINTER)),
+            Some(SNAP)
+        );
+    }
+
+    #[test]
     fn with_no_snap_marker_the_crosshairs_are_at_the_pointer() {
         assert_eq!(
             crosshair_centre(None, None, true, Some(POINTER)),

@@ -444,6 +444,17 @@ impl OpenCADStudio {
             Some(TableCellWarning) => self.table_cell_warning = None,
             Some(AnnotationScalePrompt) => self.anno_scale_prompt = None,
             // Cancel or ✕ ends the command that asked (measured).
+            // Cancel or ✕ drops the window; what Apply wrote stays.
+            Some(PointGroup) => self.point_tools.point_group = None,
+            Some(CorridorPoints) => self.point_tools.corridor = None,
+            Some(PointBlocks) => self.point_tools.blocks = None,
+            // Cancel stops the conversion; the blocks made stay.
+            Some(BlockDuplicate) => self.finish_block_job(),
+            // Cancel stops the replacement; the points made stay.
+            Some(DuplicatePoint) => {
+                self.point_tools.duplicate = None;
+                self.point_tools.legacy_job = None;
+            }
             Some(SurfaceList) => {
                 if self.surface_list.take().is_some() {
                     let _ = self.apply_cmd_result(crate::command::CmdResult::Cancel);

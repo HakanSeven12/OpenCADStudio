@@ -2671,6 +2671,46 @@ impl OpenCADStudio {
 
             "ULAYERS" => self.open_underlay_layers_dialog(i),
             crate::ui::points_menu::OPEN_COMMAND => self.points_menu.open = !self.points_menu.open,
+            "CREATEPOINTGROUP" => self.open_point_group_window(),
+            "CREATEPOINTSFROMCORRIDOR" => self.start_corridor_points(),
+            cmd if cmd.starts_with(crate::modules::civil::point_pick::CORRIDOR_PICKED) => {
+                if let Ok(h) = u64::from_str_radix(cmd[crate::modules::civil::point_pick::CORRIDOR_PICKED.len()..].trim(), 16) {
+                    self.open_corridor_points(document::Handle::new(h));
+                }
+            }
+            "CREATEBLOCKSFROMPOINTS" => self.open_point_blocks(),
+            cmd if cmd.starts_with(crate::modules::civil::point_pick::WINDOW_PICKED) => {
+                self.point_blocks_window(&cmd[crate::modules::civil::point_pick::WINDOW_PICKED.len()..]);
+            }
+            "REPLACELEGACYPOINTBLOCKS" => self.start_legacy_points(),
+            super::point_tools::LEGACY_GATHERED => self.legacy_points_gathered(),
+            "CONVERTCADPOINTS" => {
+                let c = crate::modules::civil::point_convert::selection();
+                self.command_line.push_info(&c.prompt());
+                self.tabs[i].active_cmd = Some(Box::new(c));
+            }
+            crate::modules::civil::point_convert::GATHERED => {
+                let points: Vec<(document::Handle, glam::DVec3)> = self.tabs[i]
+                    .scene
+                    .selected_entities()
+                    .into_iter()
+                    .filter_map(|(h, e)| match e {
+                        document::EntityType::Point(p) => Some((h, glam::DVec3::new(p.location.x, p.location.y, p.location.z))),
+                        _ => None,
+                    })
+                    .collect();
+                self.tabs[i].scene.deselect_all();
+                self.refresh_properties();
+                self.refresh_selected_grips();
+                // Enter on nothing ends the command.
+                if !points.is_empty() {
+                    let c = crate::modules::civil::point_convert::DescribePointsCommand::new(points);
+                    self.command_line.push_info(&c.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(c));
+                }
+            }
+            super::point_tools::PICK_INCLUDE => self.point_group_picked(false),
+            super::point_tools::PICK_EXCLUDE => self.point_group_picked(true),
             "CREATEPOINTMANUAL" | "CREATEPOINTNORTHINGEASTING" | "CREATEPOINTBEARING" | "CREATEPOINTAZIMUTH" | "CREATEPOINTANGLE" | "CREATEPOINTDEFLECTION" => {
                 use crate::modules::civil::point_manual::{CreatePointManualCommand, Mode};
                 let mode = match cmd {

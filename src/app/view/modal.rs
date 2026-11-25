@@ -76,6 +76,15 @@ impl OpenCADStudio {
             Some(K::TableCellWarning) => crate::tr!("table-cells", "warning-title"),
             Some(K::AnnotationScalePrompt) => crate::tr!("anno-scale-prompt", "title"),
             Some(K::SurfaceList) => crate::t!("Select a Surface").into_owned(),
+            Some(K::CorridorPoints) => crate::t!("Create COGO Points").into_owned(),
+            Some(K::PointBlocks) => crate::t!("Create Blocks from COGO Points").into_owned(),
+            Some(K::BlockDuplicate) => crate::t!("Point Blocks with Duplicate Point Numbers Found").into_owned(),
+            Some(K::DuplicatePoint) => crate::t!("Duplicate Point Number").into_owned(),
+            Some(K::PointGroup) => format!(
+                "{} - {}",
+                crate::t!("Point Group Properties"),
+                self.point_tools.point_group.as_ref().map_or("", |s| s.name.as_str())
+            ),
             Some(K::MTextDialog) => {
                 use crate::ui::window::mtext_dialogs::MTextDialog as D;
                 crate::t!(match self.mtext_dialog {
@@ -709,6 +718,26 @@ impl OpenCADStudio {
                     D::AutoStack(d) => sized_flow(ex, 450, 330, |_| t::view_autostack(d)),
                     D::ListsToggle(d) => sized_flow(ex, 470, 220, |_| t::view_lists_toggle(d)),
                 }
+            }
+            super::super::ModalKind::CorridorPoints => {
+                let state = self.point_tools.corridor.as_ref()?;
+                sized_flow(ex, 460, 600, |flow| crate::ui::window::point_tools::view_corridor(state, flow))
+            }
+            super::super::ModalKind::PointBlocks => {
+                let state = self.point_tools.blocks.as_ref()?;
+                sized_flow(ex, 520, 560, |flow| crate::ui::window::point_tools::view_blocks(state, flow))
+            }
+            super::super::ModalKind::BlockDuplicate => {
+                let number = self.point_tools.block_job.as_ref()?.pending.as_ref()?.0.number;
+                sized_flow(ex, 420, 260, |flow| crate::ui::window::point_tools::view_block_duplicate(number, flow))
+            }
+            super::super::ModalKind::DuplicatePoint => {
+                let state = self.point_tools.duplicate.as_ref()?;
+                sized_flow(ex, 400, 380, |flow| crate::ui::window::point_tools::view_duplicate(state, flow))
+            }
+            super::super::ModalKind::PointGroup => {
+                let state = self.point_tools.point_group.as_ref()?;
+                sized_flow(ex, 780, 560, |flow| crate::ui::window::point_group::view(state, flow))
             }
             super::super::ModalKind::SurfaceList => {
                 let state = self.surface_list.as_ref()?;

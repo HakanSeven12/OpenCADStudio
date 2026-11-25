@@ -11,6 +11,9 @@ pub mod point_object;
 pub mod point_alignment;
 pub mod point_surface;
 pub mod point_slope;
+pub mod point_group_query;
+pub mod point_convert;
+pub mod point_pick;
 
 pub struct CivilModule;
 
@@ -32,7 +35,6 @@ fn tool(id: &'static str, label: &'static str, icon: IconKind) -> RibbonItem {
 /// The civil commands this module runs.
 pub const COMMANDS: &[&str] = &[
     "CREATEPOINTS",
-    "CREATEPOINTGROUP",
     "CREATEPOINTLABELSTYLE",
     "CREATEALIGNMENT",
     "CREATEOFFSETALIGNMENT",
@@ -168,13 +170,6 @@ const EQUATION_OPTIONS: &[Opt] = &[
     Opt { label: "Direction", keyword: "D", key: "direction", prompt: "Whether the stations ahead increase or decrease (? to list)", kind: OptKind::Choice(equation_directions) },
 ];
 
-const POINT_GROUP_OPTIONS: &[Opt] = &[
-    Opt { label: "Name pattern", keyword: "N", key: "name", prompt: "Point names to include (* any run, ? one character, comma between patterns)", kind: OptKind::Text },
-    Opt { label: "Description pattern", keyword: "D", key: "description", prompt: "Point descriptions to include (* any run, ? one character, comma between patterns)", kind: OptKind::Text },
-    Opt { label: "Minimum elevation", keyword: "MI", key: "elevation_min", prompt: "Lowest elevation to include", kind: OptKind::Number },
-    Opt { label: "Maximum elevation", keyword: "MA", key: "elevation_max", prompt: "Highest elevation to include", kind: OptKind::Number },
-];
-
 /// Whether a family of the codec's parts list is a pipe's (every pipe family's name ends
 /// so; no structure family's does).
 fn is_pipe_family(name: &str) -> bool {
@@ -229,13 +224,6 @@ pub fn steps(name: &str) -> Option<Vec<Step>> {
     use Filter::*;
     Some(match name {
         "CREATEPOINTS" => vec![Step::Points { prompt: "Specify location of point (x,y,z) or press Enter to end:" }],
-        "CREATEPOINTGROUP" => vec![
-            Step::Objects { prompt: "Select COGO points for the point group or press Enter to choose them by name, description or elevation:", filter: CogoPoints, slot: 0 },
-            Step::Accept {
-                prompt: "Press Enter to create the point group or [Name pattern/Description pattern/Minimum elevation/Maximum elevation]:",
-                options: POINT_GROUP_OPTIONS,
-            },
-        ],
         "CREATEALIGNMENT" => vec![
             Step::Objects { prompt: "Select a line or polyline to make an alignment of:", filter: Paths, slot: 0 },
             Step::Accept { prompt: "Press Enter to create the alignment or [Radius/Spiral length/Type/Gauge]:", options: ALIGNMENT_OPTIONS },

@@ -66,8 +66,9 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// `save` describes its `target_version` as the DWG version.
 /// `ocs_capture` / `ocs_render` gained `layout`, `aspect_fit`, and `renderer` (`document_id` on `ocs_capture`) for headless off-screen capture.
 /// The surface list of the Create Points > Surface commands: `surface_list_dialog`.
+/// The windows of the Create Points tools: `points_tool_dialog`.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "5e1e88636817eec20180a22e7ff214044774a5edfe5cf9b0003a5e01700a1c62";
+const TOOL_SCHEMA_DIGEST: &str = "4a533dbf1e09ba94e0c9de48ab663ec2b734a6dad6b5e944107d088f9b514d90";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

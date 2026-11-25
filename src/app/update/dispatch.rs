@@ -1958,6 +1958,8 @@ impl OpenCADStudio {
             Message::TableCellDialog(message) => self.update_table_cell_dialog(message),
             Message::AnnoScalePrompt(message) => self.on_anno_scale_prompt(message),
             Message::SurfaceList(message) => self.on_surface_list(message),
+            Message::PointGroup(message) => self.on_point_group(message),
+            Message::PointTool(message) => self.on_point_tool(message),
             Message::MTextDialog(message) => self.on_mtext_dialog(message),
             Message::HyperlinkDialog(message) => self.update_hyperlink_dialog(message),
             Message::Spell(message) => self.update_spell(message),

@@ -177,6 +177,12 @@ iced_wgpu = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c49
 iced_widget = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
 iced_winit = { git = "https://github.com/HakanSeven12/iced.git", rev = "ba4ef4c495d16493a599a58fb8f2448fc9fc5a89" }
 
+# The codec with the corridor point codes (hakanaktt/acadrust#673) and the
+# point group styles (hakanaktt/acadrust#674); drop when the document crate
+# pins a codec past both.
+[patch."https://github.com/hakanaktt/acadrust.git"]
+acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "f09933e110074517c78394cc847f0b356c9f6c78" }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 mimalloc = { version = "0.1", default-features = false }
 getrandom = "0.4"

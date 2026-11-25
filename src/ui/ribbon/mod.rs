@@ -1579,8 +1579,14 @@ impl Ribbon {
         }
         tab_row = tab_row.push(
             container(
+                // Under the app's title bar the tabs keep the same margin from
+                // the window's edge whether the toolbar is above or below.
                 WrapBar::new(lead, tabs.into())
-                    .spacing(if qat_below { 0.0 } else { 6.0 })
+                    .spacing(if qat_below && !self.in_title_bar {
+                        0.0
+                    } else {
+                        6.0
+                    })
                     .center_trail(self.layout.centered)
                     .center_span(span.clone())
                     .report_natural_width(self.tab_flow_natural.clone())

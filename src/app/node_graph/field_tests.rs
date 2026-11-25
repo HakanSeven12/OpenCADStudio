@@ -1321,3 +1321,148 @@ fn the_picker_and_the_readers_list_replace_each_other() {
     rig.links(LinkDisplay::Wires);
     assert!(rig.app.tabs[rig.i].graph.readers.is_none());
 }
+
+// Renaming nodes (#3141 follow-up).
+
+impl Rig {
+    fn name(&self, id: NodeId) -> Option<String> {
+        self.app.tabs[self.i].graph.ui[&id].name.clone()
+    }
+
+    fn title(&self, id: NodeId) -> String {
+        let graph = &self.app.tabs[self.i].graph;
+        graph.title(graph.engine.node(id).expect("node"))
+    }
+
+    fn rename(&mut self, id: NodeId, typed: &str) {
+        let _ = self.app.on_graph(GraphMsg::RenameStart(id));
+        let _ = self.app.on_graph(GraphMsg::RenameInput(typed.to_owned()));
+        let _ = self.app.on_graph(GraphMsg::RenameCommit);
+    }
+}
+
+#[test]
+fn double_clicking_a_title_renames_the_node() {
+    let mut rig = Rig::new();
+    let range = rig.op("Range", Point::new(40.0, 40.0));
+    let header = rig.header(range);
+    rig.click(header);
+    rig.click(header);
+    let graph = &rig.app.tabs[rig.i].graph;
+    assert_eq!(graph.renaming, Some((range, "Range".to_owned())));
+    assert!(
+        graph.drag.is_none(),
+        "the double-click does not drag the card"
+    );
+
+    // Trimmed as it is kept.
+    let _ = rig
+        .app
+        .on_graph(GraphMsg::RenameInput("  Stations  ".to_owned()));
+    let _ = rig.app.on_graph(GraphMsg::RenameCommit);
+    assert_eq!(rig.name(range).as_deref(), Some("Stations"));
+    assert_eq!(rig.title(range), "Stations");
+    assert!(rig.app.tabs[rig.i].graph.renaming.is_none());
+
+    // One undo step brings the default back.
+    let _ = rig.app.automation_op(r#"{"op":"undo"}"#);
+    assert_eq!(rig.name(range), None);
+    assert_eq!(rig.title(range), "Range");
+}
+
+#[test]
+fn esc_in_the_title_keeps_the_old_name() {
+    let mut rig = Rig::new();
+    let range = rig.op("Range", Point::new(40.0, 40.0));
+    rig.rename(range, "Stations");
+    let header = rig.header(range);
+    rig.click(header);
+    rig.click(header);
+    // Into the field, then away with Esc.
+    rig.click(header);
+    rig.typed("Other");
+    rig.key(Named::Escape);
+    assert!(rig.app.tabs[rig.i].graph.renaming.is_none());
+    assert_eq!(rig.name(range).as_deref(), Some("Stations"));
+}
+
+#[test]
+fn a_press_elsewhere_keeps_the_typed_name() {
+    let mut rig = Rig::new();
+    let range = rig.op("Range", Point::new(40.0, 40.0));
+    let _ = rig.app.on_graph(GraphMsg::RenameStart(range));
+    let _ = rig
+        .app
+        .on_graph(GraphMsg::RenameInput("Stations".to_owned()));
+    rig.click(Point::new(800.0, 600.0));
+    assert_eq!(rig.name(range).as_deref(), Some("Stations"));
+}
+
+#[test]
+fn an_empty_name_goes_back_to_the_default() {
+    let mut rig = Rig::new();
+    let range = rig.op("Range", Point::new(40.0, 40.0));
+    rig.rename(range, "Stations");
+    rig.rename(range, "   ");
+    assert_eq!(rig.name(range), None);
+    assert_eq!(rig.title(range), "Range");
+    // An unchanged name makes no undo step: one undo removes the rename.
+    rig.rename(range, "Stations");
+    rig.rename(range, "Stations");
+    let _ = rig.app.automation_op(r#"{"op":"undo"}"#);
+    assert_eq!(rig.name(range), None);
+}
+
+#[test]
+fn a_renamed_object_node_keeps_its_count() {
+    let mut rig = Rig::new();
+    let id = rig.object(ObjectKind::Point, Point::new(40.0, 40.0));
+    rig.app.tabs[rig.i].graph.ui.get_mut(&id).unwrap().handles = vec![
+        document::Handle::new(0x9001),
+        document::Handle::new(0x9002),
+        document::Handle::new(0x9003),
+    ];
+    rig.rename(id, "Stations");
+    assert_eq!(rig.title(id), "Stations ×3");
+    // The field starts from the name alone.
+    let _ = rig.app.on_graph(GraphMsg::RenameStart(id));
+    assert_eq!(
+        rig.app.tabs[rig.i].graph.renaming,
+        Some((id, "Stations".to_owned()))
+    );
+}
+
+#[test]
+fn names_reach_the_labels_the_picker_and_the_readers() {
+    let mut rig = Rig::new();
+    let number = rig.op("Number", Point::new(40.0, 40.0));
+    let point = rig.op("Point", Point::new(400.0, 40.0));
+    rig.link(number, "value", point, "x");
+    rig.rename(number, "Length");
+    rig.rename(point, "Start");
+    let graph = &rig.app.tabs[rig.i].graph;
+    let sections = rig.app.graph_all_sections(rig.i);
+    let sources = graph.sources(&sections);
+    assert!(sources.iter().any(|source| source.name == "Length.value"));
+    let labels = graph.link_labels(&sections, &sources);
+    assert_eq!(labels.rows[&port(point, "x")], "Length.value");
+    let readers = graph.readers(&sections, &port(number, "value"));
+    assert_eq!(readers[0].1, "Start.x");
+}
+
+#[test]
+fn a_name_is_saved_only_when_set() {
+    let mut rig = Rig::new();
+    let range = rig.op("Range", Point::new(40.0, 40.0));
+    let plain = rig.op("Number", Point::new(40.0, 200.0));
+    rig.rename(range, "Stations");
+    let bytes = rig.app.graph_file_bytes(rig.i);
+    let file: Value = serde_json::from_slice(&bytes).unwrap();
+    let nodes = &file["canvas"]["nodes"];
+    assert_eq!(nodes[range.to_string()]["name"], "Stations");
+    assert!(nodes[plain.to_string()].get("name").is_none());
+
+    let (loaded, _) = crate::ui::node_graph::Graph::from_file(&bytes).unwrap();
+    assert_eq!(loaded.ui[&range].name.as_deref(), Some("Stations"));
+    assert_eq!(loaded.ui[&plain].name, None);
+}

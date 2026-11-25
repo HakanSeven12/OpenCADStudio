@@ -487,6 +487,21 @@ pub struct NodeUi {
     pub open: HashSet<String>,
     /// Entities an object node owns, one per list element.
     pub handles: Vec<Handle>,
+    /// The user's name for the node, shown in place of its operation or
+    /// object name; `None` keeps that default.
+    pub name: Option<String>,
+}
+
+/// A typed node name as it is kept: trimmed, and `None` when nothing is
+/// left, which goes back to the default name.
+pub fn node_name(typed: &str) -> Option<String> {
+    let name = typed.trim();
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
+/// The widget id of the title field a rename types into.
+pub fn rename_id() -> widget::Id {
+    widget::Id::from("node-graph-rename")
 }
 
 pub enum RowWidget {
@@ -697,6 +712,8 @@ pub struct Graph {
     /// The input whose label is under the pointer; its wire shows.
     pub hovered_label: Option<Port>,
     pub picker: Option<Picker>,
+    /// The node whose title is being renamed, and the name typed so far.
+    pub renaming: Option<(NodeId, String)>,
     /// The list of the inputs reading an output, open where its `→N` was
     /// clicked.
     pub readers: Option<Readers>,
@@ -733,6 +750,7 @@ impl Graph {
         self.hovered_label = None;
         self.picker = None;
         self.readers = None;
+        self.renaming = None;
         self.menu = None;
         if self.selected.is_some_and(|id| !self.ui.contains_key(&id)) {
             self.selected = None;
@@ -790,6 +808,13 @@ pub enum GraphMsg {
     /// The picker's Disconnect: the input loses its link.
     PickClear(Port),
     PickClose,
+    /// A double-click on a title starts renaming its node.
+    RenameStart(NodeId),
+    RenameInput(String),
+    /// Enter, or a press elsewhere: keeps the typed name.
+    RenameCommit,
+    /// Esc: the node keeps its name.
+    RenameCancel,
     /// Opens the list of the inputs reading an output, or closes it.
     Readers(Port),
     /// Pans the canvas to a node and outlines it.
@@ -953,10 +978,16 @@ impl Graph {
                 let mut open: Vec<&String> = ui.open.iter().collect();
                 open.sort();
                 let handles: Vec<u64> = ui.handles.iter().map(|handle| handle.value()).collect();
-                (
-                    id.to_string(),
-                    json!({ "pos": [ui.pos.x, ui.pos.y], "open": open, "handles": handles }),
-                )
+                (id.to_string(), {
+                    let mut node =
+                        json!({ "pos": [ui.pos.x, ui.pos.y], "open": open, "handles": handles });
+                    // Only a renamed node writes a name, so files of
+                    // unnamed graphs stay as they were.
+                    if let Some(name) = &ui.name {
+                        node["name"] = json!(name);
+                    }
+                    node
+                })
             })
             .collect();
         let applied: Vec<Value> = self
@@ -1048,6 +1079,7 @@ impl Graph {
                     pos: Point::ORIGIN + pos,
                     open,
                     handles,
+                    name: saved["name"].as_str().and_then(node_name),
                 },
             );
         }
@@ -1065,7 +1097,15 @@ impl Graph {
         let id = self.engine.add(kind);
         let mut open = HashSet::default();
         open.insert(t!("Geometry").into_owned());
-        self.ui.insert(id, NodeUi { pos, open, handles });
+        self.ui.insert(
+            id,
+            NodeUi {
+                pos,
+                open,
+                handles,
+                name: None,
+            },
+        );
         id
     }
 
@@ -1327,18 +1367,32 @@ impl Graph {
     }
 
     /// A node's card title: its operation, or its object kind and count.
-    fn title(&self, node: &graph::Node) -> String {
+    /// The card, the picker, the labels and the Read by list all name a node
+    /// through here. A user's name is shown as typed; only the default
+    /// operation or object name is translated. An object node keeps its
+    /// entity count either way (`Stations ×3`).
+    pub(crate) fn title(&self, node: &graph::Node) -> String {
+        let custom = self.ui.get(&node.id).and_then(|ui| ui.name.clone());
         match &node.kind {
-            Kind::Op(spec) => t!(spec.name).into_owned(),
+            Kind::Op(spec) => custom.unwrap_or_else(|| t!(spec.name).into_owned()),
             Kind::Object(name) => {
                 let count = self.ui.get(&node.id).map_or(0, |ui| ui.handles.len());
-                let name = t!(name.as_str()).into_owned();
+                let name = custom.unwrap_or_else(|| t!(name.as_str()).into_owned());
                 if count > 1 {
                     format!("{name} ×{count}")
                 } else {
                     name
                 }
             }
+        }
+    }
+
+    /// What a node is, whatever it is called: its translated operation or
+    /// object name.
+    fn kind_name(node: &graph::Node) -> String {
+        match &node.kind {
+            Kind::Op(spec) => t!(spec.name).into_owned(),
+            Kind::Object(name) => t!(name.as_str()).into_owned(),
         }
     }
 
@@ -1788,19 +1842,40 @@ impl Graph {
             Kind::Op(spec) => Some(*spec),
             Kind::Object(_) => None,
         };
-        let title_tip = node_tip(title.clone(), spec);
-        let header = row![
-            with_tip(
+        // A renamed node's tooltip still says what it is.
+        let named = self.ui.get(&id).is_some_and(|ui| ui.name.is_some());
+        let title_tip = if named {
+            node_tip(format!("{title}: {}", Self::kind_name(node)), spec)
+        } else {
+            node_tip(title.clone(), spec)
+        };
+        let title: Element<'_, Message> = match &self.renaming {
+            Some((renaming, draft)) if *renaming == id => text_input("", draft)
+                .id(rename_id())
+                .on_input(|typed| msg(GraphMsg::RenameInput(typed)))
+                .on_submit(msg(GraphMsg::RenameCommit))
+                .size(12)
+                .padding([3, 6])
+                .width(Length::Fill)
+                .into(),
+            _ => with_tip(
                 mouse_area(
                     container(text(title).size(12))
                         .padding([4, 8])
                         .width(Length::Fill)
                         .height(HEADER_H),
                 )
-                .on_press(msg(GraphMsg::NodePress(id))),
+                .on_press(msg(GraphMsg::NodePress(id)))
+                .on_double_click(msg(GraphMsg::RenameStart(id))),
                 title_tip,
                 zoom,
             ),
+        };
+        let header = row![
+            container(title)
+                .width(Length::Fill)
+                .height(HEADER_H)
+                .align_y(iced::Center),
             with_tip(
                 button(crate::ui::icons::themed(crate::ui::icons::CLOSE, 10.0))
                     .on_press(msg(GraphMsg::NodeDelete(id)))
@@ -2313,6 +2388,24 @@ impl Graph {
             GraphMsg::Jump(id) => self.jump_to(*id),
             GraphMsg::Area(size) => self.area = *size,
             GraphMsg::LabelHover(port) => self.hovered_label = port.clone(),
+            GraphMsg::RenameStart(id) => {
+                // The field starts from the node's name without its count.
+                let draft = self.engine.node(*id).map(|node| {
+                    self.ui
+                        .get(id)
+                        .and_then(|ui| ui.name.clone())
+                        .unwrap_or_else(|| Self::kind_name(node))
+                });
+                self.renaming = draft.map(|draft| (*id, draft));
+                // The double-click's second press grabbed the card.
+                self.drag = None;
+            }
+            GraphMsg::RenameInput(typed) => {
+                if let Some((_, draft)) = self.renaming.as_mut() {
+                    *draft = typed.clone();
+                }
+            }
+            GraphMsg::RenameCancel => self.renaming = None,
             GraphMsg::Pick(port) => {
                 self.readers = None;
                 let same = self.picker.as_ref().is_some_and(|open| open.to == *port);
@@ -2333,6 +2426,13 @@ impl Graph {
             GraphMsg::NodeDelete(id) => {
                 if self.selected == Some(*id) {
                     self.selected = None;
+                }
+                if self
+                    .renaming
+                    .as_ref()
+                    .is_some_and(|(renaming, _)| renaming == id)
+                {
+                    self.renaming = None;
                 }
                 if self.flash == Some(*id) {
                     self.flash = None;
@@ -2948,6 +3048,12 @@ impl Widget<Message, Theme, iced::Renderer> for Zoomed<'_> {
         {
             if let Some(port) = self.focused(tree, content, renderer) {
                 shell.publish(msg(GraphMsg::Discard(port)));
+            }
+            // In a title being renamed, Esc keeps the old name.
+            let mut find = FindFocused::default();
+            self.run(tree, content, renderer, &mut find);
+            if find.0 == Some(rename_id()) {
+                shell.publish(msg(GraphMsg::RenameCancel));
             }
         }
         let pressed = matches!(

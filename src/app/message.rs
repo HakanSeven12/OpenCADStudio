@@ -2818,6 +2818,8 @@ pub enum Message {
     AttOutSave(String, Option<std::path::PathBuf>),
     /// ATTIN file contents, `None` when the picker was cancelled.
     AttInPicked(Option<String>),
+    /// Import from File (alignment points): the picked file's text.
+    AlignmentPointFilePicked(Option<String>),
     // ── STL export ────────────────────────────────────────────────────────
     /// Trigger STL export: collect meshes and show save dialog.
     StlExport,

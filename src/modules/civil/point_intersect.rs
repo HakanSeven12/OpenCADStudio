@@ -326,7 +326,7 @@ pub(crate) fn site_line_curve(document: &document::Document, e: &EntityType) -> 
 
 /// How far along `curve` its point nearest `p` lies, as a share of its
 /// length.
-fn travelled_fraction(curve: &Curve, p: [f64; 2]) -> f64 {
+pub(crate) fn travelled_fraction(curve: &Curve, p: [f64; 2]) -> f64 {
     let t = closest_point(curve, p).t;
     let Curve::Polyline(pl) = curve else { return t };
     let n = if pl.closed { pl.vertices.len() } else { pl.vertices.len().saturating_sub(1) };

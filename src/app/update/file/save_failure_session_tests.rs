@@ -368,3 +368,117 @@ fn a_drawing_changed_outside_at_quit_is_kept_until_the_user_overwrites_it() {
     assert!(app.exit_requested);
     assert_ne!(std::fs::read(&drawing).unwrap(), outside);
 }
+
+/// Starts an autosave of every edited drawing and returns its task, not
+/// yet run: the autosave runs until the task is given to `finished`.
+fn autosave_running(app: &mut OpenCADStudio) -> iced::Task<Message> {
+    let task = app.on_autosave();
+    assert!(!app.active_save_jobs.is_empty(), "the autosave runs");
+    task
+}
+
+/// Ends the autosave of `task` and returns the save that waited for it.
+fn waiting_save(app: &mut OpenCADStudio, autosave: iced::Task<Message>) -> SaveOutcome {
+    let autosaved = finished(autosave);
+    assert_eq!(autosaved.purpose, SavePurpose::Autosave);
+    finished(app.on_save_finished(autosaved))
+}
+
+#[test]
+fn a_save_during_an_autosave_writes_the_drawing_after_it() {
+    let scratch = Scratch::new("save-during-autosave");
+    let (mut app, drawing) = app_with_saved_drawing(&scratch);
+    let i = app.active_tab;
+    let autosave = autosave_running(&mut app);
+
+    let version = app.tabs[i].scene.document.version;
+    let refused = app.queue_native_save(
+        i,
+        drawing.clone(),
+        version,
+        SavePurpose::Manual,
+        SaveContinuation::None,
+        false,
+        false,
+    );
+    assert!(iced_runtime::task::into_stream(refused).is_none());
+
+    let saved = waiting_save(&mut app, autosave);
+    assert_eq!(saved.purpose, SavePurpose::Manual);
+    assert_eq!(saved.path, drawing);
+    assert!(saved.result.is_ok(), "{:?}", saved.result);
+    let _ = app.on_save_finished(saved);
+    assert!(!app.tabs[i].dirty);
+}
+
+#[test]
+fn a_close_prompt_save_during_an_autosave_closes_the_drawing_after_it() {
+    let scratch = Scratch::new("close-during-autosave");
+    let (mut app, drawing) = app_with_saved_drawing(&scratch);
+    let id = app.tabs[app.active_tab].id;
+    let autosave = autosave_running(&mut app);
+    let _ = app.update(Message::TabClose(id));
+    assert_eq!(app.active_modal, Some(ModalKind::Unsaved));
+
+    let _ = app.update(Message::UnsavedDialogSave);
+    assert_ne!(app.active_modal, Some(ModalKind::Unsaved));
+
+    let saved = waiting_save(&mut app, autosave);
+    assert_eq!(saved.path, drawing);
+    assert!(saved.result.is_ok(), "{:?}", saved.result);
+    let _ = app.on_save_finished(saved);
+    assert!(!has_tab(&app, id), "the saved drawing closes");
+}
+
+#[test]
+fn a_save_at_quit_during_an_autosave_quits_after_it() {
+    let scratch = Scratch::new("quit-during-autosave");
+    let (mut app, drawing) = app_with_saved_drawing(&scratch);
+    let autosave = autosave_running(&mut app);
+    let _ = app.request_quit_with_block_edits();
+    assert_eq!(app.active_modal, Some(ModalKind::Unsaved));
+
+    let _ = app.update(Message::UnsavedDialogSave);
+    assert_ne!(app.active_modal, Some(ModalKind::Unsaved));
+    assert!(!app.exit_requested);
+
+    let saved = waiting_save(&mut app, autosave);
+    assert_eq!(saved.path, drawing);
+    assert!(saved.result.is_ok(), "{:?}", saved.result);
+    let _ = app.on_save_finished(saved);
+    assert!(app.exit_requested);
+}
+
+/// A save that waits for a save of the same drawing has nothing to add:
+/// it is refused, as before.
+#[test]
+fn a_save_during_a_save_of_the_same_drawing_is_refused() {
+    let scratch = Scratch::new("save-during-save");
+    let (mut app, drawing) = app_with_saved_drawing(&scratch);
+    let i = app.active_tab;
+    let version = app.tabs[i].scene.document.version;
+    let save = |app: &mut OpenCADStudio| {
+        app.queue_native_save(
+            i,
+            drawing.clone(),
+            version,
+            SavePurpose::Manual,
+            SaveContinuation::None,
+            false,
+            false,
+        )
+    };
+    let first = save(&mut app);
+    let refused = save(&mut app);
+    assert!(iced_runtime::task::into_stream(refused).is_none());
+    let last = app
+        .command_line
+        .history
+        .last()
+        .map(|entry| entry.text.as_str());
+    assert!(
+        last.is_some_and(|text| text.contains("Save already running for this drawing.")),
+        "{last:?}"
+    );
+    assert!(finished(first).result.is_ok());
+}

@@ -6,7 +6,7 @@
 //! ask for a profile of the alignment when it has a profile view: a point
 //! within the profile's stations takes its elevation from it.
 
-use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
+use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, PointPickContext};
 use crate::entities::curve::entity_curve;
 use document::entities::{ExtendedEntityData, LwPolyline, LwVertex};
 use document::types::Vector2;
@@ -136,6 +136,8 @@ struct Alignment {
     profiles: Vec<Profile>,
     /// Whether one of its profile views shows it.
     viewed: bool,
+    /// Station equations: raw station, station ahead, +1 or -1 after it.
+    equations: Vec<(f64, f64, f64)>,
 }
 
 impl Alignment {
@@ -145,6 +147,52 @@ impl Alignment {
 
     fn end(&self) -> f64 {
         self.start + self.length()
+    }
+
+    /// The station shown for a raw station (after the station equations).
+    fn station(&self, raw: f64) -> f64 {
+        match self.equations.iter().rev().find(|e| e.0 <= raw + 1e-9) {
+            Some(&(r, ahead, dir)) => ahead + dir * (raw - r),
+            None => raw,
+        }
+    }
+
+    /// The station ranges between the equations: (first raw, last raw,
+    /// station at the first raw, direction).
+    fn regions(&self) -> Vec<(f64, f64, f64, f64)> {
+        let mut out = Vec::new();
+        let (mut raw, mut station, mut dir) = (self.start, self.start, 1.0);
+        for &(r, ahead, d) in &self.equations {
+            out.push((raw, r, station, dir));
+            (raw, station, dir) = (r, ahead, d);
+        }
+        out.push((raw, self.end(), station, dir));
+        out
+    }
+
+    /// The raw station of a typed station; none when it lies outside the
+    /// alignment or in a gap an equation leaves (Station/Offset, measured).
+    fn raw_of(&self, station: f64) -> Option<f64> {
+        self.regions().into_iter().find_map(|(r0, r1, s0, dir)| {
+            let raw = r0 + (station - s0) * dir;
+            (r0 - 1e-9..=r1 + 1e-9).contains(&raw).then_some(raw)
+        })
+    }
+
+    /// The raw station a station range prompt takes: in a gap, the range
+    /// before it carries on (Measure and the station ranges, measured: with
+    /// 0..100 then 1000.. a typed 150 is raw 150).
+    fn raw_of_loose(&self, station: f64) -> f64 {
+        self.raw_of(station).unwrap_or_else(|| {
+            let regions = self.regions();
+            let (r0, _, s0, dir) = regions
+                .iter()
+                .copied()
+                .filter(|r| (station - r.2) * r.3 >= 0.0)
+                .max_by(|a, b| a.2.total_cmp(&b.2))
+                .unwrap_or(regions[0]);
+            r0 + (station - s0) * dir
+        })
     }
 
     fn contains(&self, station: f64) -> bool {
@@ -386,7 +434,11 @@ pub struct AlignmentPointCommand {
     picked: Option<EntityType>,
     alignment: Option<Alignment>,
     profile: Option<usize>,
-    /// Profiles a pick in a profile view offered, nearest found on the pick.
+    /// The view the profile is picked in (its pick box).
+    context: Option<PointPickContext>,
+    /// A station range prompt answered with a point: the distance to a
+    /// second point is the station.
+    first_point: Option<DVec3>,
     station: f64,
     start_station: f64,
     end_station: f64,
@@ -411,6 +463,8 @@ impl AlignmentPointCommand {
             kind,
             step: Step::Alignment,
             picked: None,
+            context: None,
+            first_point: None,
             alignment: None,
             profile: None,
             station: 0.0,
@@ -438,6 +492,16 @@ impl AlignmentPointCommand {
     /// The line shown before the first prompt (the import's format menu).
     pub fn intro(&self) -> Option<String> {
         matches!(self.step, Step::Format).then(formats)
+    }
+
+    fn station_outside(&self, station: f64) -> String {
+        let unit = if self.metric { "m" } else { "" };
+        crate::tf!("Station {}:  Either outside of the baseline limits, or within gap created by a station equation.", format!("{}{unit}", format_station(station))).into_owned()
+    }
+
+    /// The station shown for a raw station of the picked alignment.
+    fn shown(&self, raw: f64) -> f64 {
+        self.alignment.as_ref().map_or(raw, |a| a.station(raw))
     }
 
     fn profile(&self) -> Option<&Profile> {
@@ -577,6 +641,7 @@ impl AlignmentPointCommand {
             return Some(CmdResult::ReportError(t("'Transparent Commands Station Property' validation error.  Please enter a positive value.")));
         }
         let a = self.alignment.as_ref()?;
+        let s = if typed.is_empty() { s } else { a.raw_of_loose(s) };
         if !a.contains(s) || (ending && s < self.start_station - 1e-9) {
             return Some(CmdResult::ReportError(format!("{}  ", t("The specified station is not valid for this object."))));
         }
@@ -625,8 +690,12 @@ impl CadCommand for AlignmentPointCommand {
             Step::Station => t("Specify station along baseline:"),
             Step::Offset => crate::tf!("Specify an offset <{:.3}>:", self.offset).into_owned(),
             Step::Segments => crate::tf!("Enter the number of segments <{}>:", self.segments).into_owned(),
-            Step::StartStation => crate::tf!("Starting station <{}>:", format_station(self.start_station)).into_owned(),
-            Step::EndStation => crate::tf!("Ending station <{}>:", format_station(self.end_station)).into_owned(),
+            Step::StartStation | Step::EndStation if self.first_point.is_some() => {
+                let default = if matches!(self.step, Step::EndStation) { self.end_station } else { self.start_station };
+                crate::tf!("Specify second point <{}>:", format_station(self.shown(default))).into_owned()
+            }
+            Step::StartStation => crate::tf!("Starting station <{}>:", format_station(self.shown(self.start_station))).into_owned(),
+            Step::EndStation => crate::tf!("Ending station <{}>:", format_station(self.shown(self.end_station))).into_owned(),
             Step::Interval => crate::tf!("Enter an interval <{:.3}>:", self.interval).into_owned(),
             Step::Radial => t("Specify a point that is radial or perpendicular to the current alignment:"),
             Step::Format => t("Enter file format (1/2/3/4/5/6): <0>:"),
@@ -648,7 +717,7 @@ impl CadCommand for AlignmentPointCommand {
 
     fn input_kind(&self) -> InputKind {
         match self.step {
-            Step::Alignment | Step::Profile | Step::Radial => InputKind::Point,
+            Step::Alignment | Step::Profile | Step::Radial | Step::Station | Step::StartStation | Step::EndStation => InputKind::Point,
             _ => InputKind::FreeText,
         }
     }
@@ -670,6 +739,14 @@ impl CadCommand for AlignmentPointCommand {
             Step::Alignment => Some(|e| crate::modules::civil::point_intersect::alignment_curve(e).is_some()),
             _ => None,
         }
+    }
+
+    fn wants_point_pick_context(&self) -> bool {
+        matches!(self.step, Step::Profile)
+    }
+
+    fn set_point_pick_context(&mut self, context: Option<PointPickContext>) {
+        self.context = context;
     }
 
     fn inject_picked_entity(&mut self, entity: EntityType) {
@@ -696,15 +773,25 @@ impl CadCommand for AlignmentPointCommand {
             .collect();
         self.metric = document.header.insertion_units == 6;
         let (profiles, viewed) = profiles_of(document, x.common.handle.value());
-        self.alignment = Some(Alignment { path, curve, start: data.alignment_start_station().unwrap_or(0.0), pieces, profiles, viewed });
+        let equations = data.alignment_station_equations().into_iter().map(|e| (e.raw, e.ahead, if e.increasing { 1.0 } else { -1.0 })).collect();
+        self.alignment = Some(Alignment { path, curve, start: data.alignment_start_station().unwrap_or(0.0), pieces, profiles, viewed, equations });
     }
 
     fn on_entity_pick(&mut self, _handle: Handle, pick: DVec3) -> CmdResult {
         let picked = self.picked.take();
         match self.step {
             Step::Profile => {
-                // A pick on a profile view takes the profile drawn nearest it.
+                // Measured: a profile drawn within the pick box is taken; a
+                // pick on anything else is refused by type, on empty space
+                // nothing is selected (the profile prompt comes back).
                 let p = DVec2::new(pick.x, pick.y);
+                let tolerance = self.context.as_ref().and_then(|c| {
+                    use crate::scene::view::projection::project_screen;
+                    let a = project_screen(c.view, c.eye, c.bounds, pick)?;
+                    let b = project_screen(c.view, c.eye, c.bounds, pick + DVec3::X)?;
+                    let per_px = 1.0 / f64::from(((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt()).max(1e-12);
+                    Some(f64::from(c.aperture_px) * per_px)
+                });
                 let nearest = self.alignment.as_ref().and_then(|a| {
                     a.profiles
                         .iter()
@@ -713,10 +800,11 @@ impl CadCommand for AlignmentPointCommand {
                         .min_by(|a, b| a.1.total_cmp(&b.1))
                 });
                 match nearest {
-                    Some((i, _)) if picked.as_ref().is_some_and(is_profile_view) => {
+                    Some((i, d)) if tolerance.is_none_or(|t| d <= t) => {
                         self.profile = Some(i);
                         self.after_profile()
                     }
+                    _ if picked.is_none() => CmdResult::ReportError(t("Nothing selected.")),
                     _ => CmdResult::ReportError(t("Selected entity must be of type: Profile")),
                 }
             }
@@ -741,11 +829,42 @@ impl CadCommand for AlignmentPointCommand {
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
+            Step::Profile => self.on_entity_pick(Handle::NULL, pt),
+            // Measured: a point at the station prompt gives the station it
+            // projects to; past an equation that raw station is refused like
+            // a station in its gap.
+            Step::Station => {
+                let Some(a) = &self.alignment else { return CmdResult::NeedPoint };
+                let Some((raw, _)) = a.station_offset(DVec2::new(pt.x, pt.y)) else { return CmdResult::NeedPoint };
+                if a.raw_of(raw).is_none() {
+                    return CmdResult::ReportError(self.station_outside(raw));
+                }
+                self.station = raw;
+                self.step = Step::Offset;
+                CmdResult::NeedPoint
+            }
+            // A station range prompt reads a distance: two points.
+            Step::StartStation | Step::EndStation => match self.first_point.take() {
+                None => {
+                    self.first_point = Some(pt);
+                    CmdResult::NeedPoint
+                }
+                Some(first) => {
+                    let ending = matches!(self.step, Step::EndStation);
+                    self.station_given(&first.truncate().distance(pt.truncate()).to_string(), ending).unwrap_or(CmdResult::NeedPoint)
+                }
+            },
             Step::Radial => {
                 let Some(a) = &self.alignment else { return CmdResult::NeedPoint };
                 // A point whose foot falls beyond the alignment is passed
                 // over (measured).
                 let Some((station, offset)) = a.station_offset(DVec2::new(pt.x, pt.y)) else { return CmdResult::NeedPoint };
+                // Measured: the foot's raw station is read back as a station,
+                // so past an equation the point is refused like a station in
+                // its gap.
+                if a.raw_of(station).is_none() {
+                    return CmdResult::ReportError(self.station_outside(station));
+                }
                 let at = a.at(station, 0.0);
                 let elevation = self.elevation_at(station);
                 let unit = if self.metric { "m" } else { "" };
@@ -768,7 +887,11 @@ impl CadCommand for AlignmentPointCommand {
             Step::Alignment if !typed.is_empty() && !typed.chars().any(|c| c.is_ascii_digit()) => {
                 return Some(CmdResult::ReportError(crate::tr!("measurement", "angle-invalid-second")));
             }
-            Step::Alignment | Step::Radial if !typed.is_empty() && typed.chars().any(|c| c.is_ascii_digit()) && typed.contains(',') => return None,
+            Step::Alignment | Step::Profile | Step::Radial | Step::Station | Step::StartStation | Step::EndStation
+                if !typed.is_empty() && typed.chars().any(|c| c.is_ascii_digit()) && typed.contains(',') =>
+            {
+                return None
+            }
             Step::Alignment => return None,
             Step::Radial => return bad(),
             Step::Profile => {
@@ -790,11 +913,10 @@ impl CadCommand for AlignmentPointCommand {
                 }
                 let Some(s) = number(typed) else { return bad() };
                 let a = self.alignment.as_ref()?;
-                if !a.contains(s) {
-                    let unit = if self.metric { "m" } else { "" };
-                    return Some(CmdResult::ReportError(crate::tf!("Station {}:  Either outside of the baseline limits, or within gap created by a station equation.", format!("{}{unit}", format_station(s))).into_owned()));
-                }
-                self.station = s;
+                let Some(raw) = a.raw_of(s) else {
+                    return Some(CmdResult::ReportError(self.station_outside(s)));
+                };
+                self.station = raw;
                 self.step = Step::Offset;
             }
             Step::Offset => {
@@ -831,17 +953,18 @@ impl CadCommand for AlignmentPointCommand {
                 self.segments = n as u32;
                 self.step = Step::Offset;
             }
+            Step::StartStation | Step::EndStation if self.first_point.take().is_some() && typed.is_empty() => return self.station_given("", matches!(self.step, Step::EndStation)),
             Step::StartStation => return self.station_given(typed, false),
             Step::EndStation => return self.station_given(typed, true),
             Step::Interval => {
                 let v = if typed.is_empty() { self.interval } else {
                     match number(typed) {
                         Some(v) => v,
-                        None => return bad(),
+                        None => return Some(CmdResult::ReportError(crate::tf!("Invalid characters found in input string '{}'.", typed).into_owned())),
                     }
                 };
-                if v <= 0.0 {
-                    return Some(CmdResult::ReportError(t("A positive value is required")));
+                if !(f64::EPSILON..=1e24).contains(&v) {
+                    return Some(CmdResult::ReportError(t("Please enter a value greater than or equal to 2.220446E-16 and  less than or equal to 1.000000E+24")));
                 }
                 self.interval = v;
                 let points = self.placed(self.stations(), self.offset);
@@ -928,26 +1051,25 @@ impl CadCommand for AlignmentPointCommand {
     }
 
     fn on_escape(&mut self) -> CmdResult {
-        // Divide goes back one level (point → segments → alignment); the
-        // others end (measured).
+        // Measured: Divide goes back one level (point → segments →
+        // alignment); Measure and At Geometry Points leave a point prompt for
+        // the alignment prompt, Radial leaves its point prompt for it; every
+        // other prompt ends the command.
         self.queue.clear();
         match (self.kind, &self.step) {
             (Kind::Divide, Step::Description | Step::Elevation(_)) => {
                 self.step = Step::Segments;
                 CmdResult::ReportMessage(t("*Cancel*"))
             }
-            (Kind::Divide, Step::Segments | Step::Offset) => {
+            (Kind::Divide, Step::Segments | Step::Offset)
+            | (Kind::Measure | Kind::GeometryPoints, Step::Description | Step::Elevation(_))
+            | (Kind::Radial, Step::Radial) => {
                 self.step = Step::Alignment;
                 CmdResult::ReportMessage(t("*Cancel*"))
             }
             _ => CmdResult::Cancel,
         }
     }
-}
-
-/// Whether `e` is a profile view (its profiles are picked through it).
-fn is_profile_view(e: &EntityType) -> bool {
-    matches!(e, EntityType::Extended(x) if matches!(&x.data, ExtendedEntityData::Arch(a) if a.dxf_name == "AECC_PROFILE_VIEW"))
 }
 
 fn segment_distance(p: DVec2, a: DVec2, b: DVec2) -> f64 {

@@ -4681,7 +4681,9 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             entity.as_entity_mut().set_layer(layer);
         } else if !preserve_entity_layer {
             // DIMLAYER and MLEADERLAYER put new dimensions and
-            // multileaders on their own layers.
+            // multileaders on their own layers; the other layer variables
+            // put new hatches, external references and the new objects of
+            // REVCLOUD, TABLE and MVIEW on theirs.
             let xref = match &entity {
                 document::EntityType::Insert(insert) => self.tabs[i]
                     .scene
@@ -4699,6 +4701,12 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 self.new_variable_layer(i, "HATCHLAYER")
             } else if xref {
                 self.new_variable_layer(i, "XREFLAYER")
+            } else if let Some(name) = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .and_then(|command| super::commands::command_layer_variable(command.name()))
+            {
+                self.new_variable_layer(i, name)
             } else {
                 self.tabs[i].active_layer.clone()
             };

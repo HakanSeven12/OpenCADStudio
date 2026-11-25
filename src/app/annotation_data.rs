@@ -1837,7 +1837,7 @@ impl OpenCADStudio {
         let table = build_table(&rows, table_style_handle(doc, style.trim()), None);
         let command =
             crate::modules::annotate::data_link::DataLinkPlaceCommand::existing_from_table(
-                table, handle,
+                table, handle, "-TABLE",
             );
         self.command_line
             .push_info(&crate::command::CadCommand::prompt(&command));
@@ -2132,10 +2132,12 @@ impl OpenCADStudio {
                 table_style_handle(doc, &self.table_insert.style),
                 None,
             );
-            let command = crate::modules::annotate::data_link::DataLinkPlaceCommand::existing(
-                table,
-                choice.handle,
-            );
+            let command =
+                crate::modules::annotate::data_link::DataLinkPlaceCommand::existing_from_table(
+                    table,
+                    choice.handle,
+                    "TABLE",
+                );
             self.active_modal = None;
             self.reset_modal_geometry();
             self.command_line.push_info(&command.prompt());

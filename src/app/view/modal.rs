@@ -75,6 +75,7 @@ impl OpenCADStudio {
             Some(K::TableCellFormat) => crate::tr!("table-cells", "format-title"),
             Some(K::TableCellWarning) => crate::tr!("table-cells", "warning-title"),
             Some(K::AnnotationScalePrompt) => crate::tr!("anno-scale-prompt", "title"),
+            Some(K::SurfaceList) => crate::t!("Select a Surface").into_owned(),
             Some(K::MTextDialog) => {
                 use crate::ui::window::mtext_dialogs::MTextDialog as D;
                 crate::t!(match self.mtext_dialog {
@@ -708,6 +709,11 @@ impl OpenCADStudio {
                     D::AutoStack(d) => sized_flow(ex, 450, 330, |_| t::view_autostack(d)),
                     D::ListsToggle(d) => sized_flow(ex, 470, 220, |_| t::view_lists_toggle(d)),
                 }
+            }
+            super::super::ModalKind::SurfaceList => {
+                let state = self.surface_list.as_ref()?;
+                let height = 224 + 32 * state.names.len().min(8) as u16;
+                sized_flow(ex, 380, height, |flow| crate::ui::window::surface_list::view(state, flow))
             }
             super::super::ModalKind::AnnotationScalePrompt => {
                 let state = self.anno_scale_prompt.as_ref()?;

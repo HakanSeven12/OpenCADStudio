@@ -62,6 +62,7 @@ pub(crate) use log_file::{
     log_file_folder_setting, log_file_mode, set_log_file_folder, set_log_file_mode,
 };
 mod anno_scale_prompt;
+mod surface_list;
 mod hyperlink;
 pub(crate) use group_display::{group_display_mode, set_group_display_mode};
 pub(crate) use anno_scale_prompt::{annotation_scale_prompt, set_annotation_scale_prompt};

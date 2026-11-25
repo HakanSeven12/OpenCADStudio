@@ -1,6 +1,7 @@
 pub mod about;
 pub mod alias_editor;
 pub mod anno_scale_prompt;
+pub mod surface_list;
 pub mod annotation_data;
 pub mod assistant;
 pub mod attdef_dialog;

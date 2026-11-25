@@ -2703,6 +2703,7 @@ pub enum Message {
     /// An edit in a picked table cell window (Cell Borders, Cell Contents).
     TableCellDialog(crate::ui::window::table_cell_dialog::TableCellDialogMsg),
     AnnoScalePrompt(crate::ui::window::anno_scale_prompt::AnnoScaleMsg),
+    SurfaceList(crate::ui::window::surface_list::SurfaceListMsg),
     MTextDialog(crate::ui::window::mtext_dialogs::MTextDialogMsg),
     HyperlinkDialog(crate::ui::window::hyperlink_dialog::HyperlinkMsg),
     /// Check Spelling window.

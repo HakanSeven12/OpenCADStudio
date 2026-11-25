@@ -3333,6 +3333,11 @@ pub trait CadCommand: Send {
     fn has_first_point(&self) -> bool {
         false
     }
+    /// The surfaces the command asks to pick from in the surface list
+    /// window (its answer comes back as the typed name).
+    fn surface_list(&self) -> Option<(Vec<String>, usize)> {
+        None
+    }
     /// Symbol localization is committed together with the extracted entities.
     fn nested_copy_symbol_names(&self) -> Option<&document::nested_copy::NestedCopySymbolNames> {
         None

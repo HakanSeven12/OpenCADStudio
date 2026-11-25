@@ -88,8 +88,9 @@ impl OpenCADStudio {
         let Some(state) = &self.drafting_settings_state.clone() else {
             return true;
         };
-        let x = crate::ui::window::drafting_settings::parse_snap_spacing(&state.snap_x_input);
-        let y = crate::ui::window::drafting_settings::parse_snap_spacing(&state.snap_y_input);
+        use crate::ui::window::drafting_settings::applied_spacing;
+        let x = applied_spacing(&state.snap_x_input, self.snapper.snap_spacing_x);
+        let y = applied_spacing(&state.snap_y_input, self.snapper.snap_spacing_y);
         let (Some(sx), Some(sy)) = (x, y) else {
             self.command_line
                 .push_error(crate::t!("Snap X and Y spacings must be positive numbers.").as_ref());
@@ -102,8 +103,8 @@ impl OpenCADStudio {
                 live.snap_y_input = live.snap_x_input.clone();
             }
         }
-        let gx = crate::ui::window::drafting_settings::parse_snap_spacing(&state.grid_x_input);
-        let gy = crate::ui::window::drafting_settings::parse_snap_spacing(&state.grid_y_input);
+        let gx = applied_spacing(&state.grid_x_input, self.grid_spacing_x);
+        let gy = applied_spacing(&state.grid_y_input, self.grid_spacing_y);
         let gm = crate::ui::window::drafting_settings::parse_grid_major(&state.grid_major_input);
         let (Some(gx), Some(gy), Some(gm)) = (gx, gy, gm) else {
             self.command_line.push_error(
@@ -375,7 +376,8 @@ mod tests {
         assert_eq!(parse_snap_spacing("-1"), None);
         assert_eq!(parse_snap_spacing("abc"), None);
         assert_eq!(parse_snap_spacing(""), None);
-        assert_eq!(format_snap_spacing(10.0), "10");
+        // A test thread has the default unit settings: LUNITS 2, LUPREC 4.
+        assert_eq!(format_snap_spacing(10.0), "10.0000");
         assert_eq!(parse_grid_major("5"), Some(5));
         assert_eq!(parse_grid_major("1"), None);
         assert_eq!(parse_grid_major("101"), None);

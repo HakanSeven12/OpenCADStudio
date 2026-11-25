@@ -106,7 +106,15 @@ impl OpenCADStudio {
                     "GRIDMODE" => (self.show_grid as i32).to_string(),
                     "QPMODE" => (self.quick_properties as i32).to_string(),
                     "QPLOCATION" => (self.quick_properties_float as i32).to_string(),
-                    _ => format!("{},{}", self.grid_spacing_x, self.grid_spacing_y),
+                    _ => format!(
+                        "{},{}",
+                        crate::ui::window::drafting_settings::format_snap_spacing(
+                            self.grid_spacing_x
+                        ),
+                        crate::ui::window::drafting_settings::format_snap_spacing(
+                            self.grid_spacing_y
+                        ),
+                    ),
                 };
                 let Some(value) = value else {
                     self.command_line
@@ -137,10 +145,12 @@ impl OpenCADStudio {
                         }
                     }
                     ("GRIDUNIT", _) => {
-                        let mut parts = value.split(',').map(|p| p.trim().parse::<f32>());
-                        let x = parts.next().and_then(Result::ok).filter(|v| *v > 0.0);
+                        let mut parts = value
+                            .split(',')
+                            .map(crate::ui::window::drafting_settings::parse_snap_spacing);
+                        let x = parts.next().flatten();
                         let y = match parts.next() {
-                            Some(p) => p.ok().filter(|v| *v > 0.0),
+                            Some(p) => p,
                             None => x,
                         };
                         let (Some(x), Some(y)) = (x, y) else {
